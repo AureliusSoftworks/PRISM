@@ -1,6 +1,9 @@
 import { describe, it } from "node:test";
 import assert from "node:assert/strict";
-import { prepareMessagesWithSimulatedEffort } from "../model-effort-runner.ts";
+import {
+  prepareMessagesWithSimulatedEffort,
+  shouldPrepareMessagesWithSimulatedEffort,
+} from "../model-effort-runner.ts";
 import type {
   GenerateOptions,
   LlmProvider,
@@ -8,6 +11,57 @@ import type {
 } from "../providers.ts";
 
 describe("simulated model effort runner", () => {
+  it("selects local and unsupported online models while preserving native effort", () => {
+    assert.equal(
+      shouldPrepareMessagesWithSimulatedEffort({
+        provider: "local",
+        model: "qwen3:9b",
+        effort: "low",
+      }),
+      true,
+    );
+    assert.equal(
+      shouldPrepareMessagesWithSimulatedEffort({
+        provider: "openai",
+        model: "gpt-4o",
+        effort: "medium",
+      }),
+      true,
+    );
+    assert.equal(
+      shouldPrepareMessagesWithSimulatedEffort({
+        provider: "anthropic",
+        model: "claude-haiku-4-5",
+        effort: "high",
+      }),
+      true,
+    );
+    assert.equal(
+      shouldPrepareMessagesWithSimulatedEffort({
+        provider: "openai",
+        model: "gpt-5.6-sol",
+        effort: "high",
+      }),
+      false,
+    );
+    assert.equal(
+      shouldPrepareMessagesWithSimulatedEffort({
+        provider: "anthropic",
+        model: "claude-opus-4-8",
+        effort: "xhigh",
+      }),
+      false,
+    );
+    assert.equal(
+      shouldPrepareMessagesWithSimulatedEffort({
+        provider: "openai",
+        model: "gpt-4o",
+        effort: "none",
+      }),
+      false,
+    );
+  });
+
   it("uses the saved ladder without mutating canonical messages", async () => {
     const calls: Array<{
       messages: ProviderMessage[];

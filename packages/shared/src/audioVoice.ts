@@ -60,6 +60,22 @@ export const BOT_AUDIO_VOICE_IDS = [
   "voice-10",
   "voice-11",
   "voice-12",
+  "voice-13",
+  "voice-14",
+  "voice-15",
+  "voice-16",
+  "voice-17",
+  "voice-18",
+  "voice-19",
+  "voice-20",
+  "voice-21",
+  "voice-22",
+  "voice-23",
+  "voice-24",
+  "voice-25",
+  "voice-26",
+  "voice-27",
+  "voice-28",
 ] as const;
 export type BotAudioVoiceId = (typeof BOT_AUDIO_VOICE_IDS)[number];
 
@@ -151,6 +167,118 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     locale: "en-GB",
     character: "Expressive British",
   },
+  {
+    voiceId: "voice-13",
+    engineVoiceId: "af_alloy",
+    name: "Alloy",
+    locale: "en-US",
+    character: "Balanced American",
+  },
+  {
+    voiceId: "voice-14",
+    engineVoiceId: "af_jessica",
+    name: "Jessica",
+    locale: "en-US",
+    character: "Confident American",
+  },
+  {
+    voiceId: "voice-15",
+    engineVoiceId: "af_nova",
+    name: "Nova",
+    locale: "en-US",
+    character: "Airy American",
+  },
+  {
+    voiceId: "voice-16",
+    engineVoiceId: "af_river",
+    name: "River",
+    locale: "en-US",
+    character: "Relaxed American",
+  },
+  {
+    voiceId: "voice-17",
+    engineVoiceId: "af_sky",
+    name: "Sky",
+    locale: "en-US",
+    character: "Light American",
+  },
+  {
+    voiceId: "voice-18",
+    engineVoiceId: "am_adam",
+    name: "Adam",
+    locale: "en-US",
+    character: "Direct American",
+  },
+  {
+    voiceId: "voice-19",
+    engineVoiceId: "am_echo",
+    name: "Echo",
+    locale: "en-US",
+    character: "Resonant American",
+  },
+  {
+    voiceId: "voice-20",
+    engineVoiceId: "am_eric",
+    name: "Eric",
+    locale: "en-US",
+    character: "Natural American",
+  },
+  {
+    voiceId: "voice-21",
+    engineVoiceId: "am_liam",
+    name: "Liam",
+    locale: "en-US",
+    character: "Clear American",
+  },
+  {
+    voiceId: "voice-22",
+    engineVoiceId: "am_onyx",
+    name: "Onyx",
+    locale: "en-US",
+    character: "Weighty American",
+  },
+  {
+    voiceId: "voice-23",
+    engineVoiceId: "am_santa",
+    name: "Santa",
+    locale: "en-US",
+    character: "Round American",
+  },
+  {
+    voiceId: "voice-24",
+    engineVoiceId: "bf_alice",
+    name: "Alice",
+    locale: "en-GB",
+    character: "Poised British",
+  },
+  {
+    voiceId: "voice-25",
+    engineVoiceId: "bf_isabella",
+    name: "Isabella",
+    locale: "en-GB",
+    character: "Warm British",
+  },
+  {
+    voiceId: "voice-26",
+    engineVoiceId: "bf_lily",
+    name: "Lily",
+    locale: "en-GB",
+    character: "Gentle British",
+  },
+  {
+    voiceId: "voice-27",
+    engineVoiceId: "bm_daniel",
+    name: "Daniel",
+    locale: "en-GB",
+    character: "Assured British",
+  },
+  {
+    voiceId: "voice-28",
+    engineVoiceId: "bm_lewis",
+    name: "Lewis",
+    locale: "en-GB",
+    character: "Conversational British",
+  },
 ] as const satisfies ReadonlyArray<{
   voiceId: BotAudioVoiceId;
   engineVoiceId: string;
@@ -221,6 +349,20 @@ export interface BotAudioVoiceProfileV2 {
   elevenLabsStability?: number;
   pitch: number;
   warmth: number;
+  /** Local-only vocal tract openness. Negative is open; positive is nasal. */
+  openness?: number;
+  /** Local-only perceived vocal weight. Negative is light; positive is chest-forward. */
+  weight?: number;
+  /** Local-only spectral brightness, retained alongside the legacy EQ tilt. */
+  brightness?: number;
+  /** Local-only formant/resonance depth. */
+  resonance?: number;
+  /** Local engine choice. Older profiles inherit the account default. */
+  localEnginePreference?: LocalVoiceEnginePreference;
+  localVoiceSource?: LocalVoiceSource;
+  localReferenceId?: string | null;
+  accentLocale?: string | null;
+  accentMode?: LocalVoiceAccentMode;
   pace: number;
   lilt: number;
   bottishTone: number;
@@ -236,9 +378,78 @@ export interface BotAudioVoiceProfileV2 {
   avatarSfxMuted?: boolean;
 }
 
+export const LOCAL_VOICE_ENGINE_PREFERENCES = [
+  "inherit",
+  "auto",
+  "voice-plus",
+  "instant",
+] as const;
+export type LocalVoiceEnginePreference =
+  (typeof LOCAL_VOICE_ENGINE_PREFERENCES)[number];
+
+export const LOCAL_VOICE_SOURCES = ["portable", "system", "reference"] as const;
+export type LocalVoiceSource = (typeof LOCAL_VOICE_SOURCES)[number];
+
+export const LOCAL_VOICE_ACCENT_MODES = ["prefer-genuine", "approximate"] as const;
+export type LocalVoiceAccentMode = (typeof LOCAL_VOICE_ACCENT_MODES)[number];
+
+export interface BotLocalVoiceToneV1 {
+  pitch: number;
+  warmth: number;
+  openness: number;
+  weight: number;
+  brightness: number;
+  resonance: number;
+  gainDb: number;
+}
+
+export interface BotLocalVoiceProfileV1 {
+  enginePreference: LocalVoiceEnginePreference;
+  source: LocalVoiceSource;
+  archetypeId: BotAudioVoiceId;
+  systemVoiceName?: string | null;
+  referenceId?: string | null;
+  accent: {
+    locale: string;
+    mode: LocalVoiceAccentMode;
+  };
+  tone: BotLocalVoiceToneV1;
+}
+
+export interface BotPremiumVoiceProfileV1 {
+  voiceId?: string | null;
+  voiceIdOverride?: string | null;
+  initialized?: boolean;
+  direction?: string | null;
+  stability?: number;
+}
+
+export interface BotVoiceDeliveryProfileV1 {
+  effect: VoiceEffect;
+  effectExplicit?: boolean;
+  pace: number;
+  lilt: number;
+  volume: number;
+  texture: BotVoiceTextureV1;
+}
+
+/** Portable V3 storage separates local identity and tone from Premium identity
+ * while keeping delivery shared across every synthesis engine. */
+export interface BotAudioVoiceProfileV3 {
+  v: 3;
+  enabled: boolean;
+  local: BotLocalVoiceProfileV1;
+  premium: BotPremiumVoiceProfileV1;
+  delivery: BotVoiceDeliveryProfileV1;
+  bottishTone: number;
+  avatarSfx?: BotAvatarSfxV1;
+  avatarSfxMuted?: boolean;
+}
+
 export const BOT_AVATAR_SFX_MAX_BYTES = 4 * 1024 * 1024;
 export const BOT_AVATAR_SFX_PROMPT_MAX_LENGTH = 400;
 export const BOT_AVATAR_SFX_FILE_NAME_MAX_LENGTH = 160;
+export const BOT_AVATAR_SFX_DEFAULT_VOLUME = 0.2;
 
 export interface BotAvatarSfxV1 {
   v: 1;
@@ -252,7 +463,10 @@ export interface BotAvatarSfxV1 {
   volume: number;
 }
 
-export type BotAudioVoiceProfile = LegacyBotAudioVoiceProfileV1 | BotAudioVoiceProfileV2;
+export type BotAudioVoiceProfile =
+  | LegacyBotAudioVoiceProfileV1
+  | BotAudioVoiceProfileV2
+  | BotAudioVoiceProfileV3;
 
 /** Backwards-compatible exported name used by the Phase 1 call sites. New
  * persistence always writes v2 through serializeBotAudioVoiceProfileV1. */
@@ -573,6 +787,14 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2
   elevenLabsEffect: DEFAULT_VOICE_EFFECT,
   pitch: 0,
   warmth: 0,
+  openness: 0,
+  weight: 0,
+  brightness: 0,
+  resonance: 0,
+  localEnginePreference: "inherit",
+  localVoiceSource: "portable",
+  accentLocale: "en-US",
+  accentMode: "prefer-genuine",
   pace: 0,
   lilt: 0,
   bottishTone: 0.45,
@@ -580,6 +802,34 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2
   gainDb: 0,
   volume: 1,
   texture: BOT_VOICE_TEXTURE_RECIPES.clean,
+};
+export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3: Readonly<BotAudioVoiceProfileV3> = {
+  v: 3,
+  enabled: true,
+  local: {
+    enginePreference: "inherit",
+    source: "portable",
+    archetypeId: "voice-1",
+    accent: { locale: "en-US", mode: "prefer-genuine" },
+    tone: {
+      pitch: 0,
+      warmth: 0,
+      openness: 0,
+      weight: 0,
+      brightness: 0,
+      resonance: 0,
+      gainDb: 0,
+    },
+  },
+  premium: {},
+  delivery: {
+    effect: DEFAULT_VOICE_EFFECT,
+    pace: 0,
+    lilt: 0,
+    volume: 1,
+    texture: BOT_VOICE_TEXTURE_RECIPES.clean,
+  },
+  bottishTone: 0.45,
 };
 export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 = DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2;
 
@@ -590,6 +840,47 @@ export function isBotAudioVoiceId(value: unknown): value is BotAudioVoiceId {
 export function isBotVoiceTexturePreset(value: unknown): value is BotVoiceTexturePreset {
   return typeof value === "string" &&
     (BOT_VOICE_TEXTURE_PRESETS as readonly string[]).includes(value);
+}
+
+export function normalizeLocalVoiceEnginePreference(
+  value: unknown,
+  fallback: LocalVoiceEnginePreference = "inherit",
+): LocalVoiceEnginePreference {
+  return typeof value === "string" &&
+    (LOCAL_VOICE_ENGINE_PREFERENCES as readonly string[]).includes(value)
+    ? (value as LocalVoiceEnginePreference)
+    : fallback;
+}
+
+export function normalizeLocalVoiceSource(
+  value: unknown,
+  fallback: LocalVoiceSource = "portable",
+): LocalVoiceSource {
+  return typeof value === "string" &&
+    (LOCAL_VOICE_SOURCES as readonly string[]).includes(value)
+    ? (value as LocalVoiceSource)
+    : fallback;
+}
+
+export function normalizeLocalVoiceAccentMode(
+  value: unknown,
+  fallback: LocalVoiceAccentMode = "prefer-genuine",
+): LocalVoiceAccentMode {
+  return typeof value === "string" &&
+    (LOCAL_VOICE_ACCENT_MODES as readonly string[]).includes(value)
+    ? (value as LocalVoiceAccentMode)
+    : fallback;
+}
+
+export function normalizeLocalVoiceAccentLocale(
+  value: unknown,
+  fallback = "en-US",
+): string {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().replace(/_/gu, "-").slice(0, 32);
+  return /^en(?:-[a-z0-9]{2,8}){1,2}$/iu.test(normalized)
+    ? normalized
+    : fallback;
 }
 
 export function normalizeVoiceMode(value: unknown, fallback = DEFAULT_VOICE_MODE): VoiceMode {
@@ -721,15 +1012,67 @@ export function botVoiceTextureIsModified(texture: BotVoiceTextureV1): boolean {
     normalized.damage !== canonical.damage;
 }
 
+function voiceProfileObject(value: unknown): Record<string, unknown> {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+}
+
+/** Flatten V3 into the established runtime shape. This keeps every existing
+ * synthesis surface compatible while persistence and new editors use the
+ * separated local / premium / delivery contract. */
+function flattenBotAudioVoiceProfileV3Record(
+  value: Record<string, unknown>,
+): Record<string, unknown> {
+  if (value.v !== 3) return value;
+  const local = voiceProfileObject(value.local);
+  const premium = voiceProfileObject(value.premium);
+  const delivery = voiceProfileObject(value.delivery);
+  const accent = voiceProfileObject(local.accent);
+  const tone = voiceProfileObject(local.tone);
+  return {
+    v: 2,
+    enabled: value.enabled,
+    baseVoiceId: local.archetypeId,
+    systemVoiceName: local.systemVoiceName,
+    elevenLabsVoiceId: premium.voiceId,
+    elevenLabsVoiceIdOverride: premium.voiceIdOverride,
+    elevenLabsVoiceInitialized: premium.initialized,
+    elevenLabsDirection: premium.direction,
+    elevenLabsStability: premium.stability,
+    elevenLabsEffect: delivery.effect,
+    voiceEffectExplicit: delivery.effectExplicit,
+    pitch: tone.pitch,
+    warmth: tone.warmth,
+    openness: tone.openness,
+    weight: tone.weight,
+    brightness: tone.brightness,
+    resonance: tone.resonance,
+    localEnginePreference: local.enginePreference,
+    localVoiceSource: local.source,
+    localReferenceId: local.referenceId,
+    accentLocale: accent.locale,
+    accentMode: accent.mode,
+    pace: delivery.pace,
+    lilt: delivery.lilt,
+    bottishTone: value.bottishTone,
+    eqTilt: tone.brightness,
+    gainDb: tone.gainDb,
+    volume: delivery.volume,
+    texture: delivery.texture,
+    avatarSfx: value.avatarSfx,
+    avatarSfxMuted: value.avatarSfxMuted,
+  };
+}
+
 export function normalizeBotAudioVoiceProfileV1(
   value: unknown,
   fallback: BotAudioVoiceProfile = DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2
 ): BotAudioVoiceProfileV2 {
   const fallbackProfile = normalizeBotAudioVoiceProfileFallback(fallback);
-  const record = value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-  const legacy = record.v !== 2;
+  const inputRecord = voiceProfileObject(value);
+  const record = flattenBotAudioVoiceProfileV3Record(inputRecord);
+  const legacy = inputRecord.v !== 2 && inputRecord.v !== 3;
   const systemVoiceName = normalizeOptionalVoiceSelection(
     record.systemVoiceName,
     fallbackProfile.systemVoiceName ?? null
@@ -784,6 +1127,53 @@ export function normalizeBotAudioVoiceProfileV1(
     ...(record.elevenLabsStability !== undefined ? { elevenLabsStability } : {}),
     pitch: normalizeBotAudioVoiceControl(record.pitch, fallbackProfile.pitch),
     warmth: normalizeBotAudioVoiceControl(record.warmth, fallbackProfile.warmth),
+    openness: normalizeBotAudioVoiceControl(
+      record.openness,
+      fallbackProfile.openness ?? 0,
+    ),
+    weight: normalizeBotAudioVoiceControl(
+      record.weight,
+      fallbackProfile.weight ?? 0,
+    ),
+    brightness: normalizeBotAudioVoiceControl(
+      record.brightness ?? record.eqTilt,
+      fallbackProfile.brightness ?? fallbackProfile.eqTilt,
+    ),
+    resonance: normalizeBotAudioVoiceControl(
+      record.resonance,
+      fallbackProfile.resonance ?? 0,
+    ),
+    localEnginePreference: normalizeLocalVoiceEnginePreference(
+      record.localEnginePreference,
+      fallbackProfile.localEnginePreference ?? "inherit",
+    ),
+    localVoiceSource: normalizeLocalVoiceSource(
+      record.localVoiceSource,
+      fallbackProfile.localVoiceSource ?? "portable",
+    ),
+    ...(normalizeOptionalVoiceSelection(
+      record.localReferenceId,
+      fallbackProfile.localReferenceId ?? null,
+    )
+      ? {
+          localReferenceId: normalizeOptionalVoiceSelection(
+            record.localReferenceId,
+            fallbackProfile.localReferenceId ?? null,
+          ),
+        }
+      : {}),
+    accentLocale: normalizeLocalVoiceAccentLocale(
+      record.accentLocale,
+      prismBuiltinEnglishVoice(
+        isBotAudioVoiceId(record.baseVoiceId)
+          ? record.baseVoiceId
+          : fallbackProfile.baseVoiceId,
+      ).locale,
+    ),
+    accentMode: normalizeLocalVoiceAccentMode(
+      record.accentMode,
+      fallbackProfile.accentMode ?? "prefer-genuine",
+    ),
     pace: normalizeBotAudioVoiceControl(record.pace, fallbackProfile.pace),
     lilt: normalizeBotAudioVoiceControl(record.lilt, fallbackProfile.lilt),
     bottishTone: normalizeBotAudioVoiceControl(
@@ -802,6 +1192,15 @@ export function normalizeBotAudioVoiceProfileV1(
 }
 
 function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): BotAudioVoiceProfileV2 {
+  if (value.v === 3) {
+    return normalizeBotAudioVoiceProfileFallback({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
+      ...flattenBotAudioVoiceProfileV3Record(
+        value as unknown as Record<string, unknown>,
+      ),
+      v: 2,
+    } as BotAudioVoiceProfileV2);
+  }
   if (value.v === 2) {
     const {
       avatarSfx: rawAvatarSfx,
@@ -822,6 +1221,29 @@ function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): Bot
         : { elevenLabsDirection: undefined }),
       ...(elevenLabsStability === undefined ? {} : { elevenLabsStability }),
       eqTilt: normalizeBotAudioVoiceControl(value.eqTilt),
+      openness: normalizeBotAudioVoiceControl(value.openness),
+      weight: normalizeBotAudioVoiceControl(value.weight),
+      brightness: normalizeBotAudioVoiceControl(
+        value.brightness,
+        normalizeBotAudioVoiceControl(value.eqTilt),
+      ),
+      resonance: normalizeBotAudioVoiceControl(value.resonance),
+      localEnginePreference: normalizeLocalVoiceEnginePreference(
+        value.localEnginePreference,
+      ),
+      localVoiceSource: normalizeLocalVoiceSource(value.localVoiceSource),
+      ...(normalizeOptionalVoiceSelection(value.localReferenceId)
+        ? {
+            localReferenceId: normalizeOptionalVoiceSelection(
+              value.localReferenceId,
+            ),
+          }
+        : {}),
+      accentLocale: normalizeLocalVoiceAccentLocale(
+        value.accentLocale,
+        prismBuiltinEnglishVoice(value.baseVoiceId).locale,
+      ),
+      accentMode: normalizeLocalVoiceAccentMode(value.accentMode),
       gainDb: normalizeBotVoiceGainDb(value.gainDb),
       texture: botVoiceTextureForPreset("clean"),
       ...(avatarSfx ? { avatarSfx } : {}),
@@ -841,6 +1263,92 @@ function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): Bot
       value.signal,
       DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2.bottishTone
     ),
+  };
+}
+
+export function normalizeBotAudioVoiceProfileV3(
+  value: unknown,
+  fallback: BotAudioVoiceProfile = DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3,
+): BotAudioVoiceProfileV3 {
+  const profile = normalizeBotAudioVoiceProfileV1(value, fallback);
+  const inputRecord = voiceProfileObject(value);
+  const explicitSource =
+    inputRecord.v === 3 ||
+    Object.prototype.hasOwnProperty.call(inputRecord, "localVoiceSource");
+  const source = explicitSource
+    ? normalizeLocalVoiceSource(profile.localVoiceSource)
+    : profile.localReferenceId
+      ? "reference"
+      : profile.systemVoiceName
+        ? "system"
+        : "portable";
+  const referenceId = normalizeOptionalVoiceSelection(profile.localReferenceId);
+  const systemVoiceName = normalizeOptionalVoiceSelection(profile.systemVoiceName);
+  const voiceId = normalizeOptionalVoiceSelection(profile.elevenLabsVoiceId);
+  const voiceIdOverride = normalizeOptionalVoiceSelection(
+    profile.elevenLabsVoiceIdOverride,
+  );
+  const direction = normalizeElevenLabsVoiceDirection(
+    profile.elevenLabsDirection,
+  );
+  const avatarSfx = normalizeBotAvatarSfxV1(profile.avatarSfx);
+  return {
+    v: 3,
+    enabled: profile.enabled,
+    local: {
+      enginePreference: normalizeLocalVoiceEnginePreference(
+        profile.localEnginePreference,
+      ),
+      source,
+      archetypeId: profile.baseVoiceId,
+      ...(systemVoiceName ? { systemVoiceName } : {}),
+      ...(referenceId ? { referenceId } : {}),
+      accent: {
+        locale: normalizeLocalVoiceAccentLocale(
+          profile.accentLocale,
+          prismBuiltinEnglishVoice(profile.baseVoiceId).locale,
+        ),
+        mode: normalizeLocalVoiceAccentMode(profile.accentMode),
+      },
+      tone: {
+        pitch: normalizeBotAudioVoiceControl(profile.pitch),
+        warmth: normalizeBotAudioVoiceControl(profile.warmth),
+        openness: normalizeBotAudioVoiceControl(profile.openness),
+        weight: normalizeBotAudioVoiceControl(profile.weight),
+        brightness: normalizeBotAudioVoiceControl(
+          profile.brightness,
+          profile.eqTilt,
+        ),
+        resonance: normalizeBotAudioVoiceControl(profile.resonance),
+        gainDb: normalizeBotVoiceGainDb(profile.gainDb),
+      },
+    },
+    premium: {
+      ...(voiceId ? { voiceId } : {}),
+      ...(voiceIdOverride ? { voiceIdOverride } : {}),
+      ...(profile.elevenLabsVoiceInitialized
+        ? { initialized: true }
+        : {}),
+      ...(direction ? { direction } : {}),
+      ...(profile.elevenLabsStability === undefined
+        ? {}
+        : {
+            stability: normalizeElevenLabsVoiceStability(
+              profile.elevenLabsStability,
+            ),
+          }),
+    },
+    delivery: {
+      effect: normalizeVoiceEffect(profile.elevenLabsEffect),
+      ...(profile.voiceEffectExplicit ? { effectExplicit: true } : {}),
+      pace: normalizeBotAudioVoiceControl(profile.pace),
+      lilt: normalizeBotAudioVoiceControl(profile.lilt),
+      volume: normalizeBotVoiceVolume(profile.volume),
+      texture: normalizeBotVoiceTexture(profile.texture),
+    },
+    bottishTone: normalizeBotAudioVoiceControl(profile.bottishTone, 0.45),
+    ...(avatarSfx ? { avatarSfx } : {}),
+    ...(profile.avatarSfxMuted ? { avatarSfxMuted: true } : {}),
   };
 }
 
@@ -868,7 +1376,7 @@ function botAvatarSfxDataUrlIsValid(value: string): boolean {
 
 export function normalizeBotAvatarSfxVolume(
   value: unknown,
-  fallback = 0.45,
+  fallback = BOT_AVATAR_SFX_DEFAULT_VOLUME,
 ): number {
   const parsed =
     typeof value === "number"
@@ -942,7 +1450,14 @@ export function normalizeOptionalBotAudioVoiceProfileV1(value: unknown): BotAudi
     typeof record.elevenLabsVoiceIdOverride === "string" ||
     record.elevenLabsVoiceInitialized === true
   );
-  if (version !== 1 && version !== 2 && !recognizableUnversionedProfile) return null;
+  if (
+    version !== 1 &&
+    version !== 2 &&
+    version !== 3 &&
+    !recognizableUnversionedProfile
+  ) {
+    return null;
+  }
   return normalizeBotAudioVoiceProfileV1(candidate);
 }
 
@@ -994,6 +1509,20 @@ export function parseStoredBotAudioVoiceProfileV1(value: unknown): BotAudioVoice
   try { return normalizeOptionalBotAudioVoiceProfileV1(JSON.parse(value)); } catch { return null; }
 }
 
+export function parseStoredBotAudioVoiceProfileV3(
+  value: unknown,
+): BotAudioVoiceProfileV3 | null {
+  if (typeof value !== "string" || value.trim().length === 0) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return normalizeOptionalBotAudioVoiceProfileV1(parsed)
+      ? normalizeBotAudioVoiceProfileV3(parsed)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
 export function serializeBotAudioVoiceProfileV1(value: unknown): string {
-  return JSON.stringify(normalizeBotAudioVoiceProfileV1(value));
+  return JSON.stringify(normalizeBotAudioVoiceProfileV3(value));
 }

@@ -398,7 +398,19 @@ function isBotMentionAddressPrefix(raw: string): boolean {
   return /^\s*\[[^\]\n]+\]\(prism-bot:\/\/[^)\s]+\),?\s*$/u.test(raw);
 }
 
-function parseStageDirectionsDetailed(text: string): {
+export interface StageDirectionParseOptions {
+  /**
+   * Bot transcripts sometimes omit action delimiters. Player messages have an
+   * explicit Action field, so their ordinary prose should never use this
+   * heuristic fallback.
+   */
+  inferUnmarkedActions?: boolean;
+}
+
+function parseStageDirectionsDetailed(
+  text: string,
+  options: StageDirectionParseOptions = {},
+): {
   mainText: string;
   actions: string[];
   cues: StageDirectionCue[];
@@ -469,7 +481,11 @@ function parseStageDirectionsDetailed(text: string): {
     spokenRaw += text.slice(cursor);
   }
   let mainText = normalizeStageDirectionMainText(spokenRaw);
-  if (cues.length === 0 && !text.includes("*")) {
+  if (
+    options.inferUnmarkedActions !== false &&
+    cues.length === 0 &&
+    !text.includes("*")
+  ) {
     const unmarked =
       extractLeadingUnmarkedStageDirection(mainText) ??
       extractTrailingUnmarkedStageDirection(mainText);
@@ -507,16 +523,22 @@ function parseStageDirectionsDetailed(text: string): {
  * action. It is unwrapped and kept in the spoken line:
  *   - `the *thought* that counts` → `the thought that counts`
  */
-export function extractStageDirections(text: string): {
+export function extractStageDirections(
+  text: string,
+  options: StageDirectionParseOptions = {},
+): {
   mainText: string;
   actions: string[];
 } {
-  const parsed = parseStageDirectionsDetailed(text);
+  const parsed = parseStageDirectionsDetailed(text, options);
   return { mainText: parsed.mainText, actions: parsed.actions };
 }
 
-export function extractStageDirectionCues(text: string): StageDirectionCue[] {
-  return parseStageDirectionsDetailed(text).cues;
+export function extractStageDirectionCues(
+  text: string,
+  options: StageDirectionParseOptions = {},
+): StageDirectionCue[] {
+  return parseStageDirectionsDetailed(text, options).cues;
 }
 
 /**

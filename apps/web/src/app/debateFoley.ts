@@ -52,7 +52,9 @@ export interface DebateModeratorGavelCue {
 }
 
 export const DEBATE_AUDIENCE_MURMUR_URL =
-  "/audio/debate/courtroom-audience-murmur-loop.mp3";
+  // The old 12-second crowd recording contained a distinctive laugh that
+  // became conspicuous every time the loop wrapped between floor beats.
+  "/audio/session-atmosphere/default-studio-room-loop.mp3";
 export const DEBATE_AUDIENCE_CROSSTALK_URL =
   "/audio/debate/courtroom-audience-crosstalk-loop.mp3";
 export const DEBATE_AUDIENCE_AGITATION_URL =

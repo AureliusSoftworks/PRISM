@@ -4,6 +4,7 @@ import type {
   VoiceDeliveryMood,
   VoiceMode,
 } from "./audioVoice.js";
+import type { VoicePerformancePlanV1 } from "./voicePerformance.js";
 
 export const REPLAY_MANIFEST_VERSION = 1 as const;
 export const REPLAY_MANIFEST_V2_VERSION = 2 as const;
@@ -246,7 +247,10 @@ export interface ReplayVoiceTakeV1 {
   mode: VoiceMode;
   requestedEngine: EnglishVoiceEngine | null;
   resolvedEngine: string | null;
+  /** Pinned engine/model identity for faithful synthesis diagnostics. */
+  resolvedModelHash?: string | null;
   profile: BotAudioVoiceProfileV1;
+  performancePlan?: VoicePerformancePlanV1 | null;
   moodKey: VoiceDeliveryMood;
   effectsEnabled: boolean;
   gain: number;
@@ -256,6 +260,24 @@ export interface ReplayVoiceTakeV1 {
   audible: boolean;
   durationMs: number | null;
   alignment: ReplaySpeechAlignmentV1 | null;
+  segmentTimings?: ReplayVoiceSegmentTimingV1[];
+  heardCompletion?: ReplayVoiceHeardCompletionV1;
+}
+
+export interface ReplayVoiceSegmentTimingV1 {
+  kind: "speech" | "vocal-action";
+  sourceStart: number;
+  sourceEnd: number;
+  startMs: number;
+  endMs: number;
+  heard: boolean;
+  action?: string | null;
+}
+
+export interface ReplayVoiceHeardCompletionV1 {
+  state: "planned" | "completed" | "interrupted";
+  heardDurationMs: number;
+  heardCharacterCount: number;
 }
 
 export interface ReplaySpeechAlignmentV1 {

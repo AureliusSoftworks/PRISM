@@ -693,6 +693,58 @@ describe("Story API helpers", () => {
     );
   });
 
+  it("adapts Inept into an in-character Story-role failure", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Rick");
+    seedBot(db, "bot-b", "Morty");
+    const name = "Inept";
+    const intent = "Cannot follow instructions or fulfill a story role correctly.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-a'").run(
+      JSON.stringify([{
+        version: 1,
+        id: "inept",
+        name,
+        intent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(name, intent),
+          selfCue: "Always visibly botch the current task.",
+          observerCue: "Rick mishandles obvious duties.",
+          effects: [{
+            type: "ineptitude",
+            instructionFidelity: "always_botched",
+            imageFidelity: "always_unrelated",
+          }],
+          ruleLabels: ["Always botches instructions"],
+        },
+      }]),
+    );
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const provider = new SequenceProvider([episodeJson()]);
+
+    await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider,
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const prompt = provider.calls[0]?.messages
+      .map((message) => message.content)
+      .join("\n") ?? "";
+
+    assert.match(prompt, /INEPT MISTAKEN ASSIGNMENT/u);
+    assert.match(prompt, /objective|wrong action|wrong item/u);
+    assert.match(prompt, /valid app state/u);
+    assert.doesNotMatch(prompt, /Always visibly botch the current task/u);
+  });
+
   it("adapts the strongest targeted candor Power into one response scene", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ada");

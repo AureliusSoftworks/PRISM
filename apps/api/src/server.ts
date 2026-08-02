@@ -205,7 +205,6 @@ import {
   resolveDebateParticipantObjection,
   resumeDebateSession,
   resumeDebateSessionWithPersona,
-  skipDebateJuryDeliberation,
   submitDebateInterjection,
   submitDebateJudgeGavelMessage,
   submitDebateObjectionRuling,
@@ -773,6 +772,7 @@ import {
   PRISM_EULA_DOCUMENT_ID,
   PRISM_EULA_MINIMUM_AGE,
   PRISM_EULA_VERSION,
+  PRISM_BUILTIN_ENGLISH_VOICES,
   normalizeBotFaceThinkingFrames,
   normalizeHubAtmosphereStyle,
   normalizeBotFaceBlinkBar,
@@ -808,6 +808,9 @@ import {
   normalizeEnglishVoiceEngine,
   applyBotNamePronunciations,
   voicePerformanceTextFromActionCues,
+  voicePerformancePlanFromText,
+  VOICE_VOCAL_ACTIONS,
+  VOICE_VOCAL_ACTION_MODIFIERS,
   normalizeBotNamePronunciation,
   normalizeBotSelfReferral,
   normalizeBotVoiceVolume,
@@ -885,6 +888,8 @@ import {
   type BotFaceEyeMovement,
   type BotFaceThinkingFrames,
   type BotAudioVoiceProfileV1,
+  type VoicePerformancePlanV1,
+  type VoicePerformanceVocalActionSegmentV1,
   BOTCAST_ELEVENLABS_INTRO_DURATION_MS,
   BOTCAST_ELEVENLABS_OUTDENT_DURATION_MS,
   buildSignalMusicProfile,
@@ -1015,6 +1020,7 @@ import {
   requestElevenLabsVoiceCatalog,
   requestElevenLabsVoiceCollections,
   requestElevenLabsVoiceIdentity,
+  cleanSpeakableAssistantProse,
   resolveFrozenReplayVoiceEngine,
   resolveVoiceSynthesisExplicitOnlineContext,
   resolveVoiceSynthesisBoundary,
@@ -1027,6 +1033,15 @@ import {
 } from "./builtin-tts.ts";
 import { buildBabbleSpeechText } from "./babble-text.ts";
 import { splitLocalVoiceStreamText } from "./local-voice-stream.ts";
+import {
+  localVoiceCalibrationState,
+  localVoiceEngineCapabilities,
+  pcmWaveDurationMs,
+  recordInstantVoiceCalibration,
+  resolveLocalVoiceEngine,
+  PRISM_INSTANT_VOICE_MODEL_ID,
+  PRISM_INSTANT_VOICE_MODEL_SHA256,
+} from "./local-voice-engine.ts";
 import { initializePremiumVoiceDefaults } from "./premium-voice-defaults.ts";
 import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 let config: AppConfig = getAppConfig();
@@ -1836,10 +1851,25 @@ function sendVoiceWave(
     | "builtin-provider-fallback",
   characterCount: number,
   includeAlignment = false,
+  localEngine?: ReturnType<typeof resolveLocalVoiceEngine>,
 ): void {
   response.setHeader("cache-control", "no-store");
   response.setHeader("x-prism-voice-engine", engineUsed);
   response.setHeader("x-prism-voice-characters", String(characterCount));
+  if (localEngine) {
+    response.setHeader("x-prism-local-voice-engine", localEngine.resolved);
+    response.setHeader("x-prism-voice-model", PRISM_INSTANT_VOICE_MODEL_ID);
+    response.setHeader(
+      "x-prism-voice-model-sha256",
+      PRISM_INSTANT_VOICE_MODEL_SHA256,
+    );
+    if (localEngine.notice) {
+      response.setHeader(
+        "x-prism-voice-notice",
+        encodeURIComponent(localEngine.notice),
+      );
+    }
+  }
   if (includeAlignment) {
     response.setHeader("x-prism-audio-content-type", "audio/wav");
     response.setHeader("x-prism-voice-alignment", "none");
@@ -1869,9 +1899,48 @@ async function sendLocalVoiceWaveStream(args: {
     | "builtin-provider-fallback";
   allowOperatingSystemVoices: boolean;
   signal: AbortSignal;
+  localEngine?: ReturnType<typeof resolveLocalVoiceEngine>;
+  performancePlan?: VoicePerformancePlanV1 | null;
 }): Promise<void> {
-  const chunks = splitLocalVoiceStreamText(args.text);
-  if (chunks.length === 0)
+  type LocalVoiceStreamItem =
+    | {
+        kind: "speech";
+        text: string;
+        sourceStart: number;
+        sourceEnd: number;
+      }
+    | VoicePerformanceVocalActionSegmentV1;
+  const hasVocalActions =
+    args.performancePlan?.segments.some(
+      (segment) => segment.kind === "vocal-action",
+    ) === true;
+  const streamItems: LocalVoiceStreamItem[] = [];
+  if (hasVocalActions) {
+    for (const segment of args.performancePlan!.segments) {
+      if (segment.kind === "vocal-action") {
+        streamItems.push(segment);
+        continue;
+      }
+      streamItems.push(
+        ...splitLocalVoiceStreamText(segment.text).map((text) => ({
+          kind: "speech" as const,
+          text,
+          sourceStart: segment.sourceStart,
+          sourceEnd: segment.sourceEnd,
+        })),
+      );
+    }
+  } else {
+    streamItems.push(
+      ...splitLocalVoiceStreamText(args.text).map((text) => ({
+        kind: "speech" as const,
+        text,
+        sourceStart: 0,
+        sourceEnd: args.text.length,
+      })),
+    );
+  }
+  if (streamItems.length === 0)
     throw new Error("Speakable assistant text is required.");
   const generate = (text: string) =>
     builtinVoiceWaveGeneratorOverride({
@@ -1882,7 +1951,10 @@ async function sendLocalVoiceWaveStream(args: {
     });
   // Prepare the first phrase before committing a 200 response so startup
   // failures still retain the route's normal actionable 503 behavior.
-  const firstWave = await generate(chunks[0]!);
+  const firstItem = streamItems[0]!;
+  const firstWave = firstItem.kind === "speech"
+    ? await generate(firstItem.text)
+    : null;
   if (args.signal.aborted) throw new DOMException("Aborted", "AbortError");
 
   args.response.statusCode = 200;
@@ -1891,27 +1963,79 @@ async function sendLocalVoiceWaveStream(args: {
     "content-type",
     "application/x-ndjson; charset=utf-8",
   );
-  args.response.setHeader("x-prism-voice-stream", "wav-chunks-v1");
+  args.response.setHeader(
+    "x-prism-voice-stream",
+    hasVocalActions ? "wav-chunks-v2" : "wav-chunks-v1",
+  );
   args.response.setHeader("x-prism-voice-engine", args.engineUsed);
   args.response.setHeader("x-prism-voice-characters", String(args.text.length));
-  const writeChunk = (wave: Buffer, text: string, index: number) => {
+  if (args.localEngine) {
+    args.response.setHeader(
+      "x-prism-local-voice-engine",
+      args.localEngine.resolved,
+    );
+    args.response.setHeader("x-prism-voice-model", PRISM_INSTANT_VOICE_MODEL_ID);
+    args.response.setHeader(
+      "x-prism-voice-model-sha256",
+      PRISM_INSTANT_VOICE_MODEL_SHA256,
+    );
+    if (args.localEngine.notice) {
+      args.response.setHeader(
+        "x-prism-voice-notice",
+        encodeURIComponent(args.localEngine.notice),
+      );
+    }
+  }
+  if (hasVocalActions) {
+    args.response.setHeader(
+      "x-prism-voice-segments",
+      String(streamItems.length),
+    );
+  }
+  const writeSpeechChunk = (wave: Buffer, item: Extract<(typeof streamItems)[number], { kind: "speech" }>, index: number) => {
     args.response.write(
       `${JSON.stringify({
         index,
-        characterCount: text.length + (index > 0 ? 1 : 0),
-        text,
+        ...(hasVocalActions ? { kind: "speech" } : {}),
+        characterCount: item.text.length + (index > 0 ? 1 : 0),
+        text: item.text,
+        ...(hasVocalActions
+          ? { sourceStart: item.sourceStart, sourceEnd: item.sourceEnd }
+          : {}),
         audioBase64: wave.toString("base64"),
       })}\n`,
     );
   };
-  writeChunk(firstWave, chunks[0]!, 0);
+  const writeActionChunk = (
+    item: Extract<(typeof streamItems)[number], { kind: "vocal-action" }>,
+    index: number,
+  ) => {
+    args.response.write(
+      `${JSON.stringify({
+        index,
+        kind: "vocal-action",
+        characterCount: 0,
+        action: item.action,
+        modifiers: item.modifiers,
+        authoredText: item.authoredText,
+        sourceStart: item.sourceStart,
+        sourceEnd: item.sourceEnd,
+      })}\n`,
+    );
+  };
 
-  for (let index = 1; index < chunks.length; index += 1) {
+  for (let index = 0; index < streamItems.length; index += 1) {
     if (args.signal.aborted || args.response.destroyed) return;
-    const text = chunks[index]!;
-    const wave = await generate(text);
+    const item = streamItems[index]!;
+    if (item.kind === "vocal-action") {
+      writeActionChunk(item, index);
+      continue;
+    }
+    const wave = index === 0 && firstWave
+      ? firstWave
+      : await generate(item.text);
     if (args.signal.aborted || args.response.destroyed) return;
-    writeChunk(wave, text, index);
+    writeSpeechChunk(wave, item, index);
   }
   args.response.end();
 }
@@ -14111,20 +14235,6 @@ function buildRoutes(): RouteDefinition[] {
         session: debateSessionForPlayer(session),
       });
     }),
-    route("POST", "/api/debates/:id/jury/skip-deliberation", async (ctx) => {
-      const userId = requireAuth(ctx);
-      invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Jury cadence changed.");
-      const session = skipDebateJuryDeliberation(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.body as Parameters<typeof skipDebateJuryDeliberation>[3],
-      );
-      json(ctx.res, 200, {
-        ok: true,
-        session: debateSessionForPlayer(session),
-      });
-    }),
     route("POST", "/api/debates/:id/resume", async (ctx) => {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Debate resumed from a new floor state.");
@@ -18845,6 +18955,38 @@ function buildRoutes(): RouteDefinition[] {
               user.operating_system_voices_enabled !== 0,
             ...systemVoices,
           },
+          local: {
+            defaultEnginePreference: "auto",
+            engines: localVoiceEngineCapabilities(),
+            archetypes: PRISM_BUILTIN_ENGLISH_VOICES,
+            accentSources: {
+              portable: PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => ({
+                voiceId: voice.voiceId,
+                locale: voice.locale,
+                label: voice.locale === "en-GB" ? "British English" : "American English",
+                approximate: false,
+              })),
+              system: systemVoices.voices.map((voice) => ({
+                name: voice.name,
+                locale: voice.locale,
+                approximate: false,
+              })),
+              phonemeApproximationLocales: [],
+            },
+            calibration: localVoiceCalibrationState(),
+            referenceVoices: {
+              available: false,
+              consentAttestationRequired: true,
+              rawAudioRetained: false,
+              exportable: false,
+            },
+            performance: {
+              streamFormats: ["wav-chunks-v1", "wav-chunks-v2"],
+              vocalActions: VOICE_VOCAL_ACTIONS,
+              modifiers: VOICE_VOCAL_ACTION_MODIFIERS,
+              nativeActionsRequireEngineCapability: true,
+            },
+          },
           elevenLabs: {
             ...VOICE_CAPABILITIES.elevenLabs,
             configured: Boolean(
@@ -18853,6 +18995,51 @@ function buildRoutes(): RouteDefinition[] {
           },
         },
       });
+    }),
+    route("POST", "/api/voices/local/calibrate", async (ctx) => {
+      requireAuth(ctx);
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      const profile = normalizeBotAudioVoiceProfileV1(undefined);
+      const calibrationText =
+        "PRISM is measuring this voice on your device for smooth local speech.";
+      try {
+        // The first pass loads the exact packaged runtime; the second captures
+        // warm performance. Both remain device-local and retain no audio.
+        await builtinVoiceWaveGeneratorOverride({
+          text: "Warming the local voice.",
+          profile,
+          allowOperatingSystemVoices: false,
+          signal: controller.signal,
+        });
+        const startedAt = performance.now();
+        const wave = await builtinVoiceWaveGeneratorOverride({
+          text: calibrationText,
+          profile,
+          allowOperatingSystemVoices: false,
+          signal: controller.signal,
+        });
+        const elapsedMs = performance.now() - startedAt;
+        const audioDurationMs = pcmWaveDurationMs(wave);
+        if (audioDurationMs === null) {
+          throw new HttpError(502, "The local voice returned an invalid calibration wave.");
+        }
+        const calibration = recordInstantVoiceCalibration({
+          elapsedMs,
+          audioDurationMs,
+        });
+        json(ctx.res, 200, {
+          ok: true,
+          calibration,
+          selection: resolveLocalVoiceEngine({
+            preference: "auto",
+            calibration,
+          }),
+        });
+      } finally {
+        ctx.req.off("close", onClose);
+      }
     }),
     route("GET", "/api/voices/elevenlabs", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -19336,6 +19523,19 @@ function buildRoutes(): RouteDefinition[] {
               : body.sourceMessageId === null
                 ? null
                 : undefined,
+          resolvedModelHash:
+            typeof body.resolvedModelHash === "string"
+              ? body.resolvedModelHash
+              : body.resolvedModelHash === null
+                ? null
+                : undefined,
+          segmentTimings: Array.isArray(body.segmentTimings)
+            ? (body.segmentTimings as ReplayVoiceTakeV1["segmentTimings"])
+            : undefined,
+          heardCompletion:
+            body.heardCompletion && typeof body.heardCompletion === "object"
+              ? (body.heardCompletion as ReplayVoiceTakeV1["heardCompletion"])
+              : undefined,
         },
       );
       if (!take) throw new HttpError(404, "Replay voice take not found.");
@@ -19757,6 +19957,12 @@ function buildRoutes(): RouteDefinition[] {
       let sourceBotMuted = false;
       let sourceText = raw.text;
       let sourceElevenLabsText = raw.elevenLabsText;
+      let sourcePerformanceText =
+        typeof raw.performanceText === "string"
+          ? raw.performanceText
+          : typeof raw.elevenLabsText === "string"
+            ? raw.elevenLabsText
+            : raw.text;
       const requestedSpeakerBotId =
         typeof raw.speakerBotId === "string" && raw.speakerBotId.trim()
           ? raw.speakerBotId.trim().slice(0, 160)
@@ -19826,6 +20032,7 @@ function buildRoutes(): RouteDefinition[] {
         }
         sourceText = segment.text;
         sourceElevenLabsText = segment.text;
+        sourcePerformanceText = segment.text;
         persistedMessageProvider = segment.provider;
         sourceBotId = segment.botId;
         raw.moodKey = segment.moodKey;
@@ -19875,6 +20082,7 @@ function buildRoutes(): RouteDefinition[] {
         sourceText = replaySnapshot.spokenText;
         sourceElevenLabsText =
           replaySnapshot.performanceText ?? replaySnapshot.spokenText;
+        sourcePerformanceText = sourceElevenLabsText;
         sourceBotId = replaySnapshot.speakerId;
         const frozenReplayEngine = resolveFrozenReplayVoiceEngine({
           privacyMode: replayManifest?.privacyMode ?? "local",
@@ -19937,6 +20145,8 @@ function buildRoutes(): RouteDefinition[] {
           voicePerformanceTextFromActionCues(
             message?.content ?? raw.spokenText,
           ) ?? sourceElevenLabsText;
+        sourcePerformanceText =
+          message?.content ?? raw.performanceText ?? raw.spokenText;
         persistedMessageProvider = message?.provider ?? null;
         sourceBotMuted = botPowerIsMutedV1(message?.powers_json);
         if (!listenerReactionRequested || !requestedSpeakerBotId) {
@@ -19987,6 +20197,8 @@ function buildRoutes(): RouteDefinition[] {
           voicePerformanceTextFromActionCues(
             signalMessage.voice_performance_text ?? signalMessage.content,
           ) ?? signalMessage.voice_performance_text;
+        sourcePerformanceText =
+          signalMessage.voice_performance_text ?? signalMessage.content;
         persistedMessageProvider =
           signalMessage.response_mode === "local"
             ? "local"
@@ -20053,6 +20265,7 @@ function buildRoutes(): RouteDefinition[] {
         }
         sourceText = bridgeLine;
         sourceElevenLabsText = bridgeLine;
+        sourcePerformanceText = bridgeLine;
       }
       if (
         (sourceBotMuted &&
@@ -20085,6 +20298,7 @@ function buildRoutes(): RouteDefinition[] {
           // transcript utterance. Eleven v3 turns the saved tag into the sound.
           sourceText = "...";
           sourceElevenLabsText = `[${vocalFoley}] ...`;
+          sourcePerformanceText = `[${vocalFoley}]`;
         } else {
           const listenerReactionText =
             typeof raw.listenerReactionText === "string"
@@ -20111,6 +20325,7 @@ function buildRoutes(): RouteDefinition[] {
           }
           sourceText = listenerReactionText;
           sourceElevenLabsText = listenerReactionText;
+          sourcePerformanceText = listenerReactionText;
         }
       }
       if (interruptedSpeakerReactionRequested) {
@@ -20135,6 +20350,7 @@ function buildRoutes(): RouteDefinition[] {
         }
         sourceText = interruptedSpeakerReaction;
         sourceElevenLabsText = interruptedSpeakerReaction;
+        sourcePerformanceText = interruptedSpeakerReaction;
       }
       sourceElevenLabsText =
         voicePerformanceTextFromActionCues(sourceElevenLabsText) ??
@@ -20158,6 +20374,34 @@ function buildRoutes(): RouteDefinition[] {
         botNamePronunciations,
         sourceBotId,
       );
+      const authoredPerformancePlan = voicePerformancePlanFromText(
+        sourcePerformanceText,
+      );
+      const normalizedPerformanceSegments: VoicePerformancePlanV1["segments"] = [];
+      for (const segment of authoredPerformancePlan.segments) {
+        if (segment.kind === "vocal-action") {
+          normalizedPerformanceSegments.push(segment);
+          continue;
+        }
+        const text = cleanSpeakableAssistantProse(
+          applyBotNamePronunciations(
+            segment.text,
+            botNamePronunciations,
+            sourceBotId,
+          ),
+        );
+        if (text) normalizedPerformanceSegments.push({ ...segment, text });
+      }
+      const localPerformancePlan: VoicePerformancePlanV1 | null =
+        authoredPerformancePlan.segments.some(
+          (segment) => segment.kind === "vocal-action",
+        )
+          ? {
+              ...authoredPerformancePlan,
+              spokenText: cleanSpeakableAssistantProse(spokenSourceText),
+              segments: normalizedPerformanceSegments,
+            }
+          : null;
       const spokenElevenLabsText =
         typeof sourceElevenLabsText === "string"
           ? sourceElevenLabsText
@@ -20181,7 +20425,12 @@ function buildRoutes(): RouteDefinition[] {
         hasMessageId:
           typeof raw.messageId === "string" && raw.messageId.trim().length > 0,
       });
-      const requestedProfile = normalizeBotAudioVoiceProfileV1(raw.profile);
+      const requestedProfile = normalizeBotAudioVoiceProfileV1({
+        ...normalizeBotAudioVoiceProfileV1(raw.profile),
+        ...(Object.prototype.hasOwnProperty.call(raw, "localEnginePreference")
+          ? { localEnginePreference: raw.localEnginePreference }
+          : {}),
+      });
       const legacyVoiceBank = parseStoredElevenLabsVoiceBank(
         user.elevenlabs_voice_bank,
       );
@@ -20213,15 +20462,6 @@ function buildRoutes(): RouteDefinition[] {
         (raw.explicitVoicePreview === true || elevenLabsConversationEnabled)
           ? "elevenlabs"
           : "builtin";
-      if (
-        listenerReactionFoleyRequested &&
-        (requestedEngine !== "elevenlabs" || !explicitOnlineContext)
-      ) {
-        throw new HttpError(
-          409,
-          "Listener vocal Foley requires an eligible ONLINE ElevenLabs voice.",
-        );
-      }
       const request = validateVoiceSynthesisRequest({
         ...raw,
         text: spokenSourceText,
@@ -20252,6 +20492,23 @@ function buildRoutes(): RouteDefinition[] {
           lilt: 0,
           bottishTone: 0.45,
         };
+        const babblePerformancePlan = localPerformancePlan
+          ? {
+              ...localPerformancePlan,
+              spokenText: babbleText,
+              segments: localPerformancePlan.segments.map((segment, index) =>
+                segment.kind === "vocal-action"
+                  ? segment
+                  : {
+                      ...segment,
+                      text: buildBabbleSpeechText({
+                        text: segment.text,
+                        seed: `${request.seed ?? request.messageId ?? boundary.text}:segment:${index}`,
+                      }),
+                    },
+              ),
+            }
+          : null;
         try {
           if (raw.streamChunks === true && !request.includeAlignment) {
             await sendLocalVoiceWaveStream({
@@ -20261,6 +20518,7 @@ function buildRoutes(): RouteDefinition[] {
               engineUsed: "builtin-babble",
               allowOperatingSystemVoices,
               signal: controller.signal,
+              performancePlan: babblePerformancePlan,
             });
             return;
           }
@@ -20301,6 +20559,10 @@ function buildRoutes(): RouteDefinition[] {
         const controller = new AbortController();
         const onClose = () => controller.abort();
         ctx.req.once("close", onClose);
+        const localEngine = resolveLocalVoiceEngine({
+          preference: normalizeBotAudioVoiceProfileV1(boundary.profile)
+            .localEnginePreference,
+        });
         try {
           if (raw.streamChunks === true && !request.includeAlignment) {
             await sendLocalVoiceWaveStream({
@@ -20310,6 +20572,8 @@ function buildRoutes(): RouteDefinition[] {
               engineUsed: boundary.engineUsed,
               allowOperatingSystemVoices,
               signal: controller.signal,
+              localEngine,
+              performancePlan: localPerformancePlan,
             });
             return;
           }
@@ -20325,6 +20589,7 @@ function buildRoutes(): RouteDefinition[] {
             boundary.engineUsed,
             boundary.text.length,
             request.includeAlignment,
+            localEngine,
           );
         } catch (error) {
           if (controller.signal.aborted) return;
@@ -20376,6 +20641,22 @@ function buildRoutes(): RouteDefinition[] {
         const onClose = () => controller.abort();
         ctx.req.once("close", onClose);
         try {
+          if (raw.streamChunks === true && !request.includeAlignment) {
+            await sendLocalVoiceWaveStream({
+              response: ctx.res,
+              text: boundary.text,
+              profile: boundary.profile,
+              engineUsed: "builtin-provider-fallback",
+              allowOperatingSystemVoices,
+              signal: controller.signal,
+              localEngine: resolveLocalVoiceEngine({
+                preference: normalizeBotAudioVoiceProfileV1(boundary.profile)
+                  .localEnginePreference,
+              }),
+              performancePlan: localPerformancePlan,
+            });
+            return;
+          }
           const wave = await builtinVoiceWaveGeneratorOverride({
             text: boundary.text,
             profile: boundary.profile,
@@ -20532,6 +20813,22 @@ function buildRoutes(): RouteDefinition[] {
             );
           }
           try {
+            if (raw.streamChunks === true && !request.includeAlignment) {
+              await sendLocalVoiceWaveStream({
+                response: ctx.res,
+                text: boundary.text,
+                profile: boundary.profile,
+                engineUsed: "builtin-provider-fallback",
+                allowOperatingSystemVoices,
+                signal: controller.signal,
+                localEngine: resolveLocalVoiceEngine({
+                  preference: normalizeBotAudioVoiceProfileV1(boundary.profile)
+                    .localEnginePreference,
+                }),
+                performancePlan: localPerformancePlan,
+              });
+              return;
+            }
             const wave = await builtinVoiceWaveGeneratorOverride({
               text: boundary.text,
               profile: boundary.profile,
@@ -21116,7 +21413,7 @@ function buildRoutes(): RouteDefinition[] {
         const capability = resolveModelReasoningEffortCapability({
           provider,
           modelId,
-          simulatedLocalEnabled:
+          simulatedEffortEnabled:
             user.experimental_all_model_effort_enabled === 1,
         });
         if (!capability.levels.includes(effort)) {

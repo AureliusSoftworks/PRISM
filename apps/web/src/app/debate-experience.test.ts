@@ -102,6 +102,26 @@ describe("Debate experience", () => {
     );
   });
 
+  it("restores an interrupted Debate line from its durable captured voice take", () => {
+    assert.match(page, /loadCapturedReplayVoiceAudio/u);
+    assert.match(
+      page,
+      /playbackSurface === "debate"[\s\S]{0,220}sourceKey: `primary:\$\{message\.id\}`/u,
+    );
+    assert.match(
+      page,
+      /saved[\s\S]{0,180}bytes: saved\.bytes[\s\S]{0,180}engineUsed: saved\.resolvedEngine/u,
+    );
+    assert.match(
+      page,
+      /durableReplayClip = true/u,
+    );
+    assert.match(
+      page,
+      /!durableReplayClip &&[\s\S]{0,100}!signalPreferredVoiceClipReady/u,
+    );
+  });
+
   it("selects all motion fields atomically without retaining nested references", () => {
     const slate = {
       version: DEBATE_SCHEMA_VERSION,
@@ -312,6 +332,17 @@ describe("Debate experience", () => {
     assert.match(source, /PrismRefractTarget target=\{synthesisMagic\}/u);
     assert.match(source, /data-tutorial-target="debate-synthesize"/u);
     assert.match(source, /Refract into motions/u);
+  });
+
+  it("grounds table-placed evidence with contact and cast shadows", () => {
+    assert.match(
+      css,
+      /\.evidencePedestal \.evidencePedestalSprite\s*\{[^}]*filter:\s*drop-shadow\(0 3px 2px rgba\(0, 0, 0, 0\.72\)\)\s*drop-shadow\(1px 13px 11px rgba\(0, 0, 0, 0\.48\)\)/u,
+    );
+    assert.match(
+      css,
+      /\.evidencePedestalDocument\s*\{[^}]*box-shadow:\s*0 3px 3px rgba\(0, 0, 0, 0\.58\),\s*1px 13px 18px rgba\(0, 0, 0, 0\.44\)/u,
+    );
   });
 
   it("defaults to a streamlined Basic setup while preserving the current Advanced studio", () => {
@@ -529,12 +560,12 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /Choosing one restores[\s\S]{0,80}name and options[\s\S]{0,80}image-generation tokens/u,
+      /Choosing one changes[\s\S]{0,80}only the evidence sprite[\s\S]{0,80}image-generation[\s\S]{0,40}tokens/u,
     );
     assert.match(source, /selectEvidenceExhibitAsset\(asset\)/u);
     assert.match(
       source,
-      /debateEvidenceObjectDraftFromStoredExhibitAsset\(asset\)/u,
+      /applyDebateEvidenceExhibitAssetReuse\(current, asset\)/u,
     );
     assert.match(
       source,
@@ -1057,37 +1088,22 @@ describe("Debate experience", () => {
       /\.dashboard \.researchBox\s*\{[^}]*display:\s*grid[^}]*grid-template-columns:\s*minmax\(280px,\s*1fr\) auto/u,
     );
     assert.match(source, /\/end-early/u);
-    assert.match(source, /\/jury\/skip-deliberation/u);
-    assert.match(
-      source,
-      /juryDeliberating \? "Skip deliberation" : "End debate"/u,
-    );
-    assert.match(
-      source,
-      /debateAwaitsJuryDeliberationChoice\(activeSession\)/u,
-    );
-    assert.match(source, /Begin deliberation/u);
+    assert.doesNotMatch(source, /\/jury\/skip-deliberation/u);
+    assert.doesNotMatch(source, /debateAwaitsJuryDeliberationChoice/u);
+    assert.match(source, /silentDeliberationPreparing/u);
+    assert.match(source, /juryDeliberationBubble/u);
+    assert.match(source, />\s*\.\.\.\s*</u);
+    assert.match(source, /debateJuryBallotVoiceCacheKey/u);
+    assert.match(source, /jury\.preparedFinalBallots\.map/u);
+    assert.match(source, /await onPrepareUtterance\(utterance\)/u);
+    assert.match(page, /utterance\.voiceCacheKey \?\? utterance\.event\.id/u);
     assert.doesNotMatch(source, />\s*Watch Jury\s*</u);
     assert.doesNotMatch(source, />\s*Participate\s*</u);
-    assert.match(source, /Skip to ballots/u);
-    assert.match(source, /Silent deliberation begins in/u);
-    assert.match(source, /juryAutoDeliberationEnabled/u);
-    assert.match(source, /juryDecisionTimeoutMs/u);
-    assert.match(source, /All five jurors will still cast final ballots/u);
-    assert.match(source, /role="alertdialog"/u);
-    assert.match(
-      source,
-      /limited \$\{debatePublicMaterialName\(session\.formality\)\.toLowerCase\(\)\}/u,
-    );
-    assert.match(
-      source,
-      /disabled=\{busy \|\| \(!juryDeliberating && presenting\)\}/u,
-    );
-    assert.match(
-      source,
-      /if \(presenting\) cancelCurrentPresentation\(\);[\s\S]{0,180}jury\/skip-deliberation/u,
-    );
-    assert.match(css, /\.juryDeliberationChoice/u);
+    assert.doesNotMatch(source, /Skip to ballots/u);
+    assert.doesNotMatch(source, /Begin deliberation/u);
+    assert.doesNotMatch(source, /juryAutoDeliberationEnabled/u);
+    assert.doesNotMatch(source, /juryDecisionTimeoutMs/u);
+    assert.doesNotMatch(css, /\.juryDeliberationChoice/u);
     assert.match(css, /\.proceedingControlActions \.endEarlyButton/u);
   });
 
@@ -1334,12 +1350,36 @@ describe("Debate experience", () => {
     for (const kind of ["paused", "player", "verdict", "failed"]) {
       assert.match(source, new RegExp(`data-kind="${kind}"`, "u"));
     }
-    assert.match(source, /Forum in recess/u);
-    assert.match(source, /Strike gavel to resume/u);
+    assert.match(source, /Debate paused/u);
+    assert.match(source, /Resume Debate/u);
+    assert.match(
+      source,
+      /The interrupted line is preserved and will replay from\s+its beginning/u,
+    );
+    assert.match(page, /const debateLastVoiceClipRef = useRef/u);
+    assert.match(
+      page,
+      /playbackSurface === "debate"[\s\S]{0,120}debateLastVoiceClipRef\.current\?\.key === message\.id/u,
+    );
+    assert.match(
+      page,
+      /debateLastVoiceClipRef\.current = \{ key: message\.id, clip \}/u,
+    );
     assert.match(source, /The floor turns to you/u);
     assert.match(source, /The proceeding is sealed/u);
     assert.match(source, /No prevailing side/u);
     assert.match(css, /\.stageStateOverlay\s*\{[^}]*position:\s*absolute/u);
+  });
+
+  it("copies Debate error toasts when clicked", () => {
+    assert.match(source, /function DebateErrorToast/u);
+    assert.match(source, /writeDebateClipboardText\(props\.message\)/u);
+    assert.match(source, /Click to copy error\./u);
+    assert.ok(
+      (source.match(/<DebateErrorToast key=\{error\} message=\{error\} \/>/gu) ?? [])
+        .length >= 2,
+    );
+    assert.match(css, /\.errorToast\s*\{/u);
   });
 
   it("shows one overall live timer and a separate speech-synced floor clock", () => {
@@ -1438,6 +1478,14 @@ describe("Debate experience", () => {
     assert.match(
       source,
       /event\.sequence < pausedPresentationEvent\.sequence/u,
+    );
+    assert.match(
+      source,
+      /presentationPlaybackEventIdRef\.current =\s*fresh\.find\([\s\S]{0,180}event\.speakerKind !== "system" && event\.kind !== "error"/u,
+    );
+    assert.match(
+      source,
+      /const \[eventIndex, event\] of fresh\.entries\(\)[\s\S]{0,260}fresh\s*\.slice\(eventIndex \+ 1\)/u,
     );
     assert.match(source, /lifecycle:\s*\{[\s\S]*onProgress/u);
     assert.match(page, /utterance\.lifecycle \?\? \{\}/u);
@@ -1733,31 +1781,25 @@ describe("Debate experience", () => {
     assert.match(page, /debateJudgeGavelVoiceMood\(utterance\.event\)/u);
     assert.match(source, /data-tutorial-target="debate-proceeding-controls"/u);
     assert.match(source, /Judge proceeding controls/u);
-    assert.match(source, /\? "Gavel to resume"\s*: "Pause"/u);
+    assert.match(source, /\? "Resume"\s*:.*?"Pause"/u);
     assert.match(source, /debateSessionNeedsReturnPause\(result\.session\)/u);
     assert.match(source, /nextMutationKey\("return-recess"\)/u);
     assert.match(source, /nextMutationKey\("exit-recess"\)/u);
     assert.match(source, /exitRecovery: true/u);
-    assert.match(source, /triggerJudgeGavelSmash\("order"\)/u);
     assert.match(
       source,
-      /suppressNextJudgeGavelPresentationCueRef\.current = true[\s\S]{0,900}debateModeratorGavelSpeechLeadMs\("order"\)/u,
+      /presentationEventId:\s*replayEventId/u,
     );
-    assert.match(source, /\?\s*"Skip deliberation"\s*:\s*"End debate"/u);
+    assert.match(source, /pausedPresentationEventId/u);
+    assert.match(source, /debateRequestIsRevisionConflict\(caught\)/u);
+    assert.match(
+      source,
+      /previous\.status !== "paused" && busy[\s\S]{0,80}setPauseQueued\(true\)/u,
+    );
+    assert.match(source, /\(busy && session\.status === "paused"\) \|\|\s*pauseQueued/u);
+    assert.doesNotMatch(source, /\?\s*"Skip deliberation"\s*:\s*"End debate"/u);
     assert.doesNotMatch(source, /className=\{styles\.liveControls\}/u);
     assert.doesNotMatch(source, /pauseOnGavelCooldown/u);
-    assert.match(
-      source,
-      /const lifecycleControlGavel =[\s\S]{0,220}event\.stepKey === "pause"[\s\S]{0,80}event\.stepKey === "resume"[\s\S]{0,100}event\.gavelReason === "audience_order"/u,
-    );
-    assert.match(
-      source,
-      /options\.automaticJudgeGavel !== true[\s\S]{0,120}!lifecycleControlGavel/u,
-    );
-    assert.ok(
-      (source.match(/automaticJudgeGavel:\s*true/gu) ?? []).length >= 2,
-      "Pause and interrupted-presentation Resume must both make lifecycle gavel presentation automatic",
-    );
     assert.match(css, /\.proceedingControls/u);
     assert.match(css, /\.proceedingControlActions/u);
     assert.match(css, /\.judgeGavelButton/u);
@@ -2650,6 +2692,8 @@ describe("Debate experience", () => {
     assert.match(source, /ambientFoleyUrls=\{DEBATE_AUDIENCE_FOLEY_URLS\}/u);
     assert.doesNotMatch(source, /backgroundRoomAcoustics=\{/u);
     assert.match(source, /DEBATE_AMBIENT_FOLEY_PROFILE/u);
+    assert.match(source, /DEBATE_JURY_AMBIENT_FOLEY_PROFILE/u);
+    assert.match(source, /DEBATE_JURY_CHAMBER_MIX/u);
     assert.match(source, /DEBATE_VOCAL_FOLEY_PROFILE/u);
     assert.match(source, /minDelayMs: 14_000/u);
     assert.match(source, /maxDelayMs: 32_000/u);
@@ -2657,7 +2701,11 @@ describe("Debate experience", () => {
     assert.match(source, /maxDelayMs: 46_000/u);
     assert.match(
       source,
-      /ambientFoleyProfile=\{DEBATE_AMBIENT_FOLEY_PROFILE\}/u,
+      /ambientFoleyProfile=\{[\s\S]{0,120}juryChamberVisible[\s\S]{0,120}DEBATE_JURY_AMBIENT_FOLEY_PROFILE[\s\S]{0,100}DEBATE_AMBIENT_FOLEY_PROFILE/u,
+    );
+    assert.match(
+      source,
+      /backgroundTone=\{juryChamberVisible \? "warm-low" : "neutral"\}/u,
     );
     assert.match(
       source,
@@ -2758,6 +2806,14 @@ describe("Debate experience", () => {
       /`\[\$\{hiddenPerformanceCue\}\] \$\{authoredPerformanceText \?\? spokenText\}`/u,
     );
     assert.match(source, /voicePerformanceText:\s*atmosphericPerformance/u);
+    assert.match(
+      source,
+      /voiceSpokenText\(authoredVoiceText, \{ leadingMarkedAction: true \}\)/u,
+    );
+    assert.match(
+      source,
+      /voicePerformanceTextFromActionCues\(\s*authoredVoiceText,\s*\{ leadingMarkedAction: true, omitLocalFoleyTags: true \}/u,
+    );
     assert.match(
       source,
       /`- Voice performance: \$\{voicePerformanceCue \? `\[\$\{voicePerformanceCue\}\]` : "None"\}`/u,
@@ -3002,7 +3058,7 @@ describe("Debate experience", () => {
     assert.match(source, /data-evidence-view=\{evidenceAlignmentView\}/u);
     assert.match(
       source,
-      /const evidenceView = debateStageEvidenceViewForCamera\(\s*cameraView,\s*\)/u,
+      /const evidenceView = debateStageEvidenceViewForCamera\(cameraView\)/u,
     );
     assert.match(
       source,
@@ -3054,6 +3110,8 @@ describe("Debate experience", () => {
     assert.doesNotMatch(source, /Watch Jury/u);
     assert.match(source, /data-silent-deliberation/u);
     assert.match(source, /Their conversation remains unheard and uncaptioned/u);
+    assert.match(source, /juryDeliberationBubble/u);
+    assert.match(source, /foleyMouthShape/u);
     assert.match(
       css,
       /\.cameraControls\[data-judge-camera="true"\] button\[data-selected="true"\]/u,
@@ -3236,9 +3294,10 @@ describe("Debate experience", () => {
       source,
       /const activeGavelCue =\s*judgeGavelSmashCue \?\? \(presenting \? liveGavelCue : null\)/u,
     );
+    assert.match(source, /pausedPresentationEventId/u);
     assert.match(
       source,
-      /await adoptSession\(\s*previous,\s*\{\s*\.\.\.result\.session,\s*status:\s*previous\.status,\s*\},\s*\{\s*automaticJudgeGavel:\s*true,\s*\},\s*\);\s*setActiveSession\(result\.session\)/u,
+      /event\.sequence < pausedPresentationEvent\.sequence/u,
     );
     assert.match(source, /session\.status === "paused" && !presenting/u);
     assert.match(

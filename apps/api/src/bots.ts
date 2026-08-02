@@ -1,8 +1,10 @@
 import type { DatabaseSync } from "node:sqlite";
 import {
+  activeBotPowersV1,
   botFalseNameSelfCueV1,
   botPowerAddressedFandomCueV1,
   botPowerBotNamingCueV1,
+  botPowerIneptitudeRoleCueV1,
   botPowerSelfCueLinesV1,
   buildBotPowersPromptBlock,
   stripBotProfileMetaSuffix,
@@ -152,10 +154,22 @@ export function composeBotSystemPrompt(
     "Direct conversation",
   );
   const falseNameCue = believedName ? botFalseNameSelfCueV1(believedName) : "";
+  const directIneptitudeCue = botPowerIneptitudeRoleCueV1(
+    powers,
+    "conversation",
+  );
+  const genericSelfCuePowers = directIneptitudeCue
+    ? activeBotPowersV1(powers).filter(
+        (power) => !power.compiled?.effects.some(
+          (effect) => effect.type === "ineptitude",
+        ),
+      )
+    : powers;
   const powersPrompt = buildBotPowersPromptBlock([
+    ...(directIneptitudeCue ? [directIneptitudeCue] : []),
     ...(namingCue ? [namingCue] : []),
     ...(falseNameCue ? [falseNameCue] : []),
-    ...botPowerSelfCueLinesV1(powers).filter((line) => {
+    ...botPowerSelfCueLinesV1(genericSelfCuePowers).filter((line) => {
       // Prefer the concrete believed-name cue over the generic compiled selfCue.
       if (!believedName) return true;
       return !/\bfalse[- ]name\b|\brandom persona name\b|\bjohn(?:\/| |-)jane doe\b/iu.test(

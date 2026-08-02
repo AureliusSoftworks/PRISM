@@ -215,6 +215,10 @@ describe("shared composer actions", () => {
       pageSource,
       /zenActionActorLabel=\{[\s\S]{0,100}msg\.role === "user" \? "You"/u,
     );
+    assert.match(
+      pageSource,
+      /resolveZenActionPresentationFromMessage\(\{[\s\S]{0,160}inferUnmarkedActions: messageRole !== "user"/u,
+    );
   });
 
   it("renders Action and Shh as separate shared composer controls", () => {

@@ -617,7 +617,7 @@ describe("Debate moderator gavel", () => {
   it("bundles the selected murmur, sparse Foley, and synchronized reactions", () => {
     assert.equal(
       DEBATE_AUDIENCE_MURMUR_URL,
-      "/audio/debate/courtroom-audience-murmur-loop.mp3",
+      "/audio/session-atmosphere/default-studio-room-loop.mp3",
     );
     assert.equal(
       DEBATE_AUDIENCE_CROSSTALK_URL,

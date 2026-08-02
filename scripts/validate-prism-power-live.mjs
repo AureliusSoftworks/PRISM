@@ -6,6 +6,8 @@ import { parsePrismBotArchive } from "../apps/web/src/app/botArchive.ts";
 import { composeBotSystemPrompt } from "../apps/api/src/bots.ts";
 import {
   applyBotPowerAddressedInsultV1,
+  botPowerIneptitudeFinalTurnCueV1,
+  botPowerIneptUserPromptV1,
   botPowerRequiresAddressedInsultV1,
 } from "@localai/shared";
 import {
@@ -58,10 +60,15 @@ if (!systemPrompt) {
 const provider = providerName === "openai"
   ? new OpenAiProvider({ apiKey: process.env.OPENAI_API_KEY.trim() })
   : new LocalOllamaProvider();
+const finalTurnPowerCue = botPowerIneptitudeFinalTurnCueV1(bot.powers);
+const modelInput = botPowerIneptUserPromptV1(bot.powers, input);
 const rawResponse = await provider.generateResponse(
   [
     { role: "system", content: systemPrompt },
-    { role: "user", content: input },
+    { role: "user", content: modelInput },
+    ...(finalTurnPowerCue
+      ? [{ role: "system", content: finalTurnPowerCue }]
+      : []),
   ],
   {
     model,
@@ -84,6 +91,7 @@ console.log(JSON.stringify({
   bot: bot.name,
   ...(believedName ? { believedName } : {}),
   input,
+  ...(modelInput !== input ? { modelInput } : {}),
   runtimeAdjusted: response !== rawResponse,
   ...(response !== rawResponse ? { rawResponse } : {}),
   response,

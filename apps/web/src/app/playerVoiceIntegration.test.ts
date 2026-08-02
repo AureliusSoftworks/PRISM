@@ -34,7 +34,10 @@ test("Zen reveals player text on clean English playback", () => {
   const start = source.indexOf("const playZenPlayerMessage =");
   const end = source.indexOf("const playSignalProducerGuestActionSfx", start);
   const playerPlayback = source.slice(start, end);
-  assert.match(playerPlayback, /voiceSpokenText\(messageText\)/);
+  assert.match(
+    playerPlayback,
+    /voiceSpokenText\(messageText, \{ leadingMarkedAction: true \}\)/,
+  );
   assert.match(
     playerPlayback,
     /const voiceSelection = voicePlaybackSelectionRef\.current;/,
@@ -47,9 +50,17 @@ test("Zen reveals player text on clean English playback", () => {
     playerPlayback,
     /enqueueEnglishVoice\([\s\S]*?cleanProfile,[\s\S]*?revealKey,[\s\S]*?false,/,
   );
+  assert.match(
+    playerPlayback,
+    /const performanceText = voicePerformanceTextFromActionCues\(messageText, \{[\s\S]*?leadingMarkedAction: true,[\s\S]*?omitLocalFoleyTags: true/,
+  );
+  assert.match(
+    playerPlayback,
+    /engine === "elevenlabs" && performanceText[\s\S]*?elevenLabsText: performanceText/,
+  );
   assert.match(playerPlayback, /bundledActionSfxCueAtMs/);
+  assert.match(playerPlayback, /playChatPlayerActionSfx\(messageText\)/);
   assert.match(playerPlayback, /startChatSpeechReveal/);
-  assert.doesNotMatch(playerPlayback, /voicePerformanceTextFromActionCues/);
 
   assert.match(
     source,

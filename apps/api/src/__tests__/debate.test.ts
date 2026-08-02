@@ -40,7 +40,6 @@ import {
   resolveDebateParticipantObjection,
   resumeDebateSession,
   resumeDebateSessionWithPersona,
-  skipDebateJuryDeliberation,
   submitDebateJudgeGavelMessage,
   submitDebateInterjection,
   submitDebateObjectionRuling,
@@ -115,6 +114,19 @@ class DebateProviderStub implements LlmProvider {
 
   public async embedText(): Promise<number[]> {
     return [0.1, 0.2];
+  }
+}
+
+class IneptPromptProvider extends DebateProviderStub {
+  public prompts: string[] = [];
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("HARD Ineptitude")) this.prompts.push(text);
+    return super.generateResponse(messages, options);
   }
 }
 
@@ -1165,6 +1177,21 @@ function observantPowers(): BotPowerV1[] {
   ];
 }
 
+function ineptPowers(): BotPowerV1[] {
+  return [
+    readyPower(
+      "inept",
+      "Inept",
+      "Cannot follow instructions or competently fulfill a Debate role.",
+      [{
+        type: "ineptitude",
+        instructionFidelity: "always_botched",
+        imageFidelity: "always_unrelated",
+      }],
+    ),
+  ];
+}
+
 function microscopicPowers(): BotPowerV1[] {
   return [
     readyPower(
@@ -2165,7 +2192,23 @@ describe("Debate engine", () => {
         expectedRevision: created.session.revision,
         idempotencyKey: "jury:end-early:0001",
       });
+      assert.equal(session.stepKey, "moderator_to_jury");
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "jury:moderator-handoff:0001",
+        },
+        created.runtime,
+      );
       assert.equal(session.stepKey, "jury_initial_0");
+      assert.partialDeepStrictEqual(session.events.at(-1), {
+        speakerKind: "moderator",
+        speakerBotId: session.moderator.id,
+        stepKey: "moderator_to_jury",
+      });
       assert.equal(session.jury.discussionTurnTarget, 3);
       let mutation = 0;
       while (session.jury.phase === "initial_ballots") {
@@ -2700,7 +2743,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("can skip the entire Jury discussion without ending the Debate early", async () => {
+  it("makes Jury deliberation and voting automatic and unskippable", async () => {
     const db = createTestDb();
     try {
       const created = await createJuryDebateForRole(db, "spectator", 5);
@@ -2723,41 +2766,45 @@ describe("Debate engine", () => {
       assert.equal(session.jury.discussionTurnCount, 0);
       assert.equal(session.endedEarlyAt, null);
 
-      const request = {
-        expectedRevision: session.revision,
-        idempotencyKey: "jury:skip-entire-deliberation:0001",
-      };
-      const skipped = skipDebateJuryDeliberation(
-        db,
-        "user-1",
-        session.id,
-        request,
-      );
-      const replay = skipDebateJuryDeliberation(
-        db,
-        "user-1",
-        session.id,
-        request,
-      );
-      assert.deepEqual(replay, skipped);
-      assert.equal(skipped.stepKey, "jury_final_0");
-      assert.equal(skipped.status, "live");
-      assert.equal(skipped.jury.phase, "final_ballots");
-      assert.equal(skipped.jury.discussionTurnCount, 0);
-      assert.equal(skipped.jury.discussionTurnTarget, 0);
-      assert.ok(skipped.jury.calledVoteAt);
-      assert.equal(skipped.endedEarlyAt, null);
-      assert.equal(
-        skipped.events.some(
-          (event) =>
-            event.stepKey === "jury_skip_deliberation" &&
-            event.speakerKind === "system" &&
-            event.content.includes("All five jurors proceed to final ballots"),
-        ),
-        true,
+      await assert.rejects(
+        () =>
+          advanceDebateSession(
+            db,
+            "user-1",
+            session.id,
+            {
+              expectedRevision: session.revision,
+              idempotencyKey: "jury:skip-entire-deliberation:0001",
+              skip: true,
+            },
+            created.runtime,
+          ),
+        (error: unknown) =>
+          error instanceof HttpError &&
+          error.statusCode === 409 &&
+          /automatic and cannot be skipped/u.test(error.message),
       );
 
-      session = skipped;
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "jury:automatic-deliberation:0001",
+        },
+        created.runtime,
+      );
+      assert.equal(session.stepKey, "jury_final_0");
+      assert.equal(session.status, "live");
+      assert.equal(session.jury.phase, "final_ballots");
+      assert.equal(
+        session.jury.discussionTurnCount,
+        session.jury.discussionTurnTarget,
+      );
+      assert.equal(session.jury.preparedFinalBallots.length, 5);
+      assert.ok(session.jury.calledVoteAt);
+      assert.equal(session.endedEarlyAt, null);
       while (session.status !== "completed") {
         mutation += 1;
         session = await advanceDebateSession(
@@ -4089,7 +4136,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("keeps the player Judge's gavel out of Jury deliberation while preserving skip", async () => {
+  it("keeps the player Judge's gavel, skip, and early end out of Jury deliberation", async () => {
     const db = createTestDb();
     try {
       const created = await createJuryDebateForRole(db, "spectator", 5);
@@ -4140,12 +4187,35 @@ describe("Debate engine", () => {
           /Jury has the floor/u.test(error.message),
       );
 
-      const skipped = skipDebateJuryDeliberation(db, "user-1", session.id, {
-        expectedRevision: session.revision,
-        idempotencyKey: "jury:judge-gavel-lock:skip",
-      });
-      assert.equal(skipped.stepKey, "jury_final_0");
-      assert.equal(skipped.jury.phase, "final_ballots");
+      await assert.rejects(
+        () =>
+          advanceDebateSession(
+            db,
+            "user-1",
+            session.id,
+            {
+              expectedRevision: session.revision,
+              idempotencyKey: "jury:judge-gavel-lock:skip",
+              skip: true,
+            },
+            created.runtime,
+          ),
+        (error: unknown) =>
+          error instanceof HttpError &&
+          error.statusCode === 409 &&
+          /automatic and cannot be skipped/u.test(error.message),
+      );
+      assert.throws(
+        () =>
+          endDebateSessionEarly(db, "user-1", session.id, {
+            expectedRevision: session.revision,
+            idempotencyKey: "jury:judge-gavel-lock:end",
+          }),
+        (error: unknown) =>
+          error instanceof HttpError &&
+          error.statusCode === 409 &&
+          /cannot be skipped/u.test(error.message),
+      );
     } finally {
       db.close();
     }
@@ -6194,7 +6264,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("replays duplicate mutations, resumes the exact step, and lets lifecycle controls pause immediately", async () => {
+  it("replays duplicate mutations and silently resumes the exact saved presentation line", async () => {
     const db = createTestDb();
     try {
       const created = await createJudgeDebate(db);
@@ -6255,24 +6325,29 @@ describe("Debate engine", () => {
         (error) => error instanceof HttpError && error.statusCode === 409,
       );
 
+      const presentationEventId = first.events.at(-1)?.id;
+      assert.ok(presentationEventId);
+      assert.throws(
+        () =>
+          pauseDebateSession(db, "user-1", created.id, {
+            expectedRevision: first.revision,
+            idempotencyKey: "pause:invalid-presentation:0001",
+            presentationEventId: "not-a-live-event",
+          }),
+        (error: unknown) =>
+          error instanceof HttpError && error.statusCode === 409,
+      );
       const paused = pauseDebateSession(db, "user-1", created.id, {
         expectedRevision: first.revision,
         idempotencyKey: "pause:stable:0001",
+        presentationEventId,
       });
       assert.equal(paused.status, "paused");
       assert.equal(paused.stepKey, first.stepKey);
-      assert.equal(paused.events.length, first.events.length + 1);
-      assert.partialDeepStrictEqual(paused.events.at(-1), {
-        kind: "moderator_ruling",
-        speakerKind: "player",
-        speakerBotId: paused.moderator.id,
-        stepKey: "pause",
-      });
-      assert.match(paused.events.at(-1)?.content ?? "", /pause|recess|break/iu);
-      assert.notEqual(
-        paused.events.at(-1)?.content,
-        "This debate is now paused.",
-      );
+      assert.equal(paused.events.length, first.events.length);
+      assert.equal(paused.pausedPresentationEventId, presentationEventId);
+      assert.ok(paused.pausedAt);
+      assert.equal(paused.pausedDurationMs, 0);
       const resumeRequest = {
         expectedRevision: paused.revision,
         idempotencyKey: "resume:stable:0001",
@@ -6285,48 +6360,27 @@ describe("Debate engine", () => {
       );
       assert.equal(resumed.status, "live");
       assert.equal(resumed.stepKey, first.stepKey);
-      assert.equal(resumed.events.length, paused.events.length + 1);
-      assert.partialDeepStrictEqual(resumed.events.at(-1), {
-        kind: "judge_gavel",
-        speakerKind: "player",
-        speakerBotId: resumed.moderator.id,
-        stepKey: "resume",
-        gavelReason: "resume",
-      });
-      assert.match(
-        resumed.events.at(-1)?.content ?? "",
-        /back|continue|order|resume|return/iu,
-      );
-      assert.ok(
-        Date.parse(resumed.judgeGavelCooldownUntil ?? "") - Date.now() <=
-          DEBATE_JUDGE_GAVEL_COOLDOWN_MS,
-      );
+      assert.equal(resumed.events.length, paused.events.length);
+      assert.equal(resumed.pausedPresentationEventId, presentationEventId);
+      assert.equal(resumed.judgeGavelCooldownUntil, null);
+      assert.equal(resumed.pausedAt, null);
+      assert.ok((resumed.pausedDurationMs ?? -1) >= 0);
       assert.deepEqual(
         resumeDebateSession(db, "user-1", created.id, resumeRequest),
         resumed,
       );
-      assert.throws(
-        () =>
-          swingDebateJudgeGavel(db, "user-1", created.id, {
-            expectedRevision: resumed.revision,
-            idempotencyKey: "resume:context-gavel-cooldown",
-            eventId: null,
-            overtime: false,
-          }),
-        (error: unknown) =>
-          error instanceof HttpError && error.statusCode === 429,
-      );
       const pausedAgain = pauseDebateSession(db, "user-1", created.id, {
         expectedRevision: resumed.revision,
-        idempotencyKey: "resume:pause-during-gavel-cooldown",
+        idempotencyKey: "resume:pause-immediately",
       });
       assert.equal(pausedAgain.status, "paused");
+      assert.equal(pausedAgain.events.length, resumed.events.length);
     } finally {
       db.close();
     }
   });
 
-  it("lets bot-moderated roles pause immediately after the resume gavel", async () => {
+  it("lets bot-moderated roles pause again immediately after silent resume", async () => {
     const db = createTestDb();
     try {
       const created = await createDebateForRole(db, "spectator");
@@ -6336,15 +6390,9 @@ describe("Debate engine", () => {
       });
       const resumed = resumeDebateSession(db, "user-1", created.id, {
         expectedRevision: paused.revision,
-        idempotencyKey: "spectator:resume-gavel",
+        idempotencyKey: "spectator:silent-resume",
       });
-      assert.partialDeepStrictEqual(resumed.events.at(-1), {
-        kind: "judge_gavel",
-        speakerKind: "moderator",
-        speakerBotId: resumed.moderator.id,
-        stepKey: "resume",
-        gavelReason: "resume",
-      });
+      assert.equal(resumed.events.length, paused.events.length);
       assert.equal(resumed.judgeGavelCooldownUntil, null);
 
       const pausedAgain = pauseDebateSession(db, "user-1", created.id, {
@@ -6357,7 +6405,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("voices off-record pause and resume lines in the frozen moderator persona", async () => {
+  it("keeps pause and resume silent without invoking the frozen moderator persona", async () => {
     const db = createTestDb();
     try {
       const provider = new ModeratorLifecycleProvider();
@@ -6378,11 +6426,7 @@ describe("Debate engine", () => {
         },
         debateRuntime,
       );
-      assert.equal(
-        paused.events.at(-1)?.content,
-        "Yeah, yeah, recess. I need a portal-fluid break.",
-      );
-      assert.equal(paused.events.at(-1)?.stepKey, "pause");
+      assert.equal(paused.events.length, created.events.length);
 
       const resumed = await resumeDebateSessionWithPersona(
         db,
@@ -6394,21 +6438,8 @@ describe("Debate engine", () => {
         },
         debateRuntime,
       );
-      assert.equal(
-        resumed.events.at(-1)?.content,
-        "All right, portals closed. Back to the argument.",
-      );
-      assert.equal(resumed.events.at(-1)?.gavelReason, "resume");
-      assert.equal(provider.lifecyclePrompts.length, 2);
-      assert.match(
-        provider.lifecyclePrompts[0] ?? "",
-        /irreverent dimension-hopping scientist/iu,
-      );
-      assert.ok(
-        [paused.events.at(-1), resumed.events.at(-1)].every(
-          (event) => event?.stepKey === "pause" || event?.stepKey === "resume",
-        ),
-      );
+      assert.equal(resumed.events.length, created.events.length);
+      assert.equal(provider.lifecyclePrompts.length, 0);
     } finally {
       db.close();
     }
@@ -7756,25 +7787,12 @@ describe("Debate engine", () => {
         expectedRevision: reloaded.revision,
         idempotencyKey: "pause:muted:0001",
       });
-      assert.partialDeepStrictEqual(paused.events.at(-1), {
-        kind: "silence",
-        speakerKind: "moderator",
-        speakerBotId: paused.moderator.id,
-        stepKey: "pause",
-        content: "...",
-      });
+      assert.equal(paused.events.length, reloaded.events.length);
       const resumed = resumeDebateSession(db, "user-1", paused.id, {
         expectedRevision: paused.revision,
         idempotencyKey: "resume:muted:0001",
       });
-      assert.partialDeepStrictEqual(resumed.events.at(-1), {
-        kind: "judge_gavel",
-        speakerKind: "moderator",
-        speakerBotId: resumed.moderator.id,
-        stepKey: "resume",
-        content: "...",
-        gavelReason: "resume",
-      });
+      assert.equal(resumed.events.length, reloaded.events.length);
       session = endDebateSessionEarly(db, "user-1", resumed.id, {
         expectedRevision: resumed.revision,
         idempotencyKey: "muted:end-early",
@@ -8211,6 +8229,41 @@ describe("Debate engine", () => {
     }
   });
 
+  it("adapts Inept separately for Debate moderators and advocates", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new IneptPromptProvider();
+      const debateRuntime = runtimeWith(provider);
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+        moderatorPowers: ineptPowers(),
+        forPowers: ineptPowers(),
+      });
+      for (const key of ["moderator-opening", "for-opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `advance:inept:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+
+      const prompt = provider.prompts.join("\n");
+      assert.match(prompt, /INEPT MISTAKEN ASSIGNMENT/u);
+      assert.match(prompt, /Moderating: misstate procedure/u);
+      assert.match(prompt, /call the wrong bot/u);
+      assert.match(prompt, /Debating: misunderstand the motion/u);
+      assert.match(prompt, /misunderstand the motion, mishandle evidence/u);
+      assert.match(prompt, /valid state still bind/u);
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps microscopic moderation invisible but audible", async () => {
     const db = createTestDb();
     try {
@@ -8493,12 +8546,10 @@ describe("Debate engine", () => {
         0,
       );
       assert.partialDeepStrictEqual(failed.events.at(-1), {
-        kind: "moderator_ruling",
-        speakerKind: "moderator",
-        speakerBotId: failed.moderator.id,
-        stepKey: "pause",
+        kind: "error",
+        speakerKind: "system",
       });
-      assert.match(failed.events.at(-1)?.content ?? "", /pause|recess|break/iu);
+      assert.match(failed.events.at(-1)?.content ?? "", /Retry or skip this turn/u);
       const skipped = await advanceDebateSession(
         db,
         "user-1",
@@ -8652,14 +8703,12 @@ describe("Debate engine", () => {
         recovered.events.filter((event) => event.kind === "speech").length,
       );
       assert.partialDeepStrictEqual(exhausted.events.at(-1), {
-        kind: "moderator_ruling",
-        speakerKind: "moderator",
-        speakerBotId: exhausted.moderator.id,
-        stepKey: "pause",
+        kind: "error",
+        speakerKind: "system",
       });
       assert.match(
         exhausted.events.at(-1)?.content ?? "",
-        /pause|recess|break/iu,
+        /Retry or skip this turn/u,
       );
     } finally {
       db.close();

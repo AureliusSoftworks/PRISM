@@ -443,44 +443,13 @@ export function debateEvidenceObjectFromPrismCandidate(
   };
 }
 
-/**
- * Recover the `{ADJECTIVE} {OBJECT}` title baked into Debate exhibit image
- * prompts (synthesize art-bible or upload label).
- */
-export function debateEvidenceExhibitTitleFromStoredPrompt(
-  prompt: string,
-): string | null {
-  const text = prompt.replace(/\s+/gu, " ").trim();
-  if (!text) return null;
-  const synthesizeMatch = text.match(
-    /depicting exactly:\s*"([^"]+)"/iu,
-  );
-  if (synthesizeMatch?.[1]?.trim()) {
-    return synthesizeMatch[1].trim();
-  }
-  const uploadMatch = text.match(
-    /^\[Debate exhibit upload\]\s*(.+)$/iu,
-  );
-  if (uploadMatch?.[1]?.trim()) {
-    return uploadMatch[1].trim();
-  }
-  return null;
-}
-
-/**
- * Rebuild the object-editor draft from a previously generated exhibit sprite
- * so reusing it also restores the naming choices that created it.
- */
-export function debateEvidenceObjectDraftFromStoredExhibitAsset(asset: {
-  id: string;
-  prompt: string;
-}): DebateEvidenceObjectDraft | null {
-  const title = debateEvidenceExhibitTitleFromStoredPrompt(asset.prompt);
-  if (!title) return null;
-  const draft = debateEvidenceObjectFromPrismCandidate(title);
-  if (!draft) return null;
+/** Attach a saved sprite without changing the evidence authored around it. */
+export function applyDebateEvidenceExhibitAssetReuse(
+  current: DebateEvidenceObjectDraft,
+  asset: { id: string },
+): DebateEvidenceObjectDraft {
   return {
-    ...draft,
+    ...current,
     visualKind: "synthesized",
     imageId: asset.id,
   };

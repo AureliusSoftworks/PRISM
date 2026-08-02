@@ -33,13 +33,13 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Continue this Home",
-        body: "Each Home keeps separate saved conversations inside one relationship. Expand a Home in the conversation panel to open an exact conversation, use its + to begin another, or use New chat to start fresh inside the Home you are visiting. Only that conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. With Voice Effects on, fart, burp, and cough actions play their bundled local Foley when sent, just as they do in Coffee, Signal, and Debate. When Shh appears, it stops the current reply without replacing the draft you are writing.",
+        body: "Each Home keeps separate saved conversations inside one relationship. Expand a Home in the conversation panel to open an exact conversation, use its + to begin another, or use New chat to start fresh inside the Home you are visiting. Only that conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. Action text stays visual and is never read aloud as dialogue. A recognized vocal Action such as laughs, sighs, gasps, or *lol* becomes an audible local reaction with English voice, or a native performance direction when the selected Premium engine supports it. PRISM-only fart and burp actions stay out of the voice request and play their bundled local Foley when sent, just as they do in Coffee, Signal, and Debate. When Shh appears, it stops the current reply without replacing the draft you are writing.",
         clickLabel: "the message box at the bottom",
         targetSelector: '[data-tutorial-target="composer"]',
       },
       {
         heading: "Choose how replies recover",
-        body: "AUTO keeps the current response model as Primary, then quietly tries your ordered chain of one to five saved local or online fallbacks if a reply fails validation. While AUTO is selected, the model picker shows every local and online model so you can change Primary directly. Image generation keeps its own LOCAL/ONLINE choice in Images. Voice offers Mute, English, Premium, Babble, and Bottish everywhere: English uses each bot’s local PRISM or optional operating-system identity without ElevenLabs credits; Premium uses an ElevenLabs identity you choose from your connected account on AUTO and ONLINE speech. Marketplace bots do not bundle a Premium identity by default. LOCAL always shows and uses English so it never sends speech off-device. When a fresh voiced reply needs time, an eligible bot may give one brief in-character response cue before a single restrained thinking beat; the cue is never part of the bot's answer or memory. Avatar Studio edits and previews those two identities separately while sharing pitch, pace, lilt, effects, and mood delivery. The subtle Prism effect is the default house sound, gently tuning voiced speech before its refracted double; choose Clean for untouched playback or Resonance for a darker, weightier mechanical double. Voice Settings can narrow automatic Premium defaults to one ElevenLabs voice collection. Chat Settings can give your own Zen messages both a Premium voice and an independent local fallback, then reveal their text on whichever voice actually plays. The top Voice picker chooses the player identity too: Premium uses your Premium voice, while English and every non-Premium speaking type use your local fallback without applying Babble or Bottish effects. LOCAL and unavailable Premium speech also use that saved fallback. Leave speaking off to stay silent. Your player voice is always clean, with no chorus, pitch, texture, or bot delivery filters. Coffee, Signal, and Debate continue to use the Default PRISM voice because PRISM is your avatar there. The Voice tab also gives each bot a Voice Character pad: move left or right to balance low-end weight against high-end clarity, and up or down to trim that bot relative to your account Voice Volume. The SFX tab can generate an ElevenLabs loop or accept an audio upload, then play it while the avatar is talking, idle, thinking, or any selected combination. Its volume and sample controls stay separate from spoken voice. When an eligible Premium voice has a non-neutral mood, Eleven v3 automatically carries that feeling into the next spoken line; neutral speech stays untagged. With Voice Effects on, longer spoken replies may take a quiet mic-ready breath before the line.",
+        body: "AUTO keeps the current response model as Primary, then quietly tries your ordered chain of one to five saved local or online fallbacks if a reply fails validation. While AUTO is selected, the model picker shows every local and online model so you can change Primary directly. Image generation keeps its own LOCAL/ONLINE choice in Images. Voice offers Mute, English, Premium, Babble, and Bottish everywhere: English uses each bot’s local PRISM or optional operating-system identity without ElevenLabs credits; Premium uses an ElevenLabs identity you choose from your connected account on AUTO and ONLINE speech. Marketplace bots do not bundle a Premium identity by default. LOCAL always shows and uses English so it never sends speech off-device. Local English defaults to Auto, choosing Voice+ only after the bundled model passes its hardware timing and health checks, otherwise using Instant without changing the character’s portable identity. Avatar Studio can pin Account default, Auto, Voice+, or Instant, choose a genuine included accent source, and shape Local through the Open–Nasal / Light–Chest pad plus brightness, resonance, and gain; those tone controls never reshape Premium. Pace, lilt, effects, volume, and mood delivery remain shared. The Voice tab also gives each bot a Voice Character pad and a personal level relative to your account Voice Volume. Marked laughs, chuckles, sighs, gasps, coughs, throat-clears, snorts, groans, sobs, yawns, and *lol* use PRISM’s cached local reaction bank and stay source-linked for interruption and faithful replay. When a fresh voiced reply needs time, an eligible bot may give one brief in-character response cue before a single restrained thinking beat; the cue is never part of the bot's answer or memory. The subtle Prism effect is the default house sound, gently tuning voiced speech before its refracted double; choose Clean for untouched playback or Resonance for a darker, weightier mechanical double. Voice Settings can narrow automatic Premium defaults to one ElevenLabs voice collection. Chat Settings can give your own Zen messages both a Premium voice and an independent local fallback, then reveal their text on whichever voice actually plays. The top Voice picker chooses the player identity too: Premium uses your Premium voice, while English and every non-Premium speaking type use your local fallback without applying Babble or Bottish effects. LOCAL and unavailable Premium speech also use that saved fallback. Leave speaking off to stay silent. Your player voice is always clean. Coffee, Signal, and Debate continue to use the Default PRISM voice because PRISM is your avatar there. The SFX tab can generate an ElevenLabs loop or accept an audio upload, then play it while the avatar is talking, idle, thinking, or any selected combination. Its volume and sample controls stay separate from spoken voice. When an eligible Premium voice has a non-neutral mood, Eleven v3 automatically carries that feeling into the next spoken line; neutral speech stays untagged. With Voice Effects on, longer spoken replies may take a quiet mic-ready breath before the line.",
         clickLabel: "the LOCAL, AUTO, ONLINE control",
         targetSelector: '[data-tutorial-target="auto-response-mode"]',
       },
@@ -86,7 +86,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Keep the moment honest",
-        body: "Zen keeps the timeline as it happened. Type $undo to rewind the latest message when you need a clean correction. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. With Voice Effects on, fart, burp, and cough actions play their bundled local Foley when sent, just as they do in Coffee, Signal, and Debate. A voiced bot may answer an interruption with one brief in-character response cue while its real reply is prepared; that cue is labeled and stays outside history and memory. When Shh appears, it stops the current reply without replacing the draft you are writing.",
+        body: "Zen keeps the timeline as it happened. Type $undo to rewind the latest message when you need a clean correction. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. Action text stays visual and is never read aloud as dialogue. With your Premium player voice, a recognized vocal Action such as laughs becomes an ElevenLabs performance direction for that line. PRISM-only fart, burp, and cough actions stay out of the voice request and play their bundled local Foley when sent, just as they do in Coffee, Signal, and Debate. A voiced bot may answer an interruption with one brief in-character response cue while its real reply is prepared; that cue is labeled and stays outside history and memory. When Shh appears, it stops the current reply without replacing the draft you are writing.",
         clickLabel: "the message box at the bottom",
         targetSelector: '[data-tutorial-target="composer"]',
       },
@@ -174,7 +174,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Freeze one shared record",
-        body: `Evidence is optional. Add evidence asks Prism for one surprising contextual {ADJECTIVE} {OBJECT} suggestion, such as Rusty spoon, grounded in the current motion, sides, cast, and existing exhibits; the built-in object deck is only a reliable fallback when contextual generation is unavailable. Find sources for me runs a real-source Brave search from the motion in AUTO or ONLINE, and Prism never fabricates sources. Add URL accepts your own public HTTP or HTTPS source in either setup mode. AUTO and ONLINE can read a bounded page title and excerpt for you to review and edit; a failed read keeps the draft open for manual completion. LOCAL never accesses the page, so you supply the title and the exact summary both sides may use. Sources and exhibits share one clear record, up to ${DEBATE_EVIDENCE_ITEM_MAX_COUNT} items; duplicate URLs are rejected and later searches add distinct sources without replacing earlier ones. You can Wield Prism into the adjective, object, or observable-fact fields for a candidate that considers the current Debate without inventing provenance or significance. The exhibit emoji follows the object name automatically. Click it to open emoji search: type an object, idea, or relevant term, then choose from the three best live matches. You can close the search without changing the current emoji. You can also upload a PNG, JPEG, or WebP, choose a previously synthesized Debate sprite to restore the naming options that created it without spending more image-generation tokens, or synthesize a new consistent transparent exhibit sprite. A floating Prism progress card stays visible for the full synthesis operation, then dismisses when the sprite is ready or generation fails. Debate sprites stay in this tool-specific shelf instead of mixing into the general Images panel. Its approved title and observable fact are the evidence; the visual adds no facts. Sources and exhibits freeze together with the Debate. LOCAL blocks research and page reading before network access, while manual URL records, notes, object exhibits, emoji, uploads, reuse, and configured local image synthesis remain available. Debate never reads or writes relationship memory.`,
+        body: `Evidence is optional. Add evidence asks Prism for one surprising contextual {ADJECTIVE} {OBJECT} suggestion, such as Rusty spoon, grounded in the current motion, sides, cast, and existing exhibits; the built-in object deck is only a reliable fallback when contextual generation is unavailable. Find sources for me runs a real-source Brave search from the motion in AUTO or ONLINE, and Prism never fabricates sources. Add URL accepts your own public HTTP or HTTPS source in either setup mode. AUTO and ONLINE can read a bounded page title and excerpt for you to review and edit; a failed read keeps the draft open for manual completion. LOCAL never accesses the page, so you supply the title and the exact summary both sides may use. Sources and exhibits share one clear record, up to ${DEBATE_EVIDENCE_ITEM_MAX_COUNT} items; duplicate URLs are rejected and later searches add distinct sources without replacing earlier ones. You can Wield Prism into the adjective, object, or observable-fact fields for a candidate that considers the current Debate without inventing provenance or significance. The exhibit emoji follows the object name automatically. Click it to open emoji search: type an object, idea, or relevant term, then choose from the three best live matches. You can close the search without changing the current emoji. You can also upload a PNG, JPEG, or WebP, choose a previously synthesized Debate sprite to change only the evidence visual without spending more image-generation tokens, or synthesize a new consistent transparent exhibit sprite. A floating Prism progress card stays visible for the full synthesis operation, then dismisses when the sprite is ready or generation fails. Debate sprites stay in this tool-specific shelf instead of mixing into the general Images panel. Its approved title and observable fact are the evidence; the visual adds no facts. Sources and exhibits freeze together with the Debate. LOCAL blocks research and page reading before network access, while manual URL records, notes, object exhibits, emoji, uploads, reuse, and configured local image synthesis remain available. Debate never reads or writes relationship memory.`,
         clickLabel: "Evidence",
         targetSelector: '[data-tutorial-target="debate-evidence"]',
       },
@@ -363,6 +363,8 @@ const POWER_EXCLUSION_TUTORIAL_SUFFIX =
   "One plain-language Power prompt may set sight and hearing separately, including named exceptions; an excluded bot stays excluded even if a broader allowed rule would otherwise match it.";
 const POWER_IMMUNITY_TUTORIAL_SUFFIX =
   "An Observant bot experiences every other bot as their ordinary unpowered self: it can see, hear, understand, and respond normally without noticing or naming the ignored Power. This changes only that holder's experience; the player and every other bot keep their own view.";
+const INEPT_POWER_TUTORIAL_SUFFIX =
+  "An Inept bot visibly botches a central instruction in every contribution, including its assigned Debate, Signal, Coffee, or Story role, without merely announcing incompetence. Chat and Zen hard-route the current request to a mistaken assignment; production modes inject a role-shaped wrong assignment. Any image the bot itself tries to send is hard-routed to a wholly unrelated safe scene, including retries. Player controls, safety, privacy, valid session state, and harder speech effects still win.";
 const BOT_NAMING_POWER_TUTORIAL_SUFFIX =
   "A bot-name prefix or suffix changes only how its holder names other bots: the holder keeps their own name, the player and humans are untouched, and other speakers do not copy the habit. A bot who hears its own altered name may comment once, show a small contextual mood, tone, or action reaction, or let it pass; its personality and agency decide how the label lands.";
 const COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX =
@@ -452,6 +454,26 @@ function currentDebateRecordTutorialBody(body: string): string {
 function currentDebateJuryTutorialBody(body: string): string {
   return body
     .replace(
+      "The in-room Judge console keeps one contextual Gavel control, Pause or Gavel to resume, and End Debate together",
+      "The in-room Judge console keeps one contextual Gavel control, Pause or Resume, and End Debate together",
+    )
+    .replace(
+      "Pause takes effect immediately, even during the semantic intervention cooldown, and the moderator uses a short Persona-shaped recess line with varied procedural copy as a safe fallback.",
+      "Pause takes effect immediately without adding dialogue, audio, or a housekeeping event to the Debate record.",
+    )
+    .replace(
+      "Resume requires you to strike the visible gavel; its audible hit calls the camera to the moderator before that moderator gives a Persona-shaped return-to-order line.",
+      "Resume is equally silent. If a spoken line was interrupted, Debate replays that exact saved line from its beginning before continuing.",
+    )
+    .replace(
+      "Leaving an unfinished Debate by any route preserves its exact floor and makes the returning chamber appear in recess.",
+      "Leaving an unfinished Debate by any route preserves its exact floor; reopening returns to the same paused point without adding a recess to the record.",
+    )
+    .replace(
+      "Pause and Resume remain live procedural presentation only; neither housekeeping beat enters the readable proceedings or copied transcript.",
+      "Pause and Resume are lifecycle state only; neither action creates a spoken beat or transcript event.",
+    )
+    .replace(
       "The exact next juror, discussion turn, ballot, objection, intervention, or interrupted line then continues.",
       "The exact next Jury preparation, ballot, objection, intervention, or interrupted line then continues.",
     )
@@ -461,7 +483,11 @@ function currentDebateJuryTutorialBody(body: string): string {
     )
     .replace(
       "When formal Jury deliberation arrives, a timed choice appears over the current camera. Auto is the default and begins after the Debate-settings countdown; Spectators and human Judges can choose Watch Jury to hear and view the deliberation live. The Jury remains advisory to a human Judge. Skip moves directly to final ballots. Skipping remains available after discussion starts—even during a juror’s current statement—and preserves all five final ballots and the full five-ballot Jury result.",
-      "When formal Jury deliberation arrives, PRISM automatically enters a dim chamber. The jurors' mouths move as they appear to confer without audible words or captions while all five final ballot monologues generate behind the scene; once every monologue is ready, they cast their votes one at a time. The Jury remains advisory to a human Judge. Skip moves directly to final ballots and preserves the full five-ballot result.",
+      "When formal Jury deliberation arrives, the Moderator announces the handoff and PRISM automatically enters a dim chamber. The jurors' mouths move beside small ellipsis bubbles as they appear to confer without audible words or captions while all five final ballot monologues generate behind the scene; once every monologue is ready, they cast their votes one at a time. Deliberation and voting are unskippable, and the Jury remains advisory to a human Judge.",
+    )
+    .replace(
+      "Once Jury deliberation begins, the Jury owns the floor: the unified Gavel and Space are put away, while Skip deliberation remains available.",
+      "Once Jury deliberation begins, the Jury owns the floor: the unified Gavel, Space, End, and Skip actions are put away until every ballot is complete. Pause and Resume remain available as silent lifecycle controls.",
     )
     .replace(
       "Spectators and human Judges can open the five-seat Jury camera manually when Jury is enabled, and Auto also enters the chamber for leanings, deliberation, final ballots, and the foreperson’s split before returning to the forum for advocate aftermath reactions.",
@@ -490,7 +516,7 @@ function currentDebateJuryTutorialBody(body: string): string {
 }
 
 const MODEL_ROUTING_VISIBILITY_TUTORIAL_SUFFIX =
-  "Every model you left visible in Settings remains listed in every routing mode. LOCAL disables online rows, ONLINE disables local rows, and AUTO enables both lanes. You can enter AUTO directly, then choose any available model as Primary. The split model control saves Effort per concrete model across Chat, Zen, Sandbox, Coffee, Signal, Debate, and Story. Default uses the provider baseline, Not adjustable is a capability status, and local effort remains an explicit experimental simulation. Cmd/Ctrl+Shift+E opens the active model's effort HUD; arrows adjust it and D restores Default. A committed reply finishes unchanged, while prepared work is discarded before the next bot turn.";
+  "Every model you left visible in Settings remains listed in every routing mode. LOCAL disables online rows, ONLINE disables local rows, and AUTO enables both lanes. You can enter AUTO directly, then choose any available model as Primary. The split model control saves Effort per concrete model across Chat, Zen, Sandbox, Coffee, Signal, Debate, and Story. Each concrete model row shows its saved effort glyph on the right in monochrome, while the selected model receives the spectrum color. The control's symbol shows that selected level; open its vertical slider to scroll, click a level, or drag between them. The slider line mirrors the selected glyph with one through five PRISM colors as effort rises. Default uses the provider baseline. Hover a disabled glyph to find the Experimental Settings switch; when enabled, models without native effort use private multi-call simulation, including online models where extra provider calls may increase usage or cost. Native effort remains native. Cmd/Ctrl+Shift+E opens the active model's effort HUD; arrows adjust it and D restores Default. A committed reply finishes unchanged, while prepared work is discarded before the next bot turn.";
 
 function currentModelRoutingTutorialStep(
   step: ModeTutorialStep,
@@ -518,7 +544,7 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       return step.heading === "Follow and keep the record"
         ? {
             ...step,
-            body: `${currentDebateRecordTutorialBody(body)} ${POWER_IMMUNITY_TUTORIAL_SUFFIX}`,
+            body: `${currentDebateRecordTutorialBody(body)} ${POWER_IMMUNITY_TUTORIAL_SUFFIX} ${INEPT_POWER_TUTORIAL_SUFFIX}`,
           }
         : { ...step, body };
     }),
@@ -529,7 +555,7 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       index === 0
         ? {
             ...step,
-            body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX} ${POWER_IMMUNITY_TUTORIAL_SUFFIX}`,
+            body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX} ${POWER_IMMUNITY_TUTORIAL_SUFFIX} ${INEPT_POWER_TUTORIAL_SUFFIX}`,
           }
         : step,
     ),
@@ -540,7 +566,7 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       index === 0
         ? {
             ...step,
-            body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX} ${POWER_IMMUNITY_TUTORIAL_SUFFIX}`,
+            body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX} ${POWER_IMMUNITY_TUTORIAL_SUFFIX} ${INEPT_POWER_TUTORIAL_SUFFIX}`,
           }
         : step,
     ),
@@ -552,7 +578,7 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       return index === 0
         ? {
             ...step,
-            body: `${body} ${COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${POWER_IMMUNITY_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}`,
+            body: `${body} ${COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${POWER_IMMUNITY_TUTORIAL_SUFFIX} ${INEPT_POWER_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}`,
           }
         : step.heading === "Join the conversation"
           ? {
@@ -579,7 +605,7 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       return index === 5
         ? {
             ...step,
-            body: `${body} ${SIGNAL_AVATAR_SCALE_POWER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${POWER_IMMUNITY_TUTORIAL_SUFFIX} ${SIGNAL_ADDRESSED_FANDOM_POWER_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${SIGNAL_PRODUCER_GUEST_TUTORIAL_SUFFIX}`,
+            body: `${body} ${SIGNAL_AVATAR_SCALE_POWER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${POWER_IMMUNITY_TUTORIAL_SUFFIX} ${INEPT_POWER_TUTORIAL_SUFFIX} ${SIGNAL_ADDRESSED_FANDOM_POWER_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${SIGNAL_PRODUCER_GUEST_TUTORIAL_SUFFIX}`,
           }
         : step.heading === "Produce from the control room"
           ? {

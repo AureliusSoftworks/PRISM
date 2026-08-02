@@ -109,7 +109,7 @@ describe("Coffee player voice", () => {
     assert.match(livePlayerVoice, /voiceSelection\.voiceMode === "mute"/);
     assert.match(
       livePlayerVoice,
-      /const performanceText = voicePerformanceTextFromActionCues\(text\)/,
+      /const performanceText = voicePerformanceTextFromActionCues\(text, \{[\s\S]*?leadingMarkedAction: true,[\s\S]*?omitLocalFoleyTags: true/,
     );
     assert.match(
       livePlayerVoice,

@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   buildBottishPlaybackPlan,
   buildBottishPlan,
+  bottishPerformanceText,
   buildBabbleRoboticPlan,
   encodeBottishPlanWave,
   enqueueBabbleVoice,
@@ -64,6 +65,19 @@ describe("Bottish speech plan", () => {
     assert.deepEqual(
       buildBottishPlan("Hello, bot!", neutral, "message-1"),
       buildBottishPlan("Hello, bot!", neutral, "message-1")
+    );
+  });
+
+  it("turns marked vocal actions into aligned procedural motifs", () => {
+    const source = "Well—*laughs nervously*—okay.";
+    const performed = bottishPerformanceText(source);
+    assert.equal(performed.length, source.length);
+    assert.doesNotMatch(performed, /laughs/u);
+    assert.match(performed, /ha ha/u);
+    assert.equal(bottishPerformanceText("They laugh at noon."), "They laugh at noon.");
+    assert.equal(
+      buildBottishPlan(source, neutral, "action").alignment.characters.length,
+      Array.from(source).length,
     );
   });
 
@@ -315,7 +329,11 @@ describe("Bottish speech plan", () => {
     assert.match(liveBottishEffect, /liveBottishRevealKeyRef\.current = revealKey;/);
     assert.match(
       liveBottishEffect,
-      /stopBottishVoice\(\{ preservePreparedMedia: true \}\);/
+      /handoffVoicePlaybackPreservingPreparedMode\(liveRobotVoiceMode\);/,
+    );
+    assert.match(
+      pageSource,
+      /function handoffVoicePlaybackPreservingPreparedMode[\s\S]*?preservePreparedMedia: mode === "bottish" \|\| mode === "babble"[\s\S]*?preserveCompletedTails: true/,
     );
     assert.match(liveBottishEffect, /enqueueRobotVoiceMode\(\{/);
     assert.match(liveBottishEffect, /mode: liveRobotVoiceMode/);

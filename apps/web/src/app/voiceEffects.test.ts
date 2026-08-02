@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, botVoiceTextureForPreset } from "@localai/shared";
 import {
+  VOICE_COMPLETED_OVERLAP_TAIL_MS,
   VOICE_LILT_DEPTH_CENTS,
   beginVoicePlaybackProgress,
   buildVoiceDamageSchedule,
@@ -137,10 +138,49 @@ describe("engine-agnostic voice effects", () => {
       "if (args.isCurrent && !args.isCurrent()) return true;",
       decodeAt,
     );
-    const stopAt = source.indexOf("stopRealtimeVoiceAudio(channel);", decodeAt);
+    const stopAt = source.indexOf(
+      "stopRealtimeVoiceAudio(channel, { preserveCompletedTails: true });",
+      decodeAt,
+    );
     assert.ok(decodeAt >= 0);
     assert.ok(currentGuardAt > decodeAt);
     assert.ok(stopAt > currentGuardAt);
+  });
+
+  it("lets a completed final phoneme overlap the next natural voice", () => {
+    const source = readFileSync(
+      new URL("./voiceEffects.ts", import.meta.url),
+      "utf8",
+    );
+    const pageSource = readFileSync(
+      new URL("./page.tsx", import.meta.url),
+      "utf8",
+    );
+    assert.equal(VOICE_COMPLETED_OVERLAP_TAIL_MS, 320);
+    assert.match(
+      source,
+      /stopRealtimeVoiceAudio\(channel, \{ preserveCompletedTails: true \}\)/u,
+    );
+    assert.match(
+      source,
+      /completedVoiceTailStops\[channel\]\.add\(stopCompletedTail\)[\s\S]*?VOICE_COMPLETED_OVERLAP_TAIL_MS/u,
+    );
+    assert.match(
+      source,
+      /if \(speechStart\.stopAt !== null\) \{\s*speechStart\.source\.stop\(speechStart\.stopAt\)/u,
+    );
+    assert.match(
+      source,
+      /if \(!options\.preserveCompletedTails\) \{[\s\S]*?stopTail\(\)/u,
+    );
+    assert.match(
+      pageSource,
+      /function handoffVoicePlaybackPreservingPreparedMode[\s\S]*?preserveCompletedTails: true/u,
+    );
+    assert.match(
+      pageSource,
+      /const playBotcastUtterance[\s\S]*?handoffVoicePlaybackPreservingPreparedMode\(voiceSelection\.voiceMode\)/u,
+    );
   });
 
   it("announces pre-speech presence before breath foley reaches the master", () => {

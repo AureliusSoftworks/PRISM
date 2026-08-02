@@ -4,6 +4,7 @@ import {
   botcastSignalStandardCadenceDurationMs,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotVoiceVolume,
+  voicePerformancePlanFromText,
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
 import {
@@ -58,6 +59,40 @@ export interface BottishPlaybackTiming {
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
 const BOTTISH_SAMPLE_RATE = 24_000;
 const MAX_ROBOT_VOICE_COMPRESSION_RATE = 1.24;
+
+const BOTTISH_ACTION_PATTERNS = {
+  laugh: "ha ha ",
+  chuckle: "heh ",
+  sigh: "hhhh ",
+  exhale: "hhh ",
+  gasp: "ah ",
+  cough: "kh kh ",
+  "throat-clear": "ahem ",
+  snort: "hnk ",
+  groan: "ohhh ",
+  sob: "huh huh ",
+  yawn: "aaah ",
+} as const;
+
+/** Replace only explicit marked vocal actions with same-length procedural
+ * motifs so Bottish keeps canonical reveal alignment without beeping the word
+ * "laughs" as ordinary dialogue. */
+export function bottishPerformanceText(text: string): string {
+  const actions = voicePerformancePlanFromText(text).segments.filter(
+    (segment) => segment.kind === "vocal-action",
+  );
+  if (actions.length === 0) return text;
+  let output = "";
+  let cursor = 0;
+  for (const action of actions) {
+    output += text.slice(cursor, action.sourceStart);
+    const length = action.sourceEnd - action.sourceStart;
+    const pattern = BOTTISH_ACTION_PATTERNS[action.action];
+    output += pattern.repeat(Math.ceil(length / pattern.length)).slice(0, length);
+    cursor = action.sourceEnd;
+  }
+  return output + text.slice(cursor);
+}
 
 /** Keep the persisted field for profile/back-up compatibility, but do not let
  * legacy or randomized tone values change Bottish gain or processing. */
@@ -134,8 +169,19 @@ export function buildBottishPlan(
   rawProfile: BotAudioVoiceProfileV1,
   seed = text
 ): BottishPlan {
+  const performanceText = bottishPerformanceText(text);
   const profile = normalizeBottishPlaybackProfile(rawProfile);
-  const voice = VOICE_BASES[profile.baseVoiceId];
+  const mappedVoice = VOICE_BASES[
+    profile.baseVoiceId as keyof typeof VOICE_BASES
+  ];
+  const portableVoiceIndex =
+    Number(profile.baseVoiceId.replace("voice-", "")) || 1;
+  const voice = mappedVoice ?? {
+    frequency: 165 + ((portableVoiceIndex * 47) % 330),
+    waveform: (["sine", "triangle", "square"] as const)[
+      portableVoiceIndex % 3
+    ]!,
+  };
   const pitchMultiplier = 2 ** ((profile.pitch * 650) / 1200);
   const tone = profile.bottishTone;
   const organicAmount = Math.max(0, -tone);
@@ -162,7 +208,7 @@ export function buildBottishPlan(
   let cursorMs = 0;
   let spokenIndex = 0;
 
-  for (const character of Array.from(text).slice(0, 1200)) {
+  for (const character of Array.from(performanceText).slice(0, 1200)) {
     const characterStartMs = cursorMs;
     if (!isSpeakableCharacter(character)) {
       if (/[.!?]/.test(character)) cursorMs += noteMs * 2.2;
@@ -531,10 +577,15 @@ function stopScheduledNodes(): void {
 }
 
 export function stopBottishVoice(
-  options: { preservePreparedMedia?: boolean } = {}
+  options: {
+    preservePreparedMedia?: boolean;
+    preserveCompletedTails?: boolean;
+  } = {},
 ): void {
   generation += 1;
-  stopRealtimeVoiceAudio();
+  stopRealtimeVoiceAudio("primary", {
+    preserveCompletedTails: options.preserveCompletedTails,
+  });
   stopRealtimeVoiceAudio("presence");
   stopScheduledNodes();
   if (!options.preservePreparedMedia) releasePreparedMedia();

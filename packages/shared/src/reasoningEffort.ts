@@ -222,10 +222,10 @@ export function modelSupportsNativeReasoningEffort(
 export function resolveModelReasoningEffortCapability(args: {
   provider: NativeReasoningEffortProvider;
   modelId: string;
-  simulatedLocalEnabled?: boolean;
+  simulatedEffortEnabled?: boolean;
 }): ModelReasoningEffortCapabilityV1 {
   if (args.provider === "local") {
-    if (args.simulatedLocalEnabled === true) {
+    if (args.simulatedEffortEnabled === true) {
       return {
         mode: "simulated",
         levels: LOCAL_SIMULATED_REASONING_LEVELS,
@@ -236,7 +236,8 @@ export function resolveModelReasoningEffortCapability(args: {
       mode: "unavailable",
       levels: [],
       supportsNone: false,
-      disabledReason: "Enable simulated local effort in Settings.",
+      disabledReason:
+        "Enable experimental simulated effort in Settings.",
     };
   }
   if (args.provider === "openai") {
@@ -247,14 +248,21 @@ export function resolveModelReasoningEffortCapability(args: {
           levels,
           supportsNone: levels.includes("none"),
         }
-      : {
-          mode: "unavailable",
-          levels: [],
-          supportsNone: false,
-          disabledReason: openAiModelIsFixedHigh(args.modelId)
-            ? "This model uses a fixed reasoning effort."
-            : "This model does not expose adjustable effort.",
-        };
+      : args.simulatedEffortEnabled === true &&
+          !openAiModelIsFixedHigh(args.modelId)
+        ? {
+            mode: "simulated",
+            levels: LOCAL_SIMULATED_REASONING_LEVELS,
+            supportsNone: false,
+          }
+        : {
+            mode: "unavailable",
+            levels: [],
+            supportsNone: false,
+            disabledReason: openAiModelIsFixedHigh(args.modelId)
+              ? "This model uses a fixed reasoning effort."
+              : "Enable experimental simulated effort in Settings.",
+          };
   }
   if (anthropicModelSupportsReasoningEffort(args.modelId)) {
     const levels = anthropicModelSupportsXHighReasoningEffort(args.modelId)
@@ -266,11 +274,18 @@ export function resolveModelReasoningEffortCapability(args: {
       supportsNone: false,
     };
   }
+  if (args.simulatedEffortEnabled === true) {
+    return {
+      mode: "simulated",
+      levels: LOCAL_SIMULATED_REASONING_LEVELS,
+      supportsNone: false,
+    };
+  }
   return {
     mode: "unavailable",
     levels: [],
     supportsNone: false,
-    disabledReason: "This model does not expose adjustable effort.",
+    disabledReason: "Enable experimental simulated effort in Settings.",
   };
 }
 
@@ -278,7 +293,7 @@ export function effectiveModelReasoningEffort(args: {
   provider: NativeReasoningEffortProvider;
   modelId: string;
   preference: unknown;
-  simulatedLocalEnabled?: boolean;
+  simulatedEffortEnabled?: boolean;
 }): ModelReasoningEffortPreference | null {
   const preference = normalizeModelReasoningEffortPreference(args.preference);
   if (!preference) return null;

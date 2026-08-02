@@ -227,7 +227,7 @@ describe("voice Phase 1 boundary", () => {
         ...request,
         elevenLabsText: "[explosion] Welcome back.",
       }).elevenLabsText,
-      "[explosion] Welcome back.",
+      null,
     );
     assert.equal(
       validateVoiceSynthesisRequest({
@@ -245,7 +245,7 @@ describe("voice Phase 1 boundary", () => {
     assert.equal(withLeakedStageDirection.text, "Welcome back.");
     assert.equal(
       withLeakedStageDirection.elevenLabsText,
-      "[sighs] [leans back] Welcome back.",
+      "[sighs] Welcome back.",
     );
   });
 

@@ -4,7 +4,10 @@ import {
   normalizeBotVoiceVolume,
   normalizeVoiceEffect,
   resolveVoicePlaybackTransform,
+  VOICE_VOCAL_ACTIONS,
+  VOICE_VOCAL_ACTION_MODIFIERS,
   type BotAudioVoiceProfileV1,
+  type VoicePerformanceVocalActionSegmentV1,
   type VoiceEffect,
   type VoiceDeliveryMood,
 } from "@localai/shared";
@@ -24,6 +27,7 @@ import {
   replayAudioMasterCaptureActive,
   routeAudioElementToPrismOutput,
 } from "./replayAudioMasterCapture.ts";
+import { localVocalActionWave } from "./localVocalActions.ts";
 
 export interface EnglishVoicePostProcessing {
   detuneCents: number;
@@ -42,6 +46,9 @@ export interface EnglishVoiceSynthesisClip {
   alignment: EnglishVoiceCharacterAlignment | null;
   audioContentType: string;
   engineUsed: string | null;
+  localEngine?: string | null;
+  modelHash?: string | null;
+  notice?: string | null;
 }
 
 export interface EnglishVoiceWaveStreamChunk {
@@ -49,6 +56,12 @@ export interface EnglishVoiceWaveStreamChunk {
   characterCount: number;
   text: string | null;
   bytes: ArrayBuffer;
+  kind: "speech" | "vocal-action";
+  action: VoicePerformanceVocalActionSegmentV1["action"] | null;
+  modifiers: VoicePerformanceVocalActionSegmentV1["modifiers"];
+  authoredText: string | null;
+  sourceStart: number | null;
+  sourceEnd: number | null;
 }
 
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
@@ -77,14 +90,21 @@ export function parseEnglishVoiceWaveStreamChunk(
   const payload = JSON.parse(line) as Record<string, unknown>;
   const index = Number(payload.index);
   const characterCount = Number(payload.characterCount);
+  const vocalAction = payload.kind === "vocal-action";
   const audioBase64 =
     typeof payload.audioBase64 === "string" ? payload.audioBase64.trim() : "";
+  const action =
+    vocalAction &&
+    typeof payload.action === "string" &&
+    (VOICE_VOCAL_ACTIONS as readonly string[]).includes(payload.action)
+      ? (payload.action as VoicePerformanceVocalActionSegmentV1["action"])
+      : null;
   if (
     !Number.isInteger(index) ||
     index < 0 ||
     !Number.isFinite(characterCount) ||
-    characterCount <= 0 ||
-    !audioBase64
+    characterCount < 0 ||
+    (vocalAction ? !action : characterCount <= 0 || !audioBase64)
   ) {
     throw new Error("Local voice stream returned an invalid audio chunk.");
   }
@@ -92,7 +112,22 @@ export function parseEnglishVoiceWaveStreamChunk(
     index,
     characterCount,
     text: typeof payload.text === "string" ? payload.text : null,
-    bytes: decodedBase64Bytes(audioBase64),
+    bytes: audioBase64 ? decodedBase64Bytes(audioBase64) : new ArrayBuffer(0),
+    kind: vocalAction ? "vocal-action" : "speech",
+    action,
+    modifiers: Array.isArray(payload.modifiers)
+      ? payload.modifiers.filter(
+          (modifier): modifier is VoicePerformanceVocalActionSegmentV1["modifiers"][number] =>
+            typeof modifier === "string" &&
+            (VOICE_VOCAL_ACTION_MODIFIERS as readonly string[]).includes(modifier),
+        )
+      : [],
+    authoredText:
+      typeof payload.authoredText === "string" ? payload.authoredText : null,
+    sourceStart:
+      Number.isInteger(payload.sourceStart) ? Number(payload.sourceStart) : null,
+    sourceEnd:
+      Number.isInteger(payload.sourceEnd) ? Number(payload.sourceEnd) : null,
   };
 }
 
@@ -122,12 +157,26 @@ export async function readEnglishVoiceSynthesisClip(
 ): Promise<EnglishVoiceSynthesisClip> {
   const contentType = response.headers.get("content-type") ?? "application/octet-stream";
   const engineUsed = response.headers.get("x-prism-voice-engine");
+  const localEngine = response.headers.get("x-prism-local-voice-engine");
+  const modelHash = response.headers.get("x-prism-voice-model-sha256");
+  const encodedNotice = response.headers.get("x-prism-voice-notice");
+  let notice: string | null = null;
+  if (encodedNotice) {
+    try {
+      notice = decodeURIComponent(encodedNotice);
+    } catch {
+      notice = encodedNotice;
+    }
+  }
   if (!contentType.toLowerCase().includes("application/json")) {
     return {
       bytes: await response.arrayBuffer(),
       alignment: null,
       audioContentType: contentType,
       engineUsed,
+      localEngine,
+      modelHash,
+      notice,
     };
   }
   const payload = await response.json() as Record<string, unknown>;
@@ -140,6 +189,9 @@ export async function readEnglishVoiceSynthesisClip(
       ? payload.audioContentType
       : response.headers.get("x-prism-audio-content-type") ?? "application/octet-stream",
     engineUsed,
+    localEngine,
+    modelHash,
+    notice,
   };
 }
 
@@ -178,9 +230,7 @@ export function resolveEnglishVoicePlaybackDetuneCents(
   rawProfile: BotAudioVoiceProfileV1,
   engineUsed: string | null,
 ): number {
-  // Both engines use the same local transform; keeping this parameter retains
-  // the established call-site contract while making that neutrality explicit.
-  void engineUsed;
+  if (engineUsed === "elevenlabs") return 0;
   return resolveVoicePlaybackTransform(rawProfile).pitchCents;
 }
 
@@ -204,7 +254,7 @@ export function englishVoiceProfileSupportsStreaming(
   deliveryMood?: VoiceDeliveryMood | null,
 ): boolean {
   const profile = applyVoiceDeliveryMoodToProfile(rawProfile, deliveryMood);
-  if (profile.pitch !== 0 || profile.warmth !== 0 || profile.lilt !== 0) {
+  if (profile.lilt !== 0) {
     return false;
   }
   if (!effectsEnabled) return true;
@@ -351,10 +401,15 @@ function releaseActiveMedia(keepElement = false): void {
 }
 
 export function stopEnglishVoice(
-  options: { preservePreparedMedia?: boolean } = {}
+  options: {
+    preservePreparedMedia?: boolean;
+    preserveCompletedTails?: boolean;
+  } = {},
 ): void {
   generation += 1;
-  stopRealtimeVoiceAudio();
+  stopRealtimeVoiceAudio("primary", {
+    preserveCompletedTails: options.preserveCompletedTails,
+  });
   stopRealtimeVoiceAudio("presence");
   releaseActiveMedia();
   if (!options.preservePreparedMedia) releasePreparedMedia();
@@ -529,7 +584,8 @@ export function englishVoiceResponseSupportsChunkedStreaming(
   return (
     response.body !== null &&
     contentType.includes("application/x-ndjson") &&
-    response.headers.get("x-prism-voice-stream") === "wav-chunks-v1"
+    (response.headers.get("x-prism-voice-stream") === "wav-chunks-v1" ||
+      response.headers.get("x-prism-voice-stream") === "wav-chunks-v2")
   );
 }
 
@@ -772,6 +828,7 @@ async function playAudio(
   });
   if (!playbackStillValid()) return;
   const processing = resolveEnglishVoicePostProcessing(profile);
+  const localToneEnabled = engineUsed !== "elevenlabs";
   const detuneCents = resolveEnglishVoicePlaybackDetuneCents(
     profile,
     engineUsed,
@@ -784,7 +841,8 @@ async function playAudio(
       seed,
       effectsEnabled,
       detuneCents,
-      baseLowpassHz: processing.lowpassHz,
+      baseLowpassHz: localToneEnabled ? processing.lowpassHz : 20_000,
+      localToneEnabled,
       voiceEffect: voiceEffectForPlayback(profile),
       roomAcoustics,
       stereoPan,
@@ -834,9 +892,69 @@ async function playChunkedEnglishResponse(
   let consumedCharacters = 0;
   let playedChunks = 0;
   let playbackStarted = false;
+  let audibleSegmentCursorMs = 0;
 
   for await (const chunk of readEnglishVoiceWaveStream(response)) {
     if (expectedGeneration !== generation) return;
+    if (chunk.kind === "vocal-action" && chunk.action) {
+      let actualActionDurationMs: number | null = null;
+      let actualActionElapsedMs = 0;
+      const actionSegment: VoicePerformanceVocalActionSegmentV1 = {
+        kind: "vocal-action",
+        action: chunk.action,
+        modifiers: chunk.modifiers,
+        authoredText: chunk.authoredText ?? chunk.action,
+        sourceStart: chunk.sourceStart ?? 0,
+        sourceEnd: chunk.sourceEnd ?? 0,
+      };
+      await playAudio(
+        localVocalActionWave({
+          segment: actionSegment,
+          profile,
+          seed: `${seed}:action:${chunk.index}`,
+        }),
+        profile,
+        expectedGeneration,
+        `${seed}:action:${chunk.index}`,
+        effectsEnabled,
+        "procedural-vocal-action",
+        {
+          onStart: (durationMs) => {
+            actualActionDurationMs = durationMs;
+            if (!playbackStarted) {
+              playbackStarted = true;
+              lifecycle?.onStart?.(safeEstimatedDurationMs);
+            }
+          },
+          onProgress: (elapsedMs) => {
+            actualActionElapsedMs = Math.max(actualActionElapsedMs, elapsedMs);
+            // A vocal action holds the current visible text rather than
+            // revealing unheard speech underneath it.
+          },
+          onEnd: () => undefined,
+        },
+        roomAcoustics,
+        null,
+        stereoPan,
+      );
+      const actionHeardMs = Math.max(
+        actualActionElapsedMs,
+        expectedGeneration === generation ? (actualActionDurationMs ?? 1) : 0,
+      );
+      lifecycle?.onSegmentTiming?.({
+        kind: "vocal-action",
+        sourceStart: chunk.sourceStart ?? 0,
+        sourceEnd: chunk.sourceEnd ?? chunk.sourceStart ?? 0,
+        startMs: audibleSegmentCursorMs,
+        endMs: audibleSegmentCursorMs + actionHeardMs,
+        heard: actionHeardMs > 0,
+        action: chunk.action,
+      });
+      audibleSegmentCursorMs += actionHeardMs;
+      if (expectedGeneration !== generation) return;
+      playedChunks += 1;
+      continue;
+    }
     const segmentStartMs =
       safeEstimatedDurationMs * (consumedCharacters / totalCharacters);
     const segmentEndMs =
@@ -845,6 +963,7 @@ async function playChunkedEnglishResponse(
         totalCharacters);
     const segmentDurationMs = Math.max(1, segmentEndMs - segmentStartMs);
     let actualChunkDurationMs: number | null = null;
+    let actualChunkElapsedMs = 0;
     await playAudio(
       chunk.bytes,
       profile,
@@ -861,6 +980,7 @@ async function playChunkedEnglishResponse(
           }
         },
         onProgress: (elapsedMs) => {
+          actualChunkElapsedMs = Math.max(actualChunkElapsedMs, elapsedMs);
           const progress = actualChunkDurationMs
             ? Math.min(1, elapsedMs / actualChunkDurationMs)
             : Math.min(1, elapsedMs / segmentDurationMs);
@@ -876,6 +996,22 @@ async function playChunkedEnglishResponse(
       playedChunks === 0 ? preSpeechBreath : null,
       stereoPan,
     );
+    const speechHeardMs = Math.max(
+      actualChunkElapsedMs,
+      expectedGeneration === generation
+        ? (actualChunkDurationMs ?? segmentDurationMs)
+        : 0,
+    );
+    lifecycle?.onSegmentTiming?.({
+      kind: "speech",
+      sourceStart: chunk.sourceStart ?? 0,
+      sourceEnd: chunk.sourceEnd ?? chunk.sourceStart ?? 0,
+      startMs: audibleSegmentCursorMs,
+      endMs: audibleSegmentCursorMs + speechHeardMs,
+      heard: speechHeardMs > 0,
+    });
+    audibleSegmentCursorMs += speechHeardMs;
+    if (expectedGeneration !== generation) return;
     playedChunks += 1;
     consumedCharacters += chunk.characterCount;
     lifecycle?.onProgress?.(segmentEndMs, safeEstimatedDurationMs);

@@ -47,8 +47,10 @@ import {
   normalizeDebateModeratorTitle,
   resolveDebateForumRoundPlan,
   voicePerformanceTextFromActionCues,
+  voiceSpokenText,
   debateDebriefEligibleBots,
   normalizeBotAudioVoiceControl,
+  normalizeBotAudioVoiceProfileV1,
   type DebateAdvocacyConsent,
   type DebateCaseCardV1,
   type DebateDebriefChatMessageV1,
@@ -148,9 +150,9 @@ import {
 } from "./debateUrlEvidence";
 import {
   DEBATE_EVIDENCE_EMOJI_CHOICES,
+  applyDebateEvidenceExhibitAssetReuse,
   applyDebateEvidenceObjectNameEdit,
   debateEvidenceEmojiForObject,
-  debateEvidenceObjectDraftFromStoredExhibitAsset,
   debateEvidenceObjectFromPrismCandidate,
   nextDebateEvidenceExhibitId,
   randomDebateEvidenceObject,
@@ -356,6 +358,8 @@ export interface DebateBotSummary {
 
 export interface DebateUtterance {
   event: DebateEventV1;
+  /** Stable presentation-only key used to reuse a prepared voice clip. */
+  voiceCacheKey?: string;
   format: DebateFormatId;
   sessionId: string;
   speaker: DebateBotSummary | null;
@@ -412,8 +416,6 @@ export interface DebateExperienceProps {
   theme: "light" | "dark";
   audioEnabled: boolean;
   audioVolume: number;
-  juryAutoDeliberationEnabled?: boolean;
-  juryDecisionTimeoutMs?: number;
   objectionRulingTimeoutMs?: number;
   request: <T>(path: string, options?: RequestInit) => Promise<T>;
   renderBotGlyph: BotPickerGlyphRenderer;
@@ -518,10 +520,13 @@ type DebateAudienceOrderResponse = {
   returningRoomTone: boolean;
   sessionId: string;
 };
-type DebateJuryDeliberationDecision = {
-  key: string;
-  deadlineMs: number;
-};
+
+function debateJuryBallotVoiceCacheKey(
+  sessionId: string,
+  jurorBotId: string,
+): string {
+  return `debate-jury-ballot:${sessionId}:${jurorBotId}`;
+}
 type DebateObjectionRulingDecision = {
   key: string;
   deadlineMs: number;
@@ -982,10 +987,20 @@ const DEBATE_AUDIENCE_DUCKED_MIX = {
   ...DEBATE_FOLEY_MIX,
   background: 0.1,
 } as const satisfies SessionAtmosphereMix;
+const DEBATE_JURY_CHAMBER_MIX = {
+  background: 0.12,
+  grain: 0,
+  foley: 0.09,
+} as const satisfies SessionAtmosphereMix;
 const DEBATE_AMBIENT_FOLEY_PROFILE = {
   minDelayMs: 14_000,
   maxDelayMs: 32_000,
   trim: 0.72,
+} as const satisfies SessionAmbientFoleyProfile;
+const DEBATE_JURY_AMBIENT_FOLEY_PROFILE = {
+  minDelayMs: 22_000,
+  maxDelayMs: 48_000,
+  trim: 0.24,
 } as const satisfies SessionAmbientFoleyProfile;
 const DEBATE_VOCAL_FOLEY_PROFILE = {
   minDelayMs: 22_000,
@@ -1525,6 +1540,7 @@ function debateExpectedBotId(session: DebateSessionV1): string | null {
     step === "turnabout_ballot_moderator" ||
     step === "jury_closing_moderator" ||
     step === "judge_closing_moderator" ||
+    step === "moderator_to_jury" ||
     step === "moderator_to_rebuttal" ||
     step === "moderator_to_closing" ||
     step.endsWith("_prompt") ||
@@ -1655,6 +1671,15 @@ function requestBody(value: unknown): RequestInit {
   return { method: "POST", body: JSON.stringify(value) };
 }
 
+function debateRequestIsRevisionConflict(error: unknown): boolean {
+  return (
+    error instanceof Error &&
+    /Debate changed from revision \d+ to \d+\. Refresh and retry\./u.test(
+      error.message,
+    )
+  );
+}
+
 function readDebateEvidenceImageFile(file: File): Promise<string> {
   if (!["image/png", "image/jpeg", "image/webp"].includes(file.type)) {
     return Promise.reject(
@@ -1716,22 +1741,15 @@ function phaseLabel(session: DebateSessionV1): string {
   return `${session.phase.charAt(0).toUpperCase()}${session.phase.slice(1)}`;
 }
 
-function debateAwaitsJuryDeliberationChoice(session: DebateSessionV1): boolean {
-  return (
-    session.jury.enabled &&
-    session.stepKey === "jury_deliberation_0" &&
-    session.jury.discussionTurnCount === 0 &&
-    session.jury.calledVoteAt === null
-  );
-}
-
 function debateJudgeGavelLockedForJury(
   session: DebateSessionV1 | null,
 ): boolean {
   return Boolean(
     session?.playerRole === "judge" &&
     session.jury.enabled &&
-    session.stepKey.startsWith("jury_deliberation_"),
+    (session.stepKey.startsWith("jury_initial_") ||
+      session.stepKey.startsWith("jury_deliberation_") ||
+      session.stepKey.startsWith("jury_final_")),
   );
 }
 
@@ -2198,6 +2216,41 @@ async function writeDebateClipboardText(text: string): Promise<void> {
     textarea.remove();
     previouslyFocused?.focus();
   }
+}
+
+function DebateErrorToast(props: { message: string }): React.JSX.Element {
+  const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
+    "idle",
+  );
+  return (
+    <button
+      type="button"
+      className={`${styles.error} ${styles.errorToast}`}
+      role="alert"
+      data-copy-state={copyState}
+      onClick={() => {
+        void writeDebateClipboardText(props.message)
+          .then(() => setCopyState("copied"))
+          .catch(() => setCopyState("failed"));
+      }}
+      aria-label={`${props.message} ${
+        copyState === "copied"
+          ? "Copied to clipboard."
+          : copyState === "failed"
+            ? "Copy failed."
+            : "Click to copy this error."
+      }`}
+    >
+      <span>{props.message}</span>
+      <small>
+        {copyState === "copied"
+          ? "Copied to clipboard."
+          : copyState === "failed"
+            ? "Couldn’t copy. Try again."
+            : "Click to copy error."}
+      </small>
+    </button>
+  );
 }
 
 const DebateMarkdownBody = memo(
@@ -3079,6 +3132,8 @@ export function DebateExperience(
     sessionId: string;
   } | null>(null);
   const [audienceOrderSaving, setAudienceOrderSaving] = useState(false);
+  const [pauseQueued, setPauseQueued] = useState(false);
+  const pauseOrResumeRef = useRef<(() => Promise<void>) | null>(null);
   const [judgeGavelCeremony, setJudgeGavelCeremony] =
     useState<DebateJudgeGavelCeremony | null>(null);
   const [judgeGavelMissedCameraView, setJudgeGavelMissedCameraView] = useState<
@@ -3094,8 +3149,6 @@ export function DebateExperience(
   const [judgeComposerGenerating, setJudgeComposerGenerating] = useState(false);
   const [judgeGavelNowMs, setJudgeGavelNowMs] = useState(() => Date.now());
   const [cameraMode, setCameraMode] = useState<DebateCameraMode>("auto");
-  const [juryDeliberationDecision, setJuryDeliberationDecision] =
-    useState<DebateJuryDeliberationDecision | null>(null);
   const [
     juryDeliberationInFlightSessionId,
     setJuryDeliberationInFlightSessionId,
@@ -3195,10 +3248,7 @@ export function DebateExperience(
     revision: number;
   } | null>(null);
   const presentationRunRef = useRef(0);
-  const pausedPresentationReplayRef = useRef<{
-    sessionId: string;
-    eventId: string;
-  } | null>(null);
+  const presentationPlaybackEventIdRef = useRef<string | null>(null);
   const transcriptAutoFollowRef = useRef(true);
   const transcriptUserOwnsViewportRef = useRef(false);
   const transcriptTouchYRef = useRef<number | null>(null);
@@ -3568,9 +3618,13 @@ export function DebateExperience(
         activeEvent: presentedEvent,
         presenting,
         evidence: activeSession.evidence,
+        visibleContent:
+          presentedEvent && liveReveal?.eventId === presentedEvent.id
+            ? liveReveal.visibleContent
+            : undefined,
       }),
     );
-  }, [activeSession, presenting, presentationEventId]);
+  }, [activeSession, liveReveal, presenting, presentationEventId]);
   useEffect(() => {
     const session = activeSession;
     if (
@@ -5425,21 +5479,8 @@ export function DebateExperience(
 
   const selectEvidenceExhibitAsset = (asset: DebateExhibitAsset): void => {
     if (evidenceObjectVisualBusy) return;
-    const restored = debateEvidenceObjectDraftFromStoredExhibitAsset(asset);
-    if (restored) {
-      setEvidenceObjectDraft(restored);
-      setError(null);
-      return;
-    }
-    // Fallback: keep the current naming and only attach the sprite.
     setEvidenceObjectDraft((current) =>
-      current
-        ? {
-            ...current,
-            visualKind: "synthesized",
-            imageId: asset.id,
-          }
-        : current,
+      current ? applyDebateEvidenceExhibitAssetReuse(current, asset) : current,
     );
     setError(null);
   };
@@ -5734,6 +5775,7 @@ export function DebateExperience(
       eventId: string,
     ): void => {
       if (!props.audioEnabled || props.audioVolume <= 0) return;
+      if (juryCameraActive) return;
       if (
         (reactionKind === "question" || reactionKind === "session") &&
         !debateAudienceAllowsAttentiveFoley(debateMaterialQuality)
@@ -5756,7 +5798,12 @@ export function DebateExperience(
         tag: `debate-audience-reaction:${eventId}`,
       });
     },
-    [debateMaterialQuality, props.audioEnabled, props.audioVolume],
+    [
+      debateMaterialQuality,
+      juryCameraActive,
+      props.audioEnabled,
+      props.audioVolume,
+    ],
   );
 
   const debateUtteranceForEvent = useCallback(
@@ -5777,9 +5824,10 @@ export function DebateExperience(
       ) {
         return null;
       }
+      const authoredVoiceText = debateSpokenText(event.content);
       const spokenText = debateEventIsAtmosphericVocalFoley(event)
         ? debateVocalFoleyVoicePerformance(event.content).spokenText
-        : debateSpokenText(event.content);
+        : voiceSpokenText(authoredVoiceText, { leadingMarkedAction: true });
       const snapshot = debateBotSnapshot(session, event.speakerBotId);
       const presentation = snapshot
         ? debateBotPresentation(session, snapshot, event.sequence)
@@ -5791,28 +5839,41 @@ export function DebateExperience(
       const atmosphericPerformance = debateEventIsAtmosphericVocalFoley(event)
         ? debateVocalFoleyVoicePerformance(event.content)
         : null;
-      const authoredPerformanceText =
-        voicePerformanceTextFromActionCues(spokenText);
+      const authoredPerformanceText = voicePerformanceTextFromActionCues(
+        authoredVoiceText,
+        { leadingMarkedAction: true, omitLocalFoleyTags: true },
+      );
       const hiddenPerformanceCue =
         event.kind === "objection"
           ? "shouts"
           : normalizeDebateVoicePerformanceCue(event.voicePerformanceCue);
       const baseVoiceProfile = voiceSnapshot?.voiceProfile ?? null;
+      const normalizedBaseVoiceProfile = baseVoiceProfile
+        ? normalizeBotAudioVoiceProfileV1(baseVoiceProfile)
+        : null;
       const paceBoost =
         event.speakerKind === "advocate" && event.timing
           ? debateUtterancePaceBoost(event.timing)
           : 0;
       const pacedVoiceProfile =
-        baseVoiceProfile && paceBoost !== 0
+        normalizedBaseVoiceProfile && paceBoost !== 0
           ? {
-              ...baseVoiceProfile,
+              ...normalizedBaseVoiceProfile,
               pace: normalizeBotAudioVoiceControl(
-                baseVoiceProfile.pace + paceBoost,
+                normalizedBaseVoiceProfile.pace + paceBoost,
               ),
             }
           : baseVoiceProfile;
       return {
         event,
+        ...(event.kind === "ballot" && event.speakerKind === "juror"
+          ? {
+              voiceCacheKey: debateJuryBallotVoiceCacheKey(
+                session.id,
+                event.speakerBotId ?? "juror",
+              ),
+            }
+          : {}),
         format: session.format,
         sessionId: session.id,
         speaker: snapshot
@@ -5835,12 +5896,14 @@ export function DebateExperience(
                 );
                 if (!bot || paceBoost === 0 || !bot.voiceProfile)
                   return bot ?? null;
+                const normalizedBotVoiceProfile =
+                  normalizeBotAudioVoiceProfileV1(bot.voiceProfile);
                 return {
                   ...bot,
                   voiceProfile: {
-                    ...bot.voiceProfile,
+                    ...normalizedBotVoiceProfile,
                     pace: normalizeBotAudioVoiceControl(
-                      bot.voiceProfile.pace + paceBoost,
+                      normalizedBotVoiceProfile.pace + paceBoost,
                     ),
                   },
                 };
@@ -5912,8 +5975,19 @@ export function DebateExperience(
             : `Recovered with ${recovery.finalModel}.`,
         );
       }
-      for (const event of fresh) {
+      for (const [eventIndex, event] of fresh.entries()) {
         if (presentationRunRef.current !== runId) return;
+        const replayableEvent =
+          event.speakerKind !== "system" && event.kind !== "error"
+            ? event
+            : fresh
+                .slice(eventIndex + 1)
+                .find(
+                  (candidate) =>
+                    candidate.speakerKind !== "system" &&
+                    candidate.kind !== "error",
+                );
+        presentationPlaybackEventIdRef.current = replayableEvent?.id ?? null;
         setAudiencePressurePresentationEventId(event.id);
         if (debateEventIsJurySidebarComment(event)) {
           markJuryCommentPlayed(event.id);
@@ -6456,6 +6530,7 @@ export function DebateExperience(
         }
       }
       if (presentationRunRef.current !== runId) return;
+      presentationPlaybackEventIdRef.current = null;
       setLiveGavelCue(null);
       setSpeakerHandoff(null);
       replaceLiveReveal(null);
@@ -6563,8 +6638,7 @@ export function DebateExperience(
         session.status !== "live" ||
         session.judgeGavel?.status === "awaiting_message" ||
         session.objectionRuling?.status === "awaiting_ruling" ||
-        session.participantObjection?.status === "awaiting_reason" ||
-        debateAwaitsJuryDeliberationChoice(session)
+        session.participantObjection?.status === "awaiting_reason"
       ) {
         return;
       }
@@ -6630,6 +6704,7 @@ export function DebateExperience(
     ): Promise<void> => {
       const runId = presentationRunRef.current + 1;
       presentationRunRef.current = runId;
+      presentationPlaybackEventIdRef.current = null;
       activeSessionIdRef.current = next.id;
       presentationStore.clear();
       setVoicePreparationSpeakerBotId(null);
@@ -6643,6 +6718,10 @@ export function DebateExperience(
         ),
       );
       const first = fresh[0] ?? null;
+      presentationPlaybackEventIdRef.current =
+        fresh.find(
+          (event) => event.speakerKind !== "system" && event.kind !== "error",
+        )?.id ?? null;
       const firstGavelCue = first
         ? debateModeratorGavelCue({
             format: next.format,
@@ -6757,6 +6836,14 @@ export function DebateExperience(
                 expectedRevision: result.session.revision,
                 idempotencyKey: nextMutationKey("return-recess"),
                 exitRecovery: true,
+                presentationEventId:
+                  [...result.session.events]
+                    .reverse()
+                    .find(
+                      (event) =>
+                        event.speakerKind !== "system" &&
+                        event.kind !== "error",
+                    )?.id ?? null,
               }),
             )
           ).session
@@ -7022,6 +7109,48 @@ export function DebateExperience(
             provider: preferredProvider ?? "default",
           },
         );
+        if (
+          preparingJuryDeliberation &&
+          onPrepareUtterance &&
+          result.session.jury.preparedFinalBallots.length > 0
+        ) {
+          const nextSequence =
+            (result.session.events.at(-1)?.sequence ?? -1) + 1;
+          await Promise.all(
+            result.session.jury.preparedFinalBallots.map(
+              async (ballot, index) => {
+                const event: DebateEventV1 = {
+                  version: DEBATE_SCHEMA_VERSION,
+                  id: debateJuryBallotVoiceCacheKey(
+                    result.session.id,
+                    ballot.jurorBotId,
+                  ),
+                  sequence: nextSequence + index,
+                  phase: "verdict",
+                  stepKey: `jury_final_${index}`,
+                  kind: "ballot",
+                  speakerKind: "juror",
+                  speakerBotId: ballot.jurorBotId,
+                  sideId: ballot.sideId,
+                  content: ballot.reason,
+                  sourceIds: [],
+                  provider: ballot.provider,
+                  model: ballot.model,
+                  autoRecovery: ballot.autoRecovery,
+                  voicePerformanceCue: ballot.voicePerformanceCue,
+                  createdAt: ballot.createdAt,
+                };
+                const utterance = debateUtteranceForEvent(
+                  result.session,
+                  event,
+                );
+                if (utterance) {
+                  await onPrepareUtterance(utterance).catch(() => undefined);
+                }
+              },
+            ),
+          );
+        }
         if (mountedRef.current) setBusy(false);
         const adoption = adoptSession(previous, result.session);
         debateFloorMutationInFlightRef.current = false;
@@ -7050,7 +7179,9 @@ export function DebateExperience(
       adoptSession,
       busy,
       discardPreparedTurn,
+      debateUtteranceForEvent,
       nextMutationKey,
+      onPrepareUtterance,
       onResponseCueGeneration,
       preferredProvider,
       presenting,
@@ -7105,8 +7236,7 @@ export function DebateExperience(
       audienceOrderSaving ||
       presenting ||
       earlyEndOpen ||
-      presentationSuspended ||
-      debateAwaitsJuryDeliberationChoice(activeSession)
+      presentationSuspended
     ) {
       return;
     }
@@ -7124,50 +7254,6 @@ export function DebateExperience(
     presentationSuspended,
     presenting,
     view,
-  ]);
-
-  useEffect(() => {
-    const awaitingChoice =
-      view === "live" &&
-      activeSession?.status === "live" &&
-      debateAwaitsJuryDeliberationChoice(activeSession) &&
-      !busy &&
-      !presenting;
-    if (!awaitingChoice || !activeSession) {
-      setJuryDeliberationDecision(null);
-      return;
-    }
-    const key = `${activeSession.id}:${activeSession.revision}:${activeSession.stepKey}`;
-    setJuryDeliberationDecision((current) =>
-      current?.key === key
-        ? current
-        : {
-            key,
-            deadlineMs: Date.now() + (props.juryDecisionTimeoutMs ?? 6_000),
-          },
-    );
-  }, [activeSession, busy, presenting, props.juryDecisionTimeoutMs, view]);
-
-  useEffect(() => {
-    if (
-      !juryDeliberationDecision ||
-      props.juryAutoDeliberationEnabled === false ||
-      presentationSuspended
-    ) {
-      return;
-    }
-    const timeout = window.setTimeout(
-      () => {
-        void advance(false);
-      },
-      Math.max(0, juryDeliberationDecision.deadlineMs - Date.now()),
-    );
-    return () => window.clearTimeout(timeout);
-  }, [
-    advance,
-    juryDeliberationDecision,
-    presentationSuspended,
-    props.juryAutoDeliberationEnabled,
   ]);
 
   useEffect(() => {
@@ -7553,6 +7639,26 @@ export function DebateExperience(
     setAudiencePressurePresentationEventId(null);
     replaceLiveReveal(null);
     setPresenting(false);
+  };
+
+  const interruptedPresentationEventId = (
+    session: DebateSessionV1,
+  ): string | null => {
+    const eventId =
+      presentationPlaybackEventIdRef.current ?? presentationEventId;
+    if (!eventId) return null;
+    const event = session.events.find((candidate) => candidate.id === eventId);
+    if (!event || event.speakerKind === "system" || event.kind === "error") {
+      return null;
+    }
+    const snapshot = presentationStore.getSnapshot();
+    if (
+      snapshot.eventId === event.id &&
+      snapshot.visibleContent.length >= event.content.length
+    ) {
+      return null;
+    }
+    return event.id;
   };
 
   const triggerJudgeGavelSmash = (
@@ -7955,6 +8061,10 @@ export function DebateExperience(
 
   const pauseOrResume = async (): Promise<void> => {
     const previous = activeSession;
+    if (previous && previous.status !== "paused" && busy) {
+      setPauseQueued(true);
+      return;
+    }
     if (
       !previous ||
       (previous.status !== "paused" &&
@@ -7964,67 +8074,70 @@ export function DebateExperience(
     ) {
       return;
     }
+    setPauseQueued(false);
     debateFloorMutationInFlightRef.current = true;
     const resume = previous.status === "paused";
-    const interruptedPresentationEvent =
-      !resume && presentationEventId
-        ? (previous.events.find((event) => event.id === presentationEventId) ??
-          null)
-        : null;
-    if (!resume) {
-      const presentationSnapshot = presentationStore.getSnapshot();
-      pausedPresentationReplayRef.current =
-        interruptedPresentationEvent !== null &&
-        presentationSnapshot.eventId === interruptedPresentationEvent.id &&
-        presentationSnapshot.visibleContent.length <
-          interruptedPresentationEvent.content.length
-          ? {
-              sessionId: previous.id,
-              eventId: interruptedPresentationEvent.id,
-            }
-          : null;
-    }
-    const pausedPresentationEvent =
-      resume && pausedPresentationReplayRef.current?.sessionId === previous.id
-        ? (previous.events.find(
-            (event) =>
-              event.id === pausedPresentationReplayRef.current?.eventId,
-          ) ?? null)
-        : null;
-    const shouldReplayPausedPresentation =
-      resume && pausedPresentationEvent !== null;
+    let replayEventId = resume
+      ? (previous.pausedPresentationEventId ?? null)
+      : interruptedPresentationEventId(previous);
     if (!resume) cancelCurrentPresentation();
-    const resumeGavelStruckAt = resume ? debateClientPerfNowMs() : null;
-    if (resume) {
-      triggerJudgeGavelSmash("order");
-      suppressNextJudgeGavelPresentationCueRef.current = true;
-    }
     setBusy(true);
     setError(null);
     try {
-      const result = await props.request<{ session: DebateSessionV1 }>(
-        `/api/debates/${encodeURIComponent(previous.id)}/${
-          resume ? "resume" : "pause"
-        }`,
-        requestBody({
-          expectedRevision: previous.revision,
-          idempotencyKey: nextMutationKey(resume ? "resume" : "pause"),
-        }),
-      );
+      const lifecyclePath = `/api/debates/${encodeURIComponent(previous.id)}/${
+        resume ? "resume" : "pause"
+      }`;
+      const requestLifecycle = (session: DebateSessionV1) =>
+        props.request<{ session: DebateSessionV1 }>(
+          lifecyclePath,
+          requestBody({
+            expectedRevision: session.revision,
+            idempotencyKey: nextMutationKey(
+              resume ? "resume" : "pause",
+            ),
+            ...(!resume ? { presentationEventId: replayEventId } : {}),
+          }),
+        );
+      let result: { session: DebateSessionV1 };
+      try {
+        result = await requestLifecycle(previous);
+      } catch (caught) {
+        if (!debateRequestIsRevisionConflict(caught)) throw caught;
+        const refreshed = await props.request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(previous.id)}?perspective=live`,
+        );
+        if (!resume && refreshed.session.status === "paused") {
+          result = refreshed;
+        } else if (resume && refreshed.session.status !== "paused") {
+          result = refreshed;
+        } else {
+          if (!resume && !replayEventId) {
+            replayEventId =
+              debatePresentationEvents(
+                previous,
+                refreshed.session,
+                debateJuryCameraIsActive(
+                  debateCameraModeForSession(
+                    cameraModeRef.current,
+                    refreshed.session,
+                  ),
+                  refreshed.session,
+                ),
+              ).find(
+                (event) =>
+                  event.speakerKind !== "system" && event.kind !== "error",
+              )?.id ?? null;
+          }
+          result = await requestLifecycle(refreshed.session);
+        }
+      }
       if (resume) {
         if (mountedRef.current) setBusy(false);
-        const remainingGavelLeadMs = Math.max(
-          0,
-          debateModeratorGavelSpeechLeadMs("order") -
-            (debateClientPerfNowMs() - (resumeGavelStruckAt ?? 0)),
+        const pausedPresentationEvent = result.session.events.find(
+          (event) =>
+            event.id === result.session.pausedPresentationEventId,
         );
-        await new Promise((resolve) =>
-          window.setTimeout(resolve, remainingGavelLeadMs),
-        );
-        await adoptSession(previous, result.session, {
-          automaticJudgeGavel: true,
-        });
-        if (shouldReplayPausedPresentation && pausedPresentationEvent) {
+        if (pausedPresentationEvent) {
           await adoptSession(
             {
               ...result.session,
@@ -8038,35 +8151,21 @@ export function DebateExperience(
                 (event) => event.sequence <= pausedPresentationEvent.sequence,
               ),
             },
-            { automaticJudgeGavel: true },
           );
+        } else {
+          setActiveSession(result.session);
         }
-        setActiveSession(result.session);
-        pausedPresentationReplayRef.current = null;
       } else {
-        if (mountedRef.current) setBusy(false);
-        await adoptSession(
-          previous,
-          {
-            ...result.session,
-            status: previous.status,
-          },
-          {
-            automaticJudgeGavel: true,
-          },
-        );
         setActiveSession(result.session);
       }
       void loadSessions();
     } catch (caught) {
-      if (resume) suppressNextJudgeGavelPresentationCueRef.current = false;
       setError(
         caught instanceof Error
           ? caught.message
           : `${resume ? "Resume" : "Pause"} was unavailable.`,
       );
       if (!resume) {
-        pausedPresentationReplayRef.current = null;
         setTranscriptVisibleThroughSequence(null);
         replaceLiveReveal(null);
       }
@@ -8075,9 +8174,25 @@ export function DebateExperience(
       setBusy(false);
     }
   };
+  pauseOrResumeRef.current = pauseOrResume;
+
+  useEffect(() => {
+    if (
+      !pauseQueued ||
+      busy ||
+      !activeSession ||
+      activeSession.status === "paused"
+    ) {
+      return;
+    }
+    void pauseOrResumeRef.current?.();
+  }, [activeSession, busy, pauseQueued]);
 
   const exitLiveSessionToStudio = async (): Promise<void> => {
     const previous = activeSession;
+    let replayEventId = previous
+      ? interruptedPresentationEventId(previous)
+      : null;
     cancelCurrentPresentation();
     presentationStore.clear();
     activeSessionIdRef.current = null;
@@ -8086,17 +8201,49 @@ export function DebateExperience(
     setActiveSession(null);
     if (previous && debateSessionNeedsReturnPause(previous)) {
       try {
-        await props.request<{ session: DebateSessionV1 }>(
-          `/api/debates/${encodeURIComponent(previous.id)}/pause`,
-          requestBody({
-            expectedRevision: previous.revision,
-            idempotencyKey: nextMutationKey("exit-recess"),
-            exitRecovery: true,
-          }),
-        );
+        const pauseForExit = (session: DebateSessionV1) =>
+          props.request<{ session: DebateSessionV1 }>(
+            `/api/debates/${encodeURIComponent(previous.id)}/pause`,
+            requestBody({
+              expectedRevision: session.revision,
+              idempotencyKey: nextMutationKey("exit-recess"),
+              exitRecovery: true,
+              presentationEventId: replayEventId,
+            }),
+          );
+        try {
+          await pauseForExit(previous);
+        } catch (caught) {
+          if (!debateRequestIsRevisionConflict(caught)) throw caught;
+          const refreshed = await props.request<{
+            session: DebateSessionV1;
+          }>(
+            `/api/debates/${encodeURIComponent(previous.id)}?perspective=live`,
+          );
+          if (debateSessionNeedsReturnPause(refreshed.session)) {
+            if (!replayEventId) {
+              replayEventId =
+                debatePresentationEvents(
+                  previous,
+                  refreshed.session,
+                  debateJuryCameraIsActive(
+                    debateCameraModeForSession(
+                      cameraModeRef.current,
+                      refreshed.session,
+                    ),
+                    refreshed.session,
+                  ),
+                ).find(
+                  (event) =>
+                    event.speakerKind !== "system" && event.kind !== "error",
+                )?.id ?? null;
+            }
+            await pauseForExit(refreshed.session);
+          }
+        }
       } catch {
-        // A concurrent floor mutation may win this race. Opening the session
-        // applies the same recovery pause against the latest revision.
+        // Opening the unfinished session applies a final recovery pause if the
+        // process disappeared before this best-effort lifecycle write landed.
       }
     }
     void loadSessions();
@@ -8131,41 +8278,6 @@ export function DebateExperience(
         caught instanceof Error
           ? caught.message
           : "The early conclusion was unavailable.",
-      );
-    } finally {
-      if (mountedRef.current) setBusy(false);
-    }
-  };
-
-  const skipJuryDeliberation = async (): Promise<void> => {
-    const previous = activeSession;
-    if (
-      !previous ||
-      busy ||
-      !previous.jury.enabled ||
-      !previous.stepKey.startsWith("jury_deliberation_")
-    ) {
-      return;
-    }
-    if (presenting) cancelCurrentPresentation();
-    setBusy(true);
-    setError(null);
-    try {
-      const result = await props.request<{ session: DebateSessionV1 }>(
-        `/api/debates/${encodeURIComponent(previous.id)}/jury/skip-deliberation`,
-        requestBody({
-          expectedRevision: previous.revision,
-          idempotencyKey: nextMutationKey("jury-skip-deliberation"),
-        }),
-      );
-      setEarlyEndOpen(false);
-      if (mountedRef.current) setBusy(false);
-      await adoptSession(previous, result.session);
-    } catch (caught) {
-      setError(
-        caught instanceof Error
-          ? caught.message
-          : "Skipping Jury deliberation was unavailable.",
       );
     } finally {
       if (mountedRef.current) setBusy(false);
@@ -8662,9 +8774,7 @@ export function DebateExperience(
         </p>
       ) : null}
       {error ? (
-        <p className={styles.error} role="alert">
-          {error}
-        </p>
+        <DebateErrorToast key={error} message={error} />
       ) : null}
       {setupRestoreNotice ? (
         <p className={styles.notice} role="status">
@@ -10673,9 +10783,9 @@ export function DebateExperience(
                 <div>
                   <strong>Reuse a generated sprite</strong>
                   <small>
-                    These came from Debate’s exhibit tool. Choosing one restores
-                    the name and options that created it, and uses no
-                    image-generation tokens.
+                    These came from Debate’s exhibit tool. Choosing one changes
+                    only the evidence sprite and uses no image-generation
+                    tokens.
                   </small>
                 </div>
                 {evidenceExhibitAssets.length > 0 ? (
@@ -12246,11 +12356,10 @@ export function DebateExperience(
           )
         : [],
     );
-    const awaitingDeliberationChoice =
-      debateAwaitsJuryDeliberationChoice(session);
     const silentDeliberationPreparing =
       juryDeliberationInFlightSessionId === session.id ||
-      (session.jury.phase === "deliberating" && busy);
+      session.jury.phase === "initial_ballots" ||
+      session.jury.phase === "deliberating";
     const finalBallotsByJurorId = new Map(
       session.jury.finalBallots.map((ballot) => [ballot.jurorBotId, ballot]),
     );
@@ -12306,9 +12415,14 @@ export function DebateExperience(
                 ? chamberListenerReaction
                 : null;
             const foleyMouthShape =
-              !talking && debateAmbientBotVocalization?.targetId === juror.id
-                ? debateAmbientBotVocalizationMouthShape(juror.id)
-                : null;
+              silentDeliberationPreparing
+                ? (["open-small", "narrow", "open-round"] as const)[
+                    index % 3
+                  ]
+                : !talking &&
+                    debateAmbientBotVocalization?.targetId === juror.id
+                  ? debateAmbientBotVocalizationMouthShape(juror.id)
+                  : null;
             const vocalFoleyTagText = resolveDebateVocalFoleyTagText({
               ambientKind:
                 debateAmbientBotVocalization?.targetId === juror.id
@@ -12402,7 +12516,14 @@ export function DebateExperience(
                     *{sentenceCaseActionText(vocalFoleyTagText)}*
                   </span>
                 ) : null}
-                {pendingJuryThoughtBotId === juror.id ? (
+                {silentDeliberationPreparing ? (
+                  <i
+                    className={`${styles.juryThoughtChip} ${styles.juryDeliberationBubble}`}
+                    aria-hidden="true"
+                  >
+                    ...
+                  </i>
+                ) : pendingJuryThoughtBotId === juror.id ? (
                   <i
                     className={styles.juryThoughtChip}
                     aria-label={`${juror.name} has a thought`}
@@ -12539,15 +12660,13 @@ export function DebateExperience(
             ) : session.jury.phase === "initial_ballots" ? (
               "No leaning is displayed before deliberation."
             ) : silentDeliberationPreparing ? (
-              "Their conversation remains unheard and uncaptioned while all five final ballot statements are prepared."
+              "Their conversation remains unheard and uncaptioned while the Jury’s reasoning and final ballot recordings are prepared."
             ) : session.jury.phase === "final_ballots" ? (
               activeEvent?.kind === "ballot" ? (
                 "The juror’s final reason and vote are now on the record."
               ) : (
                 "Each final vote appears as it is cast."
               )
-            ) : awaitingDeliberationChoice ? (
-              "The chamber opens automatically. You may still send all five jurors directly to final ballots."
             ) : session.jury.phase === "waiting" ? (
               "The Jury follows the public floor and talks between turns."
             ) : (
@@ -13995,13 +14114,6 @@ export function DebateExperience(
                   : debateAutoCameraView(activeRole)
               : effectiveCameraMode;
     const evidenceView = debateStageEvidenceViewForCamera(cameraView);
-    const juryDecisionCountdown = juryDeliberationDecision ? (
-      <DebateDeadlineCountdown
-        deadlineMs={juryDeliberationDecision.deadlineMs}
-        intervalMs={250}
-        aria-label="Jury deliberation auto-start seconds remaining"
-      />
-    ) : null;
     const participantFloorRailVisible =
       participantOpponentSpeechActive && !judgeGavelKeyboardBlocked;
     const canInterject =
@@ -14041,8 +14153,6 @@ export function DebateExperience(
           aria-label="Intervention cooldown seconds remaining"
         />
       ) : null;
-    const juryDeliberating =
-      session.jury.enabled && session.stepKey.startsWith("jury_deliberation_");
     const judgeJuryGavelLocked =
       debateJudgeGavelLockedForJury(session) ||
       activeEvent?.speakerKind === "juror";
@@ -14505,13 +14615,18 @@ export function DebateExperience(
           sessionKey={`debate:${session.id}`}
           volume={props.audioVolume}
           backgroundUrl={ambientAudioActive ? DEBATE_AUDIENCE_MURMUR_URL : null}
+          backgroundTone={juryChamberVisible ? "warm-low" : "neutral"}
           grainUrl={
-            ambientAudioActive && audiencePressureBandTrue
+            ambientAudioActive &&
+            !juryChamberVisible &&
+            audiencePressureBandTrue
               ? DEBATE_AUDIENCE_CROSSTALK_URL
               : null
           }
           mix={
-            debateIdentPlaying !== null
+            juryChamberVisible
+              ? DEBATE_JURY_CHAMBER_MIX
+              : debateIdentPlaying !== null
               ? DEBATE_FOLEY_MIX
               : activeAudienceOrderResponse &&
                   !activeAudienceOrderResponse.returningRoomTone
@@ -14538,7 +14653,11 @@ export function DebateExperience(
               : DEBATE_FORUM_FOLEY_ROOM_SEND
           }
           ambientFoley={ambientAudioActive}
-          ambientFoleyProfile={DEBATE_AMBIENT_FOLEY_PROFILE}
+          ambientFoleyProfile={
+            juryChamberVisible
+              ? DEBATE_JURY_AMBIENT_FOLEY_PROFILE
+              : DEBATE_AMBIENT_FOLEY_PROFILE
+          }
           ambientFoleyUrls={DEBATE_AUDIENCE_FOLEY_URLS}
           deferFoley={debateIdentPlaying !== null || (busy && !presenting)}
           deferBotVocalization={
@@ -14961,52 +15080,6 @@ export function DebateExperience(
                       </button>
                     </div>
                   ) : null
-                ) : debateAwaitsJuryDeliberationChoice(session) &&
-                  !presenting ? (
-                  <div
-                    className={styles.stageStateOverlay}
-                    data-kind="jury-choice"
-                    role="dialog"
-                    aria-label="Choose how the Jury deliberates"
-                  >
-                    <span aria-hidden="true">◇ ◇ ◇ ◇ ◇</span>
-                    <strong>How should the Jury deliberate?</strong>
-                    <small>
-                      {props.juryAutoDeliberationEnabled === false ? (
-                        "The chamber opens automatically. Begin when you’re ready."
-                      ) : (
-                        <>
-                          Silent deliberation begins in{" "}
-                          {juryDecisionCountdown ??
-                            `${Math.ceil(
-                              (props.juryDecisionTimeoutMs ?? 6_000) / 1_000,
-                            )}s`}
-                          .
-                        </>
-                      )}
-                    </small>
-                    <div
-                      className={styles.juryDeliberationChoice}
-                      data-context="prompt"
-                    >
-                      <button
-                        type="button"
-                        data-default="true"
-                        autoFocus
-                        onClick={() => void advance(false)}
-                        disabled={busy}
-                      >
-                        Begin deliberation
-                      </button>
-                      <button
-                        type="button"
-                        onClick={() => void skipJuryDeliberation()}
-                        disabled={busy}
-                      >
-                        Skip to ballots
-                      </button>
-                    </div>
-                  </div>
                 ) : session.jury.enabled &&
                   session.playerRole === "participant" &&
                   session.jury.phase !== "waiting" &&
@@ -15028,21 +15101,19 @@ export function DebateExperience(
                   <div className={styles.stageStateOverlay} data-kind="paused">
                     <span aria-hidden="true">Ⅱ</span>
                     <strong>
-                      {session.format === "turnabout"
-                        ? "Turnabout in recess"
-                        : "Forum in recess"}
+                      Debate paused
                     </strong>
                     <small>
-                      The exact next action is preserved. Strike the gavel when
-                      you are ready to call the room back.
+                      The interrupted line is preserved and will replay from
+                      its beginning.
                     </small>
                     <button
                       type="button"
-                      data-action="resume-gavel"
+                      data-action="resume"
                       onClick={() => void pauseOrResume()}
                       disabled={busy || debateFloorMutationInFlightRef.current}
                     >
-                      Strike gavel to resume
+                      Resume Debate
                     </button>
                   </div>
                 ) : judgeGuidedStep && !presenting && !juryChamberVisible ? (
@@ -15361,7 +15432,8 @@ export function DebateExperience(
                       }
                       onClick={() => void pauseOrResume()}
                       disabled={
-                        busy ||
+                        (busy && session.status === "paused") ||
+                        pauseQueued ||
                         participantObjectionAwaitingReason ||
                         (session.status !== "paused" &&
                           session.judgeGavel?.status === "awaiting_message")
@@ -15370,7 +15442,7 @@ export function DebateExperience(
                         participantObjectionAwaitingReason
                           ? "State or withdraw your objection before pausing"
                           : session.status === "paused"
-                            ? "Strike the gavel to resume Debate"
+                            ? "Resume Debate"
                             : "Pause Debate"
                       }
                       title={
@@ -15380,10 +15452,12 @@ export function DebateExperience(
                       }
                     >
                       {session.status === "paused"
-                        ? "Gavel to resume"
-                        : "Pause"}
+                        ? "Resume"
+                        : pauseQueued
+                          ? "Pausing…"
+                          : "Pause"}
                     </button>
-                    {session.phase !== "verdict" || juryDeliberating ? (
+                    {session.phase !== "verdict" ? (
                       <button
                         type="button"
                         className={styles.endEarlyButton}
@@ -15393,14 +15467,12 @@ export function DebateExperience(
                           busy ||
                           participantObjectionAwaitingReason ||
                           session.judgeGavel?.status === "awaiting_message" ||
-                          (!juryDeliberating && presenting)
+                          presenting
                         }
                         aria-label={
                           participantObjectionAwaitingReason
                             ? "State or withdraw your objection before ending the Debate"
-                            : juryDeliberating
-                              ? "Skip Jury deliberation"
-                              : "End the Debate early"
+                            : "End the Debate early"
                         }
                         title={
                           participantObjectionAwaitingReason
@@ -15408,7 +15480,7 @@ export function DebateExperience(
                             : undefined
                         }
                       >
-                        {juryDeliberating ? "Skip deliberation" : "End debate"}
+                        End debate
                       </button>
                     ) : null}
                   </div>
@@ -15431,8 +15503,8 @@ export function DebateExperience(
                     >
                       Retry
                     </button>
-                    {session.stepKey.startsWith("jury_deliberation_") ||
-                    !session.stepKey.startsWith("jury_") ? (
+                    {!session.stepKey.startsWith("jury_") &&
+                    session.stepKey !== "moderator_to_jury" ? (
                       <button
                         type="button"
                         onClick={() => void advance(true)}
@@ -15445,9 +15517,7 @@ export function DebateExperience(
                 </div>
               ) : null}
               {error ? (
-                <p className={styles.error} role="alert">
-                  {error}
-                </p>
+                <DebateErrorToast key={error} message={error} />
               ) : null}
               {renderTranscript(session)}
               {renderJuryRecord(session)}
@@ -15777,23 +15847,17 @@ export function DebateExperience(
                 aria-describedby="debate-end-early-description"
               >
                 <p className={styles.eyebrow}>
-                  {juryDeliberating
-                    ? "Jury chamber"
-                    : session.judgeGavel?.status === "awaiting_message"
+                  {session.judgeGavel?.status === "awaiting_message"
                       ? "Final authority"
                       : "Accelerated verdict"}
                 </p>
                 <h2 id="debate-end-early-title">
-                  {juryDeliberating
-                    ? "Skip Jury deliberation?"
-                    : session.judgeGavel?.status === "awaiting_message"
+                  {session.judgeGavel?.status === "awaiting_message"
                       ? "End this Debate?"
                       : "End this Debate early?"}
                 </h2>
                 <p id="debate-end-early-description">
-                  {juryDeliberating
-                    ? "The chamber will skip every remaining discussion turn. All five jurors will still cast final ballots, and the full five-ballot Jury result remains intact."
-                    : session.jury.enabled
+                  {session.jury.enabled
                       ? `The remaining rounds will be skipped. The Jury will hold a shorter three-turn deliberation from only the limited ${debatePublicMaterialName(session.formality).toLowerCase()} and will not penalize unheard rounds.`
                       : session.playerRole === "judge"
                         ? `The remaining rounds will be skipped. You will decide immediately from only the limited ${debatePublicMaterialName(session.formality).toLowerCase()} so far.`
@@ -15805,26 +15869,18 @@ export function DebateExperience(
                     onClick={() => setEarlyEndOpen(false)}
                     disabled={busy}
                   >
-                    {juryDeliberating ? "Keep deliberating" : "Continue Debate"}
+                    Continue Debate
                   </button>
                   <button
                     ref={earlyEndConfirmButtonRef}
                     type="button"
                     className={styles.confirmEarlyEndButton}
-                    onClick={() =>
-                      void (juryDeliberating
-                        ? skipJuryDeliberation()
-                        : endDebateEarly())
-                    }
-                    disabled={busy || (!juryDeliberating && presenting)}
+                    onClick={() => void endDebateEarly()}
+                    disabled={busy || presenting}
                   >
                     {busy
-                      ? juryDeliberating
-                        ? "Skipping…"
-                        : "Concluding…"
-                      : juryDeliberating
-                        ? "Skip to ballots"
-                        : "Conclude now"}
+                      ? "Concluding…"
+                      : "Conclude now"}
                   </button>
                 </div>
               </section>

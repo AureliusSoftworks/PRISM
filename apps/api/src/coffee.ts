@@ -31,7 +31,10 @@ import {
   allModelReasoningEffortCursorHash,
   resolveUserModelReasoningEffort,
 } from "./model-effort-runtime.ts";
-import { prepareMessagesWithSimulatedEffort } from "./model-effort-runner.ts";
+import {
+  prepareMessagesWithSimulatedEffort,
+  shouldPrepareMessagesWithSimulatedEffort,
+} from "./model-effort-runner.ts";
 import {
   promptBotWildcardCandidates,
   promptWildcardNames,
@@ -5565,7 +5568,7 @@ export interface CoffeeTurnSettings {
    */
   sessionSpeakerModel?: string | null;
   reasoningEffort?: ReasoningEffort;
-  /** Account experiment that permits private simulated effort for local models. */
+  /** Account experiment that permits private multi-call effort for non-native models. */
   experimentalAllModelEffortEnabled?: boolean;
   /** Cancels router, private deliberation, and final speaker generation. */
   signal?: AbortSignal;
@@ -5623,7 +5626,7 @@ export function coffeeEffectiveReasoningEffort(args: {
       provider: args.effectiveProvider,
       modelId: args.modelId,
       preference: args.requested,
-      simulatedLocalEnabled: args.experimentEnabled,
+      simulatedEffortEnabled: args.experimentEnabled,
     }) ?? undefined
   );
 }
@@ -16817,7 +16820,7 @@ async function generateCoffeeBotReply(args: {
     userId,
     provider: effectiveProvider,
     modelId: concreteSpeakerModel,
-    simulatedLocalEnabled:
+    simulatedEffortEnabled:
       settings.experimentalAllModelEffortEnabled === true,
   });
   const effectiveReasoningEffort = coffeeEffectiveReasoningEffort({
@@ -17229,11 +17232,13 @@ async function generateCoffeeBotReply(args: {
     !speakerUsesHardResponse &&
     !cannedInterruptionReaction &&
     !socialSilenceMarker &&
-    effectiveProvider === "local" &&
     settings.experimentalAllModelEffortEnabled === true &&
     effectiveReasoningEffort &&
-    effectiveReasoningEffort !== "none" &&
-    effectiveReasoningEffort !== "auto"
+    shouldPrepareMessagesWithSimulatedEffort({
+      provider: effectiveProvider,
+      model: concreteSpeakerModel,
+      effort: effectiveReasoningEffort,
+    })
   ) {
     try {
       speakerMessages = await prepareMessagesWithSimulatedEffort({

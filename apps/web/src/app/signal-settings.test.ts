@@ -46,16 +46,31 @@ test("Signal navbar opens its contextual settings and preserves the tutorial", (
   );
 });
 
-test("Signal sends saved performance text only through the ElevenLabs request lane", () => {
+test("Signal keeps provider tags scoped while local actions use structured streaming", () => {
   assert.match(
     pageSource,
-    /signalOnlineVoiceEnabled && message\.voicePerformanceText[\s\S]{0,180}elevenLabsText: voiceSpokenText\([\s\S]{0,40}message\.voicePerformanceText/u,
+    /signalOnlineVoiceEnabled && message\.voicePerformanceText[\s\S]{0,180}elevenLabsText: message\.voicePerformanceText/u,
   );
   assert.match(pageSource, /signalMessageId: message\.id/u);
   assert.match(pageSource, /text: voiceSpokenText\(message\.content\)/u);
   assert.match(
     pageSource,
-    /elevenLabsText: voiceSpokenText\([\s\S]{0,40}message\.voicePerformanceText/u,
+    /const performanceText = message\.voicePerformanceText \?\? message\.content/u,
+  );
+  assert.match(
+    pageSource,
+    /const useLocalPerformanceStream =[\s\S]{0,260}segment\.kind === "vocal-action"/u,
+  );
+  assert.match(pageSource, /performanceText,/u);
+  assert.match(pageSource, /includeAlignment: !useLocalPerformanceStream/u);
+  assert.match(pageSource, /streamChunks: useLocalPerformanceStream/u);
+  assert.match(
+    pageSource,
+    /englishVoiceResponseSupportsChunkedStreaming\(response\)[\s\S]{0,300}kind: "stream"/u,
+  );
+  assert.match(
+    pageSource,
+    /onSegmentTiming: \(timing\) => \{[\s\S]{0,280}segmentTimings: replaySegmentTimings/u,
   );
   assert.match(
     pageSource,

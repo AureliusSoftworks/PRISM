@@ -1,8 +1,8 @@
 # Voices
 
 Prism Voices is account-wide: **Mute** (the default), **English**, **Babble**, or
-**Bottish**. A bot owns one compatible voice profile with a selected voice
-identity, pitch, lilt, pace, and portable Voice Character settings. Existing
+**Bottish**. A bot owns one compatible V3 voice profile with separate Local and
+Premium identities, shared delivery, and portable Voice Character settings. Existing
 profiles and backups may still contain the retired `bottishTone` field, but
 Prism no longer exposes, randomizes, or applies it. Account Voice Volume remains
 the master level.
@@ -15,10 +15,20 @@ choices move into the tools menu instead of becoming an ambiguous cycle button.
 
 Voice settings list the engines available in each privacy lane:
 
-- **Offline engine** is the **PRISM Voice Pack**: twelve portable neural voices
+- **Auto** preserves the selected character identity while choosing the best
+  healthy offline engine per utterance. It may use **Voice+** only when that
+  engine is qualified, warm real-time factor is at most 1.0, first playable
+  audio is under 2.5 seconds, and runtime health passes; otherwise it uses
+  **Instant**.
+- **Instant** is the **PRISM Voice Pack**: 28 portable Kokoro neural voices
   bundled with installed builds and generated entirely on the device. The
   Kokoro 82M q8 model is loaded only from the packaged model directory; a
   missing model never triggers a network download.
+- **Voice+** is the pinned Chatterbox Turbo ONNX Q4 candidate. Production
+  packaging is fail-closed until the exact redistributed asset, provenance
+  watermark, original PRISM reference deck, and macOS arm64/x64, Windows x64,
+  and Linux x64 qualification records pass. A forced Voice+ hard failure is
+  visible and recovers through Instant before playback begins.
 - **Operating-system voices** are an optional account setting. When enabled,
   installed English voices from macOS or Windows join bot voice menus. Turning
   the setting off immediately returns every profile to its portable PRISM
@@ -28,9 +38,11 @@ Voice settings list the engines available in each privacy lane:
   ElevenLabs voice in Prism or bot customization.
 
 Every profile defaults to one stable PRISM voice slot (`voice-1` through
-`voice-12`). Those slots map to Heart, Bella, Michael, Emma, George, Aoede,
-Kore, Nicole, Sarah, Fenrir, Puck, and Fable, spanning American and British
-voices with distinct vocal character.
+`voice-28`). These map to all currently packaged English Kokoro archetypes and
+are presented through generic traits such as register, warmth, temperament,
+and American or British source. Engine filenames and upstream embedding names
+remain implementation details. The source-first accent selector never rewrites
+visible dialogue into dialect spelling.
 Profiles persist only the stable slot, not the engine's internal voice name.
 An explicit ElevenLabs voice overrides the local identity for eligible ONLINE
 English replies. If the API key, selected provider voice, or ElevenLabs itself
@@ -38,10 +50,11 @@ is unavailable, Prism keeps playback working through the PRISM Voice Pack. A
 persisted LOCAL reply always uses the local pack regardless of its saved online
 identity.
 
-The pack aims for natural everyday speech and consistent offline availability.
-It does not reproduce every Eleven v3 performance feature: ElevenLabs remains
-the expressive option for provider audio tags, directed delivery, and higher
-emotional range.
+V1 and V2 profiles remain readable indefinitely. Saving an edited profile
+serializes V3 with `local`, `premium`, and `delivery` sections; loading an older
+profile does not bulk-rewrite its bot file. ElevenLabs remains the expressive
+provider option for native audio tags, directed delivery, and higher emotional
+range.
 
 Legacy five-slot `elevenLabsVoiceBank` backup data remains importable but is no
 longer shown in settings or consulted during synthesis.
@@ -116,22 +129,30 @@ directions.
 - Bottish is Prism's original procedural robot language. It does not call the
   synthesis API. Its deterministic beeps, chirps, and fitted timing are restored
   as the complete voice rather than mixed under synthesized speech.
-- Pitch shapes English, Babble, and Bottish, including ElevenLabs English. Lilt
-  shapes their local melodic contour. Prism applies both through a
+- Local pitch, brightness, resonance, Open–Nasal, and Light–Chest shape local
+  English, Babble, and Bottish without changing the Premium identity. Shared
+  pace, lilt, mood performance, effect, texture, and volume continue to affect
+  Local and Premium. Prism applies local tone through a
   formant-preserving browser worklet, while **Pace is the only profile control
   that changes duration**. Local and provider synthesis stay neutral-tempo so
   Pace is applied exactly once. If a browser cannot start the worklet, Prism
   still honors Pace and plays neutral pitch rather than resampling into a
   tempo wobble.
 
-Avatar Studio's **Tone** tab exposes one two-dimensional **Voice Character**
-pad instead of three technical sliders. Horizontal movement is a restrained
-±6 dB tonal tilt: left adds low-end weight while reducing high-end clarity, and
-right does the reverse. Vertical movement applies a relative per-bot trim from
-−12 dB to +6 dB while the account Voice Volume remains master. The center is
-neutral. The pad applies through the shared Web Audio voice graph to English,
-Babble, Bottish, primary speech, and listener reactions. The browser's rare
-basic media compatibility fallback remains dry.
+Avatar Studio's Local card exposes the two-dimensional **Open–Nasal / Light–Chest**
+pad plus advanced pitch, brightness, resonance, and local gain. The center is
+neutral. These controls apply through the local Web Audio graph to local
+English, Babble, Bottish, primary speech, and local vocal actions; they never
+reshape ElevenLabs audio. The browser's rare basic media compatibility fallback
+remains dry.
+
+Marked actions are planned before synthesis as source-linked segments. Explicit
+`*laughs*`, `*chuckles*`, `*giggles*`, `*sighs*`, `*exhales*`, `*gasps*`,
+`*coughs*`, `*clears throat*`, `*snorts*`, `*groans*`, `*sobs*`, `*yawns*`, and
+`*lol*` can become immediate deterministic local reactions. Supported delivery
+modifiers include softly, nervously, dryly, briefly, loudly, restrained, and
+relieved. Ordinary prose is never matched. The canonical message and model
+context remain unchanged.
 
 When Web Audio is unavailable, Babble receives the same clean additive accents
 in its media WAV. If local speech is unavailable during live speech or replay,
@@ -139,10 +160,11 @@ Babble deliberately completes through procedural Bottish. Babble previews do
 not substitute a misleading voice: they report that Babble is loading or
 unavailable and allow a retry.
 
-Playback is sequential and audio-master: carrier or procedural duration drives
-text reveal and mouth motion in Chat, Zen, Coffee, Story, previews, and replay.
-Sending another message, navigating away, changing modes, or choosing Mute stops
-the active voice and every queued accent.
+Playback is audio-master: decoded source duration plus the formant/effect tail
+drives text reveal and mouth motion. A completed final phoneme may overlap the
+next natural handoff; only an explicit interruption truncates active speech.
+Sending another message, navigating away, changing modes, or choosing Mute
+stops the relevant active voice and queued accents.
 
 ## Privacy boundary
 

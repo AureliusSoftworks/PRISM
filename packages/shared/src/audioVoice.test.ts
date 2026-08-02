@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   BOT_VOICE_TEXTURE_RECIPES,
   BOT_VOICE_EQ_TILT_DB_MAX,
+  BOT_AVATAR_SFX_DEFAULT_VOLUME,
   BOT_AVATAR_SFX_MAX_BYTES,
   ELEVENLABS_VOICE_DIRECTION_BY_MOOD,
   VOICE_DELIVERY_RATE_BY_MOOD,
@@ -18,6 +19,7 @@ import {
   elevenLabsVoiceDirectionForMood,
   expectedVoicePlaybackDurationMs,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotAudioVoiceProfileV3,
   normalizeBotAvatarSfxV1,
   normalizeBotNamePronunciation,
   normalizeBotVoiceTexture,
@@ -31,6 +33,7 @@ import {
   resolveVoicePlaybackTransform,
   resolveBotVoiceCharacter,
   parseStoredBotAudioVoiceProfileV1,
+  parseStoredBotAudioVoiceProfileV3,
   serializeBotAudioVoiceProfileV1,
 } from "./audioVoice.ts";
 
@@ -194,6 +197,14 @@ describe("audio voice normalization", () => {
       elevenLabsEffect: "chorus",
       pitch: 1,
       warmth: -1,
+      openness: 0,
+      weight: 0,
+      brightness: 0,
+      resonance: 0,
+      localEnginePreference: "inherit",
+      localVoiceSource: "portable",
+      accentLocale: "en-GB",
+      accentMode: "prefer-genuine",
       pace: 0.125,
       lilt: 0.2,
       bottishTone: 1,
@@ -208,10 +219,37 @@ describe("audio voice normalization", () => {
       "voice-12",
     );
     assert.equal(
-      normalizeBotAudioVoiceProfileV1({ v: 2, baseVoiceId: "voice-13" })
+      normalizeBotAudioVoiceProfileV1({ v: 2, baseVoiceId: "voice-29" })
         .baseVoiceId,
       DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.baseVoiceId,
     );
+  });
+
+  it("persists V3 with separate local, premium, and shared delivery profiles", () => {
+    const v3 = normalizeBotAudioVoiceProfileV3({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      baseVoiceId: "voice-28",
+      localEnginePreference: "voice-plus",
+      accentLocale: "en-GB",
+      openness: 0.35,
+      weight: -0.4,
+      resonance: 0.25,
+      elevenLabsVoiceId: "premium-id",
+      pace: 0.2,
+    });
+    assert.equal(v3.v, 3);
+    assert.equal(v3.local.archetypeId, "voice-28");
+    assert.equal(v3.local.enginePreference, "voice-plus");
+    assert.equal(v3.local.tone.openness, 0.35);
+    assert.equal(v3.premium.voiceId, "premium-id");
+    assert.equal(v3.delivery.pace, 0.2);
+
+    const serialized = serializeBotAudioVoiceProfileV1(v3);
+    assert.equal(JSON.parse(serialized).v, 3);
+    assert.deepEqual(parseStoredBotAudioVoiceProfileV3(serialized), v3);
+    const compatible = parseStoredBotAudioVoiceProfileV1(serialized);
+    assert.equal(compatible?.baseVoiceId, "voice-28");
+    assert.equal(compatible?.localEnginePreference, "voice-plus");
   });
   it("normalizes and round-trips a bounded looping avatar SFX profile", () => {
     const audioDataUrl = `data:audio/mpeg;base64,${Buffer.from("loop").toString("base64")}`;
@@ -246,6 +284,18 @@ describe("audio voice normalization", () => {
       profile,
     );
     assert.equal(BOT_AVATAR_SFX_MAX_BYTES, 4 * 1024 * 1024);
+  });
+
+  it("defaults library avatar SFX to twenty percent", () => {
+    const audioDataUrl = `data:audio/mpeg;base64,${Buffer.from("loop").toString("base64")}`;
+    assert.equal(BOT_AVATAR_SFX_DEFAULT_VOLUME, 0.2);
+    assert.equal(
+      normalizeBotAvatarSfxV1({
+        audioDataUrl,
+        playWhileThinking: true,
+      })?.volume,
+      BOT_AVATAR_SFX_DEFAULT_VOLUME,
+    );
   });
 
   it("round-trips an explicit avatar SFX mute independently of uploaded audio", () => {

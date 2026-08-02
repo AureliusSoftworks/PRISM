@@ -125,7 +125,7 @@ describe("model effort preferences", () => {
     assert.equal(listModelReasoningEffortPreferences(db, "user-2").length, 1);
   });
 
-  it("gates local simulation and changes the prepared-turn cursor", () => {
+  it("gates local and online simulation and changes the prepared-turn cursor", () => {
     const db = createTestDatabase();
     const before = allModelReasoningEffortCursorHash(db, "user-1");
     setModelReasoningEffortPreference(db, {
@@ -152,6 +152,20 @@ describe("model effort preferences", () => {
         modelId: "qwen3:9b",
       }),
       "high",
+    );
+    setModelReasoningEffortPreference(db, {
+      userId: "user-1",
+      provider: "openai",
+      modelId: "gpt-4o",
+      effort: "medium",
+    });
+    assert.equal(
+      resolveUserModelReasoningEffort(db, {
+        userId: "user-1",
+        provider: "openai",
+        modelId: "gpt-4o",
+      }),
+      "medium",
     );
     assert.notEqual(allModelReasoningEffortCursorHash(db, "user-1"), before);
   });

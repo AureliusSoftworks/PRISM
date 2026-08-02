@@ -115,6 +115,8 @@ import {
   botPowerBotNamingCueV1,
   botPowerRequiresAddressedInsultV1,
   botPowerIgnoresOtherPowersV1,
+  botPowerIneptitudeFinalTurnCueV1,
+  botPowerIneptUserPromptV1,
   botPowerObserverCueLinesV1,
   botPowerForgetfulPriorMessagesV1,
   createDefaultPrismMoodState,
@@ -1138,17 +1140,21 @@ function simulatedEffortNoticeDetail(args: {
   if (providerModelSupportsNativeReasoningEffort(args.provider, args.botOverrides)) {
     return `native_reasoning_preserved; provider=${args.provider.name}; model=${model}; effort=${args.effort}; simulated=false`;
   }
-  return `online_simulated_effort_disabled; provider=${args.provider.name}; model=${model}; effort=${args.effort}; reason=local_only`;
+  return null;
 }
 
 function shouldSimulateReasoningEffort(args: {
   experimentalAllModelEffortEnabled?: boolean;
   provider: LlmProvider;
+  botOverrides: GenerateOptions | undefined;
   effort: ReasoningEffort;
 }): boolean {
   if (args.experimentalAllModelEffortEnabled !== true) return false;
   if (args.effort === "auto" || args.effort === "none") return false;
-  return args.provider.name === "local";
+  return !providerModelSupportsNativeReasoningEffort(
+    args.provider,
+    args.botOverrides,
+  );
 }
 
 function parsePsychicPlanningResponse(raw: string): {
@@ -1445,8 +1451,8 @@ async function runPsychicPlanningPass(args: {
         args.botOverrides
       );
       const summary = nativeReasoning
-        ? "I'm using the selected online reasoning model here, so I'll keep the reasoning provider-side instead of running local private passes."
-        : "I'm helping with this turn using the selected online model, so I won't run extra local Psychic passes here.";
+        ? "I'm using the selected model's native reasoning here, so Prism won't add simulated private passes."
+        : "I'm using the selected online model at its default effort because simulated effort is off.";
       const createdAt = new Date().toISOString();
       const debug: PsychicDebugPayload = {
         summary,
@@ -1650,6 +1656,7 @@ async function generateChatResponse(args: {
       experimentalAllModelEffortEnabled:
         args.experimentalAllModelEffortEnabled,
       provider,
+      botOverrides: overrides,
       effort,
     });
     const simulatedEffortNotice = simulatedEffortNoticeDetail({
@@ -6282,6 +6289,8 @@ function buildPromptMessages(args: {
   interruptedContent?: string;
   /** Prism single-slot image job hint (busy / in-flight status). */
   imageSlotSystemHint?: string | null;
+  /** Hard holder Power enforcement placed after the current user request. */
+  finalTurnPowerCue?: string | null;
 }): ProviderMessage[] {
   const promptMessages: ProviderMessage[] = [];
   const trimmedBot = withPrismRuntimeGrounding(args.botSystemPrompt);
@@ -6452,6 +6461,12 @@ function buildPromptMessages(args: {
     }))
   );
   promptMessages.push({ role: "user", content: args.userMessage });
+  if (args.finalTurnPowerCue?.trim()) {
+    promptMessages.push({
+      role: "system",
+      content: args.finalTurnPowerCue.trim(),
+    });
+  }
   return promptMessages;
 }
 
@@ -7187,11 +7202,15 @@ export async function processChatMessage(
         : settings.sessionResumeContext,
       topicReset: settings.topicReset === true,
       chatHistory: holderPromptHistory,
-      userMessage: promptUserMessage,
+      userMessage: botPowerIneptUserPromptV1(
+        settings.botPowers,
+        promptUserMessage,
+      ),
       mode,
       askQuestionMode: botPowerEternalIntroductionTurn ? "off" : askQuestionMode,
       interruptedContent: settings.prismInterruption?.interruptedContent,
       imageSlotSystemHint: buildImageSlotSystemHint(userId, conversationId ?? null),
+      finalTurnPowerCue: botPowerIneptitudeFinalTurnCueV1(settings.botPowers),
     });
     if (zenStageActionPlan) {
       insertSystemPromptBeforeLatestUser(
@@ -8533,16 +8552,20 @@ export async function processChatMessage(
           `forgetful:${mode}:${activeConversationId}:${activeMemoryBotId ?? "default"}:${history.length}:${promptUserMessage}`,
         )
       : history,
-    userMessage: promptUserMessage,
+    userMessage: botPowerIneptUserPromptV1(
+      settings.botPowers,
+      promptUserMessage,
+    ),
     mode,
     askQuestionMode: botPowerEternalIntroductionTurn
       ? "off"
       : memoryClarification
         ? "explicit"
         : askQuestionMode,
-	    interruptedContent: settings.prismInterruption?.interruptedContent,
-	    imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
-	  });
+    interruptedContent: settings.prismInterruption?.interruptedContent,
+    imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
+    finalTurnPowerCue: botPowerIneptitudeFinalTurnCueV1(settings.botPowers),
+  });
   if (zenStageActionPlan) {
     insertSystemPromptBeforeLatestUser(
       promptMessages,

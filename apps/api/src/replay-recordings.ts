@@ -550,6 +550,9 @@ export function updateReplayVoiceTakeSnapshot(
     resolvedEngine?: string | null;
     alignment?: ReplayVoiceTakeV1["alignment"];
     sourceMessageId?: string | null;
+    resolvedModelHash?: string | null;
+    segmentTimings?: ReplayVoiceTakeV1["segmentTimings"];
+    heardCompletion?: ReplayVoiceTakeV1["heardCompletion"];
   },
 ): ReplayVoiceTakeRecordV1 | null {
   const row = db
@@ -564,6 +567,69 @@ export function updateReplayVoiceTakeSnapshot(
     typeof patch.durationMs === "number" && Number.isFinite(patch.durationMs)
       ? Math.max(1, Math.min(120_000, Math.round(patch.durationMs)))
       : snapshot.durationMs;
+  const segmentTimings = patch.segmentTimings === undefined
+    ? snapshot.segmentTimings
+    : (patch.segmentTimings ?? [])
+        .slice(0, 256)
+        .flatMap((segment) => {
+          if (
+            !segment ||
+            (segment.kind !== "speech" && segment.kind !== "vocal-action") ||
+            !Number.isFinite(segment.sourceStart) ||
+            !Number.isFinite(segment.sourceEnd) ||
+            !Number.isFinite(segment.startMs) ||
+            !Number.isFinite(segment.endMs)
+          ) {
+            return [];
+          }
+          const sourceStart = Math.max(0, Math.round(segment.sourceStart));
+          const sourceEnd = Math.max(sourceStart, Math.round(segment.sourceEnd));
+          const startMs = Math.max(0, Math.min(120_000, Math.round(segment.startMs)));
+          const endMs = Math.max(startMs, Math.min(120_000, Math.round(segment.endMs)));
+          return [{
+            kind: segment.kind,
+            sourceStart,
+            sourceEnd,
+            startMs,
+            endMs,
+            heard: segment.heard === true,
+            ...(segment.action
+              ? { action: boundedMessage(segment.action, 40) }
+              : {}),
+          }];
+        });
+  const heardCompletion = patch.heardCompletion === undefined
+    ? snapshot.heardCompletion
+    : patch.heardCompletion &&
+        (patch.heardCompletion.state === "planned" ||
+          patch.heardCompletion.state === "completed" ||
+          patch.heardCompletion.state === "interrupted")
+      ? {
+          state: patch.heardCompletion.state,
+          heardDurationMs: Math.max(
+            0,
+            Math.min(
+              120_000,
+              Math.round(
+                Number.isFinite(patch.heardCompletion.heardDurationMs)
+                  ? patch.heardCompletion.heardDurationMs
+                  : 0,
+              ),
+            ),
+          ),
+          heardCharacterCount: Math.max(
+            0,
+            Math.min(
+              20_000,
+              Math.round(
+                Number.isFinite(patch.heardCompletion.heardCharacterCount)
+                  ? patch.heardCompletion.heardCharacterCount
+                  : 0,
+              ),
+            ),
+          ),
+        }
+      : snapshot.heardCompletion;
   const next: ReplayVoiceTakeV1 = {
     ...snapshot,
     durationMs,
@@ -577,6 +643,15 @@ export function updateReplayVoiceTakeSnapshot(
       patch.sourceMessageId === undefined
         ? snapshot.sourceMessageId
         : boundedMessage(patch.sourceMessageId, 180),
+    resolvedModelHash:
+      patch.resolvedModelHash === undefined
+        ? snapshot.resolvedModelHash
+        : typeof patch.resolvedModelHash === "string" &&
+            /^[a-f0-9]{64}$/iu.test(patch.resolvedModelHash)
+          ? patch.resolvedModelHash.toLowerCase()
+          : null,
+    segmentTimings,
+    heardCompletion,
   };
   const now = new Date().toISOString();
   db.prepare(

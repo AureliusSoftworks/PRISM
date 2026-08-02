@@ -4,7 +4,10 @@ import {
   allModelReasoningEffortCursorHash,
   resolveUserModelReasoningEffort,
 } from "./model-effort-runtime.ts";
-import { prepareMessagesWithSimulatedEffort } from "./model-effort-runner.ts";
+import {
+  prepareMessagesWithSimulatedEffort,
+  shouldPrepareMessagesWithSimulatedEffort,
+} from "./model-effort-runner.ts";
 import type {
   BotcastAtmosphereState,
   BotcastAudienceExperienceV1,
@@ -162,7 +165,9 @@ import {
   botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIntermittentAudibilityEffectV1,
   botPowerIgnoresOtherPowersV1,
+  botPowerIneptitudeFinalRoleCueV1,
   botPowerIneptitudeRoleCueV1,
+  botPowerIneptRoleMisdirectionV1,
   botPowerListenerHearsTurnV1,
   botPowerAnnoyanceTargetV1,
   botPowerIsMutedV1,
@@ -8804,6 +8809,15 @@ export function buildBotcastSpeakerPrompt(
     speaker.powers,
     args.speakerRole === "host" ? "signal_host" : "signal_guest",
   );
+  const ineptitudeFinalCue = botPowerIneptitudeFinalRoleCueV1(
+    speaker.powers,
+    args.speakerRole === "host" ? "signal_host" : "signal_guest",
+  );
+  const ineptitudeMisdirection = botPowerIneptRoleMisdirectionV1(
+    speaker.powers,
+    args.speakerRole === "host" ? "signal_host" : "signal_guest",
+    `${args.episode.id}:${args.episode.segment}:${args.episode.messages.length}`,
+  );
   const powersPrompt = buildBotPowersPromptBlock([
     ...(ineptitudeCue ? [ineptitudeCue] : []),
     ...botPowerSelfCueLinesV1(genericSpeakerCuePowers),
@@ -9346,6 +9360,12 @@ export function buildBotcastSpeakerPrompt(
               : `Continue as ${speaker.name}.`,
           ]).join("\n\n"),
     },
+    ...(ineptitudeFinalCue
+      ? [{ role: "system" as const, content: ineptitudeFinalCue }]
+      : []),
+    ...(ineptitudeMisdirection
+      ? [{ role: "user" as const, content: ineptitudeMisdirection }]
+      : []),
   ];
 }
 
@@ -9370,7 +9390,7 @@ export function buildBotcastOpeningIntroPrompt(
     "Naturally launch the conversation with a concrete invitation, proposition, or first question. Do not stack multiple questions or answer on the guest's behalf. Avoid stock welcome language, generic podcast boilerplate, routine Today-we-are-here phrasing, and all variants of asking for the meaning of the topic or the lesson behind the topic.",
     "Return only the spoken on-air intro. Do not explain the creative choices, mention this authoring pass, or write the guest's response.",
   ].join("\n\n");
-  return ordinaryPrompt.map((message) =>
+  const prompt = ordinaryPrompt.map((message) =>
     message.role === "system"
       ? { ...message, content: `${message.content}\n\n${openingBrief}` }
       : message.role === "user"
@@ -9378,8 +9398,26 @@ export function buildBotcastOpeningIntroPrompt(
             ...message,
             content: `${message.content}\n\nPersisted studio identity (creative grounding, never read aloud as set description): ${args.show.studioIdentity}`,
           }
-        : message,
+      : message,
   );
+  const ineptitudeFinalCue = botPowerIneptitudeFinalRoleCueV1(
+    args.host.powers,
+    "signal_host",
+  );
+  const ineptitudeMisdirection = botPowerIneptRoleMisdirectionV1(
+    args.host.powers,
+    "signal_host",
+    `${args.episode.id}:opening:${args.episode.messages.length}`,
+  );
+  return [
+    ...prompt,
+    ...(ineptitudeFinalCue
+      ? [{ role: "system" as const, content: ineptitudeFinalCue }]
+      : []),
+    ...(ineptitudeMisdirection
+      ? [{ role: "user" as const, content: ineptitudeMisdirection }]
+      : []),
+  ];
 }
 
 const BOTCAST_BRACKETED_DIRECTION_PATTERN = /\[([^\]\n]{1,48})\]/giu;
@@ -12366,7 +12404,7 @@ export async function advanceBotcastEpisode(
     userId,
     provider: selected.providerName,
     modelId: selectedModelId,
-    simulatedLocalEnabled:
+    simulatedEffortEnabled:
       generation.experimentalAllModelEffortEnabled === true,
   });
   const generationOptions = {
@@ -12470,7 +12508,7 @@ export async function advanceBotcastEpisode(
                 userId,
                 provider: attempt.provider,
                 modelId: attempt.model,
-                simulatedLocalEnabled:
+                simulatedEffortEnabled:
                   generation.experimentalAllModelEffortEnabled === true,
               },
             );
@@ -12488,7 +12526,11 @@ export async function advanceBotcastEpisode(
               signal,
             };
             const attemptPrompt =
-              attempt.provider === "local" && attemptReasoningEffort
+              shouldPrepareMessagesWithSimulatedEffort({
+                provider: attempt.provider,
+                model: attempt.model,
+                effort: attemptReasoningEffort,
+              })
                 ? await prepareMessagesWithSimulatedEffort({
                     provider,
                     messages: prompt,
@@ -12538,21 +12580,38 @@ export async function advanceBotcastEpisode(
     }
   } else if (episode.responseMode === "online") {
     try {
+      const onlineTurnOptions = {
+        ...generationOptions,
+        ...(selected.model ? { model: selected.model } : {}),
+        maxTokens: botcastSpeakerMaxTokensForModel(
+          speaker.maxTokens,
+          selected.providerName,
+          modelUsed,
+          turnMaxTokens,
+        ),
+      };
+      const onlinePrompt =
+        shouldPrepareMessagesWithSimulatedEffort({
+          provider: selected.providerName,
+          model: selectedModelId,
+          effort: primaryReasoningEffort,
+        })
+          ? await prepareMessagesWithSimulatedEffort({
+              provider: selected.provider,
+              messages: prompt,
+              options: onlineTurnOptions,
+              effort: primaryReasoningEffort,
+              surface: "signal",
+              outputContract:
+                "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
+            })
+          : prompt;
       onlineTurn = await runSignalOnlineTurn({
         provider: selected.provider,
         providerName: selected.providerName,
         model: modelUsed,
-        messages: prompt,
-        options: {
-          ...generationOptions,
-          ...(selected.model ? { model: selected.model } : {}),
-          maxTokens: botcastSpeakerMaxTokensForModel(
-            speaker.maxTokens,
-            selected.providerName,
-            modelUsed,
-            turnMaxTokens,
-          ),
-        },
+        messages: onlinePrompt,
+        options: onlineTurnOptions,
         validate: (candidate) =>
           validateBotcastAutoSpeakerUtterance({
             raw: candidate,
@@ -12636,7 +12695,12 @@ export async function advanceBotcastEpisode(
           turnMaxTokens,
         ),
       };
-      const localPrompt = primaryReasoningEffort
+      const localPrompt =
+        shouldPrepareMessagesWithSimulatedEffort({
+          provider: selected.providerName,
+          model: selectedModelId,
+          effort: primaryReasoningEffort,
+        })
         ? await prepareMessagesWithSimulatedEffort({
             provider: selected.provider,
             messages: prompt,

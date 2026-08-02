@@ -37,11 +37,15 @@ describe("Signal room acoustics integration", () => {
   it("lets completed voice tails overlap natural handoffs without weakening interruption stops", () => {
     assert.match(
       voiceSource,
-      /if \(active\.roomConnection === roomConnection\) \{\s*active\.roomConnection = null;\s*\}\s*roomConnection\.release\(\)/u,
+      /completedVoiceTailStops\[channel\]\.add\(stopCompletedTail\)[\s\S]{0,200}VOICE_COMPLETED_OVERLAP_TAIL_MS/u,
     );
     assert.match(
       voiceSource,
-      /export function stopRealtimeVoiceAudio\([\s\S]{0,700}active\.roomConnection\?\.disconnect\(\);\s*active\.roomConnection = null;/u,
+      /stopRealtimeVoiceAudio\(channel, \{ preserveCompletedTails: true \}\)/u,
+    );
+    assert.match(
+      voiceSource,
+      /export function stopRealtimeVoiceAudio\([\s\S]{0,900}active\.roomConnection\?\.disconnect\(\);\s*active\.roomConnection = null;[\s\S]{0,220}if \(!options\.preserveCompletedTails\)/u,
     );
   });
 

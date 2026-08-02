@@ -138,7 +138,7 @@ describe("Coffee voice authorization", () => {
   it("preserves the authorized media lane when Coffee begins playback", () => {
     assert.match(
       pageSource,
-      /function stopVoicePlaybackPreservingPreparedMode\(mode: VoiceMode\).*?preservePreparedMedia: mode === "bottish" \|\| mode === "babble".*?preservePreparedMedia: mode === "english"/,
+      /function handoffVoicePlaybackPreservingPreparedMode\(mode: VoiceMode\).*?preservePreparedMedia: mode === "bottish" \|\| mode === "babble".*?preserveCompletedTails: true.*?preservePreparedMedia: mode === "english"/,
     );
     for (const [handler, nextHandler] of [
       [
@@ -156,7 +156,7 @@ describe("Coffee voice authorization", () => {
       );
       assert.match(
         source,
-      /stopVoicePlaybackPreservingPreparedMode\(voiceSelection\.voiceMode\)/,
+        /handoffVoicePlaybackPreservingPreparedMode\(voiceSelection\.voiceMode\)/,
       );
     }
     const replayEffect = pageSource.slice(
@@ -165,7 +165,7 @@ describe("Coffee voice authorization", () => {
     );
     assert.match(
       replayEffect,
-      /stopVoicePlaybackPreservingPreparedMode\(voiceSelection\.voiceMode\)/,
+      /handoffVoicePlaybackPreservingPreparedMode\(voiceSelection\.voiceMode\)/,
     );
   });
 

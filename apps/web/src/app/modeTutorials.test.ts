@@ -202,7 +202,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /never fabricates sources/u);
     assert.match(
       copy,
-      /previously synthesized Debate sprite to restore the naming options that created it without spending more image-generation tokens/u,
+      /previously synthesized Debate sprite to change only the evidence visual without spending more image-generation tokens/u,
     );
     assert.match(
       copy,
@@ -238,7 +238,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /adjective, object, or observable-fact fields/u);
     assert.match(
       copy,
-      /in-room Judge console keeps one contextual Gavel control, Pause or Gavel to resume, and End Debate together/u,
+      /in-room Judge console keeps one contextual Gavel control, Pause or Resume, and End Debate together/u,
     );
     assert.match(
       copy,
@@ -248,16 +248,13 @@ describe("mode tutorials", () => {
     assert.match(copy, /Space invokes that same context-aware control/u);
     assert.match(copy, /Participant and Spectator sessions use the same/u);
     assert.match(copy, /Pause takes effect immediately/u);
-    assert.match(copy, /Persona-shaped recess line/u);
+    assert.match(copy, /without adding dialogue, audio, or a housekeeping event/u);
     assert.match(copy, /Leaving an unfinished Debate by any route/u);
-    assert.match(copy, /returning chamber appear in recess/u);
-    assert.match(copy, /Resume requires you to strike the visible gavel/u);
-    assert.match(copy, /audible hit calls the camera to the moderator/u);
+    assert.match(copy, /reopening returns to the same paused point/u);
+    assert.match(copy, /Resume is equally silent/u);
+    assert.match(copy, /replays that exact saved line from its beginning/u);
     assert.match(copy, /exact next Jury preparation, ballot/u);
-    assert.match(
-      copy,
-      /neither housekeeping beat enters the readable proceedings or copied transcript/u,
-    );
+    assert.match(copy, /neither action creates a spoken beat or transcript event/u);
     assert.match(
       copy,
       /cooldown governs semantic interventions within that gavel control, not audience order/u,
@@ -269,8 +266,8 @@ describe("mode tutorials", () => {
     assert.match(copy, /without audible words or captions/u);
     assert.match(copy, /all five final ballot monologues generate/u);
     assert.doesNotMatch(copy, /choose Participate/u);
-    assert.match(copy, /Skip moves directly to final ballots/u);
-    assert.match(copy, /full five-ballot result/u);
+    assert.match(copy, /Deliberation and voting are unskippable/u);
+    assert.match(copy, /they cast their votes one at a time/u);
     assert.match(copy, /automatically enters the five-seat chamber/u);
     assert.match(copy, /trade short reactions between public-floor turns/u);
     assert.match(
@@ -369,8 +366,9 @@ describe("mode tutorials", () => {
       copy,
       /Once Jury deliberation begins, the Jury owns the floor/u,
     );
-    assert.match(copy, /unified Gavel and Space are put away/u);
-    assert.match(copy, /Skip deliberation remains available/u);
+    assert.match(copy, /unified Gavel, Space, End, and Skip actions are put away/u);
+    assert.match(copy, /End, and Skip actions are put away/u);
+    assert.match(copy, /Pause and Resume remain available as silent lifecycle controls/u);
     assert.match(
       copy,
       /human-Judge session automatically activates the center seat for its neutral introduction/u,
@@ -830,8 +828,11 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /optional operating-system identity/);
     assert.match(
       routing?.body ?? "",
-      /Avatar Studio edits and previews those two identities separately/,
+      /Avatar Studio can pin Account default, Auto, Voice\+, or Instant/,
     );
+    assert.match(routing?.body ?? "", /Open–Nasal \/ Light–Chest pad/);
+    assert.match(routing?.body ?? "", /tone controls never reshape Premium/);
+    assert.match(routing?.body ?? "", /cached local reaction bank/);
     assert.match(routing?.body ?? "", /on AUTO and ONLINE speech/);
     assert.match(routing?.body ?? "", /Voice Settings can narrow/);
     assert.match(routing?.body ?? "", /one ElevenLabs voice collection/);
@@ -1136,7 +1137,15 @@ describe("mode tutorials", () => {
       if (mode === "zen" || mode === "chat") {
         assert.match(
           copy,
-          /fart, burp, and cough actions play their bundled local Foley/u,
+          /Action text stays visual and is never read aloud as dialogue/u,
+        );
+        assert.match(
+          copy,
+          /recognized vocal Action such as laughs becomes an ElevenLabs performance direction/u,
+        );
+        assert.match(
+          copy,
+          /fart, burp, and cough actions stay out of the voice request and play their bundled local Foley/u,
         );
       }
     }
@@ -2119,6 +2128,23 @@ describe("mode tutorials", () => {
       );
       assert.match(body, /without noticing or naming the ignored Power/u);
       assert.match(body, /only that holder's experience/u);
+    }
+  });
+
+  it("teaches Inept as continuous role failure with unrelated bot images", () => {
+    for (const mode of [
+      "chat",
+      "zen",
+      "coffee",
+      "botcast",
+      "debate",
+    ] as const) {
+      const body = MODE_TUTORIALS[mode].steps
+        .map((step) => step.body)
+        .join(" ");
+      assert.match(body, /Inept bot visibly botches a central instruction/u);
+      assert.match(body, /hard-routed to a wholly unrelated safe scene/u);
+      assert.match(body, /valid session state/u);
     }
   });
 });

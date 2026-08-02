@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { statSync } from "node:fs";
 import test from "node:test";
 import {
+  BOT_AVATAR_SFX_DEFAULT_VOLUME,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   type BotAvatarSfxV1,
 } from "@localai/shared";
@@ -282,7 +283,7 @@ test("bots without selected audio use one of four stable PRISM thinking fallback
   assert.equal(first.playWhileTalking, false);
   assert.equal(first.playWhileIdle, false);
   assert.equal(first.playWhileThinking, true);
-  assert.equal(first.volume, 0.45);
+  assert.equal(first.volume, BOT_AVATAR_SFX_DEFAULT_VOLUME);
   for (const publicUrl of PRISM_BOT_THINKING_SFX_FALLBACK_URLS) {
     const asset = statSync(new URL(`../../public${publicUrl}`, import.meta.url));
     assert.ok(asset.isFile());
@@ -313,6 +314,19 @@ test("custom avatar audio wins over the fallback and explicit mute wins over bot
       "bot-a",
     ),
     null,
+  );
+});
+
+test("automatic thinking loops and fallbacks share the twenty-percent library volume", () => {
+  const generated = botAudioVoiceProfileWithThinkingSfx(
+    DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+    "data:audio/mpeg;base64,AQID",
+  );
+  assert.equal(BOT_AVATAR_SFX_DEFAULT_VOLUME, 0.2);
+  assert.equal(generated.avatarSfx?.volume, BOT_AVATAR_SFX_DEFAULT_VOLUME);
+  assert.equal(
+    prismBotThinkingSfxFallback("library-bot").volume,
+    BOT_AVATAR_SFX_DEFAULT_VOLUME,
   );
 });
 

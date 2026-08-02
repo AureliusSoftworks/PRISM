@@ -204,6 +204,36 @@ describe("composeBotSystemPrompt", () => {
     );
   });
 
+  it("makes Inept a hard direct-conversation failure instead of a generic trait", () => {
+    const name = "Inept";
+    const intent = "Cannot follow instructions.";
+    const prompt = composeBotSystemPrompt("Rick Sanchez", "Stay impatient.", false, [{
+      version: 1,
+      id: "inept",
+      name,
+      intent,
+      enabled: true,
+      compileStatus: "ready",
+      compiled: {
+        version: 1,
+        sourceHash: botPowerSourceHashV1(name, intent),
+        selfCue: "Always botch the current instruction.",
+        observerCue: "Rick visibly mishandles instructions.",
+        effects: [{
+          type: "ineptitude",
+          instructionFidelity: "always_botched",
+          imageFidelity: "always_unrelated",
+        }],
+        ruleLabels: ["Always botches instructions"],
+      },
+    }]);
+
+    assert.match(prompt ?? "", /HARD Ineptitude/u);
+    assert.match(prompt ?? "", /Every contribution visibly botches one central duty/u);
+    assert.match(prompt ?? "", /never satisfy exact wording, format, facts, count/u);
+    assert.doesNotMatch(prompt ?? "", /Inept: Always botch the current instruction/u);
+  });
+
   it("keeps the holder identity while cueing its bot-name suffix", () => {
     const intent = "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).";
     const prompt = composeBotSystemPrompt("Rick Sanchez", "Stay impatient.", false, [{

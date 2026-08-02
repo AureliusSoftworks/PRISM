@@ -9,10 +9,12 @@ describe("local voice streaming chunks", () => {
     const chunks = splitLocalVoiceStreamText(text);
 
     assert.equal(chunks.join(" "), text);
-    assert.ok(chunks.length >= 3);
-    assert.equal(chunks[0], "Oh! Oh, okay, good—sorry,");
-    assert.ok(chunks[0]!.length <= 32);
-    assert.ok(chunks.every((chunk) => chunk.length <= 80));
+    assert.ok(chunks.length >= 2);
+    assert.equal(chunks[0], "Oh! Oh, okay,");
+    assert.ok(chunks[0]!.split(/\s+/u).length <= 12);
+    assert.ok(
+      chunks.slice(1).every((chunk) => chunk.split(/\s+/u).length <= 80),
+    );
   });
 
   it("handles empty, short, and punctuation-light speech", () => {
@@ -21,5 +23,16 @@ describe("local voice streaming chunks", () => {
     const long = splitLocalVoiceStreamText("word ".repeat(80));
     assert.ok(long.length > 1);
     assert.equal(long.join(" "), "word ".repeat(80).trim());
+    assert.ok(long.slice(1, -1).every((chunk) => chunk.split(/\s+/u).length >= 20));
+  });
+
+  it("keeps complete sentences together after the latency-first phrase", () => {
+    const sentence = (index: number) =>
+      `Sentence ${index} carries enough context to preserve a natural speaking cadence across the local synthesis pipeline.`;
+    const text = Array.from({ length: 9 }, (_, index) => sentence(index + 1)).join(" ");
+    const chunks = splitLocalVoiceStreamText(text);
+    assert.equal(chunks.join(" "), text);
+    assert.ok(chunks.length >= 3);
+    assert.ok(chunks.slice(1).every((chunk) => chunk.split(/\s+/u).length <= 80));
   });
 });

@@ -69,6 +69,8 @@ Release tag:
 
 Before publishing any draft:
 - install and launch each desktop artifact on a clean environment
+- verify the packaged runtime's `STEAM_CONTENT_REPORT.md` matches the approved
+  Marketplace roster
 - verify local API/web startup and first-run dependency checks
 - verify release notes
 - verify Steam/GitHub channel copy and installer readiness
@@ -85,7 +87,11 @@ Prerequisites:
   Windows, macOS, and Linux depot IDs.
 - Steam app type, package/free-product setup, and branch names are recorded.
 - Steam Content Survey answers are ready, especially the live-generated AI
-  disclosure and guardrails.
+  disclosure and guardrails, including offline generated speech and bundled
+  procedural or pre-generated vocal reactions.
+- `npm run voice:assets:verify:release` passes on the release tree; an
+  unqualified Voice+ candidate blocks desktop packaging rather than silently
+  substituting an unaudited model.
 - Store presence copy and screenshots describe only shipped functionality.
 
 Operator flow:

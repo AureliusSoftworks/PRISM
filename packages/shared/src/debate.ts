@@ -749,6 +749,16 @@ export interface DebateSessionV1 {
   objectionRuling?: DebateObjectionRulingStateV1 | null;
   /** Active after a Participant shouts Objection and before they state why. */
   participantObjection?: DebateParticipantObjectionStateV1 | null;
+  /**
+   * Public event whose playback was interrupted by an explicit pause. The
+   * presentation client replays this exact saved line from its beginning after
+   * resume; lifecycle controls themselves never become Debate events.
+   */
+  pausedPresentationEventId?: string | null;
+  /** Silent lifecycle bookkeeping for the visible overall Debate timer. */
+  pausedAt?: string | null;
+  /** Accumulated paused wall time; never represented as transcript events. */
+  pausedDurationMs?: number;
   events: DebateEventV1[];
   error: string | null;
   createdAt: string;

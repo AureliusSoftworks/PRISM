@@ -15,7 +15,7 @@ redistributing the source materials.
 
 ## PRISM Voice Pack
 
-Prism bundles a quantized Kokoro 82M model and twelve voice embeddings for local
+Prism bundles a quantized Kokoro 82M model and 28 English voice embeddings for local
 English speech.
 
 - Kokoro and `kokoro-js`: https://github.com/hexgrad/kokoro — Apache-2.0
@@ -27,3 +27,8 @@ English speech.
 These licenses permit commercial use, modification, and redistribution subject
 to their notice and attribution requirements. The names and recordings produced
 by the voice pack are not an endorsement by the upstream projects.
+
+The exact pinned revisions and SHA-256 checksums distributed by PRISM are listed
+in `voice-assets.manifest.json`. Chatterbox Turbo ONNX remains a qualification
+candidate and is not represented as a shipped Voice+ engine until its pinned
+cross-platform package passes PRISM's release gate.

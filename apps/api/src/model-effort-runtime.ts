@@ -11,7 +11,7 @@ import {
   listModelReasoningEffortPreferences,
 } from "./model-effort-preferences.ts";
 
-function userAllowsSimulatedLocalEffort(
+function userAllowsSimulatedEffort(
   db: DatabaseSync,
   userId: string,
 ): boolean {
@@ -30,7 +30,7 @@ export function resolveUserModelReasoningEffort(
     userId: string;
     provider: NativeReasoningEffortProvider;
     modelId: string;
-    simulatedLocalEnabled?: boolean;
+    simulatedEffortEnabled?: boolean;
   },
 ): ModelReasoningEffortPreference | undefined {
   const preference = findModelReasoningEffortPreference(
@@ -43,10 +43,9 @@ export function resolveUserModelReasoningEffort(
     provider: args.provider,
     modelId: args.modelId,
     preference,
-    simulatedLocalEnabled:
-      args.provider === "local" &&
-      (args.simulatedLocalEnabled ??
-        userAllowsSimulatedLocalEffort(db, args.userId)),
+    simulatedEffortEnabled:
+      args.simulatedEffortEnabled ??
+      userAllowsSimulatedEffort(db, args.userId),
   });
   return effective ?? undefined;
 }
@@ -77,7 +76,7 @@ export function allModelReasoningEffortCursorHash(
   return createHash("sha256")
     .update(
       JSON.stringify({
-        simulatedLocalEnabled: userAllowsSimulatedLocalEffort(db, userId),
+        simulatedEffortEnabled: userAllowsSimulatedEffort(db, userId),
         preferences: listModelReasoningEffortPreferences(db, userId).map(
           ({ provider, modelId, effort }) => ({ provider, modelId, effort }),
         ),

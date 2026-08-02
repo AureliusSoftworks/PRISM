@@ -6,10 +6,19 @@ import process from "node:process";
 import { fileURLToPath } from "node:url";
 import { spawn } from "node:child_process";
 import { ensureBuiltinTtsModel } from "./fetch-builtin-tts-model.mjs";
+import {
+  renderSteamContentReport,
+  stageSteamMarketplace,
+} from "./steam-marketplace-content.mjs";
+import { verifyVoiceAssets } from "./verify-voice-assets.mjs";
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 const repoRoot = path.resolve(__dirname, "..");
+const steamMarketplaceAllowlistPath = path.join(
+  repoRoot,
+  "steam-marketplace-allowlist.json"
+);
 const workspaceRuntimePackages = new Set([
   "@localai/config",
   "@localai/shared"
@@ -29,13 +38,30 @@ const includedPrismVoiceFiles = new Set([
   "af_sarah.bin",
   "am_fenrir.bin",
   "am_puck.bin",
-  "bm_fable.bin"
+  "bm_fable.bin",
+  "af_alloy.bin",
+  "af_jessica.bin",
+  "af_nova.bin",
+  "af_river.bin",
+  "af_sky.bin",
+  "am_adam.bin",
+  "am_echo.bin",
+  "am_eric.bin",
+  "am_liam.bin",
+  "am_onyx.bin",
+  "am_santa.bin",
+  "bf_alice.bin",
+  "bf_isabella.bin",
+  "bf_lily.bin",
+  "bm_daniel.bin",
+  "bm_lewis.bin"
 ]);
 
 function parseArgs(argv) {
   const args = {
     outputDir: "",
-    skipBuild: false
+    skipBuild: false,
+    distribution: "steam"
   };
   for (let index = 0; index < argv.length; index += 1) {
     const token = argv[index];
@@ -46,6 +72,11 @@ function parseArgs(argv) {
     }
     if (token === "--skip-build") {
       args.skipBuild = true;
+      continue;
+    }
+    if (token === "--distribution") {
+      args.distribution = argv[index + 1] ?? "";
+      index += 1;
       continue;
     }
   }
@@ -77,6 +108,18 @@ async function ensureDir(target) {
 
 async function copyDir(source, destination) {
   await fs.cp(source, destination, { recursive: true, force: true });
+}
+
+async function copyDirExcludingTopLevel(source, destination, excludedNames) {
+  await fs.cp(source, destination, {
+    recursive: true,
+    force: true,
+    filter: (sourcePath) => {
+      const relative = path.relative(source, sourcePath);
+      if (!relative) return true;
+      return !excludedNames.has(relative.split(path.sep)[0]);
+    }
+  });
 }
 
 async function copyFile(source, destination) {
@@ -240,9 +283,15 @@ async function pruneUnusedKokoroVoices(destinationRoot) {
 }
 
 async function main() {
-  const { outputDir, skipBuild } = parseArgs(process.argv.slice(2));
+  const { outputDir, skipBuild, distribution } = parseArgs(process.argv.slice(2));
   if (!outputDir) {
-    throw new Error("Usage: stage-desktop-runtime.mjs --output-dir <absolute-or-relative-path> [--skip-build]");
+    throw new Error(
+      "Usage: stage-desktop-runtime.mjs --output-dir <absolute-or-relative-path> " +
+      "[--skip-build] [--distribution steam|development]"
+    );
+  }
+  if (distribution !== "steam" && distribution !== "development") {
+    throw new Error(`Unsupported desktop distribution: ${distribution}. Use steam or development.`);
   }
 
   const resolvedOutputDir = path.resolve(outputDir);
@@ -250,6 +299,10 @@ async function main() {
     ? path.resolve(process.env.PRISM_BUILTIN_TTS_MODEL_CACHE)
     : path.join(repoRoot, ".cache", "prism-models");
   const builtinTtsModel = await ensureBuiltinTtsModel(modelCacheRoot);
+  await verifyVoiceAssets({
+    modelRoot: modelCacheRoot,
+    requireVoicePlus: distribution === "steam",
+  });
 
   if (!skipBuild) {
     console.log("Building workspace runtime artifacts...");
@@ -283,6 +336,14 @@ async function main() {
   );
   await copyFile(path.join(repoRoot, "package.json"), path.join(resolvedOutputDir, "package.json"));
   await copyFile(path.join(repoRoot, "package-lock.json"), path.join(resolvedOutputDir, "package-lock.json"));
+  await copyFile(
+    path.join(repoRoot, "voice-assets.manifest.json"),
+    path.join(resolvedOutputDir, "voice-assets.manifest.json")
+  );
+  await copyFile(
+    path.join(repoRoot, "THIRD_PARTY_NOTICES.md"),
+    path.join(resolvedOutputDir, "THIRD_PARTY_NOTICES.md")
+  );
 
   console.log("Staging runtime dependencies...");
   const apiPackageJson = await readJsonFile(path.join(repoRoot, "apps", "api", "package.json"));
@@ -389,14 +450,50 @@ async function main() {
   const publicDir = path.join(repoRoot, "apps", "web", "public");
   const publicExists = await fileExists(publicDir);
   if (publicExists) {
-    await copyDir(
-      publicDir,
-      path.join(resolvedOutputDir, "apps", "web", ".next", "standalone", "apps", "web", "public")
+    const stagedPublicDir = path.join(
+      resolvedOutputDir,
+      "apps",
+      "web",
+      ".next",
+      "standalone",
+      "apps",
+      "web",
+      "public"
     );
+    if (distribution === "development") {
+      console.log("Staging development Marketplace (including dev-locked bots)...");
+      await copyDir(publicDir, stagedPublicDir);
+    } else {
+      console.log("Staging fail-closed Steam Marketplace...");
+      await copyDirExcludingTopLevel(
+        publicDir,
+        stagedPublicDir,
+        new Set(["bot-marketplace"])
+      );
+      const steamContentReport = await stageSteamMarketplace({
+        sourcePublicRoot: publicDir,
+        destinationPublicRoot: stagedPublicDir,
+        policyPath: steamMarketplaceAllowlistPath
+      });
+      await copyFile(
+        steamMarketplaceAllowlistPath,
+        path.join(resolvedOutputDir, "steam-marketplace-allowlist.json")
+      );
+      await fs.writeFile(
+        path.join(resolvedOutputDir, "STEAM_CONTENT_REPORT.md"),
+        renderSteamContentReport(steamContentReport),
+        "utf8"
+      );
+      console.log(
+        `Steam Marketplace verified: ${steamContentReport.approvedBots.length} approved bots; ` +
+        `${steamContentReport.excludedDevBotCount} development-only bots excluded.`
+      );
+    }
   }
 
   const runtimeLayout = {
     appName: "Prism Desktop",
+    distribution,
     apiPort: 18787,
     webPort: 18788,
     runtimeEntrypoints: {

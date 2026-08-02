@@ -30,7 +30,7 @@ describe("English speech canonical message ownership", () => {
     );
     assert.match(
       effectSource,
-      /messageId: input\.messageId,[\s\S]*?detail\.incognito[\s\S]*?ephemeralMessage: true,[\s\S]*?spokenText: speechDisplayContent/,
+      /messageId: input\.messageId,[\s\S]*?spokenText: spokenMessageText,[\s\S]*?detail\.incognito[\s\S]*?ephemeralMessage: true/,
     );
     assert.match(
       effectSource,

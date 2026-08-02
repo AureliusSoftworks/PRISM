@@ -85,6 +85,10 @@ import {
   firstRunSetupProgressPercent,
   firstRunSetupStepAt,
 } from "./firstRunOnboarding";
+import {
+  ABOUT_CREDIT_GROUPS,
+  ABOUT_CREDIT_MAINTENANCE_NOTE,
+} from "./aboutCredits";
 import { MODE_TUTORIALS, type TutorialMode } from "./modeTutorials";
 import PrismFirstRunLivingLayer, {
   type PrismFirstRunChoice,
@@ -113,6 +117,14 @@ import {
   applyGraphicsQualityToDocument,
   GRAPHICS_QUALITY_LABELS,
 } from "./graphicsQuality";
+import {
+  MODEL_EFFORT_ICON_PATHS,
+  modelEffortSliderIndex,
+  modelEffortSliderLevels,
+  modelEffortSliderProgress,
+  modelEffortStep,
+  modelEffortWheelDirection,
+} from "./modelEffortControl";
 import { prismCursorMotionStep } from "./prismCursorMotion";
 import {
   getPrismSystemPausedServerSnapshot,
@@ -155,15 +167,6 @@ import {
   type DebateCompanionContext,
   type DebateUtterance,
 } from "./DebateExperience";
-import {
-  DEFAULT_DEBATE_JURY_SETTINGS,
-  DEBATE_JURY_DECISION_TIMEOUT_MAX_MS,
-  DEBATE_JURY_DECISION_TIMEOUT_MIN_MS,
-  DEBATE_JURY_DECISION_TIMEOUT_STEP_MS,
-  readDebateJurySettings,
-  writeDebateJurySettings,
-  type DebateJurySettings,
-} from "./debateJurySettings";
 import { debateJudgeGavelVoiceMood } from "./debateJudgeGavel";
 import { debateAudioEnabled } from "./debatePresentation";
 import { BotPickerGrid, BotPickerTile, sortBotPickerItems } from "./BotPicker";
@@ -685,6 +688,7 @@ import {
 } from "./replayManifest";
 import {
   captureReplayVoiceTake,
+  loadCapturedReplayVoiceAudio,
   replayRecordingDetail,
   replayRecordingForSource,
   retryPendingFaithfulReplaySessions,
@@ -1020,6 +1024,7 @@ import {
   continuityFrameworkVersionLabel,
   applyBotNamePronunciations,
   normalizeBotAudioVoiceProfileV1,
+  normalizeBotAudioVoiceControl,
   normalizeBotAvatarSfxV1,
   normalizeBotcastVoiceLevel,
   normalizeBotNamePronunciation,
@@ -1038,6 +1043,7 @@ import {
   BOT_AVATAR_SFX_MAX_BYTES,
   BOT_AVATAR_SFX_PROMPT_MAX_LENGTH,
   PRISM_BUILTIN_ENGLISH_VOICES,
+  LOCAL_VOICE_ENGINE_PREFERENCES,
   PROJECT_OWNED_ASSET_MANIFEST_PATH,
   VOICE_EFFECTS,
   VOICE_EFFECT_DESCRIPTIONS,
@@ -1049,6 +1055,7 @@ import {
   normalizeVoiceMode,
   voiceDeliveryRateForMood,
   voicePerformanceTextFromActionCues,
+  voicePerformancePlanFromText,
   voiceSpokenText,
   botcastMessageIsEphemeralInterruptionBridge,
   coffeeInterruptionTranscriptSegments,
@@ -6448,9 +6455,7 @@ function botAccentStyle(
   return {
     ["--bot-color" as string]: accent,
     ["--bot-ink" as string]: ink,
-    ...(rgbChannels
-      ? { ["--bot-color-rgb" as string]: rgbChannels }
-      : {}),
+    ...(rgbChannels ? { ["--bot-color-rgb" as string]: rgbChannels } : {}),
   } as React.CSSProperties;
 }
 
@@ -10904,6 +10909,14 @@ interface VoiceCapabilitiesResponse {
       platform?: string;
       voices?: Array<{ name: string; locale: string }>;
     };
+    local?: {
+      engines?: Array<{
+        id: "voice-plus" | "instant";
+        name: string;
+        available: boolean;
+        qualified: boolean;
+      }>;
+    };
   };
 }
 
@@ -11754,6 +11767,11 @@ function BotVoiceEditor({
       voiceId: null,
       name: null,
     });
+  const [localVoiceEngines, setLocalVoiceEngines] = useState<
+    NonNullable<
+      NonNullable<VoiceCapabilitiesResponse["capabilities"]>["local"]
+    >["engines"]
+  >([]);
   const previewRunRef = useRef(0);
   const voiceIdResolutionRunRef = useRef(0);
   const selectedSystemVoiceValue =
@@ -11766,6 +11784,21 @@ function BotVoiceEditor({
     elevenLabsVoiceIdOverrideValue || selectedElevenLabsVoiceValue;
   const elevenLabsStability =
     normalizedProfile.elevenLabsStability ?? ELEVENLABS_VOICE_STABILITY_DEFAULT;
+  useEffect(() => {
+    let active = true;
+    void api<VoiceCapabilitiesResponse>("/api/voices/capabilities")
+      .then((response) => {
+        if (active) {
+          setLocalVoiceEngines(response.capabilities?.local?.engines ?? []);
+        }
+      })
+      .catch(() => {
+        if (active) setLocalVoiceEngines([]);
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
   const differentChoice = <T,>(current: T, values: readonly T[]): T => {
     const alternatives = values.filter((value) => value !== current);
     return (
@@ -12415,6 +12448,54 @@ function BotVoiceEditor({
             </summary>
             <div className={styles.botVoiceFallbackBody}>
               <div className={styles.botVoiceIdentityField}>
+                <label htmlFor="bot-local-voice-engine">Local engine</label>
+                <select
+                  id="bot-local-voice-engine"
+                  aria-label="Local voice engine"
+                  value={normalizedProfile.localEnginePreference ?? "inherit"}
+                  onChange={(event) =>
+                    onChange(
+                      normalizeBotAudioVoiceProfileV1({
+                        ...normalizedProfile,
+                        localEnginePreference: event.currentTarget.value,
+                      }),
+                      { saveImmediately: true },
+                    )
+                  }
+                >
+                  {LOCAL_VOICE_ENGINE_PREFERENCES.map((preference) => {
+                    const capability = localVoiceEngines?.find(
+                      (engine) => engine.id === preference,
+                    );
+                    const disabled =
+                      preference === "voice-plus" &&
+                      capability?.available !== true;
+                    const label =
+                      preference === "inherit"
+                        ? "Account default"
+                        : preference === "auto"
+                          ? "Auto"
+                          : preference === "voice-plus"
+                            ? "Voice+"
+                            : "Instant";
+                    return (
+                      <option
+                        key={preference}
+                        value={preference}
+                        disabled={disabled}
+                      >
+                        {label}
+                        {disabled ? " · Qualification required" : ""}
+                      </option>
+                    );
+                  })}
+                </select>
+                <small>
+                  Auto keeps this character identity while choosing the best
+                  healthy offline engine for each utterance.
+                </small>
+              </div>
+              <div className={styles.botVoiceIdentityField}>
                 <label htmlFor="bot-system-voice-identity">
                   Local and offline voice
                   <BotFieldRandomizerButton
@@ -12473,6 +12554,47 @@ function BotVoiceEditor({
                       ? `${normalizedProfile.systemVoiceName} is preserved from this bot's saved macOS voice setting.`
                       : identityCatalog.system.message ||
                         "Used for English and whenever Premium cannot play."}
+                </small>
+              </div>
+              <div className={styles.botVoiceIdentityField}>
+                <label htmlFor="bot-local-voice-accent">Accent source</label>
+                <select
+                  id="bot-local-voice-accent"
+                  aria-label="Local voice accent source"
+                  value={normalizedProfile.accentLocale ?? "en-US"}
+                  disabled={Boolean(normalizedProfile.systemVoiceName)}
+                  onChange={(event) => {
+                    const locale = event.currentTarget.value;
+                    const currentVoice = PRISM_BUILTIN_ENGLISH_VOICES.find(
+                      (voice) => voice.voiceId === normalizedProfile.baseVoiceId,
+                    );
+                    const genderCode = currentVoice?.engineVoiceId[1] ?? "f";
+                    const replacement = PRISM_BUILTIN_ENGLISH_VOICES.find(
+                      (voice) =>
+                        voice.locale === locale &&
+                        voice.engineVoiceId[1] === genderCode,
+                    );
+                    onChange(
+                      normalizeBotAudioVoiceProfileV1({
+                        ...normalizedProfile,
+                        baseVoiceId:
+                          replacement?.voiceId ?? normalizedProfile.baseVoiceId,
+                        systemVoiceName: null,
+                        localVoiceSource: "portable",
+                        accentLocale: locale,
+                        accentMode: "prefer-genuine",
+                      }),
+                      { saveImmediately: true },
+                    );
+                  }}
+                >
+                  <option value="en-US">American English · Genuine</option>
+                  <option value="en-GB">British English · Genuine</option>
+                </select>
+                <small>
+                  {normalizedProfile.systemVoiceName
+                    ? "The installed operating-system voice supplies its genuine accent."
+                    : "Changes to a same-register portable archetype recorded for that accent; dialogue spelling is never rewritten."}
                 </small>
               </div>
             </div>
@@ -14611,6 +14733,27 @@ const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
   high: "High",
   xhigh: "XHigh",
 };
+
+function ModelEffortIcon({
+  level,
+  className,
+}: {
+  level: ReasoningEffort;
+  className?: string;
+}): React.JSX.Element {
+  return (
+    <span
+      className={`${styles.modelEffortIcon}${className ? ` ${className}` : ""}`}
+      data-effort-level={level}
+      style={
+        {
+          "--model-effort-icon": `url("${MODEL_EFFORT_ICON_PATHS[level]}")`,
+        } as CSSProperties
+      }
+      aria-hidden="true"
+    />
+  );
+}
 const AUTO_MODEL_SETTINGS_SUBTEXT = "uses the model saved in Settings";
 const DISABLED_MODEL_SETTINGS_SUBTEXT = "do not use this model lane";
 const ELEVENLABS_IMAGE_MENU_DISABLED_REASON =
@@ -14882,7 +15025,7 @@ const BOT_VOICE_PRESET_DESCRIPTIONS: Record<BotVoicePreset, string> = {
 
 const VOICE_PREVIEW_TEXT =
   "I put my serious face somewhere safe and immediately forgot where.";
-const DEFAULT_PRISM_VOICE_PREVIEW_LINES: Record<BotAudioVoiceId, string> = {
+const DEFAULT_PRISM_VOICE_PREVIEW_LINES: Partial<Record<BotAudioVoiceId, string>> = {
   "voice-1": "I alphabetized my snacks by emotional support value.",
   "voice-2":
     "I brought a tiny umbrella in case the conversation gets dramatic.",
@@ -16289,7 +16432,7 @@ function modelEffortTargetForSelection(args: {
   provider: Provider;
   modelId: string | null | undefined;
   options: readonly ModelCatalogEntry[];
-  simulatedLocalEnabled: boolean;
+  simulatedEffortEnabled: boolean;
 }): ActiveModelEffortTarget | null {
   const modelId = args.modelId?.trim() ?? "";
   if (
@@ -16304,13 +16447,12 @@ function modelEffortTargetForSelection(args: {
     modelId,
     modelLabel:
       args.options.find(
-        (option) =>
-          option.provider === args.provider && option.id === modelId,
+        (option) => option.provider === args.provider && option.id === modelId,
       )?.label ?? modelLabelFromId(modelId),
     capability: resolveModelReasoningEffortCapability({
       provider: args.provider,
       modelId,
-      simulatedLocalEnabled: args.simulatedLocalEnabled,
+      simulatedEffortEnabled: args.simulatedEffortEnabled,
     }),
   };
 }
@@ -16482,8 +16624,8 @@ function modelOptionsForResponseMode(
   return modeAwareModelOptions({
     local: chatModelOptionsForProvider(catalog, settings, "local").map(
       (model) => ({
-      ...model,
-      hostLabel: model.hostLabel ?? providerDisplayLabel("local"),
+        ...model,
+        hostLabel: model.hostLabel ?? providerDisplayLabel("local"),
       }),
     ),
     online: onlineModelOptionsForPicker(catalog, settings),
@@ -18344,10 +18486,7 @@ function BotFaceFrame({
         style={metalMaterialStyle}
         aria-hidden="true"
       >
-        <BotFaceFrameIdentityRaster
-          kind="tint"
-          identityColor={identityColor}
-        />
+        <BotFaceFrameIdentityRaster kind="tint" identityColor={identityColor} />
         <span
           className={styles.botFaceFrameWearLayer}
           data-frame-material-layer="wear"
@@ -18372,10 +18511,7 @@ function BotFaceFrame({
         data-frame-material-layer="paint"
         aria-hidden="true"
       />
-      <BotFaceFrameIdentityRaster
-        kind="led"
-        identityColor={identityColor}
-      />
+      <BotFaceFrameIdentityRaster kind="led" identityColor={identityColor} />
       <span
         className={styles.botFaceFrameLedGlow}
         data-frame-material-layer="led-glow"
@@ -19026,6 +19162,16 @@ type BabbleSynthesisMedia =
     }
   | { kind: "stream"; response: Response };
 
+type BotcastEnglishVoiceMedia =
+  | { kind: "clip"; clip: EnglishVoiceSynthesisClip }
+  | {
+      kind: "stream";
+      response: Response;
+      engineUsed: string | null;
+      modelHash: string | null;
+      notice: string | null;
+    };
+
 async function requestBabbleSynthesisClip(args: {
   source: Record<string, unknown>;
   profile: BotAudioVoiceProfileV1;
@@ -19166,6 +19312,19 @@ function stopVoicePlaybackPreservingPreparedMode(mode: VoiceMode): void {
     preservePreparedMedia: mode === "bottish" || mode === "babble",
   });
   stopEnglishVoice({ preservePreparedMedia: mode === "english" });
+}
+
+/** Retire queue ownership for a natural speaker handoff without severing a
+ * completed voice graph that is still draining its final rendered phoneme. */
+function handoffVoicePlaybackPreservingPreparedMode(mode: VoiceMode): void {
+  stopBottishVoice({
+    preservePreparedMedia: mode === "bottish" || mode === "babble",
+    preserveCompletedTails: true,
+  });
+  stopEnglishVoice({
+    preservePreparedMedia: mode === "english",
+    preserveCompletedTails: true,
+  });
 }
 
 function releaseVoicePlaybackPreservingPreparedMode(
@@ -23166,6 +23325,7 @@ interface ComposerModelPickerEffortControl {
   targetKey: string;
   value: ReasoningEffort;
   capability: ModelReasoningEffortCapabilityV1;
+  rowValueForModel: (model: ModelCatalogEntry) => ReasoningEffort;
   onChange: (nextValue: ReasoningEffort) => void;
   onActivate?: () => void;
   disabled?: boolean;
@@ -23268,6 +23428,7 @@ function ComposerModelPicker({
   const menuRef = useRef<HTMLDivElement>(null);
   const effortTriggerRef = useRef<HTMLButtonElement>(null);
   const effortMenuRef = useRef<HTMLDivElement>(null);
+  const effortWheelLockedRef = useRef(false);
   const formValueRef = useRef<HTMLInputElement>(null);
   const autoMetaShown = autoOptionMetaOverride ?? AUTO_MODEL_SETTINGS_SUBTEXT;
   const disabledMetaShown =
@@ -23291,7 +23452,8 @@ function ComposerModelPicker({
         : disabledSelected
           ? disabledOptionLabel
           : (selectedModel?.label ?? value);
-  const visualProvider = selectedProvider ?? selectedModel?.provider ?? provider;
+  const visualProvider =
+    selectedProvider ?? selectedModel?.provider ?? provider;
   const interactionDisabled = disabled || loading;
   const menuOpen = open && !interactionDisabled;
   const menuPortalStyle = useComposeMenuPortalStyle(
@@ -23306,11 +23468,16 @@ function ComposerModelPicker({
     !effortControl ||
     effortControl.disabled === true ||
     effortControl.capability.mode === "unavailable";
+  const effortDisabledReason = effortInteractionDisabled
+    ? effortControl?.disabledReason ??
+      effortControl?.capability.disabledReason ??
+      (loading ? "Models are still loading." : "Effort is unavailable.")
+    : undefined;
   const effortMenuOpen = effortOpen && !effortInteractionDisabled;
   const effortMenuPortalStyle = useComposeMenuPortalStyle(
     effortMenuOpen,
     effortTriggerRef,
-    220,
+    264,
     COMPOSE_MENU_PORTAL_Z_INDEX_MODEL,
     placement,
   );
@@ -23318,6 +23485,51 @@ function ComposerModelPicker({
     !effortControl || effortControl.capability.mode === "unavailable"
       ? "Not adjustable"
       : REASONING_EFFORT_LABELS[effortControl.value];
+  const effortLevels = effortControl
+    ? modelEffortSliderLevels(effortControl.capability)
+    : [];
+  const effortSliderIndex = effortControl
+    ? modelEffortSliderIndex(effortLevels, effortControl.value)
+    : 0;
+  const effortSliderProgress = effortControl
+    ? modelEffortSliderProgress(effortLevels, effortControl.value)
+    : 0;
+
+  const setEffortValue = (nextValue: ReasoningEffort): void => {
+    if (!effortControl || effortInteractionDisabled) return;
+    effortControl.onActivate?.();
+    if (nextValue !== effortControl.value) {
+      effortControl.onChange(nextValue);
+    }
+  };
+
+  const handleEffortWheel = (event: React.WheelEvent<HTMLElement>): void => {
+    if (
+      !effortControl ||
+      effortInteractionDisabled ||
+      effortLevels.length <= 1 ||
+      event.ctrlKey ||
+      Math.max(Math.abs(event.deltaX), Math.abs(event.deltaY)) < 2
+    ) {
+      return;
+    }
+    const direction = modelEffortWheelDirection(event.deltaX, event.deltaY);
+    if (direction === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (effortWheelLockedRef.current) return;
+    const nextValue = modelEffortStep(
+      effortLevels,
+      effortControl.value,
+      direction,
+    );
+    if (nextValue === effortControl.value) return;
+    effortWheelLockedRef.current = true;
+    window.setTimeout(() => {
+      effortWheelLockedRef.current = false;
+    }, 90);
+    setEffortValue(nextValue);
+  };
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -23461,34 +23673,51 @@ function ComposerModelPicker({
         </span>
       </button>
       {effortControl ? (
-        <button
-          ref={effortTriggerRef}
-          type="button"
-          className={styles.composeModelEffortTrigger}
-          data-tutorial-target="model-effort"
-          data-adjustable={
-            effortControl.capability.mode !== "unavailable" ? "true" : "false"
+        <span
+          className={styles.composeModelEffortTriggerWrap}
+          data-glyph-tooltip={effortDisabledReason}
+          tabIndex={effortInteractionDisabled ? 0 : undefined}
+          aria-label={
+            effortDisabledReason
+              ? `Effort unavailable. ${effortDisabledReason}`
+              : undefined
           }
-          onClick={() => {
-            effortControl.onActivate?.();
-            setOpen(false);
-            setEffortOpen((current) => !current);
-          }}
-          disabled={effortInteractionDisabled}
-          aria-haspopup="menu"
-          aria-expanded={effortMenuOpen}
-          aria-label={`Effort: ${effortLabel}`}
-          title={
-            effortControl.disabledReason ??
-            effortControl.capability.disabledReason ??
-            "Adjust this model's saved effort"
-          }
+          aria-disabled={effortInteractionDisabled ? "true" : undefined}
         >
-          <span>{effortLabel}</span>
-          {effortControl.capability.mode !== "unavailable" ? (
-            <span aria-hidden="true">⌄</span>
-          ) : null}
-        </button>
+          <button
+            ref={effortTriggerRef}
+            type="button"
+            className={styles.composeModelEffortTrigger}
+            data-tutorial-target="model-effort"
+            data-adjustable={
+              effortControl.capability.mode !== "unavailable"
+                ? "true"
+                : "false"
+            }
+            data-effort-level={effortControl.value}
+            onClick={() => {
+              effortControl.onActivate?.();
+              setOpen(false);
+              setEffortOpen((current) => !current);
+            }}
+            onWheel={handleEffortWheel}
+            disabled={effortInteractionDisabled}
+            aria-haspopup="dialog"
+            aria-expanded={effortMenuOpen}
+            aria-label={`Effort: ${effortLabel}`}
+          >
+            <ModelEffortIcon level={effortControl.value} />
+            <span className={styles.srOnly}>{effortLabel}</span>
+            {effortControl.capability.mode !== "unavailable" ? (
+              <span
+                className={styles.composeModelEffortTriggerChevron}
+                aria-hidden="true"
+              >
+                ⌄
+              </span>
+            ) : null}
+          </button>
+        </span>
       ) : null}
       {loading ? (
         <span className={styles.srOnly} role="status" aria-live="polite">
@@ -23580,6 +23809,7 @@ function ComposerModelPicker({
               {options.map((model) => {
                 const isSelected = value === model.id;
                 const isUnavailable = Boolean(model.disabledReason);
+                const rowEffort = effortControl?.rowValueForModel(model);
                 const showSettingsDefaultBadge =
                   settingsDefaultModelId !== undefined &&
                   settingsDefaultModelId !== null &&
@@ -23614,12 +23844,32 @@ function ComposerModelPicker({
                         </span>
                       )}
                     </span>
-                    {!isUnavailable &&
-                      (showSettingsDefaultBadge || showCatalogDefaultBadge) && (
-                        <span className={styles.composeModelDefaultBadge}>
-                          Default
+                    <span className={styles.composeModelOptionStatus}>
+                      {!isUnavailable &&
+                        (showSettingsDefaultBadge ||
+                          showCatalogDefaultBadge) && (
+                          <span className={styles.composeModelDefaultBadge}>
+                            Default
+                          </span>
+                        )}
+                      {rowEffort ? (
+                        <span
+                          className={styles.composeModelRowEffort}
+                          role="img"
+                          aria-label={`Saved effort: ${REASONING_EFFORT_LABELS[rowEffort]}`}
+                          title={`Saved effort: ${REASONING_EFFORT_LABELS[rowEffort]}`}
+                        >
+                          <ModelEffortIcon
+                            level={rowEffort}
+                            className={
+                              isSelected
+                                ? undefined
+                                : styles.composeModelRowEffortIconMonochrome
+                            }
+                          />
                         </span>
-                      )}
+                      ) : null}
+                    </span>
                   </button>
                 );
               })}
@@ -23636,39 +23886,100 @@ function ComposerModelPicker({
             ref={effortMenuRef}
             className={`${styles.composeBotMenu} ${styles.composeModelEffortMenu}`}
             style={effortMenuPortalStyle}
-            role="menu"
+            role="dialog"
             aria-label="Model effort"
+            onWheel={handleEffortWheel}
           >
             <div className={styles.composeModelEffortMenuHeader}>
-              <span>Effort</span>
-              <small>
-                {effortControl.capability.mode === "simulated"
-                  ? "Experimental · simulated locally"
-                  : "Saved for this model"}
-              </small>
+              <div>
+                <span>Effort</span>
+                <small>
+                  {effortControl.capability.mode === "simulated"
+                    ? "Experimental · multi-call simulation"
+                    : "Saved for this model"}
+                </small>
+              </div>
+              <strong>
+                <ModelEffortIcon level={effortControl.value} />
+                {effortLabel}
+              </strong>
             </div>
-            {(["auto", ...effortControl.capability.levels] as ReasoningEffort[]).map(
-              (level) => (
-                <button
-                  key={level}
-                  type="button"
-                  className={styles.composeModelEffortOption}
-                  data-active={effortControl.value === level ? "true" : undefined}
-                  role="menuitemradio"
-                  aria-checked={effortControl.value === level}
-                  onClick={() => {
-                    effortControl.onChange(level);
-                    setEffortOpen(false);
-                    effortTriggerRef.current?.focus();
+            <div
+              className={styles.composeModelEffortVerticalLayout}
+              style={
+                {
+                  "--model-effort-progress": `${effortSliderProgress}%`,
+                  "--model-effort-stop-count": effortLevels.length,
+                } as CSSProperties
+              }
+            >
+              <div className={styles.composeModelEffortSlider}>
+                <div className={styles.composeModelEffortSliderRail}>
+                  <span
+                    className={styles.composeModelEffortSliderFill}
+                    data-effort-level={effortControl.value}
+                    aria-hidden="true"
+                  />
+                  {effortLevels.map((level, index) => (
+                    <span
+                      key={level}
+                      className={styles.composeModelEffortSliderTick}
+                      data-active={
+                        index <= effortSliderIndex ? "true" : undefined
+                      }
+                      style={
+                        {
+                          top: `${
+                            effortLevels.length <= 1
+                              ? 0
+                              : (index / (effortLevels.length - 1)) * 100
+                          }%`,
+                        } as CSSProperties
+                      }
+                      aria-hidden="true"
+                    />
+                  ))}
+                  <ModelEffortIcon
+                    level={effortControl.value}
+                    className={styles.composeModelEffortSliderThumb}
+                  />
+                </div>
+                <input
+                  type="range"
+                  min={0}
+                  max={Math.max(0, effortLevels.length - 1)}
+                  step={1}
+                  value={effortSliderIndex}
+                  aria-label="Model effort"
+                  aria-valuetext={effortLabel}
+                  onPointerDown={() => effortControl.onActivate?.()}
+                  onChange={(event) => {
+                    const nextValue =
+                      effortLevels[Number(event.currentTarget.value)];
+                    if (nextValue) setEffortValue(nextValue);
                   }}
-                >
-                  <span>{REASONING_EFFORT_LABELS[level]}</span>
-                  {level === "auto" ? (
-                    <small>Use the model provider's default</small>
-                  ) : null}
-                </button>
-              ),
-            )}
+                />
+              </div>
+              <div className={styles.composeModelEffortStops}>
+                {effortLevels.map((level) => (
+                  <button
+                    key={level}
+                    type="button"
+                    className={styles.composeModelEffortOption}
+                    data-active={
+                      effortControl.value === level ? "true" : undefined
+                    }
+                    aria-pressed={effortControl.value === level}
+                    onClick={() => {
+                      setEffortValue(level);
+                    }}
+                  >
+                    <ModelEffortIcon level={level} />
+                    <span>{REASONING_EFFORT_LABELS[level]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </div>,
           document.body,
         )}
@@ -26335,7 +26646,10 @@ function WildcardDeckValuesInput({
           >
             <option value="">Choose prompt, deck, or wildcard…</option>
             {expressionOptions.map((option) => (
-              <option key={`${option.label}:${option.value}`} value={option.value}>
+              <option
+                key={`${option.label}:${option.value}`}
+                value={option.value}
+              >
                 {option.label}
               </option>
             ))}
@@ -27144,13 +27458,14 @@ function messageCanUseZenActionPresentation(message: Message): boolean {
 }
 
 function resolveZenActionDisplayContent(
-  message: Pick<Message, "content" | "zenStageAction">,
+  message: Pick<Message, "role" | "content" | "zenStageAction">,
   enabled: boolean,
 ): string {
   if (!enabled) return message.content;
   const presentation = resolveZenActionPresentationFromMessage({
     content: message.content,
     zenStageAction: message.zenStageAction,
+    inferUnmarkedActions: message.role !== "user",
   });
   return presentation.hasActions ? presentation.mainText : message.content;
 }
@@ -27163,6 +27478,7 @@ function resolveMessageZenActionTextLagMs(
   const presentation = resolveZenActionPresentationFromMessage({
     content: resolveMessageDisplayContent(message),
     zenStageAction: message.zenStageAction,
+    inferUnmarkedActions: message.role !== "user",
   });
   return presentation.hasActions && !presentation.actionOnly
     ? ZEN_ACTION_TEXT_LAG_MS
@@ -27175,6 +27491,7 @@ function resolveMessageRevealContent(
 ): string {
   return resolveZenActionDisplayContent(
     {
+      role: message.role,
       content: resolveMessageDisplayContent(message),
       zenStageAction: message.zenStageAction,
     },
@@ -31590,6 +31907,7 @@ function MarkdownMessageBody({
         ? resolveZenActionPresentationFromMessage({
             content: source,
             zenStageAction,
+            inferUnmarkedActions: messageRole !== "user",
           })
         : null,
     [messageRole, source, zenActionsEnabled, zenStageAction],
@@ -32756,8 +33074,7 @@ const DesktopMarkdownComposer = forwardRef<
         ? getComposerShortcutFromEditor(ed, "tool")
         : null;
     const leadingToken =
-      !toolToken &&
-      commandPicksRef.current.length > 0
+      !toolToken && commandPicksRef.current.length > 0
         ? getComposerShortcutFromEditor(ed, "leading")
         : null;
     const promptToken =
@@ -33119,10 +33436,7 @@ const DesktopMarkdownComposer = forwardRef<
           ) {
             return true;
           }
-          if (
-            sentenceCapitalizeEnabledRef.current &&
-            text.length > 0
-          ) {
+          if (sentenceCapitalizeEnabledRef.current && text.length > 0) {
             const $from = view.state.doc.resolve(from);
             const beforeInBlock = $from.parent.textBetween(
               0,
@@ -36875,9 +37189,9 @@ function botAvatarPresetSelected(
     faceBlinkOffsetY: number;
     faceBlinkRotationDeg: number;
     faceThinkingFrames: BotFaceThinkingFrames;
-  faceThinkingScale: number;
-  faceThinkingOffsetX: number;
-  faceThinkingOffsetY: number;
+    faceThinkingScale: number;
+    faceThinkingOffsetX: number;
+    faceThinkingOffsetY: number;
   },
 ): boolean {
   return (
@@ -36903,7 +37217,10 @@ function botAvatarPresetSelected(
     args.faceBlinkOffsetX === DEFAULT_BOT_FACE_STYLE.blinkOffsetX &&
     args.faceBlinkOffsetY === DEFAULT_BOT_FACE_STYLE.blinkOffsetY &&
     args.faceBlinkRotationDeg === DEFAULT_BOT_FACE_STYLE.blinkRotationDeg &&
-    botFaceThinkingFramesEqual(preset.thinkingFrames, args.faceThinkingFrames) &&
+    botFaceThinkingFramesEqual(
+      preset.thinkingFrames,
+      args.faceThinkingFrames,
+    ) &&
     args.faceThinkingScale === DEFAULT_BOT_FACE_STYLE.thinkingScale &&
     args.faceThinkingOffsetX === DEFAULT_BOT_FACE_STYLE.thinkingOffsetX &&
     args.faceThinkingOffsetY === DEFAULT_BOT_FACE_STYLE.thinkingOffsetY
@@ -37631,8 +37948,13 @@ function BotVoiceCharacterEditor({
   }, [normalizedProfile]);
   const padRef = useRef<HTMLDivElement | null>(null);
   const character = resolveBotVoiceCharacter(normalizedProfile);
-  const point = botVoiceCharacterPadPoint(normalizedProfile);
-  const valueText = botVoiceCharacterValueText(normalizedProfile);
+  const openness = normalizedProfile.openness ?? 0;
+  const weight = normalizedProfile.weight ?? 0;
+  const point = {
+    xRatio: Math.max(0, Math.min(1, (openness + 1) / 2)),
+    yRatio: Math.max(0, Math.min(1, (weight + 1) / 2)),
+  };
+  const valueText = `${openness < -0.05 ? "Open" : openness > 0.05 ? "Nasal" : "Neutral"}, ${weight < -0.05 ? "Light" : weight > 0.05 ? "Chest" : "neutral weight"}`;
   const gainEnergy = Math.max(0, character.gainDb / 6);
   const differentCharacterScalar = (
     current: number,
@@ -37661,9 +37983,14 @@ function BotVoiceCharacterEditor({
     const rect = padRef.current?.getBoundingClientRect();
     if (!rect) return;
     applyProfile(
-      botVoiceCharacterProfileFromPoint(profileRef.current, {
-        xRatio: (event.clientX - rect.left) / rect.width,
-        yRatio: (event.clientY - rect.top) / rect.height,
+      normalizeBotAudioVoiceProfileV1({
+        ...profileRef.current,
+        openness: normalizeBotAudioVoiceControl(
+          ((event.clientX - rect.left) / rect.width) * 2 - 1,
+        ),
+        weight: normalizeBotAudioVoiceControl(
+          ((event.clientY - rect.top) / rect.height) * 2 - 1,
+        ),
       }),
       saveImmediately,
     );
@@ -37671,7 +37998,11 @@ function BotVoiceCharacterEditor({
 
   const reset = (saveImmediately = true): void => {
     applyProfile(
-      resetBotVoiceCharacterProfile(profileRef.current),
+      normalizeBotAudioVoiceProfileV1({
+        ...profileRef.current,
+        openness: 0,
+        weight: 0,
+      }),
       saveImmediately,
     );
   };
@@ -37685,38 +38016,40 @@ function BotVoiceCharacterEditor({
       <div className={styles.botVoiceCharacterHeading}>
         <span>
           <strong id="bot-voice-character-title">Voice Character</strong>
-          <small>Shape weight, clarity, and presence as one gesture.</small>
+          <small>Shape the local vocal tract without changing Premium.</small>
         </span>
         <span className={styles.botAvatarAtomicFieldActions}>
           <BotFieldRandomizerButton
-            label="Voice Character tone"
+            label="vocal openness"
             onRandomize={() => {
               const target = differentCharacterScalar(
-                character.eqTilt,
+                openness,
                 -1,
                 1,
-                BOT_VOICE_CHARACTER_TILT_STEP,
+                0.05,
               );
               applyProfile(
-                nudgeBotVoiceCharacterProfile(profileRef.current, {
-                  eqTilt: target - character.eqTilt,
+                normalizeBotAudioVoiceProfileV1({
+                  ...profileRef.current,
+                  openness: target,
                 }),
                 true,
               );
             }}
           />
           <BotFieldRandomizerButton
-            label="Voice Character gain"
+            label="vocal weight"
             onRandomize={() => {
               const target = differentCharacterScalar(
-                character.gainDb,
-                BOT_VOICE_GAIN_DB_MIN,
-                BOT_VOICE_GAIN_DB_MAX,
-                BOT_VOICE_CHARACTER_GAIN_STEP_DB,
+                weight,
+                -1,
+                1,
+                0.05,
               );
               applyProfile(
-                nudgeBotVoiceCharacterProfile(profileRef.current, {
-                  gainDb: target - character.gainDb,
+                normalizeBotAudioVoiceProfileV1({
+                  ...profileRef.current,
+                  weight: target,
                 }),
                 true,
               );
@@ -37741,7 +38074,7 @@ function BotVoiceCharacterEditor({
         aria-label="Voice Character"
         aria-valuemin={-1}
         aria-valuemax={1}
-        aria-valuenow={character.eqTilt}
+        aria-valuenow={openness}
         aria-valuetext={valueText}
         aria-describedby="bot-voice-character-help"
         data-bot-voice-character-pad="true"
@@ -37775,20 +38108,32 @@ function BotVoiceCharacterEditor({
           const multiplier = event.shiftKey ? 3 : 1;
           let next: NormalizedBotAudioVoiceProfileV1 | null = null;
           if (event.key === "ArrowLeft") {
-            next = nudgeBotVoiceCharacterProfile(profileRef.current, {
-              eqTilt: -BOT_VOICE_CHARACTER_TILT_STEP * multiplier,
+            next = normalizeBotAudioVoiceProfileV1({
+              ...profileRef.current,
+              openness: normalizeBotAudioVoiceControl(
+                openness - 0.05 * multiplier,
+              ),
             });
           } else if (event.key === "ArrowRight") {
-            next = nudgeBotVoiceCharacterProfile(profileRef.current, {
-              eqTilt: BOT_VOICE_CHARACTER_TILT_STEP * multiplier,
+            next = normalizeBotAudioVoiceProfileV1({
+              ...profileRef.current,
+              openness: normalizeBotAudioVoiceControl(
+                openness + 0.05 * multiplier,
+              ),
             });
           } else if (event.key === "ArrowUp") {
-            next = nudgeBotVoiceCharacterProfile(profileRef.current, {
-              gainDb: BOT_VOICE_CHARACTER_GAIN_STEP_DB * multiplier,
+            next = normalizeBotAudioVoiceProfileV1({
+              ...profileRef.current,
+              weight: normalizeBotAudioVoiceControl(
+                weight - 0.05 * multiplier,
+              ),
             });
           } else if (event.key === "ArrowDown") {
-            next = nudgeBotVoiceCharacterProfile(profileRef.current, {
-              gainDb: -BOT_VOICE_CHARACTER_GAIN_STEP_DB * multiplier,
+            next = normalizeBotAudioVoiceProfileV1({
+              ...profileRef.current,
+              weight: normalizeBotAudioVoiceControl(
+                weight + 0.05 * multiplier,
+              ),
             });
           } else if (event.key === "Home") {
             event.preventDefault();
@@ -37804,25 +38149,25 @@ function BotVoiceCharacterEditor({
           className={`${styles.botVoiceCharacterCorner} ${styles.botVoiceCharacterCornerBold}`}
           aria-hidden="true"
         >
-          Bold
+          Open
         </span>
         <span
           className={`${styles.botVoiceCharacterCorner} ${styles.botVoiceCharacterCornerPresent}`}
           aria-hidden="true"
         >
-          Present
+          Nasal
         </span>
         <span
           className={`${styles.botVoiceCharacterCorner} ${styles.botVoiceCharacterCornerIntimate}`}
           aria-hidden="true"
         >
-          Intimate
+          Light
         </span>
         <span
           className={`${styles.botVoiceCharacterCorner} ${styles.botVoiceCharacterCornerAiry}`}
           aria-hidden="true"
         >
-          Airy
+          Chest
         </span>
         <span className={styles.botAvatarCoordinateAxisX} aria-hidden="true" />
         <span className={styles.botAvatarCoordinateAxisY} aria-hidden="true" />
@@ -37838,25 +38183,72 @@ function BotVoiceCharacterEditor({
 
       <div className={styles.botVoiceCharacterReadout} aria-hidden="true">
         <span>
-          <small>Low</small>
-          <strong>{formatVoiceCharacterDb(character.lowShelfDb)}</strong>
+          <small>Open / Nasal</small>
+          <strong>{Math.round(openness * 100)}%</strong>
         </span>
         <span>
-          <small>High</small>
-          <strong>{formatVoiceCharacterDb(character.highShelfDb)}</strong>
+          <small>Light / Chest</small>
+          <strong>{Math.round(weight * 100)}%</strong>
         </span>
         <span>
           <small>Gain</small>
           <strong>{formatVoiceCharacterDb(character.gainDb)}</strong>
         </span>
       </div>
+      <details className={styles.botVoiceDeliveryDisclosure}>
+        <summary>
+          <span>
+            <strong>Local tone details</strong>
+            <small>Brightness, resonance, and local gain</small>
+          </span>
+          <em>Advanced</em>
+        </summary>
+        <div className={styles.botVoiceControls}>
+          {(
+            [
+              ["brightness", "Brightness", -1, 1, 0.05],
+              ["resonance", "Resonance", -1, 1, 0.05],
+              ["gainDb", "Local gain", BOT_VOICE_GAIN_DB_MIN, BOT_VOICE_GAIN_DB_MAX, 0.5],
+            ] as const
+          ).map(([key, label, min, max, step]) => (
+            <label key={key}>
+              <span>{label}</span>
+              <input
+                type="range"
+                min={min}
+                max={max}
+                step={step}
+                value={normalizedProfile[key] ?? 0}
+                aria-label={label}
+                onChange={(event) => {
+                  const value = Number(event.currentTarget.value);
+                  applyProfile(
+                    normalizeBotAudioVoiceProfileV1({
+                      ...profileRef.current,
+                      [key]: value,
+                      ...(key === "brightness" ? { eqTilt: value } : {}),
+                    }),
+                  );
+                }}
+                onPointerUp={() => onChange(profileRef.current, { saveImmediately: true })}
+                onKeyUp={() => onChange(profileRef.current, { saveImmediately: true })}
+              />
+              <output>
+                {key === "gainDb"
+                  ? formatVoiceCharacterDb(normalizedProfile.gainDb)
+                  : `${Math.round((normalizedProfile[key] ?? 0) * 100)}%`}
+              </output>
+            </label>
+          ))}
+        </div>
+      </details>
       <small
         id="bot-voice-character-help"
         className={styles.botVoiceCharacterHelp}
       >
-        Left and right balance Low against High. Up and down adjust this bot
-        relative to your account Voice Volume. Arrow keys make fine changes;
-        hold Shift for larger steps.
+        Left and right move from open to nasal. Up and down move from light to
+        chest-forward. These controls affect Local voice only; arrow keys make
+        fine changes and Shift makes larger steps.
       </small>
     </section>
   );
@@ -39178,8 +39570,12 @@ function BotAvatarFaceControls({
                   onThinkingOffsetYChange(next.y);
                 }}
                 onReset={() => {
-                  onThinkingOffsetXChange(DEFAULT_BOT_FACE_STYLE.thinkingOffsetX);
-                  onThinkingOffsetYChange(DEFAULT_BOT_FACE_STYLE.thinkingOffsetY);
+                  onThinkingOffsetXChange(
+                    DEFAULT_BOT_FACE_STYLE.thinkingOffsetX,
+                  );
+                  onThinkingOffsetYChange(
+                    DEFAULT_BOT_FACE_STYLE.thinkingOffsetY,
+                  );
                 }}
               />
             </div>
@@ -42149,7 +42545,10 @@ function BotProfileBuilder({
     );
   };
   const responseCueLines = (value: string): string[] =>
-    value.split(/\r?\n/u).map((line) => line.trim()).filter(Boolean);
+    value
+      .split(/\r?\n/u)
+      .map((line) => line.trim())
+      .filter(Boolean);
   const updateTextSection = (
     section: BotProfileTextSection,
     field: string,
@@ -42446,7 +42845,9 @@ function BotProfileBuilder({
                       })
                     }
                   />
-                  <small>Up to six phrases, eight words and 48 characters each.</small>
+                  <small>
+                    Up to six phrases, eight words and 48 characters each.
+                  </small>
                 </label>
               ))}
               <label className={styles.botProfileField}>
@@ -42462,7 +42863,9 @@ function BotProfileBuilder({
                     })
                   }
                 />
-                <small>Blocked phrases are removed from every cue category.</small>
+                <small>
+                  Blocked phrases are removed from every cue category.
+                </small>
               </label>
             </details>
             <section
@@ -44009,8 +44412,7 @@ function HomeContent(): React.JSX.Element {
         target.provider,
         target.modelId,
       );
-      const version =
-        (modelEffortMutationVersionRef.current.get(key) ?? 0) + 1;
+      const version = (modelEffortMutationVersionRef.current.get(key) ?? 0) + 1;
       modelEffortMutationVersionRef.current.set(key, version);
       const previousPreferences = settings?.modelEffortPreferences ?? [];
       setSettings((current) => {
@@ -44093,9 +44495,7 @@ function HomeContent(): React.JSX.Element {
       previousPreferences = current.modelEffortPreferences ?? [];
       return { ...current, modelEffortPreferences: [] };
     });
-    const pendingWrites = [
-      ...modelEffortMutationQueueRef.current.values(),
-    ];
+    const pendingWrites = [...modelEffortMutationQueueRef.current.values()];
     void Promise.allSettled(pendingWrites)
       .then(() =>
         api<{
@@ -44141,6 +44541,20 @@ function HomeContent(): React.JSX.Element {
           target.capability,
         ),
         capability: target.capability,
+        rowValueForModel: (model) => {
+          const capability = resolveModelReasoningEffortCapability({
+            provider: model.provider,
+            modelId: model.id,
+            simulatedEffortEnabled:
+              settings?.experimentalAllModelEffortEnabled === true,
+          });
+          return savedModelReasoningEffort(
+            settings,
+            model.provider,
+            model.id,
+            capability,
+          );
+        },
         disabled: options.disabled,
         disabledReason: options.disabledReason,
         onActivate: () => {
@@ -44151,23 +44565,6 @@ function HomeContent(): React.JSX.Element {
       };
     },
     [persistModelEffortPreference, settings],
-  );
-  const [debateJurySettings, setDebateJurySettings] =
-    useState<DebateJurySettings>(DEFAULT_DEBATE_JURY_SETTINGS);
-  const debateJurySettingsScopeId = user?.id ?? "signed-out";
-  useEffect(() => {
-    setDebateJurySettings(readDebateJurySettings(debateJurySettingsScopeId));
-  }, [debateJurySettingsScopeId]);
-  const updateDebateJurySettings = useCallback(
-    (patch: Partial<DebateJurySettings>): void => {
-      setDebateJurySettings((current) =>
-        writeDebateJurySettings(debateJurySettingsScopeId, {
-          ...current,
-          ...patch,
-        }),
-      );
-    },
-    [debateJurySettingsScopeId],
   );
   const startupPreferenceAppliedForUserRef = useRef<string | null>(null);
   useEffect(() => {
@@ -44252,8 +44649,8 @@ function HomeContent(): React.JSX.Element {
     () => [
       ...PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => ({
         value: builtinVoiceSelectionValue(voice.voiceId),
-        label: voice.name,
-        detail: `${voice.character} · Included`,
+        label: voice.character,
+        detail: `Portable ${voice.voiceId.replace("voice-", "")} · Included`,
         kind: "builtin" as const,
       })),
       ...(settings?.operatingSystemVoicesEnabled
@@ -44271,17 +44668,14 @@ function HomeContent(): React.JSX.Element {
     () => cleanPlayerVoiceProfile(settings?.playerAudioVoiceProfile),
     [settings?.playerAudioVoiceProfile],
   );
-  const selectedPlayerPremiumVoiceId = playerPremiumVoiceId(
-    playerVoiceProfile,
-  );
+  const selectedPlayerPremiumVoiceId = playerPremiumVoiceId(playerVoiceProfile);
   const selectedPlayerPremiumVoiceAvailable = selectedPlayerPremiumVoiceId
     ? elevenLabsVoiceCatalog.some(
         (voice) => voice.voiceId === selectedPlayerPremiumVoiceId,
       )
     : true;
-  const selectedPlayerLocalVoiceValue = offlineVoiceSelectionValue(
-    playerVoiceProfile,
-  );
+  const selectedPlayerLocalVoiceValue =
+    offlineVoiceSelectionValue(playerVoiceProfile);
   const selectedPlayerLocalVoiceAvailable = offlineVoiceIdentityOptions.some(
     (voice) => voice.value === selectedPlayerLocalVoiceValue,
   );
@@ -44383,7 +44777,7 @@ function HomeContent(): React.JSX.Element {
         provider,
         modelId,
         options: modelOptionsForResponseMode(modelCatalog, settings, "auto"),
-        simulatedLocalEnabled:
+        simulatedEffortEnabled:
           settings.experimentalAllModelEffortEnabled === true,
       });
     };
@@ -44427,9 +44821,8 @@ function HomeContent(): React.JSX.Element {
       );
       const currentIndex = Math.max(0, levels.indexOf(current));
       const delta = event.key === "ArrowRight" ? 1 : -1;
-      const next = levels[
-        Math.min(levels.length - 1, Math.max(0, currentIndex + delta))
-      ];
+      const next =
+        levels[Math.min(levels.length - 1, Math.max(0, currentIndex + delta))];
       if (next && next !== current) {
         persistModelEffortPreference(modelEffortHudTarget, next);
       }
@@ -45569,8 +45962,12 @@ function HomeContent(): React.JSX.Element {
   const signalCrosstalkVoiceAbortRef = useRef<AbortController | null>(null);
   const listenerReactionVoiceAbortRef = useRef<AbortController | null>(null);
   const signalVoiceClipCacheRef = useRef<
-    Map<string, Promise<EnglishVoiceSynthesisClip | null>>
+    Map<string, Promise<BotcastEnglishVoiceMedia | null>>
   >(new Map());
+  const debateLastVoiceClipRef = useRef<{
+    key: string;
+    clip: BotcastEnglishVoiceMedia;
+  } | null>(null);
   const listenerReactionVoiceClipCacheRef = useRef<
     Map<string, Promise<EnglishVoiceSynthesisClip | null>>
   >(new Map());
@@ -45678,6 +46075,7 @@ function HomeContent(): React.JSX.Element {
     botHubVoicePreviewRunRef.current += 1;
     voicePreviewAudioCacheRef.current.clear();
     signalVoiceClipCacheRef.current.clear();
+    debateLastVoiceClipRef.current = null;
     listenerReactionVoiceClipCacheRef.current.clear();
     listenerReactionVoiceReadyClipRef.current.clear();
     interruptedSpeakerVoiceClipCacheRef.current.clear();
@@ -45695,6 +46093,7 @@ function HomeContent(): React.JSX.Element {
   }, [settings?.englishVoiceEngine, settings?.preferredProvider]);
   useEffect(() => {
     signalVoiceClipCacheRef.current.clear();
+    debateLastVoiceClipRef.current = null;
     listenerReactionVoiceClipCacheRef.current.clear();
     listenerReactionVoiceReadyClipRef.current.clear();
     interruptedSpeakerVoiceClipCacheRef.current.clear();
@@ -46231,11 +46630,11 @@ function HomeContent(): React.JSX.Element {
                   },
                   body: JSON.stringify({
                     messageId: input.messageId,
+                    spokenText: spokenMessageText,
                     ...(messageBot?.id ? { speakerBotId: messageBot.id } : {}),
                     ...(detail.incognito
                       ? {
                           ephemeralMessage: true,
-                          spokenText: speechDisplayContent,
                         }
                       : {}),
                     mode: "english",
@@ -46286,13 +46685,26 @@ function HomeContent(): React.JSX.Element {
                 );
               }
               const engineUsed = response.headers.get("x-prism-voice-engine");
+              const encodedLocalVoiceNotice = response.headers.get(
+                "x-prism-voice-notice",
+              );
+              let localVoiceNotice: string | null = null;
+              if (encodedLocalVoiceNotice) {
+                try {
+                  localVoiceNotice = decodeURIComponent(encodedLocalVoiceNotice);
+                } catch {
+                  localVoiceNotice = encodedLocalVoiceNotice;
+                }
+              }
               const premiumLocalNotice = premiumLocalFallbackNotice({
                 requestedEngine: voiceSelection.englishVoiceEngine,
                 effectiveEngine: input.engine,
                 engineUsedHeader: engineUsed,
                 messageProvider: message.provider,
               });
-              if (premiumLocalNotice) {
+              if (localVoiceNotice) {
+                setVoicePlaybackNotice(localVoiceNotice);
+              } else if (premiumLocalNotice) {
                 setVoicePlaybackNotice(premiumLocalNotice);
               } else if (engineUsed === "builtin-provider-fallback") {
                 setVoicePlaybackNotice(
@@ -46510,6 +46922,7 @@ function HomeContent(): React.JSX.Element {
           },
           body: JSON.stringify({
             messageId: message.id,
+            spokenText: sourceText,
             ...(messageBot?.id ? { speakerBotId: messageBot.id } : {}),
             mode: "english",
             engine: effectiveEnglishEngine,
@@ -46599,12 +47012,17 @@ function HomeContent(): React.JSX.Element {
     useState<string | null>(null);
   const [commandCenterPreviewBusy, setCommandCenterPreviewBusy] =
     useState(false);
-  const [commandCenterPreviewNotice, setCommandCenterPreviewNotice] =
-    useState<string | null>(null);
-  const [commandCenterPreviewRollCounters, setCommandCenterPreviewRollCounters] =
-    useState<Record<string, number>>({});
-  const [commandCenterPreviewWildcardValues, setCommandCenterPreviewWildcardValues] =
-    useState<Record<string, string>>({});
+  const [commandCenterPreviewNotice, setCommandCenterPreviewNotice] = useState<
+    string | null
+  >(null);
+  const [
+    commandCenterPreviewRollCounters,
+    setCommandCenterPreviewRollCounters,
+  ] = useState<Record<string, number>>({});
+  const [
+    commandCenterPreviewWildcardValues,
+    setCommandCenterPreviewWildcardValues,
+  ] = useState<Record<string, string>>({});
   const acceptCommandCenterPreviewWildcard = useCallback(
     (occurrencePath: string, value: string) => {
       setCommandCenterPreviewWildcardValues((current) =>
@@ -47517,9 +47935,8 @@ function HomeContent(): React.JSX.Element {
     useState<number>(DEFAULT_BOT_FACE_STYLE.blinkRotationDeg);
   const [newBotFaceThinkingFrames, setNewBotFaceThinkingFrames] =
     useState<BotFaceThinkingFrames>(DEFAULT_BOT_FACE_STYLE.thinkingFrames);
-  const [newBotFaceThinkingScale, setNewBotFaceThinkingScale] = useState<number>(
-    DEFAULT_BOT_FACE_STYLE.thinkingScale,
-  );
+  const [newBotFaceThinkingScale, setNewBotFaceThinkingScale] =
+    useState<number>(DEFAULT_BOT_FACE_STYLE.thinkingScale);
   const [newBotFaceThinkingOffsetX, setNewBotFaceThinkingOffsetX] =
     useState<number>(DEFAULT_BOT_FACE_STYLE.thinkingOffsetX);
   const [newBotFaceThinkingOffsetY, setNewBotFaceThinkingOffsetY] =
@@ -49839,8 +50256,11 @@ function HomeContent(): React.JSX.Element {
           );
           const nextPrompt = savedPrompt ?? fallbackPrompt;
           const nextDeck =
-            savedDeck ?? (nextPrompt ? undefined : commandCenterWildcardDecks[0]);
-          const fallbackCommand = nextDeck ? undefined : commandCenterCommands[0];
+            savedDeck ??
+            (nextPrompt ? undefined : commandCenterWildcardDecks[0]);
+          const fallbackCommand = nextDeck
+            ? undefined
+            : commandCenterCommands[0];
           setCommandCenterSelectedCommandId(
             nextDeck ? null : (nextPrompt?.id ?? fallbackCommand?.id ?? null),
           );
@@ -53856,7 +54276,7 @@ function HomeContent(): React.JSX.Element {
       provider: primaryForAuto?.provider ?? modelProvider,
       modelId: primaryForAuto?.model ?? visibleModelChoice,
       options: modelOptions,
-      simulatedLocalEnabled:
+      simulatedEffortEnabled:
         settings.experimentalAllModelEffortEnabled === true,
     });
     const pickerStatusMessage: ComposerModelPickerStatusMessage | undefined =
@@ -54166,7 +54586,7 @@ function HomeContent(): React.JSX.Element {
       provider: primaryForAuto?.provider ?? modelProvider,
       modelId: primaryForAuto?.model ?? visibleModelChoice,
       options: modelOptions,
-      simulatedLocalEnabled:
+      simulatedEffortEnabled:
         settings?.experimentalAllModelEffortEnabled === true,
     });
     const activeSideChat =
@@ -54724,10 +55144,7 @@ function HomeContent(): React.JSX.Element {
     setCommandCenterPreviewNotice(null);
     setCommandCenterPreviewRollCounters({});
     setCommandCenterPreviewWildcardValues({});
-  }, [
-    commandCenterSelectedCommandId,
-    commandCenterSelectedWildcardDeckId,
-  ]);
+  }, [commandCenterSelectedCommandId, commandCenterSelectedWildcardDeckId]);
 
   useEffect(() => {
     setCommandCenterPreviewAiResult(null);
@@ -56759,10 +57176,9 @@ function HomeContent(): React.JSX.Element {
     );
 
     liveBottishRevealKeyRef.current = revealKey;
-    // Interrupt any older clip without discarding the media element authorized
-    // by the outgoing send gesture. Safari needs that same element later.
-    stopBottishVoice({ preservePreparedMedia: true });
-    stopEnglishVoice();
+    // Retire queue ownership without discarding the media element authorized
+    // by the outgoing send gesture or clipping a completed phoneme tail.
+    handoffVoicePlaybackPreservingPreparedMode(liveRobotVoiceMode);
     const controller = new AbortController();
     voiceSynthesisAbortRef.current?.abort();
     voiceSynthesisAbortRef.current = controller;
@@ -57577,12 +57993,10 @@ function HomeContent(): React.JSX.Element {
       responseCuePlaying;
   const typingIndicatorNode = useMemo(() => {
     if (!typingIndicatorVisible) return null;
-    const pendingRespondent =
-      activeResponseCueBeat?.speaker.botId
-        ? (bots.find(
-            (bot) => bot.id === activeResponseCueBeat.speaker.botId,
-          ) ?? null)
-        : composeBotAccentId !== null
+    const pendingRespondent = activeResponseCueBeat?.speaker.botId
+      ? (bots.find((bot) => bot.id === activeResponseCueBeat.speaker.botId) ??
+        null)
+      : composeBotAccentId !== null
         ? bots.find((b) => b.id === composeBotAccentId)
         : null;
     const displayName =
@@ -58459,7 +58873,13 @@ function HomeContent(): React.JSX.Element {
       })
       .catch(() => undefined);
     return () => controller.abort();
-  }, [coffeeConversation?.id, detail?.id, detail?.mode, recordResponseCueBeat, view]);
+  }, [
+    coffeeConversation?.id,
+    detail?.id,
+    detail?.mode,
+    recordResponseCueBeat,
+    view,
+  ]);
   const coffeeVoiceConversationIdRef = useRef<string | null>(null);
   const coffeeVoiceSeenMessageIdsRef = useRef<Set<string>>(new Set());
   const coffeeVoicePlaybackBusyRef = useRef(false);
@@ -59765,7 +60185,7 @@ function HomeContent(): React.JSX.Element {
   const coffeeContinueAbortRef = useRef<AbortController | null>(null);
   const coffeePreparedTurnRef = useRef<PreparedCoffeeLookahead | null>(null);
   const coffeePreparedVoiceClipRef = useRef<
-    Map<string, Promise<EnglishVoiceSynthesisClip | null>>
+    Map<string, Promise<BotcastEnglishVoiceMedia | null>>
   >(new Map());
   const prepareCoffeeLookaheadRef = useRef<
     (
@@ -60504,9 +60924,7 @@ function HomeContent(): React.JSX.Element {
   }, [coffeeConversation?.id]);
   useEffect(() => {
     coffeeAutoplayPausedRef.current =
-      coffeeAutoplayPaused ||
-      prismSystemPaused ||
-      prismPresentationSuspended;
+      coffeeAutoplayPaused || prismSystemPaused || prismPresentationSuspended;
   }, [coffeeAutoplayPaused, prismPresentationSuspended, prismSystemPaused]);
   useEffect(() => {
     coffeeSessionPhaseRef.current = coffeeSessionPhase;
@@ -61366,7 +61784,7 @@ function HomeContent(): React.JSX.Element {
     coffeeReplayVoicePreparingKeyRef.current = messageKey;
     coffeeReplayOwnsVoicePlaybackRef.current = true;
     voiceSynthesisAbortRef.current?.abort();
-    stopVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
+    handoffVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
     const controller = new AbortController();
     voiceSynthesisAbortRef.current = controller;
     const bot =
@@ -62563,10 +62981,7 @@ function HomeContent(): React.JSX.Element {
         // Hold a finished provisional stream until voice start/mute resolves so
         // bot processing cannot begin while player audio is still preparing.
         if (!deliveryComplete || !coffeePlayerVoiceRevealReadyRef.current) {
-          if (
-            deliveryComplete &&
-            lastPublishedLength < charCount
-          ) {
+          if (deliveryComplete && lastPublishedLength < charCount) {
             lastPublishedLength = charCount;
             setCoffeeTypewriterLength(charCount);
           }
@@ -63387,8 +63802,7 @@ function HomeContent(): React.JSX.Element {
       storyModelOverride ??
       storyEffectiveModelChoice,
     options: storyModelOptions,
-    simulatedLocalEnabled:
-      settings?.experimentalAllModelEffortEnabled === true,
+    simulatedEffortEnabled: settings?.experimentalAllModelEffortEnabled === true,
   });
   useEffect(() => {
     if (storyAnyOfflineProtected && storyProvider !== "local") {
@@ -63641,7 +64055,9 @@ function HomeContent(): React.JSX.Element {
     },
     [],
   );
-  const responseCueRuntimeState = (botId: string): BotResponseCueRuntimeState => {
+  const responseCueRuntimeState = (
+    botId: string,
+  ): BotResponseCueRuntimeState => {
     const existing = responseCueRuntimeByBotIdRef.current.get(botId);
     if (existing) return existing;
     const created: BotResponseCueRuntimeState = {
@@ -64393,11 +64809,16 @@ function HomeContent(): React.JSX.Element {
       selectedEngine: EnglishVoiceEngine,
       signal?: AbortSignal,
       playbackSurface: "signal" | "debate" = "signal",
-    ): Promise<EnglishVoiceSynthesisClip> => {
+    ): Promise<BotcastEnglishVoiceMedia> => {
       const ephemeralSoundcheck =
         signalStageSoundcheckMessageIsEphemeral(message);
       const ephemeralInterruptionBridge =
         botcastMessageIsEphemeralInterruptionBridge(message);
+      const performanceText = message.voicePerformanceText ?? message.content;
+      const useLocalPerformanceStream =
+        voicePerformancePlanFromText(performanceText).segments.some(
+          (segment) => segment.kind === "vocal-action",
+        );
       const response = await fetch(
         new URL("/api/voices/synthesize", window.location.origin),
         {
@@ -64428,10 +64849,12 @@ function HomeContent(): React.JSX.Element {
                   elevenLabsText: message.voicePerformanceText,
                 }
               : {}),
+            performanceText,
             mode: "english",
             engine: signalOnlineVoiceEnabled ? selectedEngine : "builtin",
             explicitOnlineContext: signalOnlineVoiceEnabled,
-            includeAlignment: true,
+            includeAlignment: !useLocalPerformanceStream,
+            streamChunks: useLocalPerformanceStream,
             moodKey: message.moodKey,
             profile,
           }),
@@ -64440,7 +64863,17 @@ function HomeContent(): React.JSX.Element {
       if (!response.ok) {
         throw new Error(`Signal voice playback failed (${response.status}).`);
       }
-      return readEnglishVoiceSynthesisClip(response);
+      if (englishVoiceResponseSupportsChunkedStreaming(response)) {
+        const rawNotice = response.headers.get("x-prism-voice-notice");
+        return {
+          kind: "stream",
+          response,
+          engineUsed: response.headers.get("x-prism-voice-engine"),
+          modelHash: response.headers.get("x-prism-voice-model-sha256"),
+          notice: rawNotice ? decodeURIComponent(rawNotice) : null,
+        };
+      }
+      return { kind: "clip", clip: await readEnglishVoiceSynthesisClip(response) };
     },
     [],
   );
@@ -64462,7 +64895,7 @@ function HomeContent(): React.JSX.Element {
       selectedEngine: EnglishVoiceEngine,
       signal?: AbortSignal,
       playbackSurface: "signal" | "debate" = "signal",
-    ): Promise<EnglishVoiceSynthesisClip> => {
+    ): Promise<BotcastEnglishVoiceMedia> => {
       if (!signalOnlineVoiceEnabled || selectedEngine !== "elevenlabs") {
         return requestBotcastEnglishClip(
           message,
@@ -64506,7 +64939,7 @@ function HomeContent(): React.JSX.Element {
       botSummary: BotcastBotSummary,
       playbackSurface: "signal" | "debate" = "signal",
       offlineOnly = false,
-    ): Promise<EnglishVoiceSynthesisClip | null> | null => {
+    ): Promise<BotcastEnglishVoiceMedia | null> | null => {
       const voiceSelection = voicePlaybackSelectionRef.current;
       if (
         !settings ||
@@ -64516,6 +64949,14 @@ function HomeContent(): React.JSX.Element {
         return null;
       const cached = signalVoiceClipCacheRef.current.get(message.id);
       if (cached) return cached;
+      if (
+        playbackSurface === "debate" &&
+        debateLastVoiceClipRef.current?.key === message.id
+      ) {
+        const replayClip = Promise.resolve(debateLastVoiceClipRef.current.clip);
+        signalVoiceClipCacheRef.current.set(message.id, replayClip);
+        return replayClip;
+      }
       const bot = bots.find((candidate) => candidate.id === botSummary.id);
       const frozenVoiceProfile =
         (
@@ -64552,18 +64993,58 @@ function HomeContent(): React.JSX.Element {
         () => preferredController.abort(),
         signalOnlineVoiceTimeoutMs(botcastVoiceTimeoutText(message).length),
       );
-      const clip = requestBotcastEnglishClip(
-        message,
-        normalizedProfile,
-        !offlineOnly && botSummary.online_enabled !== 0,
-        expectedEngine,
-        preferredController.signal,
-        playbackSurface,
-      )
+      let durableReplayClip = false;
+      const clip = (playbackSurface === "debate"
+        ? loadCapturedReplayVoiceAudio({
+            surface: "signal",
+            sourceId: message.episodeId,
+            sourceKey: `primary:${message.id}`,
+          })
+            .then((saved) => {
+              if (saved) {
+                durableReplayClip = true;
+                return {
+                    kind: "clip" as const,
+                    clip: {
+                      bytes: saved.bytes,
+                      alignment: saved.alignment,
+                      audioContentType: saved.contentType,
+                      engineUsed: saved.resolvedEngine,
+                    },
+                  };
+              }
+              return requestBotcastEnglishClip(
+                message,
+                normalizedProfile,
+                !offlineOnly && botSummary.online_enabled !== 0,
+                expectedEngine,
+                preferredController.signal,
+                playbackSurface,
+              );
+            })
+            .catch(() =>
+              requestBotcastEnglishClip(
+                message,
+                normalizedProfile,
+                !offlineOnly && botSummary.online_enabled !== 0,
+                expectedEngine,
+                preferredController.signal,
+                playbackSurface,
+              ),
+            )
+        : requestBotcastEnglishClip(
+            message,
+            normalizedProfile,
+            !offlineOnly && botSummary.online_enabled !== 0,
+            expectedEngine,
+            preferredController.signal,
+            playbackSurface,
+          ))
         .then((resolved) => {
           if (
+            !durableReplayClip &&
             !signalPreferredVoiceClipReady(
-              resolved,
+              resolved.kind === "clip" ? resolved.clip : resolved,
               expectedEngine,
             )
           ) {
@@ -64646,8 +65127,14 @@ function HomeContent(): React.JSX.Element {
   const playZenPlayerMessage = useCallback(
     (messageId: string, messageText: string): void => {
       if (!settings?.zenPlayerVoiceEnabled) return;
-      const spokenText = voiceSpokenText(messageText)?.trim() ?? "";
+      const spokenText =
+        voiceSpokenText(messageText, { leadingMarkedAction: true })?.trim() ??
+        "";
       if (!spokenText) return;
+      const performanceText = voicePerformanceTextFromActionCues(messageText, {
+        leadingMarkedAction: true,
+        omitLocalFoleyTags: true,
+      });
 
       zenPlayerVoiceAbortRef.current?.abort();
       const controller = new AbortController();
@@ -64684,11 +65171,7 @@ function HomeContent(): React.JSX.Element {
           durationMs,
           alignment,
         );
-        cueAtMs = bundledActionSfxCueAtMs(
-          messageText,
-          durationMs,
-          alignment,
-        );
+        cueAtMs = bundledActionSfxCueAtMs(messageText, durationMs, alignment);
         if (cueAtMs === 0) playCueOnce();
       };
       const advanceReveal = (elapsedMs: number): void => {
@@ -64745,6 +65228,9 @@ function HomeContent(): React.JSX.Element {
               },
               body: JSON.stringify({
                 text: spokenText,
+                ...(engine === "elevenlabs" && performanceText
+                  ? { elevenLabsText: performanceText }
+                  : {}),
                 mode: "english",
                 engine,
                 explicitOnlineContext: engine === "elevenlabs",
@@ -65000,6 +65486,9 @@ function HomeContent(): React.JSX.Element {
             ? null
             : voiceSelection.voiceMode,
         profile: playbackProfile,
+        performancePlan: voicePerformancePlanFromText(
+          message.voicePerformanceText ?? message.content,
+        ),
         moodKey: message.moodKey,
         effectsEnabled: settings.voiceEffectsEnabled !== false,
         gain: playbackVolume,
@@ -65009,6 +65498,12 @@ function HomeContent(): React.JSX.Element {
         audible: true,
         durationMs: null,
         alignment: null,
+        segmentTimings: [],
+        heardCompletion: {
+          state: "planned",
+          heardDurationMs: 0,
+          heardCharacterCount: 0,
+        },
       };
       const replayVoiceTakePromise = captureReplayVoiceTake({
         surface: "signal",
@@ -65035,14 +65530,46 @@ function HomeContent(): React.JSX.Element {
       const playbackIsCurrent = (): boolean =>
         !controller.signal.aborted &&
         signalVoiceAbortRef.current === controller;
-      stopVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
+      handoffVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
       let playbackStarted = false;
       let captureSpeechStarted = false;
+      let heardPlaybackStartedAtMs: number | null = null;
+      let heardPlannedDurationMs: number | null = null;
+      const replaySegmentTimings: NonNullable<
+        ReplayVoiceTakeV1["segmentTimings"]
+      > = [];
+      const recordHeardCompletion = (
+        state: "completed" | "interrupted",
+      ): void => {
+        const heardDurationMs = heardPlaybackStartedAtMs === null
+          ? 0
+          : Math.max(0, Math.round(performance.now() - heardPlaybackStartedAtMs));
+        const heardCharacterCount = state === "completed"
+          ? spokenText.length
+          : heardPlannedDurationMs && heardPlannedDurationMs > 0
+            ? Math.min(
+                spokenText.length,
+                Math.floor(
+                  spokenText.length *
+                    Math.min(1, heardDurationMs / heardPlannedDurationMs),
+                ),
+              )
+            : 0;
+        void updateCapturedReplayVoiceTake(replayVoiceTakePromise, {
+          heardCompletion: {
+            state,
+            heardDurationMs,
+            heardCharacterCount,
+          },
+        }).catch(() => undefined);
+      };
       const trackedLifecycle: VoicePlaybackLifecycle = {
         ...lifecycle,
         onStart: (durationMs, alignment) => {
           if (!playbackIsCurrent()) return;
           playbackStarted = true;
+          heardPlaybackStartedAtMs = performance.now();
+          heardPlannedDurationMs = durationMs;
           const startedAtMs = replayAudioMasterCaptureElapsedMs(
             message.episodeId,
           );
@@ -65097,6 +65624,18 @@ function HomeContent(): React.JSX.Element {
             captureSpeechStarted = false;
           }
           if (playbackIsCurrent()) lifecycle.onEnd?.();
+          recordHeardCompletion("completed");
+        },
+        onCancel: () => {
+          recordHeardCompletion("interrupted");
+          lifecycle.onCancel?.();
+        },
+        onSegmentTiming: (timing) => {
+          replaySegmentTimings.push(timing);
+          void updateCapturedReplayVoiceTake(replayVoiceTakePromise, {
+            segmentTimings: replaySegmentTimings,
+          }).catch(() => undefined);
+          lifecycle.onSegmentTiming?.(timing);
         },
       };
       try {
@@ -65137,7 +65676,7 @@ function HomeContent(): React.JSX.Element {
           ? "builtin"
           : voiceSelection.englishVoiceEngine;
         let clip = signalPreferredVoiceClipReady(
-          preparedClip,
+          preparedClip?.kind === "clip" ? preparedClip.clip : preparedClip,
           effectiveEngine,
         )
           ? preparedClip
@@ -65153,14 +65692,46 @@ function HomeContent(): React.JSX.Element {
           );
         }
         if (!clip || controller.signal.aborted) return false;
+        // A streamed response body is single-use. Only retain decoded clips for
+        // Debate's same-message replay path; replay audio is captured separately
+        // as the stream is heard.
+        if (playbackSurface === "debate" && clip.kind === "clip") {
+          debateLastVoiceClipRef.current = { key: message.id, clip };
+        } else if (playbackSurface === "debate") {
+          debateLastVoiceClipRef.current = null;
+        }
+        if (clip.kind === "stream") {
+          if (clip.notice) setVoicePlaybackNotice(clip.notice);
+          void updateCapturedReplayVoiceTake(replayVoiceTakePromise, {
+            resolvedEngine: clip.engineUsed,
+            resolvedModelHash: clip.modelHash,
+          }).catch(() => undefined);
+          await enqueueChunkedEnglishVoice(
+            clip.response,
+            playbackProfile,
+            breathSeed,
+            settings.voiceEffectsEnabled !== false,
+            playbackVolume,
+            trackedLifecycle,
+            clip.engineUsed,
+            message.moodKey,
+            signalVoiceCompletionFallbackDurationMs(spokenText),
+            voiceRoomAcoustics,
+            preSpeechBreath,
+            stereoPan,
+          );
+          return playbackStarted && !controller.signal.aborted;
+        }
+        const resolvedClip = clip.clip;
         void storeCapturedReplayVoiceAudio({
           takePromise: replayVoiceTakePromise,
-          bytes: clip.bytes,
-          contentType: clip.audioContentType,
-          resolvedEngine: clip.engineUsed,
+          bytes: resolvedClip.bytes,
+          contentType: resolvedClip.audioContentType,
+          resolvedEngine: resolvedClip.engineUsed,
+          resolvedModelHash: resolvedClip.modelHash,
         }).catch(() => undefined);
         await enqueueEnglishVoice(
-          clip.bytes,
+          resolvedClip.bytes,
           playbackProfile,
           breathSeed,
           settings.voiceEffectsEnabled !== false,
@@ -65171,13 +65742,13 @@ function HomeContent(): React.JSX.Element {
               trackedLifecycle.onStart?.(
                 durationMs,
                 scaleEnglishVoiceAlignmentForPlayback(
-                  clip.alignment,
+                  resolvedClip.alignment,
                   playbackProfile,
                   message.moodKey,
                 ),
               ),
           },
-          clip.engineUsed,
+          resolvedClip.engineUsed,
           message.moodKey,
           voiceRoomAcoustics,
           preSpeechBreath,
@@ -71390,9 +71961,7 @@ function HomeContent(): React.JSX.Element {
         d.settings.experimentalDualOllamaEnabled === true,
       experimentalAllModelEffortEnabled:
         d.settings.experimentalAllModelEffortEnabled === true,
-      modelEffortPreferences: Array.isArray(
-        d.settings.modelEffortPreferences,
-      )
+      modelEffortPreferences: Array.isArray(d.settings.modelEffortPreferences)
         ? d.settings.modelEffortPreferences
         : [],
       psychicModeEnabled: d.settings.psychicModeEnabled === true,
@@ -75261,9 +75830,7 @@ function HomeContent(): React.JSX.Element {
       ...(options.sampleInput !== undefined
         ? { sampleInput: options.sampleInput }
         : {}),
-      ...(options.rollCounters
-        ? { rollCounters: options.rollCounters }
-        : {}),
+      ...(options.rollCounters ? { rollCounters: options.rollCounters } : {}),
       ...(options.wildcardValues
         ? { wildcardValues: options.wildcardValues }
         : {}),
@@ -75288,12 +75855,14 @@ function HomeContent(): React.JSX.Element {
     if (!expression.ok) {
       return {
         kind: "error",
-        error: expression.error?.message ?? "Prompt expression could not be resolved.",
+        error:
+          expression.error?.message ??
+          "Prompt expression could not be resolved.",
       };
     }
-    const promptTraces = flattenPromptExpressionTraces(expression.traces).filter(
-      (trace) => trace.kind === "prompt",
-    );
+    const promptTraces = flattenPromptExpressionTraces(
+      expression.traces,
+    ).filter((trace) => trace.kind === "prompt");
     if (promptTraces.length === 0) return { kind: "none" };
 
     const builtInResolution = resolveBuiltInPromptWildcardInvocations(
@@ -75304,11 +75873,14 @@ function HomeContent(): React.JSX.Element {
       builtInResolution.replacements,
     );
     const firstTrace = promptTraces[0]!;
-    const firstCommand = commandCenterPromptPicks.find(
-      (command) => command.id === firstTrace.definitionId,
-    ) ?? commandCenterPromptPicks.find(
-      (command) => command.name.toLowerCase() === firstTrace.name.toLowerCase(),
-    );
+    const firstCommand =
+      commandCenterPromptPicks.find(
+        (command) => command.id === firstTrace.definitionId,
+      ) ??
+      commandCenterPromptPicks.find(
+        (command) =>
+          command.name.toLowerCase() === firstTrace.name.toLowerCase(),
+      );
     const runId =
       typeof crypto !== "undefined" && typeof crypto.randomUUID === "function"
         ? crypto.randomUUID()
@@ -75326,23 +75898,24 @@ function HomeContent(): React.JSX.Element {
           )
           .sort((a, b) => b.path.length - a.path.length)[0];
         return {
-        commandId:
-          trace.definitionId ??
-          commandCenterPromptPicks.find(
-            (command) => command.name.toLowerCase() === trace.name.toLowerCase(),
-          )?.id ??
-          trace.name,
-        name: trace.name,
-        invocation: trace.invocation,
-        sourceStart: trace.sourceStart,
-        sourceEnd: trace.sourceEnd,
-        resolvedPrompt: trace.value,
-        runId: promptRunIdByPath.get(trace.path),
-        ...(parentPrompt
-          ? { parentRunId: promptRunIdByPath.get(parentPrompt.path) }
-          : {}),
-        depth: trace.depth,
-        sourceKind: "prompt",
+          commandId:
+            trace.definitionId ??
+            commandCenterPromptPicks.find(
+              (command) =>
+                command.name.toLowerCase() === trace.name.toLowerCase(),
+            )?.id ??
+            trace.name,
+          name: trace.name,
+          invocation: trace.invocation,
+          sourceStart: trace.sourceStart,
+          sourceEnd: trace.sourceEnd,
+          resolvedPrompt: trace.value,
+          runId: promptRunIdByPath.get(trace.path),
+          ...(parentPrompt
+            ? { parentRunId: promptRunIdByPath.get(parentPrompt.path) }
+            : {}),
+          depth: trace.depth,
+          sourceKind: "prompt",
         };
       },
     );
@@ -75547,9 +76120,8 @@ function HomeContent(): React.JSX.Element {
   } {
     const expression = resolveCommandCenterExpression(rawDraft);
     const resolvedExpression = expression.ok ? expression.finalText : rawDraft;
-    const builtInResolution = resolveBuiltInPromptWildcardInvocations(
-      resolvedExpression,
-    );
+    const builtInResolution =
+      resolveBuiltInPromptWildcardInvocations(resolvedExpression);
     const resolution = clearLeftoverPromptShortcutVarPassthrough(
       builtInResolution.prompt,
       builtInResolution.replacements,
@@ -75592,7 +76164,9 @@ function HomeContent(): React.JSX.Element {
    * This is deliberately async: scripted wildcard resolution is server-owned,
    * and any truly model-filled slots must use the selected Prompt Center route.
    */
-  async function expandComposerDraftOperative(rawDraft: string): Promise<string> {
+  async function expandComposerDraftOperative(
+    rawDraft: string,
+  ): Promise<string> {
     if (!rawDraft.trim()) return rawDraft;
     const expression = resolveCommandCenterExpression(rawDraft);
     if (!expression.ok) {
@@ -75627,9 +76201,7 @@ function HomeContent(): React.JSX.Element {
       body: JSON.stringify({
         prompt: scripted.prompt,
         preferredProvider: settings?.preferredProvider ?? "local",
-        ...(modelChoice?.modelId
-          ? { modelOverride: modelChoice.modelId }
-          : {}),
+        ...(modelChoice?.modelId ? { modelOverride: modelChoice.modelId } : {}),
       }),
     });
     return resolved.prompt;
@@ -75784,7 +76356,9 @@ function HomeContent(): React.JSX.Element {
             >
               {resolvingSnapshot ? "Resolving…" : "Resolve & Save"}
             </button>
-            <small>Replaces reusable expressions with this concrete draw.</small>
+            <small>
+              Replaces reusable expressions with this concrete draw.
+            </small>
           </div>
         ) : null}
       </div>
@@ -82252,7 +82826,7 @@ function HomeContent(): React.JSX.Element {
     if (botPanelView === "defaultCustomize") {
       return DEFAULT_PRISM_VOICE_PREVIEW_LINES[
         normalizeBotAudioVoiceProfileV1(newBotAudioVoiceProfile).baseVoiceId
-      ];
+      ] ?? VOICE_PREVIEW_TEXT;
     }
     const authoredPreviewLine = newBotVoicePreviewLine.trim();
     if (authoredPreviewLine) return authoredPreviewLine;
@@ -91673,8 +92247,9 @@ function HomeContent(): React.JSX.Element {
         settings.prismDefaultBotFaceThinkingFrames,
       ) ?? DEFAULT_BOT_FACE_STYLE.thinkingFrames;
     const seededFaceThinkingScale =
-      normalizeBotFaceThinkingScale(settings.prismDefaultBotFaceThinkingScale) ??
-      DEFAULT_BOT_FACE_STYLE.thinkingScale;
+      normalizeBotFaceThinkingScale(
+        settings.prismDefaultBotFaceThinkingScale,
+      ) ?? DEFAULT_BOT_FACE_STYLE.thinkingScale;
     const seededFaceThinkingOffsetX =
       normalizeBotFaceThinkingOffsetX(
         settings.prismDefaultBotFaceThinkingOffsetX,
@@ -91930,9 +92505,9 @@ function HomeContent(): React.JSX.Element {
           faceBlinkOffsetY: newBotFaceBlinkOffsetY,
           faceBlinkRotationDeg: newBotFaceBlinkRotationDeg,
           faceThinkingFrames: newBotFaceThinkingFrames,
-      faceThinkingScale: newBotFaceThinkingScale,
-      faceThinkingOffsetX: newBotFaceThinkingOffsetX,
-      faceThinkingOffsetY: newBotFaceThinkingOffsetY,
+          faceThinkingScale: newBotFaceThinkingScale,
+          faceThinkingOffsetX: newBotFaceThinkingOffsetX,
+          faceThinkingOffsetY: newBotFaceThinkingOffsetY,
           avatarDetails: newBotAvatarDetails,
           voicePreviewLine: newBotVoicePreviewLine || null,
           authoredAudioVoiceProfile: createdAudioVoiceProfile,
@@ -92069,9 +92644,9 @@ function HomeContent(): React.JSX.Element {
           faceBlinkOffsetY: faceStyle.blinkOffsetY,
           faceBlinkRotationDeg: faceStyle.blinkRotationDeg,
           faceThinkingFrames: faceStyle.thinkingFrames,
-      faceThinkingScale: faceStyle.thinkingScale,
-      faceThinkingOffsetX: faceStyle.thinkingOffsetX,
-      faceThinkingOffsetY: faceStyle.thinkingOffsetY,
+          faceThinkingScale: faceStyle.thinkingScale,
+          faceThinkingOffsetX: faceStyle.thinkingOffsetX,
+          faceThinkingOffsetY: faceStyle.thinkingOffsetY,
           avatarDetails: resolveBotAvatarDetails(bot),
           voicePreviewLine: bot.voice_preview_line ?? null,
           authoredAudioVoiceProfile: resolveBotAudioVoiceProfileV1(
@@ -92167,9 +92742,9 @@ function HomeContent(): React.JSX.Element {
           faceBlinkOffsetY: newBotFaceBlinkOffsetY,
           faceBlinkRotationDeg: newBotFaceBlinkRotationDeg,
           faceThinkingFrames: newBotFaceThinkingFrames,
-      faceThinkingScale: newBotFaceThinkingScale,
-      faceThinkingOffsetX: newBotFaceThinkingOffsetX,
-      faceThinkingOffsetY: newBotFaceThinkingOffsetY,
+          faceThinkingScale: newBotFaceThinkingScale,
+          faceThinkingOffsetX: newBotFaceThinkingOffsetX,
+          faceThinkingOffsetY: newBotFaceThinkingOffsetY,
           avatarDetails: newBotAvatarDetails,
           authoredAudioVoiceProfile: newBotAudioVoiceProfile,
           powers: newBotPowers,
@@ -92239,9 +92814,9 @@ function HomeContent(): React.JSX.Element {
         faceBlinkOffsetY: newBotFaceBlinkOffsetY,
         faceBlinkRotationDeg: newBotFaceBlinkRotationDeg,
         faceThinkingFrames: newBotFaceThinkingFrames,
-      faceThinkingScale: newBotFaceThinkingScale,
-      faceThinkingOffsetX: newBotFaceThinkingOffsetX,
-      faceThinkingOffsetY: newBotFaceThinkingOffsetY,
+        faceThinkingScale: newBotFaceThinkingScale,
+        faceThinkingOffsetX: newBotFaceThinkingOffsetX,
+        faceThinkingOffsetY: newBotFaceThinkingOffsetY,
         avatarDetails: newBotAvatarDetails,
         profilePictureImageId: null,
         audioVoiceProfile: newBotAudioVoiceProfile,
@@ -95929,9 +96504,9 @@ function HomeContent(): React.JSX.Element {
             faceBlinkOffsetY: newBotFaceBlinkOffsetY,
             faceBlinkRotationDeg: newBotFaceBlinkRotationDeg,
             faceThinkingFrames: newBotFaceThinkingFrames,
-      faceThinkingScale: newBotFaceThinkingScale,
-      faceThinkingOffsetX: newBotFaceThinkingOffsetX,
-      faceThinkingOffsetY: newBotFaceThinkingOffsetY,
+            faceThinkingScale: newBotFaceThinkingScale,
+            faceThinkingOffsetX: newBotFaceThinkingOffsetX,
+            faceThinkingOffsetY: newBotFaceThinkingOffsetY,
             audioVoiceProfile: newBotAudioVoiceProfile,
           }),
           signal,
@@ -95991,9 +96566,9 @@ function HomeContent(): React.JSX.Element {
         faceBlinkOffsetY: newBotFaceBlinkOffsetY,
         faceBlinkRotationDeg: newBotFaceBlinkRotationDeg,
         faceThinkingFrames: newBotFaceThinkingFrames,
-      faceThinkingScale: newBotFaceThinkingScale,
-      faceThinkingOffsetX: newBotFaceThinkingOffsetX,
-      faceThinkingOffsetY: newBotFaceThinkingOffsetY,
+        faceThinkingScale: newBotFaceThinkingScale,
+        faceThinkingOffsetX: newBotFaceThinkingOffsetX,
+        faceThinkingOffsetY: newBotFaceThinkingOffsetY,
         avatarDetails: null,
         profilePictureImageId: null,
         audioVoiceProfile: normalizeBotAudioVoiceProfileV1(
@@ -96160,9 +96735,9 @@ function HomeContent(): React.JSX.Element {
         faceBlinkOffsetY: newBotFaceBlinkOffsetY,
         faceBlinkRotationDeg: newBotFaceBlinkRotationDeg,
         faceThinkingFrames: newBotFaceThinkingFrames,
-      faceThinkingScale: newBotFaceThinkingScale,
-      faceThinkingOffsetX: newBotFaceThinkingOffsetX,
-      faceThinkingOffsetY: newBotFaceThinkingOffsetY,
+        faceThinkingScale: newBotFaceThinkingScale,
+        faceThinkingOffsetX: newBotFaceThinkingOffsetX,
+        faceThinkingOffsetY: newBotFaceThinkingOffsetY,
         avatarDetails: newBotAvatarDetails,
         profilePictureImageId: newBotProfilePictureImageId,
         audioVoiceProfile: newBotAudioVoiceProfile,
@@ -96249,9 +96824,9 @@ function HomeContent(): React.JSX.Element {
         faceBlinkOffsetY: newBotFaceBlinkOffsetY,
         faceBlinkRotationDeg: newBotFaceBlinkRotationDeg,
         faceThinkingFrames: newBotFaceThinkingFrames,
-      faceThinkingScale: newBotFaceThinkingScale,
-      faceThinkingOffsetX: newBotFaceThinkingOffsetX,
-      faceThinkingOffsetY: newBotFaceThinkingOffsetY,
+        faceThinkingScale: newBotFaceThinkingScale,
+        faceThinkingOffsetX: newBotFaceThinkingOffsetX,
+        faceThinkingOffsetY: newBotFaceThinkingOffsetY,
         avatarDetails: newBotAvatarDetails,
         profilePictureImageId: newBotProfilePictureImageId,
         audioVoiceProfile: newBotAudioVoiceProfile,
@@ -102149,9 +102724,7 @@ function HomeContent(): React.JSX.Element {
           }
           aria-label="Open settings"
           data-glyph-tooltip={actionTooltip("settings", "Settings")}
-          data-tutorial-target={
-            view === "chat" ? "zen-atmosphere" : undefined
-          }
+          data-tutorial-target={view === "chat" ? "zen-atmosphere" : undefined}
           disabled={actionDisabled("settings")}
         >
           <WrenchGlyph />
@@ -107993,8 +108566,8 @@ function HomeContent(): React.JSX.Element {
                 : "";
             const selectedPromptUsesVar = Boolean(
               selectedCommand &&
-                !selectedCommand.readOnly &&
-                promptExpressionContainsVar(selectedCommandText),
+              !selectedCommand.readOnly &&
+              promptExpressionContainsVar(selectedCommandText),
             );
             const commandCenterPreview = previewSource
               ? resolvePromptExpression(previewSource, {
@@ -108019,8 +108592,7 @@ function HomeContent(): React.JSX.Element {
               ...new Set(
                 commandCenterPreview?.pendingWildcards
                   .filter(
-                    (pending) =>
-                      !builtInPreviewWildcardKeys.has(pending.key),
+                    (pending) => !builtInPreviewWildcardKeys.has(pending.key),
                   )
                   .map((pending) => pending.key) ?? [],
               ),
@@ -108035,7 +108607,9 @@ function HomeContent(): React.JSX.Element {
               "";
             const selectedLegacyChoice =
               findLegacyPromptChoiceOccurrences(selectedCommandText)[0] ?? null;
-            const rerollCommandCenterPreviewOccurrence = (path: string): void => {
+            const rerollCommandCenterPreviewOccurrence = (
+              path: string,
+            ): void => {
               setCommandCenterPreviewRollCounters((current) => ({
                 ...current,
                 [path]: (current[path] ?? 0) + 1,
@@ -108061,80 +108635,83 @@ function HomeContent(): React.JSX.Element {
                 setCommandCenterPreviewNotice("Copy failed");
               }
             };
-            const resolveCommandCenterPreviewAiSlots = async (): Promise<void> => {
-              if (
-                !commandCenterPreview?.ok ||
-                commandCenterPreviewModelPendingSlots.length === 0 ||
-                commandCenterPreviewKnownPendingWildcards.length > 0 ||
-                commandCenterPreviewBusy
-              ) {
-                return;
-              }
-              setCommandCenterPreviewBusy(true);
-              setCommandCenterPreviewNotice(null);
-              try {
-                const modelChoice = parseCommandCenterModelChoice(
-                  commandCenterPreferredModel,
-                );
-                const response = await api<{
-                  ok: true;
-                  prompt: string;
-                  provider: string;
-                  model: string;
-                  replacements: NonNullable<
-                    PromptShortcutMetadata["wildcardReplacements"]
-                  >;
-                }>("/api/prompt-center/preview/resolve", {
-                  method: "POST",
-                  body: JSON.stringify({
-                    prompt: commandCenterPreview.finalText,
-                    preferredProvider: settings?.preferredProvider ?? "local",
-                    ...(modelChoice?.modelId
-                      ? { modelOverride: modelChoice.modelId }
-                      : {}),
-                  }),
-                });
-                const replacementValuesByKey = new Map<string, string[]>();
-                for (const replacement of response.replacements ?? []) {
-                  const values =
-                    replacementValuesByKey.get(replacement.key) ?? [];
-                  values.push(replacement.value);
-                  replacementValuesByKey.set(replacement.key, values);
+            const resolveCommandCenterPreviewAiSlots =
+              async (): Promise<void> => {
+                if (
+                  !commandCenterPreview?.ok ||
+                  commandCenterPreviewModelPendingSlots.length === 0 ||
+                  commandCenterPreviewKnownPendingWildcards.length > 0 ||
+                  commandCenterPreviewBusy
+                ) {
+                  return;
                 }
-                const resolvedByPath: Record<string, string> = {};
-                for (const pending of commandCenterPreview.pendingWildcards) {
-                  if (builtInPreviewWildcardKeys.has(pending.key)) continue;
-                  const values = replacementValuesByKey.get(pending.key);
-                  const value = values?.shift();
-                  if (value !== undefined) resolvedByPath[pending.path] = value;
+                setCommandCenterPreviewBusy(true);
+                setCommandCenterPreviewNotice(null);
+                try {
+                  const modelChoice = parseCommandCenterModelChoice(
+                    commandCenterPreferredModel,
+                  );
+                  const response = await api<{
+                    ok: true;
+                    prompt: string;
+                    provider: string;
+                    model: string;
+                    replacements: NonNullable<
+                      PromptShortcutMetadata["wildcardReplacements"]
+                    >;
+                  }>("/api/prompt-center/preview/resolve", {
+                    method: "POST",
+                    body: JSON.stringify({
+                      prompt: commandCenterPreview.finalText,
+                      preferredProvider: settings?.preferredProvider ?? "local",
+                      ...(modelChoice?.modelId
+                        ? { modelOverride: modelChoice.modelId }
+                        : {}),
+                    }),
+                  });
+                  const replacementValuesByKey = new Map<string, string[]>();
+                  for (const replacement of response.replacements ?? []) {
+                    const values =
+                      replacementValuesByKey.get(replacement.key) ?? [];
+                    values.push(replacement.value);
+                    replacementValuesByKey.set(replacement.key, values);
+                  }
+                  const resolvedByPath: Record<string, string> = {};
+                  for (const pending of commandCenterPreview.pendingWildcards) {
+                    if (builtInPreviewWildcardKeys.has(pending.key)) continue;
+                    const values = replacementValuesByKey.get(pending.key);
+                    const value = values?.shift();
+                    if (value !== undefined)
+                      resolvedByPath[pending.path] = value;
+                  }
+                  if (Object.keys(resolvedByPath).length > 0) {
+                    setCommandCenterPreviewWildcardValues((current) => ({
+                      ...current,
+                      ...resolvedByPath,
+                    }));
+                  }
+                  setCommandCenterPreviewAiResult(response.prompt);
+                  setCommandCenterPreviewNotice(
+                    `Resolved with ${response.provider} · ${response.model}`,
+                  );
+                } catch (error) {
+                  setCommandCenterPreviewNotice(
+                    error instanceof Error
+                      ? error.message
+                      : "AI slots could not be resolved.",
+                  );
+                } finally {
+                  setCommandCenterPreviewBusy(false);
                 }
-                if (Object.keys(resolvedByPath).length > 0) {
-                  setCommandCenterPreviewWildcardValues((current) => ({
-                    ...current,
-                    ...resolvedByPath,
-                  }));
-                }
-                setCommandCenterPreviewAiResult(response.prompt);
-                setCommandCenterPreviewNotice(
-                  `Resolved with ${response.provider} · ${response.model}`,
-                );
-              } catch (error) {
-                setCommandCenterPreviewNotice(
-                  error instanceof Error
-                    ? error.message
-                    : "AI slots could not be resolved.",
-                );
-              } finally {
-                setCommandCenterPreviewBusy(false);
-              }
-            };
+              };
             const convertSelectedLegacyChoiceToDeck = (): void => {
               if (!selectedCommandDraft || !selectedLegacyChoice) return;
               const normalizedValues = selectedLegacyChoice.values.map(
                 normalizeWildcardDeckValueKey,
               );
               const exactDeck = commandCenterWildcardDecks.find((deck) => {
-                if (deck.values.length !== normalizedValues.length) return false;
+                if (deck.values.length !== normalizedValues.length)
+                  return false;
                 return deck.values.every(
                   (value, index) =>
                     normalizeWildcardDeckValueKey(value) ===
@@ -108189,9 +108766,7 @@ function HomeContent(): React.JSX.Element {
                 command: `${draft.command.slice(0, selectedLegacyChoice.start)}!${deckName}${draft.command.slice(selectedLegacyChoice.end)}`,
               }));
               setCommandCenterPreviewNotice(
-                exactDeck
-                  ? `Reused !${deckName}`
-                  : `Created !${deckName}`,
+                exactDeck ? `Reused !${deckName}` : `Created !${deckName}`,
               );
             };
             const updateSelectedCommandDraft = (
@@ -108629,7 +109204,10 @@ function HomeContent(): React.JSX.Element {
                     <p>{selectedCommand.command}</p>
                     {selectedCommand.aliases.length > 0 ? (
                       <p className={styles.promptCenterPreviewPending}>
-                        Aliases: {selectedCommand.aliases.map((alias) => `$${alias}`).join(", ")}
+                        Aliases:{" "}
+                        {selectedCommand.aliases
+                          .map((alias) => `$${alias}`)
+                          .join(", ")}
                       </p>
                     ) : null}
                   </section>
@@ -108665,7 +109243,9 @@ function HomeContent(): React.JSX.Element {
                       key={`${pending.path}:${commandCenterPreviewRollCounters[pending.path] ?? 0}`}
                       slotKey={pending.key}
                       occurrencePath={pending.path}
-                      reroll={commandCenterPreviewRollCounters[pending.path] ?? 0}
+                      reroll={
+                        commandCenterPreviewRollCounters[pending.path] ?? 0
+                      }
                       onResolved={acceptCommandCenterPreviewWildcard}
                     />
                   ))}
@@ -108676,7 +109256,9 @@ function HomeContent(): React.JSX.Element {
                         type="text"
                         value={commandCenterPreviewSampleInput}
                         onChange={(event) => {
-                          setCommandCenterPreviewSampleInput(event.currentTarget.value);
+                          setCommandCenterPreviewSampleInput(
+                            event.currentTarget.value,
+                          );
                           setCommandCenterPreviewAiResult(null);
                           setCommandCenterPreviewNotice(null);
                         }}
@@ -108685,7 +109267,10 @@ function HomeContent(): React.JSX.Element {
                     </label>
                   ) : null}
                   {promptDependencyIssue || promptDependencyCycle ? (
-                    <p className={styles.promptCenterPreviewDiagnostic} role="alert">
+                    <p
+                      className={styles.promptCenterPreviewDiagnostic}
+                      role="alert"
+                    >
                       {promptDependencyIssue?.message ??
                         `Cycle: ${promptDependencyCycle?.labels.join(" → ")}`}
                     </p>
@@ -108697,24 +109282,33 @@ function HomeContent(): React.JSX.Element {
                       {commandCenterPreviewResult || "(empty result)"}
                     </pre>
                   ) : (
-                    <p className={styles.promptCenterPreviewDiagnostic} role="alert">
-                      {commandCenterPreview?.error?.message ?? "Nothing to preview yet."}
+                    <p
+                      className={styles.promptCenterPreviewDiagnostic}
+                      role="alert"
+                    >
+                      {commandCenterPreview?.error?.message ??
+                        "Nothing to preview yet."}
                     </p>
                   )}
                   {commandCenterPreviewModelPendingSlots.length ? (
                     <div className={styles.promptCenterPreviewPending}>
                       <span>
-                        Pending AI slots: {commandCenterPreviewModelPendingSlots.join(", ")}
+                        Pending AI slots:{" "}
+                        {commandCenterPreviewModelPendingSlots.join(", ")}
                       </span>
                       <button
                         type="button"
-                        onClick={() => void resolveCommandCenterPreviewAiSlots()}
+                        onClick={() =>
+                          void resolveCommandCenterPreviewAiSlots()
+                        }
                         disabled={
                           commandCenterPreviewBusy ||
                           commandCenterPreviewKnownPendingWildcards.length > 0
                         }
                       >
-                        {commandCenterPreviewBusy ? "Resolving…" : "Resolve AI slots"}
+                        {commandCenterPreviewBusy
+                          ? "Resolving…"
+                          : "Resolve AI slots"}
                       </button>
                     </div>
                   ) : null}
@@ -108747,7 +109341,10 @@ function HomeContent(): React.JSX.Element {
                     </ol>
                   ) : null}
                   {commandCenterPreviewNotice ? (
-                    <p className={styles.promptCenterPreviewNotice} role="status">
+                    <p
+                      className={styles.promptCenterPreviewNotice}
+                      role="status"
+                    >
                       {commandCenterPreviewNotice}
                     </p>
                   ) : null}
@@ -108992,9 +109589,9 @@ function HomeContent(): React.JSX.Element {
                         ? "Built-in"
                         : promptHasCycle
                           ? "Cycle · repair before use"
-                        : promptNeedsDetails
-                          ? "Needs prompt text"
-                          : "Custom"}
+                          : promptNeedsDetails
+                            ? "Needs prompt text"
+                            : "Custom"}
                       {command.aliases.length > 0
                         ? ` · ${command.aliases.length} aliases`
                         : ""}
@@ -109675,7 +110272,9 @@ function HomeContent(): React.JSX.Element {
                             ) : null}
                             <button
                               type="button"
-                              disabled={selectedCommandDependencyPaths.length > 0}
+                              disabled={
+                                selectedCommandDependencyPaths.length > 0
+                              }
                               title={
                                 selectedCommandDependencyPaths.length > 0
                                   ? `Referenced by ${selectedCommandDependencyPaths[0]!.labels.join(" → ")}`
@@ -109731,7 +110330,7 @@ function HomeContent(): React.JSX.Element {
                                     const aliases =
                                       composerTrueWildcardSlotDisplayTokens(
                                         command,
-                                    );
+                                      );
                                     return (
                                       <div
                                         key={command.id}
@@ -109771,13 +110370,13 @@ function HomeContent(): React.JSX.Element {
                                             {aliases}
                                           </span>
                                         </button>
-                                        {composerTrueWildcardSlotKey(command) ? (
+                                        {composerTrueWildcardSlotKey(
+                                          command,
+                                        ) ? (
                                           <PromptCenterWildcardSampleChip
-                                            slotKey={
-                                              composerTrueWildcardSlotKey(
-                                                command,
-                                              )!
-                                            }
+                                            slotKey={composerTrueWildcardSlotKey(
+                                              command,
+                                            )!}
                                             token={token}
                                           />
                                         ) : null}
@@ -110230,7 +110829,8 @@ function HomeContent(): React.JSX.Element {
                     >
                       <span className={styles.commandHelpNames}>
                         <span className={styles.commandHelpSlash}>
-                          {invocationPrefix}{command.name}
+                          {invocationPrefix}
+                          {command.name}
                         </span>
                         {aliases.length > 0 ? (
                           <span className={styles.commandHelpAliases}>
@@ -111215,10 +111815,10 @@ function HomeContent(): React.JSX.Element {
                               label="About Zen wallpaper settings"
                             >
                               Controls whether this Zen conversation uses
-                              Atmosphere, plus wallpaper model choices,
-                              opacity, style, and generation cadence. Blank bot
-                              gradients are the fallback look before a wallpaper
-                              image exists.
+                              Atmosphere, plus wallpaper model choices, opacity,
+                              style, and generation cadence. Blank bot gradients
+                              are the fallback look before a wallpaper image
+                              exists.
                             </PanelSectionInfo>
                           </div>
                         </header>
@@ -111257,7 +111857,9 @@ function HomeContent(): React.JSX.Element {
                               }}
                             />
                             <span className={styles.controlLabelWithInfo}>
-                              <span>Enable Atmosphere for this conversation</span>
+                              <span>
+                                Enable Atmosphere for this conversation
+                              </span>
                               <PanelSectionInfo
                                 id="settings-control-info-zen-atmosphere-enabled"
                                 label="About enabling Atmosphere"
@@ -111297,8 +111899,8 @@ function HomeContent(): React.JSX.Element {
                                 : "Generate Atmosphere now"}
                             </button>
                             <small>
-                              Same action as $atmosphere. Needs at least one
-                              Zen message in this conversation.
+                              Same action as $atmosphere. Needs at least one Zen
+                              message in this conversation.
                             </small>
                           </div>
                         </div>
@@ -111640,88 +112242,32 @@ function HomeContent(): React.JSX.Element {
                             </h4>
                           </div>
                           <div className={styles.settingsSectionHeaderAside}>
-                            <small>Auto is always the default.</small>
+                            <small>Automatic and unskippable.</small>
                             <PanelSectionInfo
                               id="settings-section-info-debate-jury"
                               label="About Jury deliberation"
                             >
-                              When formal deliberation begins, Debate pauses for
-                              a short choice. Auto keeps the current camera and
-                              lets the Jury work quickly off-camera; Participate
-                              opens the Jury chamber when your role allows it;
-                              Skip moves directly to final ballots.
+                              The Moderator formally hands the proceeding to the
+                              Jury. Debate then enters the chamber automatically,
+                              prepares all five final reasons behind sealed
+                              deliberation, and presents every ballot in order.
                             </PanelSectionInfo>
                           </div>
                         </header>
-                        <div className={styles.settingsFieldGrid}>
-                          <label
-                            className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
-                          >
-                            <input
-                              type="checkbox"
-                              checked={
-                                debateJurySettings.autoDeliberationEnabled
-                              }
-                              onChange={(event) =>
-                                updateDebateJurySettings({
-                                  autoDeliberationEnabled:
-                                    event.currentTarget.checked,
-                                })
-                              }
-                            />
-                            <span>
-                              <strong>Automatically choose Auto</strong>
-                              <small>
-                                On by default. Turn this off to keep the choice
-                                open until you answer; Auto remains the primary
-                                option.
-                              </small>
-                            </span>
-                          </label>
-                          <label
-                            className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}
-                          >
-                            <span className={styles.settingsRangeHeader}>
-                              <span>
-                                <strong>Choice countdown</strong>
-                                <small>
-                                  How long Debate waits before starting fast
-                                  off-camera deliberation.
-                                </small>
-                              </span>
-                              <span className={styles.settingsRangeValue}>
-                                {Math.round(
-                                  debateJurySettings.decisionTimeoutMs / 1_000,
-                                )}
-                                s
-                              </span>
-                            </span>
-                            <input
-                              type="range"
-                              min={DEBATE_JURY_DECISION_TIMEOUT_MIN_MS}
-                              max={DEBATE_JURY_DECISION_TIMEOUT_MAX_MS}
-                              step={DEBATE_JURY_DECISION_TIMEOUT_STEP_MS}
-                              value={debateJurySettings.decisionTimeoutMs}
-                              aria-label="Jury deliberation choice countdown"
-                              onChange={(event) =>
-                                updateDebateJurySettings({
-                                  decisionTimeoutMs: Number(
-                                    event.currentTarget.value,
-                                  ),
-                                })
-                              }
-                            />
-                          </label>
-                        </div>
+                        <p className={styles.settingsSectionHint}>
+                          Pause and Resume remain available in the Jury chamber,
+                          but they are silent. If a ballot line is interrupted,
+                          its saved recording restarts from the beginning when
+                          playback resumes.
+                        </p>
                       </section>
                     </div>
 
                     <div className={styles.settingsSaveDock}>
                       <div className={styles.settingsDockRow}>
                         <span>
-                          Saved for this account on this device. Jury camera
-                          cuts remain manual; Judge / Moderator sessions stay on
-                          Auto.
+                          Jury deliberation follows one consistent automatic
+                          ceremony in every Debate.
                         </span>
                         <div className={styles.settingsDockActions}>
                           <button
@@ -112582,13 +113128,14 @@ function HomeContent(): React.JSX.Element {
                                       )
                                     }
                                   />
-                                  Give local models simulated effort
+                                  Give unsupported models simulated effort
                                 </label>
                                 <small className={styles.settingsHostHint}>
-                                  Local models can use Prism&apos;s simulated
-                                  effort across every conversational mode;
-                                  online models use native effort only when the
-                                  provider supports it.
+                                  Models without native effort can use
+                                  Prism&apos;s private multi-call simulation across
+                                  conversational modes. Online models make
+                                  multiple provider calls and may increase
+                                  usage or cost; native effort remains native.
                                 </small>
                                 <button
                                   type="button"
@@ -112643,14 +113190,18 @@ function HomeContent(): React.JSX.Element {
                               {PRISM_MODEL_VARIABILITY_NOTICE}
                             </p>
                             <div className={styles.settingsEffortProfiles}>
-                              <div className={styles.settingsEffortProfilesHeader}>
+                              <div
+                                className={styles.settingsEffortProfilesHeader}
+                              >
                                 <span>
                                   Saved effort profiles
                                   <small>
-                                    {settings.modelEffortPreferences.length === 0
+                                    {settings.modelEffortPreferences.length ===
+                                    0
                                       ? "No model overrides"
                                       : `${settings.modelEffortPreferences.length} model${
-                                          settings.modelEffortPreferences.length === 1
+                                          settings.modelEffortPreferences
+                                            .length === 1
                                             ? ""
                                             : "s"
                                         } customized`}
@@ -112668,7 +113219,9 @@ function HomeContent(): React.JSX.Element {
                                 </button>
                               </div>
                               {settings.modelEffortPreferences.length > 0 ? (
-                                <div className={styles.settingsEffortProfileList}>
+                                <div
+                                  className={styles.settingsEffortProfileList}
+                                >
                                   {settings.modelEffortPreferences.map(
                                     (preference) => (
                                       <div
@@ -112676,19 +113229,25 @@ function HomeContent(): React.JSX.Element {
                                           preference.provider,
                                           preference.modelId,
                                         )}
-                                        className={styles.settingsEffortProfileRow}
+                                        className={
+                                          styles.settingsEffortProfileRow
+                                        }
                                         data-provider={preference.provider}
                                       >
                                         <span>
                                           <strong>
-                                            {modelLabelFromId(preference.modelId)}
+                                            {modelLabelFromId(
+                                              preference.modelId,
+                                            )}
                                           </strong>
                                           <small>{preference.provider}</small>
                                         </span>
                                         <output>
-                                          {REASONING_EFFORT_LABELS[
-                                            preference.effort
-                                          ]}
+                                          {
+                                            REASONING_EFFORT_LABELS[
+                                              preference.effort
+                                            ]
+                                          }
                                         </output>
                                         <button
                                           type="button"
@@ -112708,7 +113267,7 @@ function HomeContent(): React.JSX.Element {
                                                         preference.provider,
                                                       modelId:
                                                         preference.modelId,
-                                                      simulatedLocalEnabled:
+                                                      simulatedEffortEnabled:
                                                         settings.experimentalAllModelEffortEnabled ===
                                                         true,
                                                     },
@@ -113036,16 +113595,16 @@ function HomeContent(): React.JSX.Element {
                                       Saved Premium voice
                                     </option>
                                   ) : null}
-                                  {elevenLabsVoiceCatalog.length > 0 ? (
-                                    elevenLabsVoiceCatalog.map((voice) => (
-                                      <option
-                                        key={voice.voiceId}
-                                        value={voice.voiceId}
-                                      >
-                                        {voice.name}
-                                      </option>
-                                    ))
-                                  ) : null}
+                                  {elevenLabsVoiceCatalog.length > 0
+                                    ? elevenLabsVoiceCatalog.map((voice) => (
+                                        <option
+                                          key={voice.voiceId}
+                                          value={voice.voiceId}
+                                        >
+                                          {voice.name}
+                                        </option>
+                                      ))
+                                    : null}
                                 </select>
                                 <small>
                                   Used for your Zen messages on AUTO and ONLINE
@@ -113078,8 +113637,7 @@ function HomeContent(): React.JSX.Element {
                                   id="settings-player-local-voice"
                                   value={selectedPlayerLocalVoiceValue}
                                   onChange={(event) => {
-                                    const selection =
-                                      event.currentTarget.value;
+                                    const selection = event.currentTarget.value;
                                     setSettings((previous) => {
                                       if (!previous) return previous;
                                       return {
@@ -113116,8 +113674,9 @@ function HomeContent(): React.JSX.Element {
                                 <small>
                                   Used in LOCAL and whenever Premium cannot
                                   play. Both player voices stay clean—no chorus,
-                                  pitch, texture, or bot effects. Coffee, Signal,
-                                  and Debate keep the Default PRISM avatar voice.
+                                  pitch, texture, or bot effects. Coffee,
+                                  Signal, and Debate keep the Default PRISM
+                                  avatar voice.
                                 </small>
                                 <button
                                   type="button"
@@ -113304,6 +113863,88 @@ function HomeContent(): React.JSX.Element {
                                 Read or print EULA version {PRISM_EULA_VERSION}.
                               </span>
                             </a>
+                            <div
+                              className={styles.settingsCredits}
+                              data-settings-about-credits="true"
+                            >
+                              <header className={styles.settingsCreditsHeader}>
+                                <span>Credits</span>
+                                <h5>Made with many hands</h5>
+                                <p>
+                                  Frameworks, engines, resources, and assets
+                                  that help make PRISM possible.
+                                </p>
+                              </header>
+                              <div className={styles.settingsCreditsGroups}>
+                                {ABOUT_CREDIT_GROUPS.map((group) => (
+                                  <details
+                                    className={styles.settingsCreditsGroup}
+                                    key={group.id}
+                                  >
+                                    <summary>
+                                      <span>
+                                        <strong>{group.title}</strong>
+                                        <small>{group.description}</small>
+                                      </span>
+                                      <em>{group.credits.length}</em>
+                                    </summary>
+                                    <div
+                                      className={styles.settingsCreditsList}
+                                    >
+                                      {group.credits.map((credit) => {
+                                        const content = (
+                                          <>
+                                            <span
+                                              className={
+                                                styles.settingsCreditCopy
+                                              }
+                                            >
+                                              <strong>{credit.name}</strong>
+                                              <small>
+                                                {credit.description}
+                                              </small>
+                                            </span>
+                                            {credit.license ? (
+                                              <em>{credit.license}</em>
+                                            ) : null}
+                                          </>
+                                        );
+                                        return credit.href ? (
+                                          <a
+                                            className={
+                                              styles.settingsCreditItem
+                                            }
+                                            href={credit.href}
+                                            key={credit.id}
+                                            target="_blank"
+                                            rel="noreferrer"
+                                          >
+                                            {content}
+                                          </a>
+                                        ) : (
+                                          <div
+                                            className={
+                                              styles.settingsCreditItem
+                                            }
+                                            key={credit.id}
+                                          >
+                                            {content}
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+                                  </details>
+                                ))}
+                              </div>
+                              <p className={styles.settingsCreditsFooter}>
+                                {ABOUT_CREDIT_MAINTENANCE_NOTE}
+                              </p>
+                              <p className={styles.settingsCreditsTrademark}>
+                                Product names and trademarks belong to their
+                                respective owners. Attribution does not imply
+                                endorsement.
+                              </p>
+                            </div>
                           </section>
                         )}
 
@@ -113882,12 +114523,14 @@ function HomeContent(): React.JSX.Element {
                                 )
                               }
                             />
-                            Give local models simulated effort
+                            Give unsupported models simulated effort
                           </label>
                           <small className={styles.settingsHostHint}>
-                            Local models can use Prism&apos;s simulated effort
-                            across every conversational mode; online models use
-                            native effort only when the provider supports it.
+                            Models without native effort can use Prism&apos;s
+                            private multi-call simulation across conversational
+                            modes. Online models make multiple provider calls
+                            and may increase usage or cost; native effort
+                            remains native.
                           </small>
                           <button
                             type="button"
@@ -114314,12 +114957,12 @@ function HomeContent(): React.JSX.Element {
               newBotFaceBlinkRotationDeg !==
                 editPristine.faceBlinkRotationDeg ||
               !botFaceThinkingFramesEqual(
-          newBotFaceThinkingFrames,
-          editPristine.faceThinkingFrames,
-        ) ||
-        newBotFaceThinkingScale !== editPristine.faceThinkingScale ||
-        newBotFaceThinkingOffsetX !== editPristine.faceThinkingOffsetX ||
-        newBotFaceThinkingOffsetY !== editPristine.faceThinkingOffsetY ||
+                newBotFaceThinkingFrames,
+                editPristine.faceThinkingFrames,
+              ) ||
+              newBotFaceThinkingScale !== editPristine.faceThinkingScale ||
+              newBotFaceThinkingOffsetX !== editPristine.faceThinkingOffsetX ||
+              newBotFaceThinkingOffsetY !== editPristine.faceThinkingOffsetY ||
               JSON.stringify(
                 normalizeBotAudioVoiceProfileV1(newBotAudioVoiceProfile),
               ) !==
@@ -114377,12 +115020,14 @@ function HomeContent(): React.JSX.Element {
                 newBotFaceBlinkRotationDeg !==
                   editPristine.faceBlinkRotationDeg ||
                 !botFaceThinkingFramesEqual(
-          newBotFaceThinkingFrames,
-          editPristine.faceThinkingFrames,
-        ) ||
-        newBotFaceThinkingScale !== editPristine.faceThinkingScale ||
-        newBotFaceThinkingOffsetX !== editPristine.faceThinkingOffsetX ||
-        newBotFaceThinkingOffsetY !== editPristine.faceThinkingOffsetY ||
+                  newBotFaceThinkingFrames,
+                  editPristine.faceThinkingFrames,
+                ) ||
+                newBotFaceThinkingScale !== editPristine.faceThinkingScale ||
+                newBotFaceThinkingOffsetX !==
+                  editPristine.faceThinkingOffsetX ||
+                newBotFaceThinkingOffsetY !==
+                  editPristine.faceThinkingOffsetY ||
                 !avatarDetailsEqual(
                   newBotAvatarDetails,
                   editPristine.avatarDetails,
@@ -115743,7 +116388,9 @@ function HomeContent(): React.JSX.Element {
                                 profile={botProfile}
                                 botName={profileReferenceName}
                                 studioLayer
-                                renderPickAwareComposer={renderPickAwareComposer}
+                                renderPickAwareComposer={
+                                  renderPickAwareComposer
+                                }
                                 onRandomizePersonality={
                                   applyRandomBotPersonalityDraft
                                 }
@@ -115759,7 +116406,9 @@ function HomeContent(): React.JSX.Element {
                                 open={botAiParametersModalOpen}
                                 botName={trimmedName}
                                 studioLayer
-                                renderPickAwareComposer={renderPickAwareComposer}
+                                renderPickAwareComposer={
+                                  renderPickAwareComposer
+                                }
                                 systemPrompt={newBotSystemPrompt}
                                 temperature={newBotTemperature}
                                 maxTokens={newBotMaxTokens}
@@ -116044,9 +116693,9 @@ function HomeContent(): React.JSX.Element {
                         faceBlinkOffsetY={newBotFaceBlinkOffsetY}
                         faceBlinkRotationDeg={newBotFaceBlinkRotationDeg}
                         faceThinkingFrames={newBotFaceThinkingFrames}
-                  faceThinkingScale={newBotFaceThinkingScale}
-                  faceThinkingOffsetX={newBotFaceThinkingOffsetX}
-                  faceThinkingOffsetY={newBotFaceThinkingOffsetY}
+                        faceThinkingScale={newBotFaceThinkingScale}
+                        faceThinkingOffsetX={newBotFaceThinkingOffsetX}
+                        faceThinkingOffsetY={newBotFaceThinkingOffsetY}
                         avatarDetails={newBotAvatarDetails}
                         avatarInkTemplateOwnerId={user?.id ?? "local"}
                         voicePreviewLine={newBotVoicePreviewLine}
@@ -119580,7 +120229,7 @@ function HomeContent(): React.JSX.Element {
     coffeeActiveVoiceMessageIdRef.current = message.id;
     setCoffeeLiveAvatarSpeech(null);
     voiceSynthesisAbortRef.current?.abort();
-    stopVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
+    handoffVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
     const controller = new AbortController();
     voiceSynthesisAbortRef.current = controller;
     coffeeVoicePlaybackBusyRef.current = true;
@@ -119773,6 +120422,10 @@ function HomeContent(): React.JSX.Element {
                 coffeeSessionProvider === "local" || bot?.online_enabled === 0
                   ? "builtin"
                   : voiceSelection.englishVoiceEngine;
+              const useLocalPerformanceStream =
+                voicePerformancePlanFromText(message.content).segments.some(
+                  (segment) => segment.kind === "vocal-action",
+                );
               const response = await fetch(
                 new URL("/api/voices/synthesize", window.location.origin),
                 {
@@ -119785,35 +120438,76 @@ function HomeContent(): React.JSX.Element {
                   },
                   body: JSON.stringify({
                     ...synthesisSource,
+                    performanceText: message.content,
                     mode: "english",
                     engine,
                     explicitOnlineContext: engine === "elevenlabs",
-                    includeAlignment: true,
+                    includeAlignment: !useLocalPerformanceStream,
+                    streamChunks: useLocalPerformanceStream,
                     moodKey: message.moodKey,
                     profile,
                   }),
                 },
               );
               if (!response.ok) {
-                throw new Error(
-                  `Voice playback failed (${response.status}).`,
-                );
+                throw new Error(`Voice playback failed (${response.status}).`);
               }
-              clip = await readEnglishVoiceSynthesisClip(response);
+              if (englishVoiceResponseSupportsChunkedStreaming(response)) {
+                const rawNotice = response.headers.get("x-prism-voice-notice");
+                clip = {
+                  kind: "stream",
+                  response,
+                  engineUsed: response.headers.get("x-prism-voice-engine"),
+                  modelHash: response.headers.get(
+                    "x-prism-voice-model-sha256",
+                  ),
+                  notice: rawNotice ? decodeURIComponent(rawNotice) : null,
+                };
+              } else {
+                clip = {
+                  kind: "clip",
+                  clip: await readEnglishVoiceSynthesisClip(response),
+                };
+              }
             }
             if (cancelStaleRevealVoice()) return;
+            if (clip.kind === "stream") {
+              coffeeVoiceAlignmentByMessageIdRef.current.set(message.id, null);
+              if (clip.notice) setVoicePlaybackNotice(clip.notice);
+              void enqueueChunkedEnglishVoice(
+                clip.response,
+                profile,
+                message.id,
+                settings.voiceEffectsEnabled !== false,
+                powerVoiceVolume,
+                lifecycle,
+                clip.engineUsed,
+                message.moodKey,
+                fallbackDuration,
+                undefined,
+                preSpeechBreath,
+                0,
+              ).catch((error) => {
+                if (!isAbortLikeError(error))
+                  setVoicePlaybackNotice("Coffee voice playback failed.");
+                releaseCoffeeVoicePlayback();
+                settle(null);
+              });
+              return;
+            }
+            const resolvedClip = clip.clip;
             coffeeVoiceAlignmentByMessageIdRef.current.set(
               message.id,
-              clip.alignment,
+              resolvedClip.alignment,
             );
             void enqueueEnglishVoice(
-              clip.bytes,
+              resolvedClip.bytes,
               profile,
               message.id,
               settings.voiceEffectsEnabled !== false,
               powerVoiceVolume,
               lifecycle,
-              clip.engineUsed,
+              resolvedClip.engineUsed,
               message.moodKey,
               undefined,
               preSpeechBreath,
@@ -119865,7 +120559,10 @@ function HomeContent(): React.JSX.Element {
     );
     const spokenText = extractStageDirections(text).mainText.trim();
     if (!spokenText) return null;
-    const performanceText = voicePerformanceTextFromActionCues(text);
+    const performanceText = voicePerformanceTextFromActionCues(text, {
+      leadingMarkedAction: true,
+      omitLocalFoleyTags: true,
+    });
     const displaySpokenText = getBotMentionDisplayText(spokenText);
     const englishEngine = coffeePlayerEnglishEngine({
       accountProvider: settings.preferredProvider,
@@ -119938,7 +120635,7 @@ function HomeContent(): React.JSX.Element {
     }
     coffeeActivePlayerVoiceTextRef.current = spokenText;
     voiceSynthesisAbortRef.current?.abort();
-    stopVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
+    handoffVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
     const controller = new AbortController();
     voiceSynthesisAbortRef.current = controller;
     return await new Promise<number | null>((resolve) => {
@@ -120483,7 +121180,9 @@ function HomeContent(): React.JSX.Element {
     coffeeContinueAbortRef.current?.abort();
     coffeeTurnAbortRef.current = null;
     coffeeContinueAbortRef.current = null;
-    discardCoffeeLookaheadRef.current("Coffee session operation was cancelled.");
+    discardCoffeeLookaheadRef.current(
+      "Coffee session operation was cancelled.",
+    );
   };
   const setCoffeeAutoplayPausedValue = (paused: boolean) => {
     coffeeAutoplayPausedRef.current = paused;
@@ -123437,18 +124136,15 @@ function HomeContent(): React.JSX.Element {
         }
         if (job.phase === "thinking") {
           if (!presentationHeld?.()) {
-            if (job.speakerBotId) setCoffeePendingSpeakerBotId(job.speakerBotId);
+            if (job.speakerBotId)
+              setCoffeePendingSpeakerBotId(job.speakerBotId);
             setCoffeeTurnRhythmState("botThinking");
             if (!finishResponseCue && job.speakerBotId) {
-              const responder = bots.find(
-                (bot) => bot.id === job.speakerBotId,
-              );
+              const responder = bots.find((bot) => bot.id === job.speakerBotId);
               if (responder) {
                 finishResponseCue = beginBotResponseCueGeneration({
                   bot: responder,
-                  trigger: payload.playerInterruption
-                    ? "interruption"
-                    : null,
+                  trigger: payload.playerInterruption ? "interruption" : null,
                   surface: "coffee",
                   sessionId:
                     typeof payload.conversationId === "string"
@@ -123508,10 +124204,9 @@ function HomeContent(): React.JSX.Element {
     coffeePreparedTurnRef.current = null;
     prepared.controller.abort();
     const discard = (preparationId: string) => {
-      void api(
-        `/api/turn-preparations/${encodeURIComponent(preparationId)}`,
-        { method: "DELETE" },
-      ).catch(() => undefined);
+      void api(`/api/turn-preparations/${encodeURIComponent(preparationId)}`, {
+        method: "DELETE",
+      }).catch(() => undefined);
     };
     if (prepared.preparationId) {
       discard(prepared.preparationId);
@@ -123525,8 +124220,12 @@ function HomeContent(): React.JSX.Element {
   discardCoffeeLookaheadRef.current = discardCoffeePreparedTurn;
   const prefetchCoffeePreparedVoice = (
     utterance: PreparedTurnV1["provisionalUtterances"][number],
+    signal?: AbortSignal,
   ): void => {
-    if (!settings || voicePlaybackSelectionRef.current.voiceMode !== "english") {
+    if (
+      !settings ||
+      voicePlaybackSelectionRef.current.voiceMode !== "english"
+    ) {
       return;
     }
     const bot = bots.find(
@@ -123542,11 +124241,16 @@ function HomeContent(): React.JSX.Element {
       coffeeSessionProvider === "local" || bot.online_enabled === 0
         ? "builtin"
         : voicePlaybackSelectionRef.current.englishVoiceEngine;
+    const useLocalPerformanceStream =
+      voicePerformancePlanFromText(utterance.text).segments.some(
+        (segment) => segment.kind === "vocal-action",
+      );
     const pending = fetch(
       new URL("/api/voices/synthesize", window.location.origin),
       {
         method: "POST",
         credentials: "include",
+        signal,
         headers: {
           "content-type": "application/json",
           ...authHeadersForFetch(),
@@ -123554,17 +124258,33 @@ function HomeContent(): React.JSX.Element {
         body: JSON.stringify({
           text: utterance.text,
           speakerBotId: bot.id,
+          performanceText: utterance.text,
           mode: "english",
           engine,
           explicitOnlineContext: engine === "elevenlabs",
-          includeAlignment: true,
+          includeAlignment: !useLocalPerformanceStream,
+          streamChunks: useLocalPerformanceStream,
           profile,
         }),
       },
     )
-      .then((response) =>
-        response.ok ? readEnglishVoiceSynthesisClip(response) : null,
-      )
+      .then(async (response): Promise<BotcastEnglishVoiceMedia | null> => {
+        if (!response.ok) return null;
+        if (englishVoiceResponseSupportsChunkedStreaming(response)) {
+          const rawNotice = response.headers.get("x-prism-voice-notice");
+          return {
+            kind: "stream",
+            response,
+            engineUsed: response.headers.get("x-prism-voice-engine"),
+            modelHash: response.headers.get("x-prism-voice-model-sha256"),
+            notice: rawNotice ? decodeURIComponent(rawNotice) : null,
+          };
+        }
+        return {
+          kind: "clip",
+          clip: await readEnglishVoiceSynthesisClip(response),
+        };
+      })
       .catch(() => null);
     coffeePreparedVoiceClipRef.current.set(utterance.id, pending);
     while (coffeePreparedVoiceClipRef.current.size > 12) {
@@ -123625,7 +124345,7 @@ function HomeContent(): React.JSX.Element {
         }
         if (status.preparation.phase === "ready") {
           for (const utterance of status.preparation.provisionalUtterances) {
-            prefetchCoffeePreparedVoice(utterance);
+            prefetchCoffeePreparedVoice(utterance, controller.signal);
           }
         }
         return status.preparation;
@@ -123756,8 +124476,7 @@ function HomeContent(): React.JSX.Element {
         coffeePreparedTurnRef.current = null;
       }
       let turnJob:
-        | { response: CoffeeTurnClientResponse; jobId?: string }
-        | undefined;
+        { response: CoffeeTurnClientResponse; jobId?: string } | undefined;
       if (preparedStatus?.phase === "ready") {
         try {
           const response = await api<CoffeeTurnClientResponse>(
@@ -131986,9 +132705,7 @@ function HomeContent(): React.JSX.Element {
             </header>
 
             {coffeeSessionSurfaceActive &&
-            !(
-              coffeeSessionPhase === "finished" && !coffeeReplayActive
-            ) &&
+            !(coffeeSessionPhase === "finished" && !coffeeReplayActive) &&
             coffeeConversation?.coffeeTopic?.trim() ? (
               <div
                 className={styles.coffeeSessionTopicFrame}
@@ -133527,7 +134244,7 @@ function HomeContent(): React.JSX.Element {
           ? debateAccountDefaultModel
           : debateModelChoice),
       options: debateModelOptions,
-      simulatedLocalEnabled:
+      simulatedEffortEnabled:
         settings?.experimentalAllModelEffortEnabled === true,
     });
     const debateLiveChromePolicy = debateLiveSessionActive
@@ -133567,9 +134284,10 @@ function HomeContent(): React.JSX.Element {
         (usePlayerVoice ? "__debate_player__" : "__debate_prism_juror__");
       const usePrismDefaultVoice =
         usePlayerVoice || (!speakerBot && utterance.speaker !== null);
+      const voiceCacheKey = utterance.voiceCacheKey ?? utterance.event.id;
       const clip = prefetchBotcastUtterance(
         {
-          id: utterance.event.id,
+          id: voiceCacheKey,
           episodeId: utterance.sessionId,
           speakerRole: utterance.player ? "guest" : "host",
           botId: speakerId,
@@ -133684,9 +134402,10 @@ function HomeContent(): React.JSX.Element {
         (usePlayerVoice ? "__debate_player__" : "__debate_prism_juror__");
       const usePrismDefaultVoice =
         usePlayerVoice || (!speakerBot && utterance.speaker !== null);
+      const voiceCacheKey = utterance.voiceCacheKey ?? utterance.event.id;
       const played = await playBotcastUtterance(
         {
-          id: utterance.event.id,
+          id: voiceCacheKey,
           episodeId: utterance.sessionId,
           speakerRole: utterance.player ? "guest" : "host",
           botId: speakerId,
@@ -133923,10 +134642,6 @@ function HomeContent(): React.JSX.Element {
                 }),
               )}
               audioVolume={settings?.voiceVolume ?? 0}
-              juryAutoDeliberationEnabled={
-                debateJurySettings.autoDeliberationEnabled
-              }
-              juryDecisionTimeoutMs={debateJurySettings.decisionTimeoutMs}
               request={api}
               renderBotGlyph={(glyph, options) => (
                 <BotGlyph
@@ -134272,9 +134987,15 @@ function HomeContent(): React.JSX.Element {
                     episodeId: session.id,
                     speakerRole: "host",
                     botId: speaker.id,
-                    content: utterance.text,
+                    content: voiceSpokenText(utterance.text, {
+                      leadingMarkedAction: true,
+                    }),
                     stageActionText: null,
-                    voicePerformanceText: null,
+                    voicePerformanceText:
+                      voicePerformanceTextFromActionCues(utterance.text, {
+                        leadingMarkedAction: true,
+                        omitLocalFoleyTags: true,
+                      }),
                     moodKey: "neutral",
                     createdAt: session.updatedAt,
                   },
@@ -134285,11 +135006,10 @@ function HomeContent(): React.JSX.Element {
                     glyph: speaker.glyph,
                     online_enabled: liveBot?.online_enabled ?? 1,
                     muted: botPowerIsMutedV1(speaker.powers),
-                    voiceGainMultiplier:
-                      botPowerVoiceGainMultiplierV1(speaker.powers),
-                    voicePresence: botPowerVoicePresenceModeV1(
+                    voiceGainMultiplier: botPowerVoiceGainMultiplierV1(
                       speaker.powers,
                     ),
+                    voicePresence: botPowerVoicePresenceModeV1(speaker.powers),
                     personaTemperament: signalPersonaTemperamentFor(
                       speaker.systemPrompt,
                     ),
@@ -134412,10 +135132,10 @@ function HomeContent(): React.JSX.Element {
       : signalResponseMode;
     const signalAutoSelectable = Boolean(
       settings &&
-        autoFallbackModeSelectable({
-          chain: settings.autoFallbackChain,
-          runnable: signalRunnableAutoModels,
-        }),
+      autoFallbackModeSelectable({
+        chain: settings.autoFallbackChain,
+        runnable: signalRunnableAutoModels,
+      }),
     );
     const signalNavbarResponseMode = autoResponseModeForProvider(
       signalProvider,
@@ -134970,10 +135690,9 @@ function HomeContent(): React.JSX.Element {
               )?.provider ?? signalAccountDefaultProvider;
             const episodeEffortTarget = modelEffortTargetForSelection({
               provider: episodeSelectedModelProvider,
-              modelId:
-                episodeModelControl.value || signalAccountDefaultModel,
+              modelId: episodeModelControl.value || signalAccountDefaultModel,
               options: signalNavbarModelOptions,
-              simulatedLocalEnabled:
+              simulatedEffortEnabled:
                 settings?.experimentalAllModelEffortEnabled === true,
             });
             return renderSharedAppletNavbar("Signal tools", {
@@ -135314,11 +136033,7 @@ function HomeContent(): React.JSX.Element {
       !zenFallbackWallpaperVisible &&
       !zenGeneratedAtmosphereVisible;
     const zenPersonaAtmosphereAccentStyle = zenPersonaBot
-      ? botAccentStyle(
-          zenPersonaBot.color,
-          resolvedTheme,
-          appWidePrivateMode,
-        )
+      ? botAccentStyle(zenPersonaBot.color, resolvedTheme, appWidePrivateMode)
       : undefined;
     const zenPersonaFallbackAtmosphereStyle = zenPersonaBot
       ? ({
@@ -135735,7 +136450,7 @@ function HomeContent(): React.JSX.Element {
                       provider: primaryForAuto?.provider ?? modelProvider,
                       modelId: primaryForAuto?.model ?? visibleModelChoice,
                       options: modelOptions,
-                      simulatedLocalEnabled:
+                      simulatedEffortEnabled:
                         settings?.experimentalAllModelEffortEnabled === true,
                     });
                     return (
@@ -136639,10 +137354,10 @@ function HomeContent(): React.JSX.Element {
                     chatCompletedRevealKeysRef.current.has(temporalKey));
                 const zenPlayerRevealMatches = Boolean(
                   chatLikeSurface &&
-                    msg.role === "user" &&
-                    zenPlayerSpeechReveal &&
-                    (msg.id === zenPlayerSpeechReveal.messageId ||
-                      msg.id === latestUserMessageId),
+                  msg.role === "user" &&
+                  zenPlayerSpeechReveal &&
+                  (msg.id === zenPlayerSpeechReveal.messageId ||
+                    msg.id === latestUserMessageId),
                 );
                 const zenPlayerRevealTimeline = zenPlayerRevealMatches
                   ? chatSpeechRevealByKeyRef.current.get(
@@ -136652,10 +137367,10 @@ function HomeContent(): React.JSX.Element {
                 const forcedVisibleTokenCount = zenPlayerRevealTimeline
                   ? speechRevealVisibleTokenCount(zenPlayerRevealTimeline)
                   : chatAssistantTypingMechanicsActive &&
-                  messageRevealEligible &&
-                  msg.role === "assistant" &&
-                  msg.id === latestAssistantMessageId &&
-                  detail?.id
+                      messageRevealEligible &&
+                      msg.role === "assistant" &&
+                      msg.id === latestAssistantMessageId &&
+                      detail?.id
                     ? (() => {
                         const displayContent =
                           resolveVisibleMessageContent(msg);
@@ -138695,10 +139410,10 @@ function HomeContent(): React.JSX.Element {
                   chatCompletedRevealKeysRef.current.has(temporalKey));
               const zenPlayerRevealMatches = Boolean(
                 chatLikeSurface &&
-                  msg.role === "user" &&
-                  zenPlayerSpeechReveal &&
-                  (msg.id === zenPlayerSpeechReveal.messageId ||
-                    msg.id === latestUserMessageId),
+                msg.role === "user" &&
+                zenPlayerSpeechReveal &&
+                (msg.id === zenPlayerSpeechReveal.messageId ||
+                  msg.id === latestUserMessageId),
               );
               const zenPlayerRevealTimeline = zenPlayerRevealMatches
                 ? chatSpeechRevealByKeyRef.current.get(
@@ -138708,10 +139423,10 @@ function HomeContent(): React.JSX.Element {
               const forcedVisibleTokenCount = zenPlayerRevealTimeline
                 ? speechRevealVisibleTokenCount(zenPlayerRevealTimeline)
                 : chatAssistantTypingMechanicsActive &&
-                messageRevealEligible &&
-                msg.role === "assistant" &&
-                msg.id === latestAssistantMessageId &&
-                detail?.id
+                    messageRevealEligible &&
+                    msg.role === "assistant" &&
+                    msg.id === latestAssistantMessageId &&
+                    detail?.id
                   ? (() => {
                       const displayContent = resolveVisibleMessageContent(msg);
                       const revealKey = `${detail.id}:${msg.id}`;
@@ -139309,18 +140024,24 @@ function HomeContent(): React.JSX.Element {
             <strong>
               {modelEffortHudTarget.capability.mode === "unavailable"
                 ? "Not adjustable"
-                : REASONING_EFFORT_LABELS[
-                    savedModelReasoningEffort(
+                : (() => {
+                    const level = savedModelReasoningEffort(
                       settings,
                       modelEffortHudTarget.provider,
                       modelEffortHudTarget.modelId,
                       modelEffortHudTarget.capability,
-                    )
-                  ]}
+                    );
+                    return (
+                      <>
+                        <ModelEffortIcon level={level} />
+                        {REASONING_EFFORT_LABELS[level]}
+                      </>
+                    );
+                  })()}
             </strong>
           </div>
           <div className={styles.modelEffortHudRail} aria-hidden="true">
-            {(["auto", ...modelEffortHudTarget.capability.levels] as ReasoningEffort[]).map(
+            {modelEffortSliderLevels(modelEffortHudTarget.capability).map(
               (level) => {
                 const active =
                   savedModelReasoningEffort(
@@ -139331,7 +140052,8 @@ function HomeContent(): React.JSX.Element {
                   ) === level;
                 return (
                   <span key={level} data-active={active ? "true" : undefined}>
-                    {REASONING_EFFORT_LABELS[level]}
+                    <ModelEffortIcon level={level} />
+                    <em>{REASONING_EFFORT_LABELS[level]}</em>
                   </span>
                 );
               },
@@ -139340,7 +140062,7 @@ function HomeContent(): React.JSX.Element {
           <small>
             ← → adjust · D default
             {modelEffortHudTarget.capability.mode === "simulated"
-              ? " · simulated locally"
+              ? " · multi-call simulation"
               : ""}
           </small>
         </div>

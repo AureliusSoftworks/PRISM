@@ -13,13 +13,14 @@ Observed results belong in `docs/experimental-effort-research-log.md`; keep this
 
 ## Product Boundary
 
-Simulated effort is a local-model quality booster. It is not a claim that weak models become true reasoning models.
+Simulated effort is an opt-in quality booster for models without adjustable native effort. It is not a claim that those models become true reasoning models.
 
-- Prism simulated planning/draft/audit/revision passes run only for the selected local provider/model.
-- OpenAI and Anthropic models never receive Prism simulated-effort private-pass chains.
-- OpenAI models with native reasoning support keep provider-native `reasoning_effort`.
-- Online non-reasoning models no-op simulated effort and emit a developer diagnostic instead of multiplying API calls.
-- Psychic mode can show concise summaries/diagnostics, but online Psychic mode must not trigger simulated online effort.
+- Prism simulated planning/draft/audit/revision passes run on the selected provider/model, whether local or online.
+- OpenAI and Anthropic models without adjustable native effort receive the same private multi-call ladder when the experiment is enabled.
+- Models with native effort keep provider-native effort; fixed-effort models remain fixed.
+- Online simulation makes multiple paid/provider calls and may increase usage, cost, and latency. Settings must say so plainly.
+- Psychic mode may show concise summaries/diagnostics, but private plans, drafts, audits, and revisions remain ephemeral.
+- LOCAL mode always uses the selected local provider for every private and visible pass; it must never call an online provider.
 
 ## Prerequisites
 
@@ -29,6 +30,7 @@ Simulated effort is a local-model quality booster. It is not a claim that weak m
   - `ANTHROPIC_API_KEY` for Opus
   - `OPENAI_API_KEY` for the OpenAI judge
 - Do not use online keys for LOCAL-mode assertions. LOCAL simulated effort must stay on Ollama.
+- Use provider stubs for routine online multi-call tests. Run live paid-provider checks only when explicitly evaluating quality or cost.
 
 Prefer the direct Node commands below when passing flags. The npm scripts are convenient for defaults, but direct commands avoid shell-specific argument forwarding surprises.
 
@@ -171,17 +173,24 @@ When validating LOCAL behavior:
 - Do not pass online keys as evidence that LOCAL is safe; local safety should hold even when keys exist.
 - Keep `apps/api/src/__tests__/providers.test.ts` LOCAL invariant passing.
 
+When validating online behavior:
+
+- Use an unsupported/non-native model such as `gpt-4o` with the experiment enabled.
+- Confirm the selected provider and model handle every private pass and the final response.
+- Confirm native-effort models still make one visible generation call and receive provider-native effort.
+- Confirm disabling the experiment removes simulated levels and prevents private-pass calls.
+
 ## Follow-Up Validation
 
 After changing this area, run:
 
 ```powershell
-node --test --experimental-strip-types apps/api/src/__tests__/chat.test.ts apps/api/src/__tests__/providers.test.ts
+node --test --experimental-strip-types packages/shared/src/reasoningEffort.test.ts apps/api/src/__tests__/chat.test.ts apps/api/src/__tests__/model-effort-preferences.test.ts apps/api/src/__tests__/model-effort-runner.test.ts apps/api/src/__tests__/providers.test.ts
 npm run typecheck
 ```
 
 For UI Psychic summary work, also run:
 
 ```powershell
-node --test --experimental-strip-types apps/web/src/app/psychicThoughtDisplay.test.ts apps/web/src/app/psychicCommand.test.ts
+node --test --experimental-strip-types apps/web/src/app/model-routing-picker-integration.test.ts apps/web/src/app/psychicThoughtDisplay.test.ts apps/web/src/app/psychicCommand.test.ts
 ```

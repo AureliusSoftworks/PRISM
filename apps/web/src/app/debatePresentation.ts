@@ -51,7 +51,13 @@ export function formatDebateSpokenDuration(durationMs: number): string {
 
 type DebateElapsedSession = Pick<
   DebateSessionV1,
-  "completedAt" | "createdAt" | "events" | "status" | "updatedAt"
+  | "completedAt"
+  | "createdAt"
+  | "events"
+  | "pausedAt"
+  | "pausedDurationMs"
+  | "status"
+  | "updatedAt"
 >;
 
 /**
@@ -82,19 +88,31 @@ export function debateLiveElapsedDurationMs(
         : nowMs
       : nowMs;
 
-  let recessStartedAtMs: number | null = null;
-  let recessDurationMs = 0;
-  for (const { event, timeMs } of eventTimes) {
-    if (timeMs < startedAtMs || timeMs > endAtMs) continue;
-    if (event.stepKey === "pause" && recessStartedAtMs === null) {
-      recessStartedAtMs = timeMs;
-    } else if (event.stepKey === "resume" && recessStartedAtMs !== null) {
-      recessDurationMs += Math.max(0, timeMs - recessStartedAtMs);
-      recessStartedAtMs = null;
+  const hasSilentLifecycleTiming =
+    typeof session.pausedDurationMs === "number" ||
+    typeof session.pausedAt === "string";
+  let recessDurationMs = Math.max(0, session.pausedDurationMs ?? 0);
+  if (hasSilentLifecycleTiming) {
+    const pausedAtMs = Date.parse(session.pausedAt ?? "");
+    if (Number.isFinite(pausedAtMs)) {
+      recessDurationMs += Math.max(0, endAtMs - pausedAtMs);
     }
-  }
-  if (recessStartedAtMs !== null) {
-    recessDurationMs += Math.max(0, endAtMs - recessStartedAtMs);
+  } else {
+    // Backward compatibility for archived sessions that stored lifecycle
+    // events before pause and resume became silent session metadata.
+    let recessStartedAtMs: number | null = null;
+    for (const { event, timeMs } of eventTimes) {
+      if (timeMs < startedAtMs || timeMs > endAtMs) continue;
+      if (event.stepKey === "pause" && recessStartedAtMs === null) {
+        recessStartedAtMs = timeMs;
+      } else if (event.stepKey === "resume" && recessStartedAtMs !== null) {
+        recessDurationMs += Math.max(0, timeMs - recessStartedAtMs);
+        recessStartedAtMs = null;
+      }
+    }
+    if (recessStartedAtMs !== null) {
+      recessDurationMs += Math.max(0, endAtMs - recessStartedAtMs);
+    }
   }
   return Math.max(0, endAtMs - startedAtMs - recessDurationMs);
 }

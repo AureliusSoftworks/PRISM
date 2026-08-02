@@ -14,6 +14,40 @@ Before any Steam upload:
    - `Prism-Desktop-v<version>-linux-x64.AppImage`
 3. Manually smoke-test each artifact.
 4. Confirm the exact version to publish.
+5. Confirm each platform packaging job passed `npm run steam:content:verify`.
+6. Confirm `npm run voice:assets:verify:release` passes. Voice+ is fail-closed
+   until the pinned Q4 model, runtime, checksums, provenance watermark, and
+   latency qualification are recorded for macOS arm64/x64, Windows x64, and
+   Linux x64.
+
+## Marketplace content firewall
+
+Release packaging uses `steam-marketplace-allowlist.json` as a fail-closed
+Marketplace roster. `branchLock: "dev"` entries remain available to local dev
+builds but are never copied into Steam-safe runtime staging. Adding a new
+non-dev Marketplace bot without updating the allowlist fails packaging.
+
+Every staged Steam runtime includes `STEAM_CONTENT_REPORT.md`. Before release,
+review that report alongside the asset-rights ledger; the allowlist enforces the
+approved roster but does not itself establish copyright, trademark, publicity,
+or generated-asset rights.
+
+## Steam Content Survey — voice disclosure
+
+Keep the live-generated AI disclosure explicit about both kinds of local audio:
+
+- PRISM generates bot speech locally at runtime from dialogue chosen or
+  generated during play. Packaged models run offline and do not upload spoken
+  text or reference material.
+- PRISM includes pre-generated or procedural reaction audio such as laughs,
+  sighs, gasps, coughs, and breaths. These are original generic voice
+  archetypes, not intentional real-person or actor replicas.
+- Player-imported reference voices require consent and ownership attestation,
+  remain encrypted and local, are excluded from exports and Marketplace
+  uploads, and can be deleted completely.
+- PRISM prohibits intentional celebrity, historical-recording, actor, or other
+  recognizable real-person imitation in its shipped voice system. Marketplace
+  persona and publicity-rights review remains a separate release gate.
 
 ## Local export
 
@@ -55,6 +89,8 @@ Workflow: `.github/workflows/release-desktop-steam.yml`
 
 Hard gates:
 
+- desktop artifact packaging verifies the fail-closed Marketplace roster on
+  macOS, Windows, and Linux
 - requires `smoke_test_confirmation=YES`
 - defaults to export-only
 - upload runs only when `publish_to_steam=true`

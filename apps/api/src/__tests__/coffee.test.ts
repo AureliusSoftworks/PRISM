@@ -14754,15 +14754,24 @@ describe("coffeeEffectiveReasoningEffort", () => {
         effectiveProvider: "anthropic",
         modelId: "claude-haiku-4-5",
       }),
-      undefined,
+      "high",
     );
   });
 
-  it("does not force effort onto online models without the capability", () => {
+  it("simulates effort for online models without native capability", () => {
     assert.equal(
       coffeeEffectiveReasoningEffort({
         requested: "high",
         experimentEnabled: true,
+        effectiveProvider: "openai",
+        modelId: "gpt-4o",
+      }),
+      "high",
+    );
+    assert.equal(
+      coffeeEffectiveReasoningEffort({
+        requested: "high",
+        experimentEnabled: false,
         effectiveProvider: "openai",
         modelId: "gpt-4o",
       }),

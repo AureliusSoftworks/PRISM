@@ -130,7 +130,7 @@ describe("reasoning effort helpers", () => {
     assert.equal(openAiReasoningEffortForRequest("gpt-5.6-sol", "none"), "none");
   });
 
-  it("gates simulated local effort and ignores stale unsupported preferences", () => {
+  it("gates simulated effort for local and non-native online models", () => {
     assert.equal(
       resolveModelReasoningEffortCapability({
         provider: "local",
@@ -142,17 +142,67 @@ describe("reasoning effort helpers", () => {
       resolveModelReasoningEffortCapability({
         provider: "local",
         modelId: "qwen3:14b",
-        simulatedLocalEnabled: true,
+        simulatedEffortEnabled: true,
+      }).mode,
+      "simulated",
+    );
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "openai",
+        modelId: "gpt-4o",
+      }).disabledReason,
+      "Enable experimental simulated effort in Settings.",
+    );
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "openai",
+        modelId: "gpt-4o",
+        simulatedEffortEnabled: true,
+      }).mode,
+      "simulated",
+    );
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "anthropic",
+        modelId: "claude-haiku-4-5",
+        simulatedEffortEnabled: true,
       }).mode,
       "simulated",
     );
     assert.equal(
       effectiveModelReasoningEffort({
         provider: "anthropic",
-        modelId: "claude-sonnet-4-6",
+        modelId: "claude-haiku-4-5",
         preference: "minimal",
       }),
       null,
     );
+    assert.equal(
+      effectiveModelReasoningEffort({
+        provider: "anthropic",
+        modelId: "claude-haiku-4-5",
+        preference: "minimal",
+        simulatedEffortEnabled: true,
+      }),
+      "minimal",
+    );
+  });
+
+  it("preserves native and fixed online effort behavior when simulation is enabled", () => {
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+        simulatedEffortEnabled: true,
+      }).mode,
+      "native",
+    );
+    const fixed = resolveModelReasoningEffortCapability({
+      provider: "openai",
+      modelId: "gpt-5.5-pro",
+      simulatedEffortEnabled: true,
+    });
+    assert.equal(fixed.mode, "unavailable");
+    assert.equal(fixed.disabledReason, "This model uses a fixed reasoning effort.");
   });
 });

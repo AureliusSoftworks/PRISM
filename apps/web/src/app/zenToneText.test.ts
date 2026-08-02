@@ -314,6 +314,31 @@ describe("resolveZenActionPresentation", () => {
     assert.equal(presentation.mainText, "Spoken reply.");
     assert.equal(presentation.cues[0]?.action, "Takes a breath");
   });
+
+  it("requires explicit action markup for player prose", () => {
+    const ordinarySpeech = resolveZenActionPresentationFromMessage({
+      content: "Yeah. Let’s just let it be nice for a minute.",
+      inferUnmarkedActions: false,
+    });
+
+    assert.equal(
+      ordinarySpeech.mainText,
+      "Yeah. Let’s just let it be nice for a minute.",
+    );
+    assert.equal(ordinarySpeech.hasActions, false);
+    assert.deepEqual(ordinarySpeech.cues, []);
+
+    const explicitAction = resolveZenActionPresentationFromMessage({
+      content: "*smiles* Nice",
+      inferUnmarkedActions: false,
+    });
+
+    assert.equal(explicitAction.mainText, "Nice");
+    assert.deepEqual(
+      explicitAction.cues.map((cue) => cue.action),
+      ["Smiles"],
+    );
+  });
 });
 
 describe("Zen live action client helpers", () => {

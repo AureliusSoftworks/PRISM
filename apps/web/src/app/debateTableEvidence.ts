@@ -20,6 +20,18 @@ export function debateEventEvidenceIds(event: DebateEventV1): string[] {
   return ids;
 }
 
+/** Evidence markers that have actually reached the audience in a live reveal. */
+export function debateVisibleEvidenceIds(content: string): string[] {
+  const ids: string[] = [];
+  for (const match of content.matchAll(
+    /\[\[(?:source|exhibit):([^\]\s]{1,120})\]\]/giu,
+  )) {
+    const id = match[1]?.trim();
+    if (id && !ids.includes(id)) ids.push(id);
+  }
+  return ids;
+}
+
 const DEBATE_ADVOCATE_DISCUSSION_KINDS = new Set<DebateEventV1["kind"]>([
   "speech",
   "testimony",
@@ -61,9 +73,27 @@ export function resolveDebateTableEvidenceStickyId(args: {
   activeEvent: DebateEventV1 | null;
   presenting: boolean;
   evidence: DebateEvidencePacketV1;
+  /** Growing public content; later heard markers replace earlier exhibits. */
+  visibleContent?: string;
 }): string | null {
-  const { previousStickyId, activeEvent, presenting, evidence } = args;
+  const {
+    previousStickyId,
+    activeEvent,
+    presenting,
+    evidence,
+    visibleContent,
+  } = args;
   if (!activeEvent) return previousStickyId;
+
+  const heardIds =
+    visibleContent === undefined
+      ? []
+      : debateVisibleEvidenceIds(visibleContent).filter((id) =>
+          debateEventEvidenceIds(activeEvent).includes(id),
+        );
+  for (const id of [...heardIds].reverse()) {
+    if (debateTableEvidenceItem(evidence, id)) return id;
+  }
 
   for (const id of debateEventEvidenceIds(activeEvent)) {
     if (debateTableEvidenceItem(evidence, id)) return id;

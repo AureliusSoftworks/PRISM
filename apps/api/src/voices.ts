@@ -740,8 +740,7 @@ export function validateVoiceSynthesisRequest(body: Record<string, unknown>): Vo
   return {
     text,
     elevenLabsText: normalizeElevenLabsTaggedText(
-      voicePerformanceTextFromActionCues(body.elevenLabsText) ??
-        body.elevenLabsText,
+      voicePerformanceTextFromActionCues(body.elevenLabsText),
       text,
     ),
     mode: normalizeVoiceMode(body.mode),

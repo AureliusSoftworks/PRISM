@@ -1,4 +1,5 @@
 import {
+  BOT_AVATAR_SFX_DEFAULT_VOLUME,
   BOT_AVATAR_SFX_MAX_BYTES,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotAvatarSfxV1,
@@ -800,7 +801,7 @@ export function prismBotThinkingSfxFallback(
     playWhileTalking: false,
     playWhileIdle: false,
     playWhileThinking: true,
-    volume: 0.45,
+    volume: BOT_AVATAR_SFX_DEFAULT_VOLUME,
   };
 }
 
@@ -1148,7 +1149,7 @@ export function botAudioVoiceProfileWithThinkingSfx(
     playWhileTalking: false,
     playWhileIdle: false,
     playWhileThinking: true,
-    volume: 0.45,
+    volume: BOT_AVATAR_SFX_DEFAULT_VOLUME,
   });
   if (!thinkingSfx) {
     throw new Error("PRISM could not read the generated thinking loop.");

@@ -3,11 +3,10 @@ import { describe, it } from "node:test";
 
 import {
   DEBATE_EVIDENCE_EMOJI_CHOICES,
+  applyDebateEvidenceExhibitAssetReuse,
   applyDebateEvidenceObjectNameEdit,
-  debateEvidenceObjectDraftFromStoredExhibitAsset,
   debateEvidenceObjectFromPrismCandidate,
   debateEvidenceEmojiForObject,
-  debateEvidenceExhibitTitleFromStoredPrompt,
   normalizeDebateEvidenceEmojiChoice,
   randomDebateEvidenceObject,
   searchDebateEvidenceEmojis,
@@ -119,37 +118,23 @@ describe("Debate evidence object generator", () => {
     );
   });
 
-  it("restores an evidence draft from a stored exhibit sprite prompt", () => {
-    const synthesizePrompt = [
-      'Create one evidence exhibit sprite depicting exactly: "Rusty spoon".',
-      "PRISM evidence-exhibit house style: one tactile premium miniature.",
-    ].join(" ");
-    assert.equal(
-      debateEvidenceExhibitTitleFromStoredPrompt(synthesizePrompt),
-      "Rusty spoon",
-    );
-    assert.equal(
-      debateEvidenceExhibitTitleFromStoredPrompt(
-        "[Debate exhibit upload] Weathered transit map",
-      ),
-      "Weathered transit map",
-    );
-    assert.equal(
-      debateEvidenceExhibitTitleFromStoredPrompt("unrelated image prompt"),
-      null,
-    );
+  it("reuses only the selected evidence sprite", () => {
+    const current = {
+      adjective: "Weathered",
+      object: "transit map",
+      observation: "The eastern route is circled in red.",
+      emoji: "🗺️",
+      emojiCustomized: true,
+      createdBy: "player" as const,
+      visualKind: "emoji" as const,
+      imageId: null,
+    };
     assert.deepEqual(
-      debateEvidenceObjectDraftFromStoredExhibitAsset({
+      applyDebateEvidenceExhibitAssetReuse(current, {
         id: "img-rusty-spoon",
-        prompt: synthesizePrompt,
       }),
       {
-        adjective: "Rusty",
-        object: "spoon",
-        observation: "Rusty spoon.",
-        emoji: debateEvidenceEmojiForObject("spoon", "Rusty"),
-        emojiCustomized: false,
-        createdBy: "prism",
+        ...current,
         visualKind: "synthesized",
         imageId: "img-rusty-spoon",
       },

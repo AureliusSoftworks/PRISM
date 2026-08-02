@@ -250,6 +250,10 @@ describe("Zen voice reveal fallback", () => {
       replaySource,
       /const sourceText =[\s\S]*?resolveVisibleMessageContentForVoiceRef\.current\(message\);[\s\S]*?await enqueueRobotVoiceMode\(\{[\s\S]*?sourceText,/,
     );
+    assert.match(
+      replaySource,
+      /messageId: message\.id,[\s\S]*?spokenText: sourceText/,
+    );
   });
 
   it("makes Shh non-destructive before audio playback begins", () => {

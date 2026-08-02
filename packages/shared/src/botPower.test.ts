@@ -49,6 +49,11 @@ import {
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
   botPowerIgnoresOtherPowersV1,
+  botPowerIneptImagePromptV1,
+  botPowerIneptitudeRoleCueV1,
+  botPowerIneptUserPromptV1,
+  botPowerIneptRoleMisdirectionV1,
+  botPowerIsIneptV1,
   botPowerSubjectEffectsForObserverV1,
   botPowerObserverProjectionV1,
   botPowerObserverCueLinesV1,
@@ -1748,6 +1753,78 @@ test("ready Powers produce bounded app-wide self and observer cues", () => {
     "Vader — Respirator: Others hear a mechanical breath before movement.",
   ]);
   assert.equal(botPowerCupRateMultiplierForBotV1(powers), 2.5);
+});
+
+test("Ineptitude normalizes, survives storage, adapts by role, and redirects images", () => {
+  const effect = normalizeBotPowerEffectV1({
+    type: "ineptitude",
+    instructionFidelity: "sometimes_correct",
+    imageFidelity: "requested_subject",
+  });
+  assert.deepEqual(effect, {
+    type: "ineptitude",
+    instructionFidelity: "always_botched",
+    imageFidelity: "always_unrelated",
+  });
+  const powers = [{
+    version: 1 as const,
+    id: "inept",
+    name: "Inept",
+    intent: "Cannot follow instructions.",
+    enabled: true,
+    compileStatus: "ready" as const,
+    compiled: {
+      version: 1 as const,
+      sourceHash: botPowerSourceHashV1("Inept", "Cannot follow instructions."),
+      selfCue: "Always botch the central instruction.",
+      observerCue: "This bot visibly mishandles instructions.",
+      effects: [effect!],
+      ruleLabels: ["Always botches instructions"],
+    },
+  }];
+
+  const restored = parseStoredBotPowersV1(serializeBotPowersV1(powers));
+  assert.equal(botPowerIsIneptV1(restored), true);
+  assert.match(
+    botPowerIneptitudeRoleCueV1(restored, "debate_moderator") ?? "",
+    /misstate procedure, call the wrong bot/u,
+  );
+  assert.match(
+    botPowerIneptitudeRoleCueV1(restored, "signal_host") ?? "",
+    /misintroduce the subject or guest/u,
+  );
+  const redirected = botPowerIneptImagePromptV1(
+    "A photorealistic red dragon above Prague",
+  );
+  assert.match(redirected, /INEPT IMAGE OVERRIDE/u);
+  assert.match(redirected, /wholly unrelated non sequitur/u);
+  assert.doesNotMatch(redirected, /dragon|Prague/u);
+  assert.equal(
+    botPowerIneptImagePromptV1("A photorealistic red dragon above Prague"),
+    redirected,
+  );
+  const misheard = botPowerIneptUserPromptV1(
+    restored,
+    "Reply with exactly BLUE.",
+  );
+  assert.match(misheard, /completely misheard/u);
+  assert.match(misheard, /unrelated task/u);
+  assert.doesNotMatch(misheard, /BLUE/u);
+  assert.equal(
+    botPowerIneptUserPromptV1([], "Reply with exactly BLUE."),
+    "Reply with exactly BLUE.",
+  );
+  const moderatorMisdirection = botPowerIneptRoleMisdirectionV1(
+    restored,
+    "debate_moderator",
+    "session:opening",
+  );
+  assert.match(moderatorMisdirection ?? "", /INEPT MISTAKEN ASSIGNMENT/u);
+  assert.match(
+    moderatorMisdirection ?? "",
+    /wrong side|wrong floor|wrong speaker/u,
+  );
+  assert.match(moderatorMisdirection ?? "", /Keep the required schema/u);
 });
 
 test("ready coffee-refusal Powers return a zero cup multiplier", () => {

@@ -1417,7 +1417,7 @@ describe("processChatMessage Psychic planning", () => {
     await flushBackgroundTitleJobs();
   });
 
-  it("does not simulate effort for online non-reasoning OpenAI models", async () => {
+  it("simulates effort with the selected online non-reasoning model", async () => {
     const db = createChatTestDb();
     const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -1425,10 +1425,19 @@ describe("processChatMessage Psychic planning", () => {
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       requests.push({ url, body });
       assert.equal(url, "https://api.openai.com/v1/chat/completions");
-      assert.doesNotMatch(JSON.stringify(body), /Prism's private/);
+      const serialized = JSON.stringify(body);
+      const content = serialized.includes("Prism's private planning pass")
+        ? JSON.stringify({
+            summary: "I mapped the online request.",
+            scratchpad: "private online plan",
+            answerGuidance: "Use the mapped online constraints.",
+          })
+        : serialized.includes("Prism's private")
+          ? "private online refinement"
+          : "Online answer.";
       return new Response(
         JSON.stringify({
-          choices: [{ message: { content: "Online answer." }, finish_reason: "stop" }],
+          choices: [{ message: { content }, finish_reason: "stop" }],
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       );
@@ -1450,19 +1459,26 @@ describe("processChatMessage Psychic planning", () => {
       }
     );
 
-    assert.equal(requests.length, 1);
+    assert.equal(requests.length, 4);
+    assert.equal(
+      requests.filter(({ body }) => JSON.stringify(body).includes("Prism's private"))
+        .length,
+      3,
+    );
+    assert.ok(
+      requests.every(({ body }) => body.model === "gpt-4o"),
+      "every simulated and visible pass should use the selected model",
+    );
     assert.equal(
       result.conversation.messages.find((message) => message.role === "assistant")?.content,
       "Online answer."
     );
-    assert.equal(result.psychicDebug, undefined);
+    assert.equal(result.psychicDebug?.simulated, true);
+    assert.equal(result.psychicDebug?.passCount, 3);
     assert.ok(
-      result.backendEvents?.some(
-        (event) =>
-          event.message === "Simulated effort skipped" &&
-          event.detail?.includes("online_simulated_effort_disabled") &&
-          event.detail?.includes("provider=openai")
-      )
+      !result.backendEvents?.some(
+        (event) => event.message === "Simulated effort skipped",
+      ),
     );
   });
 
@@ -1512,7 +1528,7 @@ describe("processChatMessage Psychic planning", () => {
     );
   });
 
-  it("keeps online Chat Psychic summary-only without extra online effort calls", async () => {
+  it("keeps online Chat Psychic summary-only while simulated effort stays private", async () => {
     const db = createChatTestDb();
     const requests: Array<{ body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -1520,11 +1536,19 @@ describe("processChatMessage Psychic planning", () => {
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       requests.push({ body });
       assert.equal(url, "https://api.openai.com/v1/chat/completions");
-      assert.doesNotMatch(JSON.stringify(body), /Prism's private/);
-      assert.doesNotMatch(JSON.stringify(body), /Private guidance from Prism/);
+      const serialized = JSON.stringify(body);
+      const content = serialized.includes("Prism's private planning pass")
+        ? JSON.stringify({
+            summary: "I mapped the online Chat request.",
+            scratchpad: "private online Chat plan",
+            answerGuidance: "Answer from the mapped constraints.",
+          })
+        : serialized.includes("Prism's private")
+          ? "private online Chat refinement"
+          : "Online psychic answer.";
       return new Response(
         JSON.stringify({
-          choices: [{ message: { content: "Online psychic answer." }, finish_reason: "stop" }],
+          choices: [{ message: { content }, finish_reason: "stop" }],
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       );
@@ -1549,18 +1573,18 @@ describe("processChatMessage Psychic planning", () => {
       }
     );
 
-    assert.equal(requests.length, 1);
-    assert.equal(result.psychicDebug?.simulated, false);
-    assert.equal(result.psychicDebug?.passCount, 0);
-    assert.deepEqual(result.psychicDebug?.passes, []);
-    assert.equal(result.psychicDebug?.scratchpad, "");
+    assert.equal(requests.length, 4);
+    assert.equal(result.psychicDebug?.simulated, true);
+    assert.equal(result.psychicDebug?.passCount, 3);
+    assert.match(result.psychicDebug?.scratchpad ?? "", /private online Chat plan/u);
     const userMessage = result.conversation.messages.find(
       (message) => message.role === "user"
     );
-    assert.match(
-      userMessage?.psychicThought?.summary ?? "",
-      /^I'm helping with this turn using the selected online model/
+    assert.equal(
+      userMessage?.psychicThought?.summary,
+      "I mapped the online Chat request.",
     );
+    assert.doesNotMatch(JSON.stringify(userMessage), /private online Chat plan/u);
   });
 
   it("attaches Psychic text to product Chat turns that use the Zen pipeline", async () => {
@@ -1593,7 +1617,7 @@ describe("processChatMessage Psychic planning", () => {
         mode: "zen",
         experimentalAllModelEffortEnabled: true,
         psychicModeEnabled: true,
-        botOverrides: { model: "gpt-4o", reasoningEffort: "high" },
+        botOverrides: { model: "gpt-5.5", reasoningEffort: "high" },
       }
     );
 
@@ -1605,7 +1629,7 @@ describe("processChatMessage Psychic planning", () => {
     );
     assert.match(
       userMessage?.psychicThought?.summary ?? "",
-      /^I'm helping with this turn using the selected online model/
+      /^I'm using the selected model's native reasoning/
     );
   });
 
@@ -1639,7 +1663,7 @@ describe("processChatMessage Psychic planning", () => {
         mode: "zen",
         experimentalAllModelEffortEnabled: true,
         psychicModeEnabled: false,
-        botOverrides: { model: "gpt-4o", reasoningEffort: "high" },
+        botOverrides: { model: "gpt-5.5", reasoningEffort: "high" },
       }
     );
 

@@ -1,4 +1,8 @@
-import type { ReasoningEffort } from "@localai/shared";
+import {
+  modelSupportsNativeReasoningEffort,
+  type NativeReasoningEffortProvider,
+  type ReasoningEffort,
+} from "@localai/shared";
 import type {
   GenerateOptions,
   LlmProvider,
@@ -51,6 +55,17 @@ function simulatedStepInstruction(args: {
 
 function cleanPrivatePreparation(raw: string): string {
   return raw.replace(/\s+/gu, " ").trim().slice(0, 1_800);
+}
+
+export function shouldPrepareMessagesWithSimulatedEffort(args: {
+  provider: NativeReasoningEffortProvider;
+  model: string;
+  effort: ReasoningEffort | null | undefined;
+}): boolean {
+  if (!args.effort || args.effort === "auto" || args.effort === "none") {
+    return false;
+  }
+  return !modelSupportsNativeReasoningEffort(args.provider, args.model);
 }
 
 export async function prepareMessagesWithSimulatedEffort(args: {

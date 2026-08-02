@@ -611,6 +611,31 @@ function observantPowers(): string {
   }]);
 }
 
+function ineptPowers(): string {
+  const name = "Inept";
+  const intent = "Cannot follow instructions or competently host a show.";
+  return JSON.stringify([{
+    version: 1,
+    id: "inept",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Always visibly botch the current task.",
+      observerCue: "This bot mishandles obvious duties.",
+      effects: [{
+        type: "ineptitude",
+        instructionFidelity: "always_botched",
+        imageFidelity: "always_unrelated",
+      }],
+      ruleLabels: ["Always botches instructions"],
+    },
+  }]);
+}
+
 function addressedFandomPowers(): string {
   const name = "Obsessed";
   const intent = "He is absolutely, obsessively a fan of whoever he is talking to.";
@@ -3754,6 +3779,56 @@ describe("Botcast persistence and isolation", () => {
     assert.match(prompt, /Signal fandom: obsessively idolize Ada now/iu);
     assert.match(prompt, /vary wording/iu);
     assert.match(prompt, /never stalk, coerce, invent private knowledge/iu);
+  });
+
+  it("adapts Inept separately for Signal hosts and guests", () => {
+    const base = {
+      show: {
+        name: "The Wrong Show",
+        premise: "An interview about careful work.",
+        hostingStyle: "methodical",
+      },
+      episode: {
+        id: "inept-episode",
+        topic: "Following directions",
+        producerBrief: "Keep the interview focused.",
+        segment: "interview",
+        messages: [],
+        events: [],
+        tensionStage: "calm",
+        guestPresenceMode: "present",
+      },
+      host: {
+        id: "rick",
+        name: "Rick",
+        systemPrompt: "A reluctant host.",
+        cloneFamilyId: null,
+        powers: JSON.parse(ineptPowers()),
+      },
+      guest: {
+        id: "ada",
+        name: "Ada",
+        systemPrompt: "A precise guest.",
+        cloneFamilyId: null,
+        powers: JSON.parse(ineptPowers()),
+      },
+    };
+    const hostPrompt = buildBotcastSpeakerPrompt({
+      ...base,
+      speakerRole: "host",
+    } as never).map((message) => message.content).join("\n");
+    const guestPrompt = buildBotcastSpeakerPrompt({
+      ...base,
+      speakerRole: "guest",
+    } as never).map((message) => message.content).join("\n");
+
+    assert.match(hostPrompt, /HARD Ineptitude/u);
+    assert.match(hostPrompt, /INEPT MISTAKEN ASSIGNMENT/u);
+    assert.match(hostPrompt, /misintroduce the subject or guest/u);
+    assert.match(guestPrompt, /HARD Ineptitude/u);
+    assert.match(guestPrompt, /INEPT MISTAKEN ASSIGNMENT/u);
+    assert.match(guestPrompt, /misunderstand questions/u);
+    assert.match(hostPrompt, /valid state still bind/u);
   });
 
   it("keeps a mirrored Signal holder mechanically in role while the original is irritated", () => {

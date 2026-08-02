@@ -188,3 +188,14 @@ test("shared sidebar and navbar materials remain owned by the active theme", () 
     /\.sharedAppletHeader\s*\{[\s\S]*box-sizing:\s*border-box;/,
   );
 });
+
+test("shared navbar model names stay readable beside the effort control", () => {
+  assert.match(
+    pageCss,
+    /\.chatHeaderModelPicker \.composeModelControl\s*\{[\s\S]*max-width:\s*min\(11rem, 32vw\);/u,
+  );
+  assert.match(
+    pageCss,
+    /\.chatHeaderModelPicker \.composeModelTriggerName\s*\{[\s\S]*max-width:\s*min\(14ch, 24vw\);/u,
+  );
+});

@@ -2988,6 +2988,30 @@ describe("API request integration", () => {
     assert.equal(response.headers.get("x-prism-voice-characters"), String(spokenText.length));
     assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 4).toString(), "RIFF");
 
+    const forcedVoicePlus = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        messageId: "voice-local-message",
+        spokenText,
+        mode: "english",
+        engine: "builtin",
+        localEnginePreference: "voice-plus",
+        profile: normalizeBotAudioVoiceProfileV1(undefined),
+      }),
+    );
+    assert.equal(forcedVoicePlus.status, 200);
+    assert.equal(
+      forcedVoicePlus.headers.get("x-prism-local-voice-engine"),
+      "instant",
+    );
+    assert.match(
+      decodeURIComponent(
+        forcedVoicePlus.headers.get("x-prism-voice-notice") ?? "",
+      ),
+      /release-blocked|Voice\+/u,
+    );
+    await forcedVoicePlus.arrayBuffer();
+
     const streamedText =
       "This local reply begins speaking from its first prepared phrase while the remaining sentences continue through one isolated local voice worker.";
     const callsBeforeStream = builtinVoiceCalls.length;
@@ -3088,13 +3112,34 @@ describe("API request integration", () => {
         listenerReactionFoley: "clears throat",
         mode: "english",
         engine: "elevenlabs",
+        streamChunks: true,
         profile: {
           ...normalizeBotAudioVoiceProfileV1(undefined),
           elevenLabsVoiceId: "configured-provider-voice",
         },
       }),
     );
-    assert.equal(localFoley.status, 409);
+    assert.equal(localFoley.status, 200);
+    assert.equal(
+      localFoley.headers.get("x-prism-voice-stream"),
+      "wav-chunks-v2",
+    );
+    const localFoleySegments = (await localFoley.text())
+      .trim()
+      .split("\n")
+      .map((line) => JSON.parse(line) as Record<string, unknown>);
+    assert.deepEqual(localFoleySegments, [
+      {
+        index: 0,
+        kind: "vocal-action",
+        characterCount: 0,
+        action: "throat-clear",
+        modifiers: [],
+        authoredText: "clears throat",
+        sourceStart: 0,
+        sourceEnd: 15,
+      },
+    ]);
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
   });
 
@@ -3203,7 +3248,7 @@ describe("API request integration", () => {
       assert.equal(providerBodies.length, 3);
       assert.equal(
         providerBodies[0]?.text,
-        "First [gasps] Morty line. [waves]",
+        "First [gasps] Morty line.",
       );
       assert.equal(providerBodies[0]?.model_id, "eleven_v3");
       assert.equal(
@@ -3889,7 +3934,8 @@ describe("API request integration", () => {
     assert.equal(initialVoiceSettings.operatingSystemVoicesEnabled, false);
     const capabilities = await client.request("/api/voices/capabilities");
     assert.equal(capabilities.status, 200);
-    const builtinEnglish = (await json(capabilities)).capabilities.builtinEnglish;
+    const voiceCapabilities = (await json(capabilities)).capabilities;
+    const builtinEnglish = voiceCapabilities.builtinEnglish;
     assert.equal(builtinEnglish.model, "kokoro-82m-q8");
     assert.deepEqual(
       builtinEnglish.pack.map((voice: { name: string }) => voice.name),
@@ -3906,7 +3952,52 @@ describe("API request integration", () => {
         "Fenrir",
         "Puck",
         "Fable",
+        "Alloy",
+        "Jessica",
+        "Nova",
+        "River",
+        "Sky",
+        "Adam",
+        "Echo",
+        "Eric",
+        "Liam",
+        "Onyx",
+        "Santa",
+        "Alice",
+        "Isabella",
+        "Lily",
+        "Daniel",
+        "Lewis",
       ],
+    );
+    assert.deepEqual(voiceCapabilities.local.performance.streamFormats, [
+      "wav-chunks-v1",
+      "wav-chunks-v2",
+    ]);
+    assert.ok(voiceCapabilities.local.performance.vocalActions.includes("laugh"));
+    assert.ok(voiceCapabilities.local.performance.modifiers.includes("nervous"));
+    const calibrationCallsBefore = builtinVoiceCalls.length;
+    const calibrationNetworkCallsBefore = fetchRecorder.calls.length;
+    const calibrationResponse = await client.request(
+      "/api/voices/local/calibrate",
+      { method: "POST" },
+    );
+    assert.equal(calibrationResponse.status, 200);
+    const calibrationPayload = await json(calibrationResponse);
+    assert.equal(calibrationPayload.calibration.v, 1);
+    assert.equal(
+      typeof calibrationPayload.calibration.instant.available,
+      "boolean",
+    );
+    assert.equal(
+      typeof calibrationPayload.calibration.instant.warmRealtimeFactor,
+      "number",
+    );
+    assert.equal(calibrationPayload.selection.resolved, "instant");
+    assert.equal(builtinVoiceCalls.length, calibrationCallsBefore + 2);
+    assert.deepEqual(
+      fetchRecorder.calls.slice(calibrationNetworkCallsBefore),
+      [],
     );
     const enableSystemVoices = await client.request(
       "/api/settings",
@@ -4033,6 +4124,36 @@ describe("API request integration", () => {
       assert.equal(builtinVoiceCalls.at(-1)?.systemVoiceName, "Fred");
 
       fetchRecorder.setResponse(quotaFailure());
+      const performedFallback = await client.request(
+        "/api/voices/synthesize",
+        jsonInit({
+          text: "Well. *laughs softly* Continue.",
+          performanceText: "Well. *laughs softly* Continue.",
+          mode: "english",
+          engine: "elevenlabs",
+          explicitOnlineContext: true,
+          streamChunks: true,
+          profile,
+        }),
+      );
+      assert.equal(performedFallback.status, 200);
+      assert.equal(
+        performedFallback.headers.get("x-prism-voice-stream"),
+        "wav-chunks-v2",
+      );
+      const fallbackSegments = (await performedFallback.text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      assert.ok(
+        fallbackSegments.some(
+          (segment) =>
+            segment.kind === "vocal-action" && segment.action === "laugh",
+        ),
+      );
+      const builtinCallsBeforeStrictPreview = builtinVoiceCalls.length;
+
+      fetchRecorder.setResponse(quotaFailure());
       const preview = await client.request(
         "/api/voices/synthesize",
         jsonInit({
@@ -4046,7 +4167,10 @@ describe("API request integration", () => {
       );
       assert.equal(preview.status, 429);
       assert.match(String((await json(preview)).error), /voice credits/i);
-      assert.equal(builtinVoiceCalls.length, beforeBuiltinCalls + 1);
+      assert.equal(
+        builtinVoiceCalls.length,
+        builtinCallsBeforeStrictPreview,
+      );
     } finally {
       config.elevenLabsApiKey = "";
       fetchRecorder.setResponse(new Response("{}", { status: 200 }));

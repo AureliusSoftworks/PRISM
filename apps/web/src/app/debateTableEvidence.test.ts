@@ -8,6 +8,7 @@ import {
 import {
   debateEventEvidenceIds,
   debateEventIsAdvocateDiscussion,
+  debateVisibleEvidenceIds,
   resolveDebateTableEvidenceStickyId,
 } from "./debateTableEvidence.ts";
 
@@ -49,6 +50,17 @@ const evidence: DebateEvidencePacketV1 = {
       object: "hinge",
       observation: "Rusted and corroded.",
       emoji: "🔧",
+      visualKind: "emoji",
+      imageId: null,
+      createdBy: "prism",
+    },
+    {
+      id: "exhibit-2",
+      title: "Bent key",
+      adjective: "Bent",
+      object: "key",
+      observation: "Scratched along one edge.",
+      emoji: "🔑",
       visualKind: "emoji",
       imageId: null,
       createdBy: "prism",
@@ -129,6 +141,42 @@ describe("Debate table evidence sticky placement", () => {
         evidence,
       }),
       "source-1",
+    );
+  });
+
+  it("replaces an earlier exhibit when a later marker becomes audible in the same line", () => {
+    const cited = event({
+      id: "two-exhibits",
+      sequence: 3,
+      content:
+        "First the hinge [[exhibit:exhibit-1]], then the key [[exhibit:exhibit-2]].",
+      sourceIds: ["exhibit-1", "exhibit-2"],
+    });
+    assert.deepEqual(
+      debateVisibleEvidenceIds(
+        "First the hinge [[exhibit:exhibit-1]], then the key [[exhibit:exhibit-2]].",
+      ),
+      ["exhibit-1", "exhibit-2"],
+    );
+    assert.equal(
+      resolveDebateTableEvidenceStickyId({
+        previousStickyId: null,
+        activeEvent: cited,
+        presenting: true,
+        evidence,
+        visibleContent: "First the hinge [[exhibit:exhibit-1]], then the key",
+      }),
+      "exhibit-1",
+    );
+    assert.equal(
+      resolveDebateTableEvidenceStickyId({
+        previousStickyId: "exhibit-1",
+        activeEvent: cited,
+        presenting: true,
+        evidence,
+        visibleContent: cited.content,
+      }),
+      "exhibit-2",
     );
   });
 

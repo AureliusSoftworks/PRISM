@@ -258,6 +258,16 @@ export interface VoicePlaybackLifecycle {
   ) => void;
   /** Audio-clock progress used to keep visible speech and mouth motion aligned. */
   onProgress?: (elapsedMs: number, durationMs: number) => void;
+  /** Source-linked timing for structured speech/action replay provenance. */
+  onSegmentTiming?: (timing: {
+    kind: "speech" | "vocal-action";
+    sourceStart: number;
+    sourceEnd: number;
+    startMs: number;
+    endMs: number;
+    heard: boolean;
+    action?: string | null;
+  }) => void;
   onEnd?: () => void;
   /** Clears presentation state when playback is superseded before completion. */
   onCancel?: () => void;
@@ -280,6 +290,13 @@ const VOICE_OUTPUT_LATENCY_MAX_MS = 250;
  * disconnecting mid-vowel.
  */
 export const VOICE_PLAYBACK_TAIL_FLUSH_MS = 120;
+
+/**
+ * A completed source can still have a final phoneme moving through the
+ * formant worklet and device output. Retain that released graph briefly so a
+ * natural next speaker may begin without hard-cutting the outgoing word.
+ */
+export const VOICE_COMPLETED_OVERLAP_TAIL_MS = 320;
 
 export function estimateVoiceOutputLatencyMs(
   context: Pick<AudioContext, "baseLatency" | "currentTime"> &
@@ -797,6 +814,16 @@ const activeVoiceChannels: Record<
   },
 };
 
+const completedVoiceTailStops: Record<
+  VoicePlaybackChannel,
+  Set<() => void>
+> = {
+  primary: new Set(),
+  presence: new Set(),
+  reaction: new Set(),
+  crosstalk: new Set(),
+};
+
 const preSpeechBreathBufferCache = new Map<string, Promise<AudioBuffer | null>>();
 
 function contextForPlayback(): AudioContext | null {
@@ -943,6 +970,7 @@ export async function playPreSpeechBreath(args: {
 
 export function stopRealtimeVoiceAudio(
   channel: VoicePlaybackChannel = "primary",
+  options: { preserveCompletedTails?: boolean } = {},
 ): void {
   const active = activeVoiceChannels[channel];
   if (active.releaseTimer !== null) {
@@ -963,6 +991,11 @@ export function stopRealtimeVoiceAudio(
   active.roomConnection = null;
   active.resolve?.();
   active.resolve = null;
+  if (!options.preserveCompletedTails) {
+    for (const stopTail of [...completedVoiceTailStops[channel]]) {
+      stopTail();
+    }
+  }
 }
 
 export function voiceReleaseGainAt(
@@ -1038,6 +1071,8 @@ export async function playRealtimeVoiceBytes(args: {
   stereoPan?: number;
   /** Independent listener reactions never cancel or complete primary speech. */
   channel?: VoicePlaybackChannel;
+  /** Local timbre controls never reshape a Premium provider identity. */
+  localToneEnabled?: boolean;
   /** Optional hard ceiling for short secondary clips such as backchannels. */
   maxDurationMs?: number;
   /** Prevents an older asynchronous decode from replacing newer playback. */
@@ -1054,12 +1089,15 @@ export async function playRealtimeVoiceBytes(args: {
   if (!context || !await prepareRealtimeVoiceAudio()) return false;
   if (args.isCurrent && !args.isCurrent()) return true;
   const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const localToneEnabled = args.localToneEnabled !== false;
   if (!profile.enabled || profile.volume <= 0) return true;
   const decoded = await context.decodeAudioData(args.bytes.slice(0));
   if (args.isCurrent && !args.isCurrent()) return true;
   const channel = args.channel ?? "primary";
   const active = activeVoiceChannels[channel];
-  stopRealtimeVoiceAudio(channel);
+  // A new natural utterance owns the live channel, but a source that already
+  // completed may keep draining its final rendered phoneme underneath it.
+  stopRealtimeVoiceAudio(channel, { preserveCompletedTails: true });
   const texture = resolveVoiceTexture(profile, args.effectsEnabled);
   const voiceEffect = resolveVoiceEffectPlan(
     args.effectsEnabled
@@ -1123,7 +1161,12 @@ export async function playRealtimeVoiceBytes(args: {
       outputChannelCount: decoded.numberOfChannels === 1 ? 1 : 2,
     });
     node.playbackRate.setValueAtTime(playbackRateRatio, startAt);
-    node.formantStrength.setValueAtTime(1, startAt);
+    node.formantStrength.setValueAtTime(
+      localToneEnabled
+        ? Math.max(0.5, Math.min(1.5, 1 + (profile.resonance ?? 0) * 0.45))
+        : 1,
+      startAt,
+    );
     const basePitchCents = (args.detuneCents ?? transform.pitchCents) + effectDetuneCents;
     const pitchAutomationTimes = new Set<number>([0]);
     if (profile.lilt !== 0) {
@@ -1183,8 +1226,16 @@ export async function playRealtimeVoiceBytes(args: {
   const outputGain = context.createGain();
   const lowShelf = context.createBiquadFilter();
   const highShelf = context.createBiquadFilter();
+  const chestShelf = context.createBiquadFilter();
+  const nasalPeak = context.createBiquadFilter();
   const limiter = context.createDynamicsCompressor();
-  const voiceCharacter = resolveBotVoiceCharacter(profile);
+  const localCharacterProfile = localToneEnabled
+    ? {
+        ...profile,
+        eqTilt: profile.brightness ?? profile.eqTilt,
+      }
+    : { ...profile, eqTilt: 0, gainDb: 0 };
+  const voiceCharacter = resolveBotVoiceCharacter(localCharacterProfile);
   highpass.type = "highpass";
   highpass.frequency.value = Math.max(
     voiceEffect.highpassHz,
@@ -1216,6 +1267,13 @@ export async function playRealtimeVoiceBytes(args: {
   highShelf.type = "highshelf";
   highShelf.frequency.value = BOT_VOICE_HIGH_SHELF_HZ;
   highShelf.gain.value = voiceCharacter.highShelfDb;
+  chestShelf.type = "lowshelf";
+  chestShelf.frequency.value = 260;
+  chestShelf.gain.value = localToneEnabled ? (profile.weight ?? 0) * 5.5 : 0;
+  nasalPeak.type = "peaking";
+  nasalPeak.frequency.value = 1_150;
+  nasalPeak.Q.value = 0.8;
+  nasalPeak.gain.value = localToneEnabled ? (profile.openness ?? 0) * 5 : 0;
   limiter.threshold.value = args.cleanRoboticCarrier ? -0.5 : -4;
   limiter.knee.value = args.cleanRoboticCarrier ? 0 : 8;
   limiter.ratio.value = args.cleanRoboticCarrier ? 20 : 12;
@@ -1233,7 +1291,12 @@ export async function playRealtimeVoiceBytes(args: {
     lowpass.connect(shaper).connect(speechGain);
   }
   speechGain.connect(outputGain);
-  outputGain.connect(lowShelf).connect(highShelf).connect(limiter);
+  outputGain
+    .connect(lowShelf)
+    .connect(highShelf)
+    .connect(chestShelf)
+    .connect(nasalPeak)
+    .connect(limiter);
   const roomConnection = connectRoomAcoustics({
     context,
     input: limiter,
@@ -1268,8 +1331,18 @@ export async function playRealtimeVoiceBytes(args: {
   const speechStarts: Array<{
     source: AudioBufferSourceNode;
     startAt: number;
-    stopAt: number;
-  }> = [{ source, startAt: now, stopAt: now + playbackDurationSeconds }];
+    stopAt: number | null;
+  }> = [
+    {
+      source,
+      startAt: now,
+      stopAt:
+        playbackDurationSeconds + 0.0001 <
+        decoded.duration / playbackRateRatio
+          ? now + playbackDurationSeconds
+          : null,
+    },
+  ];
   let completionSource: AudioScheduledSourceNode = source;
   let completionEndAt = now + playbackDurationSeconds;
   for (const voice of voiceEffect.parallelVoices) {
@@ -1315,13 +1388,18 @@ export async function playRealtimeVoiceBytes(args: {
     }
     parallelGain.connect(highpass);
     scheduled.push(parallelSource);
+    const naturalEndAt = startAt + decoded.duration / playbackRateRatio;
     const endAt = Math.min(
-      startAt + decoded.duration / playbackRateRatio,
+      naturalEndAt,
       args.maxDurationMs && args.maxDurationMs > 0
         ? now + args.maxDurationMs / 1_000
         : Number.POSITIVE_INFINITY,
     );
-    speechStarts.push({ source: parallelSource, startAt, stopAt: endAt });
+    speechStarts.push({
+      source: parallelSource,
+      startAt,
+      stopAt: endAt + 0.0001 < naturalEndAt ? endAt : null,
+    });
     if (endAt > completionEndAt) {
       completionSource = parallelSource;
       completionEndAt = endAt;
@@ -1411,7 +1489,36 @@ export async function playRealtimeVoiceBytes(args: {
   await new Promise<void>((resolve) => {
     let progress: VoicePlaybackProgressController | null = null;
     let endTimer: number | null = null;
+    let completedTailTimer: number | null = null;
+    let completedTailClosed = false;
     let settled = false;
+    const closeCompletedTail = (hardStop: boolean) => {
+      if (completedTailClosed) return;
+      completedTailClosed = true;
+      if (completedTailTimer !== null) {
+        window.clearTimeout(completedTailTimer);
+        completedTailTimer = null;
+      }
+      completedVoiceTailStops[channel].delete(stopCompletedTail);
+      for (const node of scheduled) {
+        if (hardStop) {
+          try {
+            if ("stop" in node && typeof node.stop === "function") node.stop();
+          } catch {
+            /* already stopped */
+          }
+        }
+        try {
+          node.disconnect();
+        } catch {
+          /* already disconnected */
+        }
+      }
+      if (hardStop) roomConnection.disconnect();
+      else roomConnection.release();
+    };
+    const stopCompletedTail = () => closeCompletedTail(true);
+    const releaseCompletedTail = () => closeCompletedTail(false);
     const finish = (completed: boolean) => {
       if (settled) return;
       settled = true;
@@ -1422,13 +1529,6 @@ export async function playRealtimeVoiceBytes(args: {
       if (active.progress === progress) active.progress = null;
       progress = null;
       if (active.resolve === cancel) active.resolve = null;
-      for (const node of scheduled) {
-        try {
-          node.disconnect();
-        } catch {
-          /* no-op */
-        }
-      }
       const ownsChannel = active.nodes === scheduled;
       if (ownsChannel) active.nodes = [];
       if (active.outputGain === outputGain) active.outputGain = null;
@@ -1437,15 +1537,20 @@ export async function playRealtimeVoiceBytes(args: {
         active.releaseTimer = null;
       }
       if (completed) {
-        // Completed speech is no longer interruptible. Detach its released
-        // room return from the active channel so the next natural turn can
-        // begin over the short studio tail instead of hard-disconnecting it.
+        // Completed speech leaves active ownership immediately, while its
+        // rendered tail remains explicitly stoppable by interruption or
+        // navigation. A natural next voice does not stop this bounded tail.
         if (active.roomConnection === roomConnection) {
           active.roomConnection = null;
         }
-        roomConnection.release();
+        completedVoiceTailStops[channel].add(stopCompletedTail);
+        completedTailTimer = window.setTimeout(
+          releaseCompletedTail,
+          VOICE_COMPLETED_OVERLAP_TAIL_MS,
+        );
         args.lifecycle?.onEnd?.();
       } else {
+        closeCompletedTail(true);
         args.lifecycle?.onCancel?.();
       }
       resolve();
@@ -1467,7 +1572,11 @@ export async function playRealtimeVoiceBytes(args: {
     );
     for (const speechStart of speechStarts) {
       speechStart.source.start(speechStart.startAt);
-      speechStart.source.stop(speechStart.stopAt);
+      // Let ordinary speech reach the AudioBuffer's true natural end. An
+      // explicit stop is only for a caller-supplied short-clip ceiling.
+      if (speechStart.stopAt !== null) {
+        speechStart.source.stop(speechStart.stopAt);
+      }
     }
     progress = beginVoicePlaybackProgress(
       args.lifecycle,

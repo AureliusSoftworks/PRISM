@@ -19,7 +19,7 @@ import {
   botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
   botPowerIntermittentAudibilityEffectFromEffectsV1,
   botPowerIgnoresOtherPowersFromEffectsV1,
-  botPowerIneptitudeRoleCueFromEffectsV1,
+  botPowerIneptRoleMisdirectionFromEffectsV1,
   botPowerListenerHearsTurnFromEffectsV1,
   botPowerAnnoyanceTargetFromEffectsV1,
   strongestBotPowerMoodBoostEffectFromEffectsV1,
@@ -1053,11 +1053,12 @@ export function coffeePowersPromptForSpeaker(
   if (!plan) return "";
   const lines: string[] = [];
   const own = plan.bots[speakerBotId];
-  const ineptitudeCue = botPowerIneptitudeRoleCueFromEffectsV1(
+  const ineptitudeMisdirection = botPowerIneptRoleMisdirectionFromEffectsV1(
     own?.effects ?? [],
     "coffee",
+    `${speakerBotId}:${visiblePeerBotIds.join(",")}`,
   );
-  if (ineptitudeCue) lines.push(ineptitudeCue);
+  if (ineptitudeMisdirection) lines.push(ineptitudeMisdirection);
   const ignoresPeerPowers = botPowerIgnoresOtherPowersFromEffectsV1(
     own?.effects ?? [],
   );

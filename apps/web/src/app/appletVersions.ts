@@ -60,6 +60,7 @@ export type BotPowerMoodDrainModePolicy = BotPowerGhostModePolicy;
 export type BotPowerThemeCompoundModePolicy = BotPowerGhostModePolicy;
 export type BotPowerSpectralPerceptionModePolicy = BotPowerGhostModePolicy;
 export type BotPowerImmunityModePolicy = BotPowerGhostModePolicy;
+export type BotPowerIneptitudeModePolicy = BotPowerGhostModePolicy;
 export type BotPowerDesignationModePolicy = BotPowerGhostModePolicy;
 
 export interface PrismAppletVersion {
@@ -73,19 +74,19 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.36",
+    version: "1.37",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.34",
+    version: "1.35",
     status: "active",
   },
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.5",
+    version: "0.6",
     status: "preview",
   },
   polling: {
@@ -97,13 +98,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.42",
+    version: "2.43",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.53",
+    version: "1.54",
     status: "active",
   },
   feed: {
@@ -121,7 +122,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.30",
+    version: "0.31",
     status: "planned",
   },
   gym: {
@@ -201,6 +202,26 @@ export const BOT_POWER_IMMUNITY_MODE_POLICY: Record<
   polling: "deferred",
   coffee: "direct",
   botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** The holder visibly botches every instruction and bot-authored production role. */
+export const BOT_POWER_INEPTITUDE_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerIneptitudeModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "adapted",
+  polling: "deferred",
+  coffee: "adapted",
+  botcast: "adapted",
   feed: "deferred",
   games: "deferred",
   story: "adapted",

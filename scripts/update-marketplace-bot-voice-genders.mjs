@@ -1,8 +1,15 @@
 #!/usr/bin/env node
 /**
- * Align Marketplace (and matching Library) built-in Prism voice slots with
- * character pronouns. Male-presenting bots leave feminine Kokoro voices, and
- * vice versa. they/them and ambiguous pronouns are left alone.
+ * Curate Marketplace (and matching Library) built-in Prism voice slots by
+ * persona. Every selection uses the portable voice pack, follows character
+ * pronouns, uses the available American/British locale when it genuinely fits,
+ * and otherwise favors the closest vocal character without inventing an accent.
+ *
+ * The filename is retained for compatibility with existing maintenance notes.
+ * Only the local voice identity changes inside a voice profile: baseVoiceId is
+ * curated and any host-specific systemVoiceName is cleared so the installed
+ * pack is authoritative. Performance, effects, online provider identity, and
+ * every other bot field remain untouched.
  *
  * Usage:
  *   node --experimental-strip-types scripts/update-marketplace-bot-voice-genders.mjs --dry-run --db PATH
@@ -29,7 +36,6 @@ import {
   BOT_AUDIO_VOICE_IDS,
   normalizeBotAudioVoiceProfileV1,
   PRISM_BUILTIN_ENGLISH_VOICES,
-  serializeBotAudioVoiceProfileV1,
 } from "@localai/shared";
 
 const root = resolve(import.meta.dirname, "..");
@@ -38,6 +44,130 @@ const manifestPath = join(marketplaceRoot, "manifest.json");
 
 /** @typedef {"feminine" | "masculine"} VoiceGender */
 /** @typedef {"feminine" | "masculine" | "neutral"} CharacterGender */
+
+/**
+ * Author-reviewed portable voice identities. Heart remains available to bot
+ * authors, but no bundled persona uses the generic default. British voices are
+ * reserved for personas whose authored delivery is explicitly British; the
+ * pack does not pretend to supply French, Indian, German, or other accents it
+ * does not install.
+ */
+const CURATED_BOT_IDS_BY_VOICE = {
+  "voice-1": [],
+  "voice-2": ["iris", "crazy-brenda", "marie-antoinette"],
+  "voice-3": [
+    "rowan",
+    "george-washington",
+    "thomas-jefferson",
+    "james-madison",
+    "socrates",
+    "aristotle",
+    "confucius",
+    "the-buddha",
+    "jesus-christ",
+    "laozi",
+    "guru-nanak",
+    "vincent-van-gogh",
+    "claude-monet",
+    "machiavelli",
+    "sun-tzu",
+    "chanakya",
+    "sigmund-freud",
+    "joseph-campbell",
+    "nikola-tesla",
+    "albert-einstein",
+    "mahatma-gandhi",
+    "silent-jack",
+    "lazy-cameron",
+    "mumbling-jim",
+    "identity-crisis-ian",
+    "abraham-lincoln",
+    "bob-ross",
+    "brian-griffin",
+    "identity-crisis-irene",
+    "jordan-peterson",
+    "l",
+    "light-yagami",
+    "mr-rogers",
+    "sam-harris",
+    "squidward",
+  ],
+  "voice-4": ["pia", "mary-shelley", "jane-austen", "professor-mcgonagall"],
+  "voice-5": [
+    "thomas-hobbes",
+    "isaac-newton",
+    "charles-darwin",
+    "obi-wan-kenobi",
+    "quiet-tim",
+  ],
+  "voice-6": ["sol", "joyful-nora", "misa-amane"],
+  "voice-7": ["mira", "marie-curie", "harriet-tubman", "kris-jenner"],
+  "voice-8": ["sad-sally", "khloe-kardashian", "kim-kardashian"],
+  "voice-9": [
+    "georgia-okeeffe",
+    "alias-avery",
+    "echo-ellen",
+    "kourtney-kardashian-barker",
+  ],
+  "voice-10": [
+    "plato",
+    "marcus-aurelius",
+    "carl-von-clausewitz",
+    "carl-jung",
+    "friedrich-nietzsche",
+    "martin-luther-king-jr",
+    "nelson-mandela",
+    "frederick-douglass",
+    "edgar-allan-poe",
+    "homer",
+    "darth-vader",
+    "barack-obama",
+    "donald-trump",
+    "joseph-stalin",
+    "maximilien-robespierre",
+    "mr-krabs",
+    "rick-sanchez",
+    "ryuk",
+  ],
+  "voice-11": [
+    "benjamin-franklin",
+    "john-adams",
+    "rumi",
+    "leonardo-da-vinci",
+    "salvador-dali",
+    "interrupting-tom",
+    "copycat-calvin",
+    "obsessed-kevin",
+    "shapeshifter-sam",
+    "forgetful-freddie",
+    "tiny-bill",
+    "adolf-hitler",
+    "bernie-sanders",
+    "joseph-smith-jr",
+    "morty-smith",
+    "near",
+    "patrick-star",
+    "peter-griffin",
+    "plankton",
+    "scatterbrained-steven",
+    "spongebob-squarepants",
+  ],
+  "voice-12": [
+    "william-shakespeare",
+    "alan-watts",
+    "andy-hominem",
+    "hagrid",
+    "harry-potter",
+    "stewie-griffin",
+  ],
+};
+
+/** @type {ReadonlyMap<string, import("@localai/shared").BotAudioVoiceId>} */
+const curatedVoiceIdByBotId = new Map(
+  Object.entries(CURATED_BOT_IDS_BY_VOICE).flatMap(([voiceId, botIds]) =>
+    botIds.map((botId) => [botId, voiceId]),
+  ),
+);
 
 function flagValue(flag) {
   const index = process.argv.indexOf(flag);
@@ -59,7 +189,9 @@ if (!shouldApply && !explicitDryRun) {
   throw new Error("Provide --dry-run or --apply.");
 }
 if (shouldApply && !workspaceBackupArgument) {
-  throw new Error("Applying Marketplace updates requires --workspace-backup PATH.");
+  throw new Error(
+    "Applying Marketplace updates requires --workspace-backup PATH.",
+  );
 }
 if (shouldApply && databaseArgument && !databaseBackupArgument) {
   throw new Error("Applying Library updates requires --db-backup PATH.");
@@ -83,13 +215,15 @@ const voiceGenderById = new Map(
     const prefix = voice.engineVoiceId.slice(0, 2);
     if (prefix === "af" || prefix === "bf") return [voice.voiceId, "feminine"];
     if (prefix === "am" || prefix === "bm") return [voice.voiceId, "masculine"];
-    throw new Error(`Unrecognized Kokoro gender prefix in ${voice.engineVoiceId}.`);
+    throw new Error(
+      `Unrecognized Kokoro gender prefix in ${voice.engineVoiceId}.`,
+    );
   }),
 );
 
-/** @type {ReadonlyMap<string, string>} */
-const voiceLocaleById = new Map(
-  PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => [voice.voiceId, voice.locale]),
+/** @type {ReadonlyMap<string, (typeof PRISM_BUILTIN_ENGLISH_VOICES)[number]>} */
+const voiceById = new Map(
+  PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => [voice.voiceId, voice]),
 );
 
 /**
@@ -111,54 +245,55 @@ function characterGenderFromPronouns(pronouns) {
 }
 
 /**
- * @param {string} seed
- * @param {number} length
- */
-function stableIndex(seed, length) {
-  if (length <= 0) throw new Error("Cannot index an empty voice pool.");
-  const digest = createHash("sha256").update(seed).digest();
-  return digest.readUInt32BE(0) % length;
-}
-
-/**
- * @param {CharacterGender} characterGender
- * @param {string | null | undefined} currentVoiceId
  * @param {string} botId
+ * @param {CharacterGender} characterGender
  */
-function chooseAlignedVoiceId(characterGender, currentVoiceId, botId) {
-  if (characterGender === "neutral") return currentVoiceId ?? "voice-1";
-  const targetGender =
-    characterGender === "masculine" ? "masculine" : "feminine";
-  const current =
-    typeof currentVoiceId === "string" &&
-    BOT_AUDIO_VOICE_IDS.includes(/** @type {any} */ (currentVoiceId))
-      ? currentVoiceId
-      : null;
-  if (current && voiceGenderById.get(current) === targetGender) {
-    return current;
+function chooseCuratedVoiceId(botId, characterGender) {
+  const voiceId = curatedVoiceIdByBotId.get(botId);
+  if (!voiceId || !BOT_AUDIO_VOICE_IDS.includes(voiceId)) {
+    throw new Error(`No valid curated PRISM voice for ${botId}.`);
   }
-  const preferredLocale = current ? voiceLocaleById.get(current) : null;
-  const gendered = BOT_AUDIO_VOICE_IDS.filter(
-    (voiceId) => voiceGenderById.get(voiceId) === targetGender,
-  );
-  const localeMatched = preferredLocale
-    ? gendered.filter((voiceId) => voiceLocaleById.get(voiceId) === preferredLocale)
-    : [];
-  const pool = localeMatched.length > 0 ? localeMatched : gendered;
-  return pool[stableIndex(`voice-gender:${botId}:${targetGender}`, pool.length)];
+  if (
+    characterGender !== "neutral" &&
+    voiceGenderById.get(voiceId) !== characterGender
+  ) {
+    throw new Error(
+      `${botId} uses ${voiceId}, which does not match ${characterGender} pronouns.`,
+    );
+  }
+  return voiceId;
 }
 
 /**
  * @param {unknown} profile
  * @param {string} nextVoiceId
  */
-function withBaseVoiceId(profile, nextVoiceId) {
-  const normalized = normalizeBotAudioVoiceProfileV1(profile);
-  if (normalized.baseVoiceId === nextVoiceId) return normalized;
-  return normalizeBotAudioVoiceProfileV1({
-    ...normalized,
+function withBuiltinVoiceIdentity(profile, nextVoiceId) {
+  const source =
+    profile && typeof profile === "object" && !Array.isArray(profile)
+      ? structuredClone(profile)
+      : {};
+  const next = {
+    ...source,
     baseVoiceId: nextVoiceId,
-  });
+  };
+  delete next.systemVoiceName;
+  return next;
+}
+
+/** @param {unknown} profile */
+function protectedVoiceProfileHash(profile) {
+  if (!profile || typeof profile !== "object" || Array.isArray(profile)) {
+    return createHash("sha256").update("{}").digest("hex");
+  }
+  const protectedProfile = Object.fromEntries(
+    Object.entries(profile).filter(
+      ([field]) => field !== "baseVoiceId" && field !== "systemVoiceName",
+    ),
+  );
+  return createHash("sha256")
+    .update(JSON.stringify(protectedProfile))
+    .digest("hex");
 }
 
 function readBundle(entry) {
@@ -178,7 +313,9 @@ function readBundle(entry) {
     execFileSync("unzip", ["-p", bundlePath, "bot.json"], { encoding: "utf8" }),
   );
   if (document.botHash !== entry.botHash || document.bot?.name !== entry.name) {
-    throw new Error(`${entry.name} bundle identity does not match the manifest.`);
+    throw new Error(
+      `${entry.name} bundle identity does not match the manifest.`,
+    );
   }
   return { bundlePath, entryNames, document };
 }
@@ -190,10 +327,14 @@ function protectedStateHash(row) {
   const protectedRow = Object.fromEntries(
     Object.entries(row).filter(
       ([column]) =>
-        column !== "authored_audio_voice_profile" && column !== "updated_at",
+        column !== "authored_audio_voice_profile" &&
+        column !== "audio_voice_profile_override" &&
+        column !== "updated_at",
     ),
   );
-  return createHash("sha256").update(JSON.stringify(protectedRow)).digest("hex");
+  return createHash("sha256")
+    .update(JSON.stringify(protectedRow))
+    .digest("hex");
 }
 
 function assertDatabaseIntegrity(database, label) {
@@ -213,34 +354,33 @@ function planVoiceUpdate(document, botId) {
     document.bot?.profile?.identity?.pronouns ??
     "";
   const characterGender = characterGenderFromPronouns(pronouns);
-  const authored = normalizeBotAudioVoiceProfileV1(
-    document.bot?.authoredAudioVoiceProfile,
-  );
+  const authoredRaw = document.bot?.authoredAudioVoiceProfile;
+  const authored = normalizeBotAudioVoiceProfileV1(authoredRaw);
   const overrideRaw = document.bot?.audioVoiceProfileOverride ?? null;
   const override = overrideRaw
     ? normalizeBotAudioVoiceProfileV1(overrideRaw)
     : null;
 
-  const nextAuthoredVoiceId = chooseAlignedVoiceId(
-    characterGender,
-    authored.baseVoiceId,
-    botId,
-  );
-  const nextOverrideVoiceId = override
-    ? chooseAlignedVoiceId(characterGender, override.baseVoiceId, `${botId}:override`)
-    : null;
+  const nextAuthoredVoiceId = chooseCuratedVoiceId(botId, characterGender);
+  const nextOverrideVoiceId = override ? nextAuthoredVoiceId : null;
 
-  const nextAuthored = withBaseVoiceId(authored, nextAuthoredVoiceId);
+  const nextAuthored = withBuiltinVoiceIdentity(
+    authoredRaw,
+    nextAuthoredVoiceId,
+  );
   const nextOverride =
     override && nextOverrideVoiceId
-      ? withBaseVoiceId(override, nextOverrideVoiceId)
+      ? withBuiltinVoiceIdentity(overrideRaw, nextOverrideVoiceId)
       : override;
 
-  const authoredChanged = authored.baseVoiceId !== nextAuthored.baseVoiceId;
+  const authoredChanged =
+    authored.baseVoiceId !== nextAuthored.baseVoiceId ||
+    Boolean(authored.systemVoiceName);
   const overrideChanged = Boolean(
     override &&
-      nextOverride &&
-      override.baseVoiceId !== nextOverride.baseVoiceId,
+    nextOverride &&
+    (override.baseVoiceId !== nextOverride.baseVoiceId ||
+      override.systemVoiceName),
   );
 
   return {
@@ -250,16 +390,33 @@ function planVoiceUpdate(document, botId) {
     toAuthored: nextAuthored.baseVoiceId,
     fromOverride: override?.baseVoiceId ?? null,
     toOverride: nextOverride?.baseVoiceId ?? null,
+    fromAuthoredSystemVoice: authored.systemVoiceName ?? null,
+    fromOverrideSystemVoice: override?.systemVoiceName ?? null,
     authoredChanged,
     overrideChanged,
     marketplaceChanged: authoredChanged || overrideChanged,
     nextAuthored,
     nextOverride,
-    skippedNeutral: characterGender === "neutral",
+    voice: voiceById.get(nextAuthoredVoiceId),
+    neutralPronouns: characterGender === "neutral",
+    authoredProtectedHash: protectedVoiceProfileHash(authoredRaw),
+    overrideProtectedHash: protectedVoiceProfileHash(overrideRaw),
   };
 }
 
 const manifest = JSON.parse(readFileSync(manifestPath, "utf8"));
+const manifestIds = new Set(manifest.bots.map((entry) => entry.id));
+const missingVoiceIds = [...manifestIds].filter(
+  (botId) => !curatedVoiceIdByBotId.has(botId),
+);
+const extraVoiceIds = [...curatedVoiceIdByBotId.keys()].filter(
+  (botId) => !manifestIds.has(botId),
+);
+if (missingVoiceIds.length > 0 || extraVoiceIds.length > 0) {
+  throw new Error(
+    `Curated voice map mismatch. Missing: ${missingVoiceIds.join(", ") || "—"}; extra: ${extraVoiceIds.join(", ") || "—"}.`,
+  );
+}
 const catalogEntries = manifest.bots.filter((entry) =>
   onlyIds ? onlyIds.has(entry.id) : true,
 );
@@ -271,10 +428,8 @@ const targets = catalogEntries.map((entry) => {
     entry,
     ...bundle,
     plan,
-    authoredJson: serializeBotAudioVoiceProfileV1(plan.nextAuthored),
-    overrideJson: plan.nextOverride
-      ? serializeBotAudioVoiceProfileV1(plan.nextOverride)
-      : null,
+    authoredJson: JSON.stringify(plan.nextAuthored),
+    overrideJson: plan.nextOverride ? JSON.stringify(plan.nextOverride) : null,
     marketplaceChanged: plan.marketplaceChanged,
   };
 });
@@ -288,7 +443,9 @@ let resolvedUserId = userIdArgument;
 let installedTargets = [];
 if (databaseArgument) {
   db = new DatabaseSync(resolve(databaseArgument), { readOnly: !shouldApply });
-  const users = db.prepare("SELECT id FROM users ORDER BY created_at ASC").all();
+  const users = db
+    .prepare("SELECT id FROM users ORDER BY created_at ASC")
+    .all();
   if (!resolvedUserId) {
     if (users.length !== 1) {
       throw new Error(
@@ -298,35 +455,79 @@ if (databaseArgument) {
     resolvedUserId = users[0].id;
   }
   if (!users.some((user) => user.id === resolvedUserId)) {
-    throw new Error("The requested Library user does not exist in this database.");
+    throw new Error(
+      "The requested Library user does not exist in this database.",
+    );
   }
-  installedTargets = mismatchedTargets.flatMap((targetEntry) => {
-    if (!targetEntry.plan.authoredChanged) return [];
-    const rows = db
+  installedTargets = targets.flatMap((targetEntry) => {
+    let rows = db
       .prepare("SELECT * FROM bots WHERE user_id = ? AND export_hash = ?")
       .all(resolvedUserId, targetEntry.entry.botHash);
+    let matchKind = "export_hash";
+    if (rows.length === 0) {
+      rows = db
+        .prepare(
+          "SELECT * FROM bots WHERE user_id = ? AND lower(name) = lower(?)",
+        )
+        .all(resolvedUserId, targetEntry.entry.name);
+      matchKind = "exact_name";
+    }
     if (rows.length > 1) {
-      throw new Error(`Found duplicate installed rows for ${targetEntry.entry.name}.`);
+      throw new Error(
+        `Found duplicate installed rows for ${targetEntry.entry.name}.`,
+      );
     }
     if (rows.length === 0) return [];
     const row = rows[0];
-    const currentAuthored = normalizeBotAudioVoiceProfileV1(
-      row.authored_audio_voice_profile
-        ? JSON.parse(row.authored_audio_voice_profile)
-        : undefined,
-    );
-    const nextAuthored = withBaseVoiceId(
-      currentAuthored,
+    const currentAuthoredRaw = row.authored_audio_voice_profile
+      ? JSON.parse(row.authored_audio_voice_profile)
+      : undefined;
+    const currentOverrideRaw = row.audio_voice_profile_override
+      ? JSON.parse(row.audio_voice_profile_override)
+      : null;
+    const currentAuthored = normalizeBotAudioVoiceProfileV1(currentAuthoredRaw);
+    const currentOverride = currentOverrideRaw
+      ? normalizeBotAudioVoiceProfileV1(currentOverrideRaw)
+      : null;
+    const nextAuthored = withBuiltinVoiceIdentity(
+      currentAuthoredRaw,
       targetEntry.plan.toAuthored,
     );
-    const authoredJson = serializeBotAudioVoiceProfileV1(nextAuthored);
+    const nextOverride = currentOverrideRaw
+      ? withBuiltinVoiceIdentity(
+          currentOverrideRaw,
+          targetEntry.plan.toAuthored,
+        )
+      : null;
+    const authoredJson = JSON.stringify(nextAuthored);
+    const overrideJson = nextOverride ? JSON.stringify(nextOverride) : null;
+    const authoredChanged =
+      currentAuthored.baseVoiceId !== nextAuthored.baseVoiceId ||
+      Boolean(currentAuthored.systemVoiceName);
+    const overrideChanged = Boolean(
+      currentOverride &&
+      nextOverride &&
+      (currentOverride.baseVoiceId !== nextOverride.baseVoiceId ||
+        currentOverride.systemVoiceName),
+    );
     return [
       {
         ...targetEntry,
         row,
+        matchKind,
         authoredJson,
-        libraryChanged: currentAuthored.baseVoiceId !== nextAuthored.baseVoiceId,
+        overrideJson,
+        libraryFromAuthored: currentAuthored.baseVoiceId,
+        libraryToAuthored: nextAuthored.baseVoiceId,
+        libraryFromOverride: currentOverride?.baseVoiceId ?? null,
+        libraryToOverride: nextOverride?.baseVoiceId ?? null,
+        libraryFromAuthoredSystemVoice: currentAuthored.systemVoiceName ?? null,
+        libraryFromOverrideSystemVoice:
+          currentOverride?.systemVoiceName ?? null,
+        libraryChanged: authoredChanged || overrideChanged,
         protectedStateHash: protectedStateHash(row),
+        authoredProtectedHash: protectedVoiceProfileHash(currentAuthoredRaw),
+        overrideProtectedHash: protectedVoiceProfileHash(currentOverrideRaw),
       },
     ];
   });
@@ -342,7 +543,9 @@ try {
   if (shouldApply) {
     workspaceBackupPath = resolve(workspaceBackupArgument);
     if (existsSync(workspaceBackupPath)) {
-      throw new Error(`Refusing to overwrite workspace backup: ${workspaceBackupPath}`);
+      throw new Error(
+        `Refusing to overwrite workspace backup: ${workspaceBackupPath}`,
+      );
     }
     mkdirSync(workspaceBackupPath, { recursive: true });
     copyFileSync(manifestPath, join(workspaceBackupPath, "manifest.json"));
@@ -356,21 +559,41 @@ try {
     if (mismatchedTargets.length > 0) {
       marketplaceUpdatedAt = new Date().toISOString();
       for (const targetEntry of mismatchedTargets) {
-        const scratch = mkdtempSync(join(tmpdir(), "prism-marketplace-voice-gender-"));
+        const scratch = mkdtempSync(
+          join(tmpdir(), "prism-marketplace-voice-gender-"),
+        );
         try {
           execFileSync("unzip", ["-qq", targetEntry.bundlePath, "-d", scratch]);
           const botJsonPath = join(scratch, "bot.json");
           const document = JSON.parse(readFileSync(botJsonPath, "utf8"));
-          document.bot.authoredAudioVoiceProfile = targetEntry.plan.nextAuthored;
+          document.bot.authoredAudioVoiceProfile =
+            targetEntry.plan.nextAuthored;
           if (targetEntry.plan.overrideChanged) {
-            document.bot.audioVoiceProfileOverride = targetEntry.plan.nextOverride;
+            document.bot.audioVoiceProfileOverride =
+              targetEntry.plan.nextOverride;
+          }
+          if (
+            protectedVoiceProfileHash(
+              document.bot.authoredAudioVoiceProfile,
+            ) !== targetEntry.plan.authoredProtectedHash ||
+            protectedVoiceProfileHash(
+              document.bot.audioVoiceProfileOverride ?? null,
+            ) !== targetEntry.plan.overrideProtectedHash
+          ) {
+            throw new Error(
+              `${targetEntry.entry.name} changed outside the base voice identity.`,
+            );
           }
           document.exportedAt = marketplaceUpdatedAt;
           writeFileSync(botJsonPath, `${JSON.stringify(document, null, 2)}\n`);
           const rebuiltPath = join(scratch, basename(targetEntry.bundlePath));
-          execFileSync("zip", ["-X", "-q", rebuiltPath, ...targetEntry.entryNames], {
-            cwd: scratch,
-          });
+          execFileSync(
+            "zip",
+            ["-X", "-q", rebuiltPath, ...targetEntry.entryNames],
+            {
+              cwd: scratch,
+            },
+          );
           renameSync(rebuiltPath, targetEntry.bundlePath);
         } finally {
           rmSync(scratch, { recursive: true, force: true });
@@ -383,10 +606,14 @@ try {
     if (db) {
       databaseBackupPath = resolve(databaseBackupArgument);
       if (databaseBackupPath === resolve(databaseArgument)) {
-        throw new Error("The database backup path must differ from the live database.");
+        throw new Error(
+          "The database backup path must differ from the live database.",
+        );
       }
       if (existsSync(databaseBackupPath)) {
-        throw new Error(`Refusing to overwrite database backup: ${databaseBackupPath}`);
+        throw new Error(
+          `Refusing to overwrite database backup: ${databaseBackupPath}`,
+        );
       }
       mkdirSync(dirname(databaseBackupPath), { recursive: true });
       await backup(db, databaseBackupPath);
@@ -402,7 +629,7 @@ try {
       );
       if (changedLibraryTargets.length > 0) {
         const update = db.prepare(
-          "UPDATE bots SET authored_audio_voice_profile = ?, updated_at = ? WHERE id = ? AND user_id = ?",
+          "UPDATE bots SET authored_audio_voice_profile = ?, audio_voice_profile_override = ?, updated_at = ? WHERE id = ? AND user_id = ?",
         );
         const updatedAt = new Date().toISOString();
         db.exec("BEGIN IMMEDIATE");
@@ -410,24 +637,47 @@ try {
         for (const targetEntry of changedLibraryTargets) {
           const result = update.run(
             targetEntry.authoredJson,
+            targetEntry.overrideJson,
             updatedAt,
             targetEntry.row.id,
             resolvedUserId,
           );
           if (result.changes !== 1) {
-            throw new Error(`Could not update installed ${targetEntry.entry.name}.`);
+            throw new Error(
+              `Could not update installed ${targetEntry.entry.name}.`,
+            );
           }
         }
-        for (const targetEntry of installedTargets) {
+        for (const targetEntry of changedLibraryTargets) {
           const row = db
             .prepare("SELECT * FROM bots WHERE id = ? AND user_id = ?")
             .get(targetEntry.row.id, resolvedUserId);
-          if (!row || row.authored_audio_voice_profile !== targetEntry.authoredJson) {
-            throw new Error(`${targetEntry.entry.name} voice sync did not persist.`);
+          if (
+            !row ||
+            row.authored_audio_voice_profile !== targetEntry.authoredJson ||
+            row.audio_voice_profile_override !== targetEntry.overrideJson
+          ) {
+            throw new Error(
+              `${targetEntry.entry.name} voice sync did not persist.`,
+            );
+          }
+          const savedAuthored = JSON.parse(row.authored_audio_voice_profile);
+          const savedOverride = row.audio_voice_profile_override
+            ? JSON.parse(row.audio_voice_profile_override)
+            : null;
+          if (
+            protectedVoiceProfileHash(savedAuthored) !==
+              targetEntry.authoredProtectedHash ||
+            protectedVoiceProfileHash(savedOverride) !==
+              targetEntry.overrideProtectedHash
+          ) {
+            throw new Error(
+              `${targetEntry.entry.name} voice performance changed outside local identity.`,
+            );
           }
           if (protectedStateHash(row) !== targetEntry.protectedStateHash) {
             throw new Error(
-              `${targetEntry.entry.name} personal state changed outside authored voice.`,
+              `${targetEntry.entry.name} personal state changed outside voice identity.`,
             );
           }
         }
@@ -446,7 +696,7 @@ try {
           scanned: targets.length,
           changed: mismatchedTargets.length,
           unchanged: targets.length - mismatchedTargets.length,
-          neutralSkipped: targets.filter((entry) => entry.plan.skippedNeutral)
+          neutralPronouns: targets.filter((entry) => entry.plan.neutralPronouns)
             .length,
           updatedAt: marketplaceUpdatedAt,
           workspaceBackupPath,
@@ -460,6 +710,12 @@ try {
               targetEntry.plan.fromOverride || targetEntry.plan.toOverride
                 ? `${targetEntry.plan.fromOverride ?? "—"} → ${targetEntry.plan.toOverride ?? "—"}`
                 : null,
+            clearedSystemVoices: [
+              targetEntry.plan.fromAuthoredSystemVoice,
+              targetEntry.plan.fromOverrideSystemVoice,
+            ].filter(Boolean),
+            voice: targetEntry.plan.voice?.name ?? targetEntry.plan.toAuthored,
+            locale: targetEntry.plan.voice?.locale ?? null,
             branchLock: targetEntry.entry.branchLock ?? null,
           })),
         },
@@ -469,23 +725,37 @@ try {
               installedMatches: installedTargets.length,
               changed: installedTargets.filter((entry) => entry.libraryChanged)
                 .length,
-              unchanged: installedTargets.filter((entry) => !entry.libraryChanged)
-                .length,
-              missing: mismatchedTargets.filter((targetEntry) => targetEntry.plan.authoredChanged)
-                .length - installedTargets.length,
+              unchanged: installedTargets.filter(
+                (entry) => !entry.libraryChanged,
+              ).length,
+              missing: targets.length - installedTargets.length,
               databaseBackupPath,
-              bots: installedTargets.map((targetEntry) => ({
-                marketplaceName: targetEntry.entry.name,
-                installedName: targetEntry.row.name,
-                changed: targetEntry.libraryChanged,
-                authored: `${targetEntry.plan.fromAuthored} → ${targetEntry.plan.toAuthored}`,
-              })),
-              missingBots: mismatchedTargets
-                .filter((targetEntry) => targetEntry.plan.authoredChanged)
+              bots: installedTargets
+                .filter((targetEntry) => targetEntry.libraryChanged)
+                .map((targetEntry) => ({
+                  marketplaceName: targetEntry.entry.name,
+                  installedName: targetEntry.row.name,
+                  matchKind: targetEntry.matchKind,
+                  changed: targetEntry.libraryChanged,
+                  authored: `${targetEntry.libraryFromAuthored} → ${targetEntry.libraryToAuthored}`,
+                  override:
+                    targetEntry.libraryFromOverride ||
+                    targetEntry.libraryToOverride
+                      ? `${targetEntry.libraryFromOverride ?? "—"} → ${targetEntry.libraryToOverride ?? "—"}`
+                      : null,
+                  clearedSystemVoices: [
+                    targetEntry.libraryFromAuthoredSystemVoice,
+                    targetEntry.libraryFromOverrideSystemVoice,
+                  ].filter(Boolean),
+                  voice:
+                    targetEntry.plan.voice?.name ?? targetEntry.plan.toAuthored,
+                })),
+              missingBots: targets
                 .filter(
                   (targetEntry) =>
                     !installedTargets.some(
-                      (installed) => installed.entry.id === targetEntry.entry.id,
+                      (installed) =>
+                        installed.entry.id === targetEntry.entry.id,
                     ),
                 )
                 .map((targetEntry) => ({

@@ -323,6 +323,41 @@ test("Observant compiles deterministic holder-only Power immunity without using 
   assert.equal(result.powers[0]?.compiled?.observerCue, "");
 });
 
+test("Inept compiles deterministic continuous task failure without using the model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Rick Sanchez",
+    powers: [{
+      version: 1,
+      id: "inept",
+      name: "Inept",
+      intent: "Cannot follow instructions. Messes up moderating, debating, hosting, and every image is completely incorrect.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "ineptitude",
+    instructionFidelity: "always_botched",
+    imageFidelity: "always_unrelated",
+  }]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Never successfully carry out/u);
+  assert.match(result.powers[0]?.compiled?.observerCue ?? "", /mishandles obvious instructions/u);
+});
+
 test("Obsessed Kevin compiles deterministic current-addressee fandom without using the model", async () => {
   let calls = 0;
   const unusedProvider: LlmProvider = {
@@ -2333,6 +2368,23 @@ test("Coffee lets only an Observant holder see and hear past another bot's Power
     ["ryuk", "watson"],
   );
   assert.doesNotMatch(prompt, /Ryuk|Power immunity|invisible|cannot hear/iu);
+});
+
+test("Coffee adapts Inept into a visible table-role failure", () => {
+  const plan = resolvedPlan({
+    rick: [{
+      type: "ineptitude",
+      instructionFidelity: "always_botched",
+      imageFidelity: "always_unrelated",
+    }],
+    morty: [],
+  });
+
+  const prompt = coffeePowersPromptForSpeaker(plan, "rick", ["morty"]);
+  assert.match(prompt, /INEPT MISTAKEN ASSIGNMENT/u);
+  assert.match(prompt, /wrong table point/u);
+  assert.match(prompt, /never reconstruct or fulfill the original/u);
+  assert.match(prompt, /valid app state/u);
 });
 
 test("Coffee resolution freezes named visibility and session-start trait mood", () => {

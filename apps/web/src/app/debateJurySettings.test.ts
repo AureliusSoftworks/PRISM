@@ -45,7 +45,7 @@ describe("Debate Jury settings", () => {
     );
   });
 
-  it("scopes the setting by account and exposes it in Debate settings", () => {
+  it("keeps legacy account keys readable but removes the obsolete choice controls", () => {
     assert.notEqual(
       debateJurySettingsStorageKey("account-a"),
       debateJurySettingsStorageKey("account-b"),
@@ -55,16 +55,11 @@ describe("Debate Jury settings", () => {
       /\{ scope: "debate", title: "Debate", icon: <Gavel/u,
     );
     assert.match(pageSource, /activeSettingsScope === "debate"/u);
-    assert.match(pageSource, /Automatically choose Auto/u);
-    assert.match(pageSource, /Jury deliberation choice countdown/u);
-    assert.match(pageSource, /Judge \/ Moderator sessions stay on\s*Auto/u);
-    assert.match(
-      pageSource,
-      /juryAutoDeliberationEnabled=\{[\s\S]{0,100}debateJurySettings\.autoDeliberationEnabled/u,
-    );
-    assert.match(
-      pageSource,
-      /juryDecisionTimeoutMs=\{debateJurySettings\.decisionTimeoutMs\}/u,
-    );
+    assert.match(pageSource, /Automatic and unskippable/u);
+    assert.match(pageSource, /Jury deliberation follows one consistent/u);
+    assert.doesNotMatch(pageSource, /Automatically choose Auto/u);
+    assert.doesNotMatch(pageSource, /Jury deliberation choice countdown/u);
+    assert.doesNotMatch(pageSource, /juryAutoDeliberationEnabled=/u);
+    assert.doesNotMatch(pageSource, /juryDecisionTimeoutMs=/u);
   });
 });

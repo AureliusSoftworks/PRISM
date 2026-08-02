@@ -2,6 +2,7 @@ import {
   extractStageDirectionCues,
   extractStageDirections,
   type StageDirectionCue,
+  type StageDirectionParseOptions,
 } from "./botMention.ts";
 import type { ZenStageActionPayload } from "@localai/shared";
 
@@ -93,18 +94,25 @@ function normalizeZenActionCue(cue: StageDirectionCue, index: number): ZenAction
   };
 }
 
-export function resolveZenActionPresentation(text: string): ZenActionPresentation {
+export function resolveZenActionPresentation(
+  text: string,
+  options: StageDirectionParseOptions = {},
+): ZenActionPresentation {
+  const inferUnmarkedActions = options.inferUnmarkedActions !== false;
+  const cacheKey = `${inferUnmarkedActions ? "inferred" : "explicit"}:${text}`;
   if (text.length >= ZEN_ACTION_PRESENTATION_CACHE_MIN_LENGTH) {
-    const cached = zenActionPresentationCache.get(text);
+    const cached = zenActionPresentationCache.get(cacheKey);
     if (cached) {
-      zenActionPresentationCache.delete(text);
-      zenActionPresentationCache.set(text, cached);
+      zenActionPresentationCache.delete(cacheKey);
+      zenActionPresentationCache.set(cacheKey, cached);
       return cached;
     }
   }
   const cues: ZenActionCue[] = [];
   let previousActionKey: string | null = null;
-  for (const [index, cue] of extractStageDirectionCues(text).entries()) {
+  for (const [index, cue] of extractStageDirectionCues(text, {
+    inferUnmarkedActions,
+  }).entries()) {
     const normalizedCue = normalizeZenActionCue(cue, index);
     if (!normalizedCue) continue;
     const actionKey = zenActionKey(normalizedCue.action);
@@ -121,7 +129,7 @@ export function resolveZenActionPresentation(text: string): ZenActionPresentatio
       actionOnly: false,
     };
     if (text.length >= ZEN_ACTION_PRESENTATION_CACHE_MIN_LENGTH) {
-      zenActionPresentationCache.set(text, presentation);
+      zenActionPresentationCache.set(cacheKey, presentation);
       while (zenActionPresentationCache.size > ZEN_ACTION_PRESENTATION_CACHE_LIMIT) {
         const oldestKey = zenActionPresentationCache.keys().next().value;
         if (typeof oldestKey !== "string") break;
@@ -131,7 +139,9 @@ export function resolveZenActionPresentation(text: string): ZenActionPresentatio
     return presentation;
   }
 
-  const { mainText } = extractStageDirections(text);
+  const { mainText } = extractStageDirections(text, {
+    inferUnmarkedActions,
+  });
   const presentation = {
     mainText,
     cues,
@@ -139,7 +149,7 @@ export function resolveZenActionPresentation(text: string): ZenActionPresentatio
     actionOnly: mainText.trim().length === 0,
   };
   if (text.length >= ZEN_ACTION_PRESENTATION_CACHE_MIN_LENGTH) {
-    zenActionPresentationCache.set(text, presentation);
+    zenActionPresentationCache.set(cacheKey, presentation);
     while (zenActionPresentationCache.size > ZEN_ACTION_PRESENTATION_CACHE_LIMIT) {
       const oldestKey = zenActionPresentationCache.keys().next().value;
       if (typeof oldestKey !== "string") break;
@@ -156,11 +166,16 @@ export function resolveZenActionPresentation(text: string): ZenActionPresentatio
 export function resolveZenActionPresentationFromMessage(args: {
   content: string;
   zenStageAction?: ZenStageActionPayload;
+  inferUnmarkedActions?: boolean;
 }): ZenActionPresentation {
   const metadataAction = args.zenStageAction?.action
     ? normalizeZenActionText(args.zenStageAction.action)
     : "";
-  if (!metadataAction) return resolveZenActionPresentation(args.content);
+  if (!metadataAction) {
+    return resolveZenActionPresentation(args.content, {
+      inferUnmarkedActions: args.inferUnmarkedActions,
+    });
+  }
 
   return {
     mainText: args.content,

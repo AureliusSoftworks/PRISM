@@ -24,7 +24,32 @@ describe("voice spoken text", () => {
     );
     assert.equal(
       voicePerformanceTextFromActionCues(text),
-      "[offers a hopeful half-smile] Oh! Hello there... goodness, I don't believe we've met.",
+      null,
+    );
+  });
+
+  it("trusts PRISM's separate Action field without muting Markdown emphasis", () => {
+    const explicitAction = { leadingMarkedAction: true } as const;
+    assert.equal(
+      voiceSpokenText(
+        "*DOES A BACKFLIP THROUGH CONFETTI* The *important* part remains.",
+        explicitAction,
+      ),
+      "The important part remains.",
+    );
+    assert.equal(
+      voicePerformanceTextFromActionCues(
+        "*DOES A BACKFLIP THROUGH CONFETTI* The *important* part remains.",
+        explicitAction,
+      ),
+      null,
+    );
+    assert.equal(
+      voicePerformanceTextFromActionCues(
+        "*LAUGHS* The *important* part remains.",
+        explicitAction,
+      ),
+      "[laughs] The important part remains.",
     );
   });
 
@@ -73,6 +98,10 @@ describe("voice spoken text", () => {
       "[clears throat] Listen. [laughs]",
     );
     assert.equal(
+      voicePerformanceTextFromActionCues("*LAUGHS* That was funny."),
+      "[laughs] That was funny.",
+    );
+    assert.equal(
       voiceSpokenText("Look *gasp* at *scream* me! *dance*"),
       "Look at me!",
     );
@@ -93,7 +122,7 @@ describe("voice spoken text", () => {
       voicePerformanceTextFromActionCues(
         "*leans back* The *important* point remains.",
       ),
-      "[leans back] The important point remains.",
+      null,
     );
   });
 
@@ -117,6 +146,24 @@ describe("voice spoken text", () => {
     );
   });
 
+  it("leaves PRISM-bundled bodily Foley out when local playback is guaranteed", () => {
+    const localFoley = { omitLocalFoleyTags: true } as const;
+    assert.equal(
+      voicePerformanceTextFromActionCues(
+        "*LAUGHS* That was funny. *FARTS* Excuse me.",
+        localFoley,
+      ),
+      "[laughs] That was funny. Excuse me.",
+    );
+    assert.equal(
+      voicePerformanceTextFromActionCues(
+        "[coughs] Still speaking. *burps* Sorry.",
+        localFoley,
+      ),
+      "Still speaking. Sorry.",
+    );
+  });
+
   it("keeps trailing winks and pause-bridged directions off mic", () => {
     // "*wink*" at the end of a sentence is a stage direction, never a word.
     assert.equal(
@@ -127,7 +174,7 @@ describe("voice spoken text", () => {
       voicePerformanceTextFromActionCues(
         "The war effort was tanking *wink*.",
       ),
-      "The war effort was tanking [wink].",
+      null,
     );
     // A direction bridging two spoken pauses is stagecraft, not emphasis.
     assert.equal(
@@ -138,7 +185,7 @@ describe("voice spoken text", () => {
       voicePerformanceTextFromActionCues(
         "No response is needed for your... *pauses* ...bluntness.",
       ),
-      "No response is needed for your... [pauses] ...bluntness.",
+      null,
     );
   });
 
@@ -147,7 +194,7 @@ describe("voice spoken text", () => {
     assert.equal(voiceSpokenText(text), "Look at me!");
     assert.equal(
       voicePerformanceTextFromActionCues(text),
-      "Look [gasp] at [screams] me! [dance]",
+      "Look [gasps] at [screams] me!",
     );
   });
 
@@ -156,7 +203,20 @@ describe("voice spoken text", () => {
     assert.equal(voiceSpokenText(text), "[Ada](prism-bot://bot-ada), hello.");
     assert.equal(
       voicePerformanceTextFromActionCues(text),
-      "[Ada](prism-bot://bot-ada), [waves] hello.",
+      null,
+    );
+  });
+
+  it("drops unsupported bracket actions instead of risking literal speech", () => {
+    assert.equal(
+      voicePerformanceTextFromActionCues(
+        "[leans back] Welcome. [explosion] Still here.",
+      ),
+      null,
+    );
+    assert.equal(
+      voicePerformanceTextFromActionCues("[sarcastic] Obviously."),
+      "[sarcastic] Obviously.",
     );
   });
 });

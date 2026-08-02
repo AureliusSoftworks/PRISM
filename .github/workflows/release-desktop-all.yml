@@ -178,6 +178,9 @@ jobs:
           chmod +x scripts/package-desktop-macos.sh
           scripts/package-desktop-macos.sh "${RELEASE_VERSION}"
 
+      - name: Verify Steam content firewall
+        run: npm run steam:content:verify
+
       - name: Upload macOS asset to desktop release
         run: |
           gh release upload "desktop/v${RELEASE_VERSION}" \
@@ -248,6 +251,9 @@ jobs:
           chmod +x scripts/package-desktop-linux.sh
           scripts/package-desktop-linux.sh "${RELEASE_VERSION}"
 
+      - name: Verify Steam content firewall
+        run: npm run steam:content:verify
+
       - name: Upload Linux asset to desktop release
         run: |
           gh release upload "desktop/v${RELEASE_VERSION}" \
@@ -289,6 +295,10 @@ jobs:
         shell: pwsh
         run: |
           pwsh scripts/package-desktop-windows.ps1 -Version $env:RELEASE_VERSION
+
+      - name: Verify Steam content firewall
+        shell: pwsh
+        run: npm run steam:content:verify
 
       - name: Upload Windows assets to desktop release
         shell: pwsh

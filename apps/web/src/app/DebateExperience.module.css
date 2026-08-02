@@ -509,6 +509,24 @@
   color: #ffd8e2;
 }
 
+.errorToast {
+  display: grid;
+  width: min(900px, calc(100% - 32px));
+  gap: 4px;
+  font: inherit;
+  text-align: left;
+  cursor: copy;
+}
+
+.errorToast small {
+  color: color-mix(in srgb, currentColor 68%, transparent);
+  font-size: 9px;
+}
+
+.errorToast[data-copy-state="copied"] {
+  border-color: color-mix(in srgb, #8fd6c8 58%, #a64f69);
+}
+
 .warning {
   border-color: #9d7e38;
   color: #ffe6a8;
@@ -3258,7 +3276,11 @@
   font-size: clamp(28px, 2.8vw, 46px);
   transform: translateY(8%)
     rotate(var(--debate-evidence-prop-rotate, -6deg));
-  filter: drop-shadow(0 10px 10px rgba(0, 0, 0, 0.5));
+  /* Tight contact + broader cast shadow keeps transparent sprites and emoji
+     visibly seated on the table instead of hovering over it. */
+  filter:
+    drop-shadow(0 3px 2px rgba(0, 0, 0, 0.72))
+    drop-shadow(1px 13px 11px rgba(0, 0, 0, 0.48));
 }
 
 .evidencePedestalDocument {
@@ -3273,7 +3295,8 @@
     linear-gradient(135deg, transparent 0 62%, rgba(255, 255, 255, 0.14) 62%),
     linear-gradient(165deg, #f7f1e6 0%, #e4d8c6 48%, #d2c3ae 100%);
   box-shadow:
-    0 10px 16px rgba(0, 0, 0, 0.46),
+    0 3px 3px rgba(0, 0, 0, 0.58),
+    1px 13px 18px rgba(0, 0, 0, 0.44),
     inset 0 1px 0 rgba(255, 255, 255, 0.55);
   transform: translateY(6%)
     rotate(var(--debate-evidence-prop-rotate, -6deg));
@@ -3395,7 +3418,8 @@
     linear-gradient(165deg, #5a5164 0%, #352e3e 55%, #241e2c 100%);
   color: #f4edf8;
   box-shadow:
-    0 10px 16px rgba(0, 0, 0, 0.55),
+    0 3px 3px rgba(0, 0, 0, 0.68),
+    1px 13px 18px rgba(0, 0, 0, 0.52),
     inset 0 1px 0 rgba(255, 255, 255, 0.12);
 }
 
@@ -6583,6 +6607,23 @@
   --gallery-prism-color: var(--jury-seat-color);
 }
 
+.juryChamberSeat .juryDeliberationBubble {
+  top: 18%;
+  right: 4%;
+  width: 28px;
+  cursor: default;
+  animation-duration: 1.15s;
+}
+
+.juryChamberSeat[data-seat="1"] .juryDeliberationBubble,
+.juryChamberSeat[data-seat="4"] .juryDeliberationBubble {
+  animation-delay: -380ms;
+}
+
+.juryChamberSeat[data-seat="2"] .juryDeliberationBubble {
+  animation-delay: -760ms;
+}
+
 /* The roster hugs the viewport floor, so previews open upward and temporarily
    escape the support band instead of disappearing below the window. */
 .stageSupport:has(.juryThoughtChip:hover),
@@ -7302,73 +7343,6 @@
   font-family: var(--font-title, var(--font-ui-sans, ui-sans-serif));
   font-size: clamp(11px, 1.08vw, 16px);
   line-height: 1.38;
-}
-
-.juryDeliberationChoice {
-  position: absolute;
-  bottom: 5.5%;
-  left: 50%;
-  z-index: 7;
-  display: flex;
-  width: max-content;
-  transform: translateX(-50%);
-  gap: 8px;
-}
-
-.juryDeliberationChoice button {
-  border: 1px solid color-mix(in srgb, var(--debate-active-color) 38%, #50485a);
-  border-radius: 999px;
-  padding: 8px 14px;
-  color: #e8e2ed;
-  font: inherit;
-  font-size: 10px;
-  letter-spacing: 0.04em;
-  background: color-mix(in srgb, #17131d 78%, var(--debate-active-color));
-  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.22);
-  cursor: pointer;
-}
-
-.juryDeliberationChoice button:last-child {
-  border-color: color-mix(in srgb, #e8a26d 52%, #50485a);
-  color: #f0ceb5;
-  background: color-mix(in srgb, #5d3425 30%, #171421);
-}
-
-.juryDeliberationChoice button:disabled {
-  cursor: default;
-  opacity: 0.5;
-}
-
-.juryChamber[data-theme="light"] .juryDeliberationChoice button,
-.live[data-theme="light"] .stageStateOverlay .juryDeliberationChoice button {
-  border-color: color-mix(in srgb, var(--debate-active-color) 30%, #cbc4cf);
-  color: #302938;
-  background: color-mix(in srgb, #ffffff 84%, var(--debate-active-color));
-}
-
-.juryChamber[data-theme="light"] .juryDeliberationChoice button:last-child,
-.live[data-theme="light"]
-  .stageStateOverlay
-  .juryDeliberationChoice
-  button:last-child {
-  border-color: color-mix(in srgb, #a86137 38%, #cfc7d5);
-  color: #7c4628;
-  background: color-mix(in srgb, #f8e9dc 68%, #ffffff);
-}
-
-.juryDeliberationChoice[data-context="sealed"],
-.juryDeliberationChoice[data-context="prompt"] {
-  position: static;
-  margin-top: 10px;
-  transform: none;
-}
-
-.juryDeliberationChoice button[data-default="true"] {
-  border-color: color-mix(in srgb, var(--debate-active-color) 74%, white);
-  color: #fff;
-  box-shadow:
-    0 8px 24px rgba(0, 0, 0, 0.22),
-    0 0 18px color-mix(in srgb, var(--debate-active-color) 26%, transparent);
 }
 
 .live[data-jury-chamber="true"] :is(.stageSupport, .floorStatus) {

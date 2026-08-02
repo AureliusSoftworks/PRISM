@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { execFileSync } from "node:child_process";
 import { createHash } from "node:crypto";
 import { readFileSync } from "node:fs";
 import path from "node:path";
@@ -22,7 +23,8 @@ import {
   normalizeBotFaceMouthScale,
   normalizeBotFaceThinkingFrames,
   normalizeOptionalBotAudioVoiceProfileV1,
-  normalizeBotPowersV1
+  normalizeBotPowersV1,
+  PRISM_BUILTIN_ENGLISH_VOICES
 } from "@localai/shared";
 import {
   marketplaceEntriesForTheme,
@@ -37,6 +39,7 @@ import {
 import { parsePrismBotArchive } from "./botArchive.ts";
 
 const appRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "../..");
+const repoRoot = path.resolve(appRoot, "../..");
 const publicRoot = path.join(appRoot, "public");
 const faceFontIds = new Set(["neutral", "warm", "concise", "playful", "formal"]);
 const precomposedPairEyeIds = new Set([
@@ -526,6 +529,56 @@ describe("bot marketplace static catalog", () => {
       assert.equal(typeof previewLine, "string", entry.name);
       assert.equal((previewLine?.trim().length ?? 0) > 0, true, entry.name);
       assert.equal((previewLine?.length ?? 0) <= 160, true, entry.name);
+    }
+  });
+
+  it("keeps every bundled voice on the reviewed PRISM-pack identity", () => {
+    const manifest = normalizeBotMarketplaceManifest(
+      readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
+    );
+    const report = JSON.parse(
+      execFileSync(
+        process.execPath,
+        [
+          "--experimental-strip-types",
+          path.join(repoRoot, "scripts/update-marketplace-bot-voice-genders.mjs"),
+          "--dry-run"
+        ],
+        { cwd: repoRoot, encoding: "utf8" }
+      )
+    ) as { marketplace: { scanned: number; changed: number } };
+
+    assert.equal(report.marketplace.scanned, manifest.bots.length);
+    assert.equal(report.marketplace.changed, 0, "curated voice map must match every bundle");
+
+    const voiceById = new Map(
+      PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => [voice.voiceId, voice])
+    );
+    for (const entry of manifest.bots) {
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
+      const pronouns = bundle.botJson.profile?.identity?.pronouns?.toLowerCase() ?? "";
+      const profiles = [
+        ["authored", bundle.botJson.bot.authoredAudioVoiceProfile],
+        ["override", bundle.botJson.bot.audioVoiceProfileOverride]
+      ] as const;
+      for (const [label, rawProfile] of profiles) {
+        const profile = normalizeOptionalBotAudioVoiceProfileV1(rawProfile);
+        if (!profile) continue;
+        const voice = voiceById.get(profile.baseVoiceId);
+        assert.ok(voice, `${entry.name} ${label} must use an installed PRISM voice`);
+        assert.notEqual(profile.baseVoiceId, "voice-1", `${entry.name} ${label} must not use Heart`);
+        assert.equal(
+          profile.systemVoiceName,
+          undefined,
+          `${entry.name} ${label} must not depend on a host OS voice`
+        );
+        if (/\bhe\b|\bhim\b|\bhis\b/u.test(pronouns)) {
+          assert.match(voice.engineVoiceId, /^(?:am|bm)_/u, `${entry.name} ${label} gender`);
+        }
+        if (/\bshe\b|\bher\b|\bhers\b/u.test(pronouns)) {
+          assert.match(voice.engineVoiceId, /^(?:af|bf)_/u, `${entry.name} ${label} gender`);
+        }
+      }
     }
   });
 

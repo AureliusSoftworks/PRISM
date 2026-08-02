@@ -10,14 +10,17 @@ const BODY_ACTION_START_PATTERN =
 
 const ASTERISK_VOCAL_CUE_TAGS = [
   [/^(?:sighs?|sighing)\b/iu, "sighs"],
-  [/^(?:burps?|burping|belches?|belching)\b/iu, "burps"],
+  [/^(?:burps?|burping|belches?|belching|eructates?|eructating)\b/iu, "burps"],
   [/^(?:laughs?|laughing|giggles?|giggling)\b/iu, "laughs"],
   [/^(?:bursts?|bursting)\s+(?:out\s+)?(?:into|in)\s+laugh(?:ter|s|ing)?\b/iu, "laughs"],
   [/^(?:bursts?|bursting)\s+out\s+laughing\b/iu, "laughs"],
   [/^(?:chuckles?|chuckling|snickers?|snickering)\b/iu, "chuckles"],
   [/^(?:snorts?|snorting)\b/iu, "snorts"],
-  [/^(?:farts?|farting|passes?\s+gas)\b/iu, "farts"],
-  [/^(?:coughs?|coughing)\b/iu, "coughs"],
+  [
+    /^(?:farts?|farting|flatulates?|flatulating|toots?|tooting|passes?\s+(?:some\s+)?gas|breaks?\s+wind|broke\s+wind)\b/iu,
+    "farts",
+  ],
+  [/^(?:coughs?|coughing|hacks?|hacking|ahems?|aheming)\b/iu, "coughs"],
   [/^(?:clears?|clearing)\s+(?:his|her|their|its|the)?\s*throat\b/iu, "clears throat"],
   [/^(?:gasps?|gasping)\b/iu, "gasps"],
   [/^(?:gulps?|gulping|swallows?|swallowing)\b/iu, "gulps"],
@@ -50,6 +53,35 @@ const ASTERISK_VOCAL_CUE_TAGS = [
   [/^(?:inhales?|inhaling|breathes?\s+in|takes?\s+(?:a\s+)?breath)\b/iu, "breathes deeply"],
 ] as const satisfies readonly (readonly [RegExp, string])[];
 
+/** PRISM can own these bodily sounds as bundled local Foley when the caller
+ * explicitly guarantees local playback. */
+const LOCAL_FOLEY_VOICE_TAGS = new Set([
+  "burps",
+  "clears throat",
+  "coughs",
+  "farts",
+]);
+
+export interface VoicePerformanceTextOptions {
+  /** The first marked block came from PRISM's separate Action field. */
+  leadingMarkedAction?: boolean;
+  /** Omit provider tags for cues the caller will perform with bundled Foley. */
+  omitLocalFoleyTags?: boolean;
+}
+
+export interface VoiceSpokenTextOptions {
+  /** The first marked block came from PRISM's separate Action field. */
+  leadingMarkedAction?: boolean;
+}
+
+const CONTROLLED_ELEVENLABS_DIRECTION_TAGS = new Set([
+  "angry",
+  "excited",
+  "nervous",
+  "sarcastic",
+  "solemn",
+]);
+
 export const ASTERISK_HUMAN_SOUND_VOICE_TAGS = [
   ...new Set(ASTERISK_VOCAL_CUE_TAGS.map(([, tag]) => tag)),
 ] as readonly string[];
@@ -60,6 +92,21 @@ function asteriskHumanSoundVoiceTag(inner: string): string | null {
     ASTERISK_VOCAL_CUE_TAGS.find(([pattern]) => pattern.test(normalized))?.[1] ??
     null
   );
+}
+
+function controlledVoicePerformanceTag(inner: string): string | null {
+  const normalized = inner.replace(/\s+/gu, " ").trim().toLocaleLowerCase();
+  return (
+    asteriskHumanSoundVoiceTag(normalized) ??
+    (CONTROLLED_ELEVENLABS_DIRECTION_TAGS.has(normalized) ? normalized : null)
+  );
+}
+
+function isExplicitLeadingMarkedAction(
+  before: string,
+  options: VoiceSpokenTextOptions,
+): boolean {
+  return options.leadingMarkedAction === true && before.trim().length === 0;
 }
 
 /**
@@ -110,7 +157,10 @@ function looksLikeMarkedStageDirection(
  * ElevenLabs receives the corresponding actor-facing form from
  * `voicePerformanceTextFromActionCues` instead.
  */
-export function voiceSpokenText(value: unknown): string {
+export function voiceSpokenText(
+  value: unknown,
+  options: VoiceSpokenTextOptions = {},
+): string {
   if (typeof value !== "string") return "";
   return normalizeNestedActionQuotes(value)
     .replace(BRACKETED_ACTION_PATTERN, " ")
@@ -120,6 +170,7 @@ export function voiceSpokenText(value: unknown): string {
         if (asteriskHumanSoundVoiceTag(inner)) return " ";
         const before = source.slice(0, offset);
         const after = source.slice(offset + match.length);
+        if (isExplicitLeadingMarkedAction(before, options)) return " ";
         return looksLikeMarkedStageDirection(inner, before, after)
           ? " "
           : inner;
@@ -130,35 +181,51 @@ export function voiceSpokenText(value: unknown): string {
 }
 
 /**
- * Gives bracketed actions and asterisk-authored stage actions one ElevenLabs
- * representation. Existing bracket tags stay in place; recognized asterisk
- * actions become bracket tags; ordinary Markdown emphasis remains spoken.
+ * Gives supported vocal actions an ElevenLabs direction without ever putting
+ * visual action prose on mic. Ordinary Markdown emphasis remains spoken.
  */
 export function voicePerformanceTextFromActionCues(
   value: unknown,
+  options: VoicePerformanceTextOptions = {},
 ): string | null {
   if (typeof value !== "string") return null;
   const normalized = normalizeNestedActionQuotes(value);
-  let foundActionCue =
-    [...normalized.matchAll(BRACKETED_ACTION_PATTERN)].length > 0;
-  const performanceText = normalized.replace(
+  let foundActionCue = false;
+  const withoutLocalBracketedFoley = normalized.replace(
+    BRACKETED_ACTION_PATTERN,
+    (_match, inner: string) => {
+      const tag = controlledVoicePerformanceTag(inner);
+      if (!tag) return " ";
+      foundActionCue = true;
+      return options.omitLocalFoleyTags &&
+        LOCAL_FOLEY_VOICE_TAGS.has(tag)
+        ? " "
+        : `[${tag}]`;
+    },
+  );
+  const performanceText = withoutLocalBracketedFoley.replace(
     MARKED_SPEECH_BLOCK_PATTERN,
     (match, _marker: string, inner: string, offset: number, source: string) => {
-      const tag = asteriskHumanSoundVoiceTag(inner);
+      const tag = controlledVoicePerformanceTag(inner);
       if (tag) {
         foundActionCue = true;
-        return `[${tag}]`;
+        return options.omitLocalFoleyTags && LOCAL_FOLEY_VOICE_TAGS.has(tag)
+          ? " "
+          : `[${tag}]`;
       }
       const before = source.slice(0, offset);
       const after = source.slice(offset + match.length);
-      if (!looksLikeMarkedStageDirection(inner, before, after)) return inner;
-      foundActionCue = true;
-      return `[${inner.replace(/\s+/gu, " ").trim()}]`;
+      if (
+        isExplicitLeadingMarkedAction(before, options) ||
+        looksLikeMarkedStageDirection(inner, before, after)
+      ) {
+        return " ";
+      }
+      return inner;
     },
   );
-  return foundActionCue
-    ? performanceText.replace(/\s+/gu, " ").trim()
-    : null;
+  if (!foundActionCue) return null;
+  return performanceText.replace(/\s+/gu, " ").trim() || null;
 }
 
 /** @deprecated Use `voicePerformanceTextFromActionCues`. */

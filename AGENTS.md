@@ -136,3 +136,13 @@ Treat onboarding and contextual tutorials as part of every user-visible feature,
 - Update the tutorial when a player-visible control, workflow, applet, or default changes. If no tutorial change is needed, record that review in the Bead or verification notes.
 - Keep tutorial target selectors stable and backed by tests. A missing, hidden, or stale target is a product regression.
 - Preserve skip, do-it-later, and reset paths so guidance never traps the player.
+
+## Credits Maintenance
+
+- When adding or replacing a direct third-party framework, package, connected
+  service, dataset, font, sound, image, or other external asset, update
+  `apps/web/src/app/aboutCredits.ts` in the same change.
+- Keep direct npm and Cargo dependency coverage green in
+  `apps/web/src/app/aboutCredits.test.ts`; curated services and production
+  assets still require a deliberate registry entry because manifests cannot
+  discover them.

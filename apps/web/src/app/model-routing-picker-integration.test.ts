@@ -11,6 +11,69 @@ const tutorialSource = readFileSync(
   new URL("./modeTutorials.ts", import.meta.url),
   "utf8",
 );
+const reasoningEffortSource = readFileSync(
+  new URL("../../../../packages/shared/src/reasoningEffort.ts", import.meta.url),
+  "utf8",
+);
+
+function effortGlyphColors(level: string): string[] {
+  const block = cssSource.match(
+    new RegExp(
+      `\\.modelEffortIcon\\[data-effort-level="${level}"\\] \\{([^}]+)\\}`,
+      "u",
+    ),
+  )?.[1];
+  assert.ok(block, `missing ${level} effort color rule`);
+  return [...new Set(block.match(/#[0-9a-f]{6}/giu) ?? [])];
+}
+
+function lightEffortGlyphColors(level: string): string[] {
+  const selector = `.modelEffortIcon[data-effort-level="${level}"]`;
+  const selectorIndex = cssSource.indexOf(
+    selector,
+    cssSource.indexOf("Light surfaces"),
+  );
+  assert.notEqual(
+    selectorIndex,
+    -1,
+    `missing light ${level} effort color rule`,
+  );
+  const blockEnd = cssSource.indexOf("}", selectorIndex);
+  const block = cssSource.slice(selectorIndex, blockEnd);
+  return [...new Set(block.match(/#[0-9a-f]{6}/giu) ?? [])];
+}
+
+function backgroundColors(block: string): string[] {
+  const background = block.match(/background:\s*([\s\S]*?);/u)?.[1] ?? "";
+  return [...new Set(background.match(/#[0-9a-f]{6}/giu) ?? [])];
+}
+
+function effortSliderColors(level: string): string[] {
+  const block = cssSource.match(
+    new RegExp(
+      `\\.composeModelEffortSliderFill\\[data-effort-level="${level}"\\] \\{([^}]+)\\}`,
+      "u",
+    ),
+  )?.[1];
+  assert.ok(block, `missing ${level} effort slider color rule`);
+  return backgroundColors(block);
+}
+
+function lightEffortSliderColors(level: string): string[] {
+  const selector = `.composeModelEffortSliderFill[data-effort-level="${level}"]`;
+  const selectorIndex = cssSource.indexOf(
+    selector,
+    cssSource.indexOf("Light surfaces mirror the glyph spectrum"),
+  );
+  assert.notEqual(
+    selectorIndex,
+    -1,
+    `missing light ${level} effort slider color rule`,
+  );
+  const blockEnd = cssSource.indexOf("}", selectorIndex);
+  const block = cssSource.slice(selectorIndex, blockEnd);
+  return backgroundColors(block);
+}
 
 describe("shared routing model picker integration", () => {
   it("can enter AUTO from a duplicate current fallback by selecting a valid Primary", () => {
@@ -61,6 +124,130 @@ describe("shared routing model picker integration", () => {
     );
   });
 
+  it("explains disabled effort and discloses online multi-call simulation", () => {
+    assert.match(pageSource, /data-glyph-tooltip=\{effortDisabledReason\}/u);
+    assert.match(
+      reasoningEffortSource,
+      /Enable experimental simulated effort in Settings/u,
+    );
+    assert.ok(
+      (pageSource.match(/Give unsupported models simulated effort/gu) ?? [])
+        .length >= 2,
+      "expected both Settings presentations to use provider-neutral copy",
+    );
+    assert.match(pageSource, /multiple provider calls/u);
+    assert.match(pageSource, /increase[\s\S]{0,30}usage or cost/u);
+  });
+
+  it("uses the supplied effort symbols in a wheel, pointer, and keyboard slider", () => {
+    assert.match(pageSource, /MODEL_EFFORT_ICON_PATHS/u);
+    assert.match(
+      pageSource,
+      /<ModelEffortIcon level=\{effortControl\.value\}/u,
+    );
+    assert.match(pageSource, /onWheel=\{handleEffortWheel\}/u);
+    assert.match(
+      pageSource,
+      /type="range"[\s\S]{0,400}aria-valuetext=\{effortLabel\}/u,
+    );
+    assert.match(cssSource, /mask: var\(--model-effort-icon\)/u);
+    assert.match(
+      cssSource,
+      /data-effort-level="xhigh"[\s\S]{0,180}linear-gradient/u,
+    );
+    assert.match(cssSource, /writing-mode: vertical-lr/u);
+    assert.doesNotMatch(pageSource, /composeModelEffortHint/u);
+  });
+
+  it("adds exactly one spectrum color at each effort increase", () => {
+    assert.deepEqual(effortGlyphColors("auto"), effortGlyphColors("none"));
+    assert.equal(effortGlyphColors("minimal").length, 1);
+    assert.notDeepEqual(
+      effortGlyphColors("minimal"),
+      effortGlyphColors("auto"),
+    );
+    assert.equal(effortGlyphColors("low").length, 2);
+    assert.equal(effortGlyphColors("medium").length, 3);
+    assert.equal(effortGlyphColors("high").length, 4);
+    assert.equal(effortGlyphColors("xhigh").length, 5);
+  });
+
+  it("uses a darker light-mode palette without changing the spectrum counts", () => {
+    assert.deepEqual(
+      lightEffortGlyphColors("auto"),
+      lightEffortGlyphColors("none"),
+    );
+    assert.deepEqual(lightEffortGlyphColors("minimal"), ["#2874b2"]);
+    assert.equal(lightEffortGlyphColors("low").length, 2);
+    assert.equal(lightEffortGlyphColors("medium").length, 3);
+    assert.equal(lightEffortGlyphColors("high").length, 4);
+    assert.deepEqual(lightEffortGlyphColors("xhigh"), [
+      "#168461",
+      "#2874b2",
+      "#6650c7",
+      "#ad3c84",
+      "#c35432",
+    ]);
+    assert.match(
+      cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,140}composeModelEffortSliderFill/u,
+    );
+  });
+
+  it("matches the slider line spectrum to the selected effort glyph", () => {
+    assert.match(
+      pageSource,
+      /composeModelEffortSliderFill[\s\S]{0,120}data-effort-level=\{effortControl\.value\}/u,
+    );
+    for (const level of [
+      "auto",
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]) {
+      assert.deepEqual(effortSliderColors(level), effortGlyphColors(level));
+      assert.deepEqual(
+        lightEffortSliderColors(level),
+        lightEffortGlyphColors(level),
+      );
+    }
+  });
+
+  it("shows each saved effort glyph while reserving color for the selected model", () => {
+    assert.match(pageSource, /rowValueForModel: \(model\) =>/u);
+    assert.match(
+      pageSource,
+      /const rowEffort = effortControl\?\.rowValueForModel\(model\)/u,
+    );
+    assert.match(
+      pageSource,
+      /<ModelEffortIcon[\s\S]{0,120}level=\{rowEffort\}/u,
+    );
+    assert.match(
+      pageSource,
+      /isSelected[\s\S]{0,120}composeModelRowEffortIconMonochrome/u,
+    );
+    assert.match(
+      pageSource,
+      /composeModelOptionMain[\s\S]{0,700}composeModelOptionStatus[\s\S]{0,500}composeModelDefaultBadge[\s\S]{0,500}composeModelRowEffort/u,
+    );
+    assert.match(
+      cssSource,
+      /\.composeModelOptionStatus\s*\{[^}]*display:\s*inline-flex;[^}]*flex:\s*0 0 auto;[^}]*align-items:\s*center/u,
+    );
+    assert.match(
+      cssSource,
+      /\.modelEffortIcon\.composeModelRowEffortIconMonochrome\s*\{[^}]*background:\s*#ffffff;[^}]*filter:\s*none/u,
+    );
+    assert.match(
+      cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,160}\.modelEffortIcon\.composeModelRowEffortIconMonochrome\s*\{[^}]*background:\s*#000000;[^}]*filter:\s*none/u,
+    );
+  });
+
   it("offers the global effort HUD and its Default reset shortcut", () => {
     assert.match(pageSource, /modelEffortHudTarget/u);
     assert.match(
@@ -73,6 +260,15 @@ describe("shared routing model picker integration", () => {
 
   it("teaches the global profile without adding a first-run choice", () => {
     assert.match(tutorialSource, /saves Effort per concrete model/u);
+    assert.match(
+      tutorialSource,
+      /model row shows its saved effort glyph on the right/u,
+    );
+    assert.match(tutorialSource, /selected model receives the spectrum color/u);
+    assert.match(tutorialSource, /vertical slider/u);
+    assert.match(tutorialSource, /one through five PRISM colors/u);
+    assert.match(tutorialSource, /Hover a disabled glyph/u);
+    assert.match(tutorialSource, /online models where extra provider calls/u);
     assert.match(tutorialSource, /Cmd\/Ctrl\+Shift\+E/u);
     assert.match(tutorialSource, /prepared work is discarded/u);
   });

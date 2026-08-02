@@ -206,6 +206,31 @@ describe("Debate live presentation", () => {
       ),
       10_000,
     );
+    assert.equal(
+      debateLiveElapsedDurationMs(
+        {
+          ...session,
+          status: "paused",
+          events: [event],
+          pausedAt: "2026-08-01T00:00:10.000Z",
+          pausedDurationMs: 0,
+        },
+        nowMs,
+      ),
+      10_000,
+    );
+    assert.equal(
+      debateLiveElapsedDurationMs(
+        {
+          ...session,
+          events: [event],
+          pausedAt: null,
+          pausedDurationMs: 20_000,
+        },
+        nowMs,
+      ),
+      30_000,
+    );
   });
 
   it("keeps Debate audio independent from optional voice effects", () => {

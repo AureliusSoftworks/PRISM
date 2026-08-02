@@ -27,7 +27,7 @@ import {
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
   botPowerIgnoresOtherPowersV1,
-  botPowerIneptitudeRoleCueV1,
+  botPowerIneptRoleMisdirectionV1,
   botPowerResponseIsSilentV1,
   botPowerObserverCueLinesV1,
   botPowerBotNamingCueV1,
@@ -70,7 +70,10 @@ import type {
   ProviderMessage,
   ProviderName,
 } from "./providers.ts";
-import { prepareMessagesWithSimulatedEffort } from "./model-effort-runner.ts";
+import {
+  prepareMessagesWithSimulatedEffort,
+  shouldPrepareMessagesWithSimulatedEffort,
+} from "./model-effort-runner.ts";
 
 export interface StoryBotProfile {
   id: string;
@@ -1863,9 +1866,10 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
         "Story scene",
       );
       const themeMoodCue = botPowerThemeMoodCueV1(bot.powers, args.theme);
-      const ineptitudeCue = botPowerIneptitudeRoleCueV1(
+      const ineptitudeMisdirection = botPowerIneptRoleMisdirectionV1(
         bot.powers,
         "story_actor",
+        `${bot.id}:${args.premise ?? "default"}`,
       );
       const genericSelfCuePowers = bot.powers?.filter(
         (power) => !power.compiled?.effects.some(
@@ -1873,7 +1877,7 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
         ),
       );
       const powers = buildBotPowersPromptBlock([
-        ...(ineptitudeCue ? [ineptitudeCue] : []),
+        ...(ineptitudeMisdirection ? [ineptitudeMisdirection] : []),
         ...(botPowerBotNamingCueV1(
           bot.name,
           bot.powers,
@@ -2178,7 +2182,13 @@ export async function generateStorySessionEpisode(
       },
       { role: "user" as const, content: storyGenerationPrompt(args) },
     ];
-    if (args.providerName === "local" && args.reasoningEffort) {
+    if (
+      shouldPrepareMessagesWithSimulatedEffort({
+        provider: args.providerName,
+        model: args.model,
+        effort: args.reasoningEffort,
+      })
+    ) {
       generationMessages = await prepareMessagesWithSimulatedEffort({
         provider: args.provider,
         messages: generationMessages,

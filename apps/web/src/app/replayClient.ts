@@ -103,6 +103,9 @@ export async function updateCapturedReplayVoiceTake(
     resolvedEngine?: string | null;
     alignment?: ReplayVoiceTakeV1["alignment"];
     sourceMessageId?: string | null;
+    resolvedModelHash?: string | null;
+    segmentTimings?: ReplayVoiceTakeV1["segmentTimings"];
+    heardCompletion?: ReplayVoiceTakeV1["heardCompletion"];
   },
 ): Promise<ReplayVoiceTakeRecordV1> {
   const take = await takePromise;
@@ -122,17 +125,20 @@ export async function storeCapturedReplayVoiceAudio(args: {
   contentType: string;
   durationMs?: number | null;
   resolvedEngine?: string | null;
+  resolvedModelHash?: string | null;
   alignment?: ReplayVoiceTakeV1["alignment"];
 }): Promise<ReplayVoiceTakeRecordV1> {
   let take = await args.takePromise;
   if (
     args.durationMs !== undefined ||
     args.resolvedEngine !== undefined ||
+    args.resolvedModelHash !== undefined ||
     args.alignment !== undefined
   ) {
     take = await updateCapturedReplayVoiceTake(Promise.resolve(take), {
       durationMs: args.durationMs,
       resolvedEngine: args.resolvedEngine,
+      resolvedModelHash: args.resolvedModelHash,
       alignment: args.alignment,
     });
   }
@@ -151,6 +157,41 @@ export async function storeCapturedReplayVoiceAudio(args: {
     throw new Error(payload?.error ?? `Replay audio capture failed (${response.status}).`);
   }
   return payload.take;
+}
+
+export async function loadCapturedReplayVoiceAudio(args: {
+  surface: "signal" | "coffee";
+  sourceId: string;
+  sourceKey: string;
+}): Promise<{
+  bytes: ArrayBuffer;
+  contentType: string;
+  resolvedEngine: string | null;
+  alignment: ReplayVoiceTakeV1["alignment"];
+} | null> {
+  const recording = await replayRecordingForSource(args.surface, args.sourceId);
+  if (!recording) return null;
+  const detail = await replayRecordingDetail(recording.id);
+  const take = detail.takes.find(
+    (candidate) =>
+      candidate.snapshot.sourceKey === args.sourceKey &&
+      candidate.status === "captured" &&
+      candidate.audioUrl,
+  );
+  if (!take) return null;
+  const response = await replayFetch(
+    `/api/replays/${encodeURIComponent(take.recordingId)}/takes/${encodeURIComponent(take.id)}/audio`,
+  );
+  if (!response.ok) return null;
+  return {
+    bytes: await response.arrayBuffer(),
+    contentType:
+      response.headers.get("content-type") ??
+      take.audioContentType ??
+      "application/octet-stream",
+    resolvedEngine: take.snapshot.resolvedEngine,
+    alignment: take.snapshot.alignment,
+  };
 }
 
 export async function queueReplayManifest(

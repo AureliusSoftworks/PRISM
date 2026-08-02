@@ -95,7 +95,7 @@ describe("English voice post processing", () => {
     assert.equal(processing.lowpassHz, 16000);
   });
 
-  it("streams only profiles whose local identity survives media playback", () => {
+  it("keeps local-only tone out of Premium streaming eligibility", () => {
     assert.equal(
       englishVoiceProfileSupportsStreaming(
         {
@@ -114,7 +114,7 @@ describe("English voice post processing", () => {
         false,
         "neutral",
       ),
-      false,
+      true,
     );
     assert.equal(
       englishVoiceProfileSupportsStreaming(
@@ -142,7 +142,7 @@ describe("English voice post processing", () => {
     );
   });
 
-  it("keeps English pitch independent from Pace in every engine", () => {
+  it("keeps Local pitch independent from Pace without reshaping Premium", () => {
     const profile = {
       v: 1 as const,
       baseVoiceId: "voice-1" as const,
@@ -151,7 +151,7 @@ describe("English voice post processing", () => {
       pace: 0.333,
       lilt: 0,
     };
-    assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "elevenlabs"), -487);
+    assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "elevenlabs"), 0);
     assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "builtin"), -487);
   });
 
@@ -456,6 +456,11 @@ describe("English voice post processing", () => {
     });
     let startCount = 0;
     let endCount = 0;
+    const segmentTimings: Array<{
+      startMs: number;
+      endMs: number;
+      heard: boolean;
+    }> = [];
     try {
       await enqueueChunkedEnglishVoice(
         response,
@@ -470,6 +475,9 @@ describe("English voice post processing", () => {
           onEnd: () => {
             endCount += 1;
           },
+          onSegmentTiming: (timing) => {
+            segmentTimings.push(timing);
+          },
         },
         "builtin",
         "neutral",
@@ -478,6 +486,9 @@ describe("English voice post processing", () => {
       assert.equal(playCount, 2);
       assert.equal(startCount, 1);
       assert.equal(endCount, 1);
+      assert.equal(segmentTimings.length, 2);
+      assert.ok(segmentTimings.every((timing) => timing.heard));
+      assert.equal(segmentTimings[1]?.startMs, segmentTimings[0]?.endMs);
     } finally {
       stopEnglishVoice();
       if (originalAudio) {
@@ -517,6 +528,32 @@ describe("English voice synthesis responses", () => {
       () => parseEnglishVoiceWaveStreamChunk('{"index":0}'),
       /invalid audio chunk/,
     );
+  });
+
+  it("recognizes Voice+ v2 vocal-action segments without network audio", () => {
+    const response = new Response("", {
+      headers: {
+        "content-type": "application/x-ndjson; charset=utf-8",
+        "x-prism-voice-stream": "wav-chunks-v2",
+      },
+    });
+    assert.equal(englishVoiceResponseSupportsChunkedStreaming(response), true);
+    const chunk = parseEnglishVoiceWaveStreamChunk(
+      JSON.stringify({
+        index: 0,
+        kind: "vocal-action",
+        characterCount: 0,
+        action: "laugh",
+        modifiers: ["nervous", "unsupported"],
+        authoredText: "laughs nervously",
+        sourceStart: 4,
+        sourceEnd: 23,
+      }),
+    );
+    assert.equal(chunk.kind, "vocal-action");
+    assert.equal(chunk.action, "laugh");
+    assert.deepEqual(chunk.modifiers, ["nervous"]);
+    assert.equal(chunk.bytes.byteLength, 0);
   });
 
   it("keeps legacy binary audio compatible", async () => {
