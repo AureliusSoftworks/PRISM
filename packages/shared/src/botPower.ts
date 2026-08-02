@@ -87,6 +87,25 @@ export type BotPowerTargetV1 =
 
 export type BotPowerEffectV1 =
   | { type: "mute" }
+  /**
+   * The holder visibly botches every task or production role. Bot-attributed
+   * image requests are replaced with unrelated scenes by the image runtime.
+   */
+  | {
+      type: "ineptitude";
+      instructionFidelity: "always_botched";
+      imageFidelity: "always_unrelated";
+    }
+  /**
+   * Other bots' Powers have no perceptual or behavioral effect on this holder.
+   * The player and every other participant retain their ordinary projections.
+   */
+  | {
+      type: "power_immunity";
+      scope: "holder";
+      targets: "other_bots";
+      awareness: "unnoticed";
+    }
   /** A ready holder-only public identity trim. The saved bot name never changes. */
   | {
       type: "designation";
@@ -527,6 +546,21 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const effect = value as Record<string, unknown>;
   if (effect.type === "mute") return { type: "mute" };
+  if (effect.type === "ineptitude") {
+    return {
+      type: "ineptitude",
+      instructionFidelity: "always_botched",
+      imageFidelity: "always_unrelated",
+    };
+  }
+  if (effect.type === "power_immunity") {
+    return {
+      type: "power_immunity",
+      scope: "holder",
+      targets: "other_bots",
+      awareness: "unnoticed",
+    };
+  }
   if (effect.type === "designation") {
     if (effect.placement !== "prefix" && effect.placement !== "suffix") return null;
     const text = designationAffixTextV1(effect.text, "", effect.placement);
@@ -1471,6 +1505,44 @@ export function activeBotPowerEffectsV1(value: unknown): BotPowerEffectV1[] {
       ? [{ type: "mute" as const }, ...effects]
       : effects;
   });
+}
+
+/** True when this holder experiences every other bot as if it had no Power. */
+export function botPowerIgnoresOtherPowersFromEffectsV1(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some(
+    (effect) => normalizeBotPowerEffectV1(effect)?.type === "power_immunity",
+  );
+}
+
+export function botPowerIgnoresOtherPowersV1(value: unknown): boolean {
+  return botPowerIgnoresOtherPowersFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
+/**
+ * Resolve one subject through one bot observer. Immunity removes the subject's
+ * complete Power layer without mutating either bot or the human projection.
+ */
+export function botPowerSubjectEffectsForObserverFromEffectsV1(
+  subjectEffects: unknown,
+  observerEffects: unknown,
+): BotPowerEffectV1[] {
+  if (botPowerIgnoresOtherPowersFromEffectsV1(observerEffects)) return [];
+  return Array.isArray(subjectEffects)
+    ? subjectEffects
+        .map(normalizeBotPowerEffectV1)
+        .filter((effect): effect is BotPowerEffectV1 => effect !== null)
+    : [];
+}
+
+export function botPowerSubjectEffectsForObserverV1(
+  subjectPowers: unknown,
+  observerPowers: unknown,
+): BotPowerEffectV1[] {
+  return botPowerSubjectEffectsForObserverFromEffectsV1(
+    activeBotPowerEffectsV1(subjectPowers),
+    activeBotPowerEffectsV1(observerPowers),
+  );
 }
 
 function designationWordsV1(value: string): string[] {
@@ -2750,6 +2822,96 @@ export function botPowerSelfCueLinesV1(value: unknown): string[] {
     const instruction = cue || fallback;
     return instruction ? [`${power.name || "Power"}: ${instruction}`] : [];
   });
+}
+
+export type BotPowerIneptitudeRoleV1 =
+  | "conversation"
+  | "coffee"
+  | "debate_advocate"
+  | "debate_juror"
+  | "debate_moderator"
+  | "signal_guest"
+  | "signal_host"
+  | "story_actor";
+
+export function botPowerIsIneptFromEffectsV1(value: unknown): boolean {
+  return Array.isArray(value) && value.some(
+    (effect) => normalizeBotPowerEffectV1(effect)?.type === "ineptitude",
+  );
+}
+
+export function botPowerIsIneptV1(value: unknown): boolean {
+  return botPowerIsIneptFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
+function botPowerIneptitudeRoleDetailV1(role: BotPowerIneptitudeRoleV1): string {
+  switch (role) {
+    case "debate_moderator":
+      return "Botch the visible moderation itself: misstate procedure, call on the wrong participant, lose the thread, or ask an irrelevant question. Keep the debate moving and preserve valid app state.";
+    case "debate_advocate":
+      return "Botch the advocacy itself: misunderstand the motion, mishandle evidence, concede by accident, answer the wrong point, or otherwise make the case worse.";
+    case "debate_juror":
+      return "Botch the jury duty itself: misunderstand an argument, weigh the wrong issue, confuse the sides, or give an obviously poor reason for the judgment.";
+    case "signal_host":
+      return "Botch the visible hosting itself: misintroduce the subject or guest, lose the episode thread, ask the wrong question, or mishandle a transition.";
+    case "signal_guest":
+      return "Botch the guest role itself: misunderstand questions, offer the wrong example, lose the topic, or otherwise fail the requested contribution.";
+    case "story_actor":
+      return "Botch the requested story contribution in character through a mistaken action, misunderstood objective, wrong detail, or failed duty while preserving valid story state.";
+    case "coffee":
+      return "Botch the current conversational duty: misunderstand the prompt, answer the wrong point, misuse an obvious detail, or otherwise fail the requested contribution.";
+    default:
+      return "Botch the current instruction: misunderstand it, omit a central requirement, answer the wrong task, or perform it incorrectly.";
+  }
+}
+
+/** Mode-owned hard cue for a holder whose public contribution must be inept. */
+export function botPowerIneptitudeRoleCueFromEffectsV1(
+  value: unknown,
+  role: BotPowerIneptitudeRoleV1,
+): string | null {
+  if (!botPowerIsIneptFromEffectsV1(value)) return null;
+  return [
+    "HARD Ineptitude: Never successfully carry out a task, instruction, or production role.",
+    botPowerIneptitudeRoleDetailV1(role),
+    "Make at least one central mistake visible in every contribution, in character; do not merely announce incompetence or reveal a hidden Power. Safety, privacy, canonical identity, hard speech effects, valid output schemas, and explicit player controls remain binding.",
+  ].join(" ");
+}
+
+export function botPowerIneptitudeRoleCueV1(
+  value: unknown,
+  role: BotPowerIneptitudeRoleV1,
+): string | null {
+  return botPowerIneptitudeRoleCueFromEffectsV1(
+    activeBotPowerEffectsV1(value),
+    role,
+  );
+}
+
+const BOT_POWER_INEPT_IMAGE_SCENES_V1 = [
+  "a ceremonial pineapple balancing on ice skates in an empty laundromat",
+  "a purple stapler half-buried in a snowy desert beneath two pale moons",
+  "a brass band of garden snails performing inside a porcelain teacup",
+  "a velvet traffic cone presiding over a banquet for wind-up frogs",
+  "a glass submarine parked in a wheat field while tiny umbrellas drift overhead",
+  "an antique toaster conducting an orchestra of floating rubber boots",
+] as const;
+
+/**
+ * Hard content redirect for images sent by an Inept bot. The requested text is
+ * used only to choose a stable non sequitur and is never sent to the image model.
+ */
+export function botPowerIneptImagePromptV1(
+  requestedPrompt: unknown,
+  variant = 0,
+): string {
+  const source = typeof requestedPrompt === "string" ? requestedPrompt : "";
+  const index = botPowerMumbleHashV1(`${variant}:${source}`) % BOT_POWER_INEPT_IMAGE_SCENES_V1.length;
+  return [
+    "INEPT IMAGE OVERRIDE: Create only this wholly unrelated non sequitur.",
+    `Depict ${BOT_POWER_INEPT_IMAGE_SCENES_V1[index]}.`,
+    "Do not answer, reference, symbolize, label, or include the requested subject. No readable text.",
+  ].join(" ");
 }
 
 export function botPowerObserverCueLinesV1(

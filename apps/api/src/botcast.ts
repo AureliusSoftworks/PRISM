@@ -1,5 +1,10 @@
 import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
+import {
+  allModelReasoningEffortCursorHash,
+  resolveUserModelReasoningEffort,
+} from "./model-effort-runtime.ts";
+import { prepareMessagesWithSimulatedEffort } from "./model-effort-runner.ts";
 import type {
   BotcastAtmosphereState,
   BotcastAudienceExperienceV1,
@@ -156,14 +161,17 @@ import {
   botPowerEternallyIntroducesV1,
   botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIntermittentAudibilityEffectV1,
+  botPowerIgnoresOtherPowersV1,
+  botPowerIneptitudeRoleCueV1,
   botPowerListenerHearsTurnV1,
   botPowerAnnoyanceTargetV1,
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
   botPowerObserverCueLinesV1,
   botPowerObserverProjectionV1,
-  botPowerPairwisePerceptionV1,
-  botPowerPairwiseSizeCueV1,
+  botPowerPairwisePerceptionFromEffectsV1,
+  botPowerPairwiseSizeCueFromEffectsV1,
+  botPowerSubjectEffectsForObserverV1,
   botPowerPerceptionOverlapStartRatioV1,
   botPowerResponseIsSilentV1,
   botPowerSelfCueLinesV1,
@@ -804,6 +812,8 @@ export interface BotcastGenerationOptions {
   preferredLocalModel?: string | null;
   preferredOnlineModel?: string | null;
   autoFallbackChain?: AutoFallbackChainV1 | null;
+  /** Account consent gate for private multi-pass effort on local models. */
+  experimentalAllModelEffortEnabled?: boolean;
   providerFactory?: typeof selectProvider;
   /** Cancels a live generation when its owning Signal request is abandoned. */
   signal?: AbortSignal;
@@ -960,7 +970,11 @@ export function botcastPreparedTurnCursor(
         guest?.powers ??
         [],
     }),
-    promptStateHash: preparedTurnHash({ episode, show }),
+    promptStateHash: preparedTurnHash({
+      episode,
+      show,
+      effortStateHash: allModelReasoningEffortCursorHash(db, userId),
+    }),
   };
 }
 
@@ -3102,8 +3116,11 @@ function botcastEventsWithPerceptionOverlapFallbackV1(
       continue;
     }
     const perceiver = identityForRole(overlapping.speakerRole);
-    const perception = botPowerPairwisePerceptionV1(
-      powersForRole(preceding.speakerRole),
+    const perception = botPowerPairwisePerceptionFromEffectsV1(
+      botPowerSubjectEffectsForObserverV1(
+        powersForRole(preceding.speakerRole),
+        powersForRole(overlapping.speakerRole),
+      ),
       (target) => botcastPowerTargetMatches(target, perceiver),
       { holderSpeaking: true },
     );
@@ -3445,6 +3462,7 @@ function botcastMoodBoostEventForPair(args: {
   theme?: BotPowerResolvedThemeV1;
 }): BotcastMoodBoostEventV1 | null {
   if (
+    botPowerIgnoresOtherPowersV1(args.target.powers) ||
     botPowerResponseIsSilentV1(args.sourceContent) ||
     botcastPowerRestriction(args.source, args.target, "awareness") ||
     botcastPowerRestriction(args.source, args.target, "speech_audience") ||
@@ -3522,6 +3540,7 @@ function botcastMoodDrainEventForPair(args: {
   theme?: BotPowerResolvedThemeV1;
 }): BotcastMoodDrainEventV1 | null {
   if (
+    botPowerIgnoresOtherPowersV1(args.addresser.powers) ||
     botPowerResponseIsSilentV1(args.sourceContent) ||
     botcastPowerRestriction(args.addresser, args.holder, "awareness") ||
     botcastPowerRestriction(args.addresser, args.holder, "speech_audience") ||
@@ -6666,7 +6685,27 @@ export function getBotcastEpisode(
     "SELECT * FROM botcast_events WHERE user_id = ? AND episode_id = ? ORDER BY sequence",
     )
     .all(userId, episodeId) as unknown as BotcastEventRow[];
-  const mappedEvents = events.map(mapEvent);
+  const mappedEvents = events.map((eventRow) => {
+    const event = mapEvent(eventRow) as BotcastInternalReplayEvent;
+    const intendedSpeech =
+      event.kind === "utterance" &&
+      typeof event.payload.powerIntendedSpeech === "string"
+        ? event.payload.powerIntendedSpeech.trim()
+        : "";
+    if (!intendedSpeech) return event;
+    const { powerIntendedSpeech: _privateSpeech, ...publicPayload } =
+      event.payload;
+    const publicEvent: BotcastInternalReplayEvent = {
+      ...event,
+      payload: publicPayload,
+    };
+    Object.defineProperty(publicEvent, BOTCAST_POWER_INTENDED_SPEECH, {
+      value: intendedSpeech,
+      enumerable: false,
+      writable: false,
+    });
+    return publicEvent;
+  });
   const guestPresenceMode: BotcastGuestPresenceMode = mappedEvents.some(
     (event) =>
       event.kind === "guest_presence" && event.payload.mode === "audience_only",
@@ -6986,8 +7025,13 @@ export async function chatWithBotcastShowHost(
     show.hostBotId,
     host.powers,
   );
+  const hostIneptitudePrompt = botPowerIneptitudeRoleCueV1(
+    host.powers,
+    "signal_host",
+  );
   const powerPrompt = buildBotPowersPromptBlock(
     [
+      ...(hostIneptitudePrompt ? [hostIneptitudePrompt] : []),
       ...(botPowerBotNamingCueV1(host.name, host.powers, guestLibrary.botNames)
         ? [botPowerBotNamingCueV1(host.name, host.powers, guestLibrary.botNames)!]
         : []),
@@ -8210,10 +8254,40 @@ export function botcastIdentityMirrorCanTriggerV1(args: {
 
 const BOTCAST_IMMERSIVE_VOICE_INTERVAL = 3;
 
+const BOTCAST_POWER_INTENDED_SPEECH = Symbol(
+  "botcastPowerIntendedSpeech",
+);
+type BotcastInternalReplayEvent = BotcastReplayEvent & {
+  [BOTCAST_POWER_INTENDED_SPEECH]?: string;
+};
+
+function botcastPowerIntendedSpeechForMessageV1(
+  events: readonly Pick<BotcastReplayEvent, "kind" | "payload">[],
+  messageId: string,
+): string | null {
+  for (let index = events.length - 1; index >= 0; index -= 1) {
+    const event = events[index];
+    if (event?.kind !== "utterance") continue;
+    const payload = event.payload as Record<string, unknown>;
+    if (payload.messageId !== messageId) continue;
+    const privateSpeech = (event as BotcastInternalReplayEvent)[
+      BOTCAST_POWER_INTENDED_SPEECH
+    ];
+    const intended = typeof privateSpeech === "string"
+      ? privateSpeech.trim().slice(0, 6_000)
+      : typeof payload.powerIntendedSpeech === "string"
+        ? payload.powerIntendedSpeech.trim().slice(0, 6_000)
+        : "";
+    return intended || null;
+  }
+  return null;
+}
+
 function botcastNegativeInfluenceForTurn(
   episode: Pick<BotcastEpisode, "events" | "messages">,
-  speaker: Pick<BotcastBotProfile, "id">,
+  speaker: Pick<BotcastBotProfile, "id" | "powers">,
 ): BotcastSocialInfluenceEventV1 | null {
+  if (botPowerIgnoresOtherPowersV1(speaker.powers)) return null;
   const hasPriorSpeakerTurn = episode.messages.some(
     (message) => message.botId === speaker.id,
   );
@@ -8608,9 +8682,19 @@ export function buildBotcastSpeakerPrompt(
     mirrorStates,
   );
   const speaker = args.speakerRole === "host" ? host : guest;
-  const peer = args.speakerRole === "host" ? guest : host;
-  const hostNamesGuest = botPowerTargetNameV1(guest.name, host.powers);
-  const guestNamesHost = botPowerTargetNameV1(host.name, guest.powers);
+  const speakerIgnoresPeerPowers = botPowerIgnoresOtherPowersV1(
+    speaker.powers,
+  );
+  const poweredPeer = args.speakerRole === "host" ? guest : host;
+  const peer = speakerIgnoresPeerPowers
+    ? args.speakerRole === "host" ? args.guest : args.host
+    : poweredPeer;
+  const hostNamesGuest = args.speakerRole === "host"
+    ? botPowerTargetNameV1(peer.name, speaker.powers)
+    : botPowerTargetNameV1(guest.name, host.powers);
+  const guestNamesHost = args.speakerRole === "guest"
+    ? botPowerTargetNameV1(peer.name, speaker.powers)
+    : botPowerTargetNameV1(host.name, guest.powers);
   const peerAddressName = args.speakerRole === "host" ? hostNamesGuest : guestNamesHost;
   const speakerEternallyIntroduces = botPowerEternallyIntroducesV1(
     speaker.powers,
@@ -8652,8 +8736,12 @@ export function buildBotcastSpeakerPrompt(
     args.host,
     args.guest,
   ]);
-  const peerPerception = botPowerPairwisePerceptionV1(
+  const perceivedPeerEffects = botPowerSubjectEffectsForObserverV1(
     peer.powers,
+    speaker.powers,
+  );
+  const peerPerception = botPowerPairwisePerceptionFromEffectsV1(
+    perceivedPeerEffects,
     (target) => botcastPowerTargetMatches(target, speaker),
     { holderSpeaking: true },
   );
@@ -8683,10 +8771,13 @@ export function buildBotcastSpeakerPrompt(
         (effect) =>
           effect.type === "identity_mirror" ||
           effect.type === "identity_shapeshift" ||
-          effect.type === "false_name",
+          effect.type === "false_name" ||
+          effect.type === "ineptitude",
       ),
   );
-  const genericPeerCuePowers = activeBotPowersV1(peer.powers).filter(
+  const genericPeerCuePowers = speakerIgnoresPeerPowers
+    ? []
+    : activeBotPowersV1(peer.powers).filter(
     (power) =>
       !power.compiled?.effects.some(
         (effect) =>
@@ -8701,15 +8792,20 @@ export function buildBotcastSpeakerPrompt(
       message.content,
     ) && message.content.toLocaleLowerCase().includes(peer.name.toLocaleLowerCase())
   );
-  const pairwiseSizeCue = botPowerPairwiseSizeCueV1({
+  const pairwiseSizeCue = botPowerPairwiseSizeCueFromEffectsV1({
     observerName: speaker.name,
-    observerPowers: speaker.powers,
+    observerEffects: [],
     subjectName: peer.name,
-    subjectPowers: peer.powers,
+    subjectEffects: perceivedPeerEffects,
     tense: args.episode.tensionStage !== "calm",
     alreadyNoticed: pairwiseSizeAlreadyNoticed,
   });
+  const ineptitudeCue = botPowerIneptitudeRoleCueV1(
+    speaker.powers,
+    args.speakerRole === "host" ? "signal_host" : "signal_guest",
+  );
   const powersPrompt = buildBotPowersPromptBlock([
+    ...(ineptitudeCue ? [ineptitudeCue] : []),
     ...botPowerSelfCueLinesV1(genericSpeakerCuePowers),
     ...(fandomCue ? [fandomCue] : []),
     ...(themeMoodCue ? [themeMoodCue] : []),
@@ -8974,7 +9070,7 @@ export function buildBotcastSpeakerPrompt(
   const transcript = transcriptMessages
     .map((message) => {
       const peerMessage = message.botId !== speaker.id;
-      const quietHearing = peerMessage
+      const quietHearing = peerMessage && !speakerIgnoresPeerPowers
         ? botcastQuietHearingOutcomeV1(
             args.episode.events,
             message.id,
@@ -8984,7 +9080,14 @@ export function buildBotcastSpeakerPrompt(
       const audible = !peerMessage ||
         (peerPerception.audible && quietHearing !== false);
       const visible = !peerMessage || peerPerception.visible;
-      const canonicalSilentResponse = botPowerResponseIsSilentV1(message.content);
+      const intendedSpeech = peerMessage && speakerIgnoresPeerPowers
+        ? botcastPowerIntendedSpeechForMessageV1(
+            args.episode.events,
+            message.id,
+          )
+        : null;
+      const perceivedContent = intendedSpeech ?? message.content;
+      const canonicalSilentResponse = botPowerResponseIsSilentV1(perceivedContent);
       const silentResponse = !audible || canonicalSilentResponse;
       const stageActionText =
         !visible || (audible && canonicalSilentResponse)
@@ -8998,7 +9101,7 @@ export function buildBotcastSpeakerPrompt(
         ? "[Their voice was too faint to make out.]"
         : silentResponse
           ? BOT_POWER_CANONICAL_SILENCE_V1
-          : botCrosstalkPrimarySpeakerContent(message.content, listenerPlan);
+          : botCrosstalkPrimarySpeakerContent(perceivedContent, listenerPlan);
       return `${message.speakerRole === "host" ? args.host.name : args.guest.name}: ${stageActionText ? `*${stageActionText}* ` : ""}${spokenClaim}`;
     })
     .join("\n");
@@ -10149,7 +10252,7 @@ async function generateAuxiliaryBotcastJson<T>(args: {
             (attempt.provider === "openai"
               ? Boolean(args.generation.openAiApiKey)
               : Boolean(args.generation.anthropicApiKey)),
-          run: (signal) => {
+          run: async (signal) => {
             const provider =
               index === 0
                 ? selected.provider
@@ -11976,6 +12079,7 @@ export async function advanceBotcastEpisode(
   );
   const plannedInterruptionCandidate =
     !picklesBeatKind &&
+    !botPowerIgnoresOtherPowersV1(speaker.powers) &&
     !producerCut &&
     episode.guestKind === "bot" &&
     episode.guestPresenceMode === "present" &&
@@ -12256,9 +12360,20 @@ export async function advanceBotcastEpisode(
     episode.provider,
     episode.model,
   );
+  const selectedModelId =
+    selected.model ?? defaultModelIdForProvider(selected.providerName);
+  const primaryReasoningEffort = resolveUserModelReasoningEffort(db, {
+    userId,
+    provider: selected.providerName,
+    modelId: selectedModelId,
+    simulatedLocalEnabled:
+      generation.experimentalAllModelEffortEnabled === true,
+  });
   const generationOptions = {
     temperature: Math.min(1.15, Math.max(0.2, speaker.temperature)),
-    reasoningEffort: "minimal" as const,
+    ...(primaryReasoningEffort
+      ? { reasoningEffort: primaryReasoningEffort }
+      : {}),
     ...(generation.signal ? { signal: generation.signal } : {}),
     ...(speaker.topP != null ? { topP: speaker.topP } : {}),
     ...(speaker.topK != null ? { topK: speaker.topK } : {}),
@@ -12278,8 +12393,7 @@ export async function advanceBotcastEpisode(
       ? BOTCAST_SPEAKER_MAX_TOKENS
       : BOTCAST_CONVERSATIONAL_MAX_TOKENS;
   let providerUsed: string = selected.providerName;
-  let modelUsed =
-    selected.model ?? defaultModelIdForProvider(selected.providerName);
+  let modelUsed = selectedModelId;
   let autoRecovery: Awaited<
     ReturnType<typeof runAutoFallbackChain>
   >["recovery"];
@@ -12340,7 +12454,7 @@ export async function advanceBotcastEpisode(
             (attempt.provider === "openai"
               ? Boolean(generation.openAiApiKey)
               : Boolean(generation.anthropicApiKey)),
-          run: (signal) => {
+          run: async (signal) => {
             const provider =
               index === 0
                 ? selected.provider
@@ -12350,9 +12464,20 @@ export async function advanceBotcastEpisode(
                     generation.secondaryOllamaHost,
                     generation.anthropicApiKey,
                   );
-            return provider.generateResponse(prompt, {
+            const attemptReasoningEffort = resolveUserModelReasoningEffort(
+              db,
+              {
+                userId,
+                provider: attempt.provider,
+                modelId: attempt.model,
+                simulatedLocalEnabled:
+                  generation.experimentalAllModelEffortEnabled === true,
+              },
+            );
+            const attemptOptions: GenerateOptions = {
               ...generationOptions,
               model: attempt.model,
+              reasoningEffort: attemptReasoningEffort,
               maxTokens: botcastSpeakerMaxTokensForModel(
                 speaker.maxTokens,
                 attempt.provider,
@@ -12361,7 +12486,20 @@ export async function advanceBotcastEpisode(
               ),
               usagePurpose: index === 0 ? "botcast_turn" : "chat_fallback",
               signal,
-            });
+            };
+            const attemptPrompt =
+              attempt.provider === "local" && attemptReasoningEffort
+                ? await prepareMessagesWithSimulatedEffort({
+                    provider,
+                    messages: prompt,
+                    options: attemptOptions,
+                    effort: attemptReasoningEffort,
+                    surface: "signal",
+                    outputContract:
+                      "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
+                  })
+                : prompt;
+            return provider.generateResponse(attemptPrompt, attemptOptions);
           },
         })),
         perAttemptTimeoutMs: 60_000,
@@ -12498,9 +12636,20 @@ export async function advanceBotcastEpisode(
           turnMaxTokens,
         ),
       };
+      const localPrompt = primaryReasoningEffort
+        ? await prepareMessagesWithSimulatedEffort({
+            provider: selected.provider,
+            messages: prompt,
+            options: localTurnOptions,
+            effort: primaryReasoningEffort,
+            surface: "signal",
+            outputContract:
+              "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
+          })
+        : prompt;
       const localTurn = await runSignalLocalTurn({
         provider: selected.provider,
-        messages: prompt,
+        messages: localPrompt,
         options: localTurnOptions,
         ...(generation.signalLocalTurnTimeoutMs !== undefined
           ? { timeoutMs: generation.signalLocalTurnTimeoutMs }
@@ -12527,7 +12676,7 @@ export async function advanceBotcastEpisode(
           const retry = await runSignalLocalTurn({
             provider: selected.provider,
             messages: [
-              ...prompt,
+              ...localPrompt,
               { role: "system", content: validationRetryInstruction },
             ],
             options: localTurnOptions,
@@ -13287,7 +13436,10 @@ export async function advanceBotcastEpisode(
     responseMode: episode.responseMode,
     immersiveVoiceEffect: voicePerformanceText !== null,
     ...(speakerMumblesSpeech && !speakerIsMutedForTurn && !speakerEchoesForTurn
-      ? { publicSpeechEffect: "speech_obfuscation" }
+      ? {
+          publicSpeechEffect: "speech_obfuscation",
+          powerIntendedSpeech: intendedContent,
+        }
       : {}),
     ...(stageActionText ? { stageActionText } : {}),
     ...(stageActionText && resolvedStageAction.action
@@ -13408,13 +13560,14 @@ export async function advanceBotcastEpisode(
     now,
   );
   const precedingPerception = latestOnAirMessage?.botId === peer.id
-    ? botPowerPairwisePerceptionV1(
-        peer.powers,
+    ? botPowerPairwisePerceptionFromEffectsV1(
+        botPowerSubjectEffectsForObserverV1(peer.powers, speaker.powers),
         (target) => botcastPowerTargetMatches(target, speaker),
         { holderSpeaking: true },
       )
     : null;
-  const precedingQuietHearing = latestOnAirMessage
+  const precedingQuietHearing = latestOnAirMessage &&
+    !botPowerIgnoresOtherPowersV1(speaker.powers)
     ? botcastQuietHearingOutcomeV1(
         episode.events,
         latestOnAirMessage.id,
@@ -13560,8 +13713,8 @@ export async function advanceBotcastEpisode(
   let deliveredContent = content;
   let deliveredVoicePerformanceText = voicePerformanceText;
   const listener = listenerRole === "host" ? host : guest;
-  const listenerPerception = botPowerPairwisePerceptionV1(
-    speaker.powers,
+  const listenerPerception = botPowerPairwisePerceptionFromEffectsV1(
+    botPowerSubjectEffectsForObserverV1(speaker.powers, listener.powers),
     (target) => botcastPowerTargetMatches(target, listener),
     { holderSpeaking: true },
   );

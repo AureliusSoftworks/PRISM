@@ -18,12 +18,15 @@ import {
   botPowerIntermittentMuteEffectFromEffectsV1,
   botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
   botPowerIntermittentAudibilityEffectFromEffectsV1,
+  botPowerIgnoresOtherPowersFromEffectsV1,
+  botPowerIneptitudeRoleCueFromEffectsV1,
   botPowerListenerHearsTurnFromEffectsV1,
   botPowerAnnoyanceTargetFromEffectsV1,
   strongestBotPowerMoodBoostEffectFromEffectsV1,
   strongestBotPowerMoodDrainEffectFromEffectsV1,
   botPowerVoicePresenceModeFromEffectsV1,
   botPowerPairwisePerceptionFromEffectsV1,
+  botPowerSubjectEffectsForObserverFromEffectsV1,
   botPowerPairwiseSizeCueFromEffectsV1,
   botPowerAvatarScaleModeFromDescriptionV1,
   buildCoffeePowersPromptBlock,
@@ -578,6 +581,15 @@ function clamp01(value: number): number {
   return Math.max(0, Math.min(1, value));
 }
 
+export function coffeePowerBotIgnoresOtherPowers(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string,
+): boolean {
+  return botPowerIgnoresOtherPowersFromEffectsV1(
+    plan?.bots[botId]?.effects ?? [],
+  );
+}
+
 function applySessionStartSocial(
   db: DatabaseSync,
   userId: string,
@@ -591,6 +603,7 @@ function applySessionStartSocial(
       const polarity = effect.polarity;
       const rawDelta = strengthDelta(effect.strength) * (polarity === "negative" ? -1 : 1);
       for (const targetId of idsFromResolvedTargets(effect.targets)) {
+        if (coffeePowerBotIgnoresOtherPowers(plan, targetId)) continue;
         if (!coffeePowerBotVisibleTo(plan, resolved.botId, targetId)) continue;
         const delta = rawDelta * resistanceMultiplier(plan, targetId, polarity);
         deltas.set(targetId, (deltas.get(targetId) ?? 0) + delta);
@@ -968,7 +981,12 @@ export function coffeePowerBotVisibleTo(
 ): boolean {
   if (subjectBotId === viewerBotId) return true;
   const frozen = plan?.bots[subjectBotId];
-  const effects = frozen?.effects ?? [];
+  const viewerEffects = plan?.bots[viewerBotId]?.effects ?? [];
+  const ignoresPowers = botPowerIgnoresOtherPowersFromEffectsV1(viewerEffects);
+  const effects = botPowerSubjectEffectsForObserverFromEffectsV1(
+    frozen?.effects ?? [],
+    viewerEffects,
+  );
   const perceived = botPowerPairwisePerceptionFromEffectsV1(
     effects,
     (target) => target.kind === "bot" && target.botId === viewerBotId,
@@ -976,10 +994,11 @@ export function coffeePowerBotVisibleTo(
   ).visible;
   const legacyAudience = frozen?.visibleToBotIds;
   return perceived &&
+    (ignoresPowers ||
     (effects.some((effect) => effect.type === "awareness") ||
       legacyAudience === null ||
       legacyAudience === undefined ||
-      legacyAudience.includes(viewerBotId));
+      legacyAudience.includes(viewerBotId)));
 }
 
 export function coffeePowerBotAudibleTo(
@@ -989,7 +1008,12 @@ export function coffeePowerBotAudibleTo(
 ): boolean {
   if (subjectBotId === listenerBotId) return true;
   const frozen = plan?.bots[subjectBotId];
-  const effects = frozen?.effects ?? [];
+  const listenerEffects = plan?.bots[listenerBotId]?.effects ?? [];
+  const ignoresPowers = botPowerIgnoresOtherPowersFromEffectsV1(listenerEffects);
+  const effects = botPowerSubjectEffectsForObserverFromEffectsV1(
+    frozen?.effects ?? [],
+    listenerEffects,
+  );
   const perceived = botPowerPairwisePerceptionFromEffectsV1(
     effects,
     (target) => target.kind === "bot" && target.botId === listenerBotId,
@@ -997,10 +1021,11 @@ export function coffeePowerBotAudibleTo(
   ).audible;
   const legacyAudience = frozen?.speechAudienceBotIds;
   return perceived &&
+    (ignoresPowers ||
     (effects.some((effect) => effect.type === "speech_audience") ||
       legacyAudience === null ||
       legacyAudience === undefined ||
-      legacyAudience.includes(listenerBotId));
+      legacyAudience.includes(listenerBotId)));
 }
 
 export function coffeePowerMessageAudience(
@@ -1028,6 +1053,14 @@ export function coffeePowersPromptForSpeaker(
   if (!plan) return "";
   const lines: string[] = [];
   const own = plan.bots[speakerBotId];
+  const ineptitudeCue = botPowerIneptitudeRoleCueFromEffectsV1(
+    own?.effects ?? [],
+    "coffee",
+  );
+  if (ineptitudeCue) lines.push(ineptitudeCue);
+  const ignoresPeerPowers = botPowerIgnoresOtherPowersFromEffectsV1(
+    own?.effects ?? [],
+  );
   const ownHasLegacyIdentityOnlyCue = Boolean(
     own?.powerIds.length === 1 &&
       own.effects.some(
@@ -1099,11 +1132,15 @@ export function coffeePowersPromptForSpeaker(
   for (const peerBotId of visiblePeerBotIds) {
     const peer = plan.bots[peerBotId];
     if (!peer) continue;
+    const perceivedPeerEffects = botPowerSubjectEffectsForObserverFromEffectsV1(
+      peer.effects,
+      own?.effects ?? [],
+    );
     const cue = botPowerPairwiseSizeCueFromEffectsV1({
       observerName: own?.botName ?? speakerBotId,
       observerEffects: own?.effects ?? [],
       subjectName: peer.botName ?? peerBotId,
-      subjectEffects: peer.effects,
+      subjectEffects: perceivedPeerEffects,
       tense: speakerAlreadyTense,
       alreadyNoticed: sizeCueAlreadyNoticedBotIds.has(peerBotId),
     });
@@ -1134,7 +1171,7 @@ export function coffeePowersPromptForSpeaker(
       );
     }
   }
-  const hasPrivatePerception = visiblePeerBotIds.some((botId) => {
+  const hasPrivatePerception = !ignoresPeerPowers && visiblePeerBotIds.some((botId) => {
     const peer = plan.bots[botId];
     if (!peer) return false;
     const privateVisibility =
@@ -1145,7 +1182,7 @@ export function coffeePowersPromptForSpeaker(
       peer.speechAudienceBotIds.includes(speakerBotId);
     return privateVisibility || privateSpeech;
   });
-  const isExcludedFromPrivatePerception = Object.values(plan.bots).some(
+  const isExcludedFromPrivatePerception = !ignoresPeerPowers && Object.values(plan.bots).some(
     (peer) => {
       if (peer.botId === speakerBotId) return false;
       const excludedFromSight =
@@ -1178,6 +1215,7 @@ export function coffeePowersPromptForSpeaker(
         ),
     );
     if (
+      !ignoresPeerPowers &&
       peer?.observerCue &&
       !peerHasLegacyIdentityOnlyCue
     ) {
@@ -1205,6 +1243,13 @@ export function coffeePowerCandorPromptForTurn(args: {
     return null;
   }
   const source = args.plan.bots[args.sourceBotId];
+  if (
+    botPowerIgnoresOtherPowersFromEffectsV1(
+      args.plan.bots[args.targetBotId]?.effects ?? [],
+    )
+  ) {
+    return null;
+  }
   if (!source || !coffeePowerBotVisibleTo(args.plan, args.sourceBotId, args.targetBotId)) {
     return null;
   }
@@ -1334,6 +1379,7 @@ export function applyCoffeePowerAfterSpeech<T extends { disposition: number }>(a
     const polarity = effect.polarity;
     const rawDelta = strengthDelta(effect.strength) * (polarity === "negative" ? -1 : 1);
     for (const targetId of idsFromResolvedTargets(effect.targets)) {
+      if (coffeePowerBotIgnoresOtherPowers(args.plan, targetId)) continue;
       if (!coffeePowerBotVisibleTo(args.plan, args.speakerBotId, targetId)) continue;
       const previous = next[targetId];
       if (!previous) continue;
@@ -1361,6 +1407,7 @@ export function applyCoffeePowerAnnoyanceAfterSpeech<T extends { disposition: nu
     stableTurnKey: `${args.sourceMessageId}:${args.speakerBotId}`,
     eligibleBotIds: args.audiblePeerBotIds.filter((botId) =>
       botId !== args.speakerBotId &&
+      !coffeePowerBotIgnoresOtherPowers(args.plan, botId) &&
       coffeePowerBotAudibleTo(args.plan, args.speakerBotId, botId)
     ),
   });
@@ -1426,6 +1473,7 @@ export function applyCoffeePowerMoodBoostAfterSpeech<T extends { disposition: nu
   const powerName = holder?.powerNames?.[0] ?? "Power";
   for (const targetId of new Set(args.recipientBotIds)) {
     if (targetId === args.speakerBotId) continue;
+    if (coffeePowerBotIgnoresOtherPowers(args.plan, targetId)) continue;
     const key = `${args.sourceMessageId}\n${targetId}`;
     if (alreadyApplied.has(key)) continue;
     if (!coffeePowerBotVisibleTo(args.plan, args.speakerBotId, targetId)) continue;
@@ -1479,7 +1527,11 @@ export function applyCoffeePowerMoodDrainAfterDirectAddress<T extends { disposit
   }
   const addresser = args.plan.bots[args.addresserBotId];
   const previous = args.socialByBotId[args.addresserBotId];
-  if (!addresser || !previous) {
+  if (
+    !addresser ||
+    !previous ||
+    coffeePowerBotIgnoresOtherPowers(args.plan, args.addresserBotId)
+  ) {
     return { socialByBotId: args.socialByBotId, events: [] };
   }
   const alreadyApplied = new Set(

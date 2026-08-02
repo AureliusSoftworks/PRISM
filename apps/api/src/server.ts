@@ -713,6 +713,17 @@ import {
   type BackupSnapshot,
 } from "./backup.ts";
 import {
+  listModelReasoningEffortPreferences,
+  normalizeModelEffortModelId,
+  normalizeModelEffortProvider,
+  resetModelReasoningEffortPreferences,
+  setModelReasoningEffortPreference,
+} from "./model-effort-preferences.ts";
+import {
+  allModelReasoningEffortCursorHash,
+  resolveUserModelReasoningEffort,
+} from "./model-effort-runtime.ts";
+import {
   ACCOUNT_BACKUP_ARCHIVE_CONTENT_TYPE,
   ACCOUNT_BACKUP_ARCHIVE_MAX_BYTES,
   decodeAccountBackupArchive,
@@ -839,7 +850,8 @@ import {
   getBuiltInPromptWildcardSlot,
   normalizePromptShortcutMetadata,
   normalizePromptWildcardRunMetadata,
-  reasoningEffortForRequest,
+  normalizeModelReasoningEffortPreference,
+  resolveModelReasoningEffortCapability,
   parseBuiltInPromptWildcardReference,
   parseStoredManualAskQuestionPayload,
   parseStoredAutoFallbackChain,
@@ -1270,9 +1282,6 @@ async function startPrismStorySession(
     context.hardLocal || anyOfflineProtected
       ? null
       : readModelOverride(input.modelOverride);
-  const requestedReasoningEffort = reasoningEffortForRequest(
-    input.reasoningEffort,
-  );
   const storyModelOverride =
     effectiveProvider === "local"
       ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
@@ -1299,6 +1308,11 @@ async function startPrismStorySession(
     catalog,
   });
   effectiveProvider = resolvedAuto.provider;
+  const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
+    userId: context.userId,
+    provider: resolvedAuto.provider,
+    modelId: resolvedAuto.model,
+  });
   const provider = selectProvider(
     effectiveProvider,
     context.hardLocal ? undefined : openAiApiKey,
@@ -1329,8 +1343,8 @@ async function startPrismStorySession(
           bots: storyBots,
           premise,
           ...(powerTheme ? { theme: powerTheme } : {}),
-          ...(requestedReasoningEffort
-            ? { reasoningEffort: requestedReasoningEffort }
+          ...(storedReasoningEffort
+            ? { reasoningEffort: storedReasoningEffort }
             : {}),
         }),
     ),
@@ -2278,6 +2292,7 @@ function invalidateTurnPreparation(
 }
 
 const SIGNAL_PREPARATION_TABLES = [
+  "model_reasoning_effort_preferences",
   "bots",
   "botcast_shows",
   "botcast_episodes",
@@ -2291,6 +2306,7 @@ interface PreparedSignalTurnPayload extends PreparedDatabaseChangeset {
 }
 
 const COFFEE_PREPARATION_TABLES = [
+  "model_reasoning_effort_preferences",
   "bots",
   "coffee_groups",
   "coffee_group_seats",
@@ -5033,6 +5049,11 @@ function debateAiRuntimeForUser(
     ),
     providerName: "local" as const,
     model: localModel,
+    reasoningEffort: resolveUserModelReasoningEffort(db, {
+      userId,
+      provider: "local",
+      modelId: localModel,
+    }),
   };
   const auxiliary = auxiliaryProviderFactoryOverride(
     user.prism_default_llm_model,
@@ -5057,6 +5078,11 @@ function debateAiRuntimeForUser(
       ),
       providerName,
       model,
+      reasoningEffort: resolveUserModelReasoningEffort(db, {
+        userId,
+        provider: providerName,
+        modelId: model,
+      }),
       available: providerFactoryOverride !== selectProvider || Boolean(apiKey),
     };
   };
@@ -5097,7 +5123,15 @@ function debateAiRuntimeForUser(
     resolvedAutoChain.length > 1
       ? resolvedAutoChain.map((entry) =>
           entry.provider === "local"
-            ? { ...local, model: entry.model }
+            ? {
+                ...local,
+                model: entry.model,
+                reasoningEffort: resolveUserModelReasoningEffort(db, {
+                  userId,
+                  provider: "local",
+                  modelId: entry.model,
+                }),
+              }
             : onlineLane(entry.provider, entry.model),
         )
       : [primary];
@@ -12421,9 +12455,6 @@ function buildRoutes(): RouteDefinition[] {
       // takes effect immediately. Zen remains PRISM-only, but users can still
       // choose how PRISM replies.
       const explicitModelOverride = readModelOverride(body.modelOverride);
-      const requestedReasoningEffort = reasoningEffortForRequest(
-        body.reasoningEffort,
-      );
       const providerOverride = readProvider(body.preferredProvider);
       const requestedProvider = providerOverride ?? undefined;
       const user = getUserRow(userId);
@@ -12690,8 +12721,13 @@ function buildRoutes(): RouteDefinition[] {
       });
       effectiveProvider = resolvedAuto.provider;
       generationOverrides.model = resolvedAuto.model;
-      if (requestedReasoningEffort) {
-        generationOverrides.reasoningEffort = requestedReasoningEffort;
+      const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
+        userId,
+        provider: resolvedAuto.provider,
+        modelId: resolvedAuto.model,
+      });
+      if (storedReasoningEffort) {
+        generationOverrides.reasoningEffort = storedReasoningEffort;
       }
       const botOverrides =
         Object.keys(generationOverrides).length > 0
@@ -12838,6 +12874,12 @@ function buildRoutes(): RouteDefinition[] {
             autoFallbackChain: parseStoredAutoFallbackChain(
               user.auto_fallback_chain,
             ),
+            resolveReasoningEffort: (provider, model) =>
+              resolveUserModelReasoningEffort(db, {
+                userId,
+                provider,
+                modelId: model,
+              }),
             prismDefaultLlmModel: user.prism_default_llm_model,
             prismImageToolLlmModel: user.prism_image_tool_llm_model,
             recentContextMessageLimit: normalizeZenRecentContextMessages(
@@ -13483,7 +13525,10 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         surface: "debate",
         sessionId: frozen.id,
-        stateCursor: debatePreparedTurnCursor(frozen),
+        stateCursor: debatePreparedTurnCursor(
+          frozen,
+          allModelReasoningEffortCursorHash(db, userId),
+        ),
         run: async () => {
           const prepared = await runWithUsageSession(
             {
@@ -13632,6 +13677,7 @@ function buildRoutes(): RouteDefinition[] {
             currentCursor: () =>
               debatePreparedTurnCursor(
                 getDebateSession(db, userId, publicPreparation.sessionId),
+                allModelReasoningEffortCursorHash(db, userId),
               ),
             commit: async (payload) => {
               const prepared = payload as DebateAdvancePreparation;
@@ -16242,6 +16288,8 @@ function buildRoutes(): RouteDefinition[] {
                       autoFallbackChain: parseStoredAutoFallbackChain(
                         user.auto_fallback_chain,
                       ),
+                      experimentalAllModelEffortEnabled:
+                        user.experimental_all_model_effort_enabled === 1,
                       signal,
                       ...(powerTheme ? { theme: powerTheme } : {}),
                       providerFactory: providerFactoryOverride,
@@ -16460,6 +16508,8 @@ function buildRoutes(): RouteDefinition[] {
             autoFallbackChain: parseStoredAutoFallbackChain(
               user.auto_fallback_chain,
             ),
+            experimentalAllModelEffortEnabled:
+              user.experimental_all_model_effort_enabled === 1,
             signal: signalAdvanceAbort.signal,
             ...(powerTheme ? { theme: powerTheme } : {}),
             providerFactory: providerFactoryOverride,
@@ -16902,9 +16952,6 @@ function buildRoutes(): RouteDefinition[] {
       const sessionSpeakerModel = readCoffeeSessionSpeakerModel(
         body.modelOverride,
       );
-      const requestedReasoningEffort = reasoningEffortForRequest(
-        body.reasoningEffort,
-      );
       const sessionRemainingMs =
         typeof body.sessionRemainingMs === "number" &&
         Number.isFinite(body.sessionRemainingMs)
@@ -16953,9 +17000,6 @@ function buildRoutes(): RouteDefinition[] {
         },
         sessionRemainingMs,
         ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
-        ...(requestedReasoningEffort
-          ? { reasoningEffort: requestedReasoningEffort }
-          : {}),
       };
       const shouldStart =
         departure.recorded &&
@@ -17358,9 +17402,6 @@ function buildRoutes(): RouteDefinition[] {
       const sessionSpeakerModel = readCoffeeSessionSpeakerModel(
         body.modelOverride,
       );
-      const requestedReasoningEffort = reasoningEffortForRequest(
-        body.reasoningEffort,
-      );
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
@@ -17417,9 +17458,6 @@ function buildRoutes(): RouteDefinition[] {
               },
               sessionRemainingMs,
               ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
-              ...(requestedReasoningEffort
-                ? { reasoningEffort: requestedReasoningEffort }
-                : {}),
             },
             userIsComposing,
             directedSpeakerBotId,
@@ -17442,9 +17480,6 @@ function buildRoutes(): RouteDefinition[] {
         await pendingDepartureEpilogue;
       }
       const requestedProvider = readProvider(body.preferredProvider);
-      const requestedReasoningEffort = reasoningEffortForRequest(
-        body.reasoningEffort,
-      );
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const openAiApiKey =
@@ -17477,9 +17512,6 @@ function buildRoutes(): RouteDefinition[] {
             userKey,
             prismDefaultLlmModel: user.prism_default_llm_model,
             providerFactory: providerFactoryOverride,
-            ...(requestedReasoningEffort
-              ? { reasoningEffort: requestedReasoningEffort }
-              : {}),
           }),
       );
       json(ctx.res, 200, {
@@ -17546,9 +17578,6 @@ function buildRoutes(): RouteDefinition[] {
       const sessionSpeakerModel = readCoffeeSessionSpeakerModel(
         body.modelOverride,
       );
-      const requestedReasoningEffort = reasoningEffortForRequest(
-        body.reasoningEffort,
-      );
       const result = await runWithUsageSession(
         {
           db,
@@ -17606,9 +17635,6 @@ function buildRoutes(): RouteDefinition[] {
               },
               sessionRemainingMs,
               ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
-              ...(requestedReasoningEffort
-                ? { reasoningEffort: requestedReasoningEffort }
-                : {}),
             },
           ),
       );
@@ -17651,9 +17677,6 @@ function buildRoutes(): RouteDefinition[] {
         const userKey = decryptUserKey(userId);
         const effectiveProvider = requestedProvider ?? user.preferred_provider;
         const powerTheme = readResolvedPowerTheme(body.theme);
-        const requestedReasoningEffort = reasoningEffortForRequest(
-          body.reasoningEffort,
-        );
         const sessionSpeakerModel = readCoffeeSessionSpeakerModel(
           body.modelOverride,
         );
@@ -17732,9 +17755,6 @@ function buildRoutes(): RouteDefinition[] {
                       sessionRemainingMs,
                       signal,
                       ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
-                      ...(requestedReasoningEffort
-                        ? { reasoningEffort: requestedReasoningEffort }
-                        : {}),
                     },
                     body.userIsComposing === true,
                     directedSpeakerBotId,
@@ -17817,17 +17837,6 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const effectiveProvider = requestedProvider ?? user.preferred_provider;
-      const requestedReasoningEffort = reasoningEffortForRequest(
-        body.reasoningEffort,
-      );
-      const jobEffort =
-        requestedReasoningEffort ??
-        (effectiveProvider === "local" &&
-        user.experimental_all_model_effort_enabled === 1
-          ? /\?/u.test(message) || body.playerInterruption != null
-            ? "medium"
-            : "low"
-          : undefined);
       const sessionSpeakerModel = readCoffeeSessionSpeakerModel(
         body.modelOverride,
       );
@@ -17872,7 +17881,6 @@ function buildRoutes(): RouteDefinition[] {
         userId,
         conversationId,
         supersedeExisting: kind === "user",
-        effort: jobEffort,
         run: async ({ signal, setPhase }) =>
           await runWithUsageSession(
             {
@@ -17922,9 +17930,6 @@ function buildRoutes(): RouteDefinition[] {
                 signal,
                 onPhase: setPhase,
                 ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
-                ...(requestedReasoningEffort
-                  ? { reasoningEffort: requestedReasoningEffort }
-                  : {}),
               };
               if (kind !== "autonomous") {
                 return processCoffeeTurn(
@@ -20945,6 +20950,10 @@ function buildRoutes(): RouteDefinition[] {
             user.experimental_dual_ollama_enabled === 1,
           experimentalAllModelEffortEnabled:
             user.experimental_all_model_effort_enabled === 1,
+          modelEffortPreferences: listModelReasoningEffortPreferences(
+            db,
+            userId,
+          ),
           coffeeExperimentalTableAngleEnabled:
             user.coffee_experimental_table_angle_enabled === 1,
           psychicModeEnabled: user.psychic_mode_enabled === 1,
@@ -21083,6 +21092,71 @@ function buildRoutes(): RouteDefinition[] {
           devMemoriesEnabled: user.dev_memories_enabled === 1,
           devMemoriesText: user.dev_memories_text ?? "",
         },
+      });
+    }),
+    route("PUT", "/api/model-effort-preferences", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const provider = normalizeModelEffortProvider(body.provider);
+      const modelId = normalizeModelEffortModelId(body.modelId);
+      if (!provider || !modelId) {
+        throw new HttpError(400, "A valid provider and model are required.");
+      }
+      const rawEffort = body.effort;
+      const isDefault =
+        rawEffort === null ||
+        (typeof rawEffort === "string" &&
+          ["auto", "default"].includes(rawEffort.trim().toLowerCase()));
+      const effort = normalizeModelReasoningEffortPreference(rawEffort);
+      if (!isDefault && !effort) {
+        throw new HttpError(400, "A valid effort level is required.");
+      }
+      if (effort) {
+        const capability = resolveModelReasoningEffortCapability({
+          provider,
+          modelId,
+          simulatedLocalEnabled:
+            user.experimental_all_model_effort_enabled === 1,
+        });
+        if (!capability.levels.includes(effort)) {
+          throw new HttpError(
+            400,
+            capability.disabledReason ??
+              "That effort level is unavailable for this model.",
+          );
+        }
+      }
+      const preference = setModelReasoningEffortPreference(db, {
+        userId,
+        provider,
+        modelId,
+        effort,
+      });
+      turnPreparationRegistry.discardUser(
+        userId,
+        "Model effort changed before the prepared turn could commit.",
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        preference,
+        modelEffortPreferences: listModelReasoningEffortPreferences(
+          db,
+          userId,
+        ),
+      });
+    }),
+    route("DELETE", "/api/model-effort-preferences", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const resetCount = resetModelReasoningEffortPreferences(db, userId);
+      turnPreparationRegistry.discardUser(
+        userId,
+        "Model effort reset before the prepared turn could commit.",
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        resetCount,
+        modelEffortPreferences: [],
       });
     }),
     route("PATCH", "/api/living-shell/progress", async (ctx) => {
@@ -21388,6 +21462,15 @@ function buildRoutes(): RouteDefinition[] {
           throw new Error(run.error || "Settings could not be updated.");
         }
         const committedUser = getUserRow(userId);
+        if (
+          committedUser.experimental_all_model_effort_enabled !==
+          user.experimental_all_model_effort_enabled
+        ) {
+          turnPreparationRegistry.discardUser(
+            userId,
+            "Local effort settings changed before the prepared turn could commit.",
+          );
+        }
         const result =
           run.result &&
           typeof run.result === "object" &&
@@ -21679,6 +21762,15 @@ function buildRoutes(): RouteDefinition[] {
         braveSearchTag,
         userId,
       );
+      if (
+        next.experimentalAllModelEffortEnabled !==
+        user.experimental_all_model_effort_enabled
+      ) {
+        turnPreparationRegistry.discardUser(
+          userId,
+          "Local effort settings changed before the prepared turn could commit.",
+        );
+      }
       json(ctx.res, 200, {
         ok: true,
         settings: {
@@ -25310,7 +25402,10 @@ async function dispatchRequest(
       method === "POST" &&
       /^\/api\/replays\/[^/]+\/studio-cut\/mix\/audio-chunk$/u.test(pathname);
     const body =
-      method === "POST" || method === "PATCH" || method === "DELETE"
+      method === "POST" ||
+      method === "PUT" ||
+      method === "PATCH" ||
+      method === "DELETE"
         ? slateArchiveUpload ||
           accountBackupArchiveUpload ||
           replayVoiceTakeUpload ||

@@ -13,6 +13,7 @@ import {
   BOT_POWER_HEARING_REPEAT_MODE_POLICY,
   BOT_POWER_IDENTITY_MIRROR_MODE_POLICY,
   BOT_POWER_IDENTITY_SHAPESHIFT_MODE_POLICY,
+  BOT_POWER_IMMUNITY_MODE_POLICY,
   BOT_POWER_FALSE_NAME_MODE_POLICY,
   BOT_POWER_INTERMITTENT_MUTE_MODE_POLICY,
   BOT_POWER_INTERMITTENT_AUDIBILITY_MODE_POLICY,
@@ -63,23 +64,23 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.35");
-    assert.equal(PRISM_APPLETS.zen.version, "1.33");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.41");
-    assert.equal(PRISM_APPLETS.debate.version, "0.4");
+    assert.equal(PRISM_APPLETS.chat.version, "1.36");
+    assert.equal(PRISM_APPLETS.zen.version, "1.34");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.42");
+    assert.equal(PRISM_APPLETS.debate.version, "0.5");
     assert.equal(PRISM_APPLETS.debate.status, "preview");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.52");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.53");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
-    assert.equal(PRISM_APPLETS.story.version, "0.29");
+    assert.equal(PRISM_APPLETS.story.version, "0.30");
     assert.equal(PRISM_APPLETS.story.status, "planned");
     assert.equal(PRISM_APPLETS.slate.version, "0.8");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.35");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.33");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.41");
-    assert.equal(prismAppletVersionLabel("debate"), "v0.4");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.52");
-    assert.equal(prismAppletVersionLabel("story"), "v0.29");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.36");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.34");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.42");
+    assert.equal(prismAppletVersionLabel("debate"), "v0.5");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.53");
+    assert.equal(prismAppletVersionLabel("story"), "v0.30");
     assert.equal(prismAppletVersionLabel("slate"), "v0.8");
   });
 
@@ -108,6 +109,28 @@ describe("applet version helpers", () => {
       Object.keys(PRISM_APPLETS),
     );
     assert.deepEqual(BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY, {
+      chat: "direct",
+      zen: "direct",
+      debate: "direct",
+      polling: "deferred",
+      coffee: "direct",
+      botcast: "direct",
+      feed: "deferred",
+      games: "deferred",
+      story: "adapted",
+      gym: "deferred",
+      slate: "irrelevant",
+      pseudo: "deferred",
+      surf: "deferred",
+    });
+  });
+
+  it("declares holder-only Power immunity for every applet", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_IMMUNITY_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_IMMUNITY_MODE_POLICY, {
       chat: "direct",
       zen: "direct",
       debate: "direct",

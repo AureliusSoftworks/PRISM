@@ -114,6 +114,7 @@ import {
   botIdentityShapeshiftTargetChangesV1,
   botPowerBotNamingCueV1,
   botPowerRequiresAddressedInsultV1,
+  botPowerIgnoresOtherPowersV1,
   botPowerObserverCueLinesV1,
   botPowerForgetfulPriorMessagesV1,
   createDefaultPrismMoodState,
@@ -1596,6 +1597,11 @@ async function generateChatResponse(args: {
   secondaryOllamaHost?: string | null;
   responseMode?: ResponseMode;
   autoFallbackChain?: AutoFallbackChainV1 | null;
+  /** Resolves the account's saved effort independently for every concrete AUTO attempt. */
+  resolveReasoningEffort?: (
+    provider: ProviderName,
+    model: string,
+  ) => Exclude<ReasoningEffort, "auto"> | undefined;
   providerFactory?: typeof selectProvider;
   openAiApiKey?: string;
   anthropicApiKey?: string;
@@ -1616,35 +1622,61 @@ async function generateChatResponse(args: {
   const primaryModel =
     requestedModel ??
     describeRequestedModel(args.provider, args.botOverrides);
-  const requestedEffort = normalizeReasoningEffort(args.botOverrides?.reasoningEffort);
-  const simulatedEffort = shouldSimulateReasoningEffort({
-    experimentalAllModelEffortEnabled: args.experimentalAllModelEffortEnabled,
-    provider: args.provider,
-    effort: requestedEffort,
-  });
-  const simulatedEffortNotice = simulatedEffortNoticeDetail({
-    experimentalAllModelEffortEnabled: args.experimentalAllModelEffortEnabled,
-    provider: args.provider,
-    botOverrides: args.botOverrides,
-    effort: requestedEffort,
-  });
-  if (simulatedEffortNotice) {
-    args.onSimulatedEffortNotice?.(simulatedEffortNotice);
-  }
-  const planningTrace = await runPsychicPlanningPass({
-    provider: args.provider,
-    promptMessages: args.promptMessages,
-    botOverrides: args.botOverrides,
-    effort: requestedEffort,
-    simulated: simulatedEffort,
-    psychicModeEnabled: args.psychicModeEnabled,
-    signal: args.signal,
-    onPlanningWarning: args.onPlanningWarning,
-  });
-  const promptMessagesForFinalAnswer = appendPsychicAnswerGuidance(
-    args.promptMessages,
-    planningTrace
-  );
+  let planningTrace: Awaited<ReturnType<typeof runPsychicPlanningPass>> = null;
+  const prepareAttempt = async (
+    provider: LlmProvider,
+    model: string,
+    botOverrides: GenerateOptions | undefined,
+    signal: AbortSignal | undefined,
+  ): Promise<{
+    messages: ProviderMessage[];
+    overrides: GenerateOptions | undefined;
+  }> => {
+    const savedEffort = args.resolveReasoningEffort?.(provider.name, model);
+    const effort = normalizeReasoningEffort(
+      savedEffort ?? botOverrides?.reasoningEffort,
+    );
+    const overrides: GenerateOptions | undefined = botOverrides
+      ? {
+          ...botOverrides,
+          model,
+          ...(effort === "auto" ? { reasoningEffort: undefined } : { reasoningEffort: effort }),
+        }
+      : {
+          model,
+          ...(effort === "auto" ? {} : { reasoningEffort: effort }),
+        };
+    const simulatedEffort = shouldSimulateReasoningEffort({
+      experimentalAllModelEffortEnabled:
+        args.experimentalAllModelEffortEnabled,
+      provider,
+      effort,
+    });
+    const simulatedEffortNotice = simulatedEffortNoticeDetail({
+      experimentalAllModelEffortEnabled:
+        args.experimentalAllModelEffortEnabled,
+      provider,
+      botOverrides: overrides,
+      effort,
+    });
+    if (simulatedEffortNotice) {
+      args.onSimulatedEffortNotice?.(simulatedEffortNotice);
+    }
+    planningTrace = await runPsychicPlanningPass({
+      provider,
+      promptMessages: args.promptMessages,
+      botOverrides: overrides,
+      effort,
+      simulated: simulatedEffort,
+      psychicModeEnabled: args.psychicModeEnabled,
+      signal,
+      onPlanningWarning: args.onPlanningWarning,
+    });
+    return {
+      messages: appendPsychicAnswerGuidance(args.promptMessages, planningTrace),
+      overrides,
+    };
+  };
 
   const withPlanningTrace = <T extends {
     assistantReplyRaw: string;
@@ -1689,9 +1721,14 @@ async function generateChatResponse(args: {
                 args.secondaryOllamaHost,
                 args.anthropicApiKey
               );
-          return provider.generateResponse(promptMessagesForFinalAnswer, {
-            ...args.botOverrides,
-            model: attempt.model,
+          const prepared = await prepareAttempt(
+            provider,
+            attempt.model,
+            args.botOverrides,
+            signal,
+          );
+          return provider.generateResponse(prepared.messages, {
+            ...prepared.overrides,
             usagePurpose: index === 0 ? "chat_reply" : "chat_fallback",
             signal,
           });
@@ -1722,10 +1759,16 @@ async function generateChatResponse(args: {
     });
   }
 
+  const prepared = await prepareAttempt(
+    args.provider,
+    primaryModel,
+    args.botOverrides,
+    args.signal,
+  );
   const assistantReplyRaw = await args.provider.generateResponse(
-    promptMessagesForFinalAnswer,
+    prepared.messages,
     withGenerationSignal(
-      { ...args.botOverrides, usagePurpose: "chat_reply" },
+      { ...prepared.overrides, usagePurpose: "chat_reply" },
       args.signal
     )
   );
@@ -1751,6 +1794,11 @@ async function generateProgressiveZenChatResponse(args: {
   secondaryOllamaHost?: string | null;
   responseMode?: ResponseMode;
   autoFallbackChain?: AutoFallbackChainV1 | null;
+  /** Resolves the saved effort independently for every concrete AUTO attempt. */
+  resolveReasoningEffort?: (
+    provider: ProviderName,
+    model: string,
+  ) => Exclude<ReasoningEffort, "auto"> | undefined;
   providerFactory?: typeof selectProvider;
   openAiApiKey?: string;
   anthropicApiKey?: string;
@@ -2659,6 +2707,11 @@ export interface UserChatSettings {
   /** Auto is a Zen-only response mode. Traditional Chat ignores it. */
   responseMode?: ResponseMode;
   autoFallbackChain?: AutoFallbackChainV1 | null;
+  /** Resolves the saved effort independently for every concrete AUTO attempt. */
+  resolveReasoningEffort?: (
+    provider: ProviderName,
+    model: string,
+  ) => Exclude<ReasoningEffort, "auto"> | undefined;
   /**
    * Per-account override for Prism internal local LLM calls (titles, summaries,
    * memory inference, Coffee router, image prompt hints). Empty uses the
@@ -4076,6 +4129,14 @@ export async function buildMentionedBotPromptContexts(args: {
     .map((mentionId) => rowsById.get(mentionId))
     .filter((row): row is MentionedBotContextRow => Boolean(row));
   const hydratedRows = externalRows.slice(0, MENTIONED_BOT_CONTEXT_MAX_BOTS);
+  const receiverPowers = args.receiverBotId && botColumns.has("powers_json")
+    ? (args.db.prepare(
+        "SELECT powers_json FROM bots WHERE id = ? AND user_id = ?",
+      ).get(args.receiverBotId, args.userId) as
+        | { powers_json?: string | null }
+        | undefined)?.powers_json
+    : null;
+  const receiverIgnoresPowers = botPowerIgnoresOtherPowersV1(receiverPowers);
   const overflowNames = externalRows
     .slice(MENTIONED_BOT_CONTEXT_MAX_BOTS)
     .map((row) => row.name?.trim() || "Unnamed bot");
@@ -4094,7 +4155,9 @@ export async function buildMentionedBotPromptContexts(args: {
     if (profileExcerpt) {
       lines.push(`  Profile excerpt: ${profileExcerpt}`);
     }
-    const powerLines = botPowerObserverCueLinesV1(displayName, row.powers_json);
+    const powerLines = receiverIgnoresPowers
+      ? []
+      : botPowerObserverCueLinesV1(displayName, row.powers_json);
     if (powerLines.length > 0) {
       lines.push(`  Active Powers: ${powerLines.join(" ")}`);
     }
@@ -7202,6 +7265,7 @@ export async function processChatMessage(
       secondaryOllamaHost: settings.secondaryOllamaHost,
       responseMode: isZenMode(mode) ? settings.responseMode : undefined,
       autoFallbackChain: settings.autoFallbackChain,
+      resolveReasoningEffort: settings.resolveReasoningEffort,
       providerFactory: settings.providerFactory,
       openAiApiKey: settings.openAiApiKey,
       anthropicApiKey: settings.anthropicApiKey,
@@ -7274,6 +7338,7 @@ export async function processChatMessage(
           secondaryOllamaHost: settings.secondaryOllamaHost,
           responseMode: isZenMode(mode) ? settings.responseMode : undefined,
           autoFallbackChain: settings.autoFallbackChain,
+          resolveReasoningEffort: settings.resolveReasoningEffort,
           providerFactory: settings.providerFactory,
           openAiApiKey: settings.openAiApiKey,
           anthropicApiKey: settings.anthropicApiKey,
@@ -8607,6 +8672,7 @@ export async function processChatMessage(
             secondaryOllamaHost: settings.secondaryOllamaHost,
             responseMode: isZenMode(mode) ? settings.responseMode : undefined,
             autoFallbackChain: settings.autoFallbackChain,
+            resolveReasoningEffort: settings.resolveReasoningEffort,
             providerFactory: settings.providerFactory,
             openAiApiKey: settings.openAiApiKey,
             anthropicApiKey: settings.anthropicApiKey,
@@ -8654,6 +8720,7 @@ export async function processChatMessage(
             secondaryOllamaHost: settings.secondaryOllamaHost,
             responseMode: isZenMode(mode) ? settings.responseMode : undefined,
             autoFallbackChain: settings.autoFallbackChain,
+            resolveReasoningEffort: settings.resolveReasoningEffort,
             providerFactory: settings.providerFactory,
             openAiApiKey: settings.openAiApiKey,
             anthropicApiKey: settings.anthropicApiKey,
@@ -8766,6 +8833,7 @@ export async function processChatMessage(
           secondaryOllamaHost: settings.secondaryOllamaHost,
           responseMode: isZenMode(mode) ? settings.responseMode : undefined,
           autoFallbackChain: settings.autoFallbackChain,
+          resolveReasoningEffort: settings.resolveReasoningEffort,
           providerFactory: settings.providerFactory,
           openAiApiKey: settings.openAiApiKey,
           anthropicApiKey: settings.anthropicApiKey,

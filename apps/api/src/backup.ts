@@ -60,6 +60,7 @@ import {
   normalizeEnglishVoiceEngine,
   normalizeGraphicsQuality,
   normalizeHubAtmosphereStyle,
+  normalizeModelReasoningEffortPreference,
   normalizePrismStartupPreference,
   normalizePrismCapabilityRevelations,
   PRISM_CAPABILITY_IDS,
@@ -87,6 +88,7 @@ import {
   type ImageProviderName,
   type GraphicsQuality,
   type HubAtmosphereStyle,
+  type ModelReasoningEffortPreferenceV1,
   type PrismStartupPreference,
   type PrismCapabilityRevelations,
   parseStoredAutoFallbackChain,
@@ -122,6 +124,12 @@ import {
   replaceLibraryGroups,
   type LibraryGroupV1,
 } from "./library-groups.ts";
+import {
+  listModelReasoningEffortPreferences,
+  normalizeModelEffortModelId,
+  normalizeModelEffortProvider,
+  setModelReasoningEffortPreference,
+} from "./model-effort-preferences.ts";
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
@@ -313,6 +321,8 @@ export interface BackupSnapshot {
   version: 1;
   exportedAt: string;
   settings?: BackupUserSettings;
+  /** Optional in older v1 snapshots. Default effort is represented by no row. */
+  modelEffortPreferences?: ModelReasoningEffortPreferenceV1[];
   bots?: BackupBotSnapshot[];
   /** Server-backed Library groups. Older browser-authored archives omit this. */
   libraryGroups?: LibraryGroupV1[];
@@ -2373,6 +2383,7 @@ export function exportUserSnapshot(
     version: 1,
     exportedAt: new Date().toISOString(),
     settings,
+    modelEffortPreferences: listModelReasoningEffortPreferences(db, userId),
     bots: bots.map((bot) => ({
         id: bot.id,
         name: bot.name,
@@ -3344,6 +3355,30 @@ function importUserSnapshotWithinTransaction(
       ),
       userId,
     );
+  }
+
+  if (Array.isArray(snapshot.modelEffortPreferences)) {
+    db.prepare(
+      "DELETE FROM model_reasoning_effort_preferences WHERE user_id = ?",
+    ).run(userId);
+    for (const rawPreference of snapshot.modelEffortPreferences) {
+      const provider = normalizeModelEffortProvider(rawPreference?.provider);
+      const modelId = normalizeModelEffortModelId(rawPreference?.modelId);
+      const effort = normalizeModelReasoningEffortPreference(
+        rawPreference?.effort,
+      );
+      if (!provider || !modelId || !effort) continue;
+      setModelReasoningEffortPreference(db, {
+        userId,
+        provider,
+        modelId,
+        effort,
+        updatedAt:
+          typeof rawPreference.updatedAt === "string"
+            ? rawPreference.updatedAt
+            : undefined,
+      });
+    }
   }
 
   if (Array.isArray(snapshot.bots)) {

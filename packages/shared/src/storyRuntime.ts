@@ -1,5 +1,4 @@
 import type { LlmProviderName } from "./index.js";
-import type { ReasoningEffort } from "./reasoningEffort.js";
 import type { StoryItemGlyphCategory, StorySpritePose } from "./storyThemes.js";
 
 export type StorySessionStatus = "generating" | "playing" | "complete" | "failed";
@@ -142,7 +141,6 @@ export interface StorySessionCreateRequest {
   premise?: string | null;
   preferredProvider?: LlmProviderName;
   modelOverride?: string | null;
-  reasoningEffort?: ReasoningEffort;
 }
 
 export interface StorySessionCreateResponse {

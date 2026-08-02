@@ -477,10 +477,6 @@ import {
   encodeAutoFallbackPickerValue,
 } from "./autoFallbackSettings";
 import { modeAwareModelOptions } from "./modeAwareModelOptions";
-import {
-  reasoningEffortForSend,
-  resolveChatZenReasoningEffortAvailability,
-} from "./chatZenReasoningEffort";
 import { shouldChoiceChipRailControlViewport } from "./choiceChipRailAnchor";
 import { rewriteWildcardSlotTokenReference } from "./wildcardReferenceBadge";
 import {
@@ -824,7 +820,6 @@ import {
   isElevenLabsImageModelId,
   MAX_PRISM_MOOD_SENSITIVITY,
   MIN_PRISM_MOOD_SENSITIVITY,
-  modelSupportsNativeReasoningEffort,
   normalizeOpenAiImageModelId,
   resolveImageProviderName,
   normalizePrismMoodSensitivity,
@@ -1002,6 +997,8 @@ import {
   type StorySessionSummary,
   type StoryTranscriptEntry,
   type ReasoningEffort,
+  type ModelReasoningEffortCapabilityV1,
+  type ModelReasoningEffortPreferenceV1,
   type ZenPreviousContextSummary,
   type ZenSessionMemoryItem,
   type ZenSessionMemoryOverview,
@@ -1067,6 +1064,9 @@ import {
   createPrismTutorialProgress,
   normalizePrismOnboardingState,
   normalizePrismTutorialProgress,
+  modelReasoningEffortPreferenceKey,
+  normalizeModelReasoningEffortPreference,
+  resolveModelReasoningEffortCapability,
   prismTutorialShouldRun,
   buildReplaySceneCheckpointsV2,
   replayMouthShapeAtV2,
@@ -10762,6 +10762,7 @@ interface UserSettings {
   composerWritingAssist: boolean;
   experimentalDualOllamaEnabled: boolean;
   experimentalAllModelEffortEnabled: boolean;
+  modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
   psychicModeEnabled: boolean;
   autoModeEnabled: boolean;
   autoFallbackChain: AutoFallbackChainV1 | null;
@@ -14601,9 +14602,8 @@ const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_LIGHT = 46;
 const AUTO_MODEL_CHOICE = "auto";
 const ACCOUNT_DEFAULT_MODEL_LABEL = "Account default";
 const DEFAULT_BOT_CHAT_MODEL_CHOICE = DISABLED_MODEL_CHOICE;
-const DEFAULT_REASONING_EFFORT: ReasoningEffort = "auto";
 const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
-  auto: "Auto",
+  auto: "Default",
   none: "None",
   minimal: "Minimal",
   low: "Low",
@@ -14611,26 +14611,6 @@ const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
   high: "High",
   xhigh: "XHigh",
 };
-const REASONING_EFFORT_SLIDER_VALUES = [
-  "none",
-  "minimal",
-  "low",
-  "medium",
-  "high",
-  "xhigh",
-] as const satisfies readonly ReasoningEffort[];
-const REASONING_EFFORT_ANCHOR_LABELS: Array<{
-  value: ReasoningEffort;
-  label: string;
-}> = [
-  { value: "none", label: "None" },
-  { value: "low", label: "Low" },
-  { value: "medium", label: "Med" },
-  { value: "high", label: "High" },
-  { value: "xhigh", label: "XHigh" },
-];
-const REASONING_EFFORT_SLIDER_MAX = 100;
-const DEFAULT_MANUAL_REASONING_EFFORT = "medium" as const;
 const AUTO_MODEL_SETTINGS_SUBTEXT = "uses the model saved in Settings";
 const DISABLED_MODEL_SETTINGS_SUBTEXT = "do not use this model lane";
 const ELEVENLABS_IMAGE_MENU_DISABLED_REASON =
@@ -15673,46 +15653,6 @@ function defaultZenModeSettings(): ZenModeSettingsFields {
   };
 }
 
-function modelChoiceSupportsReasoningEffort(
-  provider: Provider,
-  modelChoice: string,
-): boolean {
-  return (
-    modelChoice !== AUTO_MODEL_CHOICE &&
-    modelChoice !== DISABLED_MODEL_CHOICE &&
-    modelSupportsNativeReasoningEffort(provider, modelChoice)
-  );
-}
-
-function reasoningEffortSliderPosition(value: ReasoningEffort): number {
-  const sliderValue = REASONING_EFFORT_SLIDER_VALUES.includes(
-    value as (typeof REASONING_EFFORT_SLIDER_VALUES)[number],
-  )
-    ? (value as (typeof REASONING_EFFORT_SLIDER_VALUES)[number])
-    : DEFAULT_MANUAL_REASONING_EFFORT;
-  const index = REASONING_EFFORT_SLIDER_VALUES.indexOf(sliderValue);
-  const safeIndex = Math.max(0, index);
-  return (
-    (safeIndex / (REASONING_EFFORT_SLIDER_VALUES.length - 1)) *
-    REASONING_EFFORT_SLIDER_MAX
-  );
-}
-
-function reasoningEffortFromSliderPosition(position: number): ReasoningEffort {
-  const normalized = Number.isFinite(position) ? position : 0;
-  const clamped = Math.min(
-    REASONING_EFFORT_SLIDER_MAX,
-    Math.max(0, normalized),
-  );
-  const index = Math.round(
-    (clamped / REASONING_EFFORT_SLIDER_MAX) *
-      (REASONING_EFFORT_SLIDER_VALUES.length - 1),
-  );
-  return (
-    REASONING_EFFORT_SLIDER_VALUES[index] ?? DEFAULT_MANUAL_REASONING_EFFORT
-  );
-}
-
 function normalizeZenModeSettingsFields(
   settings: Partial<ZenModeSettingsFields> | null | undefined,
 ): ZenModeSettingsFields {
@@ -16326,6 +16266,53 @@ function resolvedAutoPrimaryLabel(
         model.provider === primary.provider && model.id === primary.model,
     )?.label ?? modelLabelFromId(primary.model)
   );
+}
+
+function savedModelReasoningEffort(
+  settings: UserSettings | null,
+  provider: Provider,
+  modelId: string,
+  capability: ModelReasoningEffortCapabilityV1,
+): ReasoningEffort {
+  const key = modelReasoningEffortPreferenceKey(provider, modelId);
+  const stored = settings?.modelEffortPreferences?.find(
+    (preference) =>
+      modelReasoningEffortPreferenceKey(
+        preference.provider,
+        preference.modelId,
+      ) === key,
+  )?.effort;
+  return stored && capability.levels.includes(stored) ? stored : "auto";
+}
+
+function modelEffortTargetForSelection(args: {
+  provider: Provider;
+  modelId: string | null | undefined;
+  options: readonly ModelCatalogEntry[];
+  simulatedLocalEnabled: boolean;
+}): ActiveModelEffortTarget | null {
+  const modelId = args.modelId?.trim() ?? "";
+  if (
+    !modelId ||
+    modelId === AUTO_MODEL_CHOICE ||
+    modelId === DISABLED_MODEL_CHOICE
+  ) {
+    return null;
+  }
+  return {
+    provider: args.provider,
+    modelId,
+    modelLabel:
+      args.options.find(
+        (option) =>
+          option.provider === args.provider && option.id === modelId,
+      )?.label ?? modelLabelFromId(modelId),
+    capability: resolveModelReasoningEffortCapability({
+      provider: args.provider,
+      modelId,
+      simulatedLocalEnabled: args.simulatedLocalEnabled,
+    }),
+  };
 }
 
 function visibleConcreteModelChoiceForProvider(
@@ -23176,10 +23163,20 @@ function ImageBotDirectoryDropdown({
 type ComposerModelPickerProvider = Provider | "online" | "all";
 
 interface ComposerModelPickerEffortControl {
+  targetKey: string;
   value: ReasoningEffort;
+  capability: ModelReasoningEffortCapabilityV1;
   onChange: (nextValue: ReasoningEffort) => void;
+  onActivate?: () => void;
   disabled?: boolean;
   disabledReason?: string;
+}
+
+interface ActiveModelEffortTarget {
+  provider: Provider;
+  modelId: string;
+  modelLabel: string;
+  capability: ModelReasoningEffortCapabilityV1;
 }
 
 interface ComposerModelPickerStatusMessage {
@@ -23266,8 +23263,11 @@ function ComposerModelPicker({
   dismissPopoversSignal,
 }: ComposerModelPickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
+  const [effortOpen, setEffortOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  const effortTriggerRef = useRef<HTMLButtonElement>(null);
+  const effortMenuRef = useRef<HTMLDivElement>(null);
   const formValueRef = useRef<HTMLInputElement>(null);
   const autoMetaShown = autoOptionMetaOverride ?? AUTO_MODEL_SETTINGS_SUBTEXT;
   const disabledMetaShown =
@@ -23301,18 +23301,23 @@ function ComposerModelPicker({
     COMPOSE_MENU_PORTAL_Z_INDEX_MODEL,
     placement,
   );
-  const [effortSliderPosition, setEffortSliderPosition] = useState(() =>
-    reasoningEffortSliderPosition(
-      effortControl?.value ?? DEFAULT_MANUAL_REASONING_EFFORT,
-    ),
+  const effortInteractionDisabled =
+    loading ||
+    !effortControl ||
+    effortControl.disabled === true ||
+    effortControl.capability.mode === "unavailable";
+  const effortMenuOpen = effortOpen && !effortInteractionDisabled;
+  const effortMenuPortalStyle = useComposeMenuPortalStyle(
+    effortMenuOpen,
+    effortTriggerRef,
+    220,
+    COMPOSE_MENU_PORTAL_Z_INDEX_MODEL,
+    placement,
   );
-  const lastManualReasoningEffortRef = useRef<ReasoningEffort>(
-    DEFAULT_MANUAL_REASONING_EFFORT,
-  );
-  const lastEmittedReasoningEffortRef = useRef<ReasoningEffort | null>(null);
-  const effortAutoEnabled = effortControl?.value === DEFAULT_REASONING_EFFORT;
-  const effortSliderDisabled =
-    !effortControl || effortControl.disabled === true || effortAutoEnabled;
+  const effortLabel =
+    !effortControl || effortControl.capability.mode === "unavailable"
+      ? "Not adjustable"
+      : REASONING_EFFORT_LABELS[effortControl.value];
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -23328,6 +23333,19 @@ function ComposerModelPicker({
   }, [menuOpen]);
 
   useEffect(() => {
+    if (!effortMenuOpen) return;
+    const handler = (event: MouseEvent) => {
+      if (!isPrimaryPointerDismissal(event)) return;
+      const target = event.target as Node;
+      if (effortTriggerRef.current?.contains(target)) return;
+      if (effortMenuRef.current?.contains(target)) return;
+      setEffortOpen(false);
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [effortMenuOpen]);
+
+  useEffect(() => {
     if (!menuOpen) return;
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
@@ -23341,27 +23359,39 @@ function ComposerModelPicker({
   }, [menuOpen]);
 
   useEffect(() => {
+    if (!effortMenuOpen) return;
+    const handler = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        event.stopPropagation();
+        setEffortOpen(false);
+        effortTriggerRef.current?.focus();
+      }
+    };
+    document.addEventListener("keydown", handler);
+    return () => document.removeEventListener("keydown", handler);
+  }, [effortMenuOpen]);
+
+  useEffect(() => {
     if (!interactionDisabled || !open) return;
     const timeout = window.setTimeout(() => setOpen(false), 0);
     return () => window.clearTimeout(timeout);
   }, [interactionDisabled, open]);
 
   useEffect(() => {
+    if (!effortInteractionDisabled || !effortOpen) return;
+    const timeout = window.setTimeout(() => setEffortOpen(false), 0);
+    return () => window.clearTimeout(timeout);
+  }, [effortInteractionDisabled, effortOpen]);
+
+  useEffect(() => {
     if (dismissPopoversSignal === undefined) return;
     setOpen(false);
+    setEffortOpen(false);
   }, [dismissPopoversSignal]);
 
   useEffect(() => {
-    if (!effortControl) return;
-    if (effortControl.value !== DEFAULT_REASONING_EFFORT) {
-      lastManualReasoningEffortRef.current = effortControl.value;
-    }
-    if (lastEmittedReasoningEffortRef.current === effortControl.value) {
-      lastEmittedReasoningEffortRef.current = null;
-      return;
-    }
-    setEffortSliderPosition(reasoningEffortSliderPosition(effortControl.value));
-  }, [effortControl?.value]);
+    effortControl?.onActivate?.();
+  }, [effortControl?.targetKey, effortControl?.capability.mode]);
 
   const pick = (nextValue: string): void => {
     if (formValueRef.current) {
@@ -23384,6 +23414,7 @@ function ComposerModelPicker({
       data-disabled={interactionDisabled ? "true" : undefined}
       data-loading={loading ? "true" : undefined}
       data-open={menuOpen ? "true" : undefined}
+      data-has-effort={effortControl ? "true" : undefined}
       data-provider={visualProvider}
       data-routing-provider={provider}
     >
@@ -23399,7 +23430,10 @@ function ComposerModelPicker({
         ref={triggerRef}
         type="button"
         className={styles.composeModelTrigger}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          setEffortOpen(false);
+          setOpen((current) => !current);
+        }}
         disabled={interactionDisabled}
         data-glyph-tooltip={loading ? "Models are still loading." : title}
         aria-haspopup="listbox"
@@ -23426,6 +23460,36 @@ function ComposerModelPicker({
           </svg>
         </span>
       </button>
+      {effortControl ? (
+        <button
+          ref={effortTriggerRef}
+          type="button"
+          className={styles.composeModelEffortTrigger}
+          data-tutorial-target="model-effort"
+          data-adjustable={
+            effortControl.capability.mode !== "unavailable" ? "true" : "false"
+          }
+          onClick={() => {
+            effortControl.onActivate?.();
+            setOpen(false);
+            setEffortOpen((current) => !current);
+          }}
+          disabled={effortInteractionDisabled}
+          aria-haspopup="menu"
+          aria-expanded={effortMenuOpen}
+          aria-label={`Effort: ${effortLabel}`}
+          title={
+            effortControl.disabledReason ??
+            effortControl.capability.disabledReason ??
+            "Adjust this model's saved effort"
+          }
+        >
+          <span>{effortLabel}</span>
+          {effortControl.capability.mode !== "unavailable" ? (
+            <span aria-hidden="true">⌄</span>
+          ) : null}
+        </button>
+      ) : null}
       {loading ? (
         <span className={styles.srOnly} role="status" aria-live="polite">
           Models are still loading.
@@ -23560,111 +23624,51 @@ function ComposerModelPicker({
                 );
               })}
             </div>
-            {effortControl ? (
-              <div className={styles.composeModelMenuFooter}>
-                <div
-                  className={styles.composeModelEffortControl}
-                  data-auto={effortAutoEnabled ? "true" : undefined}
-                  data-disabled={effortControl.disabled ? "true" : undefined}
-                  role="group"
-                  aria-label="Reasoning effort"
+          </div>,
+          document.body,
+        )}
+      {effortControl &&
+        effortMenuOpen &&
+        effortMenuPortalStyle &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <div
+            ref={effortMenuRef}
+            className={`${styles.composeBotMenu} ${styles.composeModelEffortMenu}`}
+            style={effortMenuPortalStyle}
+            role="menu"
+            aria-label="Model effort"
+          >
+            <div className={styles.composeModelEffortMenuHeader}>
+              <span>Effort</span>
+              <small>
+                {effortControl.capability.mode === "simulated"
+                  ? "Experimental · simulated locally"
+                  : "Saved for this model"}
+              </small>
+            </div>
+            {(["auto", ...effortControl.capability.levels] as ReasoningEffort[]).map(
+              (level) => (
+                <button
+                  key={level}
+                  type="button"
+                  className={styles.composeModelEffortOption}
+                  data-active={effortControl.value === level ? "true" : undefined}
+                  role="menuitemradio"
+                  aria-checked={effortControl.value === level}
+                  onClick={() => {
+                    effortControl.onChange(level);
+                    setEffortOpen(false);
+                    effortTriggerRef.current?.focus();
+                  }}
                 >
-                  <div className={styles.composeModelEffortHeader}>
-                    <span className={styles.controlLabelWithInfo}>
-                      <span>Effort</span>
-                      <PanelSectionInfo
-                        id="compose-model-effort-info"
-                        label="About reasoning effort"
-                        variant="control"
-                      >
-                        Adjusts how much reasoning the selected model spends
-                        before answering.
-                      </PanelSectionInfo>
-                    </span>
-                    <span className={styles.composeModelEffortStatus}>
-                      <output>
-                        {REASONING_EFFORT_LABELS[effortControl.value]}
-                      </output>
-                      <button
-                        type="button"
-                        className={styles.composeModelEffortAutoToggle}
-                        data-active={effortAutoEnabled ? "true" : undefined}
-                        aria-pressed={effortAutoEnabled}
-                        disabled={effortControl.disabled}
-                        onClick={() => {
-                          if (effortAutoEnabled) {
-                            const nextValue =
-                              lastManualReasoningEffortRef.current ===
-                              DEFAULT_REASONING_EFFORT
-                                ? DEFAULT_MANUAL_REASONING_EFFORT
-                                : lastManualReasoningEffortRef.current;
-                            lastEmittedReasoningEffortRef.current = nextValue;
-                            setEffortSliderPosition(
-                              reasoningEffortSliderPosition(nextValue),
-                            );
-                            effortControl.onChange(nextValue);
-                            return;
-                          }
-                          if (
-                            effortControl.value !== DEFAULT_REASONING_EFFORT
-                          ) {
-                            lastManualReasoningEffortRef.current =
-                              effortControl.value;
-                          }
-                          const nextValue = DEFAULT_REASONING_EFFORT;
-                          lastEmittedReasoningEffortRef.current = nextValue;
-                          effortControl.onChange(nextValue);
-                        }}
-                      >
-                        <span>Auto</span>
-                        <span
-                          className={styles.composeModelEffortAutoToggleThumb}
-                          aria-hidden="true"
-                        />
-                      </button>
-                    </span>
-                  </div>
-                  <div className={styles.composeModelEffortSliderShell}>
-                    <input
-                      type="range"
-                      min={0}
-                      max={REASONING_EFFORT_SLIDER_MAX}
-                      step="any"
-                      value={effortSliderPosition}
-                      disabled={effortSliderDisabled}
-                      aria-label="Reasoning effort"
-                      aria-valuetext={
-                        REASONING_EFFORT_LABELS[effortControl.value]
-                      }
-                      onChange={(event) => {
-                        const nextPosition = Number(event.currentTarget.value);
-                        const nextValue =
-                          reasoningEffortFromSliderPosition(nextPosition);
-                        setEffortSliderPosition(nextPosition);
-                        if (nextValue !== effortControl.value) {
-                          lastManualReasoningEffortRef.current = nextValue;
-                          lastEmittedReasoningEffortRef.current = nextValue;
-                          effortControl.onChange(nextValue);
-                        }
-                      }}
-                    />
-                    <div
-                      className={styles.composeModelEffortTicks}
-                      aria-hidden="true"
-                    >
-                      {REASONING_EFFORT_ANCHOR_LABELS.map((tick) => (
-                        <span key={tick.value}>{tick.label}</span>
-                      ))}
-                    </div>
-                  </div>
-                  {effortControl.disabled && effortControl.disabledReason ? (
-                    <p className={styles.composeModelEffortHint}>
-                      {effortControl.disabledReason}
-                    </p>
+                  <span>{REASONING_EFFORT_LABELS[level]}</span>
+                  {level === "auto" ? (
+                    <small>Use the model provider's default</small>
                   ) : null}
-                </div>
-              </div>
-            ) : null}
+                </button>
+              ),
+            )}
           </div>,
           document.body,
         )}
@@ -29851,6 +29855,11 @@ function ZenLiveBotMannequin({
           <BotFaceFrameIdentityRaster
             kind="led"
             identityColor={resolvedFrameIdentityColor}
+          />
+          <span
+            className={styles.botFaceFrameLedGlow}
+            data-frame-material-layer="led-glow"
+            aria-hidden="true"
           />
         </span>
         <span
@@ -39604,6 +39613,8 @@ function BotPowerBadge({
     return names.length > 0 ? names.join(", ") : "no matching bots";
   };
   const effectLines = effects.map((effect) => {
+    if (effect.type === "power_immunity")
+      return "Experiences every other bot as their ordinary unpowered self";
     if (effect.type === "awareness")
       return `Visible to: ${targetNames(effect.allowed)}`;
     if (effect.type === "speech_audience")
@@ -43983,6 +43994,164 @@ function HomeContent(): React.JSX.Element {
     new Map(),
   );
   const [settings, setSettings] = useState<UserSettings | null>(null);
+  const [modelEffortHudTarget, setModelEffortHudTarget] =
+    useState<ActiveModelEffortTarget | null>(null);
+  const modelEffortHudTimerRef = useRef<number | null>(null);
+  const activeModelEffortTargetRef = useRef<ActiveModelEffortTarget | null>(
+    null,
+  );
+  const modelEffortMutationVersionRef = useRef(new Map<string, number>());
+  const modelEffortMutationQueueRef = useRef(new Map<string, Promise<void>>());
+  const persistModelEffortPreference = useCallback(
+    (target: ActiveModelEffortTarget, nextValue: ReasoningEffort): void => {
+      const normalized = normalizeModelReasoningEffortPreference(nextValue);
+      const key = modelReasoningEffortPreferenceKey(
+        target.provider,
+        target.modelId,
+      );
+      const version =
+        (modelEffortMutationVersionRef.current.get(key) ?? 0) + 1;
+      modelEffortMutationVersionRef.current.set(key, version);
+      const previousPreferences = settings?.modelEffortPreferences ?? [];
+      setSettings((current) => {
+        if (!current) return current;
+        const withoutTarget = (current.modelEffortPreferences ?? []).filter(
+          (preference) =>
+            modelReasoningEffortPreferenceKey(
+              preference.provider,
+              preference.modelId,
+            ) !== key,
+        );
+        return {
+          ...current,
+          modelEffortPreferences: normalized
+            ? [
+                ...withoutTarget,
+                {
+                  provider: target.provider,
+                  modelId: target.modelId,
+                  effort: normalized,
+                },
+              ]
+            : withoutTarget,
+        };
+      });
+      const previousMutation =
+        modelEffortMutationQueueRef.current.get(key) ?? Promise.resolve();
+      const mutation = previousMutation
+        .catch(() => undefined)
+        .then(() =>
+          api<{
+            ok: true;
+            modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
+          }>("/api/model-effort-preferences", {
+            method: "PUT",
+            body: JSON.stringify({
+              provider: target.provider,
+              modelId: target.modelId,
+              effort: normalized ?? "default",
+            }),
+          }),
+        )
+        .then((response) => {
+          if (modelEffortMutationVersionRef.current.get(key) !== version) {
+            return;
+          }
+          setSettings((current) =>
+            current
+              ? {
+                  ...current,
+                  modelEffortPreferences: response.modelEffortPreferences,
+                }
+              : current,
+          );
+        })
+        .catch((error) => {
+          if (modelEffortMutationVersionRef.current.get(key) !== version) {
+            return;
+          }
+          setSettings((current) =>
+            current
+              ? { ...current, modelEffortPreferences: previousPreferences }
+              : current,
+          );
+          console.warn("[effort] preference save failed", error);
+        })
+        .finally(() => {
+          if (modelEffortMutationQueueRef.current.get(key) === mutation) {
+            modelEffortMutationQueueRef.current.delete(key);
+          }
+        });
+      modelEffortMutationQueueRef.current.set(key, mutation);
+    },
+    [settings],
+  );
+  const resetAllModelEffortPreferences = useCallback((): void => {
+    let previousPreferences: ModelReasoningEffortPreferenceV1[] = [];
+    setSettings((current) => {
+      if (!current) return current;
+      previousPreferences = current.modelEffortPreferences ?? [];
+      return { ...current, modelEffortPreferences: [] };
+    });
+    const pendingWrites = [
+      ...modelEffortMutationQueueRef.current.values(),
+    ];
+    void Promise.allSettled(pendingWrites)
+      .then(() =>
+        api<{
+          ok: true;
+          modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
+        }>("/api/model-effort-preferences", { method: "DELETE" }),
+      )
+      .then((response) => {
+        modelEffortMutationVersionRef.current.clear();
+        setSettings((current) =>
+          current
+            ? {
+                ...current,
+                modelEffortPreferences: response.modelEffortPreferences,
+              }
+            : current,
+        );
+      })
+      .catch((error) => {
+        setSettings((current) =>
+          current
+            ? { ...current, modelEffortPreferences: previousPreferences }
+            : current,
+        );
+        console.warn("[effort] reset failed", error);
+      });
+  }, []);
+  const effortControlForTarget = useCallback(
+    (
+      target: ActiveModelEffortTarget | null,
+      options: { disabled?: boolean; disabledReason?: string } = {},
+    ): ComposerModelPickerEffortControl | undefined => {
+      if (!target) return undefined;
+      return {
+        targetKey: modelReasoningEffortPreferenceKey(
+          target.provider,
+          target.modelId,
+        ),
+        value: savedModelReasoningEffort(
+          settings,
+          target.provider,
+          target.modelId,
+          target.capability,
+        ),
+        capability: target.capability,
+        disabled: options.disabled,
+        disabledReason: options.disabledReason,
+        onActivate: () => {
+          activeModelEffortTargetRef.current = target;
+        },
+        onChange: (nextValue) =>
+          persistModelEffortPreference(target, nextValue),
+      };
+    },
+    [persistModelEffortPreference, settings],
+  );
   const [debateJurySettings, setDebateJurySettings] =
     useState<DebateJurySettings>(DEFAULT_DEBATE_JURY_SETTINGS);
   const debateJurySettingsScopeId = user?.id ?? "signed-out";
@@ -44183,6 +44352,107 @@ function HomeContent(): React.JSX.Element {
     modelCatalogStatus === "checking" ||
     (modelCatalogStatus === "idle" && modelCatalog === null);
   const modelCatalogRefreshTokenRef = useRef(0);
+  useEffect(() => {
+    const dismissLater = (): void => {
+      if (modelEffortHudTimerRef.current !== null) {
+        window.clearTimeout(modelEffortHudTimerRef.current);
+      }
+      modelEffortHudTimerRef.current = window.setTimeout(() => {
+        setModelEffortHudTarget(null);
+        modelEffortHudTimerRef.current = null;
+      }, 1_600);
+    };
+    const fallbackTarget = (): ActiveModelEffortTarget | null => {
+      if (!settings) return null;
+      const primary = resolvedAutoPrimaryForComposer(
+        modelCatalog,
+        settings,
+        settings.preferredProvider,
+        AUTO_MODEL_CHOICE,
+      );
+      const provider = primary?.provider ?? settings.preferredProvider;
+      const savedModelId =
+        provider === "local"
+          ? settings.preferredLocalModel
+          : settings.preferredOnlineModel;
+      const modelId =
+        primary?.model ||
+        savedModelId?.trim() ||
+        defaultModelChoiceForProvider(modelCatalog, settings, provider);
+      return modelEffortTargetForSelection({
+        provider,
+        modelId,
+        options: modelOptionsForResponseMode(modelCatalog, settings, "auto"),
+        simulatedLocalEnabled:
+          settings.experimentalAllModelEffortEnabled === true,
+      });
+    };
+    const handler = (event: KeyboardEvent): void => {
+      const key = event.key.toLowerCase();
+      const mod = event.metaKey || event.ctrlKey;
+      if (mod && event.shiftKey && !event.altKey && key === "e") {
+        const active = activeModelEffortTargetRef.current ?? fallbackTarget();
+        if (!active) return;
+        event.preventDefault();
+        event.stopPropagation();
+        activeModelEffortTargetRef.current = active;
+        setModelEffortHudTarget(active);
+        dismissLater();
+        return;
+      }
+      if (!modelEffortHudTarget) return;
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setModelEffortHudTarget(null);
+        return;
+      }
+      if (key === "d") {
+        event.preventDefault();
+        persistModelEffortPreference(modelEffortHudTarget, "auto");
+        dismissLater();
+        return;
+      }
+      if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
+      const levels = [
+        "auto",
+        ...modelEffortHudTarget.capability.levels,
+      ] as ReasoningEffort[];
+      if (levels.length <= 1) return;
+      event.preventDefault();
+      const current = savedModelReasoningEffort(
+        settings,
+        modelEffortHudTarget.provider,
+        modelEffortHudTarget.modelId,
+        modelEffortHudTarget.capability,
+      );
+      const currentIndex = Math.max(0, levels.indexOf(current));
+      const delta = event.key === "ArrowRight" ? 1 : -1;
+      const next = levels[
+        Math.min(levels.length - 1, Math.max(0, currentIndex + delta))
+      ];
+      if (next && next !== current) {
+        persistModelEffortPreference(modelEffortHudTarget, next);
+      }
+      dismissLater();
+    };
+    document.addEventListener("keydown", handler, true);
+    return () => {
+      document.removeEventListener("keydown", handler, true);
+    };
+  }, [
+    modelCatalog,
+    modelEffortHudTarget,
+    persistModelEffortPreference,
+    settings,
+  ]);
+  useEffect(
+    () => () => {
+      if (modelEffortHudTimerRef.current !== null) {
+        window.clearTimeout(modelEffortHudTimerRef.current);
+      }
+    },
+    [],
+  );
   const [comfyUiModelsPayload, setComfyUiModelsPayload] = useState<{
     configured: boolean;
     reachable: boolean;
@@ -46461,56 +46731,34 @@ function HomeContent(): React.JSX.Element {
     openai: AUTO_MODEL_CHOICE,
     anthropic: AUTO_MODEL_CHOICE,
   });
-  const [chatReasoningEffort, setChatReasoningEffort] =
-    useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   /** Per-session Coffee header model picks (LOCAL + ONLINE slots). */
   const [coffeeModelChoiceByProvider, setCoffeeModelChoiceByProvider] =
     useState<Record<Provider, string>>(
       createDefaultChatModelChoiceByProvider(),
     );
-  const [coffeeReasoningEffort, setCoffeeReasoningEffort] =
-    useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   /** Remember picks when hopping Coffee threads or leaving Coffee view. */
   const coffeeModelChoiceByScopeRef = useRef<
     Map<string, Record<Provider, string>>
   >(new Map());
-  const coffeeReasoningEffortByScopeRef = useRef<Map<string, ReasoningEffort>>(
-    new Map(),
-  );
   const lastCoffeeModelScopeKeyRef = useRef<string | null>(null);
   const coffeeModelChoiceByProviderWriteRef = useRef(
     coffeeModelChoiceByProvider,
   );
   coffeeModelChoiceByProviderWriteRef.current = coffeeModelChoiceByProvider;
-  const coffeeReasoningEffortWriteRef = useRef(coffeeReasoningEffort);
-  coffeeReasoningEffortWriteRef.current = coffeeReasoningEffort;
   const coffeeResponseModeForSendRef = useRef<AutoResponseMode>("local");
   /** Per-thread compose model picks (Chat + Sandbox); keyed by `conversationModelScopeKey`. */
   const conversationModelChoiceByScopeRef = useRef<
     Map<string, Record<Provider, string>>
   >(new Map());
-  const conversationReasoningEffortByScopeRef = useRef<
-    Map<string, ReasoningEffort>
-  >(new Map());
   const lastConversationModelScopeKeyRef = useRef<string | null>(null);
   const chatModelChoiceByProviderWriteRef = useRef(chatModelChoiceByProvider);
   chatModelChoiceByProviderWriteRef.current = chatModelChoiceByProvider;
-  const chatReasoningEffortWriteRef = useRef(chatReasoningEffort);
-  chatReasoningEffortWriteRef.current = chatReasoningEffort;
 
   const persistChatModelChoicesForActiveScope = useCallback(
     (next: Record<Provider, string>) => {
       if (view !== "chat" && view !== "sandbox") return;
       const key = conversationModelScopeKey(selectedId, detail?.id);
       conversationModelChoiceByScopeRef.current.set(key, next);
-    },
-    [view, selectedId, detail?.id],
-  );
-  const persistChatReasoningEffortForActiveScope = useCallback(
-    (next: ReasoningEffort) => {
-      if (view !== "chat" && view !== "sandbox") return;
-      const key = conversationModelScopeKey(selectedId, detail?.id);
-      conversationReasoningEffortByScopeRef.current.set(key, next);
     },
     [view, selectedId, detail?.id],
   );
@@ -53604,6 +53852,13 @@ function HomeContent(): React.JSX.Element {
       primaryForAuto,
       modelOptions,
     );
+    const effortTarget = modelEffortTargetForSelection({
+      provider: primaryForAuto?.provider ?? modelProvider,
+      modelId: primaryForAuto?.model ?? visibleModelChoice,
+      options: modelOptions,
+      simulatedLocalEnabled:
+        settings.experimentalAllModelEffortEnabled === true,
+    });
     const pickerStatusMessage: ComposerModelPickerStatusMessage | undefined =
       modelCatalogStatus === "checking" ||
       (modelCatalogStatus === "idle" && modelCatalog === null)
@@ -53677,20 +53932,7 @@ function HomeContent(): React.JSX.Element {
           settings,
           isLocal ? "local" : "online",
         )}
-        effortControl={
-          modelChoiceSupportsReasoningEffort(modelProvider, visibleModelChoice)
-            ? {
-                value: coffeeReasoningEffort,
-                disabled: coffeeHeaderModelControlsLocked(),
-                disabledReason:
-                  coffeeHeaderModelControlsLockReason() ?? undefined,
-                onChange: (next) => {
-                  setCoffeeReasoningEffort(next);
-                  persistCoffeeReasoningEffortForScope(next);
-                },
-              }
-            : undefined
-        }
+        effortControl={effortControlForTarget(effortTarget)}
       />
     );
   };
@@ -53920,10 +54162,11 @@ function HomeContent(): React.JSX.Element {
       primaryForAuto,
       modelOptions,
     );
-    const effortAvailability = resolveChatZenReasoningEffortAvailability({
-      provider: modelProvider,
-      modelChoice: visibleModelChoice,
-      experimentalAllModelEffortEnabled:
+    const effortTarget = modelEffortTargetForSelection({
+      provider: primaryForAuto?.provider ?? modelProvider,
+      modelId: primaryForAuto?.model ?? visibleModelChoice,
+      options: modelOptions,
+      simulatedLocalEnabled:
         settings?.experimentalAllModelEffortEnabled === true,
     });
     const activeSideChat =
@@ -54002,19 +54245,7 @@ function HomeContent(): React.JSX.Element {
                 settings,
                 isLocal ? "local" : "online",
               )}
-              effortControl={
-                effortAvailability.visible
-                  ? {
-                      value: chatReasoningEffort,
-                      disabled: !effortAvailability.enabled,
-                      disabledReason: effortAvailability.disabledReason,
-                      onChange: (next) => {
-                        setChatReasoningEffort(next);
-                        persistChatReasoningEffortForActiveScope(next);
-                      },
-                    }
-                  : undefined
-              }
+              effortControl={effortControlForTarget(effortTarget)}
             />
           </>
         ) : null}
@@ -59996,8 +60227,6 @@ function HomeContent(): React.JSX.Element {
   const [storyModelChoiceByProvider, setStoryModelChoiceByProvider] = useState<
     Record<Provider, string>
   >(createDefaultChatModelChoiceByProvider());
-  const [storyReasoningEffort, setStoryReasoningEffort] =
-    useState<ReasoningEffort>(DEFAULT_REASONING_EFFORT);
   useEffect(() => {
     const previousPanel = panelPopupCleanupLastPanelRef.current;
     panelPopupCleanupLastPanelRef.current = panel;
@@ -63145,6 +63374,22 @@ function HomeContent(): React.JSX.Element {
         : storyVisibleModelChoice !== AUTO_MODEL_CHOICE
           ? storyVisibleModelChoice
           : undefined;
+  const storyEffortPrimary = resolvedAutoPrimaryForComposer(
+    modelCatalog,
+    settings,
+    storyModelProvider,
+    storyEffectiveModelChoice,
+  );
+  const storyEffortTarget = modelEffortTargetForSelection({
+    provider: storyEffortPrimary?.provider ?? storyModelProvider,
+    modelId:
+      storyEffortPrimary?.model ??
+      storyModelOverride ??
+      storyEffectiveModelChoice,
+    options: storyModelOptions,
+    simulatedLocalEnabled:
+      settings?.experimentalAllModelEffortEnabled === true,
+  });
   useEffect(() => {
     if (storyAnyOfflineProtected && storyProvider !== "local") {
       setStoryProvider("local");
@@ -65034,7 +65279,6 @@ function HomeContent(): React.JSX.Element {
     setStoryMapOpen(false);
     setStoryInventoryOpen(false);
     setStoryTranscriptOpen(false);
-    setStoryReasoningEffort(DEFAULT_REASONING_EFFORT);
     setStoryDialogCursor({ sessionId: null, sceneId: null, beatIndex: 0 });
   }, []);
   const createStorySessionFromDraft = useCallback(async (): Promise<void> => {
@@ -65047,11 +65291,6 @@ function HomeContent(): React.JSX.Element {
     }
     setStoryBusy(true);
     setStoryError(null);
-    const reasoningEffortOverride = reasoningEffortForSend(
-      storyModelProvider,
-      storyModelOverride,
-      storyReasoningEffort,
-    );
     try {
       const response = await api<{ ok: true; session: StorySessionDetail }>(
         "/api/story/sessions",
@@ -65064,9 +65303,6 @@ function HomeContent(): React.JSX.Element {
             preferredProvider: storyModelProvider,
             ...(storyModelOverride
               ? { modelOverride: storyModelOverride }
-              : {}),
-            ...(reasoningEffortOverride
-              ? { reasoningEffort: reasoningEffortOverride }
               : {}),
           }),
         },
@@ -65096,7 +65332,6 @@ function HomeContent(): React.JSX.Element {
     storyModelProvider,
     storyModelOverride,
     storyVisibleModelChoice,
-    storyReasoningEffort,
     storyPremise,
     storySelectedBotIds,
     storySelectionValid,
@@ -66672,22 +66907,6 @@ function HomeContent(): React.JSX.Element {
       persistCoffeeGroupModelChoiceToServer,
     ],
   );
-  const persistCoffeeReasoningEffortForScope = useCallback(
-    (next: ReasoningEffort) => {
-      if (view !== "coffee") return;
-      const groupId =
-        coffeeSelectedGroupId ?? coffeeConversation?.coffeeGroupId ?? null;
-      const key = coffeeModelScopeKey(groupId, coffeeConversation?.id ?? null);
-      coffeeReasoningEffortByScopeRef.current.set(key, next);
-    },
-    [
-      view,
-      coffeeConversation?.id,
-      coffeeConversation?.coffeeGroupId,
-      coffeeSelectedGroupId,
-    ],
-  );
-
   useEffect(() => {
     if (view !== "coffee") {
       const pk = lastCoffeeModelScopeKeyRef.current;
@@ -66697,10 +66916,6 @@ function HomeContent(): React.JSX.Element {
           normalizeCoffeeModelChoiceByProvider(
             coffeeModelChoiceByProviderWriteRef.current,
           ),
-        );
-        coffeeReasoningEffortByScopeRef.current.set(
-          pk,
-          coffeeReasoningEffortWriteRef.current,
         );
         lastCoffeeModelScopeKeyRef.current = null;
       }
@@ -66722,16 +66937,11 @@ function HomeContent(): React.JSX.Element {
           coffeeModelChoiceByProviderWriteRef.current,
         ),
       );
-      coffeeReasoningEffortByScopeRef.current.set(
-        prevKey,
-        coffeeReasoningEffortWriteRef.current,
-      );
     }
     lastCoffeeModelScopeKeyRef.current = nextKey;
     lastPersistedCoffeeModelChoiceRef.current = null;
 
     let stored = coffeeModelChoiceByScopeRef.current.get(nextKey);
-    let storedEffort = coffeeReasoningEffortByScopeRef.current.get(nextKey);
 
     // Server-persisted per-group memory wins over both stale in-memory cache
     // and the previous "coffee:none" carry-over so swapping groups never leaks.
@@ -66756,13 +66966,6 @@ function HomeContent(): React.JSX.Element {
       if (stored) {
         coffeeModelChoiceByScopeRef.current.set(nextKey, { ...stored });
       }
-      if (!storedEffort) {
-        storedEffort =
-          coffeeReasoningEffortByScopeRef.current.get("coffee:none");
-        if (storedEffort) {
-          coffeeReasoningEffortByScopeRef.current.set(nextKey, storedEffort);
-        }
-      }
     }
 
     setCoffeeModelChoiceByProvider(
@@ -66770,7 +66973,6 @@ function HomeContent(): React.JSX.Element {
         ? normalizeCoffeeModelChoiceByProvider(stored)
         : createDefaultChatModelChoiceByProvider(),
     );
-    setCoffeeReasoningEffort(storedEffort ?? DEFAULT_REASONING_EFFORT);
   }, [
     view,
     coffeeConversation?.id,
@@ -66847,13 +67049,6 @@ function HomeContent(): React.JSX.Element {
       settings?.autoModeEnabled === true && !coffeeAnyOfflineProtected,
     ),
   );
-  const coffeeSessionReasoningEffortOverride = reasoningEffortForSend(
-    coffeeSessionProvider,
-    coffeeSessionModelOverride,
-    coffeeReasoningEffort,
-    settings?.experimentalAllModelEffortEnabled === true,
-  );
-
   const coffeePreparationProvider =
     coffeeResponseModeForSend === "auto" && coffeePrimaryForAuto
       ? coffeePrimaryForAuto.provider
@@ -67105,9 +67300,6 @@ function HomeContent(): React.JSX.Element {
           method: "POST",
           body: JSON.stringify({
             preferredProvider: coffeeSessionProvider,
-            ...(coffeeSessionReasoningEffortOverride
-              ? { reasoningEffort: coffeeSessionReasoningEffortOverride }
-              : {}),
             ...(coffeeSessionModelOverride
               ? { modelOverride: coffeeSessionModelOverride }
               : {}),
@@ -67156,7 +67348,6 @@ function HomeContent(): React.JSX.Element {
     coffeeSessionModelOverride,
     coffeeSessionPhase,
     coffeeSessionProvider,
-    coffeeSessionReasoningEffortOverride,
   ]);
 
   const coffeeMentionBotPicks = useMemo((): BotMentionPick[] => {
@@ -70083,10 +70274,6 @@ function HomeContent(): React.JSX.Element {
         conversationModelChoiceByScopeRef.current.set(pk, {
           ...chatModelChoiceByProviderWriteRef.current,
         });
-        conversationReasoningEffortByScopeRef.current.set(
-          pk,
-          chatReasoningEffortWriteRef.current,
-        );
         lastConversationModelScopeKeyRef.current = null;
       }
       return;
@@ -70099,30 +70286,14 @@ function HomeContent(): React.JSX.Element {
       conversationModelChoiceByScopeRef.current.set(prevKey, {
         ...chatModelChoiceByProviderWriteRef.current,
       });
-      conversationReasoningEffortByScopeRef.current.set(
-        prevKey,
-        chatReasoningEffortWriteRef.current,
-      );
     }
     lastConversationModelScopeKeyRef.current = nextKey;
 
     let stored = conversationModelChoiceByScopeRef.current.get(nextKey);
-    let storedEffort =
-      conversationReasoningEffortByScopeRef.current.get(nextKey);
     if (!stored && prevKey === "p:pending" && nextKey.startsWith("c:")) {
       stored = conversationModelChoiceByScopeRef.current.get("p:pending");
       if (stored) {
         conversationModelChoiceByScopeRef.current.set(nextKey, { ...stored });
-      }
-      if (!storedEffort) {
-        storedEffort =
-          conversationReasoningEffortByScopeRef.current.get("p:pending");
-        if (storedEffort) {
-          conversationReasoningEffortByScopeRef.current.set(
-            nextKey,
-            storedEffort,
-          );
-        }
       }
     }
     if (!stored && prevKey === "p:none" && nextKey === "p:pending") {
@@ -70135,22 +70306,11 @@ function HomeContent(): React.JSX.Element {
           ...stored,
         });
       }
-      if (!storedEffort) {
-        storedEffort =
-          conversationReasoningEffortByScopeRef.current.get("p:none");
-        if (storedEffort) {
-          conversationReasoningEffortByScopeRef.current.set(
-            "p:pending",
-            storedEffort,
-          );
-        }
-      }
     }
 
     setChatModelChoiceByProvider(
       stored ? { ...stored } : createDefaultChatModelChoiceByProvider(),
     );
-    setChatReasoningEffort(storedEffort ?? DEFAULT_REASONING_EFFORT);
   }, [selectedId, view, detail?.id]);
 
   useEffect(() => {
@@ -71230,6 +71390,11 @@ function HomeContent(): React.JSX.Element {
         d.settings.experimentalDualOllamaEnabled === true,
       experimentalAllModelEffortEnabled:
         d.settings.experimentalAllModelEffortEnabled === true,
+      modelEffortPreferences: Array.isArray(
+        d.settings.modelEffortPreferences,
+      )
+        ? d.settings.modelEffortPreferences
+        : [],
       psychicModeEnabled: d.settings.psychicModeEnabled === true,
       autoModeEnabled: d.settings.autoModeEnabled === true,
       autoFallbackChain: normalizeAutoFallbackChain(
@@ -72977,24 +73142,17 @@ function HomeContent(): React.JSX.Element {
     setComposerDraftNow("");
     setError(null);
     setChatModelChoiceByProvider(modelDefaults);
-    setChatReasoningEffort(DEFAULT_REASONING_EFFORT);
     setCoffeeModelChoiceByProvider(modelDefaults);
-    setCoffeeReasoningEffort(DEFAULT_REASONING_EFFORT);
     setDebateModelChoiceByProvider(modelDefaults);
     setDebateLiveSessionActive(false);
     setImageGenModelChoiceByProvider(modelDefaults);
     setStoryModelChoiceByProvider(modelDefaults);
-    setStoryReasoningEffort(DEFAULT_REASONING_EFFORT);
     conversationModelChoiceByScopeRef.current.clear();
-    conversationReasoningEffortByScopeRef.current.clear();
     lastConversationModelScopeKeyRef.current = null;
     chatModelChoiceByProviderWriteRef.current = modelDefaults;
-    chatReasoningEffortWriteRef.current = DEFAULT_REASONING_EFFORT;
     coffeeModelChoiceByScopeRef.current.clear();
-    coffeeReasoningEffortByScopeRef.current.clear();
     lastCoffeeModelScopeKeyRef.current = null;
     coffeeModelChoiceByProviderWriteRef.current = modelDefaults;
-    coffeeReasoningEffortWriteRef.current = DEFAULT_REASONING_EFFORT;
 
     setImages([]);
     setImageBotDirectorySnapshot([]);
@@ -73379,12 +73537,6 @@ function HomeContent(): React.JSX.Element {
       modelChoice !== AUTO_MODEL_CHOICE && modelChoice !== DISABLED_MODEL_CHOICE
         ? modelChoice
         : undefined;
-    const reasoningEffortOverride = reasoningEffortForSend(
-      providerForSend,
-      modelOverride,
-      chatReasoningEffort,
-      settings?.experimentalAllModelEffortEnabled === true,
-    );
     const primaryForAuto = resolvedAutoPrimaryForComposer(
       modelCatalog,
       settings,
@@ -73499,9 +73651,6 @@ function HomeContent(): React.JSX.Element {
         ? { progressiveZenVoice: true }
         : {}),
       ...(modelOverride ? { modelOverride } : {}),
-      ...(reasoningEffortOverride
-        ? { reasoningEffort: reasoningEffortOverride }
-        : {}),
       psychicModeEnabled: mode === "chat" || view === "chat",
       ...(options.commandCenterPrompt ? { commandCenterPrompt: true } : {}),
       ...(options.resolvedCommandCenterPrompt
@@ -112437,9 +112586,20 @@ function HomeContent(): React.JSX.Element {
                                 </label>
                                 <small className={styles.settingsHostHint}>
                                   Local models can use Prism&apos;s simulated
-                                  effort; online models only show effort when
-                                  they support it natively.
+                                  effort across every conversational mode;
+                                  online models use native effort only when the
+                                  provider supports it.
                                 </small>
+                                <button
+                                  type="button"
+                                  className={styles.linkButton}
+                                  disabled={
+                                    settings.modelEffortPreferences.length === 0
+                                  }
+                                  onClick={resetAllModelEffortPreferences}
+                                >
+                                  Reset all saved model efforts
+                                </button>
                               </div>
                             </div>
                           </section>
@@ -112482,6 +112642,90 @@ function HomeContent(): React.JSX.Element {
                             >
                               {PRISM_MODEL_VARIABILITY_NOTICE}
                             </p>
+                            <div className={styles.settingsEffortProfiles}>
+                              <div className={styles.settingsEffortProfilesHeader}>
+                                <span>
+                                  Saved effort profiles
+                                  <small>
+                                    {settings.modelEffortPreferences.length === 0
+                                      ? "No model overrides"
+                                      : `${settings.modelEffortPreferences.length} model${
+                                          settings.modelEffortPreferences.length === 1
+                                            ? ""
+                                            : "s"
+                                        } customized`}
+                                  </small>
+                                </span>
+                                <button
+                                  type="button"
+                                  className={styles.linkButton}
+                                  disabled={
+                                    settings.modelEffortPreferences.length === 0
+                                  }
+                                  onClick={resetAllModelEffortPreferences}
+                                >
+                                  Reset all
+                                </button>
+                              </div>
+                              {settings.modelEffortPreferences.length > 0 ? (
+                                <div className={styles.settingsEffortProfileList}>
+                                  {settings.modelEffortPreferences.map(
+                                    (preference) => (
+                                      <div
+                                        key={modelReasoningEffortPreferenceKey(
+                                          preference.provider,
+                                          preference.modelId,
+                                        )}
+                                        className={styles.settingsEffortProfileRow}
+                                        data-provider={preference.provider}
+                                      >
+                                        <span>
+                                          <strong>
+                                            {modelLabelFromId(preference.modelId)}
+                                          </strong>
+                                          <small>{preference.provider}</small>
+                                        </span>
+                                        <output>
+                                          {REASONING_EFFORT_LABELS[
+                                            preference.effort
+                                          ]}
+                                        </output>
+                                        <button
+                                          type="button"
+                                          className={styles.linkButton}
+                                          onClick={() =>
+                                            persistModelEffortPreference(
+                                              {
+                                                provider: preference.provider,
+                                                modelId: preference.modelId,
+                                                modelLabel: modelLabelFromId(
+                                                  preference.modelId,
+                                                ),
+                                                capability:
+                                                  resolveModelReasoningEffortCapability(
+                                                    {
+                                                      provider:
+                                                        preference.provider,
+                                                      modelId:
+                                                        preference.modelId,
+                                                      simulatedLocalEnabled:
+                                                        settings.experimentalAllModelEffortEnabled ===
+                                                        true,
+                                                    },
+                                                  ),
+                                              },
+                                              "auto",
+                                            )
+                                          }
+                                        >
+                                          Default
+                                        </button>
+                                      </div>
+                                    ),
+                                  )}
+                                </div>
+                              ) : null}
+                            </div>
                             {renderDefaultsAndFallbacksControls("settings", {
                               includeZenAtmosphere: false,
                             })}
@@ -113641,10 +113885,20 @@ function HomeContent(): React.JSX.Element {
                             Give local models simulated effort
                           </label>
                           <small className={styles.settingsHostHint}>
-                            Local models can use Prism&apos;s simulated effort;
-                            online models only show effort when they support it
-                            natively.
+                            Local models can use Prism&apos;s simulated effort
+                            across every conversational mode; online models use
+                            native effort only when the provider supports it.
                           </small>
+                          <button
+                            type="button"
+                            className={styles.linkButton}
+                            disabled={
+                              settings.modelEffortPreferences.length === 0
+                            }
+                            onClick={resetAllModelEffortPreferences}
+                          >
+                            Reset all saved model efforts
+                          </button>
                         </div>
                         <p
                           className={styles.muted}
@@ -121476,9 +121730,6 @@ function HomeContent(): React.JSX.Element {
               preferredProvider: coffeeSessionProvider,
               responseMode: coffeeResponseModeForSendRef.current,
               sessionRemainingMs: currentCoffeeSessionRemainingMs(),
-              ...(coffeeSessionReasoningEffortOverride
-                ? { reasoningEffort: coffeeSessionReasoningEffortOverride }
-                : {}),
               ...(coffeeSessionModelOverride
                 ? { modelOverride: coffeeSessionModelOverride }
                 : {}),
@@ -123358,9 +123609,6 @@ function HomeContent(): React.JSX.Element {
               presentBotIds: currentCoffeePresentBotIdsForRequest(
                 conversation.id,
               ),
-              ...(coffeeSessionReasoningEffortOverride
-                ? { reasoningEffort: coffeeSessionReasoningEffortOverride }
-                : {}),
               ...(coffeeSessionModelOverride
                 ? { modelOverride: coffeeSessionModelOverride }
                 : {}),
@@ -123491,9 +123739,6 @@ function HomeContent(): React.JSX.Element {
         ...(directedSpeakerBotId ? { directedSpeakerBotId } : {}),
         ...(directedSpeakerBotId && directedUserMessage?.trim()
           ? { directedUserMessage: directedUserMessage.trim() }
-          : {}),
-        ...(coffeeSessionReasoningEffortOverride
-          ? { reasoningEffort: coffeeSessionReasoningEffortOverride }
           : {}),
         ...(coffeeSessionModelOverride
           ? { modelOverride: coffeeSessionModelOverride }
@@ -124171,9 +124416,6 @@ function HomeContent(): React.JSX.Element {
           sessionRemainingMs: currentCoffeeSessionRemainingMs(),
           ...(presentBotIds.length > 0 ? { presentBotIds } : {}),
           ...(playerInterruption ? { playerInterruption } : {}),
-          ...(coffeeSessionReasoningEffortOverride
-            ? { reasoningEffort: coffeeSessionReasoningEffortOverride }
-            : {}),
           ...(coffeeSessionModelOverride
             ? { modelOverride: coffeeSessionModelOverride }
             : {}),
@@ -124905,9 +125147,6 @@ function HomeContent(): React.JSX.Element {
           preferredProvider: coffeeSessionProvider,
           responseMode: coffeeResponseModeForSend,
           sessionRemainingMs: currentCoffeeSessionRemainingMs(),
-          ...(coffeeSessionReasoningEffortOverride
-            ? { reasoningEffort: coffeeSessionReasoningEffortOverride }
-            : {}),
           ...(coffeeSessionModelOverride
             ? { modelOverride: coffeeSessionModelOverride }
             : {}),
@@ -132430,17 +132669,7 @@ function HomeContent(): React.JSX.Element {
           settings,
           storyResponseMode === "local" ? "local" : "online",
         )}
-        effortControl={
-          modelChoiceSupportsReasoningEffort(
-            storyModelProvider,
-            storyVisibleModelChoice,
-          )
-            ? {
-                value: storyReasoningEffort,
-                onChange: setStoryReasoningEffort,
-              }
-            : undefined
-        }
+        effortControl={effortControlForTarget(storyEffortTarget)}
         dismissPopoversSignal={composerPopoverDismissSignal}
       />
     </div>
@@ -133290,6 +133519,17 @@ function HomeContent(): React.JSX.Element {
         : (debateModelOptions.find(
             (option) => option.id === debateAccountDefaultModel,
           )?.label ?? modelLabelFromId(debateAccountDefaultModel));
+    const debateEffortTarget = modelEffortTargetForSelection({
+      provider: debatePrimaryForAuto?.provider ?? debateModelProvider,
+      modelId:
+        debatePrimaryForAuto?.model ??
+        (debateModelChoice === AUTO_MODEL_CHOICE
+          ? debateAccountDefaultModel
+          : debateModelChoice),
+      options: debateModelOptions,
+      simulatedLocalEnabled:
+        settings?.experimentalAllModelEffortEnabled === true,
+    });
     const debateLiveChromePolicy = debateLiveSessionActive
       ? liveSessionChromePolicy("Debate")
       : null;
@@ -133639,6 +133879,7 @@ function HomeContent(): React.JSX.Element {
                     settings,
                     debateModelProvider === "local" ? "local" : "online",
                   )}
+                  effortControl={effortControlForTarget(debateEffortTarget)}
                   dismissPopoversSignal={composerPopoverDismissSignal}
                 />
               </>
@@ -134727,6 +134968,14 @@ function HomeContent(): React.JSX.Element {
               signalNavbarModelOptions.find(
                 (option) => option.id === episodeModelControl.value,
               )?.provider ?? signalAccountDefaultProvider;
+            const episodeEffortTarget = modelEffortTargetForSelection({
+              provider: episodeSelectedModelProvider,
+              modelId:
+                episodeModelControl.value || signalAccountDefaultModel,
+              options: signalNavbarModelOptions,
+              simulatedLocalEnabled:
+                settings?.experimentalAllModelEffortEnabled === true,
+            });
             return renderSharedAppletNavbar("Signal tools", {
               showVoiceSelector: !replayActive,
               liveSessionActive,
@@ -134790,6 +135039,7 @@ function HomeContent(): React.JSX.Element {
                         : "Uses the account model for the selected response mode."
                     }
                     settingsDefaultModelId={signalAccountDefaultModel}
+                    effortControl={effortControlForTarget(episodeEffortTarget)}
                     dismissPopoversSignal={composerPopoverDismissSignal}
                   />
                 </>
@@ -135463,6 +135713,12 @@ function HomeContent(): React.JSX.Element {
                     });
                     const modelProvider = resolvedChoice.provider;
                     const visibleModelChoice = resolvedChoice.modelChoice;
+                    const primaryForAuto = resolvedAutoPrimaryForComposer(
+                      modelCatalog,
+                      settings,
+                      modelProvider,
+                      visibleModelChoice,
+                    );
                     const modelOptions = includeSelectedResponseModeModelOption(
                       modelCatalog,
                       settings,
@@ -135475,13 +135731,13 @@ function HomeContent(): React.JSX.Element {
                       visibleModelChoice,
                       modelProvider,
                     );
-                    const effortAvailability =
-                      resolveChatZenReasoningEffortAvailability({
-                        provider: modelProvider,
-                        modelChoice: visibleModelChoice,
-                        experimentalAllModelEffortEnabled:
-                          settings?.experimentalAllModelEffortEnabled === true,
-                      });
+                    const effortTarget = modelEffortTargetForSelection({
+                      provider: primaryForAuto?.provider ?? modelProvider,
+                      modelId: primaryForAuto?.model ?? visibleModelChoice,
+                      options: modelOptions,
+                      simulatedLocalEnabled:
+                        settings?.experimentalAllModelEffortEnabled === true,
+                    });
                     return (
                       <>
                         <ComposerModelPicker
@@ -135529,22 +135785,7 @@ function HomeContent(): React.JSX.Element {
                           )}
                           placement="down"
                           minMenuWidthPx={180}
-                          effortControl={
-                            effortAvailability.visible
-                              ? {
-                                  value: chatReasoningEffort,
-                                  disabled: !effortAvailability.enabled,
-                                  disabledReason:
-                                    effortAvailability.disabledReason,
-                                  onChange: (next) => {
-                                    setChatReasoningEffort(next);
-                                    persistChatReasoningEffortForActiveScope(
-                                      next,
-                                    );
-                                  },
-                                }
-                              : undefined
-                          }
+                          effortControl={effortControlForTarget(effortTarget)}
                           dismissPopoversSignal={composerPopoverDismissSignal}
                         />
                         {renderComposeUtilityActions()}
@@ -139056,6 +139297,54 @@ function HomeContent(): React.JSX.Element {
       {renderDesktopFirstRunChecklist()}
       {renderBackendUnavailableNotice("banner")}
       {renderGlobalPrismCompanion()}
+      {modelEffortHudTarget ? (
+        <div
+          className={styles.modelEffortHud}
+          data-provider={modelEffortHudTarget.provider}
+          role="status"
+          aria-live="polite"
+        >
+          <div className={styles.modelEffortHudIdentity}>
+            <span>Effort · {modelEffortHudTarget.modelLabel}</span>
+            <strong>
+              {modelEffortHudTarget.capability.mode === "unavailable"
+                ? "Not adjustable"
+                : REASONING_EFFORT_LABELS[
+                    savedModelReasoningEffort(
+                      settings,
+                      modelEffortHudTarget.provider,
+                      modelEffortHudTarget.modelId,
+                      modelEffortHudTarget.capability,
+                    )
+                  ]}
+            </strong>
+          </div>
+          <div className={styles.modelEffortHudRail} aria-hidden="true">
+            {(["auto", ...modelEffortHudTarget.capability.levels] as ReasoningEffort[]).map(
+              (level) => {
+                const active =
+                  savedModelReasoningEffort(
+                    settings,
+                    modelEffortHudTarget.provider,
+                    modelEffortHudTarget.modelId,
+                    modelEffortHudTarget.capability,
+                  ) === level;
+                return (
+                  <span key={level} data-active={active ? "true" : undefined}>
+                    {REASONING_EFFORT_LABELS[level]}
+                  </span>
+                );
+              },
+            )}
+          </div>
+          <small>
+            ← → adjust · D default
+            {modelEffortHudTarget.capability.mode === "simulated"
+              ? " · simulated locally"
+              : ""}
+          </small>
+        </div>
+      ) : null}
       <GlyphTooltipLayer />
     </main>
   );

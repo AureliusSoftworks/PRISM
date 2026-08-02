@@ -3,10 +3,16 @@ import assert from "node:assert/strict";
 import {
   anthropicModelSupportsReasoningEffort,
   anthropicReasoningEffortForRequest,
+  effectiveModelReasoningEffort,
+  modelReasoningEffortPreferenceKey,
   modelSupportsNativeReasoningEffort,
+  normalizeModelReasoningEffortPreference,
   normalizeReasoningEffort,
   openAiModelSupportsReasoningEffort,
+  openAiReasoningEffortForRequest,
+  openAiReasoningEffortLevels,
   reasoningEffortForRequest,
+  resolveModelReasoningEffortCapability,
 } from "./reasoningEffort.ts";
 
 describe("reasoning effort helpers", () => {
@@ -16,8 +22,19 @@ describe("reasoning effort helpers", () => {
     assert.equal(normalizeReasoningEffort(" xhigh "), "xhigh");
     assert.equal(normalizeReasoningEffort("fast"), "auto");
     assert.equal(reasoningEffortForRequest("auto"), null);
-    assert.equal(reasoningEffortForRequest("none"), null);
+    assert.equal(reasoningEffortForRequest("none"), "none");
     assert.equal(reasoningEffortForRequest("minimal"), "minimal");
+  });
+
+  it("normalizes persisted per-model preferences without storing Default", () => {
+    assert.equal(normalizeModelReasoningEffortPreference("default"), null);
+    assert.equal(normalizeModelReasoningEffortPreference("auto"), null);
+    assert.equal(normalizeModelReasoningEffortPreference(" HIGH "), "high");
+    assert.equal(normalizeModelReasoningEffortPreference("fast"), null);
+    assert.equal(
+      modelReasoningEffortPreferenceKey("local", " ollama-secondary:qwen3 "),
+      "local:ollama-secondary:qwen3",
+    );
   });
 
   it("detects OpenAI reasoning models that support effort", () => {
@@ -85,5 +102,57 @@ describe("reasoning effort helpers", () => {
       false
     );
     assert.equal(modelSupportsNativeReasoningEffort("local", "qwen3:14b"), false);
+  });
+
+  it("exposes only distinct, real effort levels for each model", () => {
+    assert.deepEqual(openAiReasoningEffortLevels("gpt-5"), [
+      "minimal",
+      "low",
+      "medium",
+      "high",
+    ]);
+    assert.deepEqual(openAiReasoningEffortLevels("gpt-5.1"), [
+      "none",
+      "low",
+      "medium",
+      "high",
+    ]);
+    assert.deepEqual(openAiReasoningEffortLevels("gpt-5.6-sol"), [
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    assert.deepEqual(openAiReasoningEffortLevels("gpt-5.5-pro"), []);
+    assert.equal(openAiReasoningEffortForRequest("gpt-5", "none"), null);
+    assert.equal(openAiReasoningEffortForRequest("gpt-5.6-sol", "none"), "none");
+  });
+
+  it("gates simulated local effort and ignores stale unsupported preferences", () => {
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "local",
+        modelId: "qwen3:14b",
+      }).mode,
+      "unavailable",
+    );
+    assert.equal(
+      resolveModelReasoningEffortCapability({
+        provider: "local",
+        modelId: "qwen3:14b",
+        simulatedLocalEnabled: true,
+      }).mode,
+      "simulated",
+    );
+    assert.equal(
+      effectiveModelReasoningEffort({
+        provider: "anthropic",
+        modelId: "claude-sonnet-4-6",
+        preference: "minimal",
+      }),
+      null,
+    );
   });
 });

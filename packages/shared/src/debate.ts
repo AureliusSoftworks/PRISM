@@ -528,6 +528,32 @@ export type DebateEventKind =
 export type DebateSpeakerKind =
   "moderator" | "advocate" | "juror" | "player" | "system";
 
+/**
+ * Bounded ElevenLabs v3 direction attached to heard delivery, never canonical
+ * transcript text. The verbose review transcript may expose it for diagnosis.
+ */
+export const DEBATE_VOICE_PERFORMANCE_CUES = [
+  "angry",
+  "excited",
+  "laughs",
+  "nervous",
+  "sarcastic",
+  "shouts",
+  "sighs",
+  "solemn",
+  "whispers",
+] as const;
+export type DebateVoicePerformanceCue =
+  (typeof DEBATE_VOICE_PERFORMANCE_CUES)[number];
+
+export function normalizeDebateVoicePerformanceCue(
+  value: unknown,
+): DebateVoicePerformanceCue | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLocaleLowerCase();
+  return DEBATE_VOICE_PERFORMANCE_CUES.find((cue) => cue === normalized) ?? null;
+}
+
 export type DebateTurnTimingStatus = "within_limit" | "overtime";
 export type DebateJudgeGavelReason =
   | "audience_order"
@@ -554,6 +580,8 @@ export interface DebateEventV1 {
   speakerBotId: string | null;
   sideId: DebateSideId | null;
   content: string;
+  /** Private clear speech retained only so a Power-immune bot can understand an obfuscated speaker. */
+  powerIntendedContent?: string;
   sourceIds: string[];
   parentEventId?: string | null;
   interrupted?: boolean;
@@ -561,6 +589,7 @@ export interface DebateEventV1 {
   provider?: LlmProviderName;
   model?: string;
   autoRecovery?: AutoRecoveryTraceV1;
+  voicePerformanceCue?: DebateVoicePerformanceCue;
   statementId?: string | null;
   evidenceSourceId?: string | null;
   ruling?: DebateTurnaboutRuling | null;
@@ -638,6 +667,7 @@ export interface DebateBallotV1 {
   provider?: LlmProviderName;
   model?: string;
   autoRecovery?: AutoRecoveryTraceV1;
+  voicePerformanceCue?: DebateVoicePerformanceCue;
   createdAt: string;
 }
 
@@ -652,6 +682,7 @@ export interface DebateJuryBallotV1 {
   provider?: LlmProviderName;
   model?: string;
   autoRecovery?: AutoRecoveryTraceV1;
+  voicePerformanceCue?: DebateVoicePerformanceCue;
   createdAt: string;
 }
 
@@ -663,6 +694,8 @@ export interface DebateJuryStateV1 {
   jurors: DebateJurorSnapshotV1[];
   forepersonBotId: string | null;
   initialBallots: DebateJuryBallotV1[];
+  /** Final ballots generated behind the sealed deliberation view, before reveal. */
+  preparedFinalBallots: DebateJuryBallotV1[];
   finalBallots: DebateJuryBallotV1[];
   discussionTurnTarget: number;
   discussionTurnCount: number;
@@ -1620,6 +1653,7 @@ export function defaultDebateJuryStateV1(): DebateJuryStateV1 {
     jurors: [],
     forepersonBotId: null,
     initialBallots: [],
+    preparedFinalBallots: [],
     finalBallots: [],
     discussionTurnTarget: DEBATE_JURY_DISCUSSION_TURNS,
     discussionTurnCount: 0,
@@ -1683,6 +1717,25 @@ export function normalizeDebateJuryStateV1(value: unknown): DebateJuryStateV1 {
         )
         .slice(0, DEBATE_JURY_SIZE)
     : [];
+  const revealedJurorIds = new Set(
+    finalBallots.map((ballot) => ballot.jurorBotId),
+  );
+  const preparedFinalBallots = Array.isArray(source.preparedFinalBallots)
+    ? source.preparedFinalBallots
+        .filter((ballot): ballot is DebateJuryBallotV1 =>
+          Boolean(
+            ballot &&
+            typeof ballot === "object" &&
+            (ballot as DebateJuryBallotV1).stage === "final" &&
+            selectedJurorIds.has((ballot as DebateJuryBallotV1).jurorBotId) &&
+            !revealedJurorIds.has(
+              (ballot as DebateJuryBallotV1).jurorBotId,
+            ) &&
+            isDebateSideId((ballot as DebateJuryBallotV1).sideId),
+          ),
+        )
+        .slice(0, DEBATE_JURY_SIZE)
+    : [];
   const phase: DebateJuryPhase =
     source.phase === "waiting" ||
     source.phase === "initial_ballots" ||
@@ -1724,6 +1777,7 @@ export function normalizeDebateJuryStateV1(value: unknown): DebateJuryStateV1 {
         ? source.forepersonBotId
         : (selectedJurors[0]?.id ?? null),
     initialBallots,
+    preparedFinalBallots,
     finalBallots,
     discussionTurnTarget:
       typeof source.discussionTurnTarget === "number"

@@ -5,22 +5,19 @@ import type {
 } from "./debate.js";
 
 export type DebateAudiencePressureBand =
-  | "settled"
-  | "murmuring"
-  | "restless"
-  | "disruptive";
+  "settled" | "murmuring" | "restless" | "disruptive";
 
 export type DebateAudiencePressureReaction =
-  | "attentive"
-  | "concession"
-  | "divided"
-  | "evidence"
-  | "question"
-  | null;
+  "attentive" | "concession" | "divided" | "evidence" | "question" | null;
 
-export type DebateAudienceDeliveryCue =
-  | "*speaks loudly*"
-  | "*yells over the crowd*";
+export type DebateAudienceDeliveryCue = "*speaks loudly*" | "*shouts*";
+
+export type DebateAudienceModeratorOrderReason = "shock" | "disruptive";
+
+export interface DebateAudienceModeratorOrderPlan {
+  pressure: number;
+  reason: DebateAudienceModeratorOrderReason;
+}
 
 export const DEBATE_AUDIENCE_INITIAL_PRESSURE = 12;
 
@@ -62,6 +59,28 @@ function clampPressure(value: number): number {
 
 function clampUnit(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+const DEBATE_AUDIENCE_SHOCK_LANGUAGE =
+  /\b(?:absurd|atrocious|corrupt|coward|disgrace|disgraceful|fraud|fraudulent|idiot|insane|liar|lying|monstrous|outrage|outrageous|scandal|scandalous|shameful|shocking|stupid|traitor|unbelievable)\b/iu;
+/** Public, deterministic signal that a line plausibly earns an audible gasp. */
+export function debateAudienceEventIsShocking(
+  event: Pick<DebateEventV1, "content" | "kind" | "speakerKind">,
+): boolean {
+  if (
+    event.speakerKind !== "advocate" ||
+    !DEBATE_AUDIENCE_HEAT_EVENT_KINDS.has(event.kind)
+  ) {
+    return false;
+  }
+  const content = event.content.trim();
+  if (!content || content === "...") return false;
+  const exclamationCount = content.match(/!/gu)?.length ?? 0;
+  const allCapsWords = content.match(/\b[A-Z]{4,}\b/gu)?.length ?? 0;
+  return (
+    DEBATE_AUDIENCE_SHOCK_LANGUAGE.test(content) ||
+    (exclamationCount >= 2 && allCapsWords >= 2)
+  );
 }
 
 export function debateAudienceReactionForContent(
@@ -190,7 +209,13 @@ export function debateAudiencePressureScore(args: {
   resetAfterSequence?: number | null;
   reactionForEvent?: (event: DebateEventV1) => DebateAudiencePressureReaction;
 }): number {
-  if (args.playerRole !== "judge") return 0;
+  // The public gallery reacts in every perspective; player role determines
+  // who owns the gavel, not whether the room has a pulse.
+  const galleryActive =
+    args.playerRole === "judge" ||
+    args.playerRole === "participant" ||
+    args.playerRole === "spectator";
+  if (!galleryActive) return 0;
   const visibleThroughSequence =
     args.visibleThroughSequence === null ||
     args.visibleThroughSequence === undefined
@@ -235,12 +260,75 @@ export function debateAudiencePressureScore(args: {
   );
 }
 
+/**
+ * Sparse automatic room control for a bot Moderator. Human Judges retain the
+ * decision to strike their own gavel.
+ */
+export function debateAudienceModeratorOrderPlan(args: {
+  events: readonly DebateEventV1[];
+  formality: DebateFormalityId;
+  playerRole: DebatePlayerRole;
+  triggerEvent: DebateEventV1;
+}): DebateAudienceModeratorOrderPlan | null {
+  const { triggerEvent } = args;
+  if (
+    args.playerRole === "judge" ||
+    triggerEvent.speakerKind !== "advocate" ||
+    !DEBATE_AUDIENCE_HEAT_EVENT_KINDS.has(triggerEvent.kind) ||
+    triggerEvent.interrupted === true ||
+    !triggerEvent.content.trim() ||
+    triggerEvent.content.trim() === "..."
+  ) {
+    return null;
+  }
+
+  const automaticOrders = args.events.filter(
+    (event) =>
+      event.stepKey === "audience_order" && event.speakerKind === "moderator",
+  );
+  if (automaticOrders.length >= 3) return null;
+
+  const lastOrderSequence = automaticOrders.at(-1)?.sequence ?? null;
+  if (lastOrderSequence !== null) {
+    const advocateTurnsSinceOrder = args.events.filter(
+      (event) =>
+        event.sequence > lastOrderSequence &&
+        event.sequence <= triggerEvent.sequence &&
+        event.speakerKind === "advocate" &&
+        DEBATE_AUDIENCE_HEAT_EVENT_KINDS.has(event.kind) &&
+        event.interrupted !== true,
+    ).length;
+    if (advocateTurnsSinceOrder < 2) return null;
+  }
+
+  const pressure = debateAudiencePressureScore({
+    events: args.events,
+    formality: args.formality,
+    playerRole: args.playerRole,
+    visibleThroughSequence: triggerEvent.sequence,
+  });
+  const pressureBefore = debateAudiencePressureScore({
+    events: args.events,
+    formality: args.formality,
+    playerRole: args.playerRole,
+    visibleThroughSequence: triggerEvent.sequence - 1,
+  });
+  const shocking = debateAudienceEventIsShocking(triggerEvent);
+  if (shocking && pressure >= 40) {
+    return { pressure, reason: "shock" };
+  }
+  if (pressureBefore < 70 && pressure >= 70) {
+    return { pressure, reason: "disruptive" };
+  }
+  return null;
+}
+
 /** Deterministic actor direction for the next advocate facing a rowdy gallery. */
 export function debateAudienceDeliveryCue(
   score: number,
 ): DebateAudienceDeliveryCue | null {
   const band = debateAudiencePressureBand(score);
-  if (band === "disruptive") return "*yells over the crowd*";
+  if (band === "disruptive") return "*shouts*";
   if (band === "restless") return "*speaks loudly*";
   return null;
 }
@@ -250,7 +338,11 @@ export function applyDebateAudienceDeliveryCue(
   score: number,
 ): string {
   const cue = debateAudienceDeliveryCue(score);
-  const trimmed = content.trim();
+  const normalized = content.replace(
+    /^(\s*)\*{1,3}\s*(?:shouts?|yells?)(?:\s+over\s+(?:the\s+)?crowd)?\s*\*{1,3}\s*/iu,
+    "$1*shouts* ",
+  );
+  const trimmed = normalized.trim();
   if (
     !cue ||
     !trimmed ||
@@ -258,7 +350,7 @@ export function applyDebateAudienceDeliveryCue(
     /^\*{1,3}[^*\r\n]{1,240}\*{1,3}/u.test(trimmed) ||
     /^objection\b/iu.test(trimmed)
   ) {
-    return content;
+    return normalized;
   }
   return `${cue} ${trimmed}`;
 }

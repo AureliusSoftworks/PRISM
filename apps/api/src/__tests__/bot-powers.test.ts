@@ -19,6 +19,7 @@ import {
   coffeePowerMessageAudienceForTurn,
   coffeePowerCandorPromptForTurn,
   coffeePowerEchoSourceForTurn,
+  coffeePowerBotAudibleTo,
   coffeePowerBotVisibleTo,
   coffeePowerHistoryForSpeaker,
   coffeePowerHistoryLimitForSpeaker,
@@ -284,6 +285,42 @@ test("Mumbling Jim compiles deterministic normal-volume gibberish without using 
   }]);
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /answer rationally/u);
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /normal-volume gibberish/u);
+});
+
+test("Observant compiles deterministic holder-only Power immunity without using the model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Sherlock Holmes",
+    powers: [{
+      version: 1,
+      id: "observant",
+      name: "Observant",
+      intent: "See past every other bot's Power and treat it as if it does not exist.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "power_immunity",
+    scope: "holder",
+    targets: "other_bots",
+    awareness: "unnoticed",
+  }]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /every other bot is ordinary/u);
+  assert.equal(result.powers[0]?.compiled?.observerCue, "");
 });
 
 test("Obsessed Kevin compiles deterministic current-addressee fandom without using the model", async () => {
@@ -2269,6 +2306,33 @@ test("Coffee freezes allowed-minus-excluded sight independently from speech", ()
   assert.deepEqual(plan.bots.ryuk?.speechAudienceBotIds, ["plankton"]);
   assert.equal(coffeePowerBotVisibleTo(plan, "ryuk", "plankton"), false);
   assert.equal(coffeePowerBotVisibleTo(plan, "ryuk", "lincoln"), true);
+});
+
+test("Coffee lets only an Observant holder see and hear past another bot's Powers", () => {
+  const plan = resolvedPlan({
+    ryuk: [
+      { type: "awareness", allowed: [{ kind: "bot", name: "Light", botId: "light" }] },
+      { type: "speech_audience", allowed: [{ kind: "bot", name: "Light", botId: "light" }] },
+    ],
+    sherlock: [{
+      type: "power_immunity",
+      scope: "holder",
+      targets: "other_bots",
+      awareness: "unnoticed",
+    }],
+    watson: [],
+  });
+
+  assert.equal(coffeePowerBotVisibleTo(plan, "ryuk", "sherlock"), true);
+  assert.equal(coffeePowerBotAudibleTo(plan, "ryuk", "sherlock"), true);
+  assert.equal(coffeePowerBotVisibleTo(plan, "ryuk", "watson"), false);
+  assert.equal(coffeePowerBotAudibleTo(plan, "ryuk", "watson"), false);
+  const prompt = coffeePowersPromptForSpeaker(
+    plan,
+    "sherlock",
+    ["ryuk", "watson"],
+  );
+  assert.doesNotMatch(prompt, /Ryuk|Power immunity|invisible|cannot hear/iu);
 });
 
 test("Coffee resolution freezes named visibility and session-start trait mood", () => {

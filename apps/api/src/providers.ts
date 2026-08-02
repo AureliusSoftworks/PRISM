@@ -2,8 +2,7 @@ import { createHash } from "node:crypto";
 import { getAppConfig } from "@localai/config";
 import {
   anthropicReasoningEffortForRequest,
-  openAiModelSupportsReasoningEffort,
-  reasoningEffortForRequest,
+  openAiReasoningEffortForRequest,
   type ReasoningEffort,
   type UsagePurpose,
 } from "@localai/shared";
@@ -1640,8 +1639,11 @@ export class OpenAiProvider implements LlmProvider {
         requestBody.max_tokens = options.maxTokens;
       }
     }
-    const reasoningEffort = reasoningEffortForRequest(options?.reasoningEffort);
-    if (reasoningEffort && openAiModelSupportsReasoningEffort(modelId)) {
+    const reasoningEffort = openAiReasoningEffortForRequest(
+      modelId,
+      options?.reasoningEffort,
+    );
+    if (reasoningEffort) {
       requestBody.reasoning_effort = reasoningEffort;
     }
 

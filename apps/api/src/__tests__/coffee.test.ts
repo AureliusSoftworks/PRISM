@@ -14703,80 +14703,70 @@ describe("normalizeCoffeeSessionSettings", () => {
 });
 
 describe("coffeeEffectiveReasoningEffort", () => {
-  const social = {
-    disposition: 0.5,
-    valuesFriction: 0.25,
-    restraint: 0.5,
-    engagement: 0.6,
-    leavePressure: 0.1,
-  };
-
-  it("adapts local and native reasoning turns without simulating online non-reasoning calls", () => {
-    const base = { activePoll: null, coffeeTeams: null, social };
+  it("uses only explicit model-profile effort and respects each model capability", () => {
     assert.equal(
       coffeeEffectiveReasoningEffort({
-        ...base,
         experimentEnabled: true,
         effectiveProvider: "local",
-        tableFocus: "Tell me what happened?",
       }),
-      "medium"
+      undefined,
     );
     assert.equal(
       coffeeEffectiveReasoningEffort({
-        ...base,
+        requested: "medium",
+        experimentEnabled: true,
+        effectiveProvider: "local",
+        modelId: "llama3.2",
+      }),
+      "medium",
+    );
+    assert.equal(
+      coffeeEffectiveReasoningEffort({
+        requested: "medium",
+        experimentEnabled: false,
+        effectiveProvider: "local",
+        modelId: "llama3.2",
+      }),
+      undefined,
+    );
+    assert.equal(
+      coffeeEffectiveReasoningEffort({
+        requested: "low",
         experimentEnabled: true,
         effectiveProvider: "openai",
         modelId: "gpt-5.2",
-        tableFocus: "Add a thought.",
       }),
-      "low"
+      "low",
     );
     assert.equal(
       coffeeEffectiveReasoningEffort({
-        ...base,
-        experimentEnabled: true,
-        effectiveProvider: "openai",
-        modelId: "gpt-4o",
-        tableFocus: "Add a thought.",
-      }),
-      undefined
-    );
-    assert.equal(
-      coffeeEffectiveReasoningEffort({
-        ...base,
+        requested: "low",
         experimentEnabled: true,
         effectiveProvider: "anthropic",
         modelId: "claude-opus-4-8",
-        tableFocus: "Add a thought.",
       }),
-      "low"
+      "low",
     );
     assert.equal(
       coffeeEffectiveReasoningEffort({
-        ...base,
+        requested: "high",
         experimentEnabled: true,
         effectiveProvider: "anthropic",
         modelId: "claude-haiku-4-5",
-        tableFocus: "Add a thought.",
       }),
-      undefined
+      undefined,
     );
   });
 
-  it("keeps high effort explicit", () => {
+  it("does not force effort onto online models without the capability", () => {
     assert.equal(
       coffeeEffectiveReasoningEffort({
         requested: "high",
         experimentEnabled: true,
         effectiveProvider: "openai",
         modelId: "gpt-4o",
-        tableFocus: "Anything.",
-        activePoll: null,
-        coffeeTeams: null,
-        social,
       }),
-      "high"
+      undefined,
     );
   });
 });

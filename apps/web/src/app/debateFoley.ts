@@ -21,6 +21,7 @@ export const DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER = "..." as const;
 export type DebateModeratorGavelCueKind = "attention" | "order";
 export type DebateAudienceReactionKind =
   | "session"
+  | "gasp"
   | "order"
   | "objection"
   | "evidence"
@@ -69,6 +70,11 @@ export const DEBATE_AUDIENCE_REACTIONS = {
     url: "/audio/debate/courtroom-audience-session-settle.mp3",
     durationMs: 3_000,
     trim: 1,
+  },
+  gasp: {
+    url: "/audio/signal/soundboard/gasp.mp3",
+    durationMs: 1_200,
+    trim: 0.72,
   },
   order: {
     url: "/audio/debate/courtroom-audience-order-hush.mp3",
@@ -177,13 +183,9 @@ export function debateAudienceBeatForEvent(args: {
       ? "objection"
       : kind === "evidence"
         ? "evidence"
-        : kind === "question"
-          ? "question"
-          : kind === "concession"
-            ? "concession"
-            : kind === "ruling"
-              ? "ruling"
-              : null;
+        : kind === "ruling"
+          ? "ruling"
+          : null;
 
   return { kind, listenerReaction, seatIndices, foleyCue };
 }

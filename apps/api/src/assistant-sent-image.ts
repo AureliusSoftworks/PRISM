@@ -1,6 +1,8 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { ChatMode, ComfyUiWorkflowRegistration, SentGeneratedImagePayload } from "@localai/shared";
 import {
+  botPowerIneptImagePromptV1,
+  botPowerIsIneptV1,
   composeVerbatimFirstImagePrompt,
   buildBotPowersSelfPromptV1,
   isDisabledModelChoice,
@@ -450,6 +452,7 @@ export async function runAssistantSentImageGeneration(args: {
     ? explicitRequestedSize
     : inferAssistantSentImageSize(`${args.userMessage}\n${args.captionPrompt}`);
   let botPersona: BotPersonaImageRow | undefined;
+  let botIsInept = false;
   const personaBotId = persistence.personaBotId;
   if (personaBotId) {
     botPersona = args.db
@@ -459,6 +462,7 @@ export async function runAssistantSentImageGeneration(args: {
       )
       .get(personaBotId, args.userId) as BotPersonaImageRow | undefined;
     if (botPersona) {
+      botIsInept = botPowerIsIneptV1(botPersona.powers_json);
       const poweredSystemPrompt = [
         botPersona.system_prompt,
         buildBotPowersSelfPromptV1(botPersona.powers_json),
@@ -481,6 +485,9 @@ export async function runAssistantSentImageGeneration(args: {
           : contextAwareUserPrompt;
       }
     }
+  }
+  if (botIsInept) {
+    promptForModel = botPowerIneptImagePromptV1(contextAwareUserPrompt);
   }
 
   const preferredLocalImageModel = args.prefs.preferredLocalImageModel?.trim() ?? "";
@@ -573,13 +580,15 @@ export async function runAssistantSentImageGeneration(args: {
       ].filter(Boolean).join("\n\n").trim()
     : "";
   const buildRepairPrompt = () =>
-    inferImagePromptRepair({
-      provider: args.promptRepairProvider,
-      botName: botNameForRecovery,
-      botSystemPrompt: botPromptForRecovery,
-      userMessage: args.userMessage,
-      promptForModel,
-    });
+    botIsInept
+      ? Promise.resolve(botPowerIneptImagePromptV1(contextAwareUserPrompt, 1))
+      : inferImagePromptRepair({
+          provider: args.promptRepairProvider,
+          botName: botNameForRecovery,
+          botSystemPrompt: botPromptForRecovery,
+          userMessage: args.userMessage,
+          promptForModel,
+        });
   const deniedResult = async (): Promise<AssistantSentImageGenerationResult> => ({
     status: "denied",
     message: await inferImageBoundaryText({
@@ -592,6 +601,20 @@ export async function runAssistantSentImageGeneration(args: {
   });
   const buildRecoveryAttempts = async (): Promise<ImagePromptAttempt[]> => {
     const repairedPrompt = await buildRepairPrompt();
+    if (botIsInept) {
+      return [
+        {
+          prompt: repairedPrompt,
+          strategy: "general-audience",
+          useSourceImage: false,
+        },
+        {
+          prompt: botPowerIneptImagePromptV1(contextAwareUserPrompt, 2),
+          strategy: "original-alternative",
+          useSourceImage: false,
+        },
+      ];
+    }
     return [
       {
         prompt: repairedPrompt,

@@ -222,7 +222,10 @@ describe("Debate audience beats", () => {
   });
 
   it("labels ambient vocal Foley for Signal-style overhead tags", () => {
-    assert.equal(debateAmbientVocalFoleyTagText("throat-clear"), "Clears throat");
+    assert.equal(
+      debateAmbientVocalFoleyTagText("throat-clear"),
+      "Clears throat",
+    );
     assert.equal(debateAmbientVocalFoleyTagText("soft-sigh"), "Sighs");
     assert.equal(debateAmbientVocalFoleyTagText("soft-inhale"), "Inhales");
     assert.equal(debateAmbientVocalFoleyTagText("mouth-sound"), null);
@@ -289,7 +292,7 @@ describe("Debate audience beats", () => {
     assert.equal(capped?.seatIndices.length, 1);
   });
 
-  it("maps evidence, questions, concessions, and rulings to bounded cues", () => {
+  it("keeps generic questions and concessions visual while reserving audio for procedural events", () => {
     const cases = [
       {
         event: debateEvent("evidence", {
@@ -305,7 +308,7 @@ describe("Debate audience beats", () => {
           content: "Does that answer the actual harm?",
         }),
         kind: "question",
-        foleyCue: "question",
+        foleyCue: null,
       },
       {
         event: debateEvent("speech", {
@@ -313,7 +316,7 @@ describe("Debate audience beats", () => {
           content: "I concede that premise.",
         }),
         kind: "concession",
-        foleyCue: "concession",
+        foleyCue: null,
       },
       {
         event: debateEvent("moderator_ruling", {
@@ -629,6 +632,11 @@ describe("Debate moderator gavel", () => {
         url: "/audio/debate/courtroom-audience-session-settle.mp3",
         durationMs: 3_000,
         trim: 1,
+      },
+      gasp: {
+        url: "/audio/signal/soundboard/gasp.mp3",
+        durationMs: 1_200,
+        trim: 0.72,
       },
       order: {
         url: "/audio/debate/courtroom-audience-order-hush.mp3",

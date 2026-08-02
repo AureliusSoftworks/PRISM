@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 import { DEBATE_SCHEMA_VERSION, type DebateEventV1 } from "./debate.ts";
 import {
   applyDebateAudienceDeliveryCue,
+  debateAudienceEventIsShocking,
   debateAudienceDeliveryCue,
+  debateAudienceModeratorOrderPlan,
   debateAudiencePressureScore,
 } from "./debateAudiencePressure.ts";
 
@@ -28,14 +30,21 @@ describe("Debate audience delivery pressure", () => {
   it("adds stronger actor directions as the gallery grows rowdy", () => {
     assert.equal(debateAudienceDeliveryCue(44), null);
     assert.equal(debateAudienceDeliveryCue(45), "*speaks loudly*");
-    assert.equal(debateAudienceDeliveryCue(70), "*yells over the crowd*");
+    assert.equal(debateAudienceDeliveryCue(70), "*shouts*");
     assert.equal(
       applyDebateAudienceDeliveryCue("The record is clear.", 45),
       "*speaks loudly* The record is clear.",
     );
     assert.equal(
       applyDebateAudienceDeliveryCue("The record is clear.", 70),
-      "*yells over the crowd* The record is clear.",
+      "*shouts* The record is clear.",
+    );
+    assert.equal(
+      applyDebateAudienceDeliveryCue(
+        "*yells over the crowd* The record is clear.",
+        70,
+      ),
+      "*shouts* The record is clear.",
     );
   });
 
@@ -75,6 +84,92 @@ describe("Debate audience delivery pressure", () => {
         playerRole: "judge",
       }),
       0,
+    );
+  });
+
+  it("keeps the gallery alive outside the player-Judge perspective", () => {
+    assert.ok(
+      debateAudiencePressureScore({
+        events: [speech("spectator-floor", 1)],
+        formality: "free_for_all",
+        playerRole: "spectator",
+      }) > 0,
+    );
+  });
+
+  it("recognizes shock language and gives bot Moderators sparse order plans", () => {
+    const shocking: DebateEventV1 = {
+      ...speech("shock-1", 1),
+      content: "That is an outrageous lie, and you are wrong!",
+    };
+    assert.equal(debateAudienceEventIsShocking(shocking), true);
+    assert.equal(
+      debateAudienceEventIsShocking({
+        ...shocking,
+        content: "*shouts* The painting uses a different composition.",
+      }),
+      false,
+    );
+    assert.equal(
+      debateAudienceEventIsShocking({
+        ...shocking,
+        speakerKind: "moderator",
+      }),
+      false,
+    );
+    assert.equal(
+      debateAudienceModeratorOrderPlan({
+        events: [shocking],
+        formality: "free_for_all",
+        playerRole: "spectator",
+        triggerEvent: shocking,
+      })?.reason,
+      "shock",
+    );
+    assert.equal(
+      debateAudienceModeratorOrderPlan({
+        events: [shocking],
+        formality: "free_for_all",
+        playerRole: "judge",
+        triggerEvent: shocking,
+      }),
+      null,
+    );
+
+    const order: DebateEventV1 = {
+      ...speech("order-1", 2),
+      kind: "moderator_ruling",
+      speakerKind: "moderator",
+      stepKey: "audience_order",
+      content: "Order!",
+    };
+    const immediateRepeat: DebateEventV1 = {
+      ...speech("shock-2", 3),
+      content: "Another outrageous lie, and still wrong!",
+    };
+    assert.equal(
+      debateAudienceModeratorOrderPlan({
+        events: [shocking, order, immediateRepeat],
+        formality: "free_for_all",
+        playerRole: "spectator",
+        triggerEvent: immediateRepeat,
+      }),
+      null,
+    );
+
+    const testimony = {
+      ...shocking,
+      id: "shock-testimony",
+      kind: "testimony" as const,
+    };
+    assert.equal(
+      debateAudienceModeratorOrderPlan({
+        events: [testimony],
+        formality: "free_for_all",
+        playerRole: "spectator",
+        triggerEvent: testimony,
+      })?.reason,
+      "shock",
     );
   });
 });

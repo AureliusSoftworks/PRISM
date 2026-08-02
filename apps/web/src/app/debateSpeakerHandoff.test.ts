@@ -60,7 +60,8 @@ describe("Debate speaker handoff choreography", () => {
     assert.ok(
       plan?.foleyKind === "soft-inhale" || plan?.foleyKind === "throat-clear",
     );
-    assert.ok(DEBATE_SPEAKER_HANDOFF_TIMING.wideAudienceMs >= 1_200);
+    assert.ok(DEBATE_SPEAKER_HANDOFF_TIMING.wideAudienceMs >= 2_000);
+    assert.ok(DEBATE_SPEAKER_HANDOFF_TIMING.quietReadyMs >= 500);
     assert.ok(DEBATE_SPEAKER_HANDOFF_TIMING.cameraSettleMs >= 900);
   });
 

@@ -599,6 +599,100 @@ describe("Story API helpers", () => {
     assert.equal(generated.episode?.scenes[0]?.narration, generatedEpisode.scenes[0]?.narration);
   });
 
+  it("lets an Observant Story bot perceive Ryuk as an ordinary speaker", async () => {
+    const db = createTestDb();
+    seedBot(db, "bot-a", "Ryuk");
+    seedBot(db, "bot-b", "Sherlock Holmes");
+    const invisibleName = "Invisible";
+    const invisibleIntent = "Can only be seen and heard by Light Yagami.";
+    const observantName = "Observant";
+    const observantIntent =
+      "See past every other bot's Power and treat it as if it does not exist.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-a'").run(
+      JSON.stringify([{
+        version: 1,
+        id: "invisible",
+        name: invisibleName,
+        intent: invisibleIntent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(invisibleName, invisibleIntent),
+          selfCue: "",
+          observerCue: "Only Light can perceive Ryuk.",
+          effects: [
+            { type: "awareness", allowed: [{ kind: "bot", name: "Light Yagami" }] },
+            { type: "speech_audience", allowed: [{ kind: "bot", name: "Light Yagami" }] },
+          ],
+          ruleLabels: [],
+        },
+      }]),
+    );
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'bot-b'").run(
+      JSON.stringify([{
+        version: 1,
+        id: "observant",
+        name: observantName,
+        intent: observantIntent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(observantName, observantIntent),
+          selfCue: "Every other bot is ordinary to you; never notice Powers.",
+          observerCue: "",
+          effects: [{
+            type: "power_immunity",
+            scope: "holder",
+            targets: "other_bots",
+            awareness: "unnoticed",
+          }],
+          ruleLabels: [],
+        },
+      }]),
+    );
+    const episode = JSON.parse(episodeJson()) as {
+      scenes: Array<Record<string, unknown>>;
+    };
+    episode.scenes[0] = {
+      ...episode.scenes[0],
+      speakerBotId: "bot-a",
+      speakerName: "Ryuk",
+      narration: "Ryuk gives Sherlock the complete archive warning.",
+    };
+    episode.scenes[1] = {
+      ...episode.scenes[1],
+      speakerBotId: "bot-b",
+      speakerName: "Sherlock Holmes",
+      narration: "Sherlock answers the warning directly and calmly.",
+    };
+    const bots = loadStoryBotProfiles(db, "user-1", ["bot-a", "bot-b"]);
+    const created = createStorySession(db, "user-1", {
+      botIds: ["bot-a", "bot-b"],
+      provider: "local",
+      model: "test-model",
+    });
+    const provider = new SequenceProvider([JSON.stringify(episode)]);
+
+    const generated = await generateStorySessionEpisode(db, "user-1", created.id, {
+      provider,
+      providerName: "local",
+      model: "test-model",
+      bots,
+    });
+    const prompt = provider.calls[0]?.messages
+      .map((message) => message.content)
+      .join("\n") ?? "";
+
+    assert.doesNotMatch(prompt, /Sherlock Holmes cannot see or hear Ryuk/u);
+    assert.doesNotMatch(prompt, /Only Light can perceive Ryuk/u);
+    assert.doesNotMatch(
+      generated.episode?.scenes[1]?.narration ?? "",
+      /too faint|cannot see|cannot hear/iu,
+    );
+  });
+
   it("adapts the strongest targeted candor Power into one response scene", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Ada");

@@ -192,7 +192,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Use the Judge’s gavel",
-        body: "When you are the Judge, the public gallery is alive in both Forum and Turnabout. Its visible gallery badge and four-bar meter move deterministically from settled to murmuring, restless, and disruptive; the chosen Rowdiness controls how quickly the room heats up. Portrait crosstalk and layered room audio grow with it, with protected mix headroom for reactions and the gavel. Captions stay readable and the crowd never changes an argument, ruling, ballot, or outcome. A restless gallery also makes the next advocate's saved output begin with an actor direction such as *speaks loudly* or *yells over the crowd*; Premium passes that direction to ElevenLabs while the spoken words remain clean. Gavel is one context-aware physical room-control action. Use the control attached directly to the gallery, the mirrored Judge-console control, or press Space to strike. In its audience-order state, it forces the Judge / Moderator camera, cascades the gallery into silence, and clears the crowd voice immediately without stopping the speaker or reveal. An early strike earns only a brief awkward freeze and spectator glances—there is no authority penalty. The saved order cue preserves its exact heard position for replay while staying out of Proceedings, copied records, the case board, ballots, and AI context. Extra strikes during the two-second smash window are local showmanship, with only one canonical order cue saved. At saved procedural moments, a ceremonial cue waits for your strike without authoring one for you. If that cue expires, the interface stays clear while Auto silently cuts to one advocate and then the moderator before the proceeding carries on. Space serves that ceremonial cue first. During an explicitly started call-time burst, Space adds showmanship strikes next. Otherwise the single Gavel / Space input follows the live floor: Intervene while an advocate is speaking, Call time in overtime, and ordinary audience order when no semantic cutoff is available. An intervention stops the active floor, opens the Judge choice deck, and keeps the eight-second semantic cooldown. While semantic intervention cools down, the same gavel falls back to non-interrupting audience order and the amber countdown explains when Intervene returns. If Space is temporarily blocked by a pending ruling, intervention, pause, Jury floor, or saving strike, the chamber explains why instead of failing silently. During advocate overtime it becomes Call time; choosing it starts the existing two-second procedural burst, with repeated Space strikes shaping the measured, firm, or aggravated call-time performance. Pause, Resume, semantic intervention, and ceremonial order cues also settle the room. An advocate objection remains different: the interrupter literally shouts “Objection!” and states the challenge first, then a timed Sustained / Overruled choice takes focus; press S or O without reaching for the buttons. While that ruling is pending, room controls stay locked. Once Jury deliberation begins, the Jury owns the floor: the unified Gavel and Space are put away, while Skip deliberation remains available. Your selected camera mode survives every forced gavel shot, so Auto resumes directing as soon as the strike finishes.",
+        body: "The public gallery is alive in both Forum and Turnabout, from every seat in the room. Its visible gallery badge and four-bar meter move deterministically from settled to murmuring, restless, and disruptive; the chosen Rowdiness controls how quickly the room heats up. Portrait crosstalk and layered room audio grow with it, with protected mix headroom for reactions and the gavel. Captions stay readable and the crowd never changes an argument, ruling, ballot, or outcome. A restless gallery also makes the next advocate's saved output begin with an actor direction such as *speaks loudly* or *shouts*; Premium passes that direction to ElevenLabs while the spoken words remain clean. Generic questions and concessions stay visual instead of firing a canned crowd sound. In Participant and Spectator sessions, a genuinely shocking advocate claim can draw one sparse gasp; PRISM's own delivery directions never count as shock. The bot Moderator sparsely strikes the gavel and calls for order in character in Forum or Turnabout. The moderator never needs to shout—the gavel carries the authority. That room-control beat is preserved at its heard position for faithful replay while staying out of Proceedings, copied records, the case board, ballots, and AI context. When you are the Judge, PRISM never takes that authority from you. Gavel is one context-aware physical room-control action. Use the control attached directly to the gallery, the mirrored Judge-console control, or press Space to strike. In its audience-order state, it forces the Judge / Moderator camera, cascades the gallery into silence, and clears the crowd voice immediately without stopping the speaker or reveal. An early strike earns only a brief awkward freeze and spectator glances—there is no authority penalty. The saved order cue preserves its exact heard position for replay while staying out of Proceedings, copied records, the case board, ballots, and AI context. Extra strikes during the two-second smash window are local showmanship, with only one canonical order cue saved. At saved procedural moments, a ceremonial cue waits for your strike without authoring one for you. If that cue expires, the interface stays clear while Auto silently cuts to one advocate and then the moderator before the proceeding carries on. Space serves that ceremonial cue first. During an explicitly started call-time burst, Space adds showmanship strikes next. Otherwise the single Gavel / Space input follows the live floor: Intervene while an advocate is speaking, Call time in overtime, and ordinary audience order when no semantic cutoff is available. An intervention stops the active floor, opens the Judge choice deck, and keeps the eight-second semantic cooldown. While semantic intervention cools down, the same gavel falls back to non-interrupting audience order and the amber countdown explains when Intervene returns. If Space is temporarily blocked by a pending ruling, intervention, pause, Jury floor, or saving strike, the chamber explains why instead of failing silently. During advocate overtime it becomes Call time; choosing it starts the existing two-second procedural burst, with repeated Space strikes shaping the measured, firm, or aggravated call-time performance. Pause, Resume, semantic intervention, and ceremonial order cues also settle the room. An advocate objection remains different: the interrupter literally shouts “Objection!” and states the challenge first, then a timed Sustained / Overruled choice takes focus; press S or O without reaching for the buttons. While that ruling is pending, room controls stay locked. Once Jury deliberation begins, the Jury owns the floor: the unified Gavel and Space are put away, while Skip deliberation remains available. Your selected camera mode survives every forced gavel shot, so Auto resumes directing as soon as the strike finishes.",
         clickLabel: "Gavel",
         targetSelector: '[data-tutorial-target="debate-judge-gavel"]',
       },
@@ -216,7 +216,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Follow and keep the record",
-        body: "Proceedings render safe Markdown and source chips in the chamber's tonal transcript rail. It follows every growing live turn until you deliberately scroll back; choose Live to return to the newest phrase. A compact Spoken line timer shows elapsed and total delivery time while every voiced line unfolds, including when speech audio is disabled; timed advocate turns retain their separate floor-limit readout. Juror thoughts, deliberation, and Signal-style vocal Foley reactions stay out of Proceedings. After the verdict, Judges and Spectators get a sibling Jury commentary panel under the rail, with Copy Jury transcript beside Copy verbose transcript whenever the record is copyable (not for Participant-sealed Jury). That Jury transcript remains directly copyable from its eligible Proceeding archive entry after you return to the Studio. The Verdict rail also shows a Coffee-style session summary and a temporary pick-a-bot inquiry chat so you can ask about a cast member’s frozen in-debate reasoning — nothing is saved, and positions stay as they were. With Jury off, a human Judge's ruling is final, a Participant's bot Moderator/Judge decides the result without inventing a PRISM ballot, and a Spectator Duel uses the traditional three-bot majority. With Jury on, the majority binds Spectators and Participants but advises a human Judge. After a Participant verdict, only the bot opponent may react before the bot Moderator/Judge closes; PRISM never invents a human reaction. Spectator verdicts still let both bot advocates react before the bot Moderator closes. In Judge sessions, the human ruling is followed by both advocates’ reactions and an automatic neutral center close. Judge and Spectator records keep named deliberation and ballots; Participant API responses, transcript copies, archives, and replay-facing event data retain only the aggregate split and verdict. Every completed archived Debate shows its approximate active runtime from the saved presentation timeline, excluding generation waits, explicit recesses, and time spent away from the proceeding. It also keeps a short title synthesized in the selected Rowdiness while preserving the exact motion beneath it. Open resumes or replays that proceeding; Use setup copies its motion, title, room settings, cast, role, Jury choice, and evidence into a fresh editable workbench without changing the original. Results and old consent do not carry over, unavailable Library bots must be reassigned, and your currently selected model and routing remain in place for the rerun. Copy verbose transcript creates one review-ready role-safe record with frozen setup, runtime snapshots, evidence, event metadata, setting-independent per-line spoken durations, interruptions, moderator rulings, case-board state, and permitted public ballot reasons.",
+        body: "Proceedings render safe Markdown and source chips in the chamber's tonal transcript rail. It follows every growing live turn until you deliberately scroll back; choose Live to return to the newest phrase. A compact Debate time clock in the room tracks the proceeding's overall elapsed time, including generation and player-wait time, while freezing during explicit recesses; timed advocate turns retain their separate floor-limit readout. Juror thoughts, deliberation, and Signal-style vocal Foley reactions stay out of Proceedings. After the verdict, Judges and Spectators get a sibling Jury commentary panel under the rail, with Copy Jury transcript beside Copy verbose transcript whenever the record is copyable (not for Participant-sealed Jury). That Jury transcript remains directly copyable from its eligible Proceeding archive entry after you return to the Studio. The Verdict rail also shows a Coffee-style session summary and a temporary pick-a-bot inquiry chat so you can ask about a cast member’s frozen in-debate reasoning — nothing is saved, and positions stay as they were. With Jury off, a human Judge's ruling is final, a Participant's bot Moderator/Judge decides the result without inventing a PRISM ballot, and a Spectator Duel uses the traditional three-bot majority. With Jury on, the majority binds Spectators and Participants but advises a human Judge. After a Participant verdict, only the bot opponent may react before the bot Moderator/Judge closes; PRISM never invents a human reaction. Spectator verdicts still let both bot advocates react before the bot Moderator closes. In Judge sessions, the human ruling is followed by both advocates’ reactions and an automatic neutral center close. Judge and Spectator records keep named deliberation and ballots; Participant API responses, transcript copies, archives, and replay-facing event data retain only the aggregate split and verdict. Every completed archived Debate shows its approximate active runtime from the saved presentation timeline, excluding generation waits, explicit recesses, and time spent away from the proceeding. It also keeps a short title synthesized in the selected Rowdiness while preserving the exact motion beneath it. Open resumes or replays that proceeding; Use setup copies its motion, title, room settings, cast, role, Jury choice, and evidence into a fresh editable workbench without changing the original. Results and old consent do not carry over, unavailable Library bots must be reassigned, and your currently selected model and routing remain in place for the rerun. Copy verbose transcript creates one review-ready role-safe record with frozen setup, runtime snapshots, evidence, event metadata, setting-independent per-line spoken durations, interruptions, moderator rulings, case-board state, and permitted public ballot reasons.",
         clickLabel: "Copy verbose transcript",
         targetSelector: '[data-tutorial-target="debate-copy-transcript"]',
       },
@@ -361,6 +361,8 @@ const FALSE_NAME_POWER_TUTORIAL =
   "A John/Jane Doe cast member sincerely believes and speaks under a random persona name, then reshuffles it whenever short-term amnesia clears continuity. The alias surfaces when identity is relevant instead of forcing a correction or reintroduction into every response, and a genuinely silent turn remains only .... Stable Library labels, Signal nameplates, Coffee seats, captions, bot IDs, and routing attribution do not change; the alias lives in the transcript and performance.";
 const POWER_EXCLUSION_TUTORIAL_SUFFIX =
   "One plain-language Power prompt may set sight and hearing separately, including named exceptions; an excluded bot stays excluded even if a broader allowed rule would otherwise match it.";
+const POWER_IMMUNITY_TUTORIAL_SUFFIX =
+  "An Observant bot experiences every other bot as their ordinary unpowered self: it can see, hear, understand, and respond normally without noticing or naming the ignored Power. This changes only that holder's experience; the player and every other bot keep their own view.";
 const BOT_NAMING_POWER_TUTORIAL_SUFFIX =
   "A bot-name prefix or suffix changes only how its holder names other bots: the holder keeps their own name, the player and humans are untouched, and other speakers do not copy the habit. A bot who hears its own altered name may comment once, show a small contextual mood, tone, or action reaction, or let it pass; its personality and agency decide how the label lands.";
 const COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX =
@@ -447,8 +449,48 @@ function currentDebateRecordTutorialBody(body: string): string {
   );
 }
 
+function currentDebateJuryTutorialBody(body: string): string {
+  return body
+    .replace(
+      "The exact next juror, discussion turn, ballot, objection, intervention, or interrupted line then continues.",
+      "The exact next Jury preparation, ballot, objection, intervention, or interrupted line then continues.",
+    )
+    .replace(
+      "End Debate skips the remaining rounds: a Jury holds only three discussion turns and is told not to penalize unheard rounds.",
+      "End Debate skips the remaining rounds, and the Jury is told not to penalize unheard rounds.",
+    )
+    .replace(
+      "When formal Jury deliberation arrives, a timed choice appears over the current camera. Auto is the default and begins after the Debate-settings countdown; Spectators and human Judges can choose Watch Jury to hear and view the deliberation live. The Jury remains advisory to a human Judge. Skip moves directly to final ballots. Skipping remains available after discussion starts—even during a juror’s current statement—and preserves all five final ballots and the full five-ballot Jury result.",
+      "When formal Jury deliberation arrives, PRISM automatically enters a dim chamber. The jurors' mouths move as they appear to confer without audible words or captions while all five final ballot monologues generate behind the scene; once every monologue is ready, they cast their votes one at a time. The Jury remains advisory to a human Judge. Skip moves directly to final ballots and preserves the full five-ballot result.",
+    )
+    .replace(
+      "Spectators and human Judges can open the five-seat Jury camera manually when Jury is enabled, and Auto also enters the chamber for leanings, deliberation, final ballots, and the foreperson’s split before returning to the forum for advocate aftermath reactions.",
+      "When Jury is enabled, PRISM automatically enters the five-seat chamber for private leanings, silent deliberation, final ballots, and the foreperson’s split, then returns to the forum before advocate aftermath reactions.",
+    )
+    .replace(
+      "An ellipsis beside a juror means a thought is waiting; enter the Jury camera before the next thought and that juror will deliver it, while another camera lets them resolve immediately without holding up the proceeding.",
+      "An ellipsis beside a juror means a between-turn thought is waiting; hover it to read that opinion without interrupting the public proceeding.",
+    )
+    .replace(
+      "Five private leanings lead into five short routed discussion turns and five final ballots. Each audible juror reads the same final reason saved in the Jury record;",
+      "Five private leanings lead into one sealed preparation pass and five final ballots. Each juror reads the same final reason saved in the Jury record only after deliberation is complete;",
+    )
+    .replace(
+      "Manual public-floor cameras stay out of the chamber unless an eligible Spectator or human Judge chooses Jury or Watch Jury.",
+      "Jury never appears as a manual camera: eligible roles enter and leave it automatically, while Participants remain on the sealed public-floor view.",
+    )
+    .replace(
+      "If Jury is enabled, Jury becomes the Judge’s one additional camera, and Watch Jury enters the live advisory chamber. Auto also visits the Jury chamber for leanings, deliberation, ballots, and the split, then returns to the forum for advocate aftermath reactions. Returning to Auto restores the directed public proceeding when you have locked a manual Jury shot. Participant and Spectator sessions retain manual public-floor cameras; Spectators can still choose Jury manually or choose Watch Jury in the timed deliberation prompt.",
+      "If Jury is enabled, PRISM automatically visits the chamber for leanings, sealed deliberation, ballots, and the split, then returns to the forum before advocate aftermath reactions. Jury is never a manual camera. Participant and Spectator sessions retain manual public-floor cameras outside that automatic Jury passage.",
+    )
+    .replace(
+      "Judge and Spectator records keep named deliberation and ballots;",
+      "Judge and Spectator records keep named between-turn thoughts and ballots;",
+    );
+}
+
 const MODEL_ROUTING_VISIBILITY_TUTORIAL_SUFFIX =
-  "Every model you left visible in Settings remains listed in every routing mode. LOCAL disables online rows, ONLINE disables local rows, and AUTO enables both lanes. You can enter AUTO directly, then choose any available model as Primary.";
+  "Every model you left visible in Settings remains listed in every routing mode. LOCAL disables online rows, ONLINE disables local rows, and AUTO enables both lanes. You can enter AUTO directly, then choose any available model as Primary. The split model control saves Effort per concrete model across Chat, Zen, Sandbox, Coffee, Signal, Debate, and Story. Default uses the provider baseline, Not adjustable is a capability status, and local effort remains an explicit experimental simulation. Cmd/Ctrl+Shift+E opens the active model's effort HUD; arrows adjust it and D restores Default. A committed reply finishes unchanged, while prepared work is discarded before the next bot turn.";
 
 function currentModelRoutingTutorialStep(
   step: ModeTutorialStep,
@@ -471,11 +513,15 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
   ...BASE_MODE_TUTORIALS,
   debate: {
     ...BASE_MODE_TUTORIALS.debate,
-    steps: BASE_MODE_TUTORIALS.debate.steps.map((step) =>
-      step.heading === "Follow and keep the record"
-        ? { ...step, body: currentDebateRecordTutorialBody(step.body) }
-        : step,
-    ),
+    steps: BASE_MODE_TUTORIALS.debate.steps.map((step) => {
+      const body = currentDebateJuryTutorialBody(step.body);
+      return step.heading === "Follow and keep the record"
+        ? {
+            ...step,
+            body: `${currentDebateRecordTutorialBody(body)} ${POWER_IMMUNITY_TUTORIAL_SUFFIX}`,
+          }
+        : { ...step, body };
+    }),
   },
   zen: {
     ...BASE_MODE_TUTORIALS.zen,
@@ -483,7 +529,7 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       index === 0
         ? {
             ...step,
-            body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}`,
+            body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX} ${POWER_IMMUNITY_TUTORIAL_SUFFIX}`,
           }
         : step,
     ),
@@ -494,7 +540,7 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       index === 0
         ? {
             ...step,
-            body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}`,
+            body: `${step.body} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX} ${POWER_IMMUNITY_TUTORIAL_SUFFIX}`,
           }
         : step,
     ),
@@ -506,7 +552,7 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       return index === 0
         ? {
             ...step,
-            body: `${body} ${COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}`,
+            body: `${body} ${COFFEE_GROUP_CREATION_LOADER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${POWER_IMMUNITY_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${BOT_NAMING_POWER_TUTORIAL_SUFFIX}`,
           }
         : step.heading === "Join the conversation"
           ? {
@@ -533,7 +579,7 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       return index === 5
         ? {
             ...step,
-            body: `${body} ${SIGNAL_AVATAR_SCALE_POWER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${SIGNAL_ADDRESSED_FANDOM_POWER_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${SIGNAL_PRODUCER_GUEST_TUTORIAL_SUFFIX}`,
+            body: `${body} ${SIGNAL_AVATAR_SCALE_POWER_TUTORIAL_SUFFIX} ${POWER_EXCLUSION_TUTORIAL_SUFFIX} ${POWER_IMMUNITY_TUTORIAL_SUFFIX} ${SIGNAL_ADDRESSED_FANDOM_POWER_TUTORIAL_SUFFIX} ${IDENTITY_MIRROR_POWER_TUTORIAL_SUFFIX} ${IDENTITY_SHAPESHIFT_POWER_TUTORIAL} ${FALSE_NAME_POWER_TUTORIAL} ${FRESH_CONTACT_POWER_TUTORIAL_SUFFIX} ${SIMULATION_EVANGELIST_POWER_TUTORIAL_SUFFIX} ${SIGNAL_PRODUCER_GUEST_TUTORIAL_SUFFIX}`,
           }
         : step.heading === "Produce from the control room"
           ? {
@@ -549,15 +595,15 @@ const CURRENT_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
 
 export const MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> =
   Object.fromEntries(
-    (Object.entries(CURRENT_MODE_TUTORIALS) as [TutorialMode, ModeTutorial][]).map(
-      ([mode, tutorial]) => [
-        mode,
-        {
-          ...tutorial,
-          steps: tutorial.steps.map(currentModelRoutingTutorialStep),
-        },
-      ],
-    ),
+    (
+      Object.entries(CURRENT_MODE_TUTORIALS) as [TutorialMode, ModeTutorial][]
+    ).map(([mode, tutorial]) => [
+      mode,
+      {
+        ...tutorial,
+        steps: tutorial.steps.map(currentModelRoutingTutorialStep),
+      },
+    ]),
   ) as unknown as Record<TutorialMode, ModeTutorial>;
 
 export function modeTutorialStep(

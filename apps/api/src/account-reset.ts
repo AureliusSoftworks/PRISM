@@ -15,6 +15,7 @@ import {
 } from "./settings.ts";
 
 export const FACTORY_RESET_USER_DATA_TABLES = [
+  "model_reasoning_effort_preferences",
   "pairing_codes",
   "prism_notifications",
   "prism_monitors",

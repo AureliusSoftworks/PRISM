@@ -3,6 +3,7 @@ import type {
   DebateEvidenceItemV1,
   DebateEvidencePacketV1,
   DebateEvidenceSourceV1,
+  DebateSessionV1,
   DebateTurnTimingV1,
 } from "@localai/shared";
 import { debateEstimatedSpeechDurationMs } from "@localai/shared";
@@ -20,12 +21,6 @@ export function debateRevealDurationMs(spokenText: string): number {
 export function debateActiveDurationLabel(activeDurationMs: number): string {
   const minutes = Math.max(1, Math.round(activeDurationMs / 60_000));
   return `~${minutes} min active`;
-}
-
-export interface DebateSpokenLineClockState {
-  elapsedMs: number;
-  durationMs: number;
-  progress: number;
 }
 
 /** Canonical final-text duration used when no live voice clock is available. */
@@ -46,31 +41,72 @@ export function debateEventSpokenLineDurationMs(
   return durationMs > 0 ? durationMs : null;
 }
 
-export function debateSpokenLineClockState(
-  event: Pick<
-    DebateEventV1,
-    "content" | "kind" | "speakerKind" | "gavelReason"
-  >,
-  speechTiming: { elapsedMs: number; durationMs: number } | null,
-): DebateSpokenLineClockState | null {
-  if (!speechTiming || debateEventSpokenLineDurationMs(event) === null) {
-    return null;
-  }
-  const durationMs = Math.max(1, speechTiming.durationMs);
-  const elapsedMs = Math.max(0, Math.min(durationMs, speechTiming.elapsedMs));
-  return {
-    elapsedMs,
-    durationMs,
-    progress: elapsedMs / durationMs,
-  };
-}
-
 export function formatDebateSpokenDuration(durationMs: number): string {
   const totalTenths = Math.max(0, Math.round(durationMs / 100));
   const minutes = Math.floor(totalTenths / 600);
   const seconds = Math.floor((totalTenths % 600) / 10);
   const tenths = totalTenths % 10;
   return `${minutes}:${String(seconds).padStart(2, "0")}.${tenths}`;
+}
+
+type DebateElapsedSession = Pick<
+  DebateSessionV1,
+  "completedAt" | "createdAt" | "events" | "status" | "updatedAt"
+>;
+
+/**
+ * Wall-clock Debate runtime with explicit recesses removed. Generation and
+ * player-wait time remain part of the live proceeding's overall elapsed time.
+ */
+export function debateLiveElapsedDurationMs(
+  session: DebateElapsedSession,
+  nowMs: number,
+): number {
+  const eventTimes = [...session.events]
+    .sort((left, right) => left.sequence - right.sequence)
+    .map((event) => ({ event, timeMs: Date.parse(event.createdAt) }))
+    .filter(({ timeMs }) => Number.isFinite(timeMs));
+  const createdAtMs = Date.parse(session.createdAt);
+  const startedAtMs = Number.isFinite(createdAtMs)
+    ? createdAtMs
+    : (eventTimes[0]?.timeMs ?? nowMs);
+  const terminalAtMs = Date.parse(
+    session.completedAt ?? session.updatedAt,
+  );
+  const endAtMs =
+    session.status === "completed" ||
+    session.status === "cancelled" ||
+    session.status === "failed"
+      ? Number.isFinite(terminalAtMs)
+        ? terminalAtMs
+        : nowMs
+      : nowMs;
+
+  let recessStartedAtMs: number | null = null;
+  let recessDurationMs = 0;
+  for (const { event, timeMs } of eventTimes) {
+    if (timeMs < startedAtMs || timeMs > endAtMs) continue;
+    if (event.stepKey === "pause" && recessStartedAtMs === null) {
+      recessStartedAtMs = timeMs;
+    } else if (event.stepKey === "resume" && recessStartedAtMs !== null) {
+      recessDurationMs += Math.max(0, timeMs - recessStartedAtMs);
+      recessStartedAtMs = null;
+    }
+  }
+  if (recessStartedAtMs !== null) {
+    recessDurationMs += Math.max(0, endAtMs - recessStartedAtMs);
+  }
+  return Math.max(0, endAtMs - startedAtMs - recessDurationMs);
+}
+
+export function formatDebateElapsedDuration(durationMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(durationMs / 1_000));
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${minutes}:${String(seconds).padStart(2, "0")}`;
 }
 
 export interface DebateTurnClockState {
@@ -139,6 +175,11 @@ export function debateAudioEnabled(args: {
   voiceVolume: number;
 }): boolean {
   return args.voiceMode !== "mute" && args.voiceVolume > 0;
+}
+
+/** Procedural gavel Foley remains audible when speech is explicitly muted. */
+export function debateGavelAudioEnabled(voiceVolume: number): boolean {
+  return Number.isFinite(voiceVolume) && voiceVolume > 0;
 }
 
 export function debateVisibleContentAtProgress(

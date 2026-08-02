@@ -585,6 +585,32 @@ function mumblingPowers(): string {
   }]);
 }
 
+function observantPowers(): string {
+  const name = "Observant";
+  const intent = "See past every other bot's Power and treat it as if it does not exist.";
+  return JSON.stringify([{
+    version: 1,
+    id: "observant",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Every other bot is ordinary to you; never notice or name Powers.",
+      observerCue: "",
+      effects: [{
+        type: "power_immunity",
+        scope: "holder",
+        targets: "other_bots",
+        awareness: "unnoticed",
+      }],
+      ruleLabels: ["Other bots are unpowered"],
+    },
+  }]);
+}
+
 function addressedFandomPowers(): string {
   const name = "Obsessed";
   const intent = "He is absolutely, obsessively a fan of whoever he is talking to.";
@@ -3605,6 +3631,11 @@ describe("Botcast persistence and isolation", () => {
         (event) => event.kind === "utterance" && event.payload.messageId === advanced.message?.id,
       );
       assert.equal(utterance?.payload.publicSpeechEffect, "speech_obfuscation");
+      assert.equal(utterance?.payload.powerIntendedSpeech, undefined);
+      assert.doesNotMatch(
+        JSON.stringify(advanced.episode.events),
+        /rational explanation/iu,
+      );
       assert.equal(
         getBotcastEpisode(db, "user-1", episode.id).messages[0]?.content,
         expectedPublic,
@@ -3632,6 +3663,31 @@ describe("Botcast persistence and isolation", () => {
       const guestContext = guestPrompt.map((message) => message.content).join("\n");
       assert.match(guestContext, new RegExp(expectedPublic.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"));
       assert.doesNotMatch(guestContext, /rational explanation for the missing map/iu);
+
+      const observantGuestPrompt = buildBotcastSpeakerPrompt({
+        show,
+        episode: advanced.episode,
+        host: {
+          id: "host-1",
+          name: "Mara Vale",
+          systemPrompt: "A careful host.",
+          cloneFamilyId: null,
+          powers: JSON.parse(mumblingPowers()),
+        },
+        guest: {
+          id: "guest-1",
+          name: "Ivo Stone",
+          systemPrompt: "A skeptical guest.",
+          cloneFamilyId: null,
+          powers: JSON.parse(observantPowers()),
+        },
+        speakerRole: "guest",
+      });
+      const observantContext = observantGuestPrompt
+        .map((message) => message.content)
+        .join("\n");
+      assert.match(observantContext, /rational explanation for the missing map/iu);
+      assert.doesNotMatch(observantContext, /normal-volume gibberish|hidden meaning/iu);
     } finally {
       db.close();
     }

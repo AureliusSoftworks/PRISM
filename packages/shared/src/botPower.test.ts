@@ -48,6 +48,8 @@ import {
   botPowerPairwiseSizeCueFromEffectsV1,
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
+  botPowerIgnoresOtherPowersV1,
+  botPowerSubjectEffectsForObserverV1,
   botPowerObserverProjectionV1,
   botPowerObserverCueLinesV1,
   botPowerPairwisePerceptionV1,
@@ -1769,6 +1771,51 @@ test("ready coffee-refusal Powers return a zero cup multiplier", () => {
   }];
 
   assert.equal(botPowerCupRateMultiplierForBotV1(powers), 0);
+});
+
+test("power immunity removes only another bot's active Power layer", () => {
+  const readyPower = (
+    id: string,
+    effects: NonNullable<ReturnType<typeof normalizeBotPowerEffectV1>>[],
+  ) => ({
+    version: 1 as const,
+    id,
+    name: id,
+    intent: id,
+    enabled: true,
+    compileStatus: "ready" as const,
+    compiled: {
+      version: 1 as const,
+      sourceHash: botPowerSourceHashV1(id, id),
+      selfCue: "",
+      observerCue: "",
+      effects,
+      ruleLabels: [],
+    },
+  });
+  const observant = [readyPower("observant", [
+    {
+      type: "power_immunity",
+      scope: "holder",
+      targets: "other_bots",
+      awareness: "unnoticed",
+    },
+  ])];
+  const ryuk = [readyPower("invisible", [{
+    type: "awareness",
+    allowed: [{ kind: "bot", name: "Light" }],
+  }])];
+
+  assert.equal(botPowerIgnoresOtherPowersV1(observant), true);
+  assert.deepEqual(botPowerSubjectEffectsForObserverV1(ryuk, observant), []);
+  assert.deepEqual(
+    botPowerSubjectEffectsForObserverV1(ryuk, []),
+    activeBotPowerEffectsV1(ryuk),
+  );
+  assert.deepEqual(
+    botPowerSubjectEffectsForObserverV1(observant, observant),
+    [],
+  );
 });
 
 test("identity mirror borrows public active effects without recursive identity or perception permissions", () => {

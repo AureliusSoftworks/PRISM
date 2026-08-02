@@ -1265,6 +1265,66 @@ describe("API request integration", () => {
     assert.equal(clearedPayload.settings.braveSearchApiKeySource, "none");
   });
 
+  it("persists and resets per-model effort profiles through Settings", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "model-effort-settings@example.com",
+        password: "model-effort-settings-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+
+    const saved = await client.request(
+      "/api/model-effort-preferences",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: "openai",
+          modelId: "gpt-5.6-sol",
+          effort: "xhigh",
+        }),
+      },
+    );
+    assert.equal(saved.status, 200, await saved.clone().text());
+    const savedPayload = await json(saved);
+    assert.equal(savedPayload.modelEffortPreferences[0]?.effort, "xhigh");
+
+    const loaded = await json(await client.request("/api/settings"));
+    assert.deepEqual(
+      loaded.settings.modelEffortPreferences.map(
+        (entry: { provider: string; modelId: string; effort: string }) => ({
+          provider: entry.provider,
+          modelId: entry.modelId,
+          effort: entry.effort,
+        }),
+      ),
+      [{ provider: "openai", modelId: "gpt-5.6-sol", effort: "xhigh" }],
+    );
+
+    const defaulted = await client.request(
+      "/api/model-effort-preferences",
+      {
+        method: "PUT",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({
+          provider: "openai",
+          modelId: "gpt-5.6-sol",
+          effort: "default",
+        }),
+      },
+    );
+    assert.equal(defaulted.status, 200);
+    assert.deepEqual((await json(defaulted)).modelEffortPreferences, []);
+
+    const reset = await client.request("/api/model-effort-preferences", {
+      method: "DELETE",
+    });
+    assert.equal(reset.status, 200);
+  });
+
   it("persists the account-level Home atmosphere style", async () => {
     const client = createClient();
     const register = await client.request(

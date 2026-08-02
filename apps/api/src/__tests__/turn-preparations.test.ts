@@ -137,6 +137,38 @@ describe("turn preparation registry", () => {
     assert.deepEqual(discarded.provisionalUtterances, []);
   });
 
+  it("discards every uncommitted preparation for one account after an effort change", async () => {
+    const registry = new TurnPreparationRegistry();
+    const first = createReady(registry, "debate-effort");
+    const second = registry.create({
+      userId: "user-1",
+      surface: "signal",
+      sessionId: "signal-effort",
+      stateCursor: cursor,
+      run: async () => ({
+        speakerBotId: "bot-2",
+        provisionalUtterances: [],
+        payload: null,
+      }),
+    });
+    const otherUser = registry.create({
+      userId: "user-2",
+      surface: "coffee",
+      sessionId: "coffee-other-user",
+      stateCursor: cursor,
+      run: async () => ({
+        speakerBotId: null,
+        provisionalUtterances: [],
+        payload: null,
+      }),
+    });
+
+    assert.equal(registry.discardUser("user-1", "Effort changed.").length, 2);
+    assert.equal(registry.get(first.id, "user-1").phase, "discarded");
+    assert.equal(registry.get(second.id, "user-1").phase, "discarded");
+    assert.notEqual(registry.get(otherUser.id, "user-2").phase, "discarded");
+  });
+
   it("expires without commit and bounds each user's registry", async () => {
     let now = 1_000;
     const registry = new TurnPreparationRegistry({ now: () => now });

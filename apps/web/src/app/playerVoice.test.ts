@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import test from "node:test";
+import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 } from "@localai/shared";
 import { applyOfflineVoiceSelection } from "./offlineVoiceSelection.ts";
 import {
   cleanPlayerVoiceProfile,
@@ -82,6 +83,7 @@ test("a local player identity always selects the builtin route", () => {
 
 test("player Premium and local fallback identities remain independent", () => {
   const profile = cleanPlayerVoiceProfile({
+    ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
     v: 2,
     baseVoiceId: "voice-7",
     systemVoiceName: "Samantha",
@@ -110,6 +112,7 @@ test("player Premium and local fallback identities remain independent", () => {
 
 test("top speech type selects the matching clean player identity", () => {
   const profile = cleanPlayerVoiceProfile({
+    ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
     v: 2,
     baseVoiceId: "voice-3",
     elevenLabsVoiceId: "premium-player",

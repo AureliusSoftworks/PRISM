@@ -232,6 +232,13 @@ export {
   botPowerIntermittentMuteTurnIsIgnoredV1,
   botPowerIntermittentAudibilityEffectFromEffectsV1,
   botPowerIntermittentAudibilityEffectV1,
+  botPowerIgnoresOtherPowersFromEffectsV1,
+  botPowerIgnoresOtherPowersV1,
+  botPowerIneptImagePromptV1,
+  botPowerIneptitudeRoleCueFromEffectsV1,
+  botPowerIneptitudeRoleCueV1,
+  botPowerIsIneptFromEffectsV1,
+  botPowerIsIneptV1,
   botPowerListenerHearsTurnFromEffectsV1,
   botPowerListenerHearsTurnV1,
   botPowerAnnoyanceEffectFromEffectsV1,
@@ -254,6 +261,8 @@ export {
   botPowerResponseIsSilentV1,
   botPowerResponseIsFirstIntroductionV1,
   botPowerSelfCueLinesV1,
+  botPowerSubjectEffectsForObserverFromEffectsV1,
+  botPowerSubjectEffectsForObserverV1,
   botPowerThemeMoodCueFromEffectsV1,
   botPowerThemeMoodCueV1,
   botPowerSourceHashV1,
@@ -299,6 +308,7 @@ export {
   type BotPowerEffectV1,
   type BotPowerFrequency,
   type BotPowerGravityDirection,
+  type BotPowerIneptitudeRoleV1,
   type BotPowerInterruptionMatchV1,
   type BotPowerMemoryMode,
   type BotPowerObserverPerspectiveV1,
@@ -921,14 +931,24 @@ export {
 } from "./comfyUiWorkflow.js";
 
 export {
+  MODEL_REASONING_EFFORT_PREFERENCE_VALUES,
   REASONING_EFFORT_VALUES,
   anthropicModelSupportsReasoningEffort,
   anthropicReasoningEffortForRequest,
+  effectiveModelReasoningEffort,
+  modelReasoningEffortPreferenceKey,
   modelSupportsNativeReasoningEffort,
+  normalizeModelReasoningEffortPreference,
   normalizeReasoningEffort,
   openAiModelSupportsReasoningEffort,
+  openAiReasoningEffortForRequest,
+  openAiReasoningEffortLevels,
   reasoningEffortForRequest,
+  resolveModelReasoningEffortCapability,
   type AnthropicRequestReasoningEffort,
+  type ModelReasoningEffortCapabilityV1,
+  type ModelReasoningEffortPreference,
+  type ModelReasoningEffortPreferenceV1,
   type NativeReasoningEffortProvider,
   type ReasoningEffort,
   type RequestReasoningEffort,
@@ -1144,7 +1164,6 @@ import type {
   PrismMoodKey,
   PrismMoodSnapshot,
 } from "./mood.js";
-import type { ReasoningEffort } from "./reasoningEffort.js";
 
 export type UserRole = "user";
 export type LlmProviderName = "local" | "openai" | "anthropic";
@@ -2647,7 +2666,6 @@ export interface ChatCompanionPreferences {
 export interface SandboxRuntimeControls {
   preferredProvider?: LlmProviderName;
   modelOverride?: string;
-  reasoningEffort?: ReasoningEffort;
   botId?: string | null;
 }
 
@@ -2669,10 +2687,9 @@ export interface ChatRequestPayload {
   companionPreferences?: ChatCompanionPreferences;
   /** Advanced controls for runtime routing. */
   sandboxControls?: SandboxRuntimeControls;
-  /** Back-compat top-level advanced knobs. Chat honors explicit modelOverride only. */
+  /** Back-compat top-level routing knobs. Chat honors explicit modelOverride only. */
   preferredProvider?: LlmProviderName;
   modelOverride?: string;
-  reasoningEffort?: ReasoningEffort;
   /**
    * Chat/Sandbox bot selector. In Zen this is a backwards-compatible fallback
    * for `facetBotId`.
@@ -2970,7 +2987,6 @@ export interface CoffeeContinueRequest {
    * gating still wins — a bot with `online_enabled=0` falls back to local.
    */
   preferredProvider?: LlmProviderName;
-  reasoningEffort?: ReasoningEffort;
   /**
    * Optional director-mode pick. When present, the server asks this seated bot
    * to speak instead of running the automatic speaker router.
@@ -3015,7 +3031,6 @@ export interface CoffeeTurnRequest {
    * wins — a bot with `online_enabled=0` always falls back to local.
    */
   preferredProvider?: LlmProviderName;
-  reasoningEffort?: ReasoningEffort;
   /** The user's outgoing message. */
   message: string;
   /** Optional player-interruption metadata from the live table reveal state. */

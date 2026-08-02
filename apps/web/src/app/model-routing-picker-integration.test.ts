@@ -7,6 +7,10 @@ const cssSource = readFileSync(
   new URL("./page.module.css", import.meta.url),
   "utf8",
 );
+const tutorialSource = readFileSync(
+  new URL("./modeTutorials.ts", import.meta.url),
+  "utf8",
+);
 
 describe("shared routing model picker integration", () => {
   it("can enter AUTO from a duplicate current fallback by selecting a valid Primary", () => {
@@ -45,5 +49,31 @@ describe("shared routing model picker integration", () => {
       cssSource,
       /composeModelOption\[data-model-provider="anthropic"\][\s\S]{0,120}#d97757/u,
     );
+  });
+
+  it("persists effort per concrete model and exposes the split control everywhere", () => {
+    assert.match(pageSource, /modelEffortPreferences/u);
+    assert.match(pageSource, /\/api\/model-effort-preferences/u);
+    assert.match(pageSource, /data-tutorial-target="model-effort"/u);
+    assert.ok(
+      (pageSource.match(/effortControl=\{/gu) ?? []).length >= 6,
+      "expected the six visible picker placements to cover Chat/Zen, Sandbox, Coffee, Story, Debate, and Signal",
+    );
+  });
+
+  it("offers the global effort HUD and its Default reset shortcut", () => {
+    assert.match(pageSource, /modelEffortHudTarget/u);
+    assert.match(
+      pageSource,
+      /mod && event\.shiftKey && !event\.altKey && key === "e"/u,
+    );
+    assert.match(pageSource, /key === "d"[\s\S]{0,240}"auto"/u);
+    assert.match(cssSource, /\.modelEffortHud\b/u);
+  });
+
+  it("teaches the global profile without adding a first-run choice", () => {
+    assert.match(tutorialSource, /saves Effort per concrete model/u);
+    assert.match(tutorialSource, /Cmd\/Ctrl\+Shift\+E/u);
+    assert.match(tutorialSource, /prepared work is discarded/u);
   });
 });

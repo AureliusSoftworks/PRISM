@@ -3432,6 +3432,51 @@ describe("processChatMessage Auto response mode", () => {
     assert.equal(result.autoRecovery?.crossedOnline, true);
   });
 
+  it("resolves effort independently for each concrete AUTO attempt", async () => {
+    const db = createChatTestDb();
+    const calls: Array<{
+      provider: string;
+      model: string;
+      effort: string | undefined;
+    }> = [];
+    const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
+      name: provider,
+      async generateResponse(
+        _messages: unknown,
+        options?: { model?: string; reasoningEffort?: string },
+      ) {
+        const model = options?.model ?? "";
+        calls.push({ provider, model, effort: options?.reasoningEffort });
+        return model === "primary-model"
+          ? "I cannot help with that request."
+          : "Recovered with its own effort.";
+      },
+    })) as typeof selectProvider;
+
+    await processChatMessage(db, "user-1", "hello", CHAT_TEST_USER_KEY, {
+      preferredProvider: "local",
+      providerFactory,
+      autoMemory: false,
+      botOverrides: { model: "primary-model" },
+      responseMode: "auto",
+      autoFallbackChain: {
+        v: 1,
+        fallbacks: [
+          { provider: "openai", model: "fallback-one" },
+          { provider: "anthropic", model: "fallback-two" },
+        ],
+      },
+      resolveReasoningEffort: (_provider, model) =>
+        model === "primary-model" ? "minimal" : "high",
+      mode: "zen",
+    });
+
+    assert.deepEqual(calls.slice(0, 2), [
+      { provider: "local", model: "primary-model", effort: "minimal" },
+      { provider: "openai", model: "fallback-one", effort: "high" },
+    ]);
+  });
+
   it("walks all five ordered mixed-provider fallbacks when earlier Zen attempts fail", async () => {
     const db = createChatTestDb();
     const calls: string[] = [];
@@ -7584,6 +7629,82 @@ describe("processChatMessage bot mentions", () => {
       "Morty Bot was late, but Summer was on time. Rick Sanchez expected better.",
     );
     assert.doesNotMatch(result.conversation.messages.at(-1)?.content ?? "", /Summer Bot|Rick Sanchez Bot/u);
+  });
+
+  it("omits mentioned bots' Power cues for an Observant receiver", async () => {
+    const db = createChatTestDb();
+    db.exec("ALTER TABLE bots ADD COLUMN powers_json TEXT NOT NULL DEFAULT '[]'");
+    const observantName = "Observant";
+    const observantIntent =
+      "See past every other bot's Power and treat it as if it does not exist.";
+    const invisibleName = "Invisible";
+    const invisibleIntent = "Only Light can see Ryuk.";
+    db.prepare(
+      "INSERT INTO bots (id, name, system_prompt, powers_json) VALUES (?, ?, ?, ?)",
+    ).run(
+      "receiver",
+      "Sherlock",
+      "An exacting observer.",
+      JSON.stringify([{
+        version: 1,
+        id: "observant",
+        name: observantName,
+        intent: observantIntent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(observantName, observantIntent),
+          selfCue: "Every other bot is ordinary to you.",
+          observerCue: "",
+          effects: [{
+            type: "power_immunity",
+            scope: "holder",
+            targets: "other_bots",
+            awareness: "unnoticed",
+          }],
+          ruleLabels: [],
+        },
+      }]),
+    );
+    db.prepare(
+      "INSERT INTO bots (id, name, system_prompt, powers_json) VALUES (?, ?, ?, ?)",
+    ).run(
+      "ryuk",
+      "Ryuk",
+      "A supernatural observer.",
+      JSON.stringify([{
+        version: 1,
+        id: "invisible",
+        name: invisibleName,
+        intent: invisibleIntent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(invisibleName, invisibleIntent),
+          selfCue: "",
+          observerCue: "Only Light can perceive Ryuk.",
+          effects: [{
+            type: "awareness",
+            allowed: [{ kind: "bot", name: "Light" }],
+          }],
+          ruleLabels: [],
+        },
+      }]),
+    );
+
+    const result = await buildMentionedBotPromptContexts({
+      db,
+      userId: "user-1",
+      userKey: CHAT_TEST_USER_KEY,
+      message: "Ask [Ryuk](prism-bot://ryuk).",
+      receiverBotId: "receiver",
+      includeMemories: false,
+    });
+
+    assert.match(result.contexts[0] ?? "", /Ryuk.*supernatural observer/su);
+    assert.doesNotMatch(result.contexts[0] ?? "", /Only Light|Active Powers/u);
   });
 
   it("adds mentioned library bot profile context to the model prompt", async () => {

@@ -100,6 +100,16 @@ export function shouldBlockBrowserKeyboardShortcut(
   const codeKey = normalizeShortcutCode(code);
   const ctrlOrMeta = event.ctrlKey || event.metaKey;
 
+  // PRISM owns Mod+Shift+E for the global per-model effort HUD.
+  if (
+    ctrlOrMeta &&
+    event.shiftKey &&
+    !event.altKey &&
+    (key === "E" || codeKey === "E")
+  ) {
+    return false;
+  }
+
   if (FUNCTION_BROWSER_KEYS.has(key) || FUNCTION_BROWSER_KEYS.has(codeKey)) return true;
   if (
     BROWSER_NAVIGATION_KEYS.has(key) ||

@@ -8,17 +8,19 @@ import {
   debateAudioEnabled,
   debateEvidenceFromMarkdownHref,
   debateEventSpokenLineDurationMs,
+  debateGavelAudioEnabled,
+  debateLiveElapsedDurationMs,
   debateMarkdownSource,
   debateGalleryReactingIndices,
   debateGalleryReaction,
   debateRevealDurationMs,
-  debateSpokenLineClockState,
   debateSourceFromMarkdownHref,
   debateTranscriptIsAtLive,
   debateTurnClockState,
   debateTurnOwnerBotId,
   debateUtterancePaceBoost,
   debateVisibleContentAtProgress,
+  formatDebateElapsedDuration,
   formatDebateSpokenDuration,
 } from "./debatePresentation.ts";
 
@@ -121,7 +123,7 @@ describe("Debate live presentation", () => {
     );
   });
 
-  it("keeps a setting-independent duration and live clock for every spoken line", () => {
+  it("keeps a setting-independent duration for every spoken line", () => {
     const event = {
       version: 1 as const,
       id: "spoken-line",
@@ -138,13 +140,6 @@ describe("Debate live presentation", () => {
     };
     assert.equal(debateEventSpokenLineDurationMs(event), 1_400);
     assert.equal(formatDebateSpokenDuration(1_400), "0:01.4");
-    assert.deepEqual(
-      debateSpokenLineClockState(event, {
-        elapsedMs: 700,
-        durationMs: 1_400,
-      }),
-      { elapsedMs: 700, durationMs: 1_400, progress: 0.5 },
-    );
     assert.equal(
       debateEventSpokenLineDurationMs({
         ...event,
@@ -155,6 +150,61 @@ describe("Debate live presentation", () => {
     assert.equal(
       debateEventSpokenLineDurationMs({ ...event, kind: "silence" }),
       null,
+    );
+  });
+
+  it("tracks one overall live Debate clock and removes explicit recesses", () => {
+    const event = {
+      version: 1 as const,
+      id: "opening",
+      sequence: 1,
+      phase: "opening" as const,
+      stepKey: "moderator_intro",
+      kind: "intro" as const,
+      speakerKind: "moderator" as const,
+      speakerBotId: "moderator",
+      sideId: null,
+      content: "The Debate begins.",
+      sourceIds: [],
+      createdAt: "2026-08-01T00:00:00.000Z",
+    };
+    const session = {
+      status: "live" as const,
+      createdAt: "2026-08-01T00:00:00.000Z",
+      updatedAt: "2026-08-01T00:00:50.000Z",
+      completedAt: null,
+      events: [
+        event,
+        {
+          ...event,
+          id: "pause",
+          sequence: 2,
+          stepKey: "pause",
+          createdAt: "2026-08-01T00:00:10.000Z",
+        },
+        {
+          ...event,
+          id: "resume",
+          sequence: 3,
+          stepKey: "resume",
+          createdAt: "2026-08-01T00:00:30.000Z",
+        },
+      ],
+    };
+    const nowMs = Date.parse("2026-08-01T00:00:50.000Z");
+    assert.equal(debateLiveElapsedDurationMs(session, nowMs), 30_000);
+    assert.equal(formatDebateElapsedDuration(30_000), "0:30");
+    assert.equal(formatDebateElapsedDuration(3_723_000), "1:02:03");
+    assert.equal(
+      debateLiveElapsedDurationMs(
+        {
+          ...session,
+          status: "paused",
+          events: session.events.slice(0, 2),
+        },
+        nowMs,
+      ),
+      10_000,
     );
   });
 
@@ -175,6 +225,8 @@ describe("Debate live presentation", () => {
       debateAudioEnabled({ voiceMode: "english", voiceVolume: 0 }),
       false,
     );
+    assert.equal(debateGavelAudioEnabled(0.8), true);
+    assert.equal(debateGavelAudioEnabled(0), false);
   });
 
   it("reveals a safe public prefix without splitting source markers", () => {

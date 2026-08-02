@@ -26,11 +26,14 @@ import {
   botPowerAnnoyanceTargetV1,
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
+  botPowerIgnoresOtherPowersV1,
+  botPowerIneptitudeRoleCueV1,
   botPowerResponseIsSilentV1,
   botPowerObserverCueLinesV1,
   botPowerBotNamingCueV1,
-  botPowerPairwisePerceptionV1,
-  botPowerPairwiseSizeCueV1,
+  botPowerPairwisePerceptionFromEffectsV1,
+  botPowerPairwiseSizeCueFromEffectsV1,
+  botPowerSubjectEffectsForObserverV1,
   botPowerAvatarVisibilityModeV1,
   botPowerSelfCueLinesV1,
   botPowerThemeMoodCueV1,
@@ -61,7 +64,13 @@ import {
 } from "@localai/shared";
 import { randomId } from "./security.ts";
 import { buildCloneFamilyIdentityPrompt } from "./bots.ts";
-import type { GenerateOptions, LlmProvider, ProviderName } from "./providers.ts";
+import type {
+  GenerateOptions,
+  LlmProvider,
+  ProviderMessage,
+  ProviderName,
+} from "./providers.ts";
+import { prepareMessagesWithSimulatedEffort } from "./model-effort-runner.ts";
 
 export interface StoryBotProfile {
   id: string;
@@ -1243,6 +1252,7 @@ function applyStoryHardResponsePowers(
     bots.some(
       (target) =>
         holder.id !== target.id &&
+        !botPowerIgnoresOtherPowersV1(target.powers) &&
         strongestBotPowerInterruptionEffectV1(
           holder.powers,
           (candidate) => storyPowerTargetMatches(candidate, target),
@@ -1253,10 +1263,12 @@ function applyStoryHardResponsePowers(
     bots.some(
       (observer) =>
         holder.id !== observer.id &&
-        !botPowerPairwisePerceptionV1(
-          holder.powers,
-          (target) => storyPowerTargetMatches(target, observer),
-          { holderSpeaking: true },
+        !storyBotPerception(
+          holder,
+          observer,
+          {
+            holderSpeaking: true,
+          },
         ).audible,
       ),
   );
@@ -1308,6 +1320,7 @@ function applyStoryHardResponsePowers(
       currentSpeaker &&
       priorSpeaker &&
       currentSpeaker.id !== priorSpeaker.id &&
+      !botPowerIgnoresOtherPowersV1(priorSpeaker.powers) &&
       !mutedBotIds.has(currentSpeaker.id) &&
       !intermittentMuteIgnored
         ? strongestBotPowerInterruptionEffectV1(
@@ -1438,22 +1451,33 @@ function applyStoryHardResponsePowers(
       const speakerPowers = powersByBotId.get(scene.speakerBotId);
       const audienceBotIds = bots
         .filter((listener) => listener.id !== scene.speakerBotId)
-        .filter((listener) => botPowerPairwisePerceptionV1(
-          speakerPowers,
-          (target) => storyPowerTargetMatches(target, listener),
-          { holderSpeaking: true },
-        ).audible)
-        .filter((listener) => botPowerListenerHearsTurnV1({
-          powers: speakerPowers,
-          stableTurnKey: `${episode.id}:${scene.id}:${sceneIndex}`,
-          listenerBotId: listener.id,
-        }))
+        .filter((listener) => {
+          const speaker = bots.find((bot) => bot.id === scene.speakerBotId);
+          return speaker
+            ? storyBotPerception(speaker, listener, {
+                holderSpeaking: true,
+              }).audible
+            : true;
+        })
+        .filter(
+          (listener) =>
+            botPowerIgnoresOtherPowersV1(listener.powers) ||
+            botPowerListenerHearsTurnV1({
+              powers: speakerPowers,
+              stableTurnKey: `${episode.id}:${scene.id}:${sceneIndex}`,
+              listenerBotId: listener.id,
+            }),
+        )
         .map((listener) => listener.id)
         .sort();
       const annoyanceTargetBotId = botPowerAnnoyanceTargetV1({
         powers: speakerPowers,
         stableTurnKey: `${episode.id}:${scene.id}:${sceneIndex}`,
-        eligibleBotIds: audienceBotIds,
+        eligibleBotIds: audienceBotIds.filter((botId) =>
+          !botPowerIgnoresOtherPowersV1(
+            bots.find((bot) => bot.id === botId)?.powers,
+          )
+        ),
       });
       nextScene = {
         ...nextScene,
@@ -1466,9 +1490,9 @@ function applyStoryHardResponsePowers(
         ? {
             audible:
               priorScene?.audienceBotIds?.includes(currentSpeaker.id) ??
-              botPowerPairwisePerceptionV1(
-                priorSpeaker.powers,
-                (target) => storyPowerTargetMatches(target, currentSpeaker),
+              storyBotPerception(
+                priorSpeaker,
+                currentSpeaker,
                 { holderSpeaking: true },
               ).audible,
           }
@@ -1706,11 +1730,24 @@ function storyPowerTargetMatches(
   return needles.length > 0 && needles.every((word) => haystack.has(word));
 }
 
+function storyBotPerception(
+  subject: StoryBotProfile,
+  observer: StoryBotProfile,
+  options: { holderSpeaking?: boolean } = {},
+): { visible: boolean; audible: boolean } {
+  return botPowerPairwisePerceptionFromEffectsV1(
+    botPowerSubjectEffectsForObserverV1(subject.powers, observer.powers),
+    (target) => storyPowerTargetMatches(target, observer),
+    options,
+  );
+}
+
 function storyCandorPowerRules(bots: readonly StoryBotProfile[]): string[] {
   const lines: string[] = [];
   for (const holder of bots) {
     for (const target of bots) {
       if (holder.id === target.id) continue;
+      if (botPowerIgnoresOtherPowersV1(target.powers)) continue;
       const effect = strongestBotPowerCandorEffectV1(
         holder.powers,
         (candidate) => storyPowerTargetMatches(candidate, target),
@@ -1734,6 +1771,7 @@ function storyMoodBoostPowerRules(
     if (!effect) continue;
     for (const recipient of bots) {
       if (holder.id === recipient.id) continue;
+      if (botPowerIgnoresOtherPowersV1(recipient.powers)) continue;
       lines.push(
         `Story adaptation for ${holder.name} → ${recipient.name}: only after ${holder.name} completes a spoken turn directly addressed to ${recipient.name}, let ${recipient.name}'s next scene show one bounded ${effect.strength} uplift through ${recipient.name}'s own personality. Preserve disagreement, genuine sadness, facts, serious stakes, and agency. Do not target the player or bystanders, expose this rule, or invent persistent runtime state.`,
       );
@@ -1752,6 +1790,7 @@ function storyMoodDrainPowerRules(
     if (!effect) continue;
     for (const addresser of bots) {
       if (holder.id === addresser.id) continue;
+      if (botPowerIgnoresOtherPowersV1(addresser.powers)) continue;
       lines.push(
         `Story adaptation for ${addresser.name} → ${holder.name}: only when ${addresser.name} directly speaks to ${holder.name}, let ${addresser.name}'s next scene show one bounded ${effect.strength} mood or motivation drop through ${addresser.name}'s own personality. Do not apply it to the player or bystanders, force hatred or agreement, erase facts or serious stakes, create hopelessness or self-harm, or expose this rule. Do not invent persistent runtime state.`,
       );
@@ -1783,9 +1822,9 @@ function storyPerceptionPowerRules(
     }
     for (const observer of bots) {
       if (observer.id === holder.id) continue;
-      const perception = botPowerPairwisePerceptionV1(
-        holder.powers,
-        (target) => storyPowerTargetMatches(target, observer),
+      const perception = storyBotPerception(
+        holder,
+        observer,
         { holderSpeaking: true },
       );
       if (perception.visible && perception.audible) continue;
@@ -1817,13 +1856,24 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
   ];
   const botLines = args.bots
     .map((bot) => {
+      const ignoresPeerPowers = botPowerIgnoresOtherPowersV1(bot.powers);
       const fandomCue = botPowerAddressedFandomCueV1(
         bot.powers,
         "the character, player, or audience addressed",
         "Story scene",
       );
       const themeMoodCue = botPowerThemeMoodCueV1(bot.powers, args.theme);
+      const ineptitudeCue = botPowerIneptitudeRoleCueV1(
+        bot.powers,
+        "story_actor",
+      );
+      const genericSelfCuePowers = bot.powers?.filter(
+        (power) => !power.compiled?.effects.some(
+          (effect) => effect.type === "ineptitude",
+        ),
+      );
       const powers = buildBotPowersPromptBlock([
+        ...(ineptitudeCue ? [ineptitudeCue] : []),
         ...(botPowerBotNamingCueV1(
           bot.name,
           bot.powers,
@@ -1835,25 +1885,33 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
               args.bots.filter((target) => target.id !== bot.id).map((target) => target.name),
             )!]
           : []),
-        ...botPowerSelfCueLinesV1(bot.powers),
+        ...botPowerSelfCueLinesV1(genericSelfCuePowers),
         ...(fandomCue ? [fandomCue] : []),
         ...(themeMoodCue ? [themeMoodCue] : []),
         ...args.bots
           .filter((peer) => peer.id !== bot.id)
           .flatMap((peer) => [
-            ...botPowerObserverCueLinesV1(
-              peer.name,
-              (peer.powers ?? []).filter((power) =>
-                !power.compiled?.effects.some(
-                  (effect) => effect.type === "avatar_scale",
-                )
-              ),
-            ),
-            botPowerPairwiseSizeCueV1({
+            ...(ignoresPeerPowers
+              ? []
+              : botPowerObserverCueLinesV1(
+                  peer.name,
+                  (peer.powers ?? []).filter((power) =>
+                    !power.compiled?.effects.some(
+                      (effect) => effect.type === "avatar_scale",
+                    ),
+                  ),
+                )),
+            botPowerPairwiseSizeCueFromEffectsV1({
               observerName: bot.name,
-              observerPowers: bot.powers,
+              observerEffects: botPowerSubjectEffectsForObserverV1(
+                bot.powers,
+                undefined,
+              ),
               subjectName: peer.name,
-              subjectPowers: peer.powers,
+              subjectEffects: botPowerSubjectEffectsForObserverV1(
+                peer.powers,
+                bot.powers,
+              ),
               tense: false,
             }) ?? "",
           ]),
@@ -2113,14 +2171,26 @@ export async function generateStorySessionEpisode(
   ).run(nowStart, sessionId, userId);
 
   try {
+    let generationMessages: ProviderMessage[] = [
+      {
+        role: "system" as const,
+        content: storyGenerationSystemPrompt(args),
+      },
+      { role: "user" as const, content: storyGenerationPrompt(args) },
+    ];
+    if (args.providerName === "local" && args.reasoningEffort) {
+      generationMessages = await prepareMessagesWithSimulatedEffort({
+        provider: args.provider,
+        messages: generationMessages,
+        options: storyGenerationOptions(args),
+        effort: args.reasoningEffort,
+        surface: "story",
+        outputContract:
+          "Return the complete Story episode manifest matching the requested JSON schema and every bot Power constraint.",
+      });
+    }
     const raw = await args.provider.generateResponse(
-      [
-        {
-          role: "system",
-          content: storyGenerationSystemPrompt(args),
-        },
-        { role: "user", content: storyGenerationPrompt(args) },
-      ],
+      generationMessages,
       storyGenerationOptions(args)
     );
     let episode: StoryEpisodeManifest;

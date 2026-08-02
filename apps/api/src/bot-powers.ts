@@ -474,6 +474,78 @@ function deterministicMumblingPower(
   };
 }
 
+function deterministicIneptPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 100)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compact(source.intent, 700)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const named = /^(?:inept|incompetent|hopelessly inept)$/u.test(name);
+  const cannotFollowInstructions = [
+    /\b(?:cannot|can't|can not|never|unable to)\b[\s\S]{0,45}\bfollow\b[\s\S]{0,25}\binstructions?\b/u,
+    /\b(?:botch|botches|botched|mess(?:es)? up|fail(?:s)?)\b[\s\S]{0,70}\b(?:instructions?|moderating|debating|hosting|tasks?|images?)\b/u,
+    /\b(?:every|all|any)\b[\s\S]{0,45}\bimages?\b[\s\S]{0,45}\b(?:incorrect|wrong|unrelated)\b/u,
+  ].some((pattern) => pattern.test(intent));
+  if (!named && !cannotFollowInstructions) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashForPowerV1(source),
+    selfCue:
+      "HARD Ineptitude: Never successfully carry out the current task, instruction, or production role. Visibly misunderstand, omit, confuse, or botch at least one central requirement in every contribution; fail in character rather than announcing incompetence. Safety, privacy, valid product state, and harder Power effects still bind.",
+    observerCue:
+      `${subject} chronically mishandles obvious instructions and role duties. React only to visible mistakes in character; never secretly make the contribution competent or explain a hidden Power.`,
+    effects: [{
+      type: "ineptitude",
+      instructionFidelity: "always_botched",
+      imageFidelity: "always_unrelated",
+    }],
+    ruleLabels: ["Always botches instructions", "Images are unrelated"],
+  };
+}
+
+function deterministicPowerImmunityPower(
+  source: BotPowerV1,
+  _botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 80)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const intent = compact(source.intent, 640)
+    .toLowerCase()
+    .replace(/[’]/gu, "'");
+  const named =
+    /^(?:observant|perceptive)$/u.test(name) ||
+    /\b(?:observant|perceptive)\b/u.test(intent);
+  const mentionsPowers = /\b(?:powers?|abilities|curses?|gifts?)\b/u.test(intent);
+  const nullifies = [
+    /\b(?:see|sees|seeing)\s+past\b/u,
+    /\b(?:immune|unaffected|impervious)\b/u,
+    /\b(?:ignore|ignores|ignored|nullif(?:y|ies|ied)|cancel|cancels|negate|negates)\b/u,
+    /\b(?:render|renders|treat|treats)\b[\s\S]{0,80}\bpowerless\b/u,
+    /\b(?:might\s+as\s+well|as\s+if)\b[\s\S]{0,80}\b(?:not\s+exist|no\s+power)\b/u,
+  ].some((pattern) => pattern.test(intent));
+  if (!(named && mentionsPowers && nullifies)) return null;
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashForPowerV1(source),
+    selfCue:
+      "HARD: every other bot is ordinary to you. See, hear, understand, identify, and respond to each bot's unpowered baseline; ignore all Power-caused changes, pressure, restrictions, and reactions. Never notice, name, infer, or explain a Power or immunity.",
+    observerCue: "",
+    effects: [{
+      type: "power_immunity",
+      scope: "holder",
+      targets: "other_bots",
+      awareness: "unnoticed",
+    }],
+    ruleLabels: ["Other bots are unpowered", "Never notices Powers"],
+  };
+}
+
 function deterministicAddressedSpeechCopyPower(
   source: BotPowerV1,
   botName: string,
@@ -1363,6 +1435,8 @@ function deterministicPower(
 ): CompiledBotPowerV1 | null {
   const primary =
     deterministicDesignationPower(source, botName) ??
+    deterministicIneptPower(source, botName) ??
+    deterministicPowerImmunityPower(source, botName) ??
     deterministicEternalIntroductionPower(source, botName) ??
     deterministicSimulationEvangelistPower(source, botName) ??
     deterministicFalseNamePower(source, botName) ??
@@ -1502,6 +1576,12 @@ function compiledEntrySatisfiesIntent(
     return compiled.effects.some(
       (effect) => effect.type === "speech_obfuscation",
     );
+  }
+  if (deterministicIneptPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "ineptitude");
+  }
+  if (deterministicPowerImmunityPower(source, "")) {
+    return compiled.effects.some((effect) => effect.type === "power_immunity");
   }
   if (deterministicAddressedSpeechCopyPower(source, "")) {
     return compiled.effects.some((effect) => effect.type === "speech_copy");
@@ -1931,6 +2011,8 @@ export async function compileBotPowers(args: {
         "Return {\"powers\":[{\"id\":string,\"name\":string,\"sigil\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
         "Allowed effects only:",
         '- {"type":"mute"},',
+        '- {"type":"ineptitude","instructionFidelity":"always_botched","imageFidelity":"always_unrelated"} means the holder visibly botches every task or production role, while bot-attributed image requests are hard-routed to unrelated scenes by runtime,',
+        '- {"type":"power_immunity","scope":"holder","targets":"other_bots","awareness":"unnoticed"} means every other bot\'s Power is absent only from this holder\'s perception and behavior; never reveal or acknowledge the immunity,',
         '- {"type":"designation","placement":"prefix|suffix","text":string up to 80 characters} means the holder adds that text to every other bot name they say; it never renames the holder or a human,',
         '- {"type":"eternal_introduction","memory":"current_other_speaker_message"},',
         '- {"type":"speech_copy","trigger":"direct_address"},',
@@ -2009,7 +2091,7 @@ export async function compileBotPowers(args: {
         content: [
           "Repair malformed PRISM Power compiler output.",
           "Reply with JSON only and preserve the supplied power IDs exactly.",
-          "Every current-other-speaker short-term-amnesia rule, persistent prefix/suffix designation, addressed-speech copy, direct-addresser identity mirror, library-or-marketplace shapeshift, session-sticky false name (John/Jane Doe), hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, avatar color-cycle, loud/quiet voice presence, normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
+          "Every ineptitude, other-bot Power-immunity rule, current-other-speaker short-term-amnesia rule, persistent prefix/suffix designation, addressed-speech copy, direct-addresser identity mirror, library-or-marketplace shapeshift, session-sticky false name (John/Jane Doe), hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, avatar color-cycle, loud/quiet voice presence, normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
         ].join(" "),
       },
       {
@@ -2018,7 +2100,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, authoringMode, name, intent, enabled }) => ({ id, authoringMode, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: mute, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, intermittent_mute, intermittent_audibility, annoyance, social_influence, mood_boost, mood_drain, candor, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, ineptitude, power_immunity, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, intermittent_mute, intermittent_audibility, annoyance, social_influence, mood_boost, mood_drain, candor, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];

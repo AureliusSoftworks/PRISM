@@ -12,6 +12,7 @@ import {
 import {
   createPendingLivingShellAccountProgress,
 } from "../living-shell-progress.ts";
+import { listModelReasoningEffortPreferences } from "../model-effort-preferences.ts";
 import {
   DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
   DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
@@ -59,6 +60,45 @@ describe("backup response cues", () => {
       assert.equal(restored.text, "Okay, then.");
       assert.equal(restored.heard_character_count, 5);
       assert.equal(restored.completion, "interrupted");
+    });
+  });
+});
+
+describe("backup model effort profiles", () => {
+  it("round-trips saved provider/model effort and accepts legacy snapshots", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `INSERT INTO model_reasoning_effort_preferences
+           (user_id, provider, model_id, effort, updated_at)
+         VALUES ('user-1', 'openai', 'gpt-5.6-sol', 'high',
+                 '2026-08-01T20:00:00.000Z')`,
+      ).run();
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.deepEqual(snapshot.modelEffortPreferences, [
+        {
+          provider: "openai",
+          modelId: "gpt-5.6-sol",
+          effort: "high",
+          updatedAt: "2026-08-01T20:00:00.000Z",
+        },
+      ]);
+
+      db.prepare(
+        "DELETE FROM model_reasoning_effort_preferences WHERE user_id = 'user-1'",
+      ).run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        listModelReasoningEffortPreferences(db, "user-1")[0]?.effort,
+        "high",
+      );
+
+      const legacySnapshot = structuredClone(snapshot);
+      delete legacySnapshot.modelEffortPreferences;
+      importUserSnapshot(db, "user-1", legacySnapshot, userKey);
+      assert.equal(
+        listModelReasoningEffortPreferences(db, "user-1")[0]?.effort,
+        "high",
+      );
     });
   });
 });

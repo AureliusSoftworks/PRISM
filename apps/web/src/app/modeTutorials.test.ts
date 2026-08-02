@@ -182,8 +182,8 @@ describe("mode tutorials", () => {
       copy,
       /Judge \/ Moderator seat, the public floor stays on Auto/u,
     );
-    assert.match(copy, /Jury becomes the Judge’s one additional camera/u);
-    assert.match(copy, /Watch Jury enters the live advisory chamber/u);
+    assert.match(copy, /Jury is never a manual camera/u);
+    assert.doesNotMatch(copy, /Watch Jury/u);
     assert.match(
       copy,
       /Forum and Turnabout keep the procedural rhythm for bot-moderated roles/u,
@@ -204,7 +204,10 @@ describe("mode tutorials", () => {
       copy,
       /previously synthesized Debate sprite to restore the naming options that created it without spending more image-generation tokens/u,
     );
-    assert.match(copy, /tool-specific shelf instead of mixing into the general Images panel/u);
+    assert.match(
+      copy,
+      /tool-specific shelf instead of mixing into the general Images panel/u,
+    );
     assert.match(
       copy,
       /floating Prism progress card stays visible for the full synthesis operation/u,
@@ -215,8 +218,14 @@ describe("mode tutorials", () => {
       /Changing the motion, cast, format, or formality clears/u,
     );
     assert.match(copy, /territory dice remains available/u);
-    assert.match(copy, /Prompt Center prompts insert as ordinary editable text/u);
-    assert.match(copy, /wildcard rolls stay as chips until you Build or Refract/u);
+    assert.match(
+      copy,
+      /Prompt Center prompts insert as ordinary editable text/u,
+    );
+    assert.match(
+      copy,
+      /wildcard rolls stay as chips until you Build or Refract/u,
+    );
     assert.match(copy, /A `\{VAR\}` inside a Prompt Center body/u);
     assert.match(copy, /only one shared capture and no A\/B\/C letter links/u);
     assert.match(copy, /floating Prism remains available throughout setup/u);
@@ -231,7 +240,10 @@ describe("mode tutorials", () => {
       copy,
       /in-room Judge console keeps one contextual Gavel control, Pause or Gavel to resume, and End Debate together/u,
     );
-    assert.match(copy, /label becomes Intervene while an advocate holds the floor/u);
+    assert.match(
+      copy,
+      /label becomes Intervene while an advocate holds the floor/u,
+    );
     assert.match(copy, /Call time during overtime/u);
     assert.match(copy, /Space invokes that same context-aware control/u);
     assert.match(copy, /Participant and Spectator sessions use the same/u);
@@ -241,7 +253,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /returning chamber appear in recess/u);
     assert.match(copy, /Resume requires you to strike the visible gavel/u);
     assert.match(copy, /audible hit calls the camera to the moderator/u);
-    assert.match(copy, /exact next juror, discussion turn/u);
+    assert.match(copy, /exact next Jury preparation, ballot/u);
     assert.match(
       copy,
       /neither housekeeping beat enters the readable proceedings or copied transcript/u,
@@ -252,26 +264,22 @@ describe("mode tutorials", () => {
     );
     assert.match(copy, /End Debate skips the remaining rounds/u);
     assert.match(copy, /not to penalize unheard rounds/u);
-    assert.match(copy, /timed choice appears over the current camera/u);
-    assert.match(copy, /Auto is the default/u);
-    assert.match(copy, /Spectators and human Judges can choose Watch Jury/u);
+    assert.match(copy, /automatically enters a dim chamber/u);
+    assert.match(copy, /jurors' mouths move/u);
+    assert.match(copy, /without audible words or captions/u);
+    assert.match(copy, /all five final ballot monologues generate/u);
     assert.doesNotMatch(copy, /choose Participate/u);
-    assert.match(
-      copy,
-      /Skipping remains available after discussion starts—even during a juror’s current statement/u,
-    );
-    assert.match(copy, /all five final ballots/u);
-    assert.match(copy, /full five-ballot Jury result/u);
-    assert.match(
-      copy,
-      /Spectators and human Judges can open the five-seat Jury camera manually/u,
-    );
+    assert.match(copy, /Skip moves directly to final ballots/u);
+    assert.match(copy, /full five-ballot result/u);
+    assert.match(copy, /automatically enters the five-seat chamber/u);
     assert.match(copy, /trade short reactions between public-floor turns/u);
-    assert.match(copy, /ellipsis beside a juror means a thought is waiting/u);
-    assert.match(copy, /enter the Jury camera before the next thought/u);
-    assert.match(copy, /another camera lets them resolve immediately/u);
+    assert.match(
+      copy,
+      /ellipsis beside a juror means a between-turn thought is waiting/u,
+    );
+    assert.match(copy, /hover it to read that opinion/u);
     assert.match(copy, /seats bot faces and frames around/u);
-    assert.match(copy, /Each audible juror reads the same final reason/u);
+    assert.match(copy, /Each juror reads the same final reason/u);
     assert.match(copy, /as each final ballot is cast, its side appears/u);
     assert.match(copy, /running five-vote tally updates/u);
     assert.match(copy, /canonically silent juror still casts/u);
@@ -302,14 +310,20 @@ describe("mode tutorials", () => {
     assert.match(copy, /enter AUTO directly/u);
     assert.match(copy, /every generated statement and ballot records/u);
     assert.match(copy, /short title synthesized in the selected Rowdiness/u);
-    assert.match(copy, /approximate active runtime from the saved presentation timeline/u);
+    assert.match(
+      copy,
+      /approximate active runtime from the saved presentation timeline/u,
+    );
     assert.match(copy, /excluding generation waits, explicit recesses/u);
     assert.match(copy, /Use setup copies its motion, title, room settings/u);
     assert.match(copy, /currently selected model and routing remain in place/u);
     assert.match(copy, /whole chain fails/u);
     assert.match(copy, /LOCAL remains a hard offline guarantee/u);
     assert.match(copy, /Launch circuit becomes Start Debate/u);
-    assert.match(copy, /Start stays locked until the question, debaters, consent, and a visit to Topic, Debaters, and Evidence are all complete/u);
+    assert.match(
+      copy,
+      /Start stays locked until the question, debaters, consent, and a visit to Topic, Debaters, and Evidence are all complete/u,
+    );
     assert.match(copy, /Start then freezes that ordered chain/u);
     assert.match(copy, /instead of in the app chrome/u);
     assert.match(copy, /traditional three-bot majority/u);
@@ -325,8 +339,14 @@ describe("mode tutorials", () => {
       copy,
       /center Judge \/ Moderator seat, gives the automatic neutral introduction, then stays publicly silent and inactive until you act/u,
     );
-    assert.match(copy, /visible gallery badge and four-bar meter move deterministically/u);
-    assert.match(copy, /Gavel is one context-aware physical room-control action/u);
+    assert.match(
+      copy,
+      /visible gallery badge and four-bar meter move deterministically/u,
+    );
+    assert.match(
+      copy,
+      /Gavel is one context-aware physical room-control action/u,
+    );
     assert.match(copy, /without stopping the speaker or reveal/u);
     assert.match(copy, /early strike earns only a brief awkward freeze/u);
     assert.match(copy, /saved order cue preserves its exact heard position/u);
@@ -334,8 +354,14 @@ describe("mode tutorials", () => {
     assert.match(copy, /Space serves that ceremonial cue first/u);
     assert.match(copy, /single Gavel \x2f Space input follows the live floor/u);
     assert.match(copy, /Intervene while an advocate is speaking/u);
-    assert.match(copy, /ordinary audience order when no semantic cutoff is available/u);
-    assert.match(copy, /same gavel falls back to non-interrupting audience order/u);
+    assert.match(
+      copy,
+      /ordinary audience order when no semantic cutoff is available/u,
+    );
+    assert.match(
+      copy,
+      /same gavel falls back to non-interrupting audience order/u,
+    );
     assert.match(copy, /During advocate overtime it becomes Call time/u);
     assert.match(copy, /press S or O without reaching for the buttons/u);
     assert.match(copy, /room controls stay locked/u);
@@ -357,7 +383,10 @@ describe("mode tutorials", () => {
     assert.match(copy, /without inventing a PRISM ballot/u);
     assert.match(copy, /two-second procedural burst/u);
     assert.match(copy, /measured, firm, or aggravated call-time performance/u);
-    assert.match(copy, /Extra strikes during the two-second smash window are local showmanship/u);
+    assert.match(
+      copy,
+      /Extra strikes during the two-second smash window are local showmanship/u,
+    );
     assert.match(copy, /Public prose arrives with the live voice/u);
     assert.match(copy, /Bot advocates use their actual animated bot/u);
     assert.match(copy, /Each visible podium carries its floor holder's glyph/u);
@@ -368,16 +397,20 @@ describe("mode tutorials", () => {
     );
     assert.match(copy, /Auto is the quiet default camera/u);
     assert.match(copy, /cuts instantly/u);
-    assert.match(copy, /Sticky evidence can stay on the table without forcing Wide/u);
     assert.match(
       copy,
-      /Auto also visits the Jury chamber for leanings, deliberation, ballots, and the split/u,
+      /Sticky evidence can stay on the table without forcing Wide/u,
+    );
+    assert.match(
+      copy,
+      /PRISM automatically visits the chamber for leanings, sealed deliberation, ballots, and the split/u,
     );
     assert.match(copy, /Choose a manual view to hold the shot/u);
     assert.match(copy, /only the heard fragment remains public/iu);
     assert.match(copy, /safe Markdown/u);
-    assert.match(copy, /Spoken line timer shows elapsed and total delivery time/u);
-    assert.match(copy, /including when speech audio is disabled/u);
+    assert.match(copy, /Debate time clock.*overall elapsed time/u);
+    assert.match(copy, /including generation and player-wait time/u);
+    assert.match(copy, /freezing during explicit recesses/u);
     assert.match(copy, /setting-independent per-line spoken durations/u);
     assert.match(copy, /Copy verbose transcript/u);
   });
@@ -425,17 +458,31 @@ describe("mode tutorials", () => {
     assert.match(gavelCopy, /brief awkward freeze and spectator glances/u);
     assert.match(gavelCopy, /without stopping the speaker or reveal/u);
     assert.match(gavelCopy, /visible gallery badge and four-bar meter/u);
+    assert.match(gavelCopy, /from every seat in the room/u);
+    assert.match(
+      gavelCopy,
+      /genuinely shocking advocate claim can draw one sparse gasp/u,
+    );
+    assert.match(gavelCopy, /bot Moderator sparsely strikes the gavel/u);
+    assert.match(gavelCopy, /PRISM never takes that authority from you/u);
     assert.match(gavelCopy, /protected mix headroom/u);
-    assert.match(gavelCopy, /\*speaks loudly\* or \*yells over the crowd\*/u);
+    assert.match(gavelCopy, /\*speaks loudly\* or \*shouts\*/u);
+    assert.match(gavelCopy, /never needs to shout/u);
     assert.match(gavelCopy, /control attached directly to the gallery/u);
     assert.match(gavelCopy, /Space serves that ceremonial cue first/u);
     assert.match(
       gavelCopy,
       /single Gavel \x2f Space input follows the live floor/u,
     );
-    assert.match(gavelCopy, /same gavel falls back to non-interrupting audience order/u);
+    assert.match(
+      gavelCopy,
+      /same gavel falls back to non-interrupting audience order/u,
+    );
     assert.match(gavelCopy, /amber countdown explains when Intervene returns/u);
-    assert.match(gavelCopy, /chamber explains why instead of failing silently/u);
+    assert.match(
+      gavelCopy,
+      /chamber explains why instead of failing silently/u,
+    );
     assert.match(gavelCopy, /becomes Call time/u);
     assert.match(gavelCopy, /literally shouts “Objection!”/u);
     assert.match(gavelCopy, /timed Sustained \/ Overruled choice/u);
@@ -618,7 +665,10 @@ describe("mode tutorials", () => {
     ]);
     const copy = MODE_TUTORIALS.slate.steps.map((step) => step.body).join(" ");
     assert.match(copy, /\{wildcards\}/u);
-    assert.match(copy, /clear chapter headings become focused imported sections/u);
+    assert.match(
+      copy,
+      /clear chapter headings become focused imported sections/u,
+    );
     assert.match(copy, /ambiguous formatting stays byte-for-byte/u);
     assert.match(copy, /Mirror setup is never required/u);
     assert.match(copy, /acts, chapters, and scenes as a hierarchy/u);
@@ -879,7 +929,10 @@ describe("mode tutorials", () => {
       /clear table goodbye ends the session naturally/u,
     );
     assert.match(joinStep?.body ?? "", /Review stays quiet/u);
-    assert.match(joinStep?.body ?? "", /remain off camera during the live table/u);
+    assert.match(
+      joinStep?.body ?? "",
+      /remain off camera during the live table/u,
+    );
     assert.match(joinStep?.body ?? "", /Replay seats you as Default Prism/u);
     assert.match(joinStep?.body ?? "", /your Default Prism seat/u);
     assert.doesNotMatch(joinStep?.body ?? "", /Prism leave first/u);
@@ -2047,5 +2100,25 @@ describe("mode tutorials", () => {
       MODE_TUTORIALS.coffee.steps[0]?.body ?? "",
       /organic cut-in through its normal table dynamics; once chosen, the cutoff still happens during that active turn/u,
     );
+  });
+
+  it("teaches Observant as unnoticed holder-only Power immunity", () => {
+    for (const mode of [
+      "chat",
+      "zen",
+      "coffee",
+      "botcast",
+      "debate",
+    ] as const) {
+      const body = MODE_TUTORIALS[mode].steps
+        .map((step) => step.body)
+        .join(" ");
+      assert.match(
+        body,
+        /Observant bot experiences every other bot as their ordinary unpowered self/u,
+      );
+      assert.match(body, /without noticing or naming the ignored Power/u);
+      assert.match(body, /only that holder's experience/u);
+    }
   });
 });

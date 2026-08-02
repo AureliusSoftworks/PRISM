@@ -154,14 +154,13 @@ describe("Debate audience pressure", () => {
     );
   });
 
-  it("keeps non-Judge sessions settled and selects stable band-sized talkers", () => {
-    assert.equal(
+  it("keeps non-Judge galleries alive and selects stable band-sized talkers", () => {
+    assert.ok(
       debateAudiencePressureScore({
         events: [event("spectator", 1)],
         formality: "free_for_all",
         playerRole: "spectator",
-      }),
-      0,
+      }) > 0,
     );
     const first = debateAudienceTalkerIndices({
       band: "restless",

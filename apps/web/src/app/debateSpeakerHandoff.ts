@@ -6,15 +6,15 @@ export type DebateSpeakerHandoffPhase =
 
 export const DEBATE_SPEAKER_HANDOFF_TIMING = {
   /** Camera travel plus a short hold to read the gallery. */
-  wideAudienceMs: 1_400,
+  wideAudienceMs: 2_000,
   /** Time for a newly cited table item to register before the close shot. */
-  evidenceMs: 1_150,
+  evidenceMs: 1_350,
   /** One render boundary when no evidence needs a dedicated hold. */
   eventArmMs: 120,
   /** Matches the Forum camera's authored 900 ms travel with a small handle. */
   cameraSettleMs: 1_020,
   /** Quiet physical readiness even when audio is unavailable or inappropriate. */
-  quietReadyMs: 360,
+  quietReadyMs: 520,
 } as const;
 
 const DEBATE_STAGE_SPEAKER_KINDS = new Set<DebateEventV1["speakerKind"]>([

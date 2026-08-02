@@ -292,6 +292,19 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       created_at TEXT NOT NULL,
       last_active_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS model_reasoning_effort_preferences (
+      user_id TEXT NOT NULL,
+      provider TEXT NOT NULL
+        CHECK(provider IN ('local', 'openai', 'anthropic')),
+      model_id TEXT NOT NULL,
+      effort TEXT NOT NULL
+        CHECK(effort IN ('none', 'minimal', 'low', 'medium', 'high', 'xhigh')),
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, provider, model_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_model_effort_preferences_user_updated
+      ON model_reasoning_effort_preferences(user_id, updated_at DESC);
     CREATE TABLE IF NOT EXISTS legal_acceptances (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,

@@ -9,9 +9,72 @@ export const REASONING_EFFORT_VALUES = [
 ] as const;
 
 export type ReasoningEffort = (typeof REASONING_EFFORT_VALUES)[number];
-export type RequestReasoningEffort = Exclude<ReasoningEffort, "auto" | "none">;
+export type RequestReasoningEffort = Exclude<ReasoningEffort, "auto">;
 export type NativeReasoningEffortProvider = "local" | "openai" | "anthropic";
 export type AnthropicRequestReasoningEffort = "low" | "medium" | "high" | "xhigh" | "max";
+
+export const MODEL_REASONING_EFFORT_PREFERENCE_VALUES = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const;
+
+export type ModelReasoningEffortPreference =
+  (typeof MODEL_REASONING_EFFORT_PREFERENCE_VALUES)[number];
+
+export interface ModelReasoningEffortPreferenceV1 {
+  provider: NativeReasoningEffortProvider;
+  modelId: string;
+  effort: ModelReasoningEffortPreference;
+  updatedAt?: string;
+}
+
+export interface ModelReasoningEffortCapabilityV1 {
+  mode: "native" | "simulated" | "unavailable";
+  levels: readonly ModelReasoningEffortPreference[];
+  supportsNone: boolean;
+  disabledReason?: string;
+}
+
+const OPENAI_BASE_REASONING_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+const OPENAI_MODERN_REASONING_LEVELS = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+const OPENAI_GPT_5_1_REASONING_LEVELS = [
+  "none",
+  "low",
+  "medium",
+  "high",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+const ANTHROPIC_REASONING_LEVELS = [
+  "low",
+  "medium",
+  "high",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+const ANTHROPIC_XHIGH_REASONING_LEVELS = [
+  ...ANTHROPIC_REASONING_LEVELS,
+  "xhigh",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+const LOCAL_SIMULATED_REASONING_LEVELS = [
+  "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const satisfies readonly ModelReasoningEffortPreference[];
 
 export function normalizeReasoningEffort(value: unknown): ReasoningEffort {
   if (typeof value !== "string") return "auto";
@@ -25,7 +88,27 @@ export function reasoningEffortForRequest(
   value: unknown
 ): RequestReasoningEffort | null {
   const normalized = normalizeReasoningEffort(value);
-  return normalized === "auto" || normalized === "none" ? null : normalized;
+  return normalized === "auto" ? null : normalized;
+}
+
+export function normalizeModelReasoningEffortPreference(
+  value: unknown,
+): ModelReasoningEffortPreference | null {
+  if (typeof value !== "string") return null;
+  const normalized = value.trim().toLowerCase();
+  if (normalized === "auto" || normalized === "default") return null;
+  return (
+    MODEL_REASONING_EFFORT_PREFERENCE_VALUES as readonly string[]
+  ).includes(normalized)
+    ? (normalized as ModelReasoningEffortPreference)
+    : null;
+}
+
+export function modelReasoningEffortPreferenceKey(
+  provider: NativeReasoningEffortProvider,
+  modelId: string,
+): string {
+  return `${provider}:${modelId.trim()}`;
 }
 
 export function openAiModelSupportsReasoningEffort(modelId: string): boolean {
@@ -35,6 +118,37 @@ export function openAiModelSupportsReasoningEffort(modelId: string): boolean {
   if (normalized.endsWith("-chat-latest")) return false;
   if (/^(?:o1|o3|o4|o5)(?:-|$)/.test(normalized)) return true;
   return normalized.startsWith("gpt-5");
+}
+
+function openAiGpt5MinorVersion(modelId: string): number | null {
+  const normalized = modelId.trim().toLowerCase();
+  const match = normalized.match(/^gpt-5(?:\.(\d+))?(?:-|$)/);
+  if (!match) return null;
+  return Number(match[1] ?? 0);
+}
+
+function openAiModelIsFixedHigh(modelId: string): boolean {
+  return /^gpt-5(?:\.\d+)?-pro(?:-|$)/.test(modelId.trim().toLowerCase());
+}
+
+export function openAiReasoningEffortLevels(
+  modelId: string,
+): readonly ModelReasoningEffortPreference[] {
+  if (!openAiModelSupportsReasoningEffort(modelId)) return [];
+  if (openAiModelIsFixedHigh(modelId)) return [];
+  const minor = openAiGpt5MinorVersion(modelId);
+  if (minor === 1) return OPENAI_GPT_5_1_REASONING_LEVELS;
+  if (minor !== null && minor >= 2) return OPENAI_MODERN_REASONING_LEVELS;
+  return OPENAI_BASE_REASONING_LEVELS;
+}
+
+export function openAiReasoningEffortForRequest(
+  modelId: string,
+  value: unknown,
+): RequestReasoningEffort | null {
+  const requested = reasoningEffortForRequest(value);
+  if (!requested) return null;
+  return openAiReasoningEffortLevels(modelId).includes(requested) ? requested : null;
 }
 
 type AnthropicModelVersion = {
@@ -105,13 +219,80 @@ export function modelSupportsNativeReasoningEffort(
   return false;
 }
 
+export function resolveModelReasoningEffortCapability(args: {
+  provider: NativeReasoningEffortProvider;
+  modelId: string;
+  simulatedLocalEnabled?: boolean;
+}): ModelReasoningEffortCapabilityV1 {
+  if (args.provider === "local") {
+    if (args.simulatedLocalEnabled === true) {
+      return {
+        mode: "simulated",
+        levels: LOCAL_SIMULATED_REASONING_LEVELS,
+        supportsNone: false,
+      };
+    }
+    return {
+      mode: "unavailable",
+      levels: [],
+      supportsNone: false,
+      disabledReason: "Enable simulated local effort in Settings.",
+    };
+  }
+  if (args.provider === "openai") {
+    const levels = openAiReasoningEffortLevels(args.modelId);
+    return levels.length > 0
+      ? {
+          mode: "native",
+          levels,
+          supportsNone: levels.includes("none"),
+        }
+      : {
+          mode: "unavailable",
+          levels: [],
+          supportsNone: false,
+          disabledReason: openAiModelIsFixedHigh(args.modelId)
+            ? "This model uses a fixed reasoning effort."
+            : "This model does not expose adjustable effort.",
+        };
+  }
+  if (anthropicModelSupportsReasoningEffort(args.modelId)) {
+    const levels = anthropicModelSupportsXHighReasoningEffort(args.modelId)
+      ? ANTHROPIC_XHIGH_REASONING_LEVELS
+      : ANTHROPIC_REASONING_LEVELS;
+    return {
+      mode: "native",
+      levels,
+      supportsNone: false,
+    };
+  }
+  return {
+    mode: "unavailable",
+    levels: [],
+    supportsNone: false,
+    disabledReason: "This model does not expose adjustable effort.",
+  };
+}
+
+export function effectiveModelReasoningEffort(args: {
+  provider: NativeReasoningEffortProvider;
+  modelId: string;
+  preference: unknown;
+  simulatedLocalEnabled?: boolean;
+}): ModelReasoningEffortPreference | null {
+  const preference = normalizeModelReasoningEffortPreference(args.preference);
+  if (!preference) return null;
+  const capability = resolveModelReasoningEffortCapability(args);
+  return capability.levels.includes(preference) ? preference : null;
+}
+
 export function anthropicReasoningEffortForRequest(
   modelId: string,
   value: unknown
 ): AnthropicRequestReasoningEffort | null {
   if (!anthropicModelSupportsReasoningEffort(modelId)) return null;
   const effort = reasoningEffortForRequest(value);
-  if (!effort) return null;
+  if (!effort || effort === "none") return null;
   if (effort === "minimal") return "low";
   if (effort !== "xhigh") return effort;
   if (anthropicModelSupportsXHighReasoningEffort(modelId)) return "xhigh";

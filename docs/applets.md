@@ -29,15 +29,15 @@ ship as `0.5.2` while Coffee is `v0.7`.
 
 | Applet  | Version | Status             | Notes                                                                                                                                                                                                                                                                                                       |
 | ------- | ------- | ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| Chat    | v1.35   | Active             | Full playground with independent saved conversations, six-tier size presentation, and player-safe Quiet/Loud behavior inside each PRISM or persona Home.                                                                                                                                                    |
-| Zen     | v1.33   | Active             | Calm one-to-one continuity with draggable six-tier embodiment, direct human access, and holder-scoped bot-naming and social-reaction cues.                                                                                                                                                                  |
-| Coffee  | v2.41   | Active             | Two-to-five-bot tables with six-tier bodies, listener-specific Quiet hearing, one-peer Loud annoyance, composable identity Powers, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                                                                                                          |
-| Signal  | v1.52   | Active             | Interview studio with frozen six-tier bodies, replayed peer-hearing and one-peer annoyance outcomes, and Power-permissive bot or Producer-guest encounters.                                                                                                                                                 |
-| Debate  | v0.4    | Preview            | Power-permissive Forum and Turnabout proceedings with frozen public sources and object exhibits, explicit advocacy consent, organic cast reactions, and durable verdicts. After completion: sibling Jury commentary with header copy, Coffee-style session synopsis, and ephemeral pick-a-bot inquiry into frozen reasoning. Object exhibits use an approved `{ADJECTIVE} {OBJECT}` record plus emoji, uploaded art, or a consistent synthesized stage sprite. Territory / Your idea accepts Prompt Center prompts and wildcard decks. |
+| Chat    | v1.36   | Active             | Full playground with independent saved conversations, six-tier size presentation, and player-safe Quiet/Loud behavior inside each PRISM or persona Home.                                                                                                                                                    |
+| Zen     | v1.34   | Active             | Calm one-to-one continuity with draggable six-tier embodiment, direct human access, and holder-scoped bot-naming and social-reaction cues.                                                                                                                                                                  |
+| Coffee  | v2.42   | Active             | Two-to-five-bot tables with six-tier bodies, listener-specific Quiet hearing, one-peer Loud annoyance, composable identity Powers, local-only café Jazz beds, and faithful replay that seats Default Prism for the player.                                                                                                          |
+| Signal  | v1.53   | Active             | Interview studio with frozen six-tier bodies, replayed peer-hearing and one-peer annoyance outcomes, and Power-permissive bot or Producer-guest encounters.                                                                                                                                                 |
+| Debate  | v0.5    | Preview            | Power-permissive Forum and Turnabout proceedings with frozen public sources and object exhibits, explicit advocacy consent, organic cast reactions, and durable verdicts. After completion: sibling Jury commentary with header copy, Coffee-style session synopsis, and ephemeral pick-a-bot inquiry into frozen reasoning. Object exhibits use an approved `{ADJECTIVE} {OBJECT}` record plus emoji, uploaded art, or a consistent synthesized stage sprite. Territory / Your idea accepts Prompt Center prompts and wildcard decks. |
 | Polling | v0.0    | Planned            | AI-powered polling across bot groups.                                                                                                                                                                                                                                                                       |
 | Feed    | v0.0    | Planned            | BotBook-style social feed.                                                                                                                                                                                                                                                                                  |
 | Games   | v0.0    | Planned            | Boardgame-like bot matches.                                                                                                                                                                                                                                                                                 |
-| Story   | v0.29   | Planned (disabled) | Early implementation retained for future work, but excluded from release navigation and session restoration.                                                                                                                                                                                                |
+| Story   | v0.30   | Planned (disabled) | Early implementation retained for future work, but excluded from release navigation and session restoration.                                                                                                                                                                                                |
 | Gym     | v0.0    | Planned            | Bot training and memory-development surface.                                                                                                                                                                                                                                                                |
 | Slate   | v0.8    | Preview            | Manuscript-first Writer's Cockpit with rich focused editing, durable AI proposals, in-canvas Continuity clarification, a curated Story Bible, safe section review exports, and private recovery.                                                                                                            |
 | Pseudo  | v0.0    | Planned            | Sketch/system space for almost-code.                                                                                                                                                                                                                                                                        |
@@ -88,7 +88,25 @@ stages do not block the standalone preview.
   Feed, Games, Gym, Pseudo, Surf, and other unimplemented applets remain
   deferred until they define both perspectives.
 
+## Power immunity policy
+
+- A ready `Observant` or `Perceptive` Power removes every other bot's Power
+  layer only from its holder's perception and behavior. The holder sees, hears,
+  understands, identifies, and responds to each bot's ordinary baseline.
+- The holder never notices, names, explains, or contrasts the ignored Power.
+  The player and all other bots retain their normal live and replay projections.
+- Two immune holders therefore meet as ordinary bots. Chat, Zen, Coffee,
+  Signal, and Debate support this directly; Story adapts it during generation.
+  Slate is irrelevant, and unimplemented applets remain deferred.
+
 ## Changelog
+
+### 2026-08-01
+
+- Added the holder-only `Observant` / `Perceptive` Power contract across Chat,
+  Zen, Coffee, Signal, Debate, and the retained Story runtime. It sees Ryuk,
+  understands Mumbling Jim, ignores targeted Power pressure, and never notices
+  the absent Power layer; every other observer's experience remains unchanged.
 
 ### 2026-07-29
 

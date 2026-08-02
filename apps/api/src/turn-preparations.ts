@@ -259,6 +259,22 @@ export class TurnPreparationRegistry {
     return clonePreparation(entry.public);
   }
 
+  discardUser(
+    userId: string,
+    reason: string,
+  ): PreparedTurnV1[] {
+    const discarded: PreparedTurnV1[] = [];
+    for (const entry of this.#entries.values()) {
+      if (entry.userId !== userId) continue;
+      const previousPhase = entry.public.phase;
+      this.#discardEntry(entry, reason);
+      if (previousPhase !== "discarded" && entry.public.phase === "discarded") {
+        discarded.push(clonePreparation(entry.public));
+      }
+    }
+    return discarded;
+  }
+
   async commit<TResult>(
     input: CommitTurnPreparationInput<TResult>,
   ): Promise<{ preparation: PreparedTurnV1; value: TResult }> {

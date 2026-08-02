@@ -59,6 +59,7 @@ export type BotPowerMoodBoostModePolicy = BotPowerGhostModePolicy;
 export type BotPowerMoodDrainModePolicy = BotPowerGhostModePolicy;
 export type BotPowerThemeCompoundModePolicy = BotPowerGhostModePolicy;
 export type BotPowerSpectralPerceptionModePolicy = BotPowerGhostModePolicy;
+export type BotPowerImmunityModePolicy = BotPowerGhostModePolicy;
 export type BotPowerDesignationModePolicy = BotPowerGhostModePolicy;
 
 export interface PrismAppletVersion {
@@ -72,19 +73,19 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.35",
+    version: "1.36",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.33",
+    version: "1.34",
     status: "active",
   },
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.4",
+    version: "0.5",
     status: "preview",
   },
   polling: {
@@ -96,13 +97,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.41",
+    version: "2.42",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.52",
+    version: "1.53",
     status: "active",
   },
   feed: {
@@ -120,7 +121,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   story: {
     id: "story",
     name: "Story",
-    version: "0.29",
+    version: "0.30",
     status: "planned",
   },
   gym: {
@@ -173,6 +174,26 @@ export const BOT_POWER_DESIGNATION_MODE_POLICY: Record<
 export const BOT_POWER_SPECTRAL_PERCEPTION_MODE_POLICY: Record<
   PrismAppletId,
   BotPowerSpectralPerceptionModePolicy
+> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Other bots' Powers disappear only through the holder's participant view. */
+export const BOT_POWER_IMMUNITY_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerImmunityModePolicy
 > = {
   chat: "direct",
   zen: "direct",

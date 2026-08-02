@@ -1224,9 +1224,6 @@ function storySessionCreateCapability(
       ...(typeof input.modelOverride === "string"
         ? { modelOverride: input.modelOverride }
         : {}),
-      ...(typeof input.reasoningEffort === "string"
-        ? { reasoningEffort: input.reasoningEffort }
-        : {}),
       ...(input.theme &&
       typeof input.theme === "object" &&
       !Array.isArray(input.theme)

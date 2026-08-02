@@ -260,6 +260,41 @@ class JudgeGavelProvider extends DebateProviderStub {
   }
 }
 
+class AutomaticAudienceOrderProvider extends DebateProviderStub {
+  public orderPrompt = "";
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("public gallery just gasped")) {
+      this.orderPrompt = text;
+      return JSON.stringify({
+        content: "*shouts over the crowd* ORDER! ORDER IN THE COURT!",
+        deliveryCue: "shouts",
+      });
+    }
+    if (
+      text.includes("Give the Build Near Rail opening address") ||
+      text.includes("Give the Build Near Rail opening argument")
+    ) {
+      return JSON.stringify({
+        content: "That is an outrageous lie, and you are completely wrong!",
+      });
+    }
+    if (
+      text.includes("Fire pressable shot") ||
+      text.includes("Deliver pressable claim")
+    ) {
+      return JSON.stringify({
+        content: "That is an outrageous lie, and your whole claim is wrong!",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
 class ParticipantObjectionProvider extends DebateProviderStub {
   public moderatorPrompt = "";
   public continuationPrompt = "";
@@ -355,6 +390,9 @@ class JuryProvider extends DebateProviderStub {
         confidence: 0.72,
         personaInstinct: "I notice whether the case answers the motion.",
         reason: "The For side answered the central tradeoff more directly.",
+        deliveryCue: text.includes("Cast your final independent Jury ballot")
+          ? "solemn"
+          : null,
       });
     }
     if (text.includes("silently route one natural turn")) {
@@ -390,9 +428,35 @@ class EvidenceJuryProvider extends JuryProvider {
       return JSON.stringify({
         sideId: "for",
         confidence: 0.72,
-        personaInstinct: "I notice whether the source reaches the decisive claim.",
+        personaInstinct:
+          "I notice whether the source reaches the decisive claim.",
         reason:
           "The source supports the narrower scarcity premise, not every claimed remedy [[source:housing-1]] [[source:invented]].",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class EvidenceCoverageProvider extends JuryProvider {
+  public coveragePrompts: string[] = [];
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    const assignment = text.split("Evidence participation assignment:")[1];
+    if (assignment) {
+      this.coveragePrompts.push(text);
+      const bounded = assignment.split(
+        /\n(?:An audible floor clock|Public debate so far:)/u,
+      )[0];
+      const markers = [
+        ...new Set(bounded?.match(/\[\[(?:source|exhibit):[^\]]+\]\]/gu) ?? []),
+      ];
+      return JSON.stringify({
+        content: `These frozen items sharpen the clash: ${markers.join(" ")}.`,
       });
     }
     return super.generateResponse(messages, options);
@@ -456,8 +520,30 @@ class PersonaVoicePromptProvider extends DebateProviderStub {
   ): Promise<string> {
     const text = messages.map((message) => message.content).join("\n");
     if (text.includes("Vote independently")) this.ballotPrompt = text;
-    else if (!text.includes("private advocacy consent check")) {
+    else if (
+      !text.includes("private advocacy consent check") &&
+      !text.includes("The gavel has already struck")
+    ) {
       this.speechPrompt = text;
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class VoicePerformanceProvider extends DebateProviderStub {
+  public performancePrompt = "";
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (!text.includes("private advocacy consent check")) {
+      this.performancePrompt = text;
+      return JSON.stringify({
+        content: "This deserves to be heard with real conviction.",
+        deliveryCue: "excited",
+      });
     }
     return super.generateResponse(messages, options);
   }
@@ -548,6 +634,22 @@ class TurnaboutProvider extends DebateProviderStub {
         evidenceQuote: "A frozen housing source",
         reason:
           "The frozen source conflicts with the statement's central constraint.",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class SunriseTurnaboutProvider extends TurnaboutProvider {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("Deliver pressable claim")) {
+      return JSON.stringify({
+        content:
+          "I often try to paint a beautiful sunrise each morning, and on those days I study how the colors meet.",
       });
     }
     return super.generateResponse(messages, options);
@@ -1045,6 +1147,24 @@ function ryukInvisiblePowers(): BotPowerV1[] {
   ];
 }
 
+function observantPowers(): BotPowerV1[] {
+  return [
+    readyPower(
+      "observant",
+      "Observant",
+      "See past every other bot's Power and treat it as if it does not exist.",
+      [
+        {
+          type: "power_immunity",
+          scope: "holder",
+          targets: "other_bots",
+          awareness: "unnoticed",
+        },
+      ],
+    ),
+  ];
+}
+
 function microscopicPowers(): BotPowerV1[] {
   return [
     readyPower(
@@ -1239,6 +1359,7 @@ async function createJuryDebateForRole(
     sources: [],
     frozenAt: null,
   },
+  firstJurorPowers: BotPowerV1[] = [],
 ) {
   const debateRuntime = runtimeWith(provider);
   seedBot(db, "moderator", "Mira");
@@ -1249,7 +1370,7 @@ async function createJuryDebateForRole(
       db,
       `juror-${index + 1}`,
       `Library Juror ${index + 1}`,
-      [],
+      index === 0 ? firstJurorPowers : [],
       `Library Juror ${index + 1} values a distinct part of the public record.`,
     );
   }
@@ -1379,7 +1500,10 @@ describe("Debate engine", () => {
       fileURLToPath(new URL("../debate.ts", import.meta.url)),
       "utf8",
     );
-    assert.match(source, /export async function generateDebateSessionSynopsis/u);
+    assert.match(
+      source,
+      /export async function generateDebateSessionSynopsis/u,
+    );
     assert.match(source, /usagePurpose: "debate_synopsis"/u);
     assert.match(source, /export async function chatWithDebateDebriefBot/u);
     assert.match(source, /usagePurpose: "debate_debrief"/u);
@@ -1401,10 +1525,7 @@ describe("Debate engine", () => {
     const db = createTestDb();
     try {
       const session = await createDebateForRole(db, "spectator");
-      assert.equal(
-        listDebateSessions(db, "user-1")[0]?.activeDurationMs,
-        null,
-      );
+      assert.equal(listDebateSessions(db, "user-1")[0]?.activeDurationMs, null);
       const event: DebateEventV1 = {
         version: 1,
         id: "archive-runtime-speech",
@@ -1507,9 +1628,15 @@ describe("Debate engine", () => {
       assert.equal(result.generated, true);
       assert.match(prompt, /Museum ethics/u);
       assert.match(prompt, /surprising, concrete physical exhibit/u);
-      assert.match(prompt, /single-word adjective followed by one tangible object/u);
+      assert.match(
+        prompt,
+        /single-word adjective followed by one tangible object/u,
+      );
       assert.match(prompt, /Rejected candidates: old potato/u);
-      assert.match(prompt, /Avery favors concrete institutional accountability/u);
+      assert.match(
+        prompt,
+        /Avery favors concrete institutional accountability/u,
+      );
       assert.match(prompt, /editable candidate only/u);
       const stored = db
         .prepare("SELECT COUNT(*) AS count FROM debate_sessions")
@@ -1525,6 +1652,39 @@ describe("Debate engine", () => {
       debateSource,
       /\b(?:FROM|INTO|UPDATE)\s+(?:memories|memory_summaries|conversations|messages)\b/iu,
     );
+  });
+
+  it("keeps Power-obfuscated clear speech out of the player Debate payload", async () => {
+    const db = createTestDb();
+    try {
+      const session = await createDebateForRole(db, "spectator");
+      const event: DebateEventV1 = {
+        version: DEBATE_SCHEMA_VERSION,
+        id: "mumbled-event",
+        sequence: session.events.length + 1,
+        phase: session.phase,
+        stepKey: session.stepKey,
+        kind: "speech",
+        speakerKind: "advocate",
+        speakerBotId: session.forAdvocate.id,
+        sideId: "for",
+        content: "Blarf mrrn glabble.",
+        powerIntendedContent: "The archive key is beneath the glass.",
+        sourceIds: [],
+        createdAt: NOW,
+      };
+      const projected = debateSessionForPlayer({
+        ...session,
+        events: [...session.events, event],
+      });
+      const projectedEvent = projected.events.at(-1);
+
+      assert.equal(projectedEvent?.content, event.content);
+      assert.equal(projectedEvent?.powerIntendedContent, undefined);
+      assert.doesNotMatch(JSON.stringify(projected), /archive key/iu);
+    } finally {
+      db.close();
+    }
   });
 
   it("keeps a Persona comment on every advocacy willingness result", async () => {
@@ -1997,7 +2157,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("runs private leanings, a shortened deliberation, a skipped remainder, and five final ballots", async () => {
+  it("prepares all final Jury monologues behind sealed deliberation, then reveals five ballots", async () => {
     const db = createTestDb();
     try {
       const created = await createJuryDebateForRole(db, "spectator", 5);
@@ -2037,19 +2197,21 @@ describe("Debate engine", () => {
         },
         created.runtime,
       );
-      assert.equal(session.jury.discussionTurnCount, 1);
       assert.equal(
-        session.events.filter((event) => event.kind === "jury_deliberation")
-          .length,
-        1,
+        session.jury.discussionTurnCount,
+        session.jury.discussionTurnTarget,
       );
-
-      session = skipDebateJuryDeliberation(db, "user-1", session.id, {
-        expectedRevision: session.revision,
-        idempotencyKey: "jury:skip-deliberation:0001",
-      });
+      assert.equal(session.jury.preparedFinalBallots.length, 5);
+      assert.equal(session.jury.finalBallots.length, 0);
       assert.equal(session.stepKey, "jury_final_0");
-      assert.ok(session.jury.calledVoteAt);
+      assert.equal(
+        session.events.filter(
+          (event) =>
+            event.kind === "jury_deliberation" &&
+            !event.stepKey.startsWith("jury_sidebar_"),
+        ).length,
+        0,
+      );
 
       let sawVerdictHandoff = false;
       while (session.status !== "completed") {
@@ -2126,6 +2288,7 @@ describe("Debate engine", () => {
       assert.deepEqual(participant.jury.jurors, []);
       assert.equal(participant.jury.forepersonBotId, null);
       assert.deepEqual(participant.jury.initialBallots, []);
+      assert.deepEqual(participant.jury.preparedFinalBallots, []);
       assert.deepEqual(participant.jury.finalBallots, []);
       assert.deepEqual(participant.jury.speakerCounts, {});
       assert.equal(participant.jury.forVotes, session.jury.forVotes);
@@ -2216,8 +2379,7 @@ describe("Debate engine", () => {
       );
       assert.deepEqual(
         session.events.find(
-          (event) =>
-            event.kind === "speech" && event.speakerBotId === "for",
+          (event) => event.kind === "speech" && event.speakerBotId === "for",
         )?.sourceIds,
         ["housing-1"],
       );
@@ -2244,19 +2406,19 @@ describe("Debate engine", () => {
 
       assert.equal(provider.ballotPrompts.length, 10);
       for (const prompt of provider.ballotPrompts) {
-        assert.match(prompt, /Frozen evidence packet \(reference definitions/u);
+        assert.match(prompt, /Publicly used frozen evidence/u);
         assert.match(prompt, /Rail Housing Evidence/u);
         assert.match(
           prompt,
           /Vacant rail-adjacent parcels are scarce in the surveyed corridor\./u,
         );
         assert.match(prompt, /A citation is not a vote/u);
-        assert.match(prompt, /what the item actually supports or fails to support/u);
+        assert.match(
+          prompt,
+          /what the item actually supports or fails to support/u,
+        );
       }
-      assert.match(
-        provider.discussionPrompt,
-        /what that item actually supports or fails to support/u,
-      );
+      assert.equal(provider.discussionPrompt, "");
 
       const ballotEvents = session.events.filter(
         (event) => event.kind === "ballot" && event.speakerKind === "juror",
@@ -2277,6 +2439,172 @@ describe("Debate engine", () => {
           (ballot) =>
             ballot.reason.includes("[[source:housing-1]]") &&
             !ballot.reason.includes("[[source:invented]]"),
+        ),
+        true,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("assigns every frozen evidence item to public advocate turns, prioritizing object exhibits", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new EvidenceCoverageProvider();
+      const evidence: DebateEvidencePacketV1 = {
+        version: 1,
+        notes: "Use every item where it genuinely bears on the motion.",
+        sources: [
+          {
+            id: "source-a",
+            title: "Source A",
+            url: "https://example.com/a",
+            snippet: "Source A supplies a narrow factual premise.",
+          },
+          {
+            id: "source-b",
+            title: "Source B",
+            url: "https://example.com/b",
+            snippet: "Source B supplies a competing limitation.",
+          },
+          {
+            id: "source-c",
+            title: "Source C",
+            url: "https://example.com/c",
+            snippet: "Source C supplies useful historical context.",
+          },
+        ],
+        exhibits: [
+          {
+            id: "exhibit-key",
+            adjective: "Worn",
+            object: "key and kite",
+            title: "Old Key and Kite",
+            observation: "A worn key tied to a short length of kite string.",
+            emoji: "🗝️",
+            visualKind: "emoji",
+            imageId: null,
+            createdBy: "player",
+          },
+          {
+            id: "exhibit-hat",
+            adjective: "Blond",
+            object: "toupet",
+            title: "Blond Toupet",
+            observation: "A blond hairpiece sealed in a clear evidence sleeve.",
+            emoji: "🟨",
+            visualKind: "emoji",
+            imageId: null,
+            createdBy: "player",
+          },
+        ],
+        frozenAt: null,
+      };
+      const created = await createJuryDebateForRole(
+        db,
+        "spectator",
+        5,
+        "forum",
+        provider,
+        "plainspoken",
+        evidence,
+      );
+      let session = created.session;
+      let mutation = 0;
+      while (session.phase !== "verdict") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `evidence-coverage:advance:${mutation}`,
+          },
+          created.runtime,
+        );
+        assert.ok(mutation < 20);
+      }
+
+      const publicIds = new Set(
+        session.events.flatMap((event) => event.sourceIds),
+      );
+      assert.deepEqual([...publicIds].sort(), [
+        "exhibit-hat",
+        "exhibit-key",
+        "source-a",
+        "source-b",
+        "source-c",
+      ]);
+      assert.ok(provider.coveragePrompts.length >= 3);
+      const firstAssignment = provider.coveragePrompts[0]
+        ?.split("Evidence participation assignment:")[1]
+        ?.split(/\nAn audible floor clock/u)[0];
+      assert.match(firstAssignment ?? "", /\[\[exhibit:exhibit-key\]\]/u);
+      assert.match(firstAssignment ?? "", /\[\[exhibit:exhibit-hat\]\]/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps unpresented sealed exhibits out of Jury prompts and language", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new JuryProvider();
+      const created = await createJuryDebateForRole(
+        db,
+        "spectator",
+        5,
+        "forum",
+        provider,
+        "plainspoken",
+        {
+          version: 1,
+          notes: "",
+          sources: [],
+          exhibits: [
+            {
+              id: "sealed-key",
+              adjective: "Worn",
+              object: "key and kite",
+              title: "Old Key and Kite",
+              observation: "A worn key tied to kite string.",
+              emoji: "🗝️",
+              visualKind: "emoji",
+              imageId: null,
+              createdBy: "player",
+            },
+          ],
+          frozenAt: null,
+        },
+      );
+      let session = endDebateSessionEarly(db, "user-1", created.session.id, {
+        expectedRevision: created.session.revision,
+        idempotencyKey: "sealed-jury:end-early",
+      });
+      let mutation = 0;
+      while (session.stepKey !== "jury_final_0") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `sealed-jury:advance:${mutation}`,
+          },
+          created.runtime,
+        );
+        assert.ok(mutation < 8);
+      }
+
+      assert.equal(provider.ballotPrompts.length, 10);
+      assert.equal(
+        provider.ballotPrompts.every(
+          (prompt) =>
+            !prompt.includes("Old Key and Kite") &&
+            !prompt.includes("sealed-key") &&
+            prompt.includes("Unpresented items from the sealed packet"),
         ),
         true,
       );
@@ -2451,7 +2779,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("balances a normal five-turn Jury discussion across all five speakers", async () => {
+  it("keeps formal Jury deliberation silent while preparing five independent ballots", async () => {
     const db = createTestDb();
     try {
       const created = await createJuryDebateForRole(db, "spectator", 5);
@@ -2472,17 +2800,83 @@ describe("Debate engine", () => {
         assert.ok(mutation < 48);
       }
       assert.equal(session.jury.discussionTurnCount, 5);
-      const speakerCounts = Object.values(session.jury.speakerCounts);
-      assert.ok(speakerCounts.length >= 5);
-      assert.ok(speakerCounts.every((count) => count <= 2));
+      assert.deepEqual(session.jury.speakerCounts, {});
       assert.equal(
         session.events.filter(
           (event) =>
             event.kind === "jury_deliberation" &&
             !event.stepKey.startsWith("jury_sidebar_"),
         ).length,
-        5,
+        0,
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("applies a juror's speech-obfuscation Power to the saved final reason and audible ballot event", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new JuryProvider();
+      const intendedReason =
+        "The For side answered the central tradeoff more directly.";
+      const created = await createJuryDebateForRole(
+        db,
+        "spectator",
+        5,
+        "forum",
+        provider,
+        "plainspoken",
+        {
+          version: 1,
+          notes: "",
+          sources: [],
+          frozenAt: null,
+        },
+        [
+          readyPower(
+            "jury-gibberish",
+            "Gibberish ballot",
+            "Every public utterance is audible gibberish.",
+            [{ type: "speech_obfuscation", mode: "gibberish" }],
+          ),
+        ],
+      );
+      let session = endDebateSessionEarly(db, "user-1", created.session.id, {
+        expectedRevision: created.session.revision,
+        idempotencyKey: "jury:gibberish:end-early",
+      });
+      let mutation = 0;
+      while (session.status !== "completed") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `jury:gibberish:advance:${mutation}`,
+          },
+          created.runtime,
+        );
+        assert.ok(mutation < 24);
+      }
+
+      const expectedReason = applyBotPowerMumbledResponseV1(intendedReason);
+      const ballot = session.jury.finalBallots.find(
+        (candidate) => candidate.jurorBotId === "juror-1",
+      );
+      const event = session.events.find(
+        (candidate) =>
+          candidate.kind === "ballot" && candidate.speakerBotId === "juror-1",
+      );
+      assert.equal(ballot?.sideId, "for");
+      assert.equal(ballot?.reason, expectedReason);
+      assert.equal(ballot?.voicePerformanceCue, "solemn");
+      assert.equal(event?.sideId, "for");
+      assert.equal(event?.content, expectedReason);
+      assert.equal(event?.voicePerformanceCue, "solemn");
+      assert.doesNotMatch(event?.content ?? "", /central tradeoff/u);
     } finally {
       db.close();
     }
@@ -2816,6 +3210,34 @@ describe("Debate engine", () => {
     }
   });
 
+  it("stores bounded voice direction outside canonical Debate speech", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new VoicePerformanceProvider();
+      const debateRuntime = runtimeWith(provider);
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "debate.advance:voice-performance:0001",
+        },
+        debateRuntime,
+      );
+      const event = session.events.at(-1);
+      assert.equal(event?.voicePerformanceCue, "excited");
+      assert.doesNotMatch(event?.content ?? "", /\[excited\]/u);
+      assert.match(provider.performancePrompt, /Choose deliveryCue only/u);
+      assert.match(provider.performancePrompt, /Never put the cue/u);
+    } finally {
+      db.close();
+    }
+  });
+
   it("has the moderator announce each timed Forum floor allocation aloud", async () => {
     const db = createTestDb();
     const provider = new PersonaVoicePromptProvider();
@@ -3061,7 +3483,10 @@ describe("Debate engine", () => {
           event.speakerBotId === session.forAdvocate.id,
       );
       assert.ok(opening);
-      assert.match(provider.speechPrompt, /keep your own name exactly "Avery"/u);
+      assert.match(
+        provider.speechPrompt,
+        /keep your own name exactly "Avery"/u,
+      );
       assert.match(provider.speechPrompt, /apply suffix "Bot"/u);
       assert.doesNotMatch(provider.speechPrompt, /"type":"designation"/u);
       assert.match(opening.content, /Basil Bot misses the point/u);
@@ -3288,6 +3713,118 @@ describe("Debate engine", () => {
     }
   });
 
+  it("lets a bot Moderator answer a shocking line with a persona-shaped order call", async () => {
+    const db = createTestDb();
+    const provider = new AutomaticAudienceOrderProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+        formality: "free_for_all",
+        moderatorSystemPrompt:
+          "Mira is an impatient ringmaster who restores order with theatrical force.",
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "automatic-audience-order:intro",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "automatic-audience-order:opening",
+        },
+        debateRuntime,
+      );
+
+      const opening = session.events.find(
+        (event) => event.kind === "speech" && event.stepKey === "opening_for",
+      );
+      assert.ok(opening);
+      const order = session.events.find(
+        (event) =>
+          event.stepKey === "audience_order" &&
+          event.speakerKind === "moderator",
+      );
+      assert.partialDeepStrictEqual(order, {
+        kind: "moderator_ruling",
+        speakerBotId: session.moderator.id,
+        content: "ORDER! ORDER IN THE COURT!",
+        parentEventId: opening.id,
+        gavelReason: "audience_order",
+        gavelStrikeCount: 1,
+      });
+      assert.equal(order?.voicePerformanceCue, undefined);
+      assert.match(provider.orderPrompt, /two to twelve words/u);
+      assert.match(provider.orderPrompt, /Do not summarize, evaluate, rebut/u);
+      assert.ok((order?.sequence ?? 0) > opening.sequence);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("gives a bot Moderator the same gavel-led crowd control in Turnabout", async () => {
+    const db = createTestDb();
+    const provider = new AutomaticAudienceOrderProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createTurnaboutForRole(
+        db,
+        "spectator",
+        debateRuntime,
+        { formality: "free_for_all" },
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "turnabout-audience-order:intro",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "turnabout-audience-order:testimony",
+        },
+        debateRuntime,
+      );
+
+      const testimony = session.events.find(
+        (event) => event.kind === "testimony",
+      );
+      const order = session.events.find(
+        (event) =>
+          event.stepKey === "audience_order" &&
+          event.parentEventId === testimony?.id,
+      );
+      assert.ok(testimony);
+      assert.partialDeepStrictEqual(order, {
+        speakerKind: "moderator",
+        speakerBotId: session.moderator.id,
+        gavelReason: "audience_order",
+        gavelStrikeCount: 1,
+      });
+      assert.doesNotMatch(order?.content ?? "", /^\*(?:shouts?|yells?)/iu);
+      assert.equal(order?.voicePerformanceCue, undefined);
+    } finally {
+      db.close();
+    }
+  });
+
   it("saves a non-interrupting audience-order gavel at the heard floor position", async () => {
     const db = createTestDb();
     const debateRuntime = runtimeWith(new JudgeGavelProvider());
@@ -3369,7 +3906,7 @@ describe("Debate engine", () => {
         gavelReason: "audience_order",
         gavelStrikeCount: 1,
         gavelHeardCharacterCount: heardCharacterCount,
-          content: "I restore order.",
+        content: "I restore order.",
       });
 
       const replay = orderDebateAudience(db, "user-1", session.id, {
@@ -3380,9 +3917,8 @@ describe("Debate engine", () => {
       });
       assert.equal(replay.revision, ordered.revision);
       assert.equal(
-        replay.events.filter(
-          (event) => event.gavelReason === "audience_order",
-        ).length,
+        replay.events.filter((event) => event.gavelReason === "audience_order")
+          .length,
         1,
       );
 
@@ -4206,7 +4742,10 @@ describe("Debate engine", () => {
         idempotencyKey: "moderator-title:judge:verdict",
         sideId: "for",
       });
-      assert.equal(session.events.at(-1)?.content, "The Court rules for Build Near Rail.");
+      assert.equal(
+        session.events.at(-1)?.content,
+        "The Court rules for Build Near Rail.",
+      );
 
       await advanceDebateSession(
         db,
@@ -4639,7 +5178,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("keeps Free-for-all heat through Turnabout Jury discussion, ballots, reactions, and close", async () => {
+  it("keeps Free-for-all heat through Turnabout Jury ballots, reactions, and close", async () => {
     const db = createTestDb();
     try {
       const provider = new DaytimeShowdownProvider();
@@ -4682,13 +5221,10 @@ describe("Debate engine", () => {
         provider.ballotPrompts.at(-1) ?? "",
         /punchy, persona-shaped public reason/u,
       );
+      assert.equal(provider.discussionPrompt, "");
       assert.match(
-        provider.discussionPrompt,
-        /backstage commentary after a blowup/u,
-      );
-      assert.match(
-        provider.discussionPrompt,
-        /call the weak point, flex, flop, dodge/u,
+        provider.ballotPrompts.at(-1) ?? "",
+        /Phrase your reason independently/u,
       );
       assert.equal(provider.aftermathPrompts.length, 2);
       assert.match(
@@ -5475,14 +6011,13 @@ describe("Debate engine", () => {
     }
   });
 
-  it("uses quoted human references instead of statement ID fragments in every spectator formality", async () => {
+  it("uses concise semantic claim references instead of raw excerpts or statement IDs", async () => {
     for (const setup of [
-      { name: "parliamentary", formality: undefined, noun: "statement" },
-      { name: "plainspoken", formality: "plainspoken" as const, noun: "claim" },
+      { name: "parliamentary", formality: undefined },
+      { name: "plainspoken", formality: "plainspoken" as const },
       {
         name: "free-for-all",
         formality: "free_for_all" as const,
-        noun: "claim",
       },
     ]) {
       const db = createTestDb();
@@ -5523,12 +6058,10 @@ describe("Debate engine", () => {
           statement.speakerBotId === session.forAdvocate.id
             ? session.forAdvocate
             : session.againstAdvocate;
-        assert.match(press.content, new RegExp(`\\b${setup.noun}\\b`, "u"));
         assert.match(press.content, new RegExp(`\\b${speaker.name}\\b`, "u"));
-        assert.match(press.content, /“[^”]+”/u);
-        if (setup.formality !== "free_for_all") {
-          assert.match(press.content, /^I ask\b/u);
-        }
+        assert.match(press.content, /\bwhat (?:did you|do you) mean\b/iu);
+        assert.match(press.content, /central constraint is real/iu);
+        assert.doesNotMatch(press.content, /[“”…]/u);
         assert.doesNotMatch(
           press.content,
           new RegExp(statement.id.slice(0, 8)),
@@ -5536,6 +6069,42 @@ describe("Debate engine", () => {
       } finally {
         db.close();
       }
+    }
+  });
+
+  it("turns a first-person Turnabout statement into a natural clarification target", async () => {
+    const db = createTestDb();
+    const debateRuntime = runtimeWith(new SunriseTurnaboutProvider());
+    try {
+      let session = await createTurnaboutForRole(
+        db,
+        "spectator",
+        debateRuntime,
+        { formality: "plainspoken" },
+      );
+      let mutation = 0;
+      while (!session.events.some((event) => event.kind === "press")) {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `turnabout-semantic-clarification:${mutation}`,
+          },
+          debateRuntime,
+        );
+        assert.ok(mutation < 8);
+      }
+      const press = session.events.find((event) => event.kind === "press");
+      assert.match(
+        press?.content ?? "",
+        /what did you mean when you said you paint a beautiful sunrise each morning\?/iu,
+      );
+      assert.doesNotMatch(press?.content ?? "", /on those days|…/iu);
+    } finally {
+      db.close();
     }
   });
 
@@ -6814,20 +7383,15 @@ describe("Debate engine", () => {
         (event) => event.kind === "speech" && event.sideId === "for",
       );
       assert.ok(target);
-      const raised = raiseDebateParticipantObjection(
-        db,
-        "user-1",
-        session.id,
-        {
-          expectedRevision: session.revision,
-          idempotencyKey: "participant-exit-recovery:raise",
-          eventId: target.id,
-          heardCharacterCount: Math.max(
-            24,
-            Math.floor(target.content.length * 0.58),
-          ),
-        },
-      );
+      const raised = raiseDebateParticipantObjection(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "participant-exit-recovery:raise",
+        eventId: target.id,
+        heardCharacterCount: Math.max(
+          24,
+          Math.floor(target.content.length * 0.58),
+        ),
+      });
       const paused = pauseDebateSession(db, "user-1", raised.id, {
         expectedRevision: raised.revision,
         idempotencyKey: "participant-exit-recovery:pause",
@@ -7563,6 +8127,84 @@ describe("Debate engine", () => {
       assert.match(
         provider.patrickOpeningPrompt,
         /moderator's podium remains empty and silent/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets an Observant advocate perceive Ryuk without noticing his Power", async () => {
+    const db = createTestDb();
+    try {
+      seedBot(db, "moderator", "Ryuk", ryukInvisiblePowers());
+      seedBot(db, "for", "Light Yagami");
+      seedBot(
+        db,
+        "against",
+        "Sherlock Holmes",
+        observantPowers(),
+        "Sherlock Holmes is exacting, analytical, and concise.",
+      );
+      const provider = new PerceptibilityAwareModeratorProvider();
+      const debateRuntime = runtimeWith(provider);
+      const checks = await checkDebateAdvocacyRoles(
+        db,
+        "user-1",
+        {
+          motion: MOTION,
+          forAdvocateBotId: "for",
+          againstAdvocateBotId: "against",
+        },
+        debateRuntime,
+      );
+      let session = createDebateSession(
+        db,
+        "user-1",
+        {
+          motion: MOTION,
+          evidence: {
+            version: DEBATE_SCHEMA_VERSION,
+            notes: "",
+            sources: [],
+            frozenAt: null,
+          },
+          moderatorBotId: "moderator",
+          forAdvocateBotId: "for",
+          againstAdvocateBotId: "against",
+          playerRole: "spectator",
+          advocacyConsent: checks,
+          idempotencyKey: "create:ryuk-observant:0001",
+        },
+        debateRuntime,
+      );
+      for (const key of ["intro", "for-opening", "observant-opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `advance:ryuk-observant:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+
+      assert.match(
+        provider.patrickOpeningPrompt,
+        /MODERATOR OPENING SENTINEL/u,
+      );
+      assert.match(
+        provider.patrickOpeningPrompt,
+        /every other bot as their ordinary baseline self/u,
+      );
+      assert.doesNotMatch(
+        provider.patrickOpeningPrompt,
+        /empty and silent|no opening words/u,
+      );
+      assert.doesNotMatch(
+        provider.patrickOpeningPrompt,
+        /Only Light Yagami can (?:see|hear) Ryuk/u,
       );
     } finally {
       db.close();

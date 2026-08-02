@@ -1514,6 +1514,11 @@ describe("Zen live presence CSS", () => {
       2,
       "shared and optimized frames both use the pre-colored LED raster",
     );
+    assert.equal(
+      pageSource.match(/data-frame-material-layer="led-glow"/g)?.length,
+      2,
+      "shared and optimized frames both render the white LED glow layer",
+    );
     const identityRasterRule = ruleForSelectorNeedles(
       ".botFaceFrameIdentityRaster",
     );

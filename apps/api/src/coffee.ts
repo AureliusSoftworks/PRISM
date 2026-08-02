@@ -28,6 +28,11 @@ import type { DatabaseSync, SQLInputValue } from "node:sqlite";
 import { decryptJson, randomId } from "./security.ts";
 import { SCRIPTED_PROMPT_WILDCARD_VALUES } from "./prompt-wildcard-seeds.ts";
 import {
+  allModelReasoningEffortCursorHash,
+  resolveUserModelReasoningEffort,
+} from "./model-effort-runtime.ts";
+import { prepareMessagesWithSimulatedEffort } from "./model-effort-runner.ts";
+import {
   promptBotWildcardCandidates,
   promptWildcardNames,
   resolvePromptWildcardsWithModel,
@@ -69,6 +74,7 @@ import {
   upsertCoffeeCupTopOffState,
   upsertBotRelationship,
 } from "./db.ts";
+import { effectiveModelReasoningEffort } from "@localai/shared";
 import type {
   ChatMessage,
   Conversation,
@@ -220,7 +226,6 @@ import {
   socialSilenceMessageIsMarkedV1,
   autoFallbackResolvedChain,
   normalizeCoffeeSessionSettings,
-  modelSupportsNativeReasoningEffort,
   parseStoredAssistantToolPayload,
   parseStoredBotAvatarDetailsV1,
   parseStoredBotPrompt,
@@ -272,6 +277,7 @@ import {
   coffeePowerBotEchoesAddressedSpeech,
   coffeePowerBotEternallyIntroduces,
   coffeePowerBotMumblesSpeech,
+  coffeePowerBotIgnoresOtherPowers,
   coffeePowerBotIsMuted,
   coffeePowerQuietTurnIsIgnored,
   coffeePowerBotVisibleTo,
@@ -3505,6 +3511,8 @@ function serializeCoffeeAssistantToolPayload(args: {
   coffeeReplayEvents?: CoffeeReplayEventPayload[] | null;
   autoRecovery?: AutoRecoveryTraceV1;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
+  /** Server-only clear speech used by a Power-immune bot's private prompt. */
+  botPowerIntendedSpeech?: string | null;
   socialSilence?: SocialSilenceMarkerV1;
   crosstalkReclaim?: CrosstalkReclaimPlanV1;
 }): string | null {
@@ -3512,6 +3520,13 @@ function serializeCoffeeAssistantToolPayload(args: {
   const coffeeStageAction = args.coffeeStageAction ?? undefined;
   const coffeeDebugTurnSnapshot = args.coffeeDebugTurnSnapshot ?? undefined;
   const coffeeReplayEvents = args.coffeeReplayEvents ?? undefined;
+  const botPowerIntendedSpeech = args.botPowerIntendedSpeech?.trim() || undefined;
+  const withPrivateIntendedSpeech = (serialized: string | null): string | null => {
+    if (!botPowerIntendedSpeech) return serialized;
+    const root = serialized ? JSON.parse(serialized) as Record<string, unknown> : { v: 1 };
+    root.botPowerIntendedSpeech = botPowerIntendedSpeech;
+    return JSON.stringify(root);
+  };
   if (
     !coffeeDebugTurnSnapshot &&
     !args.interruptionEvent &&
@@ -3521,11 +3536,12 @@ function serializeCoffeeAssistantToolPayload(args: {
       coffeeReplayEvents ||
       args.autoRecovery ||
       args.botPowerExactResponse ||
+      botPowerIntendedSpeech ||
       args.socialSilence ||
       args.crosstalkReclaim
     )
   ) {
-    return serializeAssistantToolPayload({
+    return withPrivateIntendedSpeech(serializeAssistantToolPayload({
       coffeeAmbientAction,
       coffeeStageAction,
       coffeeReplayEvents,
@@ -3533,7 +3549,7 @@ function serializeCoffeeAssistantToolPayload(args: {
       botPowerExactResponse: args.botPowerExactResponse,
       socialSilence: args.socialSilence,
       crosstalkReclaim: args.crosstalkReclaim,
-    });
+    }));
   }
   if (
     !coffeeDebugTurnSnapshot &&
@@ -3543,6 +3559,7 @@ function serializeCoffeeAssistantToolPayload(args: {
     !coffeeReplayEvents &&
     !args.autoRecovery &&
     !args.botPowerExactResponse &&
+    !botPowerIntendedSpeech &&
     !args.socialSilence &&
     !args.crosstalkReclaim
   ) {
@@ -3559,6 +3576,7 @@ function serializeCoffeeAssistantToolPayload(args: {
     ...(args.botPowerExactResponse
       ? { botPowerExactResponse: args.botPowerExactResponse }
       : {}),
+    ...(botPowerIntendedSpeech ? { botPowerIntendedSpeech } : {}),
     ...(args.socialSilence ? { socialSilence: args.socialSilence } : {}),
     ...(args.crosstalkReclaim
       ? { crosstalkReclaim: args.crosstalkReclaim }
@@ -5593,95 +5611,21 @@ function throwIfCoffeeTurnCancelled(signal: AbortSignal | undefined): void {
   throw error;
 }
 
-function coffeeAdaptiveReasoningEffort(args: {
-  tableFocus: string;
-  activePoll: CoffeePoll | null;
-  coffeeTeams: CoffeeTeamState | null;
-  social: CoffeeBotSocialSnapshot;
-}): ReasoningEffort {
-  const directQuestion = /\?/u.test(args.tableFocus);
-  const tense = args.social.valuesFriction >= 0.58 || args.social.disposition <= 0.34;
-  return directQuestion || tense || args.activePoll !== null || args.coffeeTeams !== null
-    ? "medium"
-    : "low";
-}
-
 export function coffeeEffectiveReasoningEffort(args: {
   requested?: ReasoningEffort | null;
   experimentEnabled: boolean;
   effectiveProvider: ProviderName;
   modelId?: string | null;
-  tableFocus: string;
-  activePoll: CoffeePoll | null;
-  coffeeTeams: CoffeeTeamState | null;
-  social: CoffeeBotSocialSnapshot;
 }): ReasoningEffort | undefined {
-  if (args.requested) return args.requested;
-  if (!args.experimentEnabled) return undefined;
-  const supportsAdaptiveEffort =
-    args.effectiveProvider === "local" ||
-    modelSupportsNativeReasoningEffort(
-      args.effectiveProvider,
-      args.modelId?.trim() ?? ""
-    );
-  if (!supportsAdaptiveEffort) return undefined;
-  return coffeeAdaptiveReasoningEffort(args);
-}
-
-function parseCoffeePrivateGuidance(raw: string): string | null {
-  const start = raw.indexOf("{");
-  const end = raw.lastIndexOf("}");
-  if (start < 0 || end <= start) return null;
-  try {
-    const parsed = JSON.parse(raw.slice(start, end + 1)) as Record<string, unknown>;
-    const stance = typeof parsed.stance === "string" ? parsed.stance.trim() : "";
-    const priorClaim = typeof parsed.priorClaim === "string" ? parsed.priorClaim.trim() : "";
-    const contribution =
-      typeof parsed.contribution === "string" ? parsed.contribution.trim() : "";
-    if (!stance || !contribution) return null;
-    return [
-      `Private stance: ${stance.slice(0, 240)}`,
-      priorClaim ? `Relevant prior claim: ${priorClaim.slice(0, 240)}` : "",
-      `Concrete contribution: ${contribution.slice(0, 320)}`,
-    ].filter(Boolean).join("\n");
-  } catch {
-    return null;
-  }
-}
-
-async function runCoffeePrivateDeliberation(args: {
-  provider: LlmProvider;
-  messages: ProviderMessage[];
-  options: GenerateOptions;
-  effort: ReasoningEffort;
-  signal?: AbortSignal;
-}): Promise<string | null> {
-  throwIfCoffeeTurnCancelled(args.signal);
-  const raw = await args.provider.generateResponse(
-    [
-      {
-        role: "system",
-        content: [
-          "Privately prepare one strong Coffee-table reply. Do not write the visible reply.",
-          "Return one JSON object with string fields stance, priorClaim, and contribution.",
-          "Identify what the previous speaker actually meant, choose this character's stance, and plan one concrete new contribution.",
-          "Keep every field short. Do not include chain-of-thought, hidden analysis, or transcript labels.",
-        ].join("\n"),
-      },
-      ...args.messages.filter((message) => message.role !== "system").slice(-8),
-    ],
-    {
-      ...args.options,
-      maxTokens: args.effort === "medium" ? 180 : 120,
-      temperature: 0,
-      jsonMode: true,
-      reasoningEffort: args.effort,
-      usagePurpose: "psychic_planning",
-      ...(args.signal ? { signal: args.signal } : {}),
-    }
+  if (!args.requested || !args.modelId?.trim()) return undefined;
+  return (
+    effectiveModelReasoningEffort({
+      provider: args.effectiveProvider,
+      modelId: args.modelId,
+      preference: args.requested,
+      simulatedLocalEnabled: args.experimentEnabled,
+    }) ?? undefined
   );
-  throwIfCoffeeTurnCancelled(args.signal);
-  return parseCoffeePrivateGuidance(raw);
 }
 
 export interface CoffeeSessionCreateInput {
@@ -12818,6 +12762,35 @@ interface MessageRow {
   bot_glyph: string | null;
 }
 
+const COFFEE_BOT_POWER_INTENDED_SPEECH = Symbol(
+  "coffeeBotPowerIntendedSpeech",
+);
+type CoffeeInternalMessage = ChatMessage & {
+  [COFFEE_BOT_POWER_INTENDED_SPEECH]?: string;
+};
+
+function attachCoffeePrivateIntendedSpeech(
+  message: ChatMessage,
+  rawToolPayload: string | null,
+): CoffeeInternalMessage {
+  if (!rawToolPayload) return message;
+  try {
+    const parsed = JSON.parse(rawToolPayload) as Record<string, unknown>;
+    const intended = typeof parsed.botPowerIntendedSpeech === "string"
+      ? parsed.botPowerIntendedSpeech.trim().slice(0, 6_000)
+      : "";
+    if (intended) {
+      Object.defineProperty(message, COFFEE_BOT_POWER_INTENDED_SPEECH, {
+        value: intended,
+        enumerable: false,
+      });
+    }
+  } catch {
+    // Malformed optional metadata never blocks ordinary Coffee history.
+  }
+  return message;
+}
+
 function loadConversationRow(
   db: DatabaseSync,
   userId: string,
@@ -12872,7 +12845,7 @@ function loadMessages(
       const botPowerExactResponse = storedToolPayload.botPowerExactResponse;
       const socialSilence = storedToolPayload.socialSilence;
       const crosstalkReclaim = storedToolPayload.crosstalkReclaim;
-      return {
+      const message: ChatMessage = {
         id: row.id,
         role: row.role,
         content:
@@ -12902,6 +12875,7 @@ function loadMessages(
         ...(socialSilence ? { socialSilence } : {}),
         ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
       };
+      return attachCoffeePrivateIntendedSpeech(message, row.tool_payload);
     });
 }
 
@@ -12936,7 +12910,7 @@ function loadAllMessages(
       const botPowerExactResponse = storedToolPayload.botPowerExactResponse;
       const socialSilence = storedToolPayload.socialSilence;
       const crosstalkReclaim = storedToolPayload.crosstalkReclaim;
-      return {
+      const message: ChatMessage = {
         id: row.id,
         role: row.role,
         content:
@@ -12966,6 +12940,7 @@ function loadAllMessages(
         ...(socialSilence ? { socialSilence } : {}),
         ...(crosstalkReclaim ? { crosstalkReclaim } : {}),
       };
+      return attachCoffeePrivateIntendedSpeech(message, row.tool_payload);
     });
 }
 
@@ -13384,6 +13359,7 @@ export function coffeePreparedTurnCursor(
     polls: scopedRows("coffee_polls"),
     pollVotes: scopedRows("coffee_poll_votes"),
     durableRelationships,
+    effortStateHash: allModelReasoningEffortCursorHash(db, userId),
   };
   return {
     revision: row.updated_at,
@@ -16834,16 +16810,21 @@ async function generateCoffeeBotReply(args: {
       ? settings.preferredLocalModel
       : settings.preferredOnlineModel
   );
+  const concreteSpeakerModel =
+    speakerModel ?? defaultModelIdForProvider(effectiveProvider);
   if (speakerModel) speakerOptions.model = speakerModel;
+  const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
+    userId,
+    provider: effectiveProvider,
+    modelId: concreteSpeakerModel,
+    simulatedLocalEnabled:
+      settings.experimentalAllModelEffortEnabled === true,
+  });
   const effectiveReasoningEffort = coffeeEffectiveReasoningEffort({
-    requested: settings.reasoningEffort,
+    requested: storedReasoningEffort ?? settings.reasoningEffort,
     experimentEnabled: settings.experimentalAllModelEffortEnabled === true,
     effectiveProvider,
-    modelId: speakerModel,
-    tableFocus,
-    activePoll,
-    coffeeTeams,
-    social: preTurnSocialByBotId[speaker.id] ?? DEFAULT_COFFEE_SOCIAL,
+    modelId: concreteSpeakerModel,
   });
   if (effectiveReasoningEffort) speakerOptions.reasoningEffort = effectiveReasoningEffort;
   if (settings.signal) speakerOptions.signal = settings.signal;
@@ -16892,6 +16873,10 @@ async function generateCoffeeBotReply(args: {
     speakerMemoryHistory,
     speaker.id,
   );
+  const speakerIgnoresPeerPowers = coffeePowerBotIgnoresOtherPowers(
+    coffeePowerPlan,
+    speaker.id,
+  );
   const speakerVisibleHistory = arrivalVisibleHistory.flatMap((message) => {
     if (
       message.role !== "assistant" ||
@@ -16910,17 +16895,23 @@ async function generateCoffeeBotReply(args: {
       message.botId,
       speaker.id,
     ) && (
+      speakerIgnoresPeerPowers ||
       message.coffeeAudienceBotIds === null ||
       message.coffeeAudienceBotIds === undefined ||
       message.coffeeAudienceBotIds.includes(speaker.id)
     );
     if (!visible && !audible) return [];
+    const intendedSpeech = (message as CoffeeInternalMessage)[
+      COFFEE_BOT_POWER_INTENDED_SPEECH
+    ];
     const sourceVoicePresence = coffeePowerVoicePresenceMode(
       coffeePowerPlan,
       message.botId,
     );
     return [audible
-      ? message
+      ? speakerIgnoresPeerPowers && intendedSpeech
+        ? { ...message, content: intendedSpeech }
+        : message
       : {
           ...message,
           content: sourceVoicePresence === "quiet"
@@ -17245,26 +17236,15 @@ async function generateCoffeeBotReply(args: {
     effectiveReasoningEffort !== "auto"
   ) {
     try {
-      const privateGuidance = await runCoffeePrivateDeliberation({
+      speakerMessages = await prepareMessagesWithSimulatedEffort({
         provider: speakerProvider,
         messages: speakerMessages,
         options: speakerOptions,
         effort: effectiveReasoningEffort,
-        signal: settings.signal,
+        surface: "coffee",
+        outputContract:
+          "Write one short in-character Coffee contribution; preserve Powers, floor ownership, and any poll or team constraints.",
       });
-      if (privateGuidance) {
-        speakerMessages = [
-          ...speakerMessages,
-          {
-            role: "system",
-            content: [
-              "Private Coffee deliberation guidance follows. Use it silently; never mention it.",
-              privateGuidance,
-              "Now write only the short in-character Coffee line requested by the table prompt.",
-            ].join("\n"),
-          },
-        ];
-      }
     } catch (error) {
       if (settings.signal?.aborted) throw error;
       // Private deliberation is a quality enhancement; the visible turn still proceeds.
@@ -17887,6 +17867,7 @@ async function generateCoffeeBotReply(args: {
       peerAddressByBotId,
     );
   }
+  const clearSpeechBeforeObfuscation = replyText;
   if (
     speakerMumblesForTurn &&
     !speakerIsMutedForTurn &&
@@ -18472,6 +18453,10 @@ async function generateCoffeeBotReply(args: {
           ? "speech_copy"
         : speakerMumblesForTurn
           ? "speech_obfuscation"
+        : undefined,
+    botPowerIntendedSpeech:
+      speakerMumblesForTurn && !speakerIsMutedForTurn
+        ? clearSpeechBeforeObfuscation
         : undefined,
   });
   db.prepare(

@@ -227,6 +227,7 @@ import {
   type SignalDirectedCameraShot,
 } from "./signalCameraTransition";
 import { signalEpisodeRetryDraft } from "./signalEpisodeRetry";
+import { signalGenerationThinkingRole } from "./signalThinkingPresentation";
 import {
   ModelWarmupIntermission,
   type ModelWarmupIntermissionPhase,
@@ -2043,6 +2044,10 @@ export function BotcastExperience({
     null,
   );
   const [busy, setBusy] = useState(false);
+  const [signalGenerationThinking, setSignalGenerationThinking] = useState<{
+    runId: number;
+    role: "host" | "guest" | null;
+  } | null>(null);
   const [loading, setLoading] = useState(true);
   const [autoRun, setAutoRun] = useState(false);
   const [error, setError] = useState<SignalErrorToast | null>(null);
@@ -6576,6 +6581,18 @@ export function BotcastExperience({
       let finishResponseCue: (() => Promise<void>) | null = null;
       advanceInFlightRef.current = true;
       const { controller, runId } = beginEpisodeOperation();
+      setSignalGenerationThinking({
+        runId,
+        role: signalGenerationThinkingRole({
+          scheduledSpeakerRole: botcastNextSpeakerRole({
+            messages: episode.messages,
+            segment: episode.segment,
+            guestDeparted: guestHasDeparted(episode),
+          }),
+          cueDelivery,
+          hasProducerCue: Boolean(requestedCue),
+        }),
+      });
       setBusy(true);
       setError(null);
       let interruptionCrosstalkPlayback: Promise<boolean> | null = null;
@@ -6856,6 +6873,9 @@ export function BotcastExperience({
         return false;
       } finally {
         await finishResponseCue?.();
+        setSignalGenerationThinking((current) =>
+          current?.runId === runId ? null : current,
+        );
         if (episodeOperationIsCurrent(controller, runId)) {
           episodeOperationAbortRef.current = null;
           setBusy(false);
@@ -11300,7 +11320,10 @@ export function BotcastExperience({
         : busy && speakingMessageId === null
           ? producerGuestSipActive && liveNextSpeakerRole === "guest"
             ? null
-            : liveNextSpeakerRole
+            : signalGenerationThinking?.runId ===
+                episodeRunIdRef.current
+              ? signalGenerationThinking.role
+              : liveNextSpeakerRole
           : null;
   const livePresentedThinkingBot =
     livePresentedThinkingRole === "host"

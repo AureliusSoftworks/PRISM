@@ -32143,6 +32143,52 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-radius: inherit;
 }
 
+.composeModelControl[data-has-effort="true"] .composeModelTrigger {
+  border-radius: 999px 0 0 999px;
+}
+
+.composeModelEffortTrigger {
+  appearance: none;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 5px;
+  align-self: stretch;
+  min-width: 58px;
+  padding: 0 10px;
+  border: 0;
+  border-left: 1px solid color-mix(in srgb, var(--line-strong) 64%, transparent);
+  border-radius: 0 999px 999px 0;
+  background: color-mix(in srgb, var(--fg) 5%, transparent);
+  color: var(--fg-muted);
+  font-family:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 750;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.composeModelEffortTrigger:hover:not(:disabled),
+.composeModelEffortTrigger:focus-visible {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.composeModelEffortTrigger:focus-visible {
+  outline: none;
+  box-shadow: inset 0 0 0 2px
+    color-mix(in srgb, var(--accent-glow) 55%, transparent);
+}
+
+.composeModelEffortTrigger:disabled {
+  min-width: 92px;
+  color: var(--fg-subtle);
+  cursor: not-allowed;
+  opacity: 0.72;
+}
+
 .composeModelTrigger:focus-visible {
   outline: none;
   box-shadow: 0 0 0 2px color-mix(in srgb, var(--accent-glow) 55%, transparent);
@@ -32221,17 +32267,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   line-height: 1.3;
   text-transform: uppercase;
   letter-spacing: 0.04em;
-}
-
-.composeModelMenuFooter {
-  flex: 0 0 auto;
-  padding: 6px 7px 7px;
-  border-top: 1px solid color-mix(in srgb, var(--line-strong) 62%, transparent);
-  background: color-mix(in srgb, var(--bg) 90%, var(--fg) 10%);
-}
-
-.composeModelMenuFooter .composeModelEffortControl {
-  margin: 0;
 }
 
 .composeModelOption {
@@ -32326,25 +32361,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   text-transform: uppercase;
 }
 
-.composeModelEffortControl {
-  display: grid;
-  gap: 8px;
-  margin: 6px 6px 4px;
-  padding: 10px;
-  border: 1px solid color-mix(in srgb, var(--accent) 20%, var(--line));
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
+.composeModelEffortMenu {
+  min-width: 220px;
+  padding: 6px;
 }
 
-.composeModelEffortControl[data-disabled="true"] {
-  border-color: color-mix(in srgb, var(--line) 86%, var(--fg-muted) 14%);
-}
-
-.composeModelEffortHeader {
+.composeModelEffortMenuHeader {
   display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 12px;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 2px;
+  padding: 7px 8px 8px;
   font-family:
     var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 10px;
@@ -32354,113 +32381,162 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   color: var(--fg-muted);
 }
 
-.composeModelEffortHeader output {
-  color: var(--fg);
-}
-
-.composeModelEffortStatus {
-  display: inline-flex;
-  align-items: center;
-  gap: 8px;
-  min-width: 0;
-}
-
-.composeModelEffortAutoToggle {
-  display: inline-flex;
-  align-items: center;
-  gap: 6px;
-  height: 24px;
-  padding: 2px 3px 2px 8px;
-  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--bg-elevated) 80%, transparent);
-  color: var(--fg-muted);
-  font: inherit;
+.composeModelEffortMenuHeader small {
+  color: var(--fg-subtle);
   font-size: 9px;
-  cursor: pointer;
-  transition:
-    background 160ms ease,
-    border-color 160ms ease,
-    color 160ms ease,
-    opacity 160ms ease;
+  letter-spacing: 0.035em;
 }
 
-.composeModelEffortAutoToggle[data-active="true"] {
-  border-color: color-mix(in srgb, var(--accent) 58%, var(--line));
-  background: color-mix(in srgb, var(--accent) 18%, var(--bg-elevated));
-  color: var(--fg);
-}
-
-.composeModelEffortAutoToggle:disabled {
-  cursor: not-allowed;
-  opacity: 0.55;
-}
-
-.composeModelEffortAutoToggleThumb {
-  width: 18px;
-  height: 18px;
-  border-radius: 999px;
-  background: color-mix(in srgb, var(--fg-muted) 62%, transparent);
-  box-shadow: inset 0 0 0 1px color-mix(in srgb, #000000 18%, transparent);
-  transition:
-    background 160ms ease,
-    transform 160ms ease;
-}
-
-.composeModelEffortAutoToggle[data-active="true"]
-  .composeModelEffortAutoToggleThumb {
-  background: var(--accent);
-  transform: translateX(2px);
-}
-
-.composeModelEffortSliderShell {
-  display: grid;
-  gap: 6px;
-  transition:
-    filter 180ms ease,
-    opacity 180ms ease,
-    transform 180ms ease;
-}
-
-.composeModelEffortControl[data-auto="true"] .composeModelEffortSliderShell {
-  filter: saturate(0.35);
-  opacity: 0.34;
-  transform: translateY(-1px);
-}
-
-.composeModelEffortControl[data-disabled="true"]
-  .composeModelEffortSliderShell {
-  filter: saturate(0.2);
-  opacity: 0.28;
-}
-
-.composeModelEffortControl input[type="range"] {
-  width: 100%;
-  accent-color: var(--accent);
-}
-
-.composeModelEffortControl input[type="range"]:disabled {
-  cursor: not-allowed;
-}
-
-.composeModelEffortTicks {
+.composeModelEffortOption {
+  appearance: none;
   display: flex;
   align-items: center;
   justify-content: space-between;
-  gap: 8px;
+  gap: 12px;
+  width: 100%;
+  min-height: 34px;
+  padding: 7px 9px;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--fg);
+  font-size: 12px;
+  text-align: left;
+  cursor: pointer;
+}
+
+.composeModelEffortOption:hover,
+.composeModelEffortOption:focus-visible {
+  outline: none;
+  background: var(--bg-hover);
+}
+
+.composeModelEffortOption[data-active="true"] {
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg-hover));
+  box-shadow: inset 2px 0 0 var(--accent);
+  font-weight: 720;
+}
+
+.composeModelEffortOption small {
   font-family:
     var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
   font-size: 9px;
-  letter-spacing: 0.04em;
+  letter-spacing: 0.025em;
   text-transform: uppercase;
   color: var(--fg-subtle);
 }
 
-.composeModelEffortHint {
-  margin: 0;
-  font-size: 11px;
-  line-height: 1.35;
+.modelEffortHud {
+  --model-effort-hud-accent: var(--accent);
+  position: fixed;
+  left: 50%;
+  bottom: 30px;
+  z-index: 2147483000;
+  width: min(520px, calc(100vw - 28px));
+  transform: translateX(-50%);
+  display: grid;
+  gap: 9px;
+  padding: 12px 14px 11px;
+  border: 1px solid
+    color-mix(in srgb, var(--model-effort-hud-accent) 45%, var(--line));
+  border-radius: 13px;
+  background: color-mix(in srgb, var(--bg-elevated) 94%, transparent);
+  box-shadow:
+    0 18px 48px color-mix(in srgb, #000000 44%, transparent),
+    inset 0 1px 0 color-mix(in srgb, var(--fg) 10%, transparent);
+  backdrop-filter: blur(18px) saturate(1.2);
+  animation: modelEffortHudArrive 160ms ease-out both;
+}
+
+.modelEffortHud[data-provider="local"] {
+  --model-effort-hud-accent: #68e6a6;
+}
+
+.modelEffortHud[data-provider="openai"] {
+  --model-effort-hud-accent: #7db7ff;
+}
+
+.modelEffortHud[data-provider="anthropic"] {
+  --model-effort-hud-accent: #d97757;
+}
+
+.modelEffortHudIdentity {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 16px;
+  font-family:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  text-transform: uppercase;
+  letter-spacing: 0.055em;
+}
+
+.modelEffortHudIdentity span {
+  overflow: hidden;
+  color: var(--fg-muted);
+  font-size: 10px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.modelEffortHudIdentity strong {
+  flex-shrink: 0;
+  color: var(--fg);
+  font-size: 12px;
+}
+
+.modelEffortHudRail {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 4px;
+}
+
+.modelEffortHudRail span {
+  min-width: 0;
+  padding: 5px 3px;
+  border-radius: 6px;
+  background: color-mix(in srgb, var(--fg) 6%, transparent);
   color: var(--fg-subtle);
+  font-family:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 8px;
+  font-weight: 700;
+  letter-spacing: 0.035em;
+  text-align: center;
+  text-transform: uppercase;
+}
+
+.modelEffortHudRail span[data-active="true"] {
+  background: color-mix(
+    in srgb,
+    var(--model-effort-hud-accent) 22%,
+    var(--bg-hover)
+  );
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--model-effort-hud-accent) 60%, transparent);
+  color: var(--fg);
+}
+
+.modelEffortHud > small {
+  color: var(--fg-subtle);
+  font-family:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  letter-spacing: 0.025em;
+  text-align: right;
+  text-transform: uppercase;
+}
+
+@keyframes modelEffortHudArrive {
+  from {
+    opacity: 0;
+    transform: translate(-50%, 7px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, 0) scale(1);
+  }
 }
 
 /* Hue lens row — Prism-style color filter. Full-width in the pre-chat
@@ -41140,6 +41216,94 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: var(--fg-muted);
   font-size: 12px;
   font-weight: 500;
+}
+
+.settingsEffortProfiles {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+}
+
+.settingsEffortProfilesHeader,
+.settingsEffortProfileRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.settingsEffortProfilesHeader > span,
+.settingsEffortProfileRow > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.settingsEffortProfilesHeader > span {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.settingsEffortProfilesHeader small,
+.settingsEffortProfileRow small {
+  color: var(--fg-subtle);
+  font-family:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 9px;
+  font-weight: 500;
+  letter-spacing: 0.045em;
+  text-transform: uppercase;
+}
+
+.settingsEffortProfileList {
+  display: grid;
+  gap: 4px;
+}
+
+.settingsEffortProfileRow {
+  --settings-effort-provider: var(--line-strong);
+  padding: 7px 8px 7px 10px;
+  border-radius: 7px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--settings-effort-provider) 12%, transparent),
+    transparent 68%
+  );
+  box-shadow: inset 2px 0 0 var(--settings-effort-provider);
+}
+
+.settingsEffortProfileRow[data-provider="local"] {
+  --settings-effort-provider: #68e6a6;
+}
+
+.settingsEffortProfileRow[data-provider="openai"] {
+  --settings-effort-provider: #7db7ff;
+}
+
+.settingsEffortProfileRow[data-provider="anthropic"] {
+  --settings-effort-provider: #d97757;
+}
+
+.settingsEffortProfileRow strong {
+  overflow: hidden;
+  color: var(--fg);
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settingsEffortProfileRow output {
+  margin-left: auto;
+  color: var(--fg-muted);
+  font-family:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+  font-size: 10px;
+  font-weight: 700;
+  text-transform: uppercase;
 }
 
 .settingsDropdownSummaryRow .panelSectionInfoTooltip {

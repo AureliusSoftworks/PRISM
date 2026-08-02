@@ -33,6 +33,7 @@ import {
   normalizeDebateModeratorTitle,
   normalizeDebateMotionSlateV1,
   normalizeDebateTitle,
+  normalizeDebateVoicePerformanceCue,
   normalizeDebateSessionSynopsis,
   resolveDebateForumRoundPlan,
   normalizeDebateSetupPresetId,
@@ -248,6 +249,12 @@ test("defaults legacy Debate sessions to a disabled Jury", () => {
     ...defaultDebateJuryStateV1(),
     discussionTurnTarget: DEBATE_JURY_DISCUSSION_TURNS,
   });
+});
+
+test("accepts only bounded Debate voice-performance cues", () => {
+  assert.equal(normalizeDebateVoicePerformanceCue(" Solemn "), "solemn");
+  assert.equal(normalizeDebateVoicePerformanceCue("[solemn]"), null);
+  assert.equal(normalizeDebateVoicePerformanceCue("singing"), null);
 });
 
 test("normalizes a frozen moderator title with a safe legacy default", () => {
