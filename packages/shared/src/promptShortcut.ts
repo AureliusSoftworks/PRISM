@@ -870,12 +870,26 @@ export interface PromptWildcardRunMetadata {
   wildcardReplacements?: PromptShortcutWildcardReplacement[];
 }
 
+export type PsychicThoughtPassStage = "plan" | "draft" | "audit" | "revision";
+
+export interface PsychicThoughtPass {
+  stage: PsychicThoughtPassStage;
+  /** Safe, user-readable account of what this pass contributed. */
+  summary: string;
+}
+
 export interface PsychicThoughtPayload {
   v: 1;
   summary: string;
   effort: "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
   provider: "local" | "openai" | "anthropic";
   model?: string;
+  /** How PRISM produced the readable Psychic rationale for this turn. */
+  planningMode?: "simulated" | "native" | "public";
+  /** Completed public/simulated planning passes, when known. */
+  passCount?: number;
+  /** Distinct user-readable summaries for completed planning passes. */
+  passes?: PsychicThoughtPass[];
   createdAt: string;
 }
 
@@ -913,6 +927,36 @@ function readPromptShortcutRange(value: unknown): number | undefined {
   if (typeof value !== "number" || !Number.isFinite(value)) return undefined;
   const normalized = Math.floor(value);
   return normalized >= 0 && normalized <= 20000 ? normalized : undefined;
+}
+
+const PSYCHIC_THOUGHT_PASS_STAGES = new Set<PsychicThoughtPassStage>([
+  "plan",
+  "draft",
+  "audit",
+  "revision",
+]);
+
+function normalizePsychicThoughtPasses(value: unknown): PsychicThoughtPass[] {
+  if (!Array.isArray(value)) return [];
+  const passes: PsychicThoughtPass[] = [];
+  const seen = new Set<PsychicThoughtPassStage>();
+  for (const entry of value) {
+    if (!entry || typeof entry !== "object") continue;
+    const row = entry as Record<string, unknown>;
+    if (
+      typeof row.stage !== "string" ||
+      !PSYCHIC_THOUGHT_PASS_STAGES.has(row.stage as PsychicThoughtPassStage)
+    ) {
+      continue;
+    }
+    const stage = row.stage as PsychicThoughtPassStage;
+    const summary = readPromptShortcutString(row.summary, 1200);
+    if (!summary || seen.has(stage)) continue;
+    seen.add(stage);
+    passes.push({ stage, summary });
+    if (passes.length >= 4) break;
+  }
+  return passes;
 }
 
 function normalizeManualAskQuestionOptionId(value: unknown, fallback: string): string {
@@ -1142,12 +1186,23 @@ export function normalizePsychicThoughtPayload(value: unknown): PsychicThoughtPa
     return undefined;
   }
   const model = readPromptShortcutString(row.model, 200);
+  const planningMode =
+    row.planningMode === "simulated" ||
+    row.planningMode === "native" ||
+    row.planningMode === "public"
+      ? row.planningMode
+      : undefined;
+  const passCount = readPromptShortcutRange(row.passCount);
+  const passes = normalizePsychicThoughtPasses(row.passes);
   return {
     v: 1,
     summary,
     effort: normalizePsychicThoughtEffort(row.effort),
     provider,
     ...(model ? { model } : {}),
+    ...(planningMode ? { planningMode } : {}),
+    ...(passCount !== undefined ? { passCount } : {}),
+    ...(passes.length > 0 ? { passes } : {}),
     createdAt,
   };
 }

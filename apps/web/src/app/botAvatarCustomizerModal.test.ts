@@ -933,7 +933,7 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
     pageSource,
     /aria-label="Preview Prism; double-click to customize"/,
   );
-  assert.match(
+  assert.doesNotMatch(
     pageSource,
     /<button type="button" onClick=\{openDefaultBotCustomizer\}>\s*Customize Prism\s*<\/button>/,
   );

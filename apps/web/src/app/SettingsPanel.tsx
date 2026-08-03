@@ -9,6 +9,7 @@ import {
   Gavel,
   Info,
   House,
+  Keyboard,
   KeyRound,
   MessageCircle,
   Monitor,
@@ -34,6 +35,7 @@ export type SettingsScope =
   | "network"
   | "experimental"
   | "models"
+  | "shortcuts"
   | "voice"
   | "help"
   | "about"
@@ -65,6 +67,7 @@ const SETTINGS_NAV_GROUPS: readonly {
       { scope: "startup", title: "Startup", icon: <House size={16} strokeWidth={2} /> },
       { scope: "connections", title: "Connections", icon: <KeyRound size={16} strokeWidth={2} /> },
       { scope: "models", title: "Models", icon: <SlidersHorizontal size={16} strokeWidth={2} /> },
+      { scope: "shortcuts", title: "Shortcuts", icon: <Keyboard size={16} strokeWidth={2} /> },
       { scope: "appearance", title: "Appearance", icon: <Monitor size={16} strokeWidth={2} /> },
       { scope: "network", title: "Network", icon: <Network size={16} strokeWidth={2} /> },
       { scope: "experimental", title: "Experimental", icon: <FlaskConical size={16} strokeWidth={2} /> },

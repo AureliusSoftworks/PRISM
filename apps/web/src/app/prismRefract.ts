@@ -6,7 +6,11 @@ import {
   useState,
   type ReactNode,
 } from "react";
-import { prismCompanionModifierPresentation } from "./prismCompanionState.ts";
+import {
+  PRISM_KEYBOARD_SHORTCUTS_CHANGED_EVENT,
+  activePrismKeyboardShortcut,
+  keyboardShortcutAria,
+} from "./keyboardShortcuts";
 
 export const PRISM_REFRACT_TARGET_ATTRIBUTE = "data-prism-refract-id";
 
@@ -218,7 +222,7 @@ export function PrismRefractTarget({
   const targetRef = useRef(target);
   const elementRef = useRef<HTMLElement | null>(null);
   const [ariaKeyShortcuts, setAriaKeyShortcuts] = useState(
-    "Alt+Space Control+Space",
+    keyboardShortcutAria(activePrismKeyboardShortcut("prism")) ?? "",
   );
 
   useEffect(() => {
@@ -226,9 +230,15 @@ export function PrismRefractTarget({
   }, [target]);
 
   useEffect(() => {
-    setAriaKeyShortcuts(
-      prismCompanionModifierPresentation(navigator.platform).ariaKeyShortcuts,
-    );
+    const update = (): void => {
+      setAriaKeyShortcuts(
+        keyboardShortcutAria(activePrismKeyboardShortcut("prism")) ?? "",
+      );
+    };
+    update();
+    window.addEventListener(PRISM_KEYBOARD_SHORTCUTS_CHANGED_EVENT, update);
+    return () =>
+      window.removeEventListener(PRISM_KEYBOARD_SHORTCUTS_CHANGED_EVENT, update);
   }, []);
 
   useEffect(

@@ -21,6 +21,7 @@
     translateY(var(--avatar-details-facing-offset-y, 0%))
     translateY(var(--zen-live-bot-face-thumbnail-offset-y, 0%))
     scale(var(--zen-live-bot-face-thumbnail-scale, 1))
+    scale(var(--avatar-details-ink-aperture-scale, 1))
     scaleX(var(--avatar-details-scale-x, 1))
     scaleX(var(--avatar-details-facing-scale-x, 1))
     rotate(

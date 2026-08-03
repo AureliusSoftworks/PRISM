@@ -6,9 +6,14 @@ import {
   CHAT_FORCED_MUTE_REASON,
   chatPresentationForcesVoiceMute,
   effectiveVoiceModeForPresentation,
+  zenPresentationIsVoiceMuted,
 } from "./chatVoicePolicy.ts";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const tutorialSource = readFileSync(
+  new URL("./modeTutorials.ts", import.meta.url),
+  "utf8",
+);
 
 describe("Chat voice policy", () => {
   it("forces transcript Chat to mute without changing the configured mode", () => {
@@ -34,6 +39,13 @@ describe("Chat voice policy", () => {
       effectiveVoiceModeForPresentation("chat", false, "bottish"),
       "bottish",
     );
+  });
+
+  it("identifies user-muted Zen without conflating forced-mute Chat", () => {
+    assert.equal(zenPresentationIsVoiceMuted("chat", false, "mute"), true);
+    assert.equal(zenPresentationIsVoiceMuted("chat", false, "english"), false);
+    assert.equal(zenPresentationIsVoiceMuted("chat", true, "mute"), false);
+    assert.equal(zenPresentationIsVoiceMuted("coffee", false, "mute"), false);
   });
 
   it("preserves voice choices in every other applet", () => {
@@ -84,6 +96,30 @@ describe("Chat voice policy", () => {
     assert.match(
       pageSource,
       /voiceAwaitingReplyRef\.current =\s*!chatVoiceForcedMuted/u,
+    );
+    assert.match(
+      pageSource,
+      /const zenVoiceMuted = zenPresentationIsVoiceMuted\([\s\S]{0,140}const zenCanvasTypingDelayMultiplier =\s*view === "chat"\s*\? zenVoiceMuted\s*\? ZEN_MUTED_REVEAL_TIMING_MULTIPLIER/u,
+    );
+    assert.match(
+      pageSource,
+      /const zenLivePresenceRailVisible =\s*!zenVoiceMuted &&/u,
+    );
+    assert.match(
+      pageSource,
+      /const ZEN_MUTED_REVEAL_TIMING_MULTIPLIER = 0\.05;/u,
+    );
+    assert.equal(
+      [
+        ...pageSource.matchAll(
+          /:\s*!zenVoiceMuted &&\s*chatAssistantTypingMechanicsActive &&/gu,
+        ),
+      ].length,
+      2,
+    );
+    assert.match(
+      tutorialSource,
+      /In Zen, choosing Mute lets the live avatar step out and reveals each completed reply in a near-instant sweep\./u,
     );
   });
 });

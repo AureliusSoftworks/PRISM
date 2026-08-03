@@ -79,6 +79,7 @@ import {
 import {
   BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
   BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
+  BOT_AVATAR_DETAILS_INK_APERTURE_SCALE,
 } from "./bot-avatar-render-geometry";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import {
@@ -273,6 +274,10 @@ const AvatarDetailsEditorSession = forwardRef<
     "--coffee-bot-color": guideInk,
     "--coffee-seat-emotion-color": guideInk,
     zIndex: 1,
+  } as CSSProperties;
+  const inkApertureStyle = {
+    "--avatar-details-ink-aperture-scale":
+      BOT_AVATAR_DETAILS_INK_APERTURE_SCALE,
   } as CSSProperties;
   const runtimeColorPreviewStyle = {
     backgroundColor: normalizedAccentColor,
@@ -976,7 +981,7 @@ const AvatarDetailsEditorSession = forwardRef<
 
   const canvasEditor = (
     <div className={styles.canvasFrame} data-foundry-canvas={layout === "foundry" ? "true" : undefined}>
-      <div className={styles.canvasViewport}>
+      <div className={styles.canvasViewport} style={inkApertureStyle}>
         <span
           className={`${pageStyles.zenLiveBotPresenceFaceRig} ${styles.faceGuide}`}
           style={faceGuideStyle}
@@ -1069,7 +1074,7 @@ const AvatarDetailsEditorSession = forwardRef<
         <header className={styles.paintHeader}>
           <div>
             <strong>Screen editor</strong>
-            <small>128 × 128 · 5× preview</small>
+            <small>128 × 128 · Shell-scaled preview</small>
           </div>
           <div className={styles.paintHeaderActions}>
             <button

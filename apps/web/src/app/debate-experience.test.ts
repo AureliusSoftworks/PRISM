@@ -470,6 +470,18 @@ describe("Debate experience", () => {
       css,
       /\.dashboard\s+\.pickAwareSetupField\s+textarea\[data-rich-overlay="true"\]\s*\{[\s\S]*?background:\s*transparent/u,
     );
+    assert.match(
+      css,
+      /\.dashboard\s+\.pickAwareSetupField\s*\{[\s\S]*?--compose-textarea-padding:\s*13px 0 13px 14px;[\s\S]*?--compose-textarea-overlay-inset:\s*0;[\s\S]*?--compose-textarea-overlay-padding:\s*var\(--compose-textarea-padding\)/u,
+    );
+    assert.match(
+      css,
+      /\.dashboard\s+\.pickAwareSetupField\s+textarea\s*\{[\s\S]*?padding:\s*var\(--compose-textarea-padding\);[\s\S]*?font-size:\s*var\(--compose-textarea-font-size\);[\s\S]*?line-height:\s*var\(--compose-textarea-line-height\)/u,
+    );
+    assert.match(
+      pageCss,
+      /\.composeTextareaVisualOverlay\s*\{[\s\S]*?inset:\s*var\(--compose-textarea-overlay-inset, 1px\);/u,
+    );
   });
 
   it("reveals motion inputs incrementally without hiding populated downstream work", () => {

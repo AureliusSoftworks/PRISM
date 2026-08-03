@@ -69,6 +69,7 @@ const ANTHROPIC_XHIGH_REASONING_LEVELS = [
   "xhigh",
 ] as const satisfies readonly ModelReasoningEffortPreference[];
 const LOCAL_SIMULATED_REASONING_LEVELS = [
+  "none",
   "minimal",
   "low",
   "medium",
@@ -229,7 +230,7 @@ export function resolveModelReasoningEffortCapability(args: {
       return {
         mode: "simulated",
         levels: LOCAL_SIMULATED_REASONING_LEVELS,
-        supportsNone: false,
+        supportsNone: true,
       };
     }
     return {
@@ -253,7 +254,7 @@ export function resolveModelReasoningEffortCapability(args: {
         ? {
             mode: "simulated",
             levels: LOCAL_SIMULATED_REASONING_LEVELS,
-            supportsNone: false,
+            supportsNone: true,
           }
         : {
             mode: "unavailable",
@@ -278,7 +279,7 @@ export function resolveModelReasoningEffortCapability(args: {
     return {
       mode: "simulated",
       levels: LOCAL_SIMULATED_REASONING_LEVELS,
-      supportsNone: false,
+      supportsNone: true,
     };
   }
   return {

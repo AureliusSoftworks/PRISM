@@ -13,10 +13,28 @@ export const MODEL_EFFORT_ICON_PATHS: Record<ReasoningEffort, string> = {
   xhigh: "/reasoning-effort/xhigh.svg",
 };
 
+export function modelEffortBaseline(
+  capability: ModelReasoningEffortCapabilityV1,
+): ReasoningEffort {
+  return capability.mode === "simulated" ? "none" : "auto";
+}
+
+export function modelEffortValueForCapability(
+  capability: ModelReasoningEffortCapabilityV1,
+  stored: ReasoningEffort | null | undefined,
+): ReasoningEffort {
+  return stored && stored !== "auto" && capability.levels.includes(stored)
+    ? stored
+    : modelEffortBaseline(capability);
+}
+
 export function modelEffortSliderLevels(
   capability: ModelReasoningEffortCapabilityV1,
 ): ReasoningEffort[] {
-  return ["auto", ...capability.levels];
+  if (capability.mode === "unavailable") return [];
+  return capability.mode === "simulated"
+    ? [...capability.levels]
+    : ["auto", ...capability.levels];
 }
 
 export function modelEffortSliderIndex(

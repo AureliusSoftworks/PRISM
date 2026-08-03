@@ -30,7 +30,6 @@ import {
   isPrismCompanionModifierHeld,
   isPrismCompanionModifierKey,
   isPrismCompanionPlatformModifier,
-  isPrismCompanionShortcut,
   parsePrismCompanionRecovery,
   parsePrismCompanionSpeechEnabled,
   prismCompanionDismissesOnExternalInteraction,
@@ -41,6 +40,13 @@ import {
   prismCompanionSurfaceScope,
   retainPrismCompanionRecovery,
 } from "./prismCompanionState";
+import {
+  keyboardShortcutAria,
+  keyboardShortcutDisplay,
+  keyboardShortcutEventIsRecording,
+  keyboardShortcutMatchesEvent,
+  keyboardShortcutSpokenLabel,
+} from "./keyboardShortcuts";
 import {
   boundedPrismCompanionReleaseVelocity,
   clampPrismCompanionPosition,
@@ -135,6 +141,7 @@ export interface PrismCompanionSpeechPlaybackCallbacks {
 
 interface PrismCompanionProps {
   accountKey: string;
+  keyboardShortcut: string | null;
   surface: PrismCompanionSurfaceReference;
   onAction: (action: PrismCompanionActionIntent) => void | Promise<void>;
   onSpeak?: (
@@ -255,6 +262,7 @@ function actionLabel(action: PrismCompanionActionIntent): string {
 
 export default function PrismCompanion({
   accountKey,
+  keyboardShortcut,
   surface,
   onAction,
   onSpeak,
@@ -318,6 +326,14 @@ export default function PrismCompanion({
       ),
     [],
   );
+  const shortcutPresentation = useMemo(() => {
+    const platform = typeof navigator === "undefined" ? "" : navigator.platform;
+    return {
+      aria: keyboardShortcutAria(keyboardShortcut),
+      label: keyboardShortcutDisplay(keyboardShortcut, platform),
+      spokenLabel: keyboardShortcutSpokenLabel(keyboardShortcut, platform),
+    };
+  }, [keyboardShortcut]);
   const companionSuppressed = useSyncExternalStore(
     subscribePrismCompanionSuppression,
     getPrismCompanionSuppressedSnapshot,
@@ -1836,6 +1852,7 @@ export default function PrismCompanion({
     const platform = navigator.platform;
     const onKeyDown = (event: KeyboardEvent): void => {
       if (companionSuppressed) return;
+      if (keyboardShortcutEventIsRecording(event)) return;
       const refracting = refractSessionRef.current;
       if (refracting) {
         if (
@@ -1897,17 +1914,7 @@ export default function PrismCompanion({
         }
       }
       if (refracting) return;
-      if (
-        isPrismCompanionShortcut({
-          key: event.key,
-          code: event.code,
-          altKey: event.altKey,
-          ctrlKey: event.ctrlKey,
-          metaKey: event.metaKey,
-          shiftKey: event.shiftKey,
-          platform: navigator.platform,
-        })
-      ) {
+      if (keyboardShortcutMatchesEvent(keyboardShortcut, event)) {
         resetPrismWield();
         event.preventDefault();
         const targetId = focusedPrismRefractTargetId(document.activeElement);
@@ -1957,6 +1964,7 @@ export default function PrismCompanion({
   }, [
     acceptPrismRefract,
     companionSuppressed,
+    keyboardShortcut,
     open,
     openAndFocus,
     releasePrismRefract,
@@ -2419,7 +2427,7 @@ export default function PrismCompanion({
               </strong>
               <p>
                 {refractTutorialStage === "summon"
-                  ? `Wield Prism with ${modifierPresentation.modifierLabel} and click the highlighted field, focus it and use ${modifierPresentation.spokenLabel}, or drag the orb onto it.`
+                  ? `Wield Prism with ${modifierPresentation.modifierLabel} and click the highlighted field, focus it and use ${shortcutPresentation.spokenLabel}, or drag the orb onto it.`
                   : refractTutorialStage === "reroll"
                     ? `Space or ${modifierPresentation.modifierLabel}-clicking the same control refracts another candidate. It never types into the captured field.`
                     : `Enter, Tab, or ${modifierPresentation.modifierLabel}-clicking another registered control keeps the draft. Escape restores the original.`}
@@ -2929,7 +2937,7 @@ export default function PrismCompanion({
           }
           aria-expanded={open}
           aria-controls="global-prism-companion"
-          aria-keyshortcuts={modifierPresentation.ariaKeyShortcuts}
+          aria-keyshortcuts={shortcutPresentation.aria}
           onPointerDown={beginDrag}
           onPointerMove={moveDrag}
           onPointerUp={endDrag}
@@ -2944,9 +2952,11 @@ export default function PrismCompanion({
           }}
         >
           <PrismOrb aura={false} className={styles.orb} />
-          <span className={styles.shortcut} aria-hidden="true">
-            {modifierPresentation.label}
-          </span>
+          {keyboardShortcut ? (
+            <span className={styles.shortcut} aria-hidden="true">
+              {shortcutPresentation.label}
+            </span>
+          ) : null}
         </button>
         <span className={styles.refractGlyph} aria-hidden="true">
           <svg viewBox="0 0 32 32" focusable="false">

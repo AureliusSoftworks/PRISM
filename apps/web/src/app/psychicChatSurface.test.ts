@@ -13,60 +13,94 @@ const serverPath = join(
 const serverSource = readFileSync(serverPath, "utf8");
 
 describe("Psychic Chat surface wiring", () => {
-  it("requests Psychic on the product Chat surface even though it uses the Zen pipeline", () => {
+  it("requests live Psychic progress on both Zen and Chat surfaces", () => {
     assert.match(
       pageSource,
-      /psychicModeEnabled:\s*mode === "chat" \|\| view === "chat"/
+      /psychicModeEnabled:\s*isZenSurfaceView\(view\) \|\| isChatSurfaceView\(view\)/,
     );
   });
 
-  it("does not render visible Psychic lines from the Zen surface", () => {
+  it("renders settled Psychic only as a collapsed assistant disclosure in Chat", () => {
     const renderSource = pageSource.match(
-      /function renderPsychicThoughtLine[\s\S]*?\n  }/
+      /function renderAssistantPsychicDisclosure[\s\S]*?\n  }/,
     )?.[0];
 
     assert.ok(renderSource);
-    assert.match(renderSource, /if \(isZenSurfaceView\(view\)\) \{\s*return null;\s*\}/);
     assert.match(
       renderSource,
-      /psychicTextEnabledForConversation\(detail,\s*\{\s*productChatSurface:\s*view === "chat",?\s*\}\)/
+      /!isChatSurfaceView\(view\) \|\| msg\.role !== "assistant"/,
     );
+    assert.match(renderSource, /expandedPsychicAssistantMessageId === msg\.id/u);
+    assert.match(renderSource, /data-expanded=\{expanded/u);
+    assert.match(renderSource, /Click the message to expand/u);
+    assert.match(renderSource, /psychicLine\.meta/u);
+    assert.match(renderSource, /psychicLine\.passes/u);
+    assert.match(renderSource, /data-psychic-pass=\{pass\.stage\}/u);
+    assert.doesNotMatch(pageSource, /renderPsychicThoughtLine/u);
   });
 
-  it("does not show the delayed Psychic thinking indicator on the Zen surface", () => {
+  it("targets delayed live Psychic progress on both approved surfaces", () => {
     const thinkingTargetSource = pageSource.match(
-      /const psychicThinkingTargetMessageId = useMemo\(\(\) => \{[\s\S]*?\n  \}, \[/
+      /const psychicThinkingTargetMessageId = useMemo\(\(\) => \{[\s\S]*?\n  \}, \[/,
     )?.[0];
 
     assert.ok(thinkingTargetSource);
-    assert.match(thinkingTargetSource, /if \(isZenSurfaceView\(view\)\) return null;/);
-    assert.doesNotMatch(
+    assert.match(
       thinkingTargetSource,
-      /effectivePreferredProvider !== "local"/
+      /!isZenSurfaceView\(view\) && !isChatSurfaceView\(view\)/,
+    );
+    assert.match(
+      thinkingTargetSource,
+      /if \(!psychicThinkingDelayElapsed\) return null;/,
     );
   });
 
-  it("streams Psychic progress into the pending Chat turn", () => {
+  it("keeps the full live Psychic card in Chat's pending chip", () => {
     assert.match(pageSource, /psychicProgressStream:\s*true/u);
     assert.match(pageSource, /onPsychic:\s*applyLivePsychicProgress/u);
     assert.match(pageSource, /data-psychic-live=\{livePsychicSummary/u);
     assert.match(
-      serverSource,
-      /psychicModeRequested && body\.psychicProgressStream === true/u
+      pageSource,
+      /livePsychicStreamSummary \|\| PSYCHIC_PENDING_SUMMARY/u,
+    );
+    assert.match(pageSource, /livePsychicVisiblePasses\.map/u);
+    assert.match(pageSource, /typingPsychicLivePasses/u);
+    assert.match(pageSource, /psychicPlanningModeLabel/u);
+    assert.match(
+      pageSource,
+      /REASONING_EFFORT_LABELS\[livePsychicEffort\]/u,
     );
     assert.match(
       serverSource,
-      /onPsychicProgress:[\s\S]{0,180}type: "psychic"/u
+      /psychicModeRequested && body\.psychicProgressStream === true/u,
+    );
+    assert.match(
+      serverSource,
+      /onPsychicProgress:[\s\S]{0,180}type: "psychic"/u,
     );
   });
 
-  it("does not render Psychic lines from Zen conversation mode alone", () => {
-    const gateSource = pageSource.match(
-      /function psychicTextEnabledForConversation[\s\S]*?\n}/
+  it("puts Zen's live Psychic summary inside the existing loading chip", () => {
+    const zenSource = pageSource.match(
+      /const zenInitialThinkingNode = useMemo\(\(\) => \{[\s\S]*?\n  \}, \[/,
     )?.[0];
 
-    assert.ok(gateSource);
-    assert.match(gateSource, /return options\.productChatSurface === true;/);
-    assert.doesNotMatch(gateSource, /conversation\?\.mode === "chat"/);
+    assert.ok(zenSource);
+    assert.match(zenSource, /zenInitialThinkingButton/u);
+    assert.match(zenSource, /zenInitialThinkingPsychicLabel/u);
+    assert.match(zenSource, /zenInitialThinkingPsychicSummary/u);
+    assert.match(zenSource, /Psychic · \{livePsychicStageLabel\}/u);
+  });
+
+  it("reveals model and effort glyph metadata while Chat context is focused", () => {
+    const metadataSource = pageSource.match(
+      /function renderMessageGenerationMetadata[\s\S]*?\n  }/,
+    )?.[0];
+
+    assert.ok(metadataSource);
+    assert.match(metadataSource, /contextFocusedMessageId !== msg\.id/u);
+    assert.match(metadataSource, /assistantGenerationMetadata/u);
+    assert.match(metadataSource, /<ModelEffortIcon/u);
+    assert.match(metadataSource, /REASONING_EFFORT_LABELS\[metadata\.effort\]/u);
   });
 });

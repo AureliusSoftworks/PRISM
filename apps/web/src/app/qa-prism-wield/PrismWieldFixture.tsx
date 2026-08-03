@@ -105,6 +105,7 @@ export function PrismWieldFixture({
       {mounted ? (
         <PrismCompanion
           accountKey="qa-prism-wield"
+          keyboardShortcut="Control+Space"
           surface={{ surfaceId: "signal", signalShowId: "qa-show" }}
           onAction={() => undefined}
         />

@@ -23,3 +23,11 @@ export function effectiveVoiceModeForPresentation(
     ? "mute"
     : configuredMode;
 }
+
+export function zenPresentationIsVoiceMuted(
+  view: PrismSurfaceView,
+  sidebarOpen: boolean,
+  configuredMode: VoiceMode,
+): boolean {
+  return view === "chat" && !sidebarOpen && configuredMode === "mute";
+}

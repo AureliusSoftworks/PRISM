@@ -139,6 +139,21 @@ describe("shared routing model picker integration", () => {
     assert.match(pageSource, /increase[\s\S]{0,30}usage or cost/u);
   });
 
+  it("uses None instead of Default for simulated non-thinking models", () => {
+    assert.match(
+      pageSource,
+      /modelEffortValueForCapability\(capability, stored\)/u,
+    );
+    assert.match(
+      pageSource,
+      /capability\.mode === "simulated"[\s\S]{0,80}\? "none"[\s\S]{0,80}: "default"/u,
+    );
+    assert.match(
+      tutorialSource,
+      /Models without native reasoning begin at None and show only None through Extra High/u,
+    );
+  });
+
   it("uses the supplied effort symbols in a wheel, pointer, and keyboard slider", () => {
     assert.match(pageSource, /MODEL_EFFORT_ICON_PATHS/u);
     assert.match(
@@ -157,6 +172,30 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(cssSource, /writing-mode: vertical-lr/u);
     assert.doesNotMatch(pageSource, /composeModelEffortHint/u);
+  });
+
+  it("spins the selected Zen and Chat effort glyphs only during active generation", () => {
+    assert.match(pageSource, /generating\?: boolean/u);
+    assert.match(
+      pageSource,
+      /data-generating=\{generating \? "true" : undefined\}/u,
+    );
+    assert.ok(
+      (pageSource.match(/generating=\{pendingReplyVisible\}/gu) ?? []).length >= 2,
+    );
+    assert.match(
+      cssSource,
+      /composeModelEffortTrigger\[data-generating="true"\][\s\S]{0,120}animation: modelEffortThinkingSpin 1\.2s linear infinite/u,
+    );
+    assert.match(cssSource, /@keyframes modelEffortThinkingSpin/u);
+    assert.match(
+      cssSource,
+      /@keyframes modelEffortThinkingSpin[\s\S]{0,80}rotate: 1turn/u,
+    );
+    assert.match(
+      cssSource,
+      /prefers-reduced-motion: reduce[\s\S]{0,180}composeModelEffortTrigger\[data-generating="true"\][\s\S]{0,100}animation: none/u,
+    );
   });
 
   it("adds exactly one spectrum color at each effort increase", () => {
@@ -248,13 +287,16 @@ describe("shared routing model picker integration", () => {
     );
   });
 
-  it("offers the global effort HUD and its Default reset shortcut", () => {
+  it("offers the global effort HUD and its capability-aware baseline shortcut", () => {
     assert.match(pageSource, /modelEffortHudTarget/u);
     assert.match(
       pageSource,
-      /mod && event\.shiftKey && !event\.altKey && key === "e"/u,
+      /keyboardShortcutMatchesEvent\(keyboardShortcuts\.effortHud, event\)/u,
     );
-    assert.match(pageSource, /key === "d"[\s\S]{0,240}"auto"/u);
+    assert.match(
+      pageSource,
+      /key === "d"[\s\S]{0,300}modelEffortBaseline\(modelEffortHudTarget\.capability\)/u,
+    );
     assert.match(cssSource, /\.modelEffortHud\b/u);
   });
 
@@ -266,10 +308,14 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(tutorialSource, /selected model receives the spectrum color/u);
     assert.match(tutorialSource, /vertical slider/u);
+    assert.match(tutorialSource, /selected effort glyph rotates in place/u);
     assert.match(tutorialSource, /one through five PRISM colors/u);
     assert.match(tutorialSource, /Hover a disabled glyph/u);
-    assert.match(tutorialSource, /online models where extra provider calls/u);
+    assert.match(tutorialSource, /online simulation may add provider usage or cost/u);
     assert.match(tutorialSource, /Cmd\/Ctrl\+Shift\+E/u);
+    assert.match(tutorialSource, /Shift\+Tab opens Model/u);
+    assert.match(tutorialSource, /Tab commits it and moves directly into Effort/u);
+    assert.match(tutorialSource, /Settings → Shortcuts/u);
     assert.match(tutorialSource, /prepared work is discarded/u);
   });
 });

@@ -1078,7 +1078,12 @@ describe("processChatMessage Psychic planning", () => {
   it("attaches a concise Psychic summary to Chat turns even when the legacy setting is off", async () => {
     const db = createChatTestDb();
     const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
-    const progress: Array<{ stage: string; summary: string; scratchpad: string }> = [];
+    const progress: Array<{
+      stage: string;
+      summary: string;
+      scratchpad: string;
+      planningMode: string;
+    }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       const body = JSON.parse(String(init?.body ?? "{}")) as {
@@ -1086,7 +1091,7 @@ describe("processChatMessage Psychic planning", () => {
       };
       requests.push({ url, body: body as Record<string, unknown> });
       const isPlanningPass = body.messages?.some((message) =>
-        message.content.includes("Prism's private planning pass")
+        message.content.includes("Prism's user-readable Psychic planning pass")
       );
       return new Response(
         JSON.stringify({
@@ -1131,6 +1136,14 @@ describe("processChatMessage Psychic planning", () => {
       "I weighed the request and chose a practical sequence."
     );
     assert.equal(userMessage?.psychicThought?.effort, "minimal");
+    assert.equal(userMessage?.psychicThought?.planningMode, "simulated");
+    assert.equal(userMessage?.psychicThought?.passCount, 1);
+    assert.deepEqual(userMessage?.psychicThought?.passes, [
+      {
+        stage: "plan",
+        summary: "I weighed the request and chose a practical sequence.",
+      },
+    ]);
     assert.match(result.psychicDebug?.scratchpad ?? "", /developer-only hidden sketch/);
     assert.equal(result.psychicDebug?.simulated, true);
     assert.equal(result.psychicDebug?.passCount, 1);
@@ -1139,6 +1152,7 @@ describe("processChatMessage Psychic planning", () => {
       ["plan"]
     );
     assert.deepEqual(progress.map((event) => event.stage), ["plan"]);
+    assert.equal(progress[0]?.planningMode, "simulated");
     assert.equal(
       progress[0]?.summary,
       "I weighed the request and chose a practical sequence."
@@ -1147,7 +1161,7 @@ describe("processChatMessage Psychic planning", () => {
     const planningRequest = requests.find(({ body }) => {
       const messages = body.messages as Array<{ content: string }> | undefined;
       return messages?.some((message) =>
-        message.content.includes("Prism's private planning pass")
+        message.content.includes("Prism's user-readable Psychic planning pass")
       );
     });
     assert.match(
@@ -1156,7 +1170,7 @@ describe("processChatMessage Psychic planning", () => {
     );
     assert.match(
       JSON.stringify(planningRequest?.body ?? {}),
-      /I've decided it makes the most sense/
+      /decisive considerations or constraints/
     );
     assert.doesNotMatch(JSON.stringify(userMessage), /developer-only hidden sketch/);
 
@@ -1198,6 +1212,10 @@ describe("processChatMessage Psychic planning", () => {
     for (const testCase of cases) {
       const db = createChatTestDb();
       const requests: Array<{ url: string; messages?: Array<{ content: string }> }> = [];
+      const progress: Array<{
+        stage: string;
+        passes: Array<{ stage: string; summary: string }>;
+      }> = [];
       globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
         const body = JSON.parse(String(init?.body ?? "{}")) as {
           messages?: Array<{ content: string }>;
@@ -1207,7 +1225,7 @@ describe("processChatMessage Psychic planning", () => {
           ...body,
         });
         const content = body.messages?.map((message) => message.content).join("\n") ?? "";
-        if (content.includes("Prism's private planning pass")) {
+        if (content.includes("Prism's user-readable Psychic planning pass")) {
           return new Response(
             JSON.stringify({
               message: {
@@ -1223,19 +1241,40 @@ describe("processChatMessage Psychic planning", () => {
         }
         if (content.includes("Prism's private draft pass")) {
           return new Response(
-            JSON.stringify({ message: { content: "private draft secret" } }),
+            JSON.stringify({
+              message: {
+                content: JSON.stringify({
+                  artifact: "private draft secret",
+                  summary: "I shaped the plan into a candidate response.",
+                }),
+              },
+            }),
             { status: 200, headers: { "content-type": "application/json" } }
           );
         }
         if (content.includes("Prism's private audit pass")) {
           return new Response(
-            JSON.stringify({ message: { content: "private audit guidance" } }),
+            JSON.stringify({
+              message: {
+                content: JSON.stringify({
+                  artifact: "private audit guidance",
+                  summary: "I checked the candidate against the request.",
+                }),
+              },
+            }),
             { status: 200, headers: { "content-type": "application/json" } }
           );
         }
         if (content.includes("Prism's private revision-guidance pass")) {
           return new Response(
-            JSON.stringify({ message: { content: "private revision guidance" } }),
+            JSON.stringify({
+              message: {
+                content: JSON.stringify({
+                  artifact: "private revision guidance",
+                  summary: "I refined the final response guidance.",
+                }),
+              },
+            }),
             { status: 200, headers: { "content-type": "application/json" } }
           );
         }
@@ -1257,11 +1296,16 @@ describe("processChatMessage Psychic planning", () => {
           mode: "sandbox",
           experimentalAllModelEffortEnabled: true,
           botOverrides: { model: "llama3.2", reasoningEffort: testCase.effort },
+          onPsychicProgress: (event) => progress.push(event),
         }
       );
 
-      const privatePassRequests = requests.filter((request) =>
-        request.messages?.some((message) => message.content.includes("Prism's private"))
+      const psychicPassRequests = requests.filter((request) =>
+        request.messages?.some(
+          (message) =>
+            message.content.includes("Prism's user-readable Psychic planning pass") ||
+            message.content.includes("Prism's private")
+        )
       );
       const turnGenerationRequests = requests.filter(
         (request) =>
@@ -1270,7 +1314,15 @@ describe("processChatMessage Psychic planning", () => {
           )
       );
       assert.equal(turnGenerationRequests.length, testCase.passes.length + 1);
-      assert.equal(privatePassRequests.length, testCase.passes.length);
+      assert.equal(psychicPassRequests.length, testCase.passes.length);
+      assert.deepEqual(
+        progress.map((event) => event.stage),
+        testCase.passes,
+      );
+      assert.deepEqual(
+        progress.map((event) => event.passes.length),
+        testCase.passes.map((_, index) => index + 1),
+      );
       if (testCase.passes.length === 0) {
         assert.equal(result.psychicDebug, undefined);
       } else {
@@ -1279,6 +1331,12 @@ describe("processChatMessage Psychic planning", () => {
           testCase.passes
         );
         assert.equal(result.psychicDebug?.passCount, testCase.passes.length);
+        assert.equal(
+          new Set(
+            result.psychicDebug?.passes?.map((pass) => pass.summary) ?? [],
+          ).size,
+          testCase.passes.length,
+        );
       }
       assert.ok(
         requests.every(
@@ -1300,7 +1358,7 @@ describe("processChatMessage Psychic planning", () => {
       };
       requests.push(body);
       const content = body.messages?.map((message) => message.content).join("\n") ?? "";
-      if (content.includes("Prism's private planning pass")) {
+      if (content.includes("Prism's user-readable Psychic planning pass")) {
         return new Response(
           JSON.stringify({
             message: {
@@ -1370,7 +1428,7 @@ describe("processChatMessage Psychic planning", () => {
     );
     const finalRequest = requests.find((request) =>
       request.messages?.some((message) =>
-        message.content.includes("Private guidance from Prism's simulated planning pass")
+        message.content.includes("Guidance derived from Prism's user-readable Psychic plan")
       )
     );
     assert.ok(finalRequest);
@@ -1387,7 +1445,7 @@ describe("processChatMessage Psychic planning", () => {
         messages?: Array<{ content: string }>;
       };
       const isPlanningPass = body.messages?.some((message) =>
-        message.content.includes("Prism's private planning pass")
+        message.content.includes("Prism's user-readable Psychic planning pass")
       );
       return new Response(
         JSON.stringify({ message: { content: isPlanningPass ? "not json" : "Normal answer." } }),
@@ -1434,7 +1492,7 @@ describe("processChatMessage Psychic planning", () => {
       requests.push({ url, body });
       assert.equal(url, "https://api.openai.com/v1/chat/completions");
       const serialized = JSON.stringify(body);
-      const content = serialized.includes("Prism's private planning pass")
+      const content = serialized.includes("Prism's user-readable Psychic planning pass")
         ? JSON.stringify({
             summary: "I mapped the online request.",
             scratchpad: "private online plan",
@@ -1469,8 +1527,11 @@ describe("processChatMessage Psychic planning", () => {
 
     assert.equal(requests.length, 4);
     assert.equal(
-      requests.filter(({ body }) => JSON.stringify(body).includes("Prism's private"))
-        .length,
+      requests.filter(({ body }) =>
+        /Prism's (?:user-readable Psychic planning pass|private)/u.test(
+          JSON.stringify(body)
+        )
+      ).length,
       3,
     );
     assert.ok(
@@ -1545,7 +1606,7 @@ describe("processChatMessage Psychic planning", () => {
       requests.push({ body });
       assert.equal(url, "https://api.openai.com/v1/chat/completions");
       const serialized = JSON.stringify(body);
-      const content = serialized.includes("Prism's private planning pass")
+      const content = serialized.includes("Prism's user-readable Psychic planning pass")
         ? JSON.stringify({
             summary: "I mapped the online Chat request.",
             scratchpad: "private online Chat plan",
@@ -1592,6 +1653,16 @@ describe("processChatMessage Psychic planning", () => {
       userMessage?.psychicThought?.summary,
       "I mapped the online Chat request.",
     );
+    assert.deepEqual(
+      userMessage?.psychicThought?.passes?.map((pass) => pass.stage),
+      ["plan", "draft", "audit"],
+    );
+    assert.equal(
+      new Set(
+        userMessage?.psychicThought?.passes?.map((pass) => pass.summary) ?? [],
+      ).size,
+      3,
+    );
     assert.doesNotMatch(JSON.stringify(userMessage), /private online Chat plan/u);
   });
 
@@ -1603,10 +1674,18 @@ describe("processChatMessage Psychic planning", () => {
       const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
       requests.push({ body });
       assert.equal(url, "https://api.openai.com/v1/chat/completions");
-      assert.doesNotMatch(JSON.stringify(body), /Prism's private/);
+      const serialized = JSON.stringify(body);
+      const content = serialized.includes("Prism's user-readable Psychic planning pass")
+        ? JSON.stringify({
+            summary:
+              "I need to keep this response calm and concise. The user asked for quiet, so I'll avoid extra flourishes and answer directly.",
+            scratchpad: "developer-only native plan",
+            answerGuidance: "Answer calmly and directly without extra flourishes.",
+          })
+        : "Zen answer.";
       return new Response(
         JSON.stringify({
-          choices: [{ message: { content: "Zen answer." }, finish_reason: "stop" }],
+          choices: [{ message: { content }, finish_reason: "stop" }],
         }),
         { status: 200, headers: { "content-type": "application/json" } }
       );
@@ -1629,15 +1708,27 @@ describe("processChatMessage Psychic planning", () => {
       }
     );
 
-    assert.equal(requests.length, 1);
+    assert.equal(requests.length, 2);
+    assert.ok(requests.every(({ body }) => body.reasoning_effort === "high"));
     assert.equal(result.psychicDebug?.simulated, false);
-    assert.equal(result.psychicDebug?.passCount, 0);
+    assert.equal(result.psychicDebug?.passCount, 1);
     const userMessage = result.conversation.messages.find(
       (message) => message.role === "user"
     );
+    assert.equal(
+      userMessage?.psychicThought?.summary,
+      "I need to keep this response calm and concise. The user asked for quiet, so I'll avoid extra flourishes and answer directly."
+    );
+    assert.equal(userMessage?.psychicThought?.planningMode, "native");
+    assert.equal(userMessage?.psychicThought?.passCount, 1);
+    assert.doesNotMatch(JSON.stringify(userMessage), /developer-only native plan/u);
+    const finalRequest = requests.find(({ body }) =>
+      JSON.stringify(body).includes("Visible Psychic rationale:")
+    );
+    assert.ok(finalRequest);
     assert.match(
-      userMessage?.psychicThought?.summary ?? "",
-      /^I'm using the selected model's native reasoning/
+      JSON.stringify(finalRequest?.body),
+      /Answer calmly and directly without extra flourishes/
     );
   });
 

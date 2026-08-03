@@ -69,6 +69,7 @@ describe("Avatar Details Studio integration", () => {
 
   it("uses user-authored saved ink instead of a canned accessory catalog", () => {
     assert.match(editorSource, /<strong>Screen editor<\/strong>/);
+    assert.match(editorSource, /Shell-scaled preview/);
     assert.match(editorSource, /<strong>Saved ink<\/strong>/);
     assert.match(editorSource, /createAvatarDetailInkTemplate\(/);
     assert.match(editorSource, /applyAvatarDetailInkTemplate\(/);
@@ -171,6 +172,10 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /avatarDetailsWritablePixel\(x, y\)/);
     assert.match(editorSource, /rasterizeAvatarDetailsSemanticRgba\(/);
     assert.match(editorSource, /className=\{styles\.canvasViewport\}/);
+    assert.match(
+      editorSource,
+      /className=\{styles\.canvasViewport\}\s+style=\{inkApertureStyle\}/,
+    );
     assert.match(editorCss, /\.canvasViewport[\s\S]*transform:\s*scale\(1\.36\)/);
     assert.match(
       editorCss,
@@ -180,7 +185,7 @@ describe("Avatar Details Studio integration", () => {
       "data-avatar-details-face-guide=\"true\"",
     );
     const zoomedCanvasIndex = editorSource.indexOf(
-      "<div className={styles.canvasViewport}>",
+      "className={styles.canvasViewport}",
     );
     assert.ok(faceGuideIndex > 0);
     assert.ok(zoomedCanvasIndex > 0);
@@ -290,6 +295,10 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /createPortal\(canvasEditor, canvasPortalTarget\)/);
     assert.match(editorSource, /data-foundry-canvas=/);
     assert.match(pageSource, /runtimeEffectsEnabled=\{screenMode === "live"\}/);
+    assert.match(
+      pageCss,
+      /\.botAvatarCustomizerBody\[data-camera-mode="ink"\][\s\S]*?\.botAvatarFoundryCameraRig\[data-spatial-camera-rig="true"\]\s*\{[\s\S]*?transform:\s*translateX\(-11vw\) translateY\(10dvh\) scale\(1\.78\)/,
+    );
     assert.doesNotMatch(pageSource, /Render current avatar/);
   });
 
@@ -526,7 +535,11 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       maskCss,
-      /translateX\(var\(--avatar-details-offset-x, 0px\)\)[\s\S]*translateY\(var\(--zen-live-bot-ink-offset-y, 0%\)\)[\s\S]*translateY\(var\(--avatar-details-facing-offset-y, 0%\)\)[\s\S]*scaleX\(var\(--avatar-details-scale-x, 1\)\)[\s\S]*scaleX\(var\(--avatar-details-facing-scale-x, 1\)\)/,
+      /translateX\(var\(--avatar-details-offset-x, 0px\)\)[\s\S]*translateY\(var\(--zen-live-bot-ink-offset-y, 0%\)\)[\s\S]*translateY\(var\(--avatar-details-facing-offset-y, 0%\)\)[\s\S]*scale\(var\(--avatar-details-ink-aperture-scale, 1\)\)[\s\S]*scaleX\(var\(--avatar-details-scale-x, 1\)\)[\s\S]*scaleX\(var\(--avatar-details-facing-scale-x, 1\)\)/,
+    );
+    assert.match(
+      editorCss,
+      /\.screenBoundary,\s*\.canvas,\s*\.inputSurface\s*\{[\s\S]*transform:\s*scale\(var\(--avatar-details-ink-aperture-scale, 1\)\);[\s\S]*transform-origin:\s*center;/,
     );
     assert.match(
       pageCss,

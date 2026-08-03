@@ -119,12 +119,25 @@ import {
 } from "./graphicsQuality";
 import {
   MODEL_EFFORT_ICON_PATHS,
+  modelEffortBaseline,
   modelEffortSliderIndex,
   modelEffortSliderLevels,
   modelEffortSliderProgress,
   modelEffortStep,
+  modelEffortValueForCapability,
   modelEffortWheelDirection,
 } from "./modelEffortControl";
+import { modelPickerStepValue } from "./modelPickerControl";
+import { KeyboardShortcutSettings } from "./KeyboardShortcutSettings";
+import {
+  defaultPrismKeyboardShortcuts,
+  keyboardShortcutEventIsRecording,
+  keyboardShortcutMatchesEvent,
+  readPrismKeyboardShortcuts,
+  setActivePrismKeyboardShortcuts,
+  writePrismKeyboardShortcuts,
+  type PrismKeyboardShortcutPreferencesV1,
+} from "./keyboardShortcuts";
 import { prismCursorMotionStep } from "./prismCursorMotion";
 import {
   getPrismSystemPausedServerSnapshot,
@@ -475,9 +488,15 @@ import {
   type ManualAskQuestionDraft,
 } from "./manualAskQuestionTool";
 import {
+  PSYCHIC_PENDING_SUMMARY,
+  psychicPlanningModeLabel,
   psychicThoughtDisplayLineForMessage,
   type PsychicCanvasScratchpadPayload,
 } from "./psychicThoughtDisplay";
+import {
+  assistantGenerationMetadata,
+  psychicSourceForAssistantMessage,
+} from "./psychicMessagePresentation";
 import {
   createStoryDialogState,
   createStoryInventoryViewState,
@@ -1295,6 +1314,7 @@ import {
   CHAT_FORCED_MUTE_REASON,
   chatPresentationForcesVoiceMute,
   effectiveVoiceModeForPresentation,
+  zenPresentationIsVoiceMuted,
 } from "./chatVoicePolicy";
 import {
   PRISM_APPLETS,
@@ -8204,9 +8224,9 @@ interface Message {
   promptWildcards?: PromptWildcardRunMetadata;
   /** User-entered AskQuestion tool result completed by the assistant's selected choice. */
   manualAskQuestion?: ManualAskQuestionResultPayload;
-  /** Concise Psychic summary shown under Chat user turns. */
+  /** Concise Psychic summary associated with the assistant reply to this turn. */
   psychicThought?: PsychicThoughtPayload;
-  /** Live-only verbose Psychic scratchpad shown in the active Chat canvas. */
+  /** Live-only verbose Psychic scratchpad shown only in approved presentation surfaces. */
   psychicScratchpad?: PsychicCanvasScratchpadPayload;
   /** Privacy-safe Auto attempt history for the successful reply. */
   autoRecovery?: AutoRecoveryTraceV1;
@@ -9155,6 +9175,7 @@ const CHAT_MODE_COMPOSER_REVEAL_RATIO = 0.34;
 const CHAT_MODE_COMPOSING_REVEAL_DELAY_MULTIPLIER = 2;
 const CHAT_MODE_COMPOSING_REVEAL_PAUSE_MS = 2400;
 const CHAT_MODE_COMPOSING_REVEAL_RECOVERY_MS = 1200;
+const ZEN_MUTED_REVEAL_TIMING_MULTIPLIER = 0.05;
 const ZEN_VOICE_REVEAL_PREPARATION_TIMEOUT_MS = 12000;
 const CHAT_MODE_COMPOSER_PARENT_DRAFT_SYNC_MS = 240;
 const COFFEE_COMPOSER_PARENT_DRAFT_SYNC_MS = 240;
@@ -16667,7 +16688,7 @@ function savedModelReasoningEffort(
         preference.modelId,
       ) === key,
   )?.effort;
-  return stored && capability.levels.includes(stored) ? stored : "auto";
+  return modelEffortValueForCapability(capability, stored);
 }
 
 function modelEffortTargetForSelection(args: {
@@ -23571,7 +23592,7 @@ interface ComposerModelPickerEffortControl {
   targetKey: string;
   value: ReasoningEffort;
   capability: ModelReasoningEffortCapabilityV1;
-  rowValueForModel: (model: ModelCatalogEntry) => ReasoningEffort;
+  rowValueForModel: (model: ModelCatalogEntry) => ReasoningEffort | undefined;
   onChange: (nextValue: ReasoningEffort) => void;
   onActivate?: () => void;
   disabled?: boolean;
@@ -23599,6 +23620,8 @@ interface ComposerModelPickerProps {
   selectedProvider?: Provider;
   disabled?: boolean;
   loading?: boolean;
+  /** True only while the selected model is actively generating a reply. */
+  generating?: boolean;
   title?: string;
   ariaLabel: string;
   formName?: string;
@@ -23638,6 +23661,48 @@ interface ComposerModelPickerProps {
   dismissPopoversSignal?: number;
 }
 
+const MODEL_PICKER_QUICK_OPEN_EVENT = "prism:model-picker-quick-open";
+
+type ComposerModelPickerSurface = "model" | "effort";
+type ComposerModelPickerInteractionMode = "pointer" | "keyboard";
+
+interface ComposerModelPickerOpenState {
+  surface: ComposerModelPickerSurface | null;
+  interactionMode: ComposerModelPickerInteractionMode;
+}
+
+const CLOSED_COMPOSER_MODEL_PICKER_STATE: ComposerModelPickerOpenState = {
+  surface: null,
+  interactionMode: "pointer",
+};
+
+function focusVisibleComposer(): void {
+  const candidates = Array.from(
+    document.querySelectorAll<HTMLElement>(
+      [
+        '[data-starter-compose-surface="true"] textarea:not(:disabled)',
+        '[data-starter-compose-surface="true"] input:not(:disabled)',
+        '[data-starter-compose-surface="true"] [contenteditable="true"]',
+        '[data-tutorial-target="composer"] textarea:not(:disabled)',
+        '[data-tutorial-target="composer"] input:not(:disabled)',
+        '[data-tutorial-target="composer"] [contenteditable="true"]',
+      ].join(","),
+    ),
+  ).filter((candidate) => {
+    const rect = candidate.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const style = window.getComputedStyle(candidate);
+    return style.display !== "none" && style.visibility !== "hidden";
+  });
+  candidates
+    .sort(
+      (left, right) =>
+        right.getBoundingClientRect().bottom -
+        left.getBoundingClientRect().bottom,
+    )[0]
+    ?.focus();
+}
+
 function ComposerModelPicker({
   value,
   onChange,
@@ -23646,6 +23711,7 @@ function ComposerModelPicker({
   selectedProvider,
   disabled,
   loading = false,
+  generating = false,
   title,
   ariaLabel,
   formName,
@@ -23668,12 +23734,18 @@ function ComposerModelPicker({
   statusMessage,
   dismissPopoversSignal,
 }: ComposerModelPickerProps): React.JSX.Element {
-  const [open, setOpen] = useState(false);
-  const [effortOpen, setEffortOpen] = useState(false);
+  const [pickerOpenState, setPickerOpenState] =
+    useState<ComposerModelPickerOpenState>(CLOSED_COMPOSER_MODEL_PICKER_STATE);
+  const open = pickerOpenState.surface === "model";
+  const effortOpen = pickerOpenState.surface === "effort";
+  const [highlightedModelValue, setHighlightedModelValue] = useState<
+    string | null
+  >(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const effortTriggerRef = useRef<HTMLButtonElement>(null);
   const effortMenuRef = useRef<HTMLDivElement>(null);
+  const modelWheelLockedRef = useRef(false);
   const effortWheelLockedRef = useRef(false);
   const formValueRef = useRef<HTMLInputElement>(null);
   const autoMetaShown = autoOptionMetaOverride ?? AUTO_MODEL_SETTINGS_SUBTEXT;
@@ -23740,17 +23812,58 @@ function ComposerModelPicker({
   const effortSliderProgress = effortControl
     ? modelEffortSliderProgress(effortLevels, effortControl.value)
     : 0;
+  const selectableModelValues = useMemo(
+    () => [
+      ...(showAutoOption ? [autoOptionValue] : []),
+      ...(showDisabledOption ? [disabledOptionValue] : []),
+      ...options.flatMap((model) => (model.disabledReason ? [] : [model.id])),
+    ],
+    [
+      autoOptionValue,
+      disabledOptionValue,
+      options,
+      showAutoOption,
+      showDisabledOption,
+    ],
+  );
+  const activeHighlightedModelValue = selectableModelValues.includes(
+    highlightedModelValue ?? "",
+  )
+    ? highlightedModelValue
+    : selectableModelValues.includes(value)
+      ? value
+      : (selectableModelValues[0] ?? null);
 
-  const setEffortValue = (nextValue: ReasoningEffort): void => {
-    if (!effortControl || effortInteractionDisabled) return;
-    effortControl.onActivate?.();
-    if (nextValue !== effortControl.value) {
-      effortControl.onChange(nextValue);
-    }
-  };
+  const moveModelHighlight = useCallback(
+    (direction: -1 | 1): void => {
+      setHighlightedModelValue((current) =>
+        modelPickerStepValue(
+          selectableModelValues,
+          selectableModelValues.includes(current ?? "")
+            ? current
+            : activeHighlightedModelValue,
+          direction,
+        ),
+      );
+    },
+    [activeHighlightedModelValue, selectableModelValues],
+  );
+
+  const setEffortValue = useCallback(
+    (nextValue: ReasoningEffort): void => {
+      if (!effortControl || effortInteractionDisabled) return;
+      effortControl.onActivate?.();
+      if (nextValue !== effortControl.value) {
+        effortControl.onChange(nextValue);
+      }
+    },
+    [effortControl, effortInteractionDisabled],
+  );
 
   const handleEffortWheel = (event: React.WheelEvent<HTMLElement>): void => {
     if (
+      pickerOpenState.interactionMode !== "pointer" ||
+      !effortMenuOpen ||
       !effortControl ||
       effortInteractionDisabled ||
       effortLevels.length <= 1 ||
@@ -23777,6 +23890,192 @@ function ComposerModelPicker({
     setEffortValue(nextValue);
   };
 
+  const dismissPickersToComposer = useCallback((): void => {
+    setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
+    window.requestAnimationFrame(focusVisibleComposer);
+  }, []);
+
+  useEffect(() => {
+    const trigger = triggerRef.current;
+    if (!trigger) return;
+    const openQuickPicker = (): void => {
+      setHighlightedModelValue(
+        selectableModelValues.includes(value)
+          ? value
+          : (selectableModelValues[0] ?? null),
+      );
+      setPickerOpenState({
+        surface: "model",
+        interactionMode: "keyboard",
+      });
+      window.requestAnimationFrame(() => trigger.focus());
+    };
+    trigger.addEventListener(MODEL_PICKER_QUICK_OPEN_EVENT, openQuickPicker);
+    return () =>
+      trigger.removeEventListener(
+        MODEL_PICKER_QUICK_OPEN_EVENT,
+        openQuickPicker,
+      );
+  }, [selectableModelValues, value]);
+
+  useEffect(() => {
+    if (
+      pickerOpenState.interactionMode !== "keyboard" ||
+      (!menuOpen && !effortMenuOpen)
+    ) {
+      return;
+    }
+    const returnToPointerBrowsing = (): void => {
+      setPickerOpenState((current) =>
+        current.surface
+          ? { ...current, interactionMode: "pointer" }
+          : current,
+      );
+    };
+    window.addEventListener("mousemove", returnToPointerBrowsing, {
+      capture: true,
+      once: true,
+    });
+    return () =>
+      window.removeEventListener("mousemove", returnToPointerBrowsing, true);
+  }, [effortMenuOpen, menuOpen, pickerOpenState.interactionMode]);
+
+  useEffect(() => {
+    if (
+      pickerOpenState.interactionMode !== "keyboard" ||
+      (!menuOpen && !effortMenuOpen)
+    ) {
+      return;
+    }
+    const handleQuickWheel = (event: WheelEvent): void => {
+      if (
+        event.ctrlKey ||
+        Math.max(Math.abs(event.deltaX), Math.abs(event.deltaY)) < 2
+      ) {
+        return;
+      }
+      const direction = modelEffortWheelDirection(
+        event.deltaX,
+        event.deltaY,
+      );
+      if (direction === 0) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (menuOpen) {
+        if (
+          selectableModelValues.length <= 1 ||
+          modelWheelLockedRef.current
+        ) {
+          return;
+        }
+        modelWheelLockedRef.current = true;
+        window.setTimeout(() => {
+          modelWheelLockedRef.current = false;
+        }, 90);
+        moveModelHighlight(direction);
+        return;
+      }
+      if (
+        !effortControl ||
+        effortInteractionDisabled ||
+        effortLevels.length <= 1 ||
+        effortWheelLockedRef.current
+      ) {
+        return;
+      }
+      const nextValue = modelEffortStep(
+        effortLevels,
+        effortControl.value,
+        direction,
+      );
+      if (nextValue === effortControl.value) return;
+      effortWheelLockedRef.current = true;
+      window.setTimeout(() => {
+        effortWheelLockedRef.current = false;
+      }, 90);
+      setEffortValue(nextValue);
+    };
+    const handleQuickArrows = (event: KeyboardEvent): void => {
+      if (
+        event.key !== "ArrowDown" &&
+        event.key !== "ArrowRight" &&
+        event.key !== "ArrowUp" &&
+        event.key !== "ArrowLeft"
+      ) {
+        return;
+      }
+      event.preventDefault();
+      event.stopPropagation();
+      if (menuOpen) {
+        moveModelHighlight(
+          event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1,
+        );
+        return;
+      }
+      if (!effortControl || effortInteractionDisabled) return;
+      setEffortValue(
+        modelEffortStep(
+          effortLevels,
+          effortControl.value,
+          event.key === "ArrowUp" || event.key === "ArrowRight" ? 1 : -1,
+        ),
+      );
+    };
+    document.addEventListener("wheel", handleQuickWheel, {
+      capture: true,
+      passive: false,
+    });
+    document.addEventListener("keydown", handleQuickArrows, true);
+    return () => {
+      document.removeEventListener("wheel", handleQuickWheel, true);
+      document.removeEventListener("keydown", handleQuickArrows, true);
+    };
+  }, [
+    effortControl,
+    effortInteractionDisabled,
+    effortLevels,
+    effortMenuOpen,
+    menuOpen,
+    moveModelHighlight,
+    pickerOpenState.interactionMode,
+    selectableModelValues.length,
+    setEffortValue,
+  ]);
+
+  useEffect(() => {
+    if (!menuOpen) return;
+    setHighlightedModelValue(
+      selectableModelValues.includes(value)
+        ? value
+        : (selectableModelValues[0] ?? null),
+    );
+  }, [menuOpen, selectableModelValues, value]);
+
+  useEffect(() => {
+    if (
+      !menuOpen ||
+      pickerOpenState.interactionMode !== "keyboard" ||
+      !activeHighlightedModelValue
+    ) {
+      return;
+    }
+    const frame = window.requestAnimationFrame(() => {
+      const option = Array.from(
+        menuRef.current?.querySelectorAll<HTMLElement>("[data-model-value]") ??
+          [],
+      ).find(
+        (candidate) =>
+          candidate.dataset.modelValue === activeHighlightedModelValue,
+      );
+      option?.scrollIntoView({ block: "nearest" });
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [
+    activeHighlightedModelValue,
+    menuOpen,
+    pickerOpenState.interactionMode,
+  ]);
+
   useEffect(() => {
     if (!menuOpen) return;
     const handler = (event: MouseEvent) => {
@@ -23784,7 +24083,7 @@ function ComposerModelPicker({
       const target = event.target as Node;
       if (triggerRef.current?.contains(target)) return;
       if (menuRef.current?.contains(target)) return;
-      setOpen(false);
+      setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -23797,7 +24096,7 @@ function ComposerModelPicker({
       const target = event.target as Node;
       if (effortTriggerRef.current?.contains(target)) return;
       if (effortMenuRef.current?.contains(target)) return;
-      setEffortOpen(false);
+      setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
@@ -23807,44 +24106,49 @@ function ComposerModelPicker({
     if (!menuOpen) return;
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
         event.stopPropagation();
-        setOpen(false);
-        triggerRef.current?.focus();
+        dismissPickersToComposer();
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [menuOpen]);
+  }, [dismissPickersToComposer, menuOpen]);
 
   useEffect(() => {
     if (!effortMenuOpen) return;
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
+        event.preventDefault();
         event.stopPropagation();
-        setEffortOpen(false);
-        effortTriggerRef.current?.focus();
+        dismissPickersToComposer();
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [effortMenuOpen]);
+  }, [dismissPickersToComposer, effortMenuOpen]);
 
   useEffect(() => {
     if (!interactionDisabled || !open) return;
-    const timeout = window.setTimeout(() => setOpen(false), 0);
+    const timeout = window.setTimeout(
+      () => setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE),
+      0,
+    );
     return () => window.clearTimeout(timeout);
   }, [interactionDisabled, open]);
 
   useEffect(() => {
     if (!effortInteractionDisabled || !effortOpen) return;
-    const timeout = window.setTimeout(() => setEffortOpen(false), 0);
+    const timeout = window.setTimeout(
+      () => setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE),
+      0,
+    );
     return () => window.clearTimeout(timeout);
   }, [effortInteractionDisabled, effortOpen]);
 
   useEffect(() => {
     if (dismissPopoversSignal === undefined) return;
-    setOpen(false);
-    setEffortOpen(false);
+    setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
   }, [dismissPopoversSignal]);
 
   useEffect(() => {
@@ -23856,8 +24160,81 @@ function ComposerModelPicker({
       formValueRef.current.value = nextValue;
     }
     onChange(nextValue);
-    setOpen(false);
+    setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
     triggerRef.current?.focus();
+  };
+
+  const commitHighlightedModelToEffort = (): void => {
+    const nextValue = activeHighlightedModelValue;
+    if (!nextValue) return;
+    if (formValueRef.current) {
+      formValueRef.current.value = nextValue;
+    }
+    if (nextValue !== value) onChange(nextValue);
+    if (!effortInteractionDisabled) {
+      setPickerOpenState({
+        surface: "effort",
+        interactionMode: "keyboard",
+      });
+      window.requestAnimationFrame(() => effortTriggerRef.current?.focus());
+      return;
+    }
+    setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
+    triggerRef.current?.focus();
+  };
+
+  const handleModelKeyDown = (
+    event: React.KeyboardEvent<HTMLElement>,
+  ): void => {
+    if (!menuOpen) return;
+    if (event.code === "Space") {
+      event.preventDefault();
+      event.stopPropagation();
+      dismissPickersToComposer();
+      return;
+    }
+    if (
+      event.key === "Enter" &&
+      pickerOpenState.interactionMode === "keyboard"
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      pick(activeHighlightedModelValue ?? value);
+      return;
+    }
+    if (event.key === "Tab" && !event.shiftKey && !effortInteractionDisabled) {
+      event.preventDefault();
+      event.stopPropagation();
+      setPickerOpenState({
+        surface: "model",
+        interactionMode: "keyboard",
+      });
+      commitHighlightedModelToEffort();
+    }
+  };
+
+  const handleEffortKeyDown = (
+    event: React.KeyboardEvent<HTMLElement>,
+  ): void => {
+    if (effortMenuOpen && event.code === "Space") {
+      event.preventDefault();
+      event.stopPropagation();
+      dismissPickersToComposer();
+      return;
+    }
+    if (event.key !== "Tab" || event.shiftKey || !effortMenuOpen) return;
+    event.preventDefault();
+    event.stopPropagation();
+    setHighlightedModelValue(
+      selectableModelValues.includes(value)
+        ? value
+        : (selectableModelValues[0] ?? null),
+    );
+    setPickerOpenState({
+      surface: "model",
+      interactionMode: "keyboard",
+    });
+    window.requestAnimationFrame(() => triggerRef.current?.focus());
   };
 
   useEffect(() => {
@@ -23872,6 +24249,12 @@ function ComposerModelPicker({
       data-disabled={interactionDisabled ? "true" : undefined}
       data-loading={loading ? "true" : undefined}
       data-open={menuOpen ? "true" : undefined}
+      data-picker-surface={pickerOpenState.surface ?? undefined}
+      data-picker-interaction-mode={
+        pickerOpenState.surface
+          ? pickerOpenState.interactionMode
+          : undefined
+      }
       data-has-effort={effortControl ? "true" : undefined}
       data-provider={visualProvider}
       data-routing-provider={provider}
@@ -23888,10 +24271,15 @@ function ComposerModelPicker({
         ref={triggerRef}
         type="button"
         className={styles.composeModelTrigger}
+        data-prism-model-picker-trigger="true"
         onClick={() => {
-          setEffortOpen(false);
-          setOpen((current) => !current);
+          setPickerOpenState((current) =>
+            current.surface === "model"
+              ? CLOSED_COMPOSER_MODEL_PICKER_STATE
+              : { surface: "model", interactionMode: "pointer" },
+          );
         }}
+        onKeyDown={handleModelKeyDown}
         disabled={interactionDisabled}
         data-glyph-tooltip={loading ? "Models are still loading." : title}
         aria-haspopup="listbox"
@@ -23939,16 +24327,22 @@ function ComposerModelPicker({
               effortControl.capability.mode !== "unavailable" ? "true" : "false"
             }
             data-effort-level={effortControl.value}
+            data-generating={generating ? "true" : undefined}
             onClick={() => {
               effortControl.onActivate?.();
-              setOpen(false);
-              setEffortOpen((current) => !current);
+              setPickerOpenState((current) =>
+                current.surface === "effort"
+                  ? CLOSED_COMPOSER_MODEL_PICKER_STATE
+                  : { surface: "effort", interactionMode: "pointer" },
+              );
             }}
+            onKeyDown={handleEffortKeyDown}
             onWheel={handleEffortWheel}
             disabled={effortInteractionDisabled}
             aria-haspopup="dialog"
             aria-expanded={effortMenuOpen}
             aria-label={`Effort: ${effortLabel}`}
+            aria-busy={generating ? "true" : undefined}
           >
             <ModelEffortIcon level={effortControl.value} />
             <span className={styles.srOnly}>{effortLabel}</span>
@@ -23978,6 +24372,7 @@ function ComposerModelPicker({
               menuClassName ? ` ${menuClassName}` : ""
             }`}
             style={menuPortalStyle}
+            onKeyDown={handleModelKeyDown}
           >
             {statusMessage ? (
               <div className={styles.composeModelStatusRow} role="status">
@@ -24018,6 +24413,13 @@ function ComposerModelPicker({
                   type="button"
                   className={`${styles.composeBotOption} ${styles.composeModelOption}`}
                   role="option"
+                  data-model-value={autoOptionValue}
+                  data-highlighted={
+                    pickerOpenState.interactionMode === "keyboard" &&
+                    activeHighlightedModelValue === autoOptionValue
+                      ? "true"
+                      : undefined
+                  }
                   aria-selected={value === autoOptionValue}
                   onClick={() => pick(autoOptionValue)}
                 >
@@ -24037,6 +24439,13 @@ function ComposerModelPicker({
                   type="button"
                   className={`${styles.composeBotOption} ${styles.composeModelOption}`}
                   role="option"
+                  data-model-value={disabledOptionValue}
+                  data-highlighted={
+                    pickerOpenState.interactionMode === "keyboard" &&
+                    activeHighlightedModelValue === disabledOptionValue
+                      ? "true"
+                      : undefined
+                  }
                   aria-selected={value === disabledOptionValue}
                   onClick={() => pick(disabledOptionValue)}
                 >
@@ -24070,6 +24479,13 @@ function ComposerModelPicker({
                     }`}
                     role="option"
                     data-model-provider={model.provider}
+                    data-model-value={model.id}
+                    data-highlighted={
+                      pickerOpenState.interactionMode === "keyboard" &&
+                      activeHighlightedModelValue === model.id
+                        ? "true"
+                        : undefined
+                    }
                     aria-selected={isSelected}
                     aria-disabled={isUnavailable ? "true" : undefined}
                     disabled={isUnavailable}
@@ -24132,6 +24548,7 @@ function ComposerModelPicker({
             style={effortMenuPortalStyle}
             role="dialog"
             aria-label="Model effort"
+            onKeyDown={handleEffortKeyDown}
             onWheel={handleEffortWheel}
           >
             <div className={styles.composeModelEffortMenuHeader}>
@@ -45015,6 +45432,79 @@ function HomeContent(): React.JSX.Element {
   const [user, setUser] = useState<SessionUser | null>(null);
   const userRef = useRef<SessionUser | null>(null);
   userRef.current = user;
+  const [keyboardShortcutPlatform, setKeyboardShortcutPlatform] =
+    useState("");
+  const [keyboardShortcuts, setKeyboardShortcuts] =
+    useState<PrismKeyboardShortcutPreferencesV1>(() =>
+      defaultPrismKeyboardShortcuts(""),
+    );
+  useEffect(() => {
+    const platform = navigator.platform;
+    setKeyboardShortcutPlatform(platform);
+    const next = user?.id
+      ? readPrismKeyboardShortcuts(window.localStorage, user.id, platform)
+      : defaultPrismKeyboardShortcuts(platform);
+    setKeyboardShortcuts(next);
+    setActivePrismKeyboardShortcuts(next);
+  }, [user?.id]);
+  useEffect(() => {
+    setActivePrismKeyboardShortcuts(keyboardShortcuts);
+  }, [keyboardShortcuts]);
+  const updateKeyboardShortcuts = useCallback(
+    (next: PrismKeyboardShortcutPreferencesV1): void => {
+      setKeyboardShortcuts(next);
+      setActivePrismKeyboardShortcuts(next);
+      if (!user?.id) return;
+      try {
+        writePrismKeyboardShortcuts(window.localStorage, user.id, next);
+      } catch {
+        setPanelError(
+          "That shortcut works for this session, but could not be saved on this device.",
+        );
+      }
+    },
+    [user?.id],
+  );
+  useEffect(() => {
+    const handler = (event: KeyboardEvent): void => {
+      if (
+        event.repeat ||
+        keyboardShortcutEventIsRecording(event) ||
+        !keyboardShortcutMatchesEvent(keyboardShortcuts.modelPicker, event)
+      ) {
+        return;
+      }
+      const candidates = Array.from(
+        document.querySelectorAll<HTMLButtonElement>(
+          '[data-prism-model-picker-trigger="true"]',
+        ),
+      ).filter((candidate) => {
+        if (candidate.disabled || candidate.closest("[inert]")) return false;
+        const rect = candidate.getBoundingClientRect();
+        if (rect.width <= 0 || rect.height <= 0) return false;
+        const style = window.getComputedStyle(candidate);
+        return style.display !== "none" && style.visibility !== "hidden";
+      });
+      const active =
+        candidates.find((candidate) =>
+          candidate.parentElement?.contains(document.activeElement),
+        ) ??
+        candidates
+          .slice()
+          .sort(
+            (left, right) =>
+              left.getBoundingClientRect().top -
+              right.getBoundingClientRect().top,
+          )[0];
+      if (!active) return;
+      event.preventDefault();
+      event.stopPropagation();
+      active.focus();
+      active.dispatchEvent(new Event(MODEL_PICKER_QUICK_OPEN_EVENT));
+    };
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [keyboardShortcuts.modelPicker]);
   useEffect(() => {
     if (!user?.id) return;
     void retryPendingFaithfulReplaySessions().then((completed) => {
@@ -45371,6 +45861,7 @@ function HomeContent(): React.JSX.Element {
             simulatedEffortEnabled:
               settings?.experimentalAllModelEffortEnabled === true,
           });
+          if (capability.mode === "unavailable") return undefined;
           return savedModelReasoningEffort(
             settings,
             model.provider,
@@ -45635,8 +46126,8 @@ function HomeContent(): React.JSX.Element {
     };
     const handler = (event: KeyboardEvent): void => {
       const key = event.key.toLowerCase();
-      const mod = event.metaKey || event.ctrlKey;
-      if (mod && event.shiftKey && !event.altKey && key === "e") {
+      if (keyboardShortcutEventIsRecording(event)) return;
+      if (keyboardShortcutMatchesEvent(keyboardShortcuts.effortHud, event)) {
         const active = activeModelEffortTargetRef.current ?? fallbackTarget();
         if (!active) return;
         event.preventDefault();
@@ -45654,15 +46145,17 @@ function HomeContent(): React.JSX.Element {
       }
       if (key === "d") {
         event.preventDefault();
-        persistModelEffortPreference(modelEffortHudTarget, "auto");
+        persistModelEffortPreference(
+          modelEffortHudTarget,
+          modelEffortBaseline(modelEffortHudTarget.capability),
+        );
         dismissLater();
         return;
       }
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      const levels = [
-        "auto",
-        ...modelEffortHudTarget.capability.levels,
-      ] as ReasoningEffort[];
+      const levels = modelEffortSliderLevels(
+        modelEffortHudTarget.capability,
+      );
       if (levels.length <= 1) return;
       event.preventDefault();
       const current = savedModelReasoningEffort(
@@ -45687,6 +46180,7 @@ function HomeContent(): React.JSX.Element {
   }, [
     modelCatalog,
     modelEffortHudTarget,
+    keyboardShortcuts.effortHud,
     persistModelEffortPreference,
     settings,
   ]);
@@ -46181,6 +46675,8 @@ function HomeContent(): React.JSX.Element {
   const [modelRevealMessageId, setModelRevealMessageId] = useState<
     string | null
   >(null);
+  const [expandedPsychicAssistantMessageId, setExpandedPsychicAssistantMessageId] =
+    useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -46705,11 +47201,21 @@ function HomeContent(): React.JSX.Element {
     setDevToolsMessage(null);
     setDevToolsConsoleOnly(false);
   }, []);
+  const configuredVoiceMode = normalizeVoiceMode(settings?.voiceMode);
+  const zenVoiceMuted = zenPresentationIsVoiceMuted(
+    view,
+    sidebarOpen,
+    configuredVoiceMode,
+  );
   const zenCanvasTypingDelayMultiplier =
-    view === "chat" ? 1 / zenCanvasTypingSpeed : 1;
+    view === "chat"
+      ? zenVoiceMuted
+        ? ZEN_MUTED_REVEAL_TIMING_MULTIPLIER
+        : 1 / zenCanvasTypingSpeed
+      : 1;
   const effectiveChatRevealTiming = useMemo(
     () =>
-      devToolsRuntimeActive && view === "chat"
+      devToolsRuntimeActive && view === "chat" && !zenVoiceMuted
         ? devZenPauseTiming
         : scaleChatRevealTimingSettings(
             DEFAULT_CHAT_REVEAL_TIMING,
@@ -46720,10 +47226,11 @@ function HomeContent(): React.JSX.Element {
       devZenPauseTiming,
       view,
       zenCanvasTypingDelayMultiplier,
+      zenVoiceMuted,
     ],
   );
   const effectiveChatRevealAnimationMultiplier =
-    devToolsRuntimeActive && view === "chat"
+    devToolsRuntimeActive && view === "chat" && !zenVoiceMuted
       ? 1
       : zenCanvasTypingDelayMultiplier;
 
@@ -55567,6 +56074,7 @@ function HomeContent(): React.JSX.Element {
               selectedProvider={modelProvider}
               loading={modelCatalogLoading}
               disabled={!settings || pendingReplyVisible}
+              generating={pendingReplyVisible}
               title={
                 responseMode === "auto"
                   ? "Primary model for AUTO replies"
@@ -57259,14 +57767,7 @@ function HomeContent(): React.JSX.Element {
     pendingReplyNowMs - pendingReplyStartedAtMs >=
       PSYCHIC_THINKING_INDICATOR_DELAY_MS;
   const psychicThinkingTargetMessageId = useMemo(() => {
-    if (isZenSurfaceView(view)) return null;
-    if (
-      !psychicTextEnabledForConversation(detail, {
-        productChatSurface: view === "chat",
-      })
-    ) {
-      return null;
-    }
+    if (!isZenSurfaceView(view) && !isChatSurfaceView(view)) return null;
     if (!psychicThinkingDelayElapsed) return null;
     for (let i = visibleDetailMessages.length - 1; i >= 0; i -= 1) {
       const message = visibleDetailMessages[i];
@@ -57275,7 +57776,7 @@ function HomeContent(): React.JSX.Element {
       }
     }
     return null;
-  }, [detail?.mode, psychicThinkingDelayElapsed, view, visibleDetailMessages]);
+  }, [psychicThinkingDelayElapsed, view, visibleDetailMessages]);
   const pendingPsychicLiveMessage = useMemo(
     () =>
       psychicThinkingTargetMessageId
@@ -58666,7 +59167,7 @@ function HomeContent(): React.JSX.Element {
             ),
             undefined,
             psychicTextEnabledForConversation(result.conversation, {
-              productChatSurface: view === "chat",
+              productChatSurface: isChatSurfaceView(view),
             }),
           )
         : undefined;
@@ -58936,22 +59437,62 @@ function HomeContent(): React.JSX.Element {
           activeResponseCueBeat.heardCharacterCount,
         )
       : "";
-    const livePsychicSummary =
+    const livePsychicStreamSummary =
+      pendingPsychicLiveMessage?.psychicThought?.summary.trim() ?? "";
+    const livePsychicPending = Boolean(
       !responseCuePlaying &&
-      !zenFollowupActive &&
-      !chatAssistantRevealInProgress
-        ? (pendingPsychicLiveMessage?.psychicThought?.summary.trim() ?? "")
-        : "";
+        !zenFollowupActive &&
+        !chatAssistantRevealInProgress &&
+        pendingPsychicLiveMessage,
+    );
+    const livePsychicSummary = livePsychicPending
+      ? livePsychicStreamSummary || PSYCHIC_PENDING_SUMMARY
+      : "";
+    const livePsychicPasses = livePsychicPending
+      ? (pendingPsychicLiveMessage?.psychicThought?.passes ?? [])
+      : [];
+    const livePsychicVisiblePasses =
+      livePsychicPasses.length > 1 ? livePsychicPasses : [];
     const livePsychicStage =
       pendingPsychicLiveMessage?.psychicScratchpad?.stage;
     const livePsychicStageLabel = livePsychicStage
       ? PSYCHIC_PROGRESS_STAGE_LABELS[livePsychicStage]
       : "Planning";
+    const livePsychicEffort =
+      pendingPsychicLiveMessage?.psychicThought?.effort ??
+      pendingPsychicLiveMessage?.psychicScratchpad?.effort;
+    const livePsychicModeLabel = psychicPlanningModeLabel(
+      pendingPsychicLiveMessage?.psychicThought?.planningMode ??
+        (pendingPsychicLiveMessage?.psychicScratchpad?.simulated === true
+          ? "simulated"
+          : undefined),
+      pendingPsychicLiveMessage?.psychicThought?.passCount ??
+        pendingPsychicLiveMessage?.psychicScratchpad?.passCount,
+    );
+    const livePsychicLabel = [
+      "Psychic",
+      livePsychicModeLabel,
+      livePsychicEffort
+        ? REASONING_EFFORT_LABELS[livePsychicEffort]
+        : null,
+      livePsychicStageLabel,
+    ]
+      .filter((part): part is string => Boolean(part))
+      .join(" · ");
     const livePsychicScratchpad =
       livePsychicSummary && devToolsRuntimeActive
         ? (pendingPsychicLiveMessage?.psychicScratchpad?.scratchpad.trim() ??
           "")
         : "";
+    const livePsychicAccessibleSummary =
+      livePsychicVisiblePasses.length > 0
+        ? livePsychicVisiblePasses
+            .map(
+              (pass) =>
+                `${PSYCHIC_PROGRESS_STAGE_LABELS[pass.stage]}: ${pass.summary}`,
+            )
+            .join(" ")
+        : livePsychicSummary;
     const label = responseCuePlaying
       ? `Response cue · ${displayName}: ${heardCueText || "…"}`
       : zenFollowupActive
@@ -58959,7 +59500,7 @@ function HomeContent(): React.JSX.Element {
         : chatAssistantRevealInProgress
           ? `${displayName} is speaking…`
           : livePsychicSummary
-            ? `Psychic · ${livePsychicStageLabel}: ${livePsychicSummary}`
+            ? `${livePsychicLabel}: ${livePsychicAccessibleSummary}`
             : pickGeneratingLabel(displayName, salt);
     const voicePreset = resolveBotVoicePreset(pendingRespondent);
     const style = selectedComposeBotAccent
@@ -58998,11 +59539,28 @@ function HomeContent(): React.JSX.Element {
         {livePsychicSummary ? (
           <span className={styles.typingPsychicLiveContent}>
             <span className={styles.typingPsychicLiveLabel}>
-              Psychic · {livePsychicStageLabel}
+              {livePsychicLabel}
             </span>
-            <span className={styles.typingPsychicLiveSummary}>
-              {livePsychicSummary}
-            </span>
+            {livePsychicVisiblePasses.length > 0 ? (
+              <span className={styles.typingPsychicLivePasses}>
+                {livePsychicVisiblePasses.map((pass) => (
+                  <span
+                    key={pass.stage}
+                    className={styles.typingPsychicLivePass}
+                    data-psychic-pass={pass.stage}
+                  >
+                    <span className={styles.typingPsychicLivePassLabel}>
+                      {PSYCHIC_PROGRESS_STAGE_LABELS[pass.stage]}
+                    </span>
+                    <span>{pass.summary}</span>
+                  </span>
+                ))}
+              </span>
+            ) : (
+              <span className={styles.typingPsychicLiveSummary}>
+                {livePsychicSummary}
+              </span>
+            )}
             {livePsychicScratchpad ? (
               <span className={styles.typingPsychicLiveScratchpad}>
                 {livePsychicScratchpad}
@@ -59035,8 +59593,15 @@ function HomeContent(): React.JSX.Element {
     activeResponseCueBeat,
     responseCuePlaying,
     pendingPsychicLiveMessage?.psychicThought?.summary,
+    pendingPsychicLiveMessage?.psychicThought?.effort,
+    pendingPsychicLiveMessage?.psychicThought?.planningMode,
+    pendingPsychicLiveMessage?.psychicThought?.passCount,
+    pendingPsychicLiveMessage?.psychicThought?.passes,
     pendingPsychicLiveMessage?.psychicScratchpad?.stage,
     pendingPsychicLiveMessage?.psychicScratchpad?.scratchpad,
+    pendingPsychicLiveMessage?.psychicScratchpad?.effort,
+    pendingPsychicLiveMessage?.psychicScratchpad?.simulated,
+    pendingPsychicLiveMessage?.psychicScratchpad?.passCount,
     devToolsRuntimeActive,
   ]);
   const responseCueHistoryNode = useMemo(() => {
@@ -59087,6 +59652,20 @@ function HomeContent(): React.JSX.Element {
       );
     }
     const label = zenInitialStatusLabelRef.current;
+    const livePsychicPasses =
+      pendingPsychicLiveMessage?.psychicThought?.passes ?? [];
+    const latestLivePsychicPass =
+      livePsychicPasses[livePsychicPasses.length - 1];
+    const livePsychicSummary =
+      latestLivePsychicPass?.summary.trim() ||
+      pendingPsychicLiveMessage?.psychicThought?.summary.trim() ||
+      "";
+    const livePsychicStage =
+      latestLivePsychicPass?.stage ??
+      pendingPsychicLiveMessage?.psychicScratchpad?.stage;
+    const livePsychicStageLabel = livePsychicStage
+      ? PSYCHIC_PROGRESS_STAGE_LABELS[livePsychicStage]
+      : "Planning";
     const onActivate = (event?: React.MouseEvent<HTMLButtonElement>): void => {
       if (zenInitialThinkingActive) {
         handleZenInitialThinkingCancel(event);
@@ -59112,6 +59691,7 @@ function HomeContent(): React.JSX.Element {
         className={styles.zenInitialThinkingOverlay}
         data-phase={compactPhase ? "compact" : "thinking"}
         data-persona={personaBot ? "bot" : "prism"}
+        data-psychic-live={livePsychicSummary ? "true" : undefined}
         style={personaStyle}
         role="status"
         aria-live="polite"
@@ -59134,9 +59714,15 @@ function HomeContent(): React.JSX.Element {
             onActivate(event);
           }}
           aria-label={
-            compactPhase
-              ? "Stop reply"
-              : "Cancel reply and return to the Zen start"
+            `${
+              livePsychicSummary
+                ? `Psychic, ${livePsychicStageLabel}: ${livePsychicSummary}. `
+                : ""
+            }${
+              compactPhase
+                ? "Stop reply"
+                : "Cancel reply and return to the Zen start"
+            }`
           }
           title={compactPhase ? "Stop reply" : "Cancel reply"}
         >
@@ -59154,7 +59740,20 @@ function HomeContent(): React.JSX.Element {
               <PrismTriangleMark className={styles.zenInitialThinkingGlyph} />
             )}
           </span>
-          <span className={styles.zenInitialThinkingLabel}>{label}</span>
+          <span className={styles.zenInitialThinkingCopy}>
+            {livePsychicSummary ? (
+              <>
+                <span className={styles.zenInitialThinkingPsychicLabel}>
+                  Psychic · {livePsychicStageLabel}
+                </span>
+                <span className={styles.zenInitialThinkingPsychicSummary}>
+                  {livePsychicSummary}
+                </span>
+              </>
+            ) : (
+              <span className={styles.zenInitialThinkingLabel}>{label}</span>
+            )}
+          </span>
         </button>
       </div>
     );
@@ -59169,6 +59768,9 @@ function HomeContent(): React.JSX.Element {
     latestAssistantMessageId,
     pendingReplyConversationId,
     pendingReplyStartedAtMs,
+    pendingPsychicLiveMessage?.psychicThought?.passes,
+    pendingPsychicLiveMessage?.psychicThought?.summary,
+    pendingPsychicLiveMessage?.psychicScratchpad?.stage,
     resolvedTheme,
     zenPersonaBot,
     zenFloatingStatusChipVisible,
@@ -73660,7 +74262,7 @@ function HomeContent(): React.JSX.Element {
     if (
       envelope.psychicDebug &&
       psychicTextEnabledForConversation(envelope.conversation, {
-        productChatSurface: view === "chat",
+        productChatSurface: isChatSurfaceView(view),
       })
     ) {
       const debug = envelope.psychicDebug;
@@ -75209,7 +75811,7 @@ function HomeContent(): React.JSX.Element {
         ? { progressiveZenVoice: true }
         : {}),
       ...(modelOverride ? { modelOverride } : {}),
-      psychicModeEnabled: mode === "chat" || view === "chat",
+      psychicModeEnabled: isZenSurfaceView(view) || isChatSurfaceView(view),
       ...(options.commandCenterPrompt ? { commandCenterPrompt: true } : {}),
       ...(options.resolvedCommandCenterPrompt
         ? { resolvedCommandCenterPrompt: options.resolvedCommandCenterPrompt }
@@ -75423,7 +76025,7 @@ function HomeContent(): React.JSX.Element {
           ),
           d.psychicDebug,
           psychicTextEnabledForConversation(d.conversation, {
-            productChatSurface: view === "chat",
+            productChatSurface: isChatSurfaceView(view),
           }),
         );
         markLatestAssistantRevealEligible(patchedConversation);
@@ -75476,7 +76078,7 @@ function HomeContent(): React.JSX.Element {
           ),
           d.psychicDebug,
           psychicTextEnabledForConversation(d.conversation, {
-            productChatSurface: view === "chat",
+            productChatSurface: isChatSurfaceView(view),
           }),
         );
         markLatestAssistantRevealEligible(patchedConversation);
@@ -76316,7 +76918,7 @@ function HomeContent(): React.JSX.Element {
         ),
         undefined,
         psychicTextEnabledForConversation(result.conversation, {
-          productChatSurface: view === "chat",
+          productChatSurface: isChatSurfaceView(view),
         }),
       );
       setDetail(patchedConversation);
@@ -77521,7 +78123,7 @@ function HomeContent(): React.JSX.Element {
       ),
       envelope.psychicDebug,
       psychicTextEnabledForConversation(envelope.conversation, {
-        productChatSurface: view === "chat",
+        productChatSurface: isChatSurfaceView(view),
       }),
     );
     if (options.consumeCache) {
@@ -78962,6 +79564,9 @@ function HomeContent(): React.JSX.Element {
                     effort: event.effort,
                     provider: event.provider,
                     ...(event.model ? { model: event.model } : {}),
+                    planningMode: event.planningMode,
+                    passCount: event.passCount,
+                    passes: event.passes,
                     createdAt: event.createdAt,
                   },
                   psychicScratchpad: {
@@ -79537,7 +80142,7 @@ function HomeContent(): React.JSX.Element {
           ),
           d.psychicDebug,
           psychicTextEnabledForConversation(d.conversation, {
-            productChatSurface: view === "chat",
+            productChatSurface: isChatSurfaceView(view),
           }),
         );
         if (isInitialZenStarterPrompt) {
@@ -80624,64 +81229,122 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  function renderPsychicThoughtLine(msg: Message): React.ReactNode {
-    if (isZenSurfaceView(view)) {
+  function renderAssistantPsychicDisclosure(
+    msg: Message,
+    psychicSource: Message | null,
+  ): React.ReactNode {
+    if (!isChatSurfaceView(view) || msg.role !== "assistant" || !psychicSource) {
       return null;
     }
+    const psychicLine = psychicThoughtDisplayLineForMessage(
+      { ...psychicSource, role: "user" },
+      { showScratchpad: devToolsRuntimeActive },
+    );
+    if (!psychicLine) return null;
+    const expanded = expandedPsychicAssistantMessageId === msg.id;
+    return (
+      <div
+        className={styles.psychicThoughtDisclosure}
+        data-expanded={expanded ? "true" : "false"}
+        data-psychic-state={psychicLine.state}
+        aria-label={`${psychicLine.ariaLabel}. ${
+          expanded ? "Psychic details expanded." : "Click the message to expand."
+        }`}
+      >
+        <div className={styles.psychicThoughtDisclosureHeader}>
+          <span className={styles.psychicThoughtLabel}>{psychicLine.label}</span>
+          <span className={styles.psychicThoughtDisclosureHeaderMeta}>
+            {psychicLine.meta ? (
+              <span className={styles.psychicThoughtMeta}>{psychicLine.meta}</span>
+            ) : null}
+            <span
+              className={styles.psychicThoughtDisclosureChevron}
+              aria-hidden="true"
+            >
+              ⌄
+            </span>
+          </span>
+        </div>
+        {expanded ? (
+          <div className={styles.psychicThoughtBlock}>
+            {psychicLine.passes ? (
+              <ol className={styles.psychicThoughtPasses}>
+                {psychicLine.passes.map((pass) => (
+                  <li
+                    key={pass.stage}
+                    className={styles.psychicThoughtPass}
+                    data-psychic-pass={pass.stage}
+                  >
+                    <span className={styles.psychicThoughtPassLabel}>
+                      {pass.label}
+                    </span>
+                    <span className={styles.psychicThoughtText}>
+                      {pass.summary}
+                    </span>
+                  </li>
+                ))}
+              </ol>
+            ) : (
+              <p>
+                <span className={styles.psychicThoughtText}>
+                  {psychicLine.summary}
+                </span>
+              </p>
+            )}
+            {psychicLine.scratchpad ? (
+              <div className={styles.psychicScratchpadBlock}>
+                <div className={styles.psychicScratchpadHeader}>
+                  <span className={styles.psychicScratchpadLabel}>Scratchpad</span>
+                  {psychicLine.scratchpadMeta ? (
+                    <span className={styles.psychicScratchpadMeta}>
+                      {psychicLine.scratchpadMeta}
+                    </span>
+                  ) : null}
+                </div>
+                <pre className={styles.psychicScratchpadText}>
+                  {psychicLine.scratchpad}
+                </pre>
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <span className={styles.srOnly}>{psychicLine.summary}</span>
+        )}
+      </div>
+    );
+  }
+
+  function renderMessageGenerationMetadata(
+    msg: Message,
+    psychicSource: Message | null,
+  ): React.ReactNode {
     if (
-      !psychicTextEnabledForConversation(detail, {
-        productChatSurface: view === "chat",
-      })
+      !isChatSurfaceView(view) ||
+      msg.role !== "assistant" ||
+      contextFocusedMessageId !== msg.id
     ) {
       return null;
     }
-    const pendingThinking = msg.id === psychicThinkingTargetMessageId;
-    // While a turn is live, the centered stop/reply chip owns the evolving
-    // Psychic reveal. The compact line returns to the user message once the
-    // final response settles.
-    if (pendingThinking) return null;
-    const psychicLine = psychicThoughtDisplayLineForMessage(msg, {
-      pendingThinking,
-      pendingDelayElapsed: pendingThinking,
-      showScratchpad: devToolsRuntimeActive,
-    });
-    if (!psychicLine) return null;
+    const metadata = assistantGenerationMetadata(msg, psychicSource);
+    if (!metadata) return null;
     return (
       <div
-        className={styles.psychicThoughtBlock}
-        data-psychic-state={psychicLine.state}
-        data-psychic-animated={psychicLine.animated ? "true" : "false"}
-        role={psychicLine.state === "thinking" ? "status" : undefined}
-        aria-live={psychicLine.state === "thinking" ? "polite" : undefined}
-        aria-label={psychicLine.ariaLabel}
+        className={styles.messageGenerationMetadata}
+        data-message-generation-metadata="true"
+        role="status"
       >
-        <span className={styles.psychicThoughtLabel}>{psychicLine.label}</span>
-        <p>
-          <span className={styles.psychicThoughtText}>
-            {psychicLine.summary}
+        <span className={styles.messageGenerationModel}>{metadata.model}</span>
+        {metadata.effort ? (
+          <span
+            className={styles.messageGenerationEffort}
+            title={`Effort: ${REASONING_EFFORT_LABELS[metadata.effort]}`}
+          >
+            <ModelEffortIcon
+              level={metadata.effort}
+              className={styles.messageGenerationEffortIcon}
+            />
+            <span>{REASONING_EFFORT_LABELS[metadata.effort]}</span>
           </span>
-          {psychicLine.state === "thinking" ? (
-            <span className={styles.psychicThoughtShimmer} aria-hidden="true">
-              <span />
-              <span />
-              <span />
-            </span>
-          ) : null}
-        </p>
-        {psychicLine.scratchpad ? (
-          <div className={styles.psychicScratchpadBlock}>
-            <div className={styles.psychicScratchpadHeader}>
-              <span className={styles.psychicScratchpadLabel}>Scratchpad</span>
-              {psychicLine.scratchpadMeta ? (
-                <span className={styles.psychicScratchpadMeta}>
-                  {psychicLine.scratchpadMeta}
-                </span>
-              ) : null}
-            </div>
-            <pre className={styles.psychicScratchpadText}>
-              {psychicLine.scratchpad}
-            </pre>
-          </div>
         ) : null}
       </div>
     );
@@ -81265,6 +81928,7 @@ function HomeContent(): React.JSX.Element {
   const zenLiveAskQuestionMarkerVisible =
     pendingAskQuestionInteractiveKey !== null;
   const zenLivePresenceRailVisible =
+    !zenVoiceMuted &&
     !zenNewSessionPresenceDeferred &&
     (zenDefaultPrismPresenceVisible ||
       Boolean(
@@ -103448,6 +104112,7 @@ function HomeContent(): React.JSX.Element {
         {firstRunLayer}
         <PrismCompanion
           accountKey={user.id}
+          keyboardShortcut={keyboardShortcuts.prism}
           surface={prismCompanionSurfaceReference()}
           wieldTutorialActive={prismTutorialShouldRun(
             tutorialProgress.prismWield,
@@ -108124,11 +108789,6 @@ function HomeContent(): React.JSX.Element {
                 ? "Playing Bottish…"
                 : "Bottish"}
           </button>
-          {isDefaultPrism ? (
-            <button type="button" onClick={openDefaultBotCustomizer}>
-              Customize Prism
-            </button>
-          ) : null}
         </div>
       </section>
     );
@@ -113500,12 +114160,20 @@ function HomeContent(): React.JSX.Element {
                     </div>
                   </div>
                 )}
+                {settings && activeSettingsScope === "shortcuts" && (
+                  <KeyboardShortcutSettings
+                    platform={keyboardShortcutPlatform}
+                    value={keyboardShortcuts}
+                    onChange={updateKeyboardShortcuts}
+                  />
+                )}
                 {settings &&
                   activeSettingsScope !== "coffee" &&
                   activeSettingsScope !== "zen" &&
                   activeSettingsScope !== "debate" &&
                   activeSettingsScope !== "botcast" &&
-                  activeSettingsScope !== "slate" && (
+                  activeSettingsScope !== "slate" &&
+                  activeSettingsScope !== "shortcuts" && (
                     <form
                       className={`${styles.form} ${styles.settingsWorkspace}`}
                       onSubmit={saveSettings}
@@ -114423,7 +115091,7 @@ function HomeContent(): React.JSX.Element {
                                             )
                                           }
                                         >
-                                          Default
+                                          Reset
                                         </button>
                                       </div>
                                     ),
@@ -116480,21 +117148,6 @@ function HomeContent(): React.JSX.Element {
           const defaultBotCardName = "Default";
           const defaultBotCardGlyph = DEFAULT_PRISM_BOT_GLYPH;
           const defaultBotCardStyle = undefined;
-          const botPanelHomePrismAvatarStyle = {
-            "--coffee-plate-emoji-face-scale-y":
-              zenLiveBotFaceScaleYForCanvasSide("left"),
-            "--zen-live-bot-face-x": `${ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT.xPct}%`,
-            "--zen-live-bot-face-y": `${ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT.yPct}%`,
-            "--zen-live-bot-face-scale":
-              ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT.scale,
-            "--zen-live-bot-body-x": `${BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT.xPct}%`,
-            "--zen-live-bot-body-y": `${BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT.yPct}%`,
-            "--zen-live-bot-avatar-size": "126px",
-            "--zen-live-bot-avatar-body-size": "114px",
-            "--zen-live-bot-glyph-x-anchor": "0px",
-            "--zen-live-bot-glyph-y-anchor":
-              "calc(var(--zen-live-bot-avatar-body-size) * 0.37)",
-          } as CSSProperties;
           const editorPanelStyle = (() => {
             const panelAccentColor =
               botPanelView === "botHub" && selectedBotPanelBot?.color
@@ -116953,38 +117606,9 @@ function HomeContent(): React.JSX.Element {
                     data-prism-persona="true"
                     aria-label="Default Prism bot"
                   >
-                    <span
-                      className={styles.botPanelHomePrismAvatar}
-                      aria-hidden="true"
-                    >
-                      <span
-                        className={`${styles.zenLiveBotPresencePlate} ${styles.botPanelHomePrismAvatarPlate}`}
-                        data-mood="warm"
-                        data-prism-mood="warm"
-                        data-source="prism"
-                        data-prism-persona="true"
-                        data-canvas-side="left"
-                        data-body-sized="true"
-                        style={botPanelHomePrismAvatarStyle}
-                      >
-                        <ZenLiveBotMannequin
-                          glyph={DEFAULT_PRISM_BOT_GLYPH}
-                          faceStyle={zenDefaultPrismFaceStyle}
-                          faceScaleY={zenLiveBotFaceScaleYForCanvasSide("left")}
-                          voicePreset="warm"
-                          isTalking={false}
-                          avatarSfx={botAvatarSfxForProfile(
-                            settings?.prismDefaultBotAudioVoiceProfile,
-                          )}
-                          avatarSfxState="idle"
-                          mouthShape="closed"
-                          moodHint="warm"
-                          scheduleKey="bots-home-default-prism"
-                          screenMaterialSeed="prism-default"
-                          frameMaterialSeed={PRISM_FACTORY_CLEAN_FRAME_SEED}
-                        />
-                      </span>
-                    </span>
+                    <PrismTriangleMark
+                      className={styles.botPanelHomePrismGlyph}
+                    />
                     <span className={styles.botPanelHomePrismCopy}>
                       <span>Built-in companion</span>
                       <strong>Prism</strong>
@@ -137890,6 +138514,7 @@ function HomeContent(): React.JSX.Element {
                           provider={isLocal ? "local" : "online"}
                           loading={modelCatalogLoading}
                           disabled={!settings || pendingReply}
+                          generating={pendingReplyVisible}
                           title={`Model for ${responseModeShortLabel(responseMode)} replies`}
                           ariaLabel={`Model for ${
                             isLocal ? "local" : "online"
@@ -138624,6 +139249,15 @@ function HomeContent(): React.JSX.Element {
                 const modelRevealLabel =
                   modelLabel ||
                   (msg.role === "assistant" ? "not recorded" : "");
+                const psychicSourceMessage = isChatSurfaceView(view)
+                  ? psychicSourceForAssistantMessage(
+                      visibleDetailMessages,
+                      renderedDetailMessageStartIndex + messageIndex,
+                    )
+                  : null;
+                const psychicDisclosureAvailable = Boolean(
+                  msg.role === "assistant" && psychicSourceMessage,
+                );
                 const assistantFallbackBotId =
                   detail?.hubBotId ?? detail?.botId ?? null;
                 const assistantDisplayBot =
@@ -138766,7 +139400,8 @@ function HomeContent(): React.JSX.Element {
                   : null;
                 const forcedVisibleTokenCount = zenPlayerRevealTimeline
                   ? speechRevealVisibleTokenCount(zenPlayerRevealTimeline)
-                  : chatAssistantTypingMechanicsActive &&
+                  : !zenVoiceMuted &&
+                      chatAssistantTypingMechanicsActive &&
                       messageRevealEligible &&
                       msg.role === "assistant" &&
                       msg.id === latestAssistantMessageId &&
@@ -138934,6 +139569,14 @@ function HomeContent(): React.JSX.Element {
                         mobileContextMenu ? "true" : undefined
                       }
                       data-message-id={msg.id}
+                      data-psychic-available={
+                        psychicDisclosureAvailable ? "true" : undefined
+                      }
+                      aria-expanded={
+                        psychicDisclosureAvailable
+                          ? expandedPsychicAssistantMessageId === msg.id
+                          : undefined
+                      }
                       data-power-voice-presence={
                         assistantVoicePresence ?? undefined
                       }
@@ -138982,6 +139625,20 @@ function HomeContent(): React.JSX.Element {
                       }}
                       onClick={(event) => {
                         if (!mobileContextMenu) {
+                          const interactiveTarget =
+                            event.target instanceof Element
+                              ? event.target.closest(
+                                  "button, a, input, textarea, select, [role='button']",
+                                )
+                              : null;
+                          if (
+                            psychicDisclosureAvailable &&
+                            !interactiveTarget
+                          ) {
+                            setExpandedPsychicAssistantMessageId((current) =>
+                              current === msg.id ? null : msg.id,
+                            );
+                          }
                           return;
                         }
                         event.preventDefault();
@@ -139194,7 +139851,14 @@ function HomeContent(): React.JSX.Element {
                             : undefined
                         }
                       />
-                      {renderPsychicThoughtLine(msg)}
+                      {renderMessageGenerationMetadata(
+                        msg,
+                        psychicSourceMessage,
+                      )}
+                      {renderAssistantPsychicDisclosure(
+                        msg,
+                        psychicSourceMessage,
+                      )}
                       {renderManualAskQuestionResultCard(msg)}
                       {renderAskQuestionInlineCard(msg)}
                       {renderStoryActionInlineCard(msg)}
@@ -140680,6 +141344,15 @@ function HomeContent(): React.JSX.Element {
                   : "";
               const modelRevealLabel =
                 modelLabel || (msg.role === "assistant" ? "not recorded" : "");
+              const psychicSourceMessage = isChatSurfaceView(view)
+                ? psychicSourceForAssistantMessage(
+                    visibleDetailMessages,
+                    renderedDetailMessageStartIndex + messageIndex,
+                  )
+                : null;
+              const psychicDisclosureAvailable = Boolean(
+                msg.role === "assistant" && psychicSourceMessage,
+              );
               const assistantFallbackBotId =
                 detail?.hubBotId ?? detail?.botId ?? null;
               const assistantDisplayBot =
@@ -140822,7 +141495,8 @@ function HomeContent(): React.JSX.Element {
                 : null;
               const forcedVisibleTokenCount = zenPlayerRevealTimeline
                 ? speechRevealVisibleTokenCount(zenPlayerRevealTimeline)
-                : chatAssistantTypingMechanicsActive &&
+                : !zenVoiceMuted &&
+                    chatAssistantTypingMechanicsActive &&
                     messageRevealEligible &&
                     msg.role === "assistant" &&
                     msg.id === latestAssistantMessageId &&
@@ -140980,6 +141654,14 @@ function HomeContent(): React.JSX.Element {
                     }
                     data-mobile-context={mobileContextMenu ? "true" : undefined}
                     data-message-id={msg.id}
+                    data-psychic-available={
+                      psychicDisclosureAvailable ? "true" : undefined
+                    }
+                    aria-expanded={
+                      psychicDisclosureAvailable
+                        ? expandedPsychicAssistantMessageId === msg.id
+                        : undefined
+                    }
                     data-power-voice-presence={
                       assistantVoicePresence ?? undefined
                     }
@@ -141028,6 +141710,20 @@ function HomeContent(): React.JSX.Element {
                     }}
                     onClick={(event) => {
                       if (!mobileContextMenu) {
+                        const interactiveTarget =
+                          event.target instanceof Element
+                            ? event.target.closest(
+                                "button, a, input, textarea, select, [role='button']",
+                              )
+                            : null;
+                        if (
+                          psychicDisclosureAvailable &&
+                          !interactiveTarget
+                        ) {
+                          setExpandedPsychicAssistantMessageId((current) =>
+                            current === msg.id ? null : msg.id,
+                          );
+                        }
                         return;
                       }
                       event.preventDefault();
@@ -141223,7 +141919,14 @@ function HomeContent(): React.JSX.Element {
                           : undefined
                       }
                     />
-                    {renderPsychicThoughtLine(msg)}
+                    {renderMessageGenerationMetadata(
+                      msg,
+                      psychicSourceMessage,
+                    )}
+                    {renderAssistantPsychicDisclosure(
+                      msg,
+                      psychicSourceMessage,
+                    )}
                     {renderManualAskQuestionResultCard(msg)}
                     {renderAskQuestionInlineCard(msg)}
                     {renderStoryActionInlineCard(msg)}
@@ -141460,7 +142163,10 @@ function HomeContent(): React.JSX.Element {
             )}
           </div>
           <small>
-            ← → adjust · D default
+            ← → adjust · D{" "}
+            {modelEffortHudTarget.capability.mode === "simulated"
+              ? "none"
+              : "default"}
             {modelEffortHudTarget.capability.mode === "simulated"
               ? " · multi-call simulation"
               : ""}

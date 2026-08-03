@@ -3,9 +3,11 @@ import { describe, it } from "node:test";
 import type { ModelReasoningEffortCapabilityV1 } from "@localai/shared";
 import {
   MODEL_EFFORT_ICON_PATHS,
+  modelEffortBaseline,
   modelEffortSliderLevels,
   modelEffortSliderProgress,
   modelEffortStep,
+  modelEffortValueForCapability,
   modelEffortWheelDirection,
 } from "./modelEffortControl.ts";
 
@@ -41,6 +43,33 @@ describe("model effort slider", () => {
     ]);
     assert.equal(modelEffortSliderProgress(levels, "auto"), 0);
     assert.equal(modelEffortSliderProgress(levels, "low"), 50);
+    assert.equal(modelEffortSliderProgress(levels, "xhigh"), 100);
+  });
+
+  it("uses None as the baseline for simulated non-thinking models", () => {
+    const simulatedCapability: ModelReasoningEffortCapabilityV1 = {
+      mode: "simulated",
+      levels: ["none", "minimal", "low", "medium", "high", "xhigh"],
+      supportsNone: true,
+    };
+    const levels = modelEffortSliderLevels(simulatedCapability);
+    assert.equal(modelEffortBaseline(simulatedCapability), "none");
+    assert.equal(
+      modelEffortValueForCapability(simulatedCapability, undefined),
+      "none",
+    );
+    assert.equal(modelEffortValueForCapability(simulatedCapability, "auto"), "none");
+    assert.equal(modelEffortValueForCapability(simulatedCapability, "high"), "high");
+    assert.deepEqual(levels, [
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
+    assert.equal(levels.includes("auto"), false);
+    assert.equal(modelEffortSliderProgress(levels, "none"), 0);
     assert.equal(modelEffortSliderProgress(levels, "xhigh"), 100);
   });
 

@@ -289,7 +289,6 @@ describe("selected bot library showcase", () => {
   it("shows Prism first and separates library preview from bot management", () => {
     assert.match(pageSource, /botPanelShowcaseIsDefaultPrism/);
     assert.match(pageSource, /showcaseName = bot\?\.name \?\? "Prism"/);
-    assert.match(pageSource, />\s*Customize Prism\s*</);
     assert.match(pageSource, /onClick=\{\(\) => selectBotPanelShowcase\(null\)\}/);
     assert.match(
       pageSource,
@@ -300,18 +299,33 @@ describe("selected bot library showcase", () => {
     assert.match(cssSource, /\.botCard\[data-preview-selected="true"\]/);
   });
 
+  it("keeps customization out of the Default Prism Library preview", () => {
+    const previewStart = pageSource.indexOf("const renderBotHubShowcase");
+    const previewEnd = pageSource.indexOf(
+      "const renderSharedPanels",
+      previewStart,
+    );
+    assert.notEqual(previewStart, -1);
+    assert.notEqual(previewEnd, -1);
+    assert.doesNotMatch(
+      pageSource.slice(previewStart, previewEnd),
+      /Customize Prism/,
+    );
+  });
+
   it("keeps Default Prism visible on the Bots home panel", () => {
     assert.match(pageSource, /className=\{styles\.botPanelHomePrismCard\}/);
     assert.match(pageSource, /aria-label="Default Prism bot"/);
-    assert.match(pageSource, /scheduleKey="bots-home-default-prism"/);
-    assert.match(pageSource, /faceStyle=\{zenDefaultPrismFaceStyle\}/);
-    assert.match(pageSource, /frameMaterialSeed=\{PRISM_FACTORY_CLEAN_FRAME_SEED\}/);
+    assert.match(
+      pageSource,
+      /<PrismTriangleMark\s+className=\{styles\.botPanelHomePrismGlyph\}/,
+    );
     assert.match(
       pageSource,
       /className=\{styles\.botPanelHomePrismCustomize\}[\s\S]*?onClick=\{openDefaultBotCustomizer\}[\s\S]*?Customize Prism/,
     );
     assert.match(cssSource, /\.botPanelHomePrismCard\s*\{[\s\S]*?grid-column:\s*1 \/ -1;/);
-    assert.match(cssSource, /\.botPanelHomePrismAvatarPlate/);
+    assert.match(cssSource, /\.botPanelHomePrismGlyph/);
     assert.match(cssSource, /\.botPanelHomePrismCustomize/);
   });
 

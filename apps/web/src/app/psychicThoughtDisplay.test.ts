@@ -29,6 +29,93 @@ describe("psychicThoughtDisplayLineForMessage", () => {
     );
   });
 
+  it("labels simulated and native Psychic provenance without exposing private artifacts", () => {
+    const baseThought = {
+      v: 1 as const,
+      summary: "I checked the constraints before answering.",
+      effort: "xhigh" as const,
+      provider: "openai" as const,
+      model: "gpt-5.6-sol",
+      createdAt: "2026-08-03T19:00:00.000Z",
+    };
+
+    assert.deepEqual(
+      psychicThoughtDisplayLineForMessage({
+        role: "user",
+        psychicThought: {
+          ...baseThought,
+          planningMode: "simulated",
+          passCount: 4,
+        },
+      }),
+      {
+        label: "Psychic",
+        meta: "Simulated · 4 passes",
+        summary: "I checked the constraints before answering.",
+        state: "summary",
+        animated: false,
+        ariaLabel:
+          "Psychic, Simulated · 4 passes: I checked the constraints before answering.",
+      },
+    );
+
+    assert.equal(
+      psychicThoughtDisplayLineForMessage({
+        role: "user",
+        psychicThought: {
+          ...baseThought,
+          planningMode: "native",
+          passCount: 1,
+        },
+      })?.meta,
+      "Native + public plan",
+    );
+  });
+
+  it("renders every completed simulated pass as a distinct readable message", () => {
+    const line = psychicThoughtDisplayLineForMessage({
+      role: "user",
+      psychicThought: {
+        v: 1,
+        summary: "I mapped the request.",
+        effort: "xhigh",
+        provider: "local",
+        model: "qwen3.5:9b",
+        planningMode: "simulated",
+        passCount: 4,
+        passes: [
+          { stage: "plan", summary: "I mapped the request." },
+          { stage: "draft", summary: "I shaped a concise candidate." },
+          { stage: "audit", summary: "I checked the candidate for clichés." },
+          { stage: "revision", summary: "I refined the strongest approach." },
+        ],
+        createdAt: "2026-08-03T20:00:00.000Z",
+      },
+    });
+
+    assert.equal(line?.meta, "Simulated · 4 passes");
+    assert.deepEqual(line?.passes, [
+      { stage: "plan", label: "Plan", summary: "I mapped the request." },
+      {
+        stage: "draft",
+        label: "Draft",
+        summary: "I shaped a concise candidate.",
+      },
+      {
+        stage: "audit",
+        label: "Audit",
+        summary: "I checked the candidate for clichés.",
+      },
+      {
+        stage: "revision",
+        label: "Refine",
+        summary: "I refined the strongest approach.",
+      },
+    ]);
+    assert.match(line?.ariaLabel ?? "", /Plan: I mapped the request/u);
+    assert.match(line?.ariaLabel ?? "", /Refine: I refined the strongest approach/u);
+  });
+
   it("does not render under assistant messages or empty summaries", () => {
     assert.equal(
       psychicThoughtDisplayLineForMessage({

@@ -5,6 +5,7 @@ import {
   BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO,
   BOT_AVATAR_DETAILS_FACE_PLACEMENT,
   BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
+  BOT_AVATAR_DETAILS_INK_APERTURE_SCALE,
   botAvatarFaceFacingStyle,
   botAvatarDetailsFacingOffsetY,
   botAvatarDetailsFacingScaleX,
@@ -21,7 +22,10 @@ describe("Avatar Details face registration", () => {
       "--zen-live-bot-face-scale": BOT_AVATAR_DETAILS_FACE_PLACEMENT.scale,
       "--zen-live-bot-avatar-face-glyph-size":
         `${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
+      "--avatar-details-ink-aperture-scale":
+        BOT_AVATAR_DETAILS_INK_APERTURE_SCALE,
     });
+    assert.equal(BOT_AVATAR_DETAILS_INK_APERTURE_SCALE, 0.82);
   });
 });
 

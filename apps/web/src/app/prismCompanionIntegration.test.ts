@@ -47,9 +47,10 @@ test("mounts the global companion on every authenticated product shell", () => {
 test("keeps the companion explicit, keyboard accessible, and capability-driven", () => {
   assert.match(
     component,
-    /aria-keyshortcuts=\{modifierPresentation\.ariaKeyShortcuts\}/u,
+    /aria-keyshortcuts=\{shortcutPresentation\.aria\}/u,
   );
-  assert.match(component, /\{modifierPresentation\.label\}/u);
+  assert.match(component, /\{shortcutPresentation\.label\}/u);
+  assert.match(component, /keyboardShortcutMatchesEvent/u);
   assert.match(component, /createPortal\(/u);
   assert.match(component, /document\.body/u);
   assert.match(component, /window\.sessionStorage/u);

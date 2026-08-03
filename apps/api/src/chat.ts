@@ -59,6 +59,7 @@ import type {
   MemoryTier,
   OpinionBand,
   OpinionTrend,
+  PsychicThoughtPass,
   PsychicThoughtPayload,
   PrismMoodInterruptionInput,
   PrismMoodSnapshot,
@@ -291,6 +292,7 @@ export interface PsychicDebugPayload {
   passes?: Array<{
     name: "plan" | "draft" | "audit" | "revision";
     chars: number;
+    summary?: string;
     warning?: string;
   }>;
   guidanceChars?: number;
@@ -304,8 +306,10 @@ export interface PsychicProgressPayload {
   effort: ReasoningEffort;
   provider: ProviderName;
   model?: string;
+  planningMode: NonNullable<PsychicThoughtPayload["planningMode"]>;
   simulated: boolean;
   passCount: number;
+  passes: PsychicThoughtPass[];
   guidanceChars: number;
   createdAt: string;
 }
@@ -1016,22 +1020,24 @@ type PsychicPrivatePassName = "plan" | "draft" | "audit" | "revision";
 interface PsychicPrivatePassDiagnostic {
   name: PsychicPrivatePassName;
   chars: number;
+  summary?: string;
   warning?: string;
 }
 
 interface PsychicPrivateTextPassResult {
   name: Exclude<PsychicPrivatePassName, "plan">;
   content: string;
+  publicSummary: string;
   diagnostic: PsychicPrivatePassDiagnostic;
 }
 
 const PSYCHIC_PLANNING_SYSTEM_PROMPT = [
-  "You are Prism's private planning pass for the next assistant reply.",
+  "You are Prism's user-readable Psychic planning pass for the next assistant reply.",
   "Return only one JSON object with string fields: summary, scratchpad, and answerGuidance.",
   "All three fields must be non-empty.",
-  "summary: one concise user-visible reasoning summary under 80 words, written from the assistant's first-person perspective.",
-  "The summary should sound like a short intent line, not a system caption. Prefer forms like \"I've decided it makes the most sense to ___ based on ___ in regard to ___\" or \"I'm helping the user ___, so I'm going to tell them ___\".",
-  "Do not write the summary as raw chain-of-thought, a detached label, or a third-person sentence about Prism.",
+  "summary: a concise user-visible rationale under 120 words, written from the assistant's first-person perspective in 2-4 short sentences.",
+  "Make the summary genuinely informative: state the goal, the decisive considerations or constraints, and the approach the reply will take. It must be more useful than saying that reasoning is happening.",
+  "Do not claim to reveal a provider's hidden chain-of-thought. Do not write a token-by-token inner monologue, a detached system caption, or a third-person sentence about Prism.",
   "scratchpad: 2-4 short private planning notes about constraints, risks, and answer shape. This is a developer-only simulated planning artifact, not hidden chain-of-thought from a provider.",
   "answerGuidance: 2-4 concrete instructions for the final reply. Preserve exact requested formats, labels, word limits, and forbidden-word rules. If the user asks for labels like S1-S6, use those exact labels and do not convert them to 1-6. Do not include secrets or long reasoning.",
   "When the user assigns requirements to rows, bullets, or labels, restate those label requirements in answerGuidance and preserve required key terms.",
@@ -1047,7 +1053,7 @@ const PSYCHIC_PLANNING_JSON_SCHEMA = {
       type: "string",
       minLength: 1,
       description:
-        "Concise user-visible first-person assistant intent summary under 80 words.",
+        "Concise user-visible first-person rationale under 120 words that states the goal, decisive considerations, and approach.",
     },
     scratchpad: {
       type: "string",
@@ -1061,6 +1067,25 @@ const PSYCHIC_PLANNING_JSON_SCHEMA = {
     },
   },
   required: ["summary", "scratchpad", "answerGuidance"],
+} satisfies Record<string, unknown>;
+
+const PSYCHIC_PRIVATE_TEXT_PASS_JSON_SCHEMA = {
+  type: "object",
+  additionalProperties: false,
+  properties: {
+    artifact: {
+      type: "string",
+      minLength: 1,
+      description: "The private draft or guidance produced by this pass.",
+    },
+    summary: {
+      type: "string",
+      minLength: 1,
+      description:
+        "A concise first-person user-readable account of what this pass contributed, without exposing hidden chain-of-thought or quoting the private artifact.",
+    },
+  },
+  required: ["artifact", "summary"],
 } satisfies Record<string, unknown>;
 
 function psychicPlanPromptForEffort(effort: ReasoningEffort): string {
@@ -1196,7 +1221,9 @@ function buildPsychicDraftPrompt(plan: {
 }): string {
   return [
     "You are Prism's private draft pass for the next assistant reply.",
-    "Write a private draft answer that follows the plan. This draft is never shown to the user.",
+    "Return only one JSON object with string fields artifact and summary.",
+    "artifact: write a private draft answer that follows the plan. This draft is never shown to the user.",
+    "summary: write 1-2 short first-person sentences for the user explaining the concrete response shape or choices this draft established. Do not reveal hidden chain-of-thought, quote the artifact, or give away the final answer.",
     "Obey the user's requested format, labels, word limits, and forbidden-word rules exactly. If the user asks for S1-S6 labels, use S1, S2, S3, S4, S5, and S6 exactly.",
     "Preserve required key terms from the user's constraints, and return only the requested answer shape without extra notes or summaries.",
     "If the user says local-only, use local machine, local device, local provider, or Ollama wording; do not replace local-only with infrastructure-only wording.",
@@ -1216,9 +1243,10 @@ function buildPsychicAuditPrompt(args: {
 }): string {
   return [
     "You are Prism's private audit pass for the next assistant reply.",
-    "Return ONLY 3-5 short bullet lines of guidance, no more than 120 words total.",
-    "Do not output a Markdown table. Do not write the final answer. Do not copy draft wording.",
-    "Each bullet must start with '- Fix:' or '- Keep:'.",
+    "Return only one JSON object with string fields artifact and summary.",
+    "artifact: write 3-5 short bullet lines of guidance, no more than 120 words total. Each bullet must start with '- Fix:' or '- Keep:'.",
+    "summary: write 1-2 short first-person sentences for the user naming the important constraint, risk, or quality check this audit completed. Do not reveal hidden chain-of-thought, quote the private artifact, or give away the final answer.",
+    "Do not put a Markdown table in artifact. Do not write the final answer. Do not copy draft wording.",
     "Check missing constraints, privacy issues, answer shape, and likely user-facing mistakes.",
     "Specifically check exact row/step labels, forbidden words, word limits, every named row constraint, and whether any requested UI indicator is a toast, badge, subtle line, or label instead of a toggle. If S1-S6 labels were requested, say to use S1-S6 and not 1-6.",
     "If the user says local-only, tell the final answer to use local machine, local device, local provider, or Ollama wording; never recommend infrastructure-only wording.",
@@ -1248,9 +1276,10 @@ function buildPsychicRevisionPrompt(args: {
 }): string {
   return [
     "You are Prism's private revision-guidance pass for the next assistant reply.",
-    "Return ONLY 3-5 short bullet lines of final-answer guidance, no more than 120 words total.",
-    "Do not output a Markdown table. Do not write the final answer. Do not copy draft wording.",
-    "Each bullet must start with '- Final:'.",
+    "Return only one JSON object with string fields artifact and summary.",
+    "artifact: write 3-5 short bullet lines of final-answer guidance, no more than 120 words total. Each bullet must start with '- Final:'.",
+    "summary: write 1-2 short first-person sentences for the user explaining what the final refinement changed or locked in. Do not reveal hidden chain-of-thought, quote the private artifact, or give away the final answer.",
+    "Do not put a Markdown table in artifact. Do not write the final answer. Do not copy draft wording.",
     "Focus on satisfying constraints, preserving privacy, avoiding overlong output, obeying forbidden-word rules, preserving exact requested labels such as S1-S6, and naming concrete UI indicators rather than toggles.",
     "If the user says local-only, tell the final answer to use local machine, local device, local provider, or Ollama wording; never recommend infrastructure-only wording.",
     "If the user says private planning pass, tell the final answer to use the exact phrase private planning pass.",
@@ -1309,6 +1338,42 @@ function latestUserPromptContent(promptMessages: readonly ProviderMessage[]): st
     if (message?.role === "user") return message.content;
   }
   return "";
+}
+
+function psychicPrivatePassFallbackSummary(
+  passName: Exclude<PsychicPrivatePassName, "plan">,
+): string {
+  switch (passName) {
+    case "draft":
+      return "I translated the plan into a candidate response while preserving the requested shape and constraints.";
+    case "audit":
+      return "I checked the candidate against the request for missed constraints, privacy issues, and likely user-facing mistakes.";
+    case "revision":
+      return "I folded the audit into the final response guidance and locked in the clearest compliant approach.";
+  }
+}
+
+function parsePsychicPrivateTextPassResponse(
+  raw: string,
+  passName: Exclude<PsychicPrivatePassName, "plan">,
+): { content: string; publicSummary: string } | null {
+  try {
+    const parsed = JSON.parse(extractJsonObjectPayload(raw)) as unknown;
+    if (isRecord(parsed)) {
+      const content = clampPsychicPlanningText(parsed.artifact, 3200);
+      const publicSummary = clampPsychicPlanningText(parsed.summary, 1200);
+      if (content && publicSummary) return { content, publicSummary };
+    }
+  } catch {
+    // Older/local providers may ignore JSON mode. Preserve their private
+    // artifact and pair it with a safe deterministic public summary.
+  }
+  const content = clampPsychicPlanningText(raw, 3200);
+  if (!content) return null;
+  return {
+    content,
+    publicSummary: psychicPrivatePassFallbackSummary(passName),
+  };
 }
 
 function sanitizeExplicitConstraintLine(line: string): string {
@@ -1370,9 +1435,9 @@ async function runPsychicPrivateTextPass(args: {
         maxTokens: psychicPrivateTextPassTokenBudget(args.effort, args.passName),
         temperature: 0,
         reasoningEffort: args.effort === "auto" ? undefined : args.effort,
-        jsonMode: false,
-        jsonSchema: undefined,
-        jsonSchemaName: undefined,
+        jsonMode: true,
+        jsonSchema: PSYCHIC_PRIVATE_TEXT_PASS_JSON_SCHEMA,
+        jsonSchemaName: `psychic_${args.passName}`,
         usagePurpose: "psychic_planning",
         ...(args.signal ? { signal: args.signal } : {}),
       }
@@ -1388,24 +1453,31 @@ async function runPsychicPrivateTextPass(args: {
     return {
       name: args.passName,
       content: "",
+      publicSummary: "",
       diagnostic: { name: args.passName, chars: 0, warning },
     };
   }
 
-  const content = clampPsychicPlanningText(raw, 3200);
-  if (!content) {
+  const parsed = parsePsychicPrivateTextPassResponse(raw, args.passName);
+  if (!parsed) {
     const warning = `${args.passName}_empty; provider=${args.provider.name}; model=${requestedModel}; rawChars=${raw.length}`;
     args.onPlanningWarning?.(warning);
     return {
       name: args.passName,
       content: "",
+      publicSummary: "",
       diagnostic: { name: args.passName, chars: 0, warning },
     };
   }
   return {
     name: args.passName,
-    content,
-    diagnostic: { name: args.passName, chars: content.length },
+    content: parsed.content,
+    publicSummary: parsed.publicSummary,
+    diagnostic: {
+      name: args.passName,
+      chars: parsed.content.length,
+      summary: parsed.publicSummary,
+    },
   };
 }
 
@@ -1430,9 +1502,9 @@ function appendPsychicAnswerGuidance(
       : "",
   ].filter(Boolean);
   const content = [
-    "Private guidance from Prism's simulated planning pass. Use this to answer well, but do not mention the planning pass.",
+    "Guidance derived from Prism's user-readable Psychic plan. Use it to answer consistently with the visible rationale, but do not mention this system message.",
     "Follow the user's requested format exactly. Preserve requested labels exactly; if labels like S1-S6 are requested, use S1-S6 and do not convert them to 1-6. Preserve required key terms: if the prompt says local-only, include the word local; if it says private planning pass, use that exact phrase; if it says scratchpads are not persisted, use that exact phrase. Never add a Note or summary after an exact table/list request. Obey word limits and any forbidden-word rule. If a UI indicator is requested, name a toast, badge, subtle line, or label instead of a settings toggle.",
-    `Reasoning summary: ${planningTrace.debug.summary}`,
+    `Visible Psychic rationale: ${planningTrace.debug.summary}`,
     `Answer guidance: ${planningTrace.answerGuidance}`,
     ...targetedConstraintHints,
     ...(explicitConstraints.length > 0
@@ -1457,57 +1529,14 @@ async function runPsychicPlanningPass(args: {
   onProgress?: (progress: PsychicProgressPayload) => void;
 }): Promise<PsychicPlanningTrace | null> {
   const requestedModel = describeRequestedModel(args.provider, args.botOverrides);
-  const shouldPlan =
-    args.simulated || (args.psychicModeEnabled === true && args.provider.name === "local");
-  if (!shouldPlan) {
-    if (args.psychicModeEnabled === true) {
-      const nativeReasoning = providerModelSupportsNativeReasoningEffort(
-        args.provider,
-        args.botOverrides
-      );
-      const summary = nativeReasoning
-        ? "I'm using the selected model's native reasoning here, so Prism won't add simulated private passes."
-        : "I'm using the selected online model at its default effort because simulated effort is off.";
-      const createdAt = new Date().toISOString();
-      const debug: PsychicDebugPayload = {
-        summary,
-        scratchpad: "",
-        effort: args.effort,
-        provider: args.provider.name,
-        model: requestedModel,
-        simulated: false,
-        passCount: 0,
-        passes: [],
-        guidanceChars: 0,
-      };
-      args.onProgress?.({
-        stage: "plan",
-        summary,
-        scratchpad: "",
-        effort: args.effort,
-        provider: args.provider.name,
-        model: requestedModel,
-        simulated: false,
-        passCount: 0,
-        guidanceChars: 0,
-        createdAt,
-      });
-      return {
-        psychicThought: {
-          v: 1,
-          summary,
-          effort: args.effort,
-          provider: args.provider.name,
-          model: requestedModel,
-          createdAt,
-        },
-        debug,
-        answerGuidance: "",
-        shouldGuideFinalAnswer: false,
-      };
-    }
-    return null;
-  }
+  const shouldPlan = args.simulated || args.psychicModeEnabled === true;
+  if (!shouldPlan) return null;
+  const planningMode: NonNullable<PsychicThoughtPayload["planningMode"]> =
+    args.simulated
+      ? "simulated"
+      : providerModelSupportsNativeReasoningEffort(args.provider, args.botOverrides)
+        ? "native"
+        : "public";
 
   const planningMessages: ProviderMessage[] = [
     { role: "system", content: psychicPlanPromptForEffort(args.effort) },
@@ -1546,7 +1575,10 @@ async function runPsychicPlanningPass(args: {
   const createdAt = new Date().toISOString();
   const latestUserRequest = latestUserPromptContent(args.promptMessages);
   const passDiagnostics: PsychicPrivatePassDiagnostic[] = [
-    { name: "plan", chars: parsed.scratchpad.length },
+    { name: "plan", chars: parsed.scratchpad.length, summary: parsed.summary },
+  ];
+  const passSummaries: PsychicThoughtPass[] = [
+    { stage: "plan", summary: parsed.summary },
   ];
   let draft = "";
   let audit = "";
@@ -1560,13 +1592,15 @@ async function runPsychicPlanningPass(args: {
     });
     args.onProgress?.({
       stage,
-      summary: parsed.summary,
+      summary: passSummaries.at(-1)?.summary ?? parsed.summary,
       scratchpad,
       effort: args.effort,
       provider: args.provider.name,
       model: requestedModel,
+      planningMode,
       simulated: args.simulated,
       passCount: passDiagnostics.filter((pass) => pass.chars > 0).length,
+      passes: [...passSummaries],
       guidanceChars: parsed.answerGuidance.length,
       createdAt,
     });
@@ -1601,6 +1635,7 @@ async function runPsychicPlanningPass(args: {
       if (passName === "draft") draft = result.content;
       if (passName === "audit") audit = result.content;
       if (passName === "revision") revision = result.content;
+      passSummaries.push({ stage: passName, summary: result.publicSummary });
       emitProgress(passName);
     }
   }
@@ -1615,6 +1650,9 @@ async function runPsychicPlanningPass(args: {
     audit,
     revision,
   });
+  const completedPassCount = passDiagnostics.filter(
+    (pass) => pass.chars > 0,
+  ).length;
   const debug: PsychicDebugPayload = {
     summary: parsed.summary,
     scratchpad: liveScratchpad,
@@ -1622,7 +1660,7 @@ async function runPsychicPlanningPass(args: {
     provider: args.provider.name,
     model: requestedModel,
     simulated: args.simulated,
-    passCount: passDiagnostics.filter((pass) => pass.chars > 0).length,
+    passCount: completedPassCount,
     passes: passDiagnostics,
     guidanceChars: answerGuidance.length,
   };
@@ -1635,13 +1673,16 @@ async function runPsychicPlanningPass(args: {
             effort: args.effort,
             provider: args.provider.name,
             model: requestedModel,
+            planningMode,
+            passCount: completedPassCount,
+            passes: passSummaries,
             createdAt,
           },
         }
       : {}),
     debug,
     answerGuidance,
-    shouldGuideFinalAnswer: args.simulated,
+    shouldGuideFinalAnswer: args.simulated || args.psychicModeEnabled === true,
   };
 }
 

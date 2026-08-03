@@ -40,14 +40,33 @@ describe("Zen progressive chat stream", () => {
         effort: "medium",
         provider: "local",
         model: "qwen3.5:9b",
+        planningMode: "simulated",
         simulated: true,
         passCount: 2,
+        passes: [
+          { stage: "plan", summary: "I mapped the reply." },
+          {
+            stage: "audit",
+            summary: "I checked it against the request.",
+          },
+        ],
         guidanceChars: 240,
         createdAt: "2026-08-02T22:00:00.000Z",
       }),
     );
     assert.equal(psychic?.type, "psychic");
     assert.equal(psychic?.type === "psychic" ? psychic.stage : null, "audit");
+    assert.equal(
+      psychic?.type === "psychic" ? psychic.planningMode : null,
+      "simulated",
+    );
+    assert.deepEqual(
+      psychic?.type === "psychic" ? psychic.passes : null,
+      [
+        { stage: "plan", summary: "I mapped the reply." },
+        { stage: "audit", summary: "I checked it against the request." },
+      ],
+    );
     assert.equal(
       parseZenProgressiveChatEvent('{"type":"psychic","stage":"plan"}'),
       null,
@@ -65,6 +84,7 @@ describe("Zen progressive chat stream", () => {
         effort: "minimal",
         provider: "local",
         model: "qwen3.5:9b",
+        planningMode: "public",
         simulated: false,
         passCount: 1,
         guidanceChars: 64,

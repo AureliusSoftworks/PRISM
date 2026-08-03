@@ -7,7 +7,15 @@ describe("mode tutorials", () => {
   it("explains the live Psychic reply reveal and its privacy boundary", () => {
     const step = MODE_TUTORIALS.chat.steps[0];
     assert.match(step?.body ?? "", /floating Psychic card/u);
-    assert.match(step?.body ?? "", /plan, draft, audit, and revision/u);
+    assert.match(step?.body ?? "", /user-readable planning pass/u);
+    assert.match(step?.body ?? "", /assistant bubble/u);
+    assert.match(step?.body ?? "", /stays collapsed until you click/u);
+    assert.match(step?.body ?? "", /loading chip/u);
+    assert.match(step?.body ?? "", /model and effort glyph/u);
+    assert.match(step?.body ?? "", /visible passes guide the final reply/u);
+    assert.match(step?.body ?? "", /each one is an additional provider request/u);
+    assert.match(step?.body ?? "", /Plan, Draft, Audit, and Refine/u);
+    assert.match(step?.body ?? "", /distinct readable summaries/u);
     assert.match(step?.body ?? "", /scratchpad is never saved/u);
     assert.match(step?.body ?? "", /hidden chain-of-thought is never exposed/u);
   });
@@ -746,7 +754,7 @@ describe("mode tutorials", () => {
     );
     assert.deepEqual(continueHome, {
       heading: "Continue this Home",
-      body: "Opening a persona Home from All Bots, the header picker, or its grouped conversation heading continues that Home's latest saved chat. Expand the group to choose an exact older chat; use its + or New chat only when you deliberately want a separate conversation. Only the selected conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. Chat keeps dialogue, vocal Actions, response cues, and manual replay text-only; it never synthesizes or plays a voice. When Shh appears, it stops the current reply without replacing the draft you are writing.",
+      body: "Opening a persona Home from All Bots, the header picker, or its grouped conversation heading continues that Home's latest saved chat. Expand the group to choose an exact older chat; use its + or New chat only when you deliberately want a separate conversation. Only the selected conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. In Zen, choosing Mute lets the live avatar step out and reveals each completed reply in a near-instant sweep. Chat keeps dialogue, vocal Actions, response cues, and manual replay text-only; it never synthesizes or plays a voice. When Shh appears, it stops the current reply without replacing the draft you are writing.",
       clickLabel: "the message box at the bottom",
       targetSelector: '[data-tutorial-target="composer"]',
     });

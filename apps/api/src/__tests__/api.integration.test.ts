@@ -2747,7 +2747,7 @@ describe("API request integration", () => {
         messages.map((message) => ({ ...message })),
       );
       const planning = messages.some((message) =>
-        message.content.includes("Prism's private planning pass"),
+        message.content.includes("Prism's user-readable Psychic planning pass"),
       );
       return planning
         ? JSON.stringify({
@@ -2788,6 +2788,10 @@ describe("API request integration", () => {
         .map((line) => JSON.parse(line) as Record<string, unknown>);
       assert.equal(events[0]?.type, "psychic");
       assert.equal(events[0]?.stage, "plan");
+      assert.match(
+        String(events[0]?.planningMode ?? ""),
+        /^(?:simulated|native|public)$/u,
+      );
       assert.match(String(events[0]?.summary ?? ""), /clear answer/u);
       assert.equal(events.at(-1)?.type, "complete");
       const envelope = events.at(-1)?.envelope as

@@ -525,6 +525,16 @@
   pointer-events: none;
 }
 
+/* The authored 128px field is deliberately smaller than the metal shell's
+   full CRT opening. Scale the guide, paint, and pointer plane together so the
+   editor remains a faithful hit-tested preview of every runtime surface. */
+.screenBoundary,
+.canvas,
+.inputSurface {
+  transform: scale(var(--avatar-details-ink-aperture-scale, 1));
+  transform-origin: center;
+}
+
 .faceGuide {
   opacity: 0;
   filter: none;

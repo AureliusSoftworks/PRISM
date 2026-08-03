@@ -138,14 +138,21 @@ describe("reasoning effort helpers", () => {
       }).mode,
       "unavailable",
     );
-    assert.equal(
-      resolveModelReasoningEffortCapability({
-        provider: "local",
-        modelId: "qwen3:14b",
-        simulatedEffortEnabled: true,
-      }).mode,
-      "simulated",
-    );
+    const localSimulated = resolveModelReasoningEffortCapability({
+      provider: "local",
+      modelId: "qwen3:14b",
+      simulatedEffortEnabled: true,
+    });
+    assert.equal(localSimulated.mode, "simulated");
+    assert.equal(localSimulated.supportsNone, true);
+    assert.deepEqual(localSimulated.levels, [
+      "none",
+      "minimal",
+      "low",
+      "medium",
+      "high",
+      "xhigh",
+    ]);
     assert.equal(
       resolveModelReasoningEffortCapability({
         provider: "openai",
@@ -185,6 +192,15 @@ describe("reasoning effort helpers", () => {
         simulatedEffortEnabled: true,
       }),
       "minimal",
+    );
+    assert.equal(
+      effectiveModelReasoningEffort({
+        provider: "anthropic",
+        modelId: "claude-haiku-4-5",
+        preference: "none",
+        simulatedEffortEnabled: true,
+      }),
+      "none",
     );
   });
 

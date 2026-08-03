@@ -433,6 +433,44 @@ describe("prompt shortcut payloads", () => {
     });
   });
 
+  it("round-trips optional Psychic planning provenance without breaking legacy payloads", () => {
+    const serialized = serializePromptToolPayload({
+      psychicThought: {
+        v: 1,
+        summary: "I checked the request before answering.",
+        effort: "xhigh",
+        provider: "openai",
+        model: "gpt-5.6-sol",
+        planningMode: "native",
+        passCount: 1,
+        passes: [
+          {
+            stage: "plan",
+            summary: "I checked the request before answering.",
+          },
+        ],
+        createdAt: "2026-08-03T19:00:00.000Z",
+      },
+    });
+
+    assert.deepEqual(parseStoredPsychicThoughtPayload(serialized), {
+      v: 1,
+      summary: "I checked the request before answering.",
+      effort: "xhigh",
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      planningMode: "native",
+      passCount: 1,
+      passes: [
+        {
+          stage: "plan",
+          summary: "I checked the request before answering.",
+        },
+      ],
+      createdAt: "2026-08-03T19:00:00.000Z",
+    });
+  });
+
   it("adds the concrete prompt sent to wildcard metadata", () => {
     assert.deepEqual(
       withPromptWildcardResolvedPrompt(

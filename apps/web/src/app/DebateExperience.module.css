@@ -8802,6 +8802,20 @@
   --fg: var(--debate-studio-ink);
   --fg-subtle: var(--debate-studio-muted);
   --fg-muted: var(--debate-studio-muted);
+  /*
+   * The visible pick-aware overlay and its transparent textarea must share
+   * one content box. The field border lives on this wrapper, so the overlay
+   * does not need ComposerInput's usual one-pixel textarea-border inset.
+   */
+  --compose-textarea-padding: 13px 0 13px 14px;
+  --compose-textarea-font-size: 1em;
+  --compose-textarea-line-height: 1.45;
+  --compose-textarea-overlay-inset: 0;
+  --compose-textarea-overlay-padding: var(--compose-textarea-padding);
+  --compose-textarea-overlay-font-size: var(--compose-textarea-font-size);
+  --compose-textarea-overlay-line-height: var(
+    --compose-textarea-line-height
+  );
   --compose-send-ink: var(--debate-studio-ink);
   --bg-elevated: var(--debate-studio-raised);
   --bg: var(--debate-studio-surface);
@@ -8842,10 +8856,13 @@
 .dashboard .pickAwareSetupField textarea {
   border: 0;
   border-radius: 0;
+  padding: var(--compose-textarea-padding);
   box-shadow: none;
   color: var(--debate-studio-ink);
   caret-color: var(--debate-studio-ink);
   background: transparent;
+  font-size: var(--compose-textarea-font-size);
+  line-height: var(--compose-textarea-line-height);
 }
 
 .dashboard .pickAwareSetupField textarea[data-rich-overlay="true"] {

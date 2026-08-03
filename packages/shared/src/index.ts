@@ -893,6 +893,8 @@ export {
   type PromptShortcutRunMetadata,
   type PromptShortcutWildcardReplacement,
   type PromptWildcardRunMetadata,
+  type PsychicThoughtPass,
+  type PsychicThoughtPassStage,
   type PsychicThoughtPayload,
 } from "./promptShortcut.js";
 

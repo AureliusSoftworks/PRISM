@@ -29,8 +29,10 @@ export interface PsychicProgressEvent {
   effort: "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
   provider: "local" | "openai" | "anthropic";
   model?: string;
+  planningMode: "simulated" | "native" | "public";
   simulated: boolean;
   passCount: number;
+  passes: PsychicThoughtPass[];
   guidanceChars: number;
   createdAt: string;
 }
@@ -52,6 +54,37 @@ export type ZenProgressiveChatEvent<T> =
   | PsychicProgressEvent
   | ZenProgressiveCompleteEvent<T>
   | ZenProgressiveErrorEvent;
+
+function parsePsychicProgressPasses(
+  value: unknown,
+  fallbackStage: PsychicThoughtPass["stage"],
+  fallbackSummary: string,
+): PsychicThoughtPass[] {
+  const passes: PsychicThoughtPass[] = [];
+  const seen = new Set<PsychicThoughtPass["stage"]>();
+  if (Array.isArray(value)) {
+    for (const entry of value) {
+      if (!entry || typeof entry !== "object") continue;
+      const row = entry as Record<string, unknown>;
+      if (
+        row.stage !== "plan" &&
+        row.stage !== "draft" &&
+        row.stage !== "audit" &&
+        row.stage !== "revision"
+      ) {
+        continue;
+      }
+      const summary = typeof row.summary === "string" ? row.summary.trim() : "";
+      if (!summary || seen.has(row.stage)) continue;
+      seen.add(row.stage);
+      passes.push({ stage: row.stage, summary: summary.slice(0, 1200) });
+      if (passes.length >= 4) break;
+    }
+  }
+  if (passes.length > 0) return passes;
+  const summary = fallbackSummary.trim();
+  return summary ? [{ stage: fallbackStage, summary: summary.slice(0, 1200) }] : [];
+}
 
 export function parseZenProgressiveChatEvent<T>(
   line: string,
@@ -109,8 +142,21 @@ export function parseZenProgressiveChatEvent<T>(
       effort: record.effort,
       provider: record.provider,
       ...(typeof record.model === "string" ? { model: record.model } : {}),
+      planningMode:
+        record.planningMode === "simulated" ||
+        record.planningMode === "native" ||
+        record.planningMode === "public"
+          ? record.planningMode
+          : record.simulated === true
+            ? "simulated"
+            : "public",
       simulated: record.simulated === true,
       passCount: Math.max(0, Math.round(record.passCount)),
+      passes: parsePsychicProgressPasses(
+        record.passes,
+        record.stage,
+        record.summary,
+      ),
       guidanceChars: Math.max(0, Math.round(record.guidanceChars)),
       createdAt: record.createdAt,
     };
@@ -211,3 +257,4 @@ export async function readZenProgressiveChatStream<T>(args: {
   }
   return envelope;
 }
+import type { PsychicThoughtPass } from "@localai/shared";

@@ -26,11 +26,20 @@ export const BOT_AVATAR_DETAILS_FACE_PLACEMENT: BotAvatarFacePlacement = {
 };
 export const BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO = 0.2337;
 
+/**
+ * Authored ink needs a little breathing room inside the physical CRT. Keeping
+ * this as a presentation scale preserves the 128x128 storage contract while
+ * making existing and newly painted details read proportionally to the shell.
+ */
+export const BOT_AVATAR_DETAILS_INK_APERTURE_SCALE = 0.82;
+
 export const BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE = {
   "--zen-live-bot-face-x": `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.xPct}%`,
   "--zen-live-bot-face-y": `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.yPct}%`,
   "--zen-live-bot-face-scale": BOT_AVATAR_DETAILS_FACE_PLACEMENT.scale,
   "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
+  "--avatar-details-ink-aperture-scale":
+    BOT_AVATAR_DETAILS_INK_APERTURE_SCALE,
 } as const;
 
 /** Authored punctuation faces read normally with this post-rotation flip. */
