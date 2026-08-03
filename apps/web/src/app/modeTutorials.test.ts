@@ -746,7 +746,7 @@ describe("mode tutorials", () => {
     );
     assert.deepEqual(continueHome, {
       heading: "Continue this Home",
-      body: "Each Home keeps separate saved conversations inside one relationship. Expand a Home in the conversation panel to open an exact conversation, use its + to begin another, or use New chat to start fresh inside the Home you are visiting. Only that conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. When Shh appears, it stops the current reply without replacing the draft you are writing.",
+      body: "Opening a persona Home from All Bots, the header picker, or its grouped conversation heading continues that Home's latest saved chat. Expand the group to choose an exact older chat; use its + or New chat only when you deliberately want a separate conversation. Only the selected conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. Chat keeps dialogue, vocal Actions, response cues, and manual replay text-only; it never synthesizes or plays a voice. When Shh appears, it stops the current reply without replacing the draft you are writing.",
       clickLabel: "the message box at the bottom",
       targetSelector: '[data-tutorial-target="composer"]',
     });
@@ -757,6 +757,21 @@ describe("mode tutorials", () => {
     assert.equal(
       context?.body,
       "Recent messages stay visible while older continuity for this Home is carried through summaries and memory.",
+    );
+  });
+
+  it("teaches that ordinary Home visits resume while New chat remains explicit", () => {
+    const continueHome = MODE_TUTORIALS.zen.steps.find(
+      (step) => step.heading === "Continue this Home",
+    );
+
+    assert.match(
+      continueHome?.body ?? "",
+      /continues that Home's latest saved chat/u,
+    );
+    assert.match(
+      continueHome?.body ?? "",
+      /use its \+ or New chat only when you deliberately want a separate conversation/u,
     );
   });
 

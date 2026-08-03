@@ -4,18 +4,36 @@ import { describe, it } from "node:test";
 
 import {
   CHAT_FORCED_MUTE_REASON,
-  chatViewForcesVoiceMute,
-  effectiveVoiceModeForView,
+  chatPresentationForcesVoiceMute,
+  effectiveVoiceModeForPresentation,
 } from "./chatVoicePolicy.ts";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("Chat voice policy", () => {
-  it("forces product Chat to mute without changing the configured mode", () => {
-    assert.equal(chatViewForcesVoiceMute("chat"), true);
-    assert.equal(effectiveVoiceModeForView("chat", "english"), "mute");
-    assert.equal(effectiveVoiceModeForView("chat", "bottish"), "mute");
+  it("forces transcript Chat to mute without changing the configured mode", () => {
+    assert.equal(chatPresentationForcesVoiceMute("chat", true), true);
+    assert.equal(
+      effectiveVoiceModeForPresentation("chat", true, "english"),
+      "mute",
+    );
+    assert.equal(
+      effectiveVoiceModeForPresentation("chat", true, "bottish"),
+      "mute",
+    );
     assert.match(CHAT_FORCED_MUTE_REASON, /saved Voice preference resumes/u);
+  });
+
+  it("preserves configured voices on the immersive Zen canvas", () => {
+    assert.equal(chatPresentationForcesVoiceMute("chat", false), false);
+    assert.equal(
+      effectiveVoiceModeForPresentation("chat", false, "english"),
+      "english",
+    );
+    assert.equal(
+      effectiveVoiceModeForPresentation("chat", false, "bottish"),
+      "bottish",
+    );
   });
 
   it("preserves voice choices in every other applet", () => {
@@ -27,15 +45,21 @@ describe("Chat voice policy", () => {
       "story",
       "slate",
     ] as const) {
-      assert.equal(effectiveVoiceModeForView(view, "english"), "english");
-      assert.equal(effectiveVoiceModeForView(view, "babble"), "babble");
+      assert.equal(
+        effectiveVoiceModeForPresentation(view, false, "english"),
+        "english",
+      );
+      assert.equal(
+        effectiveVoiceModeForPresentation(view, true, "babble"),
+        "babble",
+      );
     }
   });
 
   it("enforces Chat silence across playback, requests, replay, and chrome", () => {
     assert.match(
       pageSource,
-      /voiceMode:\s*effectiveVoiceModeForView\(\s*view,\s*normalizeVoiceMode\(settings\?\.voiceMode\)/u,
+      /voiceMode:\s*effectiveVoiceModeForPresentation\(\s*view,\s*sidebarOpen,\s*normalizeVoiceMode\(settings\?\.voiceMode\)/u,
     );
     assert.match(
       pageSource,

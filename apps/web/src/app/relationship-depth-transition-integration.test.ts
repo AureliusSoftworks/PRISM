@@ -165,7 +165,7 @@ describe("relationship-depth page integration", () => {
     }
   });
 
-  it("focuses group cards in the bot grid while keeping each saved conversation independently selectable", () => {
+  it("resumes the latest verified Home from its group while keeping older conversations selectable", () => {
     const sidebarRows = sourceSlice(
       "const renderConversationRow =",
       "function renderConversationGroupDeleteButton",
@@ -187,12 +187,39 @@ describe("relationship-depth page integration", () => {
     );
     assert.match(
       categoryTile,
-      /performShowAllBotsView\(group\.botId, \{\s*suppressChatAutoRestore: true,\s*\}\)/,
+      /visitZenHome\(group\.botId, \{[\s\S]{0,240}sourceSurface: "library"[\s\S]{0,120}destination: \{ kind: "resolve" \}/,
     );
-    assert.doesNotMatch(categoryTile, /refreshConversation\(hubConversation\.id\)/);
-    assert.doesNotMatch(categoryTile, /selectZenPersonaFromSidebar/);
+    assert.match(
+      categoryTile,
+      /aria-label=\{`Continue \$\{group\.name\}'s latest chat and expand conversations`\}/,
+    );
+    assert.doesNotMatch(categoryTile, /performShowAllBotsView\(group\.botId/);
     assert.match(cssSource, /\.conversationGroupNewButton\s*\{/);
     assert.doesNotMatch(cssSource, /\.conversationTimelineEntry\s*\{/);
+  });
+
+  it("resolves an existing Home from both Library and Home navigation unless pending is explicit", () => {
+    const visitRoute = sourceSlice(
+      "async function visitZenHome",
+      'useEffect(() => {\n    if (view !== "chat" || relationshipDepthReturnDepth <= 0)',
+    );
+
+    assert.match(
+      visitRoute,
+      /const shouldKeepPendingHome = requestedDestination\.kind === "pending"/,
+    );
+    assert.match(
+      visitRoute,
+      /const shouldResolvePersistedHome =\s*!shouldKeepPendingHome &&\s*\(requestedDestination\.kind === "resolve" \|\|\s*requestedDestination\.kind === "infer"\)/,
+    );
+    assert.doesNotMatch(
+      visitRoute,
+      /requestedDestination\.kind === "infer" && sourceIsHome/,
+    );
+    assert.match(
+      visitRoute,
+      /Every ordinary Home visit resumes the latest continuation/,
+    );
   });
 
   it("starts a fresh isolated conversation inside the active Home", () => {

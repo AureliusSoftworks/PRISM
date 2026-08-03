@@ -1293,8 +1293,8 @@ import {
 } from "./voiceQuickToggle";
 import {
   CHAT_FORCED_MUTE_REASON,
-  chatViewForcesVoiceMute,
-  effectiveVoiceModeForView,
+  chatPresentationForcesVoiceMute,
+  effectiveVoiceModeForPresentation,
 } from "./chatVoicePolicy";
 import {
   PRISM_APPLETS,
@@ -46832,10 +46832,14 @@ function HomeContent(): React.JSX.Element {
   const interruptedSpeakerVoiceReadyClipRef = useRef<
     Map<string, EnglishVoiceSynthesisClip | null>
   >(new Map());
-  const chatVoiceForcedMuted = chatViewForcesVoiceMute(view);
+  const chatVoiceForcedMuted = chatPresentationForcesVoiceMute(
+    view,
+    sidebarOpen,
+  );
   const configuredVoicePlaybackSelection: ReplayVoiceSelectionSnapshotV2 = {
-    voiceMode: effectiveVoiceModeForView(
+    voiceMode: effectiveVoiceModeForPresentation(
       view,
+      sidebarOpen,
       normalizeVoiceMode(settings?.voiceMode),
     ),
     englishVoiceEngine: normalizeEnglishVoiceEngine(
@@ -46887,8 +46891,9 @@ function HomeContent(): React.JSX.Element {
       if (recordingVoiceSelectionRef.current?.surface !== surface) return;
       recordingVoiceSelectionRef.current = null;
       voicePlaybackSelectionRef.current = {
-        voiceMode: effectiveVoiceModeForView(
+        voiceMode: effectiveVoiceModeForPresentation(
           view,
+          sidebarOpen,
           normalizeVoiceMode(settings?.voiceMode),
         ),
         englishVoiceEngine: normalizeEnglishVoiceEngine(
@@ -46897,7 +46902,7 @@ function HomeContent(): React.JSX.Element {
       };
       setRecordingVoiceSurface(null);
     },
-    [settings?.englishVoiceEngine, settings?.voiceMode, view],
+    [settings?.englishVoiceEngine, settings?.voiceMode, sidebarOpen, view],
   );
   const handleSignalRecordingStateChange = useCallback(
     (active: boolean): void => {
@@ -89994,18 +89999,22 @@ function HomeContent(): React.JSX.Element {
       requestedDestination.kind === "conversation"
         ? requestedDestination.conversationId
         : null;
+    const shouldKeepPendingHome = requestedDestination.kind === "pending";
     const shouldResolvePersistedHome =
-      requestedDestination.kind === "resolve" ||
-      (requestedDestination.kind === "infer" && sourceIsHome);
+      !shouldKeepPendingHome &&
+      (requestedDestination.kind === "resolve" ||
+        requestedDestination.kind === "infer");
     const resolvedPersonaHome =
       shouldResolvePersistedHome && nextBotId
         ? resolveExistingPersonaHome(nextBotId, conversations)
         : null;
     const existingConversationId =
       explicitConversationId ?? resolvedPersonaHome?.conversationId ?? null;
-    // Prism's default Home retains its existing continuous-session behavior.
-    // Persona Homes fail closed to a pending, unsaved surface unless History
-    // proves the exact relationship continuation locally.
+    // Every ordinary Home visit resumes the latest continuation that History
+    // can prove belongs to that relationship. Only explicit `pending` visits
+    // and the New chat affordances are allowed to arm a fresh conversation.
+    // Missing or contradictory History still fails closed to an unsaved
+    // surface instead of guessing from presentation-era bot fields.
     const shouldOpenPrismHome =
       shouldResolvePersistedHome && nextBotId === null;
     const shouldOpenPersistedHome = Boolean(
@@ -100638,7 +100647,7 @@ function HomeContent(): React.JSX.Element {
                 event.clientY,
               );
             }}
-            onClick={() => {
+            onClick={(event) => {
               if (suppressConversationGroupClickRef.current) {
                 suppressConversationGroupClickRef.current = false;
                 return;
@@ -100648,11 +100657,13 @@ function HomeContent(): React.JSX.Element {
                 setConversationListScrollTop(0);
               }
               setExpandedConversationGroupKey(group.key);
-              performShowAllBotsView(group.botId, {
-                suppressChatAutoRestore: true,
+              void visitZenHome(group.botId, {
+                sourceElement: event.currentTarget,
+                sourceSurface: "library",
+                destination: { kind: "resolve" },
               });
             }}
-            aria-label={`Select and expand ${group.name} conversations`}
+            aria-label={`Continue ${group.name}'s latest chat and expand conversations`}
           >
             <span
               className={styles.conversationGroupChevronHitbox}
