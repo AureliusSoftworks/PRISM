@@ -66,3 +66,26 @@ export function splitLocalVoiceStreamText(text: string): string[] {
   }
   return chunks;
 }
+
+export function splitLocalVoiceStreamSegments(
+  text: string,
+  sourceOffset = 0,
+): Array<{ text: string; sourceStart: number; sourceEnd: number }> {
+  const chunks = splitLocalVoiceStreamText(text);
+  const words = [...text.matchAll(/\S+/gu)].map((match) => ({
+    start: match.index,
+    end: match.index + match[0].length,
+  }));
+  let wordCursor = 0;
+  return chunks.map((chunk) => {
+    const tokenCount = chunk.split(/\s+/u).filter(Boolean).length;
+    const first = words[wordCursor];
+    const last = words[wordCursor + tokenCount - 1];
+    wordCursor += tokenCount;
+    return {
+      text: chunk,
+      sourceStart: sourceOffset + (first?.start ?? 0),
+      sourceEnd: sourceOffset + (last?.end ?? text.length),
+    };
+  });
+}

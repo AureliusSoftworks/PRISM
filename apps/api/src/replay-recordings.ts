@@ -12,6 +12,9 @@ import {
   replayManifestV1IsValid,
   replayManifestV2IsValid,
   replayTimelineToWebVttV1,
+  normalizeBotAudioVoiceProfileV3,
+  normalizeResolvedLocalVoicePronunciationV1,
+  normalizeResolvedLocalVoiceSpeechprintV1,
   type ReplayManifest,
   type ReplayManifestV1,
   type ReplayManifestV2,
@@ -506,7 +509,17 @@ export function upsertReplayVoiceTake(
   ) {
     throw new Error("Replay voice take is incomplete.");
   }
-  const snapshotJson = JSON.stringify(snapshot);
+  const normalizedSnapshot: ReplayVoiceTakeV1 = {
+    ...snapshot,
+    profile: normalizeBotAudioVoiceProfileV3(snapshot.profile),
+    resolvedPronunciation: normalizeResolvedLocalVoicePronunciationV1(
+      snapshot.resolvedPronunciation,
+    ),
+    resolvedSpeechprint: normalizeResolvedLocalVoiceSpeechprintV1(
+      snapshot.resolvedSpeechprint,
+    ),
+  };
+  const snapshotJson = JSON.stringify(normalizedSnapshot);
   if (Buffer.byteLength(snapshotJson) > REPLAY_TAKE_SNAPSHOT_MAX_BYTES) {
     throw new Error("Replay voice take is too large.");
   }
@@ -553,6 +566,8 @@ export function updateReplayVoiceTakeSnapshot(
     resolvedModelHash?: string | null;
     segmentTimings?: ReplayVoiceTakeV1["segmentTimings"];
     heardCompletion?: ReplayVoiceTakeV1["heardCompletion"];
+    resolvedPronunciation?: ReplayVoiceTakeV1["resolvedPronunciation"];
+    resolvedSpeechprint?: ReplayVoiceTakeV1["resolvedSpeechprint"];
   },
 ): ReplayVoiceTakeRecordV1 | null {
   const row = db
@@ -652,6 +667,18 @@ export function updateReplayVoiceTakeSnapshot(
           : null,
     segmentTimings,
     heardCompletion,
+    resolvedPronunciation:
+      patch.resolvedPronunciation === undefined
+        ? snapshot.resolvedPronunciation
+        : normalizeResolvedLocalVoicePronunciationV1(
+            patch.resolvedPronunciation,
+          ),
+    resolvedSpeechprint:
+      patch.resolvedSpeechprint === undefined
+        ? snapshot.resolvedSpeechprint
+        : normalizeResolvedLocalVoiceSpeechprintV1(
+            patch.resolvedSpeechprint,
+          ),
   };
   const now = new Date().toISOString();
   db.prepare(

@@ -519,6 +519,10 @@ export {
   LOCAL_VOICE_ENGINE_PREFERENCES,
   LOCAL_VOICE_SOURCES,
   LOCAL_VOICE_ACCENT_MODES,
+  LOCAL_VOICE_PRONUNCIATION_BASES,
+  LOCAL_VOICE_PRESENTATIONS,
+  LOCAL_VOICE_SPEECHPRINT_INFLUENCES,
+  LOCAL_VOICE_SPEECHPRINT_STRENGTHS,
   botVoiceTextureForPreset,
   botVoiceTextureIsModified,
   isBotAudioVoiceId,
@@ -541,8 +545,15 @@ export {
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeLocalVoiceAccentLocale,
   normalizeLocalVoiceAccentMode,
+  normalizeLocalVoicePronunciationBase,
   normalizeLocalVoiceEnginePreference,
   normalizeLocalVoiceSource,
+  normalizeLocalVoiceSpeechprintInfluence,
+  normalizeLocalVoiceSpeechprintStrength,
+  normalizeLocalVoiceSpeechprintVariationSeed,
+  normalizeLocalVoiceSpeechprintV1,
+  resolveLocalVoicePronunciationLocale,
+  localVoicePronunciationOverrideIsActive,
   resolveBotAudioVoiceProfileV1,
   normalizeVoiceMode,
   normalizeVoiceDeliveryMood,
@@ -581,8 +592,13 @@ export {
   type BotPremiumVoiceProfileV1,
   type BotVoiceDeliveryProfileV1,
   type LocalVoiceAccentMode,
+  type LocalVoicePronunciationBase,
   type LocalVoiceEnginePreference,
   type LocalVoiceSource,
+  type LocalVoicePresentation,
+  type LocalVoiceSpeechprintInfluence,
+  type LocalVoiceSpeechprintStrength,
+  type LocalVoiceSpeechprintV1,
   type BotAvatarSfxV1,
   type BotVoiceTexturePreset,
   type BotVoiceTextureV1,
@@ -3156,6 +3172,7 @@ export * from "./signalMusicProfile.js";
 export * from "./voiceSpokenText.js";
 export * from "./voicePerformance.js";
 export * from "./localVoice.js";
+export * from "./voiceSpeechprint.js";
 export * from "./listenerReaction.js";
 export * from "./responseCue.js";
 export * from "./turnPreparation.js";

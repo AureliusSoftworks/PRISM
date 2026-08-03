@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { splitLocalVoiceStreamText } from "../local-voice-stream.ts";
+import {
+  splitLocalVoiceStreamSegments,
+  splitLocalVoiceStreamText,
+} from "../local-voice-stream.ts";
 
 describe("local voice streaming chunks", () => {
   it("preserves the complete utterance while yielding a short first phrase", () => {
@@ -34,5 +37,17 @@ describe("local voice streaming chunks", () => {
     assert.equal(chunks.join(" "), text);
     assert.ok(chunks.length >= 3);
     assert.ok(chunks.slice(1).every((chunk) => chunk.split(/\s+/u).length <= 80));
+  });
+
+  it("keeps exact canonical source ranges for interruption and replay", () => {
+    const text = "  First phrase,   then the second phrase keeps going.";
+    const segments = splitLocalVoiceStreamSegments(text, 40);
+    assert.deepEqual(
+      segments.map((segment) => text.slice(
+        segment.sourceStart - 40,
+        segment.sourceEnd - 40,
+      ).replace(/\s+/gu, " ")),
+      segments.map((segment) => segment.text),
+    );
   });
 });

@@ -345,12 +345,19 @@ describe("resolveNextSettings — Zen player voice", () => {
           pace: 0,
           lilt: 0,
           signal: 0,
+          speechprintInfluence: "korean-influenced-english",
+          speechprintStrength: "strong",
+          speechprintVariationSeed: "zen-seed",
         },
       },
       baseline(),
     );
     assert.equal(next.zenPlayerVoiceEnabled, true);
     assert.equal(next.playerAudioVoiceProfile.baseVoiceId, "voice-8");
+    assert.equal(
+      next.playerAudioVoiceProfile.speechprintInfluence,
+      "korean-influenced-english",
+    );
     assert.equal(resolveNextSettings({}, baseline()).zenPlayerVoiceEnabled, false);
   });
 });

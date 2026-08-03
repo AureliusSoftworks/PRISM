@@ -11,29 +11,39 @@ import {
   selectSystemVoice,
   systemEnglishGenerationSettings,
 } from "../builtin-tts.ts";
+import { protectedSpeechRanges } from "../builtin-tts-runtime.ts";
 
 describe("built-in English audio", () => {
-  it("ships twelve stable, distinct PRISM voice identities", () => {
+  it("ships 28 stable, distinct PRISM voice identities", () => {
     assert.deepEqual(
       PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => voice.voiceId),
-      [
-        "voice-1",
-        "voice-2",
-        "voice-3",
-        "voice-4",
-        "voice-5",
-        "voice-6",
-        "voice-7",
-        "voice-8",
-        "voice-9",
-        "voice-10",
-        "voice-11",
-        "voice-12",
-      ],
+      Array.from({ length: 28 }, (_, index) => `voice-${index + 1}`),
     );
     assert.equal(
       new Set(PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => voice.engineVoiceId)).size,
       PRISM_BUILTIN_ENGLISH_VOICES.length,
+    );
+    assert.ok(
+      PRISM_BUILTIN_ENGLISH_VOICES.every(
+        (voice) =>
+          voice.presentation === "feminine" ||
+          voice.presentation === "masculine",
+      ),
+    );
+  });
+
+  it("protects authored pronunciations, initialisms, and code-like tokens", () => {
+    assert.deepEqual(
+      protectedSpeechRanges(
+        "Dr. Icarus uses PRISM with GPT-5 and path/to_file.",
+        ["Dr. Icarus"],
+      ),
+      [
+        { start: 0, end: 10 },
+        { start: 16, end: 21 },
+        { start: 27, end: 32 },
+        { start: 37, end: 49 },
+      ],
     );
   });
 
@@ -133,6 +143,68 @@ describe("built-in English audio", () => {
     assert.equal(wave.subarray(0, 4).toString("ascii"), "RIFF");
     assert.equal(wave.subarray(8, 12).toString("ascii"), "WAVE");
     assert.ok(wave.length > 44);
+  });
+
+  it("renders a Speechprint through the pinned phoneme token interface", {
+    skip: !builtinEnglishAvailable(),
+  }, async () => {
+    const wave = await generateBuiltinEnglishWave({
+      text: "This river carries a very clear voice.",
+      profile: {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-3",
+        speechprintInfluence: "indian-english",
+        speechprintStrength: "balanced",
+        speechprintVariationSeed: "runtime-qualification",
+      },
+    });
+    assert.equal(wave.subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(wave.subarray(8, 12).toString("ascii"), "WAVE");
+    assert.ok(wave.length > 44);
+  });
+
+  it("renders British phonemes through an American portable voice", {
+    skip: !builtinEnglishAvailable(),
+  }, async () => {
+    const wave = await generateBuiltinEnglishWave({
+      text: "Ready for a glass of water after class?",
+      profile: {
+        v: 2,
+        enabled: true,
+        baseVoiceId: "voice-1",
+        accentLocale: "en-US",
+        pronunciationBase: "en-GB",
+      },
+    });
+    assert.equal(wave.subarray(0, 4).toString("ascii"), "RIFF");
+    assert.equal(wave.subarray(8, 12).toString("ascii"), "WAVE");
+    assert.ok(wave.length > 44);
+  });
+
+  it("renders French, German, and Russian Speechprints through the pinned token interface", {
+    skip: !builtinEnglishAvailable(),
+  }, async () => {
+    for (const influence of [
+      "french-influenced-english",
+      "german-influenced-english",
+      "russian-influenced-english",
+    ] as const) {
+      const wave = await generateBuiltinEnglishWave({
+        text: "This warm river road has a very clear ending.",
+        profile: {
+          v: 2,
+          enabled: true,
+          baseVoiceId: "voice-3",
+          speechprintInfluence: influence,
+          speechprintStrength: "strong",
+          speechprintVariationSeed: `${influence}-qualification`,
+        },
+      });
+      assert.equal(wave.subarray(0, 4).toString("ascii"), "RIFF");
+      assert.equal(wave.subarray(8, 12).toString("ascii"), "WAVE");
+      assert.ok(wave.length > 44);
+    }
   });
 
   it("keeps API-side timers moving during a representative local reply", {

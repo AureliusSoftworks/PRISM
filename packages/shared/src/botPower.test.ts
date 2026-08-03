@@ -519,13 +519,14 @@ test("mumbling is a normal-volume hard speech transform that preserves only phys
       ruleLabels: [],
     },
   }];
-  const intended = "*frowns slightly* [Mira](prism-bot://bot-mira), I explained the rational plan clearly.";
+  const intended = "*frowns slightly* [Mira](prism-bot://bot-mira), I explained the rational plan clearly [[source:scholar-1]].";
   const first = applyBotPowerMumbledResponseV1(intended);
   const second = applyBotPowerMumbledResponseV1(intended);
 
   assert.equal(botPowerMumblesSpeechV1(powers), true);
   assert.equal(first, second);
   assert.match(first, /^\*frowns slightly\* /u);
+  assert.match(first, /\[\[source:scholar-1\]\]/u);
   assert.doesNotMatch(first, /Mira|explained|rational|plan|clearly|prism-bot/iu);
   assert.equal(botPowerVoiceGainMultiplierV1(powers), 1);
   assert.equal(botPowerTextScaleV1(powers), 1);

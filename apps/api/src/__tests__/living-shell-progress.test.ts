@@ -44,6 +44,7 @@ describe("living-shell account progress persistence", () => {
     const progress = getLivingShellAccountProgress(db, userId);
     assert.equal(progress.onboardingState.stage, "complete");
     assert.equal(progress.tutorialProgress.slate.status, "completed");
+    assert.equal(progress.tutorialProgress.avatar.status, "pending");
     db.close();
   });
 

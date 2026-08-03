@@ -10,6 +10,14 @@ const pageSource = readFileSync(resolve(appDir, "page.tsx"), "utf8").replace(
   " ",
 );
 const cssSource = readFileSync(resolve(appDir, "page.module.css"), "utf8");
+const adjustmentPadSource = readFileSync(
+  resolve(appDir, "AdjustmentPad.tsx"),
+  "utf8",
+).replace(/\s+/gu, " ");
+const adjustmentPadCssSource = readFileSync(
+  resolve(appDir, "AdjustmentPad.module.css"),
+  "utf8",
+);
 const botAvatarSfxSource = readFileSync(
   resolve(appDir, "botAvatarSfx.ts"),
   "utf8",
@@ -249,14 +257,8 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /label="Thinking size"/);
   assert.match(pageSource, /label="Thinking position"/);
   assert.match(pageSource, /data-thinking-geometry="true"/);
-  assert.match(
-    pageSource,
-    /faceThinkingScale=\{newBotFaceThinkingScale\}/,
-  );
-  assert.match(
-    cssSource,
-    /--bot-face-thinking-scale,\s*1/,
-  );
+  assert.match(pageSource, /faceThinkingScale=\{newBotFaceThinkingScale\}/);
+  assert.match(cssSource, /--bot-face-thinking-scale,\s*1/);
   assert.match(
     cssSource,
     /\.botAvatarCustomGeometry\[data-thinking-geometry="true"\]\[data-disabled="true"\]/,
@@ -314,21 +316,18 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /label="Mouth position"/);
   assert.match(pageSource, /function BotAvatarCoordinateControl\(/);
   assert.match(pageSource, /const visualX = -x;/);
+  assert.match(pageSource, /createAdjustmentPadCoordinateAdapter\(/);
   assert.match(
-    pageSource,
-    /const xRatio = \(maxX - x\) \/ \(maxX - minX\);/,
+    adjustmentPadSource,
+    /onPreview\(nextValue, "pointer"\);[\s\S]*onCommit\(nextValue, "pointer"\);/,
   );
   assert.match(
-    pageSource,
-    /maxX - Math\.max\(0, Math\.min\(1, rawX\)\) \* \(maxX - minX\)/,
+    adjustmentPadSource,
+    /adapter\.nudge\(valueRef\.current, direction, event\.shiftKey \? 3 : 1\)/,
   );
   assert.match(
-    pageSource,
-    /event\.key === "ArrowLeft"[\s\S]*x \+ xStep[\s\S]*event\.key === "ArrowRight"[\s\S]*x - xStep/,
-  );
-  assert.match(
-    pageSource,
-    /aria-valuetext=\{botAvatarCoordinateLabel\(visualX, y\)\}/,
+    adjustmentPadSource,
+    /aria-label=\{`\$\{label\}\. \$\{valueText\}\. Use arrow keys to adjust and Home to restore\.`\}/,
   );
   assert.doesNotMatch(pageSource, /\blockX\b|\blockedX\b|data-x-locked/);
   assert.match(pageSource, /function BotAvatarMouthRotationWheel\(/);
@@ -347,9 +346,9 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     2,
     "Eyes and Mouth should each expose the shared stroke-weight slider",
   );
-  assert.match(cssRuleBody(".botAvatarCoordinatePad"), /cursor:\s*grab;/);
-  assert.match(cssSource, /\.botAvatarCoordinatePad::before/);
-  assert.match(cssRuleBody(".botAvatarCoordinateThumb"), /width:\s*20px;/);
+  assert.match(adjustmentPadCssSource, /\.pad\s*\{[\s\S]*cursor:\s*grab;/);
+  assert.match(adjustmentPadCssSource, /\.pad::before/);
+  assert.match(adjustmentPadCssSource, /\.thumb\s*\{[\s\S]*width:\s*20px;/);
   assert.match(
     cssSource,
     /--bot-face-eye-scale:\s*var\(--bot-face-blink-scale, 1\)/,
@@ -367,7 +366,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     /\[data-coffee-plate-emoji-blink-glyph="true"\][\s\S]{0,420}--bot-face-gaze-x:\s*0px;[\s\S]{0,120}--bot-face-gaze-y:\s*0px;/,
   );
   const faceBranchStart = pageSource.indexOf(
-    '{activeTab === "face" ? ( <div className={styles.botAvatarFaceControls}>',
+    'data-identity-surface="identity-core"',
   );
   const eyesBranchStart = pageSource.indexOf(
     ') : activeTab === "eyes" ? (',
@@ -394,10 +393,14 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.doesNotMatch(faceTabSource, /enableCustomMouth/);
   assert.match(faceTabSource, /<BotAvatarIdentityControls/);
   assert.match(faceTabSource, /identitySection \?/);
-  assert.match(faceTabSource, /<ColorGlyphPicker/);
+  assert.doesNotMatch(faceTabSource, /<ColorGlyphPicker/);
+  assert.match(pageSource, /ariaLabel="Shell color and identity badge"/);
   assert.match(faceTabSource, /label="thinking animation"/);
   assert.match(faceTabSource, /aria-label="Custom thinking animation frames"/);
-  assert.match(faceTabSource, /\sinline\s/);
+  assert.match(
+    pageSource,
+    /const shellControls = identitySection \? \([\s\S]*?<ColorGlyphPicker[\s\S]*?\sinline\s[\s\S]*?ariaLabel="Shell color and identity badge"/,
+  );
   assert.doesNotMatch(faceTabSource, /label="Stroke weight"/);
   assert.match(eyesTabSource, /ariaLabel="Custom eye glyph"/);
   assert.match(eyesTabSource, /label="Stroke weight"/);
@@ -431,17 +434,20 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(eyesTabSource, /One eye/);
   assert.match(eyesTabSource, /Two eyes/);
   assert.match(eyesTabSource, /label="Eye size"/);
-  assert.match(eyesTabSource, /label="Eye position"/);
+  assert.doesNotMatch(eyesTabSource, /label="Eye position"/);
   assert.match(eyesTabSource, /label="blink glyph"/);
   assert.match(eyesTabSource, /botAvatarBlinkBarOptionLabel\(blinkBar\)/);
   assert.match(eyesTabSource, /aria-label="Use a custom blink bar"/);
   assert.match(eyesTabSource, /label="Blink size"/);
-  assert.match(eyesTabSource, /label="Blink position"/);
+  assert.doesNotMatch(eyesTabSource, /label="Blink position"/);
   assert.match(eyesTabSource, /part="blink"/);
   assert.match(eyesTabSource, /value=\{faceBlinkRotationDeg\}/);
-  assert.match(eyesTabSource, /label="Eye position" x=\{faceEyeOffsetX\}/);
-  assert.match(eyesTabSource, /label="Blink position" x=\{faceBlinkOffsetX\}/);
-  assert.match(pageSource, /const blinkPlacementActive = faceBlinkBar !== "none";/);
+  assert.match(pageSource, /label="Eye position" x=\{faceEyeOffsetX\}/);
+  assert.match(pageSource, /label="Blink position" x=\{faceBlinkOffsetX\}/);
+  assert.match(
+    pageSource,
+    /const blinkPlacementActive = faceBlinkBar !== "none";/,
+  );
   assert.match(
     eyesTabSource,
     /\{blinkPlacementActive \? \( <div className=\{styles\.botAvatarCustomBlinkControls\}> \{customBlinkActive \? \(/,
@@ -491,7 +497,8 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(mouthTabSource, /faceMouthAnimation/);
   assert.match(mouthTabSource, /label="Mouth size"/);
   assert.match(mouthTabSource, /<BotAvatarMouthRotationWheel/);
-  assert.match(mouthTabSource, /label="Mouth position" x=\{faceMouthOffsetX\}/);
+  assert.doesNotMatch(mouthTabSource, /label="Mouth position"/);
+  assert.match(pageSource, /label="Mouth position" x=\{faceMouthOffsetX\}/);
   assert.doesNotMatch(mouthTabSource, /botAvatarCustomMotionRowSingle/);
   assert.doesNotMatch(mouthTabSource, /botAvatarMouthAnimationRow/);
   assert.doesNotMatch(mouthTabSource, /botAvatarCustomMotionRowCombined/);
@@ -775,8 +782,10 @@ test("avatar customizer keeps explicit save and dirty prompts for broader edits"
   assert.match(promptBackdropRule, /z-index:\s*3010;/);
   assert.match(promptBackdropRule, /place-items:\s*center;/);
   assert.match(
-    cssRuleBody(".botAvatarPanelHeader"),
-    /justify-content:\s*space-between;/,
+    cssRuleBody(
+      '.botAvatarCustomizer[data-foundry="true"] .botAvatarPanelHeader',
+    ),
+    /display:\s*none;/,
   );
   assert.match(
     cssSource,
@@ -1061,34 +1070,31 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
   assert.match(apiServerSource, /prismDefaultBotGlyph: ""/);
 });
 
-test("avatar customization modal is a contained foreground sheet", () => {
+test("avatar customization uses the entire viewport as a foundry", () => {
   const backdropRule = cssRuleBody(".botAvatarCustomizerBackdrop");
-  const modalRule = cssRuleBody(".botAvatarCustomizer");
-  const modalBackingRule = cssRuleBody(".botAvatarCustomizer::before");
-  const modalRailRule = cssRuleBody(".botAvatarCustomizer::after");
+  const modalRule = cssRuleBody(
+    '.botProfileBuilder.botAvatarCustomizer[data-foundry="true"]',
+  );
+  const modalBackingRule = cssRuleBody(
+    '.botAvatarCustomizer[data-foundry="true"]::before',
+  );
+  const modalRailRule = cssRuleBody(
+    '.botAvatarCustomizer[data-foundry="true"]::after',
+  );
   assert.match(backdropRule, /z-index:\s*3000;/);
   assert.match(backdropRule, /overflow:\s*hidden;/);
   assert.match(
     backdropRule,
     /backdrop-filter:\s*blur\(12px\)\s*saturate\(112%\);/,
   );
-  assert.match(modalRule, /position:\s*fixed;/);
-  assert.match(
-    modalRule,
-    /left:\s*max\(var\(--bot-avatar-studio-inline-margin\),\s*calc\(\(100vw - 1480px\) \/ 2\)\)/,
-  );
-  assert.match(
-    modalRule,
-    /right:\s*max\(var\(--bot-avatar-studio-inline-margin\),\s*calc\(\(100vw - 1480px\) \/ 2\)\)/,
-  );
-  assert.match(modalRule, /grid-template-rows:\s*auto minmax\(0,\s*1fr\);/);
-  assert.match(modalRule, /overflow:\s*hidden;/);
-  assert.match(modalRule, /background:\s*#0d1017;/);
+  assert.match(modalRule, /inset:\s*0;/);
+  assert.match(modalRule, /width:\s*100vw;/);
+  assert.match(modalRule, /height:\s*100dvh;/);
+  assert.match(modalRule, /border-radius:\s*0;/);
+  assert.match(modalRule, /background:\s*#111722;/);
   assert.doesNotMatch(modalRule, /var\(--panel-width/);
-  assert.match(modalBackingRule, /position:\s*absolute;/);
-  assert.match(modalBackingRule, /inset:\s*0;/);
   assert.match(modalBackingRule, /background:/);
-  assert.match(modalRailRule, /width:\s*3px;/);
+  assert.match(modalRailRule, /height:\s*2px;/);
   assert.match(
     cssSource,
     /\.botAvatarControlPanel\s*\{[\s\S]*overflow:\s*hidden;/,
@@ -1098,10 +1104,16 @@ test("avatar customization modal is a contained foreground sheet", () => {
     /\.botAvatarControlStack\s*\{[\s\S]*overflow-y:\s*auto;/,
   );
   assert.doesNotMatch(backdropRule, /overflow-y:\s*auto;/);
-  assert.match(cssRuleBody(".botAvatarControlStack"), /overflow-y:\s*auto;/);
-  assert.match(cssRuleBody(".botAvatarControlStack"), /padding-bottom:\s*36px;/);
+  assert.match(
+    cssRuleBody(
+      '.botAvatarCustomizer[data-foundry="true"] .botAvatarControlStack',
+    ),
+    /overflow:\s*auto;/,
+  );
   assert.doesNotMatch(
-    cssRuleBody(".botAvatarControlStack"),
+    cssRuleBody(
+      '.botAvatarCustomizer[data-foundry="true"] .botAvatarControlStack',
+    ),
     /overflow:\s*hidden;/,
   );
   assert.match(
@@ -1133,7 +1145,10 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /My name is \$\{trimmedName\}\./);
   const invalidChatDetailEffect = pageSource.slice(
     pageSource.indexOf('detail.id === "pending"'),
-    pageSource.indexOf("useEffect(() =>", pageSource.indexOf('detail.id === "pending"')),
+    pageSource.indexOf(
+      "useEffect(() =>",
+      pageSource.indexOf('detail.id === "pending"'),
+    ),
   );
   assert.doesNotMatch(
     invalidChatDetailEffect,
@@ -1211,7 +1226,10 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /Play while talking/);
   assert.match(pageSource, /Play while not talking/);
   assert.match(pageSource, /Play while thinking/);
-  assert.match(pageSource, /Built-in fallback · no uploaded file · thinking only/);
+  assert.match(
+    pageSource,
+    /Built-in fallback · no uploaded file · thinking only/,
+  );
   assert.match(pageSource, /aria-label="Avatar sound mode"/);
   assert.match(pageSource, /data-bot-avatar-sfx-runtime="true"/);
   assert.match(pageSource, /avatarSfxState=\{previewAvatarSfxState\}/);
@@ -1232,10 +1250,16 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(pageSource, /What makes this bot special\?/u);
   assert.match(pageSource, /Create Power/u);
-  assert.match(pageSource, /<BotPowerRune power=\{\{ \.\.\.power, sigil \}\} size=\{64\} \/>/u);
+  assert.match(
+    pageSource,
+    /<BotPowerRune power=\{\{ \.\.\.power, sigil \}\} size=\{64\} \/>/u,
+  );
   assert.match(pageSource, /data-power-source="locked"/u);
   assert.match(pageSource, /Original prompt/u);
-  assert.match(pageSource, /Locked after creation\. Rerolls always build from this\./u);
+  assert.match(
+    pageSource,
+    /Locked after creation\. Rerolls always build from this\./u,
+  );
   assert.match(pageSource, /onCompile\(next, power\.id\)/u);
   assert.match(pageSource, /onCompile\(powers, power\.id\)/u);
   assert.match(pageSource, /power\.id === powerId &&/u);
@@ -1263,10 +1287,11 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /const BOT_AVATAR_FACE_CONTROL_TABS = \[/);
   assert.match(
     pageSource,
-    /\? "Face"\s*: activeTab === "eyes"\s*\? "Eyes"\s*: "Mouth"/,
+    /shellActive\s*\? "Shell"\s*: activeTab === "face"\s*\? "Identity core"/,
   );
   assert.match(pageSource, /Presets and thinking/);
-  assert.match(pageSource, /Name, badge, presets, and thinking/);
+  assert.match(pageSource, /Name, presets, and thinking/);
+  assert.match(pageSource, /Color and identity badge/);
   assert.match(pageSource, /Built-in style and stroke weight/);
   assert.match(pageSource, /Custom glyph and stroke weight/);
   assert.doesNotMatch(pageSource, /Blink, mouth, and thinking animation/);
@@ -1311,8 +1336,10 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(cssSource, /\.botAvatarControlTabs\s*\{/);
   assert.match(
-    cssRuleBody(".botAvatarControlTabs"),
-    /grid-template-columns:\s*repeat\(3,\s*minmax\(0,\s*1fr\)\);/,
+    cssRuleBody(
+      '.botAvatarCustomizer[data-foundry="true"] .botAvatarControlTabs',
+    ),
+    /display:\s*flex;/,
   );
   assert.match(
     cssSource,
@@ -1322,10 +1349,15 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     cssSource,
     /\.botAvatarPresetStrip\s*\{[\s\S]*grid-template-columns:\s*repeat\(5,\s*minmax\(0,\s*1fr\)\);/,
   );
-  assert.match(cssRuleBody(".botAvatarControlStack"), /overflow-y:\s*auto;/);
   assert.match(
-    cssRuleBody(".botAvatarOverrideGrid"),
-    /grid-template-columns:\s*minmax\(0,\s*1fr\);/,
+    cssRuleBody(
+      '.botAvatarCustomizer[data-foundry="true"] .botAvatarControlStack',
+    ),
+    /overflow:\s*auto;/,
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarOverrideGrid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*1fr\);/,
   );
   assert.match(
     cssRuleBody(".botAvatarMouthCustomRow"),
@@ -1373,12 +1405,12 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     /min-height:\s*150px;/,
   );
   assert.match(
-    cssRuleBody(".botAvatarFaceControls"),
-    /grid-template-rows:\s*auto auto auto auto;/,
+    cssSource,
+    /\.botAvatarFaceControls\s*\{[\s\S]*?grid-template-rows:\s*auto auto auto auto;/,
   );
   assert.match(
-    cssRuleBody(".botAvatarIdentityPicker"),
-    /height:\s*clamp\(165px,\s*22dvh,\s*260px\);/,
+    cssSource,
+    /\.botAvatarIdentityPicker\s*\{[\s\S]*?height:\s*clamp\(165px,\s*22dvh,\s*260px\);/,
   );
   assert.match(
     cssRuleBody(".botAvatarIdentityPronunciationRow"),
@@ -1392,12 +1424,24 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     cssRuleBody(".botAvatarIdentityDisclosureButton"),
     /border-radius:\s*999px;/,
   );
-  assert.match(cssRuleBody(".botAvatarIdentityNameSampleButton"), /height:\s*36px;/);
+  assert.match(
+    cssRuleBody(".botAvatarIdentityNameSampleButton"),
+    /height:\s*36px;/,
+  );
   assert.match(cssRuleBody(".glyphGridScroll"), /overflow-y:\s*auto;/);
 
-  const stageRule = cssRuleBody(".botAvatarMannequinStage");
-  assert.match(stageRule, /background-size:\s*34px 34px,\s*34px 34px,\s*auto;/);
-  assert.doesNotMatch(stageRule, /radial-gradient/);
+  const stageRule = cssRuleBody(
+    '.botAvatarCustomizer[data-foundry="true"] .botAvatarMannequinStage',
+  );
+  assert.match(stageRule, /position:\s*absolute;/);
+  assert.match(stageRule, /inset:\s*0;/);
+  assert.match(stageRule, /radial-gradient/);
+  assert.match(stageRule, /linear-gradient/);
+  assert.match(stageRule, /var\(--editor-bot-color/);
+  assert.match(
+    cssSource,
+    /\.themeLight\.botAvatarStudioThemeScope[\s\S]*?\.botAvatarCustomizer\[data-foundry="true"\][\s\S]*?\.botAvatarMannequinStage\s*\{[\s\S]*?#f1f5f8[\s\S]*?#dce6ee/,
+  );
 });
 
 test("bot creation, customization, and settings open directly in Avatar Studio", () => {
@@ -1677,19 +1721,161 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   );
 });
 
-test("avatar customizer preview uses tightened studio framing", () => {
-  const stageRule = cssRuleBody(".botAvatarMannequinStage");
-  assert.match(stageRule, /min-height:\s*0\s*;/);
+test("avatar customizer preview uses full-stage foundry framing", () => {
+  const stageRule = cssRuleBody(
+    '.botAvatarCustomizer[data-foundry="true"] .botAvatarMannequinStage',
+  );
   assert.match(stageRule, /height:\s*100%\s*;/);
-  assert.match(stageRule, /padding:\s*24px\s*;/);
-  assert.match(stageRule, /overflow:\s*visible\s*;/);
-  assert.doesNotMatch(
+  assert.match(stageRule, /padding:\s*0\s*;/);
+  assert.match(stageRule, /overflow:\s*hidden\s*;/);
+  assert.match(stageRule, /radial-gradient/);
+  assert.match(
     cssSource,
-    /\.botAvatarMannequinStage\s*\{[\s\S]*min-height:\s*clamp\(500px,\s*calc\(100dvh - 318px\),\s*620px\);/,
+    /\.themeLight\.botAvatarStudioThemeScope[\s\S]*?\.botAvatarCustomizer\[data-foundry="true"\][\s\S]*?:is\(\.botAvatarMannequinPanel, \.botAvatarControlPanel\)\s*\{[\s\S]*?background:\s*transparent !important;/,
+  );
+});
+
+test("avatar foundry uses light-linked upgrade nodes and view-only camera navigation", () => {
+  assert.match(pageSource, /data-avatar-upgrade-node=\{node\.id\}/);
+  assert.match(pageSource, /BOT_AVATAR_FOUNDRY_UPGRADE_NODES\.filter/);
+  assert.match(pageSource, /"--foundry-module-color": node\.color/);
+  assert.match(pageSource, /className=\{styles\.botAvatarFoundryCameraRig\}/);
+  assert.match(pageSource, /className=\{styles\.botAvatarFoundryPlatform\}/);
+  assert.match(pageSource, /className=\{styles\.botAvatarFoundryBotAssembly\}/);
+  assert.match(pageSource, /data-avatar-foundry-platform="true"/);
+  assert.match(pageSource, /data-avatar-foundry-bot-assembly="true"/);
+  assert.match(pageSource, /Drag to pan · Scroll to zoom/);
+  assert.match(pageSource, /onWheel=\{\(event\) =>/);
+  assert.match(pageSource, /requestAnimationFrame\(\(\) =>/);
+  assert.match(pageSource, /stage\.style\.setProperty\("--foundry-pan-x"/);
+  assert.match(
+    pageSource,
+    /zoomBotAvatarFoundryViewport\(\s*foundryViewportRef\.current,\s*event\.deltaY/,
+  );
+  assert.match(pageSource, /setFoundryViewport\(viewport\);/);
+  assert.match(pageSource, /data-tutorial-target="avatar-foundry-controls"/);
+  assert.doesNotMatch(pageSource, /BotAvatarFoundryFeatureHandle/);
+  assert.doesNotMatch(pageSource, /data-avatar-hotspot/);
+  assert.match(cssSource, /\.botAvatarFoundryNode::before\s*\{/);
+  assert.match(cssSource, /\.botAvatarFoundryNodePoint\s*\{/);
+  assert.match(
+    cssSource,
+    /\.botAvatarMannequinStage\[data-foundry-camera-surface="true"\]\s*\{[\s\S]*cursor:\s*grab;/,
+  );
+  assert.match(cssSource, /will-change:\s*transform;/);
+  assert.match(cssSource, /@keyframes botAvatarFoundryHover/);
+  assert.match(
+    cssSource,
+    /data-foundry-camera-active="true"[\s\S]*animation-play-state:\s*paused;/,
+  );
+  assert.doesNotMatch(cssSource, /transition:\s*transform 80ms linear;/);
+});
+
+test("avatar foundry powers module lights only when draft sections are populated", () => {
+  assert.match(pageSource, /botAvatarFoundryModulePopulation\(\{/);
+  assert.match(
+    pageSource,
+    /screen:\s*avatarDetailsHasVisuals\(avatarDetailsPreview\)/,
+  );
+  assert.match(pageSource, /modulePopulation\[node\.id\]/);
+  assert.match(pageSource, /frameModulePopulation=\{/);
+  assert.match(pageSource, /data-avatar-foundry-frame-module-lights="true"/);
+  assert.match(
+    pageSource,
+    /"--bot-face-frame-led-glow-opacity" as string\]: 0/,
+  );
+  assert.match(pageSource, /data-populated=\{/);
+  assert.match(pageSource, /Module unconfigured\./);
+  assert.match(
+    pageSource,
+    /activeFoundryModulePopulated \? "Ready" : "Unconfigured"/,
   );
   assert.match(
     cssSource,
-    /\.botAvatarMannequinStage\s*\{[\s\S]*padding:\s*18px;/,
+    /\.botAvatarFoundryNode\[data-populated="false"\]::before\s*\{[\s\S]*?box-shadow:\s*none;/,
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarFoundryNode\[data-populated="true"\] \.botAvatarFoundryNodePoint\s*\{[\s\S]*?0 0 14px currentColor/,
+  );
+  assert.match(cssSource, /@keyframes botAvatarFoundryModuleEnergize/);
+  assert.match(
+    cssSource,
+    /\.botAvatarFoundryFrameModuleLamp\[data-populated="true"\]\s*\{[\s\S]*?0 0 18px/,
+  );
+  assert.match(
+    cssSource,
+    /data-foundry-lamp="eyes"\][\s\S]*?left:\s*7\.65%;[\s\S]*?top:\s*58\.65%;/,
+  );
+  assert.match(
+    cssSource,
+    /@media \(prefers-reduced-motion: reduce\)[\s\S]*?\.botAvatarFoundryNodePoint,[\s\S]*?animation:\s*none;/,
+  );
+});
+
+test("avatar foundry keeps a reusable color-linked adjustment console visible", () => {
+  assert.match(pageSource, /botAvatarGlobalAdjustmentConsole/);
+  assert.match(pageSource, /activeAdjustmentOptions/);
+  assert.match(pageSource, /<AdjustmentPad/);
+  assert.match(pageSource, /restoreX=\{DEFAULT_BOT_FACE_STYLE\.eyeOffsetX\}/);
+  assert.match(pageSource, /restoreY=\{DEFAULT_BOT_FACE_STYLE\.mouthOffsetY\}/);
+  assert.match(adjustmentPadSource, /renderOverlay\?/);
+  assert.match(adjustmentPadSource, /onCancel\?/);
+  assert.match(
+    adjustmentPadSource,
+    /aria-roledescription="two-dimensional adjustment pad"/,
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarGlobalAdjustmentConsole\s*\{[\s\S]*position:\s*sticky;/,
+  );
+  assert.match(
+    adjustmentPadCssSource,
+    /@media \(prefers-reduced-motion: reduce\)/,
+  );
+});
+
+test("Identity Core and Shell expose distinct control surfaces", () => {
+  assert.match(
+    pageSource,
+    /botAvatarFoundryIdentitySurfaceForNode\(\s*activeFoundryModule\.id,?\s*\)/,
+  );
+  assert.match(
+    pageSource,
+    /activeFoundryIdentitySurface === "identity-core"[\s\S]*?value: "thinking"/,
+  );
+  assert.match(pageSource, /aria-label="Shell color and identity badge"/);
+  assert.match(pageSource, /aria-label="Default Prism factory shell"/);
+  assert.match(pageSource, /Default Prism hardware is fixed\./);
+  assert.match(pageSource, /data-identity-surface="identity-core"/);
+  assert.match(cssSource, /\.botAvatarShellAdjustmentSummary\s*\{/);
+  assert.match(cssSource, /\.botAvatarFactoryShellNotice\s*\{/);
+});
+
+test("desktop Avatar Foundry uses a wide two-dimensional control workbench", () => {
+  assert.match(
+    cssSource,
+    /@media \(min-width: 1280px\)[\s\S]*?\.botAvatarCustomizer\[data-foundry="true"\] \.botAvatarControlStack\s*\{[\s\S]*?width:\s*min\(760px, calc\(56vw - 36px\)\);/,
+  );
+  assert.match(
+    cssSource,
+    /@media \(min-width: 1280px\)[\s\S]*?\.botAvatarCustomizer\[data-foundry="true"\] \.botAvatarFaceControls\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 0\.9fr\) minmax\(0, 1\.1fr\);/,
+  );
+  assert.match(
+    cssSource,
+    /@media \(min-width: 1280px\)[\s\S]*?\.botAvatarCustomizer\[data-foundry="true"\] \.botAvatarCustomControls\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 0\.58fr\) minmax\(0, 1\.42fr\);/,
+  );
+  assert.match(
+    cssSource,
+    /@media \(min-width: 1280px\)[\s\S]*?\.botAvatarCustomizer\[data-foundry="true"\] \.botAvatarThinkingControl\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 0\.9fr\) minmax\(0, 1\.1fr\);/,
+  );
+  assert.match(
+    cssSource,
+    /@media \(max-width: 1180px\)[\s\S]*?\.botAvatarCustomizer\[data-foundry="true"\] \.botAvatarControlStack\s*\{[\s\S]*?left:\s*12px;[\s\S]*?max-height:\s*43dvh;/,
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarControlGroup\[data-avatar-control-tab="eyes"\][\s\S]*?:is\(\.botAvatarOverrideGrid, \.botAvatarOverrideControl\)\s*\{[\s\S]*?display:\s*contents;/,
   );
 });
 
@@ -1847,6 +2033,7 @@ test("identity color/glyph popover is never trapped by studio panel chrome", () 
     let seen = 0;
     for (const match of cssSource.matchAll(rulePattern)) {
       seen += 1;
+      if (/\[data-foundry-ritual=/u.test(match[0])) continue;
       // Comments may (and do) mention the banned properties by name to
       // document this very constraint — only declarations count.
       const withoutComments = match[0].replace(/\/\*[\s\S]*?\*\//g, "");
@@ -1890,10 +2077,21 @@ test("desktop kiosk shell shows a full-screen notice below the viewport floor", 
     cssSource,
     /@media\s*\(max-width:\s*1279px\)[\s\S]*\.desktopViewportNotice\s*\{[\s\S]*inset:\s*0;/,
   );
+  assert.match(
+    cssSource,
+    /body:has\(\[data-foundry="true"\]\) \.desktopViewportNotice,[\s\S]*body:has\(\[data-avatar-foundry="true"\]\) \.desktopViewportNotice\s*\{[\s\S]*display:\s*none;/,
+  );
+  assert.match(
+    cssSource,
+    /@media \(max-width: 1180px\)[\s\S]*\.botAvatarCustomizer\[data-foundry="true"\] \.botAvatarControlStack\s*\{[\s\S]*left:\s*12px;[\s\S]*max-height:\s*43dvh;/,
+  );
 });
 
 test("Powers read as an app-wide bot trait across active surfaces", () => {
-  assert.match(pageSource, /Describe the magic or hard rule\. PRISM names it and makes it real\./u);
+  assert.match(
+    pageSource,
+    /Describe the magic or hard rule\. PRISM names it and makes it real\./u,
+  );
   assert.doesNotMatch(pageSource, /apply only during Coffee sessions/u);
   assert.match(
     pageSource,
@@ -1908,7 +2106,10 @@ test("Powers read as an app-wide bot trait across active surfaces", () => {
     1,
     "the released Signal render callback retains its passive legacy badge",
   );
-  assert.match(pageSource, /<BotPowerBadge powers=\{bot\.powers\} passive \/>/u);
+  assert.match(
+    pageSource,
+    /<BotPowerBadge powers=\{bot\.powers\} passive \/>/u,
+  );
   assert.match(pageSource, /botPowerCupRateMultiplierForBotV1/u);
   assert.match(
     pageSource,

@@ -63,6 +63,24 @@
         { "path": "bm_daniel.bin", "sha256": "6b3194bbceffb746733cbc22c8f593dd44e401a71d53895a2dca891bc595a1e8" },
         { "path": "bm_lewis.bin", "sha256": "b8f671cef828c30e66fdf0b0756a76bba58f6bb3398cbbf27058642acbcedb97" }
       ]
+    },
+    {
+      "id": "phonemizer-espeak-runtime",
+      "kind": "phonemizer-runtime",
+      "source": "https://www.npmjs.com/package/phonemizer/v/1.2.1",
+      "sourceRevision": "phonemizer@1.2.1",
+      "license": "Apache-2.0",
+      "notice": "THIRD_PARTY_NOTICES.md#prism-voice-pack",
+      "redistributionPermission": "allowed-with-notice",
+      "commercialUse": "allowed",
+      "consentProvenance": "not-applicable",
+      "files": [
+        { "path": "package.json", "sha256": "997824e7b16a1d30b000256146f4d8251eb1348823640bfa251b56ef5678a060" },
+        { "path": "LICENSE", "sha256": "c71d239df91726fc519c6eb72d318ec65820627232b2f796219e87dcf35d0ab4" },
+        { "path": "dist/phonemizer.js", "sha256": "193481f474f7c1ea81df3195d18b45df8ef7254dbdccb3f193d60215c4897bec" },
+        { "path": "dist/phonemizer.cjs", "sha256": "24d24f118e44dc60af797881617415be24d84de53c1fc1a8f7f9974ab52531cc" },
+        { "path": "types/phonemizer.d.ts", "sha256": "a504583e1932c21818ef842cc885828c6495e3305d24482d72cba191fae07770" }
+      ]
     }
   ],
   "qualificationCandidates": [

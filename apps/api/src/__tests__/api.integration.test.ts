@@ -37,6 +37,8 @@ const builtinVoiceCalls: Array<{
   text: string;
   systemVoiceName: string | null;
   allowOperatingSystemVoices: boolean;
+  pronunciationBase: string;
+  speechprintInfluence: string;
 }> = [];
 const auxiliaryProviderFactoryCalls: Array<{
   prismDefaultLlmModel: string | null | undefined;
@@ -102,6 +104,10 @@ const server = createServer(
         text,
         systemVoiceName: normalizedProfile.systemVoiceName ?? null,
         allowOperatingSystemVoices: allowOperatingSystemVoices === true,
+        pronunciationBase:
+          normalizedProfile.pronunciationBase ?? "follow-voice",
+        speechprintInfluence:
+          normalizedProfile.speechprintInfluence ?? "none",
       });
       if (normalizedProfile.systemVoiceName === "Unavailable Test") {
         throw new Error("System voice is still loading.");
@@ -1680,6 +1686,10 @@ describe("API request integration", () => {
         playerAudioVoiceProfile: {
           ...normalizeBotAudioVoiceProfileV1(undefined),
           baseVoiceId: "voice-3",
+          pronunciationBase: "en-GB",
+          speechprintInfluence: "spanish-influenced-english",
+          speechprintStrength: "light",
+          speechprintVariationSeed: "zen-player-seed",
         },
         playerNamePronunciation: "Jair-id",
         defaultSystemVoiceName: "Alex",
@@ -1700,6 +1710,16 @@ describe("API request integration", () => {
     const settings = (await json(loaded)).settings;
     assert.equal(settings.zenPlayerVoiceEnabled, true);
     assert.equal(settings.playerAudioVoiceProfile.baseVoiceId, "voice-3");
+    assert.equal(settings.playerAudioVoiceProfile.pronunciationBase, "en-GB");
+    assert.equal(
+      settings.playerAudioVoiceProfile.speechprintInfluence,
+      "spanish-influenced-english",
+    );
+    assert.equal(settings.playerAudioVoiceProfile.speechprintStrength, "light");
+    assert.equal(
+      settings.playerAudioVoiceProfile.speechprintVariationSeed,
+      "zen-player-seed",
+    );
     assert.equal("playerNamePronunciation" in settings, false);
     assert.equal("defaultSystemVoiceName" in settings, false);
     assert.equal("defaultElevenLabsVoiceId" in settings, false);
@@ -2710,6 +2730,78 @@ describe("API request integration", () => {
     );
   });
 
+  it("streams Psychic planning before the final Chat envelope", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "psychic-stream@example.com",
+        password: "psychic-stream-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+
+    const originalGenerateResponse = deterministicProvider.generateResponse;
+    deterministicProvider.generateResponse = async (messages) => {
+      deterministicProvider.calls.push(
+        messages.map((message) => ({ ...message })),
+      );
+      const planning = messages.some((message) =>
+        message.content.includes("Prism's private planning pass"),
+      );
+      return planning
+        ? JSON.stringify({
+            summary: "I'm choosing a clear answer about the question.",
+            scratchpad: "Keep the explanation direct and grounded.",
+            answerGuidance: "Answer plainly in one short paragraph.",
+          })
+        : "A clear final answer.";
+    };
+
+    try {
+      const response = await client.request(
+        "/api/chat",
+        jsonInit({
+          message: "What is life?",
+          mode: "zen",
+          preferredProvider: "local",
+          psychicModeEnabled: true,
+          psychicProgressStream: true,
+          incognito: true,
+          ephemeralMessages: [],
+        }),
+      );
+      assert.equal(response.status, 200);
+      const rawEvents = await response.text();
+      assert.match(
+        response.headers.get("content-type") ?? "",
+        /application\/x-ndjson/u,
+        rawEvents,
+      );
+      assert.equal(
+        response.headers.get("x-prism-psychic-progress"),
+        "planning-v1",
+      );
+      const events = rawEvents
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      assert.equal(events[0]?.type, "psychic");
+      assert.equal(events[0]?.stage, "plan");
+      assert.match(String(events[0]?.summary ?? ""), /clear answer/u);
+      assert.equal(events.at(-1)?.type, "complete");
+      const envelope = events.at(-1)?.envelope as
+        | { conversation?: { messages?: Array<{ content?: string }> } }
+        | undefined;
+      assert.equal(
+        envelope?.conversation?.messages?.at(-1)?.content,
+        "A clear final answer.",
+      );
+    } finally {
+      deterministicProvider.generateResponse = originalGenerateResponse;
+    }
+  });
+
   it("sends ready bot Powers through the real Chat and Zen route", async () => {
     const client = createClient();
     const register = await client.request(
@@ -3011,6 +3103,81 @@ describe("API request integration", () => {
       /release-blocked|Voice\+/u,
     );
     await forcedVoicePlus.arrayBuffer();
+
+    const speechprintResponse = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        messageId: "voice-local-message",
+        spokenText,
+        mode: "english",
+        engine: "builtin",
+        profile: {
+          ...normalizeBotAudioVoiceProfileV1(undefined),
+          baseVoiceId: "voice-3",
+          localEnginePreference: "auto",
+          speechprintInfluence: "indian-english",
+          speechprintStrength: "balanced",
+          speechprintVariationSeed: "api-speaker-seed",
+        },
+      }),
+    );
+    assert.equal(speechprintResponse.status, 200);
+    assert.equal(
+      speechprintResponse.headers.get("x-prism-local-voice-engine"),
+      "instant",
+    );
+    assert.equal(
+      speechprintResponse.headers.get("x-prism-speechprint-status"),
+      "applied",
+    );
+    assert.equal(
+      speechprintResponse.headers.get("x-prism-speechprint-id"),
+      "indian-english",
+    );
+    assert.match(
+      speechprintResponse.headers.get("x-prism-speechprint-sha256") ?? "",
+      /^[a-f0-9]{64}$/u,
+    );
+    await speechprintResponse.arrayBuffer();
+    assert.equal(
+      builtinVoiceCalls.at(-1)?.speechprintInfluence,
+      "indian-english",
+    );
+
+    const crossAccentResponse = await client.request(
+      "/api/voices/synthesize",
+      jsonInit({
+        text: "Ready for a glass of water after class?",
+        mode: "english",
+        engine: "builtin",
+        profile: {
+          ...normalizeBotAudioVoiceProfileV1(undefined),
+          baseVoiceId: "voice-1",
+          accentLocale: "en-US",
+          localEnginePreference: "auto",
+          pronunciationBase: "en-GB",
+        },
+      }),
+    );
+    assert.equal(crossAccentResponse.status, 200);
+    assert.equal(
+      crossAccentResponse.headers.get("x-prism-local-voice-engine"),
+      "instant",
+    );
+    assert.equal(
+      crossAccentResponse.headers.get("x-prism-pronunciation-status"),
+      "applied",
+    );
+    assert.equal(
+      crossAccentResponse.headers.get("x-prism-pronunciation-source-locale"),
+      "en-US",
+    );
+    assert.equal(
+      crossAccentResponse.headers.get("x-prism-pronunciation-base-locale"),
+      "en-GB",
+    );
+    await crossAccentResponse.arrayBuffer();
+    assert.equal(builtinVoiceCalls.at(-1)?.pronunciationBase, "en-GB");
 
     const streamedText =
       "This local reply begins speaking from its first prepared phrase while the remaining sentences continue through one isolated local voice worker.";
@@ -3937,6 +4104,25 @@ describe("API request integration", () => {
     const voiceCapabilities = (await json(capabilities)).capabilities;
     const builtinEnglish = voiceCapabilities.builtinEnglish;
     assert.equal(builtinEnglish.model, "kokoro-82m-q8");
+    assert.equal(builtinEnglish.pack.length, 28);
+    assert.ok(
+      builtinEnglish.pack.every(
+        (voice: { presentation?: string }) =>
+          voice.presentation === "feminine" ||
+          voice.presentation === "masculine",
+      ),
+    );
+    assert.equal(voiceCapabilities.local.speechprints.length, 8);
+    assert.deepEqual(
+      voiceCapabilities.local.pronunciationBases.map(
+        (entry: { id: string }) => entry.id,
+      ),
+      ["follow-voice", "en-US", "en-GB"],
+    );
+    assert.deepEqual(
+      voiceCapabilities.local.phonemeApproximationLocales,
+      ["en-US", "en-GB"],
+    );
     assert.deepEqual(
       builtinEnglish.pack.map((voice: { name: string }) => voice.name),
       [
@@ -4556,6 +4742,8 @@ describe("API request integration", () => {
       text: "Keep my saved Mac voice.",
       systemVoiceName: "Alex",
       allowOperatingSystemVoices: true,
+      pronunciationBase: "follow-voice",
+      speechprintInfluence: "none",
     });
 
     const explicitResponse = await client.request(
@@ -4567,14 +4755,31 @@ describe("API request integration", () => {
         profile: {
           ...normalizeBotAudioVoiceProfileV1(undefined),
           systemVoiceName: "Samantha",
+          pronunciationBase: "en-GB",
+          speechprintInfluence: "japanese-influenced-english",
+          speechprintVariationSeed: "system-suspended",
         },
       }),
     );
     assert.equal(explicitResponse.status, 200);
+    assert.equal(
+      explicitResponse.headers.get("x-prism-speechprint-status"),
+      "suspended",
+    );
+    assert.equal(
+      explicitResponse.headers.get("x-prism-speechprint-reason"),
+      "system-voice",
+    );
+    assert.equal(
+      explicitResponse.headers.get("x-prism-pronunciation-reason"),
+      "system-voice",
+    );
     assert.deepEqual(builtinVoiceCalls.at(-1), {
       text: "Keep this bot's saved Mac voice.",
       systemVoiceName: "Samantha",
       allowOperatingSystemVoices: true,
+      pronunciationBase: "en-GB",
+      speechprintInfluence: "japanese-influenced-english",
     });
   });
 
@@ -4649,6 +4854,9 @@ describe("API request integration", () => {
           pace: 0,
           lilt: 0.2,
           bottishTone: 0.5,
+          speechprintInfluence: "indian-english",
+          speechprintStrength: "strong",
+          speechprintVariationSeed: "babble-ignored",
           volume: 1,
           texture: {
             preset: "clean",
@@ -4665,6 +4873,7 @@ describe("API request integration", () => {
     assert.equal(response.status, 200);
     assert.equal(response.headers.get("x-prism-voice-engine"), "builtin-babble");
     assert.equal(Buffer.from(await response.arrayBuffer()).subarray(0, 4).toString(), "RIFF");
+    assert.equal(builtinVoiceCalls.at(-1)?.speechprintInfluence, "none");
     assert.deepEqual(fetchRecorder.calls.slice(beforeCalls), []);
     const streamedBabble = await client.request(
       "/api/voices/synthesize",

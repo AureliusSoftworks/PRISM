@@ -183,6 +183,7 @@ function liveMonologueAudienceSilenceFactor(args: {
 function eventResetsAudiencePressure(event: DebateEventV1): boolean {
   return (
     event.kind === "judge_gavel" ||
+    event.gavelReason === "audience_order" ||
     event.stepKey === "audience_order" ||
     event.stepKey === "pause" ||
     event.stepKey === "resume"
@@ -284,7 +285,9 @@ export function debateAudienceModeratorOrderPlan(args: {
 
   const automaticOrders = args.events.filter(
     (event) =>
-      event.stepKey === "audience_order" && event.speakerKind === "moderator",
+      (event.stepKey === "audience_order" ||
+        event.gavelReason === "audience_order") &&
+      event.speakerKind === "moderator",
   );
   if (automaticOrders.length >= 3) return null;
 

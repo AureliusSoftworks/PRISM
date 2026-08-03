@@ -1,0 +1,336 @@
+.atlas {
+  --pronunciation-atlas-color: var(--foundry-module-color, #ff7972);
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+}
+
+.heading {
+  min-width: 0;
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.heading > span {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.heading strong {
+  color: var(--fg, #f5f7fb);
+  font-size: 11px;
+  font-weight: 820;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.heading small,
+.naturalHint {
+  color: var(--fg-muted, #8e9bab);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.heading output {
+  max-width: 62%;
+  color: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 64%,
+    var(--fg, #f5f7fb)
+  );
+  font-size: 10px;
+  font-weight: 730;
+  line-height: 1.3;
+  text-align: right;
+}
+
+.map {
+  position: absolute;
+  inset: 7px 9px;
+  overflow: hidden;
+  border-radius: 5px;
+  pointer-events: none;
+  opacity: 0;
+  animation: atlasMaterialize 520ms steps(8, end) forwards;
+}
+
+.world {
+  position: absolute;
+  inset: 0;
+  display: block;
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 46%,
+    transparent
+  );
+  -webkit-mask-image: url("/voice/pronunciation-atlas-earth-v1.png");
+  mask-image: url("/voice/pronunciation-atlas-earth-v1.png");
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  opacity: 0.54;
+  filter: drop-shadow(
+    0 0 5px
+      color-mix(in srgb, var(--pronunciation-atlas-color) 28%, transparent)
+  );
+}
+
+.longitudeLines {
+  position: absolute;
+  inset: 0;
+  opacity: 0.2;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0 calc(12.5% - 0.5px),
+      color-mix(in srgb, var(--pronunciation-atlas-color) 38%, transparent)
+        calc(12.5% - 0.5px) 12.5%
+    ),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0 calc(25% - 0.5px),
+      color-mix(in srgb, var(--pronunciation-atlas-color) 34%, transparent)
+        calc(25% - 0.5px) 25%
+    );
+  mask-image: radial-gradient(ellipse, #000 44%, transparent 92%);
+}
+
+.scan {
+  position: absolute;
+  left: 0;
+  right: 0;
+  top: -18%;
+  height: 18%;
+  opacity: 0.48;
+  background: linear-gradient(
+    180deg,
+    transparent,
+    color-mix(in srgb, var(--pronunciation-atlas-color) 34%, transparent),
+    transparent
+  );
+  filter: blur(2px);
+  animation: atlasScan 3.8s linear infinite;
+}
+
+.anchor {
+  position: absolute;
+  left: var(--atlas-anchor-x);
+  top: var(--atlas-anchor-y);
+  min-width: 18px;
+  height: 18px;
+  padding: 0 3px;
+  display: grid;
+  place-items: center;
+  border: 1px solid
+    color-mix(in srgb, var(--pronunciation-atlas-color) 54%, transparent);
+  border-radius: 999px;
+  color: color-mix(in srgb, var(--pronunciation-atlas-color) 68%, #ffffff);
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 12%,
+    rgba(4, 7, 12, 0.82)
+  );
+  box-shadow: 0 0 8px
+    color-mix(in srgb, var(--pronunciation-atlas-color) 25%, transparent);
+  font-size: 7px;
+  font-weight: 820;
+  letter-spacing: 0.04em;
+  transform: translate(-50%, -50%);
+  opacity: 0.72;
+}
+
+.anchor[data-base="true"] {
+  border-style: double;
+  opacity: 0.88;
+}
+
+.anchor[data-active="true"] {
+  color: #ffffff;
+  border-color: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 82%,
+    #ffffff
+  );
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 52%,
+    rgba(4, 7, 12, 0.9)
+  );
+  box-shadow:
+    0 0 0 4px
+      color-mix(in srgb, var(--pronunciation-atlas-color) 13%, transparent),
+    0 0 18px
+      color-mix(in srgb, var(--pronunciation-atlas-color) 58%, transparent);
+  opacity: 1;
+}
+
+.controls {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 9px;
+}
+
+.strength,
+.previewBar {
+  min-width: 0;
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.strength button,
+.previewBar button,
+.listFallback summary {
+  appearance: none;
+  min-height: 28px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--pronunciation-atlas-color) 24%,
+      var(--line, #303846)
+    );
+  border-radius: 7px;
+  color: var(--fg-muted, #8e9bab);
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 9.5px;
+  font-weight: 750;
+  cursor: pointer;
+}
+
+.strength button,
+.previewBar button {
+  padding: 4px 9px;
+}
+
+.strength button[data-active="true"],
+.previewBar button[data-primary="true"] {
+  color: #ffffff;
+  border-color: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 58%,
+    #ffffff
+  );
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 22%,
+    rgba(255, 255, 255, 0.04)
+  );
+}
+
+.strength button:focus-visible,
+.previewBar button:focus-visible,
+.listFallback summary:focus-visible {
+  outline: 2px solid
+    color-mix(in srgb, var(--pronunciation-atlas-color) 64%, #ffffff);
+  outline-offset: 2px;
+}
+
+.listFallback {
+  position: relative;
+  margin-left: auto;
+}
+
+.listFallback summary {
+  padding: 6px 9px;
+  list-style: none;
+}
+
+.listFallback summary::-webkit-details-marker {
+  display: none;
+}
+
+.listFallback > div {
+  position: absolute;
+  right: 0;
+  z-index: 8;
+  width: min(330px, 78vw);
+  margin-top: 5px;
+  padding: 10px;
+  display: grid;
+  gap: 9px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--pronunciation-atlas-color) 32%,
+      var(--line, #303846)
+    );
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--surface, #11161e) 94%, transparent);
+  box-shadow: 0 14px 34px rgba(0, 0, 0, 0.38);
+  backdrop-filter: blur(16px);
+}
+
+.listFallback label {
+  display: grid;
+  gap: 4px;
+  color: var(--fg-muted, #8e9bab);
+  font-size: 9.5px;
+  font-weight: 740;
+}
+
+.listFallback select {
+  min-width: 0;
+  height: 34px;
+  border: 1px solid var(--line, #303846);
+  border-radius: 7px;
+  color: var(--fg, #f5f7fb);
+  background: var(--surface, #11161e);
+  font: inherit;
+}
+
+.previewBar {
+  justify-content: flex-end;
+  border-top: 1px solid
+    color-mix(in srgb, var(--pronunciation-atlas-color) 14%, transparent);
+  padding-top: 8px;
+}
+
+@keyframes atlasMaterialize {
+  0% {
+    opacity: 0;
+    clip-path: inset(48% 0 48% 0);
+    transform: translateY(2px) scaleY(0.94);
+  }
+  30% {
+    opacity: 0.76;
+  }
+  44% {
+    opacity: 0.28;
+  }
+  62% {
+    opacity: 0.9;
+  }
+  100% {
+    opacity: 0.94;
+    clip-path: inset(0 0 0 0);
+    transform: none;
+  }
+}
+
+@keyframes atlasScan {
+  from {
+    transform: translateY(0);
+  }
+  to {
+    transform: translateY(650%);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .map {
+    opacity: 0.94;
+    animation: none;
+  }
+
+  .scan {
+    display: none;
+  }
+}

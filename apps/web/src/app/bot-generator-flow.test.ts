@@ -126,28 +126,33 @@ test("prompt generation becomes an accessible PRISM assembly ritual", () => {
     "openFreshBotCustomizer",
   );
 
-  assert.match(pageSource, /botGeneratorBusy \? \(\s*<BotCreationRitual/u);
+  assert.match(pageSource, /<BotCreationRitual/u);
+  assert.match(pageSource, /phase=\{botFoundryPhase\}/u);
   assert.match(pageSource, /completedDraft=\{botGeneratorCompletedDraft\}/u);
+  assert.match(pageSource, /theme=\{resolvedTheme\}/u);
   assert.match(generateDraft, /setBotGeneratorCompletedDraft\(generatedDraft\)/u);
   assert.match(generateDraft, /prefers-reduced-motion: reduce/u);
   assert.match(ritualSource, /role="status"/u);
   assert.match(ritualSource, /aria-live="polite"/u);
-  assert.match(ritualSource, /aria-busy=\{!completed\}/u);
+  assert.match(ritualSource, /aria-busy=\{phase === "handoff" \|\| phase === "generation"\}/u);
   assert.match(ritualSource, /Nothing is saved until you choose Create bot\./u);
   assert.doesNotMatch(ritualSource, /\bpercent(?:age)?\b|% complete/iu);
 });
 
-test("the creation ritual refracts prompt words and reveals the generated identity", () => {
-  assert.match(ritualSource, /creationWords\(prompt\)/u);
-  assert.match(ritualSource, /completedDraft\.name/u);
-  assert.match(ritualSource, /completedDraft\?\.color/u);
-  assert.match(ritualSource, /completedDraft\?\.face\.eyeCharacter/u);
-  assert.match(ritualSource, /completedDraft\?\.face\.mouthCharacter/u);
-  assert.match(ritualSource, /<PrismOrb className=\{styles\.prismOrb\}/u);
+test("the creation ritual drops the real dormant bot and performs a visual-only Prism handoff", () => {
+  assert.doesNotMatch(ritualSource, /creationWords\(prompt\)/u);
+  assert.match(ritualSource, /\{botPreview\}/u);
+  assert.match(ritualSource, /botAvatarFoundryAtmosphere\(completedDraft\?\.color, theme\)/u);
+  assert.match(ritualSource, /data-atmosphere-source=\{atmosphere\.source\}/u);
+  assert.match(ritualSource, /data-companion-origin=/u);
+  assert.match(ritualSource, /<PrismOrb aura=\{false\} className=\{styles\.prismOrb\}/u);
+  assert.match(pageSource, /foundryRitual/u);
+  assert.match(pageSource, /botAvatarFoundryScreenMode\(\s*botFoundryPhase/u);
+  assert.match(pageSource, /runtimeEffectsEnabled=\{screenMode === "live"\}/u);
   assert.match(ritualCssSource, /\.prismOrb\s*\{/u);
-  assert.doesNotMatch(ritualCssSource, /\.prism\s*\{/u);
-  assert.match(ritualCssSource, /\.colorBeam\[data-color="cyan"\]/u);
-  assert.match(ritualCssSource, /\.botForm\s*\{/u);
+  assert.match(ritualCssSource, /\.chute\s*\{/u);
+  assert.match(ritualCssSource, /\.cradle\s*\{/u);
+  assert.match(ritualCssSource, /\.ritual\[data-foundry-phase="arrival"\]/u);
   assert.match(ritualCssSource, /@media \(prefers-reduced-motion: reduce\)/u);
-  assert.match(ritualCssSource, /@media \(max-width: 480px\)/u);
+  assert.match(ritualCssSource, /@media \(max-width: 760px\)/u);
 });

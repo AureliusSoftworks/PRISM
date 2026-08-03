@@ -30,9 +30,46 @@ describe("Zen progressive chat stream", () => {
     );
   });
 
+  it("validates live Psychic planning events", () => {
+    const psychic = parseZenProgressiveChatEvent(
+      JSON.stringify({
+        type: "psychic",
+        stage: "audit",
+        summary: "I'm checking the answer against the request.",
+        scratchpad: "Plan scratchpad: keep the answer concise.",
+        effort: "medium",
+        provider: "local",
+        model: "qwen3.5:9b",
+        simulated: true,
+        passCount: 2,
+        guidanceChars: 240,
+        createdAt: "2026-08-02T22:00:00.000Z",
+      }),
+    );
+    assert.equal(psychic?.type, "psychic");
+    assert.equal(psychic?.type === "psychic" ? psychic.stage : null, "audit");
+    assert.equal(
+      parseZenProgressiveChatEvent('{"type":"psychic","stage":"plan"}'),
+      null,
+    );
+  });
+
   it("delivers split NDJSON chunks in order and returns the final envelope", async () => {
     const encoder = new TextEncoder();
     const payload = [
+      JSON.stringify({
+        type: "psychic",
+        stage: "plan",
+        summary: "I'm choosing the clearest reply.",
+        scratchpad: "Plan scratchpad: answer directly.",
+        effort: "minimal",
+        provider: "local",
+        model: "qwen3.5:9b",
+        simulated: false,
+        passCount: 1,
+        guidanceChars: 64,
+        createdAt: "2026-08-02T22:00:00.000Z",
+      }),
       JSON.stringify({
         type: "segment",
         conversationId: "conversation-a",
@@ -76,6 +113,7 @@ describe("Zen progressive chat stream", () => {
       },
     );
     const segments: string[] = [];
+    const psychicStages: string[] = [];
     let ended = false;
     const result = await readZenProgressiveChatStream<{
       conversation: { id: string };
@@ -85,10 +123,11 @@ describe("Zen progressive chat stream", () => {
       onEnd: () => {
         ended = true;
       },
+      onPsychic: (event) => psychicStages.push(event.stage),
     });
     assert.deepEqual(segments, ["First beat."]);
+    assert.deepEqual(psychicStages, ["plan"]);
     assert.equal(ended, true);
     assert.equal(result.conversation.id, "conversation-a");
   });
 });
-

@@ -1078,6 +1078,7 @@ describe("processChatMessage Psychic planning", () => {
   it("attaches a concise Psychic summary to Chat turns even when the legacy setting is off", async () => {
     const db = createChatTestDb();
     const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
+    const progress: Array<{ stage: string; summary: string; scratchpad: string }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
       const url = String(input);
       const body = JSON.parse(String(init?.body ?? "{}")) as {
@@ -1118,6 +1119,7 @@ describe("processChatMessage Psychic planning", () => {
         botId: "bot-1",
         botSystemPrompt: "You are the selected Chat bot.",
         botOverrides: { model: "llama3.2", reasoningEffort: "minimal" },
+        onPsychicProgress: (event) => progress.push(event),
       }
     );
 
@@ -1136,6 +1138,12 @@ describe("processChatMessage Psychic planning", () => {
       result.psychicDebug?.passes?.map((pass) => pass.name),
       ["plan"]
     );
+    assert.deepEqual(progress.map((event) => event.stage), ["plan"]);
+    assert.equal(
+      progress[0]?.summary,
+      "I weighed the request and chose a practical sequence."
+    );
+    assert.match(progress[0]?.scratchpad ?? "", /developer-only hidden sketch/);
     const planningRequest = requests.find(({ body }) => {
       const messages = body.messages as Array<{ content: string }> | undefined;
       return messages?.some((message) =>

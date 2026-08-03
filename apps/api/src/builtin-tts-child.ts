@@ -31,6 +31,7 @@ process.on("message", (message: unknown) => {
       const wave = await generatePrismVoicePackWaveInProcess({
         text: message.text,
         profile: message.profile,
+        protectedPhrases: message.protectedPhrases,
       });
       send({
         type: "result",

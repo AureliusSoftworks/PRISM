@@ -482,11 +482,44 @@ describe("bot marketplace static catalog", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
     );
+    const voicePlusSignatures = new Set<string>();
     for (const entry of publicMarketplaceBots(manifest)) {
       const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
       const profile = normalizeOptionalBotAudioVoiceProfileV1(bundle.botJson.bot.authoredAudioVoiceProfile);
       assert.notEqual(profile, null, `${entry.name} must include an authored voice`);
       assert.equal(profile?.enabled, true, entry.name);
+      assert.equal(profile?.localEnginePreference, "voice-plus", `${entry.name} Voice+`);
+      assert.equal(profile?.localVoiceSource, "portable", `${entry.name} portable source`);
+      assert.equal(profile?.accentMode, "prefer-genuine", `${entry.name} accent mode`);
+      assert.equal(profile?.speechprintInfluence, "none", `${entry.name} portable speechprint`);
+      for (const [field, value] of [
+        ["openness", profile?.openness],
+        ["weight", profile?.weight],
+        ["brightness", profile?.brightness],
+        ["resonance", profile?.resonance],
+        ["gainDb", profile?.gainDb],
+      ] as const) {
+        assert.equal(typeof value, "number", `${entry.name} ${field}`);
+        assert.equal(Number.isFinite(value), true, `${entry.name} ${field}`);
+      }
+      assert.equal(
+        [profile?.openness, profile?.weight, profile?.brightness, profile?.resonance]
+          .some((value) => value !== 0),
+        true,
+        `${entry.name} must have a tailored Voice Character`,
+      );
+      voicePlusSignatures.add(JSON.stringify([
+        profile?.baseVoiceId,
+        profile?.pitch,
+        profile?.warmth,
+        profile?.openness,
+        profile?.weight,
+        profile?.brightness,
+        profile?.resonance,
+        profile?.pace,
+        profile?.lilt,
+        profile?.elevenLabsDirection,
+      ]));
       assert.equal(profile?.elevenLabsVoiceId, undefined, entry.name);
       assert.equal(profile?.elevenLabsVoiceIdOverride, undefined, entry.name);
       assert.equal(
@@ -530,6 +563,11 @@ describe("bot marketplace static catalog", () => {
       assert.equal((previewLine?.trim().length ?? 0) > 0, true, entry.name);
       assert.equal((previewLine?.length ?? 0) <= 160, true, entry.name);
     }
+    assert.equal(
+      voicePlusSignatures.size,
+      publicMarketplaceBots(manifest).length,
+      "every Steam-shippable bot should keep a distinct authored voice signature",
+    );
   });
 
   it("keeps every bundled voice on the reviewed PRISM-pack identity", () => {

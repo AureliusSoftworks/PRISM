@@ -1,12 +1,18 @@
 import {
   applyVoiceDeliveryMoodToProfile,
   normalizeBotAudioVoiceProfileV1,
+  normalizeLocalVoiceAccentLocale,
+  normalizeLocalVoicePronunciationBase,
+  normalizeLocalVoiceSpeechprintInfluence,
+  normalizeLocalVoiceSpeechprintStrength,
   normalizeBotVoiceVolume,
   normalizeVoiceEffect,
   resolveVoicePlaybackTransform,
   VOICE_VOCAL_ACTIONS,
   VOICE_VOCAL_ACTION_MODIFIERS,
   type BotAudioVoiceProfileV1,
+  type ResolvedLocalVoicePronunciationV1,
+  type ResolvedLocalVoiceSpeechprintV1,
   type VoicePerformanceVocalActionSegmentV1,
   type VoiceEffect,
   type VoiceDeliveryMood,
@@ -49,6 +55,8 @@ export interface EnglishVoiceSynthesisClip {
   localEngine?: string | null;
   modelHash?: string | null;
   notice?: string | null;
+  resolvedPronunciation?: ResolvedLocalVoicePronunciationV1 | null;
+  resolvedSpeechprint?: ResolvedLocalVoiceSpeechprintV1 | null;
 }
 
 export interface EnglishVoiceWaveStreamChunk {
@@ -66,6 +74,72 @@ export interface EnglishVoiceWaveStreamChunk {
 
 const MEDIA_PLAY_START_TIMEOUT_MS = 1500;
 const STREAM_MEDIA_PLAY_START_TIMEOUT_MS = 5000;
+
+export function readEnglishVoiceResolvedPronunciation(
+  headers: Pick<Headers, "get">,
+): ResolvedLocalVoicePronunciationV1 | null {
+  const status = headers.get("x-prism-pronunciation-status");
+  if (status !== "natural" && status !== "applied" && status !== "suspended") {
+    return null;
+  }
+  const reasonHeader = headers.get("x-prism-pronunciation-reason");
+  return {
+    requestedBase: normalizeLocalVoicePronunciationBase(
+      headers.get("x-prism-pronunciation-requested"),
+    ),
+    sourceLocale: normalizeLocalVoiceAccentLocale(
+      headers.get("x-prism-pronunciation-source-locale"),
+      "en-US",
+    ),
+    resolvedBaseLocale:
+      headers.get("x-prism-pronunciation-base-locale") === "en-GB"
+        ? "en-GB"
+        : "en-US",
+    status,
+    reason:
+      reasonHeader === "engine-unsupported" || reasonHeader === "system-voice"
+        ? reasonHeader
+        : null,
+  };
+}
+
+export function readEnglishVoiceResolvedSpeechprint(
+  headers: Pick<Headers, "get">,
+): ResolvedLocalVoiceSpeechprintV1 | null {
+  const status = headers.get("x-prism-speechprint-status");
+  if (status !== "natural" && status !== "applied" && status !== "suspended") {
+    return null;
+  }
+  const requestedInfluence = normalizeLocalVoiceSpeechprintInfluence(
+    headers.get("x-prism-speechprint-id"),
+  );
+  const reasonHeader = headers.get("x-prism-speechprint-reason");
+  const reason =
+    reasonHeader === "engine-unsupported" || reasonHeader === "system-voice"
+      ? reasonHeader
+      : null;
+  const rulesetSha256 = headers.get("x-prism-speechprint-sha256");
+  return {
+    requestedInfluence,
+    appliedInfluence:
+      status === "applied" && requestedInfluence !== "none"
+        ? requestedInfluence
+        : null,
+    strength: normalizeLocalVoiceSpeechprintStrength(
+      headers.get("x-prism-speechprint-strength"),
+    ),
+    baseLocale:
+      headers.get("x-prism-speechprint-base-locale")?.slice(0, 32) ?? "en-US",
+    status,
+    reason,
+    rulesetVersion:
+      headers.get("x-prism-speechprint-ruleset")?.slice(0, 32) ?? null,
+    rulesetSha256:
+      rulesetSha256 && /^[a-f0-9]{64}$/iu.test(rulesetSha256)
+        ? rulesetSha256.toLowerCase()
+        : null,
+  };
+}
 
 function decodedBase64Bytes(value: string): ArrayBuffer {
   if (typeof atob === "function") {
@@ -159,6 +233,12 @@ export async function readEnglishVoiceSynthesisClip(
   const engineUsed = response.headers.get("x-prism-voice-engine");
   const localEngine = response.headers.get("x-prism-local-voice-engine");
   const modelHash = response.headers.get("x-prism-voice-model-sha256");
+  const resolvedPronunciation = readEnglishVoiceResolvedPronunciation(
+    response.headers,
+  );
+  const resolvedSpeechprint = readEnglishVoiceResolvedSpeechprint(
+    response.headers,
+  );
   const encodedNotice = response.headers.get("x-prism-voice-notice");
   let notice: string | null = null;
   if (encodedNotice) {
@@ -177,6 +257,8 @@ export async function readEnglishVoiceSynthesisClip(
       localEngine,
       modelHash,
       notice,
+      resolvedPronunciation,
+      resolvedSpeechprint,
     };
   }
   const payload = await response.json() as Record<string, unknown>;
@@ -192,6 +274,8 @@ export async function readEnglishVoiceSynthesisClip(
     localEngine,
     modelHash,
     notice,
+    resolvedPronunciation,
+    resolvedSpeechprint,
   };
 }
 

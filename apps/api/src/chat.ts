@@ -296,6 +296,20 @@ export interface PsychicDebugPayload {
   guidanceChars?: number;
 }
 
+/** Live-only PRISM-owned planning progress streamed before the final Chat reply. */
+export interface PsychicProgressPayload {
+  stage: "plan" | "draft" | "audit" | "revision";
+  summary: string;
+  scratchpad: string;
+  effort: ReasoningEffort;
+  provider: ProviderName;
+  model?: string;
+  simulated: boolean;
+  passCount: number;
+  guidanceChars: number;
+  createdAt: string;
+}
+
 /** POST /api/chat returns this shape; `conversationStarters` is present only after a starter turn. */
 export interface ProcessChatMessageResult {
   conversation: Conversation;
@@ -1440,6 +1454,7 @@ async function runPsychicPlanningPass(args: {
   psychicModeEnabled?: boolean;
   signal?: AbortSignal;
   onPlanningWarning?: (detail: string) => void;
+  onProgress?: (progress: PsychicProgressPayload) => void;
 }): Promise<PsychicPlanningTrace | null> {
   const requestedModel = describeRequestedModel(args.provider, args.botOverrides);
   const shouldPlan =
@@ -1465,6 +1480,18 @@ async function runPsychicPlanningPass(args: {
         passes: [],
         guidanceChars: 0,
       };
+      args.onProgress?.({
+        stage: "plan",
+        summary,
+        scratchpad: "",
+        effort: args.effort,
+        provider: args.provider.name,
+        model: requestedModel,
+        simulated: false,
+        passCount: 0,
+        guidanceChars: 0,
+        createdAt,
+      });
       return {
         psychicThought: {
           v: 1,
@@ -1524,6 +1551,27 @@ async function runPsychicPlanningPass(args: {
   let draft = "";
   let audit = "";
   let revision = "";
+  const emitProgress = (stage: PsychicPrivatePassName): void => {
+    const scratchpad = appendPsychicPrivateArtifactsToScratchpad({
+      planScratchpad: parsed.scratchpad,
+      draft,
+      audit,
+      revision,
+    });
+    args.onProgress?.({
+      stage,
+      summary: parsed.summary,
+      scratchpad,
+      effort: args.effort,
+      provider: args.provider.name,
+      model: requestedModel,
+      simulated: args.simulated,
+      passCount: passDiagnostics.filter((pass) => pass.chars > 0).length,
+      guidanceChars: parsed.answerGuidance.length,
+      createdAt,
+    });
+  };
+  emitProgress("plan");
   if (args.simulated) {
     for (const passName of simulatedEffortTextPasses(args.effort)) {
       const systemPrompt =
@@ -1553,6 +1601,7 @@ async function runPsychicPlanningPass(args: {
       if (passName === "draft") draft = result.content;
       if (passName === "audit") audit = result.content;
       if (passName === "revision") revision = result.content;
+      emitProgress(passName);
     }
   }
   const answerGuidance = composePsychicFinalGuidance({
@@ -1615,6 +1664,7 @@ async function generateChatResponse(args: {
   psychicModeEnabled?: boolean;
   signal?: AbortSignal;
   onPlanningWarning?: (detail: string) => void;
+  onPsychicProgress?: (progress: PsychicProgressPayload) => void;
   onSimulatedEffortNotice?: (detail: string) => void;
 }): Promise<{
   assistantReplyRaw: string;
@@ -1678,6 +1728,7 @@ async function generateChatResponse(args: {
       psychicModeEnabled: args.psychicModeEnabled,
       signal,
       onPlanningWarning: args.onPlanningWarning,
+      onProgress: args.onPsychicProgress,
     });
     return {
       messages: appendPsychicAnswerGuidance(args.promptMessages, planningTrace),
@@ -1813,6 +1864,7 @@ async function generateProgressiveZenChatResponse(args: {
   psychicModeEnabled?: boolean;
   signal?: AbortSignal;
   onPlanningWarning?: (detail: string) => void;
+  onPsychicProgress?: (progress: PsychicProgressPayload) => void;
   onSimulatedEffortNotice?: (detail: string) => void;
   onSegment: (segment: ProgressiveZenGeneratedSegment) => void;
 }): Promise<Awaited<ReturnType<typeof generateChatResponse>> & {
@@ -2695,6 +2747,8 @@ export interface UserChatSettings {
     createdAt: string;
     finalSegment: boolean;
   }) => void;
+  /** Streams PRISM-owned planning artifacts while the final Chat reply is pending. */
+  onPsychicProgress?: (progress: PsychicProgressPayload) => void;
   /** Global developer rule layer applied across all bots when enabled. */
   devMemoriesEnabled?: boolean;
   /** Freeform rule text for the developer memory layer. */
@@ -7293,6 +7347,7 @@ export async function processChatMessage(
       signal: settings.signal,
       onPlanningWarning: (detail) =>
         pushBackendEvent("model", "Psychic planning unavailable", detail),
+      onPsychicProgress: settings.onPsychicProgress,
       onSimulatedEffortNotice: (detail) =>
         pushBackendEvent("model", "Simulated effort skipped", detail),
     });
@@ -7364,6 +7419,7 @@ export async function processChatMessage(
           experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
           psychicModeEnabled: psychicModeEnabledForTurn,
           signal: settings.signal,
+          onPsychicProgress: settings.onPsychicProgress,
         }));
         parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
       }
@@ -8709,6 +8765,7 @@ export async function processChatMessage(
                 "Psychic planning unavailable",
                 detail,
               ),
+            onPsychicProgress: settings.onPsychicProgress,
             onSimulatedEffortNotice: (detail) =>
               pushBackendEvent("model", "Simulated effort skipped", detail),
             onSegment: (segment) => {
@@ -8757,6 +8814,7 @@ export async function processChatMessage(
                 "Psychic planning unavailable",
                 detail,
               ),
+            onPsychicProgress: settings.onPsychicProgress,
             onSimulatedEffortNotice: (detail) =>
               pushBackendEvent("model", "Simulated effort skipped", detail),
           });
@@ -8863,6 +8921,7 @@ export async function processChatMessage(
           experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
           psychicModeEnabled: psychicModeEnabledForTurn,
           signal: settings.signal,
+          onPsychicProgress: settings.onPsychicProgress,
         }));
         parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
       } catch (error) {

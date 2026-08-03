@@ -147,8 +147,7 @@ export function buildPrismCompanionAuthoritativeContext(
             WHERE id = ? AND user_id = ?`,
         )
         .get(surface.signalShowId, userId) as
-        | { id: string; name: string }
-        | undefined)
+        { id: string; name: string } | undefined)
     : undefined;
   const episode =
     show && surface.signalEpisodeId
@@ -159,8 +158,7 @@ export function buildPrismCompanionAuthoritativeContext(
               WHERE id = ? AND show_id = ? AND user_id = ?`,
           )
           .get(surface.signalEpisodeId, show.id, userId) as
-          | { id: string; title: string; status: string }
-          | undefined)
+          { id: string; title: string; status: string } | undefined)
       : undefined;
   const project = surface.slateProjectId
     ? (db
@@ -170,8 +168,7 @@ export function buildPrismCompanionAuthoritativeContext(
             WHERE id = ? AND user_id = ?`,
         )
         .get(surface.slateProjectId, userId) as
-        | { id: string; title: string; phase: string }
-        | undefined)
+        { id: string; title: string; phase: string } | undefined)
     : undefined;
   const section =
     project && surface.slateSectionId
@@ -182,8 +179,7 @@ export function buildPrismCompanionAuthoritativeContext(
               WHERE id = ? AND project_id = ? AND user_id = ?`,
           )
           .get(surface.slateSectionId, project.id, userId) as
-          | { id: string; title: string }
-          | undefined)
+          { id: string; title: string } | undefined)
       : undefined;
   const story = surface.storySessionId
     ? (db
@@ -193,8 +189,7 @@ export function buildPrismCompanionAuthoritativeContext(
             WHERE id = ? AND user_id = ?`,
         )
         .get(surface.storySessionId, userId) as
-        | { id: string; title: string; status: string }
-        | undefined)
+        { id: string; title: string; status: string } | undefined)
     : undefined;
   const image = surface.imageId
     ? (db
@@ -204,8 +199,7 @@ export function buildPrismCompanionAuthoritativeContext(
             WHERE id = ? AND user_id = ?`,
         )
         .get(surface.imageId, userId) as
-        | { id: string; prompt: string }
-        | undefined)
+        { id: string; prompt: string } | undefined)
     : undefined;
   return {
     displayName: displayName.trim() || "Player",
@@ -254,7 +248,9 @@ export function buildPrismCompanionAuthoritativeContext(
   };
 }
 
-function safeContextLines(context: PrismCompanionAuthoritativeContext): string[] {
+function safeContextLines(
+  context: PrismCompanionAuthoritativeContext,
+): string[] {
   const lines = [
     `Player: ${context.displayName}`,
     `Current surface: ${context.surfaceId}`,
@@ -262,7 +258,9 @@ function safeContextLines(context: PrismCompanionAuthoritativeContext): string[]
   if (context.bots.length > 0) {
     lines.push(
       `Selected bots: ${context.bots
-        .map((bot) => `${bot.name}${bot.owned ? " (owned)" : " (public guest)"}`)
+        .map(
+          (bot) => `${bot.name}${bot.owned ? " (owned)" : " (public guest)"}`,
+        )
         .join(", ")}`,
     );
   }
@@ -302,7 +300,7 @@ function safeContextLines(context: PrismCompanionAuthoritativeContext): string[]
   if (context.debateDraft) {
     const draft = context.debateDraft;
     lines.push(
-      `Unsaved Debate workbench: ${draft.setupMode} setup; ${draft.studioPanel} panel; ${draft.format}; ${draft.formality}; player role ${draft.playerRole}${draft.playerRole === "participant" ? ` on ${draft.playerSideId}` : ""}; Jury ${draft.juryEnabled ? "on" : "off"}.`,
+      `Unsaved Debate workbench: ${draft.studioPanel} panel; ${draft.format}; ${draft.formality}; player role ${draft.playerRole}${draft.playerRole === "participant" ? ` on ${draft.playerSideId}` : ""}; Jury ${draft.juryEnabled ? "on" : "off"}.`,
       `Draft moderator title: ${JSON.stringify(draft.moderatorTitle || "None")}`,
       `Draft territory: ${JSON.stringify(draft.topic || "None")}`,
       `Draft motion: ${JSON.stringify(draft.motion || "None")}`,
@@ -476,7 +474,8 @@ export function prismCompanionDirectActionIntents(
   context: PrismCompanionAuthoritativeContext,
 ): PrismCompanionActionIntent[] {
   const normalized = message.trim().toLocaleLowerCase();
-  const asksToOpen = /\b(open|go to|take me to|navigate to|switch to|show me)\b/u;
+  const asksToOpen =
+    /\b(open|go to|take me to|navigate to|switch to|show me)\b/u;
   if (asksToOpen.test(normalized)) {
     if (/\bslate\b/u.test(normalized)) {
       return [{ type: "navigate", destination: "slate" }];
@@ -508,9 +507,7 @@ export function prismCompanionDirectActionIntents(
   }
   if (
     context.surfaceId === "slate" &&
-    /\b(discuss|talk about|send)\b[^.?!]{0,48}\b(zen|bot)\b/u.test(
-      normalized,
-    )
+    /\b(discuss|talk about|send)\b[^.?!]{0,48}\b(zen|bot)\b/u.test(normalized)
   ) {
     return [{ type: "begin_handoff", direction: "slate-to-zen" }];
   }
@@ -611,12 +608,7 @@ export async function chatWithPrismCompanion(args: {
     content: parsed.content,
     actions: mergeCompanionActions(directActions, parsed.actions).filter(
       (action) =>
-        companionActionIsAuthorized(
-          args.db,
-          args.userId,
-          context,
-          action,
-        ),
+        companionActionIsAuthorized(args.db, args.userId, context, action),
     ),
   };
 }

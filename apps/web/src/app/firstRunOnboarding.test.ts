@@ -69,22 +69,18 @@ describe("first-run onboarding", () => {
     assert.match(pageSource, /at least one fallback in\s*Settings/u);
   });
 
-  it("introduces Basic Debate before the advanced production controls", () => {
+  it("introduces Debate as one guided path with optional tuning", () => {
     assert.match(
       pageSource,
-      /Debate begins in Basic setup: name the idea, choose two\s*debaters/u,
+      /Debate follows one guided path: name the idea, let Prism\s*prepare the balanced motion and side briefs/u,
     );
     assert.match(
       pageSource,
-      /tune Rowdiness from University Union to Daytime\s*Showdown/u,
+      /choose the\s*debaters, then add or skip evidence/u,
     );
-    assert.match(pageSource, /optionally title the presiding voice/u);
-    assert.match(
-      pageSource,
-      /Prism\s*prepare the balanced motion and side\s*briefs/u,
-    );
-    assert.match(pageSource, /Advanced keeps\s*Forum, Turnabout, formality/u);
-    assert.match(pageSource, /Jury controls\s*available/u);
+    assert.match(pageSource, /Tune the room and Your\s*seat &amp; the Jury/u);
+    assert.match(pageSource, /Forum, Turnabout, atmosphere, roles/u);
+    assert.match(pageSource, /without crowding the setup/u);
   });
 
   it("names chat routing separately from image and voice routing", () => {

@@ -357,6 +357,8 @@ import type {
   ReplayRecordingStatusV1,
   ReplaySurfaceV1,
   ReplayVoiceTakeV1,
+  ResolvedLocalVoicePronunciationV1,
+  ResolvedLocalVoiceSpeechprintV1,
   SlateClarificationAnswerRequest,
   SlateDirectionIntentPatch,
   SlateLockedRange,
@@ -629,6 +631,10 @@ import {
 import { resolveCoffeePowersForSession } from "./coffee-powers.ts";
 import { searchWebWithBrave } from "./web-search.ts";
 import {
+  debateEvidenceSourcesFromWebResults,
+  searchScholarWithCrossref,
+} from "./debate-research.ts";
+import {
   BOT_PROFILE_PICTURE_IMAGE_PURPOSE,
   BOT_PROFILE_PICTURE_SIZE,
   GALLERY_EXCLUDED_PURPOSE_SQL,
@@ -804,6 +810,11 @@ import {
   serializeBotAvatarDetailsV1,
   serializeBotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
+  localVoicePronunciationOverrideIsActive,
+  normalizeLocalVoiceSpeechprintV1,
+  localVoiceSpeechprintIsActive,
+  LOCAL_VOICE_PRONUNCIATION_BASES,
+  LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
   normalizeBotGenerationPrompt,
   normalizeEnglishVoiceEngine,
   applyBotNamePronunciations,
@@ -1032,13 +1043,15 @@ import {
   generateBuiltinEnglishWave,
 } from "./builtin-tts.ts";
 import { buildBabbleSpeechText } from "./babble-text.ts";
-import { splitLocalVoiceStreamText } from "./local-voice-stream.ts";
+import { splitLocalVoiceStreamSegments } from "./local-voice-stream.ts";
 import {
   localVoiceCalibrationState,
   localVoiceEngineCapabilities,
   pcmWaveDurationMs,
   recordInstantVoiceCalibration,
   resolveLocalVoiceEngine,
+  resolveLocalVoicePronunciation,
+  resolveLocalVoiceSpeechprint,
   PRISM_INSTANT_VOICE_MODEL_ID,
   PRISM_INSTANT_VOICE_MODEL_SHA256,
 } from "./local-voice-engine.ts";
@@ -1841,6 +1854,102 @@ function persistPremiumVoiceDefaults(
   };
 }
 
+function resolveLocalVoiceDelivery(
+  profileValue: BotAudioVoiceProfileV1,
+  allowOperatingSystemVoices: boolean,
+): {
+  localEngine: ReturnType<typeof resolveLocalVoiceEngine>;
+  pronunciation: ResolvedLocalVoicePronunciationV1;
+  speechprint: ResolvedLocalVoiceSpeechprintV1;
+} {
+  const profile = normalizeBotAudioVoiceProfileV1(profileValue);
+  const speechprintProfile = normalizeLocalVoiceSpeechprintV1({
+    influence: profile.speechprintInfluence,
+    strength: profile.speechprintStrength,
+    variationSeed: profile.speechprintVariationSeed,
+  });
+  const localEngine = resolveLocalVoiceEngine({
+    preference: profile.localEnginePreference,
+    speechprintActive: localVoiceSpeechprintIsActive(speechprintProfile),
+    pronunciationOverrideActive: localVoicePronunciationOverrideIsActive(
+      profile.pronunciationBase,
+      profile.accentLocale,
+    ),
+  });
+  const pronunciation = resolveLocalVoicePronunciation({
+    profile,
+    localEngine,
+    usingSystemVoice:
+      allowOperatingSystemVoices && Boolean(profile.systemVoiceName),
+  });
+  return {
+    localEngine,
+    pronunciation,
+    speechprint: resolveLocalVoiceSpeechprint({
+      profile,
+      localEngine,
+      usingSystemVoice:
+        allowOperatingSystemVoices && Boolean(profile.systemVoiceName),
+      pronunciation,
+    }),
+  };
+}
+
+function setVoicePronunciationHeaders(
+  response: ServerResponse,
+  pronunciation: ResolvedLocalVoicePronunciationV1 | undefined,
+): void {
+  if (!pronunciation) return;
+  response.setHeader("x-prism-pronunciation-status", pronunciation.status);
+  response.setHeader(
+    "x-prism-pronunciation-requested",
+    pronunciation.requestedBase,
+  );
+  response.setHeader(
+    "x-prism-pronunciation-source-locale",
+    pronunciation.sourceLocale,
+  );
+  response.setHeader(
+    "x-prism-pronunciation-base-locale",
+    pronunciation.resolvedBaseLocale,
+  );
+  if (pronunciation.reason) {
+    response.setHeader(
+      "x-prism-pronunciation-reason",
+      pronunciation.reason,
+    );
+  }
+}
+
+function setVoiceSpeechprintHeaders(
+  response: ServerResponse,
+  speechprint: ResolvedLocalVoiceSpeechprintV1 | undefined,
+): void {
+  if (!speechprint) return;
+  response.setHeader("x-prism-speechprint-status", speechprint.status);
+  response.setHeader(
+    "x-prism-speechprint-id",
+    speechprint.requestedInfluence,
+  );
+  response.setHeader("x-prism-speechprint-strength", speechprint.strength);
+  response.setHeader("x-prism-speechprint-base-locale", speechprint.baseLocale);
+  if (speechprint.reason) {
+    response.setHeader("x-prism-speechprint-reason", speechprint.reason);
+  }
+  if (speechprint.rulesetVersion) {
+    response.setHeader(
+      "x-prism-speechprint-ruleset",
+      speechprint.rulesetVersion,
+    );
+  }
+  if (speechprint.rulesetSha256) {
+    response.setHeader(
+      "x-prism-speechprint-sha256",
+      speechprint.rulesetSha256,
+    );
+  }
+}
+
 function sendVoiceWave(
   response: ServerResponse,
   wave: Buffer,
@@ -1852,10 +1961,14 @@ function sendVoiceWave(
   characterCount: number,
   includeAlignment = false,
   localEngine?: ReturnType<typeof resolveLocalVoiceEngine>,
+  pronunciation?: ResolvedLocalVoicePronunciationV1,
+  speechprint?: ResolvedLocalVoiceSpeechprintV1,
 ): void {
   response.setHeader("cache-control", "no-store");
   response.setHeader("x-prism-voice-engine", engineUsed);
   response.setHeader("x-prism-voice-characters", String(characterCount));
+  setVoicePronunciationHeaders(response, pronunciation);
+  setVoiceSpeechprintHeaders(response, speechprint);
   if (localEngine) {
     response.setHeader("x-prism-local-voice-engine", localEngine.resolved);
     response.setHeader("x-prism-voice-model", PRISM_INSTANT_VOICE_MODEL_ID);
@@ -1900,6 +2013,9 @@ async function sendLocalVoiceWaveStream(args: {
   allowOperatingSystemVoices: boolean;
   signal: AbortSignal;
   localEngine?: ReturnType<typeof resolveLocalVoiceEngine>;
+  pronunciation?: ResolvedLocalVoicePronunciationV1;
+  speechprint?: ResolvedLocalVoiceSpeechprintV1;
+  protectedPhrases?: readonly string[];
   performancePlan?: VoicePerformancePlanV1 | null;
 }): Promise<void> {
   type LocalVoiceStreamItem =
@@ -1922,21 +2038,20 @@ async function sendLocalVoiceWaveStream(args: {
         continue;
       }
       streamItems.push(
-        ...splitLocalVoiceStreamText(segment.text).map((text) => ({
+        ...splitLocalVoiceStreamSegments(
+          segment.text,
+          segment.sourceStart,
+        ).map((chunk) => ({
           kind: "speech" as const,
-          text,
-          sourceStart: segment.sourceStart,
-          sourceEnd: segment.sourceEnd,
+          ...chunk,
         })),
       );
     }
   } else {
     streamItems.push(
-      ...splitLocalVoiceStreamText(args.text).map((text) => ({
+      ...splitLocalVoiceStreamSegments(args.text).map((chunk) => ({
         kind: "speech" as const,
-        text,
-        sourceStart: 0,
-        sourceEnd: args.text.length,
+        ...chunk,
       })),
     );
   }
@@ -1948,6 +2063,7 @@ async function sendLocalVoiceWaveStream(args: {
       profile: args.profile,
       allowOperatingSystemVoices: args.allowOperatingSystemVoices,
       signal: args.signal,
+      protectedPhrases: args.protectedPhrases,
     });
   // Prepare the first phrase before committing a 200 response so startup
   // failures still retain the route's normal actionable 503 behavior.
@@ -1969,6 +2085,8 @@ async function sendLocalVoiceWaveStream(args: {
   );
   args.response.setHeader("x-prism-voice-engine", args.engineUsed);
   args.response.setHeader("x-prism-voice-characters", String(args.text.length));
+  setVoicePronunciationHeaders(args.response, args.pronunciation);
+  setVoiceSpeechprintHeaders(args.response, args.speechprint);
   if (args.localEngine) {
     args.response.setHeader(
       "x-prism-local-voice-engine",
@@ -12588,6 +12706,8 @@ function buildRoutes(): RouteDefinition[] {
         body.progressiveZenVoice === true &&
         user.voice_mode === "english" &&
         normalizeEnglishVoiceEngine(user.english_voice_engine) === "elevenlabs";
+      const psychicProgressRequested =
+        psychicModeRequested && body.psychicProgressStream === true;
       let progressiveZenStreamStarted = false;
       const writeProgressiveZenEvent = (
         event: Record<string, unknown>,
@@ -12602,7 +12722,13 @@ function buildRoutes(): RouteDefinition[] {
           );
           ctx.res.setHeader("cache-control", "no-store");
           ctx.res.setHeader("x-accel-buffering", "no");
-          ctx.res.setHeader("x-prism-zen-progressive", "speech-beats-v1");
+          ctx.res.setHeader("x-prism-chat-progress", "ndjson-v1");
+          if (progressiveZenVoiceRequested) {
+            ctx.res.setHeader("x-prism-zen-progressive", "speech-beats-v1");
+          }
+          if (psychicProgressRequested) {
+            ctx.res.setHeader("x-prism-psychic-progress", "planning-v1");
+          }
           ctx.res.flushHeaders();
         }
         ctx.res.write(`${JSON.stringify(event)}\n`);
@@ -13017,6 +13143,16 @@ function buildRoutes(): RouteDefinition[] {
             experimentalAllModelEffortEnabled:
               user.experimental_all_model_effort_enabled === 1,
             psychicModeEnabled: psychicModeRequested,
+            ...(psychicProgressRequested
+              ? {
+                  onPsychicProgress: (progress) => {
+                    writeProgressiveZenEvent({
+                      type: "psychic",
+                      ...progress,
+                    });
+                  },
+                }
+              : {}),
             devMemoriesEnabled: user.dev_memories_enabled === 1,
             devMemoriesText: user.dev_memories_text,
             assistantImageUserPrefs: {
@@ -13168,7 +13304,7 @@ function buildRoutes(): RouteDefinition[] {
             }
           : {}),
       };
-      if (progressiveZenVoiceRequested) {
+      if (progressiveZenVoiceRequested || progressiveZenStreamStarted) {
         if (progressiveZen) {
           writeProgressiveZenEvent({
             type: "progressive_end",
@@ -13389,6 +13525,7 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
+      const sourceType = body.sourceType === "scholar" ? "scholar" : "web";
       if (
         normalizeResponseMode(
           body.responseMode,
@@ -13398,14 +13535,13 @@ function buildRoutes(): RouteDefinition[] {
       ) {
         throw new HttpError(
           409,
-          "Brave Search is unavailable in LOCAL mode. Add player notes or switch the account to ONLINE before searching.",
+          "Online source search is unavailable in LOCAL mode. Add player notes or switch the account to ONLINE before searching.",
         );
       }
       const query =
         typeof body.query === "string" ? body.query.trim().slice(0, 500) : "";
       if (!query) throw new HttpError(400, "Enter an evidence search query.");
-      const userKey = decryptUserKey(userId);
-      const payload = await runWithUsageSession(
+      const sources = await runWithUsageSession(
         {
           db,
           userId,
@@ -13413,23 +13549,23 @@ function buildRoutes(): RouteDefinition[] {
           mode: "debate",
           surface: "debate",
         },
-        () =>
-          searchWebWithBrave({
+        async () => {
+          if (sourceType === "scholar") {
+            return searchScholarWithCrossref({ query });
+          }
+          const userKey = decryptUserKey(userId);
+          const payload = await searchWebWithBrave({
             query,
             apiKey:
               getBraveSearchApiKeyForUser(userId, userKey) ??
               config.braveSearchApiKey,
-          }),
+          });
+          return debateEvidenceSourcesFromWebResults(payload.results);
+        },
       );
       json(ctx.res, 200, {
         ok: true,
-        sources: payload.results.map((result, index) => ({
-          id: `brave-${index + 1}`,
-          title: result.title,
-          url: result.url,
-          snippet: result.snippet ?? "",
-          publishedAt: result.publishedAt ?? null,
-        })),
+        sources,
       });
     }),
     route("POST", "/api/debates/sources/inspect", async (ctx) => {
@@ -18963,16 +19099,29 @@ function buildRoutes(): RouteDefinition[] {
               portable: PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => ({
                 voiceId: voice.voiceId,
                 locale: voice.locale,
+                presentation: voice.presentation,
                 label: voice.locale === "en-GB" ? "British English" : "American English",
                 approximate: false,
               })),
               system: systemVoices.voices.map((voice) => ({
                 name: voice.name,
-                locale: voice.locale,
+                locale: voice.locale.replace("_", "-"),
                 approximate: false,
               })),
-              phonemeApproximationLocales: [],
+              phonemeApproximationLocales: ["en-US", "en-GB"],
             },
+            phonemeApproximationLocales: ["en-US", "en-GB"],
+            pronunciationBases: LOCAL_VOICE_PRONUNCIATION_BASES.map((base) => ({
+              id: base,
+              label:
+                base === "follow-voice"
+                  ? "Follow voice"
+                  : base === "en-GB"
+                    ? "British English"
+                    : "American English",
+              compatibleEngines: ["instant"],
+            })),
+            speechprints: LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
             calibration: localVoiceCalibrationState(),
             referenceVoices: {
               available: false,
@@ -19535,6 +19684,18 @@ function buildRoutes(): RouteDefinition[] {
           heardCompletion:
             body.heardCompletion && typeof body.heardCompletion === "object"
               ? (body.heardCompletion as ReplayVoiceTakeV1["heardCompletion"])
+              : undefined,
+          resolvedPronunciation:
+            body.resolvedPronunciation === null ||
+            (body.resolvedPronunciation &&
+              typeof body.resolvedPronunciation === "object")
+              ? (body.resolvedPronunciation as ReplayVoiceTakeV1["resolvedPronunciation"])
+              : undefined,
+          resolvedSpeechprint:
+            body.resolvedSpeechprint === null ||
+            (body.resolvedSpeechprint &&
+              typeof body.resolvedSpeechprint === "object")
+              ? (body.resolvedSpeechprint as ReplayVoiceTakeV1["resolvedSpeechprint"])
               : undefined,
         },
       );
@@ -20369,6 +20530,13 @@ function buildRoutes(): RouteDefinition[] {
         name_pronunciation: string | null;
         self_referral: string | null;
       }>;
+      const speechprintProtectedPhrases = [
+        ...botNamePronunciations.flatMap((entry) => [
+          normalizeBotNamePronunciation(entry.name_pronunciation),
+          normalizeBotSelfReferral(entry.self_referral),
+        ]),
+        normalizeBotNamePronunciation(user.player_name_pronunciation),
+      ].filter((value): value is string => Boolean(value));
       const spokenSourceText = applyBotNamePronunciations(
         sourceText,
         botNamePronunciations,
@@ -20491,6 +20659,9 @@ function buildRoutes(): RouteDefinition[] {
           warmth: 0,
           lilt: 0,
           bottishTone: 0.45,
+          pronunciationBase: "follow-voice" as const,
+          speechprintInfluence: "none" as const,
+          speechprintVariationSeed: "natural-v1",
         };
         const babblePerformancePlan = localPerformancePlan
           ? {
@@ -20559,10 +20730,10 @@ function buildRoutes(): RouteDefinition[] {
         const controller = new AbortController();
         const onClose = () => controller.abort();
         ctx.req.once("close", onClose);
-        const localEngine = resolveLocalVoiceEngine({
-          preference: normalizeBotAudioVoiceProfileV1(boundary.profile)
-            .localEnginePreference,
-        });
+        const localDelivery = resolveLocalVoiceDelivery(
+          boundary.profile,
+          allowOperatingSystemVoices,
+        );
         try {
           if (raw.streamChunks === true && !request.includeAlignment) {
             await sendLocalVoiceWaveStream({
@@ -20572,7 +20743,10 @@ function buildRoutes(): RouteDefinition[] {
               engineUsed: boundary.engineUsed,
               allowOperatingSystemVoices,
               signal: controller.signal,
-              localEngine,
+              localEngine: localDelivery.localEngine,
+              pronunciation: localDelivery.pronunciation,
+              speechprint: localDelivery.speechprint,
+              protectedPhrases: speechprintProtectedPhrases,
               performancePlan: localPerformancePlan,
             });
             return;
@@ -20581,6 +20755,7 @@ function buildRoutes(): RouteDefinition[] {
             text: boundary.text,
             profile: boundary.profile,
             allowOperatingSystemVoices,
+            protectedPhrases: speechprintProtectedPhrases,
             signal: controller.signal,
           });
           sendVoiceWave(
@@ -20589,7 +20764,9 @@ function buildRoutes(): RouteDefinition[] {
             boundary.engineUsed,
             boundary.text.length,
             request.includeAlignment,
-            localEngine,
+            localDelivery.localEngine,
+            localDelivery.pronunciation,
+            localDelivery.speechprint,
           );
         } catch (error) {
           if (controller.signal.aborted) return;
@@ -20640,6 +20817,10 @@ function buildRoutes(): RouteDefinition[] {
         const controller = new AbortController();
         const onClose = () => controller.abort();
         ctx.req.once("close", onClose);
+        const localDelivery = resolveLocalVoiceDelivery(
+          boundary.profile,
+          allowOperatingSystemVoices,
+        );
         try {
           if (raw.streamChunks === true && !request.includeAlignment) {
             await sendLocalVoiceWaveStream({
@@ -20649,10 +20830,10 @@ function buildRoutes(): RouteDefinition[] {
               engineUsed: "builtin-provider-fallback",
               allowOperatingSystemVoices,
               signal: controller.signal,
-              localEngine: resolveLocalVoiceEngine({
-                preference: normalizeBotAudioVoiceProfileV1(boundary.profile)
-                  .localEnginePreference,
-              }),
+              localEngine: localDelivery.localEngine,
+              pronunciation: localDelivery.pronunciation,
+              speechprint: localDelivery.speechprint,
+              protectedPhrases: speechprintProtectedPhrases,
               performancePlan: localPerformancePlan,
             });
             return;
@@ -20661,6 +20842,7 @@ function buildRoutes(): RouteDefinition[] {
             text: boundary.text,
             profile: boundary.profile,
             allowOperatingSystemVoices,
+            protectedPhrases: speechprintProtectedPhrases,
             signal: controller.signal,
           });
           sendVoiceWave(
@@ -20669,6 +20851,9 @@ function buildRoutes(): RouteDefinition[] {
             "builtin-provider-fallback",
             boundary.text.length,
             request.includeAlignment,
+            localDelivery.localEngine,
+            localDelivery.pronunciation,
+            localDelivery.speechprint,
           );
         } catch (error) {
           if (controller.signal.aborted) return;
@@ -20813,6 +20998,10 @@ function buildRoutes(): RouteDefinition[] {
             );
           }
           try {
+            const localDelivery = resolveLocalVoiceDelivery(
+              boundary.profile,
+              allowOperatingSystemVoices,
+            );
             if (raw.streamChunks === true && !request.includeAlignment) {
               await sendLocalVoiceWaveStream({
                 response: ctx.res,
@@ -20821,10 +21010,10 @@ function buildRoutes(): RouteDefinition[] {
                 engineUsed: "builtin-provider-fallback",
                 allowOperatingSystemVoices,
                 signal: controller.signal,
-                localEngine: resolveLocalVoiceEngine({
-                  preference: normalizeBotAudioVoiceProfileV1(boundary.profile)
-                    .localEnginePreference,
-                }),
+                localEngine: localDelivery.localEngine,
+                pronunciation: localDelivery.pronunciation,
+                speechprint: localDelivery.speechprint,
+                protectedPhrases: speechprintProtectedPhrases,
                 performancePlan: localPerformancePlan,
               });
               return;
@@ -20833,6 +21022,7 @@ function buildRoutes(): RouteDefinition[] {
               text: boundary.text,
               profile: boundary.profile,
               allowOperatingSystemVoices,
+              protectedPhrases: speechprintProtectedPhrases,
               signal: controller.signal,
             });
             sendVoiceWave(
@@ -20841,6 +21031,9 @@ function buildRoutes(): RouteDefinition[] {
               "builtin-provider-fallback",
               boundary.text.length,
               request.includeAlignment,
+              localDelivery.localEngine,
+              localDelivery.pronunciation,
+              localDelivery.speechprint,
             );
             return;
           } catch {

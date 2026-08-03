@@ -113,6 +113,1715 @@
   --wildcard-slot-badge-selected-border: #05070b;
 }
 
+/* Avatar Foundry --------------------------------------------------------- */
+.zenLiveBotPresenceBody[data-screen-mode="off"]
+  .zenLiveBotPresenceFaceEmissionMask {
+  background: #010204;
+  box-shadow:
+    inset 0 0 26px rgba(0, 0, 0, 0.98),
+    0 0 0 1px rgba(255, 255, 255, 0.025);
+}
+
+.zenLiveBotPresenceBody[data-screen-mode="off"]
+  .zenLiveBotPresenceScreenGlassOverlay {
+  opacity: 0.42;
+  filter: saturate(0.25) brightness(0.54);
+}
+
+.zenLiveBotPresencePlate .botAvatarFoundryScreenOverlay {
+  position: absolute;
+  inset: 0;
+  z-index: 12;
+  display: block;
+  overflow: hidden;
+  pointer-events: auto;
+  border-radius: inherit;
+  background: #020406;
+}
+
+.zenLiveBotPresencePlate .botAvatarFoundryInkMount {
+  position: absolute;
+  inset: 0;
+  display: block;
+}
+
+.zenLiveBotPresencePlate .botAvatarFoundryInkMount,
+.zenLiveBotPresencePlate .botAvatarFoundryInkMount * {
+  pointer-events: auto;
+}
+
+.botAvatarMannequinPanel[data-foundry-ritual="true"] {
+  width: 100%;
+  height: 100%;
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  place-items: center;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.botAvatarMannequinPanel[data-foundry-ritual="true"] .botAvatarMannequinStage {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+}
+
+.botAvatarMannequinPanel[data-foundry-ritual="true"]
+  .zenLiveBotPresencePlate[data-avatar-customizer-preview="true"] {
+  transform: translateY(2.5dvh) scale(clamp(1.04, 1.1 + 0.15vw, 1.28));
+}
+
+.botGeneratorBackdrop[data-avatar-foundry="true"] {
+  padding: 0;
+  background: #030407;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
+.botGeneratorDialog[data-foundry-phase] {
+  position: fixed;
+  inset: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+  max-height: none;
+  min-height: 0;
+  display: block;
+  overflow: hidden;
+  border: 0;
+  border-radius: 0;
+  background: #030407;
+  box-shadow: none;
+}
+
+.botGeneratorDialog[data-foundry-phase][data-creating="true"] {
+  width: 100vw;
+  height: 100dvh;
+  max-width: none;
+}
+
+.botGeneratorDialog > .botGeneratorHeader,
+.botGeneratorDialog > .botGeneratorBody,
+.botGeneratorDialog > .botGeneratorActions {
+  position: absolute;
+  left: clamp(24px, 4vw, 66px);
+  z-index: 30;
+  width: min(430px, calc(100vw - 48px));
+  border-color: rgba(255, 255, 255, 0.1);
+  background: color-mix(in srgb, #10141c 88%, transparent);
+  box-shadow: 0 22px 72px rgba(0, 0, 0, 0.46);
+  backdrop-filter: blur(18px) saturate(118%);
+  -webkit-backdrop-filter: blur(18px) saturate(118%);
+}
+
+.botGeneratorDialog > .botGeneratorHeader {
+  top: clamp(112px, 16dvh, 154px);
+  min-height: 82px;
+  padding: 18px 20px 14px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-bottom: 0;
+  border-radius: 16px 16px 0 0;
+}
+
+.botGeneratorDialog > .botGeneratorBody {
+  top: calc(clamp(112px, 16dvh, 154px) + 81px);
+  max-height: min(46dvh, 430px);
+  overflow-y: auto;
+  padding: 8px 20px 16px;
+  border-inline: 1px solid rgba(255, 255, 255, 0.1);
+}
+
+.botGeneratorDialog > .botGeneratorActions {
+  top: calc(clamp(112px, 16dvh, 154px) + min(46dvh, 430px) + 81px);
+  transform: translateY(-100%);
+  padding: 14px 20px 18px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-top: 0;
+  border-radius: 0 0 16px 16px;
+}
+
+.botProfileBuilder.botAvatarCustomizer[data-foundry="true"] {
+  --bot-avatar-studio-inline-margin: 0px;
+  --bot-avatar-studio-block-margin: 0px;
+  inset: 0;
+  top: 0;
+  right: 0;
+  bottom: 0;
+  left: 0;
+  width: 100vw;
+  height: 100dvh;
+  max-height: none;
+  border: 0;
+  border-radius: 0;
+  background: #111722;
+  box-shadow: none;
+}
+
+.botAvatarCustomizer[data-foundry="true"]::before {
+  border-radius: 0;
+  background:
+    radial-gradient(
+      ellipse at 50% 58%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 20%,
+        transparent
+      ),
+      transparent 35%
+    ),
+    radial-gradient(
+      ellipse at 18% 20%,
+      rgba(100, 145, 183, 0.14),
+      transparent 42%
+    ),
+    radial-gradient(
+      ellipse at 84% 27%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 8%,
+        transparent
+      ),
+      transparent 42%
+    ),
+    linear-gradient(145deg, #1a2433, #101622 52%, #211824);
+}
+
+.botAvatarCustomizer[data-foundry="true"]::after {
+  inset: auto 8% 0;
+  width: auto;
+  height: 2px;
+  border-radius: 999px 999px 0 0;
+  opacity: 0.74;
+}
+
+.botAvatarCustomizer[data-foundry="true"] > .botProfileBuilderHeader {
+  z-index: 30;
+  min-height: 72px;
+  padding: 12px 20px 11px;
+  border-bottom-color: rgba(255, 255, 255, 0.085);
+  background: linear-gradient(
+    180deg,
+    rgba(8, 11, 16, 0.96),
+    rgba(8, 11, 16, 0.72)
+  );
+  backdrop-filter: blur(20px) saturate(116%);
+  -webkit-backdrop-filter: blur(20px) saturate(116%);
+}
+
+.botAvatarCustomizer[data-foundry="true"] > .botProfileBuilderHeader p {
+  display: none;
+}
+
+.botAvatarFoundryBackButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  min-height: 28px;
+  padding: 0 9px 0 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  background: rgba(255, 255, 255, 0.025);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 760;
+  cursor: pointer;
+}
+
+.botAvatarFoundryBackButton:hover,
+.botAvatarFoundryBackButton:focus-visible {
+  outline: none;
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 36%,
+    rgba(255, 255, 255, 0.14)
+  );
+  color: var(--fg);
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 8%,
+    rgba(255, 255, 255, 0.025)
+  );
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarCustomizerBody {
+  position: relative;
+  display: block;
+  padding: 0;
+  overflow: hidden;
+  background: transparent;
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarMannequinPanel {
+  position: absolute;
+  inset: 0;
+  display: block;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: hidden;
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarPanelHeader {
+  display: none;
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarMannequinStage {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  overflow: hidden;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 49.92%,
+      rgba(255, 255, 255, 0.035) 50%,
+      transparent 50.08%
+    ),
+    radial-gradient(
+      ellipse at calc(50% - 8vw) 95%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 25%,
+        transparent
+      ),
+      transparent 40%
+    ),
+    radial-gradient(
+      ellipse at 18% 18%,
+      rgba(98, 142, 180, 0.18),
+      transparent 42%
+    ),
+    radial-gradient(
+      ellipse at 84% 26%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 10%,
+        transparent
+      ),
+      transparent 43%
+    ),
+    linear-gradient(145deg, #1a2433, #101622 54%, #211824);
+  box-shadow: inset 0 0 150px rgba(2, 7, 15, 0.48);
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarMannequinStage::before,
+.botAvatarCustomizer[data-foundry="true"] .botAvatarMannequinStage::after {
+  content: "";
+  position: absolute;
+  z-index: 0;
+  pointer-events: none;
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarMannequinStage::before {
+  inset: 8% 7% 10%;
+  opacity: 0.38;
+  background-image:
+    linear-gradient(rgba(255, 255, 255, 0.027) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(255, 255, 255, 0.02) 1px, transparent 1px);
+  background-size: 42px 42px;
+  mask-image: radial-gradient(ellipse at center, #000 0 42%, transparent 78%);
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarMannequinStage::after {
+  left: calc(50% - 8vw);
+  bottom: 5%;
+  width: min(46vw, 590px);
+  height: 78px;
+  transform: translateX(-50%);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 50%;
+  background: radial-gradient(ellipse, #141922, #040507 62%, transparent 65%);
+  box-shadow:
+    inset 0 6px 22px #000,
+    0 22px 46px rgba(0, 0, 0, 0.58);
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarMannequinStage[data-foundry-camera-surface="true"]::after {
+  display: none;
+}
+
+.botAvatarFoundryCameraRig,
+.botAvatarFoundryBotAssembly {
+  display: contents;
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarFoundryCameraRig[data-spatial-camera-rig="true"] {
+  --foundry-bot-size: var(--zen-live-bot-avatar-body-size, 360px);
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  transform: translate3d(
+      calc(-8vw + var(--foundry-pan-x, 0px)),
+      calc(1.5dvh + var(--foundry-pan-y, 0px)),
+      0
+    )
+    scale(1.34) scale(var(--foundry-user-zoom, 1));
+  transform-origin: center center;
+  will-change: transform;
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarFoundryCameraRig[data-spatial-camera-rig="true"]
+  .botAvatarFoundryBotAssembly {
+  position: absolute;
+  inset: 0;
+  z-index: 5;
+  display: grid;
+  place-items: center;
+  pointer-events: none;
+  animation: botAvatarFoundryHover 4.8s cubic-bezier(0.45, 0, 0.55, 1) infinite;
+  will-change: transform;
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarFoundryCameraRig[data-spatial-camera-rig="true"]
+  .zenLiveBotPresencePlate[data-avatar-customizer-preview="true"] {
+  position: relative;
+  z-index: 5;
+}
+
+.botAvatarFoundryPlatform {
+  position: absolute;
+  left: 50%;
+  top: calc(50% + (var(--foundry-bot-size) / 2) + 40px);
+  z-index: 1;
+  width: min(500px, calc(var(--foundry-bot-size) + 110px));
+  height: 68px;
+  transform: translate(-50%, -50%);
+  border: 1px solid rgba(255, 255, 255, 0.075);
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse,
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 9%, #141922),
+    #040507 62%,
+    transparent 65%
+  );
+  box-shadow:
+    inset 0 6px 22px #000,
+    0 22px 46px rgba(0, 0, 0, 0.58),
+    0 -14px 46px
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 14%,
+        transparent
+      );
+  pointer-events: none;
+}
+
+@keyframes botAvatarFoundryHover {
+  0%,
+  100% {
+    transform: translate3d(0, 3px, 0);
+  }
+  50% {
+    transform: translate3d(0, -6px, 0);
+  }
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarCustomizerBody[data-camera-mode="face"]
+  .botAvatarFoundryCameraRig[data-spatial-camera-rig="true"] {
+  transform: translate3d(
+      calc(-8vw + var(--foundry-pan-x, 0px)),
+      calc(1.5dvh + var(--foundry-pan-y, 0px)),
+      0
+    )
+    scale(1.34) scale(var(--foundry-user-zoom, 1));
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarCustomizerBody[data-camera-mode="ink"]
+  .botAvatarFoundryCameraRig[data-spatial-camera-rig="true"] {
+  transform: translateX(-11vw) translateY(16dvh) scale(2.42);
+  transition: transform 520ms cubic-bezier(0.2, 0.78, 0.2, 1);
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarCustomizerBody[data-camera-mode="ink"]
+  :is(.botAvatarFoundryPlatform) {
+  opacity: 0;
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarCustomizerBody[data-camera-mode="ink"]
+  .botAvatarFoundryBotAssembly {
+  animation: none;
+  transform: none;
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarMannequinStage[data-foundry-camera-active="true"]
+  .botAvatarFoundryBotAssembly {
+  animation-play-state: paused;
+}
+
+.botAvatarFoundryNodes {
+  --foundry-bot-size: var(--zen-live-bot-avatar-body-size, 360px);
+  position: absolute !important;
+  left: 50%;
+  top: 50%;
+  z-index: 10 !important;
+  width: var(--foundry-bot-size);
+  height: var(--foundry-bot-size);
+  margin: calc(var(--foundry-bot-size) / -2) 0 0
+    calc(var(--foundry-bot-size) / -2);
+  pointer-events: none;
+}
+
+.botAvatarFoundryFrameModuleLights {
+  position: absolute;
+  inset: var(--bot-face-frame-inset, -7%);
+  z-index: calc(var(--bot-face-frame-led-z, 8) + 1);
+  display: block;
+  overflow: visible;
+  border-radius: 50%;
+  clip-path: circle(50% at 50% 50%);
+  pointer-events: none;
+}
+
+.botAvatarFoundryFrameModuleLamp {
+  position: absolute;
+  width: 2.1%;
+  aspect-ratio: 1;
+  border-radius: 50%;
+  background: radial-gradient(
+    circle at 42% 38%,
+    #ffffff 0 21%,
+    color-mix(in srgb, var(--foundry-module-color) 62%, #ffffff) 34%,
+    var(--foundry-module-color) 72%,
+    color-mix(in srgb, var(--foundry-module-color) 72%, transparent) 100%
+  );
+  opacity: 0;
+  filter: brightness(0.56);
+  transform: translate(-50%, -50%);
+  box-shadow: none;
+  transition:
+    opacity 220ms ease,
+    filter 260ms ease,
+    box-shadow 280ms ease;
+}
+
+.botAvatarFoundryFrameModuleLamp[data-populated="true"] {
+  opacity: 1;
+  filter: brightness(1);
+  box-shadow:
+    0 0 2px rgba(255, 255, 255, 0.94),
+    0 0 9px var(--foundry-module-color),
+    0 0 18px color-mix(in srgb, var(--foundry-module-color) 68%, transparent);
+}
+
+.botAvatarCustomizer[data-draft-mode="true"]
+  .botAvatarFoundryFrameModuleLamp[data-populated="true"] {
+  animation: botAvatarFoundryModuleEnergize 640ms
+    cubic-bezier(0.16, 0.84, 0.24, 1) both;
+}
+
+.botAvatarFoundryFrameModuleLamp[data-foundry-lamp="eyes"] {
+  left: 7.65%;
+  top: 58.65%;
+  width: 3.5%;
+}
+
+.botAvatarFoundryFrameModuleLamp[data-foundry-lamp="mouth"] {
+  left: 8.05%;
+  top: 75.55%;
+}
+
+.botAvatarFoundryFrameModuleLamp[data-foundry-lamp="screen"] {
+  left: 92.8%;
+  top: 58.65%;
+  width: 3.5%;
+}
+
+.botAvatarFoundryFrameModuleLamp[data-foundry-lamp="glyph"] {
+  left: 91.95%;
+  top: 75.55%;
+}
+
+.botAvatarFoundryFrameModuleLamp[data-foundry-lamp="chassis-left-outer"] {
+  left: 30.05%;
+  top: 85.35%;
+  width: 1.8%;
+}
+
+.botAvatarFoundryFrameModuleLamp[data-foundry-lamp="chassis-left-inner"] {
+  left: 33.95%;
+  top: 86.05%;
+  width: 3.2%;
+}
+
+.botAvatarFoundryFrameModuleLamp[data-foundry-lamp="chassis-right-inner"] {
+  left: 66.35%;
+  top: 86.05%;
+  width: 3.2%;
+}
+
+.botAvatarFoundryFrameModuleLamp[data-foundry-lamp="chassis-right-outer"] {
+  left: 70.25%;
+  top: 85.35%;
+  width: 1.8%;
+}
+
+.botAvatarFoundryNode {
+  position: absolute;
+  z-index: 2;
+  width: 45%;
+  height: 44px;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: var(--foundry-module-color, rgba(229, 235, 245, 0.82));
+  pointer-events: auto;
+  cursor: pointer;
+  opacity: 0.62;
+  transition:
+    opacity 160ms ease,
+    color 160ms ease;
+}
+
+.botAvatarFoundryNode::before {
+  content: "";
+  position: absolute;
+  top: 50%;
+  width: 66%;
+  height: 1px;
+  background: linear-gradient(90deg, transparent, currentColor);
+  box-shadow: 0 0 8px color-mix(in srgb, currentColor 32%, transparent);
+}
+
+.botAvatarFoundryNodeLabel {
+  position: absolute;
+  top: 50%;
+  left: 0;
+  min-width: 88px;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-start;
+  gap: 1px;
+  padding: 5px 8px 6px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 7px;
+  background: rgba(5, 8, 13, 0.86);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.045);
+  transform: translateY(-50%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.botAvatarFoundryNodeLabel small {
+  color: color-mix(in srgb, currentColor 58%, transparent);
+  font-size: 6px;
+  font-weight: 760;
+  letter-spacing: 0.16em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.botAvatarFoundryNodeLabel strong {
+  font-size: 8px;
+  font-weight: 840;
+  letter-spacing: 0.09em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.botAvatarFoundryNodePoint {
+  position: absolute;
+  top: 50%;
+  right: 0;
+  width: 8px;
+  height: 8px;
+  border: 1px solid color-mix(in srgb, currentColor 24%, #77808b);
+  border-radius: 50%;
+  background: rgba(5, 8, 12, 0.92);
+  box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.94);
+  transform: translate(50%, -50%);
+  transition:
+    border-color 220ms ease,
+    background-color 220ms ease,
+    box-shadow 280ms ease;
+}
+
+.botAvatarFoundryNode[data-populated="false"]::before {
+  box-shadow: none;
+  opacity: 0.42;
+}
+
+.botAvatarFoundryNode[data-populated="true"] .botAvatarFoundryNodePoint {
+  border-color: color-mix(in srgb, currentColor 74%, #ffffff);
+  background: color-mix(in srgb, currentColor 72%, #ffffff);
+  box-shadow:
+    0 0 3px color-mix(in srgb, currentColor 84%, #ffffff),
+    0 0 14px currentColor,
+    inset 0 0 5px rgba(255, 255, 255, 0.72);
+}
+
+.botAvatarCustomizer[data-draft-mode="true"]
+  .botAvatarFoundryNode[data-populated="true"]
+  .botAvatarFoundryNodePoint {
+  animation: botAvatarFoundryModuleEnergize 640ms
+    cubic-bezier(0.16, 0.84, 0.24, 1) both;
+}
+
+@keyframes botAvatarFoundryModuleEnergize {
+  0% {
+    opacity: 0.34;
+    filter: brightness(0.5);
+  }
+  48% {
+    opacity: 1;
+    filter: brightness(1.7);
+  }
+  100% {
+    opacity: 1;
+    filter: brightness(1);
+  }
+}
+
+.botAvatarFoundryNode:hover,
+.botAvatarFoundryNode:focus-visible,
+.botAvatarFoundryNode[data-active="true"] {
+  outline: none;
+  color: color-mix(
+    in srgb,
+    var(--foundry-module-color, var(--accent)) 78%,
+    #ffffff 22%
+  );
+  opacity: 1;
+}
+
+.botAvatarFoundryNode:focus-visible .botAvatarFoundryNodeLabel,
+.botAvatarFoundryNode[data-active="true"] .botAvatarFoundryNodeLabel {
+  border-color: currentColor;
+  box-shadow: 0 0 18px color-mix(in srgb, currentColor 24%, transparent);
+}
+
+.botAvatarFoundryNode[data-avatar-upgrade-node="eyes"] {
+  left: -35%;
+  top: 50.13%;
+  width: 36.62%;
+}
+.botAvatarFoundryNode[data-avatar-upgrade-node="mouth"] {
+  left: -35%;
+  top: 69.45%;
+  width: 37.07%;
+}
+
+.botAvatarFoundryNode[data-avatar-upgrade-node="screen"],
+.botAvatarFoundryNode[data-avatar-upgrade-node="glyph"] {
+  right: -35%;
+}
+.botAvatarFoundryNode[data-avatar-upgrade-node="screen"] {
+  top: 50.13%;
+  width: 35.99%;
+}
+.botAvatarFoundryNode[data-avatar-upgrade-node="glyph"] {
+  top: 69.45%;
+  width: 37.07%;
+}
+.botAvatarFoundryNode:is(
+    [data-avatar-upgrade-node="screen"],
+    [data-avatar-upgrade-node="glyph"]
+  )::before {
+  right: 0;
+  background: linear-gradient(90deg, currentColor, transparent);
+}
+.botAvatarFoundryNode:is(
+    [data-avatar-upgrade-node="screen"],
+    [data-avatar-upgrade-node="glyph"]
+  )
+  .botAvatarFoundryNodePoint {
+  right: auto;
+  left: 0;
+  transform: translate(-50%, -50%);
+}
+.botAvatarFoundryNode:is(
+    [data-avatar-upgrade-node="screen"],
+    [data-avatar-upgrade-node="glyph"]
+  )
+  .botAvatarFoundryNodeLabel {
+  right: 0;
+  left: auto;
+  align-items: flex-end;
+}
+
+.botAvatarFoundryNode[data-avatar-upgrade-node="chassis"] {
+  left: 36%;
+  top: 85.67%;
+  width: 28%;
+  height: 27%;
+}
+.botAvatarFoundryNode[data-avatar-upgrade-node="chassis"]::before {
+  top: 7px;
+  left: 50%;
+  width: 1px;
+  height: 64%;
+  background: linear-gradient(180deg, currentColor, transparent);
+}
+.botAvatarFoundryNode[data-avatar-upgrade-node="chassis"]
+  .botAvatarFoundryNodePoint {
+  top: 7px;
+  right: auto;
+  left: 50%;
+  transform: translate(-50%, -50%);
+}
+.botAvatarFoundryNode[data-avatar-upgrade-node="chassis"]
+  .botAvatarFoundryNodeLabel {
+  top: auto;
+  bottom: 0;
+  left: 50%;
+  align-items: center;
+  transform: translateX(-50%);
+}
+
+.botAvatarCustomizerBody[data-camera-mode="ink"] .botAvatarFoundryNode {
+  opacity: 0;
+  pointer-events: none;
+}
+
+.botAvatarFoundryCameraHud {
+  position: absolute;
+  left: 22px;
+  top: 82px;
+  z-index: 22;
+  display: grid;
+  grid-template-columns: auto auto;
+  align-items: center;
+  gap: 2px 8px;
+  padding: 7px 9px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 9px;
+  background: rgba(5, 8, 13, 0.7);
+  color: rgba(239, 243, 249, 0.72);
+  pointer-events: auto;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+.botAvatarFoundryCameraHud > span {
+  font-size: 7px;
+  font-weight: 760;
+  letter-spacing: 0.13em;
+  text-transform: uppercase;
+}
+.botAvatarFoundryCameraHud > strong {
+  justify-self: end;
+  color: #f6f8fb;
+  font-size: 9px;
+}
+.botAvatarFoundryCameraHud > button {
+  padding: 0;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font-size: 7px;
+  text-align: left;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+  cursor: pointer;
+}
+.botAvatarFoundryCameraHud > small {
+  font-size: 7px;
+  white-space: nowrap;
+}
+
+.botAvatarMannequinStage[data-foundry-camera-surface="true"] {
+  cursor: grab;
+  touch-action: none;
+}
+.botAvatarMannequinStage[data-foundry-camera-surface="true"]:active {
+  cursor: grabbing;
+}
+.botAvatarMannequinStage[data-foundry-camera-surface="true"]:focus-visible {
+  outline: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 60%, #fff 18%);
+  outline-offset: -3px;
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarPreviewToolbar {
+  position: absolute;
+  left: 22px;
+  bottom: 22px;
+  z-index: 20;
+  width: min(520px, calc(100vw - 44px));
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 12px;
+  background: rgba(7, 10, 15, 0.76);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarPreviewModeToggle {
+  display: flex;
+  flex: 1;
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarControlPanel {
+  position: absolute;
+  inset: 0;
+  z-index: 24;
+  display: block;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+  overflow: visible;
+  pointer-events: none;
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarControlTabs {
+  position: absolute;
+  left: 50%;
+  bottom: 22px;
+  z-index: 2;
+  width: auto;
+  max-width: calc(100vw - 610px);
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+  border-radius: 12px;
+  background: rgba(7, 10, 15, 0.8);
+  backdrop-filter: blur(16px);
+  -webkit-backdrop-filter: blur(16px);
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarControlStack {
+  position: absolute;
+  top: 20px;
+  right: 22px;
+  bottom: 82px;
+  z-index: 3;
+  width: min(390px, calc(100vw - 44px));
+  padding: 14px;
+  overflow: auto;
+  pointer-events: auto;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--foundry-module-color, var(--editor-bot-color, var(--accent))) 28%,
+      rgba(255, 255, 255, 0.09)
+    );
+  border-radius: 14px;
+  background: color-mix(in srgb, #0a0e15 88%, transparent);
+  box-shadow:
+    0 24px 70px rgba(0, 0, 0, 0.46),
+    inset 0 1px rgba(255, 255, 255, 0.055);
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarControlTabs button {
+  --avatar-tab-module-color: var(--foundry-module-color, var(--accent));
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarControlTabs button::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  flex: 0 0 auto;
+  border: 1px solid
+    color-mix(in srgb, var(--avatar-tab-module-color) 24%, #77808b);
+  border-radius: 999px;
+  background: rgba(5, 8, 12, 0.9);
+  box-shadow: inset 0 0 3px rgba(0, 0, 0, 0.9);
+  opacity: 0.76;
+  transition:
+    border-color 220ms ease,
+    background-color 220ms ease,
+    box-shadow 280ms ease,
+    opacity 220ms ease;
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarControlTabs
+  button[data-populated="true"]::before {
+  border-color: color-mix(in srgb, var(--avatar-tab-module-color) 74%, #ffffff);
+  background: var(--avatar-tab-module-color);
+  box-shadow: 0 0 9px
+    color-mix(in srgb, var(--avatar-tab-module-color) 62%, transparent);
+  opacity: 0.72;
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarControlTabs
+  button[data-active="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--avatar-tab-module-color) 62%,
+    rgba(255, 255, 255, 0.16)
+  );
+  background: color-mix(
+    in srgb,
+    var(--avatar-tab-module-color) 15%,
+    rgba(255, 255, 255, 0.04)
+  );
+  box-shadow: inset 0 0 0 1px
+    color-mix(in srgb, var(--avatar-tab-module-color) 18%, transparent);
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarControlTabs
+  button[data-active="true"][data-populated="true"]::before {
+  opacity: 1;
+  box-shadow: 0 0 13px
+    color-mix(in srgb, var(--avatar-tab-module-color) 84%, transparent);
+}
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarControlGroup {
+  --bot-avatar-section-accent: var(
+    --foundry-module-color,
+    var(--editor-bot-color, var(--accent))
+  );
+}
+
+.botAvatarGlobalAdjustmentConsole {
+  --editor-bot-color: var(--foundry-module-color, var(--accent));
+  position: sticky;
+  top: -2px;
+  z-index: 20;
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(142px, 0.55fr) minmax(220px, 1fr);
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--foundry-module-color, var(--accent)) 38%,
+      rgba(255, 255, 255, 0.1)
+    );
+  border-radius: 11px;
+  background:
+    linear-gradient(
+      135deg,
+      color-mix(
+        in srgb,
+        var(--foundry-module-color, var(--accent)) 11%,
+        transparent
+      ),
+      transparent 52%
+    ),
+    rgba(7, 10, 15, 0.96);
+  box-shadow:
+    0 16px 34px rgba(0, 0, 0, 0.36),
+    inset 0 1px rgba(255, 255, 255, 0.055);
+  backdrop-filter: blur(18px) saturate(116%);
+  -webkit-backdrop-filter: blur(18px) saturate(116%);
+}
+
+.botAvatarGlobalAdjustmentConsole > header {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: 18px minmax(0, 1fr);
+  align-content: start;
+  gap: 7px;
+  padding: 3px 2px;
+}
+
+.botAvatarGlobalAdjustmentConsole > header > span:nth-child(2) {
+  min-width: 0;
+  display: grid;
+  gap: 2px;
+}
+
+.botAvatarGlobalAdjustmentConsole > header small {
+  color: color-mix(
+    in srgb,
+    var(--foundry-module-color, var(--accent)) 62%,
+    var(--fg-muted)
+  );
+  font-size: 8px;
+  font-weight: 790;
+  letter-spacing: 0.14em;
+  line-height: 1.2;
+  text-transform: uppercase;
+}
+
+.botAvatarGlobalAdjustmentConsole > header strong {
+  color: var(--fg);
+  font-size: 13px;
+  font-weight: 850;
+  letter-spacing: 0.02em;
+}
+
+.botAvatarGlobalAdjustmentLight {
+  width: 10px;
+  height: 10px;
+  margin-top: 2px;
+  border: 1px solid
+    color-mix(in srgb, var(--foundry-module-color, var(--accent)) 24%, #77808b);
+  border-radius: 999px;
+  background: rgba(5, 8, 12, 0.92);
+  box-shadow: inset 0 0 4px rgba(0, 0, 0, 0.94);
+  transition:
+    border-color 220ms ease,
+    background-color 220ms ease,
+    box-shadow 280ms ease;
+}
+
+.botAvatarGlobalAdjustmentConsole[data-populated="true"]
+  .botAvatarGlobalAdjustmentLight {
+  border-color: color-mix(
+    in srgb,
+    var(--foundry-module-color, var(--accent)) 72%,
+    #fff
+  );
+  background: var(--foundry-module-color, var(--accent));
+  box-shadow:
+    0 0 0 3px
+      color-mix(
+        in srgb,
+        var(--foundry-module-color, var(--accent)) 13%,
+        transparent
+      ),
+    0 0 16px
+      color-mix(
+        in srgb,
+        var(--foundry-module-color, var(--accent)) 76%,
+        transparent
+      );
+}
+
+.botAvatarGlobalAdjustmentTargets {
+  grid-column: 1 / -1;
+  min-width: 0;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  padding-top: 6px;
+}
+
+.botAvatarGlobalAdjustmentTargets button {
+  min-height: 27px;
+  padding: 0 9px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  background: rgba(255, 255, 255, 0.025);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.botAvatarGlobalAdjustmentTargets button:hover,
+.botAvatarGlobalAdjustmentTargets button:focus-visible,
+.botAvatarGlobalAdjustmentTargets button[data-active="true"] {
+  outline: none;
+  border-color: color-mix(
+    in srgb,
+    var(--foundry-module-color, var(--accent)) 62%,
+    #fff 12%
+  );
+  color: var(--fg);
+  background: color-mix(
+    in srgb,
+    var(--foundry-module-color, var(--accent)) 16%,
+    rgba(255, 255, 255, 0.035)
+  );
+}
+
+.botAvatarGlobalAdjustmentConsole > .botAvatarCoordinateControl {
+  min-width: 0;
+  padding: 0;
+  border: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.botAvatarGlobalAdjustmentIdle {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(150px, 0.78fr) minmax(100px, 0.42fr);
+  align-items: center;
+  gap: 10px;
+}
+
+.botAvatarGlobalAdjustmentIdle p {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 9px;
+  line-height: 1.45;
+}
+
+.botAvatarShellAdjustmentSummary {
+  min-width: 0;
+  min-height: 112px;
+  display: grid;
+  align-content: center;
+  gap: 7px;
+  padding: 15px 17px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--foundry-module-color, var(--accent)) 28%,
+      rgba(255, 255, 255, 0.08)
+    );
+  border-radius: 9px;
+  background:
+    radial-gradient(
+      circle at 88% 18%,
+      color-mix(
+        in srgb,
+        var(--foundry-module-color, var(--accent)) 15%,
+        transparent
+      ),
+      transparent 42%
+    ),
+    rgba(255, 255, 255, 0.025);
+}
+
+.botAvatarShellAdjustmentSummary strong {
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 820;
+  letter-spacing: 0.035em;
+}
+
+.botAvatarShellAdjustmentSummary p {
+  max-width: 42ch;
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 9.5px;
+  line-height: 1.5;
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarCustomizerBody[data-camera-mode="overview"]
+  .botAvatarControlStack:empty {
+  display: none;
+}
+
+.botAvatarCustomizer[data-foundry="true"]
+  .botAvatarCustomizerBody[data-camera-mode="ink"]
+  .botAvatarControlStack {
+  width: min(350px, calc(100vw - 44px));
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarMannequinStage {
+  background:
+    linear-gradient(
+      90deg,
+      transparent 49.92%,
+      rgba(35, 53, 73, 0.08) 50%,
+      transparent 50.08%
+    ),
+    radial-gradient(
+      ellipse at calc(50% - 8vw) 95%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 27%,
+        transparent
+      ),
+      transparent 42%
+    ),
+    radial-gradient(
+      ellipse at 17% 18%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 10%,
+        transparent
+      ),
+      transparent 44%
+    ),
+    radial-gradient(
+      ellipse at 84% 28%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 9%,
+        transparent
+      ),
+      transparent 43%
+    ),
+    linear-gradient(145deg, #f1f5f8, #dce6ee 54%, #f0eaf0);
+  box-shadow:
+    inset 0 0 150px rgba(59, 75, 93, 0.18),
+    inset 0 1px rgba(255, 255, 255, 0.78);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarMannequinStage::before {
+  opacity: 0.42;
+  background-image:
+    linear-gradient(rgba(38, 57, 78, 0.06) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(38, 57, 78, 0.048) 1px, transparent 1px);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarMannequinStage::after {
+  border-color: rgba(40, 55, 73, 0.16);
+  background: radial-gradient(ellipse, #c7d1dc, #7d8998 60%, transparent 64%);
+  box-shadow:
+    inset 0 5px 20px rgba(31, 42, 56, 0.34),
+    0 22px 44px rgba(67, 82, 101, 0.22);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarFoundryPlatform {
+  border-color: rgba(40, 55, 73, 0.16);
+  background: radial-gradient(
+    ellipse,
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 10%, #c7d1dc),
+    #7d8998 60%,
+    transparent 64%
+  );
+  box-shadow:
+    inset 0 5px 20px rgba(31, 42, 56, 0.34),
+    0 22px 44px rgba(67, 82, 101, 0.22),
+    0 -14px 42px
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 12%,
+        transparent
+      );
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  :is(.botAvatarMannequinPanel, .botAvatarControlPanel) {
+  border-color: transparent !important;
+  background: transparent !important;
+  box-shadow: none !important;
+}
+
+/* Desktop Foundry workspace
+   The established Avatar Studio controls were designed for a narrow modal
+   rail. In the full-screen foundry, use the available width as a real
+   workbench: the live bot keeps the left half while related controls pair up
+   on the right. The existing single-column rail remains the fallback below
+   the desktop composition. */
+@media (min-width: 1280px) {
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarControlStack {
+    width: min(760px, calc(56vw - 36px));
+    padding: 12px;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarMannequinStage::after {
+    left: calc(50% - 26vw);
+    width: min(38vw, 500px);
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarFoundryCameraRig[data-spatial-camera-rig="true"],
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarCustomizerBody[data-camera-mode="face"]
+    .botAvatarFoundryCameraRig[data-spatial-camera-rig="true"] {
+    transform: translate3d(
+        calc(-26vw + var(--foundry-pan-x, 0px)),
+        calc(1.5dvh + var(--foundry-pan-y, 0px)),
+        0
+      )
+      scale(1.2) scale(var(--foundry-user-zoom, 1));
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarControlGroup {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarFaceControls {
+    height: auto;
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px 12px;
+    align-items: start;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarFaceControls
+    > .botAvatarIdentitySection {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarFaceControls
+    > .botAvatarPresetControl {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarFaceControls
+    > .botAvatarIdentityPicker {
+    grid-column: 1;
+    grid-row: 2;
+    height: clamp(220px, 31dvh, 300px);
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarFaceControls
+    > .botAvatarThinkingControl {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarThinkingControl {
+    grid-template-columns: minmax(0, 0.9fr) minmax(0, 1.1fr);
+    grid-template-rows: auto auto;
+    align-items: start;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarThinkingControl
+    > .botAvatarThinkingPresetStrip {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarThinkingControl
+    > .botAvatarThinkingTiles {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarThinkingControl
+    > .botAvatarCustomGeometry {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarFaceControls:not(:has(> .botAvatarIdentitySection)) {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    grid-template-rows: auto;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarFaceControls:not(:has(> .botAvatarIdentitySection))
+    > .botAvatarPresetControl {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarFaceControls:not(:has(> .botAvatarIdentitySection))
+    > .botAvatarThinkingControl {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarCustomControls {
+    grid-template-columns: minmax(0, 0.58fr) minmax(0, 1.42fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    gap: 10px 12px;
+    align-items: start;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarCustomControls
+    > .botAvatarExpressionRow {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarCustomControls
+    > .botAvatarSliderStack {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarCustomControls
+    > .botAvatarOverrideGrid {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarOverrideControl {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 9px;
+    padding: 10px;
+    align-items: start;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarOverrideControl
+    > :is(.botAvatarCustomMotionRow, .botAvatarGlyphRotationField) {
+    grid-column: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarOverrideControl
+    > .botAvatarCustomGeometry {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarOverrideControl
+    > .botAvatarEyeCountControl {
+    grid-column: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarOverrideControl
+    > .botAvatarGlyphAnimationControl {
+    grid-column: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarOverrideControl
+    > .botAvatarCustomChoiceGroup {
+    grid-column: 1 / -1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    .botAvatarCustomControls {
+    grid-template-columns:
+      minmax(0, 0.7fr)
+      minmax(0, 1fr)
+      minmax(0, 1fr);
+    grid-template-rows: auto auto;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    :is(.botAvatarOverrideGrid, .botAvatarOverrideControl) {
+    display: contents;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    .botAvatarCustomControls
+    > .botAvatarExpressionRow {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    .botAvatarCustomControls
+    > .botAvatarSliderStack {
+    grid-column: 1;
+    grid-row: 2;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    .botAvatarCustomMotionRow {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    .botAvatarEyeCountControl {
+    grid-column: 2;
+    grid-row: 2;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    .botAvatarOverrideControl
+    > .botAvatarCustomGeometry {
+    grid-column: 3;
+    grid-row: 1 / span 2;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    .botAvatarGlyphAnimationControl {
+    grid-column: 1;
+    grid-row: 3;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    .botAvatarCustomChoiceGroup {
+    grid-column: 2 / span 2;
+    grid-row: 3;
+    grid-template-columns: minmax(0, 0.72fr) minmax(0, 1.28fr);
+    align-items: start;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    .botAvatarCustomChoiceGroup
+    > .botAvatarCustomChoiceStrip {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
+    .botAvatarCustomChoiceGroup
+    > .botAvatarCustomBlinkControls {
+    grid-column: 2;
+    grid-row: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarCustomBlinkControls {
+    grid-template-columns: minmax(0, 0.75fr) minmax(0, 1.25fr);
+    grid-template-rows: auto auto;
+    align-items: start;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarCustomBlinkControls
+    > :is(.botAvatarSingleGlyphInput, .botAvatarMouthRotationControl) {
+    grid-column: 1;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarCustomBlinkControls
+    > .botAvatarCustomGeometry {
+    grid-column: 2;
+    grid-row: 1 / span 2;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarPresetButton,
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarFontOption {
+    min-height: 50px;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarGlyphRotationField
+    > .botAvatarCustomGlyphCapture {
+    min-height: 122px;
+  }
+}
+
+@media (max-width: 1180px) {
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarMannequinStage::after {
+    left: 50%;
+  }
+
+  .botGeneratorDialog > .botGeneratorHeader,
+  .botGeneratorDialog > .botGeneratorBody,
+  .botGeneratorDialog > .botGeneratorActions {
+    left: 16px;
+    width: calc(100vw - 32px);
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarCustomizerHeaderActions {
+    gap: 4px;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarSaveStatus,
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarCustomizerUndoButton {
+    display: none;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarControlStack {
+    top: auto;
+    right: 12px;
+    bottom: 74px;
+    left: 12px;
+    width: auto;
+    max-height: 43dvh;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarGlobalAdjustmentConsole {
+    grid-template-columns: minmax(118px, 0.42fr) minmax(190px, 1fr);
+    padding: 8px;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarGlobalAdjustmentIdle {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarGlobalAdjustmentIdle p {
+    display: none;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarControlTabs {
+    right: 12px;
+    bottom: 12px;
+    left: 12px;
+    max-width: none;
+    overflow-x: auto;
+    transform: none;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlTabs
+    button:is(
+      [data-avatar-control="face"],
+      [data-avatar-control="eyes"],
+      [data-avatar-control="mouth"],
+      [data-avatar-control="details"]
+    ) {
+    display: inline-flex;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarPreviewToolbar {
+    display: none;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarFoundryCameraRig[data-spatial-camera-rig="true"] {
+    transform: translate3d(
+        var(--foundry-pan-x, 0px),
+        calc(-8dvh + var(--foundry-pan-y, 0px)),
+        0
+      )
+      scale(0.92) scale(var(--foundry-user-zoom, 1));
+  }
+
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarCustomizerBody[data-camera-mode="ink"]
+    .botAvatarFoundryCameraRig[data-spatial-camera-rig="true"] {
+    transform: translateY(-17dvh) scale(1.28);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarFoundryCameraRig[data-spatial-camera-rig="true"] {
+    transition: none;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarFoundryBotAssembly {
+    animation: none;
+    transform: none;
+  }
+
+  .botAvatarFoundryNodePoint,
+  .botAvatarFoundryFrameModuleLamp,
+  .botAvatarCustomizer[data-foundry="true"]
+    .botAvatarControlTabs
+    button::before,
+  .botAvatarGlobalAdjustmentLight {
+    animation: none;
+    transition: none;
+  }
+}
+
 /* Story Mode MVP */
 .storyShell {
   min-height: 100vh;
@@ -7175,6 +8884,11 @@
     color: #f8fafc;
     text-align: center;
     cursor: default;
+  }
+
+  body:has([data-foundry="true"]) .desktopViewportNotice,
+  body:has([data-avatar-foundry="true"]) .desktopViewportNotice {
+    display: none;
   }
 
   .desktopViewportNoticeInner {
@@ -22655,6 +24369,54 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 1px 0 color-mix(in srgb, #ffffff 10%, transparent);
   backdrop-filter: blur(6px);
   pointer-events: auto;
+}
+
+.typingIndicatorChatCenter[data-psychic-live="true"] {
+  align-items: flex-start;
+  width: min(44rem, calc(100vw - 32px));
+  padding: 12px 14px;
+  border-radius: 18px;
+}
+
+.typingPsychicLiveContent {
+  display: grid;
+  flex: 1;
+  gap: 5px;
+  min-width: 0;
+}
+
+.typingPsychicLiveLabel {
+  color: color-mix(in srgb, var(--typing-accent, var(--accent)) 74%, var(--fg));
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.09em;
+  line-height: 1.1;
+  text-transform: uppercase;
+}
+
+.typingPsychicLiveSummary {
+  color: color-mix(in srgb, var(--fg) 92%, transparent);
+  font-size: 13px;
+  line-height: 1.45;
+  text-wrap: pretty;
+}
+
+.typingPsychicLiveScratchpad {
+  max-height: 150px;
+  margin-top: 3px;
+  padding-top: 8px;
+  overflow: auto;
+  border-top: 1px solid color-mix(in srgb, currentColor 15%, transparent);
+  color: color-mix(in srgb, var(--fg) 68%, transparent);
+  font-family:
+    ui-monospace, SFMono-Regular, Consolas, "Liberation Mono", Menlo, monospace;
+  font-size: 10px;
+  line-height: 1.5;
+  white-space: pre-wrap;
+}
+
+.typingIndicatorChatCenter[data-psychic-live="true"] > .typingDots {
+  margin-top: 3px;
 }
 
 /* Denial fallback is likely in-flight: keep text stable, but add a distinct
@@ -45866,6 +47628,70 @@ a.settingsCreditItem:focus-visible {
   width: 100%;
   min-height: 150px;
   height: clamp(165px, 22dvh, 260px);
+}
+
+.botAvatarShellControls {
+  min-width: 0;
+  display: grid;
+}
+
+.botAvatarShellControls .botAvatarIdentityPicker {
+  height: clamp(260px, 42dvh, 410px);
+}
+
+.botAvatarFactoryShellNotice {
+  min-height: clamp(210px, 34dvh, 330px);
+  display: grid;
+  align-content: center;
+  justify-items: start;
+  gap: 8px;
+  padding: clamp(22px, 4vw, 42px);
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--bot-avatar-section-accent, var(--editor-bot-color, var(--accent)))
+        28%,
+      var(--line)
+    );
+  border-radius: 10px;
+  background:
+    radial-gradient(
+      circle at 78% 24%,
+      color-mix(
+        in srgb,
+        var(--bot-avatar-section-accent, var(--editor-bot-color, var(--accent)))
+          16%,
+        transparent
+      ),
+      transparent 46%
+    ),
+    color-mix(in srgb, var(--bg-deep) 76%, var(--bg-surface) 24%);
+}
+
+.botAvatarFactoryShellNotice > span {
+  color: color-mix(
+    in srgb,
+    var(--bot-avatar-section-accent, var(--editor-bot-color, var(--accent))) 62%,
+    var(--fg-muted)
+  );
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0.15em;
+  text-transform: uppercase;
+}
+
+.botAvatarFactoryShellNotice > strong {
+  color: var(--fg);
+  font-size: clamp(18px, 2vw, 25px);
+  line-height: 1.12;
+}
+
+.botAvatarFactoryShellNotice > p {
+  max-width: 54ch;
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 11px;
+  line-height: 1.6;
 }
 
 .botAvatarIdentityPicker .colorPickerWrapper {
@@ -77076,7 +78902,49 @@ a.settingsCreditItem:focus-visible {
 }
 
 .botVoiceFallbackBody {
+  display: grid;
+  gap: 12px;
   padding: 10px;
+}
+
+.botVoicePresentationChips,
+.botVoiceInlinePreviewActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.botVoicePresentationChips button,
+.botVoiceInlinePreviewActions button {
+  min-height: 30px;
+  border: 1px solid color-mix(in srgb, var(--border) 90%, transparent);
+  border-radius: 999px;
+  padding: 5px 10px;
+  background: color-mix(in srgb, var(--bg) 90%, var(--panel));
+  color: var(--muted);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.botVoicePresentationChips button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 68%, var(--border));
+  background: color-mix(in srgb, var(--editor-bot-color) 16%, var(--panel));
+  color: var(--fg);
+}
+
+.botVoicePresentationChips button:focus-visible,
+.botVoiceInlinePreviewActions button:focus-visible {
+  outline: 2px solid
+    color-mix(in srgb, var(--editor-bot-color) 70%, transparent);
+  outline-offset: 2px;
+}
+
+.botVoicePresentationChips button:disabled,
+.botVoiceInlinePreviewActions button:disabled {
+  cursor: default;
+  opacity: 0.48;
 }
 
 .botVoiceIdentityField {

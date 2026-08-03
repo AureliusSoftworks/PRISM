@@ -6,6 +6,11 @@ import { describe, it } from "node:test";
 
 const pagePath = join(dirname(fileURLToPath(import.meta.url)), "page.tsx");
 const pageSource = readFileSync(pagePath, "utf8");
+const serverPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "../../../api/src/server.ts"
+);
+const serverSource = readFileSync(serverPath, "utf8");
 
 describe("Psychic Chat surface wiring", () => {
   it("requests Psychic on the product Chat surface even though it uses the Zen pipeline", () => {
@@ -35,6 +40,24 @@ describe("Psychic Chat surface wiring", () => {
 
     assert.ok(thinkingTargetSource);
     assert.match(thinkingTargetSource, /if \(isZenSurfaceView\(view\)\) return null;/);
+    assert.doesNotMatch(
+      thinkingTargetSource,
+      /effectivePreferredProvider !== "local"/
+    );
+  });
+
+  it("streams Psychic progress into the pending Chat turn", () => {
+    assert.match(pageSource, /psychicProgressStream:\s*true/u);
+    assert.match(pageSource, /onPsychic:\s*applyLivePsychicProgress/u);
+    assert.match(pageSource, /data-psychic-live=\{livePsychicSummary/u);
+    assert.match(
+      serverSource,
+      /psychicModeRequested && body\.psychicProgressStream === true/u
+    );
+    assert.match(
+      serverSource,
+      /onPsychicProgress:[\s\S]{0,180}type: "psychic"/u
+    );
   });
 
   it("does not render Psychic lines from Zen conversation mode alone", () => {

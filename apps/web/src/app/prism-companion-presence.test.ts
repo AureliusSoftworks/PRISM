@@ -31,7 +31,9 @@ test("shares one non-interactive orb visual between the companion and focus scre
   assert.match(orb, /data-prism-orb="true"/u);
   assert.match(orb, /aria-hidden="true"/u);
   assert.match(companion, /<PrismOrb aura=\{false\}/u);
-  assert.match(ritual, /<PrismOrb className=\{styles\.prismOrb\}/u);
+  assert.match(ritual, /<PrismOrb aura=\{false\} className=\{styles\.prismOrb\}/u);
+  assert.match(companion, /publishPrismCompanionVisualSnapshot/u);
+  assert.match(ritual, /data-companion-origin=/u);
 });
 
 test("suppresses the floating assistant throughout bot creation and full-screen loading", () => {

@@ -18,6 +18,7 @@ import {
   botVoiceTextureIsModified,
   elevenLabsVoiceDirectionForMood,
   expectedVoicePlaybackDurationMs,
+  localVoicePronunciationOverrideIsActive,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotAudioVoiceProfileV3,
   normalizeBotAvatarSfxV1,
@@ -29,6 +30,7 @@ import {
   normalizeVoiceEffect,
   normalizeOptionalBotAudioVoiceProfileV1,
   resolveBotAudioVoiceProfileV1,
+  resolveLocalVoicePronunciationLocale,
   normalizeVoiceMode,
   resolveVoicePlaybackTransform,
   resolveBotVoiceCharacter,
@@ -204,7 +206,11 @@ describe("audio voice normalization", () => {
       localEnginePreference: "inherit",
       localVoiceSource: "portable",
       accentLocale: "en-GB",
+      pronunciationBase: "follow-voice",
       accentMode: "prefer-genuine",
+      speechprintInfluence: "none",
+      speechprintStrength: "balanced",
+      speechprintVariationSeed: "natural-v1",
       pace: 0.125,
       lilt: 0.2,
       bottishTone: 1,
@@ -231,16 +237,26 @@ describe("audio voice normalization", () => {
       baseVoiceId: "voice-28",
       localEnginePreference: "voice-plus",
       accentLocale: "en-GB",
+      pronunciationBase: "en-US",
       openness: 0.35,
       weight: -0.4,
       resonance: 0.25,
+      speechprintInfluence: "japanese-influenced-english",
+      speechprintStrength: "light",
+      speechprintVariationSeed: "voice-28-japanese",
       elevenLabsVoiceId: "premium-id",
       pace: 0.2,
     });
     assert.equal(v3.v, 3);
     assert.equal(v3.local.archetypeId, "voice-28");
     assert.equal(v3.local.enginePreference, "voice-plus");
+    assert.deepEqual(v3.local.pronunciation, { base: "en-US" });
     assert.equal(v3.local.tone.openness, 0.35);
+    assert.deepEqual(v3.local.speechprint, {
+      influence: "japanese-influenced-english",
+      strength: "light",
+      variationSeed: "voice-28-japanese",
+    });
     assert.equal(v3.premium.voiceId, "premium-id");
     assert.equal(v3.delivery.pace, 0.2);
 
@@ -250,6 +266,54 @@ describe("audio voice normalization", () => {
     const compatible = parseStoredBotAudioVoiceProfileV1(serialized);
     assert.equal(compatible?.baseVoiceId, "voice-28");
     assert.equal(compatible?.localEnginePreference, "voice-plus");
+    assert.equal(compatible?.pronunciationBase, "en-US");
+  });
+
+  it("keeps genuine voice identity separate from an approximate pronunciation base", () => {
+    const american = normalizeBotAudioVoiceProfileV1({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      baseVoiceId: "voice-1",
+      pronunciationBase: "en-GB",
+    });
+    assert.equal(american.accentLocale, "en-US");
+    assert.equal(american.pronunciationBase, "en-GB");
+    assert.equal(
+      resolveLocalVoicePronunciationLocale(
+        american.pronunciationBase,
+        american.accentLocale,
+      ),
+      "en-GB",
+    );
+    assert.equal(
+      localVoicePronunciationOverrideIsActive(
+        american.pronunciationBase,
+        american.accentLocale,
+      ),
+      true,
+    );
+    assert.equal(
+      localVoicePronunciationOverrideIsActive("en-US", "en-US"),
+      false,
+    );
+    assert.equal(
+      normalizeBotAudioVoiceProfileV1({
+        ...american,
+        pronunciationBase: "unsupported",
+      }).pronunciationBase,
+      "follow-voice",
+    );
+  });
+
+  it("treats a portable voice as authoritative over stale legacy accent metadata", () => {
+    const profile = normalizeBotAudioVoiceProfileV1({
+      v: 2,
+      baseVoiceId: "voice-4",
+      accentLocale: "en-US",
+      accentMode: "approximate",
+    });
+    assert.equal(profile.accentLocale, "en-GB");
+    assert.equal(profile.speechprintInfluence, "none");
+    assert.equal(profile.speechprintVariationSeed, "natural-v1");
   });
   it("normalizes and round-trips a bounded looping avatar SFX profile", () => {
     const audioDataUrl = `data:audio/mpeg;base64,${Buffer.from("loop").toString("base64")}`;

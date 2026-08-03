@@ -15,6 +15,20 @@ import {
   type DebateStatus,
 } from "@localai/shared";
 
+export type DebateEvidenceSourcePropKind = "brave" | "url" | "scholar";
+
+/**
+ * Source provenance is encoded in stable evidence IDs so archived Debates can
+ * recover the same physical prop without expanding the frozen evidence schema.
+ */
+export function debateEvidenceSourcePropKind(
+  source: Pick<DebateEvidenceSourceV1, "id">,
+): DebateEvidenceSourcePropKind {
+  if (/^url-\d+$/u.test(source.id)) return "url";
+  if (/^scholar-\d+$/u.test(source.id)) return "scholar";
+  return "brave";
+}
+
 function canonicalDebateEvidenceUrl(value: string): string {
   try {
     const parsed = new URL(value.trim());
@@ -25,16 +39,20 @@ function canonicalDebateEvidenceUrl(value: string): string {
   }
 }
 
-function nextDebateEvidenceSourceId(usedIds: Set<string>): string {
+function nextDebateEvidenceSourceId(
+  usedIds: Set<string>,
+  requestedId: string,
+): string {
+  const prefix = requestedId.replace(/-\d+$/u, "") || "source";
   let index = 1;
-  while (usedIds.has(`brave-${index}`)) index += 1;
-  const id = `brave-${index}`;
+  while (usedIds.has(`${prefix}-${index}`)) index += 1;
+  const id = `${prefix}-${index}`;
   usedIds.add(id);
   return id;
 }
 
 /**
- * Existing evidence is locked in first. Later Brave searches only append
+ * Existing evidence is locked in first. Later source searches only append
  * distinct URLs into the packet's remaining source slots.
  */
 export function mergeDebateEvidenceSources(
@@ -53,7 +71,7 @@ export function mergeDebateEvidenceSources(
     if (!canonicalUrl || usedUrls.has(canonicalUrl)) continue;
 
     const id = usedIds.has(source.id)
-      ? nextDebateEvidenceSourceId(usedIds)
+      ? nextDebateEvidenceSourceId(usedIds, source.id)
       : source.id;
     usedIds.add(id);
     usedUrls.add(canonicalUrl);
@@ -85,7 +103,6 @@ export function debateRoomPresence(args: {
 }
 
 export interface DebateSessionRetryDraft {
-  setupMode: "basic" | "advanced";
   topic: string;
   format: DebateFormatId;
   formality: DebateFormalityId;
@@ -141,12 +158,6 @@ export function debateSessionRetryDraft(
     : currentPresetId;
 
   return {
-    setupMode:
-      session.format !== "forum" ||
-      session.playerRole !== "judge" ||
-      session.jury.enabled
-        ? "advanced"
-        : "basic",
     topic: session.motion.motion,
     format: session.format,
     formality: session.formality,
@@ -347,45 +358,4 @@ export function applyDebateSetupPreset<
         ? current.roleChecks
         : [],
   };
-}
-
-/** Studio screens that must be opened once before Start unlocks. */
-export const DEBATE_REQUIRED_SETUP_SCREENS = [
-  "motion",
-  "cast",
-  "evidence",
-] as const;
-
-export type DebateRequiredSetupScreen =
-  (typeof DEBATE_REQUIRED_SETUP_SCREENS)[number];
-
-export function isDebateRequiredSetupScreen(
-  panel: string,
-): panel is DebateRequiredSetupScreen {
-  return (DEBATE_REQUIRED_SETUP_SCREENS as readonly string[]).includes(panel);
-}
-
-/**
- * Start stays locked until Topic/Motion, Debaters/Cast, and Evidence have each
- * been opened at least once. Navigation itself stays free.
- */
-export function debateSetupScreensVisited(
-  visited: ReadonlySet<string> | readonly string[],
-): boolean {
-  const set = visited instanceof Set ? visited : new Set(visited);
-  return DEBATE_REQUIRED_SETUP_SCREENS.every((screen) => set.has(screen));
-}
-
-export function withDebateSetupScreenVisited(
-  visited: ReadonlySet<DebateRequiredSetupScreen>,
-  panel: string,
-): ReadonlySet<DebateRequiredSetupScreen> {
-  if (!isDebateRequiredSetupScreen(panel) || visited.has(panel)) return visited;
-  const next = new Set(visited);
-  next.add(panel);
-  return next;
-}
-
-export function initialDebateSetupScreensVisited(): ReadonlySet<DebateRequiredSetupScreen> {
-  return new Set<DebateRequiredSetupScreen>(["motion"]);
 }

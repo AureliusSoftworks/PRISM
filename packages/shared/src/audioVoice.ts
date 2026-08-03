@@ -79,6 +79,10 @@ export const BOT_AUDIO_VOICE_IDS = [
 ] as const;
 export type BotAudioVoiceId = (typeof BOT_AUDIO_VOICE_IDS)[number];
 
+export const LOCAL_VOICE_PRESENTATIONS = ["feminine", "masculine"] as const;
+export type LocalVoicePresentation =
+  (typeof LOCAL_VOICE_PRESENTATIONS)[number];
+
 /** PRISM's portable, always-local English voice pack. The engine voice IDs are
  * implementation details; profiles continue to persist only the stable
  * `voice-1` through `voice-12` identities. */
@@ -89,6 +93,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Heart",
     locale: "en-US",
     character: "Warm American",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-2",
@@ -96,6 +101,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Bella",
     locale: "en-US",
     character: "Rich American",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-3",
@@ -103,6 +109,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Michael",
     locale: "en-US",
     character: "Grounded American",
+    presentation: "masculine",
   },
   {
     voiceId: "voice-4",
@@ -110,6 +117,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Emma",
     locale: "en-GB",
     character: "Clear British",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-5",
@@ -117,6 +125,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "George",
     locale: "en-GB",
     character: "Measured British",
+    presentation: "masculine",
   },
   {
     voiceId: "voice-6",
@@ -124,6 +133,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Aoede",
     locale: "en-US",
     character: "Bright American",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-7",
@@ -131,6 +141,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Kore",
     locale: "en-US",
     character: "Composed American",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-8",
@@ -138,6 +149,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Nicole",
     locale: "en-US",
     character: "Smooth American",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-9",
@@ -145,6 +157,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Sarah",
     locale: "en-US",
     character: "Natural American",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-10",
@@ -152,6 +165,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Fenrir",
     locale: "en-US",
     character: "Deep American",
+    presentation: "masculine",
   },
   {
     voiceId: "voice-11",
@@ -159,6 +173,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Puck",
     locale: "en-US",
     character: "Lively American",
+    presentation: "masculine",
   },
   {
     voiceId: "voice-12",
@@ -166,6 +181,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Fable",
     locale: "en-GB",
     character: "Expressive British",
+    presentation: "masculine",
   },
   {
     voiceId: "voice-13",
@@ -173,6 +189,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Alloy",
     locale: "en-US",
     character: "Balanced American",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-14",
@@ -180,6 +197,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Jessica",
     locale: "en-US",
     character: "Confident American",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-15",
@@ -187,6 +205,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Nova",
     locale: "en-US",
     character: "Airy American",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-16",
@@ -194,6 +213,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "River",
     locale: "en-US",
     character: "Relaxed American",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-17",
@@ -201,6 +221,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Sky",
     locale: "en-US",
     character: "Light American",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-18",
@@ -208,6 +229,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Adam",
     locale: "en-US",
     character: "Direct American",
+    presentation: "masculine",
   },
   {
     voiceId: "voice-19",
@@ -215,6 +237,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Echo",
     locale: "en-US",
     character: "Resonant American",
+    presentation: "masculine",
   },
   {
     voiceId: "voice-20",
@@ -222,6 +245,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Eric",
     locale: "en-US",
     character: "Natural American",
+    presentation: "masculine",
   },
   {
     voiceId: "voice-21",
@@ -229,6 +253,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Liam",
     locale: "en-US",
     character: "Clear American",
+    presentation: "masculine",
   },
   {
     voiceId: "voice-22",
@@ -236,6 +261,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Onyx",
     locale: "en-US",
     character: "Weighty American",
+    presentation: "masculine",
   },
   {
     voiceId: "voice-23",
@@ -243,6 +269,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Santa",
     locale: "en-US",
     character: "Round American",
+    presentation: "masculine",
   },
   {
     voiceId: "voice-24",
@@ -250,6 +277,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Alice",
     locale: "en-GB",
     character: "Poised British",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-25",
@@ -257,6 +285,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Isabella",
     locale: "en-GB",
     character: "Warm British",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-26",
@@ -264,6 +293,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Lily",
     locale: "en-GB",
     character: "Gentle British",
+    presentation: "feminine",
   },
   {
     voiceId: "voice-27",
@@ -271,6 +301,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Daniel",
     locale: "en-GB",
     character: "Assured British",
+    presentation: "masculine",
   },
   {
     voiceId: "voice-28",
@@ -278,6 +309,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
     name: "Lewis",
     locale: "en-GB",
     character: "Conversational British",
+    presentation: "masculine",
   },
 ] as const satisfies ReadonlyArray<{
   voiceId: BotAudioVoiceId;
@@ -285,6 +317,7 @@ export const PRISM_BUILTIN_ENGLISH_VOICES = [
   name: string;
   locale: string;
   character: string;
+  presentation: LocalVoicePresentation;
 }>;
 
 export type PrismBuiltinEnglishVoice =
@@ -363,6 +396,10 @@ export interface BotAudioVoiceProfileV2 {
   localReferenceId?: string | null;
   accentLocale?: string | null;
   accentMode?: LocalVoiceAccentMode;
+  pronunciationBase?: LocalVoicePronunciationBase;
+  speechprintInfluence?: LocalVoiceSpeechprintInfluence;
+  speechprintStrength?: LocalVoiceSpeechprintStrength;
+  speechprintVariationSeed?: string;
   pace: number;
   lilt: number;
   bottishTone: number;
@@ -393,6 +430,44 @@ export type LocalVoiceSource = (typeof LOCAL_VOICE_SOURCES)[number];
 export const LOCAL_VOICE_ACCENT_MODES = ["prefer-genuine", "approximate"] as const;
 export type LocalVoiceAccentMode = (typeof LOCAL_VOICE_ACCENT_MODES)[number];
 
+export const LOCAL_VOICE_PRONUNCIATION_BASES = [
+  "follow-voice",
+  "en-US",
+  "en-GB",
+] as const;
+export type LocalVoicePronunciationBase =
+  (typeof LOCAL_VOICE_PRONUNCIATION_BASES)[number];
+
+export const LOCAL_VOICE_SPEECHPRINT_INFLUENCES = [
+  "none",
+  "spanish-influenced-english",
+  "brazilian-portuguese-influenced-english",
+  "mandarin-influenced-english",
+  "japanese-influenced-english",
+  "korean-influenced-english",
+  "indian-english",
+  "french-influenced-english",
+  "german-influenced-english",
+  "russian-influenced-english",
+] as const;
+export type LocalVoiceSpeechprintInfluence =
+  (typeof LOCAL_VOICE_SPEECHPRINT_INFLUENCES)[number];
+
+export const LOCAL_VOICE_SPEECHPRINT_STRENGTHS = [
+  "light",
+  "balanced",
+  "strong",
+] as const;
+export type LocalVoiceSpeechprintStrength =
+  (typeof LOCAL_VOICE_SPEECHPRINT_STRENGTHS)[number];
+
+export interface LocalVoiceSpeechprintV1 {
+  influence: LocalVoiceSpeechprintInfluence;
+  strength: LocalVoiceSpeechprintStrength;
+  /** Opaque portable seed for stable character-specific optional rules. */
+  variationSeed: string;
+}
+
 export interface BotLocalVoiceToneV1 {
   pitch: number;
   warmth: number;
@@ -413,6 +488,10 @@ export interface BotLocalVoiceProfileV1 {
     locale: string;
     mode: LocalVoiceAccentMode;
   };
+  pronunciation?: {
+    base: LocalVoicePronunciationBase;
+  };
+  speechprint: LocalVoiceSpeechprintV1;
   tone: BotLocalVoiceToneV1;
 }
 
@@ -469,7 +548,7 @@ export type BotAudioVoiceProfile =
   | BotAudioVoiceProfileV3;
 
 /** Backwards-compatible exported name used by the Phase 1 call sites. New
- * persistence always writes v2 through serializeBotAudioVoiceProfileV1. */
+ * persistence writes V3 through serializeBotAudioVoiceProfileV1. */
 export type BotAudioVoiceProfileV1 = BotAudioVoiceProfile;
 export type NormalizedBotAudioVoiceProfileV1 = BotAudioVoiceProfileV2;
 
@@ -795,6 +874,10 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2
   localVoiceSource: "portable",
   accentLocale: "en-US",
   accentMode: "prefer-genuine",
+  pronunciationBase: "follow-voice",
+  speechprintInfluence: "none",
+  speechprintStrength: "balanced",
+  speechprintVariationSeed: "natural-v1",
   pace: 0,
   lilt: 0,
   bottishTone: 0.45,
@@ -811,6 +894,12 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3: Readonly<BotAudioVoiceProfileV3
     source: "portable",
     archetypeId: "voice-1",
     accent: { locale: "en-US", mode: "prefer-genuine" },
+    pronunciation: { base: "follow-voice" },
+    speechprint: {
+      influence: "none",
+      strength: "balanced",
+      variationSeed: "natural-v1",
+    },
     tone: {
       pitch: 0,
       warmth: 0,
@@ -881,6 +970,97 @@ export function normalizeLocalVoiceAccentLocale(
   return /^en(?:-[a-z0-9]{2,8}){1,2}$/iu.test(normalized)
     ? normalized
     : fallback;
+}
+
+export function normalizeLocalVoicePronunciationBase(
+  value: unknown,
+  fallback: LocalVoicePronunciationBase = "follow-voice",
+): LocalVoicePronunciationBase {
+  return typeof value === "string" &&
+    (LOCAL_VOICE_PRONUNCIATION_BASES as readonly string[]).includes(value)
+    ? (value as LocalVoicePronunciationBase)
+    : fallback;
+}
+
+export function resolveLocalVoicePronunciationLocale(
+  pronunciationBase: unknown,
+  genuineLocale: unknown,
+): "en-US" | "en-GB" {
+  const sourceLocale = normalizeLocalVoiceAccentLocale(genuineLocale, "en-US");
+  const base = normalizeLocalVoicePronunciationBase(pronunciationBase);
+  if (base === "en-US" || base === "en-GB") return base;
+  return sourceLocale.toLowerCase() === "en-gb" ? "en-GB" : "en-US";
+}
+
+export function localVoicePronunciationOverrideIsActive(
+  pronunciationBase: unknown,
+  genuineLocale: unknown,
+): boolean {
+  const base = normalizeLocalVoicePronunciationBase(pronunciationBase);
+  return base !== "follow-voice" &&
+    resolveLocalVoicePronunciationLocale(base, genuineLocale) !==
+      resolveLocalVoicePronunciationLocale("follow-voice", genuineLocale);
+}
+
+export function normalizeLocalVoiceSpeechprintInfluence(
+  value: unknown,
+  fallback: LocalVoiceSpeechprintInfluence = "none",
+): LocalVoiceSpeechprintInfluence {
+  return typeof value === "string" &&
+    (LOCAL_VOICE_SPEECHPRINT_INFLUENCES as readonly string[]).includes(value)
+    ? (value as LocalVoiceSpeechprintInfluence)
+    : fallback;
+}
+
+export function normalizeLocalVoiceSpeechprintStrength(
+  value: unknown,
+  fallback: LocalVoiceSpeechprintStrength = "balanced",
+): LocalVoiceSpeechprintStrength {
+  return typeof value === "string" &&
+    (LOCAL_VOICE_SPEECHPRINT_STRENGTHS as readonly string[]).includes(value)
+    ? (value as LocalVoiceSpeechprintStrength)
+    : fallback;
+}
+
+export function normalizeLocalVoiceSpeechprintVariationSeed(
+  value: unknown,
+  fallback = "natural-v1",
+): string {
+  if (typeof value !== "string") return fallback;
+  const normalized = value.trim().slice(0, 64);
+  return /^[a-z0-9][a-z0-9_-]{0,63}$/iu.test(normalized)
+    ? normalized
+    : fallback;
+}
+
+export function normalizeLocalVoiceSpeechprintV1(
+  value: unknown,
+  fallback: LocalVoiceSpeechprintV1 = {
+    influence: "none",
+    strength: "balanced",
+    variationSeed: "natural-v1",
+  },
+): LocalVoiceSpeechprintV1 {
+  const record = voiceProfileObject(value);
+  const influence = normalizeLocalVoiceSpeechprintInfluence(
+    record.influence,
+    fallback.influence,
+  );
+  return {
+    influence,
+    strength: normalizeLocalVoiceSpeechprintStrength(
+      record.strength,
+      fallback.strength,
+    ),
+    variationSeed: normalizeLocalVoiceSpeechprintVariationSeed(
+      record.variationSeed,
+      influence === "none"
+        ? "natural-v1"
+        : fallback.influence === influence
+          ? fallback.variationSeed
+          : `speechprint-${influence}`.slice(0, 64),
+    ),
+  };
 }
 
 export function normalizeVoiceMode(value: unknown, fallback = DEFAULT_VOICE_MODE): VoiceMode {
@@ -1029,6 +1209,8 @@ function flattenBotAudioVoiceProfileV3Record(
   const premium = voiceProfileObject(value.premium);
   const delivery = voiceProfileObject(value.delivery);
   const accent = voiceProfileObject(local.accent);
+  const pronunciation = voiceProfileObject(local.pronunciation);
+  const speechprint = voiceProfileObject(local.speechprint);
   const tone = voiceProfileObject(local.tone);
   return {
     v: 2,
@@ -1053,6 +1235,10 @@ function flattenBotAudioVoiceProfileV3Record(
     localReferenceId: local.referenceId,
     accentLocale: accent.locale,
     accentMode: accent.mode,
+    pronunciationBase: pronunciation.base,
+    speechprintInfluence: speechprint.influence,
+    speechprintStrength: speechprint.strength,
+    speechprintVariationSeed: speechprint.variationSeed,
     pace: delivery.pace,
     lilt: delivery.lilt,
     bottishTone: value.bottishTone,
@@ -1111,12 +1297,21 @@ export function normalizeBotAudioVoiceProfileV1(
   const avatarSfxMuted = record.avatarSfxMuted === undefined
     ? fallbackProfile.avatarSfxMuted === true
     : record.avatarSfxMuted === true;
+  const baseVoiceId = isBotAudioVoiceId(record.baseVoiceId)
+    ? record.baseVoiceId
+    : fallbackProfile.baseVoiceId;
+  const localVoiceSource = normalizeLocalVoiceSource(
+    record.localVoiceSource,
+    fallbackProfile.localVoiceSource ?? "portable",
+  );
+  const speechprintInfluence = normalizeLocalVoiceSpeechprintInfluence(
+    record.speechprintInfluence,
+    fallbackProfile.speechprintInfluence ?? "none",
+  );
   return {
     v: 2,
     enabled: legacy ? true : record.enabled !== false,
-    baseVoiceId: isBotAudioVoiceId(record.baseVoiceId)
-      ? record.baseVoiceId
-      : fallbackProfile.baseVoiceId,
+    baseVoiceId,
     ...(systemVoiceName ? { systemVoiceName } : {}),
     ...(elevenLabsVoiceId ? { elevenLabsVoiceId } : {}),
     ...(elevenLabsVoiceIdOverride ? { elevenLabsVoiceIdOverride } : {}),
@@ -1147,10 +1342,7 @@ export function normalizeBotAudioVoiceProfileV1(
       record.localEnginePreference,
       fallbackProfile.localEnginePreference ?? "inherit",
     ),
-    localVoiceSource: normalizeLocalVoiceSource(
-      record.localVoiceSource,
-      fallbackProfile.localVoiceSource ?? "portable",
-    ),
+    localVoiceSource,
     ...(normalizeOptionalVoiceSelection(
       record.localReferenceId,
       fallbackProfile.localReferenceId ?? null,
@@ -1163,16 +1355,31 @@ export function normalizeBotAudioVoiceProfileV1(
         }
       : {}),
     accentLocale: normalizeLocalVoiceAccentLocale(
-      record.accentLocale,
-      prismBuiltinEnglishVoice(
-        isBotAudioVoiceId(record.baseVoiceId)
-          ? record.baseVoiceId
-          : fallbackProfile.baseVoiceId,
-      ).locale,
+      localVoiceSource === "portable" && !systemVoiceName
+        ? prismBuiltinEnglishVoice(baseVoiceId).locale
+        : record.accentLocale,
+      prismBuiltinEnglishVoice(baseVoiceId).locale,
     ),
     accentMode: normalizeLocalVoiceAccentMode(
       record.accentMode,
       fallbackProfile.accentMode ?? "prefer-genuine",
+    ),
+    pronunciationBase: normalizeLocalVoicePronunciationBase(
+      record.pronunciationBase,
+      fallbackProfile.pronunciationBase ?? "follow-voice",
+    ),
+    speechprintInfluence,
+    speechprintStrength: normalizeLocalVoiceSpeechprintStrength(
+      record.speechprintStrength,
+      fallbackProfile.speechprintStrength ?? "balanced",
+    ),
+    speechprintVariationSeed: normalizeLocalVoiceSpeechprintVariationSeed(
+      record.speechprintVariationSeed,
+      speechprintInfluence === "none"
+        ? "natural-v1"
+        : fallbackProfile.speechprintInfluence === speechprintInfluence
+          ? fallbackProfile.speechprintVariationSeed
+          : `speechprint-${speechprintInfluence}`.slice(0, 64),
     ),
     pace: normalizeBotAudioVoiceControl(record.pace, fallbackProfile.pace),
     lilt: normalizeBotAudioVoiceControl(record.lilt, fallbackProfile.lilt),
@@ -1240,10 +1447,28 @@ function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): Bot
           }
         : {}),
       accentLocale: normalizeLocalVoiceAccentLocale(
-        value.accentLocale,
+        normalizeLocalVoiceSource(value.localVoiceSource) === "portable" &&
+          !value.systemVoiceName
+          ? prismBuiltinEnglishVoice(value.baseVoiceId).locale
+          : value.accentLocale,
         prismBuiltinEnglishVoice(value.baseVoiceId).locale,
       ),
       accentMode: normalizeLocalVoiceAccentMode(value.accentMode),
+      pronunciationBase: normalizeLocalVoicePronunciationBase(
+        value.pronunciationBase,
+      ),
+      speechprintInfluence: normalizeLocalVoiceSpeechprintInfluence(
+        value.speechprintInfluence,
+      ),
+      speechprintStrength: normalizeLocalVoiceSpeechprintStrength(
+        value.speechprintStrength,
+      ),
+      speechprintVariationSeed: normalizeLocalVoiceSpeechprintVariationSeed(
+        value.speechprintVariationSeed,
+        value.speechprintInfluence && value.speechprintInfluence !== "none"
+          ? `speechprint-${value.speechprintInfluence}`.slice(0, 64)
+          : "natural-v1",
+      ),
       gainDb: normalizeBotVoiceGainDb(value.gainDb),
       texture: botVoiceTextureForPreset("clean"),
       ...(avatarSfx ? { avatarSfx } : {}),
@@ -1310,6 +1535,16 @@ export function normalizeBotAudioVoiceProfileV3(
         ),
         mode: normalizeLocalVoiceAccentMode(profile.accentMode),
       },
+      pronunciation: {
+        base: normalizeLocalVoicePronunciationBase(
+          profile.pronunciationBase,
+        ),
+      },
+      speechprint: normalizeLocalVoiceSpeechprintV1({
+        influence: profile.speechprintInfluence,
+        strength: profile.speechprintStrength,
+        variationSeed: profile.speechprintVariationSeed,
+      }),
       tone: {
         pitch: normalizeBotAudioVoiceControl(profile.pitch),
         warmth: normalizeBotAudioVoiceControl(profile.warmth),

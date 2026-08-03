@@ -93,20 +93,16 @@ import {
   copyDebateMotionSlate,
   applyDebateSetupPreset,
   debateAlignmentPreviewCast,
+  debateEvidenceSourcePropKind,
   debateMotionRevealState,
   debatePlayerJudgePrefilledCast,
   debateRoomPresence,
-  debateSetupScreensVisited,
   debateSessionRetryDraft,
   derivedDebateSetupPresetId,
-  initialDebateSetupScreensVisited,
-  isDebateRequiredSetupScreen,
   mergeDebateEvidenceSources,
   randomDebateCast,
   randomDebatePlayerJudgeCast,
-  withDebateSetupScreenVisited,
   type DebateCastSelection,
-  type DebateRequiredSetupScreen,
 } from "./debateExperienceState";
 import {
   debateAudienceBotCount,
@@ -142,7 +138,6 @@ import {
   debateJuryPresentationKeepsForumCamera,
   type DebateJuryCameraPresentationV1,
 } from "./debateJuryCamera";
-import { randomDebateEvidenceQuery } from "./debateEvidenceRandomizer";
 import {
   debateUrlEvidenceSourceFromDraft,
   emptyDebateUrlEvidenceDraft,
@@ -152,8 +147,8 @@ import {
   DEBATE_EVIDENCE_EMOJI_CHOICES,
   applyDebateEvidenceExhibitAssetReuse,
   applyDebateEvidenceObjectNameEdit,
-  debateEvidenceEmojiForObject,
   debateEvidenceObjectFromPrismCandidate,
+  emptyDebateEvidenceObjectDraft,
   nextDebateEvidenceExhibitId,
   randomDebateEvidenceObject,
   searchDebateEvidenceEmojis,
@@ -483,7 +478,6 @@ export interface DebateJudgeComposerRenderProps {
 
 type DebateView = "dashboard" | "live";
 type DebateStudioPanel = "motion" | "cast" | "evidence" | "archive";
-type DebateSetupMode = "basic" | "advanced";
 const DEBATE_ROWDINESS_SPECTRUM = [...DEBATE_FORMALITY_SPECTRUM].reverse();
 type DebateCastSlot = "moderator" | "forAdvocate" | "againstAdvocate";
 type DebateCameraView = "wide" | "left" | "moderator" | "right" | "jury";
@@ -2553,6 +2547,9 @@ function DebateEvidencePedestal({
   const lastPlacedEvidenceIdRef = useRef<string | null>(null);
   const exhibit = item.kind === "exhibit" ? item.value : null;
   const evidenceSource = item.kind === "source" ? item.value : null;
+  const evidenceSourcePropKind = evidenceSource
+    ? debateEvidenceSourcePropKind(evidenceSource)
+    : null;
   const title = item.value.title;
   const propRotationDeg = debateEvidencePropRotationDeg(item.value.id);
 
@@ -2614,8 +2611,19 @@ function DebateEvidencePedestal({
             className={styles.evidencePedestalDocument}
             aria-hidden="true"
             data-debate-evidence-document="true"
-            data-prop="document"
+            data-source-kind={evidenceSourcePropKind ?? undefined}
+            data-prop={
+              evidenceSourcePropKind === "url"
+                ? "envelope"
+                : evidenceSourcePropKind === "scholar"
+                  ? "folio"
+                  : "clipping"
+            }
           >
+            <span
+              className={styles.evidencePedestalDocumentHardware}
+              aria-hidden="true"
+            />
             {evidenceSource ? (
               <span className={styles.evidencePedestalDocumentDetails}>
                 <span className={styles.evidencePedestalDocumentOrigin}>
@@ -2640,18 +2648,10 @@ function DebateEvidenceDrawer({
   item,
   closeButtonRef,
   onClose,
-  canStart = false,
-  startBusy = false,
-  startLabel = "Start Debate",
-  onStart,
 }: {
   item: DebateEvidenceItemV1;
   closeButtonRef: RefObject<HTMLButtonElement | null>;
   onClose: () => void;
-  canStart?: boolean;
-  startBusy?: boolean;
-  startLabel?: string;
-  onStart?: () => void;
 }): React.JSX.Element {
   const source = item.kind === "source" ? item.value : null;
   const exhibit = item.kind === "exhibit" ? item.value : null;
@@ -2691,16 +2691,6 @@ function DebateEvidenceDrawer({
         <a href={source.url} target="_blank" rel="noreferrer">
           Open original source
         </a>
-      ) : null}
-      {canStart && onStart ? (
-        <button
-          type="button"
-          className={styles.primaryButton}
-          disabled={startBusy}
-          onClick={onStart}
-        >
-          {startBusy ? "Opening…" : startLabel}
-        </button>
       ) : null}
     </aside>
   );
@@ -2859,11 +2849,11 @@ export function DebateExperience(
   const [observerPerspective, setObserverPerspective] = useState<
     "live" | "replay"
   >("live");
-  const [setupMode, setSetupMode] = useState<DebateSetupMode>("basic");
   const [studioPanel, setStudioPanel] = useState<DebateStudioPanel>("motion");
-  const [visitedSetupScreens, setVisitedSetupScreens] = useState<
-    ReadonlySet<DebateRequiredSetupScreen>
-  >(initialDebateSetupScreensVisited());
+  const [roomTuningOpen, setRoomTuningOpen] = useState(false);
+  const [motionTuningOpen, setMotionTuningOpen] = useState(false);
+  const [castTuningOpen, setCastTuningOpen] = useState(false);
+  const [evidenceDecisionMade, setEvidenceDecisionMade] = useState(false);
   const [sessions, setSessions] = useState<DebateSessionListItemV1[]>([]);
   const [activeSession, setActiveSession] = useState<DebateSessionV1 | null>(
     null,
@@ -2979,7 +2969,7 @@ export function DebateExperience(
   const [evidence, setEvidence] =
     useState<DebateEvidencePacketV1>(EMPTY_EVIDENCE);
   const [researchQuery, setResearchQuery] = useState("");
-  const [evidenceGenerating, setEvidenceGenerating] = useState(false);
+  const [scholarQuery, setScholarQuery] = useState("");
   const [urlEvidenceDraft, setUrlEvidenceDraft] =
     useState<DebateUrlEvidenceDraft | null>(null);
   const [urlEvidenceInspecting, setUrlEvidenceInspecting] = useState(false);
@@ -3055,12 +3045,6 @@ export function DebateExperience(
   useEffect(() => {
     activeSessionIdRef.current = activeSession?.id ?? null;
   }, [activeSession?.id]);
-  useEffect(() => {
-    if (!isDebateRequiredSetupScreen(studioPanel)) return;
-    setVisitedSetupScreens((current) =>
-      withDebateSetupScreenVisited(current, studioPanel),
-    );
-  }, [studioPanel]);
   const [liveReveal, setLiveRevealState] = useState<DebateLiveReveal | null>(
     null,
   );
@@ -4391,20 +4375,16 @@ export function DebateExperience(
   const expectedRoleCheckCount = playerRole === "participant" ? 1 : 2;
   const roleChecksComplete =
     roleChecks.length === expectedRoleCheckCount && declinedChecks.length === 0;
-  const setupScreensComplete = debateSetupScreensVisited(visitedSetupScreens);
   const debateCanStart =
     motionComplete &&
     castComplete &&
     roleChecksComplete &&
-    setupScreensComplete &&
+    evidenceDecisionMade &&
     !(playerRole === "participant" && format !== "forum");
   const selectedPreset = DEBATE_SETUP_PRESETS.find(
     (preset) => preset.id === selectedPresetId,
   )!;
   const formalityDescriptor = debateFormalityDescriptor(formality);
-  const formalityIndex = DEBATE_FORMALITY_SPECTRUM.findIndex(
-    (level) => level.id === formality,
-  );
   const rowdinessIndex = DEBATE_ROWDINESS_SPECTRUM.findIndex(
     (level) => level.id === formality,
   );
@@ -4429,7 +4409,7 @@ export function DebateExperience(
     motionComplete,
     castComplete,
     roleChecksComplete,
-    setupScreensComplete,
+    evidenceDecisionMade,
   ].filter(Boolean).length;
   const debateCompanionBotIds = useMemo(
     () =>
@@ -4447,7 +4427,6 @@ export function DebateExperience(
   );
   const debateCompanionDraft = useMemo<PrismCompanionDebateDraft>(
     () => ({
-      setupMode,
       studioPanel,
       format,
       formality,
@@ -4482,7 +4461,6 @@ export function DebateExperience(
       motion.motion,
       playerRole,
       playerSideId,
-      setupMode,
       studioPanel,
       topic,
     ],
@@ -4548,7 +4526,10 @@ export function DebateExperience(
   const startNewDebate = (): void => {
     setView("dashboard");
     setStudioPanel("motion");
-    setVisitedSetupScreens(initialDebateSetupScreensVisited());
+    setRoomTuningOpen(false);
+    setMotionTuningOpen(false);
+    setCastTuningOpen(false);
+    setEvidenceDecisionMade(false);
     setActiveSession(null);
     setDebriefTargetBotId(null);
     setDebriefMessages([]);
@@ -4560,11 +4541,9 @@ export function DebateExperience(
     setFormat("forum");
     setForumRoundMode("auto");
     setForumRoundCount(1);
-    setFormality(setupMode === "basic" ? "plainspoken" : "parliamentary");
+    setFormality("plainspoken");
     setModeratorTitle("Moderator");
-    setSelectedPresetId(
-      setupMode === "basic" ? "public-forum" : "classic-duel",
-    );
+    setSelectedPresetId("public-forum");
     setSlates([]);
     setMotion(EMPTY_SLATE);
     setCast(debatePlayerJudgePrefilledCast(props.initialBotIds));
@@ -4577,25 +4556,13 @@ export function DebateExperience(
     setRoleChecks([]);
     setEvidence(EMPTY_EVIDENCE);
     setResearchQuery("");
+    setScholarQuery("");
     setPlayerDraft("");
     setTurnaboutObjecting(false);
     setTurnaboutEvidenceSourceId("");
     setSetupRestoreLoadingId(null);
     setSetupRestoreNotice(null);
     setError(null);
-  };
-
-  const chooseSetupMode = (nextMode: DebateSetupMode): void => {
-    if (nextMode === setupMode) return;
-    setSetupMode(nextMode);
-    if (nextMode === "advanced") return;
-    setFormat("forum");
-    setForumRoundMode("auto");
-    setSelectedPresetId("public-forum");
-    setPlayerRole("judge");
-    setActiveCastSlot("forAdvocate");
-    setJuryEnabled(false);
-    setRoleChecks([]);
   };
 
   const chooseFormality = (nextFormality: DebateFormalityId): void => {
@@ -5284,16 +5251,14 @@ export function DebateExperience(
     setActiveCastSlot(cast.moderator ? nextOpponentSlot : "moderator");
   };
 
-  const research = async (
-    queryOverride?: string,
-    generated = false,
-  ): Promise<void> => {
-    const query = (queryOverride ?? researchQuery).trim();
+  const research = async (sourceType: "web" | "scholar"): Promise<void> => {
+    const query = (
+      sourceType === "scholar" ? scholarQuery : researchQuery
+    ).trim();
     if (!query || props.responseMode === "local" || evidenceItemLimitReached) {
       return;
     }
     setBusy(true);
-    setEvidenceGenerating(generated);
     setError(null);
     try {
       const result = await props.request<{
@@ -5302,6 +5267,7 @@ export function DebateExperience(
         "/api/debates/research",
         requestBody({
           query,
+          sourceType,
           preferredProvider: props.preferredProvider,
           responseMode: props.responseMode,
         }),
@@ -5324,19 +5290,8 @@ export function DebateExperience(
         caught instanceof Error ? caught.message : "Research was unavailable.",
       );
     } finally {
-      setEvidenceGenerating(false);
       setBusy(false);
     }
-  };
-
-  const generateEvidence = async (): Promise<void> => {
-    const query = randomDebateEvidenceQuery(motion.motion, topic);
-    if (!query) {
-      setError("Shape the motion before generating evidence.");
-      return;
-    }
-    setResearchQuery(query);
-    await research(query, true);
   };
 
   const inspectUrlEvidence = async (): Promise<void> => {
@@ -5442,7 +5397,7 @@ export function DebateExperience(
     };
   }, [evidenceObjectEditorOpen, loadEvidenceExhibitAssets]);
 
-  const beginEvidenceObject = async (): Promise<void> => {
+  const beginEvidenceObject = (): void => {
     if (
       evidenceItemLimitReached ||
       evidenceObjectSuggestionBusy ||
@@ -5450,32 +5405,74 @@ export function DebateExperience(
     ) {
       return;
     }
-    const rejectedTitles = (evidence.exhibits ?? []).map(
-      (exhibit) => exhibit.title,
-    );
     setEvidenceEmojiSearchOpen(false);
-    setEvidenceObjectSuggestionBusy(true);
+    setEvidenceObjectDraft(emptyDebateEvidenceObjectDraft());
     setError(null);
-    try {
-      const candidate = await generateDebateRefractField(
-        "debate.setup.exhibitPair",
-        "",
-        rejectedTitles,
-        new AbortController().signal,
-      );
-      const contextualDraft = debateEvidenceObjectFromPrismCandidate(candidate);
-      if (!contextualDraft) {
-        throw new Error("Prism returned an incomplete exhibit.");
-      }
-      setEvidenceObjectDraft(contextualDraft);
-    } catch {
-      setEvidenceObjectDraft(
-        randomDebateEvidenceObject(Math.random, rejectedTitles),
-      );
-    } finally {
-      setEvidenceObjectSuggestionBusy(false);
-    }
   };
+
+  const refractEvidenceObject = useCallback(
+    async (direction = ""): Promise<void> => {
+      if (
+        evidenceItemLimitReached ||
+        evidenceObjectSuggestionBusy ||
+        evidenceObjectVisualBusy
+      ) {
+        return;
+      }
+      const rejectedTitles = (evidence.exhibits ?? []).map(
+        (exhibit) => exhibit.title,
+      );
+      setEvidenceEmojiSearchOpen(false);
+      setEvidenceObjectSuggestionBusy(true);
+      setError(null);
+      try {
+        const candidate = await generateDebateRefractField(
+          "debate.setup.exhibitPair",
+          direction,
+          rejectedTitles,
+          new AbortController().signal,
+        );
+        const contextualDraft =
+          debateEvidenceObjectFromPrismCandidate(candidate);
+        if (!contextualDraft) {
+          throw new Error("Prism returned an incomplete exhibit.");
+        }
+        setEvidenceObjectDraft(contextualDraft);
+      } catch {
+        setEvidenceObjectDraft(
+          randomDebateEvidenceObject(Math.random, rejectedTitles),
+        );
+      } finally {
+        setEvidenceObjectSuggestionBusy(false);
+      }
+    },
+    [
+      evidence.exhibits,
+      evidenceItemLimitReached,
+      evidenceObjectSuggestionBusy,
+      evidenceObjectVisualBusy,
+      generateDebateRefractField,
+    ],
+  );
+
+  const evidenceObjectMagic = useMemo<PrismRefractMagicTarget>(
+    () => ({
+      id: "debate:refract-evidence-object",
+      label: "a contextual object exhibit",
+      kind: "magic",
+      disabled: () =>
+        evidenceItemLimitReached ||
+        evidenceObjectSuggestionBusy ||
+        evidenceObjectVisualBusy !== null,
+      run: (direction) => refractEvidenceObject(direction),
+    }),
+    [
+      evidenceItemLimitReached,
+      evidenceObjectSuggestionBusy,
+      evidenceObjectVisualBusy,
+      refractEvidenceObject,
+    ],
+  );
 
   const selectEvidenceExhibitAsset = (asset: DebateExhibitAsset): void => {
     if (evidenceObjectVisualBusy) return;
@@ -6889,8 +6886,10 @@ export function DebateExperience(
       setObserverPerspective("live");
       setView("dashboard");
       setStudioPanel("motion");
-      setVisitedSetupScreens(initialDebateSetupScreensVisited());
-      setSetupMode(draft.setupMode);
+      setRoomTuningOpen(false);
+      setMotionTuningOpen(false);
+      setCastTuningOpen(draft.playerRole !== "judge" || draft.juryEnabled);
+      setEvidenceDecisionMade(false);
       setTopic(draft.topic);
       setFormat(draft.format);
       setForumRoundMode(draft.forumRoundMode);
@@ -6918,6 +6917,7 @@ export function DebateExperience(
       setCastPickerSearch("");
       setCastPickerGroupId("all");
       setResearchQuery("");
+      setScholarQuery("");
       setUrlEvidenceDraft(null);
       setUrlEvidenceError(null);
       setEvidenceObjectDraft(null);
@@ -6929,8 +6929,8 @@ export function DebateExperience(
       setTurnaboutEvidenceSourceId("");
       setSetupRestoreNotice(
         draft.missingBotNames.length > 0
-          ? `Setup restored. The original proceeding is unchanged. Reassign unavailable Library bots: ${draft.missingBotNames.join(", ")}. Review every setup screen and run a fresh willingness check; your current model and routing stay selected.`
-          : "Setup restored. The original proceeding is unchanged. Review every setup screen and run a fresh willingness check; your current model and routing stay selected.",
+          ? `Setup restored. The original proceeding is unchanged. Reassign unavailable Library bots: ${draft.missingBotNames.join(", ")}. Review the motion, cast, and evidence choice, then run a fresh willingness check; your current model and routing stay selected.`
+          : "Setup restored. The original proceeding is unchanged. Review the motion, cast, and evidence choice, then run a fresh willingness check; your current model and routing stay selected.",
       );
     } catch (caught) {
       setError(
@@ -8092,9 +8092,7 @@ export function DebateExperience(
           lifecyclePath,
           requestBody({
             expectedRevision: session.revision,
-            idempotencyKey: nextMutationKey(
-              resume ? "resume" : "pause",
-            ),
+            idempotencyKey: nextMutationKey(resume ? "resume" : "pause"),
             ...(!resume ? { presentationEventId: replayEventId } : {}),
           }),
         );
@@ -8134,8 +8132,7 @@ export function DebateExperience(
       if (resume) {
         if (mountedRef.current) setBusy(false);
         const pausedPresentationEvent = result.session.events.find(
-          (event) =>
-            event.id === result.session.pausedPresentationEventId,
+          (event) => event.id === result.session.pausedPresentationEventId,
         );
         if (pausedPresentationEvent) {
           await adoptSession(
@@ -8652,12 +8649,8 @@ export function DebateExperience(
         data-ready={debateCanStart ? "true" : undefined}
       >
         <header>
-          <span>
-            {setupMode === "basic"
-              ? "Debate preview"
-              : `${debateProductionName(format, formality)} schematic`}
-          </span>
-          <strong>{readinessCount}/4 locked</strong>
+          <span>{debateProductionName(format, formality)} chamber</span>
+          <strong>{format === "turnabout" ? "Turnabout" : "Forum"}</strong>
         </header>
         <div className={styles.forumCircuit}>
           <span className={styles.forumBeam} aria-hidden="true" />
@@ -8688,17 +8681,14 @@ export function DebateExperience(
           </span>
         </div>
         <p>{motion.motion || "The motion is not ready yet."}</p>
-        {setupMode === "advanced" ? (
-          <small className={styles.formatReadout}>
-            {format === "turnabout"
-              ? "Two pressable statements per side · frozen evidence only"
-              : `Openings · challenges · ${forumRoundPlan.count} rebuttal ${forumRoundPlan.count === 1 ? "round" : "rounds"} · closings`}
-          </small>
-        ) : (
-          <small className={styles.formatReadout}>
-            {formalityDescriptor.title} Forum · you make the final call
-          </small>
-        )}
+        <small className={styles.formatReadout}>
+          {formalityDescriptor.title} ·{" "}
+          {roleSummary(playerRole, format, formality)}
+          {format === "turnabout"
+            ? " · action-driven"
+            : ` · ${forumRoundMode === "auto" ? "Auto" : forumRoundPlan.count} ${forumRoundPlan.count === 1 ? "round" : "rounds"}`}
+          {juryEnabled ? " · Jury on" : " · Jury off"}
+        </small>
       </section>
     );
   };
@@ -8708,7 +8698,6 @@ export function DebateExperience(
       className={`${styles.lobby} ${styles.dashboard}`}
       data-debate-surface="dashboard"
       data-debate-format={format}
-      data-debate-setup-mode={setupMode}
       data-theme={props.theme}
     >
       <header className={styles.lobbyHeader}>
@@ -8723,30 +8712,11 @@ export function DebateExperience(
           <p className={styles.eyebrow}>PRISM / Debate</p>
           <h1>Debate Studio</h1>
           <span>
-            {setupMode === "basic"
-              ? "Basic setup · Prism fills the brief"
-              : `${format === "turnabout" ? "Turnabout" : "Forum"} · ${debateProductionName(format, formality)}`}
+            {format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
+            {formalityDescriptor.title} · Prism fills the brief
           </span>
         </div>
         <div className={styles.lobbyActions}>
-          <div
-            className={styles.setupModeToggle}
-            role="group"
-            aria-label="Debate setup detail"
-            data-tutorial-target="debate-setup-mode"
-          >
-            {(["basic", "advanced"] as const).map((mode) => (
-              <button
-                type="button"
-                key={mode}
-                data-selected={setupMode === mode ? "true" : undefined}
-                aria-pressed={setupMode === mode}
-                onClick={() => chooseSetupMode(mode)}
-              >
-                {mode === "basic" ? "Basic" : "Advanced"}
-              </button>
-            ))}
-          </div>
           <button
             type="button"
             className={styles.primaryButton}
@@ -8773,9 +8743,7 @@ export function DebateExperience(
           Create at least two Library bots to start a Debate.
         </p>
       ) : null}
-      {error ? (
-        <DebateErrorToast key={error} message={error} />
-      ) : null}
+      {error ? <DebateErrorToast key={error} message={error} /> : null}
       {setupRestoreNotice ? (
         <p className={styles.notice} role="status">
           {setupRestoreNotice}
@@ -8783,40 +8751,28 @@ export function DebateExperience(
       ) : null}
       <div className={styles.dashboardLayout}>
         <nav className={styles.studioNav} aria-label="Debate Studio">
-          <p>
-            {setupMode === "basic" ? "Set up the Debate" : "Build the Duel"}
-          </p>
+          <p>Shape the Debate</p>
           {(
             [
               {
                 id: "motion",
                 index: "01",
-                label: setupMode === "basic" ? "Topic" : "Motion",
+                label: "Motion",
                 detail: motionComplete
-                  ? setupMode === "basic"
-                    ? "Debate prepared"
-                    : "Bound"
-                  : setupMode === "basic"
-                    ? "What should they debate?"
-                    : "Shape the question",
+                  ? "Debate prepared"
+                  : "Shape the question",
                 complete: motionComplete,
                 tutorial: undefined,
               },
               {
                 id: "cast",
                 index: "02",
-                label: setupMode === "basic" ? "Debaters" : "Cast",
+                label: "Cast",
                 detail: roleChecksComplete
-                  ? setupMode === "basic"
-                    ? "Both are ready"
-                    : "Consent secured"
+                  ? "Consent secured"
                   : castComplete
-                    ? setupMode === "basic"
-                      ? "Check willingness"
-                      : "Check consent"
-                    : setupMode === "basic"
-                      ? "Choose two bots"
-                      : "Seat the proceeding",
+                    ? "Check willingness"
+                    : "Seat the proceeding",
                 complete: castComplete && roleChecksComplete,
                 tutorial: "debate-cast",
               },
@@ -8826,13 +8782,11 @@ export function DebateExperience(
                 label: "Evidence",
                 detail:
                   debateEvidenceItemCount(evidence) > 0 || evidence.notes.trim()
-                    ? setupMode === "basic"
-                      ? "Context added"
-                      : "Packet prepared"
-                    : setupMode === "basic"
-                      ? "Optional"
-                      : "Optional packet",
-                complete: true,
+                    ? "Packet prepared"
+                    : evidenceDecisionMade
+                      ? "No evidence"
+                      : "Optional",
+                complete: evidenceDecisionMade,
                 tutorial: "debate-evidence",
               },
             ] as const
@@ -8878,7 +8832,7 @@ export function DebateExperience(
               aria-label="Align stage"
               title={
                 stageAlignmentCanOpen
-                  ? "Advanced stage geometry for this account and device."
+                  ? "Stage geometry for this account and device."
                   : "Create at least three Library bots to calibrate the Debate stage."
               }
             >
@@ -8886,59 +8840,24 @@ export function DebateExperience(
               Stage geometry
             </button>
           ) : null}
-          {debateCanStart ? (
-            <button
-              type="button"
-              className={styles.studioNavLaunch}
-              disabled={busy}
-              onClick={() => void startDebate()}
-              data-tutorial-target="debate-start"
-              data-ready="true"
-              aria-label={
-                setupMode === "basic"
-                  ? "Start Debate"
-                  : format === "turnabout"
-                    ? "Start Turnabout"
-                    : "Start Forum"
-              }
-            >
-              <span>Launch circuit</span>
-              <strong>
-                {busy
-                  ? setupMode === "basic"
-                    ? "Starting…"
-                    : "Opening…"
-                  : setupMode === "basic"
-                    ? "Start Debate"
-                    : format === "turnabout"
-                      ? "Start Turnabout"
-                      : "Start Forum"}
-              </strong>
-              <div aria-hidden="true">
-                <i
-                  style={
-                    {
-                      "--debate-readiness": "1",
-                    } as CSSProperties
-                  }
-                />
-              </div>
-            </button>
-          ) : (
-            <div className={styles.studioNavStatus}>
-              <span>Launch circuit</span>
-              <strong>Stand by</strong>
-              <div aria-hidden="true">
-                <i
-                  style={
-                    {
-                      "--debate-readiness": `${readinessCount / 4}`,
-                    } as CSSProperties
-                  }
-                />
-              </div>
+          <div
+            className={styles.studioNavStatus}
+            data-ready={debateCanStart ? "true" : undefined}
+          >
+            <span>Proceeding</span>
+            <strong>
+              {debateCanStart ? "Ready" : `${readinessCount} of 4 ready`}
+            </strong>
+            <div aria-hidden="true">
+              <i
+                style={
+                  {
+                    "--debate-readiness": `${readinessCount / 4}`,
+                  } as CSSProperties
+                }
+              />
             </div>
-          )}
+          </div>
         </nav>
         <div className={styles.dashboardDesk} data-studio-panel={studioPanel}>
           {studioPanel === "motion" ? renderMotionStep() : null}
@@ -8956,16 +8875,6 @@ export function DebateExperience(
           item={selectedEvidence}
           closeButtonRef={sourceDrawerCloseButtonRef}
           onClose={() => setSourceDrawerId(null)}
-          canStart={debateCanStart}
-          startBusy={busy}
-          startLabel={
-            setupMode === "basic"
-              ? "Start Debate"
-              : format === "turnabout"
-                ? "Start Turnabout"
-                : "Start Forum"
-          }
-          onStart={() => void startDebate()}
         />
       ) : null}
       {pendingDeleteSession ? (
@@ -9034,22 +8943,36 @@ export function DebateExperience(
       data-debate-dashboard-section="motion"
     >
       <div className={styles.setupCopy}>
-        <p className={styles.eyebrow}>
-          01 / {setupMode === "basic" ? "Choose a topic" : "Motion chamber"}
-        </p>
-        <h2>
-          {setupMode === "basic"
-            ? "What should they debate?"
-            : "Shape the fault line"}
-        </h2>
+        <p className={styles.eyebrow}>01 / Motion chamber</p>
+        <h2>Shape the fault line</h2>
         <p>
-          {setupMode === "basic"
-            ? "Give Prism the idea in your own words. It will turn that into one fair motion and write a private brief for each side."
-            : "Choose the rules of the room, give Prism the territory, then tune both sides until the argument feels genuinely live."}
+          Give Prism the idea in your own words. It will shape one fair motion
+          and write a private brief for each side.
         </p>
       </div>
-      {setupMode === "advanced" ? (
-        <>
+      <details
+        className={styles.roomTuning}
+        open={roomTuningOpen}
+        onToggle={(event) => setRoomTuningOpen(event.currentTarget.open)}
+        data-tutorial-target="debate-room"
+      >
+        <summary>
+          <span aria-hidden="true">◇</span>
+          <span>
+            <strong>Tune the room</strong>
+            <small>
+              {format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
+              {formalityDescriptor.title} ·{" "}
+              {format === "forum"
+                ? forumRoundMode === "auto"
+                  ? `Auto · ${forumRoundPlan.count} ${forumRoundPlan.count === 1 ? "round" : "rounds"}`
+                  : `${forumRoundPlan.count} fixed ${forumRoundPlan.count === 1 ? "round" : "rounds"}`
+                : "Action-driven"}
+            </small>
+          </span>
+          <em>{roomTuningOpen ? "Done" : "Tune"}</em>
+        </summary>
+        <div className={styles.roomTuningBody}>
           <div
             className={styles.proceedingPresets}
             data-tutorial-target="debate-presets"
@@ -9083,62 +9006,80 @@ export function DebateExperience(
             </div>
           </div>
           <div
-            className={styles.formalityControl}
-            data-tutorial-target="debate-formality"
+            className={styles.rowdinessControl}
+            data-rowdiness={formality}
+            data-tutorial-target="debate-rowdiness"
+            style={
+              {
+                "--debate-rowdiness-progress": `${rowdinessProgress}%`,
+              } as CSSProperties
+            }
           >
-            <div>
-              <span>Formality</span>
+            <div className={styles.rowdinessReadout}>
+              <span>Atmosphere</span>
               <strong>{formalityDescriptor.title}</strong>
               <small>{formalityDescriptor.summary}</small>
             </div>
-            <input
-              type="range"
-              min="0"
-              max={DEBATE_FORMALITY_SPECTRUM.length - 1}
-              step="1"
-              value={formalityIndex}
-              aria-label="Debate formality"
-              aria-valuetext={formalityDescriptor.title}
-              aria-describedby="debate-formality-copy"
-              onChange={(event) => {
-                const next =
-                  DEBATE_FORMALITY_SPECTRUM[Number(event.currentTarget.value)];
-                if (next) chooseFormality(next.id);
-              }}
-            />
-            <div className={styles.formalityStops} aria-hidden="true">
-              {DEBATE_FORMALITY_SPECTRUM.map((level) => (
-                <span
-                  data-current={level.id === formality ? "true" : undefined}
-                  key={level.id}
-                >
-                  {level.title}
-                </span>
-              ))}
+            <div className={styles.rowdinessInstrument}>
+              <div className={styles.rowdinessEndpoints} aria-hidden="true">
+                <span>University Union</span>
+                <span>Daytime Showdown</span>
+              </div>
+              <div className={styles.rowdinessRange}>
+                <div className={styles.rowdinessTrack} aria-hidden="true">
+                  <span>
+                    {DEBATE_ROWDINESS_SPECTRUM.map((level, index) => (
+                      <i
+                        key={level.id}
+                        data-reached={
+                          index <= rowdinessIndex ? "true" : undefined
+                        }
+                        data-current={
+                          level.id === formality ? "true" : undefined
+                        }
+                      />
+                    ))}
+                  </span>
+                </div>
+                <input
+                  type="range"
+                  min="0"
+                  max={DEBATE_ROWDINESS_SPECTRUM.length - 1}
+                  step="1"
+                  value={rowdinessIndex}
+                  aria-label="Debate atmosphere"
+                  aria-valuetext={`${formalityDescriptor.title}: ${formalityDescriptor.summary}`}
+                  aria-describedby="debate-rowdiness-copy"
+                  onChange={(event) => {
+                    const next =
+                      DEBATE_ROWDINESS_SPECTRUM[
+                        Number(event.currentTarget.value)
+                      ];
+                    if (next) chooseFormality(next.id);
+                  }}
+                />
+              </div>
+              <p id="debate-rowdiness-copy">
+                Changes the room’s heat, pacing, cut-ins, and moderator
+                pressure—never the facts or Personas.
+              </p>
             </div>
-            <p id="debate-formality-copy">
-              This register freezes with the proceeding; persona voice stays in
-              charge.
-            </p>
           </div>
           <fieldset
             className={styles.formatPicker}
             data-tutorial-target="debate-format"
           >
             <legend>Debate format</legend>
-            {DEBATE_FORMAT_CATALOG.map((option) => {
+            {DEBATE_FORMAT_CATALOG.filter(
+              (option) => option.availability === "available",
+            ).map((option) => {
               const participantForumOnly =
                 playerRole === "participant" && option.id === "turnabout";
-              const disabled =
-                option.availability === "coming_soon" || participantForumOnly;
+              const disabled = participantForumOnly;
               return (
                 <label
                   key={option.id}
-                  data-selected={
-                    option.availability === "available" && format === option.id
-                      ? "true"
-                      : undefined
-                  }
+                  data-selected={format === option.id ? "true" : undefined}
                   data-availability={
                     participantForumOnly
                       ? "participant-forum-only"
@@ -9151,15 +9092,10 @@ export function DebateExperience(
                     type="radio"
                     name="debate-format"
                     value={option.id}
-                    checked={
-                      option.availability === "available" &&
-                      format === option.id
-                    }
+                    checked={format === option.id}
                     disabled={disabled}
                     onChange={() => {
-                      if (option.availability !== "available" || disabled) {
-                        return;
-                      }
+                      if (disabled) return;
                       setFormat(option.id);
                       setRoleChecks([]);
                     }}
@@ -9170,11 +9106,7 @@ export function DebateExperience(
                   </strong>
                   <span>{option.summary}</span>
                   <small>{option.cadence}</small>
-                  {option.availability === "coming_soon" ? (
-                    <b>Coming later</b>
-                  ) : participantForumOnly ? (
-                    <b>Participant uses Forum</b>
-                  ) : null}
+                  {participantForumOnly ? <b>Participant uses Forum</b> : null}
                 </label>
               );
             })}
@@ -9231,136 +9163,17 @@ export function DebateExperience(
               </div>
             )}
           </div>
-        </>
-      ) : (
-        <section
-          className={styles.basicSetupCard}
-          aria-label="Basic Debate setup"
-        >
-          <div className={styles.basicDefaults} role="note">
-            <span aria-hidden="true">◇</span>
-            <div>
-              <strong>Prism handles the setup</strong>
-              <small>
-                {formalityDescriptor.title} Forum · you judge · Prism holds your
-                seat · Auto rounds · no Jury
-              </small>
-            </div>
-            <button type="button" onClick={() => chooseSetupMode("advanced")}>
-              Customize
-            </button>
-          </div>
-          <div
-            className={styles.rowdinessControl}
-            data-rowdiness={formality}
-            data-tutorial-target="debate-rowdiness"
-            style={
-              {
-                "--debate-rowdiness-progress": `${rowdinessProgress}%`,
-              } as CSSProperties
-            }
-          >
-            <div className={styles.rowdinessReadout}>
-              <span>Rowdiness</span>
-              <strong>{formalityDescriptor.title}</strong>
-              <small>{formalityDescriptor.summary}</small>
-            </div>
-            <div className={styles.rowdinessInstrument}>
-              <div className={styles.rowdinessEndpoints} aria-hidden="true">
-                <span>University Union</span>
-                <span>Daytime Showdown</span>
-              </div>
-              <div className={styles.rowdinessRange}>
-                <div className={styles.rowdinessTrack} aria-hidden="true">
-                  <span>
-                    {DEBATE_ROWDINESS_SPECTRUM.map((level, index) => (
-                      <i
-                        key={level.id}
-                        data-reached={
-                          index <= rowdinessIndex ? "true" : undefined
-                        }
-                        data-current={
-                          level.id === formality ? "true" : undefined
-                        }
-                      />
-                    ))}
-                  </span>
-                </div>
-                <input
-                  type="range"
-                  min="0"
-                  max={DEBATE_ROWDINESS_SPECTRUM.length - 1}
-                  step="1"
-                  value={rowdinessIndex}
-                  aria-label="Debate rowdiness"
-                  aria-valuetext={`${formalityDescriptor.title}: ${formalityDescriptor.summary}`}
-                  aria-describedby="debate-rowdiness-copy"
-                  onChange={(event) => {
-                    const next =
-                      DEBATE_ROWDINESS_SPECTRUM[
-                        Number(event.currentTarget.value)
-                      ];
-                    if (next) chooseFormality(next.id);
-                  }}
-                />
-              </div>
-              <p id="debate-rowdiness-copy">
-                Changes the room’s heat, pacing, cut-ins, and moderator pressure
-                — never the facts or the Personas.
-              </p>
-            </div>
-          </div>
-        </section>
-      )}
-      <label
-        className={`${styles.field} ${styles.moderatorTitleField}`}
-        data-tutorial-target="debate-moderator-title"
-      >
-        <span>Moderator title</span>
-        <PrismRefractTarget
-          target={{
-            id: "debate-setup-moderator-title",
-            kind: "field",
-            label: "moderator title",
-            read: () => moderatorTitle,
-            preview: setModeratorTitle,
-            accept: setModeratorTitle,
-            disabled: () => busy,
-            generate: ({ currentValue, rejectedValues, signal }) =>
-              generateDebateRefractField(
-                "debate.setup.moderatorTitle",
-                currentValue,
-                rejectedValues,
-                signal,
-              ),
-          }}
-        >
-          {(binding) => (
-            <input
-              {...binding}
-              value={moderatorTitle}
-              maxLength={DEBATE_MODERATOR_TITLE_MAX_LENGTH}
-              onChange={(event) => setModeratorTitle(event.currentTarget.value)}
-              onBlur={() => setModeratorTitle(effectiveModeratorTitle)}
-              placeholder="Moderator, The House, The Court…"
-            />
-          )}
-        </PrismRefractTarget>
-        <small>
-          Enter it exactly as the presiding voice should say and display it.
-        </small>
-      </label>
+        </div>
+      </details>
       <div className={styles.motionSeed}>
         <div className={`${styles.field} ${styles.territoryField}`}>
-          <label htmlFor="debate-territory">
-            {setupMode === "basic" ? "Your idea" : "Territory"}
-          </label>
+          <label htmlFor="debate-territory">Your idea</label>
           <div className={styles.territoryInput}>
             <PrismRefractTarget
               target={{
                 id: "debate-setup-topic",
                 kind: "field",
-                label: setupMode === "basic" ? "debate idea" : "territory",
+                label: "debate idea",
                 read: () => topic,
                 preview: setTopic,
                 accept: setTopic,
@@ -9382,12 +9195,9 @@ export function DebateExperience(
                       value: topic,
                       onChange: setTopic,
                       placeholder:
-                        setupMode === "basic"
-                          ? "Is Light really Kira? Should AI art count as art? Who would win in a fight…"
-                          : "Housing near transit, whether art can be separated from its creator…",
+                        "Is Light really Kira? Should AI art count as art? Who would win in a fight…",
                       multiline: true,
-                      ariaLabel:
-                        setupMode === "basic" ? "Your idea" : "Territory",
+                      ariaLabel: "Your idea",
                       className: styles.pickAwareSetupField,
                       disabled: busy,
                     })}
@@ -9398,11 +9208,7 @@ export function DebateExperience(
                     id="debate-territory"
                     value={topic}
                     onChange={(event) => setTopic(event.currentTarget.value)}
-                    placeholder={
-                      setupMode === "basic"
-                        ? "Is Light really Kira? Should AI art count as art? Who would win in a fight…"
-                        : "Housing near transit, whether art can be separated from its creator…"
-                    }
+                    placeholder="Is Light really Kira? Should AI art count as art? Who would win in a fight…"
                     rows={3}
                   />
                 )
@@ -9436,23 +9242,13 @@ export function DebateExperience(
               data-tutorial-target="debate-synthesize"
             >
               <span aria-hidden="true">◇</span>
-              {busy
-                ? setupMode === "basic"
-                  ? "Building…"
-                  : "Refracting…"
-                : setupMode === "basic"
-                  ? "Build the debate"
-                  : "Refract into motions"}
-              <small>
-                {setupMode === "basic"
-                  ? "Prism fills the motion and both sides"
-                  : "Create three balanced options"}
-              </small>
+              {busy ? "Building…" : "Build the debate"}
+              <small>Prism fills the motion and both sides</small>
             </button>
           )}
         </PrismRefractTarget>
       </div>
-      {setupMode === "advanced" && slates.length > 0 ? (
+      {motionTuningOpen && slates.length > 1 ? (
         <div className={styles.slateGrid} aria-label="Balanced motion options">
           {slates.map((slate) => (
             <button
@@ -9470,11 +9266,20 @@ export function DebateExperience(
           ))}
         </div>
       ) : null}
-      {setupMode === "advanced" && motionReveal.motion ? (
+      {motionTuningOpen && motionReveal.motion ? (
         <div
           className={`${styles.motionEditor} ${styles.motionRevealGroup}`}
           data-debate-motion-stage="motion"
         >
+          <div className={styles.motionEditorHeader}>
+            <span>
+              <strong>Refine the motion</strong>
+              <small>Every field remains editable before Start.</small>
+            </span>
+            <button type="button" onClick={() => setMotionTuningOpen(false)}>
+              Done
+            </button>
+          </div>
           <label className={styles.fieldWide}>
             <span>Motion</span>
             <PrismRefractTarget
@@ -9699,8 +9504,8 @@ export function DebateExperience(
               })
             : null}
         </div>
-      ) : setupMode === "basic" && motionComplete ? (
-        <article className={styles.basicMotionCard} aria-live="polite">
+      ) : motionComplete ? (
+        <article className={styles.motionSummaryCard} aria-live="polite">
           <span>Prism prepared</span>
           <h3>{debateTitleForMotion(motion, formality)}</h3>
           <p>{motion.motion}</p>
@@ -9715,40 +9520,32 @@ export function DebateExperience(
               <small>{motion.againstSide.brief}</small>
             </p>
           </div>
-          <button
-            type="button"
-            onClick={() => void synthesize()}
-            disabled={busy}
-          >
-            Try another version
-          </button>
+          <div className={styles.motionCardActions}>
+            <button
+              type="button"
+              onClick={() => void synthesize()}
+              disabled={busy}
+            >
+              Try another version
+            </button>
+            <button type="button" onClick={() => setMotionTuningOpen(true)}>
+              Refine motion
+            </button>
+          </div>
         </article>
       ) : null}
       <div className={styles.panelAdvance}>
         <span aria-live="polite">
-          {setupMode === "basic"
-            ? motionComplete
-              ? "The question and both sides are ready."
-              : "Describe the idea; Prism will handle the debate brief."
-            : motionComplete
-              ? "The motion and both positions are bound."
-              : !motionReveal.motion
-                ? "Add a territory to begin shaping the motion."
-                : !motionReveal.positions
-                  ? "Shape the motion to reveal its two positions."
-                  : !motionReveal.briefs
-                    ? "Name both positions to reveal their briefs."
-                    : "Brief both positions to cast the proceeding."}
+          {motionComplete
+            ? "The question and both sides are ready."
+            : "Describe the idea; Prism will handle the debate brief."}
         </span>
         <button
           type="button"
           onClick={() => setStudioPanel("cast")}
           disabled={!motionComplete}
         >
-          {setupMode === "basic"
-            ? "Choose the debaters"
-            : "Cast the proceeding"}{" "}
-          <span aria-hidden="true">→</span>
+          Cast the proceeding <span aria-hidden="true">→</span>
         </button>
       </div>
     </section>
@@ -9762,22 +9559,15 @@ export function DebateExperience(
       <div className={styles.castStepHeader}>
         <div className={styles.setupCopy}>
           <p className={styles.eyebrow}>
-            02 /{" "}
-            {setupMode === "basic"
-              ? "Choose the debaters"
-              : format === "turnabout"
-                ? "Turnabout cast"
-                : "Forum cast"}
+            02 / {format === "turnabout" ? "Turnabout cast" : "Forum cast"}
           </p>
-          <h2>
-            {setupMode === "basic" ? "Who should argue?" : "Seat every voice"}
-          </h2>
+          <h2>Seat every voice</h2>
           <p>
-            {setupMode === "basic"
-              ? "Pick one bot for each side. You make the final call, and Prism quietly handles the room."
-              : playerRole === "participant"
-                ? "PRISM replaces your chosen-side advocate. Cast one opposing bot and one Moderator/Judge; every turn on your side belongs to you."
-                : "Select a seat, cast directly from your Library, then set your place in the room. Advocacy consent stays private and motion-specific."}
+            {playerRole === "participant"
+              ? "PRISM holds your side. Cast one opposing bot and one Moderator/Judge; every turn on your side belongs to you."
+              : playerRole === "spectator"
+                ? "Cast every seat, then watch the proceeding from the Gallery."
+                : "Pick one advocate for each side. You preside, and Prism quietly handles the room."}
           </p>
         </div>
         <button
@@ -9812,12 +9602,13 @@ export function DebateExperience(
               strokeWidth: 1.8,
             })}
           </span>
-          <strong>
-            {setupMode === "basic" ? "Surprise me" : "Random actors"}
-          </strong>
+          <strong>Surprise me</strong>
         </button>
       </div>
-      <div className={styles.castSlotGrid}>
+      <div
+        className={styles.castSlotGrid}
+        data-seat-count={selectableCastSlots.length}
+      >
         {(
           [
             ["moderator", visibleModeratorTitle],
@@ -9825,7 +9616,7 @@ export function DebateExperience(
             ["againstAdvocate", motion.againstSide.label || "Against advocate"],
           ] as const
         )
-          .filter(([key]) => setupMode === "advanced" || key !== "moderator")
+          .filter(([key]) => selectableCastSlots.includes(key))
           .map(([key, label]) => {
             const fixedPlayerJudgeModerator =
               key === "moderator" && playerRole === "judge";
@@ -9976,8 +9767,62 @@ export function DebateExperience(
           starts, and the other bots will encounter that silence in character.
         </p>
       ) : null}
-      {setupMode === "advanced" ? (
-        <>
+      <details
+        className={styles.castTuning}
+        open={castTuningOpen}
+        onToggle={(event) => setCastTuningOpen(event.currentTarget.open)}
+        data-tutorial-target="debate-seat"
+      >
+        <summary>
+          <span aria-hidden="true">◇</span>
+          <span>
+            <strong>Your seat &amp; the Jury</strong>
+            <small>
+              {playerRole.charAt(0).toUpperCase() + playerRole.slice(1)} ·{" "}
+              {visibleModeratorTitle} · Jury {juryEnabled ? "on" : "off"}
+            </small>
+          </span>
+          <em>{castTuningOpen ? "Done" : "Change"}</em>
+        </summary>
+        <div className={styles.castTuningBody}>
+          <label
+            className={`${styles.field} ${styles.moderatorTitleField}`}
+            data-tutorial-target="debate-moderator-title"
+          >
+            <span>Presiding title</span>
+            <PrismRefractTarget
+              target={{
+                id: "debate-setup-moderator-title",
+                kind: "field",
+                label: "moderator title",
+                read: () => moderatorTitle,
+                preview: setModeratorTitle,
+                accept: setModeratorTitle,
+                disabled: () => busy,
+                generate: ({ currentValue, rejectedValues, signal }) =>
+                  generateDebateRefractField(
+                    "debate.setup.moderatorTitle",
+                    currentValue,
+                    rejectedValues,
+                    signal,
+                  ),
+              }}
+            >
+              {(binding) => (
+                <input
+                  {...binding}
+                  value={moderatorTitle}
+                  maxLength={DEBATE_MODERATOR_TITLE_MAX_LENGTH}
+                  onChange={(event) =>
+                    setModeratorTitle(event.currentTarget.value)
+                  }
+                  onBlur={() => setModeratorTitle(effectiveModeratorTitle)}
+                  placeholder="Moderator, The House, The Court…"
+                />
+              )}
+            </PrismRefractTarget>
+            <small>The exact public title shown on the center seat.</small>
+          </label>
           <fieldset className={styles.rolePicker}>
             <legend>Your role</legend>
             {(["judge", "participant", "spectator"] as const).map((role) => (
@@ -10035,16 +9880,8 @@ export function DebateExperience(
               ))}
             </fieldset>
           ) : null}
-        </>
-      ) : (
-        <div className={styles.basicPlayerRole} role="note">
-          <span aria-hidden="true">◇</span>
-          <p>
-            <strong>You are the judge</strong>
-            <small>Prism stays silent in the center seat until you act.</small>
-          </p>
         </div>
-      )}
+      </details>
       {roleChecks.length > 0 ? (
         <div className={styles.consentList}>
           {roleChecks.map((check) => {
@@ -10123,10 +9960,6 @@ export function DebateExperience(
               setStudioPanel("evidence");
               return;
             }
-            if (setupMode === "basic") {
-              void checkRoles();
-              return;
-            }
             void checkRoles();
           }}
           data-tutorial-target="debate-consent"
@@ -10134,12 +9967,8 @@ export function DebateExperience(
           {busy
             ? "Checking privately…"
             : roleChecksComplete
-              ? setupMode === "basic"
-                ? "Add optional evidence →"
-                : "Prepare evidence →"
-              : setupMode === "basic"
-                ? "Make sure they’re willing"
-                : "Check advocacy consent"}
+              ? "Choose evidence →"
+              : "Make sure they’re willing"}
         </button>
       </div>
     </section>
@@ -10171,50 +10000,53 @@ export function DebateExperience(
         data-debate-dashboard-section="evidence"
       >
         <div className={styles.setupCopy}>
-          <p className={styles.eyebrow}>
-            03 / {setupMode === "basic" ? "Optional context" : "Evidence vault"}
-          </p>
-          <h2>
-            {setupMode === "basic"
-              ? "Want to give them anything else?"
-              : "Choose what enters the room"}
-          </h2>
+          <p className={styles.eyebrow}>03 / Optional evidence</p>
+          <h2>Choose what enters the room</h2>
           <p>
-            {setupMode === "basic"
-              ? "Add a note, public source, or physical exhibit—or start with nothing else."
-              : format === "turnabout"
-                ? "Every participant receives the same immutable packet. Sources and object exhibits can both be presented once the record opens."
-                : "Every participant receives the same immutable packet. Sources and object exhibits can be cited in the Forum; outside research stops at Start."}
+            Add a note, public source, or physical exhibit—or continue with an
+            empty packet. Whatever you choose freezes at Start.
           </p>
         </div>
         <label className={styles.fieldWide}>
-          <span>
-            {setupMode === "basic"
-              ? "Anything the debaters should know (optional)"
-              : "Player notes"}
-          </span>
-          <textarea
-            value={evidence.notes}
-            onChange={(event) => {
-              const value = event.currentTarget.value;
-              setEvidence((current) => ({
-                ...current,
-                notes: value,
-              }));
+          <span>Anything the debaters should know (optional)</span>
+          <PrismRefractTarget
+            target={{
+              id: "debate-setup-player-notes",
+              kind: "field",
+              label: "player notes",
+              read: () => evidence.notes,
+              preview: (value) =>
+                setEvidence((current) => ({ ...current, notes: value })),
+              accept: (value) =>
+                setEvidence((current) => ({ ...current, notes: value })),
+              disabled: () => busy,
+              generate: ({ currentValue, rejectedValues, signal }) =>
+                generateDebateRefractField(
+                  "debate.setup.playerNotes",
+                  currentValue,
+                  rejectedValues,
+                  signal,
+                ),
             }}
-            placeholder={
-              setupMode === "basic"
-                ? "A fact, rule, scenario, or bit of context you want both sides to use."
-                : "Facts, definitions, constraints, or context you want everyone in the room to share."
-            }
-            rows={setupMode === "basic" ? 5 : 8}
-          />
+          >
+            {(binding) => (
+              <textarea
+                {...binding}
+                value={evidence.notes}
+                onChange={(event) => {
+                  const value = event.currentTarget.value;
+                  setEvidence((current) => ({
+                    ...current,
+                    notes: value,
+                  }));
+                }}
+                placeholder="A fact, rule, scenario, or bit of context you want both sides to use."
+                rows={5}
+              />
+            )}
+          </PrismRefractTarget>
         </label>
-        <div
-          className={`${styles.researchBox} ${
-            setupMode === "basic" ? styles.basicResearchBox : ""
-          }`}
-        >
+        <div className={styles.researchBox}>
           <div className={styles.evidenceToolHeader}>
             <div>
               <span>Build the record</span>
@@ -10226,11 +10058,29 @@ export function DebateExperience(
               {evidenceItemTotal}/{DEBATE_EVIDENCE_ITEM_MAX_COUNT} items
             </span>
           </div>
-          {setupMode === "advanced" ? (
-            <>
-              <label className={styles.field}>
-                <span>Optional Brave Search</span>
+          <label className={styles.field}>
+            <span>Optional Brave Search</span>
+            <PrismRefractTarget
+              target={{
+                id: "debate-setup-research-query",
+                kind: "field",
+                label: "Brave Search query",
+                read: () => researchQuery,
+                preview: setResearchQuery,
+                accept: setResearchQuery,
+                disabled: () => props.responseMode === "local" || busy,
+                generate: ({ currentValue, rejectedValues, signal }) =>
+                  generateDebateRefractField(
+                    "debate.setup.researchQuery",
+                    currentValue,
+                    rejectedValues,
+                    signal,
+                  ),
+              }}
+            >
+              {(binding) => (
                 <input
+                  {...binding}
                   value={researchQuery}
                   onChange={(event) =>
                     setResearchQuery(event.currentTarget.value)
@@ -10238,185 +10088,136 @@ export function DebateExperience(
                   placeholder="Search for frozen public evidence"
                   disabled={props.responseMode === "local"}
                 />
-              </label>
-              <div className={styles.researchActions}>
-                <button
-                  type="button"
-                  onClick={() => void research()}
-                  disabled={
-                    props.responseMode === "local" ||
-                    !researchQuery.trim() ||
-                    evidenceItemLimitReached ||
-                    busy
-                  }
-                  title={
-                    evidenceItemLimitReached
-                      ? "Remove an evidence item to search again"
-                      : undefined
-                  }
-                >
-                  Search &amp; add
-                </button>
-                <button
-                  type="button"
-                  className={styles.generateEvidenceButton}
-                  onClick={() => void generateEvidence()}
-                  disabled={
-                    props.responseMode === "local" ||
-                    !motion.motion.trim() ||
-                    evidenceItemLimitReached ||
-                    busy
-                  }
-                  title={
-                    evidenceItemLimitReached
-                      ? "Remove an evidence item to search again"
-                      : undefined
-                  }
-                  aria-label="Generate randomized evidence search from the current motion"
-                >
-                  <span aria-hidden="true">◇</span>
-                  {evidenceGenerating ? "Generating…" : "Add generated search"}
-                </button>
-                <button
-                  type="button"
-                  onClick={openUrlEvidenceEditor}
-                  disabled={evidenceItemLimitReached}
-                  title={
-                    evidenceItemLimitReached
-                      ? "Remove an evidence item before adding a URL"
-                      : undefined
-                  }
-                >
-                  Add URL
-                </button>
-              </div>
-            </>
-          ) : (
-            <div
-              className={styles.evidenceObjectActions}
-              data-tutorial-target="debate-exhibit"
+              )}
+            </PrismRefractTarget>
+          </label>
+          <div className={styles.researchActions}>
+            <button
+              type="button"
+              onClick={() => void research("web")}
+              disabled={
+                props.responseMode === "local" ||
+                !researchQuery.trim() ||
+                evidenceItemLimitReached ||
+                busy
+              }
+              title={
+                evidenceItemLimitReached
+                  ? "Remove an evidence item to search again"
+                  : undefined
+              }
             >
-              <button
-                type="button"
-                className={styles.addEvidenceButton}
-                data-generating={
-                  evidenceObjectSuggestionBusy ? "true" : undefined
-                }
-                aria-busy={evidenceObjectSuggestionBusy}
-                onClick={() => void beginEvidenceObject()}
-                disabled={
-                  evidenceItemLimitReached ||
-                  evidenceObjectSuggestionBusy ||
-                  evidenceObjectVisualBusy !== null
-                }
-              >
-                <span aria-hidden="true">
-                  {evidenceObjectSuggestionBusy ? "◇" : "＋"}
-                </span>
-                <span>
-                  <strong>
-                    {evidenceObjectSuggestionBusy
-                      ? "Prism is refracting…"
-                      : "Add evidence"}
-                  </strong>
-                  <small>
-                    {evidenceObjectSuggestionBusy
-                      ? "Finding a contextual object"
-                      : "Create an editable object exhibit"}
-                  </small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className={styles.findEvidenceButton}
-                onClick={() => void generateEvidence()}
-                disabled={
-                  props.responseMode === "local" ||
-                  !motion.motion.trim() ||
-                  evidenceItemLimitReached ||
-                  busy
-                }
-                title={
-                  evidenceItemLimitReached
-                    ? "Remove an evidence item to search again"
-                    : props.responseMode === "local"
-                      ? "Public source search is unavailable in LOCAL mode"
-                      : undefined
-                }
-                aria-label="Find public evidence sources from the current motion"
-              >
-                <span aria-hidden="true">◇</span>
-                <span>
-                  <strong>
-                    {evidenceGenerating
-                      ? "Finding sources…"
-                      : evidence.sources.length > 0
-                        ? "Find more sources"
-                        : "Find sources"}
-                  </strong>
-                  <small>Search the public web</small>
-                </span>
-              </button>
-              <button
-                type="button"
-                className={styles.addUrlEvidenceButton}
-                onClick={openUrlEvidenceEditor}
-                disabled={evidenceItemLimitReached}
-                title={
-                  evidenceItemLimitReached
-                    ? "Remove an evidence item before adding a URL"
-                    : undefined
-                }
-              >
-                <span aria-hidden="true">↗</span>
-                <span>
-                  <strong>Add URL</strong>
-                  <small>Bring your own public source</small>
-                </span>
-              </button>
-            </div>
-          )}
-          {setupMode === "advanced" ? (
-            <div
-              className={styles.evidenceObjectActions}
-              data-tutorial-target="debate-exhibit"
+              Search &amp; add
+            </button>
+            <button
+              type="button"
+              onClick={openUrlEvidenceEditor}
+              disabled={evidenceItemLimitReached}
+              title={
+                evidenceItemLimitReached
+                  ? "Remove an evidence item before adding a URL"
+                  : undefined
+              }
             >
-              <button
-                type="button"
-                className={styles.addEvidenceButton}
-                data-generating={
-                  evidenceObjectSuggestionBusy ? "true" : undefined
-                }
-                aria-busy={evidenceObjectSuggestionBusy}
-                onClick={() => void beginEvidenceObject()}
-                disabled={
-                  evidenceItemLimitReached ||
-                  evidenceObjectSuggestionBusy ||
-                  evidenceObjectVisualBusy !== null
-                }
-              >
-                <span aria-hidden="true">
-                  {evidenceObjectSuggestionBusy ? "◇" : "＋"}
-                </span>
-                <span>
-                  <strong>
-                    {evidenceObjectSuggestionBusy
-                      ? "Prism is refracting…"
-                      : "Add evidence"}
-                  </strong>
-                  <small>
-                    {evidenceObjectSuggestionBusy
-                      ? "Finding a contextual object"
-                      : "Create an editable object exhibit"}
-                  </small>
-                </span>
-              </button>
-            </div>
-          ) : null}
+              Add URL
+            </button>
+          </div>
+          <label className={styles.field}>
+            <span>Optional Scholar Search</span>
+            <PrismRefractTarget
+              target={{
+                id: "debate-setup-scholar-query",
+                kind: "field",
+                label: "Scholar Search query",
+                read: () => scholarQuery,
+                preview: setScholarQuery,
+                accept: setScholarQuery,
+                disabled: () => props.responseMode === "local" || busy,
+                generate: ({ currentValue, rejectedValues, signal }) =>
+                  generateDebateRefractField(
+                    "debate.setup.scholarQuery",
+                    currentValue,
+                    rejectedValues,
+                    signal,
+                  ),
+              }}
+            >
+              {(binding) => (
+                <input
+                  {...binding}
+                  value={scholarQuery}
+                  onChange={(event) =>
+                    setScholarQuery(event.currentTarget.value)
+                  }
+                  placeholder="Search scholarly works via Crossref"
+                  disabled={props.responseMode === "local"}
+                />
+              )}
+            </PrismRefractTarget>
+          </label>
+          <div className={styles.researchActions}>
+            <button
+              type="button"
+              onClick={() => void research("scholar")}
+              disabled={
+                props.responseMode === "local" ||
+                !scholarQuery.trim() ||
+                evidenceItemLimitReached ||
+                busy
+              }
+              title={
+                evidenceItemLimitReached
+                  ? "Remove an evidence item to search again"
+                  : "Scholarly metadata and DOI links from Crossref"
+              }
+            >
+              Search papers &amp; add
+            </button>
+          </div>
+          <div
+            className={styles.evidenceObjectActions}
+            data-tutorial-target="debate-exhibit"
+          >
+            <PrismRefractTarget target={evidenceObjectMagic}>
+              {(binding) => (
+                <button
+                  {...binding}
+                  type="button"
+                  className={styles.addEvidenceButton}
+                  data-generating={
+                    evidenceObjectSuggestionBusy ? "true" : undefined
+                  }
+                  aria-busy={evidenceObjectSuggestionBusy}
+                  onClick={beginEvidenceObject}
+                  disabled={
+                    evidenceItemLimitReached ||
+                    evidenceObjectSuggestionBusy ||
+                    evidenceObjectVisualBusy !== null
+                  }
+                >
+                  <span aria-hidden="true">
+                    {evidenceObjectSuggestionBusy ? "◇" : "＋"}
+                  </span>
+                  <span>
+                    <strong>
+                      {evidenceObjectSuggestionBusy
+                        ? "Prism is refracting…"
+                        : "Add evidence"}
+                    </strong>
+                    <small>
+                      {evidenceObjectSuggestionBusy
+                        ? "Finding a contextual object"
+                        : "Create an editable object exhibit"}
+                    </small>
+                  </span>
+                </button>
+              )}
+            </PrismRefractTarget>
+          </div>
           <p className={styles.evidenceToolNote}>
             {props.responseMode === "local"
               ? "LOCAL keeps public search and page reading off. You can still add a URL with your own title and summary; PRISM will not access it."
-              : "Everything added here is shared with both sides and frozen when the Debate begins. Exhibit suggestions stay fully editable."}
+              : "Brave and Scholar each add up to three results per search. Everything added here is shared with both sides and frozen when the Debate begins."}
           </p>
         </div>
         {urlEvidenceDraft ? (
@@ -10997,26 +10798,18 @@ export function DebateExperience(
               {evidence.notes.trim() ? "notes included" : "no player notes"}
             </small>
           </div>
-          {debateCanStart ? (
-            <button
-              type="button"
-              className={styles.primaryButton}
-              disabled={busy}
-              onClick={() => void startDebate()}
-            >
-              {busy
-                ? setupMode === "basic"
-                  ? "Starting…"
-                  : "Opening…"
-                : setupMode === "basic"
-                  ? "Start Debate"
-                  : format === "turnabout"
-                    ? "Start Turnabout"
-                    : "Start Forum"}
-            </button>
-          ) : (
-            <b>Seals at Start</b>
-          )}
+          <button
+            type="button"
+            className={styles.primaryButton}
+            onClick={() => setEvidenceDecisionMade(true)}
+            data-tutorial-target="debate-evidence-continue"
+          >
+            {evidenceDecisionMade
+              ? "Evidence choice saved"
+              : debateEvidenceItemCount(evidence) > 0 || evidence.notes.trim()
+                ? "Use this evidence"
+                : "Continue without evidence"}
+          </button>
         </div>
       </section>
     );
@@ -11030,224 +10823,73 @@ export function DebateExperience(
       data-ready-count={readinessCount}
     >
       <div className={styles.setupCopy}>
-        <p className={styles.eyebrow}>
-          {setupMode === "basic" ? "Ready check" : "Launch circuit"}
-        </p>
-        <h2>
-          {debateCanStart
-            ? setupMode === "basic"
-              ? "Ready when you are"
-              : format === "turnabout"
-                ? "The record is ready"
-                : "The Forum is ready"
-            : setupMode === "basic"
-              ? "Almost ready"
-              : "Complete the circuit"}
-        </h2>
+        <p className={styles.eyebrow}>Proceeding card</p>
+        <h2>{debateCanStart ? "Ready when you are" : "Shape the room"}</h2>
         <p>
-          {setupMode === "basic"
-            ? "Prism has handled the debate structure. Start keeps this question, these debaters, their consent, and any evidence together."
-            : "Start locks the format, motion, cast, Jury, consent, model, Powers, and evidence into one proceeding."}
+          One view of what will enter the chamber. Start freezes the room,
+          motion, cast, consent, model, Powers, and evidence.
         </p>
       </div>
-      <ul className={styles.readinessList}>
-        <li data-ready={motionComplete ? "true" : undefined}>
-          <span aria-hidden="true">{motionComplete ? "✓" : "1"}</span>
-          <div>
-            <strong>
-              {setupMode === "basic" ? "Question ready" : "Motion shaped"}
-            </strong>
-            <small>
-              {motionComplete
-                ? setupMode === "basic"
-                  ? "Prism prepared both sides."
-                  : "Both positions have a clear brief."
-                : setupMode === "basic"
-                  ? "Give Prism a topic to prepare."
-                  : "Complete the motion, labels, and briefs."}
-            </small>
-          </div>
-        </li>
-        <li data-ready={castComplete ? "true" : undefined}>
-          <span aria-hidden="true">{castComplete ? "✓" : "2"}</span>
-          <div>
-            <strong>
-              {setupMode === "basic" ? "Debaters chosen" : "Proceeding cast"}
-            </strong>
-            <small>
-              {castComplete
-                ? setupMode === "basic"
-                  ? "Both sides have a voice."
-                  : playerRole === "participant"
-                    ? moderatorHardMuted
-                      ? "PRISM, the opposing bot, and the Moderator/Judge are set. The Judge’s silence will shape the proceeding."
-                      : "PRISM, the opposing bot, and the Moderator/Judge are set."
-                    : moderatorHardMuted
-                      ? "Three unique seats are filled. The moderator’s silence will shape the proceeding."
-                      : "Three unique seats are filled."
-                : setupMode === "basic"
-                  ? "Choose one bot for each side."
-                  : playerRole === "participant"
-                    ? "Choose one opposing bot and one Moderator/Judge."
-                    : "Fill all three seats with unique bots."}
-            </small>
-          </div>
-        </li>
-        <li data-ready={roleChecksComplete ? "true" : undefined}>
-          <span aria-hidden="true">{roleChecksComplete ? "✓" : "3"}</span>
-          <div>
-            <strong>
-              {setupMode === "basic" ? "Both are willing" : "Advocacy consent"}
-            </strong>
-            <small>
-              {roleChecksComplete
-                ? setupMode === "basic"
-                  ? "Both debaters accepted."
-                  : playerRole === "participant"
-                    ? "The opposing bot accepted its role."
-                    : "Both advocates accepted their roles."
-                : declinedChecks.length > 0
-                  ? "Resolve the declined assignment."
-                  : setupMode === "basic"
-                    ? "Ask privately before starting."
-                    : "Run the private role check."}
-            </small>
-          </div>
-        </li>
-        <li data-ready={setupScreensComplete ? "true" : undefined}>
-          <span aria-hidden="true">{setupScreensComplete ? "✓" : "4"}</span>
-          <div>
-            <strong>
-              {setupMode === "basic"
-                ? "Screens reviewed"
-                : "Studio walkthrough"}
-            </strong>
-            <small>
-              {setupScreensComplete
-                ? debateEvidenceItemCount(evidence) > 0 || evidence.notes.trim()
-                  ? setupMode === "basic"
-                    ? "Your added context is ready."
-                    : `${evidence.sources.length} source${evidence.sources.length === 1 ? "" : "s"}, ${evidence.exhibits?.length ?? 0} exhibit${evidence.exhibits?.length === 1 ? "" : "s"}, and player notes will freeze at Start.`
-                  : setupMode === "basic"
-                    ? "Topic, debaters, and evidence were opened."
-                    : "Motion, cast, and evidence were opened; the empty packet will freeze at Start."
-                : setupMode === "basic"
-                  ? "Open Topic, Debaters, and Evidence before Start."
-                  : "Open Motion, Cast, and Evidence before Start."}
-            </small>
-          </div>
-        </li>
-      </ul>
-      {setupMode === "advanced" ? (
-        <div className={styles.reviewGrid}>
-          <article>
-            <span>Preset</span>
-            <strong>
-              {effectivePresetId === "custom" ? "Custom" : selectedPreset.name}
-            </strong>
-            <p>
-              {effectivePresetId === "custom"
-                ? "Format, formality, role, or Jury differs from the selected preset."
-                : selectedPreset.summary}
-            </p>
-          </article>
-          <article>
-            <span>Format</span>
-            <strong>
-              {format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
-              {debateProductionName(format, formality)}
-            </strong>
-            <p>
-              {format === "turnabout"
-                ? "Pressable testimony and frozen-evidence objections"
-                : "Structured civic speech and rebuttal"}
-            </p>
-          </article>
-          <article>
-            <span>Formality</span>
-            <strong>{formalityDescriptor.title}</strong>
-            <p>{formalityDescriptor.summary}</p>
-          </article>
-          <article>
-            <span>Rebuttal rounds</span>
-            <strong>
-              {format === "turnabout"
-                ? "Action-driven"
-                : forumRoundMode === "auto"
-                  ? `Auto · ${forumRoundPlan.count}`
-                  : `${forumRoundPlan.count} fixed`}
-            </strong>
-            <p>
-              {format === "turnabout"
-                ? "Presses, objections, and rulings determine the length."
-                : forumRoundPlan.rationale}
-            </p>
-          </article>
-          <article>
-            <span>Motion</span>
-            <strong>{motion.motion || "Not yet shaped"}</strong>
-            <p>
-              {motion.forSide.label || "For"} ↔{" "}
-              {motion.againstSide.label || "Against"}
-            </p>
-          </article>
-          <article>
-            <span>Cast</span>
-            <strong>
-              {moderatorBot?.name} · {visibleModeratorTitle}
-            </strong>
-            <p>
-              {playerRole === "participant" && playerSideId === "for"
-                ? playerParticipantBot.name
-                : botById.get(cast.forAdvocate)?.name}{" "}
-              vs.{" "}
-              {playerRole === "participant" && playerSideId === "against"
-                ? playerParticipantBot.name
-                : botById.get(cast.againstAdvocate)?.name}
-            </p>
-          </article>
-          <article>
-            <span>Your role</span>
-            <strong>
-              {playerRole.charAt(0).toUpperCase() + playerRole.slice(1)}
-            </strong>
-            <p>
-              {playerRole === "participant"
-                ? `Speaking for ${
-                    playerSideId === "for"
-                      ? motion.forSide.label
-                      : motion.againstSide.label
-                  }`
-                : roleSummary(playerRole, format, formality)}
-            </p>
-          </article>
-          <article>
-            <span>Jury</span>
-            <strong>
-              {juryEnabled ? "Five seats · sampled at Start" : "Off"}
-            </strong>
-            <p>
-              {juryEnabled
-                ? juryRoleDescription(playerRole)
-                : playerRole === "participant"
-                  ? "The Gallery stays nonbinding; the Moderator/Judge makes the final decision."
-                  : "The nonbinding Gallery remains available without a Jury."}
-            </p>
-          </article>
-          <article>
-            <span>Evidence</span>
-            <strong>
-              {evidence.sources.length} source
-              {evidence.sources.length === 1 ? "" : "s"} ·{" "}
-              {evidence.exhibits?.length ?? 0} exhibit
-              {evidence.exhibits?.length === 1 ? "" : "s"}
-            </strong>
-            <p>
-              {evidence.notes ? "Player notes included" : "No player notes"}
-            </p>
-          </article>
-        </div>
-      ) : null}
+      <div className={styles.reviewGrid}>
+        <article data-ready={motionComplete ? "true" : undefined}>
+          <span>Motion</span>
+          <strong>{motion.motion || "Not yet shaped"}</strong>
+          <p>
+            {motionComplete
+              ? `${motion.forSide.label} ↔ ${motion.againstSide.label}`
+              : "Give Prism an idea to prepare."}
+          </p>
+        </article>
+        <article
+          data-ready={castComplete && roleChecksComplete ? "true" : undefined}
+        >
+          <span>Cast</span>
+          <strong>
+            {castComplete
+              ? `${playerRole.charAt(0).toUpperCase() + playerRole.slice(1)} · ${visibleModeratorTitle}`
+              : "Seats still open"}
+          </strong>
+          <p>
+            {roleChecksComplete
+              ? "Advocacy consent secured"
+              : castComplete
+                ? "Willingness check remains"
+                : "Choose every active voice"}
+          </p>
+        </article>
+        <article data-ready="true">
+          <span>Room</span>
+          <strong>
+            {format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
+            {formalityDescriptor.title}
+          </strong>
+          <p>
+            {format === "turnabout"
+              ? "Action-driven"
+              : forumRoundMode === "auto"
+                ? `Auto · ${forumRoundPlan.count} ${forumRoundPlan.count === 1 ? "round" : "rounds"}`
+                : `${forumRoundPlan.count} fixed ${forumRoundPlan.count === 1 ? "round" : "rounds"}`}
+            {juryEnabled ? " · Jury on" : " · Jury off"}
+          </p>
+        </article>
+        <article data-ready={evidenceDecisionMade ? "true" : undefined}>
+          <span>Evidence</span>
+          <strong>
+            {evidenceDecisionMade
+              ? debateEvidenceItemCount(evidence) > 0 || evidence.notes.trim()
+                ? `${debateEvidenceItemCount(evidence)} item${debateEvidenceItemCount(evidence) === 1 ? "" : "s"}`
+                : "Empty packet"
+              : "Choose or skip"}
+          </strong>
+          <p>
+            {evidenceDecisionMade
+              ? evidence.notes.trim()
+                ? "Player notes included"
+                : "No player notes"
+              : "Evidence is optional"}
+          </p>
+        </article>
+      </div>
       {roleChecks.some((check) => check.status === "devils_advocate") ? (
         <p className={styles.devilsNotice}>
           Devil’s Advocate framing will appear as one brief moderator
@@ -11265,37 +10907,23 @@ export function DebateExperience(
       <div className={styles.setupActions}>
         <span className={styles.launchThreshold}>
           {debateCanStart
-            ? setupMode === "basic"
-              ? "The debaters will use the question and context shown here."
-              : `Crossing this threshold freezes the ${debatePublicMaterialName(formality).toLowerCase()}.`
-            : motionComplete &&
-                castComplete &&
-                roleChecksComplete &&
-                !setupScreensComplete
-              ? setupMode === "basic"
-                ? "Open Topic, Debaters, and Evidence before Start."
-                : "Open Motion, Cast, and Evidence before Start."
-              : setupMode === "basic"
-                ? `${4 - readinessCount} step${4 - readinessCount === 1 ? "" : "s"} left.`
-                : `${4 - readinessCount} lock${4 - readinessCount === 1 ? "" : "s"} remain.`}
+            ? `Start freezes the ${debatePublicMaterialName(formality).toLowerCase()}.`
+            : !motionComplete
+              ? "Shape the motion to continue."
+              : !castComplete
+                ? "Seat every active voice."
+                : !roleChecksComplete
+                  ? "Secure advocacy consent."
+                  : "Choose evidence or continue without it."}
         </span>
         <button
           type="button"
           className={styles.primaryButton}
           disabled={busy || !debateCanStart}
           onClick={() => void startDebate()}
+          data-tutorial-target="debate-start"
         >
-          {busy
-            ? format === "turnabout"
-              ? formality === "parliamentary"
-                ? "Opening the record…"
-                : "Opening Turnabout…"
-              : "Opening the Forum…"
-            : setupMode === "basic"
-              ? "Start Debate"
-              : format === "turnabout"
-                ? "Start Turnabout"
-                : "Start Forum"}
+          {busy ? "Opening…" : "Start Debate"}
         </button>
       </div>
     </section>
@@ -12414,15 +12042,11 @@ export function DebateExperience(
               reactingJurorIndices.has(index)
                 ? chamberListenerReaction
                 : null;
-            const foleyMouthShape =
-              silentDeliberationPreparing
-                ? (["open-small", "narrow", "open-round"] as const)[
-                    index % 3
-                  ]
-                : !talking &&
-                    debateAmbientBotVocalization?.targetId === juror.id
-                  ? debateAmbientBotVocalizationMouthShape(juror.id)
-                  : null;
+            const foleyMouthShape = silentDeliberationPreparing
+              ? (["open-small", "narrow", "open-round"] as const)[index % 3]
+              : !talking && debateAmbientBotVocalization?.targetId === juror.id
+                ? debateAmbientBotVocalizationMouthShape(juror.id)
+                : null;
             const vocalFoleyTagText = resolveDebateVocalFoleyTagText({
               ambientKind:
                 debateAmbientBotVocalization?.targetId === juror.id
@@ -14627,15 +14251,15 @@ export function DebateExperience(
             juryChamberVisible
               ? DEBATE_JURY_CHAMBER_MIX
               : debateIdentPlaying !== null
-              ? DEBATE_FOLEY_MIX
-              : activeAudienceOrderResponse &&
-                  !activeAudienceOrderResponse.returningRoomTone
                 ? DEBATE_FOLEY_MIX
-                : audiencePressureBandTrue
-                  ? debateAudiencePressureMix(audiencePressureBandTrue)
-                  : presenting
-                    ? DEBATE_AUDIENCE_DUCKED_MIX
-                    : DEBATE_AUDIENCE_IDLE_MIX
+                : activeAudienceOrderResponse &&
+                    !activeAudienceOrderResponse.returningRoomTone
+                  ? DEBATE_FOLEY_MIX
+                  : audiencePressureBandTrue
+                    ? debateAudiencePressureMix(audiencePressureBandTrue)
+                    : presenting
+                      ? DEBATE_AUDIENCE_DUCKED_MIX
+                      : DEBATE_AUDIENCE_IDLE_MIX
           }
           mixTransitionMs={
             audiencePressureBandTrue === null
@@ -15100,12 +14724,10 @@ export function DebateExperience(
                 ) : session.status === "paused" && !presenting ? (
                   <div className={styles.stageStateOverlay} data-kind="paused">
                     <span aria-hidden="true">Ⅱ</span>
-                    <strong>
-                      Debate paused
-                    </strong>
+                    <strong>Debate paused</strong>
                     <small>
-                      The interrupted line is preserved and will replay from
-                      its beginning.
+                      The interrupted line is preserved and will replay from its
+                      beginning.
                     </small>
                     <button
                       type="button"
@@ -15516,9 +15138,7 @@ export function DebateExperience(
                   </div>
                 </div>
               ) : null}
-              {error ? (
-                <DebateErrorToast key={error} message={error} />
-              ) : null}
+              {error ? <DebateErrorToast key={error} message={error} /> : null}
               {renderTranscript(session)}
               {renderJuryRecord(session)}
               {session.status === "completed" && !presenting ? (
@@ -15827,7 +15447,6 @@ export function DebateExperience(
               item={selectedEvidence}
               closeButtonRef={sourceDrawerCloseButtonRef}
               onClose={() => setSourceDrawerId(null)}
-              canStart={false}
             />
           ) : null}
           {earlyEndOpen ? (
@@ -15848,20 +15467,20 @@ export function DebateExperience(
               >
                 <p className={styles.eyebrow}>
                   {session.judgeGavel?.status === "awaiting_message"
-                      ? "Final authority"
-                      : "Accelerated verdict"}
+                    ? "Final authority"
+                    : "Accelerated verdict"}
                 </p>
                 <h2 id="debate-end-early-title">
                   {session.judgeGavel?.status === "awaiting_message"
-                      ? "End this Debate?"
-                      : "End this Debate early?"}
+                    ? "End this Debate?"
+                    : "End this Debate early?"}
                 </h2>
                 <p id="debate-end-early-description">
                   {session.jury.enabled
-                      ? `The remaining rounds will be skipped. The Jury will hold a shorter three-turn deliberation from only the limited ${debatePublicMaterialName(session.formality).toLowerCase()} and will not penalize unheard rounds.`
-                      : session.playerRole === "judge"
-                        ? `The remaining rounds will be skipped. You will decide immediately from only the limited ${debatePublicMaterialName(session.formality).toLowerCase()} so far.`
-                        : `The remaining rounds will be skipped. The three-bot panel will cast brief ballots from only the limited ${debatePublicMaterialName(session.formality).toLowerCase()} so far.`}
+                    ? `The remaining rounds will be skipped. The Jury will hold a shorter three-turn deliberation from only the limited ${debatePublicMaterialName(session.formality).toLowerCase()} and will not penalize unheard rounds.`
+                    : session.playerRole === "judge"
+                      ? `The remaining rounds will be skipped. You will decide immediately from only the limited ${debatePublicMaterialName(session.formality).toLowerCase()} so far.`
+                      : `The remaining rounds will be skipped. The three-bot panel will cast brief ballots from only the limited ${debatePublicMaterialName(session.formality).toLowerCase()} so far.`}
                 </p>
                 <div>
                   <button
@@ -15878,9 +15497,7 @@ export function DebateExperience(
                     onClick={() => void endDebateEarly()}
                     disabled={busy || presenting}
                   >
-                    {busy
-                      ? "Concluding…"
-                      : "Conclude now"}
+                    {busy ? "Concluding…" : "Conclude now"}
                   </button>
                 </div>
               </section>

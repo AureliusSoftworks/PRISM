@@ -30,7 +30,6 @@ test("normalizes only identifier-based surface context", () => {
 
 test("keeps only bounded unsaved Debate setup context on the Debate surface", () => {
   const draft = {
-    setupMode: "advanced",
     studioPanel: "evidence",
     format: "turnabout",
     formality: "heated",
@@ -53,7 +52,6 @@ test("keeps only bounded unsaved Debate setup context on the Debate surface", ()
     surfaceId: "debate",
     debateDraft: draft,
   });
-  assert.equal(normalized.debateDraft?.setupMode, "advanced");
   assert.equal(normalized.debateDraft?.topic, "Transit policy");
   assert.equal(normalized.debateDraft?.motion.length, 320);
   assert.equal(normalized.debateDraft?.evidenceItemCount, 12);
@@ -112,11 +110,19 @@ test("accepts only allowlisted companion actions and caps the result", () => {
 
 test("rejects an unknown surface and oversized messages", () => {
   assert.throws(
-    () => normalizePrismCompanionRequest({ surface: { surfaceId: "admin" }, message: "hello" }),
+    () =>
+      normalizePrismCompanionRequest({
+        surface: { surfaceId: "admin" },
+        message: "hello",
+      }),
     /valid Prism surface/u,
   );
   assert.throws(
-    () => normalizePrismCompanionRequest({ surface: { surfaceId: "home" }, message: "x".repeat(4_001) }),
+    () =>
+      normalizePrismCompanionRequest({
+        surface: { surfaceId: "home" },
+        message: "x".repeat(4_001),
+      }),
     /4,000 characters/u,
   );
 });

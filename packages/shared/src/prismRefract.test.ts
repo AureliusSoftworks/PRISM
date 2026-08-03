@@ -3,10 +3,30 @@ import { test } from "node:test";
 import {
   normalizePrismRefractRequest,
   normalizePrismRefractDirection,
+  PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS,
   PRISM_REFRACT_DEBATE_EXHIBIT_REJECTED_CANDIDATE_LIMIT,
   PRISM_REFRACT_DIRECTION_MAX_LENGTH,
   PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT,
 } from "./prismRefract.ts";
+
+test("registers manual Debate evidence controls as explicit Refract targets", () => {
+  assert.equal(
+    PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS.includes("debate.setup.playerNotes"),
+    true,
+  );
+  assert.equal(
+    PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS.includes(
+      "debate.setup.researchQuery",
+    ),
+    true,
+  );
+  assert.equal(
+    PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS.includes(
+      "debate.setup.scholarQuery",
+    ),
+    true,
+  );
+});
 
 test("normalizes a bounded registered Signal text target", () => {
   const request = normalizePrismRefractRequest({
@@ -38,7 +58,6 @@ test("normalizes a contextual Debate setup target without trusting extra fields"
       kind: "debate.setup.exhibitObject",
       botIds: [" bot-1 ", "bot-1", "bot-2"],
       context: {
-        setupMode: "advanced",
         studioPanel: "evidence",
         format: "turnabout",
         formality: "heated",
@@ -76,7 +95,6 @@ test("normalizes a contextual complete Debate exhibit pair", () => {
       kind: "debate.setup.exhibitPair",
       botIds: [],
       context: {
-        setupMode: "basic",
         studioPanel: "evidence",
         format: "forum",
         formality: "plainspoken",

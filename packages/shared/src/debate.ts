@@ -27,6 +27,8 @@ export const DEBATE_SIDE_LABEL_MAX_LENGTH = 32;
 export const DEBATE_SIDE_BRIEF_MAX_LENGTH = 1_200;
 export const DEBATE_EVIDENCE_NOTES_MAX_LENGTH = 8_000;
 export const DEBATE_EVIDENCE_SOURCE_MAX_COUNT = 12;
+/** One source search stays reviewable while later searches remain additive. */
+export const DEBATE_EVIDENCE_SEARCH_RESULT_LIMIT = 3;
 /** Sources and exhibits share one bounded frozen packet. */
 export const DEBATE_EVIDENCE_ITEM_MAX_COUNT = 12;
 export const DEBATE_EVIDENCE_EXHIBIT_ADJECTIVE_MAX_LENGTH = 48;
@@ -679,6 +681,8 @@ export interface DebateJuryBallotV1 {
   confidence: number;
   personaInstinct: string;
   reason: string;
+  /** Private clear rationale retained when a Power transforms the public delivery. */
+  powerIntendedReason?: string;
   provider?: LlmProviderName;
   model?: string;
   autoRecovery?: AutoRecoveryTraceV1;

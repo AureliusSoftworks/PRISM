@@ -49,6 +49,9 @@ export const PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS = [
   "debate.setup.forBrief",
   "debate.setup.againstLabel",
   "debate.setup.againstBrief",
+  "debate.setup.playerNotes",
+  "debate.setup.researchQuery",
+  "debate.setup.scholarQuery",
   "debate.setup.exhibitPair",
   "debate.setup.exhibitAdjective",
   "debate.setup.exhibitObject",
@@ -121,6 +124,13 @@ function valueLimitForTarget(kind: PrismRefractTextTarget["kind"]): number {
     kind === "debate.setup.againstLabel"
   ) {
     return 32;
+  }
+  if (kind === "debate.setup.playerNotes") return 2_000;
+  if (
+    kind === "debate.setup.researchQuery" ||
+    kind === "debate.setup.scholarQuery"
+  ) {
+    return 240;
   }
   if (kind === "debate.setup.exhibitPair") return 145;
   if (kind === "debate.setup.exhibitAdjective") return 48;

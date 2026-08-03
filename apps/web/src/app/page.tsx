@@ -147,6 +147,7 @@ import PrismHandoffCanvas from "./PrismHandoffCanvas";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import { PrismOrb } from "./PrismOrb";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
+import { getPrismCompanionVisualSnapshot } from "./prismCompanionVisualSnapshot";
 import { SlateHemisphereSettingsPanel } from "./SlateHemisphereSettingsPanel";
 import type {
   SlateHemisphereSettingsSnapshot,
@@ -161,6 +162,38 @@ import {
 } from "./accountBackupArchive";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import { BotCreationRitual } from "./BotCreationRitual";
+import { AdjustmentPad } from "./AdjustmentPad";
+import { PronunciationAtlas } from "./PronunciationAtlas";
+import {
+  pronunciationAtlasValueText,
+  type PronunciationAtlasSelection,
+} from "./pronunciationAtlasModel";
+import {
+  createAdjustmentPadCoordinateAdapter,
+  type AdjustmentPadCoordinateValue,
+  type AdjustmentPadInputSource,
+} from "./adjustmentPadModel";
+import {
+  BOT_AVATAR_FOUNDRY_DEFAULT_VIEWPORT,
+  BOT_AVATAR_FOUNDRY_ALL_MODULES_POPULATED,
+  BOT_AVATAR_FOUNDRY_TIMING,
+  BOT_AVATAR_FOUNDRY_UPGRADE_NODES,
+  botAvatarFoundryCameraForControl,
+  botAvatarFoundryIdentitySurfaceForNode,
+  botAvatarFoundryModulePopulation,
+  botAvatarFoundryScreenMode,
+  botAvatarFoundryUpgradeNodeForControl,
+  normalizeBotAvatarFoundryViewport,
+  normalizeBotAvatarFoundryOrigin,
+  zoomBotAvatarFoundryViewport,
+  type BotAvatarFoundryCameraMode,
+  type BotAvatarFoundryIdentitySurface,
+  type BotAvatarFoundryModulePopulation,
+  type BotAvatarFoundryOrigin,
+  type BotAvatarFoundryPhase,
+  type BotAvatarFoundryUpgradeNodeId,
+  type BotAvatarFoundryViewport,
+} from "./botAvatarFoundry";
 import { CoffeeAtmosphereScene } from "./CoffeeAtmosphereScene";
 import {
   DebateExperience,
@@ -208,7 +241,6 @@ import {
 import {
   avatarDetailsEqual,
   avatarDetailsHasVisuals,
-  avatarDetailsKey,
   normalizeAvatarDetails,
 } from "./avatar-details";
 import {
@@ -652,6 +684,7 @@ import {
   Minus,
   Minimize2,
   Moon,
+  Move,
   Pause,
   PencilLine,
   Play,
@@ -1044,12 +1077,16 @@ import {
   BOT_AVATAR_SFX_PROMPT_MAX_LENGTH,
   PRISM_BUILTIN_ENGLISH_VOICES,
   LOCAL_VOICE_ENGINE_PREFERENCES,
+  LOCAL_VOICE_PRONUNCIATION_BASES,
+  LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
+  LOCAL_VOICE_SPEECHPRINT_STRENGTHS,
   PROJECT_OWNED_ASSET_MANIFEST_PATH,
   VOICE_EFFECTS,
   VOICE_EFFECT_DESCRIPTIONS,
   VOICE_EFFECT_LABELS,
   ELEVENLABS_VOICE_STABILITY_DEFAULT,
   normalizeEnglishVoiceEngine,
+  localVoicePronunciationOverrideIsActive,
   normalizeElevenLabsVoiceDirection,
   normalizeVoiceEffect,
   normalizeVoiceMode,
@@ -1083,6 +1120,9 @@ import {
   type BotAvatarSfxV1,
   type NormalizedBotAudioVoiceProfileV1,
   type BotAudioVoiceId,
+  type LocalVoicePresentation,
+  type LocalVoicePronunciationBase,
+  type LocalVoiceSpeechprintInfluence,
   type BotNamePronunciationEntry,
   type EnglishVoiceEngine,
   type EphemeralChatModeId,
@@ -1180,6 +1220,8 @@ import {
   englishVoiceResponseSupportsStreaming,
   prepareEnglishVoice,
   readEnglishVoiceSynthesisClip,
+  readEnglishVoiceResolvedPronunciation,
+  readEnglishVoiceResolvedSpeechprint,
   releaseEnglishVoice,
   scaleEnglishVoiceAlignmentForPlayback,
   stopEnglishVoice,
@@ -1194,8 +1236,14 @@ import { signalVoiceCompletionFallbackDurationMs } from "./signalLiveCaptions";
 import {
   applyOfflineVoiceSelection,
   builtinVoiceSelectionValue,
+  canonicalEnglishVoiceLocale,
+  offlineVoiceOptionsForFilters,
   offlineVoiceSelectionValue,
   operatingSystemVoiceSelectionValue,
+  selectOfflineVoiceAccent,
+  selectOfflineVoicePresentation,
+  type LocalVoicePresentationFilter,
+  type OfflineVoiceOption,
 } from "./offlineVoiceSelection";
 import {
   buildSpeechActivityWindows,
@@ -1243,6 +1291,11 @@ import {
   voiceSettingsForPlaybackChoice,
   type VoicePlaybackChoice,
 } from "./voiceQuickToggle";
+import {
+  CHAT_FORCED_MUTE_REASON,
+  chatViewForcesVoiceMute,
+  effectiveVoiceModeForView,
+} from "./chatVoicePolicy";
 import {
   PRISM_APPLETS,
   prismAppletVersionLabel,
@@ -1521,6 +1574,7 @@ import {
 } from "./speechRevealTimeline";
 import {
   readZenProgressiveChatStream,
+  type PsychicProgressEvent,
   type ZenProgressiveEndEvent,
   type ZenProgressiveSegmentEvent,
 } from "./zenProgressiveChat";
@@ -9955,6 +10009,15 @@ function pickStableStatusLabel(
 
 const FALLBACK_PROCESSING_TICK_MS = 300;
 const PSYCHIC_THINKING_INDICATOR_DELAY_MS = 700;
+const PSYCHIC_PROGRESS_STAGE_LABELS: Record<
+  NonNullable<PsychicCanvasScratchpadPayload["stage"]>,
+  string
+> = {
+  plan: "Planning",
+  draft: "Drafting",
+  audit: "Checking",
+  revision: "Refining",
+};
 const FALLBACK_RISK_PROMPT_KEYWORDS = [
   "copyright",
   "copyrighted",
@@ -10926,6 +10989,8 @@ interface BotVoiceIdentityCatalogLane {
     label: string;
     detail?: string;
     kind?: "builtin" | "os";
+    locale?: string;
+    presentation?: LocalVoicePresentation;
   }>;
   loading?: boolean;
   message?: string | null;
@@ -10934,8 +10999,75 @@ interface BotVoiceIdentityCatalogLane {
 }
 
 interface BotVoiceIdentityCatalog {
-  system: BotVoiceIdentityCatalogLane;
+  system: Omit<BotVoiceIdentityCatalogLane, "options"> & {
+    options: OfflineVoiceOption[];
+  };
   elevenLabs: BotVoiceIdentityCatalogLane;
+}
+
+function englishVoiceLocaleLabel(localeValue: string): string {
+  const locale = canonicalEnglishVoiceLocale(localeValue);
+  if (locale === "en-US") return "American English · Genuine";
+  if (locale === "en-GB") return "British English · Genuine";
+  const region = locale.split("-")[1] ?? locale;
+  let regionName = region;
+  try {
+    regionName =
+      new Intl.DisplayNames(["en"], { type: "region" }).of(region) ?? region;
+  } catch {
+    // Keep the stable locale code when this browser lacks DisplayNames.
+  }
+  return `${regionName} English · Installed`;
+}
+
+function speechprintVariationSeed(
+  profile: NormalizedBotAudioVoiceProfileV1,
+  influence: LocalVoiceSpeechprintInfluence,
+): string {
+  if (
+    influence !== "none" &&
+    profile.speechprintInfluence === influence &&
+    profile.speechprintVariationSeed &&
+    profile.speechprintVariationSeed !== "natural-v1"
+  ) {
+    return profile.speechprintVariationSeed;
+  }
+  if (influence === "none") return "natural-v1";
+  const entropy =
+    typeof crypto !== "undefined" && "randomUUID" in crypto
+      ? crypto.randomUUID()
+      : `${profile.baseVoiceId}-${Date.now().toString(36)}`;
+  return `${influence}:${entropy}`.slice(0, 64);
+}
+
+function pronunciationAtlasSelectionForProfile(
+  profile: BotAudioVoiceProfileV1,
+): PronunciationAtlasSelection {
+  const normalized = normalizeBotAudioVoiceProfileV1(profile);
+  return {
+    pronunciationBase: normalized.pronunciationBase ?? "follow-voice",
+    sourceLocale: normalized.accentLocale ?? "en-US",
+    influence: normalized.speechprintInfluence ?? "none",
+    strength: normalized.speechprintStrength ?? "balanced",
+  };
+}
+
+function profileWithPronunciationAtlasSelection(
+  profile: BotAudioVoiceProfileV1,
+  selection: PronunciationAtlasSelection,
+): NormalizedBotAudioVoiceProfileV1 {
+  const normalized = normalizeBotAudioVoiceProfileV1(profile);
+  return normalizeBotAudioVoiceProfileV1({
+    ...normalized,
+    pronunciationBase: selection.pronunciationBase,
+    accentLocale: selection.sourceLocale,
+    speechprintInfluence: selection.influence,
+    speechprintStrength: selection.strength,
+    speechprintVariationSeed: speechprintVariationSeed(
+      normalized,
+      selection.influence,
+    ),
+  });
 }
 
 type ElevenLabsVoiceIdResolution =
@@ -11772,10 +11904,48 @@ function BotVoiceEditor({
       NonNullable<VoiceCapabilitiesResponse["capabilities"]>["local"]
     >["engines"]
   >([]);
+  const [localVoicePresentation, setLocalVoicePresentation] =
+    useState<LocalVoicePresentationFilter>("any");
   const previewRunRef = useRef(0);
   const voiceIdResolutionRunRef = useRef(0);
   const selectedSystemVoiceValue =
     offlineVoiceSelectionValue(normalizedProfile);
+  const localAccentLocale = canonicalEnglishVoiceLocale(
+    normalizedProfile.accentLocale ?? "en-US",
+  );
+  const localAccentLocales = useMemo(
+    () =>
+      [
+        ...new Set([
+          "en-US",
+          "en-GB",
+          localAccentLocale,
+          ...identityCatalog.system.options.map((option) =>
+            canonicalEnglishVoiceLocale(option.locale),
+          ),
+        ]),
+      ].sort((left, right) => {
+        const preferred = ["en-US", "en-GB"];
+        const leftIndex = preferred.indexOf(left);
+        const rightIndex = preferred.indexOf(right);
+        if (leftIndex >= 0 || rightIndex >= 0) {
+          return (
+            (leftIndex < 0 ? 99 : leftIndex) -
+            (rightIndex < 0 ? 99 : rightIndex)
+          );
+        }
+        return left.localeCompare(right);
+      }),
+    [identityCatalog.system.options, localAccentLocale],
+  );
+  const filteredSystemVoiceOptions = useMemo(
+    () =>
+      offlineVoiceOptionsForFilters(identityCatalog.system.options, {
+        locale: localAccentLocale,
+        presentation: localVoicePresentation,
+      }),
+    [identityCatalog.system.options, localAccentLocale, localVoicePresentation],
+  );
   const selectedElevenLabsVoiceValue =
     normalizedProfile.elevenLabsVoiceId ?? "";
   const elevenLabsVoiceIdOverrideValue =
@@ -11817,6 +11987,9 @@ function BotVoiceEditor({
       )?.label ?? null)
     : null;
   const selectedSystemVoiceAvailable = identityCatalog.system.options.some(
+    (option) => option.value === selectedSystemVoiceValue,
+  );
+  const selectedSystemVoiceVisible = filteredSystemVoiceOptions.some(
     (option) => option.value === selectedSystemVoiceValue,
   );
   const selectedElevenLabsVoiceAvailable =
@@ -11949,7 +12122,9 @@ function BotVoiceEditor({
   };
   const previewVoice = async (
     choice: Exclude<VoicePlaybackChoice, "mute">,
+    profileOverride: BotAudioVoiceProfileV1 = normalizedProfile,
   ): Promise<void> => {
+    const previewProfile = normalizeBotAudioVoiceProfileV1(profileOverride);
     const mode: Exclude<VoiceMode, "mute"> =
       choice === "premium" ? "english" : choice;
     primeVoiceModePlaybackFromUserGesture(mode);
@@ -11978,10 +12153,10 @@ function BotVoiceEditor({
         "bot-editor",
         mode === "english" ? englishVoiceEngine : mode,
         previewText,
-        JSON.stringify(normalizedProfile),
+        avatarVoicePlaybackCacheProfile(previewProfile),
       ].join(":");
       await onPreview(
-        normalizedProfile,
+        previewProfile,
         mode,
         previewText,
         mode === "english"
@@ -12038,7 +12213,7 @@ function BotVoiceEditor({
       identityCatalog.elevenLabs.options.length > 0;
     const randomizationCatalog = randomizeOnlineIdentity
       ? identityCatalog.elevenLabs
-      : identityCatalog.system;
+      : { ...identityCatalog.system, options: filteredSystemVoiceOptions };
     onChange(
       randomizeBotAudioVoiceProfile(
         normalizedProfile,
@@ -12496,21 +12671,97 @@ function BotVoiceEditor({
                 </small>
               </div>
               <div className={styles.botVoiceIdentityField}>
+                <label htmlFor="bot-local-voice-accent">
+                  Genuine accent source
+                </label>
+                <select
+                  id="bot-local-voice-accent"
+                  aria-label="Local voice accent source"
+                  value={localAccentLocale}
+                  onChange={(event) => {
+                    onChange(
+                      selectOfflineVoiceAccent(
+                        normalizedProfile,
+                        event.currentTarget.value,
+                        identityCatalog.system.options,
+                        localVoicePresentation,
+                      ),
+                      { saveImmediately: true },
+                    );
+                  }}
+                >
+                  {localAccentLocales.map((locale) => (
+                    <option key={locale} value={locale}>
+                      {englishVoiceLocaleLabel(locale)}
+                    </option>
+                  ))}
+                </select>
+                <small>
+                  Only voices genuinely recorded for this accent appear below.
+                  Dialogue spelling never changes.
+                </small>
+              </div>
+              <div className={styles.botVoiceIdentityField}>
+                <span>Vocal presentation</span>
+                <div
+                  className={styles.botVoicePresentationChips}
+                  role="group"
+                  aria-label="Local voice presentation"
+                >
+                  {(["any", "feminine", "masculine"] as const).map(
+                    (presentation) => (
+                      <button
+                        key={presentation}
+                        type="button"
+                        aria-pressed={localVoicePresentation === presentation}
+                        data-active={
+                          localVoicePresentation === presentation
+                            ? "true"
+                            : undefined
+                        }
+                        onClick={() => {
+                          setLocalVoicePresentation(presentation);
+                          onChange(
+                            selectOfflineVoicePresentation(
+                              normalizedProfile,
+                              presentation,
+                              identityCatalog.system.options,
+                            ),
+                            { saveImmediately: true },
+                          );
+                        }}
+                      >
+                        {presentation === "any"
+                          ? "Any"
+                          : presentation === "feminine"
+                            ? "Feminine"
+                            : "Masculine"}
+                      </button>
+                    ),
+                  )}
+                </div>
+                <small>
+                  Installed operating-system voices appear under Any because
+                  their presentation is not reported reliably.
+                </small>
+              </div>
+              <div className={styles.botVoiceIdentityField}>
                 <label htmlFor="bot-system-voice-identity">
-                  Local and offline voice
+                  Voice
                   <BotFieldRandomizerButton
                     label="local voice"
-                    disabled={identityCatalog.system.options.length < 2}
+                    disabled={filteredSystemVoiceOptions.length < 2}
                     onRandomize={() =>
                       onChange(
                         applyOfflineVoiceSelection(
                           normalizedProfile,
                           differentChoice(
                             selectedSystemVoiceValue,
-                            identityCatalog.system.options.map(
+                            filteredSystemVoiceOptions.map(
                               (option) => option.value,
                             ),
                           ),
+                          identityCatalog.system.options,
                         ),
                         { saveImmediately: true },
                       )
@@ -12521,12 +12772,16 @@ function BotVoiceEditor({
                   id="bot-system-voice-identity"
                   aria-label="Local voice identity"
                   value={selectedSystemVoiceValue}
-                  disabled={identityCatalog.system.loading}
+                  disabled={
+                    identityCatalog.system.loading ||
+                    filteredSystemVoiceOptions.length === 0
+                  }
                   onChange={(event) => {
                     onChange(
                       applyOfflineVoiceSelection(
                         normalizedProfile,
                         event.currentTarget.value,
+                        identityCatalog.system.options,
                       ),
                       { saveImmediately: true },
                     );
@@ -12535,10 +12790,15 @@ function BotVoiceEditor({
                   {!selectedSystemVoiceAvailable ? (
                     <option value={selectedSystemVoiceValue}>
                       {normalizedProfile.systemVoiceName ??
-                        "Saved operating-system voice"}
+                        "Saved operating-system voice"}{" "}
+                      · Unavailable
+                    </option>
+                  ) : !selectedSystemVoiceVisible ? (
+                    <option value={selectedSystemVoiceValue}>
+                      Saved selection · Adjusting filter…
                     </option>
                   ) : null}
-                  {identityCatalog.system.options.map((option) => (
+                  {filteredSystemVoiceOptions.map((option) => (
                     <option key={option.value} value={option.value}>
                       {option.detail
                         ? `${option.label} — ${option.detail}`
@@ -12551,50 +12811,30 @@ function BotVoiceEditor({
                     ? "Loading available voices…"
                     : normalizedProfile.systemVoiceName &&
                         !selectedSystemVoiceAvailable
-                      ? `${normalizedProfile.systemVoiceName} is preserved from this bot's saved macOS voice setting.`
-                      : identityCatalog.system.message ||
-                        "Used for English and whenever Premium cannot play."}
+                      ? `${normalizedProfile.systemVoiceName} is preserved in ${localAccentLocale} until it returns.`
+                      : filteredSystemVoiceOptions.length === 0
+                        ? "No installed voice reports this accent and presentation. Choose Any or another accent."
+                        : identityCatalog.system.message ||
+                          "Used for English and whenever Premium cannot play."}
                 </small>
               </div>
-              <div className={styles.botVoiceIdentityField}>
-                <label htmlFor="bot-local-voice-accent">Accent source</label>
-                <select
-                  id="bot-local-voice-accent"
-                  aria-label="Local voice accent source"
-                  value={normalizedProfile.accentLocale ?? "en-US"}
-                  disabled={Boolean(normalizedProfile.systemVoiceName)}
-                  onChange={(event) => {
-                    const locale = event.currentTarget.value;
-                    const currentVoice = PRISM_BUILTIN_ENGLISH_VOICES.find(
-                      (voice) => voice.voiceId === normalizedProfile.baseVoiceId,
-                    );
-                    const genderCode = currentVoice?.engineVoiceId[1] ?? "f";
-                    const replacement = PRISM_BUILTIN_ENGLISH_VOICES.find(
-                      (voice) =>
-                        voice.locale === locale &&
-                        voice.engineVoiceId[1] === genderCode,
-                    );
-                    onChange(
-                      normalizeBotAudioVoiceProfileV1({
-                        ...normalizedProfile,
-                        baseVoiceId:
-                          replacement?.voiceId ?? normalizedProfile.baseVoiceId,
-                        systemVoiceName: null,
-                        localVoiceSource: "portable",
-                        accentLocale: locale,
-                        accentMode: "prefer-genuine",
-                      }),
-                      { saveImmediately: true },
-                    );
-                  }}
-                >
-                  <option value="en-US">American English · Genuine</option>
-                  <option value="en-GB">British English · Genuine</option>
-                </select>
+              <div
+                className={styles.botVoiceIdentityField}
+                data-bot-pronunciation-atlas-summary="true"
+              >
+                <span>Accent performance</span>
+                <strong>
+                  {pronunciationAtlasValueText(
+                    pronunciationAtlasSelectionForProfile(normalizedProfile),
+                  )}
+                </strong>
                 <small>
+                  Use the Pronunciation Atlas in the Vocalizer console above.
                   {normalizedProfile.systemVoiceName
-                    ? "The installed operating-system voice supplies its genuine accent."
-                    : "Changes to a same-register portable archetype recorded for that accent; dialogue spelling is never rewritten."}
+                    ? " Installed voices retain their genuine pronunciation."
+                    : normalizedProfile.localEnginePreference === "voice-plus"
+                      ? " Forced Voice+ suspends approximate pronunciation until qualified phoneme support is available."
+                      : " Auto uses Instant when an approximate influence is active."}
                 </small>
               </div>
             </div>
@@ -15025,7 +15265,9 @@ const BOT_VOICE_PRESET_DESCRIPTIONS: Record<BotVoicePreset, string> = {
 
 const VOICE_PREVIEW_TEXT =
   "I put my serious face somewhere safe and immediately forgot where.";
-const DEFAULT_PRISM_VOICE_PREVIEW_LINES: Partial<Record<BotAudioVoiceId, string>> = {
+const DEFAULT_PRISM_VOICE_PREVIEW_LINES: Partial<
+  Record<BotAudioVoiceId, string>
+> = {
   "voice-1": "I alphabetized my snacks by emotional support value.",
   "voice-2":
     "I brought a tiny umbrella in case the conversation gets dramatic.",
@@ -19170,6 +19412,8 @@ type BotcastEnglishVoiceMedia =
       engineUsed: string | null;
       modelHash: string | null;
       notice: string | null;
+      resolvedPronunciation?: ReplayVoiceTakeV1["resolvedPronunciation"];
+      resolvedSpeechprint?: ReplayVoiceTakeV1["resolvedSpeechprint"];
     };
 
 async function requestBabbleSynthesisClip(args: {
@@ -19678,6 +19922,7 @@ async function apiZenProgressiveChat<T>(args: {
   signal: AbortSignal;
   onSegment: (event: ZenProgressiveSegmentEvent) => void;
   onEnd?: (event: ZenProgressiveEndEvent) => void;
+  onPsychic?: (event: PsychicProgressEvent) => void;
 }): Promise<T> {
   const path = "/api/chat";
   const options: RequestInit = {
@@ -19750,6 +19995,7 @@ async function apiZenProgressiveChat<T>(args: {
     response,
     onSegment: args.onSegment,
     onEnd: args.onEnd,
+    onPsychic: args.onPsychic,
   });
   dispatchBackendAvailableEvent();
   return result;
@@ -23469,9 +23715,9 @@ function ComposerModelPicker({
     effortControl.disabled === true ||
     effortControl.capability.mode === "unavailable";
   const effortDisabledReason = effortInteractionDisabled
-    ? effortControl?.disabledReason ??
+    ? (effortControl?.disabledReason ??
       effortControl?.capability.disabledReason ??
-      (loading ? "Models are still loading." : "Effort is unavailable.")
+      (loading ? "Models are still loading." : "Effort is unavailable."))
     : undefined;
   const effortMenuOpen = effortOpen && !effortInteractionDisabled;
   const effortMenuPortalStyle = useComposeMenuPortalStyle(
@@ -23690,9 +23936,7 @@ function ComposerModelPicker({
             className={styles.composeModelEffortTrigger}
             data-tutorial-target="model-effort"
             data-adjustable={
-              effortControl.capability.mode !== "unavailable"
-                ? "true"
-                : "false"
+              effortControl.capability.mode !== "unavailable" ? "true" : "false"
             }
             data-effort-level={effortControl.value}
             onClick={() => {
@@ -29911,6 +30155,57 @@ interface ZenLiveBotMannequinProps {
   eyeTimelineMs?: number | null;
   eyeStateStartedAtMs?: number | null;
   runtimeEffectsEnabled?: boolean;
+  screenMode?: "off" | "live" | "editing";
+  screenOverlay?: ReactNode;
+  frameModulePopulation?: BotAvatarFoundryModulePopulation | null;
+}
+
+const BOT_AVATAR_FOUNDRY_FRAME_LAMPS = [
+  { lamp: "eyes", module: "eyes" },
+  { lamp: "mouth", module: "mouth" },
+  { lamp: "screen", module: "screen" },
+  { lamp: "glyph", module: "glyph" },
+  { lamp: "chassis-left-outer", module: "chassis" },
+  { lamp: "chassis-left-inner", module: "chassis" },
+  { lamp: "chassis-right-inner", module: "chassis" },
+  { lamp: "chassis-right-outer", module: "chassis" },
+] as const satisfies readonly {
+  lamp: string;
+  module: BotAvatarFoundryUpgradeNodeId;
+}[];
+
+function BotAvatarFoundryFrameModuleLights({
+  population,
+}: {
+  population: BotAvatarFoundryModulePopulation;
+}): React.JSX.Element {
+  return (
+    <span
+      className={styles.botAvatarFoundryFrameModuleLights}
+      data-avatar-foundry-frame-module-lights="true"
+      aria-hidden="true"
+    >
+      {BOT_AVATAR_FOUNDRY_FRAME_LAMPS.map(({ lamp, module }) => {
+        const node = BOT_AVATAR_FOUNDRY_UPGRADE_NODES.find(
+          (candidate) => candidate.id === module,
+        );
+        return (
+          <span
+            key={lamp}
+            className={styles.botAvatarFoundryFrameModuleLamp}
+            data-foundry-lamp={lamp}
+            data-foundry-module={module}
+            data-populated={population[module] ? "true" : "false"}
+            style={
+              {
+                "--foundry-module-color": node?.color ?? "#91a8bd",
+              } as CSSProperties
+            }
+          />
+        );
+      })}
+    </span>
+  );
 }
 
 interface BotAmbientPresenceRigProps {
@@ -30006,6 +30301,9 @@ function ZenLiveBotMannequin({
   eyeTimelineMs,
   eyeStateStartedAtMs,
   runtimeEffectsEnabled = true,
+  screenMode = "live",
+  screenOverlay,
+  frameModulePopulation = null,
 }: ZenLiveBotMannequinProps): React.JSX.Element {
   const avatarSfxAudioRef = useRef<HTMLAudioElement | null>(null);
   const avatarSfxLoadedSourceRef = useRef<string | null>(null);
@@ -30124,6 +30422,12 @@ function ZenLiveBotMannequin({
   const presenceBodyStyle = {
     ...botAvatarFaceFacingStyle(faceScaleY),
     ...(avatarDetailsFaceRegistrationStyle ?? {}),
+    ...(frameModulePopulation
+      ? {
+          ["--bot-face-frame-led-opacity" as string]: 0,
+          ["--bot-face-frame-led-glow-opacity" as string]: 0,
+        }
+      : {}),
     ...(inkOffsetY
       ? { ["--zen-live-bot-ink-offset-y" as string]: inkOffsetY }
       : {}),
@@ -30292,6 +30596,7 @@ function ZenLiveBotMannequin({
       className={styles.zenLiveBotPresenceBody}
       data-zen-live-bot-body-layer="true"
       data-render-detail={detailLevel}
+      data-screen-mode={screenMode}
       data-avatar-details-visuals={hasAvatarDetailsVisuals ? "true" : undefined}
       style={presenceBodyStyle}
     >
@@ -30316,180 +30621,198 @@ function ZenLiveBotMannequin({
           metalMaterialStyle={frameMetalMaterialStyle}
           identityColor={resolvedFrameIdentityColor}
         />
+        {frameModulePopulation ? (
+          <BotAvatarFoundryFrameModuleLights
+            population={frameModulePopulation}
+          />
+        ) : null}
       </span>
       <span
         className={styles.zenLiveBotPresenceFaceEmissionMask}
+        data-screen-mode={screenMode}
         data-crt-profile="clean"
         data-crt-phosphor="white"
         data-talking={isTalking ? "true" : undefined}
         data-coffee-plate-mouth-shape={
           isTalking ? displayedMouthShape : undefined
         }
-        aria-hidden="true"
+        aria-hidden={screenOverlay ? undefined : "true"}
       >
-        {detailLevel === "full" ? (
+        {screenMode === "live" ? (
           <>
+            {detailLevel === "full" ? (
+              <>
+                <span
+                  className={styles.botFaceCrtNoiseLayer}
+                  data-crt-material-layer="noise"
+                  data-prism-decorative-motion="true"
+                  aria-hidden="true"
+                />
+                <span
+                  className={styles.botFaceCrtBreathingLayer}
+                  data-crt-material-layer="breathing"
+                  data-prism-decorative-motion="true"
+                  aria-hidden="true"
+                />
+              </>
+            ) : null}
             <span
-              className={styles.botFaceCrtNoiseLayer}
-              data-crt-material-layer="noise"
-              data-prism-decorative-motion="true"
+              className={styles.botFaceCrtGrimeLayer}
+              data-crt-material-layer="grime"
+              style={screenMaterialStyle}
               aria-hidden="true"
             />
+            {!thinkingSpinnerActive && !showQuestionMark ? (
+              <AvatarDetailsMask
+                details={avatarDetails}
+                color={avatarDetailsColor}
+                detailLevel={avatarDetailsDetailLevel}
+                faceGeometry={faceStyle}
+                blinkPhase={avatarDetailsBlinkPhase}
+                talking={inkTalking ?? isTalking}
+                speechMotionActive={isTalking}
+                mouthAnimation={faceStyle.mouthAnimation}
+                mouthShape={displayedMouthShape}
+                depth="behind-face"
+              />
+            ) : null}
+            {thinkingSpinnerActive ? (
+              <span className={styles.zenLiveBotPresenceThinkingGlyphAnchor}>
+                <CoffeeSeatPlateEmoji
+                  enabled={detailLevel === "full" || blinkEnabled}
+                  isTalking={false}
+                  scheduleKey={thinkingScheduleKey ?? `${scheduleKey}-thinking`}
+                  showThinkingSpinner
+                  baseText={displayPlateFace.text}
+                  rotateDeg={displayPlateFace.rotateDeg}
+                  voicePreset={voicePreset}
+                  faceEyesFont={faceStyle.eyesFont}
+                  faceEyeCharacter={faceStyle.eyeCharacter}
+                  faceEyeMovement={
+                    detailLevel === "full" ? faceStyle.eyeAnimation : "still"
+                  }
+                  eyeAttentionState={eyeAttentionState}
+                  eyeTargetDirection={eyeTargetDirection}
+                  eyeTimelineMs={eyeTimelineMs}
+                  eyeStateStartedAtMs={eyeStateStartedAtMs}
+                  faceMouthFont={faceStyle.mouthFont}
+                  faceMouthCharacter={faceStyle.mouthCharacter}
+                  faceMouthAnimation={faceStyle.mouthAnimation}
+                  faceFontWeight={faceStyle.weight}
+                  faceEyeScale={faceStyle.eyeScale}
+                  faceEyeOffsetX={faceStyle.eyeOffsetX}
+                  faceEyeOffsetY={faceStyle.eyeOffsetY}
+                  faceEyeRotationDeg={faceStyle.eyeRotationDeg}
+                  faceEyeCount={faceStyle.eyeCount}
+                  faceMouthScale={faceStyle.mouthScale}
+                  faceMouthOffsetX={faceStyle.mouthOffsetX}
+                  faceMouthOffsetY={faceStyle.mouthOffsetY}
+                  faceMouthRotationDeg={faceStyle.mouthRotationDeg}
+                  faceBlinkBar={faceStyle.blinkBar}
+                  faceBlinkScale={faceStyle.blinkScale}
+                  faceBlinkOffsetX={faceStyle.blinkOffsetX}
+                  faceBlinkOffsetY={faceStyle.blinkOffsetY}
+                  faceBlinkRotationDeg={faceStyle.blinkRotationDeg}
+                  faceThinkingFrames={faceStyle.thinkingFrames}
+                  faceThinkingScale={faceStyle.thinkingScale}
+                  faceThinkingOffsetX={faceStyle.thinkingOffsetX}
+                  faceThinkingOffsetY={faceStyle.thinkingOffsetY}
+                  className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceThinkingGlyph}`}
+                />
+              </span>
+            ) : (
+              <span
+                className={styles.zenLiveBotPresenceFaceRig}
+                data-zen-live-bot-face-rig="true"
+                style={
+                  {
+                    // Keep the punctuation correction stable inside the glyph,
+                    // then mirror the complete face layer around the CRT center so
+                    // authored ink and live features share the same flip origin.
+                    ["--coffee-plate-emoji-face-scale-y" as string]:
+                      BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
+                    ["--zen-live-bot-face-layer-scale-x" as string]:
+                      showQuestionMark
+                        ? "1"
+                        : "var(--avatar-details-facing-scale-x, 1)",
+                  } as CSSProperties
+                }
+              >
+                <CoffeeSeatPlateEmoji
+                  enabled={detailLevel === "full" || blinkEnabled}
+                  isTalking={isTalking}
+                  mouthShape={displayedMouthShape}
+                  scheduleKey={scheduleKey}
+                  showQuestionMark={showQuestionMark}
+                  baseText={displayPlateFace.text}
+                  rotateDeg={displayPlateFace.rotateDeg}
+                  voicePreset={voicePreset}
+                  blinkWhileTalking={blinkWhileTalking}
+                  faceEyesFont={faceStyle.eyesFont}
+                  faceEyeCharacter={faceStyle.eyeCharacter}
+                  faceEyeMovement={
+                    detailLevel === "full" ? faceStyle.eyeAnimation : "still"
+                  }
+                  eyeAttentionState={eyeAttentionState}
+                  eyeTargetDirection={eyeTargetDirection}
+                  eyeTimelineMs={eyeTimelineMs}
+                  eyeStateStartedAtMs={eyeStateStartedAtMs}
+                  faceMouthFont={faceStyle.mouthFont}
+                  faceMouthCharacter={faceStyle.mouthCharacter}
+                  faceMouthAnimation={faceStyle.mouthAnimation}
+                  faceFontWeight={faceStyle.weight}
+                  faceEyeScale={faceStyle.eyeScale}
+                  faceEyeOffsetX={faceStyle.eyeOffsetX}
+                  faceEyeOffsetY={faceStyle.eyeOffsetY}
+                  faceEyeRotationDeg={faceStyle.eyeRotationDeg}
+                  faceEyeCount={faceStyle.eyeCount}
+                  faceMouthScale={faceStyle.mouthScale}
+                  faceMouthOffsetX={faceStyle.mouthOffsetX}
+                  faceMouthOffsetY={faceStyle.mouthOffsetY}
+                  faceMouthRotationDeg={faceStyle.mouthRotationDeg}
+                  faceBlinkBar={faceStyle.blinkBar}
+                  faceBlinkScale={faceStyle.blinkScale}
+                  faceBlinkOffsetX={faceStyle.blinkOffsetX}
+                  faceBlinkOffsetY={faceStyle.blinkOffsetY}
+                  faceBlinkRotationDeg={faceStyle.blinkRotationDeg}
+                  faceThinkingFrames={faceStyle.thinkingFrames}
+                  faceThinkingScale={faceStyle.thinkingScale}
+                  faceThinkingOffsetX={faceStyle.thinkingOffsetX}
+                  faceThinkingOffsetY={faceStyle.thinkingOffsetY}
+                  forceBlinkPhase={forceBlinkPhase}
+                  onBlinkPhaseChange={handleAvatarDetailsBlinkPhaseChange}
+                  className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceFaceGlyph}`}
+                />
+              </span>
+            )}
             <span
-              className={styles.botFaceCrtBreathingLayer}
-              data-crt-material-layer="breathing"
-              data-prism-decorative-motion="true"
+              className={styles.botFaceCrtPixelGridLayer}
+              data-crt-material-layer="pixel-grid"
               aria-hidden="true"
             />
+            {!thinkingSpinnerActive && !showQuestionMark ? (
+              <AvatarDetailsMask
+                details={avatarDetails}
+                color={avatarDetailsColor}
+                detailLevel={avatarDetailsDetailLevel}
+                faceGeometry={faceStyle}
+                blinkPhase={avatarDetailsBlinkPhase}
+                talking={inkTalking ?? isTalking}
+                speechMotionActive={isTalking}
+                mouthAnimation={faceStyle.mouthAnimation}
+                mouthShape={displayedMouthShape}
+                depth="above-face"
+              />
+            ) : null}
           </>
         ) : null}
-        <span
-          className={styles.botFaceCrtGrimeLayer}
-          data-crt-material-layer="grime"
-          style={screenMaterialStyle}
-          aria-hidden="true"
-        />
-        {!thinkingSpinnerActive && !showQuestionMark ? (
-          <AvatarDetailsMask
-            details={avatarDetails}
-            color={avatarDetailsColor}
-            detailLevel={avatarDetailsDetailLevel}
-            faceGeometry={faceStyle}
-            blinkPhase={avatarDetailsBlinkPhase}
-            talking={inkTalking ?? isTalking}
-            speechMotionActive={isTalking}
-            mouthAnimation={faceStyle.mouthAnimation}
-            mouthShape={displayedMouthShape}
-            depth="behind-face"
-          />
-        ) : null}
-        {thinkingSpinnerActive ? (
-          <span className={styles.zenLiveBotPresenceThinkingGlyphAnchor}>
-            <CoffeeSeatPlateEmoji
-              enabled={detailLevel === "full" || blinkEnabled}
-              isTalking={false}
-              scheduleKey={thinkingScheduleKey ?? `${scheduleKey}-thinking`}
-              showThinkingSpinner
-              baseText={displayPlateFace.text}
-              rotateDeg={displayPlateFace.rotateDeg}
-              voicePreset={voicePreset}
-              faceEyesFont={faceStyle.eyesFont}
-              faceEyeCharacter={faceStyle.eyeCharacter}
-              faceEyeMovement={
-                detailLevel === "full" ? faceStyle.eyeAnimation : "still"
-              }
-              eyeAttentionState={eyeAttentionState}
-              eyeTargetDirection={eyeTargetDirection}
-              eyeTimelineMs={eyeTimelineMs}
-              eyeStateStartedAtMs={eyeStateStartedAtMs}
-              faceMouthFont={faceStyle.mouthFont}
-              faceMouthCharacter={faceStyle.mouthCharacter}
-              faceMouthAnimation={faceStyle.mouthAnimation}
-              faceFontWeight={faceStyle.weight}
-              faceEyeScale={faceStyle.eyeScale}
-              faceEyeOffsetX={faceStyle.eyeOffsetX}
-              faceEyeOffsetY={faceStyle.eyeOffsetY}
-              faceEyeRotationDeg={faceStyle.eyeRotationDeg}
-              faceEyeCount={faceStyle.eyeCount}
-              faceMouthScale={faceStyle.mouthScale}
-              faceMouthOffsetX={faceStyle.mouthOffsetX}
-              faceMouthOffsetY={faceStyle.mouthOffsetY}
-              faceMouthRotationDeg={faceStyle.mouthRotationDeg}
-              faceBlinkBar={faceStyle.blinkBar}
-              faceBlinkScale={faceStyle.blinkScale}
-              faceBlinkOffsetX={faceStyle.blinkOffsetX}
-              faceBlinkOffsetY={faceStyle.blinkOffsetY}
-              faceBlinkRotationDeg={faceStyle.blinkRotationDeg}
-              faceThinkingFrames={faceStyle.thinkingFrames}
-              faceThinkingScale={faceStyle.thinkingScale}
-              faceThinkingOffsetX={faceStyle.thinkingOffsetX}
-              faceThinkingOffsetY={faceStyle.thinkingOffsetY}
-              className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceThinkingGlyph}`}
-            />
-          </span>
-        ) : (
+        {screenMode === "editing" && screenOverlay ? (
           <span
-            className={styles.zenLiveBotPresenceFaceRig}
-            data-zen-live-bot-face-rig="true"
-            style={
-              {
-                // Keep the punctuation correction stable inside the glyph,
-                // then mirror the complete face layer around the CRT center so
-                // authored ink and live features share the same flip origin.
-                ["--coffee-plate-emoji-face-scale-y" as string]:
-                  BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
-                ["--zen-live-bot-face-layer-scale-x" as string]:
-                  showQuestionMark
-                    ? "1"
-                    : "var(--avatar-details-facing-scale-x, 1)",
-              } as CSSProperties
-            }
+            className={styles.botAvatarFoundryScreenOverlay}
+            data-avatar-foundry-screen-overlay="true"
           >
-            <CoffeeSeatPlateEmoji
-              enabled={detailLevel === "full" || blinkEnabled}
-              isTalking={isTalking}
-              mouthShape={displayedMouthShape}
-              scheduleKey={scheduleKey}
-              showQuestionMark={showQuestionMark}
-              baseText={displayPlateFace.text}
-              rotateDeg={displayPlateFace.rotateDeg}
-              voicePreset={voicePreset}
-              blinkWhileTalking={blinkWhileTalking}
-              faceEyesFont={faceStyle.eyesFont}
-              faceEyeCharacter={faceStyle.eyeCharacter}
-              faceEyeMovement={
-                detailLevel === "full" ? faceStyle.eyeAnimation : "still"
-              }
-              eyeAttentionState={eyeAttentionState}
-              eyeTargetDirection={eyeTargetDirection}
-              eyeTimelineMs={eyeTimelineMs}
-              eyeStateStartedAtMs={eyeStateStartedAtMs}
-              faceMouthFont={faceStyle.mouthFont}
-              faceMouthCharacter={faceStyle.mouthCharacter}
-              faceMouthAnimation={faceStyle.mouthAnimation}
-              faceFontWeight={faceStyle.weight}
-              faceEyeScale={faceStyle.eyeScale}
-              faceEyeOffsetX={faceStyle.eyeOffsetX}
-              faceEyeOffsetY={faceStyle.eyeOffsetY}
-              faceEyeRotationDeg={faceStyle.eyeRotationDeg}
-              faceEyeCount={faceStyle.eyeCount}
-              faceMouthScale={faceStyle.mouthScale}
-              faceMouthOffsetX={faceStyle.mouthOffsetX}
-              faceMouthOffsetY={faceStyle.mouthOffsetY}
-              faceMouthRotationDeg={faceStyle.mouthRotationDeg}
-              faceBlinkBar={faceStyle.blinkBar}
-              faceBlinkScale={faceStyle.blinkScale}
-              faceBlinkOffsetX={faceStyle.blinkOffsetX}
-              faceBlinkOffsetY={faceStyle.blinkOffsetY}
-              faceBlinkRotationDeg={faceStyle.blinkRotationDeg}
-              faceThinkingFrames={faceStyle.thinkingFrames}
-              faceThinkingScale={faceStyle.thinkingScale}
-              faceThinkingOffsetX={faceStyle.thinkingOffsetX}
-              faceThinkingOffsetY={faceStyle.thinkingOffsetY}
-              forceBlinkPhase={forceBlinkPhase}
-              onBlinkPhaseChange={handleAvatarDetailsBlinkPhaseChange}
-              className={`${styles.coffeeSeatPlateEmoji} ${styles.zenLiveBotPresenceFaceGlyph}`}
-            />
+            {screenOverlay}
           </span>
-        )}
-        <span
-          className={styles.botFaceCrtPixelGridLayer}
-          data-crt-material-layer="pixel-grid"
-          aria-hidden="true"
-        />
-        {!thinkingSpinnerActive && !showQuestionMark ? (
-          <AvatarDetailsMask
-            details={avatarDetails}
-            color={avatarDetailsColor}
-            detailLevel={avatarDetailsDetailLevel}
-            faceGeometry={faceStyle}
-            blinkPhase={avatarDetailsBlinkPhase}
-            talking={inkTalking ?? isTalking}
-            speechMotionActive={isTalking}
-            mouthAnimation={faceStyle.mouthAnimation}
-            mouthShape={displayedMouthShape}
-            depth="above-face"
-          />
         ) : null}
       </span>
       <span
@@ -31253,10 +31576,12 @@ function ZenLiveBotPresencePlate({
   const avatarDraggingRef = useRef(avatarDragging);
   const transitioningRef = useRef(transitioning);
   const faceTalkingRef = useRef(faceTalking);
-  avatarCanvasSideRef.current = avatarCanvasSide;
-  avatarDraggingRef.current = avatarDragging;
-  transitioningRef.current = transitioning;
-  faceTalkingRef.current = faceTalking;
+  useLayoutEffect(() => {
+    avatarCanvasSideRef.current = avatarCanvasSide;
+    avatarDraggingRef.current = avatarDragging;
+    transitioningRef.current = transitioning;
+    faceTalkingRef.current = faceTalking;
+  }, [avatarCanvasSide, avatarDragging, faceTalking, transitioning]);
   const presencePlateMounted =
     Boolean(bot) ||
     Boolean(actionState) ||
@@ -36855,6 +37180,18 @@ type BotAvatarFaceControlTab = Extract<
   BotAvatarCustomizerTab,
   "face" | "eyes" | "mouth"
 >;
+type BotAvatarAdjustmentTarget =
+  "thinking" | "eyes" | "blink" | "mouth" | "pronunciation";
+
+function botAvatarAdjustmentTargetForControl(
+  control: BotAvatarCustomizerTab,
+): BotAvatarAdjustmentTarget | null {
+  if (control === "face") return "thinking";
+  if (control === "eyes") return "eyes";
+  if (control === "mouth") return "mouth";
+  if (control === "voice") return "pronunciation";
+  return null;
+}
 
 const BOT_AVATAR_PREVIEW_MODES = [
   { value: "idle", label: "Idle" },
@@ -37277,6 +37614,33 @@ function randomBotAvatarCustomThinkingFrames(): BotFaceThinkingFrames {
   );
 }
 
+function botAvatarFoundryPreviewStyle(
+  color: string,
+  isDefaultPrismBot: boolean,
+  previewTheme: "light" | "dark",
+): CSSProperties {
+  const bodySize = BOT_AVATAR_CUSTOMIZER_BODY_SIZE_PX;
+  const bodyPlacement = BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT;
+  const facePlacement = ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT;
+  return {
+    ...botAvatarPreviewIdentityStyle(color, isDefaultPrismBot),
+    "--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
+    "--avatar-details-scale-x": "1",
+    "--avatar-details-facing-scale-x": "1",
+    "--zen-live-bot-face-x": `${facePlacement.xPct}%`,
+    "--zen-live-bot-face-y": `${facePlacement.yPct}%`,
+    "--zen-live-bot-face-scale": facePlacement.scale,
+    "--zen-live-bot-body-x": `${bodyPlacement.xPct}%`,
+    "--zen-live-bot-body-y": `${bodyPlacement.yPct}%`,
+    "--zen-live-bot-avatar-size": `${BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX}px`,
+    "--zen-live-bot-avatar-body-size": `${bodySize}px`,
+    "--zen-live-bot-glyph-x-anchor": "0px",
+    "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.37)}px`,
+    "--bot-face-crt-screen-texture-blend-mode":
+      previewTheme === "light" ? "overlay" : "luminosity",
+  } as CSSProperties;
+}
+
 function BotAvatarPreviewPanel({
   titleName,
   glyph,
@@ -37297,6 +37661,16 @@ function BotAvatarPreviewPanel({
   onPreviewThemeChange,
   onPreviewModeChange,
   onPreviewMoodCycle,
+  screenMode = "live",
+  screenOverlay,
+  foundryRitual = false,
+  spatialControls = false,
+  activeUpgradeNode = null,
+  modulePopulation = BOT_AVATAR_FOUNDRY_ALL_MODULES_POPULATED,
+  foundryCameraMode = "overview",
+  screenHotspotEnabled = true,
+  onUpgradeNodeSelect,
+  onStageBackgroundSelect,
 }: {
   titleName: string;
   glyph: BotGlyphName;
@@ -37317,7 +37691,36 @@ function BotAvatarPreviewPanel({
   onPreviewThemeChange: (theme: "light" | "dark") => void;
   onPreviewModeChange: (mode: BotAvatarPreviewMode) => void;
   onPreviewMoodCycle: () => void;
+  screenMode?: "off" | "live" | "editing";
+  screenOverlay?: ReactNode;
+  foundryRitual?: boolean;
+  spatialControls?: boolean;
+  activeUpgradeNode?: BotAvatarFoundryUpgradeNodeId | null;
+  modulePopulation?: BotAvatarFoundryModulePopulation;
+  foundryCameraMode?: BotAvatarFoundryCameraMode;
+  screenHotspotEnabled?: boolean;
+  onUpgradeNodeSelect?: (node: BotAvatarFoundryUpgradeNodeId) => void;
+  onStageBackgroundSelect?: () => void;
 }): React.JSX.Element {
+  const [foundryViewport, setFoundryViewport] =
+    useState<BotAvatarFoundryViewport>(BOT_AVATAR_FOUNDRY_DEFAULT_VIEWPORT);
+  const foundryViewportRef = useRef<BotAvatarFoundryViewport>(
+    BOT_AVATAR_FOUNDRY_DEFAULT_VIEWPORT,
+  );
+  const foundryStageRef = useRef<HTMLDivElement>(null);
+  const foundryZoomReadoutRef = useRef<HTMLElement>(null);
+  const foundryPendingViewportRef = useRef<BotAvatarFoundryViewport | null>(
+    null,
+  );
+  const foundryViewportFrameRef = useRef<number | null>(null);
+  const foundryWheelCommitTimerRef = useRef<number | null>(null);
+  const foundryPanGestureRef = useRef<{
+    pointerId: number;
+    clientX: number;
+    clientY: number;
+    viewport: BotAvatarFoundryViewport;
+    moved: boolean;
+  } | null>(null);
   const previewThinking = previewMode === "thinking";
   const previewThinkingSpinnerActive =
     previewThinking &&
@@ -37337,183 +37740,462 @@ function BotAvatarPreviewPanel({
         }),
       }
     : faceStyle;
+  const foundryViewportStyle = spatialControls
+    ? ({
+        "--foundry-pan-x": `${foundryViewport.x}px`,
+        "--foundry-pan-y": `${foundryViewport.y}px`,
+        "--foundry-user-zoom": foundryViewport.zoom,
+      } as CSSProperties)
+    : undefined;
+  const writeFoundryViewport = (
+    viewport: BotAvatarFoundryViewport,
+  ): BotAvatarFoundryViewport => {
+    const normalized = normalizeBotAvatarFoundryViewport(viewport);
+    foundryViewportRef.current = normalized;
+    const stage = foundryStageRef.current;
+    if (stage) {
+      stage.style.setProperty("--foundry-pan-x", `${normalized.x}px`);
+      stage.style.setProperty("--foundry-pan-y", `${normalized.y}px`);
+      stage.style.setProperty("--foundry-user-zoom", String(normalized.zoom));
+    }
+    if (foundryZoomReadoutRef.current) {
+      foundryZoomReadoutRef.current.textContent = `${Math.round(normalized.zoom * 100)}%`;
+    }
+    return normalized;
+  };
+  const flushFoundryViewportFrame = (): BotAvatarFoundryViewport => {
+    if (foundryViewportFrameRef.current != null) {
+      cancelAnimationFrame(foundryViewportFrameRef.current);
+      foundryViewportFrameRef.current = null;
+    }
+    const pending = foundryPendingViewportRef.current;
+    foundryPendingViewportRef.current = null;
+    return pending ? writeFoundryViewport(pending) : foundryViewportRef.current;
+  };
+  const queueFoundryViewport = (viewport: BotAvatarFoundryViewport): void => {
+    const normalized = normalizeBotAvatarFoundryViewport(viewport);
+    // Update the logical camera immediately so wheel events that arrive before
+    // the next painted frame accumulate from the newest zoom value.
+    foundryViewportRef.current = normalized;
+    foundryPendingViewportRef.current = normalized;
+    if (foundryViewportFrameRef.current != null) return;
+    foundryViewportFrameRef.current = requestAnimationFrame(() => {
+      foundryViewportFrameRef.current = null;
+      const pending = foundryPendingViewportRef.current;
+      foundryPendingViewportRef.current = null;
+      if (pending) writeFoundryViewport(pending);
+    });
+  };
+  const clearFoundryWheelCommit = (): void => {
+    if (foundryWheelCommitTimerRef.current == null) return;
+    window.clearTimeout(foundryWheelCommitTimerRef.current);
+    foundryWheelCommitTimerRef.current = null;
+  };
+  const setFoundryCameraActive = (active: boolean): void => {
+    if (active) {
+      foundryStageRef.current?.setAttribute(
+        "data-foundry-camera-active",
+        "true",
+      );
+    } else {
+      foundryStageRef.current?.removeAttribute("data-foundry-camera-active");
+    }
+  };
+  const commitFoundryViewport = (viewport: BotAvatarFoundryViewport): void => {
+    clearFoundryWheelCommit();
+    foundryPendingViewportRef.current = null;
+    const normalized = writeFoundryViewport(viewport);
+    setFoundryViewport(normalized);
+  };
+  const resetFoundryViewport = (): void => {
+    flushFoundryViewportFrame();
+    setFoundryCameraActive(false);
+    commitFoundryViewport(BOT_AVATAR_FOUNDRY_DEFAULT_VIEWPORT);
+  };
+  useEffect(() => {
+    return () => {
+      if (foundryViewportFrameRef.current != null) {
+        cancelAnimationFrame(foundryViewportFrameRef.current);
+      }
+      if (foundryWheelCommitTimerRef.current != null) {
+        window.clearTimeout(foundryWheelCommitTimerRef.current);
+      }
+    };
+  }, []);
+  const beginFoundryPan = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const target = event.target as HTMLElement;
+    if (
+      !spatialControls ||
+      foundryCameraMode === "ink" ||
+      event.button !== 0 ||
+      target.closest(
+        "button, input, select, textarea, canvas, [data-avatar-foundry-screen-overlay]",
+      )
+    ) {
+      return;
+    }
+    clearFoundryWheelCommit();
+    flushFoundryViewportFrame();
+    setFoundryCameraActive(true);
+    foundryPanGestureRef.current = {
+      pointerId: event.pointerId,
+      clientX: event.clientX,
+      clientY: event.clientY,
+      viewport: foundryViewportRef.current,
+      moved: false,
+    };
+    event.currentTarget.setPointerCapture?.(event.pointerId);
+    event.preventDefault();
+  };
+  const moveFoundryPan = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const gesture = foundryPanGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    const deltaX = event.clientX - gesture.clientX;
+    const deltaY = event.clientY - gesture.clientY;
+    gesture.moved ||= Math.hypot(deltaX, deltaY) >= 3;
+    queueFoundryViewport(
+      normalizeBotAvatarFoundryViewport({
+        ...gesture.viewport,
+        x: gesture.viewport.x + deltaX,
+        y: gesture.viewport.y + deltaY,
+      }),
+    );
+    event.preventDefault();
+  };
+  const endFoundryPan = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const gesture = foundryPanGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    foundryPanGestureRef.current = null;
+    const viewport = flushFoundryViewportFrame();
+    setFoundryViewport(viewport);
+    setFoundryCameraActive(false);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    if (!gesture.moved) onStageBackgroundSelect?.();
+    event.preventDefault();
+  };
+  const cancelFoundryPan = (event: ReactPointerEvent<HTMLDivElement>): void => {
+    const gesture = foundryPanGestureRef.current;
+    if (!gesture || gesture.pointerId !== event.pointerId) return;
+    foundryPanGestureRef.current = null;
+    flushFoundryViewportFrame();
+    commitFoundryViewport(gesture.viewport);
+    setFoundryCameraActive(false);
+    event.currentTarget.releasePointerCapture?.(event.pointerId);
+    event.preventDefault();
+  };
 
   return (
     <section
       className={styles.botAvatarMannequinPanel}
       aria-label="Avatar preview"
+      data-foundry-ritual={foundryRitual ? "true" : undefined}
+      data-spatial-controls={spatialControls ? "true" : undefined}
     >
-      <header className={styles.botAvatarPanelHeader}>
-        <div>
-          <span>Preview</span>
-          <strong>Live avatar</strong>
-        </div>
-        <div
-          className={styles.botAvatarPreviewThemeToggle}
-          role="group"
-          aria-label="Preview theme"
-        >
-          <button
-            type="button"
-            data-active={previewTheme === "dark" ? "true" : undefined}
-            aria-pressed={previewTheme === "dark"}
-            onClick={() => onPreviewThemeChange("dark")}
+      {!foundryRitual ? (
+        <header className={styles.botAvatarPanelHeader}>
+          <div>
+            <span>Preview</span>
+            <strong>Live avatar</strong>
+          </div>
+          <div
+            className={styles.botAvatarPreviewThemeToggle}
+            role="group"
+            aria-label="Preview theme"
           >
-            <Moon size={13} strokeWidth={2.2} aria-hidden="true" />
-            Dark
-          </button>
-          <button
-            type="button"
-            data-active={previewTheme === "light" ? "true" : undefined}
-            aria-pressed={previewTheme === "light"}
-            onClick={() => onPreviewThemeChange("light")}
-          >
-            <Sun size={13} strokeWidth={2.2} aria-hidden="true" />
-            Light
-          </button>
-        </div>
-      </header>
-      <div
-        className={styles.botAvatarMannequinStage}
-        data-app-cursor-theme={previewTheme}
-        data-preview-theme={previewTheme}
-      >
-        <div
-          className={styles.zenLiveBotPresencePlate}
-          data-theme={previewTheme}
-          data-mood={previewMoodHint}
-          data-prism-mood={previewMood}
-          data-source={isDefaultPrismBot ? "prism" : "persona"}
-          data-prism-persona={isDefaultPrismBot ? "true" : undefined}
-          data-talking={previewTalking ? "true" : undefined}
-          data-mouth-open={
-            previewTalking
-              ? displayedPreviewMouthShape !== "closed"
-                ? "true"
-                : "false"
-              : undefined
-          }
-          data-mouth-shape={
-            previewTalking ? displayedPreviewMouthShape : undefined
-          }
-          data-canvas-side="left"
-          data-body-sized="true"
-          data-zen-live-bot-presence-plate="true"
-          data-avatar-customizer-preview="true"
-          data-avatar-preview-theme={previewTheme}
-          data-avatar-preview-mode={previewMode}
-          data-avatar-preview-mood={previewMood}
-          style={avatarStyle}
-          role="img"
-          aria-label={`${titleName} avatar preview`}
-        >
-          <BotAmbientPresenceRig
-            theme={previewTheme}
-            isTalking={previewTalking}
-            motionActive={!previewTalking && !previewThinkingSpinnerActive}
-          >
-            <ZenLiveBotMannequin
-              glyph={glyph}
-              faceStyle={previewFaceStyle}
-              faceScaleY={BOT_AVATAR_CANONICAL_FACE_SCALE_Y}
-              voicePreset="warm"
-              isTalking={previewTalking}
-              avatarSfx={avatarSfx}
-              avatarSfxState={previewAvatarSfxState}
-              blinkWhileTalking
-              mouthShape={displayedPreviewMouthShape}
-              moodHint={previewMoodHint}
-              scheduleKey={`${scheduleKey}-${previewMode}-${previewMood}`}
-              forceBlinkPhase={previewBlink ? "closed" : undefined}
-              showThinkingSpinner={previewThinkingSpinnerActive}
-              plateFace={
-                previewSipping ? COFFEE_SEAT_SIP_PLATE_GLYPH : undefined
-              }
-              screenMaterialSeed={screenMaterialSeed}
-              frameMaterialSeed={
-                isDefaultPrismBot
-                  ? PRISM_FACTORY_CLEAN_FRAME_SEED
-                  : frameMaterialSeed
-              }
-              avatarDetails={isDefaultPrismBot ? null : avatarDetails}
-              avatarDetailsColor={
-                isDefaultPrismBot
-                  ? null
-                  : normalizeAccentForTheme(avatarDetailsColor, previewTheme)
-              }
-            />
-          </BotAmbientPresenceRig>
-        </div>
-      </div>
-      <div className={styles.botAvatarPreviewToolbar}>
-        <div
-          className={styles.botAvatarPreviewModeToggle}
-          role="group"
-          aria-label="Preview expression"
-        >
-          {BOT_AVATAR_PREVIEW_MODES.map((mode) => (
             <button
-              key={mode.value}
               type="button"
-              data-active={previewMode === mode.value ? "true" : undefined}
-              aria-pressed={previewMode === mode.value}
-              onClick={() => onPreviewModeChange(mode.value)}
+              data-active={previewTheme === "dark" ? "true" : undefined}
+              aria-pressed={previewTheme === "dark"}
+              onClick={() => onPreviewThemeChange("dark")}
             >
-              <BotAvatarPreviewModeIcon mode={mode.value} />
-              {mode.label}
+              <Moon size={13} strokeWidth={2.2} aria-hidden="true" />
+              Dark
             </button>
-          ))}
-        </div>
-        <button
-          type="button"
-          className={styles.botAvatarMoodPreviewButton}
-          onClick={onPreviewMoodCycle}
-          aria-label={`Preview mood: ${BOT_AVATAR_PREVIEW_MOOD_LABELS[previewMood]}`}
-        >
-          <Sparkles size={13} strokeWidth={2.3} aria-hidden="true" />
-          Mood: {BOT_AVATAR_PREVIEW_MOOD_LABELS[previewMood]}
-        </button>
-      </div>
-    </section>
-  );
-}
-
-function BotAvatarDeferredPreviewPanel({
-  previewTheme,
-  onReveal,
-}: {
-  previewTheme: "light" | "dark";
-  onReveal: () => void;
-}): React.JSX.Element {
-  return (
-    <section
-      className={`${styles.botAvatarMannequinPanel} ${styles.botAvatarDeferredPreviewPanel}`}
-      aria-label="Avatar preview paused"
-      data-avatar-preview-deferred="true"
-    >
-      <header className={styles.botAvatarPanelHeader}>
-        <div>
-          <span>Preview</span>
-          <strong>Paused while editing</strong>
-        </div>
-      </header>
+            <button
+              type="button"
+              data-active={previewTheme === "light" ? "true" : undefined}
+              aria-pressed={previewTheme === "light"}
+              onClick={() => onPreviewThemeChange("light")}
+            >
+              <Sun size={13} strokeWidth={2.2} aria-hidden="true" />
+              Light
+            </button>
+          </div>
+        </header>
+      ) : null}
       <div
+        ref={foundryStageRef}
         className={styles.botAvatarMannequinStage}
         data-app-cursor-theme={previewTheme}
         data-preview-theme={previewTheme}
+        data-foundry-camera-surface={spatialControls ? "true" : undefined}
+        style={foundryViewportStyle}
+        tabIndex={
+          spatialControls && foundryCameraMode !== "ink" ? 0 : undefined
+        }
+        aria-label={
+          spatialControls && foundryCameraMode !== "ink"
+            ? "Live bot preview. Drag to pan, scroll to zoom, or use arrow and plus or minus keys."
+            : undefined
+        }
+        onPointerDown={beginFoundryPan}
+        onPointerMove={moveFoundryPan}
+        onPointerUp={endFoundryPan}
+        onPointerCancel={cancelFoundryPan}
+        onWheel={(event) => {
+          if (!spatialControls || foundryCameraMode === "ink") return;
+          event.preventDefault();
+          setFoundryCameraActive(true);
+          queueFoundryViewport(
+            zoomBotAvatarFoundryViewport(
+              foundryViewportRef.current,
+              event.deltaY,
+            ),
+          );
+          clearFoundryWheelCommit();
+          foundryWheelCommitTimerRef.current = window.setTimeout(() => {
+            foundryWheelCommitTimerRef.current = null;
+            const viewport = flushFoundryViewportFrame();
+            setFoundryViewport(viewport);
+            setFoundryCameraActive(false);
+          }, 120);
+        }}
+        onKeyDown={(event) => {
+          if (!spatialControls || foundryCameraMode === "ink") return;
+          const panStep = event.shiftKey ? 48 : 20;
+          if (event.key === "ArrowLeft") {
+            commitFoundryViewport(
+              normalizeBotAvatarFoundryViewport({
+                ...foundryViewportRef.current,
+                x: foundryViewportRef.current.x - panStep,
+              }),
+            );
+          } else if (event.key === "ArrowRight") {
+            commitFoundryViewport(
+              normalizeBotAvatarFoundryViewport({
+                ...foundryViewportRef.current,
+                x: foundryViewportRef.current.x + panStep,
+              }),
+            );
+          } else if (event.key === "ArrowUp") {
+            commitFoundryViewport(
+              normalizeBotAvatarFoundryViewport({
+                ...foundryViewportRef.current,
+                y: foundryViewportRef.current.y - panStep,
+              }),
+            );
+          } else if (event.key === "ArrowDown") {
+            commitFoundryViewport(
+              normalizeBotAvatarFoundryViewport({
+                ...foundryViewportRef.current,
+                y: foundryViewportRef.current.y + panStep,
+              }),
+            );
+          } else if (event.key === "+" || event.key === "=") {
+            commitFoundryViewport(
+              zoomBotAvatarFoundryViewport(foundryViewportRef.current, -120),
+            );
+          } else if (event.key === "-" || event.key === "_") {
+            commitFoundryViewport(
+              zoomBotAvatarFoundryViewport(foundryViewportRef.current, 120),
+            );
+          } else if (event.key === "0") {
+            resetFoundryViewport();
+          } else {
+            return;
+          }
+          event.preventDefault();
+        }}
       >
-        <div className={styles.botAvatarDeferredPreviewPrompt}>
-          <Eye size={24} strokeWidth={1.8} aria-hidden="true" />
-          <strong>Avatar preview is hidden</strong>
-          <small>
-            Render the current avatar when you want to check the finished
-            screen. It hides again when you resume editing.
-          </small>
-          <button type="button" onClick={onReveal}>
-            Render current avatar
+        <div
+          className={styles.botAvatarFoundryCameraRig}
+          data-spatial-camera-rig={spatialControls ? "true" : undefined}
+          style={spatialControls ? avatarStyle : undefined}
+        >
+          {spatialControls ? (
+            <div
+              className={styles.botAvatarFoundryPlatform}
+              data-avatar-foundry-platform="true"
+              aria-hidden="true"
+            />
+          ) : null}
+          <div
+            className={styles.botAvatarFoundryBotAssembly}
+            data-avatar-foundry-bot-assembly="true"
+          >
+            <div
+              className={styles.zenLiveBotPresencePlate}
+              data-theme={previewTheme}
+              data-mood={previewMoodHint}
+              data-prism-mood={previewMood}
+              data-source={isDefaultPrismBot ? "prism" : "persona"}
+              data-prism-persona={isDefaultPrismBot ? "true" : undefined}
+              data-talking={previewTalking ? "true" : undefined}
+              data-mouth-open={
+                previewTalking
+                  ? displayedPreviewMouthShape !== "closed"
+                    ? "true"
+                    : "false"
+                  : undefined
+              }
+              data-mouth-shape={
+                previewTalking ? displayedPreviewMouthShape : undefined
+              }
+              data-canvas-side="left"
+              data-body-sized="true"
+              data-zen-live-bot-presence-plate="true"
+              data-avatar-customizer-preview="true"
+              data-avatar-preview-theme={previewTheme}
+              data-avatar-preview-mode={previewMode}
+              data-avatar-preview-mood={previewMood}
+              style={avatarStyle}
+              role="img"
+              aria-label={`${titleName} avatar preview`}
+            >
+              <BotAmbientPresenceRig
+                theme={previewTheme}
+                isTalking={previewTalking}
+                motionActive={!previewTalking && !previewThinkingSpinnerActive}
+              >
+                <ZenLiveBotMannequin
+                  glyph={glyph}
+                  faceStyle={previewFaceStyle}
+                  faceScaleY={BOT_AVATAR_CANONICAL_FACE_SCALE_Y}
+                  voicePreset="warm"
+                  isTalking={previewTalking}
+                  avatarSfx={avatarSfx}
+                  avatarSfxState={previewAvatarSfxState}
+                  blinkWhileTalking
+                  mouthShape={displayedPreviewMouthShape}
+                  moodHint={previewMoodHint}
+                  scheduleKey={`${scheduleKey}-${previewMode}-${previewMood}`}
+                  forceBlinkPhase={previewBlink ? "closed" : undefined}
+                  showThinkingSpinner={previewThinkingSpinnerActive}
+                  plateFace={
+                    previewSipping ? COFFEE_SEAT_SIP_PLATE_GLYPH : undefined
+                  }
+                  screenMaterialSeed={screenMaterialSeed}
+                  frameMaterialSeed={
+                    isDefaultPrismBot
+                      ? PRISM_FACTORY_CLEAN_FRAME_SEED
+                      : frameMaterialSeed
+                  }
+                  avatarDetails={isDefaultPrismBot ? null : avatarDetails}
+                  avatarDetailsColor={
+                    isDefaultPrismBot
+                      ? null
+                      : normalizeAccentForTheme(
+                          avatarDetailsColor,
+                          previewTheme,
+                        )
+                  }
+                  runtimeEffectsEnabled={screenMode === "live"}
+                  screenMode={screenMode}
+                  screenOverlay={screenOverlay}
+                  frameModulePopulation={
+                    spatialControls ? modulePopulation : null
+                  }
+                />
+              </BotAmbientPresenceRig>
+            </div>
+            {spatialControls ? (
+              <div
+                className={styles.botAvatarFoundryNodes}
+                style={avatarStyle}
+                data-active-upgrade-node={activeUpgradeNode ?? undefined}
+              >
+                {BOT_AVATAR_FOUNDRY_UPGRADE_NODES.filter(
+                  (node) => node.id !== "screen" || screenHotspotEnabled,
+                ).map((node) => (
+                  <button
+                    key={node.id}
+                    type="button"
+                    className={styles.botAvatarFoundryNode}
+                    data-avatar-upgrade-node={node.id}
+                    data-active={
+                      activeUpgradeNode === node.id ? "true" : undefined
+                    }
+                    data-populated={
+                      modulePopulation[node.id] ? "true" : "false"
+                    }
+                    data-tutorial-target={
+                      node.id === "eyes"
+                        ? "avatar-foundry-upgrade-node"
+                        : undefined
+                    }
+                    style={
+                      {
+                        "--foundry-module-color": node.color,
+                      } as CSSProperties
+                    }
+                    aria-label={`${node.ariaLabel}. ${
+                      modulePopulation[node.id]
+                        ? "Module ready."
+                        : "Module unconfigured."
+                    }`}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      onUpgradeNodeSelect?.(node.id);
+                    }}
+                  >
+                    <span
+                      className={styles.botAvatarFoundryNodePoint}
+                      aria-hidden="true"
+                    />
+                    <span className={styles.botAvatarFoundryNodeLabel}>
+                      <small>{node.module}</small>
+                      <strong>{node.label}</strong>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            ) : null}
+          </div>
+        </div>
+        {spatialControls && foundryCameraMode !== "ink" ? (
+          <div className={styles.botAvatarFoundryCameraHud}>
+            <span>Live camera</span>
+            <strong ref={foundryZoomReadoutRef}>
+              {Math.round(foundryViewport.zoom * 100)}%
+            </strong>
+            <button type="button" onClick={resetFoundryViewport}>
+              Reset view
+            </button>
+            <small>Drag to pan · Scroll to zoom</small>
+          </div>
+        ) : null}
+      </div>
+      {!foundryRitual ? (
+        <div className={styles.botAvatarPreviewToolbar}>
+          <div
+            className={styles.botAvatarPreviewModeToggle}
+            role="group"
+            aria-label="Preview expression"
+          >
+            {BOT_AVATAR_PREVIEW_MODES.map((mode) => (
+              <button
+                key={mode.value}
+                type="button"
+                data-active={previewMode === mode.value ? "true" : undefined}
+                aria-pressed={previewMode === mode.value}
+                onClick={() => onPreviewModeChange(mode.value)}
+              >
+                <BotAvatarPreviewModeIcon mode={mode.value} />
+                {mode.label}
+              </button>
+            ))}
+          </div>
+          <button
+            type="button"
+            className={styles.botAvatarMoodPreviewButton}
+            onClick={onPreviewMoodCycle}
+            aria-label={`Preview mood: ${BOT_AVATAR_PREVIEW_MOOD_LABELS[previewMood]}`}
+          >
+            <Sparkles size={13} strokeWidth={2.3} aria-hidden="true" />
+            Mood: {BOT_AVATAR_PREVIEW_MOOD_LABELS[previewMood]}
           </button>
         </div>
-      </div>
+      ) : null}
     </section>
   );
 }
@@ -37577,8 +38259,8 @@ function BotAvatarIdentityControls({
           <Brush size={16} strokeWidth={2.4} />
         </span>
         <div>
-          <strong>Name & badge</strong>
-          <small>Name, color and glyph</small>
+          <strong>Name</strong>
+          <small>Identity and pronunciation</small>
         </div>
       </header>
       <div className={styles.botAvatarIdentityNameField}>
@@ -37741,16 +38423,6 @@ function BotAvatarRangeControl({
   );
 }
 
-function botAvatarSnapCoordinate(
-  value: number,
-  min: number,
-  max: number,
-  step: number,
-): number {
-  const stepped = Math.round(value / step) * step;
-  return Number(Math.max(min, Math.min(max, stepped)).toFixed(3));
-}
-
 function botAvatarCoordinateLabel(x: number, y: number): string {
   const format = (value: number) =>
     value > 0 ? `+${value.toFixed(2)}` : value.toFixed(2);
@@ -37772,7 +38444,11 @@ function BotAvatarCoordinateControl({
   minY,
   maxY,
   stepY,
+  restoreX = 0,
+  restoreY = 0,
   onChange,
+  onCommit,
+  onCancel,
   onReset,
 }: {
   label: string;
@@ -37784,33 +38460,22 @@ function BotAvatarCoordinateControl({
   minY: number;
   maxY: number;
   stepY: number;
-  onChange: (next: { x: number; y: number }) => void;
+  restoreX?: number;
+  restoreY?: number;
+  onChange: (next: AdjustmentPadCoordinateValue) => void;
+  onCommit?: (
+    next: AdjustmentPadCoordinateValue,
+    source: AdjustmentPadInputSource,
+  ) => void;
+  onCancel?: (restored: AdjustmentPadCoordinateValue) => void;
   onReset: () => void;
 }): React.JSX.Element {
-  const padRef = useRef<HTMLDivElement | null>(null);
   const visualX = -x;
-  const xRatio = (maxX - x) / (maxX - minX);
-  const yRatio = (y - minY) / (maxY - minY);
-  const updateFromPointer = (event: ReactPointerEvent<HTMLDivElement>) => {
-    const rect = padRef.current?.getBoundingClientRect();
-    if (!rect) return;
-    const rawX = (event.clientX - rect.left) / rect.width;
-    const rawY = (event.clientY - rect.top) / rect.height;
-    onChange({
-      x: botAvatarSnapCoordinate(
-        maxX - Math.max(0, Math.min(1, rawX)) * (maxX - minX),
-        minX,
-        maxX,
-        stepX,
-      ),
-      y: botAvatarSnapCoordinate(
-        minY + Math.max(0, Math.min(1, rawY)) * (maxY - minY),
-        minY,
-        maxY,
-        stepY,
-      ),
-    });
-  };
+  const adapter = createAdjustmentPadCoordinateAdapter({
+    x: { min: minX, max: maxX, step: stepX, inverted: true },
+    y: { min: minY, max: maxY, step: stepY },
+    valueText: (next) => botAvatarCoordinateLabel(-next.x, next.y),
+  });
 
   return (
     <section className={styles.botAvatarCoordinateControl} aria-label={label}>
@@ -37863,65 +38528,16 @@ function BotAvatarCoordinateControl({
           </button>
         </span>
       </header>
-      <div
-        ref={padRef}
-        className={styles.botAvatarCoordinatePad}
-        role="slider"
-        tabIndex={0}
-        aria-label={label}
-        aria-valuetext={botAvatarCoordinateLabel(visualX, y)}
-        onPointerDown={(event) => {
-          event.currentTarget.setPointerCapture(event.pointerId);
-          updateFromPointer(event);
-        }}
-        onPointerMove={(event) => {
-          if ((event.buttons & 1) === 0) return;
-          updateFromPointer(event);
-        }}
-        onKeyDown={(event) => {
-          const xStep = event.shiftKey ? stepX * 3 : stepX;
-          const yStep = event.shiftKey ? stepY * 3 : stepY;
-          if (event.key === "ArrowLeft") {
-            event.preventDefault();
-            onChange({
-              x: botAvatarSnapCoordinate(x + xStep, minX, maxX, stepX),
-              y,
-            });
-          } else if (event.key === "ArrowRight") {
-            event.preventDefault();
-            onChange({
-              x: botAvatarSnapCoordinate(x - xStep, minX, maxX, stepX),
-              y,
-            });
-          } else if (event.key === "ArrowUp") {
-            event.preventDefault();
-            onChange({
-              x,
-              y: botAvatarSnapCoordinate(y - yStep, minY, maxY, stepY),
-            });
-          } else if (event.key === "ArrowDown") {
-            event.preventDefault();
-            onChange({
-              x,
-              y: botAvatarSnapCoordinate(y + yStep, minY, maxY, stepY),
-            });
-          } else if (event.key === "Home") {
-            event.preventDefault();
-            onReset();
-          }
-        }}
-      >
-        <span className={styles.botAvatarCoordinateAxisX} aria-hidden="true" />
-        <span className={styles.botAvatarCoordinateAxisY} aria-hidden="true" />
-        <span
-          className={styles.botAvatarCoordinateThumb}
-          style={{
-            left: `${Math.max(0, Math.min(1, xRatio)) * 100}%`,
-            top: `${Math.max(0, Math.min(1, yRatio)) * 100}%`,
-          }}
-          aria-hidden="true"
-        />
-      </div>
+      <AdjustmentPad
+        label={label}
+        value={{ x, y }}
+        restoreValue={{ x: restoreX, y: restoreY }}
+        adapter={adapter}
+        color="var(--foundry-module-color, var(--editor-bot-color, #91a8bd))"
+        onPreview={(next) => onChange(next)}
+        onCommit={(next, source) => onCommit?.(next, source)}
+        onCancel={onCancel}
+      />
     </section>
   );
 }
@@ -38022,12 +38638,7 @@ function BotVoiceCharacterEditor({
           <BotFieldRandomizerButton
             label="vocal openness"
             onRandomize={() => {
-              const target = differentCharacterScalar(
-                openness,
-                -1,
-                1,
-                0.05,
-              );
+              const target = differentCharacterScalar(openness, -1, 1, 0.05);
               applyProfile(
                 normalizeBotAudioVoiceProfileV1({
                   ...profileRef.current,
@@ -38040,12 +38651,7 @@ function BotVoiceCharacterEditor({
           <BotFieldRandomizerButton
             label="vocal weight"
             onRandomize={() => {
-              const target = differentCharacterScalar(
-                weight,
-                -1,
-                1,
-                0.05,
-              );
+              const target = differentCharacterScalar(weight, -1, 1, 0.05);
               applyProfile(
                 normalizeBotAudioVoiceProfileV1({
                   ...profileRef.current,
@@ -38124,16 +38730,12 @@ function BotVoiceCharacterEditor({
           } else if (event.key === "ArrowUp") {
             next = normalizeBotAudioVoiceProfileV1({
               ...profileRef.current,
-              weight: normalizeBotAudioVoiceControl(
-                weight - 0.05 * multiplier,
-              ),
+              weight: normalizeBotAudioVoiceControl(weight - 0.05 * multiplier),
             });
           } else if (event.key === "ArrowDown") {
             next = normalizeBotAudioVoiceProfileV1({
               ...profileRef.current,
-              weight: normalizeBotAudioVoiceControl(
-                weight + 0.05 * multiplier,
-              ),
+              weight: normalizeBotAudioVoiceControl(weight + 0.05 * multiplier),
             });
           } else if (event.key === "Home") {
             event.preventDefault();
@@ -38208,7 +38810,13 @@ function BotVoiceCharacterEditor({
             [
               ["brightness", "Brightness", -1, 1, 0.05],
               ["resonance", "Resonance", -1, 1, 0.05],
-              ["gainDb", "Local gain", BOT_VOICE_GAIN_DB_MIN, BOT_VOICE_GAIN_DB_MAX, 0.5],
+              [
+                "gainDb",
+                "Local gain",
+                BOT_VOICE_GAIN_DB_MIN,
+                BOT_VOICE_GAIN_DB_MAX,
+                0.5,
+              ],
             ] as const
           ).map(([key, label, min, max, step]) => (
             <label key={key}>
@@ -38230,8 +38838,12 @@ function BotVoiceCharacterEditor({
                     }),
                   );
                 }}
-                onPointerUp={() => onChange(profileRef.current, { saveImmediately: true })}
-                onKeyUp={() => onChange(profileRef.current, { saveImmediately: true })}
+                onPointerUp={() =>
+                  onChange(profileRef.current, { saveImmediately: true })
+                }
+                onKeyUp={() =>
+                  onChange(profileRef.current, { saveImmediately: true })
+                }
               />
               <output>
                 {key === "gainDb"
@@ -38270,7 +38882,10 @@ function avatarVoicePlaybackCacheProfile(
     avatarSfxMuted: _avatarSfxMuted,
     ...voiceProfile
   } = normalizeBotAudioVoiceProfileV1(profile);
-  return JSON.stringify(voiceProfile);
+  return JSON.stringify({
+    voiceProfile,
+    speechprintRuleset: LOCAL_VOICE_SPEECHPRINT_CAPABILITIES[0]?.rulesetSha256,
+  });
 }
 
 function BotAvatarSfxEditor({
@@ -39021,6 +39636,7 @@ function BotAvatarGlyphAnimationControl({
 
 function BotAvatarFaceControls({
   activeTab,
+  identitySurface = "identity-core",
   faceEyesFont,
   faceEyeCharacter,
   faceEyeAnimation,
@@ -39080,6 +39696,7 @@ function BotAvatarFaceControls({
   identitySection,
 }: {
   activeTab: Extract<BotAvatarCustomizerTab, "face" | "eyes" | "mouth">;
+  identitySurface?: BotAvatarFoundryIdentitySurface;
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
   faceEyeAnimation: BotFaceEyeMovement;
@@ -39172,6 +39789,7 @@ function BotAvatarFaceControls({
       botFaceThinkingFramesEqual(preset.frames, faceThinkingFrames),
     ) ?? null;
   const customThinkingActive = currentThinkingPreset === null;
+  const shellActive = activeTab === "face" && identitySurface === "shell";
 
   const updateThinkingFrame = (index: number, value: string) => {
     const pastedFrames = botAvatarThinkingFramesFromPaste(value);
@@ -39217,18 +39835,27 @@ function BotAvatarFaceControls({
         : randomBotAvatarCustomThinkingFrames(),
     );
   };
-  const controlLabel =
-    activeTab === "face"
+  const controlLabel = shellActive
+    ? "Shell avatar controls"
+    : activeTab === "face"
       ? "Face avatar controls"
       : activeTab === "eyes"
         ? "Eye avatar controls"
         : "Mouth avatar controls";
-  const controlTitle =
-    activeTab === "face" ? "Face" : activeTab === "eyes" ? "Eyes" : "Mouth";
-  const controlSubtitle =
-    activeTab === "face"
+  const controlTitle = shellActive
+    ? "Shell"
+    : activeTab === "face"
+      ? "Identity core"
+      : activeTab === "eyes"
+        ? "Eyes"
+        : "Mouth";
+  const controlSubtitle = shellActive
+    ? identitySection
+      ? "Color and identity badge"
+      : "Factory frame and badge"
+    : activeTab === "face"
       ? identitySection
-        ? "Name, badge, presets, and thinking"
+        ? "Name, presets, and thinking"
         : "Presets and thinking"
       : activeTab === "eyes"
         ? customEyeActive
@@ -39239,6 +39866,58 @@ function BotAvatarFaceControls({
             ? "Custom glyph and stroke weight"
             : "Built-in style and stroke weight"
           : "Built-in style";
+  const shellControls = identitySection ? (
+    <div
+      className={styles.botAvatarShellControls}
+      aria-label="Shell color and identity badge"
+    >
+      <div className={styles.botAvatarIdentityPicker}>
+        <span className={styles.botAvatarAtomicFieldActions}>
+          <BotFieldRandomizerButton
+            label="bot color"
+            onRandomize={() =>
+              identitySection.onColorChange(randomHex([identitySection.color]))
+            }
+          />
+          <BotFieldRandomizerButton
+            label="bot glyph"
+            onRandomize={() =>
+              identitySection.onGlyphChange(
+                randomBotAvatarDifferentChoice(
+                  identitySection.glyph,
+                  CUSTOM_BOT_GLYPH_ORDER,
+                ),
+              )
+            }
+          />
+        </span>
+        <ColorGlyphPicker
+          color={identitySection.color}
+          glyph={identitySection.glyph}
+          onColorChange={identitySection.onColorChange}
+          onGlyphChange={identitySection.onGlyphChange}
+          open={identitySection.colorPickerOpen}
+          onToggle={identitySection.onColorPickerToggle}
+          inline
+          ariaLabel="Shell color and identity badge"
+          resolvedTheme={identitySection.resolvedTheme}
+        />
+      </div>
+    </div>
+  ) : (
+    <section
+      className={styles.botAvatarFactoryShellNotice}
+      aria-label="Default Prism factory shell"
+    >
+      <span>Factory shell</span>
+      <strong>Default Prism hardware is fixed.</strong>
+      <p>
+        Its chrome frame, refraction badge, and identity color remain part of
+        the factory instrument. Library bots can customize their shell color and
+        badge here.
+      </p>
+    </section>
+  );
 
   return (
     <section
@@ -39287,300 +39966,254 @@ function BotAvatarFaceControls({
               />
             </span>
           ) : null}
-          <button
-            type="button"
-            className={styles.botAvatarSectionResetButton}
-            onClick={onResetFace}
-            disabled={faceIsDefault}
-          >
-            <RotateCcw size={13} strokeWidth={2.3} aria-hidden="true" />
-            Reset face
-          </button>
+          {!shellActive ? (
+            <button
+              type="button"
+              className={styles.botAvatarSectionResetButton}
+              onClick={onResetFace}
+              disabled={faceIsDefault}
+            >
+              <RotateCcw size={13} strokeWidth={2.3} aria-hidden="true" />
+              Reset face
+            </button>
+          ) : null}
         </span>
       </header>
       {activeTab === "face" ? (
-        <div className={styles.botAvatarFaceControls}>
-          {identitySection ? (
-            <BotAvatarIdentityControls
-              name={identitySection.name}
-              namePronunciation={identitySection.namePronunciation}
-              nameSampleState={identitySection.nameSampleState}
-              tools={identitySection.tools}
-              onNameChange={identitySection.onNameChange}
-              onNamePronunciationChange={
-                identitySection.onNamePronunciationChange
-              }
-              onNameSample={identitySection.onNameSample}
-              onRandomizeName={identitySection.onRandomizeName}
-            />
-          ) : null}
-          <fieldset className={styles.botAvatarPresetControl}>
-            <legend>Presets</legend>
-            <div className={styles.botAvatarPresetStrip}>
-              {BOT_AVATAR_FACE_PRESETS.map((preset) => {
-                const selected = botAvatarPresetSelected(preset, {
-                  faceEyesFont,
-                  faceEyeCharacter,
-                  faceEyeAnimation,
-                  faceMouthFont,
-                  faceMouthCharacter,
-                  faceMouthAnimation,
-                  faceMouthCoffeePucker,
-                  faceFontWeight,
-                  faceEyeScale,
-                  faceEyeOffsetX,
-                  faceEyeOffsetY,
-                  faceEyeRotationDeg,
-                  faceEyeCount,
-                  faceMouthScale,
-                  faceMouthOffsetX,
-                  faceMouthOffsetY,
-                  faceMouthRotationDeg,
-                  faceBlinkBar,
-                  faceBlinkScale,
-                  faceBlinkOffsetX,
-                  faceBlinkOffsetY,
-                  faceBlinkRotationDeg,
-                  faceThinkingFrames,
-                  faceThinkingScale,
-                  faceThinkingOffsetX,
-                  faceThinkingOffsetY,
-                });
+        shellActive ? (
+          shellControls
+        ) : (
+          <div
+            className={styles.botAvatarFaceControls}
+            data-identity-surface="identity-core"
+          >
+            {identitySection ? (
+              <BotAvatarIdentityControls
+                name={identitySection.name}
+                namePronunciation={identitySection.namePronunciation}
+                nameSampleState={identitySection.nameSampleState}
+                tools={identitySection.tools}
+                onNameChange={identitySection.onNameChange}
+                onNamePronunciationChange={
+                  identitySection.onNamePronunciationChange
+                }
+                onNameSample={identitySection.onNameSample}
+                onRandomizeName={identitySection.onRandomizeName}
+              />
+            ) : null}
+            <fieldset className={styles.botAvatarPresetControl}>
+              <legend>Presets</legend>
+              <div className={styles.botAvatarPresetStrip}>
+                {BOT_AVATAR_FACE_PRESETS.map((preset) => {
+                  const selected = botAvatarPresetSelected(preset, {
+                    faceEyesFont,
+                    faceEyeCharacter,
+                    faceEyeAnimation,
+                    faceMouthFont,
+                    faceMouthCharacter,
+                    faceMouthAnimation,
+                    faceMouthCoffeePucker,
+                    faceFontWeight,
+                    faceEyeScale,
+                    faceEyeOffsetX,
+                    faceEyeOffsetY,
+                    faceEyeRotationDeg,
+                    faceEyeCount,
+                    faceMouthScale,
+                    faceMouthOffsetX,
+                    faceMouthOffsetY,
+                    faceMouthRotationDeg,
+                    faceBlinkBar,
+                    faceBlinkScale,
+                    faceBlinkOffsetX,
+                    faceBlinkOffsetY,
+                    faceBlinkRotationDeg,
+                    faceThinkingFrames,
+                    faceThinkingScale,
+                    faceThinkingOffsetX,
+                    faceThinkingOffsetY,
+                  });
 
-                return (
-                  <button
-                    key={preset.id}
-                    type="button"
-                    className={styles.botAvatarPresetButton}
-                    data-selected={selected ? "true" : undefined}
-                    aria-pressed={selected}
-                    onClick={() => onApplyPreset(preset)}
-                  >
-                    <span aria-hidden="true">
-                      <span
-                        className={styles.botAvatarFontOptionSample}
-                        data-face-font={preset.eyesFont}
-                      >
-                        ••
+                  return (
+                    <button
+                      key={preset.id}
+                      type="button"
+                      className={styles.botAvatarPresetButton}
+                      data-selected={selected ? "true" : undefined}
+                      aria-pressed={selected}
+                      onClick={() => onApplyPreset(preset)}
+                    >
+                      <span aria-hidden="true">
+                        <span
+                          className={styles.botAvatarFontOptionSample}
+                          data-face-font={preset.eyesFont}
+                        >
+                          ••
+                        </span>
+                        <span
+                          className={styles.botAvatarFontOptionSample}
+                          data-face-font={preset.mouthFont}
+                        >
+                          ━
+                        </span>
                       </span>
-                      <span
-                        className={styles.botAvatarFontOptionSample}
-                        data-face-font={preset.mouthFont}
-                      >
-                        ━
-                      </span>
-                    </span>
-                    <strong>{preset.label}</strong>
-                  </button>
-                );
-              })}
-            </div>
-          </fieldset>
+                      <strong>{preset.label}</strong>
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
 
-          {identitySection ? (
-            <div className={styles.botAvatarIdentityPicker}>
-              <span className={styles.botAvatarAtomicFieldActions}>
+            <fieldset className={styles.botAvatarThinkingControl}>
+              <legend>
+                Thinking animation{" "}
                 <BotFieldRandomizerButton
-                  label="bot color"
+                  label="thinking animation"
                   onRandomize={() =>
-                    identitySection.onColorChange(
-                      randomHex([identitySection.color]),
-                    )
-                  }
-                />
-                <BotFieldRandomizerButton
-                  label="bot glyph"
-                  onRandomize={() =>
-                    identitySection.onGlyphChange(
+                    onThinkingFramesChange(
                       randomBotAvatarDifferentChoice(
-                        identitySection.glyph,
-                        CUSTOM_BOT_GLYPH_ORDER,
+                        faceThinkingFrames,
+                        BOT_AVATAR_RANDOM_CUSTOM_THINKING_FRAME_SETS,
+                        botFaceThinkingFramesEqual,
                       ),
                     )
                   }
                 />
-              </span>
-              <ColorGlyphPicker
-                color={identitySection.color}
-                glyph={identitySection.glyph}
-                onColorChange={identitySection.onColorChange}
-                onGlyphChange={identitySection.onGlyphChange}
-                open={identitySection.colorPickerOpen}
-                onToggle={identitySection.onColorPickerToggle}
-                inline
-                ariaLabel="Bot color and glyph"
-                resolvedTheme={identitySection.resolvedTheme}
-              />
-            </div>
-          ) : null}
-          <fieldset className={styles.botAvatarThinkingControl}>
-            <legend>
-              Thinking animation{" "}
-              <BotFieldRandomizerButton
-                label="thinking animation"
-                onRandomize={() =>
-                  onThinkingFramesChange(
-                    randomBotAvatarDifferentChoice(
-                      faceThinkingFrames,
-                      BOT_AVATAR_RANDOM_CUSTOM_THINKING_FRAME_SETS,
-                      botFaceThinkingFramesEqual,
-                    ),
-                  )
-                }
-              />
-            </legend>
-            <div className={styles.botAvatarThinkingPresetStrip}>
-              {BOT_AVATAR_THINKING_PRESETS.map((preset) => (
+              </legend>
+              <div className={styles.botAvatarThinkingPresetStrip}>
+                {BOT_AVATAR_THINKING_PRESETS.map((preset) => (
+                  <button
+                    key={preset.id}
+                    type="button"
+                    className={styles.botAvatarThinkingPresetButton}
+                    data-selected={
+                      currentThinkingPreset?.id === preset.id
+                        ? "true"
+                        : undefined
+                    }
+                    aria-pressed={currentThinkingPreset?.id === preset.id}
+                    onClick={() => onThinkingFramesChange(preset.frames)}
+                    title={
+                      preset.id === "disabled"
+                        ? "Keep the normal face and animations while thinking"
+                        : botAvatarThinkingFramesLabel(preset.frames)
+                    }
+                  >
+                    <span aria-hidden="true">
+                      {preset.id === "disabled"
+                        ? "—"
+                        : botAvatarThinkingFramesLabel(preset.frames)}
+                    </span>
+                    <strong>{preset.label}</strong>
+                  </button>
+                ))}
                 <button
-                  key={preset.id}
                   type="button"
                   className={styles.botAvatarThinkingPresetButton}
-                  data-selected={
-                    currentThinkingPreset?.id === preset.id ? "true" : undefined
-                  }
-                  aria-pressed={currentThinkingPreset?.id === preset.id}
-                  onClick={() => onThinkingFramesChange(preset.frames)}
-                  title={
-                    preset.id === "disabled"
-                      ? "Keep the normal face and animations while thinking"
-                      : botAvatarThinkingFramesLabel(preset.frames)
-                  }
+                  data-selected={customThinkingActive ? "true" : undefined}
+                  aria-pressed={customThinkingActive}
+                  onClick={enableCustomThinking}
                 >
                   <span aria-hidden="true">
-                    {preset.id === "disabled"
-                      ? "—"
-                      : botAvatarThinkingFramesLabel(preset.frames)}
+                    {botAvatarThinkingFramesLabel(
+                      customThinkingActive
+                        ? faceThinkingFrames
+                        : BOT_AVATAR_CUSTOM_THINKING_FRAMES,
+                    )}
                   </span>
-                  <strong>{preset.label}</strong>
+                  <strong>Custom</strong>
                 </button>
-              ))}
-              <button
-                type="button"
-                className={styles.botAvatarThinkingPresetButton}
-                data-selected={customThinkingActive ? "true" : undefined}
-                aria-pressed={customThinkingActive}
-                onClick={enableCustomThinking}
-              >
-                <span aria-hidden="true">
-                  {botAvatarThinkingFramesLabel(
-                    customThinkingActive
-                      ? faceThinkingFrames
-                      : BOT_AVATAR_CUSTOM_THINKING_FRAMES,
+                <button
+                  type="button"
+                  className={styles.botAvatarThinkingIconButton}
+                  onClick={() =>
+                    onThinkingFramesChange(
+                      DEFAULT_BOT_FACE_STYLE.thinkingFrames,
+                    )
+                  }
+                  disabled={botFaceThinkingFramesEqual(
+                    faceThinkingFrames,
+                    DEFAULT_BOT_FACE_STYLE.thinkingFrames,
                   )}
-                </span>
-                <strong>Custom</strong>
-              </button>
-              <button
-                type="button"
-                className={styles.botAvatarThinkingIconButton}
-                onClick={() =>
-                  onThinkingFramesChange(DEFAULT_BOT_FACE_STYLE.thinkingFrames)
-                }
-                disabled={botFaceThinkingFramesEqual(
-                  faceThinkingFrames,
-                  DEFAULT_BOT_FACE_STYLE.thinkingFrames,
-                )}
-                aria-label="Reset thinking frames"
-                title="Reset thinking frames"
-              >
-                <RotateCcw size={13} strokeWidth={2.3} aria-hidden="true" />
-              </button>
-            </div>
-            {customThinkingActive ? (
-              <div
-                className={styles.botAvatarThinkingTiles}
-                aria-label="Custom thinking animation frames"
-              >
-                {faceThinkingFrames.map((frame, index) => (
-                  <label
-                    key={`thinking-frame-${index}`}
-                    className={styles.botAvatarThinkingTile}
-                  >
-                    <span>{index + 1}</span>
-                    <input
-                      type="text"
-                      value={frame}
-                      inputMode="text"
-                      autoCapitalize="off"
-                      autoCorrect="off"
-                      spellCheck={false}
-                      aria-label={`Custom thinking frame ${index + 1}`}
-                      onChange={(event) =>
-                        updateThinkingFrame(index, event.currentTarget.value)
-                      }
-                      onPaste={(event) => {
-                        const pastedFrames = botAvatarThinkingFramesFromPaste(
-                          event.clipboardData.getData("text"),
-                        );
-                        if (!pastedFrames) return;
-                        event.preventDefault();
-                        onThinkingFramesChange(pastedFrames);
-                      }}
-                    />
-                    <BotFieldRandomizerButton
-                      label={`thinking frame ${index + 1}`}
-                      onRandomize={() => {
-                        const frameChoices = [
-                          ...BOT_AVATAR_RANDOM_EYE_GLYPHS,
-                          ...BOT_AVATAR_RANDOM_MOUTH_GLYPHS,
-                        ];
-                        updateThinkingFrame(
-                          index,
-                          randomBotAvatarDifferentChoice(frame, frameChoices),
-                        );
-                      }}
-                    />
-                  </label>
-                ))}
+                  aria-label="Reset thinking frames"
+                  title="Reset thinking frames"
+                >
+                  <RotateCcw size={13} strokeWidth={2.3} aria-hidden="true" />
+                </button>
               </div>
-            ) : null}
+              {customThinkingActive ? (
+                <div
+                  className={styles.botAvatarThinkingTiles}
+                  aria-label="Custom thinking animation frames"
+                >
+                  {faceThinkingFrames.map((frame, index) => (
+                    <label
+                      key={`thinking-frame-${index}`}
+                      className={styles.botAvatarThinkingTile}
+                    >
+                      <span>{index + 1}</span>
+                      <input
+                        type="text"
+                        value={frame}
+                        inputMode="text"
+                        autoCapitalize="off"
+                        autoCorrect="off"
+                        spellCheck={false}
+                        aria-label={`Custom thinking frame ${index + 1}`}
+                        onChange={(event) =>
+                          updateThinkingFrame(index, event.currentTarget.value)
+                        }
+                        onPaste={(event) => {
+                          const pastedFrames = botAvatarThinkingFramesFromPaste(
+                            event.clipboardData.getData("text"),
+                          );
+                          if (!pastedFrames) return;
+                          event.preventDefault();
+                          onThinkingFramesChange(pastedFrames);
+                        }}
+                      />
+                      <BotFieldRandomizerButton
+                        label={`thinking frame ${index + 1}`}
+                        onRandomize={() => {
+                          const frameChoices = [
+                            ...BOT_AVATAR_RANDOM_EYE_GLYPHS,
+                            ...BOT_AVATAR_RANDOM_MOUTH_GLYPHS,
+                          ];
+                          updateThinkingFrame(
+                            index,
+                            randomBotAvatarDifferentChoice(frame, frameChoices),
+                          );
+                        }}
+                      />
+                    </label>
+                  ))}
+                </div>
+              ) : null}
 
-            <div
-              className={styles.botAvatarCustomGeometry}
-              data-thinking-geometry="true"
-              data-disabled={
-                botFaceThinkingSpinnerDisabled(faceThinkingFrames)
-                  ? "true"
-                  : undefined
-              }
-            >
-              <BotAvatarRangeControl
-                label="Thinking size"
-                valueLabel={botAvatarEyeScaleLabel(faceThinkingScale)}
-                min={BOT_FACE_THINKING_SCALE_MIN}
-                max={BOT_FACE_THINKING_SCALE_MAX}
-                step={BOT_FACE_THINKING_SCALE_STEP}
-                value={faceThinkingScale}
-                leftLabel="Smaller"
-                rightLabel="Larger"
-                onChange={onThinkingScaleChange}
-              />
-              <BotAvatarCoordinateControl
-                label="Thinking position"
-                x={faceThinkingOffsetX}
-                y={faceThinkingOffsetY}
-                minX={BOT_FACE_THINKING_OFFSET_X_MIN}
-                maxX={BOT_FACE_THINKING_OFFSET_X_MAX}
-                stepX={BOT_FACE_THINKING_OFFSET_X_STEP}
-                minY={BOT_FACE_THINKING_OFFSET_Y_MIN}
-                maxY={BOT_FACE_THINKING_OFFSET_Y_MAX}
-                stepY={BOT_FACE_THINKING_OFFSET_Y_STEP}
-                onChange={(next) => {
-                  onThinkingOffsetXChange(next.x);
-                  onThinkingOffsetYChange(next.y);
-                }}
-                onReset={() => {
-                  onThinkingOffsetXChange(
-                    DEFAULT_BOT_FACE_STYLE.thinkingOffsetX,
-                  );
-                  onThinkingOffsetYChange(
-                    DEFAULT_BOT_FACE_STYLE.thinkingOffsetY,
-                  );
-                }}
-              />
-            </div>
-          </fieldset>
-        </div>
+              <div
+                className={styles.botAvatarCustomGeometry}
+                data-thinking-geometry="true"
+                data-disabled={
+                  botFaceThinkingSpinnerDisabled(faceThinkingFrames)
+                    ? "true"
+                    : undefined
+                }
+              >
+                <BotAvatarRangeControl
+                  label="Thinking size"
+                  valueLabel={botAvatarEyeScaleLabel(faceThinkingScale)}
+                  min={BOT_FACE_THINKING_SCALE_MIN}
+                  max={BOT_FACE_THINKING_SCALE_MAX}
+                  step={BOT_FACE_THINKING_SCALE_STEP}
+                  value={faceThinkingScale}
+                  leftLabel="Smaller"
+                  rightLabel="Larger"
+                  onChange={onThinkingScaleChange}
+                />
+              </div>
+            </fieldset>
+          </div>
+        )
       ) : activeTab === "eyes" ? (
         <div className={styles.botAvatarCustomControls}>
           <fieldset className={styles.botAvatarExpressionRow}>
@@ -39704,25 +40337,6 @@ function BotAvatarFaceControls({
                   rightLabel="Larger"
                   onChange={onEyeScaleChange}
                 />
-                <BotAvatarCoordinateControl
-                  label="Eye position"
-                  x={faceEyeOffsetX}
-                  y={faceEyeOffsetY}
-                  minX={BOT_FACE_EYE_OFFSET_X_MIN}
-                  maxX={BOT_FACE_EYE_OFFSET_X_MAX}
-                  stepX={BOT_FACE_EYE_OFFSET_X_STEP}
-                  minY={BOT_FACE_EYE_OFFSET_Y_MIN}
-                  maxY={BOT_FACE_EYE_OFFSET_Y_MAX}
-                  stepY={BOT_FACE_EYE_OFFSET_Y_STEP}
-                  onChange={(next) => {
-                    onEyeOffsetXChange(next.x);
-                    onEyeOffsetYChange(next.y);
-                  }}
-                  onReset={() => {
-                    onEyeOffsetXChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetX);
-                    onEyeOffsetYChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetY);
-                  }}
-                />
               </div>
               <BotAvatarEyeMovementControl
                 value={faceEyeAnimation}
@@ -39827,25 +40441,6 @@ function BotAvatarFaceControls({
                         rightLabel="Larger"
                         onChange={onBlinkScaleChange}
                       />
-                      <BotAvatarCoordinateControl
-                        label="Blink position"
-                        x={faceBlinkOffsetX}
-                        y={faceBlinkOffsetY}
-                        minX={BOT_FACE_BLINK_OFFSET_X_MIN}
-                        maxX={BOT_FACE_BLINK_OFFSET_X_MAX}
-                        stepX={BOT_FACE_BLINK_OFFSET_X_STEP}
-                        minY={BOT_FACE_BLINK_OFFSET_Y_MIN}
-                        maxY={BOT_FACE_BLINK_OFFSET_Y_MAX}
-                        stepY={BOT_FACE_BLINK_OFFSET_Y_STEP}
-                        onChange={(next) => {
-                          onBlinkOffsetXChange(next.x);
-                          onBlinkOffsetYChange(next.y);
-                        }}
-                        onReset={() => {
-                          onBlinkOffsetXChange(DEFAULT_BOT_FACE_BLINK_OFFSET_X);
-                          onBlinkOffsetYChange(DEFAULT_BOT_FACE_BLINK_OFFSET_Y);
-                        }}
-                      />
                     </div>
                   </div>
                 ) : null}
@@ -39942,25 +40537,6 @@ function BotAvatarFaceControls({
                   leftLabel="Smaller"
                   rightLabel="Larger"
                   onChange={onMouthScaleChange}
-                />
-                <BotAvatarCoordinateControl
-                  label="Mouth position"
-                  x={faceMouthOffsetX}
-                  y={faceMouthOffsetY}
-                  minX={BOT_FACE_MOUTH_OFFSET_X_MIN}
-                  maxX={BOT_FACE_MOUTH_OFFSET_X_MAX}
-                  stepX={BOT_FACE_MOUTH_OFFSET_X_STEP}
-                  minY={BOT_FACE_MOUTH_OFFSET_Y_MIN}
-                  maxY={BOT_FACE_MOUTH_OFFSET_Y_MAX}
-                  stepY={BOT_FACE_MOUTH_OFFSET_Y_STEP}
-                  onChange={(next) => {
-                    onMouthOffsetXChange(next.x);
-                    onMouthOffsetYChange(next.y);
-                  }}
-                  onReset={() => {
-                    onMouthOffsetXChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetX);
-                    onMouthOffsetYChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetY);
-                  }}
                 />
               </div>
               <BotAvatarGlyphAnimationControl
@@ -40764,27 +41340,22 @@ function BotAvatarCustomizerModal({
   const [previewMoodIndex, setPreviewMoodIndex] = useState(0);
   const [activeControlTab, setActiveControlTab] =
     useState<BotAvatarCustomizerTab>(initialTab);
+  const [activeAdjustmentTarget, setActiveAdjustmentTarget] =
+    useState<BotAvatarAdjustmentTarget>(
+      botAvatarAdjustmentTargetForControl(initialTab) ?? "thinking",
+    );
+  const [activeUpgradeNode, setActiveUpgradeNode] =
+    useState<BotAvatarFoundryUpgradeNodeId | null>(null);
+  const [inkCanvasTarget, setInkCanvasTarget] = useState<HTMLElement | null>(
+    null,
+  );
   const controlStackRef = useRef<HTMLDivElement | null>(null);
+  const studioDialogRef = useRef<HTMLElement | null>(null);
   const detailsEditorRef = useRef<AvatarDetailsEditorHandle | null>(null);
   const avatarVoicePreviewRunRef = useRef(0);
   const [detailsEditorDirty, setDetailsEditorDirty] = useState(false);
-  const [detailsAvatarPreviewVisible, setDetailsAvatarPreviewVisible] =
-    useState(false);
   const [avatarDetailsPreview, setAvatarDetailsPreview] =
     useState<BotAvatarDetailsV1>(() => normalizeAvatarDetails(avatarDetails));
-  const [detailsLeaveRequest, setDetailsLeaveRequest] = useState<
-    | { kind: "tab"; tab: BotAvatarCustomizerTab }
-    | { kind: "close" }
-    | { kind: "save" }
-    | null
-  >(null);
-  const [detailsLeaveApplying, setDetailsLeaveApplying] = useState(false);
-  const [pendingDetailsSaveKey, setPendingDetailsSaveKey] = useState<
-    string | null
-  >(null);
-  const detailsLeavePanelRef = useRef<HTMLElement | null>(null);
-  const detailsLeaveKeepEditingRef = useRef<HTMLButtonElement | null>(null);
-  const detailsLeaveInvokerRef = useRef<HTMLElement | null>(null);
   const previewMood =
     BOT_AVATAR_PREVIEW_MOODS[
       previewMoodIndex % BOT_AVATAR_PREVIEW_MOODS.length
@@ -40802,26 +41373,11 @@ function BotAvatarCustomizerModal({
     ? (previewSpeechMouthShape ?? previewMouthShape)
     : "closed";
   const titleName = botName.trim() || "Bot";
-  const bodySize = BOT_AVATAR_CUSTOMIZER_BODY_SIZE_PX;
-  const bodyPlacement = BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT;
-  const facePlacement = ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT;
-  const avatarStyle = {
-    ...botAvatarPreviewIdentityStyle(color, isDefaultPrismBot),
-    "--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
-    "--avatar-details-scale-x": "1",
-    "--avatar-details-facing-scale-x": "1",
-    "--zen-live-bot-face-x": `${facePlacement.xPct}%`,
-    "--zen-live-bot-face-y": `${facePlacement.yPct}%`,
-    "--zen-live-bot-face-scale": facePlacement.scale,
-    "--zen-live-bot-body-x": `${bodyPlacement.xPct}%`,
-    "--zen-live-bot-body-y": `${bodyPlacement.yPct}%`,
-    "--zen-live-bot-avatar-size": `${BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX}px`,
-    "--zen-live-bot-avatar-body-size": `${bodySize}px`,
-    "--zen-live-bot-glyph-x-anchor": "0px",
-    "--zen-live-bot-glyph-y-anchor": `${Math.round(bodySize * 0.37)}px`,
-    "--bot-face-crt-screen-texture-blend-mode":
-      previewTheme === "light" ? "overlay" : "luminosity",
-  } as CSSProperties;
+  const avatarStyle = botAvatarFoundryPreviewStyle(
+    color,
+    isDefaultPrismBot,
+    previewTheme,
+  );
   const faceStyle = resolveBotFaceStyle(
     {
       faceEyesFont,
@@ -40861,15 +41417,20 @@ function BotAvatarCustomizerModal({
     setPreviewMode("idle");
     setPreviewMoodIndex(0);
     setActiveControlTab(initialTab);
+    setActiveUpgradeNode(
+      initialTab === "eyes"
+        ? "eyes"
+        : initialTab === "mouth"
+          ? "mouth"
+          : initialTab === "details"
+            ? "screen"
+            : null,
+    );
     setMouthPhase(0);
     setPreviewSpeechMouthShape(null);
     setPreviewSpeechPaused(false);
     setNameSampleState("idle");
     setDetailsEditorDirty(false);
-    setDetailsAvatarPreviewVisible(false);
-    setDetailsLeaveRequest(null);
-    setDetailsLeaveApplying(false);
-    setPendingDetailsSaveKey(null);
   }, [identityControlsVisible, initialTab, open, resolvedTheme]);
 
   // One-shot Sip preview: hold Coffee's sip face, then return to Idle.
@@ -40888,6 +41449,16 @@ function BotAvatarCustomizerModal({
     if (!open || !controlStackRef.current) return;
     controlStackRef.current.scrollTop = 0;
   }, [activeControlTab, open]);
+
+  useEffect(() => {
+    if (activeAdjustmentTarget !== "blink" || faceBlinkBar !== "none") return;
+    setActiveAdjustmentTarget("eyes");
+  }, [activeAdjustmentTarget, faceBlinkBar]);
+
+  useLayoutEffect(() => {
+    if (!open) return;
+    studioDialogRef.current?.focus({ preventScroll: true });
+  }, [open]);
 
   useEffect(() => {
     if (!open || savePromptOpen) return;
@@ -40939,58 +41510,24 @@ function BotAvatarCustomizerModal({
   }, [avatarDetails, detailsEditorDirty, open]);
 
   useEffect(() => {
-    if (!detailsLeaveRequest) return;
-    const invoker = detailsLeaveInvokerRef.current;
-    queueMicrotask(() => detailsLeaveKeepEditingRef.current?.focus());
-    return () => {
-      queueMicrotask(() => invoker?.focus());
-    };
-  }, [detailsLeaveRequest]);
-
-  useEffect(() => {
-    if (
-      !open ||
-      pendingDetailsSaveKey === null ||
-      avatarDetailsKey(avatarDetails) !== pendingDetailsSaveKey
-    ) {
-      return;
-    }
-    setPendingDetailsSaveKey(null);
-    void onSave();
-  }, [avatarDetails, onSave, open, pendingDetailsSaveKey]);
-
-  useEffect(() => {
     if (!open || profileEditorLayerOpen) return;
     const handleEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
       event.preventDefault();
-      if (detailsLeaveRequest) {
-        if (!detailsLeaveApplying) setDetailsLeaveRequest(null);
-        return;
-      }
       if (
-        activeControlTab === "details" &&
-        detailsEditorRef.current?.hasDirtyChanges()
+        activeControlTab === "eyes" ||
+        activeControlTab === "mouth" ||
+        activeControlTab === "details"
       ) {
-        detailsLeaveInvokerRef.current =
-          document.activeElement instanceof HTMLElement
-            ? document.activeElement
-            : null;
-        setDetailsLeaveRequest({ kind: "close" });
+        setActiveControlTab("face");
+        setActiveUpgradeNode(null);
         return;
       }
       onRequestClose();
     };
     window.addEventListener("keydown", handleEscape);
     return () => window.removeEventListener("keydown", handleEscape);
-  }, [
-    activeControlTab,
-    detailsLeaveApplying,
-    detailsLeaveRequest,
-    onRequestClose,
-    open,
-    profileEditorLayerOpen,
-  ]);
+  }, [activeControlTab, onRequestClose, open, profileEditorLayerOpen]);
 
   useEffect(() => {
     if (!open || !previewTalking) {
@@ -41150,96 +41687,52 @@ function BotAvatarCustomizerModal({
 
   if (!open) return null;
 
-  const continueDetailsNavigation = (
-    request:
-      | { kind: "tab"; tab: BotAvatarCustomizerTab }
-      | { kind: "close" }
-      | { kind: "save" },
-  ): void => {
-    setDetailsLeaveRequest(null);
-    if (request.kind === "tab") {
-      if (request.tab === "details") setDetailsAvatarPreviewVisible(false);
-      setActiveControlTab(request.tab);
-      return;
-    }
-    if (request.kind === "save") {
-      void onSave();
-      return;
-    }
-    onRequestClose();
-  };
-  const openDetailsLeavePrompt = (
-    request:
-      | { kind: "tab"; tab: BotAvatarCustomizerTab }
-      | { kind: "close" }
-      | { kind: "save" },
-  ): void => {
-    detailsLeaveInvokerRef.current =
-      document.activeElement instanceof HTMLElement
-        ? document.activeElement
-        : null;
-    setDetailsLeaveRequest(request);
-  };
   const requestControlTab = (tab: BotAvatarCustomizerTab): void => {
-    if (
-      activeControlTab === "details" &&
-      tab !== "details" &&
-      detailsEditorRef.current?.hasDirtyChanges()
-    ) {
-      openDetailsLeavePrompt({ kind: "tab", tab });
-      return;
-    }
-    if (tab === "details") setDetailsAvatarPreviewVisible(false);
     setActiveControlTab(tab);
+    const nextAdjustmentTarget = botAvatarAdjustmentTargetForControl(tab);
+    if (nextAdjustmentTarget) setActiveAdjustmentTarget(nextAdjustmentTarget);
+    setActiveUpgradeNode(
+      tab === "eyes"
+        ? "eyes"
+        : tab === "mouth"
+          ? "mouth"
+          : tab === "details"
+            ? "screen"
+            : tab === "face"
+              ? activeUpgradeNode === "glyph" || activeUpgradeNode === "chassis"
+                ? activeUpgradeNode
+                : "chassis"
+              : null,
+    );
   };
-  const requestStudioClose = (): void => {
-    if (
-      activeControlTab === "details" &&
-      detailsEditorRef.current?.hasDirtyChanges()
-    ) {
-      openDetailsLeavePrompt({ kind: "close" });
+  const selectFoundryUpgradeNode = (
+    node: BotAvatarFoundryUpgradeNodeId,
+  ): void => {
+    requestControlTab(
+      node === "eyes"
+        ? "eyes"
+        : node === "mouth"
+          ? "mouth"
+          : node === "screen"
+            ? "details"
+            : "face",
+    );
+    setActiveUpgradeNode(node);
+  };
+  const returnFoundryCameraToOverview = (): void => {
+    if (botAvatarFoundryCameraForControl(activeControlTab) === "overview")
       return;
-    }
+    setActiveControlTab("face");
+    setActiveUpgradeNode(null);
+  };
+  const foundryCameraMode = botAvatarFoundryCameraForControl(activeControlTab);
+  const requestStudioClose = (): void => {
     onRequestClose();
   };
   const requestStudioSave = (dismissOuterSavePrompt = false): void => {
     if (dismissOuterSavePrompt) onCancelSavePrompt();
-    if (
-      activeControlTab === "details" &&
-      detailsEditorRef.current?.hasDirtyChanges()
-    ) {
-      openDetailsLeavePrompt({ kind: "save" });
-      return;
-    }
     void onSave();
   };
-  const discardDetailsAndContinue = (): void => {
-    const request = detailsLeaveRequest;
-    if (!request) return;
-    detailsEditorRef.current?.cancel();
-    setDetailsEditorDirty(false);
-    setAvatarDetailsPreview(normalizeAvatarDetails(avatarDetails));
-    continueDetailsNavigation(request);
-  };
-  const applyDetailsAndContinue = async (): Promise<void> => {
-    const request = detailsLeaveRequest;
-    if (!request || detailsLeaveApplying) return;
-    setDetailsLeaveApplying(true);
-    const applied = (await detailsEditorRef.current?.apply()) ?? true;
-    setDetailsLeaveApplying(false);
-    if (!applied) {
-      setDetailsLeaveRequest(null);
-      return;
-    }
-    setDetailsEditorDirty(false);
-    if (request.kind === "save") {
-      setPendingDetailsSaveKey(avatarDetailsKey(avatarDetailsPreview));
-      setDetailsLeaveRequest(null);
-      return;
-    }
-    continueDetailsNavigation(request);
-  };
-
   // The studio portals to document.body, outside the app shell that carries
   // the .themeDark/.themeLight variable scope. Without re-declaring that scope
   // here, every var(--accent)/var(--line) declaration in the studio CSS is
@@ -41330,6 +41823,194 @@ function BotAvatarCustomizerModal({
     )
       ? [activeControlTab as BotAvatarFaceControlTab]
       : [];
+  const activeFoundryModule =
+    (activeUpgradeNode
+      ? BOT_AVATAR_FOUNDRY_UPGRADE_NODES.find(
+          (node) => node.id === activeUpgradeNode,
+        )
+      : null) ?? botAvatarFoundryUpgradeNodeForControl(activeControlTab);
+  const activeFoundryIdentitySurface = botAvatarFoundryIdentitySurfaceForNode(
+    activeFoundryModule.id,
+  );
+  const avatarPronunciationSelection =
+    pronunciationAtlasSelectionForProfile(audioVoiceProfile);
+  const playPronunciationAtlasPreview = async (
+    previewProfile: BotAudioVoiceProfileV1,
+  ): Promise<void> => {
+    const previewText = await resolveVoicePreviewText();
+    await playAvatarVoicePreview(previewProfile, "english", previewText, {
+      englishVoiceEngine: "builtin",
+      cacheKey: [
+        "pronunciation-atlas",
+        scheduleKey,
+        previewText,
+        avatarVoicePlaybackCacheProfile(previewProfile),
+      ].join(":"),
+    });
+  };
+  const activeAdjustmentOptions: readonly {
+    value: BotAvatarAdjustmentTarget;
+    label: string;
+  }[] =
+    activeControlTab === "face" &&
+    activeFoundryIdentitySurface === "identity-core"
+      ? [{ value: "thinking", label: "Thinking" }]
+      : activeControlTab === "eyes"
+        ? [
+            { value: "eyes", label: "Eyes" },
+            ...(faceBlinkBar !== "none"
+              ? ([{ value: "blink", label: "Blink" }] as const)
+              : []),
+          ]
+        : activeControlTab === "mouth"
+          ? [{ value: "mouth", label: "Mouth" }]
+          : activeControlTab === "voice"
+            ? [{ value: "pronunciation", label: "Accent" }]
+            : [];
+  const activeAdjustmentControl = (() => {
+    if (activeAdjustmentOptions.length === 0) return null;
+    if (activeAdjustmentTarget === "pronunciation") {
+      return (
+        <PronunciationAtlas
+          selection={avatarPronunciationSelection}
+          color={activeFoundryModule.color}
+          previewDisabled={
+            !normalizeBotAudioVoiceProfileV1(audioVoiceProfile).enabled ||
+            voiceMode === "mute"
+          }
+          onPreview={(selection) =>
+            onAudioVoiceProfileChange(
+              profileWithPronunciationAtlasSelection(
+                audioVoiceProfile,
+                selection,
+              ),
+            )
+          }
+          onCommit={(selection) => {
+            const nextProfile = profileWithPronunciationAtlasSelection(
+              audioVoiceProfile,
+              selection,
+            );
+            onAudioVoiceProfileChange(nextProfile, { saveImmediately: true });
+            void playPronunciationAtlasPreview(nextProfile);
+          }}
+          onPreviewSource={() => {
+            const sourceProfile = profileWithPronunciationAtlasSelection(
+              audioVoiceProfile,
+              {
+                ...avatarPronunciationSelection,
+                pronunciationBase: "follow-voice",
+                influence: "none",
+                strength: "balanced",
+              },
+            );
+            void playPronunciationAtlasPreview(sourceProfile);
+          }}
+          onPreviewCurrent={() =>
+            void playPronunciationAtlasPreview(audioVoiceProfile)
+          }
+        />
+      );
+    }
+    if (activeAdjustmentTarget === "eyes") {
+      return (
+        <BotAvatarCoordinateControl
+          label="Eye position"
+          x={faceEyeOffsetX}
+          y={faceEyeOffsetY}
+          minX={BOT_FACE_EYE_OFFSET_X_MIN}
+          maxX={BOT_FACE_EYE_OFFSET_X_MAX}
+          stepX={BOT_FACE_EYE_OFFSET_X_STEP}
+          minY={BOT_FACE_EYE_OFFSET_Y_MIN}
+          maxY={BOT_FACE_EYE_OFFSET_Y_MAX}
+          stepY={BOT_FACE_EYE_OFFSET_Y_STEP}
+          restoreX={DEFAULT_BOT_FACE_STYLE.eyeOffsetX}
+          restoreY={DEFAULT_BOT_FACE_STYLE.eyeOffsetY}
+          onChange={(next) => {
+            onEyeOffsetXChange(next.x);
+            onEyeOffsetYChange(next.y);
+          }}
+          onReset={() => {
+            onEyeOffsetXChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetX);
+            onEyeOffsetYChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetY);
+          }}
+        />
+      );
+    }
+    if (activeAdjustmentTarget === "blink") {
+      return (
+        <BotAvatarCoordinateControl
+          label="Blink position"
+          x={faceBlinkOffsetX}
+          y={faceBlinkOffsetY}
+          minX={BOT_FACE_BLINK_OFFSET_X_MIN}
+          maxX={BOT_FACE_BLINK_OFFSET_X_MAX}
+          stepX={BOT_FACE_BLINK_OFFSET_X_STEP}
+          minY={BOT_FACE_BLINK_OFFSET_Y_MIN}
+          maxY={BOT_FACE_BLINK_OFFSET_Y_MAX}
+          stepY={BOT_FACE_BLINK_OFFSET_Y_STEP}
+          restoreX={DEFAULT_BOT_FACE_BLINK_OFFSET_X}
+          restoreY={DEFAULT_BOT_FACE_BLINK_OFFSET_Y}
+          onChange={(next) => {
+            onBlinkOffsetXChange(next.x);
+            onBlinkOffsetYChange(next.y);
+          }}
+          onReset={() => {
+            onBlinkOffsetXChange(DEFAULT_BOT_FACE_BLINK_OFFSET_X);
+            onBlinkOffsetYChange(DEFAULT_BOT_FACE_BLINK_OFFSET_Y);
+          }}
+        />
+      );
+    }
+    if (activeAdjustmentTarget === "mouth") {
+      return (
+        <BotAvatarCoordinateControl
+          label="Mouth position"
+          x={faceMouthOffsetX}
+          y={faceMouthOffsetY}
+          minX={BOT_FACE_MOUTH_OFFSET_X_MIN}
+          maxX={BOT_FACE_MOUTH_OFFSET_X_MAX}
+          stepX={BOT_FACE_MOUTH_OFFSET_X_STEP}
+          minY={BOT_FACE_MOUTH_OFFSET_Y_MIN}
+          maxY={BOT_FACE_MOUTH_OFFSET_Y_MAX}
+          stepY={BOT_FACE_MOUTH_OFFSET_Y_STEP}
+          restoreX={DEFAULT_BOT_FACE_STYLE.mouthOffsetX}
+          restoreY={DEFAULT_BOT_FACE_STYLE.mouthOffsetY}
+          onChange={(next) => {
+            onMouthOffsetXChange(next.x);
+            onMouthOffsetYChange(next.y);
+          }}
+          onReset={() => {
+            onMouthOffsetXChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetX);
+            onMouthOffsetYChange(DEFAULT_BOT_FACE_STYLE.mouthOffsetY);
+          }}
+        />
+      );
+    }
+    return (
+      <BotAvatarCoordinateControl
+        label="Thinking position"
+        x={faceThinkingOffsetX}
+        y={faceThinkingOffsetY}
+        minX={BOT_FACE_THINKING_OFFSET_X_MIN}
+        maxX={BOT_FACE_THINKING_OFFSET_X_MAX}
+        stepX={BOT_FACE_THINKING_OFFSET_X_STEP}
+        minY={BOT_FACE_THINKING_OFFSET_Y_MIN}
+        maxY={BOT_FACE_THINKING_OFFSET_Y_MAX}
+        stepY={BOT_FACE_THINKING_OFFSET_Y_STEP}
+        restoreX={DEFAULT_BOT_FACE_STYLE.thinkingOffsetX}
+        restoreY={DEFAULT_BOT_FACE_STYLE.thinkingOffsetY}
+        onChange={(next) => {
+          onThinkingOffsetXChange(next.x);
+          onThinkingOffsetYChange(next.y);
+        }}
+        onReset={() => {
+          onThinkingOffsetXChange(DEFAULT_BOT_FACE_STYLE.thinkingOffsetX);
+          onThinkingOffsetYChange(DEFAULT_BOT_FACE_STYLE.thinkingOffsetY);
+        }}
+      />
+    );
+  })();
   const completedProfileCategories = botProfileCompletionCount(profile);
   const profileProgressPercent = profileDetailsUnlocked
     ? Math.round(
@@ -41354,6 +42035,56 @@ function BotAvatarCustomizerModal({
     profileTopP !== BOT_TOP_P_DEFAULT ||
     profileTopK !== BOT_TOP_K_DEFAULT ||
     profileRepetitionPenalty !== BOT_REPETITION_PENALTY_DEFAULT;
+  const opticsModulePopulated =
+    faceEyesFont !== DEFAULT_BOT_FACE_STYLE.eyesFont ||
+    faceEyeCharacter !== DEFAULT_BOT_FACE_STYLE.eyeCharacter ||
+    faceEyeAnimation !== DEFAULT_BOT_FACE_STYLE.eyeAnimation ||
+    faceFontWeight !== DEFAULT_BOT_FACE_STYLE.weight ||
+    faceEyeScale !== DEFAULT_BOT_FACE_STYLE.eyeScale ||
+    faceEyeOffsetX !== DEFAULT_BOT_FACE_STYLE.eyeOffsetX ||
+    faceEyeOffsetY !== DEFAULT_BOT_FACE_STYLE.eyeOffsetY ||
+    faceEyeRotationDeg !== DEFAULT_BOT_FACE_STYLE.eyeRotationDeg ||
+    faceEyeCount !== DEFAULT_BOT_FACE_STYLE.eyeCount ||
+    faceBlinkBar !== DEFAULT_BOT_FACE_STYLE.blinkBar ||
+    faceBlinkScale !== DEFAULT_BOT_FACE_STYLE.blinkScale ||
+    faceBlinkOffsetX !== DEFAULT_BOT_FACE_STYLE.blinkOffsetX ||
+    faceBlinkOffsetY !== DEFAULT_BOT_FACE_STYLE.blinkOffsetY ||
+    faceBlinkRotationDeg !== DEFAULT_BOT_FACE_STYLE.blinkRotationDeg;
+  const vocalizerModulePopulated =
+    faceMouthFont !== DEFAULT_BOT_FACE_STYLE.mouthFont ||
+    faceMouthCharacter !== DEFAULT_BOT_FACE_STYLE.mouthCharacter ||
+    faceMouthAnimation !== DEFAULT_BOT_FACE_STYLE.mouthAnimation ||
+    faceMouthCoffeePucker !== DEFAULT_BOT_FACE_STYLE.mouthCoffeePucker ||
+    faceFontWeight !== DEFAULT_BOT_FACE_STYLE.weight ||
+    faceMouthScale !== DEFAULT_BOT_FACE_STYLE.mouthScale ||
+    faceMouthOffsetX !== DEFAULT_BOT_FACE_STYLE.mouthOffsetX ||
+    faceMouthOffsetY !== DEFAULT_BOT_FACE_STYLE.mouthOffsetY ||
+    faceMouthRotationDeg !== DEFAULT_BOT_FACE_STYLE.mouthRotationDeg ||
+    JSON.stringify(audioVoiceProfile) !==
+      JSON.stringify(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
+  const identityModulePopulated =
+    Boolean(botName.trim()) ||
+    completedProfileCategories > 0 ||
+    color.trim().toLowerCase() !==
+      DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR.toLowerCase() ||
+    glyph !== DEFAULT_BOT_GLYPH ||
+    !botFaceThinkingFramesEqual(
+      faceThinkingFrames,
+      DEFAULT_BOT_FACE_STYLE.thinkingFrames,
+    ) ||
+    faceThinkingScale !== DEFAULT_BOT_FACE_STYLE.thinkingScale ||
+    faceThinkingOffsetX !== DEFAULT_BOT_FACE_STYLE.thinkingOffsetX ||
+    faceThinkingOffsetY !== DEFAULT_BOT_FACE_STYLE.thinkingOffsetY;
+  const foundryModulePopulation = botAvatarFoundryModulePopulation({
+    draftMode,
+    identity: identityModulePopulated,
+    eyes: opticsModulePopulated,
+    mouth: vocalizerModulePopulated,
+    screen: avatarDetailsHasVisuals(avatarDetailsPreview),
+    chassis: Boolean(profileSystemPrompt.trim()) || advancedSamplerChanged,
+  });
+  const activeFoundryModulePopulated =
+    foundryModulePopulation[activeFoundryModule.id];
   const applyFacePreset = (preset: BotAvatarFacePreset) => {
     onEyesFontChange(preset.eyesFont);
     onEyeCharacterChange(preset.eyeCharacter);
@@ -41419,15 +42150,44 @@ function BotAvatarCustomizerModal({
       }}
     >
       <section
+        ref={studioDialogRef}
         className={`${styles.botProfileBuilder} ${styles.botAvatarCustomizer}`}
+        data-foundry="true"
+        data-draft-mode={draftMode ? "true" : undefined}
         role="dialog"
         aria-modal="true"
         aria-labelledby="bot-avatar-customizer-title"
+        tabIndex={-1}
+        onKeyDown={(event) => {
+          if (event.key !== "Escape" || profileEditorLayerOpen) return;
+          event.preventDefault();
+          event.stopPropagation();
+          if (foundryCameraMode !== "overview") {
+            returnFoundryCameraToOverview();
+            return;
+          }
+          requestStudioClose();
+        }}
       >
         <header className={styles.botProfileBuilderHeader}>
           <div>
             <span>Avatar Studio</span>
             <div className={styles.botAvatarStudioTitleRow}>
+              {foundryCameraMode !== "overview" ? (
+                <button
+                  type="button"
+                  className={styles.botAvatarFoundryBackButton}
+                  onClick={returnFoundryCameraToOverview}
+                  aria-label="Back to avatar overview"
+                >
+                  <ChevronLeft
+                    size={14}
+                    strokeWidth={2.35}
+                    aria-hidden="true"
+                  />
+                  Back
+                </button>
+              ) : null}
               <h4 id="bot-avatar-customizer-title">{titleName}</h4>
             </div>
             <p>
@@ -41504,42 +42264,59 @@ function BotAvatarCustomizerModal({
         <div
           className={styles.botAvatarCustomizerBody}
           data-active-control-tab={activeControlTab}
+          data-camera-mode={foundryCameraMode}
+          data-foundry-module={activeFoundryModule.id}
+          style={
+            {
+              "--foundry-module-color": activeFoundryModule.color,
+            } as CSSProperties
+          }
+          onPointerDown={(event) => {
+            if (event.target !== event.currentTarget) return;
+            returnFoundryCameraToOverview();
+          }}
         >
-          {activeControlTab === "details" && !detailsAvatarPreviewVisible ? (
-            <BotAvatarDeferredPreviewPanel
-              previewTheme={previewTheme}
-              onReveal={() => {
-                setPreviewMode("idle");
-                setDetailsAvatarPreviewVisible(true);
-              }}
-            />
-          ) : (
-            <BotAvatarPreviewPanel
-              titleName={titleName}
-              glyph={glyph}
-              scheduleKey={scheduleKey}
-              screenMaterialSeed={screenMaterialSeed}
-              frameMaterialSeed={frameMaterialSeed}
-              isDefaultPrismBot={isDefaultPrismBot}
-              previewTheme={previewTheme}
-              previewMode={previewMode}
-              previewMood={previewMood}
-              previewTalking={previewTalking}
-              avatarSfx={previewAvatarSfx}
-              displayedPreviewMouthShape={displayedPreviewMouthShape}
-              avatarStyle={avatarStyle}
-              faceStyle={faceStyle}
-              avatarDetails={avatarDetailsPreview}
-              avatarDetailsColor={color}
-              onPreviewThemeChange={setPreviewTheme}
-              onPreviewModeChange={setPreviewMode}
-              onPreviewMoodCycle={() =>
-                setPreviewMoodIndex(
-                  (current) => (current + 1) % BOT_AVATAR_PREVIEW_MOODS.length,
-                )
-              }
-            />
-          )}
+          <BotAvatarPreviewPanel
+            titleName={titleName}
+            glyph={glyph}
+            scheduleKey={scheduleKey}
+            screenMaterialSeed={screenMaterialSeed}
+            frameMaterialSeed={frameMaterialSeed}
+            isDefaultPrismBot={isDefaultPrismBot}
+            previewTheme={previewTheme}
+            previewMode={previewMode}
+            previewMood={previewMood}
+            previewTalking={previewTalking}
+            avatarSfx={previewAvatarSfx}
+            displayedPreviewMouthShape={displayedPreviewMouthShape}
+            avatarStyle={avatarStyle}
+            faceStyle={faceStyle}
+            avatarDetails={avatarDetailsPreview}
+            avatarDetailsColor={color}
+            spatialControls
+            activeUpgradeNode={activeUpgradeNode}
+            modulePopulation={foundryModulePopulation}
+            foundryCameraMode={foundryCameraMode}
+            screenHotspotEnabled={detailsEditorVisible}
+            onUpgradeNodeSelect={selectFoundryUpgradeNode}
+            onStageBackgroundSelect={returnFoundryCameraToOverview}
+            screenMode={activeControlTab === "details" ? "editing" : "live"}
+            screenOverlay={
+              activeControlTab === "details" ? (
+                <span
+                  ref={setInkCanvasTarget}
+                  className={styles.botAvatarFoundryInkMount}
+                />
+              ) : null
+            }
+            onPreviewThemeChange={setPreviewTheme}
+            onPreviewModeChange={setPreviewMode}
+            onPreviewMoodCycle={() =>
+              setPreviewMoodIndex(
+                (current) => (current + 1) % BOT_AVATAR_PREVIEW_MOODS.length,
+              )
+            }
+          />
           <section
             className={styles.botAvatarControlPanel}
             aria-label="Avatar controls"
@@ -41550,6 +42327,7 @@ function BotAvatarCustomizerModal({
                 role="tablist"
                 aria-label="Avatar control sections"
                 data-tab-count={visibleAvatarTabs.length}
+                data-tutorial-target="avatar-foundry-dock"
               >
                 {visibleAvatarTabs.map((tab) => (
                   <button
@@ -41560,7 +42338,22 @@ function BotAvatarCustomizerModal({
                     data-active={
                       activeControlTab === tab.value ? "true" : undefined
                     }
+                    data-populated={
+                      foundryModulePopulation[
+                        botAvatarFoundryUpgradeNodeForControl(tab.value).id
+                      ]
+                        ? "true"
+                        : "false"
+                    }
                     onClick={() => requestControlTab(tab.value)}
+                    data-avatar-control={tab.value}
+                    style={
+                      {
+                        "--foundry-module-color":
+                          botAvatarFoundryUpgradeNodeForControl(tab.value)
+                            .color,
+                      } as CSSProperties
+                    }
                   >
                     {tab.value === "face" ? (
                       <Sparkles
@@ -41612,7 +42405,103 @@ function BotAvatarCustomizerModal({
               ref={controlStackRef}
               className={styles.botAvatarControlStack}
               data-avatar-control-stack="true"
+              data-tutorial-target="avatar-foundry-controls"
             >
+              <section
+                className={styles.botAvatarGlobalAdjustmentConsole}
+                data-foundry-module={activeFoundryModule.id}
+                data-populated={activeFoundryModulePopulated ? "true" : "false"}
+                data-adjustment-enabled={
+                  activeAdjustmentControl ? "true" : undefined
+                }
+                style={
+                  {
+                    "--foundry-module-color": activeFoundryModule.color,
+                  } as CSSProperties
+                }
+                aria-label={`${activeFoundryModule.label} adjustment console, ${
+                  activeFoundryModulePopulated ? "ready" : "unconfigured"
+                }`}
+              >
+                <header>
+                  <span
+                    className={styles.botAvatarGlobalAdjustmentLight}
+                    aria-hidden="true"
+                  />
+                  <span>
+                    <small>
+                      {activeFoundryModule.module} ·{" "}
+                      {activeFoundryModulePopulated ? "Ready" : "Unconfigured"}
+                    </small>
+                    <strong>{activeFoundryModule.label}</strong>
+                  </span>
+                  {activeAdjustmentOptions.length > 0 ? (
+                    <span
+                      className={styles.botAvatarGlobalAdjustmentTargets}
+                      role="group"
+                      aria-label="Adjustment target"
+                    >
+                      {activeAdjustmentOptions.map((option) => (
+                        <button
+                          key={option.value}
+                          type="button"
+                          data-active={
+                            activeAdjustmentTarget === option.value
+                              ? "true"
+                              : undefined
+                          }
+                          aria-pressed={activeAdjustmentTarget === option.value}
+                          onClick={() =>
+                            setActiveAdjustmentTarget(option.value)
+                          }
+                        >
+                          {option.label}
+                        </button>
+                      ))}
+                    </span>
+                  ) : activeFoundryIdentitySurface === "shell" ? (
+                    <small>Surface controls</small>
+                  ) : (
+                    <small>Module selected</small>
+                  )}
+                </header>
+                {activeAdjustmentControl ??
+                  (activeFoundryIdentitySurface === "shell" ? (
+                    <div className={styles.botAvatarShellAdjustmentSummary}>
+                      <strong>
+                        {identityControlsVisible
+                          ? "Color + identity badge"
+                          : "Factory finish"}
+                      </strong>
+                      <p>
+                        {identityControlsVisible
+                          ? "Use the Shell controls below to tune the frame color and lower identity badge."
+                          : "Default Prism keeps its chrome frame, refraction badge, and identity color fixed."}
+                      </p>
+                    </div>
+                  ) : (
+                    <div className={styles.botAvatarGlobalAdjustmentIdle}>
+                      <AdjustmentPad
+                        label={`${activeFoundryModule.label} position unavailable`}
+                        value={{ x: 0, y: 0 }}
+                        restoreValue={{ x: 0, y: 0 }}
+                        adapter={createAdjustmentPadCoordinateAdapter({
+                          x: { min: -1, max: 1, step: 0.1 },
+                          y: { min: -1, max: 1, step: 0.1 },
+                          valueText: () => "Fixed position",
+                        })}
+                        color={activeFoundryModule.color}
+                        disabled
+                        onPreview={() => undefined}
+                        onCommit={() => undefined}
+                      />
+                      <p>
+                        This module has no positional offset. Select Identity,
+                        Eyes, or Mouth to move a visible element.
+                      </p>
+                    </div>
+                  ))}
+              </section>
               {activeControlTab === "profile" && identityControlsVisible ? (
                 <section
                   className={styles.botAvatarProfilePanel}
@@ -41800,6 +42689,9 @@ function BotAvatarCustomizerModal({
                   accentColor={normalizeAccentForTheme(color, resolvedTheme)}
                   faceStyle={faceStyle}
                   theme={resolvedTheme}
+                  layout="foundry"
+                  canvasPortalTarget={inkCanvasTarget}
+                  autoCommit
                   onApply={async (nextDetails) => {
                     const normalized = normalizeAvatarDetails(nextDetails);
                     await onAvatarDetailsApply(
@@ -41809,7 +42701,6 @@ function BotAvatarCustomizerModal({
                   }}
                   onDirtyChange={setDetailsEditorDirty}
                   onPreviewChange={setAvatarDetailsPreview}
-                  onEditStart={() => setDetailsAvatarPreviewVisible(false)}
                 />
               ) : null}
               {activeControlTab === "powers" && identityControlsVisible
@@ -41878,6 +42769,11 @@ function BotAvatarCustomizerModal({
                 <BotAvatarFaceControls
                   key={faceControlTab}
                   activeTab={faceControlTab}
+                  identitySurface={
+                    faceControlTab === "face"
+                      ? (activeFoundryIdentitySurface ?? "identity-core")
+                      : undefined
+                  }
                   identitySection={
                     faceControlTab === "face" && identityControlsVisible
                       ? {
@@ -41969,79 +42865,6 @@ function BotAvatarCustomizerModal({
           </section>
         </div>
       </section>
-      {detailsLeaveRequest ? (
-        <div
-          className={styles.botAvatarSavePromptBackdrop}
-          role="presentation"
-          onPointerDown={(event) => event.stopPropagation()}
-        >
-          <section
-            ref={detailsLeavePanelRef}
-            className={styles.botAvatarSavePromptPanel}
-            role="alertdialog"
-            aria-modal="true"
-            aria-labelledby="bot-avatar-details-leave-title"
-            onKeyDown={(event) => {
-              if (event.key === "Escape") {
-                event.preventDefault();
-                event.stopPropagation();
-                if (!detailsLeaveApplying) setDetailsLeaveRequest(null);
-                return;
-              }
-              if (event.key !== "Tab") return;
-              const focusable = Array.from(
-                detailsLeavePanelRef.current?.querySelectorAll<HTMLButtonElement>(
-                  "button:not(:disabled)",
-                ) ?? [],
-              );
-              if (focusable.length === 0) return;
-              const first = focusable[0]!;
-              const last = focusable[focusable.length - 1]!;
-              if (event.shiftKey && document.activeElement === first) {
-                event.preventDefault();
-                last.focus();
-              } else if (!event.shiftKey && document.activeElement === last) {
-                event.preventDefault();
-                first.focus();
-              }
-            }}
-          >
-            <h2 id="bot-avatar-details-leave-title">
-              {detailsLeaveRequest.kind === "save"
-                ? "Apply avatar details before saving?"
-                : "Apply avatar details?"}
-            </h2>
-            <p>Your detail recipe is still a local working copy.</p>
-            <div className={styles.botAvatarSavePromptActions}>
-              <button
-                ref={detailsLeaveKeepEditingRef}
-                type="button"
-                className={styles.botAvatarSavePromptCancel}
-                onClick={() => setDetailsLeaveRequest(null)}
-                disabled={detailsLeaveApplying}
-              >
-                Keep editing
-              </button>
-              <button
-                type="button"
-                className={styles.botAvatarSavePromptDiscard}
-                onClick={discardDetailsAndContinue}
-                disabled={detailsLeaveApplying}
-              >
-                Discard
-              </button>
-              <button
-                type="button"
-                className={styles.botAvatarSavePromptSave}
-                onClick={() => void applyDetailsAndContinue()}
-                disabled={detailsLeaveApplying}
-              >
-                {detailsLeaveApplying ? "Applying…" : "Apply"}
-              </button>
-            </div>
-          </section>
-        </div>
-      ) : null}
     </div>
   );
   const savePrompt = (
@@ -44643,15 +45466,17 @@ function HomeContent(): React.JSX.Element {
   const [systemVoiceOptions, setSystemVoiceOptions] = useState<
     Array<{ name: string; locale: string }>
   >([]);
-  const offlineVoiceIdentityOptions = useMemo<
-    BotVoiceIdentityCatalogLane["options"]
-  >(
+  const [playerLocalVoicePresentation, setPlayerLocalVoicePresentation] =
+    useState<LocalVoicePresentationFilter>("any");
+  const offlineVoiceIdentityOptions = useMemo<OfflineVoiceOption[]>(
     () => [
       ...PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => ({
         value: builtinVoiceSelectionValue(voice.voiceId),
         label: voice.character,
         detail: `Portable ${voice.voiceId.replace("voice-", "")} · Included`,
         kind: "builtin" as const,
+        locale: voice.locale,
+        presentation: voice.presentation,
       })),
       ...(settings?.operatingSystemVoicesEnabled
         ? systemVoiceOptions.map((voice) => ({
@@ -44659,6 +45484,7 @@ function HomeContent(): React.JSX.Element {
             label: voice.name,
             detail: `${voice.locale.replace("_", "-")} · Operating system`,
             kind: "os" as const,
+            locale: canonicalEnglishVoiceLocale(voice.locale),
           }))
         : []),
     ],
@@ -44667,6 +45493,32 @@ function HomeContent(): React.JSX.Element {
   const playerVoiceProfile = useMemo(
     () => cleanPlayerVoiceProfile(settings?.playerAudioVoiceProfile),
     [settings?.playerAudioVoiceProfile],
+  );
+  const playerLocalAccentLocale = canonicalEnglishVoiceLocale(
+    playerVoiceProfile.accentLocale ?? "en-US",
+  );
+  const playerLocalAccentLocales = useMemo(
+    () => [
+      ...new Set([
+        "en-US",
+        "en-GB",
+        playerLocalAccentLocale,
+        ...offlineVoiceIdentityOptions.map((option) => option.locale),
+      ]),
+    ],
+    [offlineVoiceIdentityOptions, playerLocalAccentLocale],
+  );
+  const filteredPlayerLocalVoiceOptions = useMemo(
+    () =>
+      offlineVoiceOptionsForFilters(offlineVoiceIdentityOptions, {
+        locale: playerLocalAccentLocale,
+        presentation: playerLocalVoicePresentation,
+      }),
+    [
+      offlineVoiceIdentityOptions,
+      playerLocalAccentLocale,
+      playerLocalVoicePresentation,
+    ],
   );
   const selectedPlayerPremiumVoiceId = playerPremiumVoiceId(playerVoiceProfile);
   const selectedPlayerPremiumVoiceAvailable = selectedPlayerPremiumVoiceId
@@ -45980,8 +46832,12 @@ function HomeContent(): React.JSX.Element {
   const interruptedSpeakerVoiceReadyClipRef = useRef<
     Map<string, EnglishVoiceSynthesisClip | null>
   >(new Map());
+  const chatVoiceForcedMuted = chatViewForcesVoiceMute(view);
   const configuredVoicePlaybackSelection: ReplayVoiceSelectionSnapshotV2 = {
-    voiceMode: normalizeVoiceMode(settings?.voiceMode),
+    voiceMode: effectiveVoiceModeForView(
+      view,
+      normalizeVoiceMode(settings?.voiceMode),
+    ),
     englishVoiceEngine: normalizeEnglishVoiceEngine(
       settings?.englishVoiceEngine,
     ),
@@ -45997,7 +46853,9 @@ function HomeContent(): React.JSX.Element {
   const [recordingVoiceSurface, setRecordingVoiceSurface] = useState<
     "signal" | "coffee" | null
   >(null);
-  if (recordingVoiceSelectionRef.current) {
+  if (chatVoiceForcedMuted) {
+    voicePlaybackSelectionRef.current = configuredVoicePlaybackSelection;
+  } else if (recordingVoiceSelectionRef.current) {
     voicePlaybackSelectionRef.current =
       recordingVoiceSelectionRef.current.selection;
   } else {
@@ -46029,14 +46887,17 @@ function HomeContent(): React.JSX.Element {
       if (recordingVoiceSelectionRef.current?.surface !== surface) return;
       recordingVoiceSelectionRef.current = null;
       voicePlaybackSelectionRef.current = {
-        voiceMode: normalizeVoiceMode(settings?.voiceMode),
+        voiceMode: effectiveVoiceModeForView(
+          view,
+          normalizeVoiceMode(settings?.voiceMode),
+        ),
         englishVoiceEngine: normalizeEnglishVoiceEngine(
           settings?.englishVoiceEngine,
         ),
       };
       setRecordingVoiceSurface(null);
     },
-    [settings?.englishVoiceEngine, settings?.voiceMode],
+    [settings?.englishVoiceEngine, settings?.voiceMode, view],
   );
   const handleSignalRecordingStateChange = useCallback(
     (active: boolean): void => {
@@ -46199,6 +47060,21 @@ function HomeContent(): React.JSX.Element {
   } | null>(null);
   const chatSpeechRevealVisualFallbackKeysRef = useRef<Set<string>>(new Set());
   const [chatSpeechRevealVersion, setChatSpeechRevealVersion] = useState(0);
+  useEffect(() => {
+    if (!chatVoiceForcedMuted) return;
+    responseCuePlaybackAbortRef.current?.abort();
+    responseCuePlaybackAbortRef.current = null;
+    zenPlayerVoiceAbortRef.current?.abort();
+    zenPlayerVoiceAbortRef.current = null;
+    setZenPlayerSpeechReveal(null);
+    liveBottishRevealKeyRef.current = null;
+    chatSpeechRevealVisualFallbackKeysRef.current.clear();
+    if (chatSpeechRevealByKeyRef.current.size > 0) {
+      chatSpeechRevealByKeyRef.current.clear();
+      setChatSpeechRevealVersion((version) => version + 1);
+    }
+    stopAudioForStateExit();
+  }, [chatVoiceForcedMuted, stopAudioForStateExit]);
   const prepareChatSpeechReveal = useCallback(
     (revealKey: string, tokenSignature: string) => {
       chatSpeechRevealVisualFallbackKeysRef.current.delete(revealKey);
@@ -46310,6 +47186,10 @@ function HomeContent(): React.JSX.Element {
       }
   > {
     if (!settings) throw new Error("Voice settings are unavailable.");
+    const voiceSelection = voicePlaybackSelectionRef.current;
+    if (voiceSelection.voiceMode === "mute") {
+      throw new Error("Voice is muted for this surface.");
+    }
     const messageBot = event.botId
       ? (bots.find((bot) => bot.id === event.botId) ?? null)
       : null;
@@ -46337,7 +47217,6 @@ function HomeContent(): React.JSX.Element {
     ) {
       throw new Error("This progressive Zen segment is silent.");
     }
-    const voiceSelection = voicePlaybackSelectionRef.current;
     const engine = conversationEnglishVoiceEngine(
       voiceSelection.englishVoiceEngine,
       event.provider,
@@ -46691,7 +47570,9 @@ function HomeContent(): React.JSX.Element {
               let localVoiceNotice: string | null = null;
               if (encodedLocalVoiceNotice) {
                 try {
-                  localVoiceNotice = decodeURIComponent(encodedLocalVoiceNotice);
+                  localVoiceNotice = decodeURIComponent(
+                    encodedLocalVoiceNotice,
+                  );
                 } catch {
                   localVoiceNotice = encodedLocalVoiceNotice;
                 }
@@ -46854,7 +47735,13 @@ function HomeContent(): React.JSX.Element {
   );
 
   async function replayAssistantMessageVoice(message: Message): Promise<void> {
-    if (!settings || settings.voiceMode === "mute" || !detail) return;
+    if (
+      chatVoiceForcedMuted ||
+      !settings ||
+      settings.voiceMode === "mute" ||
+      !detail
+    )
+      return;
     const messageBot = resolveMessageBotIdentity(
       message,
       bots,
@@ -47832,6 +48719,27 @@ function HomeContent(): React.JSX.Element {
     useState<BotGeneratedDraftV1 | null>(null);
   const [botGeneratorHasGeneratedDraft, setBotGeneratorHasGeneratedDraft] =
     useState(false);
+  const [botFoundryPhase, setBotFoundryPhase] =
+    useState<BotAvatarFoundryPhase>("arrival");
+  const [botFoundryCompanionOrigin, setBotFoundryCompanionOrigin] =
+    useState<BotAvatarFoundryOrigin>(() =>
+      normalizeBotAvatarFoundryOrigin(null),
+    );
+  const botFoundryRunRef = useRef(0);
+  const botGeneratorAbortRef = useRef<AbortController | null>(null);
+  useEffect(() => {
+    if (!botGeneratorOpen || botFoundryPhase !== "arrival") return;
+    const reducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    const timer = window.setTimeout(
+      () => setBotFoundryPhase("brief"),
+      reducedMotion
+        ? BOT_AVATAR_FOUNDRY_TIMING.reducedArrivalMs
+        : BOT_AVATAR_FOUNDRY_TIMING.arrivalMs,
+    );
+    return () => window.clearTimeout(timer);
+  }, [botFoundryPhase, botGeneratorOpen]);
   const [botProfile, setBotProfile] = useState<BotProfileFields>(() =>
     blankBotProfile(),
   );
@@ -54370,20 +55278,26 @@ function HomeContent(): React.JSX.Element {
       normalizeEnglishVoiceEngine(settings?.englishVoiceEngine),
     );
     const premiumLocalOnly = options.localPremiumFallback === true;
-    const currentChoice = effectiveVoicePlaybackChoice(
-      configuredChoice,
-      premiumLocalOnly,
-    );
+    const currentChoice = chatVoiceForcedMuted
+      ? "mute"
+      : effectiveVoicePlaybackChoice(configuredChoice, premiumLocalOnly);
     const recordingLockReason = recordingVoiceSurface
       ? `Voice is baked for this ${recordingVoiceSurface === "signal" ? "Signal episode" : "Coffee session"} until recording ends.`
       : undefined;
     const disabled =
-      options.disabled === true || recordingVoiceSurface !== null || !settings;
-    const disabledReason = options.disabledReason ?? recordingLockReason;
+      chatVoiceForcedMuted ||
+      options.disabled === true ||
+      recordingVoiceSurface !== null ||
+      !settings;
+    const disabledReason = chatVoiceForcedMuted
+      ? CHAT_FORCED_MUTE_REASON
+      : (options.disabledReason ?? recordingLockReason);
     const premiumUnavailable = settings?.elevenLabsApiKeySource === "none";
-    const currentDisplayName = voiceModeDisplayName(configuredChoice, {
-      localPremiumFallback: premiumLocalOnly,
-    });
+    const currentDisplayName = chatVoiceForcedMuted
+      ? "Mute"
+      : voiceModeDisplayName(configuredChoice, {
+          localPremiumFallback: premiumLocalOnly,
+        });
     const menuId = "navbar-voice-mode-menu";
     const voiceEntries = VOICE_PLAYBACK_CHOICES.map(
       (choice): PrismMenuEntry => {
@@ -54406,7 +55320,9 @@ function HomeContent(): React.JSX.Element {
               : voiceModeDisplayName(choice),
           checked: choice === currentChoice,
           disabled: optionDisabled,
-          disabledReason: premiumDisabledReason,
+          disabledReason: chatVoiceForcedMuted
+            ? CHAT_FORCED_MUTE_REASON
+            : premiumDisabledReason,
           onSelect: () => {
             if (choice !== currentChoice) {
               return selectGlobalVoiceChoice(choice);
@@ -54420,6 +55336,7 @@ function HomeContent(): React.JSX.Element {
         key={disabled ? "voice-mode-locked" : "voice-mode-active"}
         className={styles.voiceModeSelector}
         data-voice-mode={currentChoice}
+        data-chat-forced-mute={chatVoiceForcedMuted ? "true" : undefined}
         data-disabled={disabled ? "true" : undefined}
         data-open={voiceModeSelectorOpen ? "true" : undefined}
         data-tutorial-target={options.tutorialTarget}
@@ -56345,22 +57262,24 @@ function HomeContent(): React.JSX.Element {
     ) {
       return null;
     }
-    if (effectivePreferredProvider !== "local") return null;
     if (!psychicThinkingDelayElapsed) return null;
     for (let i = visibleDetailMessages.length - 1; i >= 0; i -= 1) {
       const message = visibleDetailMessages[i];
-      if (message?.role === "user" && !message.psychicThought) {
+      if (message?.role === "user") {
         return message.id;
       }
     }
     return null;
-  }, [
-    detail?.mode,
-    effectivePreferredProvider,
-    psychicThinkingDelayElapsed,
-    view,
-    visibleDetailMessages,
-  ]);
+  }, [detail?.mode, psychicThinkingDelayElapsed, view, visibleDetailMessages]);
+  const pendingPsychicLiveMessage = useMemo(
+    () =>
+      psychicThinkingTargetMessageId
+        ? (visibleDetailMessages.find(
+            (message) => message.id === psychicThinkingTargetMessageId,
+          ) ?? null)
+        : null,
+    [psychicThinkingTargetMessageId, visibleDetailMessages],
+  );
   const promptShortcutColorIndexByMessageId = useMemo(() => {
     const colorIndexes = new Map<string, number>();
     let promptShortcutIndex = 0;
@@ -58012,13 +58931,31 @@ function HomeContent(): React.JSX.Element {
           activeResponseCueBeat.heardCharacterCount,
         )
       : "";
+    const livePsychicSummary =
+      !responseCuePlaying &&
+      !zenFollowupActive &&
+      !chatAssistantRevealInProgress
+        ? (pendingPsychicLiveMessage?.psychicThought?.summary.trim() ?? "")
+        : "";
+    const livePsychicStage =
+      pendingPsychicLiveMessage?.psychicScratchpad?.stage;
+    const livePsychicStageLabel = livePsychicStage
+      ? PSYCHIC_PROGRESS_STAGE_LABELS[livePsychicStage]
+      : "Planning";
+    const livePsychicScratchpad =
+      livePsychicSummary && devToolsRuntimeActive
+        ? (pendingPsychicLiveMessage?.psychicScratchpad?.scratchpad.trim() ??
+          "")
+        : "";
     const label = responseCuePlaying
       ? `Response cue · ${displayName}: ${heardCueText || "…"}`
       : zenFollowupActive
         ? `${displayName} is waiting while you type…`
         : chatAssistantRevealInProgress
           ? `${displayName} is speaking…`
-          : pickGeneratingLabel(displayName, salt);
+          : livePsychicSummary
+            ? `Psychic · ${livePsychicStageLabel}: ${livePsychicSummary}`
+            : pickGeneratingLabel(displayName, salt);
     const voicePreset = resolveBotVoicePreset(pendingRespondent);
     const style = selectedComposeBotAccent
       ? ({
@@ -58047,12 +58984,29 @@ function HomeContent(): React.JSX.Element {
         aria-label={`${label}. Tap or click to stop.`}
         title="Stop reply"
         data-response-cue={responseCuePlaying ? "true" : undefined}
+        data-psychic-live={livePsychicSummary ? "true" : undefined}
         onClick={() => {
           responseCuePlaybackAbortRef.current?.abort();
           handleTypingIndicatorPress();
         }}
       >
-        <span>{label}</span>
+        {livePsychicSummary ? (
+          <span className={styles.typingPsychicLiveContent}>
+            <span className={styles.typingPsychicLiveLabel}>
+              Psychic · {livePsychicStageLabel}
+            </span>
+            <span className={styles.typingPsychicLiveSummary}>
+              {livePsychicSummary}
+            </span>
+            {livePsychicScratchpad ? (
+              <span className={styles.typingPsychicLiveScratchpad}>
+                {livePsychicScratchpad}
+              </span>
+            ) : null}
+          </span>
+        ) : (
+          <span>{label}</span>
+        )}
         {!responseCuePlaying ? (
           <TypingDots className={styles.typingDots} voicePreset={voicePreset} />
         ) : null}
@@ -58075,6 +59029,10 @@ function HomeContent(): React.JSX.Element {
     zenCanvasSpeedNudgePulseActive,
     activeResponseCueBeat,
     responseCuePlaying,
+    pendingPsychicLiveMessage?.psychicThought?.summary,
+    pendingPsychicLiveMessage?.psychicScratchpad?.stage,
+    pendingPsychicLiveMessage?.psychicScratchpad?.scratchpad,
+    devToolsRuntimeActive,
   ]);
   const responseCueHistoryNode = useMemo(() => {
     if (!detail?.id || detail.id === "pending") return null;
@@ -63802,7 +64760,8 @@ function HomeContent(): React.JSX.Element {
       storyModelOverride ??
       storyEffectiveModelChoice,
     options: storyModelOptions,
-    simulatedEffortEnabled: settings?.experimentalAllModelEffortEnabled === true,
+    simulatedEffortEnabled:
+      settings?.experimentalAllModelEffortEnabled === true,
   });
   useEffect(() => {
     if (storyAnyOfflineProtected && storyProvider !== "local") {
@@ -64815,10 +65774,9 @@ function HomeContent(): React.JSX.Element {
       const ephemeralInterruptionBridge =
         botcastMessageIsEphemeralInterruptionBridge(message);
       const performanceText = message.voicePerformanceText ?? message.content;
-      const useLocalPerformanceStream =
-        voicePerformancePlanFromText(performanceText).segments.some(
-          (segment) => segment.kind === "vocal-action",
-        );
+      const useLocalPerformanceStream = voicePerformancePlanFromText(
+        performanceText,
+      ).segments.some((segment) => segment.kind === "vocal-action");
       const response = await fetch(
         new URL("/api/voices/synthesize", window.location.origin),
         {
@@ -64871,9 +65829,18 @@ function HomeContent(): React.JSX.Element {
           engineUsed: response.headers.get("x-prism-voice-engine"),
           modelHash: response.headers.get("x-prism-voice-model-sha256"),
           notice: rawNotice ? decodeURIComponent(rawNotice) : null,
+          resolvedPronunciation: readEnglishVoiceResolvedPronunciation(
+            response.headers,
+          ),
+          resolvedSpeechprint: readEnglishVoiceResolvedSpeechprint(
+            response.headers,
+          ),
         };
       }
-      return { kind: "clip", clip: await readEnglishVoiceSynthesisClip(response) };
+      return {
+        kind: "clip",
+        clip: await readEnglishVoiceSynthesisClip(response),
+      };
     },
     [],
   );
@@ -64994,16 +65961,17 @@ function HomeContent(): React.JSX.Element {
         signalOnlineVoiceTimeoutMs(botcastVoiceTimeoutText(message).length),
       );
       let durableReplayClip = false;
-      const clip = (playbackSurface === "debate"
-        ? loadCapturedReplayVoiceAudio({
-            surface: "signal",
-            sourceId: message.episodeId,
-            sourceKey: `primary:${message.id}`,
-          })
-            .then((saved) => {
-              if (saved) {
-                durableReplayClip = true;
-                return {
+      const clip = (
+        playbackSurface === "debate"
+          ? loadCapturedReplayVoiceAudio({
+              surface: "signal",
+              sourceId: message.episodeId,
+              sourceKey: `primary:${message.id}`,
+            })
+              .then((saved) => {
+                if (saved) {
+                  durableReplayClip = true;
+                  return {
                     kind: "clip" as const,
                     clip: {
                       bytes: saved.bytes,
@@ -65012,34 +65980,35 @@ function HomeContent(): React.JSX.Element {
                       engineUsed: saved.resolvedEngine,
                     },
                   };
-              }
-              return requestBotcastEnglishClip(
-                message,
-                normalizedProfile,
-                !offlineOnly && botSummary.online_enabled !== 0,
-                expectedEngine,
-                preferredController.signal,
-                playbackSurface,
-              );
-            })
-            .catch(() =>
-              requestBotcastEnglishClip(
-                message,
-                normalizedProfile,
-                !offlineOnly && botSummary.online_enabled !== 0,
-                expectedEngine,
-                preferredController.signal,
-                playbackSurface,
-              ),
+                }
+                return requestBotcastEnglishClip(
+                  message,
+                  normalizedProfile,
+                  !offlineOnly && botSummary.online_enabled !== 0,
+                  expectedEngine,
+                  preferredController.signal,
+                  playbackSurface,
+                );
+              })
+              .catch(() =>
+                requestBotcastEnglishClip(
+                  message,
+                  normalizedProfile,
+                  !offlineOnly && botSummary.online_enabled !== 0,
+                  expectedEngine,
+                  preferredController.signal,
+                  playbackSurface,
+                ),
+              )
+          : requestBotcastEnglishClip(
+              message,
+              normalizedProfile,
+              !offlineOnly && botSummary.online_enabled !== 0,
+              expectedEngine,
+              preferredController.signal,
+              playbackSurface,
             )
-        : requestBotcastEnglishClip(
-            message,
-            normalizedProfile,
-            !offlineOnly && botSummary.online_enabled !== 0,
-            expectedEngine,
-            preferredController.signal,
-            playbackSurface,
-          ))
+      )
         .then((resolved) => {
           if (
             !durableReplayClip &&
@@ -65088,6 +66057,7 @@ function HomeContent(): React.JSX.Element {
   }, [prismPresentationSuspended, stopBotcastUtterance]);
   const playChatPlayerActionSfx = useCallback(
     (messageText: string): void => {
+      if (chatVoiceForcedMuted) return;
       const plan = buildBundledActionSfxPlan(messageText);
       if (
         !plan ||
@@ -65122,11 +66092,11 @@ function HomeContent(): React.JSX.Element {
         }
       });
     },
-    [settings],
+    [chatVoiceForcedMuted, settings],
   );
   const playZenPlayerMessage = useCallback(
     (messageId: string, messageText: string): void => {
-      if (!settings?.zenPlayerVoiceEnabled) return;
+      if (chatVoiceForcedMuted || !settings?.zenPlayerVoiceEnabled) return;
       const spokenText =
         voiceSpokenText(messageText, { leadingMarkedAction: true })?.trim() ??
         "";
@@ -65285,6 +66255,7 @@ function HomeContent(): React.JSX.Element {
     [
       effectiveChatRevealTiming,
       finishChatSpeechReveal,
+      chatVoiceForcedMuted,
       playChatPlayerActionSfx,
       prepareChatSpeechReveal,
       progressChatSpeechReveal,
@@ -65541,20 +66512,25 @@ function HomeContent(): React.JSX.Element {
       const recordHeardCompletion = (
         state: "completed" | "interrupted",
       ): void => {
-        const heardDurationMs = heardPlaybackStartedAtMs === null
-          ? 0
-          : Math.max(0, Math.round(performance.now() - heardPlaybackStartedAtMs));
-        const heardCharacterCount = state === "completed"
-          ? spokenText.length
-          : heardPlannedDurationMs && heardPlannedDurationMs > 0
-            ? Math.min(
-                spokenText.length,
-                Math.floor(
-                  spokenText.length *
-                    Math.min(1, heardDurationMs / heardPlannedDurationMs),
-                ),
-              )
-            : 0;
+        const heardDurationMs =
+          heardPlaybackStartedAtMs === null
+            ? 0
+            : Math.max(
+                0,
+                Math.round(performance.now() - heardPlaybackStartedAtMs),
+              );
+        const heardCharacterCount =
+          state === "completed"
+            ? spokenText.length
+            : heardPlannedDurationMs && heardPlannedDurationMs > 0
+              ? Math.min(
+                  spokenText.length,
+                  Math.floor(
+                    spokenText.length *
+                      Math.min(1, heardDurationMs / heardPlannedDurationMs),
+                  ),
+                )
+              : 0;
         void updateCapturedReplayVoiceTake(replayVoiceTakePromise, {
           heardCompletion: {
             state,
@@ -65705,6 +66681,8 @@ function HomeContent(): React.JSX.Element {
           void updateCapturedReplayVoiceTake(replayVoiceTakePromise, {
             resolvedEngine: clip.engineUsed,
             resolvedModelHash: clip.modelHash,
+            resolvedPronunciation: clip.resolvedPronunciation,
+            resolvedSpeechprint: clip.resolvedSpeechprint,
           }).catch(() => undefined);
           await enqueueChunkedEnglishVoice(
             clip.response,
@@ -65729,6 +66707,8 @@ function HomeContent(): React.JSX.Element {
           contentType: resolvedClip.audioContentType,
           resolvedEngine: resolvedClip.engineUsed,
           resolvedModelHash: resolvedClip.modelHash,
+          resolvedPronunciation: resolvedClip.resolvedPronunciation,
+          resolvedSpeechprint: resolvedClip.resolvedSpeechprint,
         }).catch(() => undefined);
         await enqueueEnglishVoice(
           resolvedClip.bytes,
@@ -69817,13 +70797,14 @@ function HomeContent(): React.JSX.Element {
       desktopFirstRunChecklistOpen ||
       firstRunSetupPending ||
       view === "hub" ||
-      panel !== null
+      (!botAvatarCustomizerOpen && panel !== null)
     ) {
       setActiveTutorialMode(null);
       return;
     }
-    const mode: TutorialMode | null =
-      view === "chat"
+    const mode: TutorialMode | null = botAvatarCustomizerOpen
+      ? "avatar"
+      : view === "chat"
         ? "zen"
         : view === "sandbox"
           ? "chat"
@@ -69855,6 +70836,7 @@ function HomeContent(): React.JSX.Element {
     }
   }, [
     activeTutorialMode,
+    botAvatarCustomizerOpen,
     desktopFirstRunChecklistOpen,
     firstRunSetupPending,
     panel,
@@ -73521,8 +74503,9 @@ function HomeContent(): React.JSX.Element {
         : {}),
     };
     setTutorialProgress(nextProgress);
-    const currentMode: TutorialMode | null =
-      view === "chat"
+    const currentMode: TutorialMode | null = botAvatarCustomizerOpen
+      ? "avatar"
+      : view === "chat"
         ? "zen"
         : view === "sandbox"
           ? "chat"
@@ -74214,7 +75197,8 @@ function HomeContent(): React.JSX.Element {
               : responseModeForProvider(providerForSend),
           }
         : {}),
-      ...(mode === "zen" &&
+      ...(!chatVoiceForcedMuted &&
+      mode === "zen" &&
       normalizeVoiceMode(settings?.voiceMode) === "english" &&
       normalizeEnglishVoiceEngine(settings?.englishVoiceEngine) === "elevenlabs"
         ? { progressiveZenVoice: true }
@@ -77415,7 +78399,11 @@ function HomeContent(): React.JSX.Element {
       if (!options.skipComposerHistory) {
         appendComposerHistoryEntry(rawDraft);
       }
-      if (view === "chat" && settings?.zenPlayerVoiceEnabled) {
+      if (
+        !chatVoiceForcedMuted &&
+        view === "chat" &&
+        settings?.zenPlayerVoiceEnabled
+      ) {
         playZenPlayerMessage(
           optimisticFollowupMessageId,
           optimisticFollowupContent,
@@ -77628,7 +78616,11 @@ function HomeContent(): React.JSX.Element {
       !isAssistantOnlyTurn &&
       !options.zenFollowupDispatch
     ) {
-      if (!(view === "chat" && settings?.zenPlayerVoiceEnabled)) {
+      if (!(
+        !chatVoiceForcedMuted &&
+        view === "chat" &&
+        settings?.zenPlayerVoiceEnabled
+      )) {
         playChatPlayerActionSfx(displayTrimmed);
       }
     }
@@ -77672,15 +78664,20 @@ function HomeContent(): React.JSX.Element {
       // Every new send starts from the compact active-turn view again.
       hardResetChatArchiveStateForConversation(archiveConversationId);
     }
-    voiceAwaitingReplyRef.current = !isZenAutonomy && !isZenLiveActionInterrupt;
+    voiceAwaitingReplyRef.current =
+      !chatVoiceForcedMuted && !isZenAutonomy && !isZenLiveActionInterrupt;
     voiceSynthesisAbortRef.current?.abort();
     stopBottishVoice();
     stopEnglishVoice();
-    const outgoingVoiceMode = settings?.voiceMode;
+    const outgoingVoiceMode = voicePlaybackSelectionRef.current.voiceMode;
     if (outgoingVoiceMode && outgoingVoiceMode !== "mute") {
       primeVoiceModePlaybackFromUserGesture(outgoingVoiceMode);
     }
-    if (view === "chat" && settings?.zenPlayerVoiceEnabled) {
+    if (
+      !chatVoiceForcedMuted &&
+      view === "chat" &&
+      settings?.zenPlayerVoiceEnabled
+    ) {
       primeVoiceModePlaybackFromUserGesture("english");
     }
     const chatRequestController = new AbortController();
@@ -77788,6 +78785,7 @@ function HomeContent(): React.JSX.Element {
     const previousPendingIncognito = pendingIncognito;
     const previousZenPersonaBotId = zenPersonaBotIdRef.current;
     let optimisticPromptCleanupMessageId: string | null = null;
+    let optimisticUserMessageId: string | null = null;
     const optimisticIncognito =
       detailForSend?.incognito === true || pendingIncognito;
     const optimisticHubBotId =
@@ -77854,6 +78852,7 @@ function HomeContent(): React.JSX.Element {
       const optimisticMessageId = `pending-${Date.now().toString(36)}-${Math.random()
         .toString(36)
         .slice(2, 8)}`;
+      optimisticUserMessageId = optimisticMessageId;
       const optimisticUserContent = pendingCleanupOptimisticMessageContent({
         rawDraft: rawTrimmed,
         resolvedDisplayContent: displayTrimmed,
@@ -77929,10 +78928,55 @@ function HomeContent(): React.JSX.Element {
         hasAssistantReply: detailForSend?.hasAssistantReply ?? false,
         messages: [...(detailForSend?.messages ?? []), optimisticMessage],
       });
-      if (view === "chat" && settings?.zenPlayerVoiceEnabled) {
+      if (
+        !chatVoiceForcedMuted &&
+        view === "chat" &&
+        settings?.zenPlayerVoiceEnabled
+      ) {
         playZenPlayerMessage(optimisticMessageId, optimisticUserContent);
       }
     }
+    const applyLivePsychicProgress = (event: PsychicProgressEvent): void => {
+      if (!optimisticUserMessageId) return;
+      const targetMessageId = optimisticUserMessageId;
+      setDetail((current) => {
+        if (
+          !current?.messages.some((message) => message.id === targetMessageId)
+        ) {
+          return current;
+        }
+        return {
+          ...current,
+          messages: current.messages.map((message) =>
+            message.id === targetMessageId
+              ? {
+                  ...message,
+                  psychicThought: {
+                    v: 1,
+                    summary: event.summary,
+                    effort: event.effort,
+                    provider: event.provider,
+                    ...(event.model ? { model: event.model } : {}),
+                    createdAt: event.createdAt,
+                  },
+                  psychicScratchpad: {
+                    v: 1,
+                    scratchpad: event.scratchpad,
+                    stage: event.stage,
+                    effort: event.effort,
+                    provider: event.provider,
+                    ...(event.model ? { model: event.model } : {}),
+                    simulated: event.simulated,
+                    passCount: event.passCount,
+                    guidanceChars: event.guidanceChars,
+                    createdAt: event.createdAt,
+                  },
+                }
+              : message,
+          ),
+        };
+      });
+    };
     const zenInitialStarterRequestId = isInitialZenStarterPrompt
       ? `zen-starter-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
       : null;
@@ -78364,18 +79408,24 @@ function HomeContent(): React.JSX.Element {
             : {}),
         },
       );
-      appendDevChatRouteStart("send", chatBody);
+      const psychicProgressStreamRequested =
+        chatBody.psychicModeEnabled === true;
+      const requestChatBody = psychicProgressStreamRequested
+        ? { ...chatBody, psychicProgressStream: true }
+        : chatBody;
+      appendDevChatRouteStart("send", requestChatBody);
       const d =
-        chatBody.progressiveZenVoice === true
+        chatBody.progressiveZenVoice === true || psychicProgressStreamRequested
           ? await apiZenProgressiveChat<ChatPostEnvelope>({
-              body: chatBody,
+              body: requestChatBody,
               signal: chatRequestController.signal,
               onSegment: scheduleProgressiveZenSegment,
               onEnd: finishProgressiveZenStream,
+              onPsychic: applyLivePsychicProgress,
             })
           : await api<ChatPostEnvelope>("/api/chat", {
               method: "POST",
-              body: JSON.stringify(chatBody),
+              body: JSON.stringify(requestChatBody),
               signal: chatRequestController.signal,
             });
       await finishResponseCueGeneration();
@@ -79581,6 +80631,10 @@ function HomeContent(): React.JSX.Element {
       return null;
     }
     const pendingThinking = msg.id === psychicThinkingTargetMessageId;
+    // While a turn is live, the centered stop/reply chip owns the evolving
+    // Psychic reveal. The compact line returns to the user message once the
+    // final response settles.
+    if (pendingThinking) return null;
     const psychicLine = psychicThoughtDisplayLineForMessage(msg, {
       pendingThinking,
       pendingDelayElapsed: pendingThinking,
@@ -82824,9 +83878,11 @@ function HomeContent(): React.JSX.Element {
 
   async function resolveAvatarVoicePreviewText(): Promise<string> {
     if (botPanelView === "defaultCustomize") {
-      return DEFAULT_PRISM_VOICE_PREVIEW_LINES[
-        normalizeBotAudioVoiceProfileV1(newBotAudioVoiceProfile).baseVoiceId
-      ] ?? VOICE_PREVIEW_TEXT;
+      return (
+        DEFAULT_PRISM_VOICE_PREVIEW_LINES[
+          normalizeBotAudioVoiceProfileV1(newBotAudioVoiceProfile).baseVoiceId
+        ] ?? VOICE_PREVIEW_TEXT
+      );
     }
     const authoredPreviewLine = newBotVoicePreviewLine.trim();
     if (authoredPreviewLine) return authoredPreviewLine;
@@ -83215,7 +84271,7 @@ function HomeContent(): React.JSX.Element {
             showcaseVoiceId,
             previewEngine,
             previewText,
-            JSON.stringify(profile),
+            avatarVoicePlaybackCacheProfile(profile),
           ].join(":")
         : undefined;
       await previewSelectedVoice(profile, synthesisMode, previewText, {
@@ -91777,7 +92833,12 @@ function HomeContent(): React.JSX.Element {
     setBotGeneratorPrompt("");
     setBotGeneratorBusy(false);
     setBotGeneratorError(null);
+    setBotGeneratorCompletedDraft(null);
     setBotGeneratorHasGeneratedDraft(false);
+    setBotFoundryPhase("arrival");
+    botFoundryRunRef.current += 1;
+    botGeneratorAbortRef.current?.abort();
+    botGeneratorAbortRef.current = null;
     setBotProfile(blankBotProfile());
     setNewBotSystemPrompt("");
     setNewBotPowers([]);
@@ -91871,12 +92932,23 @@ function HomeContent(): React.JSX.Element {
     setBotAvatarCustomizerInitialTab("face");
     resetBotForm();
     openRightPanel("bots");
+    const companionSnapshot = getPrismCompanionVisualSnapshot();
+    setBotFoundryCompanionOrigin(
+      normalizeBotAvatarFoundryOrigin({
+        ...companionSnapshot.position,
+        available: companionSnapshot.available,
+      }),
+    );
+    setBotFoundryPhase("arrival");
     setBotGeneratorCompletedDraft(null);
     setBotGeneratorOpen(true);
   }
 
   function closeBotGenerator(): void {
-    if (botGeneratorBusy) return;
+    botFoundryRunRef.current += 1;
+    botGeneratorAbortRef.current?.abort();
+    botGeneratorAbortRef.current = null;
+    setBotGeneratorBusy(false);
     setBotGeneratorError(null);
     setBotGeneratorCompletedDraft(null);
     setBotGeneratorOpen(false);
@@ -91886,10 +92958,39 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  function openManualBotDraft(): void {
+  async function openManualBotDraft(): Promise<void> {
+    if (botGeneratorBusy) return;
+    const runId = botFoundryRunRef.current + 1;
+    botFoundryRunRef.current = runId;
+    const reducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    setBotGeneratorBusy(true);
     setBotGeneratorError(null);
     setBotGeneratorCompletedDraft(null);
+    setBotFoundryPhase("handoff");
+    await new Promise<void>((resolve) =>
+      window.setTimeout(
+        resolve,
+        reducedMotion
+          ? BOT_AVATAR_FOUNDRY_TIMING.reducedHandoffMs
+          : BOT_AVATAR_FOUNDRY_TIMING.handoffMs,
+      ),
+    );
+    if (botFoundryRunRef.current !== runId) return;
+    setBotFoundryPhase("awakening");
+    await new Promise<void>((resolve) =>
+      window.setTimeout(
+        resolve,
+        reducedMotion
+          ? BOT_AVATAR_FOUNDRY_TIMING.reducedAwakeningMs
+          : BOT_AVATAR_FOUNDRY_TIMING.awakeningMs,
+      ),
+    );
+    if (botFoundryRunRef.current !== runId) return;
     setBotGeneratorOpen(false);
+    setBotGeneratorBusy(false);
+    setBotFoundryPhase("editing");
     setBotAvatarCustomizerInitialTab("face");
     setBotAvatarCustomizerOpen(true);
   }
@@ -92036,28 +93137,60 @@ function HomeContent(): React.JSX.Element {
     ) {
       return;
     }
+    const runId = botFoundryRunRef.current + 1;
+    botFoundryRunRef.current = runId;
+    botGeneratorAbortRef.current?.abort();
+    const controller = new AbortController();
+    botGeneratorAbortRef.current = controller;
+    const reducedMotion = window.matchMedia(
+      "(prefers-reduced-motion: reduce)",
+    ).matches;
+    const handoffMs = reducedMotion
+      ? BOT_AVATAR_FOUNDRY_TIMING.reducedHandoffMs
+      : BOT_AVATAR_FOUNDRY_TIMING.handoffMs;
+    const minimumGenerationMs = reducedMotion
+      ? BOT_AVATAR_FOUNDRY_TIMING.reducedMinimumGenerationMs
+      : BOT_AVATAR_FOUNDRY_TIMING.minimumGenerationMs;
     setBotGeneratorBusy(true);
     setBotGeneratorError(null);
     setBotGeneratorCompletedDraft(null);
+    setBotFoundryPhase("handoff");
     setPanelError(null);
     const responseMode =
       settings?.autoModeEnabled && settings.autoFallbackChain
         ? "auto"
         : responseModeForProvider(settings?.preferredProvider ?? "local");
     try {
-      const result = await api<{
+      const minimumChoreography = (async (): Promise<void> => {
+        await new Promise<void>((resolve) =>
+          window.setTimeout(resolve, handoffMs),
+        );
+        if (botFoundryRunRef.current !== runId) return;
+        setBotFoundryPhase("generation");
+        await new Promise<void>((resolve) =>
+          window.setTimeout(
+            resolve,
+            Math.max(0, minimumGenerationMs - handoffMs),
+          ),
+        );
+      })();
+      const resultPromise = api<{
         draft: BotGeneratedDraftV1;
         providerNameUsed: Provider;
         modelUsed: string;
         autoRecovery?: AutoRecoveryTraceV1;
       }>("/api/bots/generate-draft", {
         method: "POST",
+        signal: controller.signal,
         body: JSON.stringify({
           prompt,
           preferredProvider: settings?.preferredProvider ?? "local",
           responseMode,
         }),
       });
+      const [result] = await Promise.all([resultPromise, minimumChoreography]);
+      if (botFoundryRunRef.current !== runId || controller.signal.aborted)
+        return;
       let generatedDraft = result.draft;
       let thinkingSfxWarning: string | null = null;
       let uniqueThinkingSfxGenerated = false;
@@ -92083,17 +93216,25 @@ function HomeContent(): React.JSX.Element {
               : "ElevenLabs could not create the thinking loop.";
         }
       }
+      if (botFoundryRunRef.current !== runId || controller.signal.aborted)
+        return;
       applyGeneratedBotDraft(generatedDraft);
       setBotGeneratorHasGeneratedDraft(true);
       setBotGeneratorCompletedDraft(generatedDraft);
-      const reducedMotion = window.matchMedia(
-        "(prefers-reduced-motion: reduce)",
-      ).matches;
+      setBotFoundryPhase("awakening");
       await new Promise<void>((resolve) =>
-        window.setTimeout(resolve, reducedMotion ? 180 : 900),
+        window.setTimeout(
+          resolve,
+          reducedMotion
+            ? BOT_AVATAR_FOUNDRY_TIMING.reducedAwakeningMs
+            : BOT_AVATAR_FOUNDRY_TIMING.awakeningMs,
+        ),
       );
+      if (botFoundryRunRef.current !== runId || controller.signal.aborted)
+        return;
       setBotGeneratorOpen(false);
       setBotGeneratorCompletedDraft(null);
+      setBotFoundryPhase("editing");
       setBotAvatarCustomizerInitialTab("face");
       setBotAvatarCustomizerOpen(true);
       setPanelNotice(
@@ -92106,12 +93247,20 @@ function HomeContent(): React.JSX.Element {
         }`,
       );
     } catch (err) {
+      if (botFoundryRunRef.current !== runId || controller.signal.aborted)
+        return;
       setBotGeneratorCompletedDraft(null);
+      setBotFoundryPhase("error");
       setBotGeneratorError(
         err instanceof Error ? err.message : "Bot generation failed.",
       );
     } finally {
-      setBotGeneratorBusy(false);
+      if (botFoundryRunRef.current === runId) {
+        setBotGeneratorBusy(false);
+        if (botGeneratorAbortRef.current === controller) {
+          botGeneratorAbortRef.current = null;
+        }
+      }
     }
   }
 
@@ -96854,31 +98003,6 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function persistBotAvatarDetails(
-    id: string,
-    details: BotAvatarDetailsV1 | null,
-  ): Promise<void> {
-    const result = await withBotAvatarSaveTimeout((signal) =>
-      api<{ bot?: Bot }>(`/api/bots/${id}`, {
-        method: "PATCH",
-        body: JSON.stringify({ avatarDetails: details }),
-        signal,
-      }),
-    );
-    if (editOriginalRef.current?.botId === id) {
-      editOriginalRef.current = {
-        ...editOriginalRef.current,
-        avatarDetails: details,
-      };
-    }
-    if (result.bot?.id) {
-      setBots((list) => replaceBotRowById(list, result.bot!));
-    } else {
-      await refreshBots();
-    }
-    setPanelNotice("Avatar details saved.");
-  }
-
   async function flushBotVoiceAutosaveQueue(): Promise<void> {
     if (voiceAutosaveTimerRef.current) {
       clearTimeout(voiceAutosaveTimerRef.current);
@@ -98353,12 +99477,11 @@ function HomeContent(): React.JSX.Element {
                   you reach it, and Settings keeps every choice available later.
                 </p>
                 <p>
-                  Debate begins in Basic setup: name the idea, choose two
-                  debaters, tune Rowdiness from University Union to Daytime
-                  Showdown, optionally title the presiding voice, and let Prism
-                  prepare the balanced motion and side briefs. Advanced keeps
-                  Forum, Turnabout, formality, roles, and Jury controls
-                  available whenever you want them.
+                  Debate follows one guided path: name the idea, let Prism
+                  prepare the balanced motion and side briefs, choose the
+                  debaters, then add or skip evidence. Tune the room and Your
+                  seat &amp; the Jury keep Forum, Turnabout, atmosphere, roles,
+                  and Jury controls close without crowding the setup.
                 </p>
                 <div>
                   <span>
@@ -98471,6 +99594,7 @@ function HomeContent(): React.JSX.Element {
     }
     if (
       !isUser &&
+      !chatVoiceForcedMuted &&
       settings?.voiceMode !== "mute" &&
       !botPowerResponseIsSilentV1(resolveVisibleMessageContent(msg))
     ) {
@@ -103124,7 +104248,11 @@ function HomeContent(): React.JSX.Element {
         label: "Settings",
         onSelect: handleSettings,
       },
-      { id: "voice-label", kind: "label", label: "Voice" },
+      {
+        id: "voice-label",
+        kind: "label",
+        label: chatVoiceForcedMuted ? "Voice · Muted in Chat" : "Voice",
+      },
       ...VOICE_PLAYBACK_CHOICES.map((choice): PrismMenuEntry => {
         const voiceOnlineBlocked = blocksOnlineCapabilities(
           autoResponseModeForProvider(
@@ -103146,29 +104274,35 @@ function HomeContent(): React.JSX.Element {
             choice === "premium"
               ? "Premium · ONLINE"
               : voiceModeDisplayName(choice),
-          checked:
-            choice ===
-            effectiveVoicePlaybackChoice(
-              voicePlaybackChoice(
-                normalizeVoiceMode(settings?.voiceMode),
-                normalizeEnglishVoiceEngine(settings?.englishVoiceEngine),
+          checked: chatVoiceForcedMuted
+            ? choice === "mute"
+            : choice ===
+              effectiveVoicePlaybackChoice(
+                voicePlaybackChoice(
+                  normalizeVoiceMode(settings?.voiceMode),
+                  normalizeEnglishVoiceEngine(settings?.englishVoiceEngine),
+                ),
+                voiceOnlineBlocked,
               ),
-              voiceOnlineBlocked,
-            ),
           disabled:
+            chatVoiceForcedMuted ||
             !settings ||
             (choice === "premium" &&
               (settings.elevenLabsApiKeySource === "none" ||
                 voiceOnlineBlocked)),
-          disabledReason: !settings
-            ? "Voice settings are still loading."
-            : choice === "premium" && voiceOnlineBlocked
-              ? "Switch response routing to AUTO or ONLINE before choosing Premium. LOCAL keeps speech on this device."
-              : choice === "premium" &&
-                  settings.elevenLabsApiKeySource === "none"
-                ? "Connect an ElevenLabs key in Settings → Keys to use Premium."
-                : undefined,
-          onSelect: () => selectGlobalVoiceChoice(choice),
+          disabledReason: chatVoiceForcedMuted
+            ? CHAT_FORCED_MUTE_REASON
+            : !settings
+              ? "Voice settings are still loading."
+              : choice === "premium" && voiceOnlineBlocked
+                ? "Switch response routing to AUTO or ONLINE before choosing Premium. LOCAL keeps speech on this device."
+                : choice === "premium" &&
+                    settings.elevenLabsApiKeySource === "none"
+                  ? "Connect an ElevenLabs key in Settings → Keys to use Premium."
+                  : undefined,
+          onSelect: () => {
+            if (!chatVoiceForcedMuted) return selectGlobalVoiceChoice(choice);
+          },
         };
       }),
     ];
@@ -112248,9 +113382,10 @@ function HomeContent(): React.JSX.Element {
                               label="About Jury deliberation"
                             >
                               The Moderator formally hands the proceeding to the
-                              Jury. Debate then enters the chamber automatically,
-                              prepares all five final reasons behind sealed
-                              deliberation, and presents every ballot in order.
+                              Jury. Debate then enters the chamber
+                              automatically, prepares all five final reasons
+                              behind sealed deliberation, and presents every
+                              ballot in order.
                             </PanelSectionInfo>
                           </div>
                         </header>
@@ -113132,9 +114267,9 @@ function HomeContent(): React.JSX.Element {
                                 </label>
                                 <small className={styles.settingsHostHint}>
                                   Models without native effort can use
-                                  Prism&apos;s private multi-call simulation across
-                                  conversational modes. Online models make
-                                  multiple provider calls and may increase
+                                  Prism&apos;s private multi-call simulation
+                                  across conversational modes. Online models
+                                  make multiple provider calls and may increase
                                   usage or cost; native effort remains native.
                                 </small>
                                 <button
@@ -113630,8 +114765,100 @@ function HomeContent(): React.JSX.Element {
                                 </button>
                               </div>
                               <div className={styles.botVoiceIdentityField}>
+                                <label htmlFor="settings-player-local-accent">
+                                  Genuine accent source
+                                </label>
+                                <select
+                                  id="settings-player-local-accent"
+                                  value={playerLocalAccentLocale}
+                                  onChange={(event) => {
+                                    const locale = event.currentTarget.value;
+                                    setSettings((previous) =>
+                                      previous
+                                        ? {
+                                            ...previous,
+                                            playerAudioVoiceProfile:
+                                              cleanPlayerVoiceProfile(
+                                                selectOfflineVoiceAccent(
+                                                  previous.playerAudioVoiceProfile,
+                                                  locale,
+                                                  offlineVoiceIdentityOptions,
+                                                  playerLocalVoicePresentation,
+                                                ),
+                                              ),
+                                          }
+                                        : previous,
+                                    );
+                                  }}
+                                >
+                                  {playerLocalAccentLocales.map((locale) => (
+                                    <option key={locale} value={locale}>
+                                      {englishVoiceLocaleLabel(locale)}
+                                    </option>
+                                  ))}
+                                </select>
+                              </div>
+                              <div className={styles.botVoiceIdentityField}>
+                                <span>Vocal presentation</span>
+                                <div
+                                  className={styles.botVoicePresentationChips}
+                                  role="group"
+                                  aria-label="Zen player voice presentation"
+                                >
+                                  {(
+                                    ["any", "feminine", "masculine"] as const
+                                  ).map((presentation) => (
+                                    <button
+                                      key={presentation}
+                                      type="button"
+                                      className={styles.linkButton}
+                                      aria-pressed={
+                                        playerLocalVoicePresentation ===
+                                        presentation
+                                      }
+                                      data-active={
+                                        playerLocalVoicePresentation ===
+                                        presentation
+                                          ? "true"
+                                          : undefined
+                                      }
+                                      onClick={() => {
+                                        setPlayerLocalVoicePresentation(
+                                          presentation,
+                                        );
+                                        setSettings((previous) =>
+                                          previous
+                                            ? {
+                                                ...previous,
+                                                playerAudioVoiceProfile:
+                                                  cleanPlayerVoiceProfile(
+                                                    selectOfflineVoicePresentation(
+                                                      previous.playerAudioVoiceProfile,
+                                                      presentation,
+                                                      offlineVoiceIdentityOptions,
+                                                    ),
+                                                  ),
+                                              }
+                                            : previous,
+                                        );
+                                      }}
+                                    >
+                                      {presentation === "any"
+                                        ? "Any"
+                                        : presentation === "feminine"
+                                          ? "Feminine"
+                                          : "Masculine"}
+                                    </button>
+                                  ))}
+                                </div>
+                                <small>
+                                  Installed voices appear under Any because
+                                  their presentation is not reported reliably.
+                                </small>
+                              </div>
+                              <div className={styles.botVoiceIdentityField}>
                                 <label htmlFor="settings-player-local-voice">
-                                  Local fallback
+                                  Local voice
                                 </label>
                                 <select
                                   id="settings-player-local-voice"
@@ -113647,29 +114874,37 @@ function HomeContent(): React.JSX.Element {
                                             applyOfflineVoiceSelection(
                                               previous.playerAudioVoiceProfile,
                                               selection,
+                                              offlineVoiceIdentityOptions,
                                             ),
                                           ),
                                       };
                                     });
                                   }}
                                 >
-                                  {!selectedPlayerLocalVoiceAvailable ? (
+                                  {!selectedPlayerLocalVoiceAvailable ||
+                                  !filteredPlayerLocalVoiceOptions.some(
+                                    (voice) =>
+                                      voice.value ===
+                                      selectedPlayerLocalVoiceValue,
+                                  ) ? (
                                     <option
                                       value={selectedPlayerLocalVoiceValue}
                                     >
                                       Saved local voice
                                     </option>
                                   ) : null}
-                                  {offlineVoiceIdentityOptions.map((voice) => (
-                                    <option
-                                      key={voice.value}
-                                      value={voice.value}
-                                    >
-                                      {voice.detail
-                                        ? `${voice.label} — ${voice.detail}`
-                                        : voice.label}
-                                    </option>
-                                  ))}
+                                  {filteredPlayerLocalVoiceOptions.map(
+                                    (voice) => (
+                                      <option
+                                        key={voice.value}
+                                        value={voice.value}
+                                      >
+                                        {voice.detail
+                                          ? `${voice.label} — ${voice.detail}`
+                                          : voice.label}
+                                      </option>
+                                    ),
+                                  )}
                                 </select>
                                 <small>
                                   Used in LOCAL and whenever Premium cannot
@@ -113698,6 +114933,73 @@ function HomeContent(): React.JSX.Element {
                                   Preview local fallback
                                 </button>
                               </div>
+                              <PronunciationAtlas
+                                label="Zen Pronunciation Atlas"
+                                color="#ff7972"
+                                selection={pronunciationAtlasSelectionForProfile(
+                                  playerVoiceProfile,
+                                )}
+                                onPreview={() => undefined}
+                                onCommit={(selection) => {
+                                  const nextProfile = cleanPlayerVoiceProfile(
+                                    profileWithPronunciationAtlasSelection(
+                                      playerVoiceProfile,
+                                      selection,
+                                    ),
+                                  );
+                                  setSettings((previous) =>
+                                    previous
+                                      ? {
+                                          ...previous,
+                                          playerAudioVoiceProfile: nextProfile,
+                                        }
+                                      : previous,
+                                  );
+                                  void previewSelectedVoice(
+                                    playerLocalVoiceProfile(nextProfile),
+                                    "english",
+                                    "This is how my messages will sound in Zen.",
+                                    {
+                                      englishVoiceEngine: "builtin",
+                                      effectsEnabled: false,
+                                    },
+                                  );
+                                }}
+                                onPreviewSource={() =>
+                                  void previewSelectedVoice(
+                                    playerLocalVoiceProfile(
+                                      profileWithPronunciationAtlasSelection(
+                                        playerVoiceProfile,
+                                        {
+                                          ...pronunciationAtlasSelectionForProfile(
+                                            playerVoiceProfile,
+                                          ),
+                                          pronunciationBase: "follow-voice",
+                                          influence: "none",
+                                          strength: "balanced",
+                                        },
+                                      ),
+                                    ),
+                                    "english",
+                                    "This is how my messages will sound in Zen.",
+                                    {
+                                      englishVoiceEngine: "builtin",
+                                      effectsEnabled: false,
+                                    },
+                                  )
+                                }
+                                onPreviewCurrent={() =>
+                                  void previewSelectedVoice(
+                                    playerLocalVoiceProfile(playerVoiceProfile),
+                                    "english",
+                                    "This is how my messages will sound in Zen.",
+                                    {
+                                      englishVoiceEngine: "builtin",
+                                      effectsEnabled: false,
+                                    },
+                                  )
+                                }
+                              />
                               <label className={styles.checkbox}>
                                 <input
                                   type="checkbox"
@@ -113888,9 +115190,7 @@ function HomeContent(): React.JSX.Element {
                                       </span>
                                       <em>{group.credits.length}</em>
                                     </summary>
-                                    <div
-                                      className={styles.settingsCreditsList}
-                                    >
+                                    <div className={styles.settingsCreditsList}>
                                       {group.credits.map((credit) => {
                                         const content = (
                                           <>
@@ -115422,6 +116722,12 @@ function HomeContent(): React.JSX.Element {
                 botPanelAdvancedEditorActive ? "true" : undefined
               }
               data-bot-panel-view={botPanelView}
+              aria-hidden={
+                botGeneratorOpen || botAvatarCustomizerOpen ? "true" : undefined
+              }
+              inert={
+                botGeneratorOpen || botAvatarCustomizerOpen ? true : undefined
+              }
               style={editorPanelStyle}
               role="dialog"
               aria-modal="true"
@@ -117002,17 +118308,11 @@ function HomeContent(): React.JSX.Element {
                           setNewBotFaceThinkingOffsetY(normalizedOffsetY);
                           createBotAppearanceTouchedRef.current = true;
                         }}
-                        onAvatarDetailsApply={async (next) => {
+                        onAvatarDetailsApply={(next) => {
                           const normalized = next
                             ? parseBotAvatarDetailsV1(next)
                             : null;
-                          pushBotAvatarUndoSnapshot("avatar-details");
-                          if (editingBotId) {
-                            await persistBotAvatarDetails(
-                              editingBotId,
-                              normalized,
-                            );
-                          }
+                          pushBotAvatarUndoSnapshot();
                           createBotAppearanceTouchedRef.current = true;
                           setNewBotAvatarDetails(normalized);
                         }}
@@ -118411,28 +119711,32 @@ function HomeContent(): React.JSX.Element {
                   )}
                 </section>
               )}
-              {botGeneratorOpen && (
-                <div
-                  className={styles.botGeneratorBackdrop}
-                  role="presentation"
-                  onClick={closeBotGenerator}
-                >
-                  <PrismCompanionPresenceBoundary reason="bot-creation" />
-                  <section
-                    className={styles.botGeneratorDialog}
-                    data-creating={botGeneratorBusy}
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="bot-generator-title"
-                    onClick={(event) => event.stopPropagation()}
-                    onKeyDown={(event) => {
-                      if (event.key !== "Escape") return;
-                      event.preventDefault();
-                      closeBotGenerator();
-                    }}
+              {botGeneratorOpen &&
+                typeof document !== "undefined" &&
+                createPortal(
+                  <div
+                    className={styles.botGeneratorBackdrop}
+                    data-avatar-foundry="true"
+                    role="presentation"
+                    onClick={closeBotGenerator}
                   >
-                    {botGeneratorBusy ? (
+                    <PrismCompanionPresenceBoundary reason="bot-creation" />
+                    <section
+                      className={styles.botGeneratorDialog}
+                      data-creating={botGeneratorBusy}
+                      data-foundry-phase={botFoundryPhase}
+                      role="dialog"
+                      aria-modal="true"
+                      aria-labelledby="bot-generator-title"
+                      onClick={(event) => event.stopPropagation()}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Escape") return;
+                        event.preventDefault();
+                        closeBotGenerator();
+                      }}
+                    >
                       <BotCreationRitual
+                        phase={botFoundryPhase}
                         prompt={botGeneratorPrompt}
                         responseMode={
                           settings?.autoModeEnabled &&
@@ -118443,138 +119747,213 @@ function HomeContent(): React.JSX.Element {
                               )
                         }
                         completedDraft={botGeneratorCompletedDraft}
+                        theme={resolvedTheme}
+                        companionOrigin={botFoundryCompanionOrigin}
+                        botPreview={
+                          <BotAvatarPreviewPanel
+                            titleName={newBotName.trim() || "New bot"}
+                            glyph={newBotGlyph}
+                            scheduleKey="bot-avatar-foundry-arrival"
+                            screenMaterialSeed="bot-avatar-foundry-arrival"
+                            frameMaterialSeed="bot-avatar-foundry-arrival"
+                            isDefaultPrismBot={false}
+                            previewTheme="dark"
+                            previewMode="idle"
+                            previewMood="warm"
+                            previewTalking={false}
+                            avatarSfx={null}
+                            displayedPreviewMouthShape="closed"
+                            avatarStyle={botAvatarFoundryPreviewStyle(
+                              newBotColor,
+                              false,
+                              "dark",
+                            )}
+                            faceStyle={resolveBotFaceStyle(
+                              {
+                                faceEyesFont: newBotFaceEyesFont,
+                                faceEyeCharacter: newBotFaceEyeCharacter,
+                                faceEyeAnimation: newBotFaceEyeAnimation,
+                                faceMouthFont: newBotFaceMouthFont,
+                                faceMouthCharacter: newBotFaceMouthCharacter,
+                                faceMouthAnimation: newBotFaceMouthAnimation,
+                                faceMouthCoffeePucker:
+                                  newBotFaceMouthCoffeePucker,
+                                faceFontWeight: newBotFaceFontWeight,
+                                faceEyeScale: newBotFaceEyeScale,
+                                faceEyeOffsetX: newBotFaceEyeOffsetX,
+                                faceEyeOffsetY: newBotFaceEyeOffsetY,
+                                faceEyeRotationDeg: newBotFaceEyeRotationDeg,
+                                faceEyeCount: newBotFaceEyeCount,
+                                faceMouthScale: newBotFaceMouthScale,
+                                faceMouthOffsetX: newBotFaceMouthOffsetX,
+                                faceMouthOffsetY: newBotFaceMouthOffsetY,
+                                faceMouthRotationDeg:
+                                  newBotFaceMouthRotationDeg,
+                                faceBlinkBar: newBotFaceBlinkBar,
+                                faceBlinkScale: newBotFaceBlinkScale,
+                                faceBlinkOffsetX: newBotFaceBlinkOffsetX,
+                                faceBlinkOffsetY: newBotFaceBlinkOffsetY,
+                                faceBlinkRotationDeg:
+                                  newBotFaceBlinkRotationDeg,
+                                faceThinkingFrames: newBotFaceThinkingFrames,
+                                faceThinkingScale: newBotFaceThinkingScale,
+                                faceThinkingOffsetX: newBotFaceThinkingOffsetX,
+                                faceThinkingOffsetY: newBotFaceThinkingOffsetY,
+                              },
+                              null,
+                            )}
+                            avatarDetails={newBotAvatarDetails}
+                            avatarDetailsColor={newBotColor}
+                            screenMode={botAvatarFoundryScreenMode(
+                              botFoundryPhase,
+                            )}
+                            foundryRitual
+                            onPreviewThemeChange={(): void => undefined}
+                            onPreviewModeChange={(): void => undefined}
+                            onPreviewMoodCycle={(): void => undefined}
+                          />
+                        }
                       />
-                    ) : null}
-                    <header
-                      className={styles.botGeneratorHeader}
-                      hidden={botGeneratorBusy}
-                    >
-                      <span
-                        className={styles.botGeneratorGlyph}
-                        aria-hidden="true"
-                      >
-                        <Sparkles size={24} strokeWidth={1.8} />
-                      </span>
-                      <div className={styles.botGeneratorTitle}>
-                        <span>Create new bot</span>
-                        <h3 id="bot-generator-title">Describe your bot</h3>
-                      </div>
-                      <div className={styles.botGeneratorHeaderActions}>
-                        <span
-                          className={styles.botGeneratorModeBadge}
-                          data-mode={
-                            settings?.autoModeEnabled &&
-                            settings.autoFallbackChain
-                              ? "auto"
-                              : responseModeForProvider(
-                                  settings?.preferredProvider ?? "local",
-                                )
-                          }
-                        >
-                          {settings?.autoModeEnabled &&
-                          settings.autoFallbackChain
-                            ? "AUTO"
-                            : responseModeForProvider(
-                                settings?.preferredProvider ?? "local",
-                              ).toUpperCase()}
-                        </span>
-                        <button
-                          type="button"
-                          aria-label="Close bot generator"
-                          onClick={closeBotGenerator}
-                          disabled={botGeneratorBusy}
-                        >
-                          ×
-                        </button>
-                      </div>
-                    </header>
-                    <div
-                      className={styles.botGeneratorBody}
-                      hidden={botGeneratorBusy}
-                    >
-                      <p>
-                        Give PRISM a spark or a full brief. It will draft the
-                        identity, personality, behavior, face, ink, local voice,
-                        Premium voice match, and response settings together.
-                      </p>
-                      <label htmlFor="bot-generator-prompt">
-                        Character brief
-                      </label>
-                      <textarea
-                        id="bot-generator-prompt"
-                        data-tutorial-target="bot-generator-prompt"
-                        value={botGeneratorPrompt}
-                        maxLength={BOT_GENERATION_PROMPT_MAX_LENGTH}
-                        rows={8}
-                        autoFocus
-                        disabled={botGeneratorBusy}
-                        placeholder="A retired lunar cartographer who speaks with dry warmth, notices tiny inconsistencies, has a hand-drawn star chart across their screen, and sounds calm but never sleepy…"
-                        onChange={(event) => {
-                          setBotGeneratorPrompt(event.currentTarget.value);
-                          if (botGeneratorError) setBotGeneratorError(null);
-                        }}
-                        onKeyDown={(event) => {
-                          if (
-                            event.key === "Enter" &&
-                            (event.metaKey || event.ctrlKey)
-                          ) {
-                            event.preventDefault();
-                            void generateBotDraftFromPrompt();
-                          }
-                        }}
-                      />
-                      <div className={styles.botGeneratorPromptMeta}>
-                        <span>
-                          Nothing is saved until you choose Create bot.
-                        </span>
-                        <span>
-                          {botGeneratorPrompt.length}/
-                          {BOT_GENERATION_PROMPT_MAX_LENGTH}
-                        </span>
-                      </div>
-                      {botGeneratorError ? (
-                        <p className={styles.botGeneratorError} role="alert">
-                          {botGeneratorError}
-                        </p>
-                      ) : null}
-                    </div>
-                    <footer
-                      className={styles.botGeneratorActions}
-                      hidden={botGeneratorBusy}
-                    >
-                      <button
-                        type="button"
-                        onClick={openManualBotDraft}
-                        disabled={botGeneratorBusy}
-                      >
-                        {botGeneratorHasGeneratedDraft
-                          ? "Keep current draft"
-                          : "Start manually"}
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.botGeneratorPrimaryAction}
-                        onClick={() => void generateBotDraftFromPrompt()}
-                        disabled={
-                          botGeneratorBusy ||
-                          botGeneratorPrompt.trim().length === 0
+                      <header
+                        className={styles.botGeneratorHeader}
+                        hidden={
+                          botFoundryPhase !== "brief" &&
+                          botFoundryPhase !== "error"
                         }
                       >
-                        <Sparkles
-                          size={16}
-                          strokeWidth={2}
+                        <span
+                          className={styles.botGeneratorGlyph}
                           aria-hidden="true"
+                        >
+                          <Sparkles size={24} strokeWidth={1.8} />
+                        </span>
+                        <div className={styles.botGeneratorTitle}>
+                          <span>Create new bot</span>
+                          <h3 id="bot-generator-title">Describe your bot</h3>
+                        </div>
+                        <div className={styles.botGeneratorHeaderActions}>
+                          <span
+                            className={styles.botGeneratorModeBadge}
+                            data-mode={
+                              settings?.autoModeEnabled &&
+                              settings.autoFallbackChain
+                                ? "auto"
+                                : responseModeForProvider(
+                                    settings?.preferredProvider ?? "local",
+                                  )
+                            }
+                          >
+                            {settings?.autoModeEnabled &&
+                            settings.autoFallbackChain
+                              ? "AUTO"
+                              : responseModeForProvider(
+                                  settings?.preferredProvider ?? "local",
+                                ).toUpperCase()}
+                          </span>
+                          <button
+                            type="button"
+                            aria-label="Close bot generator"
+                            onClick={closeBotGenerator}
+                          >
+                            ×
+                          </button>
+                        </div>
+                      </header>
+                      <div
+                        className={styles.botGeneratorBody}
+                        hidden={
+                          botFoundryPhase !== "brief" &&
+                          botFoundryPhase !== "error"
+                        }
+                      >
+                        <p>
+                          Give PRISM a spark or a full brief. It will draft the
+                          identity, personality, behavior, face, ink, local
+                          voice, Premium voice match, and response settings
+                          together.
+                        </p>
+                        <label htmlFor="bot-generator-prompt">
+                          Character brief
+                        </label>
+                        <textarea
+                          id="bot-generator-prompt"
+                          data-tutorial-target="bot-generator-prompt"
+                          value={botGeneratorPrompt}
+                          maxLength={BOT_GENERATION_PROMPT_MAX_LENGTH}
+                          rows={8}
+                          autoFocus
+                          disabled={botGeneratorBusy}
+                          placeholder="A retired lunar cartographer who speaks with dry warmth, notices tiny inconsistencies, has a hand-drawn star chart across their screen, and sounds calm but never sleepy…"
+                          onChange={(event) => {
+                            setBotGeneratorPrompt(event.currentTarget.value);
+                            if (botGeneratorError) setBotGeneratorError(null);
+                          }}
+                          onKeyDown={(event) => {
+                            if (
+                              event.key === "Enter" &&
+                              (event.metaKey || event.ctrlKey)
+                            ) {
+                              event.preventDefault();
+                              void generateBotDraftFromPrompt();
+                            }
+                          }}
                         />
-                        {botGeneratorBusy
-                          ? "Drafting every detail…"
-                          : botGeneratorHasGeneratedDraft
-                            ? "Regenerate draft"
-                            : "Generate draft"}
-                      </button>
-                    </footer>
-                  </section>
-                </div>
-              )}
+                        <div className={styles.botGeneratorPromptMeta}>
+                          <span>
+                            Nothing is saved until you choose Create bot.
+                          </span>
+                          <span>
+                            {botGeneratorPrompt.length}/
+                            {BOT_GENERATION_PROMPT_MAX_LENGTH}
+                          </span>
+                        </div>
+                        {botGeneratorError ? (
+                          <p className={styles.botGeneratorError} role="alert">
+                            {botGeneratorError}
+                          </p>
+                        ) : null}
+                      </div>
+                      <footer
+                        className={styles.botGeneratorActions}
+                        hidden={
+                          botFoundryPhase !== "brief" &&
+                          botFoundryPhase !== "error"
+                        }
+                      >
+                        <button
+                          type="button"
+                          onClick={() => void openManualBotDraft()}
+                          disabled={botGeneratorBusy}
+                        >
+                          {botGeneratorHasGeneratedDraft
+                            ? "Keep current draft"
+                            : "Start manually"}
+                        </button>
+                        <button
+                          type="button"
+                          className={styles.botGeneratorPrimaryAction}
+                          onClick={() => void generateBotDraftFromPrompt()}
+                          disabled={
+                            botGeneratorBusy ||
+                            botGeneratorPrompt.trim().length === 0
+                          }
+                        >
+                          <Sparkles
+                            size={16}
+                            strokeWidth={2}
+                            aria-hidden="true"
+                          />
+                          {botGeneratorBusy
+                            ? "Drafting every detail…"
+                            : botGeneratorHasGeneratedDraft
+                              ? "Regenerate draft"
+                              : "Generate draft"}
+                        </button>
+                      </footer>
+                    </section>
+                  </div>,
+                  document.body,
+                )}
               {importBotModalPhase !== "closed" && (
                 <div
                   className={styles.botPreferredModelsModalBackdrop}
@@ -120422,10 +121801,9 @@ function HomeContent(): React.JSX.Element {
                 coffeeSessionProvider === "local" || bot?.online_enabled === 0
                   ? "builtin"
                   : voiceSelection.englishVoiceEngine;
-              const useLocalPerformanceStream =
-                voicePerformancePlanFromText(message.content).segments.some(
-                  (segment) => segment.kind === "vocal-action",
-                );
+              const useLocalPerformanceStream = voicePerformancePlanFromText(
+                message.content,
+              ).segments.some((segment) => segment.kind === "vocal-action");
               const response = await fetch(
                 new URL("/api/voices/synthesize", window.location.origin),
                 {
@@ -120458,10 +121836,14 @@ function HomeContent(): React.JSX.Element {
                   kind: "stream",
                   response,
                   engineUsed: response.headers.get("x-prism-voice-engine"),
-                  modelHash: response.headers.get(
-                    "x-prism-voice-model-sha256",
-                  ),
+                  modelHash: response.headers.get("x-prism-voice-model-sha256"),
                   notice: rawNotice ? decodeURIComponent(rawNotice) : null,
+                  resolvedPronunciation: readEnglishVoiceResolvedPronunciation(
+                    response.headers,
+                  ),
+                  resolvedSpeechprint: readEnglishVoiceResolvedSpeechprint(
+                    response.headers,
+                  ),
                 };
               } else {
                 clip = {
@@ -124241,10 +125623,9 @@ function HomeContent(): React.JSX.Element {
       coffeeSessionProvider === "local" || bot.online_enabled === 0
         ? "builtin"
         : voicePlaybackSelectionRef.current.englishVoiceEngine;
-    const useLocalPerformanceStream =
-      voicePerformancePlanFromText(utterance.text).segments.some(
-        (segment) => segment.kind === "vocal-action",
-      );
+    const useLocalPerformanceStream = voicePerformancePlanFromText(
+      utterance.text,
+    ).segments.some((segment) => segment.kind === "vocal-action");
     const pending = fetch(
       new URL("/api/voices/synthesize", window.location.origin),
       {
@@ -124278,6 +125659,12 @@ function HomeContent(): React.JSX.Element {
             engineUsed: response.headers.get("x-prism-voice-engine"),
             modelHash: response.headers.get("x-prism-voice-model-sha256"),
             notice: rawNotice ? decodeURIComponent(rawNotice) : null,
+            resolvedPronunciation: readEnglishVoiceResolvedPronunciation(
+              response.headers,
+            ),
+            resolvedSpeechprint: readEnglishVoiceResolvedSpeechprint(
+              response.headers,
+            ),
           };
         }
         return {
@@ -134991,11 +136378,13 @@ function HomeContent(): React.JSX.Element {
                       leadingMarkedAction: true,
                     }),
                     stageActionText: null,
-                    voicePerformanceText:
-                      voicePerformanceTextFromActionCues(utterance.text, {
+                    voicePerformanceText: voicePerformanceTextFromActionCues(
+                      utterance.text,
+                      {
                         leadingMarkedAction: true,
                         omitLocalFoleyTags: true,
-                      }),
+                      },
+                    ),
                     moodKey: "neutral",
                     createdAt: session.updatedAt,
                   },

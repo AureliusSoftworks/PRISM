@@ -43,6 +43,14 @@ function seedCompletedProgressIfMissing(
   db: DatabaseSync,
   userId: string,
 ): void {
+  const tutorialProgress = createPrismTutorialProgress("completed");
+  // Avatar Foundry is a new contextual tutorial. Existing accounts skip the
+  // account setup ritual, but still receive this tutorial after awakening.
+  tutorialProgress.avatar = {
+    status: "pending",
+    step: 0,
+    remindAfter: null,
+  };
   db.prepare(
     `INSERT OR IGNORE INTO living_shell_account_state (
        user_id, onboarding_version, onboarding_state, tutorial_progress, updated_at
@@ -51,7 +59,7 @@ function seedCompletedProgressIfMissing(
     userId,
     PRISM_ONBOARDING_VERSION,
     JSON.stringify(createCompletedPrismOnboardingState()),
-    JSON.stringify(createPrismTutorialProgress("completed")),
+    JSON.stringify(tutorialProgress),
     new Date().toISOString(),
   );
 }

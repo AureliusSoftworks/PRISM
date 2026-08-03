@@ -2752,6 +2752,8 @@ function botPowerMumbleWordV1(source: string, wordIndex: number): string {
  * Obscures public speech after the holder has authored a coherent intended line.
  * Physical actions remain observable; mentions are flattened before every spoken
  * word is replaced so neither transcript context nor voice synthesis leaks intent.
+ * Structured Debate evidence markers remain intact because they are nonspoken
+ * provenance and must still be removable by the shared TTS/caption pipeline.
  */
 export function applyBotPowerMumbledResponseV1(value: unknown): string {
   const source = typeof value === "string" ? value.trim() : "";
@@ -2765,6 +2767,14 @@ export function applyBotPowerMumbledResponseV1(value: unknown): string {
     const placeholder = `\uE100${"\uE102".repeat(index + 1)}\uE101`;
     protectedSource = `${protectedSource.slice(0, action.start)}${placeholder}${protectedSource.slice(action.end)}`;
   }
+  const evidenceMarkers: string[] = [];
+  protectedSource = protectedSource.replace(
+    /\[\[(?:source|exhibit):[a-z0-9][a-z0-9_-]{0,47}\]\]/giu,
+    (marker) => {
+      const index = evidenceMarkers.push(marker) - 1;
+      return `\uE110${"\uE112".repeat(index + 1)}\uE111`;
+    },
+  );
   protectedSource = protectedSource.replace(
     /\[([^\]\n]{1,100})\]\(prism-bot:\/\/[^)\s]+\)/gu,
     "$1",
@@ -2775,6 +2785,9 @@ export function applyBotPowerMumbledResponseV1(value: unknown): string {
     (word) => botPowerMumbleWordV1(word, wordIndex++),
   );
   const restored = obscured
+    .replace(/\uE110(\uE112+)\uE111/gu, (_match, encodedIndex: string) =>
+      evidenceMarkers[encodedIndex.length - 1] ?? "",
+    )
     .replace(/\uE100(\uE102+)\uE101/gu, (_match, encodedIndex: string) => {
       const action = actions[encodedIndex.length - 1];
       return action ? `*${action.text}*` : "";

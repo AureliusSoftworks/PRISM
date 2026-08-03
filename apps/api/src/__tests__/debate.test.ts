@@ -307,6 +307,36 @@ class AutomaticAudienceOrderProvider extends DebateProviderStub {
   }
 }
 
+class OvertimeAudienceOrderProvider extends AutomaticAudienceOrderProvider {
+  public combinedOrderPrompt = "";
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("public gallery is also disruptive")) {
+      this.combinedOrderPrompt = text;
+      return JSON.stringify({
+        content: "*shouts over the crowd* ORDER! Time, Avery. Yield the floor.",
+        deliveryCue: "shouts",
+      });
+    }
+    if (
+      text.includes("Give the Build Near Rail opening address") ||
+      text.includes("Give the Build Near Rail opening argument")
+    ) {
+      return JSON.stringify({
+        content: `That is an outrageous lie! ${Array.from(
+          { length: 78 },
+          (_, index) => `heated${index + 1}`,
+        ).join(" ")}`,
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
 class ParticipantObjectionProvider extends DebateProviderStub {
   public moderatorPrompt = "";
   public continuationPrompt = "";
@@ -1183,11 +1213,13 @@ function ineptPowers(): BotPowerV1[] {
       "inept",
       "Inept",
       "Cannot follow instructions or competently fulfill a Debate role.",
-      [{
-        type: "ineptitude",
-        instructionFidelity: "always_botched",
-        imageFidelity: "always_unrelated",
-      }],
+      [
+        {
+          type: "ineptitude",
+          instructionFidelity: "always_botched",
+          imageFidelity: "always_unrelated",
+        },
+      ],
     ),
   ];
 }
@@ -1614,6 +1646,21 @@ describe("Debate engine", () => {
         name: "local",
         async generateResponse(messages): Promise<string> {
           prompt = messages.map((message) => message.content).join("\n");
+          if (prompt.includes("Target: debate.setup.playerNotes")) {
+            return JSON.stringify({
+              value: "Treat the artifact as publicly owned for this scenario.",
+            });
+          }
+          if (prompt.includes("Target: debate.setup.researchQuery")) {
+            return JSON.stringify({
+              value: "museum artifact repatriation policy evidence",
+            });
+          }
+          if (prompt.includes("Target: debate.setup.scholarQuery")) {
+            return JSON.stringify({
+              value: "museum repatriation ethics cultural heritage",
+            });
+          }
           return JSON.stringify({ value: "weathered ledger" });
         },
         async embedText(): Promise<number[]> {
@@ -1627,7 +1674,6 @@ describe("Debate engine", () => {
           kind: "debate.setup.exhibitPair",
           botIds: ["for", "missing"],
           context: {
-            setupMode: "advanced",
             studioPanel: "evidence",
             format: "turnabout",
             formality: "heated",
@@ -1665,6 +1711,114 @@ describe("Debate engine", () => {
         /Avery favors concrete institutional accountability/u,
       );
       assert.match(prompt, /editable candidate only/u);
+      const playerNotes = await generateDebateRefractDraft(
+        db,
+        "user-1",
+        {
+          kind: "debate.setup.playerNotes",
+          botIds: [],
+          context: {
+            studioPanel: "evidence",
+            format: "turnabout",
+            formality: "heated",
+            playerRole: "judge",
+            playerSideId: "for",
+            juryEnabled: false,
+            moderatorTitle: "The Forum",
+            topic: "Museum ethics",
+            motion: "Museums should return contested artifacts.",
+            forLabel: "Return",
+            forBrief: "Defend return.",
+            againstLabel: "Retain",
+            againstBrief: "Defend stewardship.",
+            exhibitAdjective: "Dusty",
+            exhibitObject: "",
+            exhibitObservation: "",
+            evidenceItemCount: 2,
+          },
+        },
+        "",
+        [],
+        runtimeWith(provider),
+      );
+      assert.equal(
+        playerNotes.value,
+        "Treat the artifact as publicly owned for this scenario.",
+      );
+      assert.match(prompt, /shared player notes/u);
+      assert.match(prompt, /Do not invent real-world evidence/u);
+      const researchQuery = await generateDebateRefractDraft(
+        db,
+        "user-1",
+        {
+          kind: "debate.setup.researchQuery",
+          botIds: [],
+          context: {
+            studioPanel: "evidence",
+            format: "turnabout",
+            formality: "heated",
+            playerRole: "judge",
+            playerSideId: "for",
+            juryEnabled: false,
+            moderatorTitle: "The Forum",
+            topic: "Museum ethics",
+            motion: "Museums should return contested artifacts.",
+            forLabel: "Return",
+            forBrief: "Defend return.",
+            againstLabel: "Retain",
+            againstBrief: "Defend stewardship.",
+            exhibitAdjective: "Dusty",
+            exhibitObject: "",
+            exhibitObservation: "",
+            evidenceItemCount: 2,
+          },
+        },
+        "",
+        [],
+        runtimeWith(provider),
+      );
+      assert.equal(
+        researchQuery.value,
+        "museum artifact repatriation policy evidence",
+      );
+      assert.match(prompt, /Brave Search query/u);
+      assert.match(prompt, /do not invent or summarize search results/u);
+      const scholarQuery = await generateDebateRefractDraft(
+        db,
+        "user-1",
+        {
+          kind: "debate.setup.scholarQuery",
+          botIds: [],
+          context: {
+            studioPanel: "evidence",
+            format: "turnabout",
+            formality: "heated",
+            playerRole: "judge",
+            playerSideId: "for",
+            juryEnabled: false,
+            moderatorTitle: "The Forum",
+            topic: "Museum ethics",
+            motion: "Museums should return contested artifacts.",
+            forLabel: "Return",
+            forBrief: "Defend return.",
+            againstLabel: "Retain",
+            againstBrief: "Defend stewardship.",
+            exhibitAdjective: "Dusty",
+            exhibitObject: "",
+            exhibitObservation: "",
+            evidenceItemCount: 2,
+          },
+        },
+        "",
+        [],
+        runtimeWith(provider),
+      );
+      assert.equal(
+        scholarQuery.value,
+        "museum repatriation ethics cultural heritage",
+      );
+      assert.match(prompt, /scholarly literature search query/u);
+      assert.match(prompt, /journal articles, books, theses/u);
       const stored = db
         .prepare("SELECT COUNT(*) AS count FROM debate_sessions")
         .get() as { count: number };
@@ -2919,11 +3073,34 @@ describe("Debate engine", () => {
       );
       assert.equal(ballot?.sideId, "for");
       assert.equal(ballot?.reason, expectedReason);
+      assert.equal(ballot?.powerIntendedReason, intendedReason);
       assert.equal(ballot?.voicePerformanceCue, "solemn");
       assert.equal(event?.sideId, "for");
       assert.equal(event?.content, expectedReason);
+      assert.equal(event?.powerIntendedContent, intendedReason);
       assert.equal(event?.voicePerformanceCue, "solemn");
       assert.doesNotMatch(event?.content ?? "", /central tradeoff/u);
+      assert.equal(
+        provider.ballotPrompts.some((prompt) =>
+          prompt.includes(
+            "author fully intelligible natural-language intent",
+          ),
+        ),
+        true,
+      );
+
+      const publicSession = debateSessionForPlayer(session);
+      const publicBallot = publicSession.jury.finalBallots.find(
+        (candidate) => candidate.jurorBotId === "juror-1",
+      );
+      const publicEvent = publicSession.events.find(
+        (candidate) =>
+          candidate.kind === "ballot" && candidate.speakerBotId === "juror-1",
+      );
+      assert.equal(publicBallot?.reason, expectedReason);
+      assert.equal("powerIntendedReason" in (publicBallot ?? {}), false);
+      assert.equal(publicEvent?.content, expectedReason);
+      assert.equal("powerIntendedContent" in (publicEvent ?? {}), false);
     } finally {
       db.close();
     }
@@ -3813,6 +3990,89 @@ describe("Debate engine", () => {
       assert.match(provider.orderPrompt, /two to twelve words/u);
       assert.match(provider.orderPrompt, /Do not summarize, evaluate, rebut/u);
       assert.ok((order?.sequence ?? 0) > opening.sequence);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("combines crowd control with an overtime correction instead of letting rowdiness ratchet", async () => {
+    const db = createTestDb();
+    const provider = new OvertimeAudienceOrderProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+        formality: "free_for_all",
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "overtime-audience-order:intro",
+        },
+        debateRuntime,
+      );
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "overtime-audience-order:opening-for",
+        },
+        debateRuntime,
+      );
+
+      const opening = session.events.find(
+        (event) => event.kind === "speech" && event.stepKey === "opening_for",
+      );
+      const correction = session.events.find(
+        (event) =>
+          event.parentEventId === opening?.id &&
+          event.gavelReason === "audience_order",
+      );
+      assert.equal(opening?.timing?.status, "overtime");
+      assert.partialDeepStrictEqual(correction, {
+        kind: "moderator_ruling",
+        speakerKind: "moderator",
+        speakerBotId: session.moderator.id,
+        stepKey: "opening_for",
+        gavelReason: "audience_order",
+        gavelStrikeCount: 1,
+      });
+      assert.doesNotMatch(correction?.content ?? "", /^\*(?:shouts?|yells?)/iu);
+      assert.equal(correction?.voicePerformanceCue, undefined);
+      assert.equal(
+        session.events.filter(
+          (event) =>
+            event.parentEventId === opening?.id &&
+            event.speakerKind === "moderator",
+        ).length,
+        1,
+      );
+      assert.match(provider.combinedOrderPrompt, /gavel has already struck/u);
+      assert.match(provider.combinedOrderPrompt, /correct the overrun/u);
+
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "overtime-audience-order:opening-against",
+        },
+        debateRuntime,
+      );
+      const nextOpening = session.events.find(
+        (event) =>
+          event.kind === "speech" && event.stepKey === "opening_against",
+      );
+      assert.doesNotMatch(
+        nextOpening?.content ?? "",
+        /^\*(?:speaks loudly|shouts)\*/iu,
+      );
     } finally {
       db.close();
     }
@@ -8549,7 +8809,10 @@ describe("Debate engine", () => {
         kind: "error",
         speakerKind: "system",
       });
-      assert.match(failed.events.at(-1)?.content ?? "", /Retry or skip this turn/u);
+      assert.match(
+        failed.events.at(-1)?.content ?? "",
+        /Retry or skip this turn/u,
+      );
       const skipped = await advanceDebateSession(
         db,
         "user-1",

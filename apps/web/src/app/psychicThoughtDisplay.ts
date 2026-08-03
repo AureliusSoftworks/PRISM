@@ -3,6 +3,7 @@ import type { PsychicThoughtPayload } from "@localai/shared";
 export interface PsychicCanvasScratchpadPayload {
   v: 1;
   scratchpad: string;
+  stage?: "plan" | "draft" | "audit" | "revision";
   effort: PsychicThoughtPayload["effort"];
   provider: PsychicThoughtPayload["provider"];
   model?: string;

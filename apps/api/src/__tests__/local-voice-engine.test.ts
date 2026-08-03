@@ -1,11 +1,16 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { LocalVoiceCalibrationStateV1 } from "@localai/shared";
+import {
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  type LocalVoiceCalibrationStateV1,
+} from "@localai/shared";
 import {
   localVoiceRuntimeHealthy,
   pcmWaveDurationMs,
   recordInstantVoiceCalibration,
   resolveLocalVoiceEngine,
+  resolveLocalVoicePronunciation,
+  resolveLocalVoiceSpeechprint,
 } from "../local-voice-engine.ts";
 
 function calibration(
@@ -57,6 +62,134 @@ describe("adaptive local voice selection", () => {
         runtimeHealthy: false,
       }).resolved,
       "instant",
+    );
+  });
+
+  it("routes active Auto Speechprints to Instant and resolves provenance", () => {
+    const engine = resolveLocalVoiceEngine({
+      preference: "auto",
+      calibration: calibration(),
+      runtimeHealthy: true,
+      speechprintActive: true,
+    });
+    assert.equal(engine.resolved, "instant");
+    const resolved = resolveLocalVoiceSpeechprint({
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        speechprintInfluence: "indian-english",
+        speechprintStrength: "balanced",
+        speechprintVariationSeed: "speaker-1",
+      },
+      localEngine: engine,
+      usingSystemVoice: false,
+    });
+    assert.equal(resolved.status, "applied");
+    assert.equal(resolved.appliedInfluence, "indian-english");
+    assert.match(resolved.rulesetSha256 ?? "", /^[a-f0-9]{64}$/u);
+  });
+
+  it("routes a cross-accent pronunciation through Instant before Speechprints", () => {
+    const engine = resolveLocalVoiceEngine({
+      preference: "auto",
+      calibration: calibration(),
+      runtimeHealthy: true,
+      pronunciationOverrideActive: true,
+    });
+    assert.equal(engine.resolved, "instant");
+    const profile = {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      baseVoiceId: "voice-1" as const,
+      accentLocale: "en-US",
+      pronunciationBase: "en-GB" as const,
+      speechprintInfluence: "spanish-influenced-english" as const,
+    };
+    const pronunciation = resolveLocalVoicePronunciation({
+      profile,
+      localEngine: engine,
+      usingSystemVoice: false,
+    });
+    assert.deepEqual(pronunciation, {
+      requestedBase: "en-GB",
+      sourceLocale: "en-US",
+      resolvedBaseLocale: "en-GB",
+      status: "applied",
+      reason: null,
+    });
+    assert.equal(
+      resolveLocalVoiceSpeechprint({
+        profile,
+        localEngine: engine,
+        usingSystemVoice: false,
+        pronunciation,
+      }).baseLocale,
+      "en-GB",
+    );
+  });
+
+  it("suspends a cross-accent pronunciation for Voice+ and system voices", () => {
+    const profile = {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      pronunciationBase: "en-GB" as const,
+    };
+    assert.equal(
+      resolveLocalVoicePronunciation({
+        profile,
+        localEngine: resolveLocalVoiceEngine({
+          preference: "voice-plus",
+          calibration: calibration(),
+          runtimeHealthy: true,
+          pronunciationOverrideActive: true,
+        }),
+        usingSystemVoice: false,
+      }).reason,
+      "engine-unsupported",
+    );
+    assert.equal(
+      resolveLocalVoicePronunciation({
+        profile,
+        localEngine: resolveLocalVoiceEngine({
+          preference: "auto",
+          calibration: calibration({ qualified: false }),
+          runtimeHealthy: true,
+          pronunciationOverrideActive: true,
+        }),
+        usingSystemVoice: true,
+      }).reason,
+      "system-voice",
+    );
+  });
+
+  it("visibly suspends Speechprints for Voice+ and system voices", () => {
+    const voicePlus = resolveLocalVoiceEngine({
+      preference: "voice-plus",
+      calibration: calibration(),
+      runtimeHealthy: true,
+      speechprintActive: true,
+    });
+    const profile = {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      speechprintInfluence: "mandarin-influenced-english" as const,
+    };
+    assert.deepEqual(
+      resolveLocalVoiceSpeechprint({
+        profile,
+        localEngine: voicePlus,
+        usingSystemVoice: false,
+      }).reason,
+      "engine-unsupported",
+    );
+    assert.deepEqual(
+      resolveLocalVoiceSpeechprint({
+        profile,
+        localEngine: {
+          requested: "auto",
+          resolved: "instant",
+          fallback: false,
+          notice: null,
+        },
+        usingSystemVoice: true,
+      }).reason,
+      "system-voice",
     );
   });
 

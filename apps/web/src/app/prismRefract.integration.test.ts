@@ -87,6 +87,23 @@ describe("Prism Refract integration", () => {
     );
     assert.match(
       debateSource,
+      /id: "debate-setup-player-notes"[\s\S]*"debate\.setup\.playerNotes"/u,
+    );
+    assert.match(
+      debateSource,
+      /id: "debate-setup-research-query"[\s\S]*"debate\.setup\.researchQuery"/u,
+    );
+    assert.match(
+      debateSource,
+      /id: "debate-setup-scholar-query"[\s\S]*"debate\.setup\.scholarQuery"/u,
+    );
+    assert.match(
+      debateSource,
+      /id: "debate:refract-evidence-object"[\s\S]*kind: "magic"[\s\S]*run: \(direction\) => refractEvidenceObject\(direction\)/u,
+    );
+    assert.doesNotMatch(debateSource, /Add generated search/u);
+    assert.match(
+      debateSource,
       /run: \(direction\) => synthesize\(direction\)/u,
     );
     assert.match(

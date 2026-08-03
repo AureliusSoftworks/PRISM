@@ -4,6 +4,14 @@ import { describe, it } from "node:test";
 import { MODE_TUTORIALS, modeTutorialStep } from "./modeTutorials.ts";
 
 describe("mode tutorials", () => {
+  it("explains the live Psychic reply reveal and its privacy boundary", () => {
+    const step = MODE_TUTORIALS.chat.steps[0];
+    assert.match(step?.body ?? "", /floating Psychic card/u);
+    assert.match(step?.body ?? "", /plan, draft, audit, and revision/u);
+    assert.match(step?.body ?? "", /scratchpad is never saved/u);
+    assert.match(step?.body ?? "", /hidden chain-of-thought is never exposed/u);
+  });
+
   it("keeps every step click-specific and targetable", () => {
     for (const tutorial of Object.values(MODE_TUTORIALS)) {
       assert.ok(tutorial.steps.length > 0);
@@ -12,6 +20,33 @@ describe("mode tutorials", () => {
         assert.match(step.targetSelector, /^\[data-tutorial-target=/);
       }
     }
+  });
+
+  it("guides Avatar Foundry modules and live controls with stable targets", () => {
+    assert.deepEqual(
+      MODE_TUTORIALS.avatar.steps.map((step) => step.targetSelector),
+      [
+        '[data-tutorial-target="avatar-foundry-upgrade-node"]',
+        '[data-tutorial-target="avatar-foundry-controls"]',
+        '[data-tutorial-target="avatar-foundry-dock"]',
+      ],
+    );
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /lights stay dark/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /generated drafts/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /light online/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Save or Create bot/u);
+  });
+
+  it("explains the holographic Pronunciation Atlas and private phonemes", () => {
+    const step = MODE_TUTORIALS.chat.steps.find(
+      (candidate) => candidate.heading === "Shape an offline voice",
+    );
+    assert.ok(step);
+    assert.match(step.body, /Pronunciation Atlas/u);
+    assert.match(step.body, /holographic world projection/u);
+    assert.match(step.body, /American and British English foundations/u);
+    assert.match(step.body, /collapsed List view/u);
+    assert.match(step.body, /private local phonemes/u);
   });
 
   it("teaches Zen Atmosphere from Settings, on by default with gradient fallback", () => {
@@ -33,13 +68,14 @@ describe("mode tutorials", () => {
       tutorial.steps.map((step) => step.targetSelector),
       [
         '[data-tutorial-target="debate-new"]',
-        '[data-tutorial-target="debate-setup-mode"]',
+        '[data-tutorial-target="debate-room"]',
         '[data-tutorial-target="debate-rowdiness"]',
-        '[data-tutorial-target="debate-moderator-title"]',
         '[data-tutorial-target="debate-synthesize"]',
         '[data-tutorial-target="debate-cast"]',
+        '[data-tutorial-target="debate-seat"]',
         '[data-tutorial-target="debate-consent"]',
         '[data-tutorial-target="debate-evidence"]',
+        '[data-tutorial-target="debate-evidence-continue"]',
         '[data-tutorial-target="debate-readiness"]',
         '[data-tutorial-target="debate-start"]',
         '[data-tutorial-target="debate-judge-gavel"]',
@@ -50,41 +86,25 @@ describe("mode tutorials", () => {
       ],
     );
     const copy = tutorial.steps.map((step) => step.body).join(" ");
-    assert.match(copy, /Basic setup is the welcoming default/u);
-    assert.match(
-      copy,
-      /Basic keeps setup focused on the debate idea, one Rowdiness dial, and two debaters/u,
-    );
-    assert.match(
-      copy,
-      /writes the balanced motion and both private side briefs/u,
-    );
-    assert.match(copy, /starts with a Plainspoken Forum/u);
+    assert.match(copy, /Studio follows one clear path/u);
+    assert.match(copy, /opens as a Plainspoken Forum with Auto rounds/u);
+    assert.match(copy, /Tune the room keeps the proceeding preset/u);
+    assert.match(copy, /leave it closed and trust the defaults/u);
     assert.match(copy, /University Union to Daytime Showdown/u);
     assert.match(copy, /sharper language, faster confrontation/u);
     assert.match(copy, /facts, safety boundaries/u);
     assert.match(
       copy,
-      /changing Rowdiness clears an earlier willingness check/u,
-    );
-    assert.match(copy, /leaves the final call to you/u);
-    assert.match(copy, /Advanced preserves the full studio/u);
-    assert.match(copy, /five formality levels/u);
-    assert.match(copy, /Forum or Turnabout/u);
-    assert.match(
-      copy,
-      /Daytime Showdown keeps its confrontation-show energy when you take the Judge role/u,
+      /changing Atmosphere clears an earlier willingness check/u,
     );
     assert.match(
       copy,
-      /Custom records the role change without turning Free-for-all into a polite panel/u,
+      /Forum supports Auto or a fixed one-to-three-round plan/u,
     );
-    assert.match(
-      copy,
-      /preserving your chosen Rowdiness, topic, cast, and sources/u,
-    );
-    assert.match(copy, /exact public authority for this proceeding/u);
-    assert.match(copy, /freezes with the saved Debate for replay/u);
+    assert.match(copy, /Refine motion reveals the alternate motions/u);
+    assert.match(copy, /optional tuning, not a second setup mode/u);
+    assert.match(copy, /exact public authority shown on the center card/u);
+    assert.match(copy, /title freezes with the saved Debate/u);
     assert.match(copy, /never changes the moderator bot’s identity/u);
     assert.match(copy, /briefs you should not have to author/u);
     assert.match(copy, /Try another version/u);
@@ -99,13 +119,25 @@ describe("mode tutorials", () => {
     );
     assert.match(copy, /private LLM check/u);
     assert.match(copy, /Evidence is optional/u);
-    assert.match(copy, /Find sources for me/u);
+    assert.match(copy, /Continue without evidence confirms that choice/u);
+    assert.match(copy, /There is one Start Debate control/u);
+    assert.doesNotMatch(copy, /Basic|Advanced/u);
+    assert.match(
+      copy,
+      /Player notes, Brave Search, Scholar Search, and Add evidence stay manual/u,
+    );
+    assert.match(copy, /Prism-drafted query does not search until/u);
+    assert.match(copy, /Crossref's public scholarly metadata/u);
+    assert.match(
+      copy,
+      /Each search adds at most its top three unique results/u,
+    );
     assert.match(copy, /Add URL accepts your own public HTTP or HTTPS/u);
     assert.match(copy, /LOCAL never accesses the page/u);
     assert.match(copy, /duplicate URLs are rejected/u);
     assert.match(
       copy,
-      /Add evidence asks Prism for one surprising contextual.*ADJECTIVE.*OBJECT.*built-in object deck is only a reliable fallback/u,
+      /Add evidence opens a blank editable object exhibit.*Wield Prism into that button.*ADJECTIVE.*OBJECT/u,
     );
     assert.doesNotMatch(copy, /Generate object/u);
     assert.match(copy, /exhibit emoji follows the object name automatically/u);
@@ -133,18 +165,12 @@ describe("mode tutorials", () => {
     assert.match(copy, /not a new argument, vote, role change/u);
     assert.match(copy, /PRISM is the complete selected-side advocate/u);
     assert.match(copy, /Participant is Forum-only/u);
-    assert.match(copy, /PRISM becomes that entire advocate/u);
+    assert.match(copy, /PRISM becomes your whole selected-side advocate/u);
+    assert.match(copy, /Spectator casts all three floor holders/u);
+    assert.match(copy, /seats PRISM in the audience gallery/u);
     assert.match(
       copy,
-      /Spectator keeps all three floor holders as Library bots/u,
-    );
-    assert.match(
-      copy,
-      /seats PRISM in the observable audience gallery below the chamber screen/u,
-    );
-    assert.match(
-      copy,
-      /exactly you, the bot Moderator\/Judge, and one bot opponent/u,
+      /leaving one bot opponent and one bot Moderator\/Judge/u,
     );
     assert.match(
       copy,
@@ -217,7 +243,7 @@ describe("mode tutorials", () => {
       copy,
       /Changing the motion, cast, format, or formality clears/u,
     );
-    assert.match(copy, /territory dice remains available/u);
+    assert.match(copy, /idea dice remains available/u);
     assert.match(
       copy,
       /Prompt Center prompts insert as ordinary editable text/u,
@@ -248,13 +274,19 @@ describe("mode tutorials", () => {
     assert.match(copy, /Space invokes that same context-aware control/u);
     assert.match(copy, /Participant and Spectator sessions use the same/u);
     assert.match(copy, /Pause takes effect immediately/u);
-    assert.match(copy, /without adding dialogue, audio, or a housekeeping event/u);
+    assert.match(
+      copy,
+      /without adding dialogue, audio, or a housekeeping event/u,
+    );
     assert.match(copy, /Leaving an unfinished Debate by any route/u);
     assert.match(copy, /reopening returns to the same paused point/u);
     assert.match(copy, /Resume is equally silent/u);
     assert.match(copy, /replays that exact saved line from its beginning/u);
     assert.match(copy, /exact next Jury preparation, ballot/u);
-    assert.match(copy, /neither action creates a spoken beat or transcript event/u);
+    assert.match(
+      copy,
+      /neither action creates a spoken beat or transcript event/u,
+    );
     assert.match(
       copy,
       /cooldown governs semantic interventions within that gavel control, not audience order/u,
@@ -316,10 +348,10 @@ describe("mode tutorials", () => {
     assert.match(copy, /currently selected model and routing remain in place/u);
     assert.match(copy, /whole chain fails/u);
     assert.match(copy, /LOCAL remains a hard offline guarantee/u);
-    assert.match(copy, /Launch circuit becomes Start Debate/u);
+    assert.match(copy, /There is one Start Debate control/u);
     assert.match(
       copy,
-      /Start stays locked until the question, debaters, consent, and a visit to Topic, Debaters, and Evidence are all complete/u,
+      /Start stays locked until the motion, cast, consent, and explicit evidence choice are complete/u,
     );
     assert.match(copy, /Start then freezes that ordered chain/u);
     assert.match(copy, /instead of in the app chrome/u);
@@ -366,9 +398,15 @@ describe("mode tutorials", () => {
       copy,
       /Once Jury deliberation begins, the Jury owns the floor/u,
     );
-    assert.match(copy, /unified Gavel, Space, End, and Skip actions are put away/u);
+    assert.match(
+      copy,
+      /unified Gavel, Space, End, and Skip actions are put away/u,
+    );
     assert.match(copy, /End, and Skip actions are put away/u);
-    assert.match(copy, /Pause and Resume remain available as silent lifecycle controls/u);
+    assert.match(
+      copy,
+      /Pause and Resume remain available as silent lifecycle controls/u,
+    );
     assert.match(
       copy,
       /human-Judge session automatically activates the center seat for its neutral introduction/u,
@@ -501,19 +539,14 @@ describe("mode tutorials", () => {
         (step) =>
           step.targetSelector === '[data-tutorial-target="debate-cast"]',
       )?.body ?? "";
-    assert.match(castCopy, /Random actors/u);
+    assert.match(castCopy, /Surprise me/u);
     assert.match(castCopy, /Prism takes the center Judge \/ Moderator seat/u);
     assert.match(castCopy, /automatic neutral introduction/u);
+    assert.match(castCopy, /Choose the two advocates/u);
     assert.match(
       castCopy,
-      /both advocates react once before Prism gives the automatic neutral procedural close/u,
+      /Your seat & the Jury reveals Participant and Spectator roles/u,
     );
-    assert.match(
-      castCopy,
-      /never invents a Judge action or changes your result/u,
-    );
-    assert.match(castCopy, /choose the two advocates/u);
-    assert.match(castCopy, /Participant and Spectator roles/u);
   });
 
   it("teaches the non-blocking Coffee Group identity synthesis flow", () => {
@@ -821,48 +854,21 @@ describe("mode tutorials", () => {
       routing?.body ?? "",
       /Image generation keeps its own LOCAL\/ONLINE choice/,
     );
+    assert.match(routing?.body ?? "", /Chat itself is deliberately text-only/u);
+    assert.match(routing?.body ?? "", /Voice selector stays locked to Mute/u);
+    assert.match(routing?.body ?? "", /entering Chat stops foreground speech/u);
     assert.match(
       routing?.body ?? "",
-      /Mute, English, Premium, Babble, and Bottish/,
-    );
-    assert.match(routing?.body ?? "", /optional operating-system identity/);
-    assert.match(
-      routing?.body ?? "",
-      /Avatar Studio can pin Account default, Auto, Voice\+, or Instant/,
-    );
-    assert.match(routing?.body ?? "", /Open–Nasal \/ Light–Chest pad/);
-    assert.match(routing?.body ?? "", /tone controls never reshape Premium/);
-    assert.match(routing?.body ?? "", /cached local reaction bank/);
-    assert.match(routing?.body ?? "", /on AUTO and ONLINE speech/);
-    assert.match(routing?.body ?? "", /Voice Settings can narrow/);
-    assert.match(routing?.body ?? "", /one ElevenLabs voice collection/);
-    assert.match(
-      routing?.body ?? "",
-      /Chat Settings can give your own Zen messages both a Premium voice and an independent local fallback/u,
+      /neither player nor bot messages request voice synthesis/u,
     );
     assert.match(
       routing?.body ?? "",
-      /LOCAL and unavailable Premium speech also use that saved fallback/u,
+      /never overwrites your saved Voice preference/u,
     );
     assert.match(
       routing?.body ?? "",
-      /top Voice picker chooses the player identity too: Premium uses your Premium voice/u,
+      /Coffee, Signal, Debate, Story, and other voiced surfaces/u,
     );
-    assert.match(routing?.body ?? "", /player voice is always clean/u);
-    assert.match(
-      routing?.body ?? "",
-      /Coffee, Signal, and Debate continue to use the Default PRISM voice/u,
-    );
-    assert.match(
-      routing?.body ?? "",
-      /Voice tab also gives each bot a Voice Character pad/,
-    );
-    assert.match(routing?.body ?? "", /relative to your account Voice Volume/);
-    assert.match(
-      routing?.body ?? "",
-      /SFX tab can generate an ElevenLabs loop/,
-    );
-    assert.match(routing?.body ?? "", /talking, idle, thinking/);
     const automaticThinkingSfx = MODE_TUTORIALS.zen.steps.find(
       (step) => step.heading === "Hear each bot think",
     );
@@ -884,8 +890,6 @@ describe("mode tutorials", () => {
       automaticThinkingSfx?.body ?? "",
       /restore the PRISM default, or mute it/,
     );
-    assert.match(routing?.body ?? "", /non-neutral mood/);
-    assert.match(routing?.body ?? "", /neutral speech stays untagged/);
   });
 
   it("teaches canonical Coffee prompts without a regeneration step", () => {

@@ -16,6 +16,29 @@ test("response cue cache invalidates on voice, engine, phrase, and delivery edit
     key,
     responseCueVoiceCacheKey({ ...base, phrase: "Let me see…" }),
   );
+  assert.match(key, /speechprintRuleset/u);
+  assert.notEqual(
+    key,
+    responseCueVoiceCacheKey({
+      ...base,
+      voiceProfile: {
+        ...base.voiceProfile,
+        pronunciationBase: "en-GB",
+      },
+    }),
+  );
+  assert.notEqual(
+    key,
+    responseCueVoiceCacheKey({
+      ...base,
+      voiceProfile: {
+        ...base.voiceProfile,
+        speechprintInfluence: "spanish-influenced-english",
+        speechprintStrength: "light",
+        speechprintVariationSeed: "bot-seed",
+      },
+    }),
+  );
   assert.notEqual(
     key,
     responseCueVoiceCacheKey({ ...base, engine: "elevenlabs" }),

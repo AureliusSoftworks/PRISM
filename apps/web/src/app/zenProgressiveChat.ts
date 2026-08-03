@@ -21,6 +21,20 @@ export interface ZenProgressiveEndEvent {
   interrupted: boolean;
 }
 
+export interface PsychicProgressEvent {
+  type: "psychic";
+  stage: "plan" | "draft" | "audit" | "revision";
+  summary: string;
+  scratchpad: string;
+  effort: "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
+  provider: "local" | "openai" | "anthropic";
+  model?: string;
+  simulated: boolean;
+  passCount: number;
+  guidanceChars: number;
+  createdAt: string;
+}
+
 export interface ZenProgressiveCompleteEvent<T> {
   type: "complete";
   envelope: T;
@@ -35,6 +49,7 @@ export interface ZenProgressiveErrorEvent {
 export type ZenProgressiveChatEvent<T> =
   | ZenProgressiveSegmentEvent
   | ZenProgressiveEndEvent
+  | PsychicProgressEvent
   | ZenProgressiveCompleteEvent<T>
   | ZenProgressiveErrorEvent;
 
@@ -62,6 +77,42 @@ export function parseZenProgressiveChatEvent<T>(
       type: "error",
       error: record.error,
       ...(typeof record.code === "string" ? { code: record.code } : {}),
+    };
+  }
+  if (
+    record.type === "psychic" &&
+    (record.stage === "plan" ||
+      record.stage === "draft" ||
+      record.stage === "audit" ||
+      record.stage === "revision") &&
+    typeof record.summary === "string" &&
+    typeof record.scratchpad === "string" &&
+    (record.effort === "auto" ||
+      record.effort === "none" ||
+      record.effort === "minimal" ||
+      record.effort === "low" ||
+      record.effort === "medium" ||
+      record.effort === "high" ||
+      record.effort === "xhigh") &&
+    (record.provider === "local" ||
+      record.provider === "openai" ||
+      record.provider === "anthropic") &&
+    typeof record.passCount === "number" &&
+    typeof record.guidanceChars === "number" &&
+    typeof record.createdAt === "string"
+  ) {
+    return {
+      type: "psychic",
+      stage: record.stage,
+      summary: record.summary,
+      scratchpad: record.scratchpad,
+      effort: record.effort,
+      provider: record.provider,
+      ...(typeof record.model === "string" ? { model: record.model } : {}),
+      simulated: record.simulated === true,
+      passCount: Math.max(0, Math.round(record.passCount)),
+      guidanceChars: Math.max(0, Math.round(record.guidanceChars)),
+      createdAt: record.createdAt,
     };
   }
   if (
@@ -118,6 +169,7 @@ export async function readZenProgressiveChatStream<T>(args: {
   response: Response;
   onSegment: (event: ZenProgressiveSegmentEvent) => void;
   onEnd?: (event: ZenProgressiveEndEvent) => void;
+  onPsychic?: (event: PsychicProgressEvent) => void;
 }): Promise<T> {
   const reader = args.response.body?.getReader();
   if (!reader) throw new Error("Progressive Zen response body is unavailable.");
@@ -133,6 +185,8 @@ export async function readZenProgressiveChatStream<T>(args: {
       args.onSegment(event);
     } else if (event.type === "progressive_end") {
       args.onEnd?.(event);
+    } else if (event.type === "psychic") {
+      args.onPsychic?.(event);
     } else if (event.type === "complete") {
       envelope = event.envelope;
     } else {
@@ -157,4 +211,3 @@ export async function readZenProgressiveChatStream<T>(args: {
   }
   return envelope;
 }
-

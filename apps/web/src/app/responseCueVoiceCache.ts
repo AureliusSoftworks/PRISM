@@ -1,4 +1,5 @@
 import {
+  LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
   normalizeBotAudioVoiceProfileV1,
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
@@ -23,6 +24,11 @@ interface StoredResponseCueClip {
   alignment: EnglishVoiceSynthesisClip["alignment"];
   audioContentType: string;
   engineUsed: string | null;
+  localEngine?: string | null;
+  modelHash?: string | null;
+  notice?: string | null;
+  resolvedPronunciation?: EnglishVoiceSynthesisClip["resolvedPronunciation"];
+  resolvedSpeechprint?: EnglishVoiceSynthesisClip["resolvedSpeechprint"];
   lastAccessedAt: number;
 }
 
@@ -46,6 +52,7 @@ export function responseCueVoiceCacheKey(
     v: 1,
     botId: input.botId,
     voiceProfile: normalizeBotAudioVoiceProfileV1(input.voiceProfile),
+    speechprintRuleset: LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
     engine: input.engine,
     model: input.model ?? null,
     phrase: input.phrase.replace(/\s+/gu, " ").trim(),
@@ -76,6 +83,11 @@ function storedClipAsEnglishClip(
     alignment: stored.alignment,
     audioContentType: stored.audioContentType,
     engineUsed: stored.engineUsed,
+    localEngine: stored.localEngine,
+    modelHash: stored.modelHash,
+    notice: stored.notice,
+    resolvedPronunciation: stored.resolvedPronunciation,
+    resolvedSpeechprint: stored.resolvedSpeechprint,
   };
 }
 
@@ -119,6 +131,11 @@ export async function storeResponseCueVoiceClip(
     alignment: clip.alignment,
     audioContentType: clip.audioContentType,
     engineUsed: clip.engineUsed,
+    localEngine: clip.localEngine,
+    modelHash: clip.modelHash,
+    notice: clip.notice,
+    resolvedPronunciation: clip.resolvedPronunciation,
+    resolvedSpeechprint: clip.resolvedSpeechprint,
     lastAccessedAt: Date.now(),
   };
   memoryFallback.set(key, stored);

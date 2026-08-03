@@ -26,6 +26,9 @@ function assetRoot(asset, options) {
       ? path.join(options.modelRoot, "onnx-community", "Kokoro-82M-v1.0-ONNX")
       : null;
   }
+  if (asset.kind === "phonemizer-runtime") {
+    return path.join(repoRoot, "node_modules", "phonemizer");
+  }
   return path.join(repoRoot, "node_modules", "kokoro-js", "voices");
 }
 

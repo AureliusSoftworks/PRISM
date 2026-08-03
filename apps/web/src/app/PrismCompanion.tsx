@@ -70,6 +70,7 @@ import {
   getPrismCompanionSuppressedSnapshot,
   subscribePrismCompanionSuppression,
 } from "./prismCompanionPresence";
+import { publishPrismCompanionVisualSnapshot } from "./prismCompanionVisualSnapshot";
 import {
   PRISM_REFRACT_TARGET_ATTRIBUTE,
   focusedPrismRefractTargetId,
@@ -418,6 +419,19 @@ export default function PrismCompanion({
   useEffect(() => {
     positionRef.current = position;
   }, [position]);
+
+  useLayoutEffect(() => {
+    publishPrismCompanionVisualSnapshot({
+      position,
+      available: !companionSuppressed,
+    });
+    return () => {
+      publishPrismCompanionVisualSnapshot({
+        position: positionRef.current,
+        available: false,
+      });
+    };
+  }, [companionSuppressed, position]);
 
   useEffect(() => {
     stopSpeakingRef.current = onStopSpeaking;

@@ -953,6 +953,13 @@ function debateRefractValueLimit(
   ) {
     return 32;
   }
+  if (kind === "debate.setup.playerNotes") return 2_000;
+  if (
+    kind === "debate.setup.researchQuery" ||
+    kind === "debate.setup.scholarQuery"
+  ) {
+    return 240;
+  }
   if (kind === "debate.setup.exhibitPair") return 145;
   if (kind === "debate.setup.exhibitAdjective") return 48;
   if (kind === "debate.setup.exhibitObject") return 96;
@@ -978,8 +985,14 @@ function debateRefractInstruction(
       return "Write one clean 1-3 word public label for the Against side. Return only the label, no punctuation or explanation.";
     case "debate.setup.againstBrief":
       return "Write a fair 2-4 sentence private mandate for the Against advocate. Clarify the strongest burden and route without inventing evidence.";
+    case "debate.setup.playerNotes":
+      return "Write concise, editable shared player notes that clarify useful definitions, constraints, hypothetical facts, or scenario context for both sides. Stay neutral. Do not invent real-world evidence, sources, provenance, or claims that are not already supplied in the draft.";
+    case "debate.setup.researchQuery":
+      return "Write one concise Brave Search query for real public evidence relevant to the current motion. Keep it neutral and specific. Return only the query; do not invent or summarize search results.";
+    case "debate.setup.scholarQuery":
+      return "Write one concise scholarly literature search query for relevant journal articles, books, theses, or conference papers. Keep it neutral and specific. Return only the query; do not invent or summarize search results.";
     case "debate.setup.exhibitPair":
-      return "Invent one surprising, concrete physical exhibit with an evocative relationship to the current territory and motion, without favoring either side or pretending the object proves anything. Return exactly one single-word adjective followed by one tangible object noun or short noun phrase in the format “{ADJECTIVE} {OBJECT}”. Prefer an indirect, memorable association over merely naming the debate subject.";
+      return "Invent one surprising, concrete physical exhibit with an evocative relationship to the current territory and motion, without favoring either side or pretending the object proves anything. Treat the current field value, when present, as a temporary player direction for this synthesis pass. Return exactly one single-word adjective followed by one tangible object noun or short noun phrase in the format “{ADJECTIVE} {OBJECT}”. Prefer an indirect, memorable association over merely naming the debate subject.";
     case "debate.setup.exhibitAdjective":
       return "Write one vivid adjective that can naturally precede the current object. Return only the adjective.";
     case "debate.setup.exhibitObject":
@@ -1017,7 +1030,7 @@ export async function generateDebateRefractDraft(
         role: "user",
         content: [
           `Target: ${target.kind}`,
-          `Setup: ${context.setupMode}; ${context.format}; ${context.formality}; player role ${context.playerRole}${context.playerRole === "participant" ? ` on ${context.playerSideId}` : ""}; Jury ${context.juryEnabled ? "on" : "off"}`,
+          `Proceeding: ${context.format}; ${context.formality}; player role ${context.playerRole}${context.playerRole === "participant" ? ` on ${context.playerSideId}` : ""}; Jury ${context.juryEnabled ? "on" : "off"}`,
           `Moderator title: ${context.moderatorTitle || "None"}`,
           `Territory: ${context.topic || "None"}`,
           `Motion: ${context.motion || "None"}`,
@@ -1049,7 +1062,8 @@ export async function generateDebateRefractDraft(
     {
       maxTokens:
         target.kind === "debate.setup.forBrief" ||
-        target.kind === "debate.setup.againstBrief"
+        target.kind === "debate.setup.againstBrief" ||
+        target.kind === "debate.setup.playerNotes"
           ? 420
           : 180,
       temperature: 0.88,
@@ -1855,6 +1869,29 @@ export function debateSessionForPlayer(
       ? ballot
       : { ...ballot, reason: null, privateReason: true },
   );
+  const jury =
+    session.jury.enabled && session.playerRole === "participant"
+      ? {
+          ...session.jury,
+          jurors: [],
+          forepersonBotId: null,
+          initialBallots: [],
+          preparedFinalBallots: [],
+          finalBallots: [],
+          speakerCounts: {},
+        }
+      : {
+          ...session.jury,
+          initialBallots: session.jury.initialBallots.map(
+            withoutDebateJuryPowerIntendedReason,
+          ),
+          preparedFinalBallots: session.jury.preparedFinalBallots.map(
+            withoutDebateJuryPowerIntendedReason,
+          ),
+          finalBallots: session.jury.finalBallots.map(
+            withoutDebateJuryPowerIntendedReason,
+          ),
+        };
   const powerPlan = participantJuryBotIds
     ? {
         ...session.powerPlan,
@@ -1925,19 +1962,7 @@ export function debateSessionForPlayer(
     : session.powerPlan;
   return {
     ...session,
-    ...(session.jury.enabled && session.playerRole === "participant"
-      ? {
-          jury: {
-            ...session.jury,
-            jurors: [],
-            forepersonBotId: null,
-            initialBallots: [],
-            preparedFinalBallots: [],
-            finalBallots: [],
-            speakerCounts: {},
-          },
-        }
-      : {}),
+    jury,
     powerPlan,
     ballots,
     events,
@@ -3091,6 +3116,14 @@ function withoutDebatePowerIntendedContent(
   return publicEvent;
 }
 
+function withoutDebateJuryPowerIntendedReason(
+  ballot: DebateJuryBallotV1,
+): DebateJuryBallotV1 {
+  const { powerIntendedReason: _privateIntendedReason, ...publicBallot } =
+    ballot;
+  return publicBallot;
+}
+
 function lanesForSession(
   runtime: DebateAiRuntime,
   session: DebateSessionV1,
@@ -3368,24 +3401,28 @@ async function repairPersonaCapabilityText(
           ].join("\n"),
         },
         ...(debateIneptitudeFinalPrompt(session, snapshot.id)
-          ? [{
-              role: "system" as const,
-              content: debateIneptitudeFinalPrompt(session, snapshot.id),
-            }]
+          ? [
+              {
+                role: "system" as const,
+                content: debateIneptitudeFinalPrompt(session, snapshot.id),
+              },
+            ]
           : []),
         ...(debateIneptitudeMisdirection(
           session,
           snapshot.id,
           `repair:${purpose}`,
         )
-          ? [{
-              role: "user" as const,
-              content: debateIneptitudeMisdirection(
-                session,
-                snapshot.id,
-                `repair:${purpose}`,
-              ),
-            }]
+          ? [
+              {
+                role: "user" as const,
+                content: debateIneptitudeMisdirection(
+                  session,
+                  snapshot.id,
+                  `repair:${purpose}`,
+                ),
+              },
+            ]
           : []),
       ],
       {
@@ -3608,12 +3645,14 @@ function debateIneptitudePrompt(
   botId: string,
 ): string {
   const snapshot = debateBots(session).find((bot) => bot.id === botId);
-  const effects = session.powerPlan.bots[botId]?.effects.map((entry) => entry.effect) ?? [];
-  const role = snapshot?.role === "moderator"
-    ? "debate_moderator"
-    : snapshot?.role === "juror"
-      ? "debate_juror"
-      : "debate_advocate";
+  const effects =
+    session.powerPlan.bots[botId]?.effects.map((entry) => entry.effect) ?? [];
+  const role =
+    snapshot?.role === "moderator"
+      ? "debate_moderator"
+      : snapshot?.role === "juror"
+        ? "debate_juror"
+        : "debate_advocate";
   return botPowerIneptitudeRoleCueFromEffectsV1(effects, role) ?? "";
 }
 
@@ -3622,12 +3661,14 @@ function debateIneptitudeFinalPrompt(
   botId: string,
 ): string {
   const snapshot = debateBots(session).find((bot) => bot.id === botId);
-  const effects = session.powerPlan.bots[botId]?.effects.map((entry) => entry.effect) ?? [];
-  const role = snapshot?.role === "moderator"
-    ? "debate_moderator"
-    : snapshot?.role === "juror"
-      ? "debate_juror"
-      : "debate_advocate";
+  const effects =
+    session.powerPlan.bots[botId]?.effects.map((entry) => entry.effect) ?? [];
+  const role =
+    snapshot?.role === "moderator"
+      ? "debate_moderator"
+      : snapshot?.role === "juror"
+        ? "debate_juror"
+        : "debate_advocate";
   return botPowerIneptitudeFinalRoleCueFromEffectsV1(effects, role) ?? "";
 }
 
@@ -3637,17 +3678,21 @@ function debateIneptitudeMisdirection(
   phase: string,
 ): string {
   const snapshot = debateBots(session).find((bot) => bot.id === botId);
-  const effects = session.powerPlan.bots[botId]?.effects.map((entry) => entry.effect) ?? [];
-  const role = snapshot?.role === "moderator"
-    ? "debate_moderator"
-    : snapshot?.role === "juror"
-      ? "debate_juror"
-      : "debate_advocate";
-  return botPowerIneptRoleMisdirectionFromEffectsV1(
-    effects,
-    role,
-    `${session.id}:${session.stepKey}:${botId}:${phase}`,
-  ) ?? "";
+  const effects =
+    session.powerPlan.bots[botId]?.effects.map((entry) => entry.effect) ?? [];
+  const role =
+    snapshot?.role === "moderator"
+      ? "debate_moderator"
+      : snapshot?.role === "juror"
+        ? "debate_juror"
+        : "debate_advocate";
+  return (
+    botPowerIneptRoleMisdirectionFromEffectsV1(
+      effects,
+      role,
+      `${session.id}:${session.stepKey}:${botId}:${phase}`,
+    ) ?? ""
+  );
 }
 
 function powerPrompt(session: DebateSessionV1, botId: string): string {
@@ -3671,6 +3716,11 @@ function powerPrompt(session: DebateSessionV1, botId: string): string {
     }
     if (effect.type === "ineptitude") {
       return [`- ${powerName} (${policy}): ${ineptitudeCue}`];
+    }
+    if (effect.type === "speech_obfuscation") {
+      return [
+        `- ${powerName} (${policy}): HARD — author fully intelligible natural-language intent. Do not imitate mumbling, gibberish, slurring, or phonetic spelling in your draft; PRISM applies the public speech transformation after generation.`,
+      ];
     }
     return [`- ${powerName} (${policy}): ${JSON.stringify(effect)}`];
   });
@@ -3851,20 +3901,24 @@ async function generateSpeech(
         ].join("\n"),
       },
       ...(debateIneptitudeFinalPrompt(session, snapshot.id)
-        ? [{
-            role: "system" as const,
-            content: debateIneptitudeFinalPrompt(session, snapshot.id),
-          }]
+        ? [
+            {
+              role: "system" as const,
+              content: debateIneptitudeFinalPrompt(session, snapshot.id),
+            },
+          ]
         : []),
       ...(debateIneptitudeMisdirection(session, snapshot.id, "speech")
-        ? [{
-            role: "user" as const,
-            content: debateIneptitudeMisdirection(
-              session,
-              snapshot.id,
-              "speech",
-            ),
-          }]
+        ? [
+            {
+              role: "user" as const,
+              content: debateIneptitudeMisdirection(
+                session,
+                snapshot.id,
+                "speech",
+              ),
+            },
+          ]
         : []),
     ],
     {
@@ -5520,12 +5574,16 @@ async function moderatorOvertimeCorrection(
   speechEvent: DebateEventV1,
   runtime: DebateAiRuntime,
   upcoming: DebateSessionV1,
+  audienceOrderReason?: "shock" | "disruptive",
 ): Promise<DebateEventV1> {
   const overtimeSeconds = Math.max(
     1,
     Math.ceil((speechEvent.timing?.overtimeMs ?? 0) / 1_000),
   );
   const guidance = debateUpcomingFloorGuidance(upcoming, speaker.name);
+  const audienceOrderFallback = audienceOrderReason
+    ? moderatorAudienceOrderFallback(session, audienceOrderReason)
+    : null;
   let correction: Awaited<ReturnType<typeof generateSpeech>>;
   try {
     correction = await generateSpeech(
@@ -5533,7 +5591,12 @@ async function moderatorOvertimeCorrection(
       session.moderator,
       [
         `${speaker.name} continued roughly ${overtimeSeconds} seconds beyond the allotted floor time.`,
-        "Correct the overrun in one concise procedural sentence.",
+        audienceOrderReason
+          ? "The public gallery is also disruptive, and the gavel has already struck. In one concise procedural sentence, call the room to order and correct the overrun."
+          : "Correct the overrun in one concise procedural sentence.",
+        audienceOrderReason
+          ? "Speak at ordinary projection. Never shout, yell, or describe yourself as shouting; the gavel carries the authority."
+          : "",
         guidance.prompt,
         "Do not evaluate, rebut, or summarize the substance of the argument.",
       ].join(" "),
@@ -5541,7 +5604,9 @@ async function moderatorOvertimeCorrection(
     );
   } catch {
     correction = {
-      content: guidance.fallback,
+      content: audienceOrderFallback
+        ? `${audienceOrderFallback} ${guidance.fallback}`
+        : guidance.fallback,
       sourceIds: [],
       silent: false,
     };
@@ -5559,6 +5624,12 @@ async function moderatorOvertimeCorrection(
     autoRecovery: correction.autoRecovery,
     voicePerformanceCue: correction.voicePerformanceCue,
     powerIntendedContent: correction.powerIntendedContent,
+    ...(audienceOrderReason
+      ? {
+          gavelReason: "audience_order" as const,
+          gavelStrikeCount: 1,
+        }
+      : {}),
   });
 }
 
@@ -5731,6 +5802,12 @@ async function speechTransition(
           event,
           runtime,
           upcoming,
+          debateAudienceModeratorOrderPlan({
+            events: withBoard.events,
+            formality: session.formality,
+            playerRole: session.playerRole,
+            triggerEvent: event,
+          })?.reason,
         )
       : null;
   if (overtimeCorrection) {
@@ -6129,20 +6206,24 @@ async function generateJuryBallot(
       },
       { role: "user", content: juryBallotPrompt(session, juror, stage) },
       ...(debateIneptitudeFinalPrompt(session, juror.id)
-        ? [{
-            role: "system" as const,
-            content: debateIneptitudeFinalPrompt(session, juror.id),
-          }]
+        ? [
+            {
+              role: "system" as const,
+              content: debateIneptitudeFinalPrompt(session, juror.id),
+            },
+          ]
         : []),
       ...(debateIneptitudeMisdirection(session, juror.id, `ballot:${stage}`)
-        ? [{
-            role: "user" as const,
-            content: debateIneptitudeMisdirection(
-              session,
-              juror.id,
-              `ballot:${stage}`,
-            ),
-          }]
+        ? [
+            {
+              role: "user" as const,
+              content: debateIneptitudeMisdirection(
+                session,
+                juror.id,
+                `ballot:${stage}`,
+              ),
+            },
+          ]
         : []),
     ],
     {
@@ -6168,23 +6249,17 @@ async function generateJuryBallot(
     sanitizeDebateStatementSources(reasonDraft, session.evidence).content ||
     "That side made the more persuasive public case.";
   if (stage === "final") {
-    const powerBot = session.powerPlan.bots[juror.id];
-    const effects = powerBot?.effects.map((entry) => entry.effect) ?? [];
+    const effects =
+      session.powerPlan.bots[juror.id]?.effects.map((entry) => entry.effect) ??
+      [];
     const responseBudget = strongestBotPowerResponseBudgetEffectV1(effects);
     reason = applyBotPowerResponseBudgetV1(reason, responseBudget, 3);
-    if (effects.some((effect) => effect.type === "speech_obfuscation")) {
-      reason = applyBotPowerMumbledResponseV1(reason);
-    }
-    if (
-      powerBot?.hardMuted ||
-      botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1(
-        effects,
-        `${session.id}:jury_final:${juror.id}`,
-      )
-    ) {
-      reason = applyBotPowerMuteResponseV1(reason);
-    }
   }
+  const publicDelivery =
+    stage === "final"
+      ? juryBallotPublicDelivery(session, juror.id, reason)
+      : { content: reason };
+  reason = publicDelivery.content;
   const voicePerformanceCue =
     stage === "final" && reason !== BOT_POWER_CANONICAL_SILENCE_V1
       ? normalizeDebateVoicePerformanceCue(generation.value.deliveryCue)
@@ -6199,6 +6274,9 @@ async function generateJuryBallot(
       compactText(generation.value.personaInstinct, 500) ||
       `I am weighing ${debatePublicMaterialDescription(session.formality)} through my own priorities.`,
     reason,
+    ...(publicDelivery.powerIntendedContent
+      ? { powerIntendedReason: publicDelivery.powerIntendedContent }
+      : {}),
     provider: generation.provider,
     model: generation.model,
     ...(generation.autoRecovery
@@ -6207,6 +6285,34 @@ async function generateJuryBallot(
     ...(voicePerformanceCue ? { voicePerformanceCue } : {}),
     createdAt: new Date().toISOString(),
   };
+}
+
+function juryBallotPublicDelivery(
+  session: DebateSessionV1,
+  jurorBotId: string,
+  intendedReason: string,
+): { content: string; powerIntendedContent?: string } {
+  const powerBot = session.powerPlan.bots[jurorBotId];
+  const effects = powerBot?.effects.map((entry) => entry.effect) ?? [];
+  if (
+    powerBot?.hardMuted ||
+    botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1(
+      effects,
+      `${session.id}:jury_final:${jurorBotId}`,
+    )
+  ) {
+    return {
+      content: applyBotPowerMuteResponseV1(intendedReason),
+      powerIntendedContent: intendedReason,
+    };
+  }
+  if (effects.some((effect) => effect.type === "speech_obfuscation")) {
+    return {
+      content: applyBotPowerMumbledResponseV1(intendedReason),
+      powerIntendedContent: intendedReason,
+    };
+  }
+  return { content: intendedReason };
 }
 
 const JURY_SIDEBAR_EVENT_KINDS = new Set<DebateEventKind>([
@@ -7318,6 +7424,7 @@ async function advanceJuryStep(
       speakerBotId: juror.id,
       sideId: ballot.sideId,
       content: ballotContent,
+      powerIntendedContent: ballot.powerIntendedReason,
       sourceIds: debateSourceIdsFromText(ballotContent, session.evidence),
       provider: ballot.provider,
       model: ballot.model,
@@ -10551,7 +10658,10 @@ function pausedPresentationEventId(
   if (!eventId) return null;
   const event = session.events.find((candidate) => candidate.id === eventId);
   if (!event || event.speakerKind === "system" || event.kind === "error") {
-    throw new HttpError(409, "That spoken line no longer belongs to the live floor.");
+    throw new HttpError(
+      409,
+      "That spoken line no longer belongs to the live floor.",
+    );
   }
   return event.id;
 }
@@ -10565,9 +10675,7 @@ function resumedDebatePauseTiming(
     pausedAt: null,
     pausedDurationMs:
       Math.max(0, session.pausedDurationMs ?? 0) +
-      (Number.isFinite(pausedAtMs)
-        ? Math.max(0, resumedAtMs - pausedAtMs)
-        : 0),
+      (Number.isFinite(pausedAtMs) ? Math.max(0, resumedAtMs - pausedAtMs) : 0),
   };
 }
 
@@ -11144,6 +11252,7 @@ function debateDebriefTargetContext(
     (ballot) => ballot.voterBotId === targetBotId,
   );
   const ballotReason =
+    juryBallot?.powerIntendedReason?.trim() ||
     juryBallot?.reason?.trim() ||
     (!floorBallot?.privateReason ? floorBallot?.reason?.trim() || null : null);
   return {

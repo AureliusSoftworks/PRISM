@@ -40,15 +40,15 @@ describe("Avatar Details Studio integration", () => {
     assert.doesNotMatch(pageSource, /prismAvatarDetailsPaneEnabled/);
   });
 
-  it("keeps the recipe local until Apply and guards dirty tab or close navigation", () => {
+  it("commits completed ink gestures into the Studio draft without a nested Apply boundary", () => {
     assert.match(editorSource, /const \[working, setWorking\]/);
-    assert.match(editorSource, /onApply\(next\)/);
+    assert.match(editorSource, /if \(autoCommit\)/);
+    assert.match(editorSource, /onApply\(cloneAvatarDetails\(next\)\)/);
     assert.match(editorSource, /beforeunload/);
-    assert.match(
-      pageSource,
-      /detailsEditorRef\.current\?\.hasDirtyChanges\(\)/,
-    );
-    assert.match(pageSource, /Apply avatar details\?/);
+    assert.match(pageSource, /layout="foundry"/);
+    assert.match(pageSource, /autoCommit/);
+    assert.match(editorSource, /layout === "panel" \? <footer/);
+    assert.doesNotMatch(pageSource, /Apply avatar details\?/);
   });
 
   it("routes Studio undo and redo to Ink before falling back to the avatar draft", () => {
@@ -278,23 +278,42 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /flushPreview\(workingRef\.current\)/);
   });
 
-  it("unmounts the large avatar throughout Details editing until explicitly rendered", () => {
+  it("mounts the lightweight canvas directly inside the canonical CRT", () => {
     assert.match(
       pageSource,
-      /const \[detailsAvatarPreviewVisible, setDetailsAvatarPreviewVisible\] =\s*useState\(false\)/,
+      /screenMode=\{\s*activeControlTab === "details" \? "editing" : "live"\s*\}/,
     );
     assert.match(
       pageSource,
-      /activeControlTab === "details" &&\s*!detailsAvatarPreviewVisible[\s\S]*<BotAvatarDeferredPreviewPanel/,
+      /className=\{styles\.botAvatarFoundryInkMount\}/,
     );
-    assert.match(pageSource, />\s*Render current avatar\s*<\/button>/);
-    assert.match(pageSource, /data-avatar-preview-deferred="true"/);
+    assert.match(editorSource, /createPortal\(canvasEditor, canvasPortalTarget\)/);
+    assert.match(editorSource, /data-foundry-canvas=/);
+    assert.match(pageSource, /runtimeEffectsEnabled=\{screenMode === "live"\}/);
+    assert.doesNotMatch(pageSource, /Render current avatar/);
+  });
+
+  it("keeps foundry ink interactive and synchronized with Studio history", () => {
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresencePlate \.botAvatarFoundryInkMount,[\s\S]*?\.zenLiveBotPresencePlate \.botAvatarFoundryInkMount \*[\s\S]*?pointer-events:\s*auto/,
+    );
+    assert.match(
+      pageCss,
+      /\.botAvatarCustomizerBody\[data-camera-mode="ink"\][\s\S]*?\.botAvatarFoundryNode\s*\{[\s\S]*?pointer-events:\s*none/,
+    );
+    assert.match(
+      editorSource,
+      /!autoCommit \|\|[\s\S]*?avatarDetailsEqual\(workingRef\.current, normalizedSource\)[\s\S]*?resetHistory\(\);[\s\S]*?updateWorking\(cloneAvatarDetails\(normalizedSource\)\)/,
+    );
     assert.match(
       pageSource,
-      /onEditStart=\{\(\) => setDetailsAvatarPreviewVisible\(false\)\}/,
+      /onAvatarDetailsApply=\{\(next\) => \{[\s\S]*?pushBotAvatarUndoSnapshot\(\);[\s\S]*?setNewBotAvatarDetails\(normalized\);/,
     );
-    assert.match(editorSource, /onEditStart\?\.\(\);[\s\S]*pointerGridPoint/);
-    assert.match(pageCss, /\.botAvatarDeferredPreviewPrompt/);
+    assert.doesNotMatch(
+      pageSource,
+      /pushBotAvatarUndoSnapshot\("avatar-details"\)/,
+    );
   });
 
   it("offers bucket recoloring, shapes, and whole-illustration dragging without hotkeys", () => {
@@ -322,30 +341,16 @@ describe("Avatar Details Studio integration", () => {
     assert.doesNotMatch(editorCss, /\.keyboardHelp|\.keyboardCursor/);
   });
 
-  it("guards Studio saves and waits for applied Details state before persisting", () => {
+  it("persists ink only through the top-level Studio save", () => {
     assert.match(
       pageSource,
       /className=\{styles\.botAvatarCustomizerSaveButton\}[\s\S]*onClick=\{\(\) => requestStudioSave\(\)\}/,
     );
-    assert.match(pageSource, /openDetailsLeavePrompt\(\{ kind: "save" \}\)/);
-    assert.match(pageSource, /await detailsEditorRef\.current\?\.apply\(\)/);
-    assert.match(
-      pageSource,
-      /if \(!applied\)[\s\S]*setDetailsLeaveRequest\(null\)[\s\S]*continueDetailsNavigation\(request\)/,
-    );
-    assert.match(
-      pageSource,
-      /setPendingDetailsSaveKey\(avatarDetailsKey\(avatarDetailsPreview\)\)/,
-    );
-    assert.match(
-      pageSource,
-      /avatarDetailsKey\(avatarDetails\) !== pendingDetailsSaveKey/,
-    );
-    assert.match(pageSource, /Apply avatar details before saving\?/);
-    assert.doesNotMatch(
-      pageSource,
-      /className=\{styles\.botAvatarCustomizerSaveButton\}[\s\S]{0,240}onClick=\{\(\) => void onSave\(\)\}/,
-    );
+    assert.match(pageSource, /const requestStudioSave =/);
+    assert.match(pageSource, /void onSave\(\);/);
+    assert.doesNotMatch(pageSource, /openDetailsLeavePrompt/);
+    assert.doesNotMatch(pageSource, /pendingDetailsSaveKey/);
+    assert.doesNotMatch(pageSource, /Apply avatar details before saving\?/);
   });
 
   it("keeps draft, create, clone, edit, and save state wired", () => {
@@ -358,20 +363,17 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       pageSource,
-      /pushBotAvatarUndoSnapshot\("avatar-details"\);[\s\S]*setNewBotAvatarDetails\(normalized\);/,
+      /pushBotAvatarUndoSnapshot\(\);[\s\S]*setNewBotAvatarDetails\(normalized\);/,
+    );
+    assert.doesNotMatch(pageSource, /persistBotAvatarDetails/);
+    assert.match(
+      pageSource,
+      /async function saveBot\([\s\S]*avatarDetails: newBotAvatarDetails/,
     );
     assert.match(
       pageSource,
-      /if \(editingBotId\) \{[\s\S]*await persistBotAvatarDetails\([\s\S]*editingBotId,[\s\S]*normalized/,
+      /async function createBot\([\s\S]*avatarDetails: newBotAvatarDetails/,
     );
-    const persistenceSource = pageSource.slice(
-      pageSource.indexOf("async function persistBotAvatarDetails("),
-      pageSource.indexOf("async function flushBotVoiceAutosaveQueue("),
-    );
-    assert.match(persistenceSource, /method: "PATCH"/);
-    assert.match(persistenceSource, /JSON\.stringify\(\{ avatarDetails: details \}\)/);
-    assert.match(persistenceSource, /avatarDetails: details/);
-    assert.match(persistenceSource, /replaceBotRowById/);
 
     const cloneSource = pageSource.slice(
       pageSource.indexOf("async function cloneBot("),
@@ -532,7 +534,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageCss,
-      /\.coffeeSeat \.zenLiveBotPresenceFaceRig\s*\{[^}]*scaleX\(var\(--zen-live-bot-face-layer-scale-x, 1\)\)/,
+      /\.coffeeSeat \.zenLiveBotPresenceFaceRig,[\s\S]*?\.coffeeReplayPlayerAvatar \.zenLiveBotPresenceFaceRig\s*\{[^}]*scaleX\(var\(--zen-live-bot-face-layer-scale-x, 1\)\)/,
     );
     assert.match(
       pageCss,
@@ -586,7 +588,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /<AvatarDetailsMask[\s\S]{0,180}detailLevel=\{detailLevel\}/,
+      /<AvatarDetailsMask[\s\S]{0,180}detailLevel=\{avatarDetailsDetailLevel\}/,
     );
     assert.match(
       pageSource,

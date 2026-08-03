@@ -36,105 +36,110 @@ function fixture(): DatabaseSync {
 
 test("builds tenant-safe metadata context without source material", () => {
   const db = fixture();
-  const context = buildPrismCompanionAuthoritativeContext(
-    db,
-    "u1",
-    "Jared",
-    {
-      surfaceId: "slate",
-      botIds: ["owned", "public", "secret"],
-      conversationId: "c1",
-      slateProjectId: "p1",
-      slateSectionId: "s1",
-    },
+  const context = buildPrismCompanionAuthoritativeContext(db, "u1", "Jared", {
+    surfaceId: "slate",
+    botIds: ["owned", "public", "secret"],
+    conversationId: "c1",
+    slateProjectId: "p1",
+    slateSectionId: "s1",
+  });
+  assert.deepEqual(
+    context.bots.map((bot) => bot.id),
+    ["owned", "public"],
   );
-  assert.deepEqual(context.bots.map((bot) => bot.id), ["owned", "public"]);
   assert.equal(context.conversation?.incognito, true);
   assert.equal(context.slate?.sectionTitle, "Chapter One");
   const serialized = JSON.stringify(context);
   assert.doesNotMatch(serialized, /SECRET MANUSCRIPT|SECRET PROSE/u);
-  assert.doesNotMatch(prismCompanionSystemPrompt(context), /SECRET MANUSCRIPT|SECRET PROSE/u);
+  assert.doesNotMatch(
+    prismCompanionSystemPrompt(context),
+    /SECRET MANUSCRIPT|SECRET PROSE/u,
+  );
 });
 
 test("authorizes focused Story and Image metadata without exposing asset data", () => {
   const db = fixture();
-  const story = buildPrismCompanionAuthoritativeContext(
-    db,
-    "u1",
-    "Jared",
-    { surfaceId: "story", storySessionId: "story-1" },
-  );
+  const story = buildPrismCompanionAuthoritativeContext(db, "u1", "Jared", {
+    surfaceId: "story",
+    storySessionId: "story-1",
+  });
   assert.equal(story.story?.sessionTitle, "Glass Archive");
   assert.equal(story.story?.sessionStatus, "playing");
-  const image = buildPrismCompanionAuthoritativeContext(
-    db,
-    "u1",
-    "Jared",
-    { surfaceId: "images", imageId: "image-1" },
-  );
-  assert.equal(
-    image.image?.promptExcerpt,
-    "A pinecone under theatrical light",
-  );
+  const image = buildPrismCompanionAuthoritativeContext(db, "u1", "Jared", {
+    surfaceId: "images",
+    imageId: "image-1",
+  });
+  assert.equal(image.image?.promptExcerpt, "A pinecone under theatrical light");
   assert.doesNotMatch(JSON.stringify(image), /data:image|local_rel_path/u);
 });
 
 test("explains the current screen controls without needing pixels or DOM", () => {
   const db = fixture();
-  const context = buildPrismCompanionAuthoritativeContext(
-    db,
-    "u1",
-    "Jared",
-    { surfaceId: "zen", botIds: ["owned"], conversationId: "c1" },
-  );
+  const context = buildPrismCompanionAuthoritativeContext(db, "u1", "Jared", {
+    surfaceId: "zen",
+    botIds: ["owned"],
+    conversationId: "c1",
+  });
   const prompt = prismCompanionSystemPrompt(context);
-  assert.match(prompt, /Screen: Lux Home, a one-to-one Zen conversation with Lux/u);
+  assert.match(
+    prompt,
+    /Screen: Lux Home, a one-to-one Zen conversation with Lux/u,
+  );
   assert.match(prompt, /You are not Lux/u);
-  assert.match(prompt, /floating "Ask Prism…" composer sends a private request to you/u);
-  assert.match(prompt, /"ACTION · What you do…" field is the player's optional physical or nonverbal stage direction for Lux/u);
+  assert.match(
+    prompt,
+    /floating "Ask Prism…" composer sends a private request to you/u,
+  );
+  assert.match(
+    prompt,
+    /"ACTION · What you do…" field is the player's optional physical or nonverbal stage direction for Lux/u,
+  );
   assert.match(prompt, /not a command or request to Prism/u);
-  assert.match(prompt, /"Say something…" field is what the player says directly to Lux/u);
+  assert.match(
+    prompt,
+    /"Say something…" field is what the player says directly to Lux/u,
+  );
   assert.match(prompt, /not a screenshot or DOM capture/u);
 });
 
 test("grounds Debate setup help in a bounded unsaved draft and authorized cast", () => {
   const db = fixture();
-  const context = buildPrismCompanionAuthoritativeContext(
-    db,
-    "u1",
-    "Jared",
-    {
-      surfaceId: "debate",
-      botIds: ["owned", "secret"],
-      debateDraft: {
-        setupMode: "advanced",
-        studioPanel: "evidence",
-        format: "turnabout",
-        formality: "heated",
-        playerRole: "judge",
-        playerSideId: "for",
-        juryEnabled: false,
-        moderatorTitle: "The Forum",
-        topic: "Museum ethics",
-        motion: "Museums should return contested artifacts.",
-        forLabel: "Return",
-        forBrief: "Defend return.",
-        againstLabel: "Retain",
-        againstBrief: "Defend stewardship.",
-        exhibitAdjective: "Dusty",
-        exhibitObject: "ledger",
-        exhibitObservation: "Several pages are visibly torn.",
-        evidenceItemCount: 1,
-      },
+  const context = buildPrismCompanionAuthoritativeContext(db, "u1", "Jared", {
+    surfaceId: "debate",
+    botIds: ["owned", "secret"],
+    debateDraft: {
+      studioPanel: "evidence",
+      format: "turnabout",
+      formality: "heated",
+      playerRole: "judge",
+      playerSideId: "for",
+      juryEnabled: false,
+      moderatorTitle: "The Forum",
+      topic: "Museum ethics",
+      motion: "Museums should return contested artifacts.",
+      forLabel: "Return",
+      forBrief: "Defend return.",
+      againstLabel: "Retain",
+      againstBrief: "Defend stewardship.",
+      exhibitAdjective: "Dusty",
+      exhibitObject: "ledger",
+      exhibitObservation: "Several pages are visibly torn.",
+      evidenceItemCount: 1,
     },
+  });
+  assert.deepEqual(
+    context.bots.map((bot) => bot.name),
+    ["Lux"],
   );
-  assert.deepEqual(context.bots.map((bot) => bot.name), ["Lux"]);
   const prompt = prismCompanionSystemPrompt(context);
   assert.match(prompt, /player is in the pre-proceeding Studio/u);
   assert.match(prompt, /unsaved, editable workbench draft/u);
   assert.match(prompt, /Draft motion: "Museums should return/u);
   assert.match(prompt, /Current object exhibit draft: "Dusty ledger"/u);
-  assert.match(prompt, /without claiming any candidate was accepted, saved, or frozen/u);
+  assert.match(
+    prompt,
+    /without claiming any candidate was accepted, saved, or frozen/u,
+  );
 });
 
 test("keeps ordinary requests answer-first instead of trapping them in the current surface", () => {
@@ -161,7 +166,10 @@ test("keeps full Prism and the orb one identity on Prism Home", () => {
       surfaceId: "prism-home",
     }),
   );
-  assert.match(prompt, /full-size Prism and the floating orb are one identity/u);
+  assert.match(
+    prompt,
+    /full-size Prism and the floating orb are one identity/u,
+  );
   assert.match(prompt, /What you do….*active Zen conversation/u);
 });
 
@@ -179,12 +187,10 @@ test("strips malformed and disallowed model actions", () => {
 
 test("recognizes explicit safe commands without executing them", () => {
   const db = fixture();
-  const context = buildPrismCompanionAuthoritativeContext(
-    db,
-    "u1",
-    "Jared",
-    { surfaceId: "home", botIds: ["owned"] },
-  );
+  const context = buildPrismCompanionAuthoritativeContext(db, "u1", "Jared", {
+    surfaceId: "home",
+    botIds: ["owned"],
+  });
   assert.deepEqual(
     prismCompanionDirectActionIntents("Please open Slate now.", context),
     [{ type: "navigate", destination: "slate" }],

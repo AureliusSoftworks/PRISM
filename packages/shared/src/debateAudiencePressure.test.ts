@@ -79,6 +79,25 @@ describe("Debate audience delivery pressure", () => {
     };
     assert.equal(
       debateAudiencePressureScore({
+        events: [
+          ...events,
+          {
+            ...order,
+            kind: "moderator_ruling",
+            speakerKind: "moderator",
+            speakerBotId: "moderator",
+            stepKey: "opening_for",
+            gavelReason: "audience_order",
+            gavelStrikeCount: 1,
+          },
+        ],
+        formality: "free_for_all",
+        playerRole: "spectator",
+      }),
+      0,
+    );
+    assert.equal(
+      debateAudiencePressureScore({
         events: [...events, order],
         formality: "heated",
         playerRole: "judge",

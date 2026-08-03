@@ -11,6 +11,7 @@ import {
   type CSSProperties,
   type PointerEvent,
 } from "react";
+import { createPortal } from "react-dom";
 import type { BotFaceStyle } from "@localai/shared";
 import {
   BookmarkPlus,
@@ -133,6 +134,9 @@ export interface AvatarDetailsEditorProps {
   onDirtyChange?: (dirty: boolean) => void;
   onPreviewChange?: (details: AvatarDetailsV1) => void;
   onEditStart?: () => void;
+  layout?: "panel" | "foundry";
+  canvasPortalTarget?: HTMLElement | null;
+  autoCommit?: boolean;
 }
 
 interface AvatarDetailsPointerStroke {
@@ -201,6 +205,9 @@ const AvatarDetailsEditorSession = forwardRef<
     onDirtyChange,
     onPreviewChange,
     onEditStart,
+    layout = "panel",
+    canvasPortalTarget = null,
+    autoCommit = false,
   },
   ref,
 ): React.JSX.Element {
@@ -339,6 +346,19 @@ const AvatarDetailsEditorSession = forwardRef<
     setRedoHistory([]);
   }, []);
 
+  useEffect(() => {
+    if (
+      !autoCommit ||
+      avatarDetailsEqual(workingRef.current, normalizedSource)
+    ) {
+      return;
+    }
+    resetHistory();
+    updateWorking(cloneAvatarDetails(normalizedSource));
+    setLimitReached(false);
+    setApplyError(null);
+  }, [autoCommit, normalizedSource, resetHistory, updateWorking]);
+
   const applyHistoryTransition = useCallback(
     (next: AvatarDetailsHistoryState, publishPreview = true): void => {
       undoHistoryRef.current = next.undo;
@@ -450,9 +470,20 @@ const AvatarDetailsEditorSession = forwardRef<
           next,
         ),
       );
+      if (autoCommit) {
+        void Promise.resolve(onApply(cloneAvatarDetails(next))).catch(
+          (error: unknown) => {
+            setApplyError(
+              error instanceof Error
+                ? error.message
+                : "Avatar details could not be updated.",
+            );
+          },
+        );
+      }
       setLimitReached(false);
     },
-    [applyHistoryTransition],
+    [applyHistoryTransition, autoCommit, onApply],
   );
 
   const persistInkTemplates = useCallback(
@@ -585,9 +616,10 @@ const AvatarDetailsEditorSession = forwardRef<
     if (next === current) return false;
     onEditStart?.();
     applyHistoryTransition(next);
+    if (autoCommit) void onApply(cloneAvatarDetails(next.working));
     setLimitReached(false);
     return true;
-  }, [applyHistoryTransition, onEditStart]);
+  }, [applyHistoryTransition, autoCommit, onApply, onEditStart]);
 
   const redo = useCallback((): boolean => {
     const current = {
@@ -599,9 +631,10 @@ const AvatarDetailsEditorSession = forwardRef<
     if (next === current) return false;
     onEditStart?.();
     applyHistoryTransition(next);
+    if (autoCommit) void onApply(cloneAvatarDetails(next.working));
     setLimitReached(false);
     return true;
-  }, [applyHistoryTransition, onEditStart]);
+  }, [applyHistoryTransition, autoCommit, onApply, onEditStart]);
 
   const applyWorkingCopy = useCallback(async (): Promise<boolean> => {
     if (!dirty) return true;
@@ -873,6 +906,13 @@ const AvatarDetailsEditorSession = forwardRef<
       );
     }
     flushPreview(workingRef.current);
+    if (
+      autoCommit &&
+      stroke.changed &&
+      !avatarDetailsEqual(stroke.before, workingRef.current)
+    ) {
+      void onApply(cloneAvatarDetails(workingRef.current));
+    }
     event.preventDefault();
   };
 
@@ -934,10 +974,95 @@ const AvatarDetailsEditorSession = forwardRef<
           ? "Drag from the center to draw a circle."
           : "Drag to paint on the screen.";
 
+  const canvasEditor = (
+    <div className={styles.canvasFrame} data-foundry-canvas={layout === "foundry" ? "true" : undefined}>
+      <div className={styles.canvasViewport}>
+        <span
+          className={`${pageStyles.zenLiveBotPresenceFaceRig} ${styles.faceGuide}`}
+          style={faceGuideStyle}
+          data-avatar-details-face-guide="true"
+          data-visible={faceGuideVisible ? "true" : "false"}
+          aria-hidden="true"
+        >
+          <CoffeeSeatPlateEmoji
+            enabled={false}
+            isTalking={false}
+            scheduleKey="avatar-details-neutral-guide"
+            baseText={AVATAR_DETAILS_NEUTRAL_FACE.text}
+            rotateDeg={AVATAR_DETAILS_NEUTRAL_FACE.rotateDeg}
+            voicePreset="warm"
+            faceEyesFont={faceStyle.eyesFont}
+            faceEyeCharacter={faceStyle.eyeCharacter}
+            faceMouthFont={faceStyle.mouthFont}
+            faceMouthCharacter={faceStyle.mouthCharacter}
+            faceMouthAnimation={faceStyle.mouthAnimation}
+            faceFontWeight={faceStyle.weight}
+            faceEyeScale={faceStyle.eyeScale}
+            faceEyeOffsetX={faceStyle.eyeOffsetX}
+            faceEyeOffsetY={faceStyle.eyeOffsetY}
+            faceEyeRotationDeg={faceStyle.eyeRotationDeg}
+            faceEyeCount={faceStyle.eyeCount}
+            faceMouthScale={faceStyle.mouthScale}
+            faceMouthOffsetX={faceStyle.mouthOffsetX}
+            faceMouthOffsetY={faceStyle.mouthOffsetY}
+            faceMouthRotationDeg={faceStyle.mouthRotationDeg}
+            faceBlinkBar={faceStyle.blinkBar}
+            faceBlinkScale={faceStyle.blinkScale}
+            faceBlinkOffsetX={faceStyle.blinkOffsetX}
+            faceBlinkOffsetY={faceStyle.blinkOffsetY}
+            faceBlinkRotationDeg={faceStyle.blinkRotationDeg}
+            faceThinkingFrames={faceStyle.thinkingFrames}
+            faceThinkingScale={faceStyle.thinkingScale}
+            faceThinkingOffsetX={faceStyle.thinkingOffsetX}
+            faceThinkingOffsetY={faceStyle.thinkingOffsetY}
+            forceBlinkPhase="open"
+            className={`${pageStyles.coffeeSeatPlateEmoji} ${pageStyles.zenLiveBotPresenceFaceGlyph} ${styles.faceGuideGlyph}`}
+          />
+        </span>
+        <canvas
+          ref={screenGuideRef}
+          className={styles.screenBoundary}
+          width={AVATAR_DETAILS_CANVAS_SIZE}
+          height={AVATAR_DETAILS_CANVAS_SIZE}
+          data-avatar-details-writable-guide="true"
+          aria-hidden="true"
+        />
+        <canvas
+          ref={canvasRef}
+          className={styles.canvas}
+          width={AVATAR_DETAILS_CANVAS_SIZE}
+          height={AVATAR_DETAILS_CANVAS_SIZE}
+          data-avatar-details-editor-core="true"
+          aria-hidden="true"
+        />
+        <div
+          className={styles.inputSurface}
+          data-tool={paintMode}
+          data-dragging={pointerActive ? "true" : undefined}
+          role="application"
+          tabIndex={0}
+          aria-label={`Avatar pixel canvas. ${inkRole} ink, ${paintMode}, ${brushSize} pixel size. ${canvasInstruction}`}
+          onPointerDown={handlePointerDown}
+          onPointerMove={handlePointerMove}
+          onPointerUp={finishPointerStroke}
+          onPointerCancel={(event) => {
+            const stroke = pointerStrokeRef.current;
+            if (!stroke || stroke.pointerId !== event.pointerId) return;
+            pointerStrokeRef.current = null;
+            setPointerActive(false);
+            updateWorking(stroke.before);
+            flushPreview(stroke.before);
+          }}
+        />
+      </div>
+    </div>
+  );
+
   return (
     <section
       className={styles.editor}
       data-editor-theme={theme}
+      data-editor-layout={layout}
       aria-label="Avatar details editor"
     >
       <section className={styles.paintSection} aria-label="Semantic screen ink">
@@ -1135,79 +1260,9 @@ const AvatarDetailsEditorSession = forwardRef<
           </div>
         </div>
 
-        <div className={styles.canvasFrame}>
-          <div className={styles.canvasViewport}>
-            <span
-              className={`${pageStyles.zenLiveBotPresenceFaceRig} ${styles.faceGuide}`}
-              style={faceGuideStyle}
-              data-avatar-details-face-guide="true"
-              data-visible={faceGuideVisible ? "true" : "false"}
-              aria-hidden="true"
-            >
-              <CoffeeSeatPlateEmoji
-                enabled={false}
-                isTalking={false}
-                scheduleKey="avatar-details-neutral-guide"
-                baseText={AVATAR_DETAILS_NEUTRAL_FACE.text}
-                rotateDeg={AVATAR_DETAILS_NEUTRAL_FACE.rotateDeg}
-                voicePreset="warm"
-                faceEyesFont={faceStyle.eyesFont}
-                faceEyeCharacter={faceStyle.eyeCharacter}
-                faceMouthFont={faceStyle.mouthFont}
-                faceMouthCharacter={faceStyle.mouthCharacter}
-                faceMouthAnimation={faceStyle.mouthAnimation}
-                faceFontWeight={faceStyle.weight}
-                faceEyeScale={faceStyle.eyeScale}
-                faceEyeOffsetX={faceStyle.eyeOffsetX}
-                faceEyeOffsetY={faceStyle.eyeOffsetY}
-                faceEyeRotationDeg={faceStyle.eyeRotationDeg}
-                faceEyeCount={faceStyle.eyeCount}
-                faceMouthScale={faceStyle.mouthScale}
-                faceMouthOffsetX={faceStyle.mouthOffsetX}
-                faceMouthOffsetY={faceStyle.mouthOffsetY}
-                faceMouthRotationDeg={faceStyle.mouthRotationDeg}
-                faceBlinkBar={faceStyle.blinkBar}
-                faceBlinkScale={faceStyle.blinkScale}
-                faceBlinkOffsetX={faceStyle.blinkOffsetX}
-                faceBlinkOffsetY={faceStyle.blinkOffsetY}
-                faceBlinkRotationDeg={faceStyle.blinkRotationDeg}
-                faceThinkingFrames={faceStyle.thinkingFrames}
-                faceThinkingScale={faceStyle.thinkingScale}
-                faceThinkingOffsetX={faceStyle.thinkingOffsetX}
-                faceThinkingOffsetY={faceStyle.thinkingOffsetY}
-                forceBlinkPhase="open"
-                className={`${pageStyles.coffeeSeatPlateEmoji} ${pageStyles.zenLiveBotPresenceFaceGlyph} ${styles.faceGuideGlyph}`}
-              />
-            </span>
-            <canvas
-              ref={screenGuideRef}
-              className={styles.screenBoundary}
-              width={AVATAR_DETAILS_CANVAS_SIZE}
-              height={AVATAR_DETAILS_CANVAS_SIZE}
-              data-avatar-details-writable-guide="true"
-              aria-hidden="true"
-            />
-            <canvas
-              ref={canvasRef}
-              className={styles.canvas}
-              width={AVATAR_DETAILS_CANVAS_SIZE}
-              height={AVATAR_DETAILS_CANVAS_SIZE}
-              data-avatar-details-editor-core="true"
-              aria-hidden="true"
-            />
-            <div
-              className={styles.inputSurface}
-              data-tool={paintMode}
-              data-dragging={pointerActive ? "true" : undefined}
-              role="application"
-              aria-label={`Avatar pixel canvas. ${inkRole} ink, ${paintMode}, ${brushSize} pixel size. ${canvasInstruction}`}
-              onPointerDown={handlePointerDown}
-              onPointerMove={handlePointerMove}
-              onPointerUp={finishPointerStroke}
-              onPointerCancel={finishPointerStroke}
-            />
-          </div>
-        </div>
+        {canvasPortalTarget
+          ? createPortal(canvasEditor, canvasPortalTarget)
+          : canvasEditor}
 
         <div className={styles.coverage} aria-live="polite">
           <div>
@@ -1421,7 +1476,7 @@ const AvatarDetailsEditorSession = forwardRef<
         ) : null}
       </section>
 
-      <footer className={styles.footer}>
+      {layout === "panel" ? <footer className={styles.footer}>
         <span data-dirty={dirty ? "true" : undefined}>
           {applying
             ? "Applying…"
@@ -1447,7 +1502,7 @@ const AvatarDetailsEditorSession = forwardRef<
             {applying ? "Applying…" : "Apply"}
           </button>
         </div>
-      </footer>
+      </footer> : null}
       {applyError ? (
         <p className={styles.applyError} role="alert">
           {applyError}
@@ -1465,7 +1520,7 @@ export const AvatarDetailsEditor = forwardRef<
 >(function AvatarDetailsEditor(props, ref): React.JSX.Element {
   return (
     <AvatarDetailsEditorSession
-      key={`${props.templateOwnerId}:${avatarDetailsKey(props.value)}`}
+      key={`${props.templateOwnerId}:${props.layout === "foundry" ? "foundry" : avatarDetailsKey(props.value)}`}
       {...props}
       ref={ref}
     />

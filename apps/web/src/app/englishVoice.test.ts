@@ -561,6 +561,16 @@ describe("English voice synthesis responses", () => {
       headers: {
         "content-type": "audio/wav",
         "x-prism-voice-engine": "builtin-provider-fallback",
+        "x-prism-pronunciation-status": "applied",
+        "x-prism-pronunciation-requested": "en-GB",
+        "x-prism-pronunciation-source-locale": "en-US",
+        "x-prism-pronunciation-base-locale": "en-GB",
+        "x-prism-speechprint-status": "applied",
+        "x-prism-speechprint-id": "indian-english",
+        "x-prism-speechprint-strength": "balanced",
+        "x-prism-speechprint-base-locale": "en-US",
+        "x-prism-speechprint-ruleset": "2026.08.1",
+        "x-prism-speechprint-sha256": "a".repeat(64),
       },
     });
     const clip = await readEnglishVoiceSynthesisClip(response);
@@ -568,6 +578,23 @@ describe("English voice synthesis responses", () => {
     assert.equal(clip.audioContentType, "audio/wav");
     assert.equal(clip.alignment, null);
     assert.equal(clip.engineUsed, "builtin-provider-fallback");
+    assert.deepEqual(clip.resolvedPronunciation, {
+      requestedBase: "en-GB",
+      sourceLocale: "en-US",
+      resolvedBaseLocale: "en-GB",
+      status: "applied",
+      reason: null,
+    });
+    assert.deepEqual(clip.resolvedSpeechprint, {
+      requestedInfluence: "indian-english",
+      appliedInfluence: "indian-english",
+      strength: "balanced",
+      baseLocale: "en-US",
+      status: "applied",
+      reason: null,
+      rulesetVersion: "2026.08.1",
+      rulesetSha256: "a".repeat(64),
+    });
   });
 
   it("decodes timed JSON audio and character alignment", async () => {

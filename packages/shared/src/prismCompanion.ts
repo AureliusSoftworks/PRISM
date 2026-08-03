@@ -31,7 +31,6 @@ export type PrismCompanionSurfaceId =
   (typeof PRISM_COMPANION_SURFACE_IDS)[number];
 
 export interface PrismCompanionDebateDraft {
-  setupMode: "basic" | "advanced";
   studioPanel: "motion" | "cast" | "evidence" | "archive";
   format: DebateFormatId;
   formality: DebateFormalityId;
@@ -80,8 +79,7 @@ export const PRISM_COMPANION_TOOL_IDS = [
   "images",
 ] as const;
 
-export type PrismCompanionToolId =
-  (typeof PRISM_COMPANION_TOOL_IDS)[number];
+export type PrismCompanionToolId = (typeof PRISM_COMPANION_TOOL_IDS)[number];
 
 export const PRISM_COMPANION_HANDOFF_DIRECTIONS = [
   "zen-to-slate",
@@ -147,7 +145,6 @@ export function normalizePrismCompanionDebateDraft(
   value: unknown,
 ): PrismCompanionDebateDraft | undefined {
   if (!isRecord(value)) return undefined;
-  const setupMode = value.setupMode === "advanced" ? "advanced" : "basic";
   const studioPanel =
     value.studioPanel === "cast" ||
     value.studioPanel === "evidence" ||
@@ -167,7 +164,6 @@ export function normalizePrismCompanionDebateDraft(
       ? value.playerRole
       : "judge";
   return {
-    setupMode,
     studioPanel,
     format,
     formality,
@@ -205,7 +201,10 @@ export function normalizePrismCompanionSurfaceReference(
     throw new Error("A valid Prism surface is required.");
   }
   const botIds = Array.isArray(value.botIds)
-    ? Array.from(new Set(value.botIds.map(boundedId).filter(Boolean))).slice(0, 5)
+    ? Array.from(new Set(value.botIds.map(boundedId).filter(Boolean))).slice(
+        0,
+        5,
+      )
     : [];
   const debateDraft =
     value.surfaceId === "debate"
@@ -236,9 +235,7 @@ export function normalizePrismCompanionSurfaceReference(
       ? { debateSessionId: boundedId(value.debateSessionId) }
       : {}),
     ...(debateDraft ? { debateDraft } : {}),
-    ...(boundedId(value.imageId)
-      ? { imageId: boundedId(value.imageId) }
-      : {}),
+    ...(boundedId(value.imageId) ? { imageId: boundedId(value.imageId) } : {}),
     ...(boundedId(value.libraryGroupId)
       ? { libraryGroupId: boundedId(value.libraryGroupId) }
       : {}),

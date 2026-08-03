@@ -671,4 +671,16 @@ describe("voice settings preview", () => {
       /if \(coffeeReplayOwnsVoicePlaybackRef\.current\) \{[\s\S]*?coffeeReplayOwnsVoicePlaybackRef\.current = false;[\s\S]*?stopBottishVoice\(\);[\s\S]*?stopEnglishVoice\(\);/,
     );
   });
+
+  it("shares genuine accent, presentation, and the Pronunciation Atlas across bot and Zen voices", () => {
+    assert.match(pageSource, /Genuine accent source/);
+    assert.match(pageSource, /Vocal presentation/);
+    assert.match(pageSource, /import \{ PronunciationAtlas \}/);
+    assert.match(pageSource, /label="Zen Pronunciation Atlas"/);
+    assert.match(pageSource, /Use the Pronunciation Atlas in the Vocalizer console above/);
+    assert.match(pageSource, /filteredSystemVoiceOptions\.map/);
+    assert.match(pageSource, /filteredPlayerLocalVoiceOptions\.map/);
+    assert.match(pageSource, /selectOfflineVoiceAccent/);
+    assert.match(pageStyles, /\.botVoicePresentationChips/);
+  });
 });

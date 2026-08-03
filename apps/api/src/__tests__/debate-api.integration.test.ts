@@ -255,6 +255,16 @@ describe("Debate API", () => {
     );
     assert.equal(blockedResearch.status, 409);
     assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
+    const blockedScholarResearch = await owner.request(
+      "/api/debates/research",
+      jsonInit({
+        query: "transit housing scholarship",
+        sourceType: "scholar",
+        preferredProvider: "local",
+      }),
+    );
+    assert.equal(blockedScholarResearch.status, 409);
+    assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
 
     const localUrlDraft = await owner.request(
       "/api/debates/sources/inspect",

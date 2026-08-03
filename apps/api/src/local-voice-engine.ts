@@ -1,10 +1,21 @@
 import { freemem, totalmem } from "node:os";
 import {
+  LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
+  LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION,
+  localVoicePronunciationOverrideIsActive,
+  normalizeBotAudioVoiceProfileV1,
   normalizeLocalVoiceEnginePreference,
+  normalizeLocalVoicePronunciationBase,
+  normalizeLocalVoiceSpeechprintInfluence,
+  normalizeLocalVoiceSpeechprintStrength,
+  resolveLocalVoicePronunciationLocale,
+  type BotAudioVoiceProfileV1,
   type LocalVoiceCalibrationStateV1,
   type LocalVoiceEngineCapabilityV1,
   type LocalVoiceEngineDecisionV1,
   type LocalVoiceEnginePreference,
+  type ResolvedLocalVoicePronunciationV1,
+  type ResolvedLocalVoiceSpeechprintV1,
 } from "@localai/shared";
 import { builtinEnglishAvailable } from "./builtin-tts.ts";
 
@@ -111,6 +122,8 @@ export function localVoiceEngineCapabilities(): LocalVoiceEngineCapabilityV1[] {
       available: calibration.voicePlus.available,
       qualified: calibration.voicePlus.qualified,
       supportsNativeVocalActions: true,
+      supportsPronunciationBases: false,
+      supportsSpeechprints: false,
       preservesProvenanceWatermark: true,
     },
     {
@@ -121,6 +134,8 @@ export function localVoiceEngineCapabilities(): LocalVoiceEngineCapabilityV1[] {
       available: calibration.instant.available,
       qualified: calibration.instant.available,
       supportsNativeVocalActions: false,
+      supportsPronunciationBases: true,
+      supportsSpeechprints: true,
       preservesProvenanceWatermark: false,
     },
   ];
@@ -154,6 +169,8 @@ export function resolveLocalVoiceEngine(args: {
   preference: LocalVoiceEnginePreference | unknown;
   calibration?: LocalVoiceCalibrationStateV1;
   runtimeHealthy?: boolean;
+  speechprintActive?: boolean;
+  pronunciationOverrideActive?: boolean;
 }): LocalVoiceEngineDecisionV1 {
   const requested = normalizeLocalVoiceEnginePreference(args.preference);
   const calibration = args.calibration ?? localVoiceCalibrationState();
@@ -163,6 +180,14 @@ export function resolveLocalVoiceEngine(args: {
     calibration.voicePlus.available &&
     calibration.voicePlus.qualified &&
     healthy;
+
+  if (
+    (args.speechprintActive === true ||
+      args.pronunciationOverrideActive === true) &&
+    (requested === "auto" || requested === "inherit")
+  ) {
+    return { requested, resolved: "instant", fallback: false, notice: null };
+  }
 
   if (requested === "voice-plus") {
     // A deliberate Voice+ choice opts out of Auto's latency thresholds. We
@@ -182,4 +207,89 @@ export function resolveLocalVoiceEngine(args: {
     return { requested, resolved: "voice-plus", fallback: false, notice: null };
   }
   return { requested, resolved: "instant", fallback: false, notice: null };
+}
+
+export function resolveLocalVoicePronunciation(args: {
+  profile: BotAudioVoiceProfileV1;
+  localEngine: LocalVoiceEngineDecisionV1;
+  usingSystemVoice: boolean;
+}): ResolvedLocalVoicePronunciationV1 {
+  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const requestedBase = normalizeLocalVoicePronunciationBase(
+    profile.pronunciationBase,
+  );
+  const sourceLocale = profile.accentLocale ?? "en-US";
+  const sourceBaseLocale = resolveLocalVoicePronunciationLocale(
+    "follow-voice",
+    sourceLocale,
+  );
+  const requestedBaseLocale = resolveLocalVoicePronunciationLocale(
+    requestedBase,
+    sourceLocale,
+  );
+  const active = localVoicePronunciationOverrideIsActive(
+    requestedBase,
+    sourceLocale,
+  );
+  const reason = !active
+    ? null
+    : args.usingSystemVoice
+      ? "system-voice"
+      : args.localEngine.resolved !== "instant"
+        ? "engine-unsupported"
+        : null;
+  return {
+    requestedBase,
+    sourceLocale,
+    resolvedBaseLocale: reason ? sourceBaseLocale : requestedBaseLocale,
+    status: !active ? "natural" : reason ? "suspended" : "applied",
+    reason,
+  };
+}
+
+export function resolveLocalVoiceSpeechprint(args: {
+  profile: BotAudioVoiceProfileV1;
+  localEngine: LocalVoiceEngineDecisionV1;
+  usingSystemVoice: boolean;
+  pronunciation?: ResolvedLocalVoicePronunciationV1;
+}): ResolvedLocalVoiceSpeechprintV1 {
+  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const requestedInfluence = normalizeLocalVoiceSpeechprintInfluence(
+    profile.speechprintInfluence,
+  );
+  const strength = normalizeLocalVoiceSpeechprintStrength(
+    profile.speechprintStrength,
+  );
+  const baseLocale = args.pronunciation?.resolvedBaseLocale ??
+    resolveLocalVoicePronunciationLocale(
+      profile.pronunciationBase,
+      profile.accentLocale,
+    );
+  if (requestedInfluence === "none") {
+    return {
+      requestedInfluence: "none",
+      appliedInfluence: null,
+      strength,
+      baseLocale,
+      status: "natural",
+      reason: null,
+      rulesetVersion: null,
+      rulesetSha256: null,
+    };
+  }
+  const reason = args.usingSystemVoice
+    ? "system-voice"
+    : args.localEngine.resolved !== "instant"
+      ? "engine-unsupported"
+      : null;
+  return {
+    requestedInfluence,
+    appliedInfluence: reason ? null : requestedInfluence,
+    strength,
+    baseLocale,
+    status: reason ? "suspended" : "applied",
+    reason,
+    rulesetVersion: reason ? null : LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION,
+    rulesetSha256: reason ? null : LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
+  };
 }

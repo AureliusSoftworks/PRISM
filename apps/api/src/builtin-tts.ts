@@ -228,7 +228,7 @@ async function listInstalledSystemVoices(
 ): Promise<string[]> {
   const options = await listInstalledSystemVoiceOptions(platform, signal);
   const english = options.filter((voice) => voice.locale.toLowerCase().startsWith("en"));
-  return (english.length > 0 ? english : options).map((voice) => voice.name);
+  return english.map((voice) => voice.name);
 }
 
 export function builtinEnglishAvailable(_platform = process.platform): boolean {
@@ -250,7 +250,7 @@ export async function getSystemVoiceCapabilities(signal?: AbortSignal): Promise<
     ? await listInstalledSystemVoiceOptions(platform, signal).catch(() => [])
     : [];
   const englishVoices = allVoices.filter((voice) => voice.locale.toLowerCase().startsWith("en"));
-  const voices = englishVoices.length > 0 ? englishVoices : allVoices;
+  const voices = englishVoices;
   const installedVoices = voices.map((voice) => voice.name);
   const slots = BOT_AUDIO_VOICE_IDS.map((voiceId) => ({
     voiceId,
@@ -375,6 +375,7 @@ async function generateSystemEnglishWave(args: {
 async function generatePrismVoicePackWave(args: {
   text: string;
   profile: BotAudioVoiceProfileV1;
+  protectedPhrases?: readonly string[];
   signal?: AbortSignal;
 }): Promise<Buffer> {
   if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
@@ -391,6 +392,7 @@ export async function generateBuiltinEnglishWave(args: {
   text: string;
   profile: BotAudioVoiceProfileV1;
   allowOperatingSystemVoices?: boolean;
+  protectedPhrases?: readonly string[];
   signal?: AbortSignal;
 }): Promise<Buffer> {
   const profile = normalizeBotAudioVoiceProfileV1(args.profile);
@@ -400,7 +402,12 @@ export async function generateBuiltinEnglishWave(args: {
     } catch (error) {
       if (isAbortError(error)) throw error;
       // A removed or broken host voice must not silence the bot. The portable
-      // built-in identity remains the deterministic local fallback.
+      // built-in identity remains the deterministic local fallback. Preserve
+      // the explicit system-voice contract by keeping phoneme controls
+      // suspended rather than changing pronunciation invisibly.
+      profile.pronunciationBase = "follow-voice";
+      profile.speechprintInfluence = "none";
+      profile.speechprintVariationSeed = "natural-v1";
     }
   }
 

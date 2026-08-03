@@ -795,3 +795,43 @@
     transition: none !important;
   }
 }
+
+.editor[data-editor-layout="foundry"] {
+  height: 100%;
+  grid-template-rows: auto auto;
+  align-content: start;
+  gap: 10px;
+}
+
+.editor[data-editor-layout="foundry"] .paintSection {
+  grid-template-columns: 1fr;
+  grid-template-rows: auto auto auto auto;
+  grid-template-areas:
+    "header"
+    "tools"
+    "palette"
+    "coverage";
+  padding: 0;
+  border: 0;
+  background: transparent;
+}
+
+.editor[data-editor-layout="foundry"] .templateSection {
+  background: color-mix(in srgb, var(--bg-deep) 84%, transparent);
+}
+
+.canvasFrame[data-foundry-canvas="true"] {
+  width: 100%;
+  height: 100%;
+  aspect-ratio: auto;
+  margin: 0;
+  border: 0;
+  border-radius: 18%;
+  background: #020406;
+  box-shadow: none;
+}
+
+.canvasFrame[data-foundry-canvas="true"] .inputSurface:focus-visible {
+  outline: 2px solid var(--editor-bot-color, var(--accent));
+  outline-offset: -3px;
+}

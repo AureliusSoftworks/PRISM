@@ -104,6 +104,8 @@ export async function updateCapturedReplayVoiceTake(
     alignment?: ReplayVoiceTakeV1["alignment"];
     sourceMessageId?: string | null;
     resolvedModelHash?: string | null;
+    resolvedPronunciation?: ReplayVoiceTakeV1["resolvedPronunciation"];
+    resolvedSpeechprint?: ReplayVoiceTakeV1["resolvedSpeechprint"];
     segmentTimings?: ReplayVoiceTakeV1["segmentTimings"];
     heardCompletion?: ReplayVoiceTakeV1["heardCompletion"];
   },
@@ -126,6 +128,8 @@ export async function storeCapturedReplayVoiceAudio(args: {
   durationMs?: number | null;
   resolvedEngine?: string | null;
   resolvedModelHash?: string | null;
+  resolvedPronunciation?: ReplayVoiceTakeV1["resolvedPronunciation"];
+  resolvedSpeechprint?: ReplayVoiceTakeV1["resolvedSpeechprint"];
   alignment?: ReplayVoiceTakeV1["alignment"];
 }): Promise<ReplayVoiceTakeRecordV1> {
   let take = await args.takePromise;
@@ -133,12 +137,16 @@ export async function storeCapturedReplayVoiceAudio(args: {
     args.durationMs !== undefined ||
     args.resolvedEngine !== undefined ||
     args.resolvedModelHash !== undefined ||
+    args.resolvedPronunciation !== undefined ||
+    args.resolvedSpeechprint !== undefined ||
     args.alignment !== undefined
   ) {
     take = await updateCapturedReplayVoiceTake(Promise.resolve(take), {
       durationMs: args.durationMs,
       resolvedEngine: args.resolvedEngine,
       resolvedModelHash: args.resolvedModelHash,
+      resolvedPronunciation: args.resolvedPronunciation,
+      resolvedSpeechprint: args.resolvedSpeechprint,
       alignment: args.alignment,
     });
   }

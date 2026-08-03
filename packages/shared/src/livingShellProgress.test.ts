@@ -38,6 +38,7 @@ describe("living-shell account progress", () => {
     const progress = normalizePrismTutorialProgress({ zen: true, slate: false });
     assert.equal(progress.zen.status, "completed");
     assert.equal(progress.slate.status, "pending");
+    assert.equal(progress.avatar.status, "pending");
     assert.equal(progress.prismWield.status, "pending");
     assert.equal(progress.signalRefract.status, "pending");
 

@@ -31,8 +31,8 @@ Voice settings list the engines available in each privacy lane:
   visible and recovers through Instant before playback begins.
 - **Operating-system voices** are an optional account setting. When enabled,
   installed English voices from macOS or Windows join bot voice menus. Turning
-  the setting off immediately returns every profile to its portable PRISM
-  identity without deleting a saved OS selection.
+  the catalog setting off hides new operating-system choices without deleting
+  or relabeling a saved selection.
 - **Online engine** is ElevenLabs for now. Listing an online engine is not a
   global activation switch: a profile uses it only after the person selects an
   ElevenLabs voice in Prism or bot customization.
@@ -55,6 +55,46 @@ serializes V3 with `local`, `premium`, and `delivery` sections; loading an older
 profile does not bulk-rewrite its bot file. ElevenLabs remains the expressive
 provider option for native audio tags, directed delivery, and higher emotional
 range.
+
+## Accent sources and Speechprints
+
+Local identity has four independent layers:
+
+- **Genuine accent source** filters the picker to the selected English locale.
+  American shows only `en-US`, British shows only `en-GB`, and another English
+  locale appears only when the operating system reports a matching voice.
+- **Vocal presentation** filters bundled archetypes to Any, Feminine, or
+  Masculine using authored metadata. Operating-system voices appear under Any
+  only because host APIs do not report presentation reliably.
+- **Pronunciation** follows the selected voice by default, or approximately
+  uses the qualified American or British phoneme base independently of that
+  voice. An American archetype can therefore keep its timbre while speaking
+  British phonemes, and vice versa.
+- **Pronunciation influence · Approximate** optionally applies one restrained,
+  PRISM-authored Speechprint: Spanish-influenced English, Brazilian
+  Portuguese-influenced English, Mandarin-influenced English,
+  Japanese-influenced English, Korean-influenced English, Indian English,
+  French-influenced English, German-influenced English, or Russian-influenced
+  English.
+  Each supports Light, Balanced, and Strong.
+
+Cross-accent pronunciation and Speechprints run only through Instant. Auto
+selects Instant when either is active; a forced Voice+ or installed
+operating-system voice preserves its genuine pronunciation and reports the
+phoneme control as suspended. Speechprints apply after the resolved American
+or British pronunciation base. Premium, Babble, Bottish, and cached vocal
+actions do not apply either control. Voice Source and Current previews compare
+the same line.
+
+Instant phonemizes each speech segment locally from its genuine American or
+British base, applies deterministic word-boundary-aware rules, then uses
+Kokoro's pinned token-ID interface. A private per-profile variation seed keeps
+optional details stable for that character and travels with bot exports.
+Explicit name pronunciations, initialisms, numbers, and code-like tokens are
+protected. Only private phonemes change: visible dialogue, captions, prompts,
+memories, summaries, boards, ballots, and transcript exports retain the
+original text. Faithful replay stores the normalized V3 profile and resolved
+ruleset provenance, never IPA or rewritten spellings.
 
 Legacy five-slot `elevenLabsVoiceBank` backup data remains importable but is no
 longer shown in settings or consulted during synthesis.

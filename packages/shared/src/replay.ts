@@ -1,9 +1,13 @@
 import type {
-  BotAudioVoiceProfileV1,
+  BotAudioVoiceProfile,
   EnglishVoiceEngine,
   VoiceDeliveryMood,
   VoiceMode,
 } from "./audioVoice.js";
+import type {
+  ResolvedLocalVoicePronunciationV1,
+  ResolvedLocalVoiceSpeechprintV1,
+} from "./localVoice.js";
 import type { VoicePerformancePlanV1 } from "./voicePerformance.js";
 
 export const REPLAY_MANIFEST_VERSION = 1 as const;
@@ -249,7 +253,9 @@ export interface ReplayVoiceTakeV1 {
   resolvedEngine: string | null;
   /** Pinned engine/model identity for faithful synthesis diagnostics. */
   resolvedModelHash?: string | null;
-  profile: BotAudioVoiceProfileV1;
+  profile: BotAudioVoiceProfile;
+  resolvedPronunciation?: ResolvedLocalVoicePronunciationV1 | null;
+  resolvedSpeechprint?: ResolvedLocalVoiceSpeechprintV1 | null;
   performancePlan?: VoicePerformancePlanV1 | null;
   moodKey: VoiceDeliveryMood;
   effectsEnabled: boolean;

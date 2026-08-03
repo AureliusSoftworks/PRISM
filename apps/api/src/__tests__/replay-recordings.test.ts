@@ -1,9 +1,11 @@
 import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import { describe, it } from "node:test";
-import type {
-  ReplayManifestV1,
-  ReplayManifestV2,
+import {
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  type ReplayVoiceTakeV1,
+  type ReplayManifestV1,
+  type ReplayManifestV2,
 } from "@localai/shared";
 import { initializeDatabase } from "../db.ts";
 import {
@@ -14,6 +16,8 @@ import {
   queueReplayRecording,
   startReplayRecordingDraft,
   storeReplayFaithfulAudio,
+  updateReplayVoiceTakeSnapshot,
+  upsertReplayVoiceTake,
 } from "../replay-recordings.ts";
 import { replayRecordingRelativeDirectory } from "../replay-storage.ts";
 
@@ -374,6 +378,84 @@ describe("faithful replay recordings", () => {
         ),
       /Unknown signal replay source/u,
     );
+  });
+
+  it("stores new voice takes as V3 and records only resolved Speechprint metadata", () => {
+    const db = fixture();
+    const snapshot: ReplayVoiceTakeV1 = {
+      v: 1,
+      sourceKey: "signal:message-1",
+      sourceMessageId: "message-1",
+      sourceEventId: null,
+      speakerId: "host-1",
+      speakerName: "Host",
+      spokenText: "This remains the canonical text.",
+      performanceText: null,
+      mode: "english",
+      requestedEngine: "builtin",
+      resolvedEngine: null,
+      profile: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        speechprintInfluence: "indian-english",
+        speechprintStrength: "balanced",
+        speechprintVariationSeed: "host-seed",
+      },
+      moodKey: "neutral",
+      effectsEnabled: true,
+      gain: 1,
+      stereoPan: 0,
+      channel: "primary",
+      seed: "take-seed",
+      audible: true,
+      durationMs: null,
+      alignment: null,
+    };
+    const inserted = upsertReplayVoiceTake(
+      db,
+      "user-1",
+      "signal",
+      "episode-1",
+      snapshot,
+    );
+    assert.equal(inserted.snapshot.profile.v, 3);
+    assert.equal(inserted.snapshot.spokenText, snapshot.spokenText);
+    assert.equal(
+      "ipa" in (inserted.snapshot as unknown as Record<string, unknown>),
+      false,
+    );
+    const updated = updateReplayVoiceTakeSnapshot(
+      db,
+      "user-1",
+      inserted.recordingId,
+      inserted.id,
+      {
+        resolvedPronunciation: {
+          requestedBase: "en-GB",
+          sourceLocale: "en-US",
+          resolvedBaseLocale: "en-GB",
+          status: "applied",
+          reason: null,
+        },
+        resolvedSpeechprint: {
+          requestedInfluence: "indian-english",
+          appliedInfluence: "indian-english",
+          strength: "balanced",
+          baseLocale: "en-US",
+          status: "applied",
+          reason: null,
+          rulesetVersion: "2026.08.1",
+          rulesetSha256: "a".repeat(64),
+        },
+      },
+    );
+    assert.equal(updated?.snapshot.resolvedPronunciation?.status, "applied");
+    assert.equal(
+      updated?.snapshot.resolvedPronunciation?.resolvedBaseLocale,
+      "en-GB",
+    );
+    assert.equal(updated?.snapshot.resolvedSpeechprint?.status, "applied");
+    assert.equal(updated?.snapshot.resolvedSpeechprint?.rulesetSha256, "a".repeat(64));
+    assert.equal(updated?.snapshot.spokenText, snapshot.spokenText);
   });
 
   it("rejects traversal in every replay media path segment", () => {
