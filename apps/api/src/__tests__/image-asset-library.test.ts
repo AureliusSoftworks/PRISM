@@ -30,7 +30,12 @@ function seedUser(db: DatabaseSync, id: string): void {
   ).run(id, `${id}@example.test`, id, NOW, NOW);
 }
 
-function seedBot(db: DatabaseSync, userId: string, id: string, name: string): void {
+function seedBot(
+  db: DatabaseSync,
+  userId: string,
+  id: string,
+  name: string,
+): void {
   db.prepare(
     `INSERT INTO bots (id, user_id, name, created_at, updated_at)
      VALUES (?, ?, ?, ?, ?)`,
@@ -156,7 +161,9 @@ describe("local image asset catalog", () => {
       assert.equal(
         Number(
           (
-            db.prepare("SELECT COUNT(*) AS count FROM image_asset_set_items").get() as {
+            db
+              .prepare("SELECT COUNT(*) AS count FROM image_asset_set_items")
+              .get() as {
               count: number | bigint;
             }
           ).count,
@@ -466,7 +473,68 @@ describe("local image asset catalog", () => {
       db.close();
       if (previousDbPath === undefined) delete process.env.DB_PATH;
       else process.env.DB_PATH = previousDbPath;
-      if (previousDataDirectory === undefined) delete process.env.LOCALAI_DATA_DIR;
+      if (previousDataDirectory === undefined)
+        delete process.env.LOCALAI_DATA_DIR;
+      else process.env.LOCALAI_DATA_DIR = previousDataDirectory;
+      rmSync(tempDirectory, { recursive: true, force: true });
+    }
+  });
+
+  it("deletes an unused generated set into recovery without a false failure", () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), "prism-delete-assets-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDirectory = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDirectory, "localai.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    const db = makeDb();
+    try {
+      seedUser(db, "user-1");
+      seedImage(db, {
+        id: "unused-room",
+        userId: "user-1",
+        origin: "bot_group_room",
+        purpose: "group-room-wallpaper",
+        prompt: "An unused observatory room",
+      });
+      const relativePath = "generated-images/user-1/unused-room.png";
+      writeGeneratedImageBytes(relativePath, Buffer.from("png"));
+      writeGeneratedImageBytes(
+        thumbWebpRelativePathFromPngRelativePath(relativePath),
+        Buffer.from("webp"),
+      );
+      const asset = listImageAssetCatalog(db, "user-1", {
+        kind: "group_room_atmosphere",
+      }).assets[0]!;
+      assert.equal(asset.usageCount, 0);
+
+      const deleted = deleteUnusedImageAssetSet(db, "user-1", asset.id);
+
+      assert.deepEqual(deleted.imageIds, ["unused-room"]);
+      assert.equal(deleted.recoveryBytes, 7);
+      assert.equal(
+        Number(
+          (
+            db
+              .prepare(
+                "SELECT COUNT(*) AS count FROM images WHERE id = 'unused-room'",
+              )
+              .get() as { count: number | bigint }
+          ).count,
+        ),
+        0,
+      );
+      assert.equal(
+        listImageAssetCatalog(db, "user-1", {
+          kind: "group_room_atmosphere",
+        }).assets.length,
+        0,
+      );
+    } finally {
+      db.close();
+      if (previousDbPath === undefined) delete process.env.DB_PATH;
+      else process.env.DB_PATH = previousDbPath;
+      if (previousDataDirectory === undefined)
+        delete process.env.LOCALAI_DATA_DIR;
       else process.env.LOCALAI_DATA_DIR = previousDataDirectory;
       rmSync(tempDirectory, { recursive: true, force: true });
     }

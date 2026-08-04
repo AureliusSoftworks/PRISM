@@ -32,6 +32,17 @@ export type BotPresenceBeatSurfaceV1 =
   | "signal"
   | "debate";
 
+/**
+ * Chat and Zen are two presentations of the same direct-conversation surface,
+ * where a filler line would compete with the real reply. Presence beats remain
+ * available to session/show surfaces and Sandbox.
+ */
+export function botResponseCuesEnabledForSurfaceV1(
+  surface: BotPresenceBeatSurfaceV1,
+): boolean {
+  return surface !== "chat" && surface !== "zen";
+}
+
 export type BotPresenceBeatCompletionV1 =
   | "playing"
   | "completed"

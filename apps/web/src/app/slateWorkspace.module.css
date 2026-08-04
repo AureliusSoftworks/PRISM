@@ -45,14 +45,16 @@
     linear-gradient(180deg, var(--bg-surface, #ffffff), var(--bg, #edf5fc));
 }
 
-.shell button,
-.shell input,
-.shell textarea,
-.shell select {
+/* Slate's cockpit controls inherit its UI type, but the shared navbar keeps
+   ownership of its compact cross-applet control typography. */
+.shell > :not(.mainNavigation) button,
+.shell > :not(.mainNavigation) input,
+.shell > :not(.mainNavigation) textarea,
+.shell > :not(.mainNavigation) select {
   font: inherit;
 }
 
-.shell button {
+.shell > :not(.mainNavigation) button {
   color: inherit;
 }
 

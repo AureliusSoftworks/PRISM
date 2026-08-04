@@ -1,8 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  PRISM_SAFE_ACTION_CLARIFICATION,
   directPrismIntentPlan,
   planPrismIntent,
+  prismMessageMayNeedOrchestration,
   resolvePrismIntentPlan,
 } from "../prism-orchestrator.ts";
 import { createPrismDomainCapabilityRegistry } from "../prism-domain-capabilities.ts";
@@ -14,6 +16,36 @@ import {
 } from "../test-support.ts";
 
 describe("Prism constrained planner", () => {
+  it("keeps conversational corrections and hypotheticals out of orchestration", () => {
+    for (const message of [
+      "No, I meant the Story. The change was a fog machine, not a request to create a new Slate series.",
+      "Actually, I was correcting what you said about the Story session.",
+      "What changes would make this Story stronger?",
+      "If I switch the appearance to dark mode, what changes?",
+    ]) {
+      assert.equal(
+        prismMessageMayNeedOrchestration(message),
+        false,
+        message,
+      );
+    }
+  });
+
+  it("keeps explicit flexible product commands eligible for orchestration", () => {
+    for (const message of [
+      "Please create a new Slate series for this conversation.",
+      "Could you update this Slate project so its title matches the Story?",
+      "I want you to change this bot's profile.",
+      "Go ahead and open the Marketplace for me.",
+    ]) {
+      assert.equal(
+        prismMessageMayNeedOrchestration(message),
+        true,
+        message,
+      );
+    }
+  });
+
   it("maps deterministic command families without an LLM mutation decision", () => {
     for (const [message, capabilityId, contextTokenIds] of [
       [
@@ -253,7 +285,49 @@ describe("Prism constrained planner", () => {
         });
         assert.equal(plan.kind, "clarification");
         assert.equal(plan.capabilityId, null);
+        assert.match(plan.clarification ?? "", /\?$/u);
       }
+    } finally {
+      closeTestDatabase(db);
+    }
+  });
+
+  it("never exposes model-authored planner rationale as clarification copy", async () => {
+    const db = createTestDatabase();
+    try {
+      const leakedRationale =
+        "The user is correcting a previous misunderstanding about their Story session. This requires creating a new Slate series for this conversation thread.";
+      const provider = createDeterministicProvider([
+        JSON.stringify({
+          kind: "clarification",
+          confidence: 0.99,
+          capabilityId: null,
+          input: {},
+          steps: [],
+          contextTokenIds: [],
+          clarification: leakedRationale,
+        }),
+      ]);
+      const plan = await planPrismIntent({
+        message: "Please change something about this Slate project.",
+        registry: createPrismDomainCapabilityRegistry(),
+        capabilityContext: {
+          db,
+          userId: "u1",
+          userKey: Buffer.alloc(32),
+          source: "prism",
+          surfaceId: "home",
+          hardLocal: true,
+          live: false,
+          now: new Date(),
+        },
+        surfaceSummary: "Prism Home",
+        provider,
+        model: "llama3.2",
+      });
+      assert.equal(plan.kind, "clarification");
+      assert.equal(plan.clarification, PRISM_SAFE_ACTION_CLARIFICATION);
+      assert.doesNotMatch(plan.clarification ?? "", /the user|requires/iu);
     } finally {
       closeTestDatabase(db);
     }

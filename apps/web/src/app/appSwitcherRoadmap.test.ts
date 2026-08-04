@@ -26,6 +26,10 @@ describe("living-shell applet navigation", () => {
       pageSource,
       /aria-label=\{`Switch Prism app\. Current app: \$\{PRISM_APPLETS\[currentAppletId\]\.name\}`\}/u,
     );
+    assert.match(
+      pageSource,
+      /: chatPresentation === "zen"\s*\? "zen"\s*: "chat";/u,
+    );
     assert.ok((pageSource.match(/renderAppSwitcher\(/gu)?.length ?? 0) > 1);
   });
 

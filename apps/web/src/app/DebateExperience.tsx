@@ -11689,11 +11689,9 @@ export function DebateExperience(
                 ? [
                     <article
                       key={beat.id}
-                      data-response-cue="true"
-                      aria-label="Response cue"
                     >
                       <header>
-                        <strong>Response cue · {beat.speaker.name}</strong>
+                        <strong>{beat.speaker.name}</strong>
                       </header>
                       <p>{heard}</p>
                     </article>,
@@ -11703,11 +11701,9 @@ export function DebateExperience(
             {props.presenceBeat?.surface === "debate" &&
             props.presenceBeat.sessionId === session.id &&
             props.presenceBeat.completion === "playing" ? (
-              <article data-response-cue="true" aria-label="Response cue">
+              <article>
                 <header>
-                  <strong>
-                    Response cue · {props.presenceBeat.speaker.name}
-                  </strong>
+                  <strong>{props.presenceBeat.speaker.name}</strong>
                 </header>
                 <p>
                   {props.presenceBeat.text.slice(

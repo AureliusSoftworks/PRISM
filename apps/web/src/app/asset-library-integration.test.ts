@@ -90,7 +90,8 @@ describe("typed local asset library", () => {
       /detail\.source === "generated"[\s\S]*REVEAL_SYNTHESIZED_ASSET_IN_FINDER_ENABLED/u,
     );
     assert.match(assetSource, /Open Signal to retry synthesis/u);
-    assert.match(assetSource, /window\.confirm/u);
+    assert.match(assetSource, /Confirm deleting unused asset/u);
+    assert.match(assetSource, /deleteConfirmationId === detail\.id/u);
     assert.match(assetSource, /method: "DELETE"/u);
     assert.match(assetSource, /Selected — protected/u);
     assert.match(assetSource, /createPortal/u);
@@ -188,9 +189,18 @@ describe("typed local asset library", () => {
     assert.match(assetSource, /\/api\/assets\/storage\/visible/u);
     assert.match(assetSource, /\{assets\.length\} shown ·/u);
     assert.match(assetSource, /Clear unused/u);
-    assert.match(assetSource, /\/api\/images\/cleanup-preview/u);
-    assert.match(assetSource, /permanent: false/u);
+    assert.match(
+      assetSource,
+      /for \(const assetSetId of confirmation\.assetSetIds\)/u,
+    );
+    assert.match(
+      assetSource,
+      /fetch\(`\/api\/assets\/\$\{encodeURIComponent\(assetSetId\)\}`/u,
+    );
+    assert.doesNotMatch(assetSource, /\/api\/images\/cleanup-preview/u);
+    assert.doesNotMatch(assetSource, /window\.confirm/u);
     assert.match(assetSource, /to recovery trash/u);
+    assert.match(assetSource, /Confirm deleting unused asset/u);
     assert.match(assetSource, /Confirm clearing unused assets/u);
     assert.match(assetSource, /Move to recovery trash/u);
     assert.match(assetSource, /setCleanupConfirmation/u);

@@ -5,9 +5,11 @@ import { LOCAL_VOICE_SPEECHPRINT_CAPABILITIES } from "@localai/shared";
 import {
   PRONUNCIATION_ATLAS_ANCHORS,
   nudgePronunciationAtlasSelection,
+  normalizePronunciationAtlasSelection,
   pronunciationAtlasAnchorForSelection,
   pronunciationAtlasPointForCoordinates,
   pronunciationAtlasNaturalSelection,
+  pronunciationAtlasPointForSelection,
   pronunciationAtlasSelectionAtPoint,
   pronunciationAtlasLocationText,
   pronunciationAtlasValueText,
@@ -97,6 +99,28 @@ describe("Pronunciation Atlas", () => {
     );
     assert.equal(selected.pronunciationBase, "en-GB");
     assert.equal(selected.influence, "japanese-influenced-english");
+    assert.deepEqual(selected.point, {
+      x: japanese.point.x - 0.01,
+      y: japanese.point.y + 0.01,
+    });
+  });
+
+  it("keeps a freely dropped pin instead of snapping it to the chosen accent", () => {
+    const dropped = { x: 0.28731, y: 0.29842 };
+    const selected = pronunciationAtlasSelectionAtPoint(dropped, britishFrench);
+    assert.deepEqual(pronunciationAtlasPointForSelection(selected), dropped);
+    assert.notDeepEqual(
+      pronunciationAtlasPointForSelection(selected),
+      pronunciationAtlasAnchorForSelection(selected).point,
+    );
+  });
+
+  it("clamps persisted pin geometry to the map", () => {
+    const normalized = normalizePronunciationAtlasSelection({
+      ...britishFrench,
+      point: { x: -0.2, y: 1.4 },
+    });
+    assert.deepEqual(normalized.point, { x: 0, y: 1 });
   });
 
   it("resolves representative world regions to broadly local accents", () => {
@@ -151,10 +175,11 @@ describe("Pronunciation Atlas", () => {
     assert.equal(selected.influence, "none");
   });
 
-  it("supports deterministic directional keyboard travel", () => {
+  it("supports deterministic continuous keyboard travel", () => {
     const natural = pronunciationAtlasNaturalSelection("en-US");
+    const origin = pronunciationAtlasPointForSelection(natural);
     const right = nudgePronunciationAtlasSelection(natural, "right");
-    assert.notEqual(right.influence, natural.influence);
+    assert.deepEqual(right.point, { x: origin.x + 0.01, y: origin.y });
     assert.deepEqual(nudgePronunciationAtlasSelection(natural, "right"), right);
   });
 

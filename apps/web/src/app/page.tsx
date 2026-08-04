@@ -494,11 +494,10 @@ import {
   type ManualAskQuestionDraft,
 } from "./manualAskQuestionTool";
 import {
-  PSYCHIC_PENDING_SUMMARY,
-  psychicPlanningModeLabel,
   psychicThoughtDisplayLineForMessage,
   type PsychicCanvasScratchpadPayload,
 } from "./psychicThoughtDisplay";
+import { immersiveThinkingCaption } from "./immersiveThinkingCaption";
 import {
   assistantGenerationMetadata,
   psychicSourceForAssistantMessage,
@@ -786,6 +785,10 @@ import {
 } from "./SettingsPanel";
 import { StorageSettings } from "./StorageSettings";
 import { AssetRail } from "./AssetLibrary";
+import {
+  prismActionLabel,
+  prismActionStatusLabel,
+} from "./prismActionPresentation";
 import type { ImageAssetSet } from "@localai/shared";
 import {
   BOT_FACT_KEY_LABELS,
@@ -891,6 +894,7 @@ import {
   memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
   normalizeBotResponseCueProfileV1,
+  botResponseCuesEnabledForSurfaceV1,
   selectBotResponseCueV1,
   heardBotPresenceBeatTextV1,
   BOT_RESPONSE_CUE_MAX_PLAYBACK_MS,
@@ -1264,8 +1268,6 @@ import {
   offlineVoiceOptionsForFilters,
   offlineVoiceSelectionValue,
   operatingSystemVoiceSelectionValue,
-  selectOfflineVoiceAccent,
-  selectOfflineVoicePresentation,
   type LocalVoicePresentationFilter,
   type OfflineVoiceOption,
 } from "./offlineVoiceSelection";
@@ -1318,6 +1320,7 @@ import {
 } from "./voiceQuickToggle";
 import {
   CHAT_FORCED_MUTE_REASON,
+  chatPresentationForSurface,
   chatPresentationForcesVoiceMute,
   effectiveVoiceModeForPresentation,
   zenPresentationIsVoiceMuted,
@@ -7713,7 +7716,6 @@ interface CoffeeCenterFeedLine {
   botId?: string;
   botTextColor?: string;
   voicePresence?: "loud" | "quiet";
-  responseCue?: boolean;
 }
 
 /** Local mirror of the Coffee conversation shape returned by `POST /api/coffee/turn`. */
@@ -9951,16 +9953,6 @@ function getMessageStatus(msg: Message): StatusTag | null {
   return null;
 }
 
-/** Line shown while the assistant slot is loading — variant index from hash(salt). */
-const GENERATING_PHRASE_BUILDERS = [
-  (name: string) => `${name} is thinking`,
-  (name: string) => `${name} is composing`,
-  (name: string) => `${name} is shaping a reply`,
-  (name: string) => `${name} is gathering words`,
-  (name: string) => `${name} is tuning in`,
-  (name: string) => `${name} is reflecting`,
-] as const;
-
 const ZEN_INITIAL_STATUS_LABELS = [
   "Thinking...",
   "Composing...",
@@ -10034,15 +10026,6 @@ function pickStableStatusLabel(
 
 const FALLBACK_PROCESSING_TICK_MS = 300;
 const PSYCHIC_THINKING_INDICATOR_DELAY_MS = 700;
-const PSYCHIC_PROGRESS_STAGE_LABELS: Record<
-  NonNullable<PsychicCanvasScratchpadPayload["stage"]>,
-  string
-> = {
-  plan: "Planning",
-  draft: "Drafting",
-  audit: "Checking",
-  revision: "Refining",
-};
 const FALLBACK_RISK_PROMPT_KEYWORDS = [
   "copyright",
   "copyrighted",
@@ -10489,11 +10472,6 @@ function hashToUnsignedInt(text: string): number {
     h = Math.imul(h, 16777619);
   }
   return h >>> 0;
-}
-
-function pickGeneratingLabel(displayName: string, salt: string): string {
-  const idx = hashToUnsignedInt(salt) % GENERATING_PHRASE_BUILDERS.length;
-  return GENERATING_PHRASE_BUILDERS[idx](displayName);
 }
 
 function opinionBandTitle(band: SessionOpinion["band"]): string {
@@ -11029,21 +11007,6 @@ interface BotVoiceIdentityCatalog {
   elevenLabs: BotVoiceIdentityCatalogLane;
 }
 
-function englishVoiceLocaleLabel(localeValue: string): string {
-  const locale = canonicalEnglishVoiceLocale(localeValue);
-  if (locale === "en-US") return "American English · Genuine";
-  if (locale === "en-GB") return "British English · Genuine";
-  const region = locale.split("-")[1] ?? locale;
-  let regionName = region;
-  try {
-    regionName =
-      new Intl.DisplayNames(["en"], { type: "region" }).of(region) ?? region;
-  } catch {
-    // Keep the stable locale code when this browser lacks DisplayNames.
-  }
-  return `${regionName} English · Installed`;
-}
-
 function speechprintVariationSeed(
   profile: NormalizedBotAudioVoiceProfileV1,
   influence: LocalVoiceSpeechprintInfluence,
@@ -11073,6 +11036,9 @@ function pronunciationAtlasSelectionForProfile(
     sourceLocale: normalized.accentLocale ?? "en-US",
     influence: normalized.speechprintInfluence ?? "none",
     strength: normalized.speechprintStrength ?? "balanced",
+    ...(normalized.pronunciationMapPoint
+      ? { point: { ...normalized.pronunciationMapPoint } }
+      : {}),
   };
 }
 
@@ -11087,6 +11053,7 @@ function profileWithPronunciationAtlasSelection(
     accentLocale: selection.sourceLocale,
     speechprintInfluence: selection.influence,
     speechprintStrength: selection.strength,
+    pronunciationMapPoint: selection.point ?? null,
     speechprintVariationSeed: speechprintVariationSeed(
       normalized,
       selection.influence,
@@ -11934,41 +11901,12 @@ function BotVoiceEditor({
   const voiceIdResolutionRunRef = useRef(0);
   const selectedSystemVoiceValue =
     offlineVoiceSelectionValue(normalizedProfile);
-  const localAccentLocale = canonicalEnglishVoiceLocale(
-    normalizedProfile.accentLocale ?? "en-US",
-  );
-  const localAccentLocales = useMemo(
-    () =>
-      [
-        ...new Set([
-          "en-US",
-          "en-GB",
-          localAccentLocale,
-          ...identityCatalog.system.options.map((option) =>
-            canonicalEnglishVoiceLocale(option.locale),
-          ),
-        ]),
-      ].sort((left, right) => {
-        const preferred = ["en-US", "en-GB"];
-        const leftIndex = preferred.indexOf(left);
-        const rightIndex = preferred.indexOf(right);
-        if (leftIndex >= 0 || rightIndex >= 0) {
-          return (
-            (leftIndex < 0 ? 99 : leftIndex) -
-            (rightIndex < 0 ? 99 : rightIndex)
-          );
-        }
-        return left.localeCompare(right);
-      }),
-    [identityCatalog.system.options, localAccentLocale],
-  );
   const filteredSystemVoiceOptions = useMemo(
     () =>
       offlineVoiceOptionsForFilters(identityCatalog.system.options, {
-        locale: localAccentLocale,
         presentation: localVoicePresentation,
       }),
-    [identityCatalog.system.options, localAccentLocale, localVoicePresentation],
+    [identityCatalog.system.options, localVoicePresentation],
   );
   const selectedElevenLabsVoiceValue =
     normalizedProfile.elevenLabsVoiceId ?? "";
@@ -12686,36 +12624,11 @@ function BotVoiceEditor({
                 </select>
               </div>
               <div className={styles.botVoiceIdentityField}>
-                <label htmlFor="bot-local-voice-accent">Base accent</label>
-                <select
-                  id="bot-local-voice-accent"
-                  aria-label="Local voice accent source"
-                  value={localAccentLocale}
-                  onChange={(event) => {
-                    onChange(
-                      selectOfflineVoiceAccent(
-                        normalizedProfile,
-                        event.currentTarget.value,
-                        identityCatalog.system.options,
-                        localVoicePresentation,
-                      ),
-                      { saveImmediately: true },
-                    );
-                  }}
-                >
-                  {localAccentLocales.map((locale) => (
-                    <option key={locale} value={locale}>
-                      {englishVoiceLocaleLabel(locale)}
-                    </option>
-                  ))}
-                </select>
-              </div>
-              <div className={styles.botVoiceIdentityField}>
-                <span>Presentation</span>
+                <span>Gender</span>
                 <div
                   className={styles.botVoicePresentationChips}
                   role="group"
-                  aria-label="Local voice presentation"
+                  aria-label="Local voice gender"
                 >
                   {(["any", "feminine", "masculine"] as const).map(
                     (presentation) => (
@@ -12730,14 +12643,6 @@ function BotVoiceEditor({
                         }
                         onClick={() => {
                           setLocalVoicePresentation(presentation);
-                          onChange(
-                            selectOfflineVoicePresentation(
-                              normalizedProfile,
-                              presentation,
-                              identityCatalog.system.options,
-                            ),
-                            { saveImmediately: true },
-                          );
                         }}
                       >
                         {presentation === "any"
@@ -12823,7 +12728,7 @@ function BotVoiceEditor({
                           !selectedSystemVoiceAvailable
                         ? `${normalizedProfile.systemVoiceName} is unavailable but preserved.`
                         : filteredSystemVoiceOptions.length === 0
-                          ? "No matching voice. Try Any or another base accent."
+                          ? "No matching voice. Try Any."
                           : identityCatalog.system.message}
                   </small>
                 ) : null}
@@ -45837,31 +45742,12 @@ function HomeContent(): React.JSX.Element {
     () => cleanPlayerVoiceProfile(settings?.playerAudioVoiceProfile),
     [settings?.playerAudioVoiceProfile],
   );
-  const playerLocalAccentLocale = canonicalEnglishVoiceLocale(
-    playerVoiceProfile.accentLocale ?? "en-US",
-  );
-  const playerLocalAccentLocales = useMemo(
-    () => [
-      ...new Set([
-        "en-US",
-        "en-GB",
-        playerLocalAccentLocale,
-        ...offlineVoiceIdentityOptions.map((option) => option.locale),
-      ]),
-    ],
-    [offlineVoiceIdentityOptions, playerLocalAccentLocale],
-  );
   const filteredPlayerLocalVoiceOptions = useMemo(
     () =>
       offlineVoiceOptionsForFilters(offlineVoiceIdentityOptions, {
-        locale: playerLocalAccentLocale,
         presentation: playerLocalVoicePresentation,
       }),
-    [
-      offlineVoiceIdentityOptions,
-      playerLocalAccentLocale,
-      playerLocalVoicePresentation,
-    ],
+    [offlineVoiceIdentityOptions, playerLocalVoicePresentation],
   );
   const selectedPlayerPremiumVoiceId = playerPremiumVoiceId(playerVoiceProfile);
   const selectedPlayerPremiumVoiceAvailable = selectedPlayerPremiumVoiceId
@@ -47040,6 +46926,7 @@ function HomeContent(): React.JSX.Element {
     setDevToolsConsoleOnly(false);
   }, []);
   const configuredVoiceMode = normalizeVoiceMode(settings?.voiceMode);
+  const chatPresentation = chatPresentationForSurface(view, sidebarOpen);
   const zenVoiceMuted = zenPresentationIsVoiceMuted(
     view,
     sidebarOpen,
@@ -54553,22 +54440,13 @@ function HomeContent(): React.JSX.Element {
     const lockedByActiveBot =
       respectActiveBotLock && activeBot?.online_enabled === 0;
     const responseMode = responseModeForProvider(providerPreference);
-    const isLocal = responseMode === "local";
-    const nextMode = nextResponseMode(responseMode);
-    const nextResolvedProvider = resolveModelChoiceForResponseMode({
-      responseMode: nextMode,
-      providerPreference,
-      choices: visibleModelChoicesByProvider(
-        modelCatalog,
-        settings,
-        chatModelChoiceByProvider,
-      ),
-      onlineOptions: onlineChatModelOptions,
-    }).provider;
+    const visibleChoices = visibleModelChoicesByProvider(
+      modelCatalog,
+      settings,
+      chatModelChoiceByProvider,
+    );
     const providerDisabled =
       !settings || Boolean(disabledReason) || lockedByActiveBot;
-    const activeModeLabel = responseModeDisplayLabel(responseMode);
-    const nextModeLabel = responseModeDisplayLabel(nextMode);
     const lockTitle =
       disabledReason ??
       (lockedByActiveBot
@@ -54576,54 +54454,45 @@ function HomeContent(): React.JSX.Element {
         : null);
     return (
       <div
-        className={`${styles.modeControl} ${
+        className={`${styles.modeControl} ${styles.autoModeControl} ${
           providerDisabled ? styles.modeControlLocked : ""
         } ${extraClassName}`}
+        data-tutorial-target="auto-response-mode"
+        data-response-mode={responseMode}
         data-protected={lockedByActiveBot ? "true" : undefined}
       >
-        <button
-          type="button"
-          className={`${styles.modeToggleTrack} ${
-            providerDisabled ? styles.modeToggleTrackLocked : ""
-          }`}
-          data-response-mode={isLocal ? "local" : "online"}
-          data-protected={lockedByActiveBot ? "true" : undefined}
-          onClick={() => {
-            if (providerDisabled) return;
-            void switchProvider(nextResolvedProvider);
-          }}
-          aria-label={
-            lockTitle
-              ? `${lockTitle} Toggle disabled.`
-              : `Response mode: ${activeModeLabel}. Click to switch to ${nextModeLabel}.`
-          }
-          aria-pressed={!isLocal}
-          aria-disabled={providerDisabled}
-          title={lockTitle ?? `Switch to ${nextModeLabel}`}
-          disabled={providerDisabled}
-        >
-          <span
-            className={`${styles.modeThumb} ${
-              isLocal ? styles.modeThumbLocal : styles.modeThumbOnline
-            }`}
-          >
-            {lockedByActiveBot ? (
-              <span className={styles.modeThumbLockGlyph} aria-hidden="true">
-                🔒
-              </span>
-            ) : (
-              <span
-                className={`${styles.providerDot} ${
-                  isLocal ? styles.providerDotLocal : styles.providerDotOnline
-                }`}
-                aria-hidden="true"
-              />
-            )}
-            <span className={styles.modeThumbLabel}>
-              {responseModeShortLabel(responseMode)}
-            </span>
-          </span>
-        </button>
+        {(["local", "online"] as const).map((mode) => {
+          const modeLabel = responseModeDisplayLabel(mode);
+          return (
+            <button
+              key={mode}
+              type="button"
+              className={`${styles.autoModeOption} ${
+                responseMode === mode ? styles.autoModeOptionActive : ""
+              }`}
+              onClick={() => {
+                if (providerDisabled || responseMode === mode) return;
+                const nextProvider = resolveModelChoiceForResponseMode({
+                  responseMode: mode,
+                  providerPreference,
+                  choices: visibleChoices,
+                  onlineOptions: onlineChatModelOptions,
+                }).provider;
+                void switchProvider(nextProvider);
+              }}
+              aria-label={
+                lockTitle
+                  ? `${lockTitle} ${modeLabel} unavailable.`
+                  : `Use ${modeLabel} responses.`
+              }
+              aria-pressed={responseMode === mode}
+              title={lockTitle ?? `${modeLabel} responses`}
+              disabled={providerDisabled}
+            >
+              {responseModeShortLabel(mode)}
+            </button>
+          );
+        })}
       </div>
     );
   };
@@ -55234,11 +55103,6 @@ function HomeContent(): React.JSX.Element {
     });
     const activeSideChat =
       view === "chat" && detail?.hubRole === "side" && detail.mode === "chat";
-    const prismHomeUsesDedicatedLocalModel =
-      view === "chat" &&
-      !activeSideChat &&
-      activeBot == null &&
-      zenPersonaBot == null;
     const zenPersonaPickerDisabled =
       view === "chat" &&
       (pendingReplyVisible || chatAssistantRevealInProgress || activeSideChat);
@@ -55259,26 +55123,6 @@ function HomeContent(): React.JSX.Element {
     return (
       <div className={styles.chatHeaderModelPicker}>
         {showModelControls ? (
-          prismHomeUsesDedicatedLocalModel ? (
-            <ComposerModelPicker
-              value={settingsLocalLlmModelChoice(
-                settings?.prismDefaultLlmModel ?? "",
-                commandCenterAuxiliaryModelId(settings),
-              )}
-              onChange={() => {}}
-              options={prismInternalLlmCallOptions}
-              provider="local"
-              loading={modelCatalogLoading}
-              disabled
-              title="Prism uses this dedicated local model. Change it in Settings → Models."
-              ariaLabel="Prism local model; change it in Settings"
-              dismissPopoversSignal={composerPopoverDismissSignal}
-              placement="down"
-              minMenuWidthPx={options.modelMenuWidthPx ?? 180}
-              menuClassName={options.modelMenuClassName}
-              showAutoOption={false}
-            />
-          ) : (
           <>
             {renderProviderModeToggle(styles.chatHeaderModeToggle)}
             <ComposerModelPicker
@@ -55321,7 +55165,6 @@ function HomeContent(): React.JSX.Element {
               effortControl={effortControlForTarget(effortTarget)}
             />
           </>
-          )
         ) : null}
         {showBotPicker ? (
           <ComposerBotPicker
@@ -55351,9 +55194,7 @@ function HomeContent(): React.JSX.Element {
         ) : null}
         {showVoiceSelector
           ? renderVoiceModeSelector({
-              localPremiumFallback:
-                prismHomeUsesDedicatedLocalModel ||
-                blocksOnlineCapabilities(responseMode),
+              localPremiumFallback: blocksOnlineCapabilities(responseMode),
             })
           : null}
       </div>
@@ -56098,7 +55939,7 @@ function HomeContent(): React.JSX.Element {
     }
   }, [conversationGroupsByKey, expandedConversationGroupKey]);
 
-  const chatImmersivePresentation = view === "chat" && !sidebarOpen;
+  const chatImmersivePresentation = chatPresentation === "zen";
   const chatEphemeralMode = chatImmersivePresentation;
   const effectiveChatPresentation = chatImmersivePresentation;
   const chatLikeSurface = effectiveChatPresentation;
@@ -58587,16 +58428,27 @@ function HomeContent(): React.JSX.Element {
       ) ?? 0,
     [detail?.messages],
   );
+  const zenPlayerMessageRevealActive = Boolean(
+    zenPlayerSpeechReveal &&
+      (() => {
+        const timeline = chatSpeechRevealByKeyRef.current.get(
+          zenPlayerSpeechReveal.revealKey,
+        );
+        return timeline && !speechRevealTimelineComplete(timeline);
+      })(),
+  );
   const zenInitialThinkingActive =
     view === "chat" &&
     zenInitialStarterOverlayActive &&
     pendingReplyVisible &&
+    !zenPlayerMessageRevealActive &&
     pendingReplyStartMessageCount === 0 &&
     detail?.hasAssistantReply !== true;
   const zenInitialReplyRevealActive =
     view === "chat" &&
     zenInitialStarterOverlayActive &&
     chatAssistantRevealInProgress &&
+    !zenPlayerMessageRevealActive &&
     pendingReplyStartMessageCount === 0 &&
     zenAssistantReplyCount <= 1;
 
@@ -58608,6 +58460,7 @@ function HomeContent(): React.JSX.Element {
   const zenPendingReplyPlaceholderVisible =
     chatLikeSurface &&
     pendingReplyVisualVisible &&
+    !zenPlayerMessageRevealActive &&
     !chatAssistantRevealInProgress;
   const zenFloatingStatusChipVisible =
     zenInitialThinkingActive ||
@@ -58618,19 +58471,17 @@ function HomeContent(): React.JSX.Element {
     zenInitialStatusLabelRef.current = null;
   }, [zenFloatingStatusChipVisible]);
   /** Chat and Zen reuse the floating bot status chip while waiting. */
-  const responseCuePlaying = activeResponseCueBeat?.completion === "playing";
   const typingIndicatorVisible = chatLikeSurface
-    ? responseCuePlaying ||
-      (chatAssistantRevealInProgress && !zenInitialReplyRevealActive)
-    : zenFollowupActive ||
-      (pendingReplyVisualVisible && !zenInitialThinkingActive) ||
-      responseCuePlaying;
+    ? chatAssistantRevealInProgress &&
+      !zenPlayerMessageRevealActive &&
+      !zenInitialReplyRevealActive
+    : !zenPlayerMessageRevealActive &&
+      (zenFollowupActive ||
+        (pendingReplyVisualVisible && !zenInitialThinkingActive));
   const typingIndicatorNode = useMemo(() => {
     if (!typingIndicatorVisible) return null;
-    const pendingRespondent = activeResponseCueBeat?.speaker.botId
-      ? (bots.find((bot) => bot.id === activeResponseCueBeat.speaker.botId) ??
-        null)
-      : composeBotAccentId !== null
+    const pendingRespondent =
+      composeBotAccentId !== null
         ? bots.find((b) => b.id === composeBotAccentId)
         : null;
     const displayName =
@@ -58639,76 +58490,21 @@ function HomeContent(): React.JSX.Element {
       DEFAULT_ASSISTANT_NAME;
     const salt = `${composeBotAccentId ?? "none"}:${detail?.messages.length ?? 0}:${pendingReplyConversationId ?? "new"}`;
     const showFallbackCheckerboardRing = false;
-    // Keep the "gathering" phase varied, but make active typed reveal explicit.
-    const heardCueText = activeResponseCueBeat
-      ? activeResponseCueBeat.text.slice(
-          0,
-          activeResponseCueBeat.heardCharacterCount,
-        )
-      : "";
-    const livePsychicStreamSummary =
-      pendingPsychicLiveMessage?.psychicThought?.summary.trim() ?? "";
-    const livePsychicPending = Boolean(
-      !responseCuePlaying &&
-        !zenFollowupActive &&
-        !chatAssistantRevealInProgress &&
-        pendingPsychicLiveMessage,
+    const thinkingCaption = immersiveThinkingCaption(
+      pendingRespondent
+        ? {
+            id: pendingRespondent.id,
+            name: pendingRespondent.name,
+            systemPrompt: pendingRespondent.system_prompt,
+          }
+        : { name: displayName },
+      salt,
     );
-    const livePsychicSummary = livePsychicPending
-      ? livePsychicStreamSummary || PSYCHIC_PENDING_SUMMARY
-      : "";
-    const livePsychicPasses = livePsychicPending
-      ? (pendingPsychicLiveMessage?.psychicThought?.passes ?? [])
-      : [];
-    const livePsychicVisiblePasses =
-      livePsychicPasses.length > 1 ? livePsychicPasses : [];
-    const livePsychicStage =
-      pendingPsychicLiveMessage?.psychicScratchpad?.stage;
-    const livePsychicStageLabel = livePsychicStage
-      ? PSYCHIC_PROGRESS_STAGE_LABELS[livePsychicStage]
-      : "Planning";
-    const livePsychicEffort =
-      pendingPsychicLiveMessage?.psychicThought?.effort ??
-      pendingPsychicLiveMessage?.psychicScratchpad?.effort;
-    const livePsychicModeLabel = psychicPlanningModeLabel(
-      pendingPsychicLiveMessage?.psychicThought?.planningMode ??
-        (pendingPsychicLiveMessage?.psychicScratchpad?.simulated === true
-          ? "simulated"
-          : undefined),
-      pendingPsychicLiveMessage?.psychicThought?.passCount ??
-        pendingPsychicLiveMessage?.psychicScratchpad?.passCount,
-    );
-    const livePsychicLabel = [
-      "Psychic",
-      livePsychicModeLabel,
-      livePsychicEffort ? REASONING_EFFORT_LABELS[livePsychicEffort] : null,
-      livePsychicStageLabel,
-    ]
-      .filter((part): part is string => Boolean(part))
-      .join(" · ");
-    const livePsychicScratchpad =
-      livePsychicSummary && devToolsRuntimeActive
-        ? (pendingPsychicLiveMessage?.psychicScratchpad?.scratchpad.trim() ??
-          "")
-        : "";
-    const livePsychicAccessibleSummary =
-      livePsychicVisiblePasses.length > 0
-        ? livePsychicVisiblePasses
-            .map(
-              (pass) =>
-                `${PSYCHIC_PROGRESS_STAGE_LABELS[pass.stage]}: ${pass.summary}`,
-            )
-            .join(" ")
-        : livePsychicSummary;
-    const label = responseCuePlaying
-      ? `Response cue · ${displayName}: ${heardCueText || "…"}`
-      : zenFollowupActive
-        ? `${displayName} is waiting while you type…`
-        : chatAssistantRevealInProgress
-          ? `${displayName} is speaking…`
-          : livePsychicSummary
-            ? `${livePsychicLabel}: ${livePsychicAccessibleSummary}`
-            : pickGeneratingLabel(displayName, salt);
+    const label = zenFollowupActive
+      ? `${displayName} is waiting while you type…`
+      : chatAssistantRevealInProgress
+        ? `${displayName} is speaking…`
+        : thinkingCaption;
     const voicePreset = resolveBotVoicePreset(pendingRespondent);
     const style = selectedComposeBotAccent
       ? ({
@@ -58721,7 +58517,7 @@ function HomeContent(): React.JSX.Element {
         className={`${styles.typingIndicator} ${
           chatLikeSurface ? styles.typingIndicatorChatCenter : ""
         } ${styles.typingIndicatorStopButton} ${
-          chatAssistantRevealInProgress || responseCuePlaying
+          chatAssistantRevealInProgress
             ? styles.typingIndicatorReplyingLive
             : ""
         } ${zenFollowupActive ? styles.typingIndicatorPaused : ""} ${
@@ -58736,50 +58532,12 @@ function HomeContent(): React.JSX.Element {
         style={style}
         aria-label={`${label}. Tap or click to stop.`}
         title="Stop reply"
-        data-response-cue={responseCuePlaying ? "true" : undefined}
-        data-psychic-live={livePsychicSummary ? "true" : undefined}
         onClick={() => {
-          responseCuePlaybackAbortRef.current?.abort();
           handleTypingIndicatorPress();
         }}
       >
-        {livePsychicSummary ? (
-          <span className={styles.typingPsychicLiveContent}>
-            <span className={styles.typingPsychicLiveLabel}>
-              {livePsychicLabel}
-            </span>
-            {livePsychicVisiblePasses.length > 0 ? (
-              <span className={styles.typingPsychicLivePasses}>
-                {livePsychicVisiblePasses.map((pass) => (
-                  <span
-                    key={pass.stage}
-                    className={styles.typingPsychicLivePass}
-                    data-psychic-pass={pass.stage}
-                  >
-                    <span className={styles.typingPsychicLivePassLabel}>
-                      {PSYCHIC_PROGRESS_STAGE_LABELS[pass.stage]}
-                    </span>
-                    <span>{pass.summary}</span>
-                  </span>
-                ))}
-              </span>
-            ) : (
-              <span className={styles.typingPsychicLiveSummary}>
-                {livePsychicSummary}
-              </span>
-            )}
-            {livePsychicScratchpad ? (
-              <span className={styles.typingPsychicLiveScratchpad}>
-                {livePsychicScratchpad}
-              </span>
-            ) : null}
-          </span>
-        ) : (
-          <span>{label}</span>
-        )}
-        {!responseCuePlaying ? (
-          <TypingDots className={styles.typingDots} voicePreset={voicePreset} />
-        ) : null}
+        <span>{label}</span>
+        <TypingDots className={styles.typingDots} voicePreset={voicePreset} />
       </button>
     );
   }, [
@@ -58797,82 +58555,25 @@ function HomeContent(): React.JSX.Element {
     chatLikeSurface,
     handleTypingIndicatorPress,
     zenCanvasSpeedNudgePulseActive,
-    activeResponseCueBeat,
-    responseCuePlaying,
-    pendingPsychicLiveMessage?.psychicThought?.summary,
-    pendingPsychicLiveMessage?.psychicThought?.effort,
-    pendingPsychicLiveMessage?.psychicThought?.planningMode,
-    pendingPsychicLiveMessage?.psychicThought?.passCount,
-    pendingPsychicLiveMessage?.psychicThought?.passes,
-    pendingPsychicLiveMessage?.psychicScratchpad?.stage,
-    pendingPsychicLiveMessage?.psychicScratchpad?.scratchpad,
-    pendingPsychicLiveMessage?.psychicScratchpad?.effort,
-    pendingPsychicLiveMessage?.psychicScratchpad?.simulated,
-    pendingPsychicLiveMessage?.psychicScratchpad?.passCount,
-    devToolsRuntimeActive,
   ]);
-  const responseCueHistoryNode = useMemo(() => {
-    if (!detail?.id || detail.id === "pending") return null;
-    const surface =
-      detail.mode === "zen"
-        ? "zen"
-        : detail.mode === "chat"
-          ? "chat"
-          : "sandbox";
-    const beats = responseCueBeatHistory
-      .filter(
-        (beat) =>
-          beat.surface === surface &&
-          beat.sessionId === detail.id &&
-          beat.completion !== "playing" &&
-          heardBotPresenceBeatTextV1(beat).length > 0,
-      )
-      .slice(-8);
-    if (beats.length === 0) return null;
-    return (
-      <div className={styles.responseCueHistory} aria-label="Response cues">
-        {beats.map((beat) => (
-          <div key={beat.id} data-response-cue="true">
-            <strong>Response cue · {beat.speaker.name}</strong>
-            <span>{heardBotPresenceBeatTextV1(beat)}</span>
-          </div>
-        ))}
-      </div>
-    );
-  }, [detail?.id, detail?.mode, responseCueBeatHistory]);
   const zenInitialThinkingNode = useMemo(() => {
     if (!zenFloatingStatusChipVisible) return null;
     const compactPhase =
       !zenInitialThinkingActive &&
       (zenInitialReplyRevealActive || zenPendingReplyPlaceholderVisible);
+    const outputSalt = [
+      pendingReplyStartedAtMs ?? "no-start",
+      pendingReplyConversationId ?? "new",
+      detail?.id ?? "pending",
+      latestAssistantMessageId ?? "no-assistant",
+      detail?.messages.length ?? 0,
+    ].join(":");
     if (!zenInitialStatusLabelRef.current) {
-      const outputSalt = [
-        pendingReplyStartedAtMs ?? "no-start",
-        pendingReplyConversationId ?? "new",
-        detail?.id ?? "pending",
-        latestAssistantMessageId ?? "no-assistant",
-        detail?.messages.length ?? 0,
-      ].join(":");
       zenInitialStatusLabelRef.current = pickStableStatusLabel(
         ZEN_INITIAL_STATUS_LABELS,
         outputSalt,
       );
     }
-    const label = zenInitialStatusLabelRef.current;
-    const livePsychicPasses =
-      pendingPsychicLiveMessage?.psychicThought?.passes ?? [];
-    const latestLivePsychicPass =
-      livePsychicPasses[livePsychicPasses.length - 1];
-    const livePsychicSummary =
-      latestLivePsychicPass?.summary.trim() ||
-      pendingPsychicLiveMessage?.psychicThought?.summary.trim() ||
-      "";
-    const livePsychicStage =
-      latestLivePsychicPass?.stage ??
-      pendingPsychicLiveMessage?.psychicScratchpad?.stage;
-    const livePsychicStageLabel = livePsychicStage
-      ? PSYCHIC_PROGRESS_STAGE_LABELS[livePsychicStage]
-      : "Planning";
     const onActivate = (event?: React.MouseEvent<HTMLButtonElement>): void => {
       if (zenInitialThinkingActive) {
         handleZenInitialThinkingCancel(event);
@@ -58893,12 +58594,21 @@ function HomeContent(): React.JSX.Element {
     const personaStyle = personaBot
       ? botAccentStyle(personaBot.color, resolvedTheme)
       : undefined;
+    const label = personaBot
+      ? immersiveThinkingCaption(
+          {
+            id: personaBot.id,
+            name: personaBot.name,
+            systemPrompt: personaBot.system_prompt,
+          },
+          outputSalt,
+        )
+      : zenInitialStatusLabelRef.current;
     return (
       <div
         className={styles.zenInitialThinkingOverlay}
         data-phase={compactPhase ? "compact" : "thinking"}
         data-persona={personaBot ? "bot" : "prism"}
-        data-psychic-live={livePsychicSummary ? "true" : undefined}
         style={personaStyle}
         role="status"
         aria-live="polite"
@@ -58920,11 +58630,7 @@ function HomeContent(): React.JSX.Element {
             }
             onActivate(event);
           }}
-          aria-label={`${
-              livePsychicSummary
-                ? `Psychic, ${livePsychicStageLabel}: ${livePsychicSummary}. `
-                : ""
-            }${
+          aria-label={`${label}. ${
               compactPhase
                 ? "Stop reply"
                 : "Cancel reply and return to the Zen start"
@@ -58946,18 +58652,7 @@ function HomeContent(): React.JSX.Element {
             )}
           </span>
           <span className={styles.zenInitialThinkingCopy}>
-            {livePsychicSummary ? (
-              <>
-                <span className={styles.zenInitialThinkingPsychicLabel}>
-                  Psychic · {livePsychicStageLabel}
-                </span>
-                <span className={styles.zenInitialThinkingPsychicSummary}>
-                  {livePsychicSummary}
-                </span>
-              </>
-            ) : (
-              <span className={styles.zenInitialThinkingLabel}>{label}</span>
-            )}
+            <span className={styles.zenInitialThinkingLabel}>{label}</span>
           </span>
         </button>
       </div>
@@ -58973,9 +58668,6 @@ function HomeContent(): React.JSX.Element {
     latestAssistantMessageId,
     pendingReplyConversationId,
     pendingReplyStartedAtMs,
-    pendingPsychicLiveMessage?.psychicThought?.passes,
-    pendingPsychicLiveMessage?.psychicThought?.summary,
-    pendingPsychicLiveMessage?.psychicScratchpad?.stage,
     resolvedTheme,
     zenPersonaBot,
     zenFloatingStatusChipVisible,
@@ -61930,6 +61622,9 @@ function HomeContent(): React.JSX.Element {
     sessionId: string;
     offlineOnly?: boolean;
   }): (() => Promise<void>) => {
+    if (!botResponseCuesEnabledForSurfaceV1(args.surface)) {
+      return async (): Promise<void> => undefined;
+    }
     if (responseCueWaitTimerRef.current !== null) {
       window.clearTimeout(responseCueWaitTimerRef.current);
       responseCueWaitTimerRef.current = null;
@@ -65249,7 +64944,7 @@ function HomeContent(): React.JSX.Element {
     }
   };
   useEffect(() => {
-    if (!settings || settings.voiceVolume <= 0) return;
+    if (!settings || settings.voiceVolume <= 0 || view === "chat") return;
     const activeBotIds = new Set(
       [
         selectedBotId,
@@ -65944,9 +65639,9 @@ function HomeContent(): React.JSX.Element {
     },
     [chatVoiceForcedMuted, settings],
   );
-  const playZenPlayerMessage = useCallback(
+  const presentChatPlayerMessage = useCallback(
     (messageId: string, messageText: string): void => {
-      if (chatVoiceForcedMuted || !settings?.zenPlayerVoiceEnabled) return;
+      if (!settings) return;
       const spokenText =
         voiceSpokenText(messageText, { leadingMarkedAction: true })?.trim() ??
         "";
@@ -65970,8 +65665,28 @@ function HomeContent(): React.JSX.Element {
           1,
         ),
       );
+      const silentRevealDurationMs = chatVoiceForcedMuted
+        ? Math.max(
+            120,
+            Math.round(
+              fallbackDurationMs * ZEN_MUTED_REVEAL_TIMING_MULTIPLIER,
+            ),
+          )
+        : fallbackDurationMs;
       prepareChatSpeechReveal(revealKey, spokenText);
       setZenPlayerSpeechReveal({ messageId, content: messageText, revealKey });
+
+      let revealStarted = false;
+      let revealFinished = false;
+
+      const cancelReveal = (): void => {
+        revealFinished = true;
+        releaseChatSpeechReveal(revealKey);
+        setZenPlayerSpeechReveal((current) =>
+          current?.revealKey === revealKey ? null : current,
+        );
+      };
+      controller.signal.addEventListener("abort", cancelReveal, { once: true });
 
       let cuePlayed = false;
       let cueAtMs: number | null = null;
@@ -65984,6 +65699,8 @@ function HomeContent(): React.JSX.Element {
         durationMs: number,
         alignment: SpeechCharacterAlignment | null,
       ): void => {
+        if (revealStarted || revealFinished || controller.signal.aborted) return;
+        revealStarted = true;
         startChatSpeechReveal(
           revealKey,
           tokens,
@@ -65999,20 +65716,33 @@ function HomeContent(): React.JSX.Element {
         if (cueAtMs !== null && elapsedMs >= cueAtMs) playCueOnce();
       };
       const finishReveal = (): void => {
+        if (revealFinished) return;
+        revealFinished = true;
         if (cueAtMs !== null) playCueOnce();
         finishChatSpeechReveal(revealKey);
+        controller.signal.removeEventListener("abort", cancelReveal);
         if (zenPlayerVoiceAbortRef.current === controller) {
           zenPlayerVoiceAbortRef.current = null;
         }
       };
       const runSilentFallback = (): void => {
-        beginReveal(fallbackDurationMs, null);
+        if (revealFinished || controller.signal.aborted) return;
+        beginReveal(silentRevealDurationMs, null);
+        const activeTimeline = chatSpeechRevealByKeyRef.current.get(revealKey);
+        const durationMs = Math.max(
+          1,
+          activeTimeline?.durationMs ?? silentRevealDurationMs,
+        );
+        const initialElapsedMs = Math.max(0, activeTimeline?.elapsedMs ?? 0);
         const startedAt = performance.now();
         const tick = (now: number): void => {
-          if (controller.signal.aborted) return;
-          const elapsedMs = Math.min(fallbackDurationMs, now - startedAt);
+          if (controller.signal.aborted || revealFinished) return;
+          const elapsedMs = Math.min(
+            durationMs,
+            initialElapsedMs + (now - startedAt),
+          );
           advanceReveal(elapsedMs);
-          if (elapsedMs >= fallbackDurationMs) {
+          if (elapsedMs >= durationMs) {
             finishReveal();
             return;
           }
@@ -66023,6 +65753,14 @@ function HomeContent(): React.JSX.Element {
 
       void (async (): Promise<void> => {
         try {
+          if (
+            chatVoiceForcedMuted ||
+            !settings.zenPlayerVoiceEnabled ||
+            settings.voiceVolume <= 0
+          ) {
+            runSilentFallback();
+            return;
+          }
           const voiceSelection = voicePlaybackSelectionRef.current;
           const playerPlayback = resolvePlayerVoicePlayback({
             profile: settings.playerAudioVoiceProfile,
@@ -66032,10 +65770,6 @@ function HomeContent(): React.JSX.Element {
           });
           const cleanProfile = playerPlayback.profile;
           const engine = playerPlayback.engine;
-          if (settings.voiceVolume <= 0) {
-            runSilentFallback();
-            return;
-          }
           const response = await fetch(
             new URL("/api/voices/synthesize", window.location.origin),
             {
@@ -66081,15 +65815,22 @@ function HomeContent(): React.JSX.Element {
             false,
             settings.voiceVolume,
             {
-              onStart: (durationMs) =>
-                beginReveal(
-                  durationMs && durationMs > 0
-                    ? durationMs
-                    : fallbackDurationMs,
-                  clip.alignment,
-                ),
+              onStart: (durationMs) => {
+                // The playback clock is the only Zen reveal clock. Committing
+                // the first token here prevents a provisional pre-audio pass
+                // from restarting when actual audio timing becomes available.
+                flushSync(() => {
+                  beginReveal(
+                    durationMs && durationMs > 0
+                      ? durationMs
+                      : fallbackDurationMs,
+                    clip.alignment,
+                  );
+                });
+              },
               onProgress: (elapsedMs) => advanceReveal(elapsedMs),
               onEnd: finishReveal,
+              onCancel: cancelReveal,
             },
             clip.engineUsed,
           );
@@ -66109,6 +65850,7 @@ function HomeContent(): React.JSX.Element {
       playChatPlayerActionSfx,
       prepareChatSpeechReveal,
       progressChatSpeechReveal,
+      releaseChatSpeechReveal,
       settings,
       startChatSpeechReveal,
     ],
@@ -78131,12 +77873,8 @@ function HomeContent(): React.JSX.Element {
       if (!options.skipComposerHistory) {
         appendComposerHistoryEntry(rawDraft);
       }
-      if (
-        !chatVoiceForcedMuted &&
-        view === "chat" &&
-        settings?.zenPlayerVoiceEnabled
-      ) {
-        playZenPlayerMessage(
+      if (view === "chat") {
+        presentChatPlayerMessage(
           optimisticFollowupMessageId,
           optimisticFollowupContent,
         );
@@ -78488,6 +78226,7 @@ function HomeContent(): React.JSX.Element {
       null;
     const finishResponseCueGeneration =
       responseCueBot &&
+      view !== "chat" &&
       !isStarterPrompt &&
       !isAssistantOnlyTurn &&
       !isZenAutonomy &&
@@ -78660,12 +78399,8 @@ function HomeContent(): React.JSX.Element {
         hasAssistantReply: detailForSend?.hasAssistantReply ?? false,
         messages: [...(detailForSend?.messages ?? []), optimisticMessage],
       });
-      if (
-        !chatVoiceForcedMuted &&
-        view === "chat" &&
-        settings?.zenPlayerVoiceEnabled
-      ) {
-        playZenPlayerMessage(optimisticMessageId, optimisticUserContent);
+      if (view === "chat") {
+        presentChatPlayerMessage(optimisticMessageId, optimisticUserContent);
       }
     }
     const applyLivePsychicProgress = (event: PsychicProgressEvent): void => {
@@ -102555,14 +102290,10 @@ function HomeContent(): React.JSX.Element {
             ) : card.type === "result" ? (
               <>
                 <strong>
-                  {card.run.status === "committed"
-                    ? "Committed"
-                    : card.run.status === "undone"
-                      ? "Restored"
-                      : card.run.status === "failed" ||
-                          card.run.status === "undo-failed"
-                        ? card.run.error || "Action failed"
-                        : "In progress"}
+                  {card.run.status === "failed" ||
+                  card.run.status === "undo-failed"
+                    ? card.run.error || prismActionStatusLabel(card.run.status)
+                    : prismActionStatusLabel(card.run.status)}
                 </strong>
                 {card.run.affectedEntities.length > 0 ? (
                   <p>
@@ -102621,9 +102352,10 @@ function HomeContent(): React.JSX.Element {
             {prismHomeRecentActionRuns.length > 0 ? (
               prismHomeRecentActionRuns.map((run) => (
                 <article key={run.id}>
-                  <span>{run.capabilityId}</span>
+                  <span>{prismActionLabel(run.capabilityId)}</span>
                   <small>
-                    {run.status} · {new Date(run.createdAt).toLocaleString()}
+                    {prismActionStatusLabel(run.status)} ·{" "}
+                    {new Date(run.createdAt).toLocaleString()}
                   </small>
                   {run.undoAvailable ? (
                     <button
@@ -103128,7 +102860,9 @@ function HomeContent(): React.JSX.Element {
               ? "story"
               : view === "slate"
                 ? "slate"
-                : "chat";
+                : chatPresentation === "zen"
+                  ? "zen"
+                  : "chat";
     const menuId = "prism-app-switcher-menu";
     const disabled = options.disabled === true;
     const appletGlyph = (appletId: PrismAppletId): React.ReactNode => {
@@ -103151,8 +102885,12 @@ function HomeContent(): React.JSX.Element {
       if (appletId === "botcast") return view === "botcast";
       if (appletId === "story") return view === "story";
       if (appletId === "slate") return view === "slate";
-      if (appletId === "zen") return view === "chat";
-      if (appletId === "chat") return view === "chat";
+      if (appletId === "zen") {
+        return view === "chat" && chatPresentation === "zen";
+      }
+      if (appletId === "chat") {
+        return view === "chat" && chatPresentation === "chat";
+      }
       return false;
     };
     const switchToApplet = (appletId: PrismAppletId): void => {
@@ -114231,45 +113969,11 @@ function HomeContent(): React.JSX.Element {
                                 </button>
                               </div>
                               <div className={styles.botVoiceIdentityField}>
-                                <label htmlFor="settings-player-local-accent">
-                                  Genuine accent source
-                                </label>
-                                <select
-                                  id="settings-player-local-accent"
-                                  value={playerLocalAccentLocale}
-                                  onChange={(event) => {
-                                    const locale = event.currentTarget.value;
-                                    setSettings((previous) =>
-                                      previous
-                                        ? {
-                                            ...previous,
-                                            playerAudioVoiceProfile:
-                                              cleanPlayerVoiceProfile(
-                                                selectOfflineVoiceAccent(
-                                                  previous.playerAudioVoiceProfile,
-                                                  locale,
-                                                  offlineVoiceIdentityOptions,
-                                                  playerLocalVoicePresentation,
-                                                ),
-                                              ),
-                                          }
-                                        : previous,
-                                    );
-                                  }}
-                                >
-                                  {playerLocalAccentLocales.map((locale) => (
-                                    <option key={locale} value={locale}>
-                                      {englishVoiceLocaleLabel(locale)}
-                                    </option>
-                                  ))}
-                                </select>
-                              </div>
-                              <div className={styles.botVoiceIdentityField}>
-                                <span>Vocal presentation</span>
+                                <span>Gender</span>
                                 <div
                                   className={styles.botVoicePresentationChips}
                                   role="group"
-                                  aria-label="Zen player voice presentation"
+                                  aria-label="Zen player voice gender"
                                 >
                                   {(
                                     ["any", "feminine", "masculine"] as const
@@ -114292,21 +113996,6 @@ function HomeContent(): React.JSX.Element {
                                         setPlayerLocalVoicePresentation(
                                           presentation,
                                         );
-                                        setSettings((previous) =>
-                                          previous
-                                            ? {
-                                                ...previous,
-                                                playerAudioVoiceProfile:
-                                                  cleanPlayerVoiceProfile(
-                                                    selectOfflineVoicePresentation(
-                                                      previous.playerAudioVoiceProfile,
-                                                      presentation,
-                                                      offlineVoiceIdentityOptions,
-                                                    ),
-                                                  ),
-                                              }
-                                            : previous,
-                                        );
                                       }}
                                     >
                                       {presentation === "any"
@@ -114319,7 +114008,8 @@ function HomeContent(): React.JSX.Element {
                                 </div>
                                 <small>
                                   Installed voices appear under Any because
-                                  their presentation is not reported reliably.
+                                  their gender metadata is not reported
+                                  reliably.
                                 </small>
                               </div>
                               <div className={styles.botVoiceIdentityField}>
@@ -128265,7 +127955,7 @@ function HomeContent(): React.JSX.Element {
         ? {
             id: activeCoffeeResponseCue.id,
             role: "assistant",
-            speaker: `Response cue · ${activeCoffeeResponseCue.speaker.name}`,
+            speaker: activeCoffeeResponseCue.speaker.name,
             text:
               activeCoffeeResponseCue.text.slice(
                 0,
@@ -128276,7 +127966,6 @@ function HomeContent(): React.JSX.Element {
               coffeeBotsById.get(activeCoffeeResponseCue.speaker.botId)?.color,
               resolvedTheme,
             ),
-            responseCue: true,
           }
         : null;
     const responseCueHistoryLines: CoffeeCenterFeedLine[] =
@@ -128292,14 +127981,13 @@ function HomeContent(): React.JSX.Element {
         .map((beat) => ({
           id: beat.id,
           role: "assistant" as const,
-          speaker: `Response cue · ${beat.speaker.name}`,
+          speaker: beat.speaker.name,
           text: heardBotPresenceBeatTextV1(beat),
           botId: beat.speaker.botId,
           botTextColor: coffeeBotTranscriptTextColor(
             coffeeBotsById.get(beat.speaker.botId)?.color,
             resolvedTheme,
           ),
-          responseCue: true,
         }));
     const centerFeedLines: CoffeeCenterFeedLine[] = [
       ...responseCueHistoryLines,
@@ -129371,9 +129059,6 @@ function HomeContent(): React.JSX.Element {
                             key={line.id}
                             className={styles.coffeeCenterFeedLine}
                             data-role={line.role}
-                            data-response-cue={
-                              line.responseCue ? "true" : undefined
-                            }
                             data-power-voice-presence={line.voicePresence}
                             data-speaker-break={
                               speakerChanged ? "true" : undefined
@@ -129387,7 +129072,7 @@ function HomeContent(): React.JSX.Element {
                                 : undefined
                             }
                           >
-                            {!isLiveCenterTranscript || line.responseCue ? (
+                            {!isLiveCenterTranscript ? (
                               <span className={styles.coffeeCenterFeedSpeaker}>
                                 {line.speaker}:{" "}
                               </span>
@@ -135893,9 +135578,18 @@ function HomeContent(): React.JSX.Element {
               signalNavbarModelOptions.find(
                 (option) => option.id === episodeModelControl.value,
               )?.provider ?? signalProvider;
+            const episodeModelChoice =
+              episodeModelControl.value || AUTO_MODEL_CHOICE;
+            const episodePrimaryForAuto = resolvedAutoPrimaryForComposer(
+              modelCatalog,
+              settings,
+              episodeSelectedModelProvider,
+              episodeModelChoice,
+            );
             const episodeEffortTarget = modelEffortTargetForSelection({
-              provider: episodeSelectedModelProvider,
-              modelId: episodeModelControl.value || AUTO_MODEL_CHOICE,
+              provider:
+                episodePrimaryForAuto?.provider ?? episodeSelectedModelProvider,
+              modelId: episodePrimaryForAuto?.model ?? episodeModelChoice,
               options: signalNavbarModelOptions,
               simulatedEffortEnabled:
                 settings?.experimentalAllModelEffortEnabled === true,
@@ -135915,7 +135609,7 @@ function HomeContent(): React.JSX.Element {
                     false,
                   )}
                   <ComposerModelPicker
-                    value={episodeModelControl.value || AUTO_MODEL_CHOICE}
+                    value={episodeModelChoice}
                     onChange={(nextChoice) =>
                       episodeModelControl.onChange(
                         nextChoice === AUTO_MODEL_CHOICE ? "" : nextChoice,
@@ -136939,7 +136633,7 @@ function HomeContent(): React.JSX.Element {
                       }
                     >
                       <span className={styles.emptyStateTitlePhrase}>
-                        <span className={styles.emptyStateTitleLead}>Chat</span>
+                        <span className={styles.emptyStateTitleLead}>Zen</span>
                         {options.inlineHero && !suppressHeroCopy ? (
                           <button
                             type="button"
@@ -137349,7 +137043,7 @@ function HomeContent(): React.JSX.Element {
                   (!messageRevealEligible ||
                     chatCompletedRevealKeysRef.current.has(temporalKey));
                 const zenPlayerRevealMatches = Boolean(
-                  chatLikeSurface &&
+                  view === "chat" &&
                   msg.role === "user" &&
                   zenPlayerSpeechReveal &&
                   (msg.id === zenPlayerSpeechReveal.messageId ||
@@ -137900,7 +137594,6 @@ function HomeContent(): React.JSX.Element {
               })}
               {devChatDebugEventsNode}
               {renderPrismHomeOrchestrationCards()}
-              {responseCueHistoryNode}
               {!chatLikeSurface ? typingIndicatorNode : null}
               {sandboxSummaryIndicatorNode}
               <div
@@ -139444,7 +139137,7 @@ function HomeContent(): React.JSX.Element {
                 (!messageRevealEligible ||
                   chatCompletedRevealKeysRef.current.has(temporalKey));
               const zenPlayerRevealMatches = Boolean(
-                chatLikeSurface &&
+                view === "chat" &&
                 msg.role === "user" &&
                 zenPlayerSpeechReveal &&
                 (msg.id === zenPlayerSpeechReveal.messageId ||
@@ -139960,7 +139653,6 @@ function HomeContent(): React.JSX.Element {
               );
             })}
             {devChatDebugEventsNode}
-            {responseCueHistoryNode}
             {!chatLikeSurface ? typingIndicatorNode : null}
             {sandboxSummaryIndicatorNode}
             {/* Scroll sentinel: kept at the very end so the scroll effect can

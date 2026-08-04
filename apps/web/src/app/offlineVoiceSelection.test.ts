@@ -10,8 +10,6 @@ import {
   offlineVoiceOptionsForFilters,
   offlineVoiceSelectionValue,
   operatingSystemVoiceSelectionValue,
-  selectOfflineVoiceAccent,
-  selectOfflineVoicePresentation,
   type OfflineVoiceOption,
 } from "./offlineVoiceSelection.ts";
 
@@ -54,76 +52,52 @@ describe("offline voice selection", () => {
     assert.equal(offlineVoiceSelectionValue(selected), "os:Samantha");
   });
 
-  it("filters exact accents and keeps OS voices under Any only", () => {
-    const britishFeminine = offlineVoiceOptionsForFilters(catalog, {
-      locale: "en-GB",
+  it("mixes American and British voices while filtering gender", () => {
+    const feminine = offlineVoiceOptionsForFilters(catalog, {
       presentation: "feminine",
     });
-    assert.ok(britishFeminine.length > 0);
+    assert.ok(feminine.length > 0);
     assert.ok(
-      britishFeminine.every(
+      feminine.every(
         (voice) =>
           voice.kind === "builtin" &&
-          voice.locale === "en-GB" &&
           voice.presentation === "feminine",
       ),
     );
+    assert.deepEqual(
+      new Set(feminine.map((voice) => voice.locale)),
+      new Set(["en-US", "en-GB"]),
+    );
     assert.equal(
       offlineVoiceOptionsForFilters(catalog, {
-        locale: "en-US",
         presentation: "feminine",
       }).some((voice) => voice.kind === "os"),
       false,
     );
     assert.equal(
       offlineVoiceOptionsForFilters(catalog, {
-        locale: "en-US",
         presentation: "any",
       }).some((voice) => voice.kind === "os"),
       true,
     );
   });
 
-  it("selects a deterministic authored counterpart inside active filters", () => {
-    const british = selectOfflineVoiceAccent(
-      { ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, baseVoiceId: "voice-3" },
-      "en-GB",
-      catalog,
-      "masculine",
-    );
-    assert.equal(british.accentLocale, "en-GB");
-    assert.equal(
-      PRISM_BUILTIN_ENGLISH_VOICES.find(
-        (voice) => voice.voiceId === british.baseVoiceId,
-      )?.presentation,
-      "masculine",
-    );
-    const feminine = selectOfflineVoicePresentation(
-      british,
-      "feminine",
-      catalog,
-    );
-    assert.equal(feminine.accentLocale, "en-GB");
-    assert.equal(
-      PRISM_BUILTIN_ENGLISH_VOICES.find(
-        (voice) => voice.voiceId === feminine.baseVoiceId,
-      )?.presentation,
-      "feminine",
-    );
-  });
-
-  it("preserves an authored pronunciation override while voice filters change", () => {
-    const selected = selectOfflineVoiceAccent(
+  it("preserves pronunciation while selecting across gender and accent", () => {
+    const selected = applyOfflineVoiceSelection(
       {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
         baseVoiceId: "voice-1",
         pronunciationBase: "en-GB",
       },
-      "en-US",
+      builtinVoiceSelectionValue("voice-5"),
       catalog,
+    );
+    assert.equal(
+      PRISM_BUILTIN_ENGLISH_VOICES.find(
+        (voice) => voice.voiceId === selected.baseVoiceId,
+      )?.presentation,
       "masculine",
     );
-    assert.equal(selected.accentLocale, "en-US");
     assert.equal(selected.pronunciationBase, "en-GB");
   });
 });

@@ -33,27 +33,18 @@ interface AssetApiResponse extends ImageAssetCatalogPage {
   ok: boolean;
 }
 
-interface CleanupPreviewResponse {
-  ok: boolean;
-  preview: {
-    snapshot: string;
-    candidates: Array<{ id: string; storageBytes: number }>;
-  };
-}
-
-interface CleanupResultResponse {
+interface DeleteAssetSetResponse {
   ok: boolean;
   result: {
-    deletedCount: number;
-    reclaimedBytes: number;
-    recoveryRetained: boolean;
+    assetSetId: string;
     imageIds: string[];
+    recoveryId: string;
+    recoveryBytes: number;
   };
 }
 
 interface CleanupConfirmation {
-  snapshot: string;
-  imageIds: string[];
+  assetSetIds: string[];
   assetCount: number;
   storageBytes: number;
 }
@@ -480,6 +471,10 @@ export function AssetLibraryModal({
   const [cleanupBusy, setCleanupBusy] = useState(false);
   const [cleanupConfirmation, setCleanupConfirmation] =
     useState<CleanupConfirmation | null>(null);
+  const [deleteConfirmationId, setDeleteConfirmationId] = useState<
+    string | null
+  >(null);
+  const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
   const [revealState, setRevealState] = useState<
     "idle" | "revealing" | "shown"
   >("idle");
@@ -492,9 +487,10 @@ export function AssetLibraryModal({
         (asset) =>
           asset.source === "generated" &&
           asset.usageCount === 0 &&
+          !asset.members.some((member) => currentIds.has(member.imageId)) &&
           asset.members.length > 0,
       ),
-    [assets],
+    [assets, currentIds],
   );
 
   const load = useCallback(
@@ -623,6 +619,7 @@ export function AssetLibraryModal({
     setDetail(asset);
     setTagDraft(asset.playerTags.join(", "));
     setRevealState("idle");
+    setDeleteConfirmationId(null);
     window.requestAnimationFrame(() => {
       detailRef.current?.scrollTo({ top: 0 });
     });
@@ -671,22 +668,35 @@ export function AssetLibraryModal({
   };
 
   const deleteAsset = async (): Promise<void> => {
-    if (!detail || !allowDelete) return;
     if (
-      !window.confirm(
-        `Move “${detail.title}” to recovery trash? You can restore it from Storage until the recovery batch is purged.`,
-      )
-    ) {
-      return;
-    }
+      !detail ||
+      !allowDelete ||
+      deleteConfirmationId !== detail.id ||
+      deletingAssetId
+    ) return;
+    const deleting = detail;
+    setDeletingAssetId(deleting.id);
+    setError(null);
+    setNotice(null);
     try {
-      await readJson<{ ok: boolean }>(
-        await fetch(`/api/assets/${encodeURIComponent(detail.id)}`, { method: "DELETE" }),
+      const { result } = await readJson<DeleteAssetSetResponse>(
+        await fetch(`/api/assets/${encodeURIComponent(deleting.id)}`, {
+          method: "DELETE",
+          credentials: "include",
+        }),
       );
-      setAssets((current) => current.filter((asset) => asset.id !== detail.id));
+      setAssets((current) =>
+        current.filter((asset) => asset.id !== deleting.id),
+      );
       setDetail(null);
+      setDeleteConfirmationId(null);
+      setNotice(
+        `Moved 1 unused asset (${formatStorageBytes(result.recoveryBytes)}) to recovery trash.`,
+      );
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The asset could not be deleted.");
+    } finally {
+      setDeletingAssetId(null);
     }
   };
 
@@ -697,35 +707,26 @@ export function AssetLibraryModal({
     setError(null);
     setNotice(null);
     try {
-      const { preview } = await readJson<CleanupPreviewResponse>(
-        await fetch("/api/images/cleanup-preview"),
+      const assetSetIds = shownAtStart.map((asset) => asset.id);
+      const { bytes } = await readJson<{
+        ok: boolean;
+        bytes: number;
+      }>(
+        await fetch("/api/assets/storage/visible", {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ assetSetIds }),
+        }),
       );
-      const candidates = new Map(
-        preview.candidates.map((candidate) => [candidate.id, candidate]),
-      );
-      const eligibleAssets = shownAtStart.filter((asset) =>
-        asset.members.every((member) => candidates.has(member.imageId)),
-      );
-      const imageIds = [
-        ...new Set(
-          eligibleAssets.flatMap((asset) =>
-            asset.members.map((member) => member.imageId),
-          ),
-        ),
-      ];
-      if (eligibleAssets.length === 0 || imageIds.length === 0) {
+      if (assetSetIds.length === 0) {
         setNotice("No safely clearable unused assets are currently shown.");
         return;
       }
-      const selectedBytes = imageIds.reduce(
-        (total, imageId) => total + (candidates.get(imageId)?.storageBytes ?? 0),
-        0,
-      );
       setCleanupConfirmation({
-        snapshot: preview.snapshot,
-        imageIds,
-        assetCount: eligibleAssets.length,
-        storageBytes: selectedBytes,
+        assetSetIds,
+        assetCount: shownAtStart.length,
+        storageBytes: bytes,
       });
     } catch (caught) {
       setError(
@@ -745,29 +746,44 @@ export function AssetLibraryModal({
     setError(null);
     setNotice(null);
     try {
-      const { result } = await readJson<CleanupResultResponse>(
-        await fetch("/api/images/cleanup", {
-          method: "POST",
-          credentials: "include",
-          headers: { "content-type": "application/json" },
-          body: JSON.stringify({
-            snapshot: confirmation.snapshot,
-            imageIds: confirmation.imageIds,
-            permanent: false,
-          }),
-        }),
-      );
-      const clearedIds = new Set(result.imageIds);
+      const clearedSetIds = new Set<string>();
+      let recoveryBytes = 0;
+      const failures: string[] = [];
+      for (const assetSetId of confirmation.assetSetIds) {
+        try {
+          const { result } = await readJson<DeleteAssetSetResponse>(
+            await fetch(`/api/assets/${encodeURIComponent(assetSetId)}`, {
+              method: "DELETE",
+              credentials: "include",
+            }),
+          );
+          clearedSetIds.add(result.assetSetId);
+          recoveryBytes += result.recoveryBytes;
+        } catch (caught) {
+          failures.push(
+            caught instanceof Error
+              ? caught.message
+              : "An asset became protected before it could be deleted.",
+          );
+        }
+      }
       setDetail((current) =>
-        current?.members.some((member) => clearedIds.has(member.imageId))
-          ? null
-          : current,
+        current && clearedSetIds.has(current.id) ? null : current,
       );
       setCleanupConfirmation(null);
       await load(null, false);
-      setNotice(
-        `Moved ${confirmation.assetCount} unused asset${confirmation.assetCount === 1 ? "" : "s"} (${formatStorageBytes(result.reclaimedBytes)}) to recovery trash.`,
-      );
+      if (clearedSetIds.size > 0) {
+        setNotice(
+          `Moved ${clearedSetIds.size} unused asset${clearedSetIds.size === 1 ? "" : "s"} (${formatStorageBytes(recoveryBytes)}) to recovery trash.`,
+        );
+      }
+      if (failures.length > 0) {
+        setError(
+          clearedSetIds.size > 0
+            ? `${failures.length} asset${failures.length === 1 ? " was" : "s were"} kept because they became used or could not be safely verified.`
+            : failures[0]!,
+        );
+      }
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -965,15 +981,16 @@ export function AssetLibraryModal({
                     {detailIsCurrent ? "Already selected" : "Use this asset"}
                   </button>
                 ) : null}
-                {allowDelete ? (
+                {allowDelete && deleteConfirmationId !== detail.id ? (
                   <button
                     type="button"
                     className={sharedStyles.dangerButton}
-                    onClick={() => void deleteAsset()}
+                    onClick={() => setDeleteConfirmationId(detail.id)}
                     disabled={
                       detailIsCurrent ||
                       detail.usageCount > 0 ||
-                      detail.source === "legacy"
+                      detail.source === "legacy" ||
+                      deletingAssetId !== null
                     }
                   >
                     {detailIsCurrent
@@ -986,6 +1003,36 @@ export function AssetLibraryModal({
                   </button>
                 ) : null}
               </div>
+              {allowDelete && deleteConfirmationId === detail.id ? (
+                <div
+                  className={styles.cleanupConfirmation}
+                  role="group"
+                  aria-label="Confirm deleting unused asset"
+                >
+                  <span>
+                    Move “{detail.title}” to recovery trash? You can restore it
+                    from Storage.
+                  </span>
+                  <button
+                    type="button"
+                    className={sharedStyles.linkButton}
+                    onClick={() => setDeleteConfirmationId(null)}
+                    disabled={deletingAssetId !== null}
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    className={sharedStyles.dangerButton}
+                    onClick={() => void deleteAsset()}
+                    disabled={deletingAssetId !== null}
+                  >
+                    {deletingAssetId === detail.id
+                      ? "Moving…"
+                      : "Move to recovery trash"}
+                  </button>
+                </div>
+              ) : null}
             </aside>
           ) : null}
         </div>

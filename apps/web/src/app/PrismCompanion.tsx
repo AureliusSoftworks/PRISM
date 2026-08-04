@@ -98,6 +98,10 @@ import {
   type PrismWieldState,
 } from "./prismWield";
 import type { SpeechCharacterAlignment } from "./speechRevealTimeline";
+import {
+  prismActionLabel,
+  prismActionStatusLabel,
+} from "./prismActionPresentation";
 import styles from "./prismCompanion.module.css";
 
 const PRISM_COMPANION_SYSTEM_PAUSE_REASON = "prism-companion";
@@ -2679,14 +2683,11 @@ export default function PrismCompanion({
                       ) : card.type === "result" ? (
                         <>
                           <strong>
-                            {card.run.status === "committed"
-                              ? "Committed"
-                              : card.run.status === "undone"
-                                ? "Restored"
-                                : card.run.status === "failed" ||
-                                    card.run.status === "undo-failed"
-                                  ? card.run.error || "Action failed"
-                                  : "In progress"}
+                            {card.run.status === "failed" ||
+                            card.run.status === "undo-failed"
+                              ? card.run.error ||
+                                prismActionStatusLabel(card.run.status)
+                              : prismActionStatusLabel(card.run.status)}
                           </strong>
                           {card.run.affectedEntities.length > 0 ? (
                             <p>
@@ -2820,9 +2821,9 @@ export default function PrismCompanion({
                   {recentRuns.length > 0 ? (
                     recentRuns.map((run) => (
                       <article key={run.id}>
-                        <span>{run.capabilityId}</span>
+                        <span>{prismActionLabel(run.capabilityId)}</span>
                         <small>
-                          {run.status} ·{" "}
+                          {prismActionStatusLabel(run.status)} ·{" "}
                           {new Date(run.createdAt).toLocaleString()}
                         </small>
                         {run.undoAvailable ? (

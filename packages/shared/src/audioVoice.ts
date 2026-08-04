@@ -395,6 +395,8 @@ export interface BotAudioVoiceProfileV2 {
   accentLocale?: string | null;
   accentMode?: LocalVoiceAccentMode;
   pronunciationBase?: LocalVoicePronunciationBase;
+  /** Exact normalized Accent Map position. The chosen influence remains approximate. */
+  pronunciationMapPoint?: LocalVoicePronunciationMapPoint;
   speechprintInfluence?: LocalVoiceSpeechprintInfluence;
   speechprintStrength?: LocalVoiceSpeechprintStrength;
   speechprintVariationSeed?: string;
@@ -438,6 +440,11 @@ export const LOCAL_VOICE_PRONUNCIATION_BASES = [
 ] as const;
 export type LocalVoicePronunciationBase =
   (typeof LOCAL_VOICE_PRONUNCIATION_BASES)[number];
+
+export interface LocalVoicePronunciationMapPoint {
+  x: number;
+  y: number;
+}
 
 export const LOCAL_VOICE_SPEECHPRINT_INFLUENCES = [
   "none",
@@ -523,6 +530,7 @@ export interface BotLocalVoiceProfileV1 {
   };
   pronunciation?: {
     base: LocalVoicePronunciationBase;
+    mapPoint?: LocalVoicePronunciationMapPoint;
   };
   speechprint: LocalVoiceSpeechprintV1;
   tone: BotLocalVoiceToneV1;
@@ -1302,6 +1310,22 @@ function voiceProfileObject(value: unknown): Record<string, unknown> {
     : {};
 }
 
+export function normalizeLocalVoicePronunciationMapPoint(
+  value: unknown,
+  fallback: LocalVoicePronunciationMapPoint | null = null,
+): LocalVoicePronunciationMapPoint | null {
+  if (value === undefined) return fallback;
+  if (value === null) return null;
+  const record = voiceProfileObject(value);
+  const x = typeof record.x === "number" ? record.x : NaN;
+  const y = typeof record.y === "number" ? record.y : NaN;
+  if (!Number.isFinite(x) || !Number.isFinite(y)) return fallback;
+  return {
+    x: Math.max(0, Math.min(1, x)),
+    y: Math.max(0, Math.min(1, y)),
+  };
+}
+
 /** Flatten V3 into the established runtime shape. This keeps every existing
  * synthesis surface compatible while persistence and new editors use the
  * separated local / premium / delivery contract. */
@@ -1340,6 +1364,7 @@ function flattenBotAudioVoiceProfileV3Record(
     accentLocale: accent.locale,
     accentMode: accent.mode,
     pronunciationBase: pronunciation.base,
+    pronunciationMapPoint: pronunciation.mapPoint,
     speechprintInfluence: speechprint.influence,
     speechprintStrength: speechprint.strength,
     speechprintVariationSeed: speechprint.variationSeed,
@@ -1414,6 +1439,10 @@ export function normalizeBotAudioVoiceProfileV1(
     record.speechprintInfluence,
     fallbackProfile.speechprintInfluence ?? "none",
   );
+  const pronunciationMapPoint = normalizeLocalVoicePronunciationMapPoint(
+    record.pronunciationMapPoint,
+    fallbackProfile.pronunciationMapPoint ?? null,
+  );
   return {
     v: 2,
     enabled: legacy ? true : record.enabled !== false,
@@ -1479,6 +1508,7 @@ export function normalizeBotAudioVoiceProfileV1(
       record.pronunciationBase,
       fallbackProfile.pronunciationBase ?? "follow-voice",
     ),
+    ...(pronunciationMapPoint ? { pronunciationMapPoint } : {}),
     speechprintInfluence,
     speechprintStrength: normalizeLocalVoiceSpeechprintStrength(
       record.speechprintStrength,
@@ -1538,6 +1568,9 @@ function normalizeBotAudioVoiceProfileFallback(
         ? undefined
         : normalizeElevenLabsVoiceStability(value.elevenLabsStability);
     const avatarSfx = normalizeBotAvatarSfxV1(rawAvatarSfx);
+    const pronunciationMapPoint = normalizeLocalVoicePronunciationMapPoint(
+      value.pronunciationMapPoint,
+    );
     return {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
       ...voiceProfile,
@@ -1576,6 +1609,9 @@ function normalizeBotAudioVoiceProfileFallback(
       pronunciationBase: normalizeLocalVoicePronunciationBase(
         value.pronunciationBase,
       ),
+      ...(pronunciationMapPoint
+        ? { pronunciationMapPoint }
+        : { pronunciationMapPoint: undefined }),
       speechprintInfluence: normalizeLocalVoiceSpeechprintInfluence(
         value.speechprintInfluence,
       ),
@@ -1658,6 +1694,9 @@ export function normalizeBotAudioVoiceProfileV3(
       },
       pronunciation: {
         base: normalizeLocalVoicePronunciationBase(profile.pronunciationBase),
+        ...(profile.pronunciationMapPoint
+          ? { mapPoint: { ...profile.pronunciationMapPoint } }
+          : {}),
       },
       speechprint: normalizeLocalVoiceSpeechprintV1({
         influence: profile.speechprintInfluence,

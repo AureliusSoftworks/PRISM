@@ -238,6 +238,7 @@ describe("audio voice normalization", () => {
       localEnginePreference: "voice-plus",
       accentLocale: "en-GB",
       pronunciationBase: "en-US",
+      pronunciationMapPoint: { x: 0.28731, y: 0.29842 },
       openness: 0.35,
       weight: -0.4,
       resonance: 0.25,
@@ -250,7 +251,10 @@ describe("audio voice normalization", () => {
     assert.equal(v3.v, 3);
     assert.equal(v3.local.archetypeId, "voice-28");
     assert.equal(v3.local.enginePreference, "voice-plus");
-    assert.deepEqual(v3.local.pronunciation, { base: "en-US" });
+    assert.deepEqual(v3.local.pronunciation, {
+      base: "en-US",
+      mapPoint: { x: 0.28731, y: 0.29842 },
+    });
     assert.equal(v3.local.tone.openness, 0.35);
     assert.deepEqual(v3.local.speechprint, {
       influence: "japanese-influenced-english",
@@ -267,6 +271,33 @@ describe("audio voice normalization", () => {
     assert.equal(compatible?.baseVoiceId, "voice-28");
     assert.equal(compatible?.localEnginePreference, "voice-plus");
     assert.equal(compatible?.pronunciationBase, "en-US");
+    assert.deepEqual(compatible?.pronunciationMapPoint, {
+      x: 0.28731,
+      y: 0.29842,
+    });
+  });
+
+  it("clamps Accent Map positions without replacing their free placement", () => {
+    assert.deepEqual(
+      normalizeBotAudioVoiceProfileV1({
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        pronunciationMapPoint: { x: -0.25, y: 0.73129 },
+      }).pronunciationMapPoint,
+      { x: 0, y: 0.73129 },
+    );
+    assert.equal(
+      normalizeBotAudioVoiceProfileV1(
+        {
+          ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+          pronunciationMapPoint: null,
+        },
+        {
+          ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+          pronunciationMapPoint: { x: 0.3, y: 0.4 },
+        },
+      ).pronunciationMapPoint,
+      undefined,
+    );
   });
 
   it("keeps genuine voice identity separate from an approximate pronunciation base", () => {

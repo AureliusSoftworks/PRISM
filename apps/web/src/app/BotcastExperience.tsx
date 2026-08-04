@@ -9402,10 +9402,10 @@ export function BotcastExperience({
         presenceBeat.completion === "playing" ? (
           <div
             className={styles.liveCaption}
-            data-response-cue="true"
+            data-signal-live-caption="true"
             aria-live="polite"
           >
-            <strong>Response cue · {presenceBeat.speaker.name}</strong>
+            <strong>{presenceBeat.speaker.name}</strong>
             <span>
               {presenceBeat.text.slice(0, presenceBeat.heardCharacterCount) ||
                 "…"}
@@ -13064,8 +13064,8 @@ export function BotcastExperience({
                 const heard = beat.text.slice(0, beat.heardCharacterCount);
                 return heard
                   ? [
-                      <div key={beat.id} data-response-cue="true">
-                        <strong>Response cue · {beat.speaker.name}</strong>
+                      <div key={beat.id}>
+                        <strong>{beat.speaker.name}</strong>
                         <span>{heard}</span>
                       </div>,
                     ]

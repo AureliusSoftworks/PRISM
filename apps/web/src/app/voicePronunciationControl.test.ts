@@ -101,4 +101,10 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.match(mapSource, /viewBox="0 0 1774 887"/u);
     assert.match(mapSource, /preserveAspectRatio="none"/u);
   });
+
+  it("commits and persists the exact dropped map point", () => {
+    assert.doesNotMatch(atlasSource, /const snapped/u);
+    assert.match(atlasSource, /pronunciationAtlasPointForSelection/u);
+    assert.match(pageSource, /pronunciationMapPoint: selection\.point/u);
+  });
 });

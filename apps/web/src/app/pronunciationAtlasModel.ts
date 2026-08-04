@@ -19,6 +19,8 @@ export interface PronunciationAtlasSelection {
   sourceLocale: string;
   influence: LocalVoiceSpeechprintInfluence;
   strength: LocalVoiceSpeechprintStrength;
+  /** The pin's exact normalized position; absent only for legacy profiles. */
+  point?: AdjustmentPadPoint;
 }
 
 export interface PronunciationAtlasAnchor {
@@ -208,6 +210,15 @@ function squaredDistance(
   return dx * dx + dy * dy;
 }
 
+function clampPronunciationAtlasPoint(
+  point: AdjustmentPadPoint,
+): AdjustmentPadPoint {
+  return {
+    x: Math.max(0, Math.min(1, point.x)),
+    y: Math.max(0, Math.min(1, point.y)),
+  };
+}
+
 function sourceBaseLocale(sourceLocale: string): "en-US" | "en-GB" {
   return resolveLocalVoicePronunciationLocale("follow-voice", sourceLocale);
 }
@@ -222,6 +233,9 @@ export function normalizePronunciationAtlasSelection(
     sourceLocale: selection.sourceLocale,
     influence: normalizeLocalVoiceSpeechprintInfluence(selection.influence),
     strength: normalizeLocalVoiceSpeechprintStrength(selection.strength),
+    ...(selection.point
+      ? { point: clampPronunciationAtlasPoint(selection.point) }
+      : {}),
   };
 }
 
@@ -234,6 +248,7 @@ export function pronunciationAtlasSelectionKey(
     normalized.sourceLocale,
     normalized.influence,
     normalized.strength,
+    normalized.point ? `${normalized.point.x},${normalized.point.y}` : "anchor",
   ].join(":");
 }
 
@@ -263,13 +278,24 @@ export function pronunciationAtlasAnchorForSelection(
   );
 }
 
+export function pronunciationAtlasPointForSelection(
+  selection: PronunciationAtlasSelection,
+): AdjustmentPadPoint {
+  const normalized = normalizePronunciationAtlasSelection(selection);
+  return (
+    normalized.point ?? pronunciationAtlasAnchorForSelection(normalized).point
+  );
+}
+
 export function pronunciationAtlasSelectionAtPoint(
   point: AdjustmentPadPoint,
   current: PronunciationAtlasSelection,
 ): PronunciationAtlasSelection {
+  const clampedPoint = clampPronunciationAtlasPoint(point);
   const normalized = normalizePronunciationAtlasSelection(current);
   const nearest = PRONUNCIATION_ATLAS_ANCHORS.reduce((best, candidate) =>
-    squaredDistance(point, candidate.point) < squaredDistance(point, best.point)
+    squaredDistance(clampedPoint, candidate.point) <
+    squaredDistance(clampedPoint, best.point)
       ? candidate
       : best,
   );
@@ -280,48 +306,28 @@ export function pronunciationAtlasSelectionAtPoint(
       ...normalized,
       pronunciationBase: matchingSource ? "follow-voice" : nearest.base,
       influence: "none",
+      point: clampedPoint,
     };
   }
   return {
     ...normalized,
     influence: nearest.influence ?? "none",
+    point: clampedPoint,
   };
 }
 
 export function nudgePronunciationAtlasSelection(
   current: PronunciationAtlasSelection,
   direction: AdjustmentPadDirection,
+  multiplier = 1,
 ): PronunciationAtlasSelection {
-  const origin = pronunciationAtlasAnchorForSelection(current);
-  const candidates = PRONUNCIATION_ATLAS_ANCHORS.filter((candidate) => {
-    const dx = candidate.point.x - origin.point.x;
-    const dy = candidate.point.y - origin.point.y;
-    if (direction === "left") return dx < -0.005;
-    if (direction === "right") return dx > 0.005;
-    if (direction === "up") return dy < -0.005;
-    return dy > 0.005;
-  });
-  if (candidates.length === 0)
-    return normalizePronunciationAtlasSelection(current);
-  const directionalDistance = (candidate: PronunciationAtlasAnchor): number => {
-    const dx = candidate.point.x - origin.point.x;
-    const dy = candidate.point.y - origin.point.y;
-    const primary =
-      direction === "left" || direction === "right"
-        ? Math.abs(dx)
-        : Math.abs(dy);
-    const cross =
-      direction === "left" || direction === "right"
-        ? Math.abs(dy)
-        : Math.abs(dx);
-    return primary + cross * 1.75;
-  };
-  const target = candidates.reduce((best, candidate) =>
-    directionalDistance(candidate) < directionalDistance(best)
-      ? candidate
-      : best,
-  );
-  return pronunciationAtlasSelectionAtPoint(target.point, current);
+  const point = { ...pronunciationAtlasPointForSelection(current) };
+  const delta = 0.01 * multiplier;
+  if (direction === "left") point.x -= delta;
+  else if (direction === "right") point.x += delta;
+  else if (direction === "up") point.y -= delta;
+  else point.y += delta;
+  return pronunciationAtlasSelectionAtPoint(point, current);
 }
 
 function baseLabel(base: "en-US" | "en-GB"): string {

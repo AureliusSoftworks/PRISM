@@ -4,6 +4,7 @@ import {
   BOT_RESPONSE_CUE_EXPLICIT_COOLDOWN_MS,
   BOT_RESPONSE_CUE_MAX_PHRASES,
   BOT_RESPONSE_CUE_WAIT_DELAY_MS,
+  botResponseCuesEnabledForSurfaceV1,
   heardBotPresenceBeatTextV1,
   normalizeBotResponseCuePhraseV1,
   normalizeBotResponseCueProfileV1,
@@ -29,6 +30,15 @@ function baseInput(
 }
 
 describe("bot response cues", () => {
+  it("keeps direct Chat and immersive Zen free of response cues", () => {
+    assert.equal(botResponseCuesEnabledForSurfaceV1("chat"), false);
+    assert.equal(botResponseCuesEnabledForSurfaceV1("zen"), false);
+    assert.equal(botResponseCuesEnabledForSurfaceV1("sandbox"), true);
+    assert.equal(botResponseCuesEnabledForSurfaceV1("coffee"), true);
+    assert.equal(botResponseCuesEnabledForSurfaceV1("signal"), true);
+    assert.equal(botResponseCuesEnabledForSurfaceV1("debate"), true);
+  });
+
   it("normalizes whitespace and rejects overlong phrases", () => {
     assert.equal(normalizeBotResponseCuePhraseV1("  Okay,   then.  "), "Okay, then.");
     assert.equal(

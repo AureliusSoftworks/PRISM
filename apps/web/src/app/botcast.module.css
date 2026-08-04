@@ -801,7 +801,6 @@
 .liveCaption strong { border: 1px solid rgba(255,255,255,.16); border-radius: 999px; padding: 4px 8px; color: color-mix(in srgb, var(--botcast-studio-accent) 42%, white); background: rgba(4,6,11,.72); backdrop-filter: blur(9px) saturate(1.1); font: 820 clamp(.52rem, .9vw, .68rem)/1 system-ui; letter-spacing: .11em; text-transform: uppercase; box-shadow: 0 5px 18px rgba(0,0,0,.28); }
 .liveCaption span { max-width: 100%; border-radius: 10px; padding: 7px 12px 8px; background: rgba(4,6,11,.76); backdrop-filter: blur(9px) saturate(1.08); font: 720 clamp(.72rem, 1.45vw, 1.05rem)/1.28 system-ui; letter-spacing: .004em; text-wrap: balance; text-shadow: 0 2px 7px rgba(0,0,0,.98); box-shadow: 0 6px 22px rgba(0,0,0,.28); }
 .liveCaption[data-signal-producer-host-prompt="true"] { pointer-events: auto; }
-.liveCaption[data-response-cue="true"] { opacity: .78; font-style: italic; }
 .liveCaption[data-signal-producer-host-prompt="true"] span {
   display: block;
   max-height: min(38vh, 13.5rem);
@@ -1067,7 +1066,6 @@
 .replayTranscript button[data-active="true"] { background: color-mix(in srgb, var(--prism-m) 12%, transparent); }
 .replayTranscript strong { color: var(--prism-m); font-size: .72rem; }
 .replayTranscript span { font-size: calc(.82rem * var(--power-message-font-scale, 1)); line-height: 1.4; }
-.replayTranscript > div[data-response-cue="true"] { width: 100%; display: grid; grid-template-columns: 110px 1fr; gap: 14px; padding: 9px 10px; opacity: .7; font-style: italic; }
 .emptyStudio { min-height: calc(100dvh - 130px); display: grid; place-content: center; justify-items: center; text-align: center; color: var(--botcast-muted); }
 .emptyStudio .logoMark { width: 70px; height: 60px; }
 .emptyStudio h1 { color: var(--botcast-ink); margin-bottom: 6px; }

@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 
 import {
   CHAT_FORCED_MUTE_REASON,
+  chatPresentationForSurface,
   chatPresentationForcesVoiceMute,
   effectiveVoiceModeForPresentation,
   zenPresentationIsVoiceMuted,
@@ -16,20 +17,23 @@ const tutorialSource = readFileSync(
 );
 
 describe("Chat voice policy", () => {
-  it("preserves the configured voice in transcript Chat", () => {
-    assert.equal(chatPresentationForcesVoiceMute("chat", true), false);
+  it("forces transcript Chat to Mute without changing the configured choice", () => {
+    assert.equal(chatPresentationForSurface("chat", true), "chat");
+    assert.equal(chatPresentationForcesVoiceMute("chat", true), true);
     assert.equal(
       effectiveVoiceModeForPresentation("chat", true, "english"),
-      "english",
+      "mute",
     );
     assert.equal(
       effectiveVoiceModeForPresentation("chat", true, "bottish"),
-      "bottish",
+      "mute",
     );
-    assert.match(CHAT_FORCED_MUTE_REASON, /surface is locked/u);
+    assert.match(CHAT_FORCED_MUTE_REASON, /muted in Chat/u);
+    assert.match(CHAT_FORCED_MUTE_REASON, /return to Zen/u);
   });
 
-  it("preserves configured voices on the immersive Zen canvas", () => {
+  it("restores the configured voice on the immersive Zen canvas", () => {
+    assert.equal(chatPresentationForSurface("chat", false), "zen");
     assert.equal(chatPresentationForcesVoiceMute("chat", false), false);
     assert.equal(
       effectiveVoiceModeForPresentation("chat", false, "english"),
@@ -46,6 +50,7 @@ describe("Chat voice policy", () => {
     assert.equal(zenPresentationIsVoiceMuted("chat", false, "english"), false);
     assert.equal(zenPresentationIsVoiceMuted("chat", true, "mute"), false);
     assert.equal(zenPresentationIsVoiceMuted("coffee", false, "mute"), false);
+    assert.equal(chatPresentationForSurface("coffee", false), null);
   });
 
   it("preserves voice choices in every other applet", () => {
@@ -68,7 +73,7 @@ describe("Chat voice policy", () => {
     }
   });
 
-  it("keeps Chat voice plumbing available while preserving explicit Mute behavior", () => {
+  it("keeps one canonical Chat/Zen boundary through the voice plumbing", () => {
     assert.match(
       pageSource,
       /voiceMode:\s*effectiveVoiceModeForPresentation\(\s*view,\s*sidebarOpen,\s*normalizeVoiceMode\(settings\?\.voiceMode\)/u,
@@ -103,6 +108,14 @@ describe("Chat voice policy", () => {
     );
     assert.match(
       pageSource,
+      /const chatPresentation = chatPresentationForSurface\(view, sidebarOpen\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const chatImmersivePresentation = chatPresentation === "zen"/u,
+    );
+    assert.match(
+      pageSource,
       /const zenLivePresenceRailVisible =\s*!zenVoiceMuted &&/u,
     );
     assert.match(
@@ -123,7 +136,7 @@ describe("Chat voice policy", () => {
     );
     assert.match(
       tutorialSource,
-      /Changing the text model or Auto never disables the Voice picker\./u,
+      /Chat always forces Mute without overwriting that saved choice/u,
     );
   });
 });

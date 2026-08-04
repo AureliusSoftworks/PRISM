@@ -19,9 +19,9 @@ import styles from "./PronunciationAtlas.module.css";
 import {
   nudgePronunciationAtlasSelection,
   normalizePronunciationAtlasSelection,
-  pronunciationAtlasAnchorForSelection,
   pronunciationAtlasNaturalSelection,
   pronunciationAtlasLocationText,
+  pronunciationAtlasPointForSelection,
   pronunciationAtlasResolvedBase,
   pronunciationAtlasSelectionAtPoint,
   pronunciationAtlasValueText,
@@ -53,7 +53,7 @@ function padValueForSelection(
   const normalized = normalizePronunciationAtlasSelection(selection);
   return {
     selection: normalized,
-    point: pronunciationAtlasAnchorForSelection(normalized).point,
+    point: pronunciationAtlasPointForSelection(normalized),
   };
 }
 
@@ -99,10 +99,11 @@ export function PronunciationAtlas({
         point,
         selection: pronunciationAtlasSelectionAtPoint(point, current.selection),
       }),
-      nudge: (value, direction) => {
+      nudge: (value, direction, multiplier) => {
         const nextSelection = nudgePronunciationAtlasSelection(
           value.selection,
           direction,
+          multiplier,
         );
         return padValueForSelection(nextSelection);
       },
@@ -161,15 +162,15 @@ export function PronunciationAtlas({
           onPreview(next.selection);
         }}
         onCommit={(next) => {
-          const snapped = padValueForSelection(next.selection);
+          const committed = padValueForSelection(next.selection);
           setDraftValue(null);
-          onPreview(snapped.selection);
-          onCommit(snapped.selection);
+          onPreview(committed.selection);
+          onCommit(committed.selection);
         }}
         onCancel={(restored) => {
-          const snapped = padValueForSelection(restored.selection);
+          const committed = padValueForSelection(restored.selection);
           setDraftValue(null);
-          onCancel?.(snapped.selection);
+          onCancel?.(committed.selection);
         }}
         renderOverlay={() => <PronunciationAtlasMap />}
       />

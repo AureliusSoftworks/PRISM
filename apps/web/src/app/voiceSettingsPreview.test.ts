@@ -711,9 +711,9 @@ describe("voice settings preview", () => {
     );
   });
 
-  it("shares concise base accent, presentation, and Accent map controls across bot and Zen voices", () => {
-    assert.match(pageSource, /Base accent/);
-    assert.match(pageSource, />Presentation</);
+  it("shares a mixed-accent gender filter and Accent map across bot and Zen voices", () => {
+    assert.doesNotMatch(pageSource, /Base accent/);
+    assert.match(pageSource, />Gender</);
     assert.match(pageSource, /import \{ PronunciationAtlas \}/);
     assert.match(pageSource, /label="Zen accent map"/);
     assert.doesNotMatch(
@@ -722,7 +722,7 @@ describe("voice settings preview", () => {
     );
     assert.match(pageSource, /filteredSystemVoiceOptions\.map/);
     assert.match(pageSource, /filteredPlayerLocalVoiceOptions\.map/);
-    assert.match(pageSource, /selectOfflineVoiceAccent/);
+    assert.doesNotMatch(pageSource, /selectOfflineVoiceAccent/);
     assert.match(pageStyles, /\.botVoicePresentationChips/);
   });
 });

@@ -76,6 +76,20 @@ describe("Chat shell header layout", () => {
     assert.doesNotMatch(pageSource, /zenHeaderBotPickerActive/);
   });
 
+  it("lets Default PRISM Chat use the same model and Effort controls as Zen personas", () => {
+    const pickerStart = pageSource.indexOf("const renderHeaderModelPicker =");
+    const pickerEnd = pageSource.indexOf(
+      "const renderImagesPanelModelPicker =",
+      pickerStart,
+    );
+    const pickerSource = pageSource.slice(pickerStart, pickerEnd);
+
+    assert.doesNotMatch(pickerSource, /prismHomeUsesDedicatedLocalModel/u);
+    assert.doesNotMatch(pickerSource, /ariaLabel="Prism local model; change it in Settings"/u);
+    assert.match(pickerSource, /renderProviderModeToggle\(styles\.chatHeaderModeToggle\)/u);
+    assert.match(pickerSource, /effortControl=\{effortControlForTarget\(effortTarget\)\}/u);
+  });
+
   it("lists saved default PRISM chats beside persona conversation groups", () => {
     const visibleConversationsStart = pageSource.indexOf(
       "const visibleConversations =",

@@ -2754,11 +2754,11 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /className=\{styles\.emptyStateTitleSubject\}/);
     assert.match(
       pageSource,
-      /<span className=\{styles\.emptyStateTitleLead\}>Chat<\/span>[\s\S]*?<span className=\{styles\.emptyStateTitleLead\}>with<\/span>/
+      /<span className=\{styles\.emptyStateTitleLead\}>Zen<\/span>[\s\S]*?<span className=\{styles\.emptyStateTitleLead\}>with<\/span>/
     );
     assert.doesNotMatch(
       pageSource,
-      /<span className=\{styles\.emptyStateTitleLead\}>Zen<\/span>[\s\S]*?<span className=\{styles\.emptyStateTitleLead\}>with<\/span>/
+      /<span className=\{styles\.emptyStateTitleLead\}>Chat<\/span>[\s\S]*?<span className=\{styles\.emptyStateTitleLead\}>with<\/span>/
     );
     assert.doesNotMatch(
       pageSource,

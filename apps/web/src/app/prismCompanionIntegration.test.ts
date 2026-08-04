@@ -62,6 +62,8 @@ test("keeps the companion explicit, keyboard accessible, and capability-driven",
   assert.match(component, /Review exact changes/u);
   assert.match(component, /Estimated cost:/u);
   assert.match(component, /aria-label="Recent Prism activity"/u);
+  assert.match(component, /prismActionLabel\(run\.capabilityId\)/u);
+  assert.match(component, /prismActionStatusLabel\(run\.status\)/u);
   assert.match(component, /“undo that” reverses the latest meaningful action/u);
   assert.doesNotMatch(component, /delete_bot|delete_project|delete_conversation/u);
   assert.match(handoffCanvas, /Exact source preview/u);
@@ -78,8 +80,11 @@ test("gives full-size Prism Home the same orchestration, activity, and undo APIs
   assert.match(page, /renderPrismHomeOrchestrationCards\(\)/u);
   assert.match(page, /Review exact changes/u);
   assert.match(page, /aria-label="Recent Prism activity"/u);
+  assert.match(page, /prismActionLabel\(run\.capabilityId\)/u);
+  assert.match(page, /prismActionStatusLabel\(run\.status\)/u);
   assert.match(api, /request\.orchestrationOnly === true/u);
   assert.match(api, /ctx\.res\.statusCode = 204/u);
+  assert.doesNotMatch(api, /title: "One thing first"/u);
 });
 
 test("shows Prism's dedicated local model without inheriting the applet picker", () => {

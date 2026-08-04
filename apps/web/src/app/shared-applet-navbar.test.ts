@@ -78,6 +78,10 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
     pageSource,
     /modelControls:\s*\([\s\S]*renderProviderModeToggle\([\s\S]*styles\.chatHeaderModeToggle,[\s\S]*liveChromePolicy\?\.lockMessage[\s\S]*false[\s\S]*<ComposerModelPicker/u,
   );
+  assert.match(
+    pageSource,
+    /const episodePrimaryForAuto = resolvedAutoPrimaryForComposer\([\s\S]{0,260}const episodeEffortTarget = modelEffortTargetForSelection\(\{[\s\S]{0,220}episodePrimaryForAuto\?\.provider[\s\S]{0,180}episodePrimaryForAuto\?\.model/u,
+  );
   assert.doesNotMatch(signalSource, /providerModeToggle/u);
   assert.doesNotMatch(signalSource, /signalGlobalProviderControl/u);
   assert.doesNotMatch(signalCss, /\.signalGlobalProviderControl/u);
@@ -110,6 +114,14 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
     pageSource,
     /const renderSharedAccountRoutingControls =[\s\S]*renderProviderModeToggle\([\s\S]*styles\.chatHeaderModeToggle,[\s\S]*null,[\s\S]*false[\s\S]*<ComposerModelPicker/u,
   );
+  const responseLaneControl = pageSource.slice(
+    pageSource.indexOf("const renderProviderModeToggle ="),
+    pageSource.indexOf("const renderSharedAccountRoutingControls ="),
+  );
+  assert.match(responseLaneControl, /\(\["local", "online"\] as const\)\.map/u);
+  assert.match(responseLaneControl, /styles\.autoModeOption/u);
+  assert.match(responseLaneControl, /styles\.autoModeOptionActive/u);
+  assert.doesNotMatch(responseLaneControl, /styles\.modeToggleTrack/u);
   assert.match(pageSource, /sharedAppletModelChoiceByProvider/u);
   assert.doesNotMatch(pageSource, /persistSharedAppletAccountModelChoice/u);
 });
@@ -167,6 +179,11 @@ test("Slate aligns the complete shared navbar above its structure rail", () => {
   );
   assert.match(
     slateCss,
+    /\.shell > :not\(\.mainNavigation\) button,[\s\S]{0,220}font:\s*inherit;/u,
+  );
+  assert.doesNotMatch(slateCss, /\.shell button,\s*\n\.shell input/u);
+  assert.match(
+    slateCss,
     /\.workspace\s*\{[\s\S]*grid-column:\s*1 \/ -1;[\s\S]*grid-row:\s*2;[\s\S]*height:\s*100%;/,
   );
   assert.match(
@@ -190,7 +207,7 @@ test("shared sidebar and navbar materials remain owned by the active theme", () 
   );
 });
 
-test("Signal, Slate, and Zen child navigation follows Debate Studio geometry", () => {
+test("Signal, Slate, and immersive Zen child navigation follows Debate Studio geometry", () => {
   assert.match(
     signalCss,
     /\.showRow\s*\{[\s\S]*border-left:\s*2px solid transparent;[\s\S]*border-radius:\s*0 8px 8px 0;/u,
@@ -209,19 +226,34 @@ test("Signal, Slate, and Zen child navigation follows Debate Studio geometry", (
   );
   assert.match(
     pageCss,
-    /\.appLayout\[data-zen-surface="true"\] \.conversationTitleButton,[\s\S]*border-left:\s*2px solid transparent;[\s\S]*border-radius:\s*0 8px 8px 0;/u,
+    /\.appLayout\[data-zen-surface="true"\]\[data-chat-sidebar-hidden="true"\][\s\S]*\.conversationTitleButton,[\s\S]*border-left:\s*2px solid transparent;[\s\S]*border-radius:\s*0 8px 8px 0;/u,
   );
   assert.match(
     pageCss,
-    /\.appLayout\[data-zen-surface="true"\] \.conversationTitleButton\.selected,[\s\S]*border-left-color:\s*var\(--row-color, var\(--accent\)\);[\s\S]*linear-gradient/u,
+    /\.appLayout\[data-zen-surface="true"\]\[data-chat-sidebar-hidden="true"\][\s\S]*\.conversationTitleButton\.selected,[\s\S]*border-left-color:\s*var\(--row-color, var\(--accent\)\);[\s\S]*linear-gradient/u,
   );
   assert.match(
     pageCss,
-    /\.appLayout\[data-zen-surface="true"\] \.conversationGroupTile,[\s\S]*border-left:\s*2px solid transparent;[\s\S]*border-radius:\s*0 8px 8px 0;/u,
+    /\.appLayout\[data-zen-surface="true"\]\[data-chat-sidebar-hidden="true"\][\s\S]*\.conversationGroupTile,[\s\S]*border-left:\s*2px solid transparent;[\s\S]*border-radius:\s*0 8px 8px 0;/u,
   );
   assert.match(
     pageCss,
     /\.conversationGroupAccordionItem:has\(\.conversationGroupCollapseExpanded\)[\s\S]*border-left-color:\s*var\(--row-color, var\(--accent\)\);/u,
+  );
+});
+
+test("sidebar-open Chat keeps the premium conversation chip treatment", () => {
+  assert.match(
+    pageCss,
+    /\.conversationRow\[style\*="--row-color"\] \.conversationTitleButton\s*\{[\s\S]*radial-gradient[\s\S]*border-color:\s*color-mix[\s\S]*color:\s*var\(--fg\);/u,
+  );
+  assert.doesNotMatch(
+    pageCss,
+    /\.appLayout\[data-zen-surface="true"\](?!\[data-chat-sidebar-hidden="true"\])[^{,]*\.conversationTitleButton/u,
+  );
+  assert.doesNotMatch(
+    pageCss,
+    /\.appLayout\[data-zen-surface="true"\](?!\[data-chat-sidebar-hidden="true"\])[^{,]*\.conversationGroupTile/u,
   );
 });
 

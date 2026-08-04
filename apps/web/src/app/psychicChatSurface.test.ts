@@ -28,7 +28,7 @@ describe("Psychic Chat surface wiring", () => {
     assert.ok(renderSource);
     assert.match(
       renderSource,
-      /!isChatSurfaceView\(view\) \|\| msg\.role !== "assistant"/,
+      /!isChatSurfaceView\(view\)\s*\|\|\s*msg\.role !== "assistant"/u,
     );
     assert.match(renderSource, /expandedPsychicAssistantMessageId === msg\.id/u);
     assert.match(renderSource, /data-expanded=\{expanded/u);
@@ -55,21 +55,13 @@ describe("Psychic Chat surface wiring", () => {
     );
   });
 
-  it("keeps the full live Psychic card in Chat's pending chip", () => {
+  it("keeps live Psychic provenance out of the immersive pending chip", () => {
     assert.match(pageSource, /psychicProgressStream:\s*true/u);
     assert.match(pageSource, /onPsychic:\s*applyLivePsychicProgress/u);
-    assert.match(pageSource, /data-psychic-live=\{livePsychicSummary/u);
-    assert.match(
-      pageSource,
-      /livePsychicStreamSummary \|\| PSYCHIC_PENDING_SUMMARY/u,
-    );
-    assert.match(pageSource, /livePsychicVisiblePasses\.map/u);
-    assert.match(pageSource, /typingPsychicLivePasses/u);
-    assert.match(pageSource, /psychicPlanningModeLabel/u);
-    assert.match(
-      pageSource,
-      /REASONING_EFFORT_LABELS\[livePsychicEffort\]/u,
-    );
+    assert.match(pageSource, /const thinkingCaption = immersiveThinkingCaption/u);
+    assert.doesNotMatch(pageSource, /data-psychic-live=\{livePsychicSummary/u);
+    assert.doesNotMatch(pageSource, /livePsychicVisiblePasses\.map/u);
+    assert.doesNotMatch(pageSource, /Psychic · \{livePsychicStageLabel\}/u);
     assert.match(
       serverSource,
       /psychicModeRequested && body\.psychicProgressStream === true/u,
@@ -80,16 +72,20 @@ describe("Psychic Chat surface wiring", () => {
     );
   });
 
-  it("puts Zen's live Psychic summary inside the existing loading chip", () => {
+  it("uses one short persona activity caption in Zen's loading chip", () => {
     const zenSource = pageSource.match(
       /const zenInitialThinkingNode = useMemo\(\(\) => \{[\s\S]*?\n  \}, \[/,
     )?.[0];
 
     assert.ok(zenSource);
     assert.match(zenSource, /zenInitialThinkingButton/u);
-    assert.match(zenSource, /zenInitialThinkingPsychicLabel/u);
-    assert.match(zenSource, /zenInitialThinkingPsychicSummary/u);
-    assert.match(zenSource, /Psychic · \{livePsychicStageLabel\}/u);
+    assert.match(zenSource, /immersiveThinkingCaption/u);
+    assert.match(
+      zenSource,
+      /<span className=\{styles\.zenInitialThinkingLabel\}>\{label\}<\/span>/u,
+    );
+    assert.doesNotMatch(zenSource, /livePsychicSummary/u);
+    assert.doesNotMatch(zenSource, /Psychic/u);
   });
 
   it("reveals model and effort glyph metadata while Chat context is focused", () => {

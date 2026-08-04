@@ -36428,8 +36428,8 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   color: var(--fg);
 }
 
-/* Integrated response-mode control: a compact lightswitch track with a
-   sliding thumb for LOCAL / ONLINE. */
+/* Shared text response-lane shell. Text surfaces use the segmented
+   LOCAL / ONLINE options below; image routing retains its separate switch. */
 .modeControl {
   display: inline-flex;
   align-items: center;
@@ -67496,38 +67496,6 @@ a.settingsCreditItem:focus-visible {
   color: var(--coffee-center-line-color, rgba(255, 255, 255, 0.88));
 }
 
-.coffeeCenterFeedLine[data-response-cue="true"] {
-  font-size: 0.86rem;
-  font-style: italic;
-  opacity: 0.78;
-}
-
-.responseCueHistory {
-  display: grid;
-  gap: 0.35rem;
-  margin: 0.35rem auto 0.7rem;
-  width: min(36rem, calc(100% - 2rem));
-}
-
-.responseCueHistory > div {
-  display: flex;
-  gap: 0.45rem;
-  align-items: baseline;
-  padding: 0.38rem 0.6rem;
-  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  border-radius: 0.65rem;
-  opacity: 0.68;
-  font-size: 0.78rem;
-  font-style: italic;
-}
-
-.responseCueHistory strong {
-  white-space: nowrap;
-  font-size: 0.7rem;
-  letter-spacing: 0.04em;
-  text-transform: uppercase;
-}
-
 .coffeeCenterFeedLine[data-power-voice-presence="loud"],
 .coffeeMessage[data-power-voice-presence="loud"] {
   --power-message-font-scale: 1.12;
@@ -81421,10 +81389,12 @@ a.settingsCreditItem:focus-visible {
   pointer-events: none;
 }
 
-/* Debate-aligned Zen child navigation. The conversation hierarchy and bot
-   accents remain intact, while the rail and every nested row share Debate's
-   flat geometry, restrained hover, and left-edge active marker. */
-.appLayout[data-zen-surface="true"] > .sidebar {
+/* Debate-aligned immersive Zen child navigation. Chat and Zen share the
+   data-zen-surface shell, so this treatment must stay behind the authoritative
+   sidebar-hidden presentation boundary. Sidebar-open Chat keeps the premium
+   conversation chips defined above. */
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  > .sidebar {
   gap: 12px;
   padding: 24px 12px 14px;
   background: linear-gradient(
@@ -81434,12 +81404,15 @@ a.settingsCreditItem:focus-visible {
   );
 }
 
-.appLayout[data-zen-surface="true"] .conversationHeaderRow {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationHeaderRow {
   margin: 0 0 8px;
   padding: 0 10px;
 }
 
-.appLayout[data-zen-surface="true"] .conversationHeaderRow .sectionLabel {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationHeaderRow
+  .sectionLabel {
   padding: 0;
   color: var(--fg-muted);
   font-family: var(--font-ui-sans), system-ui, sans-serif;
@@ -81448,10 +81421,11 @@ a.settingsCreditItem:focus-visible {
   letter-spacing: 0.16em;
 }
 
-.appLayout[data-zen-surface="true"] .conversationList,
-.appLayout[data-zen-surface="true"][data-private-active="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .conversationList,
-.appLayout[data-zen-surface="true"][data-zen-private-tone="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-private-active="true"]
+  .conversationList,
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-zen-private-tone="true"]
   .conversationList {
   gap: 5px;
   margin: 0;
@@ -81462,17 +81436,19 @@ a.settingsCreditItem:focus-visible {
   box-shadow: none;
 }
 
-.appLayout[data-zen-surface="true"] .conversationRow {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationRow {
   gap: 2px;
 }
 
-.appLayout[data-zen-surface="true"] .conversationTitleButton,
-.appLayout[data-zen-surface="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationTitleButton,
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .conversationRow[style*="--row-color"]
   .conversationTitleButton,
-.appLayout[data-zen-surface="true"][data-private-active="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-private-active="true"]
   .conversationTitleButton,
-.appLayout[data-zen-surface="true"][data-zen-private-tone="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-zen-private-tone="true"]
   .conversationTitleButton {
   min-width: 0;
   border: 0;
@@ -81490,13 +81466,14 @@ a.settingsCreditItem:focus-visible {
     background 150ms ease;
 }
 
-.appLayout[data-zen-surface="true"] .conversationTitleButton:hover,
-.appLayout[data-zen-surface="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationTitleButton:hover,
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .conversationRow[style*="--row-color"]
   .conversationTitleButton:hover,
-.appLayout[data-zen-surface="true"][data-private-active="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-private-active="true"]
   .conversationTitleButton:hover,
-.appLayout[data-zen-surface="true"][data-zen-private-tone="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-zen-private-tone="true"]
   .conversationTitleButton:hover {
   border-left-color: transparent;
   color: var(--fg);
@@ -81504,13 +81481,14 @@ a.settingsCreditItem:focus-visible {
   box-shadow: none;
 }
 
-.appLayout[data-zen-surface="true"] .conversationTitleButton.selected,
-.appLayout[data-zen-surface="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationTitleButton.selected,
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .conversationRow[style*="--row-color"]
   .conversationTitleButton.selected,
-.appLayout[data-zen-surface="true"][data-private-active="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-private-active="true"]
   .conversationTitleButton.selected,
-.appLayout[data-zen-surface="true"][data-zen-private-tone="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-zen-private-tone="true"]
   .conversationTitleButton.selected {
   border-left-color: var(--row-color, var(--accent));
   color: var(--row-selected-text-color, var(--fg));
@@ -81523,10 +81501,11 @@ a.settingsCreditItem:focus-visible {
   font-weight: 710;
 }
 
-.appLayout[data-zen-surface="true"] .conversationGroupTile,
-.appLayout[data-zen-surface="true"][data-private-active="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .conversationGroupTile,
-.appLayout[data-zen-surface="true"][data-zen-private-tone="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-private-active="true"]
+  .conversationGroupTile,
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-zen-private-tone="true"]
   .conversationGroupTile {
   border: 0;
   border-left: 2px solid transparent;
@@ -81542,10 +81521,11 @@ a.settingsCreditItem:focus-visible {
     background 150ms ease;
 }
 
-.appLayout[data-zen-surface="true"] .conversationGroupTile:hover,
-.appLayout[data-zen-surface="true"][data-private-active="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .conversationGroupTile:hover,
-.appLayout[data-zen-surface="true"][data-zen-private-tone="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-private-active="true"]
+  .conversationGroupTile:hover,
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"][data-zen-private-tone="true"]
   .conversationGroupTile:hover {
   border-left-color: var(--row-color, var(--accent));
   color: var(--fg);
@@ -81557,7 +81537,7 @@ a.settingsCreditItem:focus-visible {
   box-shadow: none;
 }
 
-.appLayout[data-zen-surface="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .conversationGroupAccordionItem:has(.conversationGroupCollapseExpanded)
   .conversationGroupTile {
   border-left-color: var(--row-color, var(--accent));
@@ -81569,7 +81549,8 @@ a.settingsCreditItem:focus-visible {
   );
 }
 
-.appLayout[data-zen-surface="true"] .conversationGroupGlyph {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationGroupGlyph {
   width: 28px;
   height: 28px;
   color: color-mix(
@@ -81579,26 +81560,29 @@ a.settingsCreditItem:focus-visible {
   );
 }
 
-.appLayout[data-zen-surface="true"] .conversationGroupName {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationGroupName {
   font-size: 12px;
   font-weight: 710;
 }
 
-.appLayout[data-zen-surface="true"] .conversationGroupCount {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationGroupCount {
   color: var(--fg-muted);
   font-size: 10px;
   font-weight: 600;
   text-shadow: none;
 }
 
-.appLayout[data-zen-surface="true"] .conversationGroupNestedList {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationGroupNestedList {
   gap: 5px;
   margin: 5px 0 5px 12px;
   padding: 0 0 0 10px;
   border-left: 1px solid var(--line);
 }
 
-.appLayout[data-zen-surface="true"]
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .conversationRowNested
   .conversationTitleButton {
   border-radius: 0 8px 8px 0;
@@ -81606,15 +81590,18 @@ a.settingsCreditItem:focus-visible {
   font-size: 11px;
 }
 
-.appLayout[data-zen-surface="true"] .conversationGroupNewButton {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationGroupNewButton {
   border: 0;
   border-radius: 7px;
   background: transparent;
   box-shadow: none;
 }
 
-.appLayout[data-zen-surface="true"] .conversationGroupNewButton:hover,
-.appLayout[data-zen-surface="true"] .conversationGroupNewButton:focus-visible {
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationGroupNewButton:hover,
+.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
+  .conversationGroupNewButton:focus-visible {
   border: 0;
   background: color-mix(in srgb, var(--row-color, var(--accent)) 10%, transparent);
   box-shadow: none;

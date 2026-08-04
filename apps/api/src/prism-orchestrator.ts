@@ -15,6 +15,8 @@ import { listLibraryGroups } from "./library-groups.ts";
 import { readPrismContextToken } from "./prism-action-journal.ts";
 
 const PRISM_PLANNER_CONFIDENCE_FLOOR = 0.72;
+export const PRISM_SAFE_ACTION_CLARIFICATION =
+  "Which PRISM item should I act on, and what would you like me to change?";
 
 const PRISM_INTENT_SCHEMA = {
   type: "object",
@@ -612,16 +614,33 @@ export function prismMessageMayNeedOrchestration(
   message: string,
   contextTokenIds: readonly string[] = [],
 ): boolean {
-  if (directPrismIntentPlan(message, contextTokenIds)) return true;
   const normalized = normalizedText(message);
-  return (
-    /\b(?:make|create|change|update|delete|remove|export|backup|favorite|favourite|protect|unprotect|monitor|remind|undo|open|navigate|switch|play|start)\b/u.test(
-      normalized,
-    ) &&
-    /\b(?:prism|bot|group|coffee|signal|episode|show|slate|story|image|marketplace|memory|conversation|setting|model|elevenlabs|credit|backup|account|library|avatar)\b/u.test(
+  if (
+    /^(?:no|nope|actually|to clarify|for clarity)\b/u.test(normalized) ||
+    /^(?:if|when)\b/u.test(normalized) ||
+    /^(?:what|why|how)\b.{0,24}\b(?:would|could|happens?|happen)\b/u.test(
       normalized,
     )
-  );
+  ) {
+    return false;
+  }
+  if (directPrismIntentPlan(message, contextTokenIds)) return true;
+  const productTarget =
+    /\b(?:prism|bot|group|coffee|signal|episode|show|slate|story|image|marketplace|memory|conversation|setting|model|elevenlabs|credit|backup|account|library|avatar)\b/u;
+  if (!productTarget.test(normalized)) return false;
+
+  // Prism Home probes this predicate before every ordinary conversation turn.
+  // Keep the flexible planner behind an explicit command shape so discussion
+  // about a Story, Slate, a change, or a hypothetical action stays in chat.
+  const commandVerb =
+    "(?:make|create|change|update|delete|remove|export|backup|favorite|favourite|protect|unprotect|monitor|remind|undo|open|navigate|switch|play|start)";
+  return new RegExp(
+    `^(?:in prism )?(?:(?:please|kindly) )?${commandVerb}\\b|` +
+      `^(?:can|could|would|will) (?:you|prism) (?:please )?${commandVerb}\\b|` +
+      `^i (?:want|need|would like) (?:you|prism) to ${commandVerb}\\b|` +
+      `^(?:go ahead and|please go ahead and) ${commandVerb}\\b`,
+    "u",
+  ).test(normalized);
 }
 
 function plannerPrompt(args: {
@@ -648,16 +667,13 @@ function validatePlannerSemantics(
   descriptors: ReturnType<PrismCapabilityRegistry["descriptors"]>,
 ): PrismIntentPlanV1 {
   if (plan.kind === "clarification") {
-    return clarification(
-      plan.clarification?.trim() ||
-        "I found more than one safe interpretation. What should I act on?",
-    );
+    return clarification(PRISM_SAFE_ACTION_CLARIFICATION);
   }
   if (
     typeof plan.clarification === "string" &&
     plan.clarification.trim()
   ) {
-    return clarification(plan.clarification);
+    return clarification(PRISM_SAFE_ACTION_CLARIFICATION);
   }
   const descriptorById = new Map(
     descriptors.map((descriptor) => [descriptor.id, descriptor]),
@@ -771,10 +787,7 @@ export async function planPrismIntent(args: {
         plan.kind !== "clarification" &&
         plan.confidence < PRISM_PLANNER_CONFIDENCE_FLOOR
       ) {
-        return clarification(
-          plan.clarification ??
-            "I found more than one safe interpretation. What should I act on?",
-        );
+        return clarification(PRISM_SAFE_ACTION_CLARIFICATION);
       }
       return plan;
     } catch (error) {

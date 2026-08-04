@@ -11,6 +11,10 @@ const debate = readFileSync(
   new URL("./DebateExperience.tsx", import.meta.url),
   "utf8",
 );
+const tutorials = readFileSync(
+  new URL("./modeTutorials.ts", import.meta.url),
+  "utf8",
+);
 
 describe("conversational presence surfaces", () => {
   it("keeps Coffee lookahead private until a cursor-checked commit", () => {
@@ -61,14 +65,30 @@ describe("conversational presence surfaces", () => {
     );
   });
 
-  it("renders heard response cues without stacking a thinking state", () => {
+  it("keeps cues out of Chat and presents show cues as ordinary speech", () => {
     assert.match(page, /BOT_RESPONSE_CUE_MAX_PLAYBACK_MS/u);
     assert.match(page, /exactResponseRequired:[\s\S]{0,100}botRequiresExactResponse/u);
     assert.match(
       page,
+      /if \(!botResponseCuesEnabledForSurfaceV1\(args\.surface\)\)/u,
+    );
+    assert.match(page, /responseCueBot &&\s*view !== "chat"/u);
+    assert.match(
+      page,
       /const showThinkingIndicator =\s*!activeCoffeeResponseCue/u,
     );
-    assert.match(signal, /data-response-cue="true"/u);
+    assert.doesNotMatch(page, /Response cue ·/u);
+    assert.doesNotMatch(signal, /Response cue ·|data-response-cue/u);
+    assert.match(signal, /<strong>\{presenceBeat\.speaker\.name\}<\/strong>/u);
+    assert.doesNotMatch(debate, /Response cue ·|data-response-cue/u);
+    assert.match(debate, /<strong>\{beat\.speaker\.name\}<\/strong>/u);
     assert.match(debate, /heardBotPresenceBeatTextV1\(beat\)/u);
+    assert.match(
+      tutorials,
+      /Chat and immersive Zen wait for the real reply instead of inserting a filler response/u,
+    );
+    assert.match(tutorials, /appears naturally as table speech/u);
+    assert.match(tutorials, /appears like any other on-air line/u);
+    assert.doesNotMatch(tutorials, /labeled response cue/u);
   });
 });

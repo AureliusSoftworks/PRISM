@@ -4,13 +4,21 @@ import { describe, it } from "node:test";
 import { MODE_TUTORIALS, modeTutorialStep } from "./modeTutorials.ts";
 
 describe("mode tutorials", () => {
-  it("explains the live Psychic reply reveal and its privacy boundary", () => {
+  it("explains immersive waiting captions and the Psychic privacy boundary", () => {
     const step = MODE_TUTORIALS.chat.steps[0];
-    assert.match(step?.body ?? "", /floating Psychic card/u);
+    assert.match(step?.body ?? "", /short in-character activity caption/u);
+    assert.match(
+      step?.body ?? "",
+      /words stream onto the canvas once, in step with the words you hear/u,
+    );
+    assert.match(
+      step?.body ?? "",
+      /Transcript Chat keeps that same single visual stream but runs it much faster because Chat is muted/u,
+    );
+    assert.match(step?.body ?? "", /thinking veil waits until your line finishes/u);
     assert.match(step?.body ?? "", /user-readable planning pass/u);
     assert.match(step?.body ?? "", /assistant bubble/u);
     assert.match(step?.body ?? "", /stays collapsed until you click/u);
-    assert.match(step?.body ?? "", /loading chip/u);
     assert.match(step?.body ?? "", /model and effort glyph/u);
     assert.match(step?.body ?? "", /visible passes guide the final reply/u);
     assert.match(step?.body ?? "", /each one is an additional provider request/u);
@@ -54,7 +62,9 @@ describe("mode tutorials", () => {
     assert.ok(step);
     assert.match(step.body, /full-width Accent map/u);
     assert.match(step.body, /anywhere in the world/u);
+    assert.match(step.body, /pin stays exactly where you leave it/u);
     assert.match(step.body, /nearest broadly regional pronunciation/u);
+    assert.match(step.body, /Gender filter mixes American and British/u);
     assert.match(step.body, /All accents/u);
     assert.match(step.body, /Original and With accent/u);
   });
@@ -783,7 +793,7 @@ describe("mode tutorials", () => {
     );
     assert.deepEqual(continueHome, {
       heading: "Continue this Home",
-      body: "Opening a persona Home from All Bots, the header picker, or its grouped conversation heading continues that Home's latest saved chat. Expand the group to choose an exact older chat; use its + or New chat only when you deliberately want a separate conversation. Only the selected conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. In Chat or Zen, choose Mute for a text-only exchange or select English, Premium, Babble, or Bottish for spoken replies. In Zen, Mute also lets the live avatar step out and reveals each completed reply in a near-instant sweep. When Shh appears, it stops the current reply without replacing the draft you are writing.",
+      body: "Opening a persona Home from All Bots, the header picker, or its grouped conversation heading continues that Home's latest saved chat. Expand the group to choose an exact older chat; use its + or New chat only when you deliberately want a separate conversation. Only the selected conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. Opening the Conversations panel enters transcript Chat and temporarily forces Voice to Mute without changing your saved choice. Close the panel to return to immersive Zen, where English, Premium, Babble, or Bottish resumes automatically; an explicitly saved Mute remains muted. In Zen, Mute also lets the live avatar step out and reveals each completed reply in a near-instant sweep. When Shh appears, it stops the current reply without replacing the draft you are writing.",
       clickLabel: "the message box at the bottom",
       targetSelector: '[data-tutorial-target="composer"]',
     });
@@ -911,14 +921,14 @@ describe("mode tutorials", () => {
       routing?.body ?? "",
       /Image generation keeps its own LOCAL\/ONLINE choice/,
     );
-    assert.match(routing?.body ?? "", /Voice remains independently selectable in Chat/u);
+    assert.match(routing?.body ?? "", /Voice remains independent from text routing/u);
     assert.match(
       routing?.body ?? "",
-      /Changing the text model or Auto never disables the Voice picker/u,
+      /Chat always forces Mute without overwriting that saved choice/u,
     );
     assert.match(
       routing?.body ?? "",
-      /LOCAL disables only Premium while leaving Mute, English, Babble, and Bottish available/u,
+      /Zen honors your saved Mute, English, Premium, Babble, or Bottish choice, while LOCAL disables only Premium/u,
     );
     const automaticThinkingSfx = MODE_TUTORIALS.zen.steps.find(
       (step) => step.heading === "Hear each bot think",

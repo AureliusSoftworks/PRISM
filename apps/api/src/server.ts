@@ -465,6 +465,7 @@ import { prismSettingsPatchIsJournalable } from "./prism-settings-mutations.ts";
 import { prismBotPatchIsJournalable } from "./prism-bot-mutations.ts";
 import { prismSlatePatchIsRootOnly } from "./prism-slate-mutations.ts";
 import {
+  PRISM_SAFE_ACTION_CLARIFICATION,
   planPrismIntent,
   prismMessageMayNeedOrchestration,
   resolvePrismIntentPlan,
@@ -3231,19 +3232,13 @@ async function orchestratePrismCompanionRequest(args: {
     return { ...planned, steps: resolvedSteps };
   })();
   if (plan.kind === "clarification") {
-    const question =
-      plan.clarification || "What specific item and change should I use?";
+    const question = plan.clarification || PRISM_SAFE_ACTION_CLARIFICATION;
     return {
       content: question,
-      cards: [
-        {
-          schemaVersion: PRISM_ORCHESTRATION_VERSION,
-          type: "clarification",
-          title: "One thing first",
-          question,
-          choices: [],
-        },
-      ],
+      // A clarification is conversation, not a completed or proposed action.
+      // Keeping it out of the action rail also avoids duplicating the same
+      // question in both the assistant bubble and a card.
+      cards: [],
       provider: "local",
       model,
     };

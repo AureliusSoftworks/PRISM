@@ -3,16 +3,28 @@ import type { VoiceMode } from "@localai/shared";
 import type { PrismSurfaceView } from "./viewRouting";
 
 export const CHAT_FORCED_MUTE_REASON =
-  "Voice is temporarily unavailable while this surface is locked.";
+  "Voice is muted in Chat. Close Conversations to return to Zen and restore your voice choice.";
+
+export type ChatPresentation = "chat" | "zen";
+
+/**
+ * Chat and Zen intentionally share the product `chat` route and conversation
+ * data. The expanded Conversations panel is the authoritative presentation
+ * boundary: open is transcript Chat; closed is immersive Zen.
+ */
+export function chatPresentationForSurface(
+  view: PrismSurfaceView,
+  sidebarOpen: boolean,
+): ChatPresentation | null {
+  if (view !== "chat") return null;
+  return sidebarOpen ? "chat" : "zen";
+}
 
 export function chatPresentationForcesVoiceMute(
-  _view: PrismSurfaceView,
-  _sidebarOpen: boolean,
+  view: PrismSurfaceView,
+  sidebarOpen: boolean,
 ): boolean {
-  // Chat and Zen share the `chat` route, but both honor the account Voice
-  // choice. LOCAL privacy disables only Premium; it must not lock Mute,
-  // English, Babble, or Bottish.
-  return false;
+  return chatPresentationForSurface(view, sidebarOpen) === "chat";
 }
 
 export function effectiveVoiceModeForPresentation(
@@ -30,5 +42,8 @@ export function zenPresentationIsVoiceMuted(
   sidebarOpen: boolean,
   configuredMode: VoiceMode,
 ): boolean {
-  return view === "chat" && !sidebarOpen && configuredMode === "mute";
+  return (
+    chatPresentationForSurface(view, sidebarOpen) === "zen" &&
+    configuredMode === "mute"
+  );
 }
