@@ -269,6 +269,8 @@ function debateAlignedSpokenProgress(args: {
 
   const elapsedSeconds = elapsedMs / 1_000;
   let completedAlignedCharacters = 0;
+  let previousStart = 0;
+  let previousEnd = 0;
   for (let index = 0; index < alignedCount; index += 1) {
     const start = alignment.characterStartTimesSeconds[index];
     const end = alignment.characterEndTimesSeconds[index];
@@ -278,10 +280,14 @@ function debateAlignedSpokenProgress(args: {
       !Number.isFinite(start) ||
       !Number.isFinite(end) ||
       start < 0 ||
-      end < start
+      end < start ||
+      start < previousStart ||
+      end < previousEnd
     ) {
       return elapsedMs / durationMs;
     }
+    previousStart = start;
+    previousEnd = end;
     if (end <= elapsedSeconds) completedAlignedCharacters = index + 1;
   }
 

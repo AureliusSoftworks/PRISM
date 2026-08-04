@@ -967,6 +967,7 @@ import {
   deleteUnusedImageAssetSet,
   getImageAssetSet,
   getImageAssetSetForImage,
+  imageAssetSelectionStorageBytes,
   imageAssetStorageSummary,
   ImageAssetLibraryError,
   listImageAssetCatalog,
@@ -24253,6 +24254,31 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         storage: imageAssetStorageSummary(db, userId),
       });
+    }),
+    route("POST", "/api/assets/storage/visible", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (
+        !Array.isArray(body.assetSetIds) ||
+        body.assetSetIds.some((value) => typeof value !== "string")
+      ) {
+        throw new HttpError(400, "assetSetIds must be an array of asset-set ids.");
+      }
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          bytes: imageAssetSelectionStorageBytes(
+            db,
+            userId,
+            body.assetSetIds as string[],
+          ),
+        });
+      } catch (error) {
+        if (error instanceof ImageAssetLibraryError) {
+          throw new HttpError(400, error.message);
+        }
+        throw error;
+      }
     }),
     route("PATCH", "/api/assets/:id", async (ctx) => {
       const userId = requireAuth(ctx);

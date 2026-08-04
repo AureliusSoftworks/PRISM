@@ -46832,7 +46832,6 @@ function HomeContent(): React.JSX.Element {
   const botGroupRoomAtmosphereUploadRef = useRef<HTMLInputElement | null>(null);
   const homeAtmosphereUploadRef = useRef<HTMLInputElement | null>(null);
   const zenAtmosphereUploadRef = useRef<HTMLInputElement | null>(null);
-  const generalImageUploadRef = useRef<HTMLInputElement | null>(null);
   const botGroupRoomAtmosphereDialogBusyRef = useRef(false);
   botGroupRoomAtmosphereDialogBusyRef.current = Boolean(
     botGroupRoomAtmosphereDialog?.busy,
@@ -98534,45 +98533,6 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function uploadGeneralImage(file: File): Promise<void> {
-    try {
-      const asset = await uploadAssetLibraryImage(
-        "general_image",
-        file,
-        `Uploaded image · ${file.name}`,
-      );
-      await refreshImageBotDirectorySnapshot();
-      if (imagePanelScopeRef.current === "general") {
-        await refreshImages("general");
-      } else {
-        await refreshImages(null);
-      }
-      const member = asset.members.find(
-        (candidate) => candidate.role === "primary",
-      );
-      if (member) {
-        openImageLightbox({
-          id: member.imageId,
-          prompt: member.prompt,
-          url: member.url,
-          displayUrl: member.url,
-          createdAt: member.createdAt,
-          hasLocalFile: true,
-          revisedPrompt: member.revisedPrompt,
-          size: member.size,
-          provider: member.provider,
-          model: member.model,
-          purpose: "gallery",
-          origin: "images_panel",
-        });
-      }
-    } catch (error) {
-      setPanelError(
-        error instanceof Error ? error.message : "Image upload failed.",
-      );
-    }
-  }
-
   async function revealGeneralImageAsset(asset: ImageAssetSet): Promise<void> {
     const member = asset.members.find(
       (candidate) => candidate.role === "primary",
@@ -119572,24 +119532,11 @@ function HomeContent(): React.JSX.Element {
                     </button>
                   </div>
                 )}
-                <input
-                  ref={generalImageUploadRef}
-                  className={styles.assetUploadInput}
-                  type="file"
-                  accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
-                  aria-label="Upload image"
-                  onChange={(event) => {
-                    const file = event.currentTarget.files?.[0];
-                    event.currentTarget.value = "";
-                    if (file) void uploadGeneralImage(file);
-                  }}
-                />
                 <AssetRail
                   kind="general_image"
                   label="Recent images"
                   context={imagePanelBot?.name ?? activeBot?.name ?? imagePrompt}
                   refreshKey={images.length}
-                  onUpload={() => generalImageUploadRef.current?.click()}
                   onSynthesize={synthesizeGeneralImage}
                   synthesizeDisabled={
                     !canGenerate ||

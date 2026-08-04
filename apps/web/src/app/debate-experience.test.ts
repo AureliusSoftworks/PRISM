@@ -1417,6 +1417,10 @@ describe("Debate experience", () => {
     assert.match(source, /activeTurnClock\?\.status === "overtime"/u);
     assert.match(
       source,
+      /debateVisibleContentAtSpeechTime\(\{[\s\S]{0,260}elapsedMs[\s\S]{0,120}alignment: playbackAlignment/u,
+    );
+    assert.match(
+      source,
       /<DebateTurnClockConsumer\s+store=\{presentationStore\}\s+sessionId=\{session\.id\}\s+event=\{activeEvent\}/u,
     );
     assert.match(css, /\.turnClock\s*\{[^}]*position:\s*absolute/u);

@@ -249,7 +249,6 @@ import {
   writeDebateLiveCaptionsEnabled,
 } from "./debateLiveCaptionsPreference";
 import { prismBranchIsDev } from "./prismDevGating";
-import { useRevealSynthesizedAssetContextMenu } from "./revealSynthesizedAssetInFinder";
 import {
   BotPickerGrid,
   BotPickerTile,
@@ -2833,13 +2832,6 @@ export function DebateExperience(
     request,
   } = props;
   const playerName = props.playerName.trim() || "You";
-  const {
-    revealSynthesizedAssetContextMenuEnabled,
-    onRevealSynthesizedAssetContextMenu,
-  } = useRevealSynthesizedAssetContextMenu({
-    request,
-    theme: props.theme,
-  });
   const [view, setView] = useState<DebateView>("dashboard");
   const [observerPerspective, setObserverPerspective] = useState<
     "live" | "replay"
@@ -10598,12 +10590,6 @@ export function DebateExperience(
                 );
                 setError(null);
               }}
-              onRevealImage={
-                revealSynthesizedAssetContextMenuEnabled
-                  ? (imageId, event) =>
-                      onRevealSynthesizedAssetContextMenu(event, imageId)
-                  : undefined
-              }
             />
             <small>
               Uploaded and synthesized images are cut into transparent stage

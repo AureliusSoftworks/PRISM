@@ -103,7 +103,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Use quick tools",
-        body: "Right-click in the canvas for shortcuts to settings, memories, images, and bot actions. In the account-wide Images hub, type the reusable prompt, then wield Prism onto + to synthesize; ordinary + uploads. Five recent general images stay in the rail and View all searches only general images, never Slate covers, Signal studios, logos, exhibits, or Atmospheres. A running render can still queue up to eight more prompts with its captured model, keywords, privacy, and library.",
+        body: "Right-click in the canvas for shortcuts to settings, memories, images, and bot actions. In the account-wide Images hub, type the reusable prompt, then select Synthesize. Five recent general images stay in the rail and View all searches only general images, never Slate covers, Signal studios, logos, exhibits, or Atmospheres. Uploads appear only where an asset is actually needed, such as a cover, studio, exhibit, or Atmosphere. A running render can still queue up to eight more prompts with its captured model, keywords, privacy, and library.",
         clickLabel: "the conversation canvas with your right mouse button",
         targetSelector: '[data-tutorial-target="conversation-canvas"]',
       },

@@ -15,6 +15,10 @@ const signalSource = readFileSync(
   new URL("./BotcastExperience.tsx", import.meta.url),
   "utf8",
 );
+const assetLibrarySource = readFileSync(
+  new URL("./AssetLibrary.tsx", import.meta.url),
+  "utf8",
+);
 const coffeeSource = readFileSync(
   new URL("./CoffeeGroupIdentitySection.tsx", import.meta.url),
   "utf8",
@@ -53,14 +57,16 @@ describe("reveal synthesized asset in Finder", () => {
     assert.doesNotMatch(serverSource, /absolutePath.*json\(/u);
   });
 
-  it("wires right-click chrome across Debate, Signal, Images, and Coffee", () => {
+  it("keeps Debate Finder access explicit while retaining contextual chrome elsewhere", () => {
+    assert.doesNotMatch(debateSource, /useRevealSynthesizedAssetContextMenu/u);
     assert.match(
-      debateSource,
-      /onRevealSynthesizedAssetContextMenu\(\s*event,\s*asset\.id/u,
+      assetLibrarySource,
+      /revealSynthesizedAssetInFinder\(member\.imageId\)/u,
     );
+    assert.match(assetLibrarySource, /Reveal in Finder/u);
     assert.match(
       signalSource,
-      /onRevealSynthesizedAssetContextMenu\(\s*event,\s*asset\.id/u,
+      /onRevealImage=[\s\S]{0,260}onRevealSynthesizedAssetContextMenu\(\s*event,\s*imageId/u,
     );
     assert.match(
       pageSource,

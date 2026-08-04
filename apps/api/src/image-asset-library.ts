@@ -1107,6 +1107,38 @@ export function imageAssetStorageSummary(
   };
 }
 
+export function imageAssetSelectionStorageBytes(
+  db: DatabaseSync,
+  userId: string,
+  assetSetIds: readonly string[],
+): number {
+  const ids = [...new Set(assetSetIds.map((id) => id.trim()).filter(Boolean))];
+  if (ids.length === 0) return 0;
+  if (ids.length > 1_000) {
+    throw new ImageAssetLibraryError(
+      "invalid",
+      "Too many visible asset sets were supplied.",
+    );
+  }
+  synchronizeImageAssetCatalog(db, userId);
+  const rows = db
+    .prepare(
+      `SELECT DISTINCT images.local_rel_path
+         FROM image_asset_sets sets
+         JOIN image_asset_set_items items ON items.set_id = sets.id
+         JOIN images ON images.id = items.image_id
+        WHERE sets.user_id = ?
+          AND sets.id IN (${ids.map(() => "?").join(",")})
+          AND images.local_rel_path IS NOT NULL`,
+    )
+    .all(userId, ...ids) as Array<{ local_rel_path: string }>;
+  return rows.reduce(
+    (total, row) =>
+      total + generatedImageStorageSizeBytes(row.local_rel_path.trim()),
+    0,
+  );
+}
+
 export function deleteUnusedImageAssetSet(
   db: DatabaseSync,
   userId: string,

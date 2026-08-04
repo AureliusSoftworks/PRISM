@@ -1,15 +1,23 @@
 import assert from "node:assert/strict";
+import { mkdtempSync, rmSync } from "node:fs";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
 import { describe, it } from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import { initializeDatabase } from "../db.ts";
 import {
   ImageAssetLibraryError,
+  imageAssetSelectionStorageBytes,
   imageAssetStorageSummary,
   listImageAssetCatalog,
   synchronizeImageAssetCatalog,
   updateImageAssetPlayerTags,
   deleteUnusedImageAssetSet,
 } from "../image-asset-library.ts";
+import {
+  thumbWebpRelativePathFromPngRelativePath,
+  writeGeneratedImageBytes,
+} from "../image-storage.ts";
 
 const NOW = "2026-08-03T12:00:00.000Z";
 
@@ -394,6 +402,73 @@ describe("local image asset catalog", () => {
       );
     } finally {
       db.close();
+    }
+  });
+
+  it("counts visible originals and thumbnails once while preserving tenant scope", () => {
+    const tempDirectory = mkdtempSync(join(tmpdir(), "prism-visible-assets-"));
+    const previousDbPath = process.env.DB_PATH;
+    const previousDataDirectory = process.env.LOCALAI_DATA_DIR;
+    process.env.DB_PATH = join(tempDirectory, "localai.db");
+    delete process.env.LOCALAI_DATA_DIR;
+    const db = makeDb();
+    try {
+      seedUser(db, "user-1");
+      seedUser(db, "user-2");
+      seedImage(db, {
+        id: "visible-a",
+        userId: "user-1",
+        origin: "debate",
+        purpose: "debate_exhibit",
+        prompt: "Visible exhibit A",
+      });
+      seedImage(db, {
+        id: "visible-b",
+        userId: "user-1",
+        origin: "debate",
+        purpose: "debate_exhibit",
+        prompt: "Visible exhibit B",
+      });
+      seedImage(db, {
+        id: "other-tenant",
+        userId: "user-2",
+        origin: "debate",
+        purpose: "debate_exhibit",
+        prompt: "Other tenant exhibit",
+      });
+      synchronizeImageAssetCatalog(db, "user-1");
+      synchronizeImageAssetCatalog(db, "user-2");
+
+      const sharedPath = "generated-images/user-1/visible-a.png";
+      db.prepare(
+        "UPDATE images SET local_rel_path = ? WHERE id = 'visible-b'",
+      ).run(sharedPath);
+      writeGeneratedImageBytes(sharedPath, Buffer.from("png"));
+      writeGeneratedImageBytes(
+        thumbWebpRelativePathFromPngRelativePath(sharedPath),
+        Buffer.from("webp"),
+      );
+      const userAssets = listImageAssetCatalog(db, "user-1", {
+        kind: "debate_exhibit",
+      }).assets;
+      const otherTenantAsset = listImageAssetCatalog(db, "user-2", {
+        kind: "debate_exhibit",
+      }).assets[0]!;
+
+      assert.equal(
+        imageAssetSelectionStorageBytes(db, "user-1", [
+          ...userAssets.map((asset) => asset.id),
+          otherTenantAsset.id,
+        ]),
+        7,
+      );
+    } finally {
+      db.close();
+      if (previousDbPath === undefined) delete process.env.DB_PATH;
+      else process.env.DB_PATH = previousDbPath;
+      if (previousDataDirectory === undefined) delete process.env.LOCALAI_DATA_DIR;
+      else process.env.LOCALAI_DATA_DIR = previousDataDirectory;
+      rmSync(tempDirectory, { recursive: true, force: true });
     }
   });
 });

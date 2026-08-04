@@ -10,6 +10,7 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
+import { FolderOpen } from "lucide-react";
 import {
   IMAGE_ASSET_KIND_LABELS,
   type ImageAssetCatalogPage,
@@ -21,10 +22,32 @@ import {
   requestPrismRefract,
   type PrismRefractMagicTarget,
 } from "./prismRefract";
+import {
+  REVEAL_SYNTHESIZED_ASSET_IN_FINDER_ENABLED,
+  revealSynthesizedAssetInFinder,
+} from "./revealSynthesizedAssetInFinder";
 import styles from "./AssetLibrary.module.css";
 
 interface AssetApiResponse extends ImageAssetCatalogPage {
   ok: boolean;
+}
+
+interface CleanupPreviewResponse {
+  ok: boolean;
+  preview: {
+    snapshot: string;
+    candidates: Array<{ id: string; storageBytes: number }>;
+  };
+}
+
+interface CleanupResultResponse {
+  ok: boolean;
+  result: {
+    deletedCount: number;
+    reclaimedBytes: number;
+    recoveryRetained: boolean;
+    imageIds: string[];
+  };
 }
 
 export interface AssetRailProps {
@@ -35,7 +58,7 @@ export interface AssetRailProps {
   refreshKey?: string | number | null;
   disabled?: boolean;
   synthesizeDisabled?: boolean;
-  onUpload: () => void;
+  onUpload?: () => void;
   onSynthesize: (direction: string) => void | Promise<void>;
   onSelect: (asset: ImageAssetSet) => void | Promise<void>;
   onRevealImage?: (imageId: string, event: React.MouseEvent) => void;
@@ -56,6 +79,30 @@ function assetSourceLabel(asset: ImageAssetSet): string {
     : asset.source === "legacy"
       ? "Legacy"
       : "Generated";
+}
+
+function assetDisplayTitle(asset: ImageAssetSet): string {
+  if (asset.kind === "debate_exhibit") {
+    for (const candidate of [asset.title, primaryMember(asset)?.prompt ?? ""]) {
+      const match = candidate.match(
+        /depicting exactly:\s*["“']([^"”']+)["”']/iu,
+      );
+      if (match?.[1]?.trim()) return match[1].trim();
+    }
+  }
+  return asset.title.trim() || IMAGE_ASSET_KIND_LABELS[asset.kind].replace(/s$/u, "");
+}
+
+function formatStorageBytes(bytes: number): string {
+  const bounded = Math.max(0, Number.isFinite(bytes) ? bytes : 0);
+  if (bounded < 1024) return `${Math.round(bounded)} B`;
+  if (bounded < 1024 * 1024) {
+    return `${Math.max(1, Math.round(bounded / 1024))} KB`;
+  }
+  if (bounded < 1024 * 1024 * 1024) {
+    return `${(bounded / (1024 * 1024)).toFixed(1)} MB`;
+  }
+  return `${(bounded / (1024 * 1024 * 1024)).toFixed(2)} GB`;
 }
 
 async function readJson<T>(response: Response): Promise<T> {
@@ -87,9 +134,19 @@ function AssetPreview({ asset }: { asset: ImageAssetSet }) {
     return (
       <span className={styles.studioPreview} aria-hidden="true">
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={light.thumbnailUrl} alt="" loading="lazy" />
+        <img
+          src={light.thumbnailUrl}
+          alt=""
+          loading="lazy"
+          data-asset-preview-kind={asset.kind}
+        />
         {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img src={dark.thumbnailUrl} alt="" loading="lazy" />
+        <img
+          src={dark.thumbnailUrl}
+          alt=""
+          loading="lazy"
+          data-asset-preview-kind={asset.kind}
+        />
         <small>Light</small>
         <small>Dark</small>
       </span>
@@ -98,7 +155,12 @@ function AssetPreview({ asset }: { asset: ImageAssetSet }) {
   const member = primaryMember(asset);
   return member ? (
     // eslint-disable-next-line @next/next/no-img-element
-    <img src={member.thumbnailUrl} alt="" loading="lazy" />
+    <img
+      src={member.thumbnailUrl}
+      alt=""
+      loading="lazy"
+      data-asset-preview-kind={asset.kind}
+    />
   ) : (
     <span className={styles.missingPreview} aria-hidden="true">◇</span>
   );
@@ -209,6 +271,10 @@ export function AssetRail({
 
   const activateAdd = (): void => {
     if (disabled) return;
+    if (!onUpload) {
+      requestPrismRefract(targetId, "focused-shortcut");
+      return;
+    }
     if (
       coarsePointer ||
       window.matchMedia("(hover: none), (pointer: coarse)").matches
@@ -225,7 +291,11 @@ export function AssetRail({
       <header>
         <div>
           <strong>{label ?? IMAGE_ASSET_KIND_LABELS[kind]}</strong>
-          <small>Upload, reuse, or wield Prism onto + to synthesize.</small>
+          <small>
+            {onUpload
+              ? "Upload, reuse, or wield Prism onto + to synthesize."
+              : "Reuse a recent image or synthesize a new one."}
+          </small>
         </div>
         <button type="button" onClick={() => setModalOpen(true)}>
           View all
@@ -242,10 +312,14 @@ export function AssetRail({
               onClick={activateAdd}
               disabled={disabled}
               data-tutorial-target={`asset-add-${kind}`}
-              aria-label={`Upload ${IMAGE_ASSET_KIND_LABELS[kind]}. Wield Prism here to synthesize.`}
+              aria-label={
+                onUpload
+                  ? `Upload ${IMAGE_ASSET_KIND_LABELS[kind]}. Wield Prism here to synthesize.`
+                  : `Synthesize ${IMAGE_ASSET_KIND_LABELS[kind]}`
+              }
             >
               <span aria-hidden="true">＋</span>
-              <small>Upload</small>
+              <small>{onUpload ? "Upload" : "Synthesize"}</small>
             </button>
           )}
         </PrismRefractTarget>
@@ -286,7 +360,7 @@ export function AssetRail({
           })
         )}
       </div>
-      {touchActionsOpen ? (
+      {touchActionsOpen && onUpload ? (
         <div className={styles.actionSheetBackdrop} role="presentation" onClick={() => setTouchActionsOpen(false)}>
           <div
             ref={touchSheetRef}
@@ -327,7 +401,11 @@ export function AssetRail({
           kind={kind}
           context={context}
           currentImageIds={[...currentIds]}
-          onClose={() => setModalOpen(false)}
+          allowDelete
+          onClose={() => {
+            setModalOpen(false);
+            void loadRecent();
+          }}
           onSelect={async (asset) => {
             await onSelect(asset);
             setModalOpen(false);
@@ -359,6 +437,7 @@ export function AssetLibraryModal({
 }: AssetLibraryModalProps) {
   const headingId = useId();
   const modalRootRef = useRef<HTMLDivElement | null>(null);
+  const detailRef = useRef<HTMLElement | null>(null);
   const searchRef = useRef<HTMLInputElement | null>(null);
   const [query, setQuery] = useState("");
   const [source, setSource] = useState<"all" | "generated" | "uploaded">("all");
@@ -368,11 +447,29 @@ export function AssetLibraryModal({
   const [nextCursor, setNextCursor] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [notice, setNotice] = useState<string | null>(null);
   const [detail, setDetail] = useState<ImageAssetSet | null>(null);
   const [tagDraft, setTagDraft] = useState("");
+  const [visibleStorageBytes, setVisibleStorageBytes] = useState<number | null>(
+    null,
+  );
+  const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [revealState, setRevealState] = useState<
+    "idle" | "revealing" | "shown"
+  >("idle");
   const currentIds = useMemo(() => new Set(currentImageIds), [currentImageIds]);
   const detailIsCurrent =
     detail?.members.some((member) => currentIds.has(member.imageId)) ?? false;
+  const clearableShownAssets = useMemo(
+    () =>
+      assets.filter(
+        (asset) =>
+          asset.source === "generated" &&
+          asset.usageCount === 0 &&
+          asset.members.length > 0,
+      ),
+    [assets],
+  );
 
   const load = useCallback(
     async (cursor: string | null, append: boolean): Promise<void> => {
@@ -404,6 +501,29 @@ export function AssetLibraryModal({
     const timer = window.setTimeout(() => void load(null, false), 180);
     return () => window.clearTimeout(timer);
   }, [load]);
+
+  useEffect(() => {
+    if (assets.length === 0) {
+      setVisibleStorageBytes(0);
+      return;
+    }
+    const controller = new AbortController();
+    setVisibleStorageBytes(null);
+    void fetch("/api/assets/storage/visible", {
+        method: "POST",
+        credentials: "include",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ assetSetIds: assets.map((asset) => asset.id) }),
+        signal: controller.signal,
+      })
+      .then((response) => readJson<{ ok: boolean; bytes: number }>(response))
+      .then((result) => setVisibleStorageBytes(result.bytes))
+      .catch((caught) => {
+        if (caught instanceof DOMException && caught.name === "AbortError") return;
+        setVisibleStorageBytes(null);
+      });
+    return () => controller.abort();
+  }, [assets]);
 
   useEffect(() => {
     const modalRoot = modalRootRef.current;
@@ -472,6 +592,35 @@ export function AssetLibraryModal({
   const openDetail = (asset: ImageAssetSet): void => {
     setDetail(asset);
     setTagDraft(asset.playerTags.join(", "));
+    setRevealState("idle");
+    window.requestAnimationFrame(() => {
+      detailRef.current?.scrollTo({ top: 0 });
+    });
+  };
+
+  const revealDetailInFinder = async (): Promise<void> => {
+    const member = detail ? primaryMember(detail) : null;
+    if (
+      !detail ||
+      detail.source !== "generated" ||
+      !REVEAL_SYNTHESIZED_ASSET_IN_FINDER_ENABLED ||
+      !member
+    ) {
+      return;
+    }
+    setRevealState("revealing");
+    setError(null);
+    try {
+      await revealSynthesizedAssetInFinder(member.imageId);
+      setRevealState("shown");
+    } catch (caught) {
+      setRevealState("idle");
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Could not reveal the asset in Finder.",
+      );
+    }
   };
 
   const saveTags = async (): Promise<void> => {
@@ -508,6 +657,77 @@ export function AssetLibraryModal({
       setDetail(null);
     } catch (caught) {
       setError(caught instanceof Error ? caught.message : "The asset could not be deleted.");
+    }
+  };
+
+  const clearUnusedShown = async (): Promise<void> => {
+    if (cleanupBusy || clearableShownAssets.length === 0) return;
+    const shownAtStart = clearableShownAssets;
+    setCleanupBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
+      const { preview } = await readJson<CleanupPreviewResponse>(
+        await fetch("/api/images/cleanup-preview"),
+      );
+      const candidates = new Map(
+        preview.candidates.map((candidate) => [candidate.id, candidate]),
+      );
+      const eligibleAssets = shownAtStart.filter((asset) =>
+        asset.members.every((member) => candidates.has(member.imageId)),
+      );
+      const imageIds = [
+        ...new Set(
+          eligibleAssets.flatMap((asset) =>
+            asset.members.map((member) => member.imageId),
+          ),
+        ),
+      ];
+      if (eligibleAssets.length === 0 || imageIds.length === 0) {
+        setNotice("No safely clearable unused assets are currently shown.");
+        return;
+      }
+      const selectedBytes = imageIds.reduce(
+        (total, imageId) => total + (candidates.get(imageId)?.storageBytes ?? 0),
+        0,
+      );
+      if (
+        !window.confirm(
+          `Move ${eligibleAssets.length} unused shown asset${eligibleAssets.length === 1 ? "" : "s"} (${formatStorageBytes(selectedBytes)}) to recovery trash?`,
+        )
+      ) {
+        return;
+      }
+      const { result } = await readJson<CleanupResultResponse>(
+        await fetch("/api/images/cleanup", {
+          method: "POST",
+          credentials: "include",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            snapshot: preview.snapshot,
+            imageIds,
+            permanent: false,
+          }),
+        }),
+      );
+      const clearedIds = new Set(result.imageIds);
+      setDetail((current) =>
+        current?.members.some((member) => clearedIds.has(member.imageId))
+          ? null
+          : current,
+      );
+      await load(null, false);
+      setNotice(
+        `Moved ${result.deletedCount} unused asset${result.deletedCount === 1 ? "" : "s"} (${formatStorageBytes(result.reclaimedBytes)}) to recovery trash.`,
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Unused assets could not be cleared.",
+      );
+    } finally {
+      setCleanupBusy(false);
     }
   };
 
@@ -561,22 +781,28 @@ export function AssetLibraryModal({
           </select>
         </div>
         {error ? <p className={styles.error} role="alert">{error}</p> : null}
+        {notice ? <p className={styles.notice} role="status">{notice}</p> : null}
         <div className={styles.modalBody}>
           <div className={styles.assetGrid} aria-live="polite">
             {assets.map((asset) => {
               const selected = asset.members.some((member) => currentIds.has(member.imageId));
+              const active = detail?.id === asset.id;
               return (
                 <button
                   key={asset.id}
                   type="button"
                   className={styles.assetCard}
                   data-selected={selected ? "true" : undefined}
+                  data-active={active ? "true" : undefined}
                   onClick={() => openDetail(asset)}
+                  aria-label={`View details for ${assetDisplayTitle(asset)}`}
                 >
                   <AssetPreview asset={asset} />
                   <span>
-                    <strong>{asset.title}</strong>
-                    <small>{assetSourceLabel(asset)} · {asset.usageCount > 0 ? `Used ${asset.usageCount}` : "Unused"}</small>
+                    <strong>{assetDisplayTitle(asset)}</strong>
+                    <small>
+                      {assetSourceLabel(asset)} · {selected ? "Current" : asset.usageCount > 0 ? `Used ${asset.usageCount}` : "Unused"}
+                    </small>
                   </span>
                   {asset.status !== "ready" ? <em>{asset.status}</em> : null}
                 </button>
@@ -587,47 +813,119 @@ export function AssetLibraryModal({
             ) : null}
           </div>
           {detail ? (
-            <aside className={styles.detail} aria-label="Asset details">
+            <aside ref={detailRef} className={styles.detail} aria-label="Asset details">
+              <header className={styles.detailHeader}>
+                <div>
+                  <small>Asset details</small>
+                  <h3>{assetDisplayTitle(detail)}</h3>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setDetail(null)}
+                  aria-label="Close asset details"
+                >
+                  ×
+                </button>
+              </header>
               <AssetPreview asset={detail} />
-              <h3>{detail.title}</h3>
               <p>{detail.source === "legacy" ? "Protected legacy asset" : assetSourceLabel(detail)} · {new Date(detail.createdAt).toLocaleString()}</p>
-              {primaryMember(detail) ? (
-                <dl className={styles.provenance}>
-                  <div><dt>Provider</dt><dd>{primaryMember(detail)!.provider}</dd></div>
-                  <div><dt>Model</dt><dd>{primaryMember(detail)!.model}</dd></div>
-                  <div><dt>Prompt</dt><dd>{primaryMember(detail)!.prompt || "Not recorded"}</dd></div>
-                </dl>
+              {detail.source === "generated" &&
+              REVEAL_SYNTHESIZED_ASSET_IN_FINDER_ENABLED &&
+              primaryMember(detail) ? (
+                <button
+                  type="button"
+                  className={styles.revealButton}
+                  onClick={() => void revealDetailInFinder()}
+                  disabled={revealState === "revealing"}
+                >
+                  <FolderOpen aria-hidden="true" />
+                  <span aria-live="polite">
+                    {revealState === "revealing"
+                      ? "Revealing…"
+                      : revealState === "shown"
+                        ? "Shown in Finder"
+                        : "Reveal in Finder"}
+                  </span>
+                </button>
               ) : null}
               {detail.usage.length > 0 ? (
                 <div><strong>Used by</strong><ul>{detail.usage.map((item) => <li key={item.label}>{item.href ? <a href={item.href}>{item.label}</a> : item.label}</li>)}</ul></div>
               ) : <p>Not currently used.</p>}
-              <label>
-                <span>Tags</span>
-                <input value={tagDraft} onChange={(event) => setTagDraft(event.currentTarget.value)} placeholder="character, project, mood" />
-              </label>
-              <button type="button" onClick={() => void saveTags()}>Save tags</button>
+              <div className={styles.tagEditor}>
+                <label>
+                  <span>Tags</span>
+                  <input value={tagDraft} onChange={(event) => setTagDraft(event.currentTarget.value)} placeholder="character, project, mood" />
+                </label>
+                <button type="button" onClick={() => void saveTags()}>Save tags</button>
+              </div>
+              {primaryMember(detail) ? (
+                <details className={styles.generationDetails}>
+                  <summary>Generation details</summary>
+                  <dl className={styles.provenance}>
+                    <div><dt>Provider</dt><dd>{primaryMember(detail)!.provider}</dd></div>
+                    <div><dt>Model</dt><dd>{primaryMember(detail)!.model}</dd></div>
+                    <div><dt>Prompt</dt><dd>{primaryMember(detail)!.prompt || "Not recorded"}</dd></div>
+                  </dl>
+                </details>
+              ) : null}
               {detail.status !== "ready" && detail.kind === "signal_studio" ? (
                 <p>
                   This studio set is incomplete. <Link href="/?view=botcast">Open Signal to retry synthesis</Link>,
                   or delete the unused partial set below.
                 </p>
               ) : null}
-              {onSelect && detail.status === "ready" ? (
-                <button type="button" className={styles.applyButton} onClick={() => void onSelect(detail)} disabled={detailIsCurrent}>
-                  {detailIsCurrent ? "Already selected" : "Use this asset"}
-                </button>
-              ) : null}
-              {allowDelete ? (
-                <button type="button" className={styles.deleteButton} onClick={() => void deleteAsset()} disabled={detail.usageCount > 0 || detail.source === "legacy"}>
-                  {detail.usageCount > 0 ? "In use — protected" : detail.source === "legacy" ? "Legacy set — protected" : "Delete unused asset"}
-                </button>
-              ) : null}
+              <div className={styles.detailActions}>
+                {onSelect && detail.status === "ready" ? (
+                  <button type="button" className={styles.applyButton} onClick={() => void onSelect(detail)} disabled={detailIsCurrent}>
+                    {detailIsCurrent ? "Already selected" : "Use this asset"}
+                  </button>
+                ) : null}
+                {allowDelete ? (
+                  <button
+                    type="button"
+                    className={styles.deleteButton}
+                    onClick={() => void deleteAsset()}
+                    disabled={
+                      detailIsCurrent ||
+                      detail.usageCount > 0 ||
+                      detail.source === "legacy"
+                    }
+                  >
+                    {detailIsCurrent
+                      ? "Selected — protected"
+                      : detail.usageCount > 0
+                        ? "In use — protected"
+                        : detail.source === "legacy"
+                          ? "Legacy set — protected"
+                          : "Delete unused asset"}
+                  </button>
+                ) : null}
+              </div>
             </aside>
           ) : null}
         </div>
         <footer>
-          {nextCursor ? <button type="button" onClick={() => void load(nextCursor, true)} disabled={loading}>Load more</button> : null}
-          {loading ? <span>Loading local assets…</span> : <span>{assets.length} shown</span>}
+          <div className={styles.footerActions}>
+            {nextCursor ? <button type="button" onClick={() => void load(nextCursor, true)} disabled={loading}>Load more</button> : null}
+            {allowDelete ? (
+              <button
+                type="button"
+                className={styles.clearUnusedButton}
+                onClick={() => void clearUnusedShown()}
+                disabled={cleanupBusy || clearableShownAssets.length === 0}
+                title="Moves safely eligible unused generated assets currently shown to recovery trash."
+              >
+                {cleanupBusy ? "Checking unused…" : "Clear unused"}
+              </button>
+            ) : null}
+          </div>
+          {loading ? (
+            <span>Loading local assets…</span>
+          ) : (
+            <span>
+              {assets.length} shown · {visibleStorageBytes === null ? "Calculating storage…" : formatStorageBytes(visibleStorageBytes)}
+            </span>
+          )}
         </footer>
       </section>
     </div>,

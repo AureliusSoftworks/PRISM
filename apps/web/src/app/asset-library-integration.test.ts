@@ -6,6 +6,10 @@ const assetSource = readFileSync(
   new URL("./AssetLibrary.tsx", import.meta.url),
   "utf8",
 );
+const assetStyles = readFileSync(
+  new URL("./AssetLibrary.module.css", import.meta.url),
+  "utf8",
+);
 const storageSource = readFileSync(
   new URL("./StorageSettings.tsx", import.meta.url),
   "utf8",
@@ -70,12 +74,49 @@ describe("typed local asset library", () => {
     assert.match(assetSource, /Provider/u);
     assert.match(assetSource, /Model/u);
     assert.match(assetSource, /Prompt/u);
+    assert.match(assetSource, /<details className=\{styles\.generationDetails\}>/u);
+    assert.match(assetSource, /assetDisplayTitle\(asset\)/u);
+    assert.match(assetSource, /Close asset details/u);
+    assert.match(assetSource, /detailRef\.current\?\.scrollTo\(\{ top: 0 \}\)/u);
+    assert.match(assetSource, /Reveal in Finder/u);
+    assert.match(assetSource, /Shown in Finder/u);
+    assert.match(assetSource, /revealSynthesizedAssetInFinder\(member\.imageId\)/u);
+    assert.match(
+      assetSource,
+      /detail\.source === "generated"[\s\S]*REVEAL_SYNTHESIZED_ASSET_IN_FINDER_ENABLED/u,
+    );
     assert.match(assetSource, /Open Signal to retry synthesis/u);
     assert.match(assetSource, /window\.confirm/u);
+    assert.match(assetSource, /method: "DELETE"/u);
+    assert.match(assetSource, /Selected — protected/u);
     assert.match(assetSource, /createPortal/u);
     assert.match(assetSource, /element\.setAttribute\("inert", ""\)/u);
     assert.match(assetSource, /event\.key !== "Tab"/u);
     assert.match(assetSource, /previouslyFocused\.focus/u);
+    assert.match(
+      assetStyles,
+      /\.detail > img[\s\S]*height: auto[\s\S]*aspect-ratio: 1\.55/u,
+    );
+    assert.match(
+      assetStyles,
+      /data-asset-preview-kind="debate_exhibit"[\s\S]*object-fit: contain/u,
+    );
+    assert.match(assetStyles, /\.detailActions[\s\S]*position: sticky/u);
+    assert.match(assetStyles, /\.revealButton[\s\S]*inline-flex/u);
+  });
+
+  it("allows safe deletion from rail-launched modals without Debate Finder chrome", () => {
+    assert.match(
+      assetSource,
+      /<AssetLibraryModal[\s\S]*currentImageIds=\{\[\.\.\.currentIds\]\}[\s\S]*allowDelete/u,
+    );
+    assert.match(assetSource, /void loadRecent\(\)/u);
+    assert.doesNotMatch(debateSource, /useRevealSynthesizedAssetContextMenu/u);
+    const debateRail = debateSource.slice(
+      debateSource.indexOf('<AssetRail\n              kind="debate_exhibit"'),
+      debateSource.indexOf("Uploaded and synthesized images are cut"),
+    );
+    assert.doesNotMatch(debateRail, /onRevealImage|onContextMenu|Finder/u);
   });
 
   it("migrates every requested image surface to its declared asset kind", () => {
@@ -88,6 +129,14 @@ describe("typed local asset library", () => {
     assert.match(pageSource, /kind="home_atmosphere"/u);
     assert.match(pageSource, /kind="group_room_atmosphere"/u);
     assert.match(pageSource, /kind="general_image"/u);
+    const generalImageRail = pageSource.slice(
+      pageSource.indexOf('<AssetRail\n                  kind="general_image"'),
+      pageSource.indexOf("{imageKeywordEditorOpen &&"),
+    );
+    assert.doesNotMatch(generalImageRail, /onUpload/u);
+    assert.doesNotMatch(pageSource, /generalImageUploadRef|uploadGeneralImage/u);
+    assert.match(assetSource, /onUpload\?: \(\) => void/u);
+    assert.match(assetSource, /onUpload \? "Upload" : "Synthesize"/u);
   });
 
   it("keeps storage and mutation interfaces local and set-aware", () => {
@@ -100,8 +149,15 @@ describe("typed local asset library", () => {
     assert.match(storageSource, /allowDelete/u);
     assert.match(serverSource, /route\("POST", "\/api\/assets\/upload"/u);
     assert.match(serverSource, /route\("GET", "\/api\/assets\/storage"/u);
+    assert.match(serverSource, /route\("POST", "\/api\/assets\/storage\/visible"/u);
     assert.match(serverSource, /route\("PATCH", "\/api\/assets\/:id"/u);
     assert.match(serverSource, /route\("DELETE", "\/api\/assets\/:id"/u);
+    assert.match(assetSource, /\/api\/assets\/storage\/visible/u);
+    assert.match(assetSource, /\{assets\.length\} shown ·/u);
+    assert.match(assetSource, /Clear unused/u);
+    assert.match(assetSource, /\/api\/images\/cleanup-preview/u);
+    assert.match(assetSource, /permanent: false/u);
+    assert.match(assetSource, /to recovery trash/u);
   });
 
   it("passes bounded Refract direction to providers without making it canonical", () => {
