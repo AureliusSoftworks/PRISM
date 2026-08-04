@@ -1238,10 +1238,13 @@ describe("Signal experience shell", () => {
       pageSource,
       /recordingVoiceSelection=\{voicePlaybackSelectionRef\.current\}/u,
     );
-    assert.match(pageSource, /recordedReplay:\s*replayActive/u);
     assert.match(
       pageSource,
-      /data-recorded-replay="true"[\s\S]{0,260}Recorded replay/u,
+      /renderSharedAppletNavbar\("Signal tools", \{[\s\S]*showVoiceSelector: true[\s\S]*modelControls:/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /renderSharedAppletNavbar\("Signal tools", \{[\s\S]{0,500}recordedReplay:/u,
     );
   });
 

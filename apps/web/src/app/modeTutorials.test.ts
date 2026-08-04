@@ -1449,11 +1449,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /Zen, Coffee, Signal, Debate, and Slate use the same persistent PRISM navbar/u,
+      /Chat, Coffee, Signal, Debate, and Slate use the same persistent PRISM navbar/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /Zen Home keeps its bot and Voice choices uncluttered; privacy, Model, and Effort appear once you open a bot chat/u,
+      /Chat\/Zen is the default Home and does not appear as a selectable applet[\s\S]*privacy, Model, and Effort appear once you open a bot conversation/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",

@@ -6,6 +6,7 @@ import {
   PRONUNCIATION_ATLAS_ANCHORS,
   nudgePronunciationAtlasSelection,
   pronunciationAtlasAnchorForSelection,
+  pronunciationAtlasPointForCoordinates,
   pronunciationAtlasNaturalSelection,
   pronunciationAtlasSelectionAtPoint,
   pronunciationAtlasLocationText,
@@ -21,6 +22,21 @@ const britishFrench: PronunciationAtlasSelection = {
 };
 
 describe("Pronunciation Atlas", () => {
+  it("uses one full-frame equirectangular projection for pins and hit testing", () => {
+    assert.deepEqual(pronunciationAtlasPointForCoordinates(-180, 90), {
+      x: 0,
+      y: 0,
+    });
+    assert.deepEqual(pronunciationAtlasPointForCoordinates(0, 0), {
+      x: 0.5,
+      y: 0.5,
+    });
+    assert.deepEqual(pronunciationAtlasPointForCoordinates(180, -90), {
+      x: 1,
+      y: 1,
+    });
+  });
+
   it("places every qualified Speechprint on the projection", () => {
     const mapped = new Set(
       PRONUNCIATION_ATLAS_ANCHORS.flatMap((anchor) =>

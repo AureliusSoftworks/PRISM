@@ -6334,7 +6334,9 @@ export function DebateExperience(
         const { spokenText } = utterance;
         replaceLiveReveal({ eventId: event.id, visibleContent: "" });
         let playbackProgressSeen = false;
+        let playbackCancelled = false;
         let playbackAlignment: VoicePlaybackCharacterAlignment | null = null;
+        let playbackCompletionContent = "";
         let playbackDurationMs = Math.max(
           1,
           debateRevealDurationMs(spokenText || event.content),
@@ -6412,10 +6414,17 @@ export function DebateExperience(
             },
             onEnd: () => {
               if (presentationRunRef.current !== runId) return;
-              performLinkedAudienceOrderCues(event.content.length);
+              playbackCompletionContent = debateVisibleContentAtSpeechTime({
+                content: event.content,
+                spokenText,
+                elapsedMs: playbackDurationMs,
+                durationMs: playbackDurationMs,
+                alignment: playbackAlignment,
+              });
+              performLinkedAudienceOrderCues(playbackCompletionContent.length);
               replaceLiveReveal({
                 eventId: event.id,
-                visibleContent: event.content,
+                visibleContent: playbackCompletionContent,
                 speechTiming: {
                   text: spokenText,
                   elapsedMs: playbackDurationMs,
@@ -6424,9 +6433,27 @@ export function DebateExperience(
                 },
               });
             },
+            onCancel: () => {
+              if (presentationRunRef.current !== runId) return;
+              playbackCancelled = true;
+              updateLiveReveal((current) =>
+                current?.eventId === event.id
+                  ? { ...current, speechTiming: null }
+                  : current,
+              );
+            },
           },
         });
         if (presentationRunRef.current !== runId) return;
+        if (playbackCancelled) return;
+        if (!played && playbackProgressSeen) {
+          updateLiveReveal((current) =>
+            current?.eventId === event.id
+              ? { ...current, speechTiming: null }
+              : current,
+          );
+          return;
+        }
         if (!played || !playbackProgressSeen) {
           await revealEventSilently(
             event,
@@ -6437,10 +6464,14 @@ export function DebateExperience(
         } else {
           updateLiveReveal((current) =>
             current?.eventId === event.id
-              ? { ...current, visibleContent: event.content }
+              ? {
+                  ...current,
+                  visibleContent:
+                    playbackCompletionContent || current.visibleContent,
+                }
               : {
                   eventId: event.id,
-                  visibleContent: event.content,
+                  visibleContent: playbackCompletionContent,
                 },
           );
         }
@@ -11629,7 +11660,10 @@ export function DebateExperience(
               )
               .map((event) => {
                 const streaming =
-                  presenting && presentationEventId === event.id;
+                  presentationEventId === event.id &&
+                  (presenting ||
+                    (liveReveal?.eventId === event.id &&
+                      liveReveal.visibleContent.length < event.content.length));
                 return streaming ? (
                   <DebateStreamingTranscriptArticle
                     key={event.id}

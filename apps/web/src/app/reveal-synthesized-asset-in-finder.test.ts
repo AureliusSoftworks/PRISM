@@ -29,7 +29,7 @@ const serverSource = readFileSync(
 );
 
 describe("reveal synthesized asset in Finder", () => {
-  it("gates the helper and API route to the exact dev branch", () => {
+  it("gates the helper to dev UI and lets the native desktop API reveal files", () => {
     assert.match(
       helperSource,
       /REVEAL_SYNTHESIZED_ASSET_IN_FINDER_ENABLED = prismBranchIsDev\(\s*process\.env\.NEXT_PUBLIC_PRISM_BRANCH/u,
@@ -47,7 +47,7 @@ describe("reveal synthesized asset in Finder", () => {
     );
     assert.match(
       serverSource,
-      /if \(!prismBranchIsDev\(\)\) \{\s*throw new HttpError\(404, "Not found\."\);/u,
+      /if \(!prismLocalFileRevealEnabled\(\)\) \{\s*throw new HttpError\(404, "Not found\."\);/u,
     );
     assert.match(
       serverSource,

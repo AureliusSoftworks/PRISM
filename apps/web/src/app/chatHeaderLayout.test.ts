@@ -59,10 +59,10 @@ describe("Chat shell header layout", () => {
     assert.match(openHomeSource, /void openZenMode\(\)/);
   });
 
-  it("keeps the Zen navbar but reserves model controls for a bot chat", () => {
+  it("keeps the default Chat navbar but reserves model controls for a bot chat", () => {
     assert.match(
       pageSource,
-      /renderSharedAppletNavbar\("Zen tools", \{[\s\S]*brandAppletId: "zen"/,
+      /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: "chat"/,
     );
     assert.match(
       pageSource,

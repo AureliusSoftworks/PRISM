@@ -26,6 +26,7 @@ import {
   REVEAL_SYNTHESIZED_ASSET_IN_FINDER_ENABLED,
   revealSynthesizedAssetInFinder,
 } from "./revealSynthesizedAssetInFinder";
+import sharedStyles from "./page.module.css";
 import styles from "./AssetLibrary.module.css";
 
 interface AssetApiResponse extends ImageAssetCatalogPage {
@@ -48,6 +49,13 @@ interface CleanupResultResponse {
     recoveryRetained: boolean;
     imageIds: string[];
   };
+}
+
+interface CleanupConfirmation {
+  snapshot: string;
+  imageIds: string[];
+  assetCount: number;
+  storageBytes: number;
 }
 
 export interface AssetRailProps {
@@ -297,7 +305,11 @@ export function AssetRail({
               : "Reuse a recent image or synthesize a new one."}
           </small>
         </div>
-        <button type="button" onClick={() => setModalOpen(true)}>
+        <button
+          type="button"
+          className={sharedStyles.linkButton}
+          onClick={() => setModalOpen(true)}
+        >
           View all
         </button>
       </header>
@@ -308,7 +320,7 @@ export function AssetRail({
               {...binding}
               ref={addButtonRef}
               type="button"
-              className={styles.addTile}
+              className={`${styles.addTile} ${sharedStyles.imageThumbWrap}`}
               onClick={activateAdd}
               disabled={disabled}
               data-tutorial-target={`asset-add-${kind}`}
@@ -326,7 +338,11 @@ export function AssetRail({
         {loading ? (
           <span className={styles.railStatus}>Loading…</span>
         ) : unavailable ? (
-          <button type="button" className={styles.railStatus} onClick={() => void loadRecent()}>
+          <button
+            type="button"
+            className={`${styles.railStatus} ${sharedStyles.linkButton}`}
+            onClick={() => void loadRecent()}
+          >
             Retry library
           </button>
         ) : (
@@ -336,7 +352,7 @@ export function AssetRail({
               <button
                 key={asset.id}
                 type="button"
-                className={styles.assetTile}
+                className={`${styles.assetTile} ${sharedStyles.imageThumbWrap}`}
                 aria-pressed={selected}
                 title={asset.title}
                 onClick={() => void onSelect(asset)}
@@ -361,10 +377,14 @@ export function AssetRail({
         )}
       </div>
       {touchActionsOpen && onUpload ? (
-        <div className={styles.actionSheetBackdrop} role="presentation" onClick={() => setTouchActionsOpen(false)}>
+        <div
+          className={`${styles.actionSheetBackdrop} ${sharedStyles.imageLightboxBackdrop}`}
+          role="presentation"
+          onClick={() => setTouchActionsOpen(false)}
+        >
           <div
             ref={touchSheetRef}
-            className={styles.actionSheet}
+            className={`${styles.actionSheet} ${sharedStyles.settingsTutorialCard} ${sharedStyles.form} ${sharedStyles.formInModal}`}
             role="dialog"
             aria-modal="true"
             aria-label={`Add ${IMAGE_ASSET_KIND_LABELS[kind]}`}
@@ -390,7 +410,11 @@ export function AssetRail({
             >
               Synthesize with Prism
             </button>
-            <button type="button" onClick={() => setTouchActionsOpen(false)}>
+            <button
+              type="button"
+              className={sharedStyles.accountLogoutButton}
+              onClick={() => setTouchActionsOpen(false)}
+            >
               Cancel
             </button>
           </div>
@@ -454,6 +478,8 @@ export function AssetLibraryModal({
     null,
   );
   const [cleanupBusy, setCleanupBusy] = useState(false);
+  const [cleanupConfirmation, setCleanupConfirmation] =
+    useState<CleanupConfirmation | null>(null);
   const [revealState, setRevealState] = useState<
     "idle" | "revealing" | "shown"
   >("idle");
@@ -475,6 +501,10 @@ export function AssetLibraryModal({
     async (cursor: string | null, append: boolean): Promise<void> => {
       setLoading(true);
       setError(null);
+      if (!append) {
+        setCleanupConfirmation(null);
+        setNotice(null);
+      }
       try {
         const params = new URLSearchParams({ kind, limit: "24", sort });
         if (query.trim()) params.set("q", query.trim());
@@ -660,7 +690,7 @@ export function AssetLibraryModal({
     }
   };
 
-  const clearUnusedShown = async (): Promise<void> => {
+  const prepareClearUnusedShown = async (): Promise<void> => {
     if (cleanupBusy || clearableShownAssets.length === 0) return;
     const shownAtStart = clearableShownAssets;
     setCleanupBusy(true);
@@ -691,21 +721,38 @@ export function AssetLibraryModal({
         (total, imageId) => total + (candidates.get(imageId)?.storageBytes ?? 0),
         0,
       );
-      if (
-        !window.confirm(
-          `Move ${eligibleAssets.length} unused shown asset${eligibleAssets.length === 1 ? "" : "s"} (${formatStorageBytes(selectedBytes)}) to recovery trash?`,
-        )
-      ) {
-        return;
-      }
+      setCleanupConfirmation({
+        snapshot: preview.snapshot,
+        imageIds,
+        assetCount: eligibleAssets.length,
+        storageBytes: selectedBytes,
+      });
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "Unused assets could not be checked.",
+      );
+    } finally {
+      setCleanupBusy(false);
+    }
+  };
+
+  const confirmClearUnusedShown = async (): Promise<void> => {
+    const confirmation = cleanupConfirmation;
+    if (!confirmation || cleanupBusy) return;
+    setCleanupBusy(true);
+    setError(null);
+    setNotice(null);
+    try {
       const { result } = await readJson<CleanupResultResponse>(
         await fetch("/api/images/cleanup", {
           method: "POST",
           credentials: "include",
           headers: { "content-type": "application/json" },
           body: JSON.stringify({
-            snapshot: preview.snapshot,
-            imageIds,
+            snapshot: confirmation.snapshot,
+            imageIds: confirmation.imageIds,
             permanent: false,
           }),
         }),
@@ -716,15 +763,16 @@ export function AssetLibraryModal({
           ? null
           : current,
       );
+      setCleanupConfirmation(null);
       await load(null, false);
       setNotice(
-        `Moved ${result.deletedCount} unused asset${result.deletedCount === 1 ? "" : "s"} (${formatStorageBytes(result.reclaimedBytes)}) to recovery trash.`,
+        `Moved ${confirmation.assetCount} unused asset${confirmation.assetCount === 1 ? "" : "s"} (${formatStorageBytes(result.reclaimedBytes)}) to recovery trash.`,
       );
     } catch (caught) {
       setError(
         caught instanceof Error
           ? caught.message
-          : "Unused assets could not be cleared.",
+          : "Unused assets could not be moved to recovery trash.",
       );
     } finally {
       setCleanupBusy(false);
@@ -736,7 +784,7 @@ export function AssetLibraryModal({
   return createPortal(
     <div
       ref={modalRootRef}
-      className={styles.modalBackdrop}
+      className={`${styles.modalBackdrop} ${sharedStyles.imageLightboxBackdrop}`}
       role="presentation"
       tabIndex={-1}
       onClick={onClose}
@@ -749,14 +797,23 @@ export function AssetLibraryModal({
         data-asset-library-kind={kind}
         onClick={(event) => event.stopPropagation()}
       >
-        <header className={styles.modalHeader}>
-          <div>
+        <header className={`${styles.modalHeader} ${sharedStyles.panelHeader}`}>
+          <div className={sharedStyles.panelHeaderTitleText}>
             <small>Local asset library</small>
             <h2 id={headingId}>{IMAGE_ASSET_KIND_LABELS[kind]}</h2>
           </div>
-          <button type="button" onClick={onClose} aria-label="Close asset library">×</button>
+          <button
+            type="button"
+            className={sharedStyles.panelClose}
+            onClick={onClose}
+            aria-label="Close asset library"
+          >
+            ×
+          </button>
         </header>
-        <div className={styles.filters}>
+        <div
+          className={`${styles.filters} ${sharedStyles.form} ${sharedStyles.formInModal}`}
+        >
           <input
             ref={searchRef}
             type="search"
@@ -780,10 +837,16 @@ export function AssetLibraryModal({
             <option value="recency">Most recent</option>
           </select>
         </div>
-        {error ? <p className={styles.error} role="alert">{error}</p> : null}
-        {notice ? <p className={styles.notice} role="status">{notice}</p> : null}
+        {error ? (
+          <p className={sharedStyles.error} role="alert">
+            {error}
+          </p>
+        ) : null}
         <div className={styles.modalBody}>
-          <div className={styles.assetGrid} aria-live="polite">
+          <div
+            className={`${styles.assetGrid} ${sharedStyles.imageGrid}`}
+            aria-live="polite"
+          >
             {assets.map((asset) => {
               const selected = asset.members.some((member) => currentIds.has(member.imageId));
               const active = detail?.id === asset.id;
@@ -791,7 +854,7 @@ export function AssetLibraryModal({
                 <button
                   key={asset.id}
                   type="button"
-                  className={styles.assetCard}
+                  className={`${styles.assetCard} ${sharedStyles.imageThumbWrap}`}
                   data-selected={selected ? "true" : undefined}
                   data-active={active ? "true" : undefined}
                   onClick={() => openDetail(asset)}
@@ -809,18 +872,27 @@ export function AssetLibraryModal({
               );
             })}
             {!loading && assets.length === 0 ? (
-              <p className={styles.empty}>No matching assets of this type.</p>
+              <p className={sharedStyles.muted}>
+                No matching assets of this type.
+              </p>
             ) : null}
           </div>
           {detail ? (
-            <aside ref={detailRef} className={styles.detail} aria-label="Asset details">
-              <header className={styles.detailHeader}>
-                <div>
+            <aside
+              ref={detailRef}
+              className={`${styles.detail} ${sharedStyles.settingsTutorialCard}`}
+              aria-label="Asset details"
+            >
+              <header
+                className={`${styles.detailHeader} ${sharedStyles.panelHeader}`}
+              >
+                <div className={sharedStyles.panelHeaderTitleText}>
                   <small>Asset details</small>
                   <h3>{assetDisplayTitle(detail)}</h3>
                 </div>
                 <button
                   type="button"
+                  className={sharedStyles.panelClose}
                   onClick={() => setDetail(null)}
                   aria-label="Close asset details"
                 >
@@ -834,7 +906,7 @@ export function AssetLibraryModal({
               primaryMember(detail) ? (
                 <button
                   type="button"
-                  className={styles.revealButton}
+                  className={`${styles.revealButton} ${sharedStyles.accountLogoutButton}`}
                   onClick={() => void revealDetailInFinder()}
                   disabled={revealState === "revealing"}
                 >
@@ -851,12 +923,20 @@ export function AssetLibraryModal({
               {detail.usage.length > 0 ? (
                 <div><strong>Used by</strong><ul>{detail.usage.map((item) => <li key={item.label}>{item.href ? <a href={item.href}>{item.label}</a> : item.label}</li>)}</ul></div>
               ) : <p>Not currently used.</p>}
-              <div className={styles.tagEditor}>
+              <div
+                className={`${styles.tagEditor} ${sharedStyles.form} ${sharedStyles.formInModal}`}
+              >
                 <label>
                   <span>Tags</span>
                   <input value={tagDraft} onChange={(event) => setTagDraft(event.currentTarget.value)} placeholder="character, project, mood" />
                 </label>
-                <button type="button" onClick={() => void saveTags()}>Save tags</button>
+                <button
+                  type="button"
+                  className={sharedStyles.linkButton}
+                  onClick={() => void saveTags()}
+                >
+                  Save tags
+                </button>
               </div>
               {primaryMember(detail) ? (
                 <details className={styles.generationDetails}>
@@ -876,14 +956,19 @@ export function AssetLibraryModal({
               ) : null}
               <div className={styles.detailActions}>
                 {onSelect && detail.status === "ready" ? (
-                  <button type="button" className={styles.applyButton} onClick={() => void onSelect(detail)} disabled={detailIsCurrent}>
+                  <button
+                    type="button"
+                    className={sharedStyles.btnPrimary}
+                    onClick={() => void onSelect(detail)}
+                    disabled={detailIsCurrent}
+                  >
                     {detailIsCurrent ? "Already selected" : "Use this asset"}
                   </button>
                 ) : null}
                 {allowDelete ? (
                   <button
                     type="button"
-                    className={styles.deleteButton}
+                    className={sharedStyles.dangerButton}
                     onClick={() => void deleteAsset()}
                     disabled={
                       detailIsCurrent ||
@@ -906,12 +991,56 @@ export function AssetLibraryModal({
         </div>
         <footer>
           <div className={styles.footerActions}>
-            {nextCursor ? <button type="button" onClick={() => void load(nextCursor, true)} disabled={loading}>Load more</button> : null}
-            {allowDelete ? (
+            {nextCursor ? (
               <button
                 type="button"
-                className={styles.clearUnusedButton}
-                onClick={() => void clearUnusedShown()}
+                className={sharedStyles.accountLogoutButton}
+                onClick={() => void load(nextCursor, true)}
+                disabled={loading}
+              >
+                Load more
+              </button>
+            ) : null}
+            {notice ? (
+              <span
+                className={`${styles.footerNotice} ${sharedStyles.panelNotice}`}
+                role="status"
+              >
+                {notice}
+              </span>
+            ) : null}
+            {allowDelete && cleanupConfirmation ? (
+              <div
+                className={styles.cleanupConfirmation}
+                role="group"
+                aria-label="Confirm clearing unused assets"
+              >
+                <span>
+                  Move {cleanupConfirmation.assetCount} unused asset
+                  {cleanupConfirmation.assetCount === 1 ? "" : "s"} · {formatStorageBytes(cleanupConfirmation.storageBytes)}?
+                </span>
+                <button
+                  type="button"
+                  className={sharedStyles.linkButton}
+                  onClick={() => setCleanupConfirmation(null)}
+                  disabled={cleanupBusy}
+                >
+                  Cancel
+                </button>
+                <button
+                  type="button"
+                  className={sharedStyles.dangerButton}
+                  onClick={() => void confirmClearUnusedShown()}
+                  disabled={cleanupBusy}
+                >
+                  {cleanupBusy ? "Moving…" : "Move to recovery trash"}
+                </button>
+              </div>
+            ) : allowDelete ? (
+              <button
+                type="button"
+                className={`${styles.clearUnusedButton} ${sharedStyles.linkButton}`}
+                onClick={() => void prepareClearUnusedShown()}
                 disabled={cleanupBusy || clearableShownAssets.length === 0}
                 title="Moves safely eligible unused generated assets currently shown to recovery trash."
               >

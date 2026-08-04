@@ -96,7 +96,7 @@ describe("universal voice selector", () => {
     );
 
     const zenHeader = pageSource.slice(
-      pageSource.indexOf('renderSharedAppletNavbar("Zen tools"'),
+      pageSource.indexOf('renderSharedAppletNavbar("Chat tools"'),
       pageSource.indexOf("renderZenMemoryToasts()"),
     );
     assert.match(zenHeader, /renderHeaderModelPicker\(/);

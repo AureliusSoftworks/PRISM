@@ -4413,6 +4413,7 @@ describe("API request integration", () => {
           engine: "elevenlabs",
           explicitOnlineContext: true,
           includeAlignment: true,
+          streamChunks: true,
           profile: {
             ...normalizeBotAudioVoiceProfileV1(undefined),
             elevenLabsVoiceId: "truncated-provider-voice",
@@ -4426,11 +4427,23 @@ describe("API request integration", () => {
         response.headers.get("x-prism-voice-engine"),
         "builtin-provider-fallback",
       );
-      assert.equal(builtinVoiceCalls.length, beforeBuiltinCalls + 1);
-      assert.equal(builtinVoiceCalls.at(-1)?.text, fullLine);
-      const payload = await json(response);
-      assert.equal(payload.alignment, null);
-      assert.equal(payload.audioContentType, "audio/wav");
+      assert.equal(
+        response.headers.get("x-prism-voice-stream"),
+        "wav-chunks-v1",
+      );
+      const chunks = (await response.text())
+        .trim()
+        .split("\n")
+        .map((line) => JSON.parse(line) as Record<string, unknown>);
+      assert.ok(chunks.length > 1);
+      assert.equal(
+        builtinVoiceCalls.length,
+        beforeBuiltinCalls + chunks.length,
+      );
+      assert.equal(
+        chunks.map((chunk) => String(chunk.text)).join(" "),
+        fullLine,
+      );
     } finally {
       config.elevenLabsApiKey = "";
       fetchRecorder.setResponse(new Response("{}", { status: 200 }));

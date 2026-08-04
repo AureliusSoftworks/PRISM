@@ -62,8 +62,8 @@ test("Signal keeps provider tags scoped while local actions use structured strea
     /const useLocalPerformanceStream =[\s\S]{0,260}segment\.kind === "vocal-action"/u,
   );
   assert.match(pageSource, /performanceText,/u);
-  assert.match(pageSource, /includeAlignment: !useLocalPerformanceStream/u);
-  assert.match(pageSource, /streamChunks: useLocalPerformanceStream/u);
+  assert.match(pageSource, /includeAlignment: premiumAlignmentRequested/u);
+  assert.match(pageSource, /streamChunks: true/u);
   assert.match(
     pageSource,
     /englishVoiceResponseSupportsChunkedStreaming\(response\)[\s\S]{0,300}kind: "stream"/u,

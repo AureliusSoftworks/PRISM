@@ -53,9 +53,9 @@
 
 .map {
   position: absolute;
-  inset: 7px 9px;
+  inset: 0;
   overflow: hidden;
-  border-radius: 5px;
+  border-radius: inherit;
   pointer-events: none;
   opacity: 0;
   animation: atlasMaterialize 520ms steps(8, end) forwards;
@@ -70,8 +70,8 @@
     var(--pronunciation-atlas-color) 46%,
     transparent
   );
-  -webkit-mask-image: url("/voice/pronunciation-atlas-earth-v1.png");
-  mask-image: url("/voice/pronunciation-atlas-earth-v1.png");
+  -webkit-mask-image: url("/voice/pronunciation-atlas-earth-equirectangular-v2.svg");
+  mask-image: url("/voice/pronunciation-atlas-earth-equirectangular-v2.svg");
   -webkit-mask-position: center;
   mask-position: center;
   -webkit-mask-repeat: no-repeat;

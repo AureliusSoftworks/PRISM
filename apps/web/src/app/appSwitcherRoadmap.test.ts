@@ -20,7 +20,7 @@ describe("living-shell applet navigation", () => {
     assert.match(pageSource, /label: "Switch Prism app"/u);
     assert.match(
       pageSource,
-      /prismTopLevelSwitcherApplets\(\)\.filter\(\s*\(applet\) => applet\.id !== "chat",?\s*\)/u,
+      /prismTopLevelSwitcherApplets\(\)\.filter\([\s\S]*applet\.id !== "chat" && applet\.id !== "zen"[\s\S]*\)/u,
     );
     assert.match(
       pageSource,

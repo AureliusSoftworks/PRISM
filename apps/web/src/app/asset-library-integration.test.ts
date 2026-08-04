@@ -10,6 +10,10 @@ const assetStyles = readFileSync(
   new URL("./AssetLibrary.module.css", import.meta.url),
   "utf8",
 );
+const sharedStyles = readFileSync(
+  new URL("./page.module.css", import.meta.url),
+  "utf8",
+);
 const storageSource = readFileSync(
   new URL("./StorageSettings.tsx", import.meta.url),
   "utf8",
@@ -105,6 +109,35 @@ describe("typed local asset library", () => {
     assert.match(assetStyles, /\.revealButton[\s\S]*inline-flex/u);
   });
 
+  it("reuses PRISM surface, form, gallery, and state primitives", () => {
+    assert.match(assetSource, /import sharedStyles from "\.\/page\.module\.css"/u);
+    for (const className of [
+      "imageLightboxBackdrop",
+      "panelHeader",
+      "panelHeaderTitleText",
+      "panelClose",
+      "form",
+      "formInModal",
+      "imageGrid",
+      "imageThumbWrap",
+      "settingsTutorialCard",
+      "error",
+      "panelNotice",
+      "muted",
+      "btnPrimary",
+      "dangerButton",
+      "linkButton",
+    ]) {
+      assert.match(assetSource, new RegExp(`sharedStyles\\.${className}`, "u"));
+      assert.match(sharedStyles, new RegExp(`\\.${className}\\b`, "u"));
+    }
+    assert.doesNotMatch(
+      assetStyles,
+      /\.filters input,[\s\S]*\.detail input\s*\{/u,
+    );
+    assert.doesNotMatch(assetStyles, /\.modalHeader > button\s*\{/u);
+  });
+
   it("allows safe deletion from rail-launched modals without Debate Finder chrome", () => {
     assert.match(
       assetSource,
@@ -158,6 +191,9 @@ describe("typed local asset library", () => {
     assert.match(assetSource, /\/api\/images\/cleanup-preview/u);
     assert.match(assetSource, /permanent: false/u);
     assert.match(assetSource, /to recovery trash/u);
+    assert.match(assetSource, /Confirm clearing unused assets/u);
+    assert.match(assetSource, /Move to recovery trash/u);
+    assert.match(assetSource, /setCleanupConfirmation/u);
   });
 
   it("passes bounded Refract direction to providers without making it canonical", () => {

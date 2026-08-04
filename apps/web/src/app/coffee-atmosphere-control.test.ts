@@ -42,7 +42,10 @@ test("Coffee Jazz is a wired local-only atmosphere control with stations", () =>
 });
 
 test("Coffee Jazz preference stays outside CoffeeSessionSettings persistence", () => {
-  assert.match(source, /persistCoffeeJazzAtmosphereToBrowser\(coffeeJazzAtmosphere\)/u);
+  assert.match(
+    source,
+    /persistCoffeeJazzAtmosphereToBrowser\(coffeeJazzAtmosphere\)/u,
+  );
   assert.match(source, /loadCoffeeJazzAtmosphereFromBrowser\(\)/u);
   assert.match(
     jazzSource,
@@ -73,6 +76,32 @@ test("Coffee shares tactful foley and cup-synchronized audio with Signal", () =>
   assert.match(
     atmosphereSource,
     /coffeeCupFoleyCueForTransition\(previous, false\)/u,
+  );
+});
+
+test("Coffee idle presence is richer, local, and yields to real table activity", () => {
+  assert.match(source, /ambientFoleyUrls=\{COFFEE_AMBIENT_FOLEY_URLS\}/u);
+  assert.match(source, /ambientFoleyProfile=\{COFFEE_AMBIENT_FOLEY_PROFILE\}/u);
+  assert.match(
+    source,
+    /ambientBotVocalizationProfile=\{\s*COFFEE_AMBIENT_BOT_VOCALIZATION_PROFILE\s*\}/u,
+  );
+  assert.match(
+    source,
+    /deferFoley=\{\s*coffeeTurnRhythmState !== "idle" \|\| coffeeReplayPlaying\s*\}/u,
+  );
+  assert.match(
+    source,
+    /deferBotVocalization=\{\s*coffeeTurnRhythmState !== "idle" \|\| coffeeReplayPlaying\s*\}/u,
+  );
+  assert.match(source, /coffeeAmbientPresenceWord\(/u);
+  assert.match(source, /engine: "builtin"/u);
+  assert.match(source, /explicitOnlineContext: false/u);
+  assert.match(source, /channel: "presence"/u);
+  assert.match(source, /releaseRealtimeVoiceAudio\("presence", 140\)/u);
+  assert.doesNotMatch(
+    source,
+    /coffeeAmbientPresenceWord[\s\S]{0,500}\/api\/messages/u,
   );
 });
 

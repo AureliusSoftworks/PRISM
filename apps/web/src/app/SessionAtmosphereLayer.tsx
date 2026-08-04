@@ -85,9 +85,15 @@ export function SessionAtmosphereLayer({
   const coffeeCupFoleyRef = useRef(onCoffeeCupFoley);
   useEffect(() => {
     deferFoleyRef.current = deferFoley;
+    if (deferFoley) {
+      controllerRef.current?.stopFoley("ambient-foley", 140);
+    }
   }, [deferFoley]);
   useEffect(() => {
     deferBotVocalizationRef.current = deferBotVocalization;
+    if (deferBotVocalization) {
+      controllerRef.current?.stopFoley("ambient-bot-vocalization", 140);
+    }
   }, [deferBotVocalization]);
   useEffect(() => {
     ambientBotVocalizationRef.current = onAmbientBotVocalization;

@@ -4,7 +4,11 @@ import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
-import { prismBranchIsDev, resolvePrismBranchName } from "../prism-branch.ts";
+import {
+  prismBranchIsDev,
+  prismLocalFileRevealEnabled,
+  resolvePrismBranchName,
+} from "../prism-branch.ts";
 import { revealLocalFileInFolder } from "../reveal-local-file.ts";
 
 describe("prism branch gate", () => {
@@ -26,6 +30,30 @@ describe("prism branch gate", () => {
         NEXT_PUBLIC_PRISM_BRANCH: "main",
       } as NodeJS.ProcessEnv),
       "main",
+    );
+  });
+
+  it("allows bundled desktop runtimes without Git branch metadata", () => {
+    assert.equal(
+      prismLocalFileRevealEnabled({
+        PRISM_DESKTOP_MODE: "1",
+        PRISM_BRANCH: "unknown",
+      } as NodeJS.ProcessEnv),
+      true,
+    );
+    assert.equal(
+      prismLocalFileRevealEnabled({
+        PRISM_DESKTOP_MODE: "0",
+        PRISM_BRANCH: "dev",
+      } as NodeJS.ProcessEnv),
+      true,
+    );
+    assert.equal(
+      prismLocalFileRevealEnabled({
+        PRISM_DESKTOP_MODE: "0",
+        PRISM_BRANCH: "main",
+      } as NodeJS.ProcessEnv),
+      false,
     );
   });
 });

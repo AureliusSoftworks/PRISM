@@ -906,7 +906,10 @@ export function startSessionAtmosphere(args: {
             args.ambientFoleyUrls ?? GENERAL_FOLEY_URLS,
           ),
           "foley",
-          { trim: Math.max(0, ambientFoleyProfile.trim) },
+          {
+            trim: Math.max(0, ambientFoleyProfile.trim),
+            tag: "ambient-foley",
+          },
         );
         foleyIndex += 1;
         scheduleFoley();
@@ -943,6 +946,7 @@ export function startSessionAtmosphere(args: {
         if (accepted === true) {
           play(cue.url, "foley", {
             trim: Math.max(0, ambientBotVocalizationProfile.trim),
+            tag: "ambient-bot-vocalization",
           });
         } else if (accepted === "owned") {
           // Caller owns playback (e.g. Debate ElevenLabs vocal Foley).

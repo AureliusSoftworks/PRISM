@@ -86,6 +86,10 @@ describe("About credits", () => {
     );
     const credits = ABOUT_CREDIT_GROUPS.flatMap((group) => group.credits);
     assert.equal(new Set(credits.map((credit) => credit.id)).size, credits.length);
+    assert.equal(
+      credits.find((credit) => credit.id === "natural-earth")?.license,
+      "Public domain",
+    );
     for (const group of ABOUT_CREDIT_GROUPS) {
       assert.ok(group.description.trim());
       assert.ok(group.credits.length > 0);

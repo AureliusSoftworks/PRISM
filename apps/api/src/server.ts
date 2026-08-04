@@ -1007,7 +1007,7 @@ import {
   writeGeneratedImageBytes,
   resolveAbsoluteUnderDataRoot,
 } from "./image-storage.ts";
-import { prismBranchIsDev } from "./prism-branch.ts";
+import { prismLocalFileRevealEnabled } from "./prism-branch.ts";
 import { revealLocalFileInFolder } from "./reveal-local-file.ts";
 import {
   readOrCreateThumbBytes,
@@ -21600,7 +21600,7 @@ function buildRoutes(): RouteDefinition[] {
           allowOperatingSystemVoices,
         );
         try {
-          if (raw.streamChunks === true && !request.includeAlignment) {
+          if (raw.streamChunks === true) {
             await sendLocalVoiceWaveStream({
               response: ctx.res,
               text: boundary.text,
@@ -21780,7 +21780,7 @@ function buildRoutes(): RouteDefinition[] {
               boundary.profile,
               allowOperatingSystemVoices,
             );
-            if (raw.streamChunks === true && !request.includeAlignment) {
+            if (raw.streamChunks === true) {
               await sendLocalVoiceWaveStream({
                 response: ctx.res,
                 text: boundary.text,
@@ -24560,8 +24560,8 @@ function buildRoutes(): RouteDefinition[] {
       ctx.res.end(bytes);
     }),
     route("POST", "/api/images/:id/reveal-in-finder", async (ctx) => {
-      // Dev-branch-only developer aid: never expose absolute paths to clients.
-      if (!prismBranchIsDev()) {
+      // Native desktop and exact-dev builds only; never expose absolute paths.
+      if (!prismLocalFileRevealEnabled()) {
         throw new HttpError(404, "Not found.");
       }
       const userId = requireAuth(ctx);

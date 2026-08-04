@@ -28,7 +28,11 @@ export interface PronunciationAtlasAnchor {
   influence?: Exclude<LocalVoiceSpeechprintInfluence, "none">;
 }
 
-function atlasPoint(
+/**
+ * Projects geographic coordinates into the same full-frame equirectangular
+ * space used by the Accent Map artwork and pointer pad.
+ */
+export function pronunciationAtlasPointForCoordinates(
   longitudeDegrees: number,
   latitudeDegrees: number,
 ): AdjustmentPadPoint {
@@ -40,127 +44,127 @@ function atlasPoint(
 
 const INFLUENCE_ANCHOR_DATA = {
   "spanish-influenced-english": {
-    point: atlasPoint(-3.7, 40.4),
+    point: pronunciationAtlasPointForCoordinates(-3.7, 40.4),
   },
   "latin-american-spanish-influenced-english": {
-    point: atlasPoint(-74.07, 4.71),
+    point: pronunciationAtlasPointForCoordinates(-74.07, 4.71),
   },
   "brazilian-portuguese-influenced-english": {
-    point: atlasPoint(-47.9, -15.8),
+    point: pronunciationAtlasPointForCoordinates(-47.9, -15.8),
   },
   "european-portuguese-influenced-english": {
-    point: atlasPoint(-9.14, 38.72),
+    point: pronunciationAtlasPointForCoordinates(-9.14, 38.72),
   },
   "mandarin-influenced-english": {
-    point: atlasPoint(116.4, 39.9),
+    point: pronunciationAtlasPointForCoordinates(116.4, 39.9),
   },
   "cantonese-influenced-english": {
-    point: atlasPoint(114.17, 22.32),
+    point: pronunciationAtlasPointForCoordinates(114.17, 22.32),
   },
   "japanese-influenced-english": {
-    point: atlasPoint(139.7, 35.7),
+    point: pronunciationAtlasPointForCoordinates(139.7, 35.7),
   },
   "korean-influenced-english": {
-    point: atlasPoint(127, 37.6),
+    point: pronunciationAtlasPointForCoordinates(127, 37.6),
   },
   "indian-english": {
-    point: atlasPoint(77.2, 28.6),
+    point: pronunciationAtlasPointForCoordinates(77.2, 28.6),
   },
   "pakistani-english": {
-    point: atlasPoint(73.05, 33.68),
+    point: pronunciationAtlasPointForCoordinates(73.05, 33.68),
   },
   "bengali-influenced-english": {
-    point: atlasPoint(90.41, 23.81),
+    point: pronunciationAtlasPointForCoordinates(90.41, 23.81),
   },
   "sri-lankan-english": {
-    point: atlasPoint(79.86, 6.93),
+    point: pronunciationAtlasPointForCoordinates(79.86, 6.93),
   },
   "french-influenced-english": {
-    point: atlasPoint(2.35, 48.86),
+    point: pronunciationAtlasPointForCoordinates(2.35, 48.86),
   },
   "german-influenced-english": {
-    point: atlasPoint(13.4, 52.52),
+    point: pronunciationAtlasPointForCoordinates(13.4, 52.52),
   },
   "dutch-influenced-english": {
-    point: atlasPoint(4.9, 52.37),
+    point: pronunciationAtlasPointForCoordinates(4.9, 52.37),
   },
   "nordic-influenced-english": {
-    point: atlasPoint(18.07, 59.33),
+    point: pronunciationAtlasPointForCoordinates(18.07, 59.33),
   },
   "polish-influenced-english": {
-    point: atlasPoint(21.01, 52.23),
+    point: pronunciationAtlasPointForCoordinates(21.01, 52.23),
   },
   "greek-influenced-english": {
-    point: atlasPoint(23.73, 37.98),
+    point: pronunciationAtlasPointForCoordinates(23.73, 37.98),
   },
   "russian-influenced-english": {
-    point: atlasPoint(37.62, 55.75),
+    point: pronunciationAtlasPointForCoordinates(37.62, 55.75),
   },
   "italian-influenced-english": {
-    point: atlasPoint(12.5, 41.9),
+    point: pronunciationAtlasPointForCoordinates(12.5, 41.9),
   },
   "irish-english": {
-    point: atlasPoint(-6.26, 53.35),
+    point: pronunciationAtlasPointForCoordinates(-6.26, 53.35),
   },
   "scottish-english": {
-    point: atlasPoint(-3.19, 55.95),
+    point: pronunciationAtlasPointForCoordinates(-3.19, 55.95),
   },
   "australian-english": {
-    point: atlasPoint(149.13, -35.28),
+    point: pronunciationAtlasPointForCoordinates(149.13, -35.28),
   },
   "new-zealand-english": {
-    point: atlasPoint(174.78, -41.29),
+    point: pronunciationAtlasPointForCoordinates(174.78, -41.29),
   },
   "canadian-english": {
-    point: atlasPoint(-75.7, 45.42),
+    point: pronunciationAtlasPointForCoordinates(-75.7, 45.42),
   },
   "new-york-english": {
-    point: atlasPoint(-74.01, 40.71),
+    point: pronunciationAtlasPointForCoordinates(-74.01, 40.71),
   },
   "southern-us-english": {
-    point: atlasPoint(-84.39, 33.75),
+    point: pronunciationAtlasPointForCoordinates(-84.39, 33.75),
   },
   "caribbean-english": {
-    point: atlasPoint(-76.79, 17.97),
+    point: pronunciationAtlasPointForCoordinates(-76.79, 17.97),
   },
   "north-african-arabic-influenced-english": {
-    point: atlasPoint(10.18, 36.8),
+    point: pronunciationAtlasPointForCoordinates(10.18, 36.8),
   },
   "middle-eastern-arabic-influenced-english": {
-    point: atlasPoint(46.68, 24.71),
+    point: pronunciationAtlasPointForCoordinates(46.68, 24.71),
   },
   "persian-influenced-english": {
-    point: atlasPoint(51.39, 35.69),
+    point: pronunciationAtlasPointForCoordinates(51.39, 35.69),
   },
   "turkish-influenced-english": {
-    point: atlasPoint(32.86, 39.93),
+    point: pronunciationAtlasPointForCoordinates(32.86, 39.93),
   },
   "nigerian-english": {
-    point: atlasPoint(3.38, 6.52),
+    point: pronunciationAtlasPointForCoordinates(3.38, 6.52),
   },
   "east-african-english": {
-    point: atlasPoint(36.82, -1.29),
+    point: pronunciationAtlasPointForCoordinates(36.82, -1.29),
   },
   "south-african-english": {
-    point: atlasPoint(28.05, -26.2),
+    point: pronunciationAtlasPointForCoordinates(28.05, -26.2),
   },
   "filipino-english": {
-    point: atlasPoint(120.98, 14.6),
+    point: pronunciationAtlasPointForCoordinates(120.98, 14.6),
   },
   "vietnamese-influenced-english": {
-    point: atlasPoint(105.83, 21.03),
+    point: pronunciationAtlasPointForCoordinates(105.83, 21.03),
   },
   "thai-influenced-english": {
-    point: atlasPoint(100.5, 13.76),
+    point: pronunciationAtlasPointForCoordinates(100.5, 13.76),
   },
   "indonesian-influenced-english": {
-    point: atlasPoint(106.85, -6.2),
+    point: pronunciationAtlasPointForCoordinates(106.85, -6.2),
   },
   "singapore-english": {
-    point: atlasPoint(103.82, 1.35),
+    point: pronunciationAtlasPointForCoordinates(103.82, 1.35),
   },
   "pacific-island-english": {
-    point: atlasPoint(178.45, -18.14),
+    point: pronunciationAtlasPointForCoordinates(178.45, -18.14),
   },
 } as const satisfies Record<
   Exclude<LocalVoiceSpeechprintInfluence, "none">,
@@ -172,12 +176,12 @@ const INFLUENCE_ANCHOR_DATA = {
 const BASE_ANCHORS = [
   {
     id: "base-en-US",
-    point: atlasPoint(-98.5, 39.8),
+    point: pronunciationAtlasPointForCoordinates(-98.5, 39.8),
     base: "en-US",
   },
   {
     id: "base-en-GB",
-    point: atlasPoint(-0.13, 51.51),
+    point: pronunciationAtlasPointForCoordinates(-0.13, 51.51),
     base: "en-GB",
   },
 ] as const satisfies readonly PronunciationAtlasAnchor[];

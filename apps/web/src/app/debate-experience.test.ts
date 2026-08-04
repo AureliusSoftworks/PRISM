@@ -1990,6 +1990,27 @@ describe("Debate experience", () => {
     );
   });
 
+  it("does not promote a cut-off voice to the full canonical statement", () => {
+    assert.match(
+      source,
+      /onEnd: \(\) => \{[\s\S]{0,260}playbackCompletionContent = debateVisibleContentAtSpeechTime\([\s\S]{0,420}visibleContent: playbackCompletionContent/u,
+    );
+    assert.match(
+      source,
+      /onCancel: \(\) => \{[\s\S]{0,180}playbackCancelled = true[\s\S]{0,220}speechTiming: null/u,
+    );
+    assert.match(source, /if \(playbackCancelled\) return;/u);
+    assert.match(source, /if \(!played && playbackProgressSeen\)/u);
+    assert.match(
+      source,
+      /presentationEventId === event\.id &&[\s\S]{0,180}liveReveal\.visibleContent\.length < event\.content\.length/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /onEnd: \(\) => \{[\s\S]{0,260}visibleContent: event\.content/u,
+    );
+  });
+
   it("uses the camera audience instead of the legacy generic glyph gallery", () => {
     assert.doesNotMatch(source, /7 of many · nonbinding/u);
     assert.doesNotMatch(source, /Nonbinding gallery sample/u);

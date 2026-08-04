@@ -307,6 +307,14 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
         packageNames: ["subtlex-word-frequencies"],
       },
       {
+        id: "natural-earth",
+        name: "Natural Earth",
+        description:
+          "Public-domain land geometry used by the georeferenced Accent Map.",
+        href: "https://www.naturalearthdata.com/",
+        license: "Public domain",
+      },
+      {
         id: "google-fonts",
         name: "Instrument Sans & Raleway",
         description: "Google Fonts used by the bundled sound-design workbench.",

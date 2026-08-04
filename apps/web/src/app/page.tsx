@@ -231,6 +231,12 @@ import {
   type CoffeeJazzAtmospherePreference,
   type CoffeeJazzStationId,
 } from "./coffeeJazzAtmosphere";
+import {
+  COFFEE_AMBIENT_BOT_VOCALIZATION_PROFILE,
+  COFFEE_AMBIENT_FOLEY_PROFILE,
+  COFFEE_AMBIENT_FOLEY_URLS,
+  coffeeAmbientPresenceWord,
+} from "./coffeeAmbientPresence";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import { useAmbientBotVocalization } from "./ambient-bot-vocalization";
 import {
@@ -1268,9 +1274,10 @@ import {
   speechActivityAtMs,
   type SpeechActivityWindow,
 } from "./speechActivity";
-import type {
-  VoicePlaybackCharacterAlignment,
-  VoicePlaybackLifecycle,
+import {
+  releaseRealtimeVoiceAudio,
+  type VoicePlaybackCharacterAlignment,
+  type VoicePlaybackLifecycle,
 } from "./voiceEffects";
 import {
   DEBATE_FORUM_VOICE_ROOM_SEND,
@@ -60558,8 +60565,12 @@ function HomeContent(): React.JSX.Element {
   const {
     active: coffeeAmbientBotVocalization,
     start: startCoffeeAmbientBotVocalization,
+    stop: stopCoffeeAmbientBotVocalization,
     mouthShapeForTarget: coffeeAmbientBotVocalizationMouthShape,
   } = useAmbientBotVocalization();
+  const coffeeAmbientPresenceVoiceAbortRef = useRef<AbortController | null>(
+    null,
+  );
   const coffeeSessionClockLastTickAtMsRef = useRef(coffeeSessionClockMs);
   useEffect(() => {
     setCoffeeCupSipLockedUntilMsByBotId((current) => {
@@ -61047,6 +61058,26 @@ function HomeContent(): React.JSX.Element {
   const coffeePerceptionOverlapVoiceAbortRef = useRef<AbortController | null>(
     null,
   );
+  useEffect(() => {
+    const idleCoffeeTable =
+      view === "coffee" &&
+      coffeeSessionPhase === "live" &&
+      !coffeeReplayActive &&
+      !coffeeReplayPlaying &&
+      coffeeTurnRhythmState === "idle";
+    if (idleCoffeeTable) return;
+    coffeeAmbientPresenceVoiceAbortRef.current?.abort();
+    coffeeAmbientPresenceVoiceAbortRef.current = null;
+    releaseRealtimeVoiceAudio("presence", 140);
+    stopCoffeeAmbientBotVocalization();
+  }, [
+    coffeeReplayActive,
+    coffeeReplayPlaying,
+    coffeeSessionPhase,
+    coffeeTurnRhythmState,
+    stopCoffeeAmbientBotVocalization,
+    view,
+  ]);
   const [coffeeReplayPlayerThinking, setCoffeeReplayPlayerThinking] =
     useState(false);
   const [coffeeReplaySpeakingBotId, setCoffeeReplaySpeakingBotId] = useState<
@@ -65588,6 +65619,10 @@ function HomeContent(): React.JSX.Element {
       const useLocalPerformanceStream = voicePerformancePlanFromText(
         performanceText,
       ).segments.some((segment) => segment.kind === "vocal-action");
+      const premiumAlignmentRequested =
+        signalOnlineVoiceEnabled &&
+        selectedEngine === "elevenlabs" &&
+        !useLocalPerformanceStream;
       const response = await fetch(
         new URL("/api/voices/synthesize", window.location.origin),
         {
@@ -65622,8 +65657,12 @@ function HomeContent(): React.JSX.Element {
             mode: "english",
             engine: signalOnlineVoiceEnabled ? selectedEngine : "builtin",
             explicitOnlineContext: signalOnlineVoiceEnabled,
-            includeAlignment: !useLocalPerformanceStream,
-            streamChunks: useLocalPerformanceStream,
+            includeAlignment: premiumAlignmentRequested,
+            // Premium keeps its exact timestamped clip when available. Every
+            // local path, including Premium recovery, may instead return the
+            // sentence-chunk stream so long statements cannot hit the local
+            // voice model's single-clip token ceiling.
+            streamChunks: true,
             moodKey: message.moodKey,
             profile,
           }),
@@ -103072,10 +103111,10 @@ function HomeContent(): React.JSX.Element {
   const renderAppSwitcher = (
     options: { disabled?: boolean; disabledReason?: string } = {},
   ): React.JSX.Element => {
-    // Chat is the canonical Home now. The Home glyph owns that navigation,
-    // so this menu only lists the sibling experiences and studios.
+    // Chat/Zen is the canonical default. The Home glyph owns that navigation,
+    // so this menu only lists sibling experiences and studios.
     const applets = prismTopLevelSwitcherApplets().filter(
-      (applet) => applet.id !== "chat",
+      (applet) => applet.id !== "chat" && applet.id !== "zen",
     );
     const roadmapApplets = prismPlannedRoadmapApplets();
     const currentAppletId: PrismAppletId =
@@ -103089,8 +103128,6 @@ function HomeContent(): React.JSX.Element {
               ? "story"
               : view === "slate"
                 ? "slate"
-                : view === "chat"
-                  ? "zen"
                 : "chat";
     const menuId = "prism-app-switcher-menu";
     const disabled = options.disabled === true;
@@ -132721,10 +132758,145 @@ function HomeContent(): React.JSX.Element {
       coffeeLiveInterruptionCue?.kind === "botInterruptsPlayer"
         ? `${interruptionCueBotName} cuts in briefly, but you can keep typing.`
         : null;
-    const handleCoffeeAmbientBotVocalization = (
+    const coffeeAmbientSeatIsEligible = (targetId: string): boolean => {
+      const seat = document.querySelector<HTMLElement>(
+        `[data-coffee-seat-bot-id="${CSS.escape(targetId)}"]`,
+      );
+      return Boolean(
+        seat &&
+          seat.dataset.arrivalState !== "walking-in" &&
+          seat.dataset.nameplatePending !== "true" &&
+          seat.dataset.tableSpeaking !== "true" &&
+          seat.dataset.thinking !== "true" &&
+          seat.dataset.powerMuted !== "true" &&
+          seat.dataset.coffeeCupSipping !== "true" &&
+          seat.dataset.coffeeListenerReaction !== "true" &&
+          !seat.dataset.coffeeAuthoredActionReaction,
+      );
+    };
+    const playCoffeeAmbientPresenceWord = (
+      targetId: string,
       cue: SessionAmbientBotVocalizationCue,
     ): boolean => {
-      if (coffeeSessionPhaseRef.current !== "live" || coffeeReplayActive) {
+      const bot = coffeeBotsById.get(targetId);
+      const word = coffeeAmbientPresenceWord(
+        coffeeConversation?.id ?? "coffee",
+        cue.index,
+        targetId,
+      );
+      const voiceSelection = voicePlaybackSelectionRef.current;
+      const mode: ListenerReactionVoiceMode | null =
+        voiceSelection.voiceMode === "english" ||
+        voiceSelection.voiceMode === "bottish" ||
+        voiceSelection.voiceMode === "babble"
+          ? voiceSelection.voiceMode
+          : null;
+      if (!bot || !word || !mode || !settings || settings.voiceVolume <= 0) {
+        return false;
+      }
+      const profile = resolveBotAudioVoiceProfileV1(
+        bot.authored_audio_voice_profile,
+        bot.audio_voice_profile_override,
+      );
+      if (!profile.enabled || botPowerIsMutedV1(bot.powers)) return false;
+
+      coffeeAmbientPresenceVoiceAbortRef.current?.abort();
+      releaseRealtimeVoiceAudio("presence", 120);
+      const controller = new AbortController();
+      coffeeAmbientPresenceVoiceAbortRef.current = controller;
+      void (async () => {
+        try {
+          let englishClip: EnglishVoiceSynthesisClip | null = null;
+          if (mode === "english") {
+            const key = responseCueVoiceCacheKey({
+              botId: bot.id,
+              voiceProfile: profile,
+              engine: "builtin",
+              phrase: word.text,
+              deliverySettings: { mood: "neutral" },
+            });
+            englishClip = await getOrPrepareResponseCueVoiceClip(
+              key,
+              async () => {
+                const response = await fetch(
+                  new URL("/api/voices/synthesize", window.location.origin),
+                  {
+                    method: "POST",
+                    credentials: "include",
+                    signal: controller.signal,
+                    headers: {
+                      "content-type": "application/json",
+                      ...authHeadersForFetch(),
+                    },
+                    body: JSON.stringify({
+                      text: word.text,
+                      speakerBotId: bot.id,
+                      mode: "english",
+                      engine: "builtin",
+                      explicitOnlineContext: false,
+                      includeAlignment: true,
+                      profile,
+                    }),
+                  },
+                );
+                if (!response.ok) {
+                  throw new Error(
+                    `Coffee ambient voice failed (${response.status}).`,
+                  );
+                }
+                return readEnglishVoiceSynthesisClip(response);
+              },
+            );
+          }
+          if (
+            controller.signal.aborted ||
+            coffeeSessionPhaseRef.current !== "live" ||
+            coffeeTurnRhythmStateRef.current !== "idle" ||
+            !coffeeAmbientSeatIsEligible(targetId)
+          ) {
+            return;
+          }
+          const visualCue: SessionAmbientBotVocalizationCue = {
+            ...cue,
+            kind: "mouth-sound",
+            durationMs: word.durationMs,
+            sequenceKey: word.sequenceKey,
+          };
+          await playEphemeralReactionVoice({
+            text: word.text,
+            seed: word.sequenceKey,
+            mode,
+            profile,
+            globalVolume: settings.voiceVolume * 0.62,
+            effectsEnabled: settings.voiceEffectsEnabled !== false,
+            mood: "neutral",
+            englishClip,
+            channel: "presence",
+            maxDurationMs: 1_200,
+            signal: controller.signal,
+            lifecycle: {
+              onStart: () =>
+                startCoffeeAmbientBotVocalization(targetId, visualCue),
+            },
+          });
+        } catch {
+          // Ambient presence is opportunistic and must never interrupt Coffee.
+        } finally {
+          if (coffeeAmbientPresenceVoiceAbortRef.current === controller) {
+            coffeeAmbientPresenceVoiceAbortRef.current = null;
+          }
+        }
+      })();
+      return true;
+    };
+    const handleCoffeeAmbientBotVocalization = (
+      cue: SessionAmbientBotVocalizationCue,
+    ): boolean | "owned" => {
+      if (
+        coffeeSessionPhaseRef.current !== "live" ||
+        coffeeReplayActive ||
+        coffeeTurnRhythmStateRef.current !== "idle"
+      ) {
         return false;
       }
       const eligibleBotIds = Array.from(
@@ -132749,6 +132921,7 @@ function HomeContent(): React.JSX.Element {
         eligibleBotIds,
       );
       if (!targetId) return false;
+      if (playCoffeeAmbientPresenceWord(targetId, cue)) return "owned";
       startCoffeeAmbientBotVocalization(targetId, cue);
       return true;
     };
@@ -132804,10 +132977,18 @@ function HomeContent(): React.JSX.Element {
             grain: 0.04,
             foley: 0.16,
           }}
-          deferFoley={
-            coffeeTurnRhythmState === "tableTyping" || coffeeReplayPlaying
+          preloadFoleyUrls={COFFEE_AMBIENT_FOLEY_URLS}
+          ambientFoleyUrls={COFFEE_AMBIENT_FOLEY_URLS}
+          ambientFoleyProfile={COFFEE_AMBIENT_FOLEY_PROFILE}
+          ambientBotVocalizationProfile={
+            COFFEE_AMBIENT_BOT_VOCALIZATION_PROFILE
           }
-          deferBotVocalization={coffeeReplayPlaying}
+          deferFoley={
+            coffeeTurnRhythmState !== "idle" || coffeeReplayPlaying
+          }
+          deferBotVocalization={
+            coffeeTurnRhythmState !== "idle" || coffeeReplayPlaying
+          }
           ambientFoley={
             !(coffeeReplayActive && coffeeReplayUsesAudioMaster) &&
             settings?.voiceMode !== "mute"
@@ -135703,11 +135884,7 @@ function HomeContent(): React.JSX.Element {
           }}
           navigationHeader={({
             liveSessionActive,
-            showLiveExit,
-            cuttingShow,
-            onCutShow,
             episodeModelControl,
-            replayActive,
           }) => {
             const liveChromePolicy = liveSessionActive
               ? liveSessionChromePolicy("Signal")
@@ -135725,22 +135902,12 @@ function HomeContent(): React.JSX.Element {
             });
             return renderSharedAppletNavbar("Signal tools", {
               brandAppletId: "botcast",
-              showVoiceSelector: !replayActive,
+              showVoiceSelector: true,
               liveSessionActive,
-              recordedReplay: replayActive,
-              liveSessionExit: showLiveExit
-                ? {
-                    label: cuttingShow ? "■ Cut now" : "■ Cut show",
-                    title:
-                      "Cut the live Signal episode and restore full chrome",
-                    busy: cuttingShow,
-                    onClick: onCutShow,
-                  }
-                : undefined,
               voiceLocalPremiumFallback: blocksOnlineCapabilities(
                 signalEpisodeResponseMode,
               ),
-              modelControls: replayActive ? undefined : (
+              modelControls: (
                 <>
                   {renderProviderModeToggle(
                     styles.chatHeaderModeToggle,
@@ -135796,6 +135963,10 @@ function HomeContent(): React.JSX.Element {
           theme={resolvedTheme}
           navigationHeader={renderSharedAppletNavbar("Slate tools", {
             brandAppletId: "slate",
+            showVoiceSelector: true,
+            voiceLocalPremiumFallback: blocksOnlineCapabilities(
+              responseModeForProvider(settings?.preferredProvider ?? "local"),
+            ),
             modelControls: renderSharedAccountRoutingControls("Slate"),
           })}
           onHemisphereSettingsSnapshot={setSlateHemisphereSettingsSnapshot}
@@ -136320,8 +136491,8 @@ function HomeContent(): React.JSX.Element {
           <p className={styles.srOnly} role="status" aria-live="polite">
             {relationshipDepthAnnouncement}
           </p>
-          {renderSharedAppletNavbar("Zen tools", {
-            brandAppletId: "zen",
+          {renderSharedAppletNavbar("Chat tools", {
+            brandAppletId: "chat",
             headerRef: chatHeaderRef,
             controlRail: renderHeaderModelPicker({
               showModelControls: zenHeaderModelPickerActive,

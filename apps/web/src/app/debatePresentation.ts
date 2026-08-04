@@ -253,7 +253,6 @@ function debateAlignedSpokenProgress(args: {
 }): number {
   const durationMs = Math.max(1, args.durationMs);
   const elapsedMs = Math.max(0, Math.min(durationMs, args.elapsedMs));
-  if (elapsedMs >= durationMs) return 1;
 
   const spokenCharacters = Array.from(args.spokenText);
   const alignment = args.alignment;
@@ -291,12 +290,27 @@ function debateAlignedSpokenProgress(args: {
     if (end <= elapsedSeconds) completedAlignedCharacters = index + 1;
   }
 
-  const exactAlignment = alignment.characters.join("") === args.spokenText;
+  const alignedText = alignment.characters.join("");
+  const exactAlignment = alignedText === args.spokenText;
+  const compactSpokenText = args.spokenText.replace(/\s+/gu, " ").trim();
+  const compactAlignedText = alignedText.replace(/\s+/gu, " ").trim();
+  // A provider can return a valid audio file whose timing covers only a strict
+  // prefix of the requested line. At natural audio end that prefix is all the
+  // room heard; never scale it up to the complete canonical statement.
+  const strictAlignedPrefix =
+    compactAlignedText.length < compactSpokenText.length &&
+    compactSpokenText.startsWith(compactAlignedText) &&
+    /[\p{L}\p{N}]/u.test(
+      compactSpokenText.slice(compactAlignedText.length),
+    );
   const completedSpokenCharacters = exactAlignment
     ? completedAlignedCharacters
-    : Math.round(
-        (completedAlignedCharacters / alignedCount) * spokenCharacters.length,
-      );
+    : strictAlignedPrefix
+      ? Math.min(spokenCharacters.length, completedAlignedCharacters)
+      : Math.round(
+          (completedAlignedCharacters / alignedCount) *
+            spokenCharacters.length,
+        );
   return Math.max(
     0,
     Math.min(

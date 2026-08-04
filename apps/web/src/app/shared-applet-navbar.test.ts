@@ -67,12 +67,12 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
     /options\.brandAppletId[\s\S]*renderSharedAppletBrand\(options\.brandAppletId\)/u,
   );
 
-  for (const appletId of ["zen", "coffee", "debate", "botcast", "slate"]) {
+  for (const appletId of ["chat", "coffee", "debate", "botcast", "slate"]) {
     assert.match(pageSource, new RegExp(`brandAppletId:\\s*"${appletId}"`));
   }
   assert.match(
     pageSource,
-    /navigationHeader=\{\(\{[\s\S]*liveSessionActive,[\s\S]*showLiveExit,[\s\S]*cuttingShow,[\s\S]*onCutShow,[\s\S]*episodeModelControl,[\s\S]*\}\) => \{[\s\S]*renderSharedAppletNavbar\("Signal tools", \{[\s\S]*showVoiceSelector: !replayActive,[\s\S]*liveSessionActive,[\s\S]*liveSessionExit: showLiveExit/u,
+    /navigationHeader=\{\(\{[\s\S]*liveSessionActive,[\s\S]*episodeModelControl,[\s\S]*\}\) => \{[\s\S]*renderSharedAppletNavbar\("Signal tools", \{[\s\S]*showVoiceSelector: true,[\s\S]*liveSessionActive,[\s\S]*modelControls:/u,
   );
   assert.match(
     pageSource,
@@ -83,7 +83,7 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
   assert.doesNotMatch(signalCss, /\.signalGlobalProviderControl/u);
   assert.match(
     pageSource,
-    /navigationHeader=\{renderSharedAppletNavbar\("Slate tools", \{[\s\S]*modelControls: renderSharedAccountRoutingControls\("Slate"\),[\s\S]*\}\)\}/u,
+    /navigationHeader=\{renderSharedAppletNavbar\("Slate tools", \{[\s\S]*showVoiceSelector: true,[\s\S]*modelControls: renderSharedAccountRoutingControls\("Slate"\),[\s\S]*\}\)\}/u,
   );
   assert.match(
     pageSource,
@@ -91,7 +91,7 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
   );
   assert.match(
     pageSource,
-    /renderSharedAppletNavbar\("Zen tools", \{[\s\S]*brandAppletId: "zen"[\s\S]*headerRef: chatHeaderRef[\s\S]*showModelControls: zenHeaderModelPickerActive/u,
+    /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: "chat"[\s\S]*headerRef: chatHeaderRef[\s\S]*showModelControls: zenHeaderModelPickerActive/u,
   );
   assert.doesNotMatch(pageSource, /data-zen-header-hidden=/u);
   assert.match(

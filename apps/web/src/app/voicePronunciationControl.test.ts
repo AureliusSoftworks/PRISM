@@ -12,8 +12,8 @@ const atlasCssSource = readFileSync(
   new URL("./PronunciationAtlas.module.css", import.meta.url),
   "utf8",
 );
-const atlasRaster = new URL(
-  "../../public/voice/pronunciation-atlas-earth-v1.png",
+const atlasMap = new URL(
+  "../../public/voice/pronunciation-atlas-earth-equirectangular-v2.svg",
   import.meta.url,
 );
 
@@ -87,17 +87,18 @@ describe("cross-accent local voice pronunciation controls", () => {
     }
   });
 
-  it("uses the generated Earth raster instead of procedural land polygons", () => {
+  it("uses one full-frame georeferenced Earth mask instead of procedural land polygons", () => {
     assert.doesNotMatch(atlasSource, /<path d=/u);
     assert.match(
       atlasCssSource,
-      /url\("\/voice\/pronunciation-atlas-earth-v1\.png"\)/u,
+      /url\("\/voice\/pronunciation-atlas-earth-equirectangular-v2\.svg"\)/u,
     );
-    assert.equal(existsSync(atlasRaster), true);
-    const rasterBytes = readFileSync(atlasRaster);
-    const rasterWidth = rasterBytes.readUInt32BE(16);
-    const rasterHeight = rasterBytes.readUInt32BE(20);
-    assert.equal(rasterWidth, rasterHeight * 2);
-    assert.equal(rasterBytes[25], 6, "atlas raster should retain RGBA alpha");
+    assert.match(atlasCssSource, /\.map\s*\{[\s\S]*?inset:\s*0;/u);
+    assert.equal(existsSync(atlasMap), true);
+    const mapSource = readFileSync(atlasMap, "utf8");
+    assert.match(mapSource, /Natural Earth 1:50m land, public domain/u);
+    assert.match(mapSource, /Projection: equirectangular/u);
+    assert.match(mapSource, /viewBox="0 0 1774 887"/u);
+    assert.match(mapSource, /preserveAspectRatio="none"/u);
   });
 });

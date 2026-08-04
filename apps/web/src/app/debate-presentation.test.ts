@@ -300,6 +300,30 @@ describe("Debate live presentation", () => {
     );
   });
 
+  it("keeps an unheard suffix hidden when provider timing ends at a strict prefix", () => {
+    const content = "One two three four.";
+    const heard = "One two";
+    const characters = Array.from(heard);
+    const visible = debateVisibleContentAtSpeechTime({
+      content,
+      spokenText: content,
+      elapsedMs: 1_000,
+      durationMs: 1_000,
+      alignment: {
+        characters,
+        characterStartTimesSeconds: characters.map(
+          (_, index) => index / characters.length,
+        ),
+        characterEndTimesSeconds: characters.map(
+          (_, index) => (index + 1) / characters.length,
+        ),
+      },
+    });
+    assert.ok(content.startsWith(visible));
+    assert.match(visible, /One/u);
+    assert.doesNotMatch(visible, /three|four/u);
+  });
+
   it("recognizes an exact live transcript clamp", () => {
     assert.equal(
       debateTranscriptIsAtLive({
