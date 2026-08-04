@@ -1,6 +1,10 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { preparedTurnCursorMatchesV1, type PreparedTurnCursorV1 } from "./turnPreparation.ts";
+import {
+  PREPARED_TURN_TTL_MS,
+  preparedTurnCursorMatchesV1,
+  type PreparedTurnCursorV1,
+} from "./turnPreparation.ts";
 
 const cursor: PreparedTurnCursorV1 = {
   revision: 7,
@@ -13,6 +17,10 @@ const cursor: PreparedTurnCursorV1 = {
 };
 
 describe("prepared turn cursors", () => {
+  it("retains prepared work beyond the ten-minute AUTO ceiling", () => {
+    assert.equal(PREPARED_TURN_TTL_MS, 12 * 60_000);
+  });
+
   it("matches only when every prompt-affecting field remains frozen", () => {
     assert.equal(preparedTurnCursorMatchesV1(cursor, { ...cursor }), true);
     for (const key of Object.keys(cursor) as Array<keyof PreparedTurnCursorV1>) {

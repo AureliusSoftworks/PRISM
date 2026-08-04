@@ -1388,6 +1388,8 @@ function signalEpisodeRuntimeMs(
     | "runtimeMs"
     | "modelWarmupHoldDurationMs"
     | "modelWarmupHoldStartedAt"
+    | "sessionClockHoldDurationMs"
+    | "sessionClockHoldStartedAt"
     | "guestKind"
     | "events"
   >,
@@ -1402,6 +1404,7 @@ function signalEpisodeRuntimeMs(
     accumulatedMs: number;
     startedAtMs: number | null;
   } | null = null,
+  clientRecordedForegroundHoldMs = 0,
 ): number {
   if (episode.runtimeMs !== null) return Math.max(0, episode.runtimeMs);
   const startedAtMs = Date.parse(episode.startedAt);
@@ -1410,8 +1413,10 @@ function signalEpisodeRuntimeMs(
     ? Date.parse(episode.completedAt)
     : Number.NaN;
   const endMs = Number.isFinite(completedAtMs) ? completedAtMs : nowMs;
-  const activeWarmupStartedAtMs = episode.modelWarmupHoldStartedAt
-    ? Date.parse(episode.modelWarmupHoldStartedAt)
+  const sessionClockHoldStartedAt =
+    episode.sessionClockHoldStartedAt ?? episode.modelWarmupHoldStartedAt;
+  const activeWarmupStartedAtMs = sessionClockHoldStartedAt
+    ? Date.parse(sessionClockHoldStartedAt)
     : Number.NaN;
   const activeWarmupMs =
     episode.status === "live" && Number.isFinite(activeWarmupStartedAtMs)
@@ -1448,7 +1453,12 @@ function signalEpisodeRuntimeMs(
     0,
     endMs -
       startedAtMs -
-      Math.max(0, episode.modelWarmupHoldDurationMs) -
+      Math.max(
+        0,
+        (episode.sessionClockHoldDurationMs ??
+          episode.modelWarmupHoldDurationMs) -
+          Math.max(0, clientRecordedForegroundHoldMs),
+      ) -
       activeWarmupMs -
       thinkingDiscountMs,
   );
@@ -2157,6 +2167,10 @@ export function BotcastExperience({
   const producerGuestThinkingEndedAtRef = useRef<number | null>(null);
   const signalAirTimeFreezeAccumulatedMsRef = useRef(0);
   const signalAirTimeFreezeStartedAtRef = useRef<number | null>(null);
+  const signalClientRecordedForegroundHoldRef = useRef<{
+    episodeId: string | null;
+    durationMs: number;
+  }>({ episodeId: null, durationMs: 0 });
   /** Mirrors the one compact hold owned by the presented Signal thinking state. */
   const signalThinkingCompactHoldActiveRef = useRef(false);
   const signalEphemeralSpeakingDepthByBotIdRef = useRef(new Map<string, number>());
@@ -2855,8 +2869,11 @@ export function BotcastExperience({
   );
 
   const releaseSignalModelWarmup = useCallback(
-    async (episodeId: string | null): Promise<void> => {
-      if (episodeId) {
+    async (
+      episodeId: string | null,
+      releasePersistedHold = true,
+    ): Promise<void> => {
+      if (episodeId && releasePersistedHold) {
         await setPersistedSignalModelWarmupHold(episodeId, false).catch(
           () => undefined,
         );
@@ -2878,6 +2895,53 @@ export function BotcastExperience({
       assignSignalModelWarmup(null);
     },
     [assignSignalModelWarmup, setPersistedSignalModelWarmupHold],
+  );
+
+  const recordSignalForegroundGenerationHold = useCallback(
+    async (args: {
+      episodeId: string;
+      holdId: string;
+      durationMs: number;
+    }): Promise<void> => {
+      const response = await request<{ episode: BotcastEpisode }>(
+        `/api/botcast/episodes/${encodeURIComponent(args.episodeId)}/session-clock-hold`,
+        {
+          method: "POST",
+          body: JSON.stringify({
+            holdId: args.holdId,
+            reason: "foreground_generation",
+            durationMs: Math.max(0, Math.round(args.durationMs)),
+          }),
+        },
+      );
+      const recorded = signalClientRecordedForegroundHoldRef.current;
+      const durationMs = Math.max(0, Math.round(args.durationMs));
+      if (recorded.episodeId !== args.episodeId) {
+        signalClientRecordedForegroundHoldRef.current = {
+          episodeId: args.episodeId,
+          durationMs,
+        };
+      } else {
+        recorded.durationMs += durationMs;
+      }
+      setEpisode((current) =>
+        current?.id === response.episode.id
+          ? {
+              ...current,
+              events: response.episode.events,
+              modelWarmupHoldDurationMs:
+                response.episode.modelWarmupHoldDurationMs,
+              modelWarmupHoldStartedAt:
+                response.episode.modelWarmupHoldStartedAt,
+              sessionClockHoldDurationMs:
+                response.episode.sessionClockHoldDurationMs,
+              sessionClockHoldStartedAt:
+                response.episode.sessionClockHoldStartedAt,
+            }
+          : current,
+      );
+    },
+    [request],
   );
 
   const beginEpisodeOperation = useCallback((): {
@@ -3794,6 +3858,10 @@ export function BotcastExperience({
                   accumulatedMs: signalAirTimeFreezeAccumulatedMsRef.current,
                   startedAtMs: signalAirTimeFreezeStartedAtRef.current,
                 },
+                signalClientRecordedForegroundHoldRef.current.episodeId ===
+                  episode.id
+                  ? signalClientRecordedForegroundHoldRef.current.durationMs
+                  : 0,
               ),
               deterministicClose,
             }),
@@ -6667,6 +6735,27 @@ export function BotcastExperience({
             );
           })()
         : null;
+      const foregroundFloorAvailableAtMs = (async (): Promise<number> => {
+        if (interruptionBridgePlayback) await interruptionBridgePlayback;
+        if (interruptionCrosstalkPlayback) {
+          await interruptionCrosstalkPlayback;
+        }
+        return Date.now();
+      })();
+      const foregroundHoldId = `${episode.id}:${runId}:${Date.now()}`;
+      let completedForegroundHold: Promise<void> | null = null;
+      const completeForegroundGenerationHold = (): Promise<void> => {
+        if (completedForegroundHold) return completedForegroundHold;
+        completedForegroundHold = (async () => {
+          const floorAvailableAtMs = await foregroundFloorAvailableAtMs;
+          await recordSignalForegroundGenerationHold({
+            episodeId: episode.id,
+            holdId: foregroundHoldId,
+            durationMs: Math.max(0, Date.now() - floorAvailableAtMs),
+          });
+        })().catch(() => undefined);
+        return completedForegroundHold;
+      };
       try {
         const lastVisibleMessageId = episode.messages.at(-1)?.id ?? null;
         const prepared =
@@ -6705,7 +6794,6 @@ export function BotcastExperience({
             }) ?? null;
           }
         }
-        let directHoldStart: Promise<BotcastEpisode> | null = null;
         if (
           !readyPreparation &&
           !(producerGuestHostInterruption && !producerGuestMessage)
@@ -6728,10 +6816,6 @@ export function BotcastExperience({
                   initial: false,
                   episodeId: episode.id,
                 });
-                directHoldStart ??= setPersistedSignalModelWarmupHold(
-                  episode.id,
-                  true,
-                );
               } else if (status.state === "unavailable") {
                 assignSignalModelWarmup({
                   phase: "failed",
@@ -6744,7 +6828,6 @@ export function BotcastExperience({
               }
             },
           });
-          if (directHoldStart) await directHoldStart;
           if (preparationStatus.state === "unavailable") {
             signalModelWarmupVisibleRef.current = true;
             setAutoRun(false);
@@ -6793,7 +6876,7 @@ export function BotcastExperience({
           assignQueuedProducerCue(null);
         }
         if (warmupHoldActive || signalModelWarmupRef.current) {
-          await releaseSignalModelWarmup(response.episode.id);
+          await releaseSignalModelWarmup(response.episode.id, false);
         }
         const priorMessageIds = new Set(
           episode.messages.map((message) => message.id),
@@ -6825,6 +6908,9 @@ export function BotcastExperience({
             controller,
             runId,
             false,
+            () => {
+              void completeForegroundGenerationHold();
+            },
           );
           if (!episodeOperationIsCurrent(controller, runId)) return false;
         }
@@ -6843,8 +6929,16 @@ export function BotcastExperience({
               response.episode,
               controller,
               runId,
+              true,
+              () => {
+                void completeForegroundGenerationHold();
+              },
             );
+          } else {
+            void completeForegroundGenerationHold();
           }
+        } else {
+          void completeForegroundGenerationHold();
         }
         if (response.episode.status === "completed") {
           assignQueuedProducerCue(null);
@@ -6864,7 +6958,7 @@ export function BotcastExperience({
         await finishResponseCue?.();
         if (episodeOperationIsCurrent(controller, runId)) {
           if (signalModelWarmupRef.current) {
-            await releaseSignalModelWarmup(episode.id);
+            await releaseSignalModelWarmup(episode.id, false);
           }
           if (activeSpeechMessageIdRef.current !== null) stopUtterance();
           setAutoRun(false);
@@ -6873,6 +6967,7 @@ export function BotcastExperience({
         return false;
       } finally {
         await finishResponseCue?.();
+        void completeForegroundGenerationHold();
         setSignalGenerationThinking((current) =>
           current?.runId === runId ? null : current,
         );
@@ -6898,13 +6993,13 @@ export function BotcastExperience({
       playEpisodeOutro,
       playPreparedEpisodeMessage,
       prepareEpisodeMessage,
+      recordSignalForegroundGenerationHold,
       releaseSignalModelWarmup,
       request,
       selectedShow,
       selectedShowId,
       liveGuestBot,
       stopUtterance,
-      setPersistedSignalModelWarmupHold,
       theme,
     ],
   );
@@ -11123,6 +11218,9 @@ export function BotcastExperience({
           accumulatedMs: signalAirTimeFreezeAccumulatedMsRef.current,
           startedAtMs: signalAirTimeFreezeStartedAtRef.current,
         },
+        signalClientRecordedForegroundHoldRef.current.episodeId === episode.id
+          ? signalClientRecordedForegroundHoldRef.current.durationMs
+          : 0,
       )
     : 0;
   const liveCameraElapsedMs = (() => {

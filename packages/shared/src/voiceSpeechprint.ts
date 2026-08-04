@@ -8,9 +8,9 @@ import {
   type LocalVoiceSpeechprintV1,
 } from "./audioVoice.js";
 
-export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.2.1";
+export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.3";
 export const LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256 =
-  "dc7bd919eefe2341af6d86cf11fca9c0de214f6bb1426412a13563fd1b9995f1";
+  "c96f1fa60a70303017ad7561ac428ca0b12191db82b795f736d35f5bf3f500bf";
 
 export interface LocalVoiceSpeechprintCapabilityV1 {
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -72,6 +72,21 @@ const LOCAL_VOICE_SPEECHPRINT_DESCRIPTORS = [
     id: "russian-influenced-english",
     label: "Russian-influenced English",
     description: "A restrained Russian-language pronunciation influence.",
+  },
+  {
+    id: "italian-influenced-english",
+    label: "Italian-influenced English",
+    description: "A restrained Italian-language pronunciation influence.",
+  },
+  {
+    id: "australian-english",
+    label: "Australian English",
+    description: "A restrained Australian English pronunciation profile.",
+  },
+  {
+    id: "canadian-english",
+    label: "Canadian English",
+    description: "A restrained Canadian English pronunciation profile.",
   },
 ] as const satisfies ReadonlyArray<{
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -369,6 +384,107 @@ const SPEECHPRINT_RULES: Record<
       tier: "strong",
       pattern: /v(?=[,.;:!?)]?$)/gu,
       replacement: "f",
+      optional: true,
+    },
+  ],
+  "italian-influenced-english": [
+    { id: "r-tap", tier: "light", pattern: /ɹ/gu, replacement: "ɾ" },
+    { id: "theta-t", tier: "balanced", pattern: /θ/gu, replacement: "t" },
+    {
+      id: "eth-d",
+      tier: "balanced",
+      pattern: /ð/gu,
+      replacement: "d",
+      optional: true,
+    },
+    {
+      id: "open-a",
+      tier: "strong",
+      pattern: /æ/gu,
+      replacement: "a",
+      optional: true,
+    },
+    {
+      id: "final-schwa",
+      tier: "strong",
+      pattern: /(?<=[ptkbdgfvszʃʒmnlrɾ])(?=[,.;:!?)]?$)/gu,
+      replacement: "ə",
+      optional: true,
+    },
+  ],
+  "australian-english": [
+    {
+      id: "postvocalic-r-drop",
+      tier: "light",
+      pattern:
+        /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      replacement: "",
+    },
+    {
+      id: "rhotacized-schwa",
+      tier: "light",
+      pattern: /ɚ/gu,
+      replacement: "ə",
+    },
+    {
+      id: "rhotacized-nurse",
+      tier: "light",
+      pattern: /ɝ/gu,
+      replacement: "ɜ",
+    },
+    {
+      id: "face-ae",
+      tier: "balanced",
+      pattern: /eɪ/gu,
+      replacement: "æɪ",
+      optional: true,
+    },
+    {
+      id: "goat-central",
+      tier: "balanced",
+      pattern: /(?:oʊ|əʊ)/gu,
+      replacement: "əʉ",
+    },
+    {
+      id: "price-broad",
+      tier: "strong",
+      pattern: /(?:aɪ|ɑɪ)/gu,
+      replacement: "ɑe",
+      optional: true,
+    },
+    {
+      id: "mouth-fronted",
+      tier: "strong",
+      pattern: /aʊ/gu,
+      replacement: "æɔ",
+      optional: true,
+    },
+  ],
+  "canadian-english": [
+    {
+      id: "price-raise",
+      tier: "light",
+      pattern: /aɪ(?=[ptkfsθʃ])/gu,
+      replacement: "ʌɪ",
+    },
+    {
+      id: "mouth-raise",
+      tier: "balanced",
+      pattern: /aʊ(?=[ptkfsθʃ])/gu,
+      replacement: "ʌʊ",
+    },
+    {
+      id: "cot-caught-merge",
+      tier: "strong",
+      pattern: /ɔ/gu,
+      replacement: "ɑ",
+      optional: true,
+    },
+    {
+      id: "trap-retract",
+      tier: "strong",
+      pattern: /æ/gu,
+      replacement: "a",
       optional: true,
     },
   ],

@@ -126,6 +126,14 @@ test("Signal and Coffee log thinking from committed presentation state", () => {
     /useLayoutEffect\(\(\) => \{[\s\S]*coffeeTurnRhythmState === "botThinking"[\s\S]*syncReplayThinkingPresentations/u,
   );
   assert.match(
+    pageSource,
+    /compactThinkingGaps:\s*true/u,
+  );
+  assert.match(
+    pageSource,
+    /coffeeTurnRhythmState === "botThinking"[\s\S]{0,800}setReplayAudioMasterCompactHold/u,
+  );
+  assert.match(
     signalSource,
     /const livePresentedThinkingRole[\s\S]*useLayoutEffect\(\(\) => \{[\s\S]*syncReplayThinkingPresentations/u,
   );

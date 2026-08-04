@@ -25,6 +25,36 @@ export const MODEL_REASONING_EFFORT_PREFERENCE_VALUES = [
 export type ModelReasoningEffortPreference =
   (typeof MODEL_REASONING_EFFORT_PREFERENCE_VALUES)[number];
 
+/** Maximum wall time for one complete response attempt, including any
+ * simulated preparation passes and the final visible generation. */
+export function reasoningGenerationBudgetMs(
+  value: unknown,
+  model?: {
+    provider: NativeReasoningEffortProvider;
+    modelId: string;
+  },
+): number {
+  const effort = normalizeReasoningEffort(value);
+  if (effort === "xhigh") return 300_000;
+  if (effort === "high") return 180_000;
+  if (effort === "medium") return 120_000;
+  if (effort === "auto") {
+    const usesNativeReasoning = model
+      ? model.provider === "openai"
+        ? openAiModelSupportsReasoningEffort(model.modelId)
+        : model.provider === "anthropic"
+          ? anthropicModelSupportsReasoningEffort(model.modelId)
+          : false
+      : true;
+    return usesNativeReasoning ? 180_000 : 60_000;
+  }
+  return 60_000;
+}
+
+/** AUTO may recover visibly, but must not turn one reply into an unbounded
+ * sequence of long-running model attempts. */
+export const REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS = 600_000;
+
 export interface ModelReasoningEffortPreferenceV1 {
   provider: NativeReasoningEffortProvider;
   modelId: string;

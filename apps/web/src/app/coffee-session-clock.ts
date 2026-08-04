@@ -9,7 +9,8 @@ export type CoffeeSessionClockPhase =
 
 export type CoffeeSessionClockHoldReason =
   | "manual_autoplay_pause"
-  | "model_warmup";
+  | "model_warmup"
+  | "foreground_generation";
 
 /**
  * A composing player no longer holds the countdown: bots keep talking while
@@ -18,10 +19,12 @@ export type CoffeeSessionClockHoldReason =
 export function coffeeSessionClockHoldReasons(args: {
   autoplayPaused: boolean;
   modelWarmup: boolean;
+  foregroundGeneration: boolean;
 }): CoffeeSessionClockHoldReason[] {
   const reasons: CoffeeSessionClockHoldReason[] = [];
   if (args.autoplayPaused) reasons.push("manual_autoplay_pause");
   if (args.modelWarmup) reasons.push("model_warmup");
+  if (args.foregroundGeneration) reasons.push("foreground_generation");
   return reasons;
 }
 

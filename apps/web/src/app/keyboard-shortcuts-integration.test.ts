@@ -46,7 +46,7 @@ test("uses the configurable Prism and model-picker shortcuts globally", () => {
   assert.match(pageSource, /keyboardShortcuts\.effortHud, event/u);
 });
 
-test("separates pointer browsing from cursor-independent keyboard quick selection", () => {
+test("keeps Model wheel scrolling native while Effort owns wheel selection", () => {
   assert.match(pageSource, /surface: ComposerModelPickerSurface \| null/u);
   assert.match(pageSource, /const open = pickerOpenState\.surface === "model"/u);
   assert.match(
@@ -54,9 +54,14 @@ test("separates pointer browsing from cursor-independent keyboard quick selectio
     /const effortOpen = pickerOpenState\.surface === "effort"/u,
   );
   assert.doesNotMatch(pageSource, /onWheel=\{handleModelWheel\}/u);
+  assert.doesNotMatch(pageSource, /modelWheelLockedRef/u);
   assert.match(
     pageSource,
     /document\.addEventListener\("wheel", handleQuickWheel, \{[\s\S]{0,100}passive: false/u,
+  );
+  assert.match(
+    pageSource,
+    /handleQuickWheel[\s\S]{0,400}if \(menuOpen\) return;[\s\S]{0,500}event\.preventDefault\(\)/u,
   );
   assert.match(
     pageSource,
@@ -72,6 +77,14 @@ test("separates pointer browsing from cursor-independent keyboard quick selectio
     /onMouseEnter[\s\S]{0,100}setHighlightedModelValue\(autoOptionValue\)/u,
   );
   assert.match(pageSource, /moveModelHighlight\(/u);
+  assert.match(
+    pageSource,
+    /if \(!menuOpen && !effortMenuOpen\) return;[\s\S]{0,700}document\.addEventListener\("pointerdown", handler, true\)/u,
+  );
+  assert.match(
+    pageSource,
+    /triggerRef\.current\?\.contains\(target\)[\s\S]{0,240}effortMenuRef\.current\?\.contains\(target\)/u,
+  );
   assert.match(pageSource, /event\.key === "Tab"/u);
   assert.match(pageSource, /commitHighlightedModelToEffort\(\)/u);
   assert.match(
@@ -93,11 +106,13 @@ test("separates pointer browsing from cursor-independent keyboard quick selectio
 
 test("updates contextual guidance without adding first-run setup", () => {
   assert.match(tutorialSource, /Shift\+Tab opens Model/u);
-  assert.match(tutorialSource, /wheel scrolls the available model list/u);
-  assert.match(tutorialSource, /regardless of pointer location/u);
+  assert.match(tutorialSource, /Model always keeps ordinary wheel behavior/u);
+  assert.match(tutorialSource, /never changes the highlighted selection/u);
+  assert.match(tutorialSource, /Wheel-based value selection belongs only to Effort/u);
   assert.match(tutorialSource, /moving the mouse returns/u);
   assert.match(tutorialSource, /Model and Effort never remain open together/u);
-  assert.match(tutorialSource, /Space or Escape closes either picker/u);
+  assert.match(tutorialSource, /Clicking anywhere outside closes the open picker/u);
+  assert.match(tutorialSource, /Space or Escape also closes it/u);
   assert.match(tutorialSource, /Settings → Shortcuts/u);
   assert.doesNotMatch(firstRunSource, /keyboard shortcuts|Shift\+Tab/u);
 });

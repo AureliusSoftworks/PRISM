@@ -27,11 +27,12 @@ export const BOT_AVATAR_DETAILS_FACE_PLACEMENT: BotAvatarFacePlacement = {
 export const BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO = 0.2337;
 
 /**
- * Authored ink needs a little breathing room inside the physical CRT. Keeping
- * this as a presentation scale preserves the 128x128 storage contract while
- * making existing and newly painted details read proportionally to the shell.
+ * The writable 128px mask is already sampled from the physical CRT aperture,
+ * so it must remain at a one-to-one presentation scale. Insetting the complete
+ * canvas a second time creates a visible screen perimeter that authored ink
+ * can never reach.
  */
-export const BOT_AVATAR_DETAILS_INK_APERTURE_SCALE = 0.82;
+export const BOT_AVATAR_DETAILS_INK_APERTURE_SCALE = 1;
 
 export const BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE = {
   "--zen-live-bot-face-x": `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.xPct}%`,

@@ -1416,41 +1416,39 @@ describe("OpenAiProvider request shape", () => {
     assert.equal("reasoning_effort" in (bodies[1] ?? {}), false);
   });
 
-  it("retries once without reasoning_effort when OpenAI rejects it", async () => {
-    const originalConsoleWarn = console.warn;
+  it("surfaces an unsupported reasoning effort without silently retrying", async () => {
+    const originalConsoleError = console.error;
     const bodies: Array<Record<string, unknown>> = [];
-    console.warn = () => {};
+    console.error = () => {};
     try {
       globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
         bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
-        if (bodies.length === 1) {
-          return new Response(
-            JSON.stringify({
-              error: {
-                message: "Unknown parameter: 'reasoning_effort'.",
-              },
-            }),
-            { status: 400, headers: { "content-type": "application/json" } }
-          );
-        }
         return new Response(
-          JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
-          { status: 200, headers: { "content-type": "application/json" } }
+          JSON.stringify({
+            error: {
+              message: "Unknown parameter: 'reasoning_effort'.",
+            },
+          }),
+          { status: 400, headers: { "content-type": "application/json" } }
         );
       }) as typeof fetch;
 
       const provider = new OpenAiProvider({ apiKey: "sk-test" });
-      const response = await provider.generateResponse([{ role: "user", content: "hi" }], {
-        model: "gpt-5.4",
-        reasoningEffort: "xhigh",
-      });
-
-      assert.equal(response, "ok");
-      assert.equal(bodies.length, 2);
-      assert.equal(bodies[0]?.reasoning_effort, "xhigh");
-      assert.equal("reasoning_effort" in (bodies[1] ?? {}), false);
+      await assert.rejects(
+        () =>
+          provider.generateResponse([{ role: "user", content: "hi" }], {
+            model: "gpt-5.4",
+            reasoningEffort: "xhigh",
+          }),
+        /rejected the selected xhigh reasoning effort.*Choose a supported effort/iu,
+      );
+      const reasoningBodies = bodies.filter(
+        (body) => body.model === "gpt-5.4",
+      );
+      assert.equal(reasoningBodies.length, 1);
+      assert.equal(reasoningBodies[0]?.reasoning_effort, "xhigh");
     } finally {
-      console.warn = originalConsoleWarn;
+      console.error = originalConsoleError;
     }
   });
 

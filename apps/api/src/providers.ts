@@ -1659,7 +1659,6 @@ export class OpenAiProvider implements LlmProvider {
       });
 
     let startedAt = Date.now();
-    let retriedWithoutReasoningEffort = false;
     let response: Response;
     try {
       response = await sendRequest(requestBody);
@@ -1689,62 +1688,23 @@ export class OpenAiProvider implements LlmProvider {
         response.status === 400 &&
         isUnsupportedReasoningEffortError(detail)
       ) {
-        const retryBody = { ...requestBody };
-        delete retryBody.reasoning_effort;
         recordDeveloperTranscriptEvent({
           kind: "llm",
           purpose: usagePurpose(options?.usagePurpose),
           provider: "openai",
           model: modelId,
           request: requestBody,
-          error: "OpenAI rejected reasoning effort; retrying without it.",
+          error: "OpenAI rejected the selected reasoning effort.",
           durationMs: Date.now() - startedAt,
         });
-        console.warn(
-          `[openai] reasoning_effort rejected for model=${modelUsed}; retrying without effort detail=${
+        console.error(
+          `[openai] reasoning_effort rejected for model=${modelUsed}; preserving the selected effort detail=${
             detail || "<empty body>"
           }`
         );
-        startedAt = Date.now();
-        retriedWithoutReasoningEffort = true;
-        try {
-          response = await sendRequest(retryBody);
-        } catch (error) {
-          recordDeveloperTranscriptEvent({
-            kind: "llm",
-            purpose: usagePurpose(options?.usagePurpose),
-            provider: "openai",
-            model: modelId,
-            request: retryBody,
-            fallback: true,
-            error: isAbortFailure(error, options?.signal)
-              ? "OpenAI retry was aborted by the caller."
-              : "OpenAI retry could not reach the provider.",
-            durationMs: Date.now() - startedAt,
-          });
-          throw error;
-        }
-        if (response.ok) {
-          delete requestBody.reasoning_effort;
-        } else {
-          const retryDetail = await readOpenAiErrorMessage(response);
-          console.error(
-            `[openai] chat completion failed status=${response.status} model=${modelUsed} detail=${
-              retryDetail || "<empty body>"
-            }`
-          );
-          recordDeveloperTranscriptEvent({
-            kind: "llm",
-            purpose: usagePurpose(options?.usagePurpose),
-            provider: "openai",
-            model: modelId,
-            request: retryBody,
-            fallback: true,
-            error: `OpenAI retry failed with HTTP ${response.status}.`,
-            durationMs: Date.now() - startedAt,
-          });
-          throw new Error(formatOpenAiError("OpenAI request failed", response.status, retryDetail));
-        }
+        throw new Error(
+          `OpenAI rejected the selected ${String(requestBody.reasoning_effort)} reasoning effort for ${modelUsed}. Choose a supported effort or retry with another model.`,
+        );
       } else {
         console.error(
           `[openai] chat completion failed status=${response.status} model=${modelUsed} detail=${
@@ -1801,7 +1761,7 @@ export class OpenAiProvider implements LlmProvider {
         parsedOutput,
         stopReason: finishReason ?? null,
         streaming: false,
-        fallback: retriedWithoutReasoningEffort,
+        fallback: false,
         ...(!parsedOutput ? { error: "OpenAI returned an empty response." } : {}),
         durationMs,
       },

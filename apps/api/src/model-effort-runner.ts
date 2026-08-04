@@ -1,5 +1,6 @@
 import {
   modelSupportsNativeReasoningEffort,
+  reasoningGenerationBudgetMs,
   type NativeReasoningEffortProvider,
   type ReasoningEffort,
 } from "@localai/shared";
@@ -14,6 +15,56 @@ export type SimulatedEffortSurface =
   | "signal"
   | "debate"
   | "story";
+
+export class ReasoningGenerationTimeoutError extends Error {
+  public readonly timeoutMs: number;
+
+  public constructor(timeoutMs: number) {
+    super(
+      `The selected model did not finish within ${Math.round(timeoutMs / 1_000)} seconds. Retry or choose a lower effort.`,
+    );
+    this.name = "ReasoningGenerationTimeoutError";
+    this.timeoutMs = timeoutMs;
+  }
+}
+
+/** Bounds one complete direct-mode response, not each simulated preparation
+ * pass. The caller supplies the whole prepare-and-generate pipeline. */
+export async function runWithReasoningGenerationBudget<T>(args: {
+  effort: ReasoningEffort | null | undefined;
+  provider?: NativeReasoningEffortProvider;
+  modelId?: string;
+  signal?: AbortSignal;
+  run: (signal: AbortSignal) => Promise<T>;
+}): Promise<T> {
+  if (args.signal?.aborted) {
+    throw args.signal.reason ?? new DOMException("Generation cancelled.", "AbortError");
+  }
+  const timeoutMs = reasoningGenerationBudgetMs(
+    args.effort,
+    args.provider && args.modelId
+      ? { provider: args.provider, modelId: args.modelId }
+      : undefined,
+  );
+  const timeoutController = new AbortController();
+  let timedOut = false;
+  const timeout = setTimeout(() => {
+    timedOut = true;
+    timeoutController.abort(new ReasoningGenerationTimeoutError(timeoutMs));
+  }, timeoutMs);
+  const signal = args.signal
+    ? AbortSignal.any([args.signal, timeoutController.signal])
+    : timeoutController.signal;
+  try {
+    return await args.run(signal);
+  } catch (error) {
+    if (args.signal?.aborted) throw args.signal.reason ?? error;
+    if (timedOut) throw new ReasoningGenerationTimeoutError(timeoutMs);
+    throw error;
+  } finally {
+    clearTimeout(timeout);
+  }
+}
 
 const SIMULATED_EFFORT_STEPS: Record<
   Exclude<ReasoningEffort, "auto" | "none">,

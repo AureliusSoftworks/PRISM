@@ -180,6 +180,30 @@ describe("Auto fallback runner", () => {
     );
   });
 
+  it("uses the concrete model's attempt budget within one total ceiling", async () => {
+    const budgets: Array<{ model: string; index: number }> = [];
+    const result = await runAutoFallbackChain({
+      attempts: [
+        attempt("local", "primary", (signal) => new Promise((_, reject) => {
+          signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+        })),
+        attempt("openai", "fallback-1", async () => "recovered"),
+        attempt("anthropic", "fallback-2", async () => "unused"),
+      ],
+      perAttemptTimeoutMs: (model, index) => {
+        budgets.push({ model: model.model, index });
+        return index === 0 ? 5 : 100;
+      },
+      totalTimeoutMs: 200,
+    });
+    assert.equal(result.value, "recovered");
+    assert.deepEqual(budgets, [
+      { model: "primary", index: 0 },
+      { model: "fallback-1", index: 1 },
+    ]);
+    assert.equal(result.attempts[0]?.reason, "timeout");
+  });
+
   it("does not start another attempt after the total budget is exhausted", async () => {
     const calls: string[] = [];
     const timeline = [1_000, 1_000, 1_009];

@@ -1189,7 +1189,7 @@ describe("Botcast episode state", () => {
     }), true);
   });
 
-  it("subtracts completed and active model warmup holds from Signal time", () => {
+  it("subtracts completed and active session holds from Signal time", () => {
     const threeExchanges = Array.from({ length: 6 }, (_, index) => ({
       speakerRole: index % 2 === 0 ? "host" as const : "guest" as const,
       content: "A line.",
@@ -1207,6 +1207,20 @@ describe("Botcast episode state", () => {
       startedAtMs: 0,
       nowMs: 4 * 60_000,
       modelWarmupHoldStartedAtMs: 2 * 60_000,
+    }), false);
+    assert.equal(botcastSessionShouldClose({
+      messages: threeExchanges,
+      durationMinutes: 3,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+      sessionClockHoldDurationMs: 2 * 60_000,
+    }), false);
+    assert.equal(botcastSessionShouldClose({
+      messages: threeExchanges,
+      durationMinutes: 3,
+      startedAtMs: 0,
+      nowMs: 4 * 60_000,
+      sessionClockHoldStartedAtMs: 2 * 60_000,
     }), false);
   });
 

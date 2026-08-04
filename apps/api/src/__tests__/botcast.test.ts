@@ -96,6 +96,7 @@ import {
   runSignalOnlineTurn,
   setBotcastEpisodeCameraMode,
   setBotcastModelWarmupHold,
+  recordBotcastSessionClockHold,
   signalOnlineTurnHttpStatus,
   selectBotcastReviewPersona,
   signalVisualOnlyListenerReaction,
@@ -2768,6 +2769,58 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("records completed foreground holds once without opening a warmup hold", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Foreground timing",
+      });
+      const recorded = recordBotcastSessionClockHold(
+        db,
+        "user-1",
+        episode.id,
+        {
+          holdId: "run-1",
+          reason: "foreground_generation",
+          durationMs: 5_000,
+        },
+      );
+      assert.equal(recorded.modelWarmupHoldDurationMs, 5_000);
+      assert.equal(recorded.sessionClockHoldDurationMs, 5_000);
+      assert.equal(recorded.modelWarmupHoldStartedAt, null);
+      assert.equal(
+        recorded.events.filter(
+          (event) =>
+            event.kind === "session_clock_hold" &&
+            event.payload.holdId === "run-1",
+        ).length,
+        1,
+      );
+
+      const duplicate = recordBotcastSessionClockHold(
+        db,
+        "user-1",
+        episode.id,
+        {
+          holdId: "run-1",
+          reason: "foreground_generation",
+          durationMs: 8_000,
+        },
+      );
+      assert.equal(duplicate.modelWarmupHoldDurationMs, 5_000);
+      assert.equal(
+        duplicate.events.filter(
+          (event) => event.kind === "session_clock_hold",
+        ).length,
+        1,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("uses the local ident by default and revisions cached ElevenLabs show audio", () => {
     const db = fixture();
     try {
@@ -3133,7 +3186,7 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("keeps Signal turns short and uses minimal reasoning without a picker", async () => {
+  it("keeps Signal turns short and leaves native effort at provider default", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const options: GenerateOptions[] = [];
@@ -3164,9 +3217,9 @@ describe("Botcast persistence and isolation", () => {
         generation(provider),
       );
 
-      assert.equal(options[0]?.reasoningEffort, "minimal");
+      assert.equal(options[0]?.reasoningEffort, undefined);
       assert.equal(options[0]?.maxTokens, 160);
-      assert.equal(options[1]?.reasoningEffort, "minimal");
+      assert.equal(options[1]?.reasoningEffort, undefined);
       assert.equal(options[1]?.maxTokens, 112);
       assert.match(
         captures[0]!.map((message) => message.content).join("\n"),
@@ -8601,7 +8654,7 @@ describe("Botcast persistence and isolation", () => {
         },
       );
 
-      assert.equal(options[0]?.reasoningEffort, "minimal");
+      assert.equal(options[0]?.reasoningEffort, undefined);
       assert.equal(options[0]?.maxTokens, 384);
       assert.match(advanced.message?.content ?? "", new RegExp(show.name, "u"));
       assert.match(advanced.message?.content ?? "", /I'm Mara Vale/u);
@@ -13288,7 +13341,7 @@ describe("Botcast persistence and isolation", () => {
     assert.equal(providerSignal?.aborted, true);
   });
 
-  it("repairs a timed-out LOCAL opening instead of stranding the live episode", async () => {
+  it("surfaces a timed-out direct LOCAL opening without silently changing behavior", async () => {
     const db = fixture();
     const neverReturns: LlmProvider = {
       name: "local",
@@ -13313,21 +13366,21 @@ describe("Botcast persistence and isolation", () => {
         preferredProvider: "local",
         responseMode: "local",
       });
-      const advanced = await advanceBotcastEpisode(
-        db,
-        "user-1",
-        episode.id,
-        {},
-        {
-          ...generation(neverReturns),
-          signalLocalTurnTimeoutMs: 5,
+      await assert.rejects(
+        () =>
+          advanceBotcastEpisode(db, "user-1", episode.id, {}, {
+            ...generation(neverReturns),
+            signalLocalTurnTimeoutMs: 5,
+          }),
+        (error: unknown) => {
+          assert.ok(error instanceof SignalLocalTurnTimeoutError);
+          assert.equal(error.timeoutMs, 5);
+          return true;
         },
       );
-
-      assert.equal(advanced.message?.speakerRole, "host");
-      assert.match(advanced.message?.content ?? "", new RegExp(show.name, "u"));
-      assert.equal(advanced.episode.status, "live");
-      assert.equal(advanced.episode.messages.length, 1);
+      const unchanged = getBotcastEpisode(db, "user-1", episode.id);
+      assert.equal(unchanged.status, "live");
+      assert.equal(unchanged.messages.length, 0);
     } finally {
       db.close();
     }

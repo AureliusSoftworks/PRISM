@@ -9,8 +9,8 @@ import {
 const SAMPLE_IPA = "θɪs ɹɪvɚ wɪl ðɹaɪv vɛɹi faɹ";
 
 describe("local voice Speechprints", () => {
-  it("publishes nine versioned Instant-compatible profiles for both bases", () => {
-    assert.equal(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length, 9);
+  it("publishes twelve versioned Instant-compatible profiles for both bases", () => {
+    assert.equal(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length, 12);
     assert.match(LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256, /^[a-f0-9]{64}$/u);
     for (const capability of LOCAL_VOICE_SPEECHPRINT_CAPABILITIES) {
       assert.deepEqual(capability.supportedBaseLocales, ["en-US", "en-GB"]);
@@ -18,6 +18,38 @@ describe("local voice Speechprints", () => {
       assert.deepEqual(capability.supportedEngines, ["instant"]);
       assert.equal(capability.approximate, true);
     }
+  });
+
+  it("adds restrained Italian, Australian, and Canadian signatures", () => {
+    const italian = applyLocalVoiceSpeechprintToIpa({
+      ipa: "θɪs ɹɛd bag",
+      speechprint: {
+        influence: "italian-influenced-english",
+        strength: "balanced",
+        variationSeed: "italian-character",
+      },
+    });
+    const australian = applyLocalVoiceSpeechprintToIpa({
+      ipa: "faɹ oʊvɚ seɪf",
+      speechprint: {
+        influence: "australian-english",
+        strength: "balanced",
+        variationSeed: "australian-character",
+      },
+    });
+    const canadian = applyLocalVoiceSpeechprintToIpa({
+      ipa: "ɹaɪt ɹaɪd aʊt laʊd",
+      speechprint: {
+        influence: "canadian-english",
+        strength: "balanced",
+        variationSeed: "canadian-character",
+      },
+    });
+
+    assert.match(italian.ipa, /^tɪs ɾɛd /u);
+    assert.equal(australian.ipa.includes("ɹ"), false);
+    assert.match(australian.ipa, /əʉvə/u);
+    assert.equal(canadian.ipa, "ɹʌɪt ɹaɪd ʌʊt laʊd");
   });
 
   it("keeps French and German influences restrained and strength-bounded", () => {

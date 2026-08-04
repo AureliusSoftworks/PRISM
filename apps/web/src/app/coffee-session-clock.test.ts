@@ -37,6 +37,7 @@ describe("coffee session clock", () => {
       coffeeSessionClockHoldReasons({
         autoplayPaused: false,
         modelWarmup: true,
+        foregroundGeneration: false,
       }),
       ["model_warmup"],
     );
@@ -44,8 +45,9 @@ describe("coffee session clock", () => {
       coffeeSessionClockHoldReasons({
         autoplayPaused: true,
         modelWarmup: true,
+        foregroundGeneration: true,
       }),
-      ["manual_autoplay_pause", "model_warmup"],
+      ["manual_autoplay_pause", "model_warmup", "foreground_generation"],
     );
     // Player composing is deliberately not a hold reason: bots keep talking
     // while the user types, so session time keeps flowing.
@@ -53,8 +55,32 @@ describe("coffee session clock", () => {
       coffeeSessionClockHoldReasons({
         autoplayPaused: false,
         modelWarmup: false,
+        foregroundGeneration: false,
       }),
       [],
+    );
+  });
+
+  it("holds an expired session while foreground generation blocks the table", () => {
+    const holdReasons = coffeeSessionClockHoldReasons({
+      autoplayPaused: false,
+      modelWarmup: false,
+      foregroundGeneration: true,
+    });
+    assert.deepEqual(holdReasons, ["foreground_generation"]);
+    assert.deepEqual(
+      reconcileCoffeeSessionClock({
+        previousTickAtMs: 10_000,
+        nowMs: 25_000,
+        endsAtMs: 20_000,
+        countdownPaused: holdReasons.length > 0,
+      }),
+      {
+        elapsedMs: 15_000,
+        nextEndsAtMs: 35_000,
+        shouldFinish: false,
+        shouldUpdate: true,
+      },
     );
   });
 

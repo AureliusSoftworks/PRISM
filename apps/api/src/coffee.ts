@@ -33,6 +33,7 @@ import {
 } from "./model-effort-runtime.ts";
 import {
   prepareMessagesWithSimulatedEffort,
+  runWithReasoningGenerationBudget,
   shouldPrepareMessagesWithSimulatedEffort,
 } from "./model-effort-runner.ts";
 import {
@@ -77,7 +78,11 @@ import {
   upsertCoffeeCupTopOffState,
   upsertBotRelationship,
 } from "./db.ts";
-import { effectiveModelReasoningEffort } from "@localai/shared";
+import {
+  effectiveModelReasoningEffort,
+  reasoningGenerationBudgetMs,
+  REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
+} from "@localai/shared";
 import type {
   ChatMessage,
   Conversation,
@@ -17228,33 +17233,50 @@ async function generateCoffeeBotReply(args: {
       },
     ];
   }
-  if (
-    !speakerUsesHardResponse &&
-    !cannedInterruptionReaction &&
-    !socialSilenceMarker &&
-    settings.experimentalAllModelEffortEnabled === true &&
-    effectiveReasoningEffort &&
-    shouldPrepareMessagesWithSimulatedEffort({
-      provider: effectiveProvider,
-      model: concreteSpeakerModel,
-      effort: effectiveReasoningEffort,
-    })
-  ) {
-    try {
-      speakerMessages = await prepareMessagesWithSimulatedEffort({
-        provider: speakerProvider,
-        messages: speakerMessages,
-        options: speakerOptions,
-        effort: effectiveReasoningEffort,
-        surface: "coffee",
-        outputContract:
-          "Write one short in-character Coffee contribution; preserve Powers, floor ownership, and any poll or team constraints.",
-      });
-    } catch (error) {
-      if (settings.signal?.aborted) throw error;
-      // Private deliberation is a quality enhancement; the visible turn still proceeds.
+  const reasoningEffortForAttempt = (
+    provider: ProviderName,
+    model: string,
+  ): ReasoningEffort | undefined =>
+    resolveUserModelReasoningEffort(db, {
+      userId,
+      provider,
+      modelId: model,
+      simulatedEffortEnabled:
+        settings.experimentalAllModelEffortEnabled === true,
+    }) ?? (provider === effectiveProvider && model === concreteSpeakerModel
+      ? effectiveReasoningEffort
+      : undefined);
+  const prepareSpeakerAttempt = async (args: {
+    provider: LlmProvider;
+    providerName: ProviderName;
+    model: string;
+    effort: ReasoningEffort | undefined;
+    options: GenerateOptions;
+  }): Promise<ProviderMessage[]> => {
+    if (
+      speakerUsesHardResponse ||
+      cannedInterruptionReaction ||
+      socialSilenceMarker ||
+      settings.experimentalAllModelEffortEnabled !== true ||
+      !args.effort ||
+      !shouldPrepareMessagesWithSimulatedEffort({
+        provider: args.providerName,
+        model: args.model,
+        effort: args.effort,
+      })
+    ) {
+      return speakerMessages;
     }
-  }
+    return prepareMessagesWithSimulatedEffort({
+      provider: args.provider,
+      messages: speakerMessages,
+      options: args.options,
+      effort: args.effort,
+      surface: "coffee",
+      outputContract:
+        "Write one short in-character Coffee contribution; preserve Powers, floor ownership, and any poll or team constraints.",
+    });
+  };
   const peersForRepair = speakerPromptGroup.filter((bot) => bot.id !== speaker.id);
   const knownCoffeeSpeakerNames = speakerPromptGroup.map((bot) => bot.name);
   const primarySpeakerModel = speakerModel ?? defaultModelIdForProvider(effectiveProvider);
@@ -17324,16 +17346,33 @@ async function generateCoffeeBotReply(args: {
                   settings.secondaryOllamaHost,
                   settings.anthropicApiKey
                 );
-            return provider.generateResponse(speakerMessages, {
+            const attemptEffort = reasoningEffortForAttempt(
+              attempt.provider,
+              attempt.model,
+            );
+            const attemptOptions: GenerateOptions = {
               ...speakerOptions,
               model: attempt.model,
+              reasoningEffort: attemptEffort,
               usagePurpose: "coffee_turn",
               signal,
+            };
+            const attemptMessages = await prepareSpeakerAttempt({
+              provider,
+              providerName: attempt.provider,
+              model: attempt.model,
+              effort: attemptEffort,
+              options: attemptOptions,
             });
+            return provider.generateResponse(attemptMessages, attemptOptions);
           },
         })),
-        perAttemptTimeoutMs: 30_000,
-        totalTimeoutMs: resolvedAutoChain.length * 30_000,
+        perAttemptTimeoutMs: (attempt) =>
+          reasoningGenerationBudgetMs(
+            reasoningEffortForAttempt(attempt.provider, attempt.model),
+            { provider: attempt.provider, modelId: attempt.model },
+          ),
+        totalTimeoutMs: REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
         signal: settings.signal,
         isTerminalError: (error) => error instanceof CoffeeAutoStaleTurnError,
         validate: (raw) => {
@@ -17393,52 +17432,71 @@ async function generateCoffeeBotReply(args: {
     finalModel = result.model;
     autoAttemptAccepted = true;
   } else {
-    try {
-      throwIfCoffeeTurnCancelled(settings.signal);
-      speakerReply = cannedInterruptionReaction
-        ? cannedInterruptionReaction.text === "..." && !speakerUsesHardResponse
+    if (cannedInterruptionReaction) {
+      speakerReply =
+        cannedInterruptionReaction.text === "..." && !speakerUsesHardResponse
           ? "I will be quiet."
-          : cannedInterruptionReaction.text
-        : await speakerProvider.generateResponse(
-            speakerMessages,
-            { ...speakerOptions, usagePurpose: "coffee_turn" }
-          );
-    } catch (error) {
-      if (coffeeProviderReturnedEmptyResponse(error, effectiveProvider)) {
-        console.warn(
-          `[coffee] speaker returned empty ${effectiveProvider} response; falling back to emergency line conversation=${row.id} speaker=${speaker.id}`
-        );
-        speakerReply = "";
-      } else {
-        throw error;
-      }
-    }
-    if (
-      !speakerUsesHardResponse &&
-      !cannedInterruptionReaction &&
-      !socialSilenceMarker &&
-      typeof speakerReply === "string" &&
-      coffeeReplyIsPunctuationOnly(stripCoffeeSpeakerPrefix(speakerReply, speaker.name))
-    ) {
-      punctuationOnlyRetryAttempted = true;
-      console.warn(
-        `[coffee] speaker returned punctuation-only output; retrying once conversation=${row.id} speaker=${speaker.id}`
-      );
+          : cannedInterruptionReaction.text;
+    } else {
       try {
-        speakerReply = await speakerProvider.generateResponse(
-          [
-            ...speakerMessages,
-            {
-              role: "system",
-              content:
-                "Your previous draft contained only punctuation. Retry once with one short, substantive in-character line. If silence is intentional, pair it with one brief physical action.",
-            },
-          ],
-          { ...speakerOptions, usagePurpose: "coffee_turn" }
-        );
+        throwIfCoffeeTurnCancelled(settings.signal);
+        speakerReply = await runWithReasoningGenerationBudget({
+          effort: effectiveReasoningEffort,
+          provider: effectiveProvider,
+          modelId: concreteSpeakerModel,
+          signal: settings.signal,
+          run: async (signal) => {
+            const directOptions: GenerateOptions = {
+              ...speakerOptions,
+              signal,
+              usagePurpose: "coffee_turn",
+            };
+            const directMessages = await prepareSpeakerAttempt({
+              provider: speakerProvider,
+              providerName: effectiveProvider,
+              model: concreteSpeakerModel,
+              effort: effectiveReasoningEffort,
+              options: directOptions,
+            });
+            let reply = await speakerProvider.generateResponse(
+              directMessages,
+              directOptions,
+            );
+            if (
+              !speakerUsesHardResponse &&
+              !socialSilenceMarker &&
+              coffeeReplyIsPunctuationOnly(
+                stripCoffeeSpeakerPrefix(reply, speaker.name),
+              )
+            ) {
+              punctuationOnlyRetryAttempted = true;
+              console.warn(
+                `[coffee] speaker returned punctuation-only output; retrying once conversation=${row.id} speaker=${speaker.id}`,
+              );
+              reply = await speakerProvider.generateResponse(
+                [
+                  ...directMessages,
+                  {
+                    role: "system",
+                    content:
+                      "Your previous draft contained only punctuation. Retry once with one short, substantive in-character line. If silence is intentional, pair it with one brief physical action.",
+                  },
+                ],
+                directOptions,
+              );
+            }
+            return reply;
+          },
+        });
       } catch (error) {
-        if (settings.signal?.aborted) throw error;
-        speakerReply = "";
+        if (coffeeProviderReturnedEmptyResponse(error, effectiveProvider)) {
+          console.warn(
+            `[coffee] speaker returned empty ${effectiveProvider} response; falling back to emergency line conversation=${row.id} speaker=${speaker.id}`,
+          );
+          speakerReply = "";
+        } else {
+          throw error;
+        }
       }
     }
   }

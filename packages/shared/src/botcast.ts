@@ -1139,6 +1139,7 @@ export type BotcastReplayEventKind =
   | "audio_cue"
   | "capture_timing"
   | "guest_thinking"
+  | "session_clock_hold"
   | "episode_completed"
   | "episode_cancelled";
 
@@ -2050,6 +2051,10 @@ export interface BotcastEpisodeSummary {
   modelWarmupHoldDurationMs: number;
   /** Active hold start, persisted so a live episode can resume honestly after reload. */
   modelWarmupHoldStartedAt: string | null;
+  /** Generic alias for all completed foreground session-clock holds. */
+  sessionClockHoldDurationMs?: number;
+  /** Generic alias for the legacy active warmup hold, retained during migration. */
+  sessionClockHoldStartedAt?: string | null;
   /** One candid Library-persona response generated after the episode completes. */
   personaReview: BotcastPersonaReview | null;
   createdAt: string;
@@ -2562,6 +2567,8 @@ export function botcastSessionShouldClose(args: {
   nowMs: number;
   modelWarmupHoldDurationMs?: number;
   modelWarmupHoldStartedAtMs?: number | null;
+  sessionClockHoldDurationMs?: number;
+  sessionClockHoldStartedAtMs?: number | null;
   producerGuestThinkingDiscountMs?: number;
 }): boolean {
   const utteranceCount = args.messages.length;
@@ -2571,13 +2578,17 @@ export function botcastSessionShouldClose(args: {
   ) {
     return false;
   }
-  const completedHoldMs = Number.isFinite(args.modelWarmupHoldDurationMs)
-    ? Math.max(0, args.modelWarmupHoldDurationMs ?? 0)
+  const completedHoldDurationMs =
+    args.sessionClockHoldDurationMs ?? args.modelWarmupHoldDurationMs;
+  const activeHoldStartedAtMs =
+    args.sessionClockHoldStartedAtMs ?? args.modelWarmupHoldStartedAtMs;
+  const completedHoldMs = Number.isFinite(completedHoldDurationMs)
+    ? Math.max(0, completedHoldDurationMs ?? 0)
     : 0;
   const activeHoldMs =
-    typeof args.modelWarmupHoldStartedAtMs === "number" &&
-    Number.isFinite(args.modelWarmupHoldStartedAtMs)
-      ? Math.max(0, args.nowMs - args.modelWarmupHoldStartedAtMs)
+    typeof activeHoldStartedAtMs === "number" &&
+    Number.isFinite(activeHoldStartedAtMs)
+      ? Math.max(0, args.nowMs - activeHoldStartedAtMs)
       : 0;
   const producerGuestThinkingDiscountMs = Number.isFinite(
     args.producerGuestThinkingDiscountMs,

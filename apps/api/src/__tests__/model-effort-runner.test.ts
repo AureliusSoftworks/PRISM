@@ -2,6 +2,8 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   prepareMessagesWithSimulatedEffort,
+  ReasoningGenerationTimeoutError,
+  runWithReasoningGenerationBudget,
   shouldPrepareMessagesWithSimulatedEffort,
 } from "../model-effort-runner.ts";
 import type {
@@ -11,6 +13,37 @@ import type {
 } from "../providers.ts";
 
 describe("simulated model effort runner", () => {
+  it("uses one abort signal for a complete direct reasoning attempt", async () => {
+    const controller = new AbortController();
+    const result = await runWithReasoningGenerationBudget({
+      effort: "xhigh",
+      signal: controller.signal,
+      run: async (signal) => {
+        assert.equal(signal.aborted, false);
+        return "complete";
+      },
+    });
+    assert.equal(result, "complete");
+  });
+
+  it("preserves caller cancellation instead of reporting a timeout", async () => {
+    const controller = new AbortController();
+    const pending = runWithReasoningGenerationBudget({
+      effort: "xhigh",
+      signal: controller.signal,
+      run: (signal) => new Promise((_, reject) => {
+        signal.addEventListener("abort", () => reject(signal.reason), { once: true });
+      }),
+    });
+    const cancellation = new DOMException("cancelled", "AbortError");
+    controller.abort(cancellation);
+    await assert.rejects(pending, (error) => {
+      assert.equal(error, cancellation);
+      assert.equal(error instanceof ReasoningGenerationTimeoutError, false);
+      return true;
+    });
+  });
+
   it("selects local and unsupported online models while preserving native effort", () => {
     assert.equal(
       shouldPrepareMessagesWithSimulatedEffort({

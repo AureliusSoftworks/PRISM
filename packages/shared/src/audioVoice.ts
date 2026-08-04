@@ -449,6 +449,9 @@ export const LOCAL_VOICE_SPEECHPRINT_INFLUENCES = [
   "french-influenced-english",
   "german-influenced-english",
   "russian-influenced-english",
+  "italian-influenced-english",
+  "australian-english",
+  "canadian-english",
 ] as const;
 export type LocalVoiceSpeechprintInfluence =
   (typeof LOCAL_VOICE_SPEECHPRINT_INFLUENCES)[number];

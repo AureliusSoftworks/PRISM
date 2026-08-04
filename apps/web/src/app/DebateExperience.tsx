@@ -5929,7 +5929,10 @@ export function DebateExperience(
       previous: DebateSessionV1 | null,
       next: DebateSessionV1,
       runId: number,
-      options: { automaticJudgeGavel?: boolean } = {},
+      options: {
+        automaticJudgeGavel?: boolean;
+        resumedJudgeGavelPresentationEventId?: string | null;
+      } = {},
     ): Promise<void> => {
       const freshWithAudienceOrder = debatePresentationEvents(
         previous,
@@ -6002,6 +6005,17 @@ export function DebateExperience(
               event,
               moderatorBotId: next.moderator.id,
             });
+        const resumedJudgeGavelAlreadyStruck =
+          next.playerRole === "judge" &&
+          options.resumedJudgeGavelPresentationEventId === event.id;
+        if (resumedJudgeGavelAlreadyStruck) {
+          // Resume is the Judge's return-to-order strike. Preserve the resumed
+          // event's gavel-led camera and timing without presenting a second cue.
+          gavelCue = {
+            eventId: event.id,
+            kind: "order",
+          };
+        }
         const audienceBeat = debateAudienceBeatForEvent({
           event,
           publicContent: event.content,
@@ -6111,6 +6125,7 @@ export function DebateExperience(
           gavelCue &&
           next.playerRole === "judge" &&
           options.automaticJudgeGavel !== true &&
+          !resumedJudgeGavelAlreadyStruck &&
           !lifecycleControlGavel
         ) {
           setLiveGavelCue(null);
@@ -6118,7 +6133,7 @@ export function DebateExperience(
           if (presentationRunRef.current !== runId) return;
           gavelCue = null;
         }
-        setLiveGavelCue(gavelCue);
+        setLiveGavelCue(resumedJudgeGavelAlreadyStruck ? null : gavelCue);
         const orderCameraCutMs =
           gavelCue?.kind === "order" ? DEBATE_GAVEL_ORDER_CAMERA_CUT_MS : 0;
         if (orderCameraCutMs > 0) {
@@ -6697,6 +6712,7 @@ export function DebateExperience(
       options: {
         playIntro?: boolean;
         automaticJudgeGavel?: boolean;
+        resumedJudgeGavelPresentationEventId?: string | null;
       } = {},
     ): Promise<void> => {
       const runId = presentationRunRef.current + 1;
@@ -6719,16 +6735,22 @@ export function DebateExperience(
         fresh.find(
           (event) => event.speakerKind !== "system" && event.kind !== "error",
         )?.id ?? null;
+      const firstResumesWithJudgeGavel =
+        next.playerRole === "judge" &&
+        first?.id === options.resumedJudgeGavelPresentationEventId;
       const firstGavelCue = first
-        ? debateModeratorGavelCue({
-            format: next.format,
-            event: first,
-            moderatorBotId: next.moderator.id,
-          })
+        ? firstResumesWithJudgeGavel
+          ? ({ eventId: first.id, kind: "order" } as const)
+          : debateModeratorGavelCue({
+              format: next.format,
+              event: first,
+              moderatorBotId: next.moderator.id,
+            })
         : null;
       const firstWaitsForJudgeGavel =
         next.playerRole === "judge" &&
         firstGavelCue !== null &&
+        !firstResumesWithJudgeGavel &&
         options.automaticJudgeGavel !== true;
       if (first) {
         const presentsImmediately =
@@ -6770,6 +6792,8 @@ export function DebateExperience(
         }
         await consumeNewEvents(previous, next, runId, {
           automaticJudgeGavel: options.automaticJudgeGavel,
+          resumedJudgeGavelPresentationEventId:
+            options.resumedJudgeGavelPresentationEventId,
         });
         if (presentationRunRef.current !== runId) return;
         if (
@@ -7663,6 +7687,7 @@ export function DebateExperience(
 
   const triggerJudgeGavelSmash = (
     kind: DebateModeratorGavelCue["kind"],
+    eventId?: string,
   ): void => {
     judgeGavelSmashShowmanshipKindRef.current = kind;
     if (judgeGavelOvertimeBurstActiveRef.current) {
@@ -7670,7 +7695,7 @@ export function DebateExperience(
     }
     judgeGavelSmashCounterRef.current += 1;
     const cue: DebateModeratorGavelCue = {
-      eventId: `player-smash:${judgeGavelSmashCounterRef.current}`,
+      eventId: eventId ?? `player-smash:${judgeGavelSmashCounterRef.current}`,
       kind,
     };
     setJudgeGavelSmashCue(cue);
@@ -8087,12 +8112,15 @@ export function DebateExperience(
       const lifecyclePath = `/api/debates/${encodeURIComponent(previous.id)}/${
         resume ? "resume" : "pause"
       }`;
+      const lifecycleIdempotencyKey = nextMutationKey(
+        resume ? "resume" : "pause",
+      );
       const requestLifecycle = (session: DebateSessionV1) =>
         props.request<{ session: DebateSessionV1 }>(
           lifecyclePath,
           requestBody({
             expectedRevision: session.revision,
-            idempotencyKey: nextMutationKey(resume ? "resume" : "pause"),
+            idempotencyKey: lifecycleIdempotencyKey,
             ...(!resume ? { presentationEventId: replayEventId } : {}),
           }),
         );
@@ -8134,6 +8162,21 @@ export function DebateExperience(
         const pausedPresentationEvent = result.session.events.find(
           (event) => event.id === result.session.pausedPresentationEventId,
         );
+        const judgeResumedWithGavel = result.session.playerRole === "judge";
+        if (judgeResumedWithGavel) {
+          const resumeGavelEventId = `resume-gavel:${result.session.id}:${result.session.revision}`;
+          triggerJudgeGavelSmash("order", resumeGavelEventId);
+          triggerAudienceOrderResponse({
+            eventId: resumeGavelEventId,
+            kind: "hush",
+            performGavel: false,
+            resetAfterSequence:
+              pausedPresentationEvent?.sequence ??
+              result.session.events.at(-1)?.sequence ??
+              0,
+            sessionId: result.session.id,
+          });
+        }
         if (pausedPresentationEvent) {
           await adoptSession(
             {
@@ -8147,6 +8190,11 @@ export function DebateExperience(
               events: result.session.events.filter(
                 (event) => event.sequence <= pausedPresentationEvent.sequence,
               ),
+            },
+            {
+              resumedJudgeGavelPresentationEventId: judgeResumedWithGavel
+                ? pausedPresentationEvent.id
+                : null,
             },
           );
         } else {

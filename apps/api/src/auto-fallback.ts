@@ -78,7 +78,9 @@ export function validateAutoFallbackText(
 
 export async function runAutoFallbackChain<T = string>(args: {
   attempts: readonly AutoFallbackAttempt[];
-  perAttemptTimeoutMs: number;
+  perAttemptTimeoutMs:
+    | number
+    | ((attempt: AutoFallbackModelRef, index: number) => number);
   totalTimeoutMs: number;
   signal?: AbortSignal;
   validate?: (raw: string, attempt: AutoFallbackModelRef) => AutoFallbackValidationResult<T>;
@@ -96,11 +98,10 @@ export async function runAutoFallbackChain<T = string>(args: {
   const now = args.now ?? Date.now;
   const startedAt = now();
   const deadline = startedAt + Math.max(1, Math.floor(args.totalTimeoutMs));
-  const perAttemptTimeoutMs = Math.max(1, Math.floor(args.perAttemptTimeoutMs));
   const validate = args.validate ?? (validateAutoFallbackText as (raw: string) => AutoFallbackValidationResult<T>);
   const traces: AutoFallbackAttemptTraceV1[] = [];
 
-  for (const attempt of args.attempts) {
+  for (const [attemptIndex, attempt] of args.attempts.entries()) {
     rethrowOuterCancellation(args.signal);
     const attemptStartedAt = now();
     const remainingMs = deadline - attemptStartedAt;
@@ -117,6 +118,18 @@ export async function runAutoFallbackChain<T = string>(args: {
       continue;
     }
 
+    const configuredAttemptTimeoutMs =
+      typeof args.perAttemptTimeoutMs === "function"
+        ? args.perAttemptTimeoutMs(attempt, attemptIndex)
+        : args.perAttemptTimeoutMs;
+    const perAttemptTimeoutMs = Math.max(
+      1,
+      Math.floor(
+        Number.isFinite(configuredAttemptTimeoutMs)
+          ? configuredAttemptTimeoutMs
+          : remainingMs,
+      ),
+    );
     const controller = new AbortController();
     const attemptBudgetMs = Math.min(perAttemptTimeoutMs, remainingMs);
     const exhaustsTotalBudget = attemptBudgetMs >= remainingMs;

@@ -2,6 +2,7 @@ import { describe, it } from "node:test";
 import assert from "node:assert/strict";
 import {
   cancelCoffeeTurnJobsForConversation,
+  COFFEE_TURN_JOB_TTL_MS,
   coffeeThinkingCutInDelayMs,
   getActiveCoffeeTurnJobForConversation,
   getCoffeeTurnJob,
@@ -11,6 +12,10 @@ import {
 } from "../coffee-turn-jobs.ts";
 
 describe("Coffee turn jobs", () => {
+  it("retains jobs beyond the ten-minute AUTO ceiling", () => {
+    assert.equal(COFFEE_TURN_JOB_TTL_MS, 12 * 60_000);
+  });
+
   it("publishes thinking before a completed response and advances through speaking", async () => {
     let release!: () => void;
     const wait = new Promise<void>((resolve) => { release = resolve; });

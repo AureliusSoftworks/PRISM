@@ -198,6 +198,43 @@ describe("shared routing model picker integration", () => {
     );
   });
 
+  it("keeps the Model and Effort Tab loop active while Shift remains held", () => {
+    const modelKeySource = pageSource.match(
+      /const handleModelKeyDown[\s\S]*?\n  \};/u,
+    )?.[0];
+    const effortKeySource = pageSource.match(
+      /const handleEffortKeyDown[\s\S]*?\n  \};/u,
+    )?.[0];
+
+    assert.ok(modelKeySource);
+    assert.ok(effortKeySource);
+    assert.match(modelKeySource, /event\.key === "Tab"/u);
+    assert.doesNotMatch(modelKeySource, /event\.shiftKey/u);
+    assert.match(effortKeySource, /event\.key !== "Tab"/u);
+    assert.doesNotMatch(effortKeySource, /event\.shiftKey/u);
+    assert.match(
+      pageSource,
+      /activePickerControl\?\.dataset\.pickerSurface[\s\S]{0,220}keep repeated Tab presses[\s\S]{0,100}return;/u,
+    );
+    assert.match(tutorialSource, /even if Shift is still held/u);
+  });
+
+  it("hands a pointer-opened picker to its sibling when Tab is pressed", () => {
+    assert.match(
+      pageSource,
+      /className=\{styles\.composeModelTrigger\}[\s\S]{0,220}onClick=\{\(event\) => \{[\s\S]{0,100}event\.currentTarget\.focus\(\)/u,
+    );
+    assert.match(
+      pageSource,
+      /className=\{styles\.composeModelEffortTrigger\}[\s\S]{0,300}onClick=\{\(event\) => \{[\s\S]{0,100}event\.currentTarget\.focus\(\)/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(event\.key === "Tab" && !effortInteractionDisabled\)/u,
+    );
+    assert.match(tutorialSource, /Pressing Tab after clicking either picker/u);
+  });
+
   it("adds exactly one spectrum color at each effort increase", () => {
     assert.deepEqual(effortGlyphColors("auto"), effortGlyphColors("none"));
     assert.equal(effortGlyphColors("minimal").length, 1);
@@ -314,7 +351,7 @@ describe("shared routing model picker integration", () => {
     assert.match(tutorialSource, /online simulation may add provider usage or cost/u);
     assert.match(tutorialSource, /Cmd\/Ctrl\+Shift\+E/u);
     assert.match(tutorialSource, /Shift\+Tab opens Model/u);
-    assert.match(tutorialSource, /Tab commits it and moves directly into Effort/u);
+    assert.match(tutorialSource, /tap Tab again to commit it and move directly into Effort/u);
     assert.match(tutorialSource, /Settings → Shortcuts/u);
     assert.match(tutorialSource, /prepared work is discarded/u);
   });

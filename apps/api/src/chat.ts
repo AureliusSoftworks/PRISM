@@ -127,6 +127,8 @@ import {
   isPrismMoodIgnoring,
   modelSupportsNativeReasoningEffort,
   normalizeReasoningEffort,
+  reasoningGenerationBudgetMs,
+  REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
   normalizePrismMoodSensitivity,
   prismMoodDeclineReason,
   prismMoodIgnoreForgivenessChance,
@@ -156,6 +158,7 @@ import {
   runAutoFallbackChain,
   validateAutoFallbackText,
 } from "./auto-fallback.ts";
+import { runWithReasoningGenerationBudget } from "./model-effort-runner.ts";
 import type { AssistantSentImageUserPrefs } from "./assistant-sent-image.ts";
 import {
   peekActiveImageJobForUser,
@@ -1833,8 +1836,13 @@ async function generateChatResponse(args: {
           });
         },
       })),
-      perAttemptTimeoutMs: 60_000,
-      totalTimeoutMs: resolvedChain.length * 60_000,
+      perAttemptTimeoutMs: (attempt) =>
+        reasoningGenerationBudgetMs(
+          args.resolveReasoningEffort?.(attempt.provider, attempt.model) ??
+            args.botOverrides?.reasoningEffort,
+          { provider: attempt.provider, modelId: attempt.model },
+        ),
+      totalTimeoutMs: REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
       signal: args.signal,
       validate: (raw) => {
         const base = validateAutoFallbackText(raw);
@@ -1858,19 +1866,31 @@ async function generateChatResponse(args: {
     });
   }
 
-  const prepared = await prepareAttempt(
-    args.provider,
-    primaryModel,
-    args.botOverrides,
-    args.signal,
+  const primaryEffort = normalizeReasoningEffort(
+    args.resolveReasoningEffort?.(args.provider.name, primaryModel) ??
+      args.botOverrides?.reasoningEffort,
   );
-  const assistantReplyRaw = await args.provider.generateResponse(
-    prepared.messages,
-    withGenerationSignal(
-      { ...prepared.overrides, usagePurpose: "chat_reply" },
-      args.signal
-    )
-  );
+  const assistantReplyRaw = await runWithReasoningGenerationBudget({
+    effort: primaryEffort,
+    provider: args.provider.name,
+    modelId: primaryModel,
+    signal: args.signal,
+    run: async (signal) => {
+      const prepared = await prepareAttempt(
+        args.provider,
+        primaryModel,
+        args.botOverrides,
+        signal,
+      );
+      return args.provider.generateResponse(
+        prepared.messages,
+        withGenerationSignal(
+          { ...prepared.overrides, usagePurpose: "chat_reply" },
+          signal,
+        ),
+      );
+    },
+  });
   return withPlanningTrace({
     assistantReplyRaw,
     providerNameUsed: args.provider.name,

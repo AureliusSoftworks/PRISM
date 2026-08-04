@@ -277,6 +277,7 @@ import {
   readBotcastShowIntroAudio,
   readBotcastShowOutdentAudio,
   recordBotcastAudioCue,
+  recordBotcastSessionClockHold,
   recordBotcastSoundboardCue,
   resolveBotcastProducerGuestName,
   setBotcastEpisodeCameraMode,
@@ -16330,6 +16331,41 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           ctx.params.id,
           body.active,
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          episode: projectBotcastEpisodeForAudienceV1(episode),
+        });
+      },
+    ),
+    route(
+      "POST",
+      "/api/botcast/episodes/:id/session-clock-hold",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const body = ctx.body as Record<string, unknown>;
+        if (typeof body.holdId !== "string" || !body.holdId.trim()) {
+          throw new HttpError(400, "holdId is required.");
+        }
+        if (body.reason !== "foreground_generation") {
+          throw new HttpError(400, "reason must be foreground_generation.");
+        }
+        if (
+          typeof body.durationMs !== "number" ||
+          !Number.isFinite(body.durationMs) ||
+          body.durationMs < 0
+        ) {
+          throw new HttpError(400, "durationMs must be a non-negative number.");
+        }
+        const episode = recordBotcastSessionClockHold(
+          db,
+          userId,
+          ctx.params.id,
+          {
+            holdId: body.holdId,
+            reason: body.reason,
+            durationMs: body.durationMs,
+          },
         );
         json(ctx.res, 200, {
           ok: true,

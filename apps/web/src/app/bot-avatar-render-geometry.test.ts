@@ -25,7 +25,7 @@ describe("Avatar Details face registration", () => {
       "--avatar-details-ink-aperture-scale":
         BOT_AVATAR_DETAILS_INK_APERTURE_SCALE,
     });
-    assert.equal(BOT_AVATAR_DETAILS_INK_APERTURE_SCALE, 0.82);
+    assert.equal(BOT_AVATAR_DETAILS_INK_APERTURE_SCALE, 1);
   });
 });
 

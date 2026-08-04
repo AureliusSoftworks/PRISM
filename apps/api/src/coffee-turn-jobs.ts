@@ -6,7 +6,7 @@ import type {
   ReasoningEffort,
 } from "@localai/shared";
 
-const COFFEE_TURN_JOB_TTL_MS = 5 * 60_000;
+export const COFFEE_TURN_JOB_TTL_MS = 12 * 60_000;
 
 type InternalCoffeeTurnJob = CoffeeTurnJobStatus & {
   userId: string;
@@ -62,7 +62,7 @@ export function startCoffeeTurnJob(args: {
    * never cancel a response already being prepared for the player. */
   supersedeExisting?: boolean;
   effort?: ReasoningEffort | null;
-  /** Test and embedding override; production jobs use the five-minute default. */
+  /** Test and embedding override; production jobs outlive bounded AUTO recovery. */
   ttlMs?: number;
   run: (context: {
     signal: AbortSignal;

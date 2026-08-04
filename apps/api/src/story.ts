@@ -72,6 +72,7 @@ import type {
 } from "./providers.ts";
 import {
   prepareMessagesWithSimulatedEffort,
+  runWithReasoningGenerationBudget,
   shouldPrepareMessagesWithSimulatedEffort,
 } from "./model-effort-runner.ts";
 
@@ -1543,6 +1544,7 @@ export async function repairStoryQuietContextDependencies(args: {
   provider: LlmProvider;
   model: string;
   reasoningEffort?: ReasoningEffort;
+  signal?: AbortSignal;
 }): Promise<StoryEpisodeManifest> {
   const botsById = new Map(args.bots.map((bot) => [bot.id, bot] as const));
   const affected = args.episode.scenes.flatMap((scene, index) => {
@@ -1587,6 +1589,7 @@ export async function repairStoryQuietContextDependencies(args: {
       maxTokens: Math.min(900, Math.max(220, affected.length * 180)),
       temperature: 0.2,
       ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}),
+      ...(args.signal ? { signal: args.signal } : {}),
     },
   );
   const parsed = extractJsonObjects(response).find((candidate) =>
@@ -2163,6 +2166,83 @@ function storyGenerationLooseJsonOptions(args: StoryGenerationInput): GenerateOp
   return options;
 }
 
+async function generateStoryEpisodeWithRepairs(
+  args: StoryGenerationInput,
+  signal: AbortSignal,
+): Promise<StoryEpisodeManifest> {
+  let generationMessages: ProviderMessage[] = [
+    {
+      role: "system" as const,
+      content: storyGenerationSystemPrompt(args),
+    },
+    { role: "user" as const, content: storyGenerationPrompt(args) },
+  ];
+  if (
+    shouldPrepareMessagesWithSimulatedEffort({
+      provider: args.providerName,
+      model: args.model,
+      effort: args.reasoningEffort,
+    })
+  ) {
+    generationMessages = await prepareMessagesWithSimulatedEffort({
+      provider: args.provider,
+      messages: generationMessages,
+      options: { ...storyGenerationOptions(args), signal },
+      effort: args.reasoningEffort,
+      surface: "story",
+      outputContract:
+        "Return the complete Story episode manifest matching the requested JSON schema and every bot Power constraint.",
+    });
+  }
+  const raw = await args.provider.generateResponse(generationMessages, {
+    ...storyGenerationOptions(args),
+    signal,
+  });
+  try {
+    return parseGeneratedStoryEpisode(raw, args);
+  } catch (parseError) {
+    const repairedRaw = await args.provider.generateResponse(
+      [
+        { role: "system", content: storyGenerationSystemPrompt(args) },
+        {
+          role: "user",
+          content: storyGenerationRepairPrompt(args, raw, parseError),
+        },
+      ],
+      { ...storyGenerationRepairOptions(args), signal },
+    );
+    try {
+      return parseGeneratedStoryEpisode(repairedRaw, args);
+    } catch (repairError) {
+      const regeneratedRaw = await args.provider.generateResponse(
+        [
+          { role: "system", content: storyGenerationSystemPrompt(args) },
+          {
+            role: "user",
+            content: storyGenerationSchemaRepairPrompt(args, repairError),
+          },
+        ],
+        { ...storyGenerationSchemaRepairOptions(args), signal },
+      );
+      try {
+        return parseGeneratedStoryEpisode(regeneratedRaw, args);
+      } catch (schemaRepairError) {
+        const looseRaw = await args.provider.generateResponse(
+          [
+            { role: "system", content: storyGenerationSystemPrompt(args) },
+            {
+              role: "user",
+              content: storyGenerationLooseJsonPrompt(args, schemaRepairError),
+            },
+          ],
+          { ...storyGenerationLooseJsonOptions(args), signal },
+        );
+        return parseGeneratedStoryEpisode(looseRaw, args);
+      }
+    }
+  }
+}
+
 export async function generateStorySessionEpisode(
   db: DatabaseSync,
   userId: string,
@@ -2175,90 +2255,34 @@ export async function generateStorySessionEpisode(
   ).run(nowStart, sessionId, userId);
 
   try {
-    let generationMessages: ProviderMessage[] = [
-      {
-        role: "system" as const,
-        content: storyGenerationSystemPrompt(args),
-      },
-      { role: "user" as const, content: storyGenerationPrompt(args) },
-    ];
-    if (
-      shouldPrepareMessagesWithSimulatedEffort({
-        provider: args.providerName,
-        model: args.model,
-        effort: args.reasoningEffort,
-      })
-    ) {
-      generationMessages = await prepareMessagesWithSimulatedEffort({
-        provider: args.provider,
-        messages: generationMessages,
-        options: storyGenerationOptions(args),
-        effort: args.reasoningEffort,
-        surface: "story",
-        outputContract:
-          "Return the complete Story episode manifest matching the requested JSON schema and every bot Power constraint.",
-      });
-    }
-    const raw = await args.provider.generateResponse(
-      generationMessages,
-      storyGenerationOptions(args)
-    );
-    let episode: StoryEpisodeManifest;
-    try {
-      episode = parseGeneratedStoryEpisode(raw, args);
-    } catch (parseError) {
-      const repairedRaw = await args.provider.generateResponse(
-        [
-          {
-            role: "system",
-            content: storyGenerationSystemPrompt(args),
-          },
-          { role: "user", content: storyGenerationRepairPrompt(args, raw, parseError) },
-        ],
-        storyGenerationRepairOptions(args)
-      );
-      try {
-        episode = parseGeneratedStoryEpisode(repairedRaw, args);
-      } catch (repairError) {
-        const regeneratedRaw = await args.provider.generateResponse(
-          [
-            {
-              role: "system",
-              content: storyGenerationSystemPrompt(args),
-            },
-            { role: "user", content: storyGenerationSchemaRepairPrompt(args, repairError) },
-          ],
-          storyGenerationSchemaRepairOptions(args)
-        );
+    const episode = await runWithReasoningGenerationBudget({
+      effort: args.reasoningEffort,
+      provider: args.providerName,
+      modelId: args.model,
+      run: async (signal) => {
+        let generatedEpisode = await generateStoryEpisodeWithRepairs(args, signal);
+        generatedEpisode = applyStoryHardResponsePowers(generatedEpisode, args.bots);
         try {
-          episode = parseGeneratedStoryEpisode(regeneratedRaw, args);
-        } catch (schemaRepairError) {
-          const looseRaw = await args.provider.generateResponse(
-            [
-              {
-                role: "system",
-                content: storyGenerationSystemPrompt(args),
-              },
-              { role: "user", content: storyGenerationLooseJsonPrompt(args, schemaRepairError) },
-            ],
-            storyGenerationLooseJsonOptions(args)
+          generatedEpisode = await repairStoryQuietContextDependencies({
+            episode: generatedEpisode,
+            bots: args.bots,
+            provider: args.provider,
+            model: args.model,
+            ...(args.reasoningEffort
+              ? { reasoningEffort: args.reasoningEffort }
+              : {}),
+            signal,
+          });
+        } catch (error) {
+          if (signal.aborted) throw error;
+          console.warn(
+            "Story Quiet context repair pass failed; preserving the deterministic redacted fallback.",
+            error,
           );
-          episode = parseGeneratedStoryEpisode(looseRaw, args);
         }
-      }
-    }
-    episode = applyStoryHardResponsePowers(episode, args.bots);
-    try {
-      episode = await repairStoryQuietContextDependencies({
-        episode,
-        bots: args.bots,
-        provider: args.provider,
-        model: args.model,
-        ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}),
-      });
-    } catch (error) {
-      console.warn("Story Quiet context repair pass failed; preserving the deterministic redacted fallback.", error);
-    }
+        return generatedEpisode;
+      },
+    });
     const now = new Date().toISOString();
     const progress = createInitialStoryProgress(episode, now);
     const transcript = createInitialStoryTranscript(episode, randomId(12), now);

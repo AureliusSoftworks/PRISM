@@ -17,7 +17,6 @@ import type {
 } from "./adjustmentPadModel";
 import styles from "./PronunciationAtlas.module.css";
 import {
-  PRONUNCIATION_ATLAS_ANCHORS,
   nudgePronunciationAtlasSelection,
   normalizePronunciationAtlasSelection,
   pronunciationAtlasAnchorForSelection,
@@ -57,37 +56,12 @@ function padValueForSelection(
   };
 }
 
-function selectedAnchorId(selection: PronunciationAtlasSelection): string {
-  return pronunciationAtlasAnchorForSelection(selection).id;
-}
-
-function PronunciationAtlasMap({
-  selection,
-}: {
-  selection: PronunciationAtlasSelection;
-}): ReactElement {
-  const selectedId = selectedAnchorId(selection);
+function PronunciationAtlasMap(): ReactElement {
   return (
     <div className={styles.map} aria-hidden="true">
       <span className={styles.world} />
       <div className={styles.longitudeLines} />
       <div className={styles.scan} />
-      {PRONUNCIATION_ATLAS_ANCHORS.map((anchor) => (
-        <span
-          key={anchor.id}
-          className={styles.anchor}
-          data-active={anchor.id === selectedId ? "true" : undefined}
-          data-base={anchor.base ? "true" : undefined}
-          style={
-            {
-              "--atlas-anchor-x": `${anchor.point.x * 100}%`,
-              "--atlas-anchor-y": `${anchor.point.y * 100}%`,
-            } as CSSProperties
-          }
-        >
-          {anchor.shortLabel}
-        </span>
-      ))}
     </div>
   );
 }
@@ -195,9 +169,7 @@ export function PronunciationAtlas({
           setDraftValue(null);
           onCancel?.(snapped.selection);
         }}
-        renderOverlay={({ value }) => (
-          <PronunciationAtlasMap selection={value.selection} />
-        )}
+        renderOverlay={() => <PronunciationAtlasMap />}
       />
       <div className={styles.controls}>
         {padValue.selection.influence !== "none" ? (
@@ -229,7 +201,7 @@ export function PronunciationAtlas({
           </div>
         ) : (
           <small className={styles.naturalHint}>
-            Drag toward a glowing region to introduce an influence.
+            Drag across the map to introduce a pronunciation influence.
           </small>
         )}
         <details className={styles.listFallback} id={fallbackId}>

@@ -67,14 +67,29 @@ export function findModelReasoningEffortPreference(
   provider: NativeReasoningEffortProvider,
   modelId: string,
 ): ModelReasoningEffortPreference | null {
-  const row = db
-    .prepare(
-      `SELECT provider, model_id, effort, updated_at
-         FROM model_reasoning_effort_preferences
-        WHERE user_id = ? AND provider = ? AND model_id = ?
-        LIMIT 1`,
-    )
-    .get(userId, provider, modelId) as ModelEffortPreferenceRow | undefined;
+  let row: ModelEffortPreferenceRow | undefined;
+  try {
+    row = db
+      .prepare(
+        `SELECT provider, model_id, effort, updated_at
+           FROM model_reasoning_effort_preferences
+          WHERE user_id = ? AND provider = ? AND model_id = ?
+          LIMIT 1`,
+      )
+      .get(userId, provider, modelId) as ModelEffortPreferenceRow | undefined;
+  } catch (error) {
+    // Older portable databases and focused in-memory fixtures can predate the
+    // preference table. Treat that state as provider Default until migration.
+    if (
+      error instanceof Error &&
+      /no such table:\s*model_reasoning_effort_preferences/iu.test(
+        error.message,
+      )
+    ) {
+      return null;
+    }
+    throw error;
+  }
   return row ? (preferenceFromRow(row)?.effort ?? null) : null;
 }
 

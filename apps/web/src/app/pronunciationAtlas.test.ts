@@ -41,6 +41,9 @@ describe("Pronunciation Atlas", () => {
         y: 0.588,
       },
       "influence-japanese-influenced-english": { x: 0.888, y: 0.302 },
+      "influence-italian-influenced-english": { x: 0.535, y: 0.267 },
+      "influence-australian-english": { x: 0.914, y: 0.696 },
+      "influence-canadian-english": { x: 0.29, y: 0.248 },
     } as const;
 
     for (const [id, expected] of Object.entries(expectedPoints)) {

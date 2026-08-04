@@ -155,6 +155,10 @@ import {
 } from "./prismBrand";
 import SlateWorkspace from "./SlateWorkspace";
 import PrismCompanion from "./PrismCompanion";
+import {
+  PrismRefractTarget,
+  type PrismRefractBinding,
+} from "./prismRefract";
 import { registerSpatialUiSfx } from "./spatialUiSfx";
 import PrismHandoffCanvas from "./PrismHandoffCanvas";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
@@ -760,6 +764,7 @@ import {
   replayAudioMasterCaptureDirection,
   replayAudioMasterCaptureEvents,
   replayAudioMasterCaptureMouthTracks,
+  setReplayAudioMasterCompactHold,
   startReplayAudioMasterCapture,
   stopReplayAudioMasterCapture,
   syncReplayThinkingPresentations,
@@ -23745,7 +23750,6 @@ function ComposerModelPicker({
   const menuRef = useRef<HTMLDivElement>(null);
   const effortTriggerRef = useRef<HTMLButtonElement>(null);
   const effortMenuRef = useRef<HTMLDivElement>(null);
-  const modelWheelLockedRef = useRef(false);
   const effortWheelLockedRef = useRef(false);
   const formValueRef = useRef<HTMLInputElement>(null);
   const autoMetaShown = autoOptionMetaOverride ?? AUTO_MODEL_SETTINGS_SUBTEXT;
@@ -23948,6 +23952,9 @@ function ComposerModelPicker({
       return;
     }
     const handleQuickWheel = (event: WheelEvent): void => {
+      // Model always keeps native wheel scrolling. Only Effort owns wheel
+      // selection, including cursor-independent keyboard quick-select mode.
+      if (menuOpen) return;
       if (
         event.ctrlKey ||
         Math.max(Math.abs(event.deltaX), Math.abs(event.deltaY)) < 2
@@ -23961,20 +23968,6 @@ function ComposerModelPicker({
       if (direction === 0) return;
       event.preventDefault();
       event.stopPropagation();
-      if (menuOpen) {
-        if (
-          selectableModelValues.length <= 1 ||
-          modelWheelLockedRef.current
-        ) {
-          return;
-        }
-        modelWheelLockedRef.current = true;
-        window.setTimeout(() => {
-          modelWheelLockedRef.current = false;
-        }, 90);
-        moveModelHighlight(direction);
-        return;
-      }
       if (
         !effortControl ||
         effortInteractionDisabled ||
@@ -24038,7 +24031,6 @@ function ComposerModelPicker({
     menuOpen,
     moveModelHighlight,
     pickerOpenState.interactionMode,
-    selectableModelValues.length,
     setEffortValue,
   ]);
 
@@ -24077,30 +24069,19 @@ function ComposerModelPicker({
   ]);
 
   useEffect(() => {
-    if (!menuOpen) return;
-    const handler = (event: MouseEvent) => {
+    if (!menuOpen && !effortMenuOpen) return;
+    const handler = (event: PointerEvent) => {
       if (!isPrimaryPointerDismissal(event)) return;
       const target = event.target as Node;
       if (triggerRef.current?.contains(target)) return;
-      if (menuRef.current?.contains(target)) return;
-      setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
-    };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [menuOpen]);
-
-  useEffect(() => {
-    if (!effortMenuOpen) return;
-    const handler = (event: MouseEvent) => {
-      if (!isPrimaryPointerDismissal(event)) return;
-      const target = event.target as Node;
       if (effortTriggerRef.current?.contains(target)) return;
+      if (menuRef.current?.contains(target)) return;
       if (effortMenuRef.current?.contains(target)) return;
       setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
-  }, [effortMenuOpen]);
+    document.addEventListener("pointerdown", handler, true);
+    return () => document.removeEventListener("pointerdown", handler, true);
+  }, [effortMenuOpen, menuOpen]);
 
   useEffect(() => {
     if (!menuOpen) return;
@@ -24202,7 +24183,7 @@ function ComposerModelPicker({
       pick(activeHighlightedModelValue ?? value);
       return;
     }
-    if (event.key === "Tab" && !event.shiftKey && !effortInteractionDisabled) {
+    if (event.key === "Tab" && !effortInteractionDisabled) {
       event.preventDefault();
       event.stopPropagation();
       setPickerOpenState({
@@ -24222,7 +24203,7 @@ function ComposerModelPicker({
       dismissPickersToComposer();
       return;
     }
-    if (event.key !== "Tab" || event.shiftKey || !effortMenuOpen) return;
+    if (event.key !== "Tab" || !effortMenuOpen) return;
     event.preventDefault();
     event.stopPropagation();
     setHighlightedModelValue(
@@ -24272,7 +24253,8 @@ function ComposerModelPicker({
         type="button"
         className={styles.composeModelTrigger}
         data-prism-model-picker-trigger="true"
-        onClick={() => {
+        onClick={(event) => {
+          event.currentTarget.focus();
           setPickerOpenState((current) =>
             current.surface === "model"
               ? CLOSED_COMPOSER_MODEL_PICKER_STATE
@@ -24328,7 +24310,8 @@ function ComposerModelPicker({
             }
             data-effort-level={effortControl.value}
             data-generating={generating ? "true" : undefined}
-            onClick={() => {
+            onClick={(event) => {
+              event.currentTarget.focus();
               effortControl.onActivate?.();
               setPickerOpenState((current) =>
                 current.surface === "effort"
@@ -37424,7 +37407,13 @@ function BotAvatarCustomGlyphCapture({
   };
 
   return (
+    <BotAvatarRefractRandomizer
+      label={ariaLabel}
+      onRandomize={onRandomize}
+    >
+      {(binding) => (
     <div
+      {...binding}
       className={styles.botAvatarCustomGlyphCapture}
       data-capturing={capturing ? "true" : undefined}
     >
@@ -37465,7 +37454,6 @@ function BotAvatarCustomGlyphCapture({
           {capturing ? "Type glyph…" : value ? "Custom" : "Set glyph"}
         </strong>
       </button>
-      <BotFieldRandomizerButton label={ariaLabel} onRandomize={onRandomize} />
       {value ? (
         <button
           type="button"
@@ -37477,6 +37465,8 @@ function BotAvatarCustomGlyphCapture({
         </button>
       ) : null}
     </div>
+      )}
+    </BotAvatarRefractRandomizer>
   );
 }
 
@@ -38644,6 +38634,41 @@ function BotFieldRandomizerButton({
   );
 }
 
+function BotAvatarRefractRandomizer({
+  label,
+  onRandomize,
+  disabled = false,
+  children,
+}: {
+  label: string;
+  onRandomize: () => void | Promise<void>;
+  disabled?: boolean;
+  children: (binding: PrismRefractBinding) => ReactNode;
+}): ReactNode {
+  const reactId = useId();
+  const randomizeRef = useRef(onRandomize);
+  const disabledRef = useRef(disabled);
+
+  useEffect(() => {
+    randomizeRef.current = onRandomize;
+    disabledRef.current = disabled;
+  }, [disabled, onRandomize]);
+
+  return (
+    <PrismRefractTarget
+      target={{
+        id: `avatar-studio-randomize-${reactId}`,
+        kind: "magic",
+        label,
+        disabled: () => disabledRef.current,
+        run: () => randomizeRef.current(),
+      }}
+    >
+      {children}
+    </PrismRefractTarget>
+  );
+}
+
 function BotAvatarIdentityControls({
   name,
   namePronunciation,
@@ -38680,52 +38705,54 @@ function BotAvatarIdentityControls({
           <small>Identity and pronunciation</small>
         </div>
       </header>
-      <div className={styles.botAvatarIdentityNameField}>
-        <div className={styles.botAvatarIdentityFieldLabelRow}>
-          <div className={styles.botAvatarIdentityFieldLabel}>
-            <label htmlFor={fullNameInputId}>Name</label>
-            <button
-              type="button"
-              className={styles.botAvatarIdentityDisclosureButton}
-              data-expanded={pronunciationExpanded ? "true" : undefined}
-              aria-label={
-                pronunciationExpanded
-                  ? "Hide pronunciation"
-                  : "Show optional pronunciation"
-              }
-              aria-expanded={pronunciationExpanded}
-              aria-controls={pronunciationDetailsId}
-              onClick={() => {
-                setPronunciationExpanded((current) => !current);
-              }}
-            >
-              <ChevronDown
-                className={styles.botAvatarIdentityDisclosureIcon}
-                size={14}
-                strokeWidth={2.3}
-                aria-hidden="true"
-              />
-            </button>
+      <BotAvatarRefractRandomizer
+        label="Bot name"
+        disabled={!onRandomizeName}
+        onRandomize={() => onRandomizeName?.()}
+      >
+        {(binding) => (
+        <div {...binding} className={styles.botAvatarIdentityNameField}>
+          <div className={styles.botAvatarIdentityFieldLabelRow}>
+            <div className={styles.botAvatarIdentityFieldLabel}>
+              <label htmlFor={fullNameInputId}>Name</label>
+              <button
+                type="button"
+                className={styles.botAvatarIdentityDisclosureButton}
+                data-expanded={pronunciationExpanded ? "true" : undefined}
+                aria-label={
+                  pronunciationExpanded
+                    ? "Hide pronunciation"
+                    : "Show optional pronunciation"
+                }
+                aria-expanded={pronunciationExpanded}
+                aria-controls={pronunciationDetailsId}
+                onClick={() => {
+                  setPronunciationExpanded((current) => !current);
+                }}
+              >
+                <ChevronDown
+                  className={styles.botAvatarIdentityDisclosureIcon}
+                  size={14}
+                  strokeWidth={2.3}
+                  aria-hidden="true"
+                />
+              </button>
+            </div>
           </div>
-          {onRandomizeName ? (
-            <BotFieldRandomizerButton
-              label="name"
-              onRandomize={onRandomizeName}
-            />
-          ) : null}
+          <input
+            id={fullNameInputId}
+            type="text"
+            value={name}
+            placeholder="Name this bot"
+            autoCapitalize="words"
+            autoCorrect="off"
+            spellCheck={false}
+            aria-label="Bot name"
+            onChange={(event) => onNameChange(event.currentTarget.value)}
+          />
         </div>
-        <input
-          id={fullNameInputId}
-          type="text"
-          value={name}
-          placeholder="Name this bot"
-          autoCapitalize="words"
-          autoCorrect="off"
-          spellCheck={false}
-          aria-label="Bot name"
-          onChange={(event) => onNameChange(event.currentTarget.value)}
-        />
-      </div>
+        )}
+      </BotAvatarRefractRandomizer>
       {pronunciationExpanded ? (
         <div
           id={pronunciationDetailsId}
@@ -38815,12 +38842,13 @@ function BotAvatarRangeControl({
     );
   };
   return (
-    <label className={styles.botAvatarRangeControl}>
+    <BotAvatarRefractRandomizer label={label} onRandomize={randomize}>
+      {(binding) => (
+    <label {...binding} className={styles.botAvatarRangeControl}>
       <span>
         {label}
         <span className={styles.botAvatarAtomicFieldActions}>
           <strong>{valueLabel}</strong>
-          <BotFieldRandomizerButton label={label} onRandomize={randomize} />
         </span>
       </span>
       <input
@@ -38837,6 +38865,8 @@ function BotAvatarRangeControl({
         <span>{rightLabel}</span>
       </div>
     </label>
+      )}
+    </BotAvatarRefractRandomizer>
   );
 }
 
@@ -38893,53 +38923,43 @@ function BotAvatarCoordinateControl({
     y: { min: minY, max: maxY, step: stepY },
     valueText: (next) => botAvatarCoordinateLabel(-next.x, next.y),
   });
+  const randomAxis = (
+    current: number,
+    min: number,
+    max: number,
+    step: number,
+  ): number => {
+    const count = Math.max(1, Math.floor((max - min) / step) + 1);
+    if (count <= 1) return current;
+    const currentIndex = Math.round((current - min) / step);
+    const offset = 1 + Math.floor(Math.random() * (count - 1));
+    return Number(
+      (min + ((currentIndex + offset) % count) * step).toFixed(4),
+    );
+  };
 
   return (
-    <section className={styles.botAvatarCoordinateControl} aria-label={label}>
+    <BotAvatarRefractRandomizer
+      label={label}
+      onRandomize={() =>
+        onChange({
+          x: randomAxis(x, minX, maxX, stepX),
+          y: randomAxis(y, minY, maxY, stepY),
+        })
+      }
+    >
+      {(binding) => (
+    <section
+      {...binding}
+      className={styles.botAvatarCoordinateControl}
+      aria-label={label}
+    >
       <header>
         <span>
           <strong>{label}</strong>
           <small>{botAvatarCoordinateLabel(visualX, y)}</small>
         </span>
         <span className={styles.botAvatarAtomicFieldActions}>
-          <BotFieldRandomizerButton
-            label={`${label} X coordinate`}
-            onRandomize={() => {
-              const randomAxis = (
-                current: number,
-                min: number,
-                max: number,
-                step: number,
-              ): number => {
-                const count = Math.max(1, Math.floor((max - min) / step) + 1);
-                if (count <= 1) return current;
-                const currentIndex = Math.round((current - min) / step);
-                const offset = 1 + Math.floor(Math.random() * (count - 1));
-                return Number(
-                  (min + ((currentIndex + offset) % count) * step).toFixed(4),
-                );
-              };
-              onChange({
-                x: randomAxis(x, minX, maxX, stepX),
-                y,
-              });
-            }}
-          />
-          <BotFieldRandomizerButton
-            label={`${label} Y coordinate`}
-            onRandomize={() => {
-              const count = Math.max(1, Math.floor((maxY - minY) / stepY) + 1);
-              if (count <= 1) return;
-              const currentIndex = Math.round((y - minY) / stepY);
-              const offset = 1 + Math.floor(Math.random() * (count - 1));
-              onChange({
-                x,
-                y: Number(
-                  (minY + ((currentIndex + offset) % count) * stepY).toFixed(4),
-                ),
-              });
-            }}
-          />
           <button type="button" onClick={onReset} aria-label={`Reset ${label}`}>
             <RotateCcw size={12} strokeWidth={2.4} aria-hidden="true" />
           </button>
@@ -38956,6 +38976,8 @@ function BotAvatarCoordinateControl({
         onCancel={onCancel}
       />
     </section>
+      )}
+    </BotAvatarRefractRandomizer>
   );
 }
 
@@ -39853,9 +39875,28 @@ function BotAvatarMouthRotationWheel({
     const step = rotationStep * (large ? 3 : 1);
     commitRotation(normalizedValue + direction * step);
   };
+  const randomizeRotation = (): void => {
+    const count = Math.max(
+      1,
+      Math.floor((maxRotation - minRotation) / rotationStep) + 1,
+    );
+    const currentIndex = Math.round(
+      (normalizedValue - minRotation) / rotationStep,
+    );
+    const offset =
+      count > 1 ? 1 + Math.floor(Math.random() * (count - 1)) : 0;
+    onChange(minRotation + ((currentIndex + offset) % count) * rotationStep);
+  };
 
   return (
+    <BotAvatarRefractRandomizer
+      label={`${partLabel} rotation`}
+      disabled={disabled}
+      onRandomize={randomizeRotation}
+    >
+      {(binding) => (
     <section
+      {...binding}
       className={styles.botAvatarMouthRotationControl}
       aria-label={`${partLabel} rotation`}
       data-disabled={disabled ? "true" : undefined}
@@ -39866,24 +39907,6 @@ function BotAvatarMouthRotationWheel({
           <small>{valueLabel}</small>
         </span>
         <span className={styles.botAvatarAtomicFieldActions}>
-          <BotFieldRandomizerButton
-            label={`${partLabel.toLowerCase()} rotation`}
-            disabled={disabled}
-            onRandomize={() => {
-              const count = Math.max(
-                1,
-                Math.floor((maxRotation - minRotation) / rotationStep) + 1,
-              );
-              const currentIndex = Math.round(
-                (normalizedValue - minRotation) / rotationStep,
-              );
-              const offset =
-                count > 1 ? 1 + Math.floor(Math.random() * (count - 1)) : 0;
-              onChange(
-                minRotation + ((currentIndex + offset) % count) * rotationStep,
-              );
-            }}
-          />
           <button
             type="button"
             onClick={onReset}
@@ -39959,6 +39982,8 @@ function BotAvatarMouthRotationWheel({
         </div>
       </div>
     </section>
+      )}
+    </BotAvatarRefractRandomizer>
   );
 }
 
@@ -40017,23 +40042,21 @@ function BotAvatarGlyphAnimationControl({
   disabled: boolean;
   onChange: (value: BotFaceGlyphAnimation) => void;
 }): React.JSX.Element {
+  const randomize = (): void =>
+    onChange(randomBotAvatarDifferentChoice(value, BOT_FACE_GLYPH_ANIMATIONS));
   return (
+    <BotAvatarRefractRandomizer
+      label={label}
+      disabled={disabled}
+      onRandomize={randomize}
+    >
+      {(binding) => (
     <fieldset
+      {...binding}
       className={styles.botAvatarGlyphAnimationControl}
       disabled={disabled}
     >
-      <legend>
-        {label}{" "}
-        <BotFieldRandomizerButton
-          label={label}
-          disabled={disabled}
-          onRandomize={() =>
-            onChange(
-              randomBotAvatarDifferentChoice(value, BOT_FACE_GLYPH_ANIMATIONS),
-            )
-          }
-        />
-      </legend>
+      <legend>{label}</legend>
       <div role="group" aria-label={label}>
         {BOT_FACE_GLYPH_ANIMATIONS.map((animation) => (
           <button
@@ -40048,6 +40071,8 @@ function BotAvatarGlyphAnimationControl({
         ))}
       </div>
     </fieldset>
+      )}
+    </BotAvatarRefractRandomizer>
   );
 }
 
@@ -40288,26 +40313,20 @@ function BotAvatarFaceControls({
       className={styles.botAvatarShellControls}
       aria-label="Shell color and identity badge"
     >
-      <div className={styles.botAvatarIdentityPicker}>
-        <span className={styles.botAvatarAtomicFieldActions}>
-          <BotFieldRandomizerButton
-            label="bot color"
-            onRandomize={() =>
-              identitySection.onColorChange(randomHex([identitySection.color]))
-            }
-          />
-          <BotFieldRandomizerButton
-            label="bot glyph"
-            onRandomize={() =>
-              identitySection.onGlyphChange(
-                randomBotAvatarDifferentChoice(
-                  identitySection.glyph,
-                  CUSTOM_BOT_GLYPH_ORDER,
-                ),
-              )
-            }
-          />
-        </span>
+      <BotAvatarRefractRandomizer
+        label="Shell color and identity badge"
+        onRandomize={() => {
+          identitySection.onColorChange(randomHex([identitySection.color]));
+          identitySection.onGlyphChange(
+            randomBotAvatarDifferentChoice(
+              identitySection.glyph,
+              CUSTOM_BOT_GLYPH_ORDER,
+            ),
+          );
+        }}
+      >
+        {(binding) => (
+      <div {...binding} className={styles.botAvatarIdentityPicker}>
         <ColorGlyphPicker
           color={identitySection.color}
           glyph={identitySection.glyph}
@@ -40320,6 +40339,8 @@ function BotAvatarFaceControls({
           resolvedTheme={identitySection.resolvedTheme}
         />
       </div>
+        )}
+      </BotAvatarRefractRandomizer>
     </div>
   ) : (
     <section
@@ -40375,12 +40396,6 @@ function BotAvatarFaceControls({
               >
                 <strong>Coffee *</strong>
               </button>
-              <BotFieldRandomizerButton
-                label="Coffee pucker"
-                onRandomize={() =>
-                  onMouthCoffeePuckerChange(!faceMouthCoffeePucker)
-                }
-              />
             </span>
           ) : null}
           {!shellActive ? (
@@ -40481,22 +40496,21 @@ function BotAvatarFaceControls({
               </div>
             </fieldset>
 
-            <fieldset className={styles.botAvatarThinkingControl}>
-              <legend>
-                Thinking animation{" "}
-                <BotFieldRandomizerButton
-                  label="thinking animation"
-                  onRandomize={() =>
-                    onThinkingFramesChange(
-                      randomBotAvatarDifferentChoice(
-                        faceThinkingFrames,
-                        BOT_AVATAR_RANDOM_CUSTOM_THINKING_FRAME_SETS,
-                        botFaceThinkingFramesEqual,
-                      ),
-                    )
-                  }
-                />
-              </legend>
+            <BotAvatarRefractRandomizer
+              label="Thinking animation"
+              onRandomize={() =>
+                onThinkingFramesChange(
+                  randomBotAvatarDifferentChoice(
+                    faceThinkingFrames,
+                    BOT_AVATAR_RANDOM_CUSTOM_THINKING_FRAME_SETS,
+                    botFaceThinkingFramesEqual,
+                  ),
+                )
+              }
+            >
+              {(binding) => (
+            <fieldset {...binding} className={styles.botAvatarThinkingControl}>
+              <legend>Thinking animation</legend>
               <div className={styles.botAvatarThinkingPresetStrip}>
                 {BOT_AVATAR_THINKING_PRESETS.map((preset) => (
                   <button
@@ -40589,19 +40603,6 @@ function BotAvatarFaceControls({
                           onThinkingFramesChange(pastedFrames);
                         }}
                       />
-                      <BotFieldRandomizerButton
-                        label={`thinking frame ${index + 1}`}
-                        onRandomize={() => {
-                          const frameChoices = [
-                            ...BOT_AVATAR_RANDOM_EYE_GLYPHS,
-                            ...BOT_AVATAR_RANDOM_MOUTH_GLYPHS,
-                          ];
-                          updateThinkingFrame(
-                            index,
-                            randomBotAvatarDifferentChoice(frame, frameChoices),
-                          );
-                        }}
-                      />
                     </label>
                   ))}
                 </div>
@@ -40629,25 +40630,23 @@ function BotAvatarFaceControls({
                 />
               </div>
             </fieldset>
+              )}
+            </BotAvatarRefractRandomizer>
           </div>
         )
       ) : activeTab === "eyes" ? (
         <div className={styles.botAvatarCustomControls}>
-          <fieldset className={styles.botAvatarExpressionRow}>
-            <legend>
-              Style{" "}
-              <BotFieldRandomizerButton
-                label="eye font"
-                onRandomize={() =>
-                  selectEyeFont(
-                    randomBotAvatarDifferentChoice(
-                      faceEyesFont,
-                      BOT_FACE_FONT_IDS,
-                    ),
-                  )
-                }
-              />
-            </legend>
+          <BotAvatarRefractRandomizer
+            label="Eye style"
+            onRandomize={() =>
+              selectEyeFont(
+                randomBotAvatarDifferentChoice(faceEyesFont, BOT_FACE_FONT_IDS),
+              )
+            }
+          >
+            {(binding) => (
+          <fieldset {...binding} className={styles.botAvatarExpressionRow}>
+            <legend>Style</legend>
             <div className={styles.botAvatarFontOptions}>
               {BOT_FACE_FONT_IDS.map((fontId) => (
                 <BotAvatarFontOption
@@ -40660,6 +40659,8 @@ function BotAvatarFaceControls({
               ))}
             </div>
           </fieldset>
+            )}
+          </BotAvatarRefractRandomizer>
           <div className={styles.botAvatarSliderStack}>
             <BotAvatarRangeControl
               label="Stroke weight"
@@ -40711,16 +40712,15 @@ function BotAvatarFaceControls({
                 />
               </div>
               {customEyeActive ? (
-                <div className={styles.botAvatarEyeCountControl}>
-                  <span>
-                    Eye count{" "}
-                    <BotFieldRandomizerButton
-                      label="eye count"
-                      onRandomize={() =>
-                        onEyeCountChange(faceEyeCount === 1 ? 2 : 1)
-                      }
-                    />
-                  </span>
+                <BotAvatarRefractRandomizer
+                  label="Eye count"
+                  onRandomize={() =>
+                    onEyeCountChange(faceEyeCount === 1 ? 2 : 1)
+                  }
+                >
+                  {(binding) => (
+                <div {...binding} className={styles.botAvatarEyeCountControl}>
+                  <span>Eye count</span>
                   <div
                     className={styles.botAvatarGlyphModeControl}
                     role="group"
@@ -40741,6 +40741,8 @@ function BotAvatarFaceControls({
                     ))}
                   </div>
                 </div>
+                  )}
+                </BotAvatarRefractRandomizer>
               ) : null}
               <div className={styles.botAvatarCustomGeometry}>
                 <BotAvatarRangeControl
@@ -40759,22 +40761,21 @@ function BotAvatarFaceControls({
                 value={faceEyeAnimation}
                 onChange={onEyeAnimationChange}
               />
-              <fieldset className={styles.botAvatarCustomChoiceGroup}>
-                <legend>
-                  Blink{" "}
-                  <BotFieldRandomizerButton
-                    label="blink glyph"
-                    onRandomize={() => {
-                      const choices = [
-                        ...BOT_FACE_BLINK_BAR_VALUES,
-                        ...BOT_AVATAR_RANDOM_CUSTOM_BLINK_GLYPHS,
-                      ] as readonly BotFaceBlinkBar[];
-                      onBlinkBarChange(
-                        randomBotAvatarDifferentChoice(faceBlinkBar, choices),
-                      );
-                    }}
-                  />
-                </legend>
+              <BotAvatarRefractRandomizer
+                label="Blink"
+                onRandomize={() => {
+                  const choices = [
+                    ...BOT_FACE_BLINK_BAR_VALUES,
+                    ...BOT_AVATAR_RANDOM_CUSTOM_BLINK_GLYPHS,
+                  ] as readonly BotFaceBlinkBar[];
+                  onBlinkBarChange(
+                    randomBotAvatarDifferentChoice(faceBlinkBar, choices),
+                  );
+                }}
+              >
+                {(binding) => (
+              <fieldset {...binding} className={styles.botAvatarCustomChoiceGroup}>
+                <legend>Blink</legend>
                 <div className={styles.botAvatarCustomChoiceStrip}>
                   {BOT_FACE_BLINK_BAR_VALUES.map((blinkBar) => (
                     <button
@@ -40862,26 +40863,27 @@ function BotAvatarFaceControls({
                   </div>
                 ) : null}
               </fieldset>
+                )}
+              </BotAvatarRefractRandomizer>
             </section>
           </div>
         </div>
       ) : activeTab === "mouth" ? (
         <div className={styles.botAvatarCustomControls}>
-          <fieldset className={styles.botAvatarExpressionRow}>
-            <legend>
-              Style{" "}
-              <BotFieldRandomizerButton
-                label="mouth font"
-                onRandomize={() =>
-                  selectMouthFont(
-                    randomBotAvatarDifferentChoice(
-                      faceMouthFont,
-                      BOT_FACE_FONT_IDS,
-                    ),
-                  )
-                }
-              />
-            </legend>
+          <BotAvatarRefractRandomizer
+            label="Mouth style"
+            onRandomize={() =>
+              selectMouthFont(
+                randomBotAvatarDifferentChoice(
+                  faceMouthFont,
+                  BOT_FACE_FONT_IDS,
+                ),
+              )
+            }
+          >
+            {(binding) => (
+          <fieldset {...binding} className={styles.botAvatarExpressionRow}>
+            <legend>Style</legend>
             <div className={styles.botAvatarFontOptions}>
               {BOT_FACE_FONT_IDS.map((fontId) => (
                 <BotAvatarFontOption
@@ -40894,6 +40896,8 @@ function BotAvatarFaceControls({
               ))}
             </div>
           </fieldset>
+            )}
+          </BotAvatarRefractRandomizer>
           <div className={styles.botAvatarSliderStack}>
             <BotAvatarRangeControl
               label="Stroke weight"
@@ -45497,6 +45501,14 @@ function HomeContent(): React.JSX.Element {
               right.getBoundingClientRect().top,
           )[0];
       if (!active) return;
+      const activePickerControl = active.closest<HTMLElement>(
+        "[data-picker-surface]",
+      );
+      if (activePickerControl?.dataset.pickerSurface) {
+        // Once the shortcut has opened this control, keep repeated Tab presses
+        // inside the picker loop even if Shift is still held.
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
       active.focus();
@@ -62588,10 +62600,12 @@ function HomeContent(): React.JSX.Element {
   const coffeeReplayCaptureBySessionRef = useRef<
     Map<string, ReplayAudioMasterCaptureResult>
   >(new Map());
+  const coffeeThinkingCompactHoldSourceIdRef = useRef<string | null>(null);
   const startCoffeeAudioMasterCapture = useCallback(
     async (sourceId: string): Promise<boolean> => {
       const voiceSelection = freezeRecordingVoiceSelection("coffee", sourceId);
       const started = await startReplayAudioMasterCapture(sourceId, {
+        compactThinkingGaps: true,
         markIntro: false,
         voiceSelection,
       });
@@ -62810,6 +62824,23 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     coffeeTurnRhythmStateRef.current = coffeeTurnRhythmState;
   }, [coffeeTurnRhythmState]);
+  useLayoutEffect(() => {
+    const sourceId = coffeeConversation?.id ?? null;
+    const shouldHold = Boolean(
+      sourceId &&
+        !coffeeReplayActive &&
+        coffeeTurnRhythmState === "botThinking",
+    );
+    const previousSourceId = coffeeThinkingCompactHoldSourceIdRef.current;
+    if (previousSourceId && (!shouldHold || previousSourceId !== sourceId)) {
+      setReplayAudioMasterCompactHold(previousSourceId, false);
+      coffeeThinkingCompactHoldSourceIdRef.current = null;
+    }
+    if (shouldHold && sourceId && previousSourceId !== sourceId) {
+      setReplayAudioMasterCompactHold(sourceId, true);
+      coffeeThinkingCompactHoldSourceIdRef.current = sourceId;
+    }
+  }, [coffeeConversation?.id, coffeeReplayActive, coffeeTurnRhythmState]);
   useLayoutEffect(() => {
     const sourceId = coffeeConversation?.id;
     if (!sourceId) return;
@@ -63044,6 +63075,8 @@ function HomeContent(): React.JSX.Element {
       const holdReasons = coffeeSessionClockHoldReasons({
         autoplayPaused: coffeeAutoplayPausedRef.current,
         modelWarmup: modelWarmupActive,
+        foregroundGeneration:
+          coffeeTurnRhythmStateRef.current === "botThinking",
       });
       const reconciliation = reconcileCoffeeSessionClock({
         previousTickAtMs: coffeeSessionClockLastTickAtMsRef.current,

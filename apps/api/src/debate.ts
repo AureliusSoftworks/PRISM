@@ -127,6 +127,8 @@ import {
   type PreparedTurnCursorV1,
   type ReasoningEffort,
   type ResponseMode,
+  reasoningGenerationBudgetMs,
+  REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
   debateDebriefEligibleBots,
   normalizeDebateSessionSynopsis,
   DEBATE_SESSION_SYNOPSIS_MAX_LENGTH,
@@ -162,6 +164,7 @@ import {
 import { HttpError } from "./utils.http.ts";
 import {
   prepareMessagesWithSimulatedEffort,
+  runWithReasoningGenerationBudget,
   shouldPrepareMessagesWithSimulatedEffort,
 } from "./model-effort-runner.ts";
 
@@ -893,7 +896,12 @@ async function generateJson(
   if (!primary) throw new Error("No Debate generation model is available.");
   if (ordered.length === 1) {
     return {
-      value: await generateJsonOnLane(primary, messages, options),
+      value: await runWithReasoningGenerationBudget({
+        effort: options.reasoningEffort ?? primary.reasoningEffort,
+        provider: primary.providerName,
+        modelId: options.model ?? primary.model,
+        run: (signal) => generateJsonOnLane(primary, messages, options, signal),
+      }),
       provider: primary.providerName,
       model: options.model ?? primary.model,
     };
@@ -913,8 +921,12 @@ async function generateJson(
           ),
         ),
     })),
-    perAttemptTimeoutMs: 60_000,
-    totalTimeoutMs: ordered.length * 60_000,
+    perAttemptTimeoutMs: (attempt, index) =>
+      reasoningGenerationBudgetMs(
+        options.reasoningEffort ?? ordered[index]?.reasoningEffort,
+        { provider: attempt.provider, modelId: attempt.model },
+      ),
+    totalTimeoutMs: REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
     validate: validateDebateJson,
   });
   return {

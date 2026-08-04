@@ -841,6 +841,16 @@
   box-shadow: none;
 }
 
+/* The foundry canvas is portaled directly into the live CRT emission mask,
+   which already is the canonical shell coordinate space. The standalone
+   editor zoom above is useful when the canvas has its own square viewport,
+   but applying it again here enlarges and raises the authored pixels relative
+   to the face shown everywhere else. */
+.canvasFrame[data-foundry-canvas="true"] .canvasViewport {
+  transform: none;
+  transform-origin: center;
+}
+
 .canvasFrame[data-foundry-canvas="true"] .inputSurface:focus-visible {
   outline: 2px solid var(--editor-bot-color, var(--accent));
   outline-offset: -3px;

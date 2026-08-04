@@ -32,6 +32,11 @@ describe("local model warmup intermission integration", () => {
 
   it("persists Signal holds and resumes them after hydration", () => {
     assert.match(signalSource, /model-warmup-hold/u);
+    assert.match(signalSource, /session-clock-hold/u);
+    assert.match(signalSource, /reason: "foreground_generation"/u);
+    assert.match(signalSource, /foregroundFloorAvailableAtMs/u);
+    assert.match(signalSource, /completeForegroundGenerationHold/u);
+    assert.doesNotMatch(signalSource, /directHoldStart/u);
     assert.match(signalSource, /detail\.modelWarmupHoldStartedAt/u);
     assert.match(signalSource, /await releaseSignalModelWarmup\(opening\.episode\.id\)/u);
     assert.match(

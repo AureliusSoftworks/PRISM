@@ -11,6 +11,7 @@ import {
   openAiModelSupportsReasoningEffort,
   openAiReasoningEffortForRequest,
   openAiReasoningEffortLevels,
+  reasoningGenerationBudgetMs,
   reasoningEffortForRequest,
   resolveModelReasoningEffortCapability,
 } from "./reasoningEffort.ts";
@@ -24,6 +25,38 @@ describe("reasoning effort helpers", () => {
     assert.equal(reasoningEffortForRequest("auto"), null);
     assert.equal(reasoningEffortForRequest("none"), "none");
     assert.equal(reasoningEffortForRequest("minimal"), "minimal");
+  });
+
+  it("budgets one complete generation attempt by effort", () => {
+    assert.equal(reasoningGenerationBudgetMs("none"), 60_000);
+    assert.equal(reasoningGenerationBudgetMs("minimal"), 60_000);
+    assert.equal(reasoningGenerationBudgetMs("low"), 60_000);
+    assert.equal(reasoningGenerationBudgetMs("medium"), 120_000);
+    assert.equal(reasoningGenerationBudgetMs("high"), 180_000);
+    assert.equal(reasoningGenerationBudgetMs("xhigh"), 300_000);
+    assert.equal(reasoningGenerationBudgetMs("auto"), 180_000);
+    assert.equal(reasoningGenerationBudgetMs(undefined), 180_000);
+    assert.equal(
+      reasoningGenerationBudgetMs(undefined, {
+        provider: "openai",
+        modelId: "gpt-5.5",
+      }),
+      180_000,
+    );
+    assert.equal(
+      reasoningGenerationBudgetMs(undefined, {
+        provider: "local",
+        modelId: "llama3.2",
+      }),
+      60_000,
+    );
+    assert.equal(
+      reasoningGenerationBudgetMs(undefined, {
+        provider: "openai",
+        modelId: "gpt-4o",
+      }),
+      60_000,
+    );
   });
 
   it("normalizes persisted per-model preferences without storing Default", () => {

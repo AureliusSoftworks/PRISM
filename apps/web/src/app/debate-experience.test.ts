@@ -1355,7 +1355,7 @@ describe("Debate experience", () => {
     assert.match(source, /Resume Debate/u);
     assert.match(
       source,
-      /The interrupted line is preserved and will replay from\s+its beginning/u,
+      /The interrupted line is preserved and will replay from\s+its\s+beginning/u,
     );
     assert.match(page, /const debateLastVoiceClipRef = useRef/u);
     assert.match(
@@ -1793,6 +1793,28 @@ describe("Debate experience", () => {
     assert.match(source, /presentationEventId:\s*replayEventId/u);
     assert.match(source, /pausedPresentationEventId/u);
     assert.match(source, /debateRequestIsRevisionConflict\(caught\)/u);
+    assert.match(source, /const lifecycleIdempotencyKey = nextMutationKey/u);
+    assert.match(source, /idempotencyKey: lifecycleIdempotencyKey/u);
+    assert.match(
+      source,
+      /const judgeResumedWithGavel = result\.session\.playerRole === "judge"/u,
+    );
+    assert.match(
+      source,
+      /triggerJudgeGavelSmash\("order", resumeGavelEventId\)/u,
+    );
+    assert.match(
+      source,
+      /resumedJudgeGavelPresentationEventId: judgeResumedWithGavel[\s\S]{0,100}pausedPresentationEvent\.id/u,
+    );
+    assert.match(
+      source,
+      /!resumedJudgeGavelAlreadyStruck[\s\S]{0,100}!lifecycleControlGavel/u,
+    );
+    assert.match(
+      source,
+      /setLiveGavelCue\(resumedJudgeGavelAlreadyStruck \? null : gavelCue\)/u,
+    );
     assert.match(
       source,
       /previous\.status !== "paused" && busy[\s\S]{0,80}setPauseQueued\(true\)/u,
@@ -1893,7 +1915,7 @@ describe("Debate experience", () => {
   it("performs a missed Judge gavel cue as a silent camera beat", () => {
     assert.match(
       source,
-      /gavelCue &&[\s\S]{0,120}next\.playerRole === "judge"[\s\S]{0,180}requestJudgeGavelCeremonyRef\.current\?\.\(gavelCue\)[\s\S]{0,100}gavelCue = null/u,
+      /gavelCue &&[\s\S]{0,120}next\.playerRole === "judge"[\s\S]{0,260}requestJudgeGavelCeremonyRef\.current\?\.\(gavelCue\)[\s\S]{0,100}gavelCue = null/u,
     );
     assert.match(source, /data-debate-judge-gavel-cue="true"/u);
     assert.match(source, /The room is waiting on you\./u);
@@ -3298,7 +3320,7 @@ describe("Debate experience", () => {
     assert.match(source, /debateModeratorGavelSpeechLeadMs\(gavelCue\.kind\)/u);
     assert.match(
       source,
-      /setLiveGavelCue\(gavelCue\)[\s\S]{0,260}DEBATE_GAVEL_ORDER_CAMERA_CUT_MS[\s\S]{0,420}let presentationArmedForHandoff = false[\s\S]{0,600}setPresentationEventId\(event\.id\)/u,
+      /setLiveGavelCue\([^)]+gavelCue\)[\s\S]{0,260}DEBATE_GAVEL_ORDER_CAMERA_CUT_MS[\s\S]{0,420}let presentationArmedForHandoff = false[\s\S]{0,600}setPresentationEventId\(event\.id\)/u,
     );
     assert.match(
       source,

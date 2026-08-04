@@ -182,13 +182,16 @@ describe("built-in English audio", () => {
     assert.ok(wave.length > 44);
   });
 
-  it("renders French, German, and Russian Speechprints through the pinned token interface", {
+  it("renders recent Speechprints through the pinned token interface", {
     skip: !builtinEnglishAvailable(),
   }, async () => {
     for (const influence of [
       "french-influenced-english",
       "german-influenced-english",
       "russian-influenced-english",
+      "italian-influenced-english",
+      "australian-english",
+      "canadian-english",
     ] as const) {
       const wave = await generateBuiltinEnglishWave({
         text: "This warm river road has a very clear ending.",

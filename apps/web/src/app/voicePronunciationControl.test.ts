@@ -45,6 +45,22 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.match(atlasSource, /LOCAL_VOICE_SPEECHPRINT_CAPABILITIES\.map/u);
   });
 
+  it("offers Italian, Australian, and Canadian pronunciation without map nodes", () => {
+    for (const id of [
+      "italian-influenced-english",
+      "australian-english",
+      "canadian-english",
+    ]) {
+      assert.ok(
+        LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.some(
+          (capability) => capability.id === id,
+        ),
+      );
+    }
+    assert.doesNotMatch(atlasSource, /PRONUNCIATION_ATLAS_ANCHORS\.map/u);
+    assert.doesNotMatch(atlasCssSource, /\.anchor\b/u);
+  });
+
   it("uses the generated Earth raster instead of procedural land polygons", () => {
     assert.doesNotMatch(atlasSource, /<path d=/u);
     assert.match(

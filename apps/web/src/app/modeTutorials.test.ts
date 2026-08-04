@@ -42,6 +42,8 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /lights stay dark/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /generated drafts/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /light online/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /Wield Prism/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /randomizer buttons/u);
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Save or Create bot/u);
   });
 
@@ -52,6 +54,8 @@ describe("mode tutorials", () => {
     assert.ok(step);
     assert.match(step.body, /Pronunciation Atlas/u);
     assert.match(step.body, /holographic world projection/u);
+    assert.match(step.body, /unlabeled/u);
+    assert.match(step.body, /without cluttering the Earth with region nodes/u);
     assert.match(step.body, /American and British English foundations/u);
     assert.match(step.body, /collapsed List view/u);
     assert.match(step.body, /private local phonemes/u);
@@ -288,12 +292,14 @@ describe("mode tutorials", () => {
     );
     assert.match(copy, /Leaving an unfinished Debate by any route/u);
     assert.match(copy, /reopening returns to the same paused point/u);
-    assert.match(copy, /Resume is equally silent/u);
+    assert.match(copy, /Resume is the return-to-order gavel strike/u);
+    assert.match(copy, /without asking for a second slam/u);
+    assert.match(copy, /Other roles resume silently/u);
     assert.match(copy, /replays that exact saved line from its beginning/u);
     assert.match(copy, /exact next Jury preparation, ballot/u);
     assert.match(
       copy,
-      /neither action creates a spoken beat or transcript event/u,
+      /audiovisual room control, not a spoken beat or transcript event/u,
     );
     assert.match(
       copy,
@@ -413,7 +419,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /End, and Skip actions are put away/u);
     assert.match(
       copy,
-      /Pause and Resume remain available as silent lifecycle controls/u,
+      /Pause remains silent; when a human Judge resumes/u,
     );
     assert.match(
       copy,
@@ -617,6 +623,9 @@ describe("mode tutorials", () => {
     assert.match(copy, /no waiter, barista, or service bot/u);
     assert.match(copy, /two or three table replies/u);
     assert.match(copy, /invisible visit clock/u);
+    assert.match(copy, /clock measures active table presentation/u);
+    assert.match(copy, /background lookahead beneath an audible line still counts/u);
+    assert.match(copy, /foreground generation leaves the floor waiting/u);
     assert.match(
       copy,
       /recognized asterisk cue such as \*yells\*[\s\S]*ElevenLabs performance direction/u,
@@ -649,6 +658,25 @@ describe("mode tutorials", () => {
     assert.match(copy, /without its exact master remains transcript-only/u);
     assert.match(copy, /offers Coffee home to return to setup/u);
     assert.match(copy, /one readable transcript download/u);
+  });
+
+  it("explains foreground generation clock holds without discounting lookahead", () => {
+    const coffee = MODE_TUTORIALS.coffee.steps
+      .map((step) => step.body)
+      .join(" ");
+    const signal =
+      MODE_TUTORIALS.botcast.steps.find(
+        (step) => step.heading === "Produce from the control room",
+      )?.body ?? "";
+    assert.match(coffee, /clock measures active table presentation/u);
+    assert.match(coffee, /background lookahead beneath an audible line still counts/u);
+    assert.match(coffee, /foreground generation leaves the floor waiting/u);
+    assert.match(signal, /on-air clock measures active presentation/u);
+    assert.match(signal, /Background lookahead under an audible line still counts/u);
+    assert.match(
+      signal,
+      /foreground model readiness, reasoning, generation, or blocking voice preparation pauses the clock/u,
+    );
   });
 
   it("teaches the Prism house sound and its character alternatives", () => {
@@ -1738,7 +1766,15 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /on-air clock shows elapsed episode time/u,
+      /on-air clock measures active presentation/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /Background lookahead under an audible line still counts/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
+      /foreground model readiness, reasoning, generation, or blocking voice preparation pauses the clock/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",

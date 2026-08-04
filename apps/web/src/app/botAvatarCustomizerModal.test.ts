@@ -272,8 +272,8 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /none:\s*"Default"/);
   assert.match(pageSource, /aria-label="Eyes"/);
   assert.match(pageSource, /aria-label="Mouth"/);
-  assert.match(pageSource, /label="blink glyph"/);
-  assert.match(pageSource, /label="thinking animation"/);
+  assert.match(pageSource, /label="Blink"/);
+  assert.match(pageSource, /label="Thinking animation"/);
   assert.match(pageSource, /aria-label="Custom blink bar"/);
   assert.match(
     pageSource,
@@ -395,7 +395,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(faceTabSource, /identitySection \?/);
   assert.doesNotMatch(faceTabSource, /<ColorGlyphPicker/);
   assert.match(pageSource, /ariaLabel="Shell color and identity badge"/);
-  assert.match(faceTabSource, /label="thinking animation"/);
+  assert.match(faceTabSource, /label="Thinking animation"/);
   assert.match(faceTabSource, /aria-label="Custom thinking animation frames"/);
   assert.match(
     pageSource,
@@ -435,7 +435,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(eyesTabSource, /Two eyes/);
   assert.match(eyesTabSource, /label="Eye size"/);
   assert.doesNotMatch(eyesTabSource, /label="Eye position"/);
-  assert.match(eyesTabSource, /label="blink glyph"/);
+  assert.match(eyesTabSource, /label="Blink"/);
   assert.match(eyesTabSource, /botAvatarBlinkBarOptionLabel\(blinkBar\)/);
   assert.match(eyesTabSource, /aria-label="Use a custom blink bar"/);
   assert.match(eyesTabSource, /label="Blink size"/);
@@ -1535,6 +1535,41 @@ test("personality randomization is scoped away from identity and settings", () =
   assert.doesNotMatch(helperSource, /setNewBotOnlineEnabled/);
   assert.doesNotMatch(helperSource, /setNewBotLocalModel/);
   assert.match(pageSource, /aria-label="Randomize personality"/);
+});
+
+test("Avatar Studio face controls use Wield Prism instead of shuffle buttons", () => {
+  const rangeStart = pageSource.indexOf("function BotAvatarRangeControl(");
+  const rangeEnd = pageSource.indexOf(
+    "function botAvatarCoordinateLabel",
+    rangeStart,
+  );
+  const coordinateStart = pageSource.indexOf(
+    "function BotAvatarCoordinateControl(",
+  );
+  const coordinateEnd = pageSource.indexOf(
+    "function formatVoiceCharacterDb",
+    coordinateStart,
+  );
+  const faceStart = pageSource.indexOf("function BotAvatarFaceControls(");
+  const faceEnd = pageSource.indexOf("function BotPowerBadge(", faceStart);
+
+  assert.notEqual(rangeStart, -1);
+  assert.notEqual(rangeEnd, -1);
+  assert.notEqual(coordinateStart, -1);
+  assert.notEqual(coordinateEnd, -1);
+  assert.notEqual(faceStart, -1);
+  assert.notEqual(faceEnd, -1);
+
+  for (const source of [
+    pageSource.slice(rangeStart, rangeEnd),
+    pageSource.slice(coordinateStart, coordinateEnd),
+    pageSource.slice(faceStart, faceEnd),
+  ]) {
+    assert.match(source, /BotAvatarRefractRandomizer/);
+    assert.doesNotMatch(source, /<BotFieldRandomizerButton/);
+  }
+  assert.match(pageSource, /kind: "magic", label,/);
+  assert.match(pageSource, /id: `avatar-studio-randomize-\$\{reactId\}`/);
 });
 
 test("avatar preview theme keeps persona ink on normalized color without Prism rainbow aura", () => {

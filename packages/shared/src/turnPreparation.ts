@@ -1,5 +1,6 @@
 export const PREPARED_TURN_VERSION = 1 as const;
-export const PREPARED_TURN_TTL_MS = 90_000;
+/** Long enough for a complete ten-minute AUTO recovery plus commit handoff. */
+export const PREPARED_TURN_TTL_MS = 12 * 60_000;
 
 export type PreparedTurnSurfaceV1 = "coffee" | "signal" | "debate";
 export type PreparedTurnPhaseV1 =

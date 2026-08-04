@@ -6,6 +6,8 @@ import {
 } from "./model-effort-runtime.ts";
 import {
   prepareMessagesWithSimulatedEffort,
+  ReasoningGenerationTimeoutError,
+  runWithReasoningGenerationBudget,
   shouldPrepareMessagesWithSimulatedEffort,
 } from "./model-effort-runner.ts";
 import type {
@@ -238,6 +240,8 @@ import {
   parseStoredBotPowersV1,
   planSocialSilenceV1,
   rankSignalPersonaTemperaments,
+  reasoningGenerationBudgetMs,
+  REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
   signalPicklesLineIndex,
   signalPicklesMagicEnabled,
   signalPicklesReactionPending,
@@ -2654,6 +2658,11 @@ function mapEpisodeSummary(row: BotcastEpisodeRow): BotcastEpisodeSummary {
       row.model_warmup_hold_duration_ms ?? 0,
     ),
     modelWarmupHoldStartedAt: row.model_warmup_hold_started_at ?? null,
+    sessionClockHoldDurationMs: Math.max(
+      0,
+      row.model_warmup_hold_duration_ms ?? 0,
+    ),
+    sessionClockHoldStartedAt: row.model_warmup_hold_started_at ?? null,
     personaReview:
       row.persona_reviewer_bot_id &&
       row.persona_reviewer_name &&
@@ -10890,6 +10899,54 @@ export function setBotcastModelWarmupHold(
   return getBotcastEpisode(db, userId, episodeId);
 }
 
+export function recordBotcastSessionClockHold(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  input: {
+    holdId: string;
+    reason: "foreground_generation";
+    durationMs: number;
+  },
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  const holdId = input.holdId.trim().slice(0, 160);
+  if (!holdId) throw new Error("Signal session hold requires a hold id.");
+  if (input.reason !== "foreground_generation") {
+    throw new Error("Signal session hold reason is not supported.");
+  }
+  if (!Number.isFinite(input.durationMs) || input.durationMs < 0) {
+    throw new Error("Signal session hold duration must be a non-negative number.");
+  }
+  const duplicate = episode.events.some(
+    (event) =>
+      event.kind === "session_clock_hold" &&
+      event.payload.holdId === holdId,
+  );
+  if (duplicate) return episode;
+
+  const durationMs = Math.min(
+    12 * 60_000,
+    Math.max(0, Math.round(input.durationMs)),
+  );
+  const now = new Date().toISOString();
+  db.prepare(
+    `UPDATE botcast_episodes
+        SET model_warmup_hold_duration_ms = model_warmup_hold_duration_ms + ?,
+            updated_at = ?
+      WHERE id = ? AND user_id = ?`,
+  ).run(durationMs, now, episodeId, userId);
+  recordEvent(
+    db,
+    userId,
+    episodeId,
+    "session_clock_hold",
+    { holdId, reason: input.reason, durationMs },
+    now,
+  );
+  return getBotcastEpisode(db, userId, episodeId);
+}
+
 function beginBotcastProducerCut(
   db: DatabaseSync,
   userId: string,
@@ -11798,6 +11855,10 @@ export async function advanceBotcastEpisode(
       modelWarmupHoldStartedAtMs: episode.modelWarmupHoldStartedAt
         ? Date.parse(episode.modelWarmupHoldStartedAt)
         : null,
+      sessionClockHoldDurationMs: episode.sessionClockHoldDurationMs,
+      sessionClockHoldStartedAtMs: episode.sessionClockHoldStartedAt
+        ? Date.parse(episode.sessionClockHoldStartedAt)
+        : null,
       producerGuestThinkingDiscountMs:
         botcastProducerGuestThinkingDiscountMs(episode.events),
     });
@@ -12544,8 +12605,18 @@ export async function advanceBotcastEpisode(
             return provider.generateResponse(attemptPrompt, attemptOptions);
           },
         })),
-        perAttemptTimeoutMs: 60_000,
-        totalTimeoutMs: resolvedChain.length * 60_000,
+        perAttemptTimeoutMs: (attempt) =>
+          reasoningGenerationBudgetMs(
+            resolveUserModelReasoningEffort(db, {
+              userId,
+              provider: attempt.provider,
+              modelId: attempt.model,
+              simulatedEffortEnabled:
+                generation.experimentalAllModelEffortEnabled === true,
+            }),
+            { provider: attempt.provider, modelId: attempt.model },
+          ),
+        totalTimeoutMs: REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
         ...(generation.signal ? { signal: generation.signal } : {}),
         ...(speakerIsMutedForTurn
           ? {}
@@ -12580,57 +12651,73 @@ export async function advanceBotcastEpisode(
     }
   } else if (episode.responseMode === "online") {
     try {
-      const onlineTurnOptions = {
-        ...generationOptions,
-        ...(selected.model ? { model: selected.model } : {}),
-        maxTokens: botcastSpeakerMaxTokensForModel(
-          speaker.maxTokens,
-          selected.providerName,
-          modelUsed,
-          turnMaxTokens,
-        ),
-      };
-      const onlinePrompt =
-        shouldPrepareMessagesWithSimulatedEffort({
-          provider: selected.providerName,
-          model: selectedModelId,
-          effort: primaryReasoningEffort,
-        })
-          ? await prepareMessagesWithSimulatedEffort({
-              provider: selected.provider,
-              messages: prompt,
-              options: onlineTurnOptions,
+      const onlineBudgetMs = reasoningGenerationBudgetMs(
+        primaryReasoningEffort,
+        { provider: selected.providerName, modelId: modelUsed },
+      );
+      onlineTurn = await runWithReasoningGenerationBudget({
+        effort: primaryReasoningEffort,
+        provider: selected.providerName,
+        modelId: modelUsed,
+        signal: generation.signal,
+        run: async (signal) => {
+          const onlineTurnOptions: GenerateOptions = {
+            ...generationOptions,
+            ...(selected.model ? { model: selected.model } : {}),
+            maxTokens: botcastSpeakerMaxTokensForModel(
+              speaker.maxTokens,
+              selected.providerName,
+              modelUsed,
+              turnMaxTokens,
+            ),
+            signal,
+          };
+          const onlinePrompt =
+            shouldPrepareMessagesWithSimulatedEffort({
+              provider: selected.providerName,
+              model: selectedModelId,
               effort: primaryReasoningEffort,
-              surface: "signal",
-              outputContract:
-                "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
             })
-          : prompt;
-      onlineTurn = await runSignalOnlineTurn({
-        provider: selected.provider,
-        providerName: selected.providerName,
-        model: modelUsed,
-        messages: onlinePrompt,
-        options: onlineTurnOptions,
-        validate: (candidate) =>
-          validateBotcastAutoSpeakerUtterance({
-            raw: candidate,
-            speakerName: speaker.name,
-            peerName: peer.name,
-            speakerRole,
-            hostClosing: hostClosingTurn,
-            ...(hostClosingTurn &&
-            episode.guestPresenceMode !== "audience_only"
-              ? { hostClosingGuestName: peerAddressName }
-              : {}),
-            rejectPeerIdentityClaim: speakerEternallyIntroduces,
-            requireFreshContact: speakerEternallyIntroduces,
-            requireAddressedInsult: speakerRequiresAddressedInsult,
-          }),
-        validationRetryInstruction,
+              ? await prepareMessagesWithSimulatedEffort({
+                  provider: selected.provider,
+                  messages: prompt,
+                  options: onlineTurnOptions,
+                  effort: primaryReasoningEffort,
+                  surface: "signal",
+                  outputContract:
+                    "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
+                })
+              : prompt;
+          return runSignalOnlineTurn({
+            provider: selected.provider,
+            providerName: selected.providerName,
+            model: modelUsed,
+            messages: onlinePrompt,
+            options: onlineTurnOptions,
+            attemptTimeoutMs: onlineBudgetMs,
+            totalTimeoutMs: onlineBudgetMs,
+            validate: (candidate) =>
+              validateBotcastAutoSpeakerUtterance({
+                raw: candidate,
+                speakerName: speaker.name,
+                peerName: peer.name,
+                speakerRole,
+                hostClosing: hostClosingTurn,
+                ...(hostClosingTurn &&
+                episode.guestPresenceMode !== "audience_only"
+                  ? { hostClosingGuestName: peerAddressName }
+                  : {}),
+                rejectPeerIdentityClaim: speakerEternallyIntroduces,
+                requireFreshContact: speakerEternallyIntroduces,
+                requireAddressedInsult: speakerRequiresAddressedInsult,
+              }),
+            validationRetryInstruction,
+          });
+        },
       });
       raw = onlineTurn.value;
     } catch (error) {
+      if (error instanceof ReasoningGenerationTimeoutError) throw error;
       if (error instanceof SignalOnlineTurnError) {
         const latestEpisode = getBotcastEpisode(db, userId, episode.id);
         const producerCutStartedDuringTurn =
@@ -12685,81 +12772,90 @@ export async function advanceBotcastEpisode(
     }
   } else {
     try {
-      const localTurnOptions = {
-        ...generationOptions,
-        ...(selected.model ? { model: selected.model } : {}),
-        maxTokens: botcastSpeakerMaxTokensForModel(
-          speaker.maxTokens,
-          selected.providerName,
-          modelUsed,
-          turnMaxTokens,
-        ),
-      };
-      const localPrompt =
-        shouldPrepareMessagesWithSimulatedEffort({
-          provider: selected.providerName,
-          model: selectedModelId,
-          effort: primaryReasoningEffort,
-        })
-        ? await prepareMessagesWithSimulatedEffort({
+      raw = await runWithReasoningGenerationBudget({
+        effort: primaryReasoningEffort,
+        provider: selected.providerName,
+        modelId: modelUsed,
+        signal: generation.signal,
+        run: async (signal) => {
+          const localTurnOptions: GenerateOptions = {
+            ...generationOptions,
+            ...(selected.model ? { model: selected.model } : {}),
+            maxTokens: botcastSpeakerMaxTokensForModel(
+              speaker.maxTokens,
+              selected.providerName,
+              modelUsed,
+              turnMaxTokens,
+            ),
+            signal,
+          };
+          const localPrompt =
+            shouldPrepareMessagesWithSimulatedEffort({
+              provider: selected.providerName,
+              model: selectedModelId,
+              effort: primaryReasoningEffort,
+            })
+              ? await prepareMessagesWithSimulatedEffort({
+                  provider: selected.provider,
+                  messages: prompt,
+                  options: localTurnOptions,
+                  effort: primaryReasoningEffort,
+                  surface: "signal",
+                  outputContract:
+                    "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
+                })
+              : prompt;
+          const timeoutMs =
+            generation.signalLocalTurnTimeoutMs ??
+            reasoningGenerationBudgetMs(primaryReasoningEffort, {
+              provider: selected.providerName,
+              modelId: modelUsed,
+            });
+          const localTurn = await runSignalLocalTurn({
             provider: selected.provider,
-            messages: prompt,
+            messages: localPrompt,
             options: localTurnOptions,
-            effort: primaryReasoningEffort,
-            surface: "signal",
-            outputContract:
-              "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
-          })
-        : prompt;
-      const localTurn = await runSignalLocalTurn({
-        provider: selected.provider,
-        messages: localPrompt,
-        options: localTurnOptions,
-        ...(generation.signalLocalTurnTimeoutMs !== undefined
-          ? { timeoutMs: generation.signalLocalTurnTimeoutMs }
-          : {}),
-      });
-      raw = localTurn.value;
-      if (
-        (hostClosingTurn ||
-          speakerEternallyIntroduces ||
-          speakerRequiresAddressedInsult) &&
-        !speakerIsMutedForTurn &&
-        !validateBotcastAutoSpeakerUtterance({
-          raw,
-          speakerName: speaker.name,
-          peerName: peer.name,
-          speakerRole,
-          hostClosing: hostClosingTurn,
-          requireAddressedInsult: speakerRequiresAddressedInsult,
-          rejectPeerIdentityClaim: speakerEternallyIntroduces,
-          requireFreshContact: speakerEternallyIntroduces,
-        }).ok
-      ) {
-        try {
-          const retry = await runSignalLocalTurn({
-            provider: selected.provider,
-            messages: [
-              ...localPrompt,
-              { role: "system", content: validationRetryInstruction },
-            ],
-            options: localTurnOptions,
-            ...(generation.signalLocalTurnTimeoutMs !== undefined
-              ? { timeoutMs: generation.signalLocalTurnTimeoutMs }
-              : {}),
+            timeoutMs,
           });
-          raw = retry.value;
-        } catch (error) {
-          if (generation.signal?.aborted) throw error;
-          raw = "";
-        }
-      }
+          let value = localTurn.value;
+          if (
+            (hostClosingTurn ||
+              speakerEternallyIntroduces ||
+              speakerRequiresAddressedInsult) &&
+            !speakerIsMutedForTurn &&
+            !validateBotcastAutoSpeakerUtterance({
+              raw: value,
+              speakerName: speaker.name,
+              peerName: peer.name,
+              speakerRole,
+              hostClosing: hostClosingTurn,
+              requireAddressedInsult: speakerRequiresAddressedInsult,
+              rejectPeerIdentityClaim: speakerEternallyIntroduces,
+              requireFreshContact: speakerEternallyIntroduces,
+            }).ok
+          ) {
+            const retry = await runSignalLocalTurn({
+              provider: selected.provider,
+              messages: [
+                ...localPrompt,
+                { role: "system", content: validationRetryInstruction },
+              ],
+              options: localTurnOptions,
+              timeoutMs,
+            });
+            value = retry.value;
+          }
+          return value;
+        },
+      });
     } catch (error) {
       if (generation.signal?.aborted) throw error;
-      const timedOut = error instanceof SignalLocalTurnTimeoutError;
+      const timedOut =
+        error instanceof SignalLocalTurnTimeoutError ||
+        error instanceof ReasoningGenerationTimeoutError;
+      if (timedOut) throw error;
       if (
         !firstHostOpening &&
-        !timedOut &&
         !botcastProviderReturnedEmptyResponse(error, selected.providerName)
       ) {
         throw error;

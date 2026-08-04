@@ -23,8 +23,6 @@ export interface PronunciationAtlasSelection {
 
 export interface PronunciationAtlasAnchor {
   id: string;
-  shortLabel: string;
-  label: string;
   point: AdjustmentPadPoint;
   base?: "en-US" | "en-GB";
   influence?: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -42,55 +40,44 @@ function atlasPoint(
 
 const INFLUENCE_ANCHOR_DATA = {
   "spanish-influenced-english": {
-    shortLabel: "ES",
-    label: "Spanish-influenced English",
     point: atlasPoint(-3.7, 40.4),
   },
   "brazilian-portuguese-influenced-english": {
-    shortLabel: "BR",
-    label: "Brazilian Portuguese-influenced English",
     point: atlasPoint(-47.9, -15.8),
   },
   "mandarin-influenced-english": {
-    shortLabel: "ZH",
-    label: "Mandarin-influenced English",
     point: atlasPoint(116.4, 39.9),
   },
   "japanese-influenced-english": {
-    shortLabel: "JP",
-    label: "Japanese-influenced English",
     point: atlasPoint(139.7, 35.7),
   },
   "korean-influenced-english": {
-    shortLabel: "KR",
-    label: "Korean-influenced English",
     point: atlasPoint(127, 37.6),
   },
   "indian-english": {
-    shortLabel: "IN",
-    label: "Indian English",
     point: atlasPoint(77.2, 28.6),
   },
   "french-influenced-english": {
-    shortLabel: "FR",
-    label: "French-influenced English",
     point: atlasPoint(2.35, 48.86),
   },
   "german-influenced-english": {
-    shortLabel: "DE",
-    label: "German-influenced English",
     point: atlasPoint(13.4, 52.52),
   },
   "russian-influenced-english": {
-    shortLabel: "RU",
-    label: "Russian-influenced English",
     point: atlasPoint(37.62, 55.75),
+  },
+  "italian-influenced-english": {
+    point: atlasPoint(12.5, 41.9),
+  },
+  "australian-english": {
+    point: atlasPoint(149.13, -35.28),
+  },
+  "canadian-english": {
+    point: atlasPoint(-75.7, 45.42),
   },
 } as const satisfies Record<
   Exclude<LocalVoiceSpeechprintInfluence, "none">,
   {
-    shortLabel: string;
-    label: string;
     point: AdjustmentPadPoint;
   }
 >;
@@ -98,15 +85,11 @@ const INFLUENCE_ANCHOR_DATA = {
 const BASE_ANCHORS = [
   {
     id: "base-en-US",
-    shortLabel: "US",
-    label: "American English foundation",
     point: atlasPoint(-98.5, 39.8),
     base: "en-US",
   },
   {
     id: "base-en-GB",
-    shortLabel: "UK",
-    label: "British English foundation",
     point: atlasPoint(-0.13, 51.51),
     base: "en-GB",
   },
@@ -119,8 +102,6 @@ export const PRONUNCIATION_ATLAS_ANCHORS: readonly PronunciationAtlasAnchor[] =
       const authored = INFLUENCE_ANCHOR_DATA[capability.id];
       return {
         id: `influence-${capability.id}`,
-        shortLabel: authored.shortLabel,
-        label: capability.label,
         point: authored.point,
         influence: capability.id,
       } satisfies PronunciationAtlasAnchor;

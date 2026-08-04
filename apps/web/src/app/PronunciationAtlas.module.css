@@ -118,58 +118,6 @@
   animation: atlasScan 3.8s linear infinite;
 }
 
-.anchor {
-  position: absolute;
-  left: var(--atlas-anchor-x);
-  top: var(--atlas-anchor-y);
-  min-width: 18px;
-  height: 18px;
-  padding: 0 3px;
-  display: grid;
-  place-items: center;
-  border: 1px solid
-    color-mix(in srgb, var(--pronunciation-atlas-color) 54%, transparent);
-  border-radius: 999px;
-  color: color-mix(in srgb, var(--pronunciation-atlas-color) 68%, #ffffff);
-  background: color-mix(
-    in srgb,
-    var(--pronunciation-atlas-color) 12%,
-    rgba(4, 7, 12, 0.82)
-  );
-  box-shadow: 0 0 8px
-    color-mix(in srgb, var(--pronunciation-atlas-color) 25%, transparent);
-  font-size: 7px;
-  font-weight: 820;
-  letter-spacing: 0.04em;
-  transform: translate(-50%, -50%);
-  opacity: 0.72;
-}
-
-.anchor[data-base="true"] {
-  border-style: double;
-  opacity: 0.88;
-}
-
-.anchor[data-active="true"] {
-  color: #ffffff;
-  border-color: color-mix(
-    in srgb,
-    var(--pronunciation-atlas-color) 82%,
-    #ffffff
-  );
-  background: color-mix(
-    in srgb,
-    var(--pronunciation-atlas-color) 52%,
-    rgba(4, 7, 12, 0.9)
-  );
-  box-shadow:
-    0 0 0 4px
-      color-mix(in srgb, var(--pronunciation-atlas-color) 13%, transparent),
-    0 0 18px
-      color-mix(in srgb, var(--pronunciation-atlas-color) 58%, transparent);
-  opacity: 1;
-}
-
 .controls {
   min-width: 0;
   display: flex;

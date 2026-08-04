@@ -294,6 +294,10 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(editorSource, /createPortal\(canvasEditor, canvasPortalTarget\)/);
     assert.match(editorSource, /data-foundry-canvas=/);
+    assert.match(
+      editorCss,
+      /\.canvasFrame\[data-foundry-canvas="true"\] \.canvasViewport\s*\{[\s\S]*?transform:\s*none;[\s\S]*?transform-origin:\s*center;/,
+    );
     assert.match(pageSource, /runtimeEffectsEnabled=\{screenMode === "live"\}/);
     assert.match(
       pageCss,
