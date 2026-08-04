@@ -52,7 +52,7 @@ import {
   slateImportedSectionRequiresPassageScope,
   transformSlateLockedRangesForTextEdit,
 } from "@localai/shared";
-import { FolderOpen, ImageIcon, Trash2 } from "lucide-react";
+import { FolderOpen, Trash2 } from "lucide-react";
 import {
   usePrismMenu,
   type PrismMenuAnchor,
@@ -90,6 +90,7 @@ import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import { SlateDirectionQuestion } from "./SlateDirectionQuestion";
 import { SlateDirectorBar } from "./SlateDirectorBar";
 import { SlateCreativeStudiosDesk } from "./SlateCreativeStudiosDesk";
+import { AssetRail } from "./AssetLibrary";
 import { SlateFullBookReader } from "./SlateFullBookReader";
 import { SlateMirrorDesk } from "./SlateMirrorDesk";
 import {
@@ -419,6 +420,24 @@ async function slateApi<T>(path: string, init: RequestInit = {}): Promise<T> {
   return payload as T;
 }
 
+function readSlateAssetFile(file: File): Promise<string> {
+  if (!/^image\/(?:png|jpe?g|webp|gif|avif)$/iu.test(file.type)) {
+    return Promise.reject(new Error("Choose a PNG, JPEG, WebP, GIF, or AVIF image."));
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    return Promise.reject(new Error("Choose an image smaller than 20 MB."));
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      typeof reader.result === "string"
+        ? resolve(reader.result)
+        : reject(new Error("Slate could not read that image."));
+    reader.onerror = () => reject(new Error("Slate could not read that image."));
+    reader.readAsDataURL(file);
+  });
+}
+
 async function loadSlateManuscriptSections(
   projectId: string,
 ): Promise<SlateSectionDetail[]> {
@@ -625,6 +644,7 @@ export default function SlateWorkspace({
   const recoveryRefreshTimerRef = useRef<number | null>(null);
   const sparkTextareaRef = useRef<HTMLTextAreaElement | null>(null);
   const archiveInputRef = useRef<HTMLInputElement | null>(null);
+  const coverUploadRef = useRef<HTMLInputElement | null>(null);
   const companionMessagesBufferRef = useRef<SlateProjectChatMessage[]>([]);
   const companionBubbleSequenceRef = useRef(0);
   const companionBubbleTimersRef = useRef<Map<string, number>>(new Map());
@@ -946,7 +966,7 @@ export default function SlateWorkspace({
   }, []);
 
   const synthesizeProjectCover = useCallback(
-    async (projectId: string, quiet = false): Promise<void> => {
+    async (projectId: string, quiet = false, direction = ""): Promise<void> => {
       setCoverGeneratingProjectIds((current) => {
         const next = new Set(current);
         next.add(projectId);
@@ -956,7 +976,7 @@ export default function SlateWorkspace({
       try {
         const response = await slateApi<SlateProjectResponse>(
           `/api/slate/projects/${encodeURIComponent(projectId)}/cover`,
-          { method: "POST", body: JSON.stringify({}) },
+          { method: "POST", body: JSON.stringify({ direction }) },
         );
         setProjects((current) =>
           current.map((item) =>
@@ -980,6 +1000,56 @@ export default function SlateWorkspace({
           next.delete(projectId);
           return next;
         });
+      }
+    },
+    [adoptProject],
+  );
+
+  const reuseProjectCover = useCallback(
+    async (projectId: string, assetSetId: string): Promise<void> => {
+      setError(null);
+      try {
+        const response = await slateApi<SlateProjectResponse>(
+          `/api/slate/projects/${encodeURIComponent(projectId)}/cover/reuse`,
+          {
+            method: "POST",
+            body: JSON.stringify({ assetSetId }),
+          },
+        );
+        setProjects((current) =>
+          current.map((item) => item.id === projectId ? response.project : item),
+        );
+        if (projectRef.current?.id === projectId) adoptProject(response.project);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Slate could not reuse that cover.");
+      }
+    },
+    [adoptProject],
+  );
+
+  const uploadProjectCover = useCallback(
+    async (projectId: string, file: File): Promise<void> => {
+      setCoverGeneratingProjectIds((current) => new Set(current).add(projectId));
+      setError(null);
+      try {
+        const dataUrl = await readSlateAssetFile(file);
+        const response = await slateApi<SlateProjectResponse>(
+          `/api/slate/projects/${encodeURIComponent(projectId)}/cover/upload`,
+          { method: "POST", body: JSON.stringify({ dataUrl }) },
+        );
+        setProjects((current) =>
+          current.map((item) => item.id === projectId ? response.project : item),
+        );
+        if (projectRef.current?.id === projectId) adoptProject(response.project);
+      } catch (cause) {
+        setError(cause instanceof Error ? cause.message : "Slate could not upload that cover.");
+      } finally {
+        setCoverGeneratingProjectIds((current) => {
+          const next = new Set(current);
+          next.delete(projectId);
+          return next;
+        });
+        if (coverUploadRef.current) coverUploadRef.current.value = "";
       }
     },
     [adoptProject],
@@ -1407,13 +1477,6 @@ export default function SlateWorkspace({
             label: "Open project",
             onSelect: () => openProject(item.id),
           },
-          {
-            id: "create-cover",
-            icon: <ImageIcon />,
-            label: item.cover.imageId ? "Create new cover" : "Create cover",
-            disabled: coverGeneratingProjectIds.has(item.id),
-            onSelect: () => void synthesizeProjectCover(item.id),
-          },
           { id: "delete-project-separator", kind: "separator" },
           {
             id: "delete-project",
@@ -1426,10 +1489,8 @@ export default function SlateWorkspace({
       });
     },
     [
-      coverGeneratingProjectIds,
       openMenu,
       openProject,
-      synthesizeProjectCover,
       theme,
     ],
   );
@@ -4131,22 +4192,33 @@ export default function SlateWorkspace({
                   >
                     {titleSuggestionBusy ? "Prism is listening…" : "Generate a new title"}
                   </button>
-                  <button
-                    type="button"
-                    className={styles.titleSuggestionTrigger}
-                    disabled={coverGeneratingProjectIds.has(project.id)}
-                    onClick={() => void synthesizeProjectCover(project.id)}
-                  >
-                    {coverGeneratingProjectIds.has(project.id)
-                      ? "Rendering cover…"
-                      : project.cover.imageId
-                        ? "Generate a new cover"
-                        : "Generate a cover"}
-                  </button>
                 </div>
                 {titleSuggestionNotice ? (
                   <span className={styles.titleSuggestionNotice}>{titleSuggestionNotice}</span>
                 ) : null}
+                <input
+                  ref={coverUploadRef}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+                  hidden
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    if (file) void uploadProjectCover(project.id, file);
+                  }}
+                />
+                <AssetRail
+                  kind="slate_cover"
+                  label="Book covers"
+                  context={project.id}
+                  currentImageIds={[project.cover.imageId]}
+                  refreshKey={project.cover.imageId}
+                  disabled={coverGeneratingProjectIds.has(project.id)}
+                  onUpload={() => coverUploadRef.current?.click()}
+                  onSynthesize={(direction) =>
+                    synthesizeProjectCover(project.id, false, direction)
+                  }
+                  onSelect={(asset) => reuseProjectCover(project.id, asset.id)}
+                />
               </div>
               <div className={styles.manuscriptHeaderActions}>
                 <div className={styles.statusStack} role="status" aria-live="polite">
@@ -5295,18 +5367,6 @@ export default function SlateWorkspace({
                       {titleSuggestionBusy
                         ? "Prism is listening…"
                         : "Generate a new title"}
-                    </button>
-                    <button
-                      type="button"
-                      className={styles.quietButton}
-                      disabled={coverGeneratingProjectIds.has(project.id)}
-                      onClick={() => void synthesizeProjectCover(project.id)}
-                    >
-                      {coverGeneratingProjectIds.has(project.id)
-                        ? "Rendering cover…"
-                        : project.cover.imageId
-                          ? "Generate a new cover"
-                          : "Generate a cover"}
                     </button>
                   </div>
                 </section>

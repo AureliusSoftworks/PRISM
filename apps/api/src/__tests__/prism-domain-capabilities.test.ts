@@ -918,7 +918,45 @@ describe("Prism Slate project capabilities", () => {
 });
 
 describe("Prism Image Library capability", () => {
-  it("quarantines and restores the row, local file, and profile reference", async () => {
+  it("blocks legacy single-image deletion when the reusable asset is still in use", () => {
+    const db = fixture();
+    try {
+      const createdAt = "2026-07-26T04:05:00.000Z";
+      db.prepare(
+        `INSERT INTO images
+          (id, user_id, bot_id, prompt, url, provider, model, purpose, origin,
+           created_at)
+         VALUES ('image-in-use', 'u1', 'host', 'A reusable pinecone portrait',
+                 '/api/images/image-in-use/file', 'openai', 'gpt-image-2',
+                 'gallery', 'images_panel', ?)`,
+      ).run(createdAt);
+      db.prepare(
+        `UPDATE bots
+            SET profile_picture_image_id = 'image-in-use'
+          WHERE id = 'host' AND user_id = 'u1'`,
+      ).run();
+
+      const registry = createPrismDomainCapabilityRegistry();
+      assert.throws(
+        () =>
+          registry.createProposal({
+            context: context(db),
+            capabilityId: "images.delete",
+            input: { imageId: "image-in-use" },
+          }),
+        /still used by Bot profile picture/u,
+      );
+      assert.ok(
+        db
+          .prepare("SELECT id FROM images WHERE id = 'image-in-use'")
+          .get(),
+      );
+    } finally {
+      closeTestDatabase(db);
+    }
+  });
+
+  it("quarantines and restores an unused row and local file", async () => {
     const tempDirectory = mkdtempSync(
       join(tmpdir(), "prism-image-capability-"),
     );
@@ -938,16 +976,6 @@ describe("Prism Image Library capability", () => {
                  '/api/images/image-1/file', 'openai', ?, 'gpt-image-2',
                  'gallery', ?)`,
       ).run(localRelPath, createdAt);
-      db.prepare(
-        `UPDATE bots
-            SET profile_picture_image_id = 'image-1'
-          WHERE id = 'host' AND user_id = 'u1'`,
-      ).run();
-      const originalBotRevision = (
-        db
-          .prepare("SELECT updated_at FROM bots WHERE id = 'host'")
-          .get() as { updated_at: string }
-      ).updated_at;
       const registry = createPrismDomainCapabilityRegistry();
       const capabilityContext = {
         db,
@@ -978,16 +1006,6 @@ describe("Prism Image Library capability", () => {
           .get(),
         undefined,
       );
-      assert.equal(
-        (
-          db
-            .prepare(
-              "SELECT profile_picture_image_id FROM bots WHERE id = 'host'",
-            )
-            .get() as { profile_picture_image_id: string | null }
-        ).profile_picture_image_id,
-        null,
-      );
       assert.throws(() => readGeneratedImageBytes(localRelPath));
 
       const undone = registry.undo({
@@ -1006,16 +1024,6 @@ describe("Prism Image Library capability", () => {
         ).prompt,
         "A pinecone portrait",
       );
-      const restoredBot = db
-        .prepare(
-          "SELECT profile_picture_image_id, updated_at FROM bots WHERE id = 'host'",
-        )
-        .get() as {
-        profile_picture_image_id: string | null;
-        updated_at: string;
-      };
-      assert.equal(restoredBot.profile_picture_image_id, "image-1");
-      assert.equal(restoredBot.updated_at, originalBotRevision);
       assert.deepEqual(readGeneratedImageBytes(localRelPath), bytes);
     } finally {
       closeTestDatabase(db);

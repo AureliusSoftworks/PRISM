@@ -778,6 +778,9 @@ import {
   type SettingsLeafScope,
   type SettingsScope,
 } from "./SettingsPanel";
+import { StorageSettings } from "./StorageSettings";
+import { AssetRail } from "./AssetLibrary";
+import type { ImageAssetSet } from "@localai/shared";
 import {
   BOT_FACT_KEY_LABELS,
   BOT_GENERATION_PROMPT_MAX_LENGTH,
@@ -23159,7 +23162,7 @@ function ComposerBotPicker({
                     </span>
                   )}
                 </div>
-                {showHueLensInMenu && onHueChange && (
+                {showHueLensInMenu && (
                   <HueLensControl
                     bots={bots}
                     filteredBots={visibleBots}
@@ -46827,6 +46830,9 @@ function HomeContent(): React.JSX.Element {
     null,
   );
   const botGroupRoomAtmosphereUploadRef = useRef<HTMLInputElement | null>(null);
+  const homeAtmosphereUploadRef = useRef<HTMLInputElement | null>(null);
+  const zenAtmosphereUploadRef = useRef<HTMLInputElement | null>(null);
+  const generalImageUploadRef = useRef<HTMLInputElement | null>(null);
   const botGroupRoomAtmosphereDialogBusyRef = useRef(false);
   botGroupRoomAtmosphereDialogBusyRef.current = Boolean(
     botGroupRoomAtmosphereDialog?.busy,
@@ -51870,7 +51876,7 @@ function HomeContent(): React.JSX.Element {
   const requestHubAtmosphereGeneration = useCallback(
     async (
       requestedStyle: HubAtmosphereStyle,
-      options: { force?: boolean } = {},
+      options: { force?: boolean; direction?: string } = {},
     ): Promise<void> => {
       if (
         !user ||
@@ -51906,6 +51912,9 @@ function HomeContent(): React.JSX.Element {
             body: JSON.stringify({
               purpose: HUB_ATMOSPHERE_IMAGE_PURPOSE,
               atmosphereStyle,
+              ...(options.direction?.trim()
+                ? { direction: options.direction.trim() }
+                : {}),
             }),
           },
         );
@@ -51937,6 +51946,108 @@ function HomeContent(): React.JSX.Element {
     },
     [settings, user],
   );
+
+  async function uploadAssetLibraryImage(
+    kind: Exclude<ImageAssetSet["kind"], "signal_studio">,
+    file: File,
+    title: string,
+  ): Promise<ImageAssetSet> {
+    const dataUrl = await readImageBlobAsDataUrl(file);
+    const result = await api<{ ok: true; asset: ImageAssetSet }>(
+      "/api/assets/upload",
+      {
+        method: "POST",
+        body: JSON.stringify({ kind, dataUrl, title }),
+      },
+    );
+    return result.asset;
+  }
+
+  function primaryImageIdForAsset(asset: ImageAssetSet): string | null {
+    return (
+      asset.members.find((member) => member.role === "primary")?.imageId ??
+      asset.members[0]?.imageId ??
+      null
+    );
+  }
+
+  async function applyHomeAtmosphereAsset(asset: ImageAssetSet): Promise<void> {
+    if (!settings) return;
+    const result = await api<{
+      ok: true;
+      imageId: string;
+      atmosphereStyle: string;
+    }>(`/api/home/atmosphere/assets/${encodeURIComponent(asset.id)}/reuse`, {
+      method: "POST",
+      body: JSON.stringify({ atmosphereStyle: settings.atmosphereStyle }),
+    });
+    setSettings((current) =>
+      current
+        ? {
+            ...current,
+            hubAtmosphereEnabled: true,
+            hubAtmosphereImageId: result.imageId,
+            hubAtmosphereImageStyle: normalizeHubAtmosphereStyle(
+              result.atmosphereStyle,
+            ),
+          }
+        : current,
+    );
+    setPanelNotice("Home Atmosphere updated from your local asset library.");
+  }
+
+  async function uploadHomeAtmosphere(file: File): Promise<void> {
+    try {
+      const asset = await uploadAssetLibraryImage(
+        "home_atmosphere",
+        file,
+        `Uploaded Home Atmosphere · ${file.name}`,
+      );
+      await applyHomeAtmosphereAsset(asset);
+    } catch (error) {
+      setPanelError(
+        error instanceof Error ? error.message : "Home Atmosphere upload failed.",
+      );
+    }
+  }
+
+  async function applyZenAtmosphereAsset(asset: ImageAssetSet): Promise<void> {
+    const conversationId =
+      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
+    if (!conversationId || conversationId === "pending") return;
+    setZenWallpaperBusyConversationId(conversationId);
+    setZenWallpaperError(null);
+    try {
+      const result = await api<ZenWallpaperApiResponse>(
+        `/api/conversations/${encodeURIComponent(conversationId)}/zen-wallpaper/assets/${encodeURIComponent(asset.id)}/reuse`,
+        { method: "POST" },
+      );
+      applyZenWallpaperMetadata(conversationId, result.zenWallpaper);
+    } catch (error) {
+      setZenWallpaperError(
+        error instanceof Error ? error.message : "Zen Atmosphere reuse failed.",
+      );
+    } finally {
+      setZenWallpaperBusyConversationId((current) =>
+        current === conversationId ? null : current,
+      );
+    }
+  }
+
+  async function uploadZenAtmosphere(file: File): Promise<void> {
+    try {
+      const asset = await uploadAssetLibraryImage(
+        "zen_atmosphere",
+        file,
+        `Uploaded Zen Atmosphere · ${file.name}`,
+      );
+      await applyZenAtmosphereAsset(asset);
+    } catch (error) {
+      setZenWallpaperError(
+        error instanceof Error ? error.message : "Zen Atmosphere upload failed.",
+      );
+    }
+  }
 
   async function saveAndAdvanceDesktopFirstRunStep(
     skip = false,
@@ -76039,7 +76150,9 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function generateAtmosphereFromSlashCommand(): Promise<void> {
+  async function generateAtmosphereFromSlashCommand(
+    direction = "",
+  ): Promise<void> {
     if (view !== "chat") {
       setError("$atmosphere is only available in Zen.");
       return;
@@ -76086,6 +76199,7 @@ function HomeContent(): React.JSX.Element {
       enabled: true,
       force: true,
       promptOverride,
+      direction,
     });
   }
 
@@ -93956,6 +94070,7 @@ function HomeContent(): React.JSX.Element {
 
   async function generateBotGroupRoomAtmosphere(
     groupId: string,
+    direction = "",
   ): Promise<void> {
     const target = botLibraryGroups.find((group) => group.id === groupId);
     const memberBotIds = target?.botIds.filter((botId) =>
@@ -94014,6 +94129,7 @@ function HomeContent(): React.JSX.Element {
             : `${Date.now().toString(36)}:${Math.random().toString(36).slice(2)}`,
         size: "1536x1024",
       };
+      if (direction.trim()) body.direction = direction.trim();
       if (groupImageProvider !== "local") {
         if (zenWallpaperImageLaneDisabled("openai")) {
           if (zenWallpaperImageLaneDisabled("local") || !localModelId) {
@@ -94075,6 +94191,22 @@ function HomeContent(): React.JSX.Element {
         current?.groupId === groupId ? { ...current, busy: null } : current,
       );
     }
+  }
+
+  async function applyBotGroupRoomAtmosphereAsset(
+    groupId: string,
+    asset: ImageAssetSet,
+  ): Promise<void> {
+    const member = asset.members.find((candidate) => candidate.role === "primary");
+    if (!member) {
+      setBotGroupRoomAtmosphereDialog((current) =>
+        current?.groupId === groupId
+          ? { ...current, error: "That Atmosphere has no reusable image." }
+          : current,
+      );
+      return;
+    }
+    chooseBotGroupRoomAtmosphere(groupId, member.imageId, member.prompt);
   }
 
   function requestDeleteBotLibraryGroup(groupId: string): void {
@@ -97779,6 +97911,7 @@ function HomeContent(): React.JSX.Element {
       force?: boolean;
       generate?: boolean;
       promptOverride?: string;
+      direction?: string;
     },
   ): Promise<void> {
     const generationRequested = options.generate !== false;
@@ -97807,6 +97940,9 @@ function HomeContent(): React.JSX.Element {
       }
       if (options.promptOverride?.trim()) {
         body.promptOverride = options.promptOverride.trim();
+      }
+      if (options.direction?.trim()) {
+        body.direction = options.direction.trim();
       }
       if (options.enabled && generationRequested) {
         if (effectiveImageProvider === "local") {
@@ -98116,6 +98252,7 @@ function HomeContent(): React.JSX.Element {
 
   function createQueuedImageGeneration(
     promptTrimmed: string,
+    direction = "",
   ): QueuedImageGeneration {
     const scopeBotId = imagesPanelPersonaBotId;
     const scopeKey = imageGenerationScopeKey(
@@ -98139,6 +98276,7 @@ function HomeContent(): React.JSX.Element {
       size: IMAGE_GENERATION_SIZE_BY_VARIANT[effectiveVariant],
       origin: "images_panel",
     };
+    if (direction.trim()) requestBody.direction = direction.trim();
     if (sandboxImageGenConversationId) {
       requestBody.conversationId = sandboxImageGenConversationId;
     }
@@ -98372,6 +98510,88 @@ function HomeContent(): React.JSX.Element {
           : "Image generation could not start.",
       );
     }
+  }
+
+  async function synthesizeGeneralImage(direction: string): Promise<void> {
+    const promptTrimmed = imagePrompt.trim();
+    if (!promptTrimmed) {
+      setPanelError("Describe the image before wielding Prism onto +.");
+      return;
+    }
+    if (view === "chat" && privateChatActive && !imagePrivateMode) {
+      setImagePrivateMode(true);
+    }
+    try {
+      enqueueImageGeneration(
+        createQueuedImageGeneration(promptTrimmed, direction),
+      );
+    } catch (error) {
+      setPanelError(
+        error instanceof Error
+          ? error.message
+          : "Image generation could not start.",
+      );
+    }
+  }
+
+  async function uploadGeneralImage(file: File): Promise<void> {
+    try {
+      const asset = await uploadAssetLibraryImage(
+        "general_image",
+        file,
+        `Uploaded image · ${file.name}`,
+      );
+      await refreshImageBotDirectorySnapshot();
+      if (imagePanelScopeRef.current === "general") {
+        await refreshImages("general");
+      } else {
+        await refreshImages(null);
+      }
+      const member = asset.members.find(
+        (candidate) => candidate.role === "primary",
+      );
+      if (member) {
+        openImageLightbox({
+          id: member.imageId,
+          prompt: member.prompt,
+          url: member.url,
+          displayUrl: member.url,
+          createdAt: member.createdAt,
+          hasLocalFile: true,
+          revisedPrompt: member.revisedPrompt,
+          size: member.size,
+          provider: member.provider,
+          model: member.model,
+          purpose: "gallery",
+          origin: "images_panel",
+        });
+      }
+    } catch (error) {
+      setPanelError(
+        error instanceof Error ? error.message : "Image upload failed.",
+      );
+    }
+  }
+
+  async function revealGeneralImageAsset(asset: ImageAssetSet): Promise<void> {
+    const member = asset.members.find(
+      (candidate) => candidate.role === "primary",
+    );
+    if (!member) return;
+    openImageLightbox({
+      id: member.imageId,
+      prompt: member.prompt,
+      url: member.url,
+      displayUrl: member.url,
+      createdAt: member.createdAt,
+      hasLocalFile: true,
+      revisedPrompt: member.revisedPrompt,
+      size: member.size,
+      provider: member.provider,
+      model: member.model,
+      purpose: "gallery",
+      origin: "images_panel",
+    });
   }
 
   async function randomizeImagePrompt() {
@@ -98780,9 +99000,10 @@ function HomeContent(): React.JSX.Element {
                 <p>
                   Your first Home scene starts rendering quietly while you
                   finish setup, then appears automatically when you enter PRISM.
-                  You can disable it later in Appearance settings. If generation
-                  is unavailable, setup continues and Appearance can try again
-                  later.
+                  Appearance keeps every generated or uploaded Home scene in
+                  your local asset library, where you can reuse it or wield
+                  Prism onto + for another pass. If generation is unavailable,
+                  setup continues and Appearance can try again later.
                 </p>
               </div>
             ) : null}
@@ -101002,35 +101223,24 @@ function HomeContent(): React.JSX.Element {
                   Clear atmosphere
                 </button>
               ) : null}
-              <button
-                type="button"
-                className={styles.deleteAllModalCancel}
-                disabled={Boolean(dialog.busy)}
-                onClick={() => botGroupRoomAtmosphereUploadRef.current?.click()}
-              >
-                <ImageGlyph size={14} strokeWidth={2.1} aria-hidden="true" />
-                {dialog.busy === "upload" ? "Uploading..." : "Upload"}
-              </button>
-              <button
-                type="button"
-                className={styles.deleteAllModalConfirm}
-                disabled={Boolean(dialog.busy)}
-                onClick={() => void generateBotGroupRoomAtmosphere(group.id)}
-              >
-                {selectedAtmosphere ? (
-                  <RotateCw size={14} strokeWidth={2.1} aria-hidden="true" />
-                ) : (
-                  <Sparkles size={14} strokeWidth={2.1} aria-hidden="true" />
-                )}
-                {dialog.busy === "generate"
-                  ? selectedAtmosphere
-                    ? "Refreshing..."
-                    : "Generating..."
-                  : selectedAtmosphere
-                    ? "Refresh"
-                    : "Generate"}
-              </button>
             </div>
+            <AssetRail
+              kind="group_room_atmosphere"
+              label="Group-room Atmospheres"
+              context={`${group.name} ${group.description}`}
+              currentImageIds={[selectedAtmosphere?.imageId]}
+              disabled={Boolean(dialog.busy)}
+              synthesizeDisabled={!zenWallpaperImageGenerationAvailable()}
+              onUpload={() =>
+                botGroupRoomAtmosphereUploadRef.current?.click()
+              }
+              onSynthesize={(direction) =>
+                generateBotGroupRoomAtmosphere(group.id, direction)
+              }
+              onSelect={(asset) =>
+                applyBotGroupRoomAtmosphereAsset(group.id, asset)
+              }
+            />
             <p className={styles.botGroupRoomAtmosphereHint}>
               Generation follows your image-provider setting. LOCAL stays on
               your network; ONLINE sends member cues. Nothing is attached to a
@@ -112381,31 +112591,44 @@ function HomeContent(): React.JSX.Element {
                           <div
                             className={`${styles.settingsTextField} ${styles.settingsFieldFull}`}
                           >
-                            <button
-                              type="button"
-                              className={styles.linkButton}
+                            <input
+                              ref={zenAtmosphereUploadRef}
+                              className={styles.assetUploadInput}
+                              type="file"
+                              accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+                              aria-label="Upload Zen Atmosphere"
+                              onChange={(event) => {
+                                const file = event.currentTarget.files?.[0];
+                                event.currentTarget.value = "";
+                                if (file) void uploadZenAtmosphere(file);
+                              }}
+                            />
+                            <AssetRail
+                              kind="zen_atmosphere"
+                              label="Zen Atmospheres"
+                              context={detail?.title ?? activeBot?.name ?? "Zen"}
+                              currentImageIds={[detail?.zenWallpaper?.imageId]}
                               disabled={
                                 !detail ||
                                 detail.mode !== "zen" ||
                                 detail.id === "pending" ||
-                                detail.messages.length === 0 ||
                                 zenWallpaperBusyConversationId === detail.id ||
                                 detail.zenWallpaper?.status === "generating"
                               }
-                              onClick={() => {
-                                void generateAtmosphereFromSlashCommand();
-                              }}
-                              aria-label="Generate a fresh Zen Atmosphere wallpaper"
-                            >
-                              {detail?.zenWallpaper?.status === "generating" ||
-                              (detail &&
-                                zenWallpaperBusyConversationId === detail.id)
-                                ? "Generating Atmosphere…"
-                                : "Generate Atmosphere now"}
-                            </button>
+                              synthesizeDisabled={
+                                !detail || detail.messages.length === 0
+                              }
+                              onUpload={() =>
+                                zenAtmosphereUploadRef.current?.click()
+                              }
+                              onSynthesize={(direction) =>
+                                generateAtmosphereFromSlashCommand(direction)
+                              }
+                              onSelect={applyZenAtmosphereAsset}
+                            />
                             <small>
-                              Same action as $atmosphere. Needs at least one Zen
-                              message in this conversation.
+                              Synthesis needs at least one Zen message. $atmosphere
+                              remains available from the composer.
                             </small>
                           </div>
                         </div>
@@ -112948,32 +113171,39 @@ function HomeContent(): React.JSX.Element {
                                   </small>
                                 </span>
                               </label>
-                              <button
-                                type="button"
-                                className={styles.linkButton}
-                                data-home-atmosphere-action="regenerate"
-                                disabled={
-                                  busy ||
+                              <input
+                                ref={homeAtmosphereUploadRef}
+                                className={styles.assetUploadInput}
+                                type="file"
+                                accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+                                aria-label="Upload Home Atmosphere"
+                                onChange={(event) => {
+                                  const file = event.currentTarget.files?.[0];
+                                  event.currentTarget.value = "";
+                                  if (file) void uploadHomeAtmosphere(file);
+                                }}
+                              />
+                              <AssetRail
+                                kind="home_atmosphere"
+                                label="Home Atmospheres"
+                                context={settings.atmosphereStyle}
+                                currentImageIds={[settings.hubAtmosphereImageId]}
+                                disabled={busy}
+                                synthesizeDisabled={
                                   !settings.hubAtmosphereEnabled ||
                                   hubAtmosphereGenerationState === "generating"
                                 }
-                                onClick={() =>
-                                  void requestHubAtmosphereGeneration(
+                                onUpload={() =>
+                                  homeAtmosphereUploadRef.current?.click()
+                                }
+                                onSynthesize={(direction) =>
+                                  requestHubAtmosphereGeneration(
                                     settings.atmosphereStyle,
-                                    { force: true },
+                                    { force: true, direction },
                                   )
                                 }
-                              >
-                                {hubAtmosphereGenerationState === "generating"
-                                  ? "Preparing wallpaper…"
-                                  : hubAtmosphereGenerationState === "error"
-                                    ? "Retry generation"
-                                    : settings.hubAtmosphereImageId &&
-                                        settings.hubAtmosphereImageStyle ===
-                                          settings.atmosphereStyle
-                                      ? "Regenerate wallpaper"
-                                      : "Generate wallpaper"}
-                              </button>
+                                onSelect={applyHomeAtmosphereAsset}
+                              />
                             </div>
                             <div className={styles.settingsSubsectionHeading}>
                               <strong>Atmosphere style</strong>
@@ -114287,6 +114517,13 @@ function HomeContent(): React.JSX.Element {
                               </div>
                             </div>
                           </section>
+                        )}
+
+                        {activeSettingsScope === "storage" && (
+                          <StorageSettings
+                            onAuditUnused={() => void previewUnusedImageAssets()}
+                            auditBusy={busy || imageCleanupPreviewLoading}
+                          />
                         )}
 
                         {activeSettingsScope === "help" && (
@@ -119313,16 +119550,6 @@ function HomeContent(): React.JSX.Element {
                         </button>
                       </div>
                     </>
-                    <button
-                      type="submit"
-                      disabled={busy || imageRandomPromptBusy}
-                    >
-                      {imageGenInflightHere <= 0
-                        ? "Generate"
-                        : imageGenLocalInflight && imageGenWarmupHintVisible
-                          ? "Warming up…"
-                          : "Generating…"}
-                    </button>
                   </form>
                 ) : (
                   <div className={styles.imageUnavailableState} role="status">
@@ -119345,6 +119572,33 @@ function HomeContent(): React.JSX.Element {
                     </button>
                   </div>
                 )}
+                <input
+                  ref={generalImageUploadRef}
+                  className={styles.assetUploadInput}
+                  type="file"
+                  accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+                  aria-label="Upload image"
+                  onChange={(event) => {
+                    const file = event.currentTarget.files?.[0];
+                    event.currentTarget.value = "";
+                    if (file) void uploadGeneralImage(file);
+                  }}
+                />
+                <AssetRail
+                  kind="general_image"
+                  label="Recent images"
+                  context={imagePanelBot?.name ?? activeBot?.name ?? imagePrompt}
+                  refreshKey={images.length}
+                  onUpload={() => generalImageUploadRef.current?.click()}
+                  onSynthesize={synthesizeGeneralImage}
+                  synthesizeDisabled={
+                    !canGenerate ||
+                    busy ||
+                    imageRandomPromptBusy ||
+                    imagePrompt.trim().length === 0
+                  }
+                  onSelect={revealGeneralImageAsset}
+                />
                 {imageKeywordEditorOpen && (
                   <div
                     className={styles.imageKeywordModalBackdrop}

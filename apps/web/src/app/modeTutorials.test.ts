@@ -234,15 +234,15 @@ describe("mode tutorials", () => {
     assert.match(copy, /never fabricates sources/u);
     assert.match(
       copy,
-      /previously synthesized Debate sprite to change only the evidence visual without spending more image-generation tokens/u,
+      /exhibit asset rail keeps five recent Debate visuals/u,
     );
     assert.match(
       copy,
-      /tool-specific shelf instead of mixing into the general Images panel/u,
+      /Debate exhibits never mix into general Images/u,
     );
     assert.match(
       copy,
-      /floating Prism progress card stays visible for the full synthesis operation/u,
+      /click \+ to upload, wield Prism onto it to synthesize/u,
     );
     assert.match(copy, /never reads or writes relationship memory/u);
     assert.match(
@@ -1315,11 +1315,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /previously generated Light studios, Dark studios, and logos/u,
+      /exact-type rails for studio sets and logos/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /stay separate from the general Images panel/u,
+      /never mix into general Images/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
@@ -1332,7 +1332,7 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /activity card/u);
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /Dark-to-Light studio pair/u,
+      /Light\/Dark studio set/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
@@ -1344,7 +1344,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
-      /replace either studio visual/u,
+      /studio upload requires both Light and Dark/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[2]?.body ?? "",

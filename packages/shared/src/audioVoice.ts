@@ -466,6 +466,8 @@ export const LOCAL_VOICE_SPEECHPRINT_INFLUENCES = [
   "australian-english",
   "new-zealand-english",
   "canadian-english",
+  "new-york-english",
+  "southern-us-english",
   "caribbean-english",
   "north-african-arabic-influenced-english",
   "middle-eastern-arabic-influenced-english",

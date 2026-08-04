@@ -85,6 +85,7 @@ import {
   type PrismRefractMagicTarget,
 } from "./prismRefract";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import { AssetRail } from "./AssetLibrary";
 import styles from "./DebateExperience.module.css";
 import { debateLiveCaptionPage } from "./debateLiveCaption";
 import type { DebateForumRole } from "./DebateForumScene";
@@ -144,7 +145,6 @@ import {
 } from "./debateUrlEvidence";
 import {
   DEBATE_EVIDENCE_EMOJI_CHOICES,
-  applyDebateEvidenceExhibitAssetReuse,
   applyDebateEvidenceObjectNameEdit,
   debateEvidenceObjectFromPrismCandidate,
   emptyDebateEvidenceObjectDraft,
@@ -176,6 +176,7 @@ import {
   debateTurnOwnerBotId,
   debateUtterancePaceBoost,
   debateVisibleContentAtProgress,
+  debateVisibleContentAtSpeechTime,
   formatDebateElapsedDuration,
   formatDebateSpokenDuration,
 } from "./debatePresentation";
@@ -529,12 +530,6 @@ type DebateDeleteUndo = {
   runId: string;
   sessionId: string;
   motion: string;
-};
-type DebateExhibitAsset = {
-  id: string;
-  prompt: string;
-  displayUrl: string;
-  createdAt: string;
 };
 type DebateStageAlignmentDrag = {
   pointerId: number;
@@ -2988,21 +2983,10 @@ export function DebateExperience(
   const [evidenceObjectVisualBusy, setEvidenceObjectVisualBusy] = useState<
     "upload" | "synthesize" | null
   >(null);
-  const [evidenceExhibitAssets, setEvidenceExhibitAssets] = useState<
-    DebateExhibitAsset[]
-  >([]);
-  const [evidenceExhibitAssetsLoading, setEvidenceExhibitAssetsLoading] =
-    useState(false);
-  const [
-    evidenceExhibitAssetsUnavailable,
-    setEvidenceExhibitAssetsUnavailable,
-  ] = useState(false);
-  const evidenceExhibitAssetsRequestRef = useRef(0);
   const evidenceExhibitUploadRef = useRef<HTMLInputElement | null>(null);
   const evidenceItemTotal = debateEvidenceItemCount(evidence);
   const evidenceItemLimitReached =
     evidenceItemTotal >= DEBATE_EVIDENCE_ITEM_MAX_COUNT;
-  const evidenceObjectEditorOpen = evidenceObjectDraft !== null;
   const [playerDraft, setPlayerDraft] = useState("");
   const [turnaboutObjecting, setTurnaboutObjecting] = useState(false);
   const [turnaboutEvidenceSourceId, setTurnaboutEvidenceSourceId] =
@@ -5328,35 +5312,6 @@ export function DebateExperience(
     setUrlEvidenceError(null);
   };
 
-  const loadEvidenceExhibitAssets = useCallback(async (): Promise<void> => {
-    const requestId = evidenceExhibitAssetsRequestRef.current + 1;
-    evidenceExhibitAssetsRequestRef.current = requestId;
-    setEvidenceExhibitAssetsLoading(true);
-    setEvidenceExhibitAssetsUnavailable(false);
-    try {
-      const result = await request<{ images: DebateExhibitAsset[] }>(
-        "/api/images/tool-assets?scope=debate_exhibit&limit=24",
-      );
-      if (evidenceExhibitAssetsRequestRef.current !== requestId) return;
-      setEvidenceExhibitAssets(result.images);
-    } catch {
-      if (evidenceExhibitAssetsRequestRef.current !== requestId) return;
-      setEvidenceExhibitAssetsUnavailable(true);
-    } finally {
-      if (evidenceExhibitAssetsRequestRef.current === requestId) {
-        setEvidenceExhibitAssetsLoading(false);
-      }
-    }
-  }, [request]);
-
-  useEffect(() => {
-    if (!evidenceObjectEditorOpen) return;
-    void loadEvidenceExhibitAssets();
-    return () => {
-      evidenceExhibitAssetsRequestRef.current += 1;
-    };
-  }, [evidenceObjectEditorOpen, loadEvidenceExhibitAssets]);
-
   const beginEvidenceObject = (): void => {
     if (
       evidenceItemLimitReached ||
@@ -5433,14 +5388,6 @@ export function DebateExperience(
       refractEvidenceObject,
     ],
   );
-
-  const selectEvidenceExhibitAsset = (asset: DebateExhibitAsset): void => {
-    if (evidenceObjectVisualBusy) return;
-    setEvidenceObjectDraft((current) =>
-      current ? applyDebateEvidenceExhibitAssetReuse(current, asset) : current,
-    );
-    setError(null);
-  };
 
   const updateEvidenceObjectName = (
     field: "adjective" | "object",
@@ -5529,7 +5476,7 @@ export function DebateExperience(
     }
   };
 
-  const synthesizeEvidenceObjectImage = async (): Promise<void> => {
+  const synthesizeEvidenceObjectImage = async (direction = ""): Promise<void> => {
     const draft = evidenceObjectDraft;
     const title = draft ? debateEvidenceExhibitTitle(draft) : "";
     if (!draft || !title || evidenceObjectVisualBusy) {
@@ -5548,6 +5495,7 @@ export function DebateExperience(
           object: draft.object,
           preferredProvider: props.preferredImageProvider,
           responseMode: props.responseMode,
+          direction,
         }),
       );
       setEvidenceObjectDraft((current) =>
@@ -5559,7 +5507,6 @@ export function DebateExperience(
             }
           : current,
       );
-      await loadEvidenceExhibitAssets();
     } catch (caught) {
       setError(
         caught instanceof Error
@@ -6446,10 +6393,13 @@ export function DebateExperience(
                 return;
               }
               lastSpeechRenderAt = now;
-              const visibleContent = debateVisibleContentAtProgress(
-                event.content,
-                elapsedMs / playbackDurationMs,
-              );
+              const visibleContent = debateVisibleContentAtSpeechTime({
+                content: event.content,
+                spokenText,
+                elapsedMs,
+                durationMs: playbackDurationMs,
+                alignment: playbackAlignment,
+              });
               const floorReady = visibleContent.length >= 24;
               const semanticKey = floorReady ? "floor-ready" : "floor-warming";
               replaceLiveReveal(
@@ -10612,70 +10562,6 @@ export function DebateExperience(
                 </section>
               </div>
             ) : null}
-            <section
-              className={styles.evidenceExhibitAssetLibrary}
-              aria-label="Previously generated Debate exhibit sprites"
-              data-debate-exhibit-asset-library="true"
-            >
-              <header>
-                <div>
-                  <strong>Reuse a generated sprite</strong>
-                  <small>
-                    These came from Debate’s exhibit tool. Choosing one changes
-                    only the evidence sprite and uses no image-generation
-                    tokens.
-                  </small>
-                </div>
-                {evidenceExhibitAssets.length > 0 ? (
-                  <span>{evidenceExhibitAssets.length} saved</span>
-                ) : null}
-              </header>
-              {evidenceExhibitAssetsLoading ? (
-                <p>Loading your Debate sprites…</p>
-              ) : evidenceExhibitAssetsUnavailable ? (
-                <p>Saved sprites are temporarily unavailable.</p>
-              ) : evidenceExhibitAssets.length > 0 ? (
-                <div className={styles.evidenceExhibitAssetRail}>
-                  {evidenceExhibitAssets.map((asset, index) => {
-                    const selected =
-                      evidenceObjectDraft.visualKind === "synthesized" &&
-                      evidenceObjectDraft.imageId === asset.id;
-                    return (
-                      <button
-                        key={asset.id}
-                        type="button"
-                        aria-label={`Reuse generated Debate exhibit sprite ${index + 1}`}
-                        aria-pressed={selected}
-                        title={asset.prompt}
-                        onClick={() => selectEvidenceExhibitAsset(asset)}
-                        onContextMenu={
-                          revealSynthesizedAssetContextMenuEnabled
-                            ? (event) =>
-                                onRevealSynthesizedAssetContextMenu(
-                                  event,
-                                  asset.id,
-                                )
-                            : undefined
-                        }
-                        disabled={evidenceObjectVisualBusy !== null}
-                      >
-                        {/* eslint-disable-next-line @next/next/no-img-element */}
-                        <img
-                          src={`/api/images/${encodeURIComponent(asset.id)}/thumb`}
-                          alt=""
-                        />
-                        {selected ? <span aria-hidden="true">✓</span> : null}
-                      </button>
-                    );
-                  })}
-                </div>
-              ) : (
-                <p>
-                  Your first synthesized Debate exhibit will stay here for
-                  future proceedings.
-                </p>
-              )}
-            </section>
             <input
               ref={evidenceExhibitUploadRef}
               className={styles.visuallyHidden}
@@ -10686,37 +10572,43 @@ export function DebateExperience(
                 if (file) void uploadEvidenceObjectImage(file);
               }}
             />
-            <div className={styles.evidenceObjectVisualActions}>
-              <button
-                type="button"
-                onClick={() => evidenceExhibitUploadRef.current?.click()}
-                disabled={!objectTitle || evidenceObjectVisualBusy !== null}
-              >
-                {evidenceObjectVisualBusy === "upload"
-                  ? "Uploading…"
-                  : evidenceObjectDraft.visualKind === "upload"
-                    ? "Replace upload"
-                    : "Upload image"}
-              </button>
-              <button
-                type="button"
-                className={styles.generateEvidenceButton}
-                onClick={() => void synthesizeEvidenceObjectImage()}
-                disabled={!objectTitle || evidenceObjectVisualBusy !== null}
-              >
-                <span aria-hidden="true">◇</span>
-                {evidenceObjectVisualBusy === "synthesize"
-                  ? "Synthesizing…"
-                  : evidenceObjectDraft.visualKind === "synthesized"
-                    ? "Resynthesize"
-                    : "Synthesize exhibit"}
-              </button>
-              <small>
-                Uploaded and synthesized images are cut into a transparent stage
-                sprite. Emoji stays hidden while that sprite is showing, and
-                returns only if the sprite cannot load.
-              </small>
-            </div>
+            <AssetRail
+              kind="debate_exhibit"
+              label="Exhibit sprites"
+              context={objectTitle}
+              currentImageIds={[evidenceObjectDraft.imageId]}
+              refreshKey={evidenceObjectDraft.imageId}
+              disabled={!objectTitle || evidenceObjectVisualBusy !== null}
+              onUpload={() => evidenceExhibitUploadRef.current?.click()}
+              onSynthesize={synthesizeEvidenceObjectImage}
+              onSelect={(asset) => {
+                const member =
+                  asset.members.find((candidate) => candidate.role === "primary") ??
+                  asset.members[0];
+                if (!member) return;
+                setEvidenceObjectDraft((current) =>
+                  current
+                    ? {
+                        ...current,
+                        visualKind:
+                          asset.source === "uploaded" ? "upload" : "synthesized",
+                        imageId: member.imageId,
+                      }
+                    : current,
+                );
+                setError(null);
+              }}
+              onRevealImage={
+                revealSynthesizedAssetContextMenuEnabled
+                  ? (imageId, event) =>
+                      onRevealSynthesizedAssetContextMenu(event, imageId)
+                  : undefined
+              }
+            />
+            <small>
+              Uploaded and synthesized images are cut into transparent stage
+              sprites. Reuse references the original local file.
+            </small>
             <div className={styles.evidenceObjectCommitActions}>
               <button
                 type="button"

@@ -311,8 +311,6 @@ describe("Prism Refract integration", () => {
       "Complete this show",
       "Book for me",
       "Regenerate blurbs",
-      "Refresh studio",
-      "Refresh logo",
       "Create atmosphere",
     ]) {
       assert.match(signalSource, new RegExp(action, "u"));
@@ -323,9 +321,13 @@ describe("Prism Refract integration", () => {
     );
     assert.match(
       signalSource,
-      /logo-direction[\s\S]*body: JSON\.stringify\(\{[\s\S]*direction/u,
+      /const regenerateLogo[\s\S]*startSignalArtworkJob\([\s\S]*"logo"[\s\S]*direction/u,
     );
     assert.doesNotMatch(signalSource, /keywords: \[direction\]/u);
+    assert.match(signalSource, /kind="signal_studio"/u);
+    assert.match(signalSource, /kind="signal_logo"/u);
+    assert.doesNotMatch(signalSource, />Refresh studio</u);
+    assert.doesNotMatch(signalSource, />Refresh logo</u);
   });
 
   it("keeps the ritual skippable, remindable, resettable, and persisted outside the walkthrough", () => {

@@ -199,7 +199,8 @@ describe("Slate workspace integration", () => {
       source,
       /if \(shouldGenerateCover\) \{[\s\S]*?synthesizeProjectCover\(response\.project\.id\)/,
     );
-    assert.match(source, /Create new cover/);
+    assert.match(source, /kind="slate_cover"/);
+    assert.match(source, /onSynthesize=\{\(direction\) =>/);
     assert.match(source, /\/api\/slate\/projects\/\$\{encodeURIComponent\(projectId\)\}\/cover/);
     assert.match(source, /setEntryMode\("desk"\)[\s\S]*?setReturnSession\(null\)/);
     assert.match(
@@ -245,7 +246,8 @@ describe("Slate workspace integration", () => {
     assert.match(source, /Create a book cover/);
     assert.match(source, /shouldGenerateCover/);
     assert.match(source, /Generate a new title/);
-    assert.match(source, /Generate a new cover/);
+    assert.match(source, /label="Book covers"/);
+    assert.doesNotMatch(source, />Generate a new cover</);
     assert.match(source, /event\.metaKey \|\| event\.ctrlKey/);
     assert.match(progressiveSource, /manuscript: existingMaterial/);
     assert.match(progressiveSource, /catch \(cause\)[\s\S]*?Slate could not create the project/);

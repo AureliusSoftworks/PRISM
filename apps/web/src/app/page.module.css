@@ -81420,3 +81420,202 @@ a.settingsCreditItem:focus-visible {
   opacity: 0.45;
   pointer-events: none;
 }
+
+/* Debate-aligned Zen child navigation. The conversation hierarchy and bot
+   accents remain intact, while the rail and every nested row share Debate's
+   flat geometry, restrained hover, and left-edge active marker. */
+.appLayout[data-zen-surface="true"] > .sidebar {
+  gap: 12px;
+  padding: 24px 12px 14px;
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, var(--bg-elevated) 72%, transparent),
+    color-mix(in srgb, var(--bg-surface) 92%, transparent)
+  );
+}
+
+.appLayout[data-zen-surface="true"] .conversationHeaderRow {
+  margin: 0 0 8px;
+  padding: 0 10px;
+}
+
+.appLayout[data-zen-surface="true"] .conversationHeaderRow .sectionLabel {
+  padding: 0;
+  color: var(--fg-muted);
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 9px;
+  font-weight: 760;
+  letter-spacing: 0.16em;
+}
+
+.appLayout[data-zen-surface="true"] .conversationList,
+.appLayout[data-zen-surface="true"][data-private-active="true"]
+  .conversationList,
+.appLayout[data-zen-surface="true"][data-zen-private-tone="true"]
+  .conversationList {
+  gap: 5px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  border-radius: 0;
+  background: transparent;
+  box-shadow: none;
+}
+
+.appLayout[data-zen-surface="true"] .conversationRow {
+  gap: 2px;
+}
+
+.appLayout[data-zen-surface="true"] .conversationTitleButton,
+.appLayout[data-zen-surface="true"]
+  .conversationRow[style*="--row-color"]
+  .conversationTitleButton,
+.appLayout[data-zen-surface="true"][data-private-active="true"]
+  .conversationTitleButton,
+.appLayout[data-zen-surface="true"][data-zen-private-tone="true"]
+  .conversationTitleButton {
+  min-width: 0;
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0 8px 8px 0;
+  padding: 11px 9px 11px 10px;
+  color: var(--fg-muted);
+  background: transparent;
+  box-shadow: none;
+  font-size: 12px;
+  font-weight: 600;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background 150ms ease;
+}
+
+.appLayout[data-zen-surface="true"] .conversationTitleButton:hover,
+.appLayout[data-zen-surface="true"]
+  .conversationRow[style*="--row-color"]
+  .conversationTitleButton:hover,
+.appLayout[data-zen-surface="true"][data-private-active="true"]
+  .conversationTitleButton:hover,
+.appLayout[data-zen-surface="true"][data-zen-private-tone="true"]
+  .conversationTitleButton:hover {
+  border-left-color: transparent;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--fg) 4.5%, transparent);
+  box-shadow: none;
+}
+
+.appLayout[data-zen-surface="true"] .conversationTitleButton.selected,
+.appLayout[data-zen-surface="true"]
+  .conversationRow[style*="--row-color"]
+  .conversationTitleButton.selected,
+.appLayout[data-zen-surface="true"][data-private-active="true"]
+  .conversationTitleButton.selected,
+.appLayout[data-zen-surface="true"][data-zen-private-tone="true"]
+  .conversationTitleButton.selected {
+  border-left-color: var(--row-color, var(--accent));
+  color: var(--row-selected-text-color, var(--fg));
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--row-color, var(--accent)) 14%, transparent),
+    color-mix(in srgb, var(--row-color, var(--accent)) 3%, transparent)
+  );
+  box-shadow: none;
+  font-weight: 710;
+}
+
+.appLayout[data-zen-surface="true"] .conversationGroupTile,
+.appLayout[data-zen-surface="true"][data-private-active="true"]
+  .conversationGroupTile,
+.appLayout[data-zen-surface="true"][data-zen-private-tone="true"]
+  .conversationGroupTile {
+  border: 0;
+  border-left: 2px solid transparent;
+  border-radius: 0 8px 8px 0;
+  padding: 9px 9px 9px 10px;
+  color: var(--fg-muted);
+  background: transparent;
+  box-shadow: none;
+  font-size: 12px;
+  transition:
+    color 150ms ease,
+    border-color 150ms ease,
+    background 150ms ease;
+}
+
+.appLayout[data-zen-surface="true"] .conversationGroupTile:hover,
+.appLayout[data-zen-surface="true"][data-private-active="true"]
+  .conversationGroupTile:hover,
+.appLayout[data-zen-surface="true"][data-zen-private-tone="true"]
+  .conversationGroupTile:hover {
+  border-left-color: var(--row-color, var(--accent));
+  color: var(--fg);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--row-color, var(--accent)) 10%, transparent),
+    color-mix(in srgb, var(--row-color, var(--accent)) 2%, transparent)
+  );
+  box-shadow: none;
+}
+
+.appLayout[data-zen-surface="true"]
+  .conversationGroupAccordionItem:has(.conversationGroupCollapseExpanded)
+  .conversationGroupTile {
+  border-left-color: var(--row-color, var(--accent));
+  color: var(--fg);
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--row-color, var(--accent)) 14%, transparent),
+    color-mix(in srgb, var(--row-color, var(--accent)) 3%, transparent)
+  );
+}
+
+.appLayout[data-zen-surface="true"] .conversationGroupGlyph {
+  width: 28px;
+  height: 28px;
+  color: color-mix(
+    in srgb,
+    var(--row-glyph-color, var(--row-color, var(--accent))) 68%,
+    var(--fg-muted)
+  );
+}
+
+.appLayout[data-zen-surface="true"] .conversationGroupName {
+  font-size: 12px;
+  font-weight: 710;
+}
+
+.appLayout[data-zen-surface="true"] .conversationGroupCount {
+  color: var(--fg-muted);
+  font-size: 10px;
+  font-weight: 600;
+  text-shadow: none;
+}
+
+.appLayout[data-zen-surface="true"] .conversationGroupNestedList {
+  gap: 5px;
+  margin: 5px 0 5px 12px;
+  padding: 0 0 0 10px;
+  border-left: 1px solid var(--line);
+}
+
+.appLayout[data-zen-surface="true"]
+  .conversationRowNested
+  .conversationTitleButton {
+  border-radius: 0 8px 8px 0;
+  padding: 9px 8px 9px 9px;
+  font-size: 11px;
+}
+
+.appLayout[data-zen-surface="true"] .conversationGroupNewButton {
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  box-shadow: none;
+}
+
+.appLayout[data-zen-surface="true"] .conversationGroupNewButton:hover,
+.appLayout[data-zen-surface="true"] .conversationGroupNewButton:focus-visible {
+  border: 0;
+  background: color-mix(in srgb, var(--row-color, var(--accent)) 10%, transparent);
+  box-shadow: none;
+}

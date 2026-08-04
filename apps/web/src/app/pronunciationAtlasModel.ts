@@ -114,6 +114,12 @@ const INFLUENCE_ANCHOR_DATA = {
   "canadian-english": {
     point: atlasPoint(-75.7, 45.42),
   },
+  "new-york-english": {
+    point: atlasPoint(-74.01, 40.71),
+  },
+  "southern-us-english": {
+    point: atlasPoint(-84.39, 33.75),
+  },
   "caribbean-english": {
     point: atlasPoint(-76.79, 17.97),
   },

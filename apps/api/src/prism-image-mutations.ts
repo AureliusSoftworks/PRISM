@@ -1,6 +1,7 @@
 import type { DatabaseSync } from "node:sqlite";
 import type { PrismJsonObject, PrismJsonValue } from "@localai/shared";
 import { clearBotProfilePictureReference } from "./bot-profile-pictures.ts";
+import { imageAssetUsageLabels } from "./image-asset-cleanup.ts";
 import {
   listGeneratedImageRecoveryBatchesForUser,
   markGeneratedImageQuarantineCommitted,
@@ -69,6 +70,46 @@ function stringField(row: PrismJsonObject, key: string): string {
   return value;
 }
 
+function assertReusableImageIsUnused(
+  db: DatabaseSync,
+  userId: string,
+  row: Record<string, unknown>,
+): void {
+  const imageId = typeof row.id === "string" ? row.id : "";
+  const membership = db
+    .prepare(
+      `SELECT items.set_id
+         FROM image_asset_set_items items
+         JOIN image_asset_sets sets ON sets.id = items.set_id
+        WHERE items.image_id = ? AND sets.user_id = ?`,
+    )
+    .get(imageId, userId) as { set_id: string } | undefined;
+  const memberIds = membership
+    ? (
+        db
+          .prepare(
+            "SELECT image_id FROM image_asset_set_items WHERE set_id = ? ORDER BY ordinal, image_id",
+          )
+          .all(membership.set_id) as Array<{ image_id: string }>
+      ).map((member) => member.image_id)
+    : [];
+  if (memberIds.length > 1) {
+    throw new Error(
+      "This image belongs to a linked asset set. Use Storage to delete the complete set atomically.",
+    );
+  }
+  const usageImageIds = memberIds.length > 0 ? memberIds : [imageId];
+  const usageByImage = imageAssetUsageLabels(db, userId, usageImageIds);
+  const usage = [
+    ...new Set(usageImageIds.flatMap((id) => usageByImage.get(id) ?? [])),
+  ];
+  if (usage.length > 0) {
+    throw new Error(
+      `This asset is still used by ${usage.join(", ")}. Replace it before deleting it.`,
+    );
+  }
+}
+
 export function previewPrismImageDeletion(args: {
   db: DatabaseSync;
   userId: string;
@@ -80,6 +121,7 @@ export function previewPrismImageDeletion(args: {
   profileReferenceCount: number;
 } {
   const row = jsonRow(imageRow(args.db, args.userId, args.imageId));
+  assertReusableImageIsUnused(args.db, args.userId, row);
   const profileReferences = args.db
     .prepare(
       `SELECT COUNT(*) AS count
@@ -104,6 +146,7 @@ export function deletePrismImage(args: {
   now: Date;
 }): PrismImageDeletion {
   const row = jsonRow(imageRow(args.db, args.userId, args.imageId));
+  assertReusableImageIsUnused(args.db, args.userId, row);
   const botReferences = (
     args.db
       .prepare(

@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Image from "next/image";
 import type {
   SlateReviewCircleSession,
@@ -10,6 +10,7 @@ import type {
   SlateVisualReferenceKind,
 } from "../../../../packages/shared/src/slateCreativeStudios";
 import styles from "./slateCreativeStudiosDesk.module.css";
+import { AssetRail } from "./AssetLibrary";
 
 type StudioDesk = "sources" | "visuals" | "review";
 
@@ -58,6 +59,24 @@ async function studioRequest(
     throw new Error(body.error || "Slate could not open that creative desk.");
   }
   return body;
+}
+
+function readVisualStudyFile(file: File): Promise<string> {
+  if (!/^image\/(?:png|jpe?g|webp|gif|avif)$/iu.test(file.type)) {
+    return Promise.reject(new Error("Choose a PNG, JPEG, WebP, GIF, or AVIF image."));
+  }
+  if (file.size > 20 * 1024 * 1024) {
+    return Promise.reject(new Error("Choose an image smaller than 20 MB."));
+  }
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onload = () =>
+      typeof reader.result === "string"
+        ? resolve(reader.result)
+        : reject(new Error("Slate could not read that image."));
+    reader.onerror = () => reject(new Error("Slate could not read that image."));
+    reader.readAsDataURL(file);
+  });
 }
 
 const VISUAL_KINDS: Array<[SlateVisualReferenceKind, string]> = [
@@ -118,6 +137,7 @@ export function SlateCreativeStudiosDesk({
   const [guestEnabled, setGuestEnabled] = useState(false);
   const [guestName, setGuestName] = useState("");
   const [guestBrief, setGuestBrief] = useState("");
+  const visualUploadRef = useRef<HTMLInputElement | null>(null);
 
   const reload = useCallback(async () => {
     setError("");
@@ -165,6 +185,57 @@ export function SlateCreativeStudiosDesk({
     () => visuals.filter((visual) => visual.status === "pinned"),
     [visuals],
   );
+
+  const createVisualStudy = (direction = ""): void => {
+    if (!visualPrompt.trim()) return;
+    void act(async () => {
+      const body = await studioRequest(`${base}/visual-references`, {
+        method: "POST",
+        body: JSON.stringify({
+          sectionId: currentSectionId,
+          kind: visualKind,
+          prompt: visualPrompt,
+          direction,
+        }),
+      });
+      if (body.visual) setVisuals((items) => [body.visual!, ...items]);
+      setVisualPrompt("");
+    });
+  };
+
+  const reuseVisualStudy = (assetSetId: string): void => {
+    void act(async () => {
+      const body = await studioRequest(`${base}/visual-references/reuse`, {
+        method: "POST",
+        body: JSON.stringify({
+          assetSetId,
+          sectionId: currentSectionId,
+          kind: visualKind,
+          prompt: visualPrompt,
+        }),
+      });
+      if (body.visual) setVisuals((items) => [body.visual!, ...items]);
+      setVisualPrompt("");
+    });
+  };
+
+  const uploadVisualStudy = (file: File): void => {
+    void act(async () => {
+      const dataUrl = await readVisualStudyFile(file);
+      const body = await studioRequest(`${base}/visual-references/upload`, {
+        method: "POST",
+        body: JSON.stringify({
+          dataUrl,
+          sectionId: currentSectionId,
+          kind: visualKind,
+          prompt: visualPrompt.trim() || file.name,
+        }),
+      });
+      if (body.visual) setVisuals((items) => [body.visual!, ...items]);
+      setVisualPrompt("");
+      if (visualUploadRef.current) visualUploadRef.current.value = "";
+    });
+  };
 
   return (
     <section
@@ -427,18 +498,7 @@ export function SlateCreativeStudiosDesk({
             className={styles.composer}
             onSubmit={(event) => {
               event.preventDefault();
-              void act(async () => {
-                const body = await studioRequest(`${base}/visual-references`, {
-                  method: "POST",
-                  body: JSON.stringify({
-                    sectionId: currentSectionId,
-                    kind: visualKind,
-                    prompt: visualPrompt,
-                  }),
-                });
-                if (body.visual) setVisuals((items) => [body.visual!, ...items]);
-                setVisualPrompt("");
-              });
+              createVisualStudy();
             }}
           >
             <div className={styles.kindRail}>
@@ -459,9 +519,28 @@ export function SlateCreativeStudiosDesk({
               placeholder="Describe the visual study in natural language…"
               rows={3}
             />
-            <button type="submit" disabled={busy || !visualPrompt.trim()}>
-              Generate study
-            </button>
+            <input
+              ref={visualUploadRef}
+              type="file"
+              accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
+              hidden
+              onChange={(event) => {
+                const file = event.currentTarget.files?.[0];
+                if (file) uploadVisualStudy(file);
+              }}
+            />
+            <AssetRail
+              kind="slate_visual_study"
+              label="Visual studies"
+              context={projectId}
+              currentImageIds={pinnedVisuals.map((visual) => visual.assetId)}
+              refreshKey={visuals[0]?.assetId}
+              disabled={busy}
+              synthesizeDisabled={!visualPrompt.trim()}
+              onUpload={() => visualUploadRef.current?.click()}
+              onSynthesize={createVisualStudy}
+              onSelect={(asset) => reuseVisualStudy(asset.id)}
+            />
           </form>
           {pinnedVisuals.length > 0 ? (
             <p className={styles.pinnedCount}>

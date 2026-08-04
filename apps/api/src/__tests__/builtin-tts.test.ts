@@ -192,6 +192,8 @@ describe("built-in English audio", () => {
       "italian-influenced-english",
       "australian-english",
       "canadian-english",
+      "new-york-english",
+      "southern-us-english",
     ] as const) {
       const wave = await generateBuiltinEnglishWave({
         text: "This warm river road has a very clear ending.",

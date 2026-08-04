@@ -138,6 +138,7 @@ import {
   type ReplayStudioCutEligibilityV1,
   type PrismRefractResponse,
   type PrismRefractSignalTextTarget,
+  type ImageAssetSet,
   type PreparedTurnV1,
   type BotPresenceBeatV1,
   type SignalPersonaTemperament,
@@ -173,6 +174,7 @@ import {
   type BotcastSpeechRevealState,
 } from "./botcastSpeechReveal";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import { AssetRail } from "./AssetLibrary";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import { PrismRefractTarget } from "./prismRefract";
 import { useRevealSynthesizedAssetContextMenu } from "./revealSynthesizedAssetInFinder";
@@ -760,16 +762,6 @@ type SignalBookingSuggestionOperation = "booking";
 
 type SignalAssetSlot = "day-studio" | "night-studio" | "logo";
 type SignalArtworkKind = SignalAssetSlot;
-type SignalGeneratedAsset = {
-  id: string;
-  prompt: string;
-  displayUrl: string;
-  createdAt: string;
-};
-type SignalGeneratedAssetLibrary = Record<
-  SignalAssetSlot,
-  SignalGeneratedAsset[]
->;
 
 const SIGNAL_BOT_PICKER_TILE = {
   tileSize: 78,
@@ -1154,17 +1146,6 @@ const SIGNAL_ASSET_LABELS: Record<SignalAssetSlot, string> = {
   "night-studio": "Dark studio",
   logo: "logo",
 };
-const SIGNAL_ASSET_LIBRARY_SCOPES: Record<SignalAssetSlot, string> = {
-  "day-studio": "signal_studio_day",
-  "night-studio": "signal_studio_night",
-  logo: "signal_logo",
-};
-const EMPTY_SIGNAL_GENERATED_ASSET_LIBRARY: SignalGeneratedAssetLibrary = {
-  "day-studio": [],
-  "night-studio": [],
-  logo: [],
-};
-
 type SignalBlockingOperation = {
   title: string;
   detail: string;
@@ -2095,18 +2076,6 @@ export function BotcastExperience({
   const [artworkJob, setArtworkJob] = useState<SignalArtworkJobSnapshot | null>(
     null,
   );
-  const [generatedAssetLibrary, setGeneratedAssetLibrary] =
-    useState<SignalGeneratedAssetLibrary>(EMPTY_SIGNAL_GENERATED_ASSET_LIBRARY);
-  const [generatedAssetLibraryLoading, setGeneratedAssetLibraryLoading] =
-    useState(false);
-  const [
-    generatedAssetLibraryUnavailable,
-    setGeneratedAssetLibraryUnavailable,
-  ] = useState(false);
-  const [generatedAssetReuseId, setGeneratedAssetReuseId] = useState<
-    string | null
-  >(null);
-  const generatedAssetLibraryRequestRef = useRef(0);
   const [studioLayoutEditorOpen, setStudioLayoutEditorOpen] = useState(false);
   const [studioLayoutPreviewTheme, setStudioLayoutPreviewTheme] = useState<
     "light" | "dark"
@@ -2214,6 +2183,8 @@ export function BotcastExperience({
   const deleteReturnFocusRef = useRef<HTMLElement | null>(null);
   const audiencePulseCloseButtonRef = useRef<HTMLButtonElement | null>(null);
   const audiencePulseReturnFocusRef = useRef<HTMLButtonElement | null>(null);
+  const [studioUploadLightFile, setStudioUploadLightFile] =
+    useState<File | null>(null);
   const lightStudioUploadRef = useRef<HTMLInputElement | null>(null);
   const darkStudioUploadRef = useRef<HTMLInputElement | null>(null);
   const logoUploadRef = useRef<HTMLInputElement | null>(null);
@@ -3010,41 +2981,6 @@ export function BotcastExperience({
   const showIdentityControlsExpanded = Boolean(
     selectedShow && showIdentityControlsShowId === selectedShow.id,
   );
-  useEffect(() => {
-    if (!showIdentityControlsExpanded || !selectedShow) return;
-    const requestId = generatedAssetLibraryRequestRef.current + 1;
-    generatedAssetLibraryRequestRef.current = requestId;
-    setGeneratedAssetLibraryLoading(true);
-    setGeneratedAssetLibraryUnavailable(false);
-    const slots: SignalAssetSlot[] = ["day-studio", "night-studio", "logo"];
-    void Promise.all(
-      slots.map(async (slot) => {
-        const scope = SIGNAL_ASSET_LIBRARY_SCOPES[slot];
-        const result = await request<{ images: SignalGeneratedAsset[] }>(
-          `/api/images/tool-assets?scope=${scope}&botId=${encodeURIComponent(selectedShow.hostBotId)}&limit=12`,
-        );
-        return [slot, result.images] as const;
-      }),
-    )
-      .then((entries) => {
-        if (generatedAssetLibraryRequestRef.current !== requestId) return;
-        setGeneratedAssetLibrary(
-          Object.fromEntries(entries) as SignalGeneratedAssetLibrary,
-        );
-      })
-      .catch(() => {
-        if (generatedAssetLibraryRequestRef.current !== requestId) return;
-        setGeneratedAssetLibraryUnavailable(true);
-      })
-      .finally(() => {
-        if (generatedAssetLibraryRequestRef.current === requestId) {
-          setGeneratedAssetLibraryLoading(false);
-        }
-      });
-    return () => {
-      generatedAssetLibraryRequestRef.current += 1;
-    };
-  }, [request, selectedShow, showIdentityControlsExpanded]);
   const selectedShowArtworkBusy = Boolean(
     selectedShow &&
       artworkJob?.showId === selectedShow.id &&
@@ -4789,6 +4725,7 @@ export function BotcastExperience({
     kinds: readonly SignalArtworkKind[],
     identityMs: number | null = null,
     signal?: AbortSignal,
+    direction = "",
   ): Promise<SignalArtworkJobSnapshot> => {
     const response = await request<{ job: SignalArtworkJobSnapshot }>(
       `/api/botcast/shows/${encodeURIComponent(sourceShow.id)}/artwork-job`,
@@ -4798,6 +4735,7 @@ export function BotcastExperience({
           preferredProvider: preferredImageProvider,
           kinds,
           ...(identityMs === null ? {} : { identityMs }),
+          ...(direction.trim() ? { direction: direction.trim() } : {}),
         }),
         signal,
       },
@@ -5009,26 +4947,13 @@ export function BotcastExperience({
     setError(null);
     setNotice("Refreshing the show’s linked studio pair…");
     try {
-      const reset = direction
-        ? await request<{ show: BotcastShow }>(
-            `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/atmosphere/refresh`,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                preferredProvider,
-                direction,
-              }),
-            },
-          )
-        : await request<{ show: BotcastShow }>(
-            `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}`,
-            {
-              method: "PATCH",
-              body: JSON.stringify({ regenerateAtmosphere: true }),
-            },
-          );
-      replaceShow(reset.show);
-      await startSignalArtworkJob(reset.show, ["night-studio", "day-studio"]);
+      await startSignalArtworkJob(
+        selectedShow,
+        ["night-studio", "day-studio"],
+        null,
+        undefined,
+        direction,
+      );
       if (preferredProvider === "local") {
         setNotice(
           "The refreshed Dark studio and source-linked Light studio are rendering in the background. Signal will keep the built-in room atmosphere while you are Local. You can keep using PRISM.",
@@ -5036,7 +4961,7 @@ export function BotcastExperience({
       } else {
         try {
           const response = await request<{ show: BotcastShow }>(
-            `/api/botcast/shows/${encodeURIComponent(reset.show.id)}/atmosphere-audio/generate`,
+            `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/atmosphere-audio/generate`,
             {
               method: "POST",
               body: JSON.stringify({}),
@@ -5069,26 +4994,13 @@ export function BotcastExperience({
     setError(null);
     setNotice("Refreshing the show’s logo…");
     try {
-      const reset = direction
-        ? await request<{ show: BotcastShow }>(
-            `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/logo-direction`,
-            {
-              method: "POST",
-              body: JSON.stringify({
-                preferredProvider,
-                direction,
-              }),
-            },
-          )
-        : await request<{ show: BotcastShow }>(
-            `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}`,
-            {
-              method: "PATCH",
-              body: JSON.stringify({ regenerateLogo: true }),
-            },
-          );
-      replaceShow(reset.show);
-      await startSignalArtworkJob(reset.show, ["logo"]);
+      await startSignalArtworkJob(
+        selectedShow,
+        ["logo"],
+        null,
+        undefined,
+        direction,
+      );
       setNotice(
         "The refreshed logo is rendering in the background. You can keep using PRISM.",
       );
@@ -5244,22 +5156,20 @@ export function BotcastExperience({
     });
   };
 
-  const reuseGeneratedShowAsset = async (
-    slot: SignalAssetSlot,
-    asset: SignalGeneratedAsset,
+  const reuseShowAssetSet = async (
+    asset: ImageAssetSet,
+    label: string,
   ): Promise<void> => {
     if (!selectedShow || busy || selectedShowArtworkBusy) return;
-    const label = SIGNAL_ASSET_LABELS[slot];
     setBusy(true);
-    setGeneratedAssetReuseId(asset.id);
     setError(null);
     setNotice(`Installing the saved ${label}…`);
     try {
       const response = await request<{ show: BotcastShow }>(
-        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/assets/${slot}/reuse`,
+        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/asset-sets/${encodeURIComponent(asset.id)}/reuse`,
         {
           method: "POST",
-          body: JSON.stringify({ imageId: asset.id }),
+          body: JSON.stringify({}),
         },
       );
       replaceShow(response.show);
@@ -5270,7 +5180,51 @@ export function BotcastExperience({
       setError(signalErrorToast(`Reuse ${label}`, reuseError));
       setNotice(`The current ${label} remains in place.`);
     } finally {
-      setGeneratedAssetReuseId(null);
+      setBusy(false);
+    }
+  };
+
+  const uploadStudioSet = async (
+    lightFile: File,
+    darkFile: File,
+  ): Promise<void> => {
+    if (!selectedShow) return;
+    setBusy(true);
+    setError(null);
+    setBlockingOperation({
+      title: "Installing a studio pair",
+      detail: `Saving ${lightFile.name} and ${darkFile.name} to ${selectedShow.name}.`,
+      stepLabel: "Reading Light and Dark images",
+      progress: null,
+      cancellable: false,
+    });
+    try {
+      const [lightDataUrl, darkDataUrl] = await Promise.all([
+        readSignalAssetFile(lightFile),
+        readSignalAssetFile(darkFile),
+      ]);
+      setBlockingOperation((current) =>
+        current
+          ? { ...current, stepLabel: "Saving pair and rebuilding Studio lighting" }
+          : null,
+      );
+      const response = await request<{ show: BotcastShow }>(
+        `/api/botcast/shows/${encodeURIComponent(selectedShow.id)}/studio-set/upload`,
+        {
+          method: "POST",
+          body: JSON.stringify({ lightDataUrl, darkDataUrl }),
+        },
+      );
+      replaceShow(response.show);
+      setNotice(
+        "The Light/Dark studio set is live and its lighting map has been rebuilt. The previous set remains saved.",
+      );
+    } catch (uploadError) {
+      setError(signalErrorToast("Upload Signal studio pair", uploadError));
+      setNotice("The current studio pair remains in place.");
+    } finally {
+      setStudioUploadLightFile(null);
+      setBlockingOperation(null);
       setBusy(false);
     }
   };
@@ -13333,7 +13287,12 @@ export function BotcastExperience({
                       onChange={(event) => {
                         const file = event.currentTarget.files?.[0];
                         event.currentTarget.value = "";
-                        if (file) void uploadShowAsset("day-studio", file);
+                        if (!file) return;
+                        setStudioUploadLightFile(file);
+                        setNotice("Light selected. Choose the matching Dark studio.");
+                        window.requestAnimationFrame(() =>
+                          darkStudioUploadRef.current?.click(),
+                        );
                       }}
                     />
                     <input
@@ -13346,7 +13305,16 @@ export function BotcastExperience({
                       onChange={(event) => {
                         const file = event.currentTarget.files?.[0];
                         event.currentTarget.value = "";
-                        if (file) void uploadShowAsset("night-studio", file);
+                        if (file && studioUploadLightFile) {
+                          void uploadStudioSet(studioUploadLightFile, file);
+                        } else if (file) {
+                          setError(
+                            signalErrorToast(
+                              "Upload Signal studio pair",
+                              "Choose the Light studio first.",
+                            ),
+                          );
+                        }
                       }}
                     />
                     <input
@@ -13367,105 +13335,53 @@ export function BotcastExperience({
                         Refresh the linked studio pair, tune the premise, name,
                         dashboard blurbs, and logo, or shape the opening ident.
                       </small>
-                    <section
-                      className={styles.generatedAssetLibrary}
-                      aria-label="Previously generated Signal artwork"
-                      data-signal-generated-asset-library="true"
-                    >
-                      <header>
-                        <div>
-                          <strong>Reuse generated artwork</strong>
-                          <small>
-                            Signal-only studios and logos. Reusing one skips
-                            image generation entirely.
-                          </small>
-                        </div>
-                      </header>
-                      {generatedAssetLibraryLoading ? (
-                        <p>Loading your Signal artwork…</p>
-                      ) : generatedAssetLibraryUnavailable ? (
-                        <p>Saved Signal artwork is temporarily unavailable.</p>
-                      ) : (
-                        <div className={styles.generatedAssetLanes}>
-                          {(
-                            ["night-studio", "day-studio", "logo"] as const
-                          ).map((slot) => {
-                            const assets = generatedAssetLibrary[slot];
-                            const currentImageId =
-                              slot === "night-studio"
-                                ? selectedShow.nightAtmosphere.imageId
-                                : slot === "day-studio"
-                                  ? selectedShow.dayAtmosphere.imageId
-                                  : selectedShow.logo.imageId;
-                            return (
-                              <section
-                                key={slot}
-                                className={styles.generatedAssetLane}
-                                data-slot={slot}
-                              >
-                                <strong>
-                                  {SIGNAL_ASSET_LABELS[slot]}
-                                  {assets.length > 0
-                                    ? ` · ${assets.length}`
-                                    : ""}
-                                </strong>
-                                {assets.length > 0 ? (
-                                  <div>
-                                    {assets.map((asset, index) => {
-                                      const current =
-                                        currentImageId === asset.id;
-                                      return (
-                                        <button
-                                          key={asset.id}
-                                          type="button"
-                                          aria-label={`Reuse generated ${SIGNAL_ASSET_LABELS[slot]} ${index + 1}`}
-                                          aria-pressed={current}
-                                          title={asset.prompt}
-                                          onClick={() =>
-                                            void reuseGeneratedShowAsset(
-                                              slot,
-                                              asset,
-                                            )
-                                          }
-                                          onContextMenu={
-                                            revealSynthesizedAssetContextMenuEnabled
-                                              ? (event) =>
-                                                  onRevealSynthesizedAssetContextMenu(
-                                                    event,
-                                                    asset.id,
-                                                  )
-                                              : undefined
-                                          }
-                                          disabled={
-                                            busy ||
-                                            selectedShowArtworkBusy ||
-                                            current
-                                          }
-                                        >
-                                          {/* eslint-disable-next-line @next/next/no-img-element */}
-                                          <img
-                                            src={`/api/images/${encodeURIComponent(asset.id)}/thumb`}
-                                            alt=""
-                                          />
-                                          {current ? (
-                                            <span aria-hidden="true">✓</span>
-                                          ) : generatedAssetReuseId ===
-                                            asset.id ? (
-                                            <span aria-hidden="true">…</span>
-                                          ) : null}
-                                        </button>
-                                      );
-                                    })}
-                                  </div>
-                                ) : (
-                                  <small>No generated versions yet.</small>
-                                )}
-                              </section>
-                            );
-                          })}
-                        </div>
-                      )}
-                    </section>
+                    <div data-signal-asset-rails="true">
+                      <AssetRail
+                        kind="signal_studio"
+                        label="Studio pairs"
+                        context={selectedShow.hostBotId}
+                        currentImageIds={[
+                          selectedShow.dayAtmosphere.imageId,
+                          selectedShow.nightAtmosphere.imageId,
+                        ]}
+                        refreshKey={`${selectedShow.dayAtmosphere.imageId ?? ""}:${selectedShow.nightAtmosphere.imageId ?? ""}`}
+                        disabled={busy || selectedShowArtworkBusy}
+                        onUpload={() => lightStudioUploadRef.current?.click()}
+                        onSynthesize={regenerateStudio}
+                        onSelect={(asset) =>
+                          reuseShowAssetSet(asset, "studio pair")
+                        }
+                        onRevealImage={
+                          revealSynthesizedAssetContextMenuEnabled
+                            ? (imageId, event) =>
+                                onRevealSynthesizedAssetContextMenu(
+                                  event,
+                                  imageId,
+                                )
+                            : undefined
+                        }
+                      />
+                      <AssetRail
+                        kind="signal_logo"
+                        label="Logos"
+                        context={selectedShow.hostBotId}
+                        currentImageIds={[selectedShow.logo.imageId]}
+                        refreshKey={selectedShow.logo.imageId}
+                        disabled={busy || selectedShowArtworkBusy}
+                        onUpload={() => logoUploadRef.current?.click()}
+                        onSynthesize={regenerateLogo}
+                        onSelect={(asset) => reuseShowAssetSet(asset, "logo")}
+                        onRevealImage={
+                          revealSynthesizedAssetContextMenuEnabled
+                            ? (imageId, event) =>
+                                onRevealSynthesizedAssetContextMenu(
+                                  event,
+                                  imageId,
+                                )
+                            : undefined
+                        }
+                      />
+                    </div>
                     <div className={styles.showLookControlGrid}>
                       <div className={styles.showLookControlGroup}>
                         <label htmlFor={`signal-show-name-${selectedShow.id}`}>
@@ -13608,82 +13524,6 @@ export function BotcastExperience({
                             )}
                           </PrismRefractTarget>
                         </div>
-                      <div className={styles.showLookControlGroup}>
-                        <span>Studio pair</span>
-                        <PrismRefractTarget
-                          target={{
-                            id: `signal-refresh-studio-${selectedShow.id}`,
-                            kind: "magic",
-                            label: "Refresh studio",
-                            run: regenerateStudio,
-                            disabled: () => busy || selectedShowArtworkBusy,
-                          }}
-                        >
-                          {(binding) => (
-                            <button
-                              {...binding}
-                              type="button"
-                              data-signal-artwork-action="studio"
-                              title="Regenerate the Dark studio and its source-linked Light variant"
-                              onClick={() => void regenerateStudio()}
-                              disabled={busy || selectedShowArtworkBusy}
-                            >
-                              Refresh studio
-                            </button>
-                          )}
-                        </PrismRefractTarget>
-                        <button
-                          type="button"
-                          className={styles.assetUploadButton}
-                          title="Upload a replacement for the Light Mode studio"
-                          onClick={() => lightStudioUploadRef.current?.click()}
-                          disabled={busy || selectedShowArtworkBusy}
-                        >
-                          Replace Light
-                        </button>
-                        <button
-                          type="button"
-                          className={styles.assetUploadButton}
-                          title="Upload a replacement for the Dark Mode studio"
-                          onClick={() => darkStudioUploadRef.current?.click()}
-                          disabled={busy || selectedShowArtworkBusy}
-                        >
-                          Replace Dark
-                        </button>
-                      </div>
-                      <div className={styles.showLookControlGroup}>
-                        <span>Logo</span>
-                        <PrismRefractTarget
-                          target={{
-                            id: `signal-refresh-logo-${selectedShow.id}`,
-                            kind: "magic",
-                            label: "Refresh logo",
-                            run: regenerateLogo,
-                            disabled: () => busy || selectedShowArtworkBusy,
-                          }}
-                        >
-                          {(binding) => (
-                            <button
-                              {...binding}
-                              type="button"
-                              data-signal-artwork-action="logo"
-                              onClick={() => void regenerateLogo()}
-                              disabled={busy || selectedShowArtworkBusy}
-                            >
-                              Refresh logo
-                            </button>
-                          )}
-                        </PrismRefractTarget>
-                        <button
-                          type="button"
-                          className={styles.assetUploadButton}
-                          title="Upload a replacement show logo"
-                          onClick={() => logoUploadRef.current?.click()}
-                          disabled={busy || selectedShowArtworkBusy}
-                        >
-                          Replace logo
-                        </button>
-                      </div>
                       <div className={styles.showLookControlGroup}>
                           <span>Atmosphere audio</span>
                         <PrismRefractTarget

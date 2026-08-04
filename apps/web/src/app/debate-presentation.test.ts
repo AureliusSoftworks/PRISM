@@ -20,6 +20,7 @@ import {
   debateTurnOwnerBotId,
   debateUtterancePaceBoost,
   debateVisibleContentAtProgress,
+  debateVisibleContentAtSpeechTime,
   formatDebateElapsedDuration,
   formatDebateSpokenDuration,
 } from "./debatePresentation.ts";
@@ -75,7 +76,7 @@ describe("Debate live presentation", () => {
     assert.equal(debateActiveDurationLabel(754_000), "~13 min active");
   });
 
-  it("maps the public floor clock onto actual speech presentation progress", () => {
+  it("advances the public floor clock at one second per presented second", () => {
     const event = {
       version: 1 as const,
       id: "timed-speech",
@@ -102,18 +103,18 @@ describe("Debate live presentation", () => {
         durationMs: 5_000,
       }),
       {
-        elapsedMs: 20_000,
+        elapsedMs: 4_000,
         limitMs: 20_000,
-        progress: 1,
-        remainingMs: 0,
+        progress: 0.2,
+        remainingMs: 16_000,
         status: "running",
         timing: event.timing,
       },
     );
     assert.equal(
       debateTurnClockState(event, {
-        elapsedMs: 4_500,
-        durationMs: 5_000,
+        elapsedMs: 20_001,
+        durationMs: 25_000,
       })?.status,
       "overtime",
     );
@@ -262,6 +263,41 @@ describe("Debate live presentation", () => {
     const partial = debateVisibleContentAtProgress(content, 0.68);
     assert.equal(partial.includes("[[source:"), false);
     assert.ok(content.startsWith(partial));
+  });
+
+  it("reveals Proceedings from provider character timing instead of text fraction", () => {
+    const content = "One two three.";
+    const characters = Array.from(content);
+    const ends = [
+      0.05, 0.1, 0.2, 0.21, 0.65, 0.75, 0.8, 0.81, 0.9, 0.94, 0.97,
+      0.99, 1,
+    ];
+    assert.equal(
+      debateVisibleContentAtSpeechTime({
+        content,
+        spokenText: content,
+        elapsedMs: 400,
+        durationMs: 1_000,
+        alignment: {
+          characters,
+          characterStartTimesSeconds: ends.map((end, index) =>
+            index === 0 ? 0 : (ends[index - 1] ?? 0),
+          ),
+          characterEndTimesSeconds: ends,
+        },
+      }),
+      "One ",
+    );
+    assert.equal(
+      debateVisibleContentAtSpeechTime({
+        content,
+        spokenText: content,
+        elapsedMs: 1_000,
+        durationMs: 1_000,
+        alignment: null,
+      }),
+      content,
+    );
   });
 
   it("recognizes an exact live transcript clamp", () => {

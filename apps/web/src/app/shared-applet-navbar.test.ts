@@ -23,6 +23,10 @@ const slateCss = readFileSync(
   new URL("./slateWorkspace.module.css", import.meta.url),
   "utf8",
 );
+const slateStoryMapCss = readFileSync(
+  new URL("./slateStoryMap.module.css", import.meta.url),
+  "utf8",
+);
 
 test("every active applet consumes the Debate PRISM navbar contract", () => {
   const brandHelper = pageSource.slice(
@@ -183,6 +187,41 @@ test("shared sidebar and navbar materials remain owned by the active theme", () 
   assert.match(
     pageCss,
     /\.sharedAppletHeader\s*\{[\s\S]*box-sizing:\s*border-box;/,
+  );
+});
+
+test("Signal, Slate, and Zen child navigation follows Debate Studio geometry", () => {
+  assert.match(
+    signalCss,
+    /\.showRow\s*\{[\s\S]*border-left:\s*2px solid transparent;[\s\S]*border-radius:\s*0 8px 8px 0;/u,
+  );
+  assert.match(
+    signalCss,
+    /\.showRow\[data-selected="true"\]\s*\{[\s\S]*border-left-color:\s*var\(--show-accent\);[\s\S]*linear-gradient/u,
+  );
+  assert.match(
+    slateStoryMapCss,
+    /\.row\s*\{[\s\S]*border-left:\s*2px solid transparent;[\s\S]*border-radius:\s*0 8px 8px 0;/u,
+  );
+  assert.match(
+    slateStoryMapCss,
+    /\.row\[data-selected="true"\]\s*\{[\s\S]*border-left-color:[\s\S]*linear-gradient/u,
+  );
+  assert.match(
+    pageCss,
+    /\.appLayout\[data-zen-surface="true"\] \.conversationTitleButton,[\s\S]*border-left:\s*2px solid transparent;[\s\S]*border-radius:\s*0 8px 8px 0;/u,
+  );
+  assert.match(
+    pageCss,
+    /\.appLayout\[data-zen-surface="true"\] \.conversationTitleButton\.selected,[\s\S]*border-left-color:\s*var\(--row-color, var\(--accent\)\);[\s\S]*linear-gradient/u,
+  );
+  assert.match(
+    pageCss,
+    /\.appLayout\[data-zen-surface="true"\] \.conversationGroupTile,[\s\S]*border-left:\s*2px solid transparent;[\s\S]*border-radius:\s*0 8px 8px 0;/u,
+  );
+  assert.match(
+    pageCss,
+    /\.conversationGroupAccordionItem:has\(\.conversationGroupCollapseExpanded\)[\s\S]*border-left-color:\s*var\(--row-color, var\(--accent\)\);/u,
   );
 });
 

@@ -46,11 +46,13 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.match(atlasSource, /LOCAL_VOICE_SPEECHPRINT_CAPABILITIES\.map/u);
   });
 
-  it("offers Italian, Australian, and Canadian pronunciation without map nodes", () => {
+  it("offers international and regional American pronunciation without map nodes", () => {
     for (const id of [
       "italian-influenced-english",
       "australian-english",
       "canadian-english",
+      "new-york-english",
+      "southern-us-english",
     ]) {
       assert.ok(
         LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.some(

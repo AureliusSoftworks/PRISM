@@ -181,6 +181,11 @@ function uniqueStrings(
   ];
 }
 
+function usageLabel(prefix: string, name: string | null | undefined, id: string): string {
+  const identity = name?.trim().replace(/\s+/gu, " ").slice(0, 100) || id;
+  return `${prefix} · ${identity}`;
+}
+
 function decodedImageId(value: string): string | null {
   try {
     return decodeURIComponent(value).trim() || null;
@@ -310,7 +315,18 @@ function verifiedGeneratedLocalPath(
 function buildImageAssetCleanupGraph(
   db: DatabaseSync,
   userId: string,
-): ImageAssetCleanupGraph {
+  referencesOnly: true,
+): Map<string, Set<string>>;
+function buildImageAssetCleanupGraph(
+  db: DatabaseSync,
+  userId: string,
+  referencesOnly?: false,
+): ImageAssetCleanupGraph;
+function buildImageAssetCleanupGraph(
+  db: DatabaseSync,
+  userId: string,
+  referencesOnly = false,
+): ImageAssetCleanupGraph | Map<string, Set<string>> {
   const rows = readRows<ImageAssetRow>(
     db,
     `SELECT id, conversation_id, bot_id, related_bot_ids, origin, prompt, revised_prompt, url,
@@ -322,18 +338,6 @@ function buildImageAssetCleanupGraph(
     userId,
   );
   const knownImageIds = new Set(rows.map((row) => row.id));
-  const localPathReferenceCounts = new Map<string, number>();
-  for (const row of readAllRows<{ local_rel_path: string | null }>(
-    db,
-    "SELECT local_rel_path FROM images WHERE local_rel_path IS NOT NULL",
-  )) {
-    const localRelPath = row.local_rel_path?.trim();
-    if (!localRelPath) continue;
-    localPathReferenceCounts.set(
-      localRelPath,
-      (localPathReferenceCounts.get(localRelPath) ?? 0) + 1,
-    );
-  }
   const references = new Map(
     rows.map((row) => [row.id, new Set<string>()] as const),
   );
@@ -347,12 +351,19 @@ function buildImageAssetCleanupGraph(
     }
   };
 
-  for (const row of readRows<{ profile_picture_image_id: string | null }>(
+  for (const row of readRows<{
+    id: string;
+    name: string;
+    profile_picture_image_id: string | null;
+  }>(
     db,
-    "SELECT profile_picture_image_id FROM bots WHERE user_id = ?",
+    "SELECT id, name, profile_picture_image_id FROM bots WHERE user_id = ?",
     userId,
   )) {
-    addExactReference(row.profile_picture_image_id, "Bot profile picture");
+    addExactReference(
+      row.profile_picture_image_id,
+      usageLabel("Bot profile picture", row.name, row.id),
+    );
   }
   for (const row of readRows<{ hub_atmosphere_image_id: string | null }>(
     db,
@@ -362,35 +373,42 @@ function buildImageAssetCleanupGraph(
     addExactReference(row.hub_atmosphere_image_id, "Current Home atmosphere");
   }
   for (const row of readRows<{
+    id: string;
+    title: string;
     zen_wallpaper_image_id: string | null;
     zen_wallpaper_history: string | null;
     coffee_settings: string | null;
   }>(
     db,
-    `SELECT zen_wallpaper_image_id, zen_wallpaper_history, coffee_settings
+    `SELECT id, title, zen_wallpaper_image_id, zen_wallpaper_history, coffee_settings
        FROM conversations WHERE user_id = ?`,
     userId,
   )) {
-    addExactReference(row.zen_wallpaper_image_id, "Current Zen wallpaper");
+    addExactReference(
+      row.zen_wallpaper_image_id,
+      usageLabel("Current Zen Atmosphere", row.title, row.id),
+    );
     collectImageReferencesFromText(
       row.zen_wallpaper_history,
       knownImageIds,
       references,
-      "Zen wallpaper history",
+      usageLabel("Zen Atmosphere history", row.title, row.id),
     );
     collectImageReferencesFromText(
       row.coffee_settings,
       knownImageIds,
       references,
-      "Coffee drink surface",
+      usageLabel("Coffee drink surface", row.title, row.id),
     );
   }
   for (const row of readRows<{
+    id: string;
+    conversation_id: string;
     content: string | null;
     tool_payload: string | null;
   }>(
     db,
-    `SELECT content, tool_payload FROM messages
+    `SELECT id, conversation_id, content, tool_payload FROM messages
       WHERE user_id = ? AND (content IS NOT NULL OR tool_payload IS NOT NULL)`,
     userId,
   )) {
@@ -399,65 +417,99 @@ function buildImageAssetCleanupGraph(
         value,
         knownImageIds,
         references,
-        "Conversation message",
+        usageLabel("Conversation", null, row.conversation_id),
       );
     }
   }
-  for (const row of readRows<{ atmosphere_json: string }>(
+  for (const row of readRows<{ id: string; name: string; atmosphere_json: string }>(
     db,
-    "SELECT atmosphere_json FROM botcast_shows WHERE user_id = ?",
+    "SELECT id, name, atmosphere_json FROM botcast_shows WHERE user_id = ?",
     userId,
   )) {
     collectImageReferencesFromText(
       row.atmosphere_json,
       knownImageIds,
       references,
-      "Signal show artwork",
+      usageLabel("Signal show artwork", row.name, row.id),
     );
   }
-  for (const row of readRows<{ cover_json: string }>(
+  for (const row of readRows<{ id: string; name: string; atmosphere_json: string }>(
     db,
-    "SELECT cover_json FROM slate_projects WHERE user_id = ?",
+    "SELECT id, name, atmosphere_json FROM library_groups WHERE user_id = ?",
+    userId,
+  )) {
+    collectImageReferencesFromText(
+      row.atmosphere_json,
+      knownImageIds,
+      references,
+      usageLabel("Saved group-room Atmosphere", row.name, row.id),
+    );
+  }
+  for (const row of readRows<{
+    id: string;
+    name: string;
+    atmosphere_json: string | null;
+  }>(
+    db,
+    "SELECT id, name, atmosphere_json FROM coffee_groups WHERE user_id = ?",
+    userId,
+  )) {
+    collectImageReferencesFromText(
+      row.atmosphere_json,
+      knownImageIds,
+      references,
+      usageLabel("Coffee Group Atmosphere", row.name, row.id),
+    );
+  }
+  for (const row of readRows<{ id: string; title: string; cover_json: string }>(
+    db,
+    "SELECT id, title, cover_json FROM slate_projects WHERE user_id = ?",
     userId,
   )) {
     collectImageReferencesFromText(
       row.cover_json,
       knownImageIds,
       references,
-      "Slate cover",
+      usageLabel("Slate cover", row.title, row.id),
     );
   }
-  for (const row of readRows<{ session_json: string }>(
+  for (const row of readRows<{
+    id: string;
+    motion: string;
+    session_json: string;
+  }>(
     db,
-    "SELECT session_json FROM debate_sessions WHERE user_id = ?",
+    "SELECT id, motion, session_json FROM debate_sessions WHERE user_id = ?",
     userId,
   )) {
     collectImageReferencesFromText(
       row.session_json,
       knownImageIds,
       references,
-      "Debate evidence exhibit",
+      usageLabel("Debate evidence exhibit", row.motion, row.id),
     );
   }
-  for (const row of readRows<{ markdown: string }>(
+  for (const row of readRows<{ id: string; markdown: string }>(
     db,
-    "SELECT markdown FROM conversation_exports WHERE user_id = ?",
+    "SELECT id, markdown FROM conversation_exports WHERE user_id = ?",
     userId,
   )) {
     collectImageReferencesFromText(
       row.markdown,
       knownImageIds,
       references,
-      "Saved conversation export",
+      usageLabel("Saved conversation export", null, row.id),
     );
   }
   for (const row of readRows<{
+    id: string;
+    title: string;
     episode_json: string | null;
     progress_json: string | null;
     transcript_json: string | null;
   }>(
     db,
-    "SELECT episode_json, progress_json, transcript_json FROM story_sessions WHERE user_id = ?",
+    "SELECT id, title, episode_json, progress_json, transcript_json FROM story_sessions WHERE user_id = ?",
     userId,
   )) {
     for (const value of [
@@ -469,9 +521,43 @@ function buildImageAssetCleanupGraph(
         value,
         knownImageIds,
         references,
-        "Story session",
+        usageLabel("Story session", row.title, row.id),
       );
     }
+  }
+
+  for (const row of readRows<{
+    image_id: string | null;
+    project_id: string;
+    title: string;
+  }>(
+    db,
+    `SELECT refs.image_id, refs.project_id, projects.title
+       FROM slate_visual_references refs
+       JOIN slate_projects projects
+         ON projects.id = refs.project_id AND projects.user_id = refs.user_id
+      WHERE refs.user_id = ? AND refs.image_id IS NOT NULL`,
+    userId,
+  )) {
+    addExactReference(
+      row.image_id,
+      usageLabel("Slate visual study", row.title, row.project_id),
+    );
+  }
+
+  if (referencesOnly) return references;
+
+  const localPathReferenceCounts = new Map<string, number>();
+  for (const row of readAllRows<{ local_rel_path: string | null }>(
+    db,
+    "SELECT local_rel_path FROM images WHERE local_rel_path IS NOT NULL",
+  )) {
+    const localRelPath = row.local_rel_path?.trim();
+    if (!localRelPath) continue;
+    localPathReferenceCounts.set(
+      localRelPath,
+      (localPathReferenceCounts.get(localRelPath) ?? 0) + 1,
+    );
   }
 
   let generatedLocalAssets = 0;
@@ -482,7 +568,7 @@ function buildImageAssetCleanupGraph(
   let protectedSharedFileCount = 0;
   let protectedRecentCount = 0;
   let remoteOnlyCount = 0;
-  const allCandidates: ImageAssetCleanupCandidate[] = [];
+  let allCandidates: ImageAssetCleanupCandidate[] = [];
   const candidateRows = new Map<
     string,
     ImageAssetRow & { local_rel_path: string }
@@ -545,6 +631,38 @@ function buildImageAssetCleanupGraph(
       ...row,
       local_rel_path: verifiedLocalPath,
     });
+  }
+
+  // A reusable set is one cleanup unit. If any linked member is protected,
+  // protect the whole set; otherwise keep every member eligible together.
+  const candidateIds = new Set(allCandidates.map((candidate) => candidate.id));
+  const setMembership = readRows<{ set_id: string; image_id: string }>(
+    db,
+    `SELECT items.set_id, items.image_id
+       FROM image_asset_set_items items
+       JOIN image_asset_sets sets ON sets.id = items.set_id
+      WHERE sets.user_id = ?`,
+    userId,
+  );
+  const setMembers = new Map<string, string[]>();
+  for (const membership of setMembership) {
+    setMembers.set(membership.set_id, [
+      ...(setMembers.get(membership.set_id) ?? []),
+      membership.image_id,
+    ]);
+  }
+  const protectedSetImageIds = new Set(
+    [...setMembers.values()]
+      .filter((imageIds) => imageIds.some((imageId) => !candidateIds.has(imageId)))
+      .flat(),
+  );
+  if (protectedSetImageIds.size > 0) {
+    const previousCount = allCandidates.length;
+    allCandidates = allCandidates.filter(
+      (candidate) => !protectedSetImageIds.has(candidate.id),
+    );
+    for (const imageId of protectedSetImageIds) candidateRows.delete(imageId);
+    protectedIntentionalAssetCount += previousCount - allCandidates.length;
   }
 
   const snapshot = createHash("sha256")
@@ -625,7 +743,7 @@ export function imageAssetUsageLabels(
   userId: string,
   imageIds: readonly string[],
 ): Map<string, string[]> {
-  const references = buildImageAssetCleanupGraph(db, userId).references;
+  const references = buildImageAssetCleanupGraph(db, userId, true);
   return new Map(
     imageIds.map((imageId) => [
       imageId,
@@ -1082,6 +1200,26 @@ export function cleanupUnreferencedImageAssets(
       }
       return row;
     });
+    const selectedIds = new Set(validated.imageIds);
+    const linkedRows = db
+      .prepare(
+        `SELECT selected.set_id, members.image_id
+           FROM image_asset_set_items selected
+           JOIN image_asset_sets sets ON sets.id = selected.set_id
+           JOIN image_asset_set_items members ON members.set_id = selected.set_id
+          WHERE sets.user_id = ?
+            AND selected.image_id IN (${validated.imageIds.map(() => "?").join(",")})`,
+      )
+      .all(userId, ...validated.imageIds) as Array<{
+      set_id: string;
+      image_id: string;
+    }>;
+    if (linkedRows.some((row) => !selectedIds.has(row.image_id))) {
+      throw new ImageAssetCleanupError(
+        "unsafe_selection",
+        "Linked asset variants must be cleaned together. Run the audit again and keep the complete set selected.",
+      );
+    }
     selectedStorageBytes = validated.imageIds.reduce(
       (total, imageId) =>
         total +

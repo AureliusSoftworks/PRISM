@@ -337,6 +337,46 @@ function imageContextsForUser(
     });
   }
 
+  const groupRooms = db
+    .prepare(
+      `SELECT id, name, atmosphere_json
+         FROM library_groups
+        WHERE user_id = ?`,
+    )
+    .all(userId) as Array<{
+    id: string;
+    name: string;
+    atmosphere_json: string;
+  }>;
+  for (const group of groupRooms) {
+    const state = parseJsonObject(group.atmosphere_json);
+    merge(readNestedString(state, ["imageId"]), {
+      title: `${group.name} room`,
+      tags: [group.name],
+      data: { groupId: group.id, groupName: group.name },
+    });
+  }
+
+  const coffeeGroups = db
+    .prepare(
+      `SELECT id, name, atmosphere_json
+         FROM coffee_groups
+        WHERE user_id = ? AND atmosphere_json IS NOT NULL`,
+    )
+    .all(userId) as Array<{
+    id: string;
+    name: string;
+    atmosphere_json: string;
+  }>;
+  for (const group of coffeeGroups) {
+    const state = parseJsonObject(group.atmosphere_json);
+    merge(readNestedString(state, ["imageId"]), {
+      title: `${group.name} atmosphere`,
+      tags: [group.name],
+      data: { coffeeGroupId: group.id, groupName: group.name },
+    });
+  }
+
   const projects = db
     .prepare("SELECT id, title, cover_json FROM slate_projects WHERE user_id = ?")
     .all(userId) as Array<{ id: string; title: string; cover_json: string }>;
@@ -597,12 +637,75 @@ export function synchronizeImageAssetCatalog(
       }>
     ).map((row) => [row.id, row.name] as const),
   );
+  const alreadyCataloged = new Map(
+    (
+      db.prepare(
+        `SELECT items.image_id, items.set_id
+           FROM image_asset_set_items items
+           JOIN image_asset_sets sets ON sets.id = items.set_id
+          WHERE sets.user_id = ?`,
+      ).all(userId) as Array<{ image_id: string; set_id: string }>
+    ).map((row) => [row.image_id, row.set_id] as const),
+  );
   for (const image of images) {
     if (consumed.has(image.id)) continue;
     const kind = imageAssetKindForImage(image);
     if (!kind) continue;
     const context = contexts.get(image.id) ?? { tags: [], data: {} };
     const botName = image.bot_id ? botNames.get(image.bot_id) : undefined;
+    const existingSetId = alreadyCataloged.get(image.id);
+    if (existingSetId) {
+      const existing = db
+        .prepare(
+          `SELECT sets.automatic_tags_json, sets.source_context_json,
+                  COUNT(items.image_id) AS member_count
+             FROM image_asset_sets sets
+             JOIN image_asset_set_items items ON items.set_id = sets.id
+            WHERE sets.id = ? AND sets.user_id = ?
+            GROUP BY sets.id`,
+        )
+        .get(existingSetId, userId) as
+        | {
+            automatic_tags_json: string;
+            source_context_json: string;
+            member_count: number | bigint;
+          }
+        | undefined;
+      if (!existing || Number(existing.member_count) !== 1) continue;
+      const automaticTags = normalizeTags([
+        ...parseStringArray(existing.automatic_tags_json),
+        ...context.tags,
+        botName,
+        image.prompt,
+        image.revised_prompt,
+      ]);
+      const sourceContext =
+        Object.keys(context.data).length > 0
+          ? context.data
+          : parseJsonObject(existing.source_context_json);
+      db.prepare(
+        `UPDATE image_asset_sets
+            SET kind = ?,
+                status = ?,
+                title = COALESCE(?, title),
+                source_context_json = ?,
+                automatic_tags_json = ?
+          WHERE id = ? AND user_id = ?`,
+      ).run(
+        kind,
+        kind === "signal_studio" ? "incomplete" : "ready",
+        context.title ?? null,
+        JSON.stringify(sourceContext),
+        JSON.stringify(automaticTags),
+        existingSetId,
+        userId,
+      );
+      db.prepare(
+        `UPDATE image_asset_set_items SET role = ?
+          WHERE set_id = ? AND image_id = ?`,
+      ).run(imageAssetMemberRoleForImage(image), existingSetId, image.id);
+      continue;
+    }
     const status: ImageAssetSetStatus =
       kind === "signal_studio" ? "incomplete" : "ready";
     const setId = deterministicSetId(userId, kind, image.id);
@@ -750,6 +853,31 @@ function membersForSets(
   return result;
 }
 
+function usageHrefForKind(kind: ImageAssetKind): string | null {
+  const destinations: Partial<Record<ImageAssetKind, string>> = {
+    debate_exhibit: "/?view=debate",
+    signal_studio: "/?view=signal",
+    signal_logo: "/?view=signal",
+    slate_cover: "/?view=slate",
+    slate_visual_study: "/?view=slate",
+    zen_atmosphere: "/?view=zen",
+    home_atmosphere: "/?view=chat",
+    group_room_atmosphere: "/?view=chat",
+  };
+  return destinations[kind] ?? null;
+}
+
+function navigableUsage(
+  usage: readonly ImageAssetUsage[],
+  kind: ImageAssetKind,
+): ImageAssetUsage[] {
+  const href = usageHrefForKind(kind);
+  return usage.map((item) => ({
+    ...item,
+    ...(href ? { href } : {}),
+  }));
+}
+
 function mapAssetSetRows(
   db: DatabaseSync,
   userId: string,
@@ -759,10 +887,11 @@ function mapAssetSetRows(
   const members = membersForSets(db, ids);
   const usage = usageForSets(db, userId, ids);
   return rows.map((row) => {
-    const setUsage = usage.get(row.id) ?? [];
+    const kind = row.kind as ImageAssetKind;
+    const setUsage = navigableUsage(usage.get(row.id) ?? [], kind);
     return {
       id: row.id,
-      kind: row.kind as ImageAssetKind,
+      kind,
       status: row.status as ImageAssetSetStatus,
       title: row.title,
       source: row.source as ImageAssetSource,
@@ -812,20 +941,34 @@ export function listImageAssetCatalog(
     : "";
   if (context) params.push(`%${context.replaceAll("%", "\\%").replaceAll("_", "\\_")}%`);
   const relevance = match && options.sort !== "recency" ? "bm25(image_asset_search)," : "";
+  const fetchAllForUsageFilter = options.usage === "used" || options.usage === "unused";
   const rows = db
     .prepare(
       `SELECT sets.* FROM image_asset_sets sets ${join}
         WHERE ${clauses.join(" AND ")}
         ORDER BY ${contextRank} ${relevance} sets.updated_at DESC, sets.id DESC
-        LIMIT ? OFFSET ?`,
+        ${fetchAllForUsageFilter ? "" : "LIMIT ? OFFSET ?"}`,
     )
-    .all(...params, limit + 1, offset) as unknown as AssetSetRow[];
-  let assets = mapAssetSetRows(db, userId, rows.slice(0, limit));
-  if (options.usage === "used") assets = assets.filter((asset) => asset.usageCount > 0);
-  if (options.usage === "unused") assets = assets.filter((asset) => asset.usageCount === 0);
+    .all(
+      ...params,
+      ...(fetchAllForUsageFilter ? [] : [limit + 1, offset]),
+    ) as unknown as AssetSetRow[];
+  const mapped = mapAssetSetRows(db, userId, rows);
+  const filtered =
+    options.usage === "used"
+      ? mapped.filter((asset) => asset.usageCount > 0)
+      : options.usage === "unused"
+        ? mapped.filter((asset) => asset.usageCount === 0)
+        : mapped;
+  const assets = fetchAllForUsageFilter
+    ? filtered.slice(offset, offset + limit)
+    : filtered.slice(0, limit);
+  const hasMore = fetchAllForUsageFilter
+    ? filtered.length > offset + limit
+    : rows.length > limit;
   return {
     assets,
-    nextCursor: rows.length > limit ? cursorForOffset(offset + limit) : null,
+    nextCursor: hasMore ? cursorForOffset(offset + limit) : null,
   };
 }
 
@@ -854,6 +997,35 @@ export function updateImageAssetPlayerTags(
   return mapAssetSetRows(db, userId, [row])[0]!;
 }
 
+export function getImageAssetSet(
+  db: DatabaseSync,
+  userId: string,
+  assetSetId: string,
+): ImageAssetSet | null {
+  synchronizeImageAssetCatalog(db, userId);
+  const row = db
+    .prepare("SELECT * FROM image_asset_sets WHERE id = ? AND user_id = ?")
+    .get(assetSetId, userId) as unknown as AssetSetRow | undefined;
+  return row ? mapAssetSetRows(db, userId, [row])[0] ?? null : null;
+}
+
+export function getImageAssetSetForImage(
+  db: DatabaseSync,
+  userId: string,
+  imageId: string,
+): ImageAssetSet | null {
+  synchronizeImageAssetCatalog(db, userId);
+  const row = db
+    .prepare(
+      `SELECT sets.*
+         FROM image_asset_sets sets
+         JOIN image_asset_set_items items ON items.set_id = sets.id
+        WHERE sets.user_id = ? AND items.image_id = ?`,
+    )
+    .get(userId, imageId) as unknown as AssetSetRow | undefined;
+  return row ? mapAssetSetRows(db, userId, [row])[0] ?? null : null;
+}
+
 export function imageAssetStorageSummary(
   db: DatabaseSync,
   userId: string,
@@ -861,7 +1033,7 @@ export function imageAssetStorageSummary(
   synchronizeImageAssetCatalog(db, userId);
   const rows = db
     .prepare(
-      `SELECT images.id, images.local_rel_path, images.provider, sets.kind
+      `SELECT images.id, images.local_rel_path, images.provider, images.origin, sets.kind
          FROM images
          LEFT JOIN image_asset_set_items items ON items.image_id = images.id
          LEFT JOIN image_asset_sets sets ON sets.id = items.set_id
@@ -871,10 +1043,11 @@ export function imageAssetStorageSummary(
     id: string;
     local_rel_path: string | null;
     provider: string;
+    origin: string | null;
     kind: ImageAssetKind | null;
   }>;
   const seenPaths = new Set<string>();
-  const kindTotals = new Map<ImageAssetKind, { bytes: number; ids: Set<string> }>();
+  const kindTotals = new Map<ImageAssetKind, number>();
   let activeBytes = 0;
   let generatedBytes = 0;
   let uploadedBytes = 0;
@@ -884,17 +1057,33 @@ export function imageAssetStorageSummary(
     const bytes = path && !seenPaths.has(path) ? generatedImageStorageSizeBytes(path) : 0;
     if (path) seenPaths.add(path);
     activeBytes += bytes;
-    if (row.provider.trim().toLowerCase() === "upload") uploadedBytes += bytes;
+    if (
+      row.provider.trim().toLowerCase() === "upload" ||
+      (row.origin?.trim().toLowerCase() ?? "").includes("upload") ||
+      (row.origin?.trim().toLowerCase() ?? "").includes("import")
+    ) uploadedBytes += bytes;
     else generatedBytes += bytes;
     if (!row.kind) {
       systemManagedBytes += bytes;
       continue;
     }
-    const total = kindTotals.get(row.kind) ?? { bytes: 0, ids: new Set<string>() };
-    total.bytes += bytes;
-    total.ids.add(row.id);
-    kindTotals.set(row.kind, total);
+    kindTotals.set(row.kind, (kindTotals.get(row.kind) ?? 0) + bytes);
   }
+  const kindCounts = new Map(
+    (
+      db
+        .prepare(
+          `SELECT kind, COUNT(*) AS count
+             FROM image_asset_sets
+            WHERE user_id = ?
+            GROUP BY kind`,
+        )
+        .all(userId) as Array<{
+        kind: ImageAssetKind;
+        count: number | bigint;
+      }>
+    ).map((row) => [row.kind, Number(row.count)] as const),
+  );
   return {
     activeBytes,
     recoveryTrashBytes: listGeneratedImageRecoveryBatchesForUser(userId).reduce(
@@ -912,8 +1101,8 @@ export function imageAssetStorageSummary(
     ),
     byKind: IMAGE_ASSET_KINDS.map((kind) => ({
       kind,
-      bytes: kindTotals.get(kind)?.bytes ?? 0,
-      count: kindTotals.get(kind)?.ids.size ?? 0,
+      bytes: kindTotals.get(kind) ?? 0,
+      count: kindCounts.get(kind) ?? 0,
     })),
   };
 }
@@ -928,10 +1117,10 @@ export function deleteUnusedImageAssetSet(
     .prepare("SELECT * FROM image_asset_sets WHERE id = ? AND user_id = ?")
     .get(assetSetId, userId) as AssetSetRow | undefined;
   if (!set) throw new ImageAssetLibraryError("not_found", "Asset set not found.");
-  if (set.source === "legacy" || set.status !== "ready") {
+  if (set.source === "legacy") {
     throw new ImageAssetLibraryError(
       "unsafe",
-      "Incomplete legacy sets stay protected until their membership is verified.",
+      "Unmatched legacy sets stay protected until their membership is verified.",
     );
   }
   const rows = db
@@ -952,7 +1141,10 @@ export function deleteUnusedImageAssetSet(
     role: string;
     ordinal: number | bigint;
   }>;
-  const usage = usageForSets(db, userId, [assetSetId]).get(assetSetId) ?? [];
+  const usage = navigableUsage(
+    usageForSets(db, userId, [assetSetId]).get(assetSetId) ?? [],
+    set.kind as ImageAssetKind,
+  );
   if (usage.length > 0) {
     throw new ImageAssetLibraryError(
       "in_use",
@@ -998,7 +1190,10 @@ export function deleteUnusedImageAssetSet(
   try {
     db.exec("BEGIN IMMEDIATE;");
     transactionStarted = true;
-    const recheckedUsage = usageForSets(db, userId, [assetSetId]).get(assetSetId) ?? [];
+    const recheckedUsage = navigableUsage(
+      usageForSets(db, userId, [assetSetId]).get(assetSetId) ?? [],
+      set.kind as ImageAssetKind,
+    );
     if (recheckedUsage.length > 0) {
       throw new ImageAssetLibraryError(
         "in_use",

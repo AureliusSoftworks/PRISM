@@ -8,6 +8,8 @@ import type {
 } from "@localai/shared";
 import { debateEstimatedSpeechDurationMs } from "@localai/shared";
 
+import type { SpeechCharacterAlignment } from "./speechRevealTimeline";
+
 export const DEBATE_SOURCE_LINK_PREFIX = "prism-debate-source:";
 export const DEBATE_EVIDENCE_LINK_PREFIX = "prism-debate-evidence:";
 
@@ -141,16 +143,17 @@ export function debateTurnClockState(
   speechTiming: { elapsedMs: number; durationMs: number } | null,
 ): DebateTurnClockState | null {
   if (!event?.timing) return null;
-  const playbackProgress = speechTiming
+  // Advance from the presentation clock itself. Scaling the authored duration
+  // estimate across a shorter clip made displayed seconds pass too quickly.
+  const elapsedMs = speechTiming
     ? Math.max(
         0,
         Math.min(
-          1,
-          speechTiming.elapsedMs / Math.max(1, speechTiming.durationMs),
+          Math.max(0, speechTiming.durationMs),
+          speechTiming.elapsedMs,
         ),
       )
     : 0;
-  const elapsedMs = event.timing.estimatedDurationMs * playbackProgress;
   const remainingMs = event.timing.limitMs - elapsedMs;
   return {
     elapsedMs,
@@ -240,6 +243,75 @@ export function debateVisibleContentAtProgress(
   }
 
   return content.slice(0, Math.max(0, end));
+}
+
+function debateAlignedSpokenProgress(args: {
+  spokenText: string;
+  elapsedMs: number;
+  durationMs: number;
+  alignment?: SpeechCharacterAlignment | null;
+}): number {
+  const durationMs = Math.max(1, args.durationMs);
+  const elapsedMs = Math.max(0, Math.min(durationMs, args.elapsedMs));
+  if (elapsedMs >= durationMs) return 1;
+
+  const spokenCharacters = Array.from(args.spokenText);
+  const alignment = args.alignment;
+  const alignedCount = alignment?.characters.length ?? 0;
+  if (
+    !alignment ||
+    alignedCount === 0 ||
+    alignedCount !== alignment.characterStartTimesSeconds.length ||
+    alignedCount !== alignment.characterEndTimesSeconds.length
+  ) {
+    return elapsedMs / durationMs;
+  }
+
+  const elapsedSeconds = elapsedMs / 1_000;
+  let completedAlignedCharacters = 0;
+  for (let index = 0; index < alignedCount; index += 1) {
+    const start = alignment.characterStartTimesSeconds[index];
+    const end = alignment.characterEndTimesSeconds[index];
+    if (
+      typeof start !== "number" ||
+      typeof end !== "number" ||
+      !Number.isFinite(start) ||
+      !Number.isFinite(end) ||
+      start < 0 ||
+      end < start
+    ) {
+      return elapsedMs / durationMs;
+    }
+    if (end <= elapsedSeconds) completedAlignedCharacters = index + 1;
+  }
+
+  const exactAlignment = alignment.characters.join("") === args.spokenText;
+  const completedSpokenCharacters = exactAlignment
+    ? completedAlignedCharacters
+    : Math.round(
+        (completedAlignedCharacters / alignedCount) * spokenCharacters.length,
+      );
+  return Math.max(
+    0,
+    Math.min(
+      1,
+      completedSpokenCharacters / Math.max(1, spokenCharacters.length),
+    ),
+  );
+}
+
+/** Public transcript prefix synchronized to the real voice playback clock. */
+export function debateVisibleContentAtSpeechTime(args: {
+  content: string;
+  spokenText: string;
+  elapsedMs: number;
+  durationMs: number;
+  alignment?: SpeechCharacterAlignment | null;
+}): string {
+  return debateVisibleContentAtProgress(
+    args.content,
+    debateAlignedSpokenProgress(args),
+  );
 }
 
 export function debateTranscriptIsAtLive(

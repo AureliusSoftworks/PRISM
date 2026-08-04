@@ -908,6 +908,7 @@ import {
   buildSignalMusicProfile,
   normalizePrismRefractDirection,
   normalizePrismRefractRequest,
+  isImageAssetKind,
   signalPersonaTemperamentFor,
   type BotcastProducerCue,
   type BotcastShowPatchRequest,
@@ -934,6 +935,7 @@ import {
 import { editImage, generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
 import { shouldAttemptLenientLocalImageFallback } from "./image-lenient-fallback.ts";
+import { normalizeImageAssetUpload } from "./image-asset-upload.ts";
 import {
   buildImagePromptAttempts,
   runImagePromptAttempts,
@@ -953,6 +955,7 @@ import {
 import { resolveImagePromptForGeneration } from "./image-prompt-routing.ts";
 import {
   cleanupUnreferencedImageAssets,
+  imageAssetUsageLabels,
   ImageAssetCleanupError,
   listImageAssetCleanupRecoveries,
   permanentlyDeleteImageAssetCleanupRecovery,
@@ -962,6 +965,8 @@ import {
 } from "./image-asset-cleanup.ts";
 import {
   deleteUnusedImageAssetSet,
+  getImageAssetSet,
+  getImageAssetSetForImage,
   imageAssetStorageSummary,
   ImageAssetLibraryError,
   listImageAssetCatalog,
@@ -1106,7 +1111,6 @@ async function rebuildSignalStudioLighting(
     if (
       !source ||
       source.origin !== "botcast" ||
-      source.bot_id !== show.hostBotId ||
       !source.local_rel_path?.trim()
     ) {
       throw new HttpError(
@@ -6925,30 +6929,11 @@ function promoteHubAtmosphereImage(
   imageId: string,
   atmosphereStyle: string,
 ): void {
-  const current = db
-    .prepare("SELECT hub_atmosphere_image_id FROM users WHERE id = ?")
-    .get(userId) as { hub_atmosphere_image_id: string | null } | undefined;
-  const previousImageId = current?.hub_atmosphere_image_id?.trim() || null;
   db.prepare(
     `UPDATE users
         SET hub_atmosphere_image_id = ?, hub_atmosphere_image_style = ?
       WHERE id = ?`,
   ).run(imageId, normalizeHubAtmosphereStyle(atmosphereStyle), userId);
-  if (!previousImageId || previousImageId === imageId) return;
-  const previous = db
-    .prepare(
-      `SELECT local_rel_path
-         FROM images
-        WHERE id = ? AND user_id = ? AND purpose = ?`,
-    )
-    .get(previousImageId, userId, HUB_ATMOSPHERE_IMAGE_PURPOSE) as
-    { local_rel_path: string | null } | undefined;
-  if (!previous) return;
-  db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
-    previousImageId,
-    userId,
-  );
-  tryUnlinkGeneratedImageFile(previous.local_rel_path);
 }
 
 function readableHubAtmosphereCache(user: UserDbRow): {
@@ -7116,6 +7101,8 @@ async function generateAndPersistSignalArtworkAsset(args: {
   hostBotId: string;
   kind: SignalArtworkGenerationKind;
   prompt: string;
+  /** Canonical prompt retained when a one-pass Refract direction shapes output. */
+  persistencePrompt?: string;
   size: "1536x1024" | "1024x1024";
   preferredProvider: ImageProviderName;
   sourceNightImageId: string | null;
@@ -7429,8 +7416,8 @@ async function generateAndPersistSignalArtworkAsset(args: {
       args.userId,
       args.hostBotId,
       serializeImageRelatedBotIds(relatedBotIds, args.hostBotId),
-      shouldRunLocal ? localPrompt : onlinePrompt,
-      revisedPrompt,
+      args.persistencePrompt ?? (shouldRunLocal ? localPrompt : onlinePrompt),
+      args.persistencePrompt ? null : revisedPrompt,
       storedUrl,
       args.size,
       quality,
@@ -7518,6 +7505,8 @@ async function generateAndPersistSignalArtworkAsset(args: {
 async function generateAndPersistStandaloneImageAsset(args: {
   userId: string;
   prompt: string;
+  /** Canonical catalog prompt when ephemeral Refract direction shaped generation. */
+  persistencePrompt?: string;
   preferredProvider: ImageProviderName;
   offlineOnly?: boolean;
   signal: AbortSignal;
@@ -7710,8 +7699,8 @@ async function generateAndPersistStandaloneImageAsset(args: {
       args.userId,
       serializeImageRelatedBotIds(args.relatedBotIds ?? []),
       args.origin,
-      args.prompt,
-      revisedPrompt,
+      args.persistencePrompt ?? args.prompt,
+      args.persistencePrompt ? null : revisedPrompt,
       storedUrl,
       size,
       quality,
@@ -7788,6 +7777,7 @@ async function persistUploadedDebateExhibitImageAsset(args: {
 async function generateAndPersistSlateCoverAsset(args: {
   userId: string;
   prompt: string;
+  persistencePrompt?: string;
   preferredProvider: ImageProviderName;
   offlineOnly: boolean;
   signal: AbortSignal;
@@ -7918,7 +7908,6 @@ async function runCoffeeGroupSynthesisItem(
       group: profiles,
     });
     const user = getUserRow(userId);
-    const previousImageId = latest.atmosphere?.imageId ?? null;
     const asset = await generateAndPersistStandaloneImageAsset({
       userId,
       prompt,
@@ -7960,25 +7949,6 @@ async function runCoffeeGroupSynthesisItem(
         }
       }
       return;
-    }
-    if (previousImageId && previousImageId !== asset.imageId) {
-      const previous = db
-        .prepare(
-          `SELECT local_rel_path
-             FROM images
-            WHERE id = ? AND user_id = ? AND purpose = 'group-room-wallpaper'`,
-        )
-        .get(previousImageId, userId) as
-        { local_rel_path: string | null } | undefined;
-      if (previous) {
-        db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
-          previousImageId,
-          userId,
-        );
-        if (previous.local_rel_path) {
-          tryUnlinkGeneratedImageFile(previous.local_rel_path);
-        }
-      }
     }
   } catch (error) {
     try {
@@ -8837,7 +8807,11 @@ function buildRoutes(): RouteDefinition[] {
       if (typeof body.kind !== "string" || !validKinds.has(body.kind)) {
         throw new HttpError(400, "Choose a valid Visual Bible study kind.");
       }
-      const prompt = readString(body.prompt, "prompt");
+      const canonicalPrompt = readString(body.prompt, "prompt");
+      const direction = normalizePrismRefractDirection(body.direction);
+      const prompt = direction
+        ? `${canonicalPrompt}\nCreative direction for this pass: ${direction}`
+        : canonicalPrompt;
       const user = getUserRow(userId);
       const offlineOnly = project.proseMode === "offline";
       const preferredProvider = resolveImageProviderName({
@@ -8852,7 +8826,7 @@ function buildRoutes(): RouteDefinition[] {
         mode: "sandbox",
         incognito: false,
         captionPrompt: "Slate Visual Bible study",
-        userMessage: `[Slate] Visual study: ${prompt.slice(0, 220)}`,
+        userMessage: `[Slate] Visual study: ${canonicalPrompt.slice(0, 220)}`,
         source: "slate_visual_bible",
         requestedSize: "1536x1024",
       });
@@ -8866,6 +8840,7 @@ function buildRoutes(): RouteDefinition[] {
         const asset = await generateAndPersistStandaloneImageAsset({
           userId,
           prompt,
+          ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
           preferredProvider,
           offlineOnly,
           signal: acquired.job.abortController.signal,
@@ -8896,7 +8871,7 @@ function buildRoutes(): RouteDefinition[] {
             imageId: asset.imageId,
             sectionId: body.sectionId,
             kind: body.kind,
-            prompt,
+            prompt: canonicalPrompt,
             negativePrompt: body.negativePrompt,
             referenceAssetIds: body.referenceAssetIds,
             passageAnchor: body.passageAnchor,
@@ -8909,6 +8884,86 @@ function buildRoutes(): RouteDefinition[] {
         });
       } finally {
         await releaseImageSlotIfOwned(userId, acquired.job.id);
+      }
+    }),
+    route("POST", "/api/slate/projects/:id/visual-references/reuse", async (ctx) => {
+      const userId = requireAuth(ctx);
+      getSlateProject(db, userId, ctx.params.id);
+      const body = ctx.body as Record<string, unknown>;
+      const assetSetId = readOptionalString(body.assetSetId);
+      const asset = assetSetId ? getImageAssetSet(db, userId, assetSetId) : null;
+      const member = asset?.members.find((candidate) => candidate.role === "primary");
+      if (
+        !asset ||
+        asset.kind !== "slate_visual_study" ||
+        asset.status !== "ready" ||
+        !member
+      ) {
+        throw new HttpError(404, "That Visual Bible study is unavailable.");
+      }
+      json(ctx.res, 201, {
+        ok: true,
+        visual: recordSlateVisualStudy(db, userId, ctx.params.id, {
+          imageId: member.imageId,
+          sectionId: body.sectionId,
+          kind: body.kind,
+          prompt:
+            typeof body.prompt === "string" && body.prompt.trim()
+              ? body.prompt
+              : member.prompt,
+          provider: "local",
+          model: `reuse:${member.model}`.slice(0, 240),
+        }),
+      });
+    }),
+    route("POST", "/api/slate/projects/:id/visual-references/upload", async (ctx) => {
+      const userId = requireAuth(ctx);
+      getSlateProject(db, userId, ctx.params.id);
+      const body = ctx.body as Record<string, unknown>;
+      const prompt = readString(body.prompt, "prompt");
+      const upload = await normalizeImageAssetUpload(body.dataUrl, {
+        width: 1536,
+        height: 1024,
+      });
+      const imageId = randomId(12);
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+      const createdAt = new Date().toISOString();
+      try {
+        writeGeneratedImageBytes(localRelPath, upload.pngBytes);
+        await tryGenerateThumbAfterPngWrite(localRelPath);
+        db.prepare(
+          `INSERT INTO images
+             (id, user_id, origin, prompt, revised_prompt, url, size, quality,
+              provider, model, local_rel_path, purpose, created_at)
+           VALUES (?, ?, 'slate_visual_bible', ?, ?, ?, ?, 'upload',
+                   'upload', 'upload', ?, 'slate_visual_bible', ?)`,
+        ).run(
+          imageId,
+          userId,
+          prompt,
+          prompt,
+          displayUrl,
+          `${upload.width}x${upload.height}`,
+          localRelPath,
+          createdAt,
+        );
+        const visual = recordSlateVisualStudy(db, userId, ctx.params.id, {
+          imageId,
+          sectionId: body.sectionId,
+          kind: body.kind,
+          prompt,
+          provider: "local",
+          model: "upload",
+        });
+        json(ctx.res, 201, { ok: true, visual });
+      } catch (error) {
+        db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+          imageId,
+          userId,
+        );
+        tryUnlinkGeneratedImageFile(localRelPath);
+        throw error;
       }
     }),
     route(
@@ -9158,7 +9213,11 @@ function buildRoutes(): RouteDefinition[] {
         requestedProvider: body.preferredProvider,
         offlineOnly,
       });
-      const prompt = composeSlateProjectCoverPrompt(project);
+      const canonicalPrompt = composeSlateProjectCoverPrompt(project);
+      const direction = normalizePrismRefractDirection(body.direction);
+      const prompt = direction
+        ? `${canonicalPrompt}\nCreative direction for this pass: ${direction}`
+        : canonicalPrompt;
       const acquired = await tryAcquireImageSlot({
         userId,
         conversationId: null,
@@ -9181,7 +9240,7 @@ function buildRoutes(): RouteDefinition[] {
       setSlateProjectCover(db, userId, project.id, {
         ...project.cover,
         seed: project.cover.seed || project.id,
-        prompt,
+        prompt: canonicalPrompt,
         revision,
         status: "generating",
       });
@@ -9189,13 +9248,14 @@ function buildRoutes(): RouteDefinition[] {
         const asset = await generateAndPersistSlateCoverAsset({
           userId,
           prompt,
+          ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
           preferredProvider,
           offlineOnly,
           signal: acquired.job.abortController.signal,
         });
         const updated = setSlateProjectCover(db, userId, project.id, {
           seed: project.cover.seed || project.id,
-          prompt,
+          prompt: canonicalPrompt,
           imageUrl: asset.imageUrl,
           imageId: asset.imageId,
           revision,
@@ -9207,7 +9267,7 @@ function buildRoutes(): RouteDefinition[] {
           setSlateProjectCover(db, userId, project.id, {
             ...project.cover,
             seed: project.cover.seed || project.id,
-            prompt,
+            prompt: canonicalPrompt,
             revision,
             status: "failed",
           });
@@ -9217,6 +9277,77 @@ function buildRoutes(): RouteDefinition[] {
         throw error;
       } finally {
         await releaseImageSlotIfOwned(userId, acquired.job.id);
+      }
+    }),
+    route("POST", "/api/slate/projects/:id/cover/reuse", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const project = getSlateProject(db, userId, ctx.params.id);
+      const body = ctx.body as Record<string, unknown>;
+      const assetSetId = readOptionalString(body.assetSetId);
+      const asset = assetSetId ? getImageAssetSet(db, userId, assetSetId) : null;
+      const member = asset?.members.find((candidate) => candidate.role === "primary");
+      if (!asset || asset.kind !== "slate_cover" || asset.status !== "ready" || !member) {
+        throw new HttpError(404, "That Slate cover is unavailable.");
+      }
+      const updated = setSlateProjectCover(db, userId, project.id, {
+        seed: project.cover.seed || project.id,
+        prompt: member.prompt,
+        imageUrl: member.url,
+        imageId: member.imageId,
+        revision: project.cover.revision + 1,
+        status: "ready",
+      });
+      json(ctx.res, 200, { ok: true, project: updated, asset });
+    }),
+    route("POST", "/api/slate/projects/:id/cover/upload", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const project = getSlateProject(db, userId, ctx.params.id);
+      const body = ctx.body as Record<string, unknown>;
+      const upload = await normalizeImageAssetUpload(body.dataUrl, {
+        width: 1024,
+        height: 1536,
+        fit: "cover",
+      });
+      const imageId = randomId(12);
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+      const displayUrl = `/api/images/${encodeURIComponent(imageId)}/file`;
+      const prompt = `Uploaded cover for ${project.title}`;
+      const createdAt = new Date().toISOString();
+      try {
+        writeGeneratedImageBytes(localRelPath, upload.pngBytes);
+        await tryGenerateThumbAfterPngWrite(localRelPath);
+        db.prepare(
+          `INSERT INTO images
+             (id, user_id, origin, prompt, revised_prompt, url, size, quality,
+              provider, model, local_rel_path, purpose, created_at)
+           VALUES (?, ?, 'slate_cover', ?, ?, ?, ?, 'upload', 'upload',
+                   'upload', ?, 'slate_cover', ?)`,
+        ).run(
+          imageId,
+          userId,
+          prompt,
+          prompt,
+          displayUrl,
+          `${upload.width}x${upload.height}`,
+          localRelPath,
+          createdAt,
+        );
+        const updated = setSlateProjectCover(db, userId, project.id, {
+          seed: project.cover.seed || project.id,
+          prompt,
+          imageUrl: displayUrl,
+          imageId,
+          revision: project.cover.revision + 1,
+          status: "ready",
+        });
+        json(ctx.res, 201, { ok: true, project: updated, imageId });
+      } catch (error) {
+        db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+          imageId,
+          userId,
+        );
+        tryUnlinkGeneratedImageFile(localRelPath);
+        throw error;
       }
     }),
     route("GET", "/api/slate/projects/:id/summary", async (ctx) => {
@@ -11184,6 +11315,7 @@ function buildRoutes(): RouteDefinition[] {
       const conversationId = ctx.params.id;
       recoverStaleZenWallpaperStatusForRequest(userId, conversationId);
       const body = ctx.body as Record<string, unknown>;
+      const refractDirection = normalizePrismRefractDirection(body.direction);
       const enabled = body.enabled !== false;
       const generationRequested = body.generate !== false;
       const force =
@@ -11587,7 +11719,9 @@ function buildRoutes(): RouteDefinition[] {
       try {
         const imageId = randomId(12);
         const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
-        const promptForModel = prompt;
+        const promptForModel = refractDirection
+          ? `${prompt}\nCreative direction for this pass: ${refractDirection}`
+          : prompt;
         const wallpaperPromptAttempts = buildImagePromptAttempts({
           prompt: promptForModel,
         });
@@ -12178,6 +12312,26 @@ function buildRoutes(): RouteDefinition[] {
         ) as unknown as Array<{ id: string }>;
       if (rows.length === 0) {
         json(ctx.res, 200, { ok: true, deleted: 0 });
+        return;
+      }
+      const usageByImage = imageAssetUsageLabels(
+        db,
+        userId,
+        rows.map((row) => row.id),
+      );
+      const used = rows.flatMap((row) =>
+        (usageByImage.get(row.id) ?? []).map((label) => ({
+          imageId: row.id,
+          type: "reference",
+          label,
+        })),
+      );
+      if (used.length > 0) {
+        json(ctx.res, 409, {
+          ok: false,
+          error: "One or more images are still used. Replace them before deleting the library.",
+          usage: used,
+        });
         return;
       }
       const user = getUserRow(userId);
@@ -14000,7 +14154,11 @@ function buildRoutes(): RouteDefinition[] {
         adjective: body.adjective,
         object: body.object,
       });
-      const prompt = buildDebateExhibitSpritePrompt(descriptor);
+      const canonicalPrompt = buildDebateExhibitSpritePrompt(descriptor);
+      const direction = normalizePrismRefractDirection(body.direction);
+      const prompt = direction
+        ? `${canonicalPrompt}\nCreative direction for this pass: ${direction}`
+        : canonicalPrompt;
       const user = getUserRow(userId);
       const requestedImageProvider: ImageProviderName =
         body.preferredProvider === "openai"
@@ -14041,6 +14199,7 @@ function buildRoutes(): RouteDefinition[] {
         const asset = await generateAndPersistStandaloneImageAsset({
           userId,
           prompt,
+          ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
           preferredProvider: requestedImageProvider,
           offlineOnly,
           signal: acquired.job.abortController.signal,
@@ -15020,6 +15179,7 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
       const keywords = normalizeSignalGenerationKeywords(body.keywords);
+      const direction = normalizePrismRefractDirection(body.direction);
       const preferredProvider: ImageProviderName =
         body.preferredProvider === "local" ||
         body.preferredProvider === "openai"
@@ -15100,19 +15260,25 @@ function buildRoutes(): RouteDefinition[] {
             await releaseImageSlotIfOwned(userId, acquired.job.id);
           },
           generate: (kind, sourceNightImageId, signal) =>
-            generateAndPersistSignalArtworkAsset({
-              userId,
-              hostBotId: show.hostBotId,
-              kind,
-              prompt: withSignalGenerationKeywords(
+            {
+              const canonicalPrompt = withSignalGenerationKeywords(
                 promptByKind[kind],
                 keywords,
-              ),
-              size: kind === "logo" ? "1024x1024" : "1536x1024",
-              preferredProvider,
-              sourceNightImageId,
-              signal,
-            }),
+              );
+              return generateAndPersistSignalArtworkAsset({
+                userId,
+                hostBotId: show.hostBotId,
+                kind,
+                prompt: direction
+                  ? `${canonicalPrompt}\nCreative direction for this pass: ${direction}`
+                  : canonicalPrompt,
+                ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
+                size: kind === "logo" ? "1024x1024" : "1536x1024",
+                preferredProvider,
+                sourceNightImageId,
+                signal,
+              });
+            },
           attach: async (kind, asset) => {
             let attachmentError: unknown;
             for (let attempt = 0; attempt < 3; attempt += 1) {
@@ -15557,6 +15723,104 @@ function buildRoutes(): RouteDefinition[] {
       }
       json(ctx.res, 200, { ok: true, ...result });
     }),
+    route(
+      "POST",
+      "/api/botcast/shows/:id/asset-sets/:setId/reuse",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const show = getBotcastShow(db, userId, ctx.params.id);
+        if (signalArtworkJobs.hasActiveJobForShow(userId, show.id)) {
+          throw new HttpError(
+            409,
+            "This show’s custom look is still generating.",
+          );
+        }
+        const asset = getImageAssetSet(db, userId, ctx.params.setId);
+        if (!asset || asset.status !== "ready") {
+          throw new HttpError(404, "That reusable Signal asset is unavailable.");
+        }
+        if (asset.kind !== "signal_studio" && asset.kind !== "signal_logo") {
+          throw new HttpError(409, "That asset does not belong in Signal.");
+        }
+        const loadMember = (
+          role: (typeof asset.members)[number]["role"],
+          required = true,
+        ) => {
+          const member = asset.members.find((candidate) => candidate.role === role);
+          if (!member) {
+            if (required) {
+              throw new HttpError(409, `This Signal asset is missing its ${role} member.`);
+            }
+            return null;
+          }
+          const row = db
+            .prepare(
+              `SELECT local_rel_path FROM images
+                WHERE id = ? AND user_id = ? AND origin = 'botcast'`,
+            )
+            .get(member.imageId, userId) as
+            | { local_rel_path: string | null }
+            | undefined;
+          if (!row?.local_rel_path) {
+            throw new HttpError(404, "A Signal asset file is unavailable locally.");
+          }
+          try {
+            readGeneratedImageBytes(row.local_rel_path);
+          } catch {
+            throw new HttpError(404, "A Signal asset file was not found.");
+          }
+          return member;
+        };
+
+        if (asset.kind === "signal_logo") {
+          const logo = loadMember("primary");
+          const savedShow = updateBotcastShow(db, userId, show.id, {
+            logoImageId: logo!.imageId,
+            logoImageUrl: logo!.url,
+          });
+          json(ctx.res, 200, { ok: true, show: savedShow, asset });
+          return;
+        }
+
+        const light = loadMember("light");
+        const dark = loadMember("dark");
+        const lightMask = loadMember("light_mask", false);
+        const darkMask = loadMember("dark_mask", false);
+        updateBotcastShow(db, userId, show.id, {
+          dayAtmosphereImageId: light!.imageId,
+          dayAtmosphereImageUrl: light!.url,
+          dayAtmosphereMicrophoneTintMaskImageId: lightMask?.imageId ?? null,
+          dayAtmosphereMicrophoneTintMaskUrl: lightMask?.url ?? null,
+          nightAtmosphereImageId: dark!.imageId,
+          nightAtmosphereImageUrl: dark!.url,
+          nightAtmosphereMicrophoneTintMaskImageId: darkMask?.imageId ?? null,
+          nightAtmosphereMicrophoneTintMaskUrl: darkMask?.url ?? null,
+        });
+        try {
+          const savedShow = await rebuildSignalStudioLighting(userId, show.id, {
+            preferredProvider: "local",
+          });
+          json(ctx.res, 200, { ok: true, show: savedShow, asset });
+        } catch (error) {
+          updateBotcastShow(db, userId, show.id, {
+            dayAtmosphereImageId: show.dayAtmosphere.imageId,
+            dayAtmosphereImageUrl: show.dayAtmosphere.imageUrl,
+            dayAtmosphereMicrophoneTintMaskImageId:
+              show.dayAtmosphere.microphoneTintMaskImageId,
+            dayAtmosphereMicrophoneTintMaskUrl:
+              show.dayAtmosphere.microphoneTintMaskUrl,
+            nightAtmosphereImageId: show.nightAtmosphere.imageId,
+            nightAtmosphereImageUrl: show.nightAtmosphere.imageUrl,
+            nightAtmosphereMicrophoneTintMaskImageId:
+              show.nightAtmosphere.microphoneTintMaskImageId,
+            nightAtmosphereMicrophoneTintMaskUrl:
+              show.nightAtmosphere.microphoneTintMaskUrl,
+            studioLighting: show.studioLighting,
+          });
+          throw error;
+        }
+      },
+    ),
     route("POST", "/api/botcast/shows/:id/assets/:slot/reuse", async (ctx) => {
       const userId = requireAuth(ctx);
       const show = getBotcastShow(db, userId, ctx.params.id);
@@ -15713,7 +15977,7 @@ function buildRoutes(): RouteDefinition[] {
               prompt, revised_prompt, url, size, quality, provider, model,
               local_rel_path, purpose, created_at)
            VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, 'upload',
-                   'upload', 'upload', ?, 'gallery', ?)`,
+                   'upload', 'upload', ?, ?, ?)`,
         ).run(
           imageId,
           userId,
@@ -15724,6 +15988,7 @@ function buildRoutes(): RouteDefinition[] {
           displayUrl,
           `${upload.width}x${upload.height}`,
           localRelPath,
+          signalArtworkImagePurpose(slot),
           createdAt,
         );
         try {
@@ -15775,9 +16040,127 @@ function buildRoutes(): RouteDefinition[] {
           created_at: createdAt,
           local_rel_path: localRelPath,
           model: "upload",
-          purpose: "gallery",
+          purpose: signalArtworkImagePurpose(slot),
         }),
       });
+    }),
+    route("POST", "/api/botcast/shows/:id/studio-set/upload", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const show = getBotcastShow(db, userId, ctx.params.id);
+      if (signalArtworkJobs.hasActiveJobForShow(userId, show.id)) {
+        throw new HttpError(409, "This show’s custom look is still generating.");
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const [lightUpload, darkUpload] = await Promise.all([
+        normalizeSignalAssetUpload(body.lightDataUrl, "day-studio"),
+        normalizeSignalAssetUpload(body.darkDataUrl, "night-studio"),
+      ]);
+      const createdAt = new Date().toISOString();
+      const members = [
+        {
+          slot: "day-studio" as const,
+          id: randomId(12),
+          upload: lightUpload,
+          prompt: `Uploaded Signal Light studio pair for ${show.name}`,
+        },
+        {
+          slot: "night-studio" as const,
+          id: randomId(12),
+          upload: darkUpload,
+          prompt: `Uploaded Signal Dark studio pair for ${show.name}`,
+        },
+      ].map((member) => ({
+        ...member,
+        localRelPath: buildGeneratedImageRelativePath(userId, member.id),
+        displayUrl: `/api/images/${encodeURIComponent(member.id)}/file`,
+      }));
+      const relatedBotIds = serializeImageRelatedBotIds(
+        [show.hostBotId],
+        show.hostBotId,
+      );
+      let committed = false;
+      let transactionStarted = false;
+      try {
+        for (const member of members) {
+          writeGeneratedImageBytes(member.localRelPath, member.upload.pngBytes);
+          await tryGenerateThumbAfterPngWrite(member.localRelPath);
+        }
+        db.exec("BEGIN IMMEDIATE;");
+        transactionStarted = true;
+        const insert = db.prepare(
+          `INSERT INTO images
+             (id, user_id, conversation_id, bot_id, related_bot_ids, origin,
+              prompt, revised_prompt, url, size, quality, provider, model,
+              local_rel_path, purpose, created_at)
+           VALUES (?, ?, NULL, ?, ?, 'botcast', ?, ?, ?, ?, 'upload',
+                   'upload', 'upload', ?, ?, ?)`,
+        );
+        for (const member of members) {
+          insert.run(
+            member.id,
+            userId,
+            show.hostBotId,
+            relatedBotIds,
+            member.prompt,
+            member.prompt,
+            member.displayUrl,
+            `${member.upload.width}x${member.upload.height}`,
+            member.localRelPath,
+            signalArtworkImagePurpose(member.slot),
+            createdAt,
+          );
+        }
+        updateBotcastShow(db, userId, show.id, {
+          dayAtmosphereImageId: members[0]!.id,
+          dayAtmosphereImageUrl: members[0]!.displayUrl,
+          dayAtmosphereMicrophoneTintMaskImageId: null,
+          dayAtmosphereMicrophoneTintMaskUrl: null,
+          nightAtmosphereImageId: members[1]!.id,
+          nightAtmosphereImageUrl: members[1]!.displayUrl,
+          nightAtmosphereMicrophoneTintMaskImageId: null,
+          nightAtmosphereMicrophoneTintMaskUrl: null,
+        });
+        db.exec("COMMIT;");
+        transactionStarted = false;
+        committed = true;
+        const savedShow = await rebuildSignalStudioLighting(userId, show.id, {
+          preferredProvider: "local",
+        });
+        json(ctx.res, 201, {
+          ok: true,
+          show: savedShow,
+          imageIds: members.map((member) => member.id),
+        });
+      } catch (error) {
+        if (transactionStarted) db.exec("ROLLBACK;");
+        if (committed) {
+          updateBotcastShow(db, userId, show.id, {
+            dayAtmosphereImageId: show.dayAtmosphere.imageId,
+            dayAtmosphereImageUrl: show.dayAtmosphere.imageUrl,
+            dayAtmosphereMicrophoneTintMaskImageId:
+              show.dayAtmosphere.microphoneTintMaskImageId,
+            dayAtmosphereMicrophoneTintMaskUrl:
+              show.dayAtmosphere.microphoneTintMaskUrl,
+            nightAtmosphereImageId: show.nightAtmosphere.imageId,
+            nightAtmosphereImageUrl: show.nightAtmosphere.imageUrl,
+            nightAtmosphereMicrophoneTintMaskImageId:
+              show.nightAtmosphere.microphoneTintMaskImageId,
+            nightAtmosphereMicrophoneTintMaskUrl:
+              show.nightAtmosphere.microphoneTintMaskUrl,
+            studioLighting: show.studioLighting,
+          });
+          for (const member of members) {
+            db.prepare("DELETE FROM images WHERE id = ? AND user_id = ?").run(
+              member.id,
+              userId,
+            );
+          }
+        }
+        for (const member of members) {
+          tryUnlinkGeneratedImageFile(member.localRelPath);
+        }
+        throw error;
+      }
     }),
     route(
       "POST",
@@ -22813,6 +23196,7 @@ function buildRoutes(): RouteDefinition[] {
       ctx.req.once("close", onImageGenClientClose);
       try {
         const body = ctx.body as Record<string, unknown>;
+        const refractDirection = normalizePrismRefractDirection(body.direction);
         const rawImagePurpose = body.purpose ?? body.imagePurpose;
         const imagePurpose =
           rawImagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
@@ -23083,6 +23467,11 @@ function buildRoutes(): RouteDefinition[] {
             botSystemPrompt: botPersona?.system_prompt,
           });
         }
+        if (refractDirection) {
+          const directedSuffix = `\nCreative direction for this pass: ${refractDirection}`;
+          localPromptForModel = `${localPromptForModel}${directedSuffix}`;
+          onlinePromptForModel = `${onlinePromptForModel}${directedSuffix}`;
+        }
 
         const { preferredLocalImageModel, preferredOpenAiImageModel } =
           resolveImageGenerateModelPreferences(imagePurpose, {
@@ -23140,7 +23529,9 @@ function buildRoutes(): RouteDefinition[] {
           ? localPromptForModel
           : onlinePromptForModel;
         if (imageOrigin === "botcast") {
-          promptForPersistence = promptForModel;
+          promptForPersistence = refractDirection
+            ? (composedPrompt ?? prompt)
+            : promptForModel;
         }
 
         const acqPanel = await waitForImageSlot({
@@ -23637,6 +24028,188 @@ function buildRoutes(): RouteDefinition[] {
       ).map((row) => mapImageRowToClient(row));
       json(ctx.res, 200, { ok: true, images });
     }),
+    route("POST", "/api/assets/upload", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (!isImageAssetKind(body.kind) || body.kind === "signal_studio") {
+        throw new HttpError(
+          400,
+          "Choose a recognized single-image asset kind. Signal studios require both Light and Dark uploads.",
+        );
+      }
+      const kind = body.kind;
+      const normalized = await normalizeImageAssetUpload(body.dataUrl, {
+        ...(kind === "slate_cover"
+          ? { width: 1536, height: 2048, fit: "cover" as const }
+          : kind === "zen_atmosphere" ||
+              kind === "home_atmosphere" ||
+              kind === "group_room_atmosphere"
+            ? { width: 2048, height: 1365, fit: "cover" as const }
+            : { width: 2048, height: 2048, fit: "inside" as const }),
+      }).catch((error) => {
+        throw new HttpError(
+          400,
+          error instanceof Error ? error.message : "The image could not be normalized.",
+        );
+      });
+      const provenanceByKind = {
+        general_image: { origin: "images_panel", purpose: "gallery" },
+        debate_exhibit: {
+          origin: "debate_exhibit",
+          purpose: DEBATE_EXHIBIT_IMAGE_PURPOSE,
+        },
+        signal_logo: { origin: "botcast", purpose: SIGNAL_LOGO_IMAGE_PURPOSE },
+        slate_cover: { origin: "slate_cover", purpose: "slate_cover" },
+        slate_visual_study: {
+          origin: "slate_visual_bible",
+          purpose: "slate_visual_bible",
+        },
+        zen_atmosphere: { origin: "zen_wallpaper", purpose: "wallpaper" },
+        home_atmosphere: {
+          origin: "hub_atmosphere",
+          purpose: HUB_ATMOSPHERE_IMAGE_PURPOSE,
+        },
+        group_room_atmosphere: {
+          origin: "bot_group_room_import",
+          purpose: GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+        },
+      } as const;
+      const provenance = provenanceByKind[kind];
+      const title =
+        typeof body.title === "string" && body.title.trim()
+          ? body.title.trim().slice(0, 240)
+          : `Uploaded ${kind.replaceAll("_", " ")}`;
+      const imageId = randomId(12);
+      const localRelPath = buildGeneratedImageRelativePath(userId, imageId);
+      const createdAt = new Date().toISOString();
+      try {
+        writeGeneratedImageBytes(localRelPath, normalized.pngBytes);
+        await tryGenerateThumbAfterPngWrite(localRelPath);
+        db.prepare(
+          `INSERT INTO images
+             (id, user_id, related_bot_ids, origin, prompt, revised_prompt, url,
+              size, quality, provider, model, local_rel_path, purpose, created_at)
+           VALUES (?, ?, '[]', ?, ?, NULL, '', ?, 'standard', 'upload',
+                   'asset-upload', ?, ?, ?)`,
+        ).run(
+          imageId,
+          userId,
+          provenance.origin,
+          title,
+          `${normalized.width}x${normalized.height}`,
+          localRelPath,
+          provenance.purpose,
+          createdAt,
+        );
+      } catch (error) {
+        tryUnlinkGeneratedImageFile(localRelPath);
+        throw error;
+      }
+      const asset = getImageAssetSetForImage(db, userId, imageId);
+      if (!asset) {
+        throw new Error("The uploaded image could not be registered in the local asset library.");
+      }
+      json(ctx.res, 201, { ok: true, imageId, asset });
+    }),
+    route("POST", "/api/home/atmosphere/assets/:id/reuse", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const asset = getImageAssetSet(db, userId, ctx.params.id);
+      const member = asset?.members.find((candidate) => candidate.role === "primary");
+      if (!asset || asset.kind !== "home_atmosphere" || asset.status !== "ready" || !member) {
+        throw new HttpError(400, "Choose a ready Home Atmosphere asset.");
+      }
+      const body = ctx.body as Record<string, unknown>;
+      const user = getUserRow(userId);
+      const atmosphereStyle = normalizeHubAtmosphereStyle(
+        body.atmosphereStyle ?? user.atmosphere_style,
+      );
+      promoteHubAtmosphereImage(userId, member.imageId, atmosphereStyle);
+      json(ctx.res, 200, {
+        ok: true,
+        imageId: member.imageId,
+        atmosphereStyle,
+      });
+    }),
+    route("POST", "/api/conversations/:id/zen-wallpaper/assets/:assetId/reuse", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversation = db
+        .prepare(
+          `SELECT id, conversation_mode, zen_wallpaper_history,
+                  (SELECT COUNT(*) FROM messages
+                    WHERE conversation_id = conversations.id AND user_id = ?) AS message_count
+             FROM conversations
+            WHERE id = ? AND user_id = ?`,
+        )
+        .get(userId, ctx.params.id, userId) as
+        | {
+            id: string;
+            conversation_mode: string | null;
+            zen_wallpaper_history: string | null;
+            message_count: number | bigint;
+          }
+        | undefined;
+      if (
+        !conversation ||
+        (conversation.conversation_mode !== "zen" &&
+          conversation.conversation_mode !== "chat")
+      ) {
+        throw new HttpError(404, "Zen conversation not found.");
+      }
+      const asset = getImageAssetSet(db, userId, ctx.params.assetId);
+      const member = asset?.members.find((candidate) => candidate.role === "primary");
+      if (!asset || asset.kind !== "zen_atmosphere" || asset.status !== "ready" || !member) {
+        throw new HttpError(400, "Choose a ready Zen Atmosphere asset.");
+      }
+      const messageCount = Number(conversation.message_count);
+      const history = serializeZenWallpaperHistory(
+        buildZenWallpaperHistoryForGeneratedImage(
+          conversation.zen_wallpaper_history,
+          {
+            imageId: member.imageId,
+            promptSeed: member.prompt,
+            generationMessageCount: messageCount,
+            createdAt: member.createdAt,
+          },
+          {
+            latestMessageCount: messageCount,
+            restoreMessageLimit: ZEN_RESTORE_MESSAGE_LIMIT,
+          },
+        ),
+      );
+      db.prepare(
+        `UPDATE conversations
+            SET zen_wallpaper_enabled = 1,
+                zen_wallpaper_image_id = ?,
+                zen_wallpaper_prompt_seed = ?,
+                zen_wallpaper_message_count = ?,
+                zen_wallpaper_history = ?,
+                zen_wallpaper_status = 'ready'
+          WHERE id = ? AND user_id = ?`,
+      ).run(member.imageId, member.prompt, messageCount, history, conversation.id, userId);
+      json(ctx.res, 200, {
+        ok: true,
+        image: { id: member.imageId },
+        zenWallpaper: zenWallpaperResponseForConversation(conversation.id),
+      });
+    }),
+    route("POST", "/api/coffee/groups/:id/atmosphere/assets/:assetId/reuse", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const group = getCoffeeGroup(db, userId, ctx.params.id);
+      if (!group) throw new HttpError(404, "Coffee group not found.");
+      const asset = getImageAssetSet(db, userId, ctx.params.assetId);
+      const member = asset?.members.find((candidate) => candidate.role === "primary");
+      if (!asset || asset.kind !== "group_room_atmosphere" || asset.status !== "ready" || !member) {
+        throw new HttpError(400, "Choose a ready group-room Atmosphere asset.");
+      }
+      const updated = saveSynthesizedCoffeeGroupAtmosphere({
+        db,
+        userId,
+        groupId: group.id,
+        imageId: member.imageId,
+        prompt: member.prompt,
+      });
+      json(ctx.res, 200, { ok: true, group: updated });
+    }),
     route("GET", "/api/assets", async (ctx) => {
       const userId = requireAuth(ctx);
       const kind = ctx.query.get("kind") ?? "";
@@ -24008,6 +24581,12 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("DELETE", "/api/images", async (ctx) => {
       const userId = requireAuth(ctx);
+      if (peekActiveImageJobForUser(userId)) {
+        throw new HttpError(
+          409,
+          "Image generation is still finishing. Wait before deleting assets.",
+        );
+      }
       const filterBotId = readOptionalString(ctx.query.get("botId"));
       const rows = (
         filterBotId
@@ -24074,6 +24653,13 @@ function buildRoutes(): RouteDefinition[] {
       if (run.status !== "committed") {
         if (/not found/iu.test(run.error ?? "")) {
           throw new HttpError(404, run.error ?? "Image not found.");
+        }
+        if (
+          /still used|replace it before deleting|linked asset set/iu.test(
+            run.error ?? "",
+          )
+        ) {
+          throw new HttpError(409, run.error ?? "That image is still used.");
         }
         throw new Error(run.error || "Image could not be deleted.");
       }

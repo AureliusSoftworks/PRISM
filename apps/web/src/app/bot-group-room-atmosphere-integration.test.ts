@@ -69,7 +69,7 @@ describe("saved group room atmosphere integration", () => {
     assert.doesNotMatch(manifestInterface, /roomAtmosphere|imageId/u);
   });
 
-  it("offers Signal-style generate, refresh, upload, and clear controls from the group hero", () => {
+  it("offers the shared typed asset rail and clear control from the group hero", () => {
     assert.match(pageSource, /data-tutorial-target="chat-group-atmosphere"/u);
     assert.match(pageSource, /data-room-atmosphere-dialog="true"/u);
     assert.match(
@@ -80,10 +80,13 @@ describe("saved group room atmosphere integration", () => {
       pageSource,
       /readImageBlobAsDataUrl\(file\)[\s\S]*?\/api\/images\/group-room-wallpaper\/upload/u,
     );
+    assert.match(pageSource, /kind="group_room_atmosphere"/u);
     assert.match(
       pageSource,
-      /selectedAtmosphere[\s\S]{0,220}?"Refresh"[\s\S]{0,80}?"Generate"/u,
+      /onSynthesize=\{\(direction\) =>[\s\S]*?generateBotGroupRoomAtmosphere\(group\.id, direction\)/u,
     );
+    assert.match(pageSource, /onSelect=\{\(asset\) =>[\s\S]*?applyBotGroupRoomAtmosphereAsset/u);
+    assert.doesNotMatch(pageSource, /selectedAtmosphere[\s\S]{0,220}?"Refresh"/u);
     assert.doesNotMatch(pageSource, /Saved local images/u);
     assert.match(pageSource, /clearBotGroupRoomAtmosphere\(current/u);
     assert.match(
@@ -227,6 +230,7 @@ describe("saved group room atmosphere integration", () => {
     );
     assert.match(tutorialSource, /Shape a saved group's room/u);
     assert.match(tutorialSource, /chat-group-atmosphere/u);
-    assert.match(tutorialSource, /Generate or Refresh it, or Upload your own/u);
+    assert.match(tutorialSource, /leading \+ uploads/u);
+    assert.match(tutorialSource, /wield Prism onto that same tile to synthesize/u);
   });
 });

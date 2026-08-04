@@ -45,6 +45,8 @@ describe("Pronunciation Atlas", () => {
       "influence-italian-influenced-english": { x: 0.535, y: 0.267 },
       "influence-australian-english": { x: 0.914, y: 0.696 },
       "influence-canadian-english": { x: 0.29, y: 0.248 },
+      "influence-new-york-english": { x: 0.294, y: 0.274 },
+      "influence-southern-us-english": { x: 0.266, y: 0.313 },
     } as const;
 
     for (const [id, expected] of Object.entries(expectedPoints)) {
@@ -99,6 +101,23 @@ describe("Pronunciation Atlas", () => {
       assert.equal(
         pronunciationAtlasSelectionAtPoint(point, britishFrench).influence,
         expectedInfluence,
+      );
+    }
+  });
+
+  it("resolves New York and the Southern U.S. as distinct American regions", () => {
+    for (const influence of [
+      "new-york-english",
+      "southern-us-english",
+    ] as const) {
+      const anchor = PRONUNCIATION_ATLAS_ANCHORS.find(
+        (candidate) => candidate.influence === influence,
+      );
+      assert.ok(anchor);
+      assert.equal(
+        pronunciationAtlasSelectionAtPoint(anchor.point, britishFrench)
+          .influence,
+        influence,
       );
     }
   });

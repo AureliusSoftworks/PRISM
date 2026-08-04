@@ -41,7 +41,8 @@ describe("first-run onboarding", () => {
     );
     assert.match(pageSource, /Your first Home scene starts rendering quietly/u);
     assert.match(pageSource, /appears automatically when you enter/u);
-    assert.match(pageSource, /disable it later in Appearance settings/u);
+    assert.match(pageSource, /local asset library/u);
+    assert.match(pageSource, /wield\s*Prism onto \+/u);
   });
 
   it("marks credentials and contextual Auto guidance as skippable", () => {

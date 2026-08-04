@@ -8,9 +8,9 @@ import {
   type LocalVoiceSpeechprintV1,
 } from "./audioVoice.js";
 
-export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.4";
+export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.5";
 export const LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256 =
-  "5e792dddae28ada1af347e8bdafb89dc1948a2a7b7a05c3844e430c98926ae4a";
+  "97019091d6176b3fb2329ca9618fea1be6994b100efc81084a08f5801977bc55";
 
 export interface LocalVoiceSpeechprintCapabilityV1 {
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -152,6 +152,16 @@ const LOCAL_VOICE_SPEECHPRINT_DESCRIPTORS = [
     id: "canadian-english",
     label: "Canadian English",
     description: "A restrained Canadian English pronunciation profile.",
+  },
+  {
+    id: "new-york-english",
+    label: "New York English",
+    description: "A restrained New York English pronunciation profile.",
+  },
+  {
+    id: "southern-us-english",
+    label: "Southern U.S. English",
+    description: "A restrained Southern U.S. English pronunciation profile.",
   },
   {
     id: "caribbean-english",
@@ -620,6 +630,49 @@ const SPEECHPRINT_RULES: Record<
       tier: "strong",
       pattern: /æ/gu,
       replacement: "a",
+      optional: true,
+    },
+  ],
+  "new-york-english": [
+    {
+      id: "postvocalic-r-drop",
+      tier: "light",
+      pattern:
+        /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      replacement: "",
+    },
+    {
+      id: "thought-raised",
+      tier: "balanced",
+      pattern: /ɔ/gu,
+      replacement: "oə",
+    },
+    {
+      id: "trap-tensing",
+      tier: "strong",
+      pattern: /æ(?=[mnfθs])/gu,
+      replacement: "eə",
+      optional: true,
+    },
+  ],
+  "southern-us-english": [
+    {
+      id: "pin-pen-merge",
+      tier: "light",
+      pattern: /ɛ(?=[mnŋ])/gu,
+      replacement: "ɪ",
+    },
+    {
+      id: "price-monophthong",
+      tier: "balanced",
+      pattern: /aɪ/gu,
+      replacement: "aː",
+    },
+    {
+      id: "face-monophthong",
+      tier: "strong",
+      pattern: /eɪ/gu,
+      replacement: "eː",
       optional: true,
     },
   ],

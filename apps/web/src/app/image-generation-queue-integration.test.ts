@@ -85,7 +85,7 @@ describe("Images drawer generation queue", () => {
     );
     assert.match(
       tutorialSource,
-      /running render lets you queue up to eight more prompts/u,
+      /running render can still queue up to eight more prompts/u,
     );
   });
 });

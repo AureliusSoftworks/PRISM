@@ -1,0 +1,636 @@
+"use client";
+
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useMemo,
+  useRef,
+  useState,
+} from "react";
+import { createPortal } from "react-dom";
+import Link from "next/link";
+import {
+  IMAGE_ASSET_KIND_LABELS,
+  type ImageAssetCatalogPage,
+  type ImageAssetKind,
+  type ImageAssetSet,
+} from "@localai/shared";
+import {
+  PrismRefractTarget,
+  requestPrismRefract,
+  type PrismRefractMagicTarget,
+} from "./prismRefract";
+import styles from "./AssetLibrary.module.css";
+
+interface AssetApiResponse extends ImageAssetCatalogPage {
+  ok: boolean;
+}
+
+export interface AssetRailProps {
+  kind: ImageAssetKind;
+  label?: string;
+  context?: string | null;
+  currentImageIds?: readonly (string | null | undefined)[];
+  refreshKey?: string | number | null;
+  disabled?: boolean;
+  synthesizeDisabled?: boolean;
+  onUpload: () => void;
+  onSynthesize: (direction: string) => void | Promise<void>;
+  onSelect: (asset: ImageAssetSet) => void | Promise<void>;
+  onRevealImage?: (imageId: string, event: React.MouseEvent) => void;
+}
+
+function primaryMember(asset: ImageAssetSet) {
+  return (
+    asset.members.find((member) => member.role === "primary") ??
+    asset.members.find((member) => member.role === "dark") ??
+    asset.members[0] ??
+    null
+  );
+}
+
+function assetSourceLabel(asset: ImageAssetSet): string {
+  return asset.source === "uploaded"
+    ? "Uploaded"
+    : asset.source === "legacy"
+      ? "Legacy"
+      : "Generated";
+}
+
+async function readJson<T>(response: Response): Promise<T> {
+  const payload = (await response.json().catch(() => null)) as
+    | (T & { error?: string })
+    | null;
+  if (!response.ok || !payload) {
+    throw new Error(payload?.error ?? "The local asset library is unavailable.");
+  }
+  return payload;
+}
+
+function useCoarsePointer(): boolean {
+  const [coarse, setCoarse] = useState(false);
+  useEffect(() => {
+    const query = window.matchMedia("(hover: none), (pointer: coarse)");
+    const update = (): void => setCoarse(query.matches);
+    update();
+    query.addEventListener("change", update);
+    return () => query.removeEventListener("change", update);
+  }, []);
+  return coarse;
+}
+
+function AssetPreview({ asset }: { asset: ImageAssetSet }) {
+  const light = asset.members.find((member) => member.role === "light");
+  const dark = asset.members.find((member) => member.role === "dark");
+  if (asset.kind === "signal_studio" && light && dark) {
+    return (
+      <span className={styles.studioPreview} aria-hidden="true">
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={light.thumbnailUrl} alt="" loading="lazy" />
+        {/* eslint-disable-next-line @next/next/no-img-element */}
+        <img src={dark.thumbnailUrl} alt="" loading="lazy" />
+        <small>Light</small>
+        <small>Dark</small>
+      </span>
+    );
+  }
+  const member = primaryMember(asset);
+  return member ? (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img src={member.thumbnailUrl} alt="" loading="lazy" />
+  ) : (
+    <span className={styles.missingPreview} aria-hidden="true">◇</span>
+  );
+}
+
+export function AssetRail({
+  kind,
+  label,
+  context,
+  currentImageIds = [],
+  refreshKey,
+  disabled = false,
+  synthesizeDisabled = false,
+  onUpload,
+  onSynthesize,
+  onSelect,
+  onRevealImage,
+}: AssetRailProps) {
+  const reactId = useId().replaceAll(":", "");
+  const targetId = `asset-add:${kind}:${reactId}`;
+  const [assets, setAssets] = useState<ImageAssetSet[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [unavailable, setUnavailable] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [touchActionsOpen, setTouchActionsOpen] = useState(false);
+  const addButtonRef = useRef<HTMLButtonElement | null>(null);
+  const touchSheetRef = useRef<HTMLDivElement | null>(null);
+  const coarsePointer = useCoarsePointer();
+  const currentIds = useMemo(
+    () => new Set(currentImageIds.filter((value): value is string => Boolean(value))),
+    [currentImageIds],
+  );
+
+  const loadRecent = useCallback(async (): Promise<void> => {
+    setLoading(true);
+    setUnavailable(false);
+    try {
+      const query = new URLSearchParams({ kind, limit: "5", sort: "recency" });
+      if (context?.trim()) query.set("context", context.trim());
+      const result = await readJson<AssetApiResponse>(
+        await fetch(`/api/assets?${query.toString()}`),
+      );
+      setAssets(result.assets);
+    } catch {
+      setUnavailable(true);
+    } finally {
+      setLoading(false);
+    }
+  }, [context, kind]);
+
+  useEffect(() => {
+    void loadRecent();
+  }, [loadRecent, refreshKey]);
+
+  useEffect(() => {
+    if (!touchActionsOpen) return;
+    const sheet = touchSheetRef.current;
+    const addButton = addButtonRef.current;
+    if (!sheet) return;
+    const frameId = window.requestAnimationFrame(() =>
+      sheet.querySelector<HTMLButtonElement>("button:not([disabled])")?.focus({
+        preventScroll: true,
+      }),
+    );
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setTouchActionsOpen(false);
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const buttons = Array.from(
+        sheet.querySelectorAll<HTMLButtonElement>("button:not([disabled])"),
+      );
+      const first = buttons[0];
+      const last = buttons.at(-1);
+      if (!first || !last) return;
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.cancelAnimationFrame(frameId);
+      document.removeEventListener("keydown", onKeyDown, true);
+      addButton?.focus({ preventScroll: true });
+    };
+  }, [touchActionsOpen]);
+
+  const synthesizeTarget = useMemo<PrismRefractMagicTarget>(
+    () => ({
+      id: targetId,
+      kind: "magic",
+      label: `Synthesize ${IMAGE_ASSET_KIND_LABELS[kind].replace(/s$/u, "")}`,
+      disabled: () => disabled || synthesizeDisabled,
+      run: async (direction) => {
+        setTouchActionsOpen(false);
+        await onSynthesize(direction);
+        await loadRecent();
+      },
+    }),
+    [disabled, kind, loadRecent, onSynthesize, synthesizeDisabled, targetId],
+  );
+
+  const activateAdd = (): void => {
+    if (disabled) return;
+    if (
+      coarsePointer ||
+      window.matchMedia("(hover: none), (pointer: coarse)").matches
+    ) setTouchActionsOpen(true);
+    else onUpload();
+  };
+
+  return (
+    <section
+      className={styles.railShell}
+      aria-label={label ?? IMAGE_ASSET_KIND_LABELS[kind]}
+      data-asset-rail-kind={kind}
+    >
+      <header>
+        <div>
+          <strong>{label ?? IMAGE_ASSET_KIND_LABELS[kind]}</strong>
+          <small>Upload, reuse, or wield Prism onto + to synthesize.</small>
+        </div>
+        <button type="button" onClick={() => setModalOpen(true)}>
+          View all
+        </button>
+      </header>
+      <div className={styles.rail}>
+        <PrismRefractTarget target={synthesizeTarget}>
+          {(binding) => (
+            <button
+              {...binding}
+              ref={addButtonRef}
+              type="button"
+              className={styles.addTile}
+              onClick={activateAdd}
+              disabled={disabled}
+              data-tutorial-target={`asset-add-${kind}`}
+              aria-label={`Upload ${IMAGE_ASSET_KIND_LABELS[kind]}. Wield Prism here to synthesize.`}
+            >
+              <span aria-hidden="true">＋</span>
+              <small>Upload</small>
+            </button>
+          )}
+        </PrismRefractTarget>
+        {loading ? (
+          <span className={styles.railStatus}>Loading…</span>
+        ) : unavailable ? (
+          <button type="button" className={styles.railStatus} onClick={() => void loadRecent()}>
+            Retry library
+          </button>
+        ) : (
+          assets.map((asset) => {
+            const selected = asset.members.some((member) => currentIds.has(member.imageId));
+            return (
+              <button
+                key={asset.id}
+                type="button"
+                className={styles.assetTile}
+                aria-pressed={selected}
+                title={asset.title}
+                onClick={() => void onSelect(asset)}
+                onContextMenu={
+                  onRevealImage
+                    ? (event) => {
+                        const member = primaryMember(asset);
+                        if (member) onRevealImage(member.imageId, event);
+                      }
+                    : undefined
+                }
+                disabled={disabled || selected}
+              >
+                <AssetPreview asset={asset} />
+                <span className={styles.badge} data-source={asset.source}>
+                  {assetSourceLabel(asset)}
+                </span>
+                {selected ? <span className={styles.selected}>✓</span> : null}
+              </button>
+            );
+          })
+        )}
+      </div>
+      {touchActionsOpen ? (
+        <div className={styles.actionSheetBackdrop} role="presentation" onClick={() => setTouchActionsOpen(false)}>
+          <div
+            ref={touchSheetRef}
+            className={styles.actionSheet}
+            role="dialog"
+            aria-modal="true"
+            aria-label={`Add ${IMAGE_ASSET_KIND_LABELS[kind]}`}
+            onClick={(event) => event.stopPropagation()}
+          >
+            <strong>Add {IMAGE_ASSET_KIND_LABELS[kind]}</strong>
+            <button
+              type="button"
+              onClick={() => {
+                setTouchActionsOpen(false);
+                onUpload();
+              }}
+            >
+              Upload
+            </button>
+            <button
+              type="button"
+              disabled={synthesizeDisabled}
+              onClick={() => {
+                setTouchActionsOpen(false);
+                requestPrismRefract(targetId, "focused-shortcut");
+              }}
+            >
+              Synthesize with Prism
+            </button>
+            <button type="button" onClick={() => setTouchActionsOpen(false)}>
+              Cancel
+            </button>
+          </div>
+        </div>
+      ) : null}
+      {modalOpen ? (
+        <AssetLibraryModal
+          kind={kind}
+          context={context}
+          currentImageIds={[...currentIds]}
+          onClose={() => setModalOpen(false)}
+          onSelect={async (asset) => {
+            await onSelect(asset);
+            setModalOpen(false);
+          }}
+        />
+      ) : null}
+    </section>
+  );
+}
+
+export interface AssetLibraryModalProps {
+  kind: ImageAssetKind;
+  context?: string | null;
+  currentImageIds?: readonly string[];
+  includeIncomplete?: boolean;
+  allowDelete?: boolean;
+  onClose: () => void;
+  onSelect?: (asset: ImageAssetSet) => void | Promise<void>;
+}
+
+export function AssetLibraryModal({
+  kind,
+  context,
+  currentImageIds = [],
+  includeIncomplete = false,
+  allowDelete = false,
+  onClose,
+  onSelect,
+}: AssetLibraryModalProps) {
+  const headingId = useId();
+  const modalRootRef = useRef<HTMLDivElement | null>(null);
+  const searchRef = useRef<HTMLInputElement | null>(null);
+  const [query, setQuery] = useState("");
+  const [source, setSource] = useState<"all" | "generated" | "uploaded">("all");
+  const [usage, setUsage] = useState<"all" | "used" | "unused">("all");
+  const [sort, setSort] = useState<"relevance" | "recency">("relevance");
+  const [assets, setAssets] = useState<ImageAssetSet[]>([]);
+  const [nextCursor, setNextCursor] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [detail, setDetail] = useState<ImageAssetSet | null>(null);
+  const [tagDraft, setTagDraft] = useState("");
+  const currentIds = useMemo(() => new Set(currentImageIds), [currentImageIds]);
+  const detailIsCurrent =
+    detail?.members.some((member) => currentIds.has(member.imageId)) ?? false;
+
+  const load = useCallback(
+    async (cursor: string | null, append: boolean): Promise<void> => {
+      setLoading(true);
+      setError(null);
+      try {
+        const params = new URLSearchParams({ kind, limit: "24", sort });
+        if (query.trim()) params.set("q", query.trim());
+        if (context?.trim()) params.set("context", context.trim());
+        if (source !== "all") params.set("source", source);
+        if (usage !== "all") params.set("usage", usage);
+        if (includeIncomplete) params.set("includeIncomplete", "1");
+        if (cursor) params.set("cursor", cursor);
+        const result = await readJson<AssetApiResponse>(
+          await fetch(`/api/assets?${params.toString()}`),
+        );
+        setAssets((current) => append ? [...current, ...result.assets] : result.assets);
+        setNextCursor(result.nextCursor);
+      } catch (caught) {
+        setError(caught instanceof Error ? caught.message : "The library could not be opened.");
+      } finally {
+        setLoading(false);
+      }
+    },
+    [context, includeIncomplete, kind, query, sort, source, usage],
+  );
+
+  useEffect(() => {
+    const timer = window.setTimeout(() => void load(null, false), 180);
+    return () => window.clearTimeout(timer);
+  }, [load]);
+
+  useEffect(() => {
+    const modalRoot = modalRootRef.current;
+    if (!modalRoot) return;
+    const previouslyFocused =
+      document.activeElement instanceof HTMLElement
+        ? document.activeElement
+        : null;
+    const siblingStates = Array.from(document.body.children)
+      .filter(
+        (element): element is HTMLElement =>
+          element instanceof HTMLElement && element !== modalRoot,
+      )
+      .map((element) => ({
+        element,
+        wasInert: element.hasAttribute("inert"),
+      }));
+    siblingStates.forEach(({ element }) => element.setAttribute("inert", ""));
+    const previousOverflow = document.body.style.overflow;
+    document.body.style.overflow = "hidden";
+    const focusFrame = window.requestAnimationFrame(() =>
+      (searchRef.current ?? modalRoot).focus({ preventScroll: true }),
+    );
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        modalRoot.querySelectorAll<HTMLElement>(
+          'a[href], button:not([disabled]), input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])',
+        ),
+      ).filter((element) => !element.hasAttribute("hidden"));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        modalRoot.focus({ preventScroll: true });
+        return;
+      }
+      const first = focusable[0]!;
+      const last = focusable.at(-1)!;
+      const active = document.activeElement;
+      if (event.shiftKey && (active === first || !modalRoot.contains(active))) {
+        event.preventDefault();
+        last.focus({ preventScroll: true });
+      } else if (!event.shiftKey && (active === last || !modalRoot.contains(active))) {
+        event.preventDefault();
+        first.focus({ preventScroll: true });
+      }
+    };
+    document.addEventListener("keydown", onKeyDown, true);
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      document.removeEventListener("keydown", onKeyDown, true);
+      siblingStates.forEach(({ element, wasInert }) => {
+        if (!wasInert) element.removeAttribute("inert");
+      });
+      document.body.style.overflow = previousOverflow;
+      if (previouslyFocused?.isConnected) {
+        previouslyFocused.focus({ preventScroll: true });
+      }
+    };
+  }, [onClose]);
+
+  const openDetail = (asset: ImageAssetSet): void => {
+    setDetail(asset);
+    setTagDraft(asset.playerTags.join(", "));
+  };
+
+  const saveTags = async (): Promise<void> => {
+    if (!detail) return;
+    try {
+      const result = await readJson<{ ok: boolean; asset: ImageAssetSet }>(
+        await fetch(`/api/assets/${encodeURIComponent(detail.id)}`, {
+          method: "PATCH",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({ tags: tagDraft.split(",").map((tag) => tag.trim()).filter(Boolean) }),
+        }),
+      );
+      setDetail(result.asset);
+      setAssets((current) => current.map((asset) => asset.id === result.asset.id ? result.asset : asset));
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "Tags could not be saved.");
+    }
+  };
+
+  const deleteAsset = async (): Promise<void> => {
+    if (!detail || !allowDelete) return;
+    if (
+      !window.confirm(
+        `Move “${detail.title}” to recovery trash? You can restore it from Storage until the recovery batch is purged.`,
+      )
+    ) {
+      return;
+    }
+    try {
+      await readJson<{ ok: boolean }>(
+        await fetch(`/api/assets/${encodeURIComponent(detail.id)}`, { method: "DELETE" }),
+      );
+      setAssets((current) => current.filter((asset) => asset.id !== detail.id));
+      setDetail(null);
+    } catch (caught) {
+      setError(caught instanceof Error ? caught.message : "The asset could not be deleted.");
+    }
+  };
+
+  if (typeof document === "undefined") return null;
+
+  return createPortal(
+    <div
+      ref={modalRootRef}
+      className={styles.modalBackdrop}
+      role="presentation"
+      tabIndex={-1}
+      onClick={onClose}
+    >
+      <section
+        className={styles.modal}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={headingId}
+        data-asset-library-kind={kind}
+        onClick={(event) => event.stopPropagation()}
+      >
+        <header className={styles.modalHeader}>
+          <div>
+            <small>Local asset library</small>
+            <h2 id={headingId}>{IMAGE_ASSET_KIND_LABELS[kind]}</h2>
+          </div>
+          <button type="button" onClick={onClose} aria-label="Close asset library">×</button>
+        </header>
+        <div className={styles.filters}>
+          <input
+            ref={searchRef}
+            type="search"
+            value={query}
+            onChange={(event) => setQuery(event.currentTarget.value)}
+            placeholder={`Search ${IMAGE_ASSET_KIND_LABELS[kind].toLowerCase()}…`}
+            aria-label="Search local assets"
+          />
+          <select value={source} onChange={(event) => setSource(event.currentTarget.value as typeof source)} aria-label="Asset source">
+            <option value="all">Generated + uploaded</option>
+            <option value="generated">Generated</option>
+            <option value="uploaded">Uploaded</option>
+          </select>
+          <select value={usage} onChange={(event) => setUsage(event.currentTarget.value as typeof usage)} aria-label="Asset usage">
+            <option value="all">Used + unused</option>
+            <option value="used">Used</option>
+            <option value="unused">Unused</option>
+          </select>
+          <select value={sort} onChange={(event) => setSort(event.currentTarget.value as typeof sort)} aria-label="Asset sorting">
+            <option value="relevance">Relevance</option>
+            <option value="recency">Most recent</option>
+          </select>
+        </div>
+        {error ? <p className={styles.error} role="alert">{error}</p> : null}
+        <div className={styles.modalBody}>
+          <div className={styles.assetGrid} aria-live="polite">
+            {assets.map((asset) => {
+              const selected = asset.members.some((member) => currentIds.has(member.imageId));
+              return (
+                <button
+                  key={asset.id}
+                  type="button"
+                  className={styles.assetCard}
+                  data-selected={selected ? "true" : undefined}
+                  onClick={() => openDetail(asset)}
+                >
+                  <AssetPreview asset={asset} />
+                  <span>
+                    <strong>{asset.title}</strong>
+                    <small>{assetSourceLabel(asset)} · {asset.usageCount > 0 ? `Used ${asset.usageCount}` : "Unused"}</small>
+                  </span>
+                  {asset.status !== "ready" ? <em>{asset.status}</em> : null}
+                </button>
+              );
+            })}
+            {!loading && assets.length === 0 ? (
+              <p className={styles.empty}>No matching assets of this type.</p>
+            ) : null}
+          </div>
+          {detail ? (
+            <aside className={styles.detail} aria-label="Asset details">
+              <AssetPreview asset={detail} />
+              <h3>{detail.title}</h3>
+              <p>{detail.source === "legacy" ? "Protected legacy asset" : assetSourceLabel(detail)} · {new Date(detail.createdAt).toLocaleString()}</p>
+              {primaryMember(detail) ? (
+                <dl className={styles.provenance}>
+                  <div><dt>Provider</dt><dd>{primaryMember(detail)!.provider}</dd></div>
+                  <div><dt>Model</dt><dd>{primaryMember(detail)!.model}</dd></div>
+                  <div><dt>Prompt</dt><dd>{primaryMember(detail)!.prompt || "Not recorded"}</dd></div>
+                </dl>
+              ) : null}
+              {detail.usage.length > 0 ? (
+                <div><strong>Used by</strong><ul>{detail.usage.map((item) => <li key={item.label}>{item.href ? <a href={item.href}>{item.label}</a> : item.label}</li>)}</ul></div>
+              ) : <p>Not currently used.</p>}
+              <label>
+                <span>Tags</span>
+                <input value={tagDraft} onChange={(event) => setTagDraft(event.currentTarget.value)} placeholder="character, project, mood" />
+              </label>
+              <button type="button" onClick={() => void saveTags()}>Save tags</button>
+              {detail.status !== "ready" && detail.kind === "signal_studio" ? (
+                <p>
+                  This studio set is incomplete. <Link href="/?view=botcast">Open Signal to retry synthesis</Link>,
+                  or delete the unused partial set below.
+                </p>
+              ) : null}
+              {onSelect && detail.status === "ready" ? (
+                <button type="button" className={styles.applyButton} onClick={() => void onSelect(detail)} disabled={detailIsCurrent}>
+                  {detailIsCurrent ? "Already selected" : "Use this asset"}
+                </button>
+              ) : null}
+              {allowDelete ? (
+                <button type="button" className={styles.deleteButton} onClick={() => void deleteAsset()} disabled={detail.usageCount > 0 || detail.source === "legacy"}>
+                  {detail.usageCount > 0 ? "In use — protected" : detail.source === "legacy" ? "Legacy set — protected" : "Delete unused asset"}
+                </button>
+              ) : null}
+            </aside>
+          ) : null}
+        </div>
+        <footer>
+          {nextCursor ? <button type="button" onClick={() => void load(nextCursor, true)} disabled={loading}>Load more</button> : null}
+          {loading ? <span>Loading local assets…</span> : <span>{assets.length} shown</span>}
+        </footer>
+      </section>
+    </div>,
+    document.body,
+  );
+}

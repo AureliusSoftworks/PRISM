@@ -4116,7 +4116,7 @@ describe("API request integration", () => {
           voice.presentation === "masculine",
       ),
     );
-    assert.equal(voiceCapabilities.local.speechprints.length, 12);
+    assert.equal(voiceCapabilities.local.speechprints.length, 41);
     assert.deepEqual(
       voiceCapabilities.local.pronunciationBases.map(
         (entry: { id: string }) => entry.id,

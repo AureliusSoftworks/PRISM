@@ -10,7 +10,7 @@ const SAMPLE_IPA = "θɪs ɹɪvɚ wɪl ðɹaɪv vɛɹi faɹ";
 
 describe("local voice Speechprints", () => {
   it("publishes broad versioned Instant-compatible profiles for both bases", () => {
-    assert.equal(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length, 39);
+    assert.equal(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length, 41);
     assert.match(LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256, /^[a-f0-9]{64}$/u);
     for (const capability of LOCAL_VOICE_SPEECHPRINT_CAPABILITIES) {
       assert.deepEqual(capability.supportedBaseLocales, ["en-US", "en-GB"]);
@@ -90,6 +90,28 @@ describe("local voice Speechprints", () => {
     assert.equal(australian.ipa.includes("ɹ"), false);
     assert.match(australian.ipa, /əʉvə/u);
     assert.equal(canadian.ipa, "ɹʌɪt ɹaɪd ʌʊt laʊd");
+  });
+
+  it("adds distinct New York and Southern U.S. signatures", () => {
+    const newYork = applyLocalVoiceSpeechprintToIpa({
+      ipa: "faɹ ɔl taɪm",
+      speechprint: {
+        influence: "new-york-english",
+        strength: "balanced",
+        variationSeed: "new-york-character",
+      },
+    });
+    const southern = applyLocalVoiceSpeechprintToIpa({
+      ipa: "pɛn ɹaɪd seɪf",
+      speechprint: {
+        influence: "southern-us-english",
+        strength: "balanced",
+        variationSeed: "southern-character",
+      },
+    });
+
+    assert.equal(newYork.ipa, "fa oəl taɪm");
+    assert.equal(southern.ipa, "pɪn ɹaːd seɪf");
   });
 
   it("keeps French and German influences restrained and strength-bounded", () => {

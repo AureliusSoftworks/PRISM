@@ -9,6 +9,7 @@ import {
   Gavel,
   Info,
   House,
+  HardDrive,
   Keyboard,
   KeyRound,
   MessageCircle,
@@ -37,6 +38,7 @@ export type SettingsScope =
   | "models"
   | "shortcuts"
   | "voice"
+  | "storage"
   | "help"
   | "about"
   | "account";
@@ -72,6 +74,7 @@ const SETTINGS_NAV_GROUPS: readonly {
       { scope: "network", title: "Network", icon: <Network size={16} strokeWidth={2} /> },
       { scope: "experimental", title: "Experimental", icon: <FlaskConical size={16} strokeWidth={2} /> },
       { scope: "voice", title: "Voice", icon: <Volume2 size={16} strokeWidth={2} /> },
+      { scope: "storage", title: "Storage", icon: <HardDrive size={16} strokeWidth={2} /> },
     ],
   },
   {

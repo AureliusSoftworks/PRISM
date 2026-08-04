@@ -33,7 +33,7 @@ export const FIRST_RUN_SETUP_STEPS: readonly FirstRunSetupStep[] = [
   { id: "place", title: "Welcome home", shortTitle: "Welcome", optional: false },
   {
     id: "atmosphere",
-    title: "Choose your atmosphere",
+    title: "Choose your first atmosphere",
     shortTitle: "Atmosphere",
     optional: false,
   },

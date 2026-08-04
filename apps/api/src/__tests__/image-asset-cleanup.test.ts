@@ -46,30 +46,54 @@ function fixture(): DatabaseSync {
       id TEXT PRIMARY KEY,
       hub_atmosphere_image_id TEXT
     );
-    CREATE TABLE bots (user_id TEXT NOT NULL, profile_picture_image_id TEXT);
-    CREATE TABLE conversations (
+    CREATE TABLE bots (
+      id TEXT NOT NULL,
       user_id TEXT NOT NULL,
+      name TEXT NOT NULL,
+      profile_picture_image_id TEXT
+    );
+    CREATE TABLE conversations (
+      id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
       zen_wallpaper_image_id TEXT,
       zen_wallpaper_history TEXT NOT NULL DEFAULT '[]',
       coffee_settings TEXT
     );
     CREATE TABLE messages (
+      id TEXT NOT NULL,
+      conversation_id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       content TEXT,
       tool_payload TEXT
     );
-    CREATE TABLE botcast_shows (user_id TEXT NOT NULL, atmosphere_json TEXT NOT NULL);
-    CREATE TABLE slate_projects (user_id TEXT NOT NULL, cover_json TEXT NOT NULL);
-    CREATE TABLE conversation_exports (user_id TEXT NOT NULL, markdown TEXT NOT NULL);
+    CREATE TABLE botcast_shows (id TEXT NOT NULL, user_id TEXT NOT NULL, name TEXT NOT NULL, atmosphere_json TEXT NOT NULL);
+    CREATE TABLE library_groups (id TEXT NOT NULL, user_id TEXT NOT NULL, name TEXT NOT NULL, atmosphere_json TEXT NOT NULL);
+    CREATE TABLE coffee_groups (id TEXT NOT NULL, user_id TEXT NOT NULL, name TEXT NOT NULL, atmosphere_json TEXT);
+    CREATE TABLE slate_projects (id TEXT NOT NULL, user_id TEXT NOT NULL, title TEXT NOT NULL, cover_json TEXT NOT NULL);
+    CREATE TABLE slate_visual_references (user_id TEXT NOT NULL, project_id TEXT NOT NULL, image_id TEXT);
+    CREATE TABLE conversation_exports (id TEXT NOT NULL, user_id TEXT NOT NULL, markdown TEXT NOT NULL);
     CREATE TABLE story_sessions (
+      id TEXT NOT NULL,
       user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
       episode_json TEXT,
       progress_json TEXT,
       transcript_json TEXT
     );
     CREATE TABLE debate_sessions (
+      id TEXT NOT NULL,
       user_id TEXT NOT NULL,
+      motion TEXT NOT NULL,
       session_json TEXT NOT NULL
+    );
+    CREATE TABLE image_asset_sets (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL
+    );
+    CREATE TABLE image_asset_set_items (
+      set_id TEXT NOT NULL,
+      image_id TEXT NOT NULL
     );
   `);
   db.prepare("INSERT INTO users VALUES (?, NULL)").run("user-1");
@@ -157,47 +181,64 @@ describe("image asset cleanup preview", () => {
       seedImage(db, "remote-only", { local: false });
       seedImage(db, "other-user-unused", { userId: "user-2" });
 
-      db.prepare("INSERT INTO bots VALUES (?, ?)").run(
+      db.prepare("INSERT INTO bots VALUES (?, ?, ?, ?)").run(
+        "bot-profile",
         "user-1",
+        "Profile bot",
         "profile-image",
       );
       db.prepare(
-        "INSERT INTO conversations (user_id, zen_wallpaper_image_id, zen_wallpaper_history) VALUES (?, ?, ?)",
+        "INSERT INTO conversations (id, user_id, title, zen_wallpaper_image_id, zen_wallpaper_history) VALUES (?, ?, ?, ?, ?)",
       ).run(
+        "conversation-1",
         "user-1",
+        "Zen room",
         "zen-current",
         JSON.stringify([{ imageId: "zen-history" }]),
       );
       db.prepare(
-        "INSERT INTO messages (user_id, tool_payload) VALUES (?, ?)",
+        "INSERT INTO messages (id, conversation_id, user_id, tool_payload) VALUES (?, ?, ?, ?)",
       ).run(
+        "message-1",
+        "conversation-1",
         "user-1",
         JSON.stringify({ sentGeneratedImage: { imageId: "message-image" } }),
       );
-      db.prepare("INSERT INTO messages (user_id, content) VALUES (?, ?)").run(
+      db.prepare("INSERT INTO messages (id, conversation_id, user_id, content) VALUES (?, ?, ?, ?)").run(
+        "message-2",
+        "conversation-1",
         "user-1",
         "![kept](/api/images/message-content-image/file)",
       );
-      db.prepare("INSERT INTO botcast_shows VALUES (?, ?)").run(
+      db.prepare("INSERT INTO botcast_shows VALUES (?, ?, ?, ?)").run(
+        "show-1",
         "user-1",
+        "Signal show",
         JSON.stringify({ logo: { imageId: "signal-active" } }),
       );
-      db.prepare("INSERT INTO slate_projects VALUES (?, ?)").run(
+      db.prepare("INSERT INTO slate_projects VALUES (?, ?, ?, ?)").run(
+        "slate-1",
         "user-1",
+        "Slate project",
         JSON.stringify({ imageUrl: "/api/images/slate-cover/file" }),
       );
-      db.prepare("INSERT INTO conversation_exports VALUES (?, ?)").run(
+      db.prepare("INSERT INTO conversation_exports VALUES (?, ?, ?)").run(
+        "export-1",
         "user-1",
         "![saved](/api/images/export-image/file)",
       );
-      db.prepare("INSERT INTO story_sessions VALUES (?, ?, ?, ?)").run(
+      db.prepare("INSERT INTO story_sessions VALUES (?, ?, ?, ?, ?, ?)").run(
+        "story-1",
         "user-1",
+        "Story",
         JSON.stringify({ imageId: "story-image" }),
         null,
         "[]",
       );
-      db.prepare("INSERT INTO debate_sessions VALUES (?, ?)").run(
+      db.prepare("INSERT INTO debate_sessions VALUES (?, ?, ?, ?)").run(
+        "debate-1",
         "user-1",
+        "A motion",
         JSON.stringify({
           evidence: {
             exhibits: [{ id: "exhibit-1", imageId: "debate-exhibit" }],
@@ -261,6 +302,41 @@ describe("image asset cleanup preview", () => {
       const preview = previewUnreferencedImageAssets(db, "user-1");
       assert.equal(preview.candidates.length, 0);
       assert.equal(preview.protectedByReferenceCount, 1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("treats every linked set member as one cleanup unit", () => {
+    const db = fixture();
+    try {
+      seedImage(db, "studio-light", {
+        origin: "botcast",
+        purpose: "signal_studio_day",
+      });
+      seedImage(db, "studio-dark", {
+        origin: "botcast",
+        purpose: "signal_studio_night",
+      });
+      db.prepare("INSERT INTO image_asset_sets VALUES ('studio-set', 'user-1')").run();
+      db.prepare("INSERT INTO image_asset_set_items VALUES ('studio-set', 'studio-light')").run();
+      db.prepare("INSERT INTO image_asset_set_items VALUES ('studio-set', 'studio-dark')").run();
+      db.prepare("INSERT INTO botcast_shows VALUES (?, ?, ?, ?)").run(
+        "show-studio",
+        "user-1",
+        "Studio show",
+        JSON.stringify({ dayAtmosphere: { imageId: "studio-light" } }),
+      );
+
+      const protectedPreview = previewUnreferencedImageAssets(db, "user-1");
+      assert.deepEqual(protectedPreview.candidates, []);
+
+      db.prepare("DELETE FROM botcast_shows").run();
+      const atomicPreview = previewUnreferencedImageAssets(db, "user-1");
+      assert.deepEqual(
+        atomicPreview.candidates.map((candidate) => candidate.id).sort(),
+        ["studio-dark", "studio-light"],
+      );
     } finally {
       db.close();
     }
@@ -572,8 +648,10 @@ describe("image asset cleanup preview", () => {
     try {
       seedImage(db, "candidate-a");
       seedImage(db, "profile-image");
-      db.prepare("INSERT INTO bots VALUES (?, ?)").run(
+      db.prepare("INSERT INTO bots VALUES (?, ?, ?, ?)").run(
+        "bot-profile",
         "user-1",
+        "Profile bot",
         "profile-image",
       );
       const preview = previewUnreferencedImageAssets(db, "user-1");
