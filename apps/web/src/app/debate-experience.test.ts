@@ -545,23 +545,17 @@ describe("Debate experience", () => {
     );
     assert.doesNotMatch(source, /Add generated search/u);
     assert.doesNotMatch(source, /Find sources for me/u);
+    assert.match(source, /Describe a physical exhibit/u);
     assert.match(
       source,
-      /const beginEvidenceObject = \(\): void =>[\s\S]*emptyDebateEvidenceObjectDraft\(\)/u,
+      /disabled=\{[\s\S]{0,160}!evidenceObjectSeed\.trim\(\)/u,
     );
+    assert.match(source, /Draft exhibit/u);
     assert.match(
       source,
-      /id: "debate:refract-evidence-object"[\s\S]*kind: "magic"[\s\S]*run: \(direction\) => refractEvidenceObject\(direction\)/u,
+      /"debate\.setup\.exhibitDraft"[\s\S]*seed,[\s\S]*rejectedTitles[\s\S]*debateEvidenceObjectDraftFromPrismCandidate/u,
     );
-    assert.match(source, /PrismRefractTarget target=\{evidenceObjectMagic\}/u);
-    assert.match(
-      source,
-      /"debate\.setup\.exhibitPair"[\s\S]*rejectedTitles[\s\S]*debateEvidenceObjectFromPrismCandidate/u,
-    );
-    assert.match(
-      source,
-      /randomDebateEvidenceObject\(Math\.random, rejectedTitles\)/u,
-    );
+    assert.doesNotMatch(source, /debate:refract-evidence-object/u);
     assert.match(source, /Prism is refracting…/u);
     assert.match(
       css,
@@ -569,6 +563,11 @@ describe("Debate experience", () => {
     );
     assert.match(source, /\/api\/debates\/exhibits\/upload/u);
     assert.match(source, /\/api\/debates\/exhibits\/synthesize/u);
+    assert.match(source, /"Synthesize asset"/u);
+    assert.match(
+      source,
+      /Optional\. Upload, reuse, or synthesize only changes the stage[\s\S]*sprite; the editable text and emoji remain the evidence/u,
+    );
     assert.match(
       source,
       /import \{ PrismBlockingLoader \} from "\.\/PrismBlockingLoader"/u,
@@ -583,26 +582,21 @@ describe("Debate experience", () => {
       source,
       /setEvidenceObjectVisualBusy\("synthesize"\)[\s\S]{0,800}\/api\/debates\/exhibits\/synthesize[\s\S]{0,1600}finally \{[\s\S]{0,120}setEvidenceObjectVisualBusy\(null\)/u,
     );
-    assert.match(source, /\/api\/images\/tool-assets\?scope=debate_exhibit/u);
-    assert.match(
-      source,
-      /aria-label="Previously generated Debate exhibit sprites"/u,
-    );
-    assert.match(
-      source,
-      /Choosing one changes[\s\S]{0,80}only the evidence sprite[\s\S]{0,80}image-generation[\s\S]{0,40}tokens/u,
-    );
-    assert.match(source, /selectEvidenceExhibitAsset\(asset\)/u);
-    assert.match(
-      source,
-      /applyDebateEvidenceExhibitAssetReuse\(current, asset\)/u,
-    );
+    assert.match(source, /<AssetRail[\s\S]{0,180}kind="debate_exhibit"/u);
+    assert.match(source, /onSynthesize=\{synthesizeEvidenceObjectImage\}/u);
+    assert.match(source, /onSelect=\{\(asset\) =>/u);
     assert.match(
       source,
       /applyDebateEvidenceObjectNameEdit\(current, field, value\)/u,
     );
     assert.doesNotMatch(source, /Name the object before choosing a sprite/u);
-    assert.match(css, /\.evidenceExhibitAssetRail/u);
+    const draftStart = source.indexOf("const draftEvidenceObject");
+    const draftEnd = source.indexOf("const updateEvidenceObjectName", draftStart);
+    assert.ok(draftStart >= 0 && draftEnd > draftStart);
+    assert.doesNotMatch(
+      source.slice(draftStart, draftEnd),
+      /debates\/exhibits\/synthesize|setEvidenceObjectVisualBusy/u,
+    );
     assert.match(source, /The text record is evidence/u);
     assert.doesNotMatch(source, /openDesktopEmojiPicker\(\)/u);
     assert.match(source, /Choose exhibit emoji\. Current emoji:/u);
@@ -630,10 +624,7 @@ describe("Debate experience", () => {
       css,
       /\.evidenceExhibitVisual:has\(>\s*img:not\(\[hidden\]\)\)\s*>\s*span\s*\{[^}]*visibility:\s*hidden/u,
     );
-    assert.match(
-      source,
-      /Emoji stays hidden while that sprite is showing[\s\S]{0,80}returns only if the sprite cannot load/u,
-    );
+    assert.match(source, /onError=\{\(event\) => \{[\s\S]{0,100}hidden = true/u);
     assert.doesNotMatch(source, /Emoji always remains as the fallback/u);
     assert.doesNotMatch(css, /\.evidenceObjectPreview span,/u);
     assert.match(source, /props\.responseMode === "local"/u);
@@ -681,7 +672,7 @@ describe("Debate experience", () => {
     assert.match(source, /Optional Brave Search/u);
     assert.match(source, /Remove an evidence item to search again/u);
     assert.match(source, /DEBATE_EVIDENCE_ITEM_MAX_COUNT/u);
-    assert.match(source, /:\s*"Add evidence"/u);
+    assert.match(source, /Add a physical exhibit or bring in public sources/u);
     assert.doesNotMatch(source, />\s*\+ Add object\s*</u);
     assert.doesNotMatch(source, />\s*Generate object\s*</u);
     assert.match(source, /className=\{styles\.evidenceToolHeader\}/u);

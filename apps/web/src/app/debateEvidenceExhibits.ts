@@ -443,6 +443,41 @@ export function debateEvidenceObjectFromPrismCandidate(
   };
 }
 
+export function debateEvidenceObjectDraftFromPrismCandidate(
+  candidate: string,
+): DebateEvidenceObjectDraft | null {
+  const parts = candidate
+    .replace(/\r\n?/gu, "\n")
+    .trim()
+    .split(/\s*\|\|\s*/u)
+    .map((part) => part.replace(/\s+/gu, " ").trim());
+  if (parts.length !== 4) return null;
+  const [adjectiveRaw = "", objectRaw = "", observationRaw = "", emojiRaw = ""] =
+    parts;
+  const adjective = adjectiveRaw.slice(0, 48).trim();
+  const object = objectRaw.slice(0, 96).trim();
+  const observation = observationRaw.slice(0, 800).trim();
+  const emoji = normalizeDebateEvidenceEmojiChoice(emojiRaw, "");
+  if (
+    !/^[\p{L}\p{N}][\p{L}\p{N}'’-]*$/u.test(adjective) ||
+    !object ||
+    !observation ||
+    !/\p{Extended_Pictographic}/u.test(emoji)
+  ) {
+    return null;
+  }
+  return {
+    adjective,
+    object,
+    observation,
+    emoji,
+    emojiCustomized: false,
+    createdBy: "prism",
+    visualKind: "emoji",
+    imageId: null,
+  };
+}
+
 /** Attach a saved sprite without changing the evidence authored around it. */
 export function applyDebateEvidenceExhibitAssetReuse(
   current: DebateEvidenceObjectDraft,

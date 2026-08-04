@@ -45029,6 +45029,9 @@ function HomeContent(): React.JSX.Element {
   > | null>(null);
   const viewSwitchOverlayEnterFrameRef = useRef<number | null>(null);
   const pendingPrivateExitOnChatHomeRef = useRef(false);
+  const disarmPrivateModeForAppletSwitchRef = useRef<(next: View) => void>(
+    () => {},
+  );
   // Kept as call-site seams while the surrounding conversation transitions
   // settle; the canonical applet navbar is persistent and never auto-hides.
   const revealZenHeaderForFreshSurface = useCallback(() => {
@@ -45091,6 +45094,7 @@ function HomeContent(): React.JSX.Element {
         setPanelNotice(COFFEE_CONFIGURATION_LOCK_MESSAGE);
         return;
       }
+      disarmPrivateModeForAppletSwitchRef.current(next);
       if (view === "debate") {
         debateVoiceSurfaceActiveRef.current = false;
       }
@@ -55197,6 +55201,33 @@ function HomeContent(): React.JSX.Element {
               localPremiumFallback: blocksOnlineCapabilities(responseMode),
             })
           : null}
+        {view === "chat" && detail?.incognito === true ? (
+          <span
+            className={styles.chatPrivateStatusBadge}
+            style={privateChatButtonStyle}
+            data-private-chat-status="true"
+            data-tutorial-target="private-chat-status"
+            aria-label="Private chat. No memories saved."
+            title="Private chat — no memories saved"
+          >
+            <span className={styles.chatPrivateStatusIcon} aria-hidden="true">
+              <svg
+                width="13"
+                height="13"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              >
+                <rect x="4" y="11" width="16" height="9" rx="2" />
+                <path d="M8 11V8a4 4 0 0 1 8 0v3" />
+              </svg>
+            </span>
+            <span className={styles.chatPrivateStatusLabel}>Private chat</span>
+          </span>
+        ) : null}
       </div>
     );
   };
@@ -83101,6 +83132,14 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  disarmPrivateModeForAppletSwitchRef.current = (next) => {
+    // Chat and Sandbox share the same incognito conversation contract. Every
+    // sibling applet is a new experience boundary, so a pending Private chat
+    // must never remain armed when the player later returns Home.
+    if (next === "chat" || next === "sandbox" || !appWidePrivateMode) return;
+    setAppWidePrivateMode(false);
+  };
+
   function toggleAppWidePrivateMode(): void {
     if (!appWidePrivateMode) {
       setAppWidePrivateMode(true);
@@ -102866,18 +102905,18 @@ function HomeContent(): React.JSX.Element {
     const menuId = "prism-app-switcher-menu";
     const disabled = options.disabled === true;
     const appletGlyph = (appletId: PrismAppletId): React.ReactNode => {
-      if (appletId === "debate") return <GlyphDebate size={18} />;
-      if (appletId === "polling") return <GlyphPolling size={18} />;
-      if (appletId === "coffee") return <GlyphCoffee size={18} />;
-      if (appletId === "botcast") return <GlyphSignal size={18} />;
-      if (appletId === "feed") return <GlyphFeed size={18} />;
-      if (appletId === "games") return <GlyphGames size={18} />;
-      if (appletId === "story") return <GlyphStory size={18} />;
-      if (appletId === "gym") return <GlyphGym size={18} />;
-      if (appletId === "slate") return <GlyphSlate size={18} />;
-      if (appletId === "pseudo") return <GlyphPseudo size={18} />;
-      if (appletId === "surf") return <GlyphSurf size={18} />;
-      return <GlyphChat size={18} />;
+      if (appletId === "debate") return <GlyphDebate size={24} />;
+      if (appletId === "polling") return <GlyphPolling size={24} />;
+      if (appletId === "coffee") return <GlyphCoffee size={24} />;
+      if (appletId === "botcast") return <GlyphSignal size={24} />;
+      if (appletId === "feed") return <GlyphFeed size={24} />;
+      if (appletId === "games") return <GlyphGames size={24} />;
+      if (appletId === "story") return <GlyphStory size={24} />;
+      if (appletId === "gym") return <GlyphGym size={24} />;
+      if (appletId === "slate") return <GlyphSlate size={24} />;
+      if (appletId === "pseudo") return <GlyphPseudo size={24} />;
+      if (appletId === "surf") return <GlyphSurf size={24} />;
+      return <GlyphChat size={24} />;
     };
     const appletIsSelected = (appletId: PrismAppletId): boolean => {
       if (appletId === "coffee") return view === "coffee";
@@ -102939,6 +102978,7 @@ function HomeContent(): React.JSX.Element {
           kind: "radio",
           group: "prism-applet",
           icon: appletGlyph(applet.id),
+          iconPresentation: "identity",
           label: applet.name,
           description: prismAppletVersionLabel(applet.id),
           checked: selected,
@@ -102955,20 +102995,30 @@ function HomeContent(): React.JSX.Element {
       entries.push(
         { id: "roadmap-separator", kind: "separator" },
         {
-          id: "roadmap-label",
-          kind: "label",
+          id: "roadmap",
+          kind: "submenu",
+          icon: <Compass size={20} aria-hidden="true" />,
           label: "Roadmap",
-          description: "Planned for future PRISM releases.",
+          description: `${roadmapApplets.length} planned applets`,
+          entries: [
+            {
+              id: "roadmap-label",
+              kind: "label",
+              label: "Roadmap",
+              description: "Planned for future PRISM releases.",
+            },
+            ...roadmapApplets.map((applet): PrismMenuEntry => ({
+              id: `roadmap-${applet.id}`,
+              icon: appletGlyph(applet.id),
+              iconPresentation: "identity",
+              label: applet.name,
+              description: "Planned",
+              disabled: true,
+              disabledReason: "This applet is on the PRISM roadmap.",
+              onSelect: () => undefined,
+            })),
+          ],
         },
-        ...roadmapApplets.map((applet): PrismMenuEntry => ({
-          id: `roadmap-${applet.id}`,
-          icon: appletGlyph(applet.id),
-          label: applet.name,
-          description: "Planned",
-          disabled: true,
-          disabledReason: "This applet is on the PRISM roadmap.",
-          onSelect: () => undefined,
-        })),
       );
     }
 
@@ -135995,10 +136045,6 @@ function HomeContent(): React.JSX.Element {
     const hubAtmosphereMounted = Boolean(
       settings?.hubAtmosphereEnabled && hubAtmosphereImageId,
     );
-    const zenFirstReplyPending =
-      pendingReplyVisible &&
-      pendingReplyStartMessageCount === 0 &&
-      detail?.hasAssistantReply !== true;
     // Empty Home hero (with or without sidebar) already paints the startup
     // summary in the main band — never also mount the floating chip above it.
     const emptyHomeHeroMounted =
@@ -136006,10 +136052,8 @@ function HomeContent(): React.JSX.Element {
       !pendingReplyVisible &&
       !zenEphemeralUserActionMessage;
     const zenHeroSurfaceVisible = chatLikeSurface && emptyHomeHeroMounted;
-    const zenCanvasModelPickerActive =
+    const zenCanvasPrivateControlActive =
       chatLikeSurface && zenHeroSurfaceVisible && !emptyStateSearchActive;
-    const zenHeaderModelPickerActive =
-      view === "chat" && detail !== null && !zenFirstReplyPending;
     const activeSideChatSurface =
       detail?.hubRole === "side" && detail.mode === "chat";
     return (
@@ -136125,7 +136169,8 @@ function HomeContent(): React.JSX.Element {
               style={privateChatButtonStyle}
               onClick={toggleAppWidePrivateMode}
               aria-pressed={appWidePrivateMode}
-              title="Private mode - no saved history or memory"
+              aria-label="Private chat. No memories saved."
+              title="Private chat — no memories saved"
             >
               <span className={styles.privateChatButtonIcon} aria-hidden="true">
                 <svg
@@ -136188,9 +136233,7 @@ function HomeContent(): React.JSX.Element {
           {renderSharedAppletNavbar("Chat tools", {
             brandAppletId: "chat",
             headerRef: chatHeaderRef,
-            controlRail: renderHeaderModelPicker({
-              showModelControls: zenHeaderModelPickerActive,
-            }),
+            controlRail: renderHeaderModelPicker(),
             zenDragExclusion: true,
           })}
           {renderZenMemoryToasts()}
@@ -136668,26 +136711,20 @@ function HomeContent(): React.JSX.Element {
                     </div>
                   );
                   const renderZenSplashControls = () =>
-                    zenCanvasModelPickerActive ? (
+                    zenCanvasPrivateControlActive ? (
                       <div
                         className={styles.zenSplashControls}
                         onClick={(event) => event.stopPropagation()}
                       >
-                        <div className={styles.zenSplashModelPicker}>
-                          {renderHeaderModelPicker({
-                            modelMenuClassName: styles.zenSplashModelMenu,
-                            modelMenuWidthPx: 220,
-                            showBotPicker: false,
-                            showVoiceSelector: false,
-                          })}
-                        </div>
                         <button
                           type="button"
                           className={`${styles.privateChatButton} ${styles.zenSplashPrivateButton}`}
                           style={privateChatButtonStyle}
                           onClick={toggleAppWidePrivateMode}
                           aria-pressed={appWidePrivateMode}
-                          title="Private mode - no saved history or memory"
+                          aria-label="Private chat. No memories saved."
+                          title="Private chat — no memories saved"
+                          data-tutorial-target="private-chat-new"
                         >
                           <span
                             className={styles.privateChatButtonIcon}
@@ -136707,7 +136744,7 @@ function HomeContent(): React.JSX.Element {
                               <path d="M8 11V8a4 4 0 0 1 8 0v3" />
                             </svg>
                           </span>
-                          <span>Private</span>
+                          <span>Private chat</span>
                         </button>
                       </div>
                     ) : null;
@@ -137964,7 +138001,8 @@ function HomeContent(): React.JSX.Element {
             style={privateChatButtonStyle}
             onClick={toggleAppWidePrivateMode}
             aria-pressed={appWidePrivateMode}
-            title="Private mode - no saved history or memory"
+            aria-label="Private chat. No memories saved."
+            title="Private chat — no memories saved"
           >
             <span className={styles.privateChatButtonIcon} aria-hidden="true">
               <svg
@@ -139136,26 +139174,16 @@ function HomeContent(): React.JSX.Element {
                 !messageRevealCancelled &&
                 (!messageRevealEligible ||
                   chatCompletedRevealKeysRef.current.has(temporalKey));
-              const zenPlayerRevealMatches = Boolean(
-                view === "chat" &&
-                msg.role === "user" &&
-                zenPlayerSpeechReveal &&
-                (msg.id === zenPlayerSpeechReveal.messageId ||
-                  msg.id === latestUserMessageId),
-              );
-              const zenPlayerRevealTimeline = zenPlayerRevealMatches
-                ? chatSpeechRevealByKeyRef.current.get(
-                    zenPlayerSpeechReveal!.revealKey,
-                  )
-                : null;
-              const forcedVisibleTokenCount = zenPlayerRevealTimeline
-                ? speechRevealVisibleTokenCount(zenPlayerRevealTimeline)
-                : !zenVoiceMuted &&
-                    chatAssistantTypingMechanicsActive &&
-                    messageRevealEligible &&
-                    msg.role === "assistant" &&
-                    msg.id === latestAssistantMessageId &&
-                    detail?.id
+              // Chat returns through its dedicated renderer above. This shared
+              // transcript branch is Sandbox-only, so it must never consume
+              // Chat's player-voice reveal timeline.
+              const forcedVisibleTokenCount =
+                !zenVoiceMuted &&
+                chatAssistantTypingMechanicsActive &&
+                messageRevealEligible &&
+                msg.role === "assistant" &&
+                msg.id === latestAssistantMessageId &&
+                detail?.id
                   ? (() => {
                       const displayContent = resolveVisibleMessageContent(msg);
                       const revealKey = `${detail.id}:${msg.id}`;
@@ -139481,12 +139509,11 @@ function HomeContent(): React.JSX.Element {
                       assistantStripPrismToolTail={msg.role === "assistant"}
                       messageRole={msg.role}
                       revealWordByWord={
-                        zenPlayerRevealMatches ||
-                        (assistantWordByWordMode &&
-                          messageRevealEligible &&
-                          msg.role === "assistant" &&
-                          msg.id === latestAssistantMessageId &&
-                          !messageRevealAlreadyCompleted)
+                        assistantWordByWordMode &&
+                        messageRevealEligible &&
+                        msg.role === "assistant" &&
+                        msg.id === latestAssistantMessageId &&
+                        !messageRevealAlreadyCompleted
                       }
                       // Use line-by-line typed reveal only while actively typing;
                       // settled content falls back to full Markdown rendering.

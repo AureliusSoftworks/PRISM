@@ -9510,9 +9510,20 @@
   white-space: nowrap;
 }
 
+.evidenceObjectComposer {
+  grid-column: 1 / -1;
+  display: grid;
+  grid-template-columns: minmax(280px, 1fr) auto;
+  align-items: end;
+  gap: 16px;
+  border-top: 1px solid var(--debate-studio-line);
+  padding-top: 14px;
+}
+
 .evidenceObjectActions,
 .evidenceObjectVisualActions,
-.evidenceObjectCommitActions {
+.evidenceObjectCommitActions,
+.evidenceObjectAssetActions {
   display: flex;
   align-items: center;
   gap: 8px;
@@ -9520,7 +9531,8 @@
 
 .evidenceObjectActions > button,
 .evidenceObjectVisualActions > button,
-.evidenceObjectCommitActions > button {
+.evidenceObjectCommitActions > button,
+.evidenceObjectAssetActions > button {
   border: 1px solid var(--debate-studio-line-strong);
   border-radius: 7px;
   padding: 9px 12px;
@@ -9531,7 +9543,8 @@
 
 .evidenceObjectActions > button:disabled,
 .evidenceObjectVisualActions > button:disabled,
-.evidenceObjectCommitActions > button:disabled {
+.evidenceObjectCommitActions > button:disabled,
+.evidenceObjectAssetActions > button:disabled {
   opacity: 0.45;
   cursor: not-allowed;
 }
@@ -9894,10 +9907,27 @@
 }
 
 .evidenceObjectPreview small,
-.evidenceObjectVisualActions > small {
+.evidenceObjectVisualActions > small,
+.evidenceObjectAssetActions > small {
   color: var(--debate-studio-muted);
   font-size: 9px;
   line-height: 1.45;
+}
+
+.evidenceObjectAssetActions {
+  align-items: center;
+  justify-content: space-between;
+  border-top: 1px solid var(--debate-studio-line);
+  padding-top: 12px;
+}
+
+.evidenceObjectAssetActions > button {
+  flex: 0 0 auto;
+  border-color: color-mix(
+    in srgb,
+    var(--debate-studio-accent) 42%,
+    var(--debate-studio-line-strong)
+  );
 }
 
 .evidenceObjectNameFields {
@@ -13103,6 +13133,19 @@
 @media (max-width: 900px) {
   .dashboard .researchBox {
     grid-template-columns: minmax(0, 1fr);
+  }
+
+  .evidenceObjectComposer {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .evidenceObjectActions > .addEvidenceButton {
+    width: 100%;
+  }
+
+  .evidenceObjectAssetActions {
+    align-items: stretch;
+    flex-direction: column;
   }
 
   .liveCommandDeck {

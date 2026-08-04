@@ -102,7 +102,11 @@ test("Zen uses one audio-owned reveal while muted Chat uses one fast reveal", ()
     source.match(
       /const zenPlayerRevealMatches = Boolean\(\s*view === "chat" &&\s*msg\.role === "user"/gu,
     )?.length,
-    2,
+    1,
+  );
+  assert.match(
+    source,
+    /Chat returns through its dedicated renderer above\.[\s\S]*Sandbox-only, so it must never consume[\s\S]*Chat's player-voice reveal timeline/u,
   );
   assert.match(playerPlayback, /onCancel: cancelReveal/u);
   assert.match(

@@ -119,6 +119,12 @@
   background: transparent;
 }
 
+.item[data-icon-presentation="identity"] {
+  grid-template-columns: 29px minmax(0, 1fr) auto;
+  min-height: 48px;
+  column-gap: 11px;
+}
+
 .icon,
 .indicator,
 .chevron {
@@ -139,6 +145,35 @@
 
 .indicator {
   color: var(--prism-menu-accent);
+}
+
+.identityIcon {
+  display: inline-grid;
+  place-items: center;
+  width: 29px;
+  height: 29px;
+  color: color-mix(in srgb, var(--prism-menu-accent) 88%, currentColor);
+}
+
+.identityIcon svg {
+  width: 25px;
+  height: 25px;
+  stroke-width: 1.9;
+}
+
+.selectionMark {
+  display: inline-grid;
+  place-items: center;
+  justify-self: end;
+  width: 17px;
+  height: 17px;
+  color: var(--prism-menu-accent);
+}
+
+.selectionMark svg {
+  width: 15px;
+  height: 15px;
+  stroke-width: 2.2;
 }
 
 .chevron {

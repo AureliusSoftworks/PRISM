@@ -146,10 +146,8 @@ import {
 import {
   DEBATE_EVIDENCE_EMOJI_CHOICES,
   applyDebateEvidenceObjectNameEdit,
-  debateEvidenceObjectFromPrismCandidate,
-  emptyDebateEvidenceObjectDraft,
+  debateEvidenceObjectDraftFromPrismCandidate,
   nextDebateEvidenceExhibitId,
-  randomDebateEvidenceObject,
   searchDebateEvidenceEmojis,
   type DebateEvidenceObjectDraft,
 } from "./debateEvidenceExhibits";
@@ -2961,6 +2959,7 @@ export function DebateExperience(
     useState<DebateUrlEvidenceDraft | null>(null);
   const [urlEvidenceInspecting, setUrlEvidenceInspecting] = useState(false);
   const [urlEvidenceError, setUrlEvidenceError] = useState<string | null>(null);
+  const [evidenceObjectSeed, setEvidenceObjectSeed] = useState("");
   const [evidenceObjectDraft, setEvidenceObjectDraft] =
     useState<DebateEvidenceObjectDraft | null>(null);
   const [evidenceEmojiSearchOpen, setEvidenceEmojiSearchOpen] = useState(false);
@@ -4493,6 +4492,8 @@ export function DebateExperience(
     setEvidence(EMPTY_EVIDENCE);
     setResearchQuery("");
     setScholarQuery("");
+    setEvidenceObjectSeed("");
+    setEvidenceObjectDraft(null);
     setPlayerDraft("");
     setTurnaboutObjecting(false);
     setTurnaboutEvidenceSourceId("");
@@ -5304,22 +5305,11 @@ export function DebateExperience(
     setUrlEvidenceError(null);
   };
 
-  const beginEvidenceObject = (): void => {
-    if (
-      evidenceItemLimitReached ||
-      evidenceObjectSuggestionBusy ||
-      evidenceObjectVisualBusy
-    ) {
-      return;
-    }
-    setEvidenceEmojiSearchOpen(false);
-    setEvidenceObjectDraft(emptyDebateEvidenceObjectDraft());
-    setError(null);
-  };
-
-  const refractEvidenceObject = useCallback(
-    async (direction = ""): Promise<void> => {
+  const draftEvidenceObject = useCallback(
+    async (): Promise<void> => {
+      const seed = evidenceObjectSeed.trim();
       if (
+        !seed ||
         evidenceItemLimitReached ||
         evidenceObjectSuggestionBusy ||
         evidenceObjectVisualBusy
@@ -5334,20 +5324,23 @@ export function DebateExperience(
       setError(null);
       try {
         const candidate = await generateDebateRefractField(
-          "debate.setup.exhibitPair",
-          direction,
+          "debate.setup.exhibitDraft",
+          seed,
           rejectedTitles,
           new AbortController().signal,
         );
         const contextualDraft =
-          debateEvidenceObjectFromPrismCandidate(candidate);
+          debateEvidenceObjectDraftFromPrismCandidate(candidate);
         if (!contextualDraft) {
           throw new Error("Prism returned an incomplete exhibit.");
         }
         setEvidenceObjectDraft(contextualDraft);
-      } catch {
-        setEvidenceObjectDraft(
-          randomDebateEvidenceObject(Math.random, rejectedTitles),
+        setEvidenceObjectSeed("");
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Prism could not draft that exhibit.",
         );
       } finally {
         setEvidenceObjectSuggestionBusy(false);
@@ -5356,28 +5349,10 @@ export function DebateExperience(
     [
       evidence.exhibits,
       evidenceItemLimitReached,
+      evidenceObjectSeed,
       evidenceObjectSuggestionBusy,
       evidenceObjectVisualBusy,
       generateDebateRefractField,
-    ],
-  );
-
-  const evidenceObjectMagic = useMemo<PrismRefractMagicTarget>(
-    () => ({
-      id: "debate:refract-evidence-object",
-      label: "a contextual object exhibit",
-      kind: "magic",
-      disabled: () =>
-        evidenceItemLimitReached ||
-        evidenceObjectSuggestionBusy ||
-        evidenceObjectVisualBusy !== null,
-      run: (direction) => refractEvidenceObject(direction),
-    }),
-    [
-      evidenceItemLimitReached,
-      evidenceObjectSuggestionBusy,
-      evidenceObjectVisualBusy,
-      refractEvidenceObject,
     ],
   );
 
@@ -5546,6 +5521,7 @@ export function DebateExperience(
       volume: props.audioVolume,
     });
     setEvidenceEmojiSearchOpen(false);
+    setEvidenceObjectSeed("");
     setEvidenceObjectDraft(null);
     setError(null);
   };
@@ -6886,6 +6862,7 @@ export function DebateExperience(
       setCastPickerGroupId("all");
       setResearchQuery("");
       setScholarQuery("");
+      setEvidenceObjectSeed("");
       setUrlEvidenceDraft(null);
       setUrlEvidenceError(null);
       setEvidenceObjectDraft(null);
@@ -10185,44 +10162,67 @@ export function DebateExperience(
             </button>
           </div>
           <div
-            className={styles.evidenceObjectActions}
+            className={styles.evidenceObjectComposer}
             data-tutorial-target="debate-exhibit"
           >
-            <PrismRefractTarget target={evidenceObjectMagic}>
-              {(binding) => (
-                <button
-                  {...binding}
-                  type="button"
-                  className={styles.addEvidenceButton}
-                  data-generating={
-                    evidenceObjectSuggestionBusy ? "true" : undefined
+            <label className={styles.field}>
+              <span>Describe a physical exhibit</span>
+              <input
+                value={evidenceObjectSeed}
+                onChange={(event) =>
+                  setEvidenceObjectSeed(event.currentTarget.value)
+                }
+                onKeyDown={(event) => {
+                  if (
+                    event.key !== "Enter" ||
+                    event.nativeEvent.isComposing ||
+                    !evidenceObjectSeed.trim()
+                  ) {
+                    return;
                   }
-                  aria-busy={evidenceObjectSuggestionBusy}
-                  onClick={beginEvidenceObject}
-                  disabled={
-                    evidenceItemLimitReached ||
-                    evidenceObjectSuggestionBusy ||
-                    evidenceObjectVisualBusy !== null
-                  }
-                >
-                  <span aria-hidden="true">
-                    {evidenceObjectSuggestionBusy ? "◇" : "＋"}
-                  </span>
-                  <span>
-                    <strong>
-                      {evidenceObjectSuggestionBusy
-                        ? "Prism is refracting…"
-                        : "Add evidence"}
-                    </strong>
-                    <small>
-                      {evidenceObjectSuggestionBusy
-                        ? "Finding a contextual object"
-                        : "Create an editable object exhibit"}
-                    </small>
-                  </span>
-                </button>
-              )}
-            </PrismRefractTarget>
+                  event.preventDefault();
+                  void draftEvidenceObject();
+                }}
+                maxLength={600}
+                placeholder="A torn glove with one finger stained blue"
+                disabled={
+                  evidenceItemLimitReached || evidenceObjectSuggestionBusy
+                }
+              />
+            </label>
+            <div className={styles.evidenceObjectActions}>
+              <button
+                type="button"
+                className={styles.addEvidenceButton}
+                data-generating={
+                  evidenceObjectSuggestionBusy ? "true" : undefined
+                }
+                aria-busy={evidenceObjectSuggestionBusy}
+                onClick={() => void draftEvidenceObject()}
+                disabled={
+                  !evidenceObjectSeed.trim() ||
+                  evidenceItemLimitReached ||
+                  evidenceObjectSuggestionBusy ||
+                  evidenceObjectVisualBusy !== null
+                }
+              >
+                <span aria-hidden="true">
+                  {evidenceObjectSuggestionBusy ? "◇" : "＋"}
+                </span>
+                <span>
+                  <strong>
+                    {evidenceObjectSuggestionBusy
+                      ? "Prism is refracting…"
+                      : "Draft exhibit"}
+                  </strong>
+                  <small>
+                    {evidenceObjectSuggestionBusy
+                      ? "Deriving its editable details"
+                      : "Create adjective, name, description, and emoji"}
+                  </small>
+                </span>
+              </button>
+            </div>
           </div>
           <p className={styles.evidenceToolNote}>
             {props.responseMode === "local"
@@ -10622,10 +10622,23 @@ export function DebateExperience(
                 setError(null);
               }}
             />
-            <small>
-              Uploaded and synthesized images are cut into transparent stage
-              sprites. Reuse references the original local file.
-            </small>
+            <div className={styles.evidenceObjectAssetActions}>
+              <button
+                type="button"
+                onClick={() => void synthesizeEvidenceObjectImage()}
+                disabled={!objectTitle || evidenceObjectVisualBusy !== null}
+              >
+                {evidenceObjectVisualBusy === "synthesize"
+                  ? "Synthesizing…"
+                  : evidenceObjectDraft.imageId
+                    ? "Synthesize another asset"
+                    : "Synthesize asset"}
+              </button>
+              <small>
+                Optional. Upload, reuse, or synthesize only changes the stage
+                sprite; the editable text and emoji remain the evidence.
+              </small>
+            </div>
             <div className={styles.evidenceObjectCommitActions}>
               <button
                 type="button"

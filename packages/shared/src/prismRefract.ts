@@ -52,6 +52,7 @@ export const PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS = [
   "debate.setup.playerNotes",
   "debate.setup.researchQuery",
   "debate.setup.scholarQuery",
+  "debate.setup.exhibitDraft",
   "debate.setup.exhibitPair",
   "debate.setup.exhibitAdjective",
   "debate.setup.exhibitObject",
@@ -132,6 +133,7 @@ function valueLimitForTarget(kind: PrismRefractTextTarget["kind"]): number {
   ) {
     return 240;
   }
+  if (kind === "debate.setup.exhibitDraft") return 1_100;
   if (kind === "debate.setup.exhibitPair") return 145;
   if (kind === "debate.setup.exhibitAdjective") return 48;
   if (kind === "debate.setup.exhibitObject") return 96;
@@ -214,6 +216,7 @@ export function normalizePrismRefractRequest(
   const target = normalizeTarget(value.target);
   const limit = valueLimitForTarget(target.kind);
   const rejectedCandidateLimit =
+    target.kind === "debate.setup.exhibitDraft" ||
     target.kind === "debate.setup.exhibitPair"
       ? PRISM_REFRACT_DEBATE_EXHIBIT_REJECTED_CANDIDATE_LIMIT
       : PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT;

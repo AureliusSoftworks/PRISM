@@ -95,7 +95,7 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
   );
   assert.match(
     pageSource,
-    /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: "chat"[\s\S]*headerRef: chatHeaderRef[\s\S]*showModelControls: zenHeaderModelPickerActive/u,
+    /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: "chat"[\s\S]*headerRef: chatHeaderRef[\s\S]*controlRail: renderHeaderModelPicker\(\)/u,
   );
   assert.doesNotMatch(pageSource, /data-zen-header-hidden=/u);
   assert.match(
@@ -182,6 +182,22 @@ test("Slate aligns the complete shared navbar above its structure rail", () => {
     /\.shell > :not\(\.mainNavigation\) button,[\s\S]{0,220}font:\s*inherit;/u,
   );
   assert.doesNotMatch(slateCss, /\.shell button,\s*\n\.shell input/u);
+  assert.match(
+    slateCss,
+    /\[data-shared-app-navbar="true"\][\s\S]*\[data-app-switcher-trigger="true"\][\s\S]*font-size:\s*0\.76rem;/u,
+  );
+  assert.match(
+    slateCss,
+    /\[data-tutorial-target="auto-response-mode"\][\s\S]*> button[\s\S]*font-size:\s*9px;/u,
+  );
+  assert.match(
+    slateCss,
+    /\[data-prism-model-picker-trigger="true"\][\s\S]*font-size:\s*12px;/u,
+  );
+  assert.match(
+    slateCss,
+    /\[data-voice-mode\][\s\S]*> button[\s\S]*font-size:\s*0\.73rem;/u,
+  );
   assert.match(
     slateCss,
     /\.workspace\s*\{[\s\S]*grid-column:\s*1 \/ -1;[\s\S]*grid-row:\s*2;[\s\S]*height:\s*100%;/,

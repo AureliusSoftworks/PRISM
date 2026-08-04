@@ -37,6 +37,48 @@
   box-sizing: border-box;
 }
 
+/* Slate owns the manuscript typography, but its embedded shared navbar must
+   keep the exact compact type contract used by Debate and the other applets.
+   These data selectors outrank Slate's descendant control inheritance without
+   coupling this module to page.module.css's generated class names. */
+.mainNavigation
+  [data-shared-app-navbar="true"]
+  [data-app-switcher-trigger="true"] {
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 0.76rem;
+  font-weight: 760;
+  line-height: 1;
+}
+
+.mainNavigation
+  [data-shared-app-navbar="true"]
+  [data-tutorial-target="auto-response-mode"]
+  > button {
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 9px;
+  font-weight: 820;
+  letter-spacing: 0.045em;
+  line-height: 1;
+}
+
+.mainNavigation
+  [data-shared-app-navbar="true"]
+  [data-prism-model-picker-trigger="true"] {
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 12px;
+  line-height: normal;
+}
+
+.mainNavigation
+  [data-shared-app-navbar="true"]
+  [data-voice-mode]
+  > button {
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-size: 0.73rem;
+  font-weight: 650;
+  line-height: 1;
+}
+
 .shell[data-theme="light"] {
   background:
     radial-gradient(circle at 9% -8%, color-mix(in srgb, var(--slate-p) 8%, transparent), transparent 32%),

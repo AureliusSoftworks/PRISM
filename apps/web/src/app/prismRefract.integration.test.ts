@@ -99,8 +99,9 @@ describe("Prism Refract integration", () => {
     );
     assert.match(
       debateSource,
-      /id: "debate:refract-evidence-object"[\s\S]*kind: "magic"[\s\S]*run: \(direction\) => refractEvidenceObject\(direction\)/u,
+      /const seed = evidenceObjectSeed\.trim\(\)[\s\S]*"debate\.setup\.exhibitDraft"[\s\S]*debateEvidenceObjectDraftFromPrismCandidate/u,
     );
+    assert.doesNotMatch(debateSource, /debate:refract-evidence-object/u);
     assert.doesNotMatch(debateSource, /Add generated search/u);
     assert.match(
       debateSource,

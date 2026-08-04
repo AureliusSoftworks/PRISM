@@ -59,21 +59,31 @@ describe("Chat shell header layout", () => {
     assert.match(openHomeSource, /void openZenMode\(\)/);
   });
 
-  it("keeps the default Chat navbar but reserves model controls for a bot chat", () => {
+  it("keeps Chat and Zen routing controls in the navbar before and during a conversation", () => {
     assert.match(
       pageSource,
       /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: "chat"/,
     );
     assert.match(
       pageSource,
-      /const zenHeaderModelPickerActive =\s*view === "chat" && detail !== null && !zenFirstReplyPending;/,
+      /controlRail: renderHeaderModelPicker\(\)/,
     );
+    assert.doesNotMatch(pageSource, /zenHeaderModelPickerActive/u);
+    assert.doesNotMatch(pageSource, /zenFirstReplyPending/u);
     assert.match(
       pageSource,
-      /controlRail: renderHeaderModelPicker\(\{\s*showModelControls: zenHeaderModelPickerActive,\s*\}\)/,
+      /const renderHeaderModelPicker =[\s\S]*renderProviderModeToggle\(styles\.chatHeaderModeToggle\)[\s\S]*<ComposerModelPicker/u,
     );
     assert.doesNotMatch(pageSource, /data-zen-header-hidden=/u);
     assert.doesNotMatch(pageSource, /zenHeaderBotPickerActive/);
+    assert.match(
+      pageSource,
+      /view === "chat" && detail\?\.incognito === true[\s\S]*data-private-chat-status="true"[\s\S]*Private chat/u,
+    );
+    assert.match(
+      pageSource,
+      /aria-label="Private chat\. No memories saved\."/u,
+    );
   });
 
   it("lets Default PRISM Chat use the same model and Effort controls as Zen personas", () => {

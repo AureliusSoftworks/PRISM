@@ -26,6 +26,12 @@ test("registers manual Debate evidence controls as explicit Refract targets", ()
     ),
     true,
   );
+  assert.equal(
+    PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS.includes(
+      "debate.setup.exhibitDraft",
+    ),
+    true,
+  );
 });
 
 test("normalizes a bounded registered Signal text target", () => {
@@ -125,6 +131,39 @@ test("normalizes a contextual complete Debate exhibit pair", () => {
     request.rejectedValues.length,
     PRISM_REFRACT_DEBATE_EXHIBIT_REJECTED_CANDIDATE_LIMIT,
   );
+});
+
+test("keeps a player exhibit description bounded for complete draft refraction", () => {
+  const request = normalizePrismRefractRequest({
+    target: {
+      kind: "debate.setup.exhibitDraft",
+      botIds: [],
+      context: {
+        studioPanel: "evidence",
+        format: "forum",
+        formality: "plainspoken",
+        playerRole: "judge",
+        playerSideId: "for",
+        juryEnabled: false,
+        moderatorTitle: "Moderator",
+        topic: "Urban wildlife",
+        motion: "Cities should protect urban wildlife corridors.",
+        forLabel: "Protect",
+        forBrief: "",
+        againstLabel: "Develop",
+        againstBrief: "",
+        exhibitAdjective: "",
+        exhibitObject: "",
+        exhibitObservation: "",
+        evidenceItemCount: 1,
+      },
+    },
+    currentValue: `  ${"blue glove ".repeat(180)}  `,
+    rejectedValues: ["Frayed blue glove"],
+  });
+  assert.equal(request.target.kind, "debate.setup.exhibitDraft");
+  assert.equal(request.currentValue.length, 1_100);
+  assert.deepEqual(request.rejectedValues, ["Frayed blue glove"]);
 });
 
 test("rejects arbitrary and incomplete targets", () => {

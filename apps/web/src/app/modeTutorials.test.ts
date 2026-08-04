@@ -28,6 +28,30 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /hidden chain-of-thought is never exposed/u);
   });
 
+  it("distinguishes the network lane from unsaved Private chat status", () => {
+    const chatStep = MODE_TUTORIALS.chat.steps.find(
+      (candidate) => candidate.heading === "Shape an offline voice",
+    );
+    const zenStep = MODE_TUTORIALS.zen.steps.find(
+      (candidate) => candidate.heading === "Choose how replies recover",
+    );
+    assert.ok(chatStep);
+    assert.ok(zenStep);
+    for (const step of [chatStep, zenStep]) {
+      assert.match(step.body, /LOCAL or ONLINE as the hard network privacy lane/u);
+      assert.match(step.body, /Private chat is separate/u);
+      assert.match(step.body, /do not want the conversation or memories saved/u);
+      assert.match(
+        step.body,
+        /locked Private chat badge remains in the navbar as status, not a switch/u,
+      );
+      assert.match(
+        step.body,
+        /Switching to another applet disarms Private chat/u,
+      );
+    }
+  });
+
   it("keeps every step click-specific and targetable", () => {
     for (const tutorial of Object.values(MODE_TUTORIALS)) {
       assert.ok(tutorial.steps.length > 0);
@@ -144,7 +168,7 @@ describe("mode tutorials", () => {
     assert.doesNotMatch(copy, /Basic|Advanced/u);
     assert.match(
       copy,
-      /Player notes, Brave Search, Scholar Search, and Add evidence stay manual/u,
+      /Player notes, Brave Search, Scholar Search, and exhibit descriptions stay player-authored/u,
     );
     assert.match(copy, /Prism-drafted query does not search until/u);
     assert.match(copy, /Crossref's public scholarly metadata/u);
@@ -157,14 +181,14 @@ describe("mode tutorials", () => {
     assert.match(copy, /duplicate URLs are rejected/u);
     assert.match(
       copy,
-      /Add evidence opens a blank editable object exhibit.*Wield Prism into that button.*ADJECTIVE.*OBJECT/u,
+      /describe the physical object.*Draft exhibit remains unavailable until.*editable adjective, object name, observable description, and emoji/u,
     );
-    assert.doesNotMatch(copy, /Generate object/u);
-    assert.match(copy, /exhibit emoji follows the object name automatically/u);
-    assert.match(copy, /Click it to open emoji search/u);
+    assert.match(copy, /It does not generate artwork/u);
+    assert.match(copy, /Click the exhibit emoji to search/u);
     assert.match(copy, /three best live matches/u);
     assert.match(copy, /close the search without changing/u);
     assert.match(copy, /upload a PNG, JPEG, or WebP/u);
+    assert.match(copy, /Synthesize asset creates a new sprite/u);
     assert.match(copy, /visual adds no facts/u);
     assert.match(copy, /later searches add distinct sources/u);
     assert.match(copy, /up to 12/u);
@@ -244,7 +268,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /never fabricates sources/u);
     assert.match(
       copy,
-      /exhibit asset rail keeps five recent Debate visuals/u,
+      /recent assets can be reused/u,
     );
     assert.match(
       copy,
@@ -252,7 +276,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
-      /click \+ to upload, wield Prism onto it to synthesize/u,
+      /leading \+ lets you upload[\s\S]*Wielding Prism onto \+ is the directional synthesis shortcut/u,
     );
     assert.match(copy, /never reads or writes relationship memory/u);
     assert.match(
@@ -1463,7 +1487,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /Chat\/Zen is the default Home and does not appear as a selectable applet[\s\S]*privacy, Model, and Effort appear once you open a bot conversation/u,
+      /Chat\/Zen is the default Home and does not appear as a selectable applet[\s\S]*LOCAL\/ONLINE privacy lane, Model, Effort, bot, and Voice controls stay in that navbar before and throughout a conversation[\s\S]*hero keeps only the Private chat toggle[\s\S]*navbar shows Private chat as locked status rather than a switch/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",

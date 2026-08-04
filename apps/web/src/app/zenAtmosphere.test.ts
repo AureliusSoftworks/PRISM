@@ -30,7 +30,7 @@ describe("zenAtmosphereGrayscaleAmount", () => {
   it("drives grayscale and tint from the active persona", () => {
     const backdropStyleSource = pageSource.slice(
       pageSource.indexOf("const zenAtmosphereBackdropStyle ="),
-      pageSource.indexOf("const zenFirstReplyPending")
+      pageSource.indexOf("const emptyHomeHeroMounted"),
     );
 
     assert.match(

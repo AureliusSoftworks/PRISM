@@ -13755,6 +13755,46 @@
     margin 320ms cubic-bezier(0.32, 0.72, 0, 1);
 }
 
+.chatPrivateStatusBadge {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  height: 30px;
+  padding: 0 10px;
+  border: 1px solid
+    color-mix(in srgb, var(--private-chat-color, var(--fg)) 58%, transparent);
+  border-radius: 999px;
+  background: color-mix(
+    in srgb,
+    var(--private-chat-color, var(--fg)) 10%,
+    var(--bg-surface)
+  );
+  color: var(--private-chat-color, var(--fg));
+  font-size: 0.7rem;
+  font-weight: 680;
+  letter-spacing: 0.025em;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: default;
+}
+
+.chatPrivateStatusIcon {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+}
+
+.themeLight .chatPrivateStatusBadge {
+  color: color-mix(
+    in srgb,
+    var(--private-chat-color, var(--fg)) 64%,
+    #172638 36%
+  );
+}
+
 .recordedReplayBadge {
   flex: 0 0 auto;
   display: inline-flex;
@@ -27426,13 +27466,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker {
-  display: flex;
-  justify-content: center;
-  min-width: 0;
-}
-
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
   .emptyStateInfoBandRow
   .zenSplashControls {
   grid-column: 1 / -1;
@@ -27450,119 +27483,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   margin-top: 2px;
   padding-top: 12px;
   justify-content: center;
-}
-
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .chatHeaderModelPicker {
-  max-width: none;
-  justify-content: center;
-  flex-wrap: wrap;
-  gap: 8px;
-}
-
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .modeControl.chatHeaderModeToggle {
-  height: 32px;
-}
-
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .chatHeaderModeToggle
-  .modeToggleTrack {
-  width: 88px;
-  height: 32px;
-}
-
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .chatHeaderModeToggle
-  .modeThumb {
-  width: 68px;
-  min-width: 68px;
-  height: 32px;
-  font-size: 11px;
-}
-
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .chatHeaderModeToggle
-  .modeThumbOnline {
-  transform: translate3d(20px, 0, 0);
-}
-
-.appLayout.themeDark[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .modeToggleTrack[data-response-mode="local"],
-.appLayout.themeDark[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .modeToggleTrack[data-response-mode="online"] {
-  --mode-toggle-track: color-mix(
-    in srgb,
-    var(--accent) 44%,
-    var(--bg-deep) 56%
-  );
-}
-
-.appLayout.themeLight[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .modeToggleTrack[data-response-mode="local"],
-.appLayout.themeLight[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .modeToggleTrack[data-response-mode="online"] {
-  --mode-toggle-track: color-mix(
-    in srgb,
-    var(--accent) 34%,
-    var(--bg-surface) 66%
-  );
-}
-
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .chatHeaderModelPicker
-  .composeModelControl {
-  height: 32px;
-  max-width: min(15rem, 56vw);
-  border-radius: 999px;
-  border-color: color-mix(in srgb, var(--line) 68%, transparent);
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg-surface) 74%, var(--accent) 8%),
-    color-mix(in srgb, var(--bg-deep) 86%, var(--accent) 6%)
-  );
-  box-shadow:
-    inset 0 1px 0 color-mix(in srgb, #ffffff 8%, transparent),
-    0 10px 28px rgba(0, 0, 0, 0.12);
-}
-
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .chatHeaderModelPicker
-  .composeModelTrigger {
-  min-width: 154px;
-  padding-inline: 13px;
-  gap: 8px;
-  justify-content: center;
-}
-
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .chatHeaderModelPicker
-  .composeControlLabel {
-  display: inline;
-  font-size: 10px;
-  font-weight: 620;
-  letter-spacing: 0;
-  color: color-mix(in srgb, var(--fg-subtle) 82%, transparent);
-}
-
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .zenSplashModelPicker
-  .chatHeaderModelPicker
-  .composeModelTriggerName {
-  max-width: min(16ch, 38vw);
-  font-size: 12px;
 }
 
 .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
@@ -27608,29 +27528,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
 }
 
-.composeBotMenu.zenSplashModelMenu {
-  min-width: min(240px, calc(100vw - 24px)) !important;
-  max-width: min(260px, calc(100vw - 24px));
-  max-height: min(
-    280px,
-    var(--compose-menu-available-height, calc(100dvh - 180px))
-  );
-  border-radius: 9px;
-  box-shadow:
-    0 16px 34px rgba(0, 0, 0, 0.26),
-    inset 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent);
-}
-
-.zenSplashModelMenu .composeBotListbox {
-  max-height: min(
-    166px,
-    max(96px, calc(var(--compose-menu-available-height, 280px) - 114px))
-  );
-  padding: 4px;
-  gap: 1px;
-  border-radius: 7px;
-}
-
 .composeBotMenu.zenSplashBotMenu {
   min-width: min(240px, calc(100vw - 24px)) !important;
   max-width: min(300px, calc(100vw - 24px));
@@ -27654,28 +27551,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   padding: 4px;
   gap: 1px;
   border-radius: 7px;
-}
-
-.zenSplashModelMenu .composeModelOption {
-  min-height: 28px;
-  padding: 5px 9px;
-  gap: 9px;
-  font-size: 12px;
-  border-radius: 5px;
-}
-
-.zenSplashModelMenu .composeModelOptionMain {
-  gap: 1px;
-}
-
-.zenSplashModelMenu .composeModelOptionMeta {
-  font-size: 9px;
-  letter-spacing: 0.035em;
-}
-
-.zenSplashModelMenu .composeModelDefaultBadge {
-  padding: 1px 3px;
-  font-size: 8px;
 }
 
 .appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"] .compose {
@@ -63565,6 +63440,15 @@ a.settingsCreditItem:focus-visible {
     max-width: min(320px, 100%);
     justify-content: center;
     gap: 6px;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .chatPrivateStatusBadge {
+    width: 30px;
+    padding: 0;
+  }
+
+  .appLayout[data-chat-sidebar-hidden="true"] .chatPrivateStatusLabel {
+    display: none;
   }
 
   .appLayout[data-chat-sidebar-hidden="true"]

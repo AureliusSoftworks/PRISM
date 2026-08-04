@@ -2692,23 +2692,31 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(css, /\.zenZoomReturnButton\b/);
   });
 
-  it("keeps fresh Zen hero model and privacy controls inside the hero", () => {
+  it("keeps only the Private conversation control inside the fresh Zen hero", () => {
     assert.match(
       pageSource,
-      /const renderZenSplashControls = \(\) =>\s*zenCanvasModelPickerActive \? \(\s*<div\s*className=\{styles\.zenSplashControls\}/
+      /const renderZenSplashControls = \(\) =>\s*zenCanvasPrivateControlActive \? \(\s*<div\s*className=\{styles\.zenSplashControls\}/
     );
-    assert.match(
-      pageSource,
-      /renderHeaderModelPicker\(\{\s*modelMenuClassName: styles\.zenSplashModelMenu,\s*modelMenuWidthPx: 220,\s*showBotPicker: false,\s*showVoiceSelector: false,\s*\}\)/
-    );
+    assert.doesNotMatch(pageSource, /styles\.zenSplashModelPicker/u);
+    assert.doesNotMatch(pageSource, /styles\.zenSplashModelMenu/u);
     assert.match(
       pageSource,
       /className=\{`\$\{styles\.privateChatButton\} \$\{styles\.zenSplashPrivateButton\}`\}/
     );
     assert.match(pageSource, /aria-pressed=\{appWidePrivateMode\}/);
+    assert.match(
+      pageSource,
+      /data-tutorial-target="private-chat-new"[\s\S]*<span>Private chat<\/span>/u
+    );
+    assert.match(
+      pageSource,
+      /title="Private chat — no memories saved"/u
+    );
     assert.equal(pageSource.match(/\{renderZenSplashControls\(\)\}/g)?.length, 2);
     assert.match(css, /\.zenSplashControls\b/);
     assert.match(css, /\.zenSplashPrivateButton\b/);
+    assert.doesNotMatch(css, /\.zenSplashModelPicker\b/);
+    assert.doesNotMatch(css, /\.zenSplashModelMenu\b/);
   });
 
   it("keeps sparse Zen transcripts natively scrollable", () => {

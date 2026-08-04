@@ -5,6 +5,7 @@ import {
   DEBATE_EVIDENCE_EMOJI_CHOICES,
   applyDebateEvidenceExhibitAssetReuse,
   applyDebateEvidenceObjectNameEdit,
+  debateEvidenceObjectDraftFromPrismCandidate,
   debateEvidenceObjectFromPrismCandidate,
   debateEvidenceEmojiForObject,
   normalizeDebateEvidenceEmojiChoice,
@@ -115,6 +116,51 @@ describe("Debate evidence object generator", () => {
     assert.equal(
       debateEvidenceObjectFromPrismCandidate("Weathered transit map."),
       null,
+    );
+  });
+
+  it("turns a player-directed Prism draft into complete editable metadata", () => {
+    assert.deepEqual(
+      debateEvidenceObjectDraftFromPrismCandidate(
+        "Frayed || blue work glove || The index fingertip is stained cobalt blue. || 🧤",
+      ),
+      {
+        adjective: "Frayed",
+        object: "blue work glove",
+        observation: "The index fingertip is stained cobalt blue.",
+        emoji: "🧤",
+        emojiCustomized: false,
+        createdBy: "prism",
+        visualKind: "emoji",
+        imageId: null,
+      },
+    );
+    assert.equal(
+      debateEvidenceObjectDraftFromPrismCandidate(
+        "Frayed || blue work glove || Missing emoji || glove",
+      ),
+      null,
+    );
+    assert.equal(
+      debateEvidenceObjectDraftFromPrismCandidate(
+        "Frayed || blue work glove || Ambiguous emoji field || 🧤 extra",
+      ),
+      null,
+    );
+    assert.deepEqual(
+      debateEvidenceObjectDraftFromPrismCandidate(
+        "Torn || glove || A torn glove with one finger stained blue. || 🧤",
+      ),
+      {
+        adjective: "Torn",
+        object: "glove",
+        observation: "A torn glove with one finger stained blue.",
+        emoji: "🧤",
+        emojiCustomized: false,
+        createdBy: "prism",
+        visualKind: "emoji",
+        imageId: null,
+      },
     );
   });
 

@@ -7,6 +7,14 @@ const cssSource = readFileSync(
   new URL("./page.module.css", import.meta.url),
   "utf8",
 );
+const prismMenuSource = readFileSync(
+  new URL("./PrismMenu.tsx", import.meta.url),
+  "utf8",
+);
+const prismMenuCss = readFileSync(
+  new URL("./PrismMenu.module.css", import.meta.url),
+  "utf8",
+);
 
 describe("living-shell applet navigation", () => {
   it("keeps the applet switcher beside wordmark-owned Home navigation", () => {
@@ -41,6 +49,67 @@ describe("living-shell applet navigation", () => {
     assert.match(
       pageSource,
       /const roadmapApplets = prismPlannedRoadmapApplets\(\)/u,
+    );
+  });
+
+  it("keeps applet identity glyphs prominent without hiding the selected state", () => {
+    assert.match(
+      pageSource,
+      /kind: "radio",[\s\S]*icon: appletGlyph\(applet\.id\),[\s\S]*iconPresentation: "identity",/u,
+    );
+    assert.match(
+      prismMenuSource,
+      /entry\.iconPresentation === "identity" && Boolean\(entry\.icon\)/u,
+    );
+    assert.match(
+      prismMenuSource,
+      /preservesIdentityIcon && entry\.kind === "radio" && checked/u,
+    );
+    assert.match(
+      prismMenuCss,
+      /\.item\[data-icon-presentation="identity"\][\s\S]*min-height: 48px/u,
+    );
+    assert.match(
+      prismMenuCss,
+      /\.identityIcon svg[\s\S]*width: 25px;[\s\S]*height: 25px;/u,
+    );
+  });
+
+  it("collapses planned applets behind an accessible Roadmap submenu", () => {
+    assert.match(
+      pageSource,
+      /id: "roadmap",[\s\S]*kind: "submenu",[\s\S]*description: `\$\{roadmapApplets\.length\} planned applets`,[\s\S]*entries: \[/u,
+    );
+    assert.match(
+      pageSource,
+      /\.\.\.roadmapApplets\.map\(\(applet\): PrismMenuEntry => \(\{/u,
+    );
+    assert.match(
+      prismMenuSource,
+      /aria-haspopup=\{entry\.kind === "submenu" \? "menu" : undefined\}/u,
+    );
+    assert.match(
+      prismMenuSource,
+      /aria-expanded=\{entry\.kind === "submenu" \? openSubmenuId === entry\.id : undefined\}/u,
+    );
+  });
+
+  it("disarms Private chat at every sibling applet boundary", () => {
+    const navigationStart = pageSource.indexOf(
+      "const navigateToView = useCallback(",
+    );
+    const navigationEnd = pageSource.indexOf(
+      "useEffect(() => {\n    debateVoiceSurfaceActiveRef.current",
+      navigationStart,
+    );
+    const navigationSource = pageSource.slice(navigationStart, navigationEnd);
+    assert.match(
+      navigationSource,
+      /disarmPrivateModeForAppletSwitchRef\.current\(next\)/u,
+    );
+    assert.match(
+      pageSource,
+      /disarmPrivateModeForAppletSwitchRef\.current = \(next\) => \{[\s\S]*next === "chat" \|\| next === "sandbox" \|\| !appWidePrivateMode[\s\S]*setAppWidePrivateMode\(false\)/u,
     );
   });
 

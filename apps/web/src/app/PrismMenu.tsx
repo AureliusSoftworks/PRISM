@@ -25,6 +25,7 @@ import styles from "./PrismMenu.module.css";
 
 export type PrismMenuTone = "default" | "danger";
 export type PrismMenuTheme = "dark" | "light";
+export type PrismMenuIconPresentation = "default" | "identity";
 
 export interface PrismMenuBoundary {
   element?: HTMLElement | null;
@@ -49,6 +50,7 @@ export type PrismMenuAnchor =
 interface PrismMenuEntryBase {
   id: string;
   icon?: ReactNode;
+  iconPresentation?: PrismMenuIconPresentation;
   label: string;
   description?: string;
   shortcut?: string;
@@ -531,11 +533,15 @@ export function PrismMenuSurface({
               ? "menuitemcheckbox"
               : "menuitem";
           const checked = entry.kind === "radio" || entry.kind === "toggle" ? entry.checked : undefined;
-          const indicator = checked
-            ? <Check aria-hidden="true" />
-            : entry.kind === "radio"
-              ? <Circle aria-hidden="true" />
-              : entry.icon;
+          const preservesIdentityIcon =
+            entry.iconPresentation === "identity" && Boolean(entry.icon);
+          const leadingIcon = preservesIdentityIcon
+            ? entry.icon
+            : checked
+              ? <Check aria-hidden="true" />
+              : entry.kind === "radio"
+                ? <Circle aria-hidden="true" />
+                : entry.icon;
           return (
             <button
               key={entry.id}
@@ -552,6 +558,7 @@ export function PrismMenuSurface({
               disabled={disabled}
               className={styles.item}
               data-active={activeId === entry.id ? "true" : undefined}
+              data-icon-presentation={preservesIdentityIcon ? "identity" : undefined}
               data-tone={entry.tone ?? "default"}
               title={entry.disabledReason}
               onPointerDown={(event) => event.preventDefault()}
@@ -559,8 +566,17 @@ export function PrismMenuSurface({
               onMouseEnter={() => setActiveId(entry.id)}
               onClick={() => void invoke(entry)}
             >
-              <span className={checked ? styles.indicator : styles.icon} aria-hidden="true">
-                {indicator}
+              <span
+                className={
+                  preservesIdentityIcon
+                    ? styles.identityIcon
+                    : checked
+                      ? styles.indicator
+                      : styles.icon
+                }
+                aria-hidden="true"
+              >
+                {leadingIcon}
               </span>
               <span className={styles.copy}>
                 <strong>{entry.label}</strong>
@@ -569,6 +585,8 @@ export function PrismMenuSurface({
               </span>
               {entry.kind === "submenu"
                 ? <span className={styles.chevron} aria-hidden="true"><ChevronRight /></span>
+                : preservesIdentityIcon && entry.kind === "radio" && checked
+                  ? <span className={styles.selectionMark} aria-hidden="true"><Check /></span>
                 : entry.shortcut
                   ? <span className={styles.shortcut}>{entry.shortcut}</span>
                   : null}

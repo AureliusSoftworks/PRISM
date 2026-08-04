@@ -1740,6 +1740,12 @@ describe("Debate engine", () => {
               value: "museum repatriation ethics cultural heritage",
             });
           }
+          if (prompt.includes("Target: debate.setup.exhibitDraft")) {
+            return JSON.stringify({
+              value:
+                "Weathered || transit map || The eastern route is circled in red. || 🗺️",
+            });
+          }
           return JSON.stringify({ value: "weathered ledger" });
         },
         async embedText(): Promise<number[]> {
@@ -1750,7 +1756,7 @@ describe("Debate engine", () => {
         db,
         "user-1",
         {
-          kind: "debate.setup.exhibitPair",
+          kind: "debate.setup.exhibitDraft",
           botIds: ["for", "missing"],
           context: {
             studioPanel: "evidence",
@@ -1772,18 +1778,19 @@ describe("Debate engine", () => {
             evidenceItemCount: 2,
           },
         },
-        "",
+        "A folded transit map with one route circled in red",
         ["old potato"],
         runtimeWith(provider),
       );
-      assert.equal(result.value, "weathered ledger");
+      assert.equal(
+        result.value,
+        "Weathered || transit map || The eastern route is circled in red. || 🗺️",
+      );
       assert.equal(result.generated, true);
       assert.match(prompt, /Museum ethics/u);
-      assert.match(prompt, /surprising, concrete physical exhibit/u);
-      assert.match(
-        prompt,
-        /single-word adjective followed by one tangible object/u,
-      );
+      assert.match(prompt, /player's requested physical exhibit/u);
+      assert.match(prompt, /adjective.*object name.*observable description.*emoji/u);
+      assert.match(prompt, /folded transit map with one route circled/u);
       assert.match(prompt, /Rejected candidates: old potato/u);
       assert.match(
         prompt,
@@ -1902,6 +1909,55 @@ describe("Debate engine", () => {
         .prepare("SELECT COUNT(*) AS count FROM debate_sessions")
         .get() as { count: number };
       assert.equal(stored.count, 0);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a player-directed exhibit editable when every Auto model fails", async () => {
+    const db = createTestDb();
+    try {
+      const result = await generateDebateRefractDraft(
+        db,
+        "user-1",
+        {
+          kind: "debate.setup.exhibitDraft",
+          botIds: [],
+          context: {
+            studioPanel: "evidence",
+            format: "forum",
+            formality: "plainspoken",
+            playerRole: "judge",
+            playerSideId: "for",
+            juryEnabled: false,
+            moderatorTitle: "Moderator",
+            topic: "",
+            motion: "",
+            forLabel: "For",
+            forBrief: "",
+            againstLabel: "Against",
+            againstBrief: "",
+            exhibitAdjective: "",
+            exhibitObject: "",
+            exhibitObservation: "",
+            evidenceItemCount: 0,
+          },
+        },
+        "A torn glove with one finger stained blue",
+        [],
+        autoRuntime(
+          new MalformedDebateProvider(),
+          new MalformedDebateProvider(),
+        ),
+      );
+
+      assert.deepEqual(result, {
+        value:
+          "Torn || glove || A torn glove with one finger stained blue. || 🧤",
+        generated: true,
+        provider: "local",
+        model: "deterministic-exhibit-draft-v1",
+      });
     } finally {
       db.close();
     }
