@@ -316,7 +316,10 @@ export function resolveEnglishVoicePlaybackDetuneCents(
   rawProfile: BotAudioVoiceProfileV1,
   engineUsed: string | null,
 ): number {
-  if (engineUsed === "elevenlabs") return 0;
+  // Local and Premium share the same client pitch transform. Premium still
+  // skips local timbre (warmth/EQ/resonance) via localToneEnabled — pitch is
+  // an authored identity control, not a provider reshape.
+  void engineUsed;
   return resolveVoicePlaybackTransform(rawProfile).pitchCents;
 }
 
@@ -340,7 +343,9 @@ export function englishVoiceProfileSupportsStreaming(
   deliveryMood?: VoiceDeliveryMood | null,
 ): boolean {
   const profile = applyVoiceDeliveryMoodToProfile(rawProfile, deliveryMood);
-  if (profile.lilt !== 0) {
+  // Pitch and lilt need the Web Audio formant graph; media elements can only
+  // change tempo while preserving the provider's native pitch.
+  if (profile.pitch !== 0 || profile.lilt !== 0) {
     return false;
   }
   if (!effectsEnabled) return true;

@@ -114,7 +114,7 @@ describe("English voice post processing", () => {
         false,
         "neutral",
       ),
-      true,
+      false,
     );
     assert.equal(
       englishVoiceProfileSupportsStreaming(
@@ -142,7 +142,7 @@ describe("English voice post processing", () => {
     );
   });
 
-  it("keeps Local pitch independent from Pace without reshaping Premium", () => {
+  it("applies the same pitch transform to Local and Premium", () => {
     const profile = {
       v: 1 as const,
       baseVoiceId: "voice-1" as const,
@@ -151,7 +151,10 @@ describe("English voice post processing", () => {
       pace: 0.333,
       lilt: 0,
     };
-    assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "elevenlabs"), 0);
+    assert.equal(
+      resolveEnglishVoicePlaybackDetuneCents(profile, "elevenlabs"),
+      -487,
+    );
     assert.equal(resolveEnglishVoicePlaybackDetuneCents(profile, "builtin"), -487);
   });
 
