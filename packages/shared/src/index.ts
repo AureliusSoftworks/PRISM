@@ -4,6 +4,7 @@ import type {
 } from "./prismTool.js";
 import type { PrismMoodIgnoredQuestionPenaltyLevel } from "./mood.js";
 import type { AutoRecoveryTraceV1 } from "./autoFallback.js";
+import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type {
   BotCrosstalkInterruptedSpeakerCue,
   CrosstalkFloorOutcome,
@@ -141,14 +142,18 @@ export {
 export {
   AUTO_FALLBACK_CHAIN_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT,
+  AUTO_FALLBACK_CHAIN_MAX_TOTAL_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_MIN_FALLBACK_COUNT,
   AUTO_FALLBACK_CHAIN_VERSION,
+  FALLBACK_CHAINS_VERSION,
   AUTO_FALLBACK_MODEL_ID_MAX_LENGTH,
   autoFallbackModelKey,
   autoFallbackResolvedChain,
+  fallbackChainForLane,
   isAutoFallbackProvider,
   normalizeAutoFallbackChain,
+  normalizeFallbackChainsV2,
   normalizeAutoFallbackModelRef,
   normalizeAutoRecoveryTrace,
   normalizeResponseMode,
@@ -159,6 +164,7 @@ export {
   type AutoFallbackFailureReason,
   type AutoFallbackModelRef,
   type AutoFallbackProvider,
+  type FallbackChainsV2,
   type AutoRecoveryTraceV1,
   type ResponseMode,
 } from "./autoFallback.js";
@@ -1052,6 +1058,7 @@ export {
   type StorySessionListResponse,
   type StorySessionMutationResponse,
   type StorySessionProgress,
+  type StoryRoutingSnapshotV1,
   type StorySessionStatus,
   type StorySessionSummary,
   type StorySessionTravelRequest,
@@ -1346,6 +1353,8 @@ export interface ChatMessage {
   provider?: LlmProviderName;
   /** Concrete model id used for this assistant reply, when recorded. */
   model?: string;
+  /** Contextual Auto route used for this assistant message. */
+  autoRoute?: AutoRouteDecisionV1;
   /** Bot/persona id attributed to this message. Null/undefined = default PRISM. */
   botId?: string | null;
   /** Bot that generated the message (assistant only). Resolved from bots.name at read time. */
@@ -2623,19 +2632,27 @@ export interface ZenSessionMemoryOverview {
 export {
   REQUIRED_LOCAL_MODELS,
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+  AUTO_MODEL_ROUTING_POLICY_VERSION,
   DISABLED_MODEL_CHOICE,
   MODEL_VISIBILITY_DEFAULTS_VERSION,
   defaultHiddenModelIdsForCatalog,
   isCommonOnlineChatModel,
   isDisabledModelChoice,
+  normalizeAutoRouteDecisionV1,
   reconcileHiddenModelIdsForCatalog,
   sanitizeHiddenModelIds,
   resolveAutoModel,
   type AutoModelProvider,
+  type AutoModelPriceV1,
+  type AutoRouteDecisionV1,
+  type AutoRouteReasonCode,
+  type AutoRoutingContextV1,
   type CatalogShapeForAuto,
   type ModelForDefaultVisibility,
   type ResolveAutoModelInput,
   type ResolvedAutoModel,
+  type ModelSelectionV1,
+  type ResponseLane,
 } from "./modelRouting.js";
 
 export {
@@ -3190,6 +3207,7 @@ export * from "./ephemeralChat.js";
 export * from "./replay.js";
 export * from "./livingShell.js";
 export * from "./livingShellProgress.js";
+export * from "./imageAssets.js";
 export * from "./slateHandoff.js";
 export * from "./debate.js";
 export * from "./debateAudiencePressure.js";

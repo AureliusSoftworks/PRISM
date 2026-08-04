@@ -1122,6 +1122,7 @@ export function botcastSoundboardCueFromEvent(
 
 export type BotcastReplayEventKind =
   | "segment"
+  | "routing"
   | "guest_presence"
   | "power_effect"
   | "producer_cue"

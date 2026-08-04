@@ -51,10 +51,9 @@ test("active Coffee centrally locks configuration while preserving End Session",
     /const coffeeHeaderModelControlsLocked = \(\): boolean =>\s*coffeeHeaderModelControlsLockReason\(\) !== null/u,
   );
   assert.match(pageSource, /disabled=\{coffeeHeaderModelControlsLocked\(\)\}/u);
-  assert.match(pageSource, /disabled:\s*coffeeHeaderModelControlsLocked\(\)/u);
   assert.match(
     pageSource,
-    /renderCoffeeHeaderModelPicker\(\)[\s\S]*renderVoiceModeSelector\(\{[\s\S]*disabled:\s*options\.voiceDisabled/u,
+    /renderSharedAppletNavbar\("Coffee tools", \{[\s\S]*liveSessionActive: coffeeChromePolicy\.liveSessionActive[\s\S]*renderCoffeeHeaderModelPicker\(\)/u,
   );
   assert.match(
     pageSource,
@@ -62,7 +61,7 @@ test("active Coffee centrally locks configuration while preserving End Session",
   );
   assert.match(
     pageSource,
-    /coffeeChromePolicy\.disabledNavbarActions\.voice === true/u,
+    /const liveChromePolicy = options\.liveSessionActive[\s\S]*disabledNavbarActions\.voice/u,
   );
   assert.match(
     pageSource,
@@ -70,19 +69,18 @@ test("active Coffee centrally locks configuration while preserving End Session",
   );
   assert.match(
     pageSource,
-    /coffeeChromePolicy\.showEndSessionInSwitcher[\s\S]*End session[\s\S]*renderAppSwitcher\(\)/u,
+    /liveSessionExit: coffeeChromePolicy\.showEndSessionInSwitcher[\s\S]*label: "End session"/u,
   );
-  assert.match(pageSource, />\s*End session\s*</iu);
   assert.match(
     pageSource,
-    /data-live-session-locked=\{[\s\S]*coffeeChromePolicy\.liveSessionActive/u,
+    /data-live-session-locked=\{[\s\S]*options\.liveSessionActive/u,
   );
 });
 
 test("Coffee's PRISM wordmark returns to All Bots Home", () => {
   assert.match(
     pageSource,
-    /className=\{`\$\{styles\.coffeeHubButton\} \$\{styles\.sidebarWordmarkButton\}`\}[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?aria-label="Open All Bots Home"[\s\S]*?<AppletHeaderLabel appletId="coffee" \/>/u,
+    /renderSharedAppletNavbar\("Coffee tools", \{[\s\S]*brandAppletId: "coffee"/u,
   );
   assert.doesNotMatch(pageSource, /returnToCoffeeStart/u);
 });

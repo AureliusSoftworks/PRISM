@@ -1,7 +1,9 @@
 export const AUTO_FALLBACK_CHAIN_VERSION = 1 as const;
+export const FALLBACK_CHAINS_VERSION = 2 as const;
 export const AUTO_FALLBACK_CHAIN_MIN_FALLBACK_COUNT = 1 as const;
 export const AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT = 5 as const;
 export const AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT = 6 as const;
+export const AUTO_FALLBACK_CHAIN_MAX_TOTAL_FALLBACK_COUNT = 10 as const;
 /** @deprecated Use AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT. */
 export const AUTO_FALLBACK_CHAIN_FALLBACK_COUNT =
   AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT;
@@ -9,6 +11,7 @@ export const AUTO_FALLBACK_MODEL_ID_MAX_LENGTH = 240;
 
 export type AutoFallbackProvider = "local" | "openai" | "anthropic";
 export type ResponseMode = "local" | "auto" | "online";
+export type ResponseLane = "local" | "online";
 
 export type AutoFallbackFailureReason =
   | "timeout"
@@ -26,6 +29,12 @@ export interface AutoFallbackModelRef {
 export interface AutoFallbackChainV1 {
   v: typeof AUTO_FALLBACK_CHAIN_VERSION;
   fallbacks: AutoFallbackModelRef[];
+}
+
+export interface FallbackChainsV2 {
+  v: typeof FALLBACK_CHAINS_VERSION;
+  local: AutoFallbackModelRef[];
+  online: AutoFallbackModelRef[];
 }
 
 export interface AutoFallbackAttemptTraceV1 extends AutoFallbackModelRef {
@@ -81,17 +90,77 @@ export function normalizeAutoFallbackChain(
   if (
     !Array.isArray(value.fallbacks) ||
     value.fallbacks.length < AUTO_FALLBACK_CHAIN_MIN_FALLBACK_COUNT ||
-    value.fallbacks.length > AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT
+    value.fallbacks.length > AUTO_FALLBACK_CHAIN_MAX_TOTAL_FALLBACK_COUNT
   ) {
     return null;
   }
   const fallbacks = value.fallbacks.map(normalizeAutoFallbackModelRef);
   if (fallbacks.some((fallback) => fallback === null)) return null;
   const normalized = fallbacks as AutoFallbackModelRef[];
+  const localCount = normalized.filter((entry) => entry.provider === "local").length;
+  const onlineCount = normalized.length - localCount;
+  if (
+    localCount > AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT ||
+    onlineCount > AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT
+  ) {
+    return null;
+  }
   if (new Set(normalized.map(autoFallbackModelKey)).size !== normalized.length) {
     return null;
   }
   return { v: AUTO_FALLBACK_CHAIN_VERSION, fallbacks: normalized };
+}
+
+export function normalizeFallbackChainsV2(
+  value: unknown,
+): FallbackChainsV2 | null {
+  const legacy = normalizeAutoFallbackChain(value);
+  const record = isRecord(value) ? value : null;
+  const rawLocal = legacy
+    ? legacy.fallbacks.filter((entry) => entry.provider === "local")
+    : record?.v === FALLBACK_CHAINS_VERSION && Array.isArray(record.local)
+      ? record.local.map(normalizeAutoFallbackModelRef)
+      : null;
+  const rawOnline = legacy
+    ? legacy.fallbacks.filter((entry) => entry.provider !== "local")
+    : record?.v === FALLBACK_CHAINS_VERSION && Array.isArray(record.online)
+      ? record.online.map(normalizeAutoFallbackModelRef)
+      : null;
+  if (!rawLocal || !rawOnline) return null;
+  if (rawLocal.some((entry) => entry === null) || rawOnline.some((entry) => entry === null)) {
+    return null;
+  }
+  const local = (rawLocal as AutoFallbackModelRef[]).filter(
+    (entry) => entry.provider === "local",
+  );
+  const online = (rawOnline as AutoFallbackModelRef[]).filter(
+    (entry) => entry.provider !== "local",
+  );
+  if (
+    local.length > AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT ||
+    online.length > AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT
+  ) {
+    return null;
+  }
+  if (
+    new Set(local.map(autoFallbackModelKey)).size !== local.length ||
+    new Set(online.map(autoFallbackModelKey)).size !== online.length
+  ) {
+    return null;
+  }
+  if (local.length === 0 && online.length === 0) return null;
+  return { v: FALLBACK_CHAINS_VERSION, local, online };
+}
+
+export function fallbackChainForLane(
+  value: AutoFallbackChainV1 | FallbackChainsV2 | null | undefined,
+  lane: ResponseLane,
+): AutoFallbackChainV1 | null {
+  const chains = normalizeFallbackChainsV2(value);
+  const fallbacks = chains?.[lane] ?? [];
+  return fallbacks.length > 0
+    ? { v: AUTO_FALLBACK_CHAIN_VERSION, fallbacks }
+    : null;
 }
 
 export function parseStoredAutoFallbackChain(
@@ -99,7 +168,13 @@ export function parseStoredAutoFallbackChain(
 ): AutoFallbackChainV1 | null {
   if (!raw?.trim()) return null;
   try {
-    return normalizeAutoFallbackChain(JSON.parse(raw) as unknown);
+    const parsed = JSON.parse(raw) as unknown;
+    const chains = normalizeFallbackChainsV2(parsed);
+    if (!chains) return null;
+    return {
+      v: AUTO_FALLBACK_CHAIN_VERSION,
+      fallbacks: [...chains.local, ...chains.online],
+    };
   } catch {
     return null;
   }
@@ -108,7 +183,7 @@ export function parseStoredAutoFallbackChain(
 export function serializeAutoFallbackChain(
   value: AutoFallbackChainV1 | null | undefined
 ): string | null {
-  const normalized = normalizeAutoFallbackChain(value);
+  const normalized = normalizeFallbackChainsV2(value);
   return normalized ? JSON.stringify(normalized) : null;
 }
 
@@ -117,11 +192,17 @@ export function autoFallbackResolvedChain(
   chain: AutoFallbackChainV1 | null | undefined
 ): AutoFallbackModelRef[] | null {
   const normalizedPrimary = normalizeAutoFallbackModelRef(primary);
-  const normalizedChain = normalizeAutoFallbackChain(chain);
+  const lane = normalizedPrimary?.provider === "local" ? "local" : "online";
+  const normalizedChain = normalizedPrimary
+    ? fallbackChainForLane(chain, lane)
+    : null;
   if (!normalizedPrimary || !normalizedChain) return null;
   const primaryKey = autoFallbackModelKey(normalizedPrimary);
+  const primaryLane = normalizedPrimary.provider === "local" ? "local" : "online";
   const remainingFallbacks = normalizedChain.fallbacks.filter(
-    (fallback) => autoFallbackModelKey(fallback) !== primaryKey,
+    (fallback) =>
+      autoFallbackModelKey(fallback) !== primaryKey &&
+      (fallback.provider === "local" ? "local" : "online") === primaryLane,
   );
   return remainingFallbacks.length > 0
     ? [normalizedPrimary, ...remainingFallbacks]

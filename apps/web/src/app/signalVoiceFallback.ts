@@ -2,6 +2,10 @@ export const SIGNAL_ONLINE_VOICE_TIMEOUT_MS = 15_000;
 export const SIGNAL_ONLINE_VOICE_TIMEOUT_MAX_MS = 45_000;
 /** Extra preferred-voice patience for long closings and tagged performance text. */
 export const SIGNAL_ONLINE_VOICE_TIMEOUT_MS_PER_CHAR = 35;
+/** Mirrors the API worker's bounded local synthesis budget. */
+export const SIGNAL_BUILTIN_VOICE_TIMEOUT_MS = 60_000;
+/** Lets playback lifecycle callbacks settle after synthesis returns. */
+export const SIGNAL_VOICE_START_SETTLE_GRACE_MS = 5_000;
 
 /**
  * Scales the ElevenLabs wait so a long closing line is not aborted into the
@@ -15,6 +19,27 @@ export function signalOnlineVoiceTimeoutMs(textLength: number): number {
     SIGNAL_ONLINE_VOICE_TIMEOUT_MAX_MS,
     SIGNAL_ONLINE_VOICE_TIMEOUT_MS +
       length * SIGNAL_ONLINE_VOICE_TIMEOUT_MS_PER_CHAR,
+  );
+}
+
+/**
+ * Signal's outer playback watchdog must not cancel a healthy voice request
+ * before the selected engine's own bounded recovery path can finish.
+ */
+export function signalVoiceStartTimeoutMs(args: {
+  textLength: number;
+  voiceMode: "mute" | "english" | "babble" | "bottish";
+  englishVoiceEngine: "builtin" | "elevenlabs";
+}): number {
+  if (args.voiceMode !== "english") return SIGNAL_ONLINE_VOICE_TIMEOUT_MS;
+  const preferredBudgetMs =
+    args.englishVoiceEngine === "elevenlabs"
+      ? signalOnlineVoiceTimeoutMs(args.textLength)
+      : 0;
+  return (
+    preferredBudgetMs +
+    SIGNAL_BUILTIN_VOICE_TIMEOUT_MS +
+    SIGNAL_VOICE_START_SETTLE_GRACE_MS
   );
 }
 

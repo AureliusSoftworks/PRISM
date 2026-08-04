@@ -1,5 +1,5 @@
 export const FIRST_RUN_WELCOME_STORAGE_KEY = "prism_first_run_welcome_v1";
-export const FIRST_RUN_SETUP_STORAGE_KEY = "prism_desktop_first_run_complete_v3";
+export const FIRST_RUN_SETUP_STORAGE_KEY = "prism_desktop_first_run_complete_v4";
 
 export function clearFirstRunSetupCompletion(storage: {
   removeItem(key: string): void;
@@ -19,8 +19,6 @@ export type FirstRunSetupStepId =
   | "openai"
   | "anthropic"
   | "elevenlabs"
-  | "local-model"
-  | "online-model"
   | "auto-models"
   | "ready";
 
@@ -49,20 +47,8 @@ export const FIRST_RUN_SETUP_STEPS: readonly FirstRunSetupStep[] = [
   { id: "anthropic", title: "Connect Anthropic", shortTitle: "Anthropic", optional: true },
   { id: "elevenlabs", title: "Connect ElevenLabs", shortTitle: "Voice", optional: true },
   {
-    id: "local-model",
-    title: "Pick your local default",
-    shortTitle: "Local model",
-    optional: true,
-  },
-  {
-    id: "online-model",
-    title: "Pick your online default",
-    shortTitle: "Online model",
-    optional: true,
-  },
-  {
     id: "auto-models",
-    title: "Meet Auto recovery",
+    title: "Meet contextual Auto",
     shortTitle: "Auto",
     optional: true,
   },

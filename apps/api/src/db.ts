@@ -31,6 +31,10 @@ import {
   sanitizePrismMoodState,
   type CoffeeSessionDurationMinutes,
 } from "@localai/shared";
+import {
+  ensureImageAssetLibrarySchema,
+  synchronizeImageAssetCatalog,
+} from "./image-asset-library.ts";
 
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 
@@ -677,6 +681,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       status TEXT NOT NULL DEFAULT 'generating',
       provider TEXT NOT NULL DEFAULT 'local',
       model TEXT,
+      routing_json TEXT,
       bot_ids TEXT NOT NULL DEFAULT '[]',
       premise TEXT,
       episode_json TEXT,
@@ -720,7 +725,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       locked_ranges_json TEXT NOT NULL DEFAULT '[]',
       last_provider TEXT,
       last_model TEXT,
-      prose_mode TEXT NOT NULL DEFAULT 'auto',
+      prose_mode TEXT NOT NULL DEFAULT 'offline',
       prose_model TEXT,
       prose_provider TEXT,
       deliberation_config_json TEXT NOT NULL DEFAULT '{}',
@@ -2209,6 +2214,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   addReplayRecordingColumn("audio_content_type", "TEXT");
   addReplayRecordingColumn("audio_size_bytes", "INTEGER");
   addReplayRecordingColumn("audio_duration_ms", "INTEGER");
+  const storySessionColumns = new Set(
+    (db.prepare("PRAGMA table_info(story_sessions)").all() as Array<{
+      name: string;
+    }>).map((column) => column.name),
+  );
+  if (!storySessionColumns.has("routing_json")) {
+    db.exec("ALTER TABLE story_sessions ADD COLUMN routing_json TEXT;");
+  }
   const replayPremiumProductionColumns = new Set(
     (db.prepare("PRAGMA table_info(replay_premium_productions)").all() as Array<{
       name: string;
@@ -2291,7 +2304,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   addSlateProjectColumn("book_ordinal", "INTEGER NOT NULL DEFAULT 0");
   addSlateProjectColumn("title_origin", "TEXT NOT NULL DEFAULT 'writer'");
   addSlateProjectColumn("cover_json", "TEXT NOT NULL DEFAULT '{}'");
-  addSlateProjectColumn("prose_mode", "TEXT NOT NULL DEFAULT 'auto'");
+  addSlateProjectColumn("prose_mode", "TEXT NOT NULL DEFAULT 'offline'");
   addSlateProjectColumn("prose_model", "TEXT");
   addSlateProjectColumn("prose_provider", "TEXT");
   addSlateProjectColumn(
@@ -4426,6 +4439,13 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories (user_id, created_at DESC);",
   );
+
+  ensureImageAssetLibrarySchema(db);
+  for (const row of db.prepare("SELECT id FROM users").all() as Array<{
+    id: string;
+  }>) {
+    synchronizeImageAssetCatalog(db, row.id);
+  }
 
   return db;
 }

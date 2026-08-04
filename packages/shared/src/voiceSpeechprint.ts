@@ -8,9 +8,9 @@ import {
   type LocalVoiceSpeechprintV1,
 } from "./audioVoice.js";
 
-export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.3";
+export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.4";
 export const LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256 =
-  "c96f1fa60a70303017ad7561ac428ca0b12191db82b795f736d35f5bf3f500bf";
+  "5e792dddae28ada1af347e8bdafb89dc1948a2a7b7a05c3844e430c98926ae4a";
 
 export interface LocalVoiceSpeechprintCapabilityV1 {
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -34,14 +34,29 @@ const LOCAL_VOICE_SPEECHPRINT_DESCRIPTORS = [
     description: "A restrained Spanish-language pronunciation influence.",
   },
   {
+    id: "latin-american-spanish-influenced-english",
+    label: "Latin American Spanish-influenced English",
+    description: "A restrained Latin American Spanish pronunciation influence.",
+  },
+  {
     id: "brazilian-portuguese-influenced-english",
     label: "Brazilian Portuguese-influenced English",
     description: "A restrained Brazilian Portuguese pronunciation influence.",
   },
   {
+    id: "european-portuguese-influenced-english",
+    label: "European Portuguese-influenced English",
+    description: "A restrained European Portuguese pronunciation influence.",
+  },
+  {
     id: "mandarin-influenced-english",
     label: "Mandarin-influenced English",
     description: "A restrained Mandarin pronunciation influence.",
+  },
+  {
+    id: "cantonese-influenced-english",
+    label: "Cantonese-influenced English",
+    description: "A restrained Cantonese pronunciation influence.",
   },
   {
     id: "japanese-influenced-english",
@@ -59,6 +74,21 @@ const LOCAL_VOICE_SPEECHPRINT_DESCRIPTORS = [
     description: "A restrained Indian English pronunciation profile.",
   },
   {
+    id: "pakistani-english",
+    label: "Pakistani English",
+    description: "A restrained Pakistani English pronunciation profile.",
+  },
+  {
+    id: "bengali-influenced-english",
+    label: "Bengali-influenced English",
+    description: "A restrained Bengali pronunciation influence.",
+  },
+  {
+    id: "sri-lankan-english",
+    label: "Sri Lankan English",
+    description: "A restrained Sri Lankan English pronunciation profile.",
+  },
+  {
     id: "french-influenced-english",
     label: "French-influenced English",
     description: "A restrained French-language pronunciation influence.",
@@ -67,6 +97,26 @@ const LOCAL_VOICE_SPEECHPRINT_DESCRIPTORS = [
     id: "german-influenced-english",
     label: "German-influenced English",
     description: "A restrained German-language pronunciation influence.",
+  },
+  {
+    id: "dutch-influenced-english",
+    label: "Dutch-influenced English",
+    description: "A restrained Dutch pronunciation influence.",
+  },
+  {
+    id: "nordic-influenced-english",
+    label: "Nordic-influenced English",
+    description: "A restrained Nordic-language pronunciation influence.",
+  },
+  {
+    id: "polish-influenced-english",
+    label: "Polish-influenced English",
+    description: "A restrained Polish pronunciation influence.",
+  },
+  {
+    id: "greek-influenced-english",
+    label: "Greek-influenced English",
+    description: "A restrained Greek pronunciation influence.",
   },
   {
     id: "russian-influenced-english",
@@ -79,14 +129,99 @@ const LOCAL_VOICE_SPEECHPRINT_DESCRIPTORS = [
     description: "A restrained Italian-language pronunciation influence.",
   },
   {
+    id: "irish-english",
+    label: "Irish English",
+    description: "A restrained Irish English pronunciation profile.",
+  },
+  {
+    id: "scottish-english",
+    label: "Scottish English",
+    description: "A restrained Scottish English pronunciation profile.",
+  },
+  {
     id: "australian-english",
     label: "Australian English",
     description: "A restrained Australian English pronunciation profile.",
   },
   {
+    id: "new-zealand-english",
+    label: "New Zealand English",
+    description: "A restrained New Zealand English pronunciation profile.",
+  },
+  {
     id: "canadian-english",
     label: "Canadian English",
     description: "A restrained Canadian English pronunciation profile.",
+  },
+  {
+    id: "caribbean-english",
+    label: "Caribbean English",
+    description: "A restrained Caribbean English pronunciation profile.",
+  },
+  {
+    id: "north-african-arabic-influenced-english",
+    label: "North African Arabic-influenced English",
+    description: "A restrained North African Arabic pronunciation influence.",
+  },
+  {
+    id: "middle-eastern-arabic-influenced-english",
+    label: "Middle Eastern Arabic-influenced English",
+    description: "A restrained Middle Eastern Arabic pronunciation influence.",
+  },
+  {
+    id: "persian-influenced-english",
+    label: "Persian-influenced English",
+    description: "A restrained Persian pronunciation influence.",
+  },
+  {
+    id: "turkish-influenced-english",
+    label: "Turkish-influenced English",
+    description: "A restrained Turkish pronunciation influence.",
+  },
+  {
+    id: "nigerian-english",
+    label: "Nigerian English",
+    description: "A restrained Nigerian English pronunciation profile.",
+  },
+  {
+    id: "east-african-english",
+    label: "East African English",
+    description: "A restrained East African English pronunciation profile.",
+  },
+  {
+    id: "south-african-english",
+    label: "South African English",
+    description: "A restrained South African English pronunciation profile.",
+  },
+  {
+    id: "filipino-english",
+    label: "Filipino English",
+    description: "A restrained Filipino English pronunciation profile.",
+  },
+  {
+    id: "vietnamese-influenced-english",
+    label: "Vietnamese-influenced English",
+    description: "A restrained Vietnamese pronunciation influence.",
+  },
+  {
+    id: "thai-influenced-english",
+    label: "Thai-influenced English",
+    description: "A restrained Thai pronunciation influence.",
+  },
+  {
+    id: "indonesian-influenced-english",
+    label: "Indonesian-influenced English",
+    description: "A restrained Indonesian pronunciation influence.",
+  },
+  {
+    id: "singapore-english",
+    label: "Singapore English",
+    description: "A restrained Singapore English pronunciation profile.",
+  },
+  {
+    id: "pacific-island-english",
+    label: "Pacific Island English",
+    description: "A restrained Pacific Island English pronunciation profile.",
   },
 ] as const satisfies ReadonlyArray<{
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -485,6 +620,487 @@ const SPEECHPRINT_RULES: Record<
       tier: "strong",
       pattern: /æ/gu,
       replacement: "a",
+      optional: true,
+    },
+  ],
+  "latin-american-spanish-influenced-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "r-tap",
+      tier: "balanced",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+    {
+      id: "v-b",
+      tier: "strong",
+      pattern: /v/gu,
+      replacement: "b",
+      optional: true,
+    },
+  ],
+  "european-portuguese-influenced-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    {
+      id: "r-tap",
+      tier: "balanced",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "near-close-i",
+      tier: "strong",
+      pattern: /ɪ/gu,
+      replacement: "i",
+      optional: true,
+    },
+  ],
+  "cantonese-influenced-english": [
+    { id: "theta-s", tier: "light", pattern: /θ/gu, replacement: "s" },
+    { id: "eth-z", tier: "balanced", pattern: /ð/gu, replacement: "z" },
+    {
+      id: "v-glide",
+      tier: "balanced",
+      pattern: /v/gu,
+      replacement: "w",
+      optional: true,
+    },
+    {
+      id: "r-glide",
+      tier: "strong",
+      pattern: /ɹ/gu,
+      replacement: "w",
+      optional: true,
+    },
+  ],
+  "pakistani-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "r-retroflex",
+      tier: "balanced",
+      pattern: /ɹ/gu,
+      replacement: "ɽ",
+      optional: true,
+    },
+    {
+      id: "w-labiodental",
+      tier: "strong",
+      pattern: /w/gu,
+      replacement: "ʋ",
+      optional: true,
+    },
+  ],
+  "bengali-influenced-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "r-tap",
+      tier: "balanced",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+    {
+      id: "v-b",
+      tier: "strong",
+      pattern: /v/gu,
+      replacement: "b",
+      optional: true,
+    },
+  ],
+  "sri-lankan-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    {
+      id: "r-tap",
+      tier: "balanced",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "w-labiodental",
+      tier: "strong",
+      pattern: /w/gu,
+      replacement: "ʋ",
+      optional: true,
+    },
+  ],
+  "dutch-influenced-english": [
+    { id: "w-labiodental", tier: "light", pattern: /w/gu, replacement: "v" },
+    { id: "theta-t", tier: "balanced", pattern: /θ/gu, replacement: "t" },
+    {
+      id: "eth-d",
+      tier: "balanced",
+      pattern: /ð/gu,
+      replacement: "d",
+      optional: true,
+    },
+    {
+      id: "final-d-devoice",
+      tier: "strong",
+      pattern: /d(?=[,.;:!?)]?$)/gu,
+      replacement: "t",
+      optional: true,
+    },
+  ],
+  "nordic-influenced-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    {
+      id: "eth-d",
+      tier: "balanced",
+      pattern: /ð/gu,
+      replacement: "d",
+      optional: true,
+    },
+    {
+      id: "w-labiodental",
+      tier: "balanced",
+      pattern: /w/gu,
+      replacement: "v",
+      optional: true,
+    },
+    {
+      id: "r-tap",
+      tier: "strong",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+  ],
+  "polish-influenced-english": [
+    { id: "w-labiodental", tier: "light", pattern: /w/gu, replacement: "v" },
+    { id: "theta-s", tier: "balanced", pattern: /θ/gu, replacement: "s" },
+    { id: "eth-z", tier: "balanced", pattern: /ð/gu, replacement: "z" },
+    {
+      id: "r-trill",
+      tier: "strong",
+      pattern: /ɹ/gu,
+      replacement: "r",
+      optional: true,
+    },
+  ],
+  "greek-influenced-english": [
+    { id: "w-labiodental", tier: "light", pattern: /w/gu, replacement: "v" },
+    {
+      id: "r-tap",
+      tier: "balanced",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+    {
+      id: "schwa-full",
+      tier: "strong",
+      pattern: /ə/gu,
+      replacement: "a",
+      optional: true,
+    },
+  ],
+  "irish-english": [
+    {
+      id: "theta-t",
+      tier: "light",
+      pattern: /θ/gu,
+      replacement: "t",
+      optional: true,
+    },
+    {
+      id: "eth-d",
+      tier: "balanced",
+      pattern: /ð/gu,
+      replacement: "d",
+      optional: true,
+    },
+    {
+      id: "face-monophthong",
+      tier: "strong",
+      pattern: /eɪ/gu,
+      replacement: "eː",
+      optional: true,
+    },
+  ],
+  "scottish-english": [
+    {
+      id: "face-monophthong",
+      tier: "light",
+      pattern: /eɪ/gu,
+      replacement: "e",
+    },
+    {
+      id: "goat-monophthong",
+      tier: "balanced",
+      pattern: /(?:oʊ|əʊ)/gu,
+      replacement: "o",
+    },
+    {
+      id: "trap-open",
+      tier: "strong",
+      pattern: /æ/gu,
+      replacement: "a",
+      optional: true,
+    },
+  ],
+  "new-zealand-english": [
+    {
+      id: "postvocalic-r-drop",
+      tier: "light",
+      pattern:
+        /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      replacement: "",
+    },
+    { id: "kit-central", tier: "balanced", pattern: /ɪ/gu, replacement: "ə" },
+    {
+      id: "dress-raised",
+      tier: "strong",
+      pattern: /ɛ/gu,
+      replacement: "e",
+      optional: true,
+    },
+    {
+      id: "trap-raised",
+      tier: "strong",
+      pattern: /æ/gu,
+      replacement: "ɛ",
+      optional: true,
+    },
+  ],
+  "caribbean-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "price-monophthong",
+      tier: "strong",
+      pattern: /aɪ/gu,
+      replacement: "aː",
+      optional: true,
+    },
+  ],
+  "north-african-arabic-influenced-english": [
+    { id: "r-tap", tier: "light", pattern: /ɹ/gu, replacement: "ɾ" },
+    {
+      id: "p-b",
+      tier: "balanced",
+      pattern: /p/gu,
+      replacement: "b",
+      optional: true,
+    },
+    {
+      id: "v-f",
+      tier: "strong",
+      pattern: /v/gu,
+      replacement: "f",
+      optional: true,
+    },
+  ],
+  "middle-eastern-arabic-influenced-english": [
+    { id: "r-tap", tier: "light", pattern: /ɹ/gu, replacement: "ɾ" },
+    {
+      id: "p-b",
+      tier: "balanced",
+      pattern: /p/gu,
+      replacement: "b",
+      optional: true,
+    },
+    {
+      id: "near-close-i",
+      tier: "strong",
+      pattern: /ɪ/gu,
+      replacement: "i",
+      optional: true,
+    },
+  ],
+  "persian-influenced-english": [
+    { id: "w-labiodental", tier: "light", pattern: /w/gu, replacement: "v" },
+    { id: "theta-s", tier: "balanced", pattern: /θ/gu, replacement: "s" },
+    {
+      id: "r-tap",
+      tier: "balanced",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+    {
+      id: "eth-z",
+      tier: "strong",
+      pattern: /ð/gu,
+      replacement: "z",
+      optional: true,
+    },
+  ],
+  "turkish-influenced-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "w-labiodental",
+      tier: "balanced",
+      pattern: /w/gu,
+      replacement: "v",
+      optional: true,
+    },
+    {
+      id: "r-tap",
+      tier: "strong",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+  ],
+  "nigerian-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "near-close-i",
+      tier: "strong",
+      pattern: /ɪ/gu,
+      replacement: "i",
+      optional: true,
+    },
+  ],
+  "east-african-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    {
+      id: "r-tap",
+      tier: "balanced",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "near-close-i",
+      tier: "strong",
+      pattern: /ɪ/gu,
+      replacement: "i",
+      optional: true,
+    },
+  ],
+  "south-african-english": [
+    {
+      id: "postvocalic-r-drop",
+      tier: "light",
+      pattern:
+        /(?<=[iɪeɛæaɑɒɔoʊuʌəɚɝɐɜɞœøyɨʉ])ɹ(?=[ptkbdgfvθðszʃʒhmnŋlwj,.;:!?)]|$)/gu,
+      replacement: "",
+    },
+    {
+      id: "trap-raised",
+      tier: "balanced",
+      pattern: /æ/gu,
+      replacement: "ɛ",
+      optional: true,
+    },
+    {
+      id: "face-central",
+      tier: "strong",
+      pattern: /eɪ/gu,
+      replacement: "əɪ",
+      optional: true,
+    },
+  ],
+  "filipino-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "r-tap",
+      tier: "balanced",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+    {
+      id: "v-b",
+      tier: "strong",
+      pattern: /v/gu,
+      replacement: "b",
+      optional: true,
+    },
+  ],
+  "vietnamese-influenced-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "postalveolar-z",
+      tier: "strong",
+      pattern: /ʒ/gu,
+      replacement: "z",
+      optional: true,
+    },
+    {
+      id: "final-z-devoice",
+      tier: "strong",
+      pattern: /z(?=[,.;:!?)]?$)/gu,
+      replacement: "s",
+      optional: true,
+    },
+  ],
+  "thai-influenced-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "v-glide",
+      tier: "balanced",
+      pattern: /v/gu,
+      replacement: "w",
+      optional: true,
+    },
+    {
+      id: "r-lateral",
+      tier: "strong",
+      pattern: /ɹ/gu,
+      replacement: "l",
+      optional: true,
+    },
+  ],
+  "indonesian-influenced-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "r-trill",
+      tier: "balanced",
+      pattern: /ɹ/gu,
+      replacement: "r",
+      optional: true,
+    },
+    {
+      id: "f-p",
+      tier: "strong",
+      pattern: /f/gu,
+      replacement: "p",
+      optional: true,
+    },
+  ],
+  "singapore-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "schwa-full",
+      tier: "strong",
+      pattern: /ə/gu,
+      replacement: "a",
+      optional: true,
+    },
+  ],
+  "pacific-island-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    {
+      id: "r-tap",
+      tier: "balanced",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    {
+      id: "price-monophthong",
+      tier: "strong",
+      pattern: /aɪ/gu,
+      replacement: "aː",
       optional: true,
     },
   ],

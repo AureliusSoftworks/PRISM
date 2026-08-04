@@ -155,10 +155,7 @@ import {
 } from "./prismBrand";
 import SlateWorkspace from "./SlateWorkspace";
 import PrismCompanion from "./PrismCompanion";
-import {
-  PrismRefractTarget,
-  type PrismRefractBinding,
-} from "./prismRefract";
+import { PrismRefractTarget, type PrismRefractBinding } from "./prismRefract";
 import { registerSpatialUiSfx } from "./spatialUiSfx";
 import PrismHandoffCanvas from "./PrismHandoffCanvas";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
@@ -182,7 +179,6 @@ import { BotCreationRitual } from "./BotCreationRitual";
 import { AdjustmentPad } from "./AdjustmentPad";
 import { PronunciationAtlas } from "./PronunciationAtlas";
 import {
-  pronunciationAtlasValueText,
   type PronunciationAtlasSelection,
 } from "./pronunciationAtlasModel";
 import {
@@ -511,7 +507,6 @@ import {
 import {
   applyModelChoiceForResponseMode,
   applyOnlineModelChoice,
-  autoResponseModeForProvider,
   blocksOnlineCapabilities,
   combinedOnlineModelOptions,
   fallbackOnlineModelIdsForProvider,
@@ -521,16 +516,13 @@ import {
   resolveModelChoiceForResponseMode,
   responseModeForProvider,
   type AutoResponseMode,
+  type ResponseMode,
 } from "./providerMode";
 import {
-  autoFallbackAvailableForPrimary,
-  autoFallbackModeSelectable,
   autoFallbackChainWithAddedEntry,
   autoFallbackChainWithEntry,
   autoFallbackChainWithoutEntry,
   autoFallbackPrimaryForSelection,
-  autoFallbackResponseModeForSend,
-  autoFallbackSelectablePrimary,
   decodeAutoFallbackPickerValue,
   encodeAutoFallbackPickerValue,
 } from "./autoFallbackSettings";
@@ -963,7 +955,6 @@ import {
   randomBotProfile,
   resolveBotFaceStyle,
   PRISM_EULA_VERSION,
-  PRISM_MODEL_VARIABILITY_NOTICE,
   PRISM_DEFAULT_STORY_THEME,
   COFFEE_GROUP_ETHOS_MAX_LENGTH,
   COFFEE_TOPIC_MAX_LENGTH,
@@ -1361,8 +1352,8 @@ import {
   normalizeCoffeeMessageDelivery,
 } from "./coffee-voice-text";
 import {
-  COFFEE_ACCOUNT_DEFAULT_MODEL_LABEL,
-  COFFEE_ACCOUNT_DEFAULT_MODEL_META,
+  COFFEE_AUTO_MODEL_LABEL,
+  COFFEE_AUTO_MODEL_META,
   coffeeModelPickerAriaLabel,
 } from "./coffee-model-controls";
 import { shouldShowEmptyStateHueLens } from "./hue-lens-visibility";
@@ -2461,8 +2452,6 @@ const MEMORY_TOAST_DISMISS_MS = 7000;
 const MEMORY_TOAST_REARM_MS = 2500;
 const MEMORY_TOAST_VISIBLE_LIMIT = 3;
 const LOCAL_COMMAND_TOAST_DISMISS_MS = 3600;
-const ZEN_HEADER_REVEAL_EDGE_PX = 72;
-const ZEN_HEADER_REVEAL_HOLD_MS = 3200;
 const COMPOSER_HISTORY_LIMIT = 50;
 
 // ── Prism logo letter palette ─────────────────────────────────────────
@@ -10858,7 +10847,6 @@ interface UserSettings {
   experimentalAllModelEffortEnabled: boolean;
   modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
   psychicModeEnabled: boolean;
-  autoModeEnabled: boolean;
   autoFallbackChain: AutoFallbackChainV1 | null;
   legacyAutoFallbackModelSuggestion?: string;
   hiddenBotModelIds: string[];
@@ -10883,13 +10871,13 @@ interface UserSettings {
   elevenLabsVoiceModel: string;
   elevenLabsVoiceCollectionId: string;
   ollamaModel: string;
-  /** Server OLLAMA_AUXILIARY_MODEL — Prism internal LLM when not overridden below. */
+  /** Server OLLAMA_AUXILIARY_MODEL — dedicated local Prism model when not overridden below. */
   ollamaAuxiliaryModel: string;
   secondaryOllamaHost: string;
   comfyUiHost: string;
   /** Empty string → use server auxiliary model (see ollamaAuxiliaryModel). */
   prismDefaultLlmModel: string;
-  /** Empty → use hub chat model for turns that may emit in-thread image tool JSON. */
+  /** Legacy compatibility only; image-intent routing now follows prismDefaultLlmModel. */
   prismImageToolLlmModel: string;
   /** Kept empty in the UI/API; the built-in Default assistant only exposes avatar customization. */
   prismDefaultBotName: string;
@@ -12262,14 +12250,11 @@ function BotVoiceEditor({
           <span>Voice</span>
           <strong>
             {normalizedProfile.enabled
-              ? `${fallbackVoiceLabel} · ${premiumVoiceLabel}`
-              : "Voice is muted"}
+              ? effectiveElevenLabsVoiceValue
+                ? `${premiumVoiceLabel} · ElevenLabs`
+                : `${fallbackVoiceLabel} · Local`
+              : "Muted"}
           </strong>
-          <small>
-            {normalizedProfile.enabled
-              ? "English and Premium identities share the performance controls below."
-              : "You can keep editing the voice while it is silent."}
-          </small>
         </div>
         <button
           type="button"
@@ -12294,10 +12279,7 @@ function BotVoiceEditor({
       >
         <div className={styles.botVoiceSectionHeading}>
           <div>
-            <span id="bot-voice-source-title">Voice route</span>
-            <small>
-              Two explicit identities with the local voice as fallback.
-            </small>
+            <span id="bot-voice-source-title">Choose a voice</span>
           </div>
           <span
             className={styles.botVoiceSourceStatus}
@@ -12330,7 +12312,7 @@ function BotVoiceEditor({
                 <Globe size={15} strokeWidth={2.2} />
               </span>
               <div>
-                <small>PREMIUM VOICE · ELEVENLABS</small>
+                <small>ELEVENLABS</small>
                 <strong>
                   {effectiveElevenLabsVoiceValue
                     ? premiumVoiceLabel
@@ -12339,9 +12321,9 @@ function BotVoiceEditor({
               </div>
               <em>
                 {elevenLabsVoiceIdOverrideValue
-                  ? "ID override"
+                  ? "Voice ID"
                   : selectedElevenLabsVoiceValue
-                    ? "Selected"
+                    ? "Active"
                     : "Optional"}
               </em>
             </div>
@@ -12389,14 +12371,17 @@ function BotVoiceEditor({
                   </option>
                 ))}
               </select>
-              <small>
-                {identityCatalog.elevenLabs.loading
-                  ? "Loading ElevenLabs voices…"
-                  : elevenLabsVoiceIdOverrideValue
-                    ? "Choose a library voice here to replace the exact Voice ID."
-                    : identityCatalog.elevenLabs.message ||
-                      "Choose from your connected ElevenLabs library."}
-              </small>
+              {identityCatalog.elevenLabs.loading ||
+              elevenLabsVoiceIdOverrideValue ||
+              identityCatalog.elevenLabs.message ? (
+                <small>
+                  {identityCatalog.elevenLabs.loading
+                    ? "Loading ElevenLabs voices…"
+                    : elevenLabsVoiceIdOverrideValue
+                      ? "Choose a library voice to replace the Voice ID."
+                      : identityCatalog.elevenLabs.message}
+                </small>
+              ) : null}
             </div>
 
             <details
@@ -12406,8 +12391,7 @@ function BotVoiceEditor({
             >
               <summary>
                 <span>
-                  <strong>Use an exact Voice ID</strong>
-                  <small>Portable override for advanced setups</small>
+                  <strong>Exact Voice ID</strong>
                 </span>
                 <em>
                   {elevenLabsVoiceIdOverrideValue ? "Active" : "Advanced"}
@@ -12504,8 +12488,7 @@ function BotVoiceEditor({
               <details className={styles.botVoiceDeliveryDisclosure}>
                 <summary>
                   <span>
-                    <strong>Fine-tune delivery</strong>
-                    <small>Stability and ElevenLabs v3 cues</small>
+                    <strong>ElevenLabs controls</strong>
                   </span>
                   <em>Advanced</em>
                 </summary>
@@ -12642,14 +12625,14 @@ function BotVoiceEditor({
                 <Volume2 size={15} strokeWidth={2.2} />
               </span>
               <div>
-                <small>ENGLISH VOICE · LOCAL</small>
+                <small>LOCAL · FALLBACK</small>
                 <strong>{fallbackVoiceLabel}</strong>
               </div>
-              <em>English</em>
+              <em>{effectiveElevenLabsVoiceValue ? "Fallback" : "Active"}</em>
             </summary>
             <div className={styles.botVoiceFallbackBody}>
               <div className={styles.botVoiceIdentityField}>
-                <label htmlFor="bot-local-voice-engine">Local engine</label>
+                <label htmlFor="bot-local-voice-engine">Engine</label>
                 <select
                   id="bot-local-voice-engine"
                   aria-label="Local voice engine"
@@ -12673,7 +12656,7 @@ function BotVoiceEditor({
                       capability?.available !== true;
                     const label =
                       preference === "inherit"
-                        ? "Account default"
+                        ? "Auto"
                         : preference === "auto"
                           ? "Auto"
                           : preference === "voice-plus"
@@ -12691,15 +12674,9 @@ function BotVoiceEditor({
                     );
                   })}
                 </select>
-                <small>
-                  Auto keeps this character identity while choosing the best
-                  healthy offline engine for each utterance.
-                </small>
               </div>
               <div className={styles.botVoiceIdentityField}>
-                <label htmlFor="bot-local-voice-accent">
-                  Genuine accent source
-                </label>
+                <label htmlFor="bot-local-voice-accent">Base accent</label>
                 <select
                   id="bot-local-voice-accent"
                   aria-label="Local voice accent source"
@@ -12722,13 +12699,9 @@ function BotVoiceEditor({
                     </option>
                   ))}
                 </select>
-                <small>
-                  Only voices genuinely recorded for this accent appear below.
-                  Dialogue spelling never changes.
-                </small>
               </div>
               <div className={styles.botVoiceIdentityField}>
-                <span>Vocal presentation</span>
+                <span>Presentation</span>
                 <div
                   className={styles.botVoicePresentationChips}
                   role="group"
@@ -12766,10 +12739,6 @@ function BotVoiceEditor({
                     ),
                   )}
                 </div>
-                <small>
-                  Installed operating-system voices appear under Any because
-                  their presentation is not reported reliably.
-                </small>
               </div>
               <div className={styles.botVoiceIdentityField}>
                 <label htmlFor="bot-system-voice-identity">
@@ -12832,36 +12801,22 @@ function BotVoiceEditor({
                     </option>
                   ))}
                 </select>
-                <small>
-                  {identityCatalog.system.loading
-                    ? "Loading available voices…"
-                    : normalizedProfile.systemVoiceName &&
-                        !selectedSystemVoiceAvailable
-                      ? `${normalizedProfile.systemVoiceName} is preserved in ${localAccentLocale} until it returns.`
-                      : filteredSystemVoiceOptions.length === 0
-                        ? "No installed voice reports this accent and presentation. Choose Any or another accent."
-                        : identityCatalog.system.message ||
-                          "Used for English and whenever Premium cannot play."}
-                </small>
-              </div>
-              <div
-                className={styles.botVoiceIdentityField}
-                data-bot-pronunciation-atlas-summary="true"
-              >
-                <span>Accent performance</span>
-                <strong>
-                  {pronunciationAtlasValueText(
-                    pronunciationAtlasSelectionForProfile(normalizedProfile),
-                  )}
-                </strong>
-                <small>
-                  Use the Pronunciation Atlas in the Vocalizer console above.
-                  {normalizedProfile.systemVoiceName
-                    ? " Installed voices retain their genuine pronunciation."
-                    : normalizedProfile.localEnginePreference === "voice-plus"
-                      ? " Forced Voice+ suspends approximate pronunciation until qualified phoneme support is available."
-                      : " Auto uses Instant when an approximate influence is active."}
-                </small>
+                {identityCatalog.system.loading ||
+                (normalizedProfile.systemVoiceName &&
+                  !selectedSystemVoiceAvailable) ||
+                filteredSystemVoiceOptions.length === 0 ||
+                identityCatalog.system.message ? (
+                  <small>
+                    {identityCatalog.system.loading
+                      ? "Loading voices…"
+                      : normalizedProfile.systemVoiceName &&
+                          !selectedSystemVoiceAvailable
+                        ? `${normalizedProfile.systemVoiceName} is unavailable but preserved.`
+                        : filteredSystemVoiceOptions.length === 0
+                          ? "No matching voice. Try Any or another base accent."
+                          : identityCatalog.system.message}
+                  </small>
+                ) : null}
               </div>
             </div>
           </details>
@@ -12875,7 +12830,6 @@ function BotVoiceEditor({
         <div className={styles.botVoiceSectionHeading}>
           <div>
             <span id="bot-voice-performance-title">Performance</span>
-            <small>Shape delivery and choose an effect for every voice.</small>
           </div>
         </div>
         <div className={styles.botVoicePerformanceCard}>
@@ -12929,9 +12883,7 @@ function BotVoiceEditor({
                 VOICE_EFFECT_DESCRIPTIONS[
                   normalizeVoiceEffect(normalizedProfile.elevenLabsEffect)
                 ]
-              }{" "}
-              Applied locally to PRISM, operating-system, ElevenLabs, Babble,
-              and Bottish playback. Basic compatibility playback stays clean.
+              }
             </small>
           </div>
           <div className={styles.botVoiceControls}>
@@ -12985,16 +12937,12 @@ function BotVoiceEditor({
               </label>
             ))}
           </div>
-          <small className={styles.botVoiceControlHint}>
-            Pace is the only duration control. Pitch shapes every voice; Lilt
-            adds a local melodic contour.
-          </small>
         </div>
       </section>
 
       <label className={styles.botVoiceIdentityField}>
         <span>
-          Voice preview line{" "}
+          Sample line{" "}
           {onRandomizePreviewLine ? (
             <BotFieldRandomizerButton
               label="voice preview line"
@@ -13008,20 +12956,17 @@ function BotVoiceEditor({
           type="text"
           value={previewLine}
           maxLength={240}
-          placeholder="Generated automatically when left blank"
+          placeholder="Use the bot's default sample"
           onChange={(event) => onPreviewLineChange(event.currentTarget.value)}
           aria-label="Voice preview line"
         />
-        <small>
-          This is the bot&apos;s editable voice sample, not a conversation
-          memory.
-        </small>
       </label>
 
       <footer className={styles.botVoiceActions}>
         <div
           className={styles.botVoicePreviewStatus}
           data-state={previewFeedback.state}
+          data-empty={previewFeedback.message ? undefined : "true"}
           role={previewFeedback.state === "error" ? "alert" : "status"}
           aria-live="polite"
           aria-atomic="true"
@@ -13035,10 +12980,7 @@ function BotVoiceEditor({
               <Volume2 size={13} strokeWidth={2.3} />
             )}
           </span>
-          <small>
-            {previewFeedback.message ||
-              `English previews ${fallbackVoiceLabel}. Premium checks ElevenLabs directly and never substitutes fallback audio.`}
-          </small>
+          <small>{previewFeedback.message}</small>
         </div>
         <div className={styles.botVoicePreviewActions}>
           <button
@@ -13052,7 +12994,7 @@ function BotVoiceEditor({
               ? "Generating audio sample…"
               : englishPreviewState === "playing"
                 ? `Playing ${fallbackVoiceLabel}…`
-                : "Preview English"}
+                : "Preview local"}
           </button>
           <button
             type="button"
@@ -13072,7 +13014,7 @@ function BotVoiceEditor({
               ? "Contacting ElevenLabs…"
               : previewing === "premium" && englishPreviewState === "playing"
                 ? `Playing ${premiumVoiceLabel}…`
-                : "Preview Premium"}
+                : "Preview premium"}
           </button>
           <button type="button" onClick={() => void previewVoice("babble")}>
             <Play size={13} strokeWidth={2.3} aria-hidden="true" />
@@ -14988,8 +14930,7 @@ const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_DARK = 44;
 const BOT_PANEL_COLOR_HARMONY_LIGHTNESS_TARGET_LIGHT = 46;
 
 const AUTO_MODEL_CHOICE = "auto";
-const ACCOUNT_DEFAULT_MODEL_LABEL = "Account default";
-const DEFAULT_BOT_CHAT_MODEL_CHOICE = DISABLED_MODEL_CHOICE;
+const DEFAULT_BOT_CHAT_MODEL_CHOICE = AUTO_MODEL_CHOICE;
 const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
   auto: "Default",
   none: "None",
@@ -15020,8 +14961,26 @@ function ModelEffortIcon({
     />
   );
 }
-const AUTO_MODEL_SETTINGS_SUBTEXT = "uses the model saved in Settings";
-const DISABLED_MODEL_SETTINGS_SUBTEXT = "do not use this model lane";
+
+function HollowTriangleEffortIcon(): React.JSX.Element {
+  return (
+    <svg
+      className={styles.modelEffortAutoIcon}
+      width="18"
+      height="18"
+      viewBox="0 0 18 18"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="1.7"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <path d="M9 2.75 15.25 14H2.75L9 2.75Z" />
+    </svg>
+  );
+}
+const AUTO_MODEL_SETTINGS_SUBTEXT =
+  "Prism chooses the best model and effort for each request";
 const ELEVENLABS_IMAGE_MENU_DISABLED_REASON =
   "ElevenLabs Image & Video - integration pending";
 const SETTINGS_OPENAI_KEY_FIELD = "openAiApiKey";
@@ -15029,9 +14988,6 @@ const SETTINGS_ANTHROPIC_KEY_FIELD = "anthropicApiKey";
 const SETTINGS_ELEVENLABS_KEY_FIELD = "elevenLabsApiKey";
 const SETTINGS_BRAVE_SEARCH_KEY_FIELD = "braveSearchApiKey";
 const SETTINGS_PRISM_DEFAULT_LLM_MODEL_FIELD = "prismDefaultLlmModel";
-const SETTINGS_PRISM_IMAGE_TOOL_LLM_MODEL_FIELD = "prismImageToolLlmModel";
-const SETTINGS_PREFERRED_LOCAL_MODEL_FIELD = "preferredLocalModel";
-const SETTINGS_PREFERRED_ONLINE_MODEL_FIELD = "preferredOnlineModel";
 const SETTINGS_PREFERRED_LOCAL_IMAGE_MODEL_FIELD = "preferredLocalImageModel";
 const SETTINGS_PREFERRED_OPENAI_IMAGE_MODEL_FIELD = "preferredOpenAiImageModel";
 const SETTINGS_PREFERRED_ZEN_WALLPAPER_LOCAL_IMAGE_MODEL_FIELD =
@@ -15676,12 +15632,12 @@ function formatBotParameterValue(value: number, digits = 2): string {
 
 function normalizeModelChoice(value: string | null | undefined): string {
   const trimmed = value?.trim() ?? "";
-  if (isDisabledModelChoice(trimmed)) return DISABLED_MODEL_CHOICE;
+  if (isDisabledModelChoice(trimmed)) return AUTO_MODEL_CHOICE;
   return trimmed.length > 0 ? trimmed : AUTO_MODEL_CHOICE;
 }
 
 function modelChoiceIsDisabled(value: string | null | undefined): boolean {
-  return normalizeModelChoice(value) === DISABLED_MODEL_CHOICE;
+  return isDisabledModelChoice(value);
 }
 
 function normalizeZenWallpaperOpacitySetting(value: unknown): number {
@@ -16215,23 +16171,6 @@ function resolveCommandCenterModelChoiceForSend(
   return `local:${commandCenterAuxiliaryModelId(settings)}`;
 }
 
-/** Row to badge in chat model menus: the concrete id saved in Settings (no badge when Auto). */
-function chatSettingsSavedDefaultModelId(
-  settings: UserSettings | null,
-  provider: Provider | "online",
-): string | null {
-  if (!settings) return null;
-  const raw =
-    provider === "local"
-      ? settings.preferredLocalModel
-      : settings.preferredOnlineModel;
-  const normalized = normalizeModelChoice(raw);
-  return normalized === AUTO_MODEL_CHOICE ||
-    normalized === DISABLED_MODEL_CHOICE
-    ? null
-    : normalized;
-}
-
 /** Row to badge in image model menus from Settings image preferences. */
 function imageSettingsSavedDefaultModelId(
   settings: UserSettings | null,
@@ -16586,10 +16525,7 @@ function fallbackChatModelOptionsForProvider(
   ) {
     return [];
   }
-  return fallbackOnlineModelIdsForProvider(
-    provider,
-    settings?.preferredOnlineModel,
-  ).map((id, index) => ({
+  return fallbackOnlineModelIdsForProvider(provider, null).map((id, index) => ({
     id,
     label: modelLabelFromId(id),
     provider,
@@ -16659,8 +16595,6 @@ function resolvedAutoPrimaryForComposer(
   return autoFallbackPrimaryForSelection({
     provider,
     modelChoice,
-    preferredLocalModel: settings.preferredLocalModel,
-    preferredOnlineModel: settings.preferredOnlineModel,
     hiddenModelIds: settings.hiddenBotModelIds,
     catalog,
   });
@@ -16670,7 +16604,7 @@ function resolvedAutoPrimaryLabel(
   primary: AutoFallbackModelRef | null,
   options: readonly ModelCatalogEntry[],
 ): string {
-  if (!primary) return ACCOUNT_DEFAULT_MODEL_LABEL;
+  if (!primary) return "Auto";
   return (
     options.find(
       (model) =>
@@ -22980,6 +22914,7 @@ function ComposerBotPicker({
 }: ComposerBotPickerProps): React.JSX.Element {
   const [open, setOpen] = useState(false);
   const [botNameFilter, setBotNameFilter] = useState("");
+  const [hueSortEngaged, setHueSortEngaged] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
   const optionRefs = useRef<Map<string, HTMLButtonElement>>(new Map());
@@ -22996,10 +22931,10 @@ function ComposerBotPicker({
     () =>
       sortBotPickerItems(
         bots,
-        filtersEnabled && hueFilterCenter !== null,
+        filtersEnabled && hueSortEngaged && hueFilterCenter !== null,
         (a, b) => compareBotsByColor(a, b, resolvedTheme, false),
       ),
-    [bots, filtersEnabled, hueFilterCenter, resolvedTheme],
+    [bots, filtersEnabled, hueFilterCenter, hueSortEngaged, resolvedTheme],
   );
   const normalizedBotNameFilter = botNameFilter.trim().toLocaleLowerCase();
   const visibleBots = useMemo(() => {
@@ -23016,7 +22951,9 @@ function ComposerBotPicker({
   const filterSummaryVisible =
     showFilterControls && normalizedBotNameFilter.length > 0;
   const hueFocusBotId = useMemo(() => {
-    if (!filtersEnabled || hueFilterCenter === null) return null;
+    if (!filtersEnabled || !hueSortEngaged || hueFilterCenter === null) {
+      return null;
+    }
     let bestBotId: string | null = null;
     let bestDistance = Infinity;
     for (const bot of visibleBots) {
@@ -23029,7 +22966,7 @@ function ComposerBotPicker({
       }
     }
     return bestBotId;
-  }, [filtersEnabled, hueFilterCenter, visibleBots]);
+  }, [filtersEnabled, hueFilterCenter, hueSortEngaged, visibleBots]);
   const menuOpen = open && !disabled;
   const menuPortalStyle = useComposeMenuPortalStyle(
     menuOpen,
@@ -23039,9 +22976,29 @@ function ComposerBotPicker({
     placement,
   );
 
+  const closeMenu = useCallback((): void => {
+    setOpen(false);
+    setHueSortEngaged(false);
+  }, []);
+
   const toggleMenu = (): void => {
-    setOpen((current) => !current);
+    if (menuOpen) {
+      closeMenu();
+      return;
+    }
+    // A parent hue value may outlive this popover. Each opening still starts
+    // alphabetically until the user moves this menu's hue slider again.
+    setHueSortEngaged(false);
+    setOpen(true);
   };
+
+  const handleMenuHueChange = useCallback(
+    (next: number | null): void => {
+      setHueSortEngaged(next !== null);
+      onHueChange?.(next);
+    },
+    [onHueChange],
+  );
 
   // Outside-click closes. Using mousedown (not click) so a click that
   // lands on a menu option isn't intercepted by this handler.
@@ -23052,11 +23009,11 @@ function ComposerBotPicker({
       const target = event.target as Node;
       if (triggerRef.current?.contains(target)) return;
       if (menuRef.current?.contains(target)) return;
-      setOpen(false);
+      closeMenu();
     };
     document.addEventListener("mousedown", handler);
     return () => document.removeEventListener("mousedown", handler);
-  }, [menuOpen]);
+  }, [closeMenu, menuOpen]);
 
   // Escape closes and returns focus to the trigger so keyboard users
   // stay oriented in the compose rail instead of dropping focus to
@@ -23066,28 +23023,28 @@ function ComposerBotPicker({
     const handler = (event: KeyboardEvent) => {
       if (event.key === "Escape") {
         event.stopPropagation();
-        setOpen(false);
+        closeMenu();
         triggerRef.current?.focus();
       }
     };
     document.addEventListener("keydown", handler);
     return () => document.removeEventListener("keydown", handler);
-  }, [menuOpen]);
+  }, [closeMenu, menuOpen]);
 
   // If the control becomes disabled while the menu is open (e.g.,
   // send-in-flight disables mid-thread bot switching), close it so a
   // stale floating popover isn't left stranded on screen.
   useEffect(() => {
     if (!disabled || !open) return;
-    const timeout = window.setTimeout(() => setOpen(false), 0);
+    const timeout = window.setTimeout(closeMenu, 0);
     return () => window.clearTimeout(timeout);
-  }, [disabled, open]);
+  }, [closeMenu, disabled, open]);
 
   useEffect(() => {
     if (dismissPopoversSignal === undefined) return;
-    setOpen(false);
+    closeMenu();
     setBotNameFilter("");
-  }, [dismissPopoversSignal]);
+  }, [closeMenu, dismissPopoversSignal]);
 
   useEffect(() => {
     if (!menuOpen || !hueFocusBotId) return;
@@ -23102,7 +23059,7 @@ function ComposerBotPicker({
   const pick = (nextValue: string): void => {
     onChange(nextValue);
     setBotNameFilter("");
-    setOpen(false);
+    closeMenu();
     triggerRef.current?.focus();
   };
 
@@ -23207,7 +23164,7 @@ function ComposerBotPicker({
                     bots={bots}
                     filteredBots={visibleBots}
                     hueFilterCenter={hueFilterCenter}
-                    onHueChange={onHueChange}
+                    onHueChange={handleMenuHueChange}
                     hueLensAvailable={hueLensAvailable}
                     trackGradient={hueLensTrackGradient}
                     trackSegments={hueLensTrackSegments}
@@ -23637,29 +23594,14 @@ interface ComposerModelPickerProps {
   showAutoOption?: boolean;
   /** Value emitted by the synthetic Auto row. Defaults to `auto`. */
   autoOptionValue?: string;
-  /** Visible label for the synthetic Auto row. Defaults to Account default. */
+  /** Visible label for the contextual Auto row. */
   autoOptionLabel?: string;
-  /** Closed-trigger label when the synthetic Auto row is selected. */
-  autoOptionTriggerLabel?: string;
   /** Replaces the default Auto subtitle when a surface needs context-specific copy. */
   autoOptionMetaOverride?: string;
-  /** Shows a synthetic Disabled row when this picker supports shutting off a lane. */
-  showDisabledOption?: boolean;
-  /** Value emitted by the synthetic Disabled row. Defaults to `disabled`. */
-  disabledOptionValue?: string;
-  /** Visible label for the synthetic Disabled row. Defaults to Disabled. */
-  disabledOptionLabel?: string;
-  /** Replaces the default Disabled subtitle when a surface needs context-specific copy. */
-  disabledOptionMetaOverride?: string;
   /** Synthetic value used by batch edit when selected bots disagree. */
   mixedOptionValue?: string;
   /** Visible label for the synthetic mixed state. */
   mixedOptionLabel?: string;
-  /**
-   * When set, the "Default" badge follows this id (user’s saved Settings choice).
-   * `null` = never badge a concrete row. Omit to fall back to catalog `isDefault`.
-   */
-  settingsDefaultModelId?: string | null;
   effortControl?: ComposerModelPickerEffortControl;
   statusMessage?: ComposerModelPickerStatusMessage;
   /** Increment to close floating picker menus from the parent shell. */
@@ -23725,16 +23667,10 @@ function ComposerModelPicker({
   menuClassName,
   showAutoOption = true,
   autoOptionValue = AUTO_MODEL_CHOICE,
-  autoOptionLabel = ACCOUNT_DEFAULT_MODEL_LABEL,
-  autoOptionTriggerLabel,
+  autoOptionLabel: _autoOptionLabel = "Auto",
   autoOptionMetaOverride,
-  showDisabledOption = false,
-  disabledOptionValue = DISABLED_MODEL_CHOICE,
-  disabledOptionLabel = "Disabled",
-  disabledOptionMetaOverride,
   mixedOptionValue,
   mixedOptionLabel = BOT_BATCH_MIXED_LABEL,
-  settingsDefaultModelId,
   effortControl,
   statusMessage,
   dismissPopoversSignal,
@@ -23753,15 +23689,17 @@ function ComposerModelPicker({
   const effortWheelLockedRef = useRef(false);
   const formValueRef = useRef<HTMLInputElement>(null);
   const autoMetaShown = autoOptionMetaOverride ?? AUTO_MODEL_SETTINGS_SUBTEXT;
-  const disabledMetaShown =
-    disabledOptionMetaOverride ?? DISABLED_MODEL_SETTINGS_SUBTEXT;
-  const disabledSelected = value === disabledOptionValue;
+  const autoLabelShown = "Auto";
+  const normalizedValue = isDisabledModelChoice(value)
+    ? autoOptionValue
+    : value;
+  const autoSelected = normalizedValue === autoOptionValue;
   const mixedSelected =
-    mixedOptionValue !== undefined && value === mixedOptionValue;
+    mixedOptionValue !== undefined && normalizedValue === mixedOptionValue;
   const selectedModel =
-    (value === autoOptionValue || disabledSelected || mixedSelected
+    (autoSelected || mixedSelected
       ? null
-      : options.find((model) => model.id === value)) ??
+      : options.find((model) => model.id === normalizedValue)) ??
     options.find((model) => model.isDefault) ??
     options[0] ??
     null;
@@ -23769,11 +23707,9 @@ function ComposerModelPicker({
     ? "Loading models…"
     : mixedSelected
       ? mixedOptionLabel
-      : value === autoOptionValue
-        ? (autoOptionTriggerLabel ?? autoOptionLabel)
-        : disabledSelected
-          ? disabledOptionLabel
-          : (selectedModel?.label ?? value);
+      : autoSelected
+        ? autoLabelShown
+        : (selectedModel?.label ?? normalizedValue);
   const visualProvider =
     selectedProvider ?? selectedModel?.provider ?? provider;
   const interactionDisabled = disabled || loading;
@@ -23787,11 +23723,14 @@ function ComposerModelPicker({
   );
   const effortInteractionDisabled =
     loading ||
+    autoSelected ||
     !effortControl ||
     effortControl.disabled === true ||
     effortControl.capability.mode === "unavailable";
   const effortDisabledReason = effortInteractionDisabled
-    ? (effortControl?.disabledReason ??
+    ? autoSelected
+      ? "Effort is chosen automatically for each request."
+      : (effortControl?.disabledReason ??
       effortControl?.capability.disabledReason ??
       (loading ? "Models are still loading." : "Effort is unavailable."))
     : undefined;
@@ -23803,8 +23742,9 @@ function ComposerModelPicker({
     COMPOSE_MENU_PORTAL_Z_INDEX_MODEL,
     placement,
   );
-  const effortLabel =
-    !effortControl || effortControl.capability.mode === "unavailable"
+  const effortLabel = autoSelected
+    ? "Chosen automatically"
+    : !effortControl || effortControl.capability.mode === "unavailable"
       ? "Not adjustable"
       : REASONING_EFFORT_LABELS[effortControl.value];
   const effortLevels = effortControl
@@ -23819,23 +23759,16 @@ function ComposerModelPicker({
   const selectableModelValues = useMemo(
     () => [
       ...(showAutoOption ? [autoOptionValue] : []),
-      ...(showDisabledOption ? [disabledOptionValue] : []),
       ...options.flatMap((model) => (model.disabledReason ? [] : [model.id])),
     ],
-    [
-      autoOptionValue,
-      disabledOptionValue,
-      options,
-      showAutoOption,
-      showDisabledOption,
-    ],
+    [autoOptionValue, options, showAutoOption],
   );
   const activeHighlightedModelValue = selectableModelValues.includes(
     highlightedModelValue ?? "",
   )
     ? highlightedModelValue
-    : selectableModelValues.includes(value)
-      ? value
+    : selectableModelValues.includes(normalizedValue)
+      ? normalizedValue
       : (selectableModelValues[0] ?? null);
 
   const moveModelHighlight = useCallback(
@@ -23904,8 +23837,8 @@ function ComposerModelPicker({
     if (!trigger) return;
     const openQuickPicker = (): void => {
       setHighlightedModelValue(
-        selectableModelValues.includes(value)
-          ? value
+        selectableModelValues.includes(normalizedValue)
+          ? normalizedValue
           : (selectableModelValues[0] ?? null),
       );
       setPickerOpenState({
@@ -23920,7 +23853,7 @@ function ComposerModelPicker({
         MODEL_PICKER_QUICK_OPEN_EVENT,
         openQuickPicker,
       );
-  }, [selectableModelValues, value]);
+  }, [normalizedValue, selectableModelValues]);
 
   useEffect(() => {
     if (
@@ -23931,9 +23864,7 @@ function ComposerModelPicker({
     }
     const returnToPointerBrowsing = (): void => {
       setPickerOpenState((current) =>
-        current.surface
-          ? { ...current, interactionMode: "pointer" }
-          : current,
+        current.surface ? { ...current, interactionMode: "pointer" } : current,
       );
     };
     window.addEventListener("mousemove", returnToPointerBrowsing, {
@@ -23961,10 +23892,7 @@ function ComposerModelPicker({
       ) {
         return;
       }
-      const direction = modelEffortWheelDirection(
-        event.deltaX,
-        event.deltaY,
-      );
+      const direction = modelEffortWheelDirection(event.deltaX, event.deltaY);
       if (direction === 0) return;
       event.preventDefault();
       event.stopPropagation();
@@ -24037,11 +23965,11 @@ function ComposerModelPicker({
   useEffect(() => {
     if (!menuOpen) return;
     setHighlightedModelValue(
-      selectableModelValues.includes(value)
-        ? value
+      selectableModelValues.includes(normalizedValue)
+        ? normalizedValue
         : (selectableModelValues[0] ?? null),
     );
-  }, [menuOpen, selectableModelValues, value]);
+  }, [menuOpen, normalizedValue, selectableModelValues]);
 
   useEffect(() => {
     if (
@@ -24062,11 +23990,7 @@ function ComposerModelPicker({
       option?.scrollIntoView({ block: "nearest" });
     });
     return () => window.cancelAnimationFrame(frame);
-  }, [
-    activeHighlightedModelValue,
-    menuOpen,
-    pickerOpenState.interactionMode,
-  ]);
+  }, [activeHighlightedModelValue, menuOpen, pickerOpenState.interactionMode]);
 
   useEffect(() => {
     if (!menuOpen && !effortMenuOpen) return;
@@ -24137,6 +24061,7 @@ function ComposerModelPicker({
   }, [effortControl?.targetKey, effortControl?.capability.mode]);
 
   const pick = (nextValue: string): void => {
+    if (isDisabledModelChoice(nextValue)) return;
     if (formValueRef.current) {
       formValueRef.current.value = nextValue;
     }
@@ -24151,7 +24076,7 @@ function ComposerModelPicker({
     if (formValueRef.current) {
       formValueRef.current.value = nextValue;
     }
-    if (nextValue !== value) onChange(nextValue);
+    if (nextValue !== normalizedValue) onChange(nextValue);
     if (!effortInteractionDisabled) {
       setPickerOpenState({
         surface: "effort",
@@ -24180,7 +24105,7 @@ function ComposerModelPicker({
     ) {
       event.preventDefault();
       event.stopPropagation();
-      pick(activeHighlightedModelValue ?? value);
+      pick(activeHighlightedModelValue ?? normalizedValue);
       return;
     }
     if (event.key === "Tab" && !effortInteractionDisabled) {
@@ -24207,8 +24132,8 @@ function ComposerModelPicker({
     event.preventDefault();
     event.stopPropagation();
     setHighlightedModelValue(
-      selectableModelValues.includes(value)
-        ? value
+      selectableModelValues.includes(normalizedValue)
+        ? normalizedValue
         : (selectableModelValues[0] ?? null),
     );
     setPickerOpenState({
@@ -24220,9 +24145,9 @@ function ComposerModelPicker({
 
   useEffect(() => {
     if (formValueRef.current) {
-      formValueRef.current.value = value;
+      formValueRef.current.value = normalizedValue;
     }
-  }, [value]);
+  }, [normalizedValue]);
 
   return (
     <div
@@ -24232,9 +24157,7 @@ function ComposerModelPicker({
       data-open={menuOpen ? "true" : undefined}
       data-picker-surface={pickerOpenState.surface ?? undefined}
       data-picker-interaction-mode={
-        pickerOpenState.surface
-          ? pickerOpenState.interactionMode
-          : undefined
+        pickerOpenState.surface ? pickerOpenState.interactionMode : undefined
       }
       data-has-effort={effortControl ? "true" : undefined}
       data-provider={visualProvider}
@@ -24245,7 +24168,7 @@ function ComposerModelPicker({
           ref={formValueRef}
           type="hidden"
           name={formName}
-          defaultValue={value}
+          defaultValue={normalizedValue}
         />
       ) : null}
       <button
@@ -24306,7 +24229,9 @@ function ComposerModelPicker({
             className={styles.composeModelEffortTrigger}
             data-tutorial-target="model-effort"
             data-adjustable={
-              effortControl.capability.mode !== "unavailable" ? "true" : "false"
+              !autoSelected && effortControl.capability.mode !== "unavailable"
+                ? "true"
+                : "false"
             }
             data-effort-level={effortControl.value}
             data-generating={generating ? "true" : undefined}
@@ -24324,12 +24249,21 @@ function ComposerModelPicker({
             disabled={effortInteractionDisabled}
             aria-haspopup="dialog"
             aria-expanded={effortMenuOpen}
-            aria-label={`Effort: ${effortLabel}`}
+            aria-label={
+              autoSelected
+                ? "Effort chosen automatically"
+                : `Effort: ${effortLabel}`
+            }
             aria-busy={generating ? "true" : undefined}
           >
+            {autoSelected ? (
+              <HollowTriangleEffortIcon />
+            ) : (
             <ModelEffortIcon level={effortControl.value} />
+            )}
             <span className={styles.srOnly}>{effortLabel}</span>
-            {effortControl.capability.mode !== "unavailable" ? (
+            {!autoSelected &&
+            effortControl.capability.mode !== "unavailable" ? (
               <span
                 className={styles.composeModelEffortTriggerChevron}
                 aria-hidden="true"
@@ -24403,12 +24337,12 @@ function ComposerModelPicker({
                       ? "true"
                       : undefined
                   }
-                  aria-selected={value === autoOptionValue}
+                  aria-selected={normalizedValue === autoOptionValue}
                   onClick={() => pick(autoOptionValue)}
                 >
                   <span className={styles.composeModelOptionMain}>
                     <span className={styles.composeModelOptionName}>
-                      {autoOptionLabel}
+                      {autoLabelShown}
                     </span>
                     <span className={styles.composeModelOptionMeta}>
                       {autoMetaShown}
@@ -24416,43 +24350,11 @@ function ComposerModelPicker({
                   </span>
                 </button>
               )}
-              {showDisabledOption && (
-                <button
-                  key={disabledOptionValue}
-                  type="button"
-                  className={`${styles.composeBotOption} ${styles.composeModelOption}`}
-                  role="option"
-                  data-model-value={disabledOptionValue}
-                  data-highlighted={
-                    pickerOpenState.interactionMode === "keyboard" &&
-                    activeHighlightedModelValue === disabledOptionValue
-                      ? "true"
-                      : undefined
-                  }
-                  aria-selected={value === disabledOptionValue}
-                  onClick={() => pick(disabledOptionValue)}
-                >
-                  <span className={styles.composeModelOptionMain}>
-                    <span className={styles.composeModelOptionName}>
-                      {disabledOptionLabel}
-                    </span>
-                    <span className={styles.composeModelOptionMeta}>
-                      {disabledMetaShown}
-                    </span>
-                  </span>
-                </button>
-              )}
               {options.map((model) => {
-                const isSelected = value === model.id;
+                const isSelected = normalizedValue === model.id;
                 const isUnavailable = Boolean(model.disabledReason);
                 const rowEffort = effortControl?.rowValueForModel(model);
-                const showSettingsDefaultBadge =
-                  settingsDefaultModelId !== undefined &&
-                  settingsDefaultModelId !== null &&
-                  model.id === settingsDefaultModelId;
-                const showCatalogDefaultBadge =
-                  settingsDefaultModelId === undefined &&
-                  Boolean(model.isDefault);
+                const showCatalogDefaultBadge = Boolean(model.isDefault);
                 return (
                   <button
                     key={`${model.provider}:${model.id}`}
@@ -24488,9 +24390,7 @@ function ComposerModelPicker({
                       )}
                     </span>
                     <span className={styles.composeModelOptionStatus}>
-                      {!isUnavailable &&
-                        (showSettingsDefaultBadge ||
-                          showCatalogDefaultBadge) && (
+                      {!isUnavailable && showCatalogDefaultBadge && (
                           <span className={styles.composeModelDefaultBadge}>
                             Default
                           </span>
@@ -31588,7 +31488,6 @@ function ZenLiveBotPresencePlate({
         "data-choice-composer-hidden",
         "data-session-active",
         "data-transcript-open",
-        "data-zen-header-hidden",
       ],
     });
     window.addEventListener("transitionend", scheduleClamp, true);
@@ -37407,10 +37306,7 @@ function BotAvatarCustomGlyphCapture({
   };
 
   return (
-    <BotAvatarRefractRandomizer
-      label={ariaLabel}
-      onRandomize={onRandomize}
-    >
+    <BotAvatarRefractRandomizer label={ariaLabel} onRandomize={onRandomize}>
       {(binding) => (
     <div
       {...binding}
@@ -38933,9 +38829,7 @@ function BotAvatarCoordinateControl({
     if (count <= 1) return current;
     const currentIndex = Math.round((current - min) / step);
     const offset = 1 + Math.floor(Math.random() * (count - 1));
-    return Number(
-      (min + ((currentIndex + offset) % count) * step).toFixed(4),
-    );
+    return Number((min + ((currentIndex + offset) % count) * step).toFixed(4));
   };
 
   return (
@@ -38960,7 +38854,11 @@ function BotAvatarCoordinateControl({
           <small>{botAvatarCoordinateLabel(visualX, y)}</small>
         </span>
         <span className={styles.botAvatarAtomicFieldActions}>
-          <button type="button" onClick={onReset} aria-label={`Reset ${label}`}>
+              <button
+                type="button"
+                onClick={onReset}
+                aria-label={`Reset ${label}`}
+              >
             <RotateCcw size={12} strokeWidth={2.4} aria-hidden="true" />
           </button>
         </span>
@@ -39883,8 +39781,7 @@ function BotAvatarMouthRotationWheel({
     const currentIndex = Math.round(
       (normalizedValue - minRotation) / rotationStep,
     );
-    const offset =
-      count > 1 ? 1 + Math.floor(Math.random() * (count - 1)) : 0;
+    const offset = count > 1 ? 1 + Math.floor(Math.random() * (count - 1)) : 0;
     onChange(minRotation + ((currentIndex + offset) % count) * rotationStep);
   };
 
@@ -39950,7 +39847,10 @@ function BotAvatarMouthRotationWheel({
             if (event.key === "ArrowLeft" || event.key === "ArrowDown") {
               event.preventDefault();
               nudge(-1, event.shiftKey);
-            } else if (event.key === "ArrowRight" || event.key === "ArrowUp") {
+                } else if (
+                  event.key === "ArrowRight" ||
+                  event.key === "ArrowUp"
+                ) {
               event.preventDefault();
               nudge(1, event.shiftKey);
             } else if (event.key === "Home") {
@@ -40509,7 +40409,10 @@ function BotAvatarFaceControls({
               }
             >
               {(binding) => (
-            <fieldset {...binding} className={styles.botAvatarThinkingControl}>
+                <fieldset
+                  {...binding}
+                  className={styles.botAvatarThinkingControl}
+                >
               <legend>Thinking animation</legend>
               <div className={styles.botAvatarThinkingPresetStrip}>
                 {BOT_AVATAR_THINKING_PRESETS.map((preset) => (
@@ -40569,7 +40472,11 @@ function BotAvatarFaceControls({
                   aria-label="Reset thinking frames"
                   title="Reset thinking frames"
                 >
-                  <RotateCcw size={13} strokeWidth={2.3} aria-hidden="true" />
+                      <RotateCcw
+                        size={13}
+                        strokeWidth={2.3}
+                        aria-hidden="true"
+                      />
                 </button>
               </div>
               {customThinkingActive ? (
@@ -40592,10 +40499,14 @@ function BotAvatarFaceControls({
                         spellCheck={false}
                         aria-label={`Custom thinking frame ${index + 1}`}
                         onChange={(event) =>
-                          updateThinkingFrame(index, event.currentTarget.value)
+                              updateThinkingFrame(
+                                index,
+                                event.currentTarget.value,
+                              )
                         }
                         onPaste={(event) => {
-                          const pastedFrames = botAvatarThinkingFramesFromPaste(
+                              const pastedFrames =
+                                botAvatarThinkingFramesFromPaste(
                             event.clipboardData.getData("text"),
                           );
                           if (!pastedFrames) return;
@@ -40719,7 +40630,10 @@ function BotAvatarFaceControls({
                   }
                 >
                   {(binding) => (
-                <div {...binding} className={styles.botAvatarEyeCountControl}>
+                    <div
+                      {...binding}
+                      className={styles.botAvatarEyeCountControl}
+                    >
                   <span>Eye count</span>
                   <div
                     className={styles.botAvatarGlyphModeControl}
@@ -40774,7 +40688,10 @@ function BotAvatarFaceControls({
                 }}
               >
                 {(binding) => (
-              <fieldset {...binding} className={styles.botAvatarCustomChoiceGroup}>
+                  <fieldset
+                    {...binding}
+                    className={styles.botAvatarCustomChoiceGroup}
+                  >
                 <legend>Blink</legend>
                 <div className={styles.botAvatarCustomChoiceStrip}>
                   {BOT_FACE_BLINK_BAR_VALUES.map((blinkBar) => (
@@ -42832,6 +42749,9 @@ function BotAvatarCustomizerModal({
                 className={styles.botAvatarGlobalAdjustmentConsole}
                 data-foundry-module={activeFoundryModule.id}
                 data-populated={activeFoundryModulePopulated ? "true" : "false"}
+                data-adjustment-target={
+                  activeAdjustmentControl ? activeAdjustmentTarget : undefined
+                }
                 data-adjustment-enabled={
                   activeAdjustmentControl ? "true" : undefined
                 }
@@ -42856,7 +42776,7 @@ function BotAvatarCustomizerModal({
                     </small>
                     <strong>{activeFoundryModule.label}</strong>
                   </span>
-                  {activeAdjustmentOptions.length > 0 ? (
+                  {activeAdjustmentTarget === "pronunciation" ? null : activeAdjustmentOptions.length > 0 ? (
                     <span
                       className={styles.botAvatarGlobalAdjustmentTargets}
                       role="group"
@@ -45176,11 +45096,16 @@ function HomeContent(): React.JSX.Element {
     useState<Record<Provider, string>>(
       createDefaultChatModelChoiceByProvider(),
     );
+  const [
+    sharedAppletModelChoiceByProvider,
+    setSharedAppletModelChoiceByProvider,
+  ] = useState<Record<Provider, string>>(
+    createDefaultChatModelChoiceByProvider(),
+  );
   const [viewSwitchTarget, setViewSwitchTarget] = useState<View | null>(null);
   const [viewSwitchOverlayPhase, setViewSwitchOverlayPhase] = useState<
     "hidden" | "entering" | "visible" | "fading"
   >("hidden");
-  const [zenHeaderVisible, setZenHeaderVisible] = useState(true);
   const viewSwitchOverlayHideTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
@@ -45188,102 +45113,15 @@ function HomeContent(): React.JSX.Element {
     typeof setTimeout
   > | null>(null);
   const viewSwitchOverlayEnterFrameRef = useRef<number | null>(null);
-  const zenHeaderAutoHideTimerRef = useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
-  const zenHeaderAutoHideArmedRef = useRef(false);
-  const zenHeaderPinnedRef = useRef(false);
   const pendingPrivateExitOnChatHomeRef = useRef(false);
-  const clearZenHeaderAutoHideTimer = useCallback(() => {
-    if (zenHeaderAutoHideTimerRef.current) {
-      clearTimeout(zenHeaderAutoHideTimerRef.current);
-      zenHeaderAutoHideTimerRef.current = null;
-    }
-  }, []);
-  const scheduleZenHeaderAutoHide = useCallback(() => {
-    if (view !== "chat") return;
-    if (!zenHeaderAutoHideArmedRef.current) return;
-    clearZenHeaderAutoHideTimer();
-    zenHeaderAutoHideTimerRef.current = setTimeout(() => {
-      if (zenHeaderPinnedRef.current) {
-        setZenHeaderVisible((current) => (current ? current : true));
-        zenHeaderAutoHideTimerRef.current = null;
-        return;
-      }
-      setZenHeaderVisible(false);
-      zenHeaderAutoHideTimerRef.current = null;
-    }, ZEN_HEADER_REVEAL_HOLD_MS);
-  }, [clearZenHeaderAutoHideTimer, view]);
-  const revealZenHeaderTemporarily = useCallback(() => {
-    if (view !== "chat") return;
-    setZenHeaderVisible(true);
-    scheduleZenHeaderAutoHide();
-  }, [scheduleZenHeaderAutoHide, view]);
-  const showZenHeaderWhileInteracting = useCallback(() => {
-    if (view !== "chat") return;
-    clearZenHeaderAutoHideTimer();
-    setZenHeaderVisible(true);
-  }, [clearZenHeaderAutoHideTimer, view]);
+  // Kept as call-site seams while the surrounding conversation transitions
+  // settle; the canonical applet navbar is persistent and never auto-hides.
   const revealZenHeaderForFreshSurface = useCallback(() => {
-    if (view !== "chat") return;
-    zenHeaderAutoHideArmedRef.current = false;
-    clearZenHeaderAutoHideTimer();
-    setZenHeaderVisible(true);
-  }, [clearZenHeaderAutoHideTimer, view]);
+    // Persistent by design.
+  }, []);
   const hideZenHeaderForConversationAction = useCallback(() => {
-    if (view !== "chat") return;
-    zenHeaderAutoHideArmedRef.current = true;
-    clearZenHeaderAutoHideTimer();
-    if (zenHeaderPinnedRef.current) {
-      setZenHeaderVisible((current) => (current ? current : true));
-      return;
-    }
-    setZenHeaderVisible(false);
-  }, [clearZenHeaderAutoHideTimer, view]);
-  const handleZenSurfacePointerMove = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      if (event.pointerType !== "mouse") return;
-      if (zenHeaderVisible) return;
-      if (event.clientY > ZEN_HEADER_REVEAL_EDGE_PX) return;
-      revealZenHeaderTemporarily();
-    },
-    [revealZenHeaderTemporarily, zenHeaderVisible],
-  );
-  const handleZenSurfacePointerDownCapture = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      if (event.pointerType === "mouse") return;
-      if (zenHeaderVisible) return;
-      if (event.clientY > ZEN_HEADER_REVEAL_EDGE_PX) return;
-      revealZenHeaderTemporarily();
-    },
-    [revealZenHeaderTemporarily, zenHeaderVisible],
-  );
-  const handleZenHeaderPointerEnter = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      if (event.pointerType !== "mouse") return;
-      showZenHeaderWhileInteracting();
-    },
-    [showZenHeaderWhileInteracting],
-  );
-  const handleZenHeaderPointerLeave = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      if (event.pointerType !== "mouse") return;
-      scheduleZenHeaderAutoHide();
-    },
-    [scheduleZenHeaderAutoHide],
-  );
-  const handleZenHeaderFocusCapture = useCallback(() => {
-    showZenHeaderWhileInteracting();
-  }, [showZenHeaderWhileInteracting]);
-  const handleZenHeaderBlurCapture = useCallback(
-    (event: React.FocusEvent<HTMLElement>) => {
-      const nextFocus = event.relatedTarget;
-      if (nextFocus instanceof Node && event.currentTarget.contains(nextFocus))
-        return;
-      scheduleZenHeaderAutoHide();
-    },
-    [scheduleZenHeaderAutoHide],
-  );
+    // Persistent by design.
+  }, []);
   const clearViewSwitchOverlayTimers = useCallback(() => {
     if (viewSwitchOverlayHideTimerRef.current) {
       clearTimeout(viewSwitchOverlayHideTimerRef.current);
@@ -45298,13 +45136,6 @@ function HomeContent(): React.JSX.Element {
       viewSwitchOverlayEnterFrameRef.current = null;
     }
   }, []);
-  useEffect(() => {
-    if (view === "chat") return;
-    zenHeaderAutoHideArmedRef.current = false;
-    clearZenHeaderAutoHideTimer();
-    setZenHeaderVisible(true);
-  }, [clearZenHeaderAutoHideTimer, view]);
-  useEffect(() => clearZenHeaderAutoHideTimer, [clearZenHeaderAutoHideTimer]);
   const triggerConversationModeExitCompaction = useCallback(
     (conversationId: string, sourceMode: "zen" | "chat" | "sandbox") => {
       void api(
@@ -45436,8 +45267,7 @@ function HomeContent(): React.JSX.Element {
   const [user, setUser] = useState<SessionUser | null>(null);
   const userRef = useRef<SessionUser | null>(null);
   userRef.current = user;
-  const [keyboardShortcutPlatform, setKeyboardShortcutPlatform] =
-    useState("");
+  const [keyboardShortcutPlatform, setKeyboardShortcutPlatform] = useState("");
   const [keyboardShortcuts, setKeyboardShortcuts] =
     useState<PrismKeyboardShortcutPreferencesV1>(() =>
       defaultPrismKeyboardShortcuts(""),
@@ -46120,13 +45950,8 @@ function HomeContent(): React.JSX.Element {
         AUTO_MODEL_CHOICE,
       );
       const provider = primary?.provider ?? settings.preferredProvider;
-      const savedModelId =
-        provider === "local"
-          ? settings.preferredLocalModel
-          : settings.preferredOnlineModel;
       const modelId =
         primary?.model ||
-        savedModelId?.trim() ||
         defaultModelChoiceForProvider(modelCatalog, settings, provider);
       return modelEffortTargetForSelection({
         provider,
@@ -46165,9 +45990,7 @@ function HomeContent(): React.JSX.Element {
         return;
       }
       if (event.key !== "ArrowLeft" && event.key !== "ArrowRight") return;
-      const levels = modelEffortSliderLevels(
-        modelEffortHudTarget.capability,
-      );
+      const levels = modelEffortSliderLevels(modelEffortHudTarget.capability);
       if (levels.length <= 1) return;
       event.preventDefault();
       const current = savedModelReasoningEffort(
@@ -46231,10 +46054,7 @@ function HomeContent(): React.JSX.Element {
         ? elevenLabsCreditCheckAvailability({
             keySource: settings.elevenLabsApiKeySource,
             blocksOnlineCapabilities: blocksOnlineCapabilities(
-              autoResponseModeForProvider(
-                settings.preferredProvider,
-                settings.autoModeEnabled === true,
-              ),
+              responseModeForProvider(settings.preferredProvider),
             ),
           })
         : {
@@ -46375,14 +46195,6 @@ function HomeContent(): React.JSX.Element {
   ] = useState<Provider>("local");
   const [desktopFirstRunAtmosphereStyle, setDesktopFirstRunAtmosphereStyle] =
     useState<HubAtmosphereStyle>(() => normalizeHubAtmosphereStyle(undefined));
-  const [
-    desktopFirstRunPreferredLocalModel,
-    setDesktopFirstRunPreferredLocalModel,
-  ] = useState("");
-  const [
-    desktopFirstRunPreferredOnlineModel,
-    setDesktopFirstRunPreferredOnlineModel,
-  ] = useState("");
   const [desktopFirstRunStepBusy, setDesktopFirstRunStepBusy] = useState(false);
   const [desktopFirstRunStepError, setDesktopFirstRunStepError] = useState<
     string | null
@@ -46687,8 +46499,10 @@ function HomeContent(): React.JSX.Element {
   const [modelRevealMessageId, setModelRevealMessageId] = useState<
     string | null
   >(null);
-  const [expandedPsychicAssistantMessageId, setExpandedPsychicAssistantMessageId] =
-    useState<string | null>(null);
+  const [
+    expandedPsychicAssistantMessageId,
+    setExpandedPsychicAssistantMessageId,
+  ] = useState<string | null>(null);
   const [copiedMessageId, setCopiedMessageId] = useState<string | null>(null);
   const copiedMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
@@ -48574,7 +48388,7 @@ function HomeContent(): React.JSX.Element {
     coffeeModelChoiceByProvider,
   );
   coffeeModelChoiceByProviderWriteRef.current = coffeeModelChoiceByProvider;
-  const coffeeResponseModeForSendRef = useRef<AutoResponseMode>("local");
+  const coffeeResponseModeForSendRef = useRef<ResponseMode>("local");
   /** Per-thread compose model picks (Chat + Sandbox); keyed by `conversationModelScopeKey`. */
   const conversationModelChoiceByScopeRef = useRef<
     Map<string, Record<Provider, string>>
@@ -48598,9 +48412,9 @@ function HomeContent(): React.JSX.Element {
       openai: AUTO_MODEL_CHOICE,
       anthropic: AUTO_MODEL_CHOICE,
     });
-  // Do not sync this from `settings.preferred*ImageModel`: "Auto" in the header means
-  // "follow the chain" (picker → account default in Settings → catalog). Copying
-  // the account default into state would replace the Auto label with a concrete id.
+  // Do not sync this from `settings.preferred*ImageModel`: image Auto follows
+  // its own image-only settings and catalog. Copying a saved image preference
+  // into state would replace the Auto label with a concrete id.
   // Active hue lens center, in degrees on the 360° color wheel. `null`
   // means "show all bots" for the pre-chat starter-grid filter. After a
   // chat has messages, the compact bot popout seeds this to a random
@@ -49432,12 +49246,6 @@ function HomeContent(): React.JSX.Element {
   const [botProfileBuilderOpen, setBotProfileBuilderOpen] = useState(false);
   const [botAiParametersModalOpen, setBotAiParametersModalOpen] =
     useState(false);
-  const [botPreferredModelsModalOpen, setBotPreferredModelsModalOpen] =
-    useState(false);
-  /** Which page is visible inside the bot model / image routing UI. */
-  const [botModelRoutingPage, setBotModelRoutingPage] = useState<
-    "chat" | "image"
-  >("chat");
   const [settingsAboutModalOpen, setSettingsAboutModalOpen] = useState(false);
   const [settingsHostsModalOpen, setSettingsHostsModalOpen] = useState(false);
   const [settingsDefaultsModalOpen, setSettingsDefaultsModalOpen] =
@@ -49791,7 +49599,6 @@ function HomeContent(): React.JSX.Element {
       setColorWheelOpen(false);
       setBotProfileBuilderOpen(false);
       setBotAiParametersModalOpen(false);
-      setBotPreferredModelsModalOpen(false);
       if (advanced) {
         setNewBotSystemPrompt(
           serializeStoredBotPrompt(
@@ -50658,7 +50465,6 @@ function HomeContent(): React.JSX.Element {
         "data-choice-composer-hidden",
         "data-session-active",
         "data-transcript-open",
-        "data-zen-header-hidden",
       ],
     });
     window.addEventListener("resize", scheduleMeasure);
@@ -50675,17 +50481,6 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     if (sidebarOpen || panel !== null) setChatOverflowMenuOpen(false);
   }, [sidebarOpen, panel]);
-
-  useEffect(() => {
-    if (!botPreferredModelsModalOpen) return;
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        setBotPreferredModelsModalOpen(false);
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [botPreferredModelsModalOpen]);
 
   useEffect(() => {
     if (!settingsAboutModalOpen) return;
@@ -51581,8 +51376,6 @@ function HomeContent(): React.JSX.Element {
   // transient UI so reopening a panel doesn't resurrect stale state.
   const resetPanelTransientState = useCallback(() => {
     setColorWheelOpen(false);
-    setBotPreferredModelsModalOpen(false);
-    setBotModelRoutingPage("chat");
     setSettingsAboutModalOpen(false);
     setSettingsHostsModalOpen(false);
     setSettingsDefaultsModalOpen(false);
@@ -52046,16 +51839,6 @@ function HomeContent(): React.JSX.Element {
     setDesktopFirstRunAtmosphereStyle(
       normalizeHubAtmosphereStyle(settings.atmosphereStyle),
     );
-    setDesktopFirstRunPreferredLocalModel(
-      modelChoiceIsDisabled(settings.preferredLocalModel)
-        ? ""
-        : settings.preferredLocalModel.trim(),
-    );
-    setDesktopFirstRunPreferredOnlineModel(
-      modelChoiceIsDisabled(settings.preferredOnlineModel)
-        ? ""
-        : settings.preferredOnlineModel.trim(),
-    );
   }, [desktopFirstRunChecklistOpen, firstRunSetupPending, settings]);
 
   const goToDesktopFirstRunStep = useCallback(
@@ -52187,10 +51970,6 @@ function HomeContent(): React.JSX.Element {
       keyProvider = "elevenlabs";
       keyValue = elevenLabsKey.trim();
       if (keyValue) patch.elevenLabsApiKey = keyValue;
-    } else if (step.id === "local-model") {
-      patch.preferredLocalModel = desktopFirstRunPreferredLocalModel;
-    } else if (step.id === "online-model") {
-      patch.preferredOnlineModel = desktopFirstRunPreferredOnlineModel;
     }
 
     setDesktopFirstRunStepBusy(true);
@@ -52217,15 +51996,11 @@ function HomeContent(): React.JSX.Element {
           body: JSON.stringify(patch),
         });
         await refreshSettings();
-        if (keyProvider || step.id.endsWith("model")) {
+        if (keyProvider) {
           await refreshModels();
         }
       }
-      if (
-        step.id === "atmosphere" ||
-        step.id === "openai" ||
-        step.id === "local-model"
-      ) {
+      if (step.id === "atmosphere" || step.id === "openai") {
         void requestHubAtmosphereGeneration(desktopFirstRunAtmosphereStyle, {
           force: step.id !== "atmosphere",
         });
@@ -53880,7 +53655,7 @@ function HomeContent(): React.JSX.Element {
       selectedModel?.label?.trim() ||
       (visibleModelChoice !== AUTO_MODEL_CHOICE
         ? modelLabelFromId(visibleModelChoice)
-        : ACCOUNT_DEFAULT_MODEL_LABEL);
+        : "Auto");
     return modelTitle;
   }, [
     chatModelChoiceByProvider,
@@ -53999,7 +53774,7 @@ function HomeContent(): React.JSX.Element {
     modelId: string | null | undefined,
   ): string => {
     const trimmed = modelId?.trim() ?? "";
-    if (modelChoiceIsDisabled(trimmed)) return DISABLED_MODEL_CHOICE;
+    if (modelChoiceIsDisabled(trimmed)) return "";
     return trimmed.length > 0 && visibleLocalImageModelIds.has(trimmed)
       ? trimmed
       : "";
@@ -54026,14 +53801,14 @@ function HomeContent(): React.JSX.Element {
     modelId: string | null | undefined,
   ): string => {
     const trimmed = modelId?.trim() ?? "";
-    if (modelChoiceIsDisabled(trimmed)) return DISABLED_MODEL_CHOICE;
+    if (modelChoiceIsDisabled(trimmed)) return "";
     if (!trimmed) return "";
     if (visibleOnlineImageModelIds.has(trimmed)) return trimmed;
     return visibleOpenAiImageModelIdOrEmpty(trimmed);
   };
   const normalizeOnlineImageModelPreference = (modelId: string): string => {
     const trimmed = modelId.trim();
-    if (modelChoiceIsDisabled(trimmed)) return DISABLED_MODEL_CHOICE;
+    if (modelChoiceIsDisabled(trimmed)) return "";
     if (!trimmed || trimmed === AUTO_MODEL_CHOICE) return "";
     return visibleOnlineImageModelIdOrEmpty(trimmed);
   };
@@ -54047,7 +53822,6 @@ function HomeContent(): React.JSX.Element {
   const settingsLocalImageModelChoice = (
     modelId: string | null | undefined,
   ): string => {
-    if (modelChoiceIsDisabled(modelId)) return DISABLED_MODEL_CHOICE;
     return (
       visibleLocalImageModelIdOrEmpty(modelId) || defaultLocalImageModelChoice
     );
@@ -54055,7 +53829,6 @@ function HomeContent(): React.JSX.Element {
   const settingsOnlineImageModelChoice = (
     modelId: string | null | undefined,
   ): string => {
-    if (modelChoiceIsDisabled(modelId)) return DISABLED_MODEL_CHOICE;
     return (
       visibleOnlineImageModelIdOrEmpty(modelId) || defaultOnlineImageModelChoice
     );
@@ -54064,7 +53837,7 @@ function HomeContent(): React.JSX.Element {
     modelId: string | null | undefined,
     fallbackModelId: string,
   ): string => {
-    if (modelChoiceIsDisabled(modelId)) return DISABLED_MODEL_CHOICE;
+    if (modelChoiceIsDisabled(modelId)) return fallbackModelId;
     const trimmed = modelId?.trim() ?? "";
     if (trimmed.length > 0) return trimmed;
     return fallbackModelId;
@@ -54089,34 +53862,6 @@ function HomeContent(): React.JSX.Element {
     ],
   );
 
-  const hubPreferredLocalOptions = useMemo(() => {
-    const choice = visibleModelChoiceForProvider(
-      modelCatalog,
-      settings,
-      "local",
-      settings?.preferredLocalModel,
-    );
-    return includeSelectedModelOption(
-      chatModelOptionsForProvider(modelCatalog, settings, "local"),
-      choice,
-      "local",
-    );
-  }, [modelCatalog, settings]);
-  const hubPreferredOnlineOptions = useMemo(() => {
-    const choice = visiblePreferredOnlineModelChoice(
-      modelCatalog,
-      settings,
-      settings?.preferredOnlineModel,
-    );
-    return withOnlineProviderHostLabels(
-      includeSelectedOnlineModelOption(
-        modelCatalog,
-        settings,
-        onlineModelOptionsForPicker(modelCatalog, settings),
-        choice,
-      ),
-    );
-  }, [modelCatalog, settings]);
   const prismInternalLlmCallOptions = useMemo(
     () =>
       includeSelectedModelOption(
@@ -54124,18 +53869,6 @@ function HomeContent(): React.JSX.Element {
         settingsLocalLlmModelChoice(
           settings?.prismDefaultLlmModel,
           commandCenterAuxiliaryModelId(settings),
-        ),
-        "local",
-      ),
-    [modelCatalog, settings],
-  );
-  const prismImageToolLlmCallOptions = useMemo(
-    () =>
-      includeSelectedModelOption(
-        modelOptionsForProvider(modelCatalog, settings, "local"),
-        settingsLocalLlmModelChoice(
-          settings?.prismImageToolLlmModel,
-          defaultModelChoiceForProvider(modelCatalog, settings, "local"),
         ),
         "local",
       ),
@@ -54180,8 +53913,7 @@ function HomeContent(): React.JSX.Element {
               );
             }}
             options={
-              (settings.preferredZenWallpaperLocalImageModel?.trim() ?? "")
-                .length > 0
+              settings.preferredZenWallpaperLocalImageModel.trim().length > 0
                 ? includeSelectedLocalImageModelOption(
                     localImageModelCatalogEntries,
                     settings.preferredZenWallpaperLocalImageModel,
@@ -54195,8 +53927,6 @@ function HomeContent(): React.JSX.Element {
             placement="down"
             minMenuWidthPx={260}
             showAutoOption={false}
-            showDisabledOption
-            settingsDefaultModelId={null}
             dismissPopoversSignal={composerPopoverDismissSignal}
           />
         </label>
@@ -54248,34 +53978,22 @@ function HomeContent(): React.JSX.Element {
             }
             provider="online"
             loading={modelCatalogLoading}
-            title={
-              hasRunnableOnlineImageModels
-                ? "Online image model."
-                : hasVisibleOnlineImageModels
-                  ? "Online image models are visible, but no runnable model is available yet."
-                  : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
-            }
             ariaLabel="Atmosphere wallpaper online image model"
             formName={SETTINGS_PREFERRED_ZEN_WALLPAPER_OPENAI_IMAGE_MODEL_FIELD}
             placement="down"
             minMenuWidthPx={260}
             showAutoOption={false}
-            showDisabledOption
-            settingsDefaultModelId={null}
             dismissPopoversSignal={composerPopoverDismissSignal}
           />
         </label>
       </div>
     );
   }
-
   const renderDefaultsAndFallbacksControls = (
     variant: "settings" | "modal",
-    options: { includeZenAtmosphere?: boolean } = {},
   ): React.ReactNode => {
     if (!settings) return null;
     const isModal = variant === "modal";
-    const includeZenAtmosphere = options.includeZenAtmosphere !== false;
     const autoFallbackModels = [
       ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
       ...onlineChatModelOptions,
@@ -54304,57 +54022,23 @@ function HomeContent(): React.JSX.Element {
       }),
       label: `${providerDisplayLabel(model.provider)} · ${model.label}`,
     }));
-    const autoPrimaryProviderPreference =
-      view === "coffee"
-        ? coffeeAnyOfflineProtected
-          ? "local"
-          : coffeeProvider
-        : effectivePreferredProvider;
-    const autoPrimaryResolved = resolveModelChoiceForResponseMode({
-      responseMode: responseModeForProvider(autoPrimaryProviderPreference),
-      providerPreference: autoPrimaryProviderPreference,
-      choices:
-        view === "coffee"
-          ? visibleModelChoicesByProvider(
-              modelCatalog,
-              settings,
-              normalizeCoffeeModelChoiceByProvider(coffeeModelChoiceByProvider),
-            )
-          : visibleModelChoicesByProvider(
-              modelCatalog,
-              settings,
-              chatModelChoiceByProvider,
-            ),
-      onlineOptions: onlineChatModelOptions,
-    });
-    const autoPrimary = resolvedAutoPrimaryForComposer(
-      modelCatalog,
-      settings,
-      autoPrimaryResolved.provider,
-      autoPrimaryResolved.modelChoice,
-    );
-    const autoPrimaryLabel = resolvedAutoPrimaryLabel(
-      autoPrimary,
-      autoFallbackModels,
-    );
     const autoFallbackEntries = suggestedChain?.fallbacks ?? [];
     const autoFallbackSelectedValues = new Set(
       autoFallbackEntries.map(encodeAutoFallbackPickerValue),
     );
-    const autoPrimaryValue = autoPrimary
-      ? encodeAutoFallbackPickerValue(autoPrimary)
-      : null;
-    const autoFallbackAddCandidates = autoFallbackRefs.filter(
-      (candidate) =>
-        encodeAutoFallbackPickerValue(candidate) !== autoPrimaryValue,
+    const fallbackRowsForLane = (lane: "local" | "online") =>
+      autoFallbackEntries
+        .map((fallback, index) => ({ fallback, index }))
+        .filter(({ fallback }) =>
+          lane === "local"
+            ? fallback.provider === "local"
+            : fallback.provider !== "local",
     );
-    const autoFallbackCanAdd =
-      autoFallbackEntries.length < AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT &&
-      autoFallbackAddCandidates.some(
-        (candidate) =>
-          !autoFallbackSelectedValues.has(
-            encodeAutoFallbackPickerValue(candidate),
-          ),
+    const fallbackCandidatesForLane = (lane: "local" | "online") =>
+      autoFallbackRefs.filter((candidate) =>
+        lane === "local"
+          ? candidate.provider === "local"
+          : candidate.provider !== "local",
       );
     return (
       <div
@@ -54362,17 +54046,19 @@ function HomeContent(): React.JSX.Element {
           isModal ? styles.settingsModelControlsInModal : ""
         }`}
       >
-        <div className={styles.settingsSystemModelRow}>
+        <div className={styles.settingsPrismModelControl}>
           <div className={styles.settingsModelField}>
             <span className={styles.controlLabelWithInfo}>
-              <span>Prism internal LLM</span>
+              <span>Prism model</span>
               <PanelSectionInfo
                 id={`${variant}-control-info-prism-internal-llm`}
-                label="About Prism internal LLM"
+                label="About Prism model"
                 variant="control"
               >
-                Chooses the local model Prism uses for internal tasks like
-                titles, summaries, routing, and helper inference.
+                Chooses the local-only model used by Prism Home, the floating
+                companion, Wield and Refract, orchestration, titles, summaries,
+                routing, and helper inference. Applet model pickers do not
+                change it.
               </PanelSectionInfo>
             </span>
             <ComposerModelPicker
@@ -54391,7 +54077,7 @@ function HomeContent(): React.JSX.Element {
               options={prismInternalLlmCallOptions}
               provider="local"
               loading={modelCatalogLoading}
-              ariaLabel="Prism internal LLM"
+              ariaLabel="Prism model"
               formName={SETTINGS_PRISM_DEFAULT_LLM_MODEL_FIELD}
               placement="down"
               minMenuWidthPx={260}
@@ -54399,324 +54085,91 @@ function HomeContent(): React.JSX.Element {
               dismissPopoversSignal={composerPopoverDismissSignal}
             />
           </div>
-          <div className={styles.settingsModelField}>
-            <span className={styles.controlLabelWithInfo}>
-              <span>Image-request LLM</span>
-              <PanelSectionInfo
-                id={`${variant}-control-info-image-request-llm`}
-                label="About image-request LLM"
-                variant="control"
-              >
-                Chooses the local chat model used when a conversation turn may
-                call the in-thread image tool.
-              </PanelSectionInfo>
-            </span>
-            <ComposerModelPicker
-              value={settingsLocalLlmModelChoice(
-                settings.prismImageToolLlmModel,
-                defaultModelChoiceForProvider(modelCatalog, settings, "local"),
-              )}
-              onChange={(nextValue) => {
-                const next = nextValue.trim();
-                setSettings((previous) =>
-                  previous
-                    ? { ...previous, prismImageToolLlmModel: next }
-                    : previous,
-                );
-                void persistPrismImageToolLlmModelField(next);
-              }}
-              options={prismImageToolLlmCallOptions}
-              provider="local"
-              loading={modelCatalogLoading}
-              ariaLabel="Image-request LLM"
-              formName={SETTINGS_PRISM_IMAGE_TOOL_LLM_MODEL_FIELD}
-              placement="down"
-              minMenuWidthPx={260}
-              showAutoOption={false}
-              dismissPopoversSignal={composerPopoverDismissSignal}
-            />
-          </div>
-        </div>
-
-        <div className={styles.settingsModelMatrix}>
-          <div className={styles.settingsModelPairHeader} aria-hidden="true">
-            <span>Use case</span>
-            <span>Offline</span>
-            <span>Online</span>
           </div>
 
-          <div className={styles.settingsModelPairRow}>
-            <div className={styles.settingsModelPairTitle}>
-              <span>Chat replies</span>
-            </div>
-            <label className={styles.settingsModelLane}>
-              <span
-                className={`${styles.settingsModelLaneLabel} ${styles.controlLabelWithInfo}`}
-              >
-                <span>Offline model</span>
-                <PanelSectionInfo
-                  id={`${variant}-control-info-default-offline-chat-model`}
-                  label="About default offline chat model"
-                  variant="control"
-                >
-                  Sets the default local chat model for normal assistant
-                  replies.
-                </PanelSectionInfo>
-              </span>
-              <ComposerModelPicker
-                value={visibleConcreteModelChoiceForProvider(
-                  modelCatalog,
-                  settings,
-                  "local",
-                  settings.preferredLocalModel,
-                )}
-                onChange={(next) => {
-                  setSettings((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          preferredLocalModel:
-                            next === AUTO_MODEL_CHOICE ? "" : next,
-                        }
-                      : previous,
-                  );
-                }}
-                options={hubPreferredLocalOptions}
-                provider="local"
-                loading={modelCatalogLoading}
-                ariaLabel="Default offline chat model"
-                formName={SETTINGS_PREFERRED_LOCAL_MODEL_FIELD}
-                placement="down"
-                minMenuWidthPx={260}
-                showAutoOption={false}
-                showDisabledOption
-                settingsDefaultModelId={null}
-                dismissPopoversSignal={composerPopoverDismissSignal}
-              />
-            </label>
-            <label className={styles.settingsModelLane}>
-              <span
-                className={`${styles.settingsModelLaneLabel} ${styles.controlLabelWithInfo}`}
-              >
-                <span>Online model</span>
-                <PanelSectionInfo
-                  id={`${variant}-control-info-default-online-chat-model`}
-                  label="About default online chat model"
-                  variant="control"
-                >
-                  Sets the default online chat model when the response mode is
-                  online.
-                </PanelSectionInfo>
-              </span>
-              <ComposerModelPicker
-                value={visibleConcreteOnlineModelChoice(
-                  modelCatalog,
-                  settings,
-                  settings.preferredOnlineModel,
-                )}
-                onChange={(next) => {
-                  setSettings((previous) =>
-                    previous
-                      ? {
-                          ...previous,
-                          preferredOnlineModel:
-                            next === AUTO_MODEL_CHOICE ? "" : next,
-                        }
-                      : previous,
-                  );
-                }}
-                options={hubPreferredOnlineOptions}
-                provider="online"
-                loading={modelCatalogLoading}
-                ariaLabel="Default online chat model"
-                formName={SETTINGS_PREFERRED_ONLINE_MODEL_FIELD}
-                placement="down"
-                minMenuWidthPx={260}
-                showAutoOption={false}
-                showDisabledOption
-                settingsDefaultModelId={null}
-                dismissPopoversSignal={composerPopoverDismissSignal}
-              />
-            </label>
-          </div>
-
-          <div className={styles.settingsModelPairRow}>
-            <div className={styles.settingsModelPairTitle}>
-              <span>Image generation</span>
-              {renderImageProviderModeToggle(
-                styles.settingsImageProviderMode,
-                false,
-              )}
-              <small>Routes image prompts only.</small>
-            </div>
-            <label className={styles.settingsModelLane}>
-              <span
-                className={`${styles.settingsModelLaneLabel} ${styles.controlLabelWithInfo}`}
-              >
-                <span>Offline model</span>
-                <PanelSectionInfo
-                  id={`${variant}-control-info-default-offline-image-model`}
-                  label="About default offline image model"
-                  variant="control"
-                >
-                  Sets the default local image model used for image generation.
-                </PanelSectionInfo>
-              </span>
-              <ComposerModelPicker
-                value={settingsLocalImageModelChoice(
-                  settings.preferredLocalImageModel,
-                )}
-                onChange={(next) => {
-                  setSettings((previous) =>
-                    previous
-                      ? { ...previous, preferredLocalImageModel: next }
-                      : previous,
-                  );
-                  void persistAccountImageDefaultModelField(
-                    "preferredLocalImageModel",
-                    next,
-                  );
-                }}
-                options={
-                  (settings.preferredLocalImageModel?.trim() ?? "").length > 0
-                    ? includeSelectedLocalImageModelOption(
-                        localImageModelCatalogEntries,
-                        settings.preferredLocalImageModel,
-                      )
-                    : localImageModelCatalogEntries
-                }
-                provider="local"
-                loading={modelCatalogLoading}
-                ariaLabel="Default offline image model"
-                formName={SETTINGS_PREFERRED_LOCAL_IMAGE_MODEL_FIELD}
-                placement="down"
-                minMenuWidthPx={260}
-                showAutoOption={false}
-                showDisabledOption
-                settingsDefaultModelId={null}
-                dismissPopoversSignal={composerPopoverDismissSignal}
-              />
-            </label>
-            <label className={styles.settingsModelLane}>
-              <span
-                className={`${styles.settingsModelLaneLabel} ${styles.controlLabelWithInfo}`}
-              >
-                <span>Online model</span>
-                <PanelSectionInfo
-                  id={`${variant}-control-info-default-online-image-model`}
-                  label="About default online image model"
-                  variant="control"
-                >
-                  Sets the default online image model when online image
-                  generation is available.
-                </PanelSectionInfo>
-              </span>
-              <ComposerModelPicker
-                value={settingsOnlineImageModelChoice(
-                  settings.preferredOpenAiImageModel,
-                )}
-                onChange={(next) => {
-                  const stored = normalizeOnlineImageModelPreference(next);
-                  setSettings((previous) =>
-                    previous
-                      ? { ...previous, preferredOpenAiImageModel: stored }
-                      : previous,
-                  );
-                  void persistAccountImageDefaultModelField(
-                    "preferredOpenAiImageModel",
-                    next,
-                  );
-                }}
-                options={
-                  visibleOnlineImageModelIdOrEmpty(
-                    settings.preferredOpenAiImageModel,
-                  )
-                    ? includeSelectedModelOption(
-                        onlineImageModelCatalogEntries,
-                        visibleOnlineImageModelIdOrEmpty(
-                          settings.preferredOpenAiImageModel,
-                        ),
-                        "openai",
-                      )
-                    : onlineImageModelCatalogEntries
-                }
-                provider="online"
-                loading={modelCatalogLoading}
-                title={
-                  hasRunnableOnlineImageModels
-                    ? "Online image model."
-                    : hasVisibleOnlineImageModels
-                      ? "Online image models are visible, but no runnable model is available yet."
-                      : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
-                }
-                ariaLabel="Default online image model"
-                formName={SETTINGS_PREFERRED_OPENAI_IMAGE_MODEL_FIELD}
-                placement="down"
-                minMenuWidthPx={260}
-                showAutoOption={false}
-                showDisabledOption
-                settingsDefaultModelId={null}
-                dismissPopoversSignal={composerPopoverDismissSignal}
-              />
-            </label>
-          </div>
-
-          {includeZenAtmosphere &&
-            renderZenAtmosphereModelRow(`${variant}-zen-atmosphere`)}
-        </div>
-
-        <div
-          className={styles.settingsFallbackControls}
+        <details
+          className={styles.settingsModelDropdown}
           data-tutorial-target="auto-model-chain"
-        >
-          <div className={styles.settingsFallbackTitle}>Auto model chain</div>
+              >
+          <summary>
+            <span className={styles.settingsDropdownSummaryRow}>
+              <span>Auto recovery</span>
+                <PanelSectionInfo
+                id={`${variant}-control-info-auto-recovery`}
+                label="About Auto recovery"
+                  variant="control"
+                >
+                Optional local and online fallback models used only when the
+                selected model fails or returns invalid output.
+                </PanelSectionInfo>
+              </span>
+            <small>
+              {autoFallbackEntries.length === 0
+                ? "No fallbacks configured"
+                : `${autoFallbackEntries.length} fallback${autoFallbackEntries.length === 1 ? "" : "s"}`}
+            </small>
+          </summary>
+          <div className={styles.settingsFallbackControls}>
           <p className={styles.settingsFallbackDescription}>
-            Primary is the model selected in Zen or Coffee. Auto then tries up
-            to five local or online backups in your chosen order only when an
-            earlier model fails or returns invalid output. A backup matching the
-            current Primary is skipped.
+              Prism tries these in order only after the selected model fails,
+              skips duplicates, and uses no thinking for fallback attempts.
           </p>
+            {(["local", "online"] as const).map((lane) => {
+              const laneLabel = lane === "local" ? "LOCAL" : "ONLINE";
+              const rows = fallbackRowsForLane(lane);
+              const laneCandidates = fallbackCandidatesForLane(lane);
+              const canAdd =
+                rows.length < AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT &&
+                laneCandidates.some(
+                  (candidate) =>
+                    !autoFallbackSelectedValues.has(
+                      encodeAutoFallbackPickerValue(candidate),
+                    ),
+                );
+              return (
+                <div key={lane} className={styles.settingsFallbackLane}>
           <div className={styles.settingsAutoPrimary}>
-            <span>Contextual Primary</span>
-            <strong>
-              {view === "coffee" ? "Coffee" : "Zen"} ·{" "}
-              {providerDisplayLabel(
-                autoPrimary?.provider ?? autoPrimaryResolved.provider,
-              )}{" "}
-              · {autoPrimaryLabel}
-            </strong>
-            <small>Changes with the model selected on that surface.</small>
+                    <span>{laneLabel} fallback chain</span>
+                    <small>
+                      {lane === "local"
+                        ? "Only local Ollama models can run here."
+                        : "Only runnable OpenAI and Anthropic models can run here."}
+                    </small>
           </div>
           <div className={styles.settingsFallbackGrid}>
-            {autoFallbackEntries.map((fallback, index) => {
-              const selectedValue = encodeAutoFallbackPickerValue(fallback);
-              const optionsForSlot = autoFallbackPickerOptions.map((option) =>
+                    {rows.map(({ fallback, index }, laneIndex) => {
+                      const selectedValue =
+                        encodeAutoFallbackPickerValue(fallback);
+                      const optionsForSlot = autoFallbackPickerOptions
+                        .filter((option) =>
+                          lane === "local"
+                            ? option.provider === "local"
+                            : option.provider !== "local",
+                        )
+                        .map((option) =>
                 option.id !== selectedValue &&
                 autoFallbackSelectedValues.has(option.id)
                   ? {
                       ...option,
-                      disabledReason: "Already used elsewhere in this chain",
+                                disabledReason:
+                                  "Already used elsewhere in this chain",
                     }
                   : option,
               );
               return (
                 <div
-                  key={`${index}:${selectedValue}`}
+                          key={`${lane}:${index}:${selectedValue}`}
                   className={styles.settingsFallbackEntry}
                 >
                   <div className={styles.settingsModelField}>
                     <span className={styles.controlLabelWithInfo}>
-                      <span>Fallback {index + 1}</span>
+                              <span>Fallback {laneIndex + 1}</span>
                       <PanelSectionInfo
-                        id={`${variant}-control-info-auto-fallback-${index + 1}`}
-                        label={`About Auto fallback ${index + 1}`}
+                                id={`${variant}-control-info-${lane}-fallback-${laneIndex + 1}`}
+                                label={`About ${laneLabel} fallback ${laneIndex + 1}`}
                         variant="control"
                       >
-                        {`Tried after ${
-                          index === 0
-                            ? "the contextual Primary"
-                            : `Fallback ${index}`
-                        } fails validation.`}
+                                {`Used only after the selected ${laneLabel} model fails validation.`}
                       </PanelSectionInfo>
                     </span>
                     <ComposerModelPicker
@@ -54729,27 +54182,29 @@ function HomeContent(): React.JSX.Element {
                             ? {
                                 ...previous,
                                 legacyAutoFallbackModelSuggestion: "",
-                                autoFallbackChain: autoFallbackChainWithEntry({
+                                        autoFallbackChain:
+                                          autoFallbackChainWithEntry({
                                   chain:
                                     previous.autoFallbackChain ??
                                     suggestedChain,
                                   index,
                                   next: ref,
-                                  available: autoFallbackRefs,
+                                            available: laneCandidates,
                                 }),
                               }
                             : previous,
                         );
                       }}
                       options={optionsForSlot}
-                      provider="online"
+                              provider={lane}
                       loading={modelCatalogLoading}
-                      ariaLabel={`Auto fallback ${index + 1} model`}
+                              ariaLabel={`${laneLabel} fallback ${laneIndex + 1} model`}
                       placement="down"
                       minMenuWidthPx={260}
                       showAutoOption={false}
-                      settingsDefaultModelId={null}
-                      dismissPopoversSignal={composerPopoverDismissSignal}
+                              dismissPopoversSignal={
+                                composerPopoverDismissSignal
+                              }
                     />
                   </div>
                   <button
@@ -54761,17 +54216,19 @@ function HomeContent(): React.JSX.Element {
                           ? {
                               ...previous,
                               legacyAutoFallbackModelSuggestion: "",
-                              autoFallbackChain: autoFallbackChainWithoutEntry({
+                                      autoFallbackChain:
+                                        autoFallbackChainWithoutEntry({
                                 chain:
-                                  previous.autoFallbackChain ?? suggestedChain,
+                                            previous.autoFallbackChain ??
+                                            suggestedChain,
                                 index,
                               }),
                             }
                           : previous,
                       )
                     }
-                    aria-label={`Remove fallback ${index + 1}`}
-                    title={`Remove fallback ${index + 1}`}
+                            aria-label={`Remove ${laneLabel} fallback ${laneIndex + 1}`}
+                            title={`Remove ${laneLabel} fallback ${laneIndex + 1}`}
                   >
                     <X size={14} strokeWidth={2.4} aria-hidden="true" />
                   </button>
@@ -54782,120 +54239,94 @@ function HomeContent(): React.JSX.Element {
           <button
             type="button"
             className={styles.settingsFallbackAddButton}
-            disabled={!autoFallbackCanAdd}
+                    disabled={!canAdd}
             onClick={() =>
               setSettings((previous) =>
                 previous
                   ? {
                       ...previous,
                       legacyAutoFallbackModelSuggestion: "",
-                      autoFallbackChain: autoFallbackChainWithAddedEntry({
-                        chain: previous.autoFallbackChain ?? suggestedChain,
-                        available: autoFallbackAddCandidates,
+                              autoFallbackChain:
+                                autoFallbackChainWithAddedEntry({
+                                  chain:
+                                    previous.autoFallbackChain ??
+                                    suggestedChain,
+                                  available: laneCandidates,
                       }),
                     }
                   : previous,
               )
             }
           >
-            {autoFallbackEntries.length >=
-            AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT
+                    {rows.length >= AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT
               ? "Five fallbacks configured"
-              : "+ Add fallback"}
+                      : `+ Add ${laneLabel} fallback`}
           </button>
         </div>
-
-        <div className={styles.settingsFallbackControls}>
-          <div className={styles.settingsFallbackTitle}>Image fallback</div>
-          <div className={styles.settingsFallbackGrid}>
-            <div className={styles.settingsModelField}>
-              <span className={styles.controlLabelWithInfo}>
-                <span>Offline image model</span>
-                <PanelSectionInfo
-                  id={`${variant}-control-info-image-fallback-model`}
-                  label="About image fallback model"
-                  variant="control"
-                >
-                  Optional local image model used when the primary image request
-                  needs an offline fallback.
-                </PanelSectionInfo>
-              </span>
-              <ComposerModelPicker
-                value={visibleLocalImageModelSelectValue(
-                  settings.lenientLocalImageFallbackModel,
-                )}
-                onChange={(next) =>
-                  setSettings((previous) =>
-                    previous
-                      ? { ...previous, lenientLocalImageFallbackModel: next }
-                      : previous,
-                  )
-                }
-                options={includeSelectedLocalImageModelOption(
-                  localImageModelCatalogEntries,
-                  settings.lenientLocalImageFallbackModel,
-                )}
-                provider="local"
-                loading={modelCatalogLoading}
-                ariaLabel="Image fallback offline model"
-                formName={SETTINGS_LENIENT_LOCAL_IMAGE_FALLBACK_MODEL_FIELD}
-                placement="down"
-                minMenuWidthPx={260}
-                autoOptionValue=""
-                autoOptionLabel="Disabled"
-                autoOptionMetaOverride="no image fallback model"
-                settingsDefaultModelId={null}
-                dismissPopoversSignal={composerPopoverDismissSignal}
-              />
-            </div>
+              );
+            })}
           </div>
+        </details>
         </div>
-
-        {includeZenAtmosphere && (
-          <label
-            className={`${styles.settingsRangeField} ${styles.settingsFieldFull}`}
-          >
-            <span className={styles.settingsRangeHeader}>
-              <span className={styles.controlLabelWithInfo}>
-                <span>Atmosphere wallpaper opacity</span>
-                <PanelSectionInfo
-                  id={`${variant}-control-info-atmosphere-wallpaper-opacity`}
-                  label="About Atmosphere wallpaper opacity"
-                  variant="control"
-                >
-                  Controls how strongly the generated Atmosphere wallpaper shows
-                  behind Zen text.
-                </PanelSectionInfo>
-              </span>
-              <span className={styles.settingsRangeValue}>
-                {formatZenWallpaperOpacity(settings.zenWallpaperOpacity)}
-              </span>
-            </span>
-            <input
-              type="range"
-              min={MIN_ZEN_WALLPAPER_OPACITY}
-              max={MAX_ZEN_WALLPAPER_OPACITY}
-              step={0.01}
-              value={normalizeZenWallpaperOpacitySetting(
-                settings.zenWallpaperOpacity,
-              )}
-              onChange={(event) => {
-                const next = normalizeZenWallpaperOpacitySetting(
-                  event.target.value,
-                );
-                setSettings((previous) =>
-                  previous
-                    ? { ...previous, zenWallpaperOpacity: next }
-                    : previous,
-                );
-                void persistZenWallpaperOpacityField(next);
-              }}
-            />
-          </label>
-        )}
-      </div>
     );
   };
+  const renderComfyUiWorkflowVisibilityControls = (): React.ReactNode => (
+    <details className={styles.settingsModelDropdown}>
+      <summary>
+        <span className={styles.settingsDropdownSummaryRow}>
+          <span>Visible ComfyUI workflows</span>
+                <PanelSectionInfo
+            id="settings-control-info-comfyui-workflow-list"
+            label="About visible ComfyUI workflows"
+                  variant="control"
+                >
+            Controls which detected workflows appear in Images.
+                </PanelSectionInfo>
+              </span>
+        <small>
+          {allComfyUiWorkflowCatalogEntries.length === 0
+            ? "No workflows detected"
+            : settings?.hiddenComfyUiWorkflowIds.length === 0
+              ? "All visible"
+              : `${settings?.hiddenComfyUiWorkflowIds.length ?? 0} hidden`}
+        </small>
+      </summary>
+      {allComfyUiWorkflowCatalogEntries.length > 0 ? (
+        <div className={styles.settingsModelList}>
+          {allComfyUiWorkflowCatalogEntries.map((model) => {
+            const visible = !settings?.hiddenComfyUiWorkflowIds.includes(
+              model.id,
+                );
+            const remotePath = parseComfyUiRemoteWorkflowPath(model.id);
+            return (
+              <label key={model.id} className={styles.settingsModelToggle}>
+                <input
+                  type="checkbox"
+                  checked={visible}
+                  onChange={(event) =>
+                    setComfyUiWorkflowVisible(
+                      model.id,
+                      event.currentTarget.checked,
+                    )
+                  }
+            />
+                <span>{model.label}</span>
+                <small>
+                  {visible ? "Visible in Images" : "Hidden from Images"}
+                  {remotePath ? ` · ${remotePath}` : ""}
+                </small>
+          </label>
+            );
+          })}
+      </div>
+      ) : (
+        <p className={styles.muted} style={{ margin: "10px 12px 12px" }}>
+          Connect ComfyUI and refresh models to choose which workflows appear in
+          Images.
+        </p>
+      )}
+    </details>
+    );
   const showZenAutoRecovery = (recovery: AutoRecoveryTraceV1 | undefined) => {
     if (!recovery) return;
     setZenAutoRecoveryStatus(recovery);
@@ -54994,7 +54425,6 @@ function HomeContent(): React.JSX.Element {
   };
   const renderProviderModeToggle = (
     extraClassName = "",
-    forceAutoAllowed = false,
     disabledReason: string | null = null,
     respectActiveBotLock = true,
   ): React.ReactNode => {
@@ -55005,169 +54435,6 @@ function HomeContent(): React.JSX.Element {
       : (settings?.preferredProvider ?? "local");
     const lockedByActiveBot =
       respectActiveBotLock && activeBot?.online_enabled === 0;
-    const autoAllowed =
-      forceAutoAllowed ||
-      (isZenSurfaceView(view) &&
-        detail?.mode !== "chat" &&
-        detail?.hubRole !== "side");
-    if (autoAllowed && settings) {
-      const binaryMode = responseModeForProvider(providerPreference);
-      const resolvedPrimary = forceAutoAllowed
-        ? binaryMode === "local"
-          ? {
-              provider: "local" as const,
-              modelChoice: visibleConcreteModelChoiceForProvider(
-                modelCatalog,
-                settings,
-                "local",
-                settings.preferredLocalModel,
-              ),
-            }
-          : {
-              provider:
-                onlineChatModelOptions.find(
-                  (model) => model.id === settings.preferredOnlineModel,
-                )?.provider ??
-                inferOnlineProviderForModelId(settings.preferredOnlineModel),
-              modelChoice: visibleConcreteOnlineModelChoice(
-                modelCatalog,
-                settings,
-                settings.preferredOnlineModel,
-              ),
-            }
-        : resolveModelChoiceForResponseMode({
-            responseMode: binaryMode,
-            providerPreference,
-            choices: visibleModelChoicesByProvider(
-              modelCatalog,
-              settings,
-              chatModelChoiceByProvider,
-            ),
-            onlineOptions: onlineChatModelOptions,
-          });
-      const currentPrimary = resolvedAutoPrimaryForComposer(
-        modelCatalog,
-        settings,
-        resolvedPrimary.provider,
-        resolvedPrimary.modelChoice,
-      );
-      const runnable = [
-        ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
-        ...onlineChatModelOptions,
-      ]
-        .filter(
-          (model) => !model.disabledReason && !isDisabledModelChoice(model.id),
-        )
-        .map((model) => ({ provider: model.provider, model: model.id }));
-      const autoPrimaryCandidate = autoFallbackSelectablePrimary({
-        chain: settings.autoFallbackChain,
-        runnable: currentPrimary
-          ? [
-              currentPrimary,
-              ...runnable.filter(
-                (candidate) =>
-                  candidate.provider !== currentPrimary.provider ||
-                  candidate.model !== currentPrimary.model,
-              ),
-            ]
-          : runnable,
-      });
-      const autoSelectable = autoPrimaryCandidate !== null;
-      const responseMode = autoResponseModeForProvider(
-        providerPreference,
-        settings.autoModeEnabled,
-        autoSelectable && !lockedByActiveBot,
-      );
-      const selectMode = (nextMode: AutoResponseMode) => {
-        if (
-          disabledReason ||
-          lockedByActiveBot ||
-          (nextMode === "auto" && !autoSelectable)
-        )
-          return;
-        if (!respectActiveBotLock) {
-          void persistSharedAppletResponseMode(nextMode);
-          return;
-        }
-        void persistAutoModeEnabled(nextMode === "auto");
-        if (
-          nextMode === "auto" &&
-          autoPrimaryCandidate &&
-          (!currentPrimary ||
-            currentPrimary.provider !== autoPrimaryCandidate.provider ||
-            currentPrimary.model !== autoPrimaryCandidate.model)
-        ) {
-          setChatModelChoiceByProvider((previous) => {
-            const next = {
-              ...previous,
-              [autoPrimaryCandidate.provider]: autoPrimaryCandidate.model,
-            };
-            persistChatModelChoicesForActiveScope(next);
-            return next;
-          });
-          void switchProvider(autoPrimaryCandidate.provider);
-        }
-        if (nextMode === "local") void switchProvider("local");
-        if (nextMode === "online") {
-          const nextProvider = forceAutoAllowed
-            ? (onlineChatModelOptions.find(
-                (model) => model.id === settings.preferredOnlineModel,
-              )?.provider ??
-              inferOnlineProviderForModelId(settings.preferredOnlineModel))
-            : resolveModelChoiceForResponseMode({
-                responseMode: "online",
-                providerPreference,
-                choices: visibleModelChoicesByProvider(
-                  modelCatalog,
-                  settings,
-                  chatModelChoiceByProvider,
-                ),
-                onlineOptions: onlineChatModelOptions,
-              }).provider;
-          void switchProvider(nextProvider);
-        }
-      };
-      return (
-        <div className={styles.autoModeStatusCluster}>
-          <div
-            className={`${styles.modeControl} ${styles.autoModeControl} ${extraClassName}`}
-            data-tutorial-target="auto-response-mode"
-            data-response-mode={responseMode}
-            data-auto-recovered={zenAutoRecoveryStatus ? "true" : undefined}
-          >
-            {(["local", "auto", "online"] as const).map((mode) => (
-              <button
-                key={mode}
-                type="button"
-                className={`${styles.autoModeOption} ${
-                  responseMode === mode ? styles.autoModeOptionActive : ""
-                }`}
-                disabled={
-                  Boolean(disabledReason) ||
-                  lockedByActiveBot ||
-                  (mode === "auto" && !autoSelectable)
-                }
-                onClick={() => selectMode(mode)}
-                aria-pressed={responseMode === mode}
-                title={
-                  disabledReason ??
-                  (mode === "auto" && !autoSelectable
-                    ? "Choose at least one runnable fallback model in Settings."
-                    : `${responseModeDisplayLabel(mode)} responses`)
-                }
-              >
-                {responseModeShortLabel(mode)}
-              </button>
-            ))}
-          </div>
-          {zenAutoRecoveryStatus ? (
-            <span className={styles.autoRecoveryStatus} role="status">
-              {autoRecoveryStatusText(zenAutoRecoveryStatus)}
-            </span>
-          ) : null}
-        </div>
-      );
-    }
     const responseMode = responseModeForProvider(providerPreference);
     const isLocal = responseMode === "local";
     const nextMode = nextResponseMode(responseMode);
@@ -55248,107 +54515,76 @@ function HomeContent(): React.JSX.Element {
     surfaceLabel: string,
   ): React.ReactNode => {
     if (!settings) {
-      return renderProviderModeToggle(
-        styles.chatHeaderModeToggle,
-        true,
-        null,
-        false,
-      );
+      return renderProviderModeToggle(styles.chatHeaderModeToggle, null, false);
     }
     const accountProvider = settings.preferredProvider;
-    const binaryResponseMode = responseModeForProvider(accountProvider);
-    const accountModelChoice =
-      binaryResponseMode === "local"
-        ? visibleConcreteModelChoiceForProvider(
+    const responseMode = responseModeForProvider(accountProvider);
+    const resolvedChoice = resolveModelChoiceForResponseMode({
+      responseMode,
+      providerPreference: accountProvider,
+      choices: visibleModelChoicesByProvider(
             modelCatalog,
             settings,
-            "local",
-            settings.preferredLocalModel,
-          )
-        : visibleConcreteOnlineModelChoice(
-            modelCatalog,
-            settings,
-            settings.preferredOnlineModel,
-          );
-    const accountModelProvider: Provider =
-      binaryResponseMode === "local"
-        ? "local"
-        : (onlineChatModelOptions.find(
-            (model) => model.id === accountModelChoice,
-          )?.provider ?? inferOnlineProviderForModelId(accountModelChoice));
+        sharedAppletModelChoiceByProvider,
+      ),
+      onlineOptions: onlineChatModelOptions,
+    });
+    const modelChoice = resolvedChoice.modelChoice;
+    const modelProvider = resolvedChoice.provider;
     const primary = resolvedAutoPrimaryForComposer(
       modelCatalog,
       settings,
-      accountModelProvider,
-      accountModelChoice,
-    );
-    const runnable = [
-      ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
-      ...onlineChatModelOptions,
-    ]
-      .filter(
-        (model) => !model.disabledReason && !isDisabledModelChoice(model.id),
-      )
-      .map((model) => ({ provider: model.provider, model: model.id }));
-    const responseMode = autoResponseModeForProvider(
-      accountProvider,
-      settings.autoModeEnabled,
-      autoFallbackModeSelectable({
-        chain: settings.autoFallbackChain,
-        runnable,
-      }),
+      modelProvider,
+      modelChoice,
     );
     const modelOptions = includeSelectedResponseModeModelOption(
       modelCatalog,
       settings,
       responseMode,
       modelOptionsForResponseMode(modelCatalog, settings, responseMode),
-      accountModelChoice,
-      accountModelProvider,
+      modelChoice,
+      modelProvider,
     );
-    const primaryLabel = resolvedAutoPrimaryLabel(primary, modelOptions);
+    const effortTarget = modelEffortTargetForSelection({
+      provider: primary?.provider ?? modelProvider,
+      modelId: primary?.model ?? modelChoice,
+      options: modelOptions,
+      simulatedEffortEnabled:
+        settings.experimentalAllModelEffortEnabled === true,
+    });
     return (
       <>
-        {renderProviderModeToggle(
-          styles.chatHeaderModeToggle,
-          true,
-          null,
-          false,
-        )}
+        {renderProviderModeToggle(styles.chatHeaderModeToggle, null, false)}
         <ComposerModelPicker
-          value={accountModelChoice}
-          onChange={(nextChoice) =>
-            void persistSharedAppletAccountModelChoice(
-              nextChoice,
+          value={modelChoice}
+          onChange={(nextChoice) => {
+            const applied = applyModelChoiceForResponseMode({
               responseMode,
-              modelOptions,
-            )
+              currentChoices: sharedAppletModelChoiceByProvider,
+              nextChoice,
+              options: modelOptions,
+              providerPreference: accountProvider,
+            });
+            setSharedAppletModelChoiceByProvider(applied.choices);
+            if (
+              nextChoice !== AUTO_MODEL_CHOICE &&
+              applied.provider !== accountProvider
+            ) {
+              void switchProvider(applied.provider);
           }
+          }}
           options={modelOptions}
-          provider={
-            responseMode === "auto"
-              ? "all"
-              : accountModelProvider === "local"
-                ? "local"
-                : "online"
-          }
-          selectedProvider={accountModelProvider}
+          provider={modelProvider === "local" ? "local" : "online"}
+          selectedProvider={modelProvider}
           loading={modelCatalogLoading}
           disabled={!settings}
-          title={
-            responseMode === "auto"
-              ? `${surfaceLabel} primary model for AUTO; shared across applets`
-              : `${surfaceLabel} ${responseModeShortLabel(responseMode)} model; shared across applets`
-          }
-          ariaLabel={`${surfaceLabel} account model; shared across applets`}
+          title={`${surfaceLabel} ${responseModeShortLabel(responseMode)} model`}
+          ariaLabel={`${surfaceLabel} model`}
           placement="down"
           minMenuWidthPx={180}
-          autoOptionLabel="Provider default"
-          autoOptionTriggerLabel={primaryLabel}
-          autoOptionMetaOverride="Uses the provider default for this shared account route."
-          settingsDefaultModelId={accountModelChoice}
+          autoOptionMetaOverride="PRISM chooses the best in-lane model and effort for each request."
+          effortControl={effortControlForTarget(effortTarget)}
           dismissPopoversSignal={composerPopoverDismissSignal}
-          showDisabledOption
         />
       </>
     );
@@ -55456,76 +54692,10 @@ function HomeContent(): React.JSX.Element {
       settings,
       normalizeCoffeeModelChoiceByProvider(coffeeModelChoiceByProvider),
     );
-    const resolvedPrimary = resolveModelChoiceForResponseMode({
-      responseMode: binaryMode,
-      providerPreference: effectiveCoffeeProvider,
-      choices: coffeeChoices,
-      onlineOptions: onlineChatModelOptions,
-    });
-    const currentPrimary = resolvedAutoPrimaryForComposer(
-      modelCatalog,
-      settings,
-      resolvedPrimary.provider,
-      resolvedPrimary.modelChoice,
-    );
-    const runnable = settings
-      ? [
-          ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
-          ...onlineChatModelOptions,
-        ]
-          .filter(
-            (model) =>
-              !model.disabledReason && !isDisabledModelChoice(model.id),
-          )
-          .map((model) => ({ provider: model.provider, model: model.id }))
-      : [];
-    const autoPrimaryCandidate = settings
-      ? autoFallbackSelectablePrimary({
-          chain: settings.autoFallbackChain,
-          runnable: currentPrimary
-            ? [
-                currentPrimary,
-                ...runnable.filter(
-                  (candidate) =>
-                    candidate.provider !== currentPrimary.provider ||
-                    candidate.model !== currentPrimary.model,
-                ),
-              ]
-            : runnable,
-        })
-      : null;
-    const autoSelectable = autoPrimaryCandidate !== null;
-    const responseMode = autoResponseModeForProvider(
-      effectiveCoffeeProvider,
-      settings?.autoModeEnabled === true,
-      autoSelectable && !lockedByProtectedBot,
-    );
+    const responseMode = binaryMode;
     if (settings) {
-      const selectMode = (nextMode: AutoResponseMode) => {
-        if (
-          coffeeHeaderModelControlsLocked() ||
-          lockedByProtectedBot ||
-          (nextMode === "auto" && !autoSelectable)
-        )
-          return;
-        void persistAutoModeEnabled(nextMode === "auto");
-        if (
-          nextMode === "auto" &&
-          autoPrimaryCandidate &&
-          (!currentPrimary ||
-            currentPrimary.provider !== autoPrimaryCandidate.provider ||
-            currentPrimary.model !== autoPrimaryCandidate.model)
-        ) {
-          const nextChoices = {
-            ...coffeeModelChoiceByProvider,
-            [autoPrimaryCandidate.provider]: autoPrimaryCandidate.model,
-          };
-          setCoffeeModelChoiceByProvider(nextChoices);
-          persistCoffeeModelChoicesForScope(nextChoices);
-          setCoffeeProvider(autoPrimaryCandidate.provider);
-          setCoffeeProviderTouched(true);
-        }
-        if (nextMode !== "auto") {
+      const selectMode = (nextMode: "local" | "online") => {
+        if (coffeeHeaderModelControlsLocked() || lockedByProtectedBot) return;
           const nextProvider = resolveModelChoiceForResponseMode({
             responseMode: nextMode,
             providerPreference: effectiveCoffeeProvider,
@@ -55534,7 +54704,6 @@ function HomeContent(): React.JSX.Element {
           }).provider;
           setCoffeeProvider(nextProvider);
           setCoffeeProviderTouched(true);
-        }
       };
       return (
         <div className={styles.autoModeStatusCluster}>
@@ -55544,7 +54713,7 @@ function HomeContent(): React.JSX.Element {
             data-response-mode={responseMode}
             data-protected={lockedByProtectedBot ? "true" : undefined}
           >
-            {(["local", "auto", "online"] as const).map((mode) => (
+            {(["local", "online"] as const).map((mode) => (
               <button
                 key={mode}
                 type="button"
@@ -55552,17 +54721,13 @@ function HomeContent(): React.JSX.Element {
                   responseMode === mode ? styles.autoModeOptionActive : ""
                 }`}
                 disabled={
-                  coffeeHeaderModelControlsLocked() ||
-                  lockedByProtectedBot ||
-                  (mode === "auto" && !autoSelectable)
+                  coffeeHeaderModelControlsLocked() || lockedByProtectedBot
                 }
                 onClick={() => selectMode(mode)}
                 aria-pressed={responseMode === mode}
                 title={
                   coffeeHeaderModelControlsLockReason() ??
-                  (mode === "auto" && !autoSelectable
-                    ? "Choose at least one runnable fallback model in Settings."
-                    : `${responseModeDisplayLabel(mode)} responses`)
+                  `${responseModeDisplayLabel(mode)} responses`
                 }
               >
                 {responseModeShortLabel(mode)}
@@ -55673,24 +54838,7 @@ function HomeContent(): React.JSX.Element {
       modelProvider,
       visibleModelChoice,
     );
-    const runnableAutoModels = modelOptionsForResponseMode(
-      modelCatalog,
-      settings,
-      "auto",
-    )
-      .filter(
-        (model) => !model.disabledReason && !isDisabledModelChoice(model.id),
-      )
-      .map((model) => ({ provider: model.provider, model: model.id }));
-    const responseMode = autoResponseModeForProvider(
-      effectiveProvider,
-      settings.autoModeEnabled,
-      !lockedByProtectedBot &&
-        autoFallbackModeSelectable({
-          chain: settings.autoFallbackChain,
-          runnable: runnableAutoModels,
-        }),
-    );
+    const responseMode = binaryResponseMode;
     const isLocal = modelProvider === "local";
     const modelOptions = includeSelectedResponseModeModelOption(
       modelCatalog,
@@ -55716,10 +54864,7 @@ function HomeContent(): React.JSX.Element {
       (modelCatalogStatus === "idle" && modelCatalog === null)
         ? {
             title: "Checking model providers",
-            detail:
-              responseMode === "auto"
-                ? "Local and online model choices may still be arriving."
-                : isLocal
+            detail: isLocal
                   ? "Local model choices may still be arriving."
                   : "Online chat models may still be arriving.",
           }
@@ -55758,32 +54903,21 @@ function HomeContent(): React.JSX.Element {
           }
         }}
         options={modelOptions}
-        provider={
-          responseMode === "auto" ? "all" : isLocal ? "local" : "online"
-        }
+        provider={isLocal ? "local" : "online"}
         selectedProvider={modelProvider}
         loading={modelCatalogLoading}
         disabled={coffeeHeaderModelControlsLocked()}
         title={
           coffeeHeaderModelControlsLockReason() ??
-          (responseMode === "auto"
-            ? "Coffee primary model (AUTO uses configured fallbacks after this choice)"
-            : `Coffee model (${responseModeShortLabel(responseMode)} — concrete choices override seated bots)`)
+          `Coffee model (${responseModeShortLabel(responseMode)} — concrete choices override contextual Auto)`
         }
-        ariaLabel={coffeeModelPickerAriaLabel(
-          responseMode === "auto" ? "auto" : isLocal ? "local" : "online",
-        )}
+        ariaLabel={coffeeModelPickerAriaLabel(isLocal ? "local" : "online")}
         dismissPopoversSignal={composerPopoverDismissSignal}
         placement="down"
         minMenuWidthPx={180}
         statusMessage={pickerStatusMessage}
-        autoOptionLabel={COFFEE_ACCOUNT_DEFAULT_MODEL_LABEL}
-        autoOptionTriggerLabel={primaryTriggerLabel}
-        autoOptionMetaOverride={COFFEE_ACCOUNT_DEFAULT_MODEL_META}
-        settingsDefaultModelId={chatSettingsSavedDefaultModelId(
-          settings,
-          isLocal ? "local" : "online",
-        )}
+        autoOptionLabel={COFFEE_AUTO_MODEL_LABEL}
+        autoOptionMetaOverride={COFFEE_AUTO_MODEL_META}
         effortControl={effortControlForTarget(effortTarget)}
       />
     );
@@ -55925,34 +55059,6 @@ function HomeContent(): React.JSX.Element {
       </div>
     );
   };
-  const renderCoffeeHeaderModelChrome = (
-    options: {
-      localPremiumFallback?: boolean;
-      recordedReplay?: boolean;
-      voiceDisabled?: boolean;
-      voiceDisabledReason?: string;
-    } = {},
-  ): React.ReactNode =>
-    options.recordedReplay ? (
-      <div
-        className={styles.recordedReplayBadge}
-        data-recorded-replay="true"
-        aria-label="Recorded replay. Routing, model, and voice are baked into this recording."
-        title="Routing, model, and voice controls do not affect recorded replays."
-      >
-        Recorded replay
-      </div>
-    ) : (
-      <div className={styles.chatHeaderModelPicker}>
-        {renderCoffeeProviderModeToggle()}
-        {renderCoffeeHeaderModelPicker()}
-        {renderVoiceModeSelector({
-          disabled: options.voiceDisabled,
-          disabledReason: options.voiceDisabledReason,
-          localPremiumFallback: options.localPremiumFallback === true,
-        })}
-      </div>
-    );
   const renderHeaderModelPicker = (
     options: {
       modelMenuClassName?: string;
@@ -55988,28 +55094,7 @@ function HomeContent(): React.JSX.Element {
       modelProvider,
       visibleModelChoice,
     );
-    const runnableAutoModels = settings
-      ? modelOptionsForResponseMode(modelCatalog, settings, "auto")
-          .filter(
-            (model) =>
-              !model.disabledReason && !isDisabledModelChoice(model.id),
-          )
-          .map((model) => ({ provider: model.provider, model: model.id }))
-      : [];
-    const autoAllowed =
-      isZenSurfaceView(view) &&
-      detail?.mode !== "chat" &&
-      detail?.hubRole !== "side" &&
-      activeBot?.online_enabled !== 0;
-    const responseMode = autoResponseModeForProvider(
-      effectivePreferredProvider,
-      settings?.autoModeEnabled === true,
-      autoAllowed &&
-        autoFallbackModeSelectable({
-          chain: settings?.autoFallbackChain,
-          runnable: runnableAutoModels,
-        }),
-    );
+    const responseMode = binaryResponseMode;
     const isLocal = modelProvider === "local";
     const modelOptions = includeSelectedResponseModeModelOption(
       modelCatalog,
@@ -56032,6 +55117,11 @@ function HomeContent(): React.JSX.Element {
     });
     const activeSideChat =
       view === "chat" && detail?.hubRole === "side" && detail.mode === "chat";
+    const prismHomeUsesDedicatedLocalModel =
+      view === "chat" &&
+      !activeSideChat &&
+      activeBot == null &&
+      zenPersonaBot == null;
     const zenPersonaPickerDisabled =
       view === "chat" &&
       (pendingReplyVisible || chatAssistantRevealInProgress || activeSideChat);
@@ -56052,6 +55142,26 @@ function HomeContent(): React.JSX.Element {
     return (
       <div className={styles.chatHeaderModelPicker}>
         {showModelControls ? (
+          prismHomeUsesDedicatedLocalModel ? (
+            <ComposerModelPicker
+              value={settingsLocalLlmModelChoice(
+                settings?.prismDefaultLlmModel ?? "",
+                commandCenterAuxiliaryModelId(settings),
+              )}
+              onChange={() => {}}
+              options={prismInternalLlmCallOptions}
+              provider="local"
+              loading={modelCatalogLoading}
+              disabled
+              title="Prism uses this dedicated local model. Change it in Settings → Models."
+              ariaLabel="Prism local model; change it in Settings"
+              dismissPopoversSignal={composerPopoverDismissSignal}
+              placement="down"
+              minMenuWidthPx={options.modelMenuWidthPx ?? 180}
+              menuClassName={options.modelMenuClassName}
+              showAutoOption={false}
+            />
+          ) : (
           <>
             {renderProviderModeToggle(styles.chatHeaderModeToggle)}
             <ComposerModelPicker
@@ -56080,36 +55190,21 @@ function HomeContent(): React.JSX.Element {
                 }
               }}
               options={modelOptions}
-              provider={
-                responseMode === "auto" ? "all" : isLocal ? "local" : "online"
-              }
+                provider={isLocal ? "local" : "online"}
               selectedProvider={modelProvider}
               loading={modelCatalogLoading}
               disabled={!settings || pendingReplyVisible}
               generating={pendingReplyVisible}
-              title={
-                responseMode === "auto"
-                  ? "Primary model for AUTO replies"
-                  : `Model for ${responseModeShortLabel(responseMode)} replies`
-              }
-              ariaLabel={
-                responseMode === "auto"
-                  ? "Primary model for Auto replies; includes all models"
-                  : `Model for ${isLocal ? "local" : "online"} replies`
-              }
+                title={`Model for ${responseModeShortLabel(responseMode)} replies`}
+                ariaLabel={`Model for ${isLocal ? "local" : "online"} replies`}
               dismissPopoversSignal={composerPopoverDismissSignal}
               placement="down"
               minMenuWidthPx={options.modelMenuWidthPx ?? 180}
               menuClassName={options.modelMenuClassName}
-              showDisabledOption
-              autoOptionTriggerLabel={primaryTriggerLabel}
-              settingsDefaultModelId={chatSettingsSavedDefaultModelId(
-                settings,
-                isLocal ? "local" : "online",
-              )}
               effortControl={effortControlForTarget(effortTarget)}
             />
           </>
+          )
         ) : null}
         {showBotPicker ? (
           <ComposerBotPicker
@@ -56139,7 +55234,9 @@ function HomeContent(): React.JSX.Element {
         ) : null}
         {showVoiceSelector
           ? renderVoiceModeSelector({
-              localPremiumFallback: blocksOnlineCapabilities(responseMode),
+              localPremiumFallback:
+                prismHomeUsesDedicatedLocalModel ||
+                blocksOnlineCapabilities(responseMode),
             })
           : null}
       </div>
@@ -56181,7 +55278,6 @@ function HomeContent(): React.JSX.Element {
             placement="down"
             minMenuWidthPx={180}
             showAutoOption={false}
-            settingsDefaultModelId={null}
             dismissPopoversSignal={composerPopoverDismissSignal}
           />
         </div>
@@ -56256,11 +55352,6 @@ function HomeContent(): React.JSX.Element {
           placement="down"
           minMenuWidthPx={180}
           showAutoOption
-          showDisabledOption
-          settingsDefaultModelId={imageSettingsSavedDefaultModelId(
-            settings,
-            modelProvider,
-          )}
           dismissPopoversSignal={composerPopoverDismissSignal}
         />
       </div>
@@ -57031,17 +56122,6 @@ function HomeContent(): React.JSX.Element {
     editingMessageId !== null ||
     mobileKeyboardInset > 0;
   const chatHeaderChromePinned = chatOverflowMenuOpen;
-  const zenHeaderPinned =
-    view === "chat" && (chatHeaderChromePinned || chatComposerChromePinned);
-  zenHeaderPinnedRef.current = zenHeaderPinned;
-
-  useEffect(() => {
-    zenHeaderPinnedRef.current = zenHeaderPinned;
-    if (!zenHeaderPinned) return;
-    clearZenHeaderAutoHideTimer();
-    setZenHeaderVisible((current) => (current ? current : true));
-  }, [clearZenHeaderAutoHideTimer, zenHeaderPinned]);
-
   const setChatHeaderChromeVisibleState = useCallback((visible: boolean) => {
     if (chatHeaderChromeVisibleRef.current === visible) return;
     chatHeaderChromeVisibleRef.current = visible;
@@ -59484,9 +58564,7 @@ function HomeContent(): React.JSX.Element {
     const livePsychicLabel = [
       "Psychic",
       livePsychicModeLabel,
-      livePsychicEffort
-        ? REASONING_EFFORT_LABELS[livePsychicEffort]
-        : null,
+      livePsychicEffort ? REASONING_EFFORT_LABELS[livePsychicEffort] : null,
       livePsychicStageLabel,
     ]
       .filter((part): part is string => Boolean(part))
@@ -59725,8 +58803,7 @@ function HomeContent(): React.JSX.Element {
             }
             onActivate(event);
           }}
-          aria-label={
-            `${
+          aria-label={`${
               livePsychicSummary
                 ? `Psychic, ${livePsychicStageLabel}: ${livePsychicSummary}. `
                 : ""
@@ -59734,8 +58811,7 @@ function HomeContent(): React.JSX.Element {
               compactPhase
                 ? "Stop reply"
                 : "Cancel reply and return to the Zen start"
-            }`
-          }
+          }`}
           title={compactPhase ? "Stop reply" : "Cancel reply"}
         >
           <span
@@ -60863,7 +59939,6 @@ function HomeContent(): React.JSX.Element {
     setBotAvatarSavePromptOpen(false);
     setBotProfileBuilderOpen(false);
     setBotAiParametersModalOpen(false);
-    setBotPreferredModelsModalOpen(false);
     setCoffeeSettingsModalOpen(false);
     if (
       panel === "bots" &&
@@ -65345,14 +64420,6 @@ function HomeContent(): React.JSX.Element {
     ? "local"
     : storyProvider;
   const storyResponseMode = responseModeForProvider(storyEffectiveProvider);
-  const storyBaselineLocalModelOption = modelCatalog?.local.find(
-    (model) => model.id === REQUIRED_PRIMARY_LOCAL_MODEL_ID,
-  ) ?? {
-    id: REQUIRED_PRIMARY_LOCAL_MODEL_ID,
-    label: modelLabelFromId(REQUIRED_PRIMARY_LOCAL_MODEL_ID),
-    provider: "local" as const,
-    isDefault: true,
-  };
   const storyResolvedChoice = resolveModelChoiceForResponseMode({
     responseMode: storyResponseMode,
     providerPreference: storyEffectiveProvider,
@@ -65365,14 +64432,10 @@ function HomeContent(): React.JSX.Element {
   });
   const storyModelProvider = storyResolvedChoice.provider;
   const storyVisibleModelChoice = storyResolvedChoice.modelChoice;
-  const storyEffectiveModelChoice =
-    storyResponseMode === "local" &&
-    storyVisibleModelChoice !== DISABLED_MODEL_CHOICE
-      ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
-      : storyVisibleModelChoice;
+  const storyEffectiveModelChoice = storyVisibleModelChoice;
   const storyModelOptions =
     storyResponseMode === "local"
-      ? [storyBaselineLocalModelOption]
+      ? chatModelOptionsForProvider(modelCatalog, settings, "local")
       : includeSelectedOnlineModelOption(
           modelCatalog,
           settings,
@@ -65382,8 +64445,6 @@ function HomeContent(): React.JSX.Element {
   const storyModelOverride =
     storyVisibleModelChoice === DISABLED_MODEL_CHOICE
       ? undefined
-      : storyResponseMode === "local"
-        ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
         : storyVisibleModelChoice !== AUTO_MODEL_CHOICE
           ? storyVisibleModelChoice
           : undefined;
@@ -69202,54 +68263,19 @@ function HomeContent(): React.JSX.Element {
     coffeeSessionResolvedChoice.modelChoice !== DISABLED_MODEL_CHOICE
       ? coffeeSessionResolvedChoice.modelChoice
       : undefined;
-  const coffeeRunnableAutoModels = useMemo(
-    () =>
-      settings
-        ? [
-            ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
-            ...onlineChatModelOptions,
-          ]
-            .filter(
-              (model) =>
-                !model.disabledReason && !isDisabledModelChoice(model.id),
-            )
-            .map((model) => ({ provider: model.provider, model: model.id }))
-        : [],
-    [modelCatalog, onlineChatModelOptions, settings],
-  );
-  const coffeePrimaryForAuto = resolvedAutoPrimaryForComposer(
-    modelCatalog,
-    settings,
+  const coffeeResponseModeForSend = responseModeForProvider(
     coffeeSessionProvider,
-    coffeeSessionResolvedChoice.modelChoice,
   );
-  const coffeeResponseModeForSend = autoFallbackResponseModeForSend({
-    autoEnabled:
-      settings?.autoModeEnabled === true && !coffeeAnyOfflineProtected,
-    primary: coffeePrimaryForAuto ?? {
-      provider: coffeeSessionProvider,
-      model: AUTO_MODEL_CHOICE,
-    },
-    chain: settings?.autoFallbackChain,
-    runnable: coffeeRunnableAutoModels,
-  });
   coffeeResponseModeForSendRef.current = coffeeResponseModeForSend;
   const coffeeBlocksOnlineCapabilities = blocksOnlineCapabilities(
-    autoResponseModeForProvider(
+    responseModeForProvider(
       coffeeAnyOfflineProtected ? "local" : coffeeProvider,
-      settings?.autoModeEnabled === true && !coffeeAnyOfflineProtected,
     ),
   );
-  const coffeePreparationProvider =
-    coffeeResponseModeForSend === "auto" && coffeePrimaryForAuto
-      ? coffeePrimaryForAuto.provider
-      : coffeeSessionProvider;
+  const coffeePreparationProvider = coffeeSessionProvider;
   const coffeePreparationModel =
     coffeePreparationProvider === "local"
-      ? coffeeResponseModeForSend === "auto" &&
-        coffeePrimaryForAuto?.provider === "local"
-        ? coffeePrimaryForAuto.model
-        : (coffeeSessionModelOverride ?? null)
+      ? (coffeeSessionModelOverride ?? null)
       : null;
   const assignCoffeeModelWarmup = (
     next: CoffeeModelWarmupState | null,
@@ -73587,7 +72613,6 @@ function HomeContent(): React.JSX.Element {
         ? d.settings.modelEffortPreferences
         : [],
       psychicModeEnabled: d.settings.psychicModeEnabled === true,
-      autoModeEnabled: d.settings.autoModeEnabled === true,
       autoFallbackChain: normalizeAutoFallbackChain(
         d.settings.autoFallbackChain,
       ),
@@ -73910,26 +72935,6 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function persistPrismImageToolLlmModelField(rawFromSelect: string) {
-    if (!settings) return;
-    const stored = rawFromSelect.trim();
-    try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ prismImageToolLlmModel: stored }),
-      });
-      setSettings((prev) =>
-        prev ? { ...prev, prismImageToolLlmModel: stored } : prev,
-      );
-    } catch (err) {
-      setPanelError(
-        err instanceof Error
-          ? err.message
-          : "Could not save in-chat image LLM choice.",
-      );
-      await refreshSettings();
-    }
-  }
   async function refreshModels(comfyUiHostOverride?: string) {
     const refreshToken = modelCatalogRefreshTokenRef.current + 1;
     modelCatalogRefreshTokenRef.current = refreshToken;
@@ -75401,7 +74406,6 @@ function HomeContent(): React.JSX.Element {
     setColorWheelOpen(false);
     setBotProfileBuilderOpen(false);
     setBotAiParametersModalOpen(false);
-    setBotPreferredModelsModalOpen(false);
     setEditingBotId(null);
     setPanelBotDeleteConfirm(null);
     setSelectedBotDeleteConfirm(null);
@@ -75660,8 +74664,7 @@ function HomeContent(): React.JSX.Element {
   //
   // Mode semantics (kept aligned with the server-side contract):
   //   - Chat: companion lane (single persona, minimal knobs). An explicit
-  //     model picker choice still overrides the account default; Auto
-  //     keeps using the server's normal model chain.
+  //     a concrete picker choice overrides contextual Auto for that request.
   //   - Sandbox: full runtime lane (provider/model/bot controls).
   //   - Private sends intentionally reuse the Chat-mode incognito contract so
   //     they remain ephemeral/no-memory.
@@ -75729,33 +74732,6 @@ function HomeContent(): React.JSX.Element {
       modelChoice !== AUTO_MODEL_CHOICE && modelChoice !== DISABLED_MODEL_CHOICE
         ? modelChoice
         : undefined;
-    const primaryForAuto = resolvedAutoPrimaryForComposer(
-      modelCatalog,
-      settings,
-      providerForSend,
-      modelChoice,
-    );
-    const runnableAutoModels = settings
-      ? [
-          ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
-          ...onlineChatModelOptions,
-        ]
-          .filter(
-            (model) =>
-              !model.disabledReason && !isDisabledModelChoice(model.id),
-          )
-          .map((model) => ({ provider: model.provider, model: model.id }))
-      : [];
-    const zenAutoForSend = Boolean(
-      mode === "zen" &&
-      settings?.autoModeEnabled &&
-      activeBot?.online_enabled !== 0 &&
-      autoFallbackAvailableForPrimary({
-        primary: primaryForAuto,
-        chain: settings.autoFallbackChain,
-        runnable: runnableAutoModels,
-      }),
-    );
     const hasZenPersonaBotOverride = Object.prototype.hasOwnProperty.call(
       options,
       "zenPersonaBotId",
@@ -75832,9 +74808,7 @@ function HomeContent(): React.JSX.Element {
       preferredProvider: providerForSend,
       ...(mode === "zen"
         ? {
-            responseMode: zenAutoForSend
-              ? "auto"
-              : responseModeForProvider(providerForSend),
+            responseMode: responseModeForProvider(providerForSend),
           }
         : {}),
       ...(!chatVoiceForcedMuted &&
@@ -78455,33 +77429,6 @@ function HomeContent(): React.JSX.Element {
     }, COFFEE_SEND_COOLDOWN_MS);
   }
 
-  function disabledTextModelSendMessage(): string | null {
-    if (!settings) return null;
-    const responseMode = responseModeForProvider(effectivePreferredProvider);
-    const resolvedChoice = resolveModelChoiceForResponseMode({
-      responseMode,
-      providerPreference: effectivePreferredProvider,
-      choices: visibleModelChoicesByProvider(
-        modelCatalog,
-        settings,
-        chatModelChoiceByProvider,
-      ),
-      onlineOptions: onlineChatModelOptions,
-    });
-    const settingsDefaultDisabled =
-      responseMode === "local"
-        ? modelChoiceIsDisabled(settings.preferredLocalModel)
-        : modelChoiceIsDisabled(settings.preferredOnlineModel);
-    if (
-      resolvedChoice.modelChoice === AUTO_MODEL_CHOICE &&
-      settingsDefaultDisabled
-    ) {
-      return `${responseModeShortLabel(responseMode)} replies are disabled in Settings. Choose a model in Settings, or pick a model here before sending.`;
-    }
-    if (resolvedChoice.modelChoice !== DISABLED_MODEL_CHOICE) return null;
-    return `${responseModeShortLabel(responseMode)} replies are disabled. Choose Auto or a model before sending.`;
-  }
-
   function prismHomeOrchestrationSurfaceActive(): boolean {
     if (view !== "chat" || zenPersonaBotIdRef.current !== null) return false;
     if (detail?.hubRole === "side") return false;
@@ -78822,13 +77769,6 @@ function HomeContent(): React.JSX.Element {
         "Prompt runs are disabled. Choose Auto or a local model in Command Center before using that command.",
       );
       return;
-    }
-    if (!isAssistantOnlyTurn) {
-      const disabledMessage = disabledTextModelSendMessage();
-      if (disabledMessage) {
-        setError(disabledMessage);
-        return;
-      }
     }
     const commandCenterPromptShortcut =
       commandCenterResolution.kind === "resolved"
@@ -81266,7 +80206,11 @@ function HomeContent(): React.JSX.Element {
     msg: Message,
     psychicSource: Message | null,
   ): React.ReactNode {
-    if (!isChatSurfaceView(view) || msg.role !== "assistant" || !psychicSource) {
+    if (
+      !isChatSurfaceView(view) ||
+      msg.role !== "assistant" ||
+      !psychicSource
+    ) {
       return null;
     }
     const psychicLine = psychicThoughtDisplayLineForMessage(
@@ -81281,14 +80225,20 @@ function HomeContent(): React.JSX.Element {
         data-expanded={expanded ? "true" : "false"}
         data-psychic-state={psychicLine.state}
         aria-label={`${psychicLine.ariaLabel}. ${
-          expanded ? "Psychic details expanded." : "Click the message to expand."
+          expanded
+            ? "Psychic details expanded."
+            : "Click the message to expand."
         }`}
       >
         <div className={styles.psychicThoughtDisclosureHeader}>
-          <span className={styles.psychicThoughtLabel}>{psychicLine.label}</span>
+          <span className={styles.psychicThoughtLabel}>
+            {psychicLine.label}
+          </span>
           <span className={styles.psychicThoughtDisclosureHeaderMeta}>
             {psychicLine.meta ? (
-              <span className={styles.psychicThoughtMeta}>{psychicLine.meta}</span>
+              <span className={styles.psychicThoughtMeta}>
+                {psychicLine.meta}
+              </span>
             ) : null}
             <span
               className={styles.psychicThoughtDisclosureChevron}
@@ -81327,7 +80277,9 @@ function HomeContent(): React.JSX.Element {
             {psychicLine.scratchpad ? (
               <div className={styles.psychicScratchpadBlock}>
                 <div className={styles.psychicScratchpadHeader}>
-                  <span className={styles.psychicScratchpadLabel}>Scratchpad</span>
+                  <span className={styles.psychicScratchpadLabel}>
+                    Scratchpad
+                  </span>
                   {psychicLine.scratchpadMeta ? (
                     <span className={styles.psychicScratchpadMeta}>
                       {psychicLine.scratchpadMeta}
@@ -84467,18 +83419,11 @@ function HomeContent(): React.JSX.Element {
     if (
       nextChoice === "premium" &&
       blocksOnlineCapabilities(
-        autoResponseModeForProvider(
-          effectivePreferredProvider,
-          settings.autoModeEnabled === true,
-          isZenSurfaceView(view) &&
-            detail?.mode !== "chat" &&
-            detail?.hubRole !== "side" &&
-            (view === "chat" ? zenPersonaBot : activeBot)?.online_enabled !== 0,
-        ),
+        responseModeForProvider(effectivePreferredProvider),
       )
     ) {
       showLocalCommandToast(
-        "Premium needs AUTO or ONLINE",
+        "Premium needs ONLINE",
         "Switch response routing off LOCAL first. LOCAL always keeps speech on this device.",
       );
       return;
@@ -85260,21 +84205,6 @@ function HomeContent(): React.JSX.Element {
         SETTINGS_PRISM_DEFAULT_LLM_MODEL_FIELD,
         settings.prismDefaultLlmModel,
       ).trim();
-      const prismImageToolLlmModel = readSettingsFormDataText(
-        formData,
-        SETTINGS_PRISM_IMAGE_TOOL_LLM_MODEL_FIELD,
-        settings.prismImageToolLlmModel,
-      ).trim();
-      const preferredLocalModelRaw = readSettingsFormDataText(
-        formData,
-        SETTINGS_PREFERRED_LOCAL_MODEL_FIELD,
-        settings.preferredLocalModel,
-      ).trim();
-      const preferredOnlineModelRaw = readSettingsFormDataText(
-        formData,
-        SETTINGS_PREFERRED_ONLINE_MODEL_FIELD,
-        settings.preferredOnlineModel,
-      ).trim();
       const preferredLocalImageModel = readSettingsFormDataText(
         formData,
         SETTINGS_PREFERRED_LOCAL_IMAGE_MODEL_FIELD,
@@ -85324,21 +84254,6 @@ function HomeContent(): React.JSX.Element {
         settings.prismDefaultLlmModel,
         commandCenterAuxiliaryModelId(settings),
       );
-      const visiblePrismImageToolLlmModel = settingsLocalLlmModelChoice(
-        settings.prismImageToolLlmModel,
-        defaultModelChoiceForProvider(modelCatalog, settings, "local"),
-      );
-      const visiblePreferredLocalModel = visibleConcreteModelChoiceForProvider(
-        modelCatalog,
-        settings,
-        "local",
-        settings.preferredLocalModel,
-      );
-      const visiblePreferredOnlineModel = visibleConcreteOnlineModelChoice(
-        modelCatalog,
-        settings,
-        settings.preferredOnlineModel,
-      );
       const visiblePreferredLocalImageModel = settingsLocalImageModelChoice(
         settings.preferredLocalImageModel,
       );
@@ -85360,21 +84275,6 @@ function HomeContent(): React.JSX.Element {
           prismDefaultLlmModel,
           settings.prismDefaultLlmModel,
           visiblePrismDefaultLlmModel,
-        ),
-        prismImageToolLlmModel: normalizeSettingsPickerSubmit(
-          prismImageToolLlmModel,
-          settings.prismImageToolLlmModel,
-          visiblePrismImageToolLlmModel,
-        ),
-        preferredLocalModel: normalizeSettingsPickerSubmit(
-          preferredLocalModelRaw,
-          settings.preferredLocalModel,
-          visiblePreferredLocalModel,
-        ),
-        preferredOnlineModel: normalizeSettingsPickerSubmit(
-          preferredOnlineModelRaw,
-          settings.preferredOnlineModel,
-          visiblePreferredOnlineModel,
         ),
         preferredLocalImageModel: normalizeSettingsPickerSubmit(
           preferredLocalImageModel,
@@ -85579,8 +84479,6 @@ function HomeContent(): React.JSX.Element {
       return {
         ...previous,
         hiddenBotModelIds: Array.from(current),
-        preferredLocalModel: clearIfHidden(previous.preferredLocalModel),
-        preferredOnlineModel: clearIfHidden(previous.preferredOnlineModel),
         preferredLocalImageModel: clearIfHidden(
           previous.preferredLocalImageModel,
         ),
@@ -85594,7 +84492,6 @@ function HomeContent(): React.JSX.Element {
           previous.preferredZenWallpaperOpenAiImageModel,
         ),
         autoFallbackChain,
-        autoModeEnabled: autoFallbackChain ? previous.autoModeEnabled : false,
         lenientLocalImageFallbackModel: clearIfHidden(
           previous.lenientLocalImageFallbackModel,
         ),
@@ -85657,160 +84554,6 @@ function HomeContent(): React.JSX.Element {
     } catch (err) {
       setSettings(previous);
       setError(err instanceof Error ? err.message : "Provider switch failed.");
-    }
-  }
-
-  async function persistSharedAppletResponseMode(
-    responseMode: AutoResponseMode,
-  ): Promise<void> {
-    if (!settings) return;
-    const previous = settings;
-    const currentResponseMode = responseModeForProvider(
-      settings.preferredProvider,
-    );
-    const currentModelChoice =
-      currentResponseMode === "local"
-        ? visibleConcreteModelChoiceForProvider(
-            modelCatalog,
-            settings,
-            "local",
-            settings.preferredLocalModel,
-          )
-        : visibleConcreteOnlineModelChoice(
-            modelCatalog,
-            settings,
-            settings.preferredOnlineModel,
-          );
-    const currentModelProvider: Provider =
-      currentResponseMode === "local"
-        ? "local"
-        : (onlineChatModelOptions.find(
-            (model) => model.id === currentModelChoice,
-          )?.provider ?? inferOnlineProviderForModelId(currentModelChoice));
-    const currentPrimary = resolvedAutoPrimaryForComposer(
-      modelCatalog,
-      settings,
-      currentModelProvider,
-      currentModelChoice,
-    );
-    const runnable = [
-      ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
-      ...onlineChatModelOptions,
-    ]
-      .filter(
-        (model) => !model.disabledReason && !isDisabledModelChoice(model.id),
-      )
-      .map((model) => ({ provider: model.provider, model: model.id }));
-    const autoPrimaryCandidate = autoFallbackSelectablePrimary({
-      chain: settings.autoFallbackChain,
-      runnable: currentPrimary
-        ? [
-            currentPrimary,
-            ...runnable.filter(
-              (candidate) =>
-                candidate.provider !== currentPrimary.provider ||
-                candidate.model !== currentPrimary.model,
-            ),
-          ]
-        : runnable,
-    });
-    const preferredProvider: Provider =
-      responseMode === "local"
-        ? "local"
-        : responseMode === "online"
-          ? (onlineChatModelOptions.find(
-              (model) => model.id === settings.preferredOnlineModel,
-            )?.provider ??
-            inferOnlineProviderForModelId(settings.preferredOnlineModel))
-          : (autoPrimaryCandidate?.provider ?? settings.preferredProvider);
-    const patch = {
-      autoModeEnabled: responseMode === "auto",
-      preferredProvider,
-      ...(responseMode === "auto" && autoPrimaryCandidate
-        ? autoPrimaryCandidate.provider === "local"
-          ? { preferredLocalModel: autoPrimaryCandidate.model }
-          : { preferredOnlineModel: autoPrimaryCandidate.model }
-        : {}),
-    };
-    if (
-      settings.autoModeEnabled === patch.autoModeEnabled &&
-      settings.preferredProvider === patch.preferredProvider
-    ) {
-      return;
-    }
-    setSettings({ ...settings, ...patch });
-    setError(null);
-    setPanelError(null);
-    try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      });
-      await refreshSettings();
-    } catch (err) {
-      setSettings(previous);
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Shared response mode failed to save.",
-      );
-    }
-  }
-
-  async function persistSharedAppletAccountModelChoice(
-    nextChoice: string,
-    responseMode: AutoResponseMode,
-    options: readonly ModelCatalogEntry[],
-  ): Promise<void> {
-    if (
-      !settings ||
-      nextChoice === DISABLED_MODEL_CHOICE ||
-      modelChoiceIsDisabled(nextChoice)
-    ) {
-      return;
-    }
-    const previous = settings;
-    const selectedOption =
-      nextChoice === AUTO_MODEL_CHOICE
-        ? null
-        : (options.find((option) => option.id === nextChoice) ?? null);
-    const targetProvider: Provider =
-      selectedOption?.provider ??
-      (responseMode === "local"
-        ? "local"
-        : responseMode === "online"
-          ? settings.preferredProvider === "local"
-            ? inferOnlineProviderForModelId(settings.preferredOnlineModel)
-            : settings.preferredProvider
-          : settings.preferredProvider);
-    const preferredModel =
-      nextChoice === AUTO_MODEL_CHOICE ? "" : nextChoice.trim();
-    const patch =
-      targetProvider === "local"
-        ? {
-            preferredProvider: targetProvider,
-            preferredLocalModel: preferredModel,
-          }
-        : {
-            preferredProvider: targetProvider,
-            preferredOnlineModel: preferredModel,
-          };
-    setSettings({ ...settings, ...patch });
-    setError(null);
-    setPanelError(null);
-    try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify(patch),
-      });
-      await refreshSettings();
-    } catch (err) {
-      setSettings(previous);
-      setError(
-        err instanceof Error
-          ? err.message
-          : "Shared account model failed to save.",
-      );
     }
   }
 
@@ -85880,22 +84623,6 @@ function HomeContent(): React.JSX.Element {
       setPanelError(
         err instanceof Error ? err.message : "Image provider switch failed.",
       );
-    }
-  }
-
-  async function persistAutoModeEnabled(enabled: boolean) {
-    if (!settings || settings.autoModeEnabled === enabled) return;
-    const previous = settings;
-    setSettings({ ...settings, autoModeEnabled: enabled });
-    setError(null);
-    try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({ autoModeEnabled: enabled }),
-      });
-    } catch (err) {
-      setSettings(previous);
-      setError(err instanceof Error ? err.message : "Auto mode update failed.");
     }
   }
 
@@ -93597,8 +92324,6 @@ function HomeContent(): React.JSX.Element {
     setBotProfileBuilderOpen(false);
     setBotAiParametersModalOpen(false);
     setBotProfileActivePage("purpose");
-    setBotPreferredModelsModalOpen(false);
-    setBotModelRoutingPage("chat");
     // Drop any stashed edit-mode snapshot so the next edit compares
     // against the correct starting state. Safe to always clear here:
     // the only places that hold a snapshot are paths that also call
@@ -93616,7 +92341,6 @@ function HomeContent(): React.JSX.Element {
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     setBotLibraryExpanded(false);
     setBotLibraryClosing(false);
-    setBotPreferredModelsModalOpen(false);
     setActiveFieldHelp(null);
     setSelectedBotPanelBotId(null);
   }
@@ -93708,10 +92432,9 @@ function HomeContent(): React.JSX.Element {
   ): Promise<void> {
     const runId = (botFieldGenerationRunRef.current.get(fieldKey) ?? 0) + 1;
     botFieldGenerationRunRef.current.set(fieldKey, runId);
-    const responseMode =
-      settings?.autoModeEnabled && settings.autoFallbackChain
-        ? "auto"
-        : responseModeForProvider(settings?.preferredProvider ?? "local");
+    const responseMode = responseModeForProvider(
+      settings?.preferredProvider ?? "local",
+    );
     try {
       const result = await api<{
         ok: true;
@@ -93862,10 +92585,9 @@ function HomeContent(): React.JSX.Element {
     setBotGeneratorCompletedDraft(null);
     setBotFoundryPhase("handoff");
     setPanelError(null);
-    const responseMode =
-      settings?.autoModeEnabled && settings.autoFallbackChain
-        ? "auto"
-        : responseModeForProvider(settings?.preferredProvider ?? "local");
+    const responseMode = responseModeForProvider(
+      settings?.preferredProvider ?? "local",
+    );
     try {
       const minimumChoreography = (async (): Promise<void> => {
         await new Promise<void>((resolve) =>
@@ -94013,8 +92735,6 @@ function HomeContent(): React.JSX.Element {
     setBotPanelGroup(BOT_LIBRARY_FILTER_ALL);
     setBotLibraryExpanded(false);
     setBotLibraryClosing(false);
-    setBotPreferredModelsModalOpen(false);
-    setBotModelRoutingPage("chat");
 
     const seededName = "Default";
     const rawStoredPrompt = "";
@@ -99822,13 +98542,6 @@ function HomeContent(): React.JSX.Element {
     );
     const activeStep = firstRunSetupStepAt(activeStepIndex);
     const progressPercent = firstRunSetupProgressPercent(activeStepIndex);
-    const hiddenModels = new Set(settings?.hiddenBotModelIds ?? []);
-    const localModelChoices = (modelCatalog?.local ?? []).filter(
-      (model) => !hiddenModels.has(model.id),
-    );
-    const onlineModelChoices = (modelCatalog?.online ?? []).filter(
-      (model) => !hiddenModels.has(model.id),
-    );
     const activeKeyProvider: ApiKeyValidationProvider | null =
       activeStep.id === "openai" ||
       activeStep.id === "anthropic" ||
@@ -100106,72 +98819,19 @@ function HomeContent(): React.JSX.Element {
                 </p>
               </div>
             ) : null}
-            {activeStep.id === "local-model" ? (
-              <div className={styles.firstRunModelStep}>
-                <label>
-                  <span>Default local model</span>
-                  <select
-                    value={desktopFirstRunPreferredLocalModel}
-                    onChange={(event) =>
-                      setDesktopFirstRunPreferredLocalModel(event.target.value)
-                    }
-                  >
-                    <option value="">Automatic · first available model</option>
-                    {localModelChoices.map((model) => (
-                      <option key={model.id} value={model.id}>
-                        {model.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <p>Bots inherit this choice whenever the workspace is LOCAL.</p>
-                <p data-model-variability-notice="true">
-                  {PRISM_MODEL_VARIABILITY_NOTICE}
-                </p>
-              </div>
-            ) : null}
-            {activeStep.id === "online-model" ? (
-              <div className={styles.firstRunModelStep}>
-                <label>
-                  <span>Default online model</span>
-                  <select
-                    value={desktopFirstRunPreferredOnlineModel}
-                    onChange={(event) =>
-                      setDesktopFirstRunPreferredOnlineModel(event.target.value)
-                    }
-                  >
-                    <option value="">Automatic · first available model</option>
-                    {onlineModelChoices.map((model) => (
-                      <option
-                        key={`${model.provider}:${model.id}`}
-                        value={model.id}
-                      >
-                        {model.label}
-                      </option>
-                    ))}
-                  </select>
-                </label>
-                <p>
-                  Bots inherit this choice whenever the workspace is ONLINE.
-                </p>
-                <p data-model-variability-notice="true">
-                  {PRISM_MODEL_VARIABILITY_NOTICE}
-                </p>
-              </div>
-            ) : null}
             {activeStep.id === "auto-models" ? (
               <div className={styles.firstRunReadyStep}>
                 <PrismTriangleMark />
                 <p>
-                  Auto is available in Zen, Coffee, Signal, and Debate. Its
-                  model picker shows every local and online model; your
-                  selection is Primary, then Prism tries your ordered chain of
-                  one to five fallbacks if a turn times out, refuses, or returns
-                  invalid output.
+                  Auto is the default text model. Prism chooses the fastest
+                  suitable model and Effort for each request using its context,
+                  complexity, tools, structure, and privacy lane. The hollow
+                  triangle means Effort is being chosen automatically.
                 </p>
                 <p>
-                  Auto stays off until you choose at least one fallback in
-                  Settings. Offline-only bots always remain LOCAL.
+                  LOCAL and ONLINE have separate optional fallback chains in
+                  Settings. Every fallback uses no thinking for speed, and
+                  LOCAL never evaluates or calls an online model.
                 </p>
               </div>
             ) : null}
@@ -100200,7 +98860,7 @@ function HomeContent(): React.JSX.Element {
                   </span>
                   <span>
                     Bot routing
-                    <strong>Account defaults</strong>
+                    <strong>Contextual Auto</strong>
                   </span>
                   <span>
                     Atmosphere
@@ -104259,6 +102919,8 @@ function HomeContent(): React.JSX.Element {
               ? "story"
               : view === "slate"
                 ? "slate"
+                : view === "chat"
+                  ? "zen"
                 : "chat";
     const menuId = "prism-app-switcher-menu";
     const disabled = options.disabled === true;
@@ -104282,6 +102944,7 @@ function HomeContent(): React.JSX.Element {
       if (appletId === "botcast") return view === "botcast";
       if (appletId === "story") return view === "story";
       if (appletId === "slate") return view === "slate";
+      if (appletId === "zen") return view === "chat";
       if (appletId === "chat") return view === "chat";
       return false;
     };
@@ -104311,6 +102974,10 @@ function HomeContent(): React.JSX.Element {
       }
       if (appletId === "slate") {
         if (view !== "slate") navigateToView("slate");
+        return;
+      }
+      if (appletId === "zen") {
+        if (view !== "chat") navigateToView("chat");
         return;
       }
       if (appletId === "chat") {
@@ -104631,14 +103298,14 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  const renderSharedAppletSidebarHeader = (
+  const renderSharedAppletBrand = (
     appletId: PrismAppletId,
   ): React.JSX.Element => (
     <button
       type="button"
       className={`${styles.coffeeHubButton} ${styles.sidebarWordmarkButton}`}
       onClick={openLivingShellHome}
-      data-shared-app-sidebar-brand={appletId}
+      data-shared-applet-brand={appletId}
       aria-label="Open All Bots Home"
       title="All Bots Home"
     >
@@ -104655,6 +103322,8 @@ function HomeContent(): React.JSX.Element {
   const renderSharedAppletNavbar = (
     toolsLabel: string,
     options: {
+      headerRef?: React.Ref<HTMLElement>;
+      controlRail?: React.ReactNode;
       showVoiceSelector?: boolean;
       liveSessionActive?: boolean;
       liveSessionExit?: {
@@ -104669,6 +103338,8 @@ function HomeContent(): React.JSX.Element {
       liveSessionName?: LiveSessionChromeName;
       voiceTutorialTarget?: string;
       recordedReplay?: boolean;
+      utilityLead?: React.ReactNode;
+      zenDragExclusion?: boolean;
     } = {},
   ): React.JSX.Element => {
     const liveChromePolicy = options.liveSessionActive
@@ -104682,6 +103353,7 @@ function HomeContent(): React.JSX.Element {
     };
     return (
       <header
+        ref={options.headerRef}
         className={`${styles.chatHeader} ${styles.sharedAppletHeader}`}
         data-app-shell-header="true"
         data-shared-app-navbar="true"
@@ -104689,11 +103361,14 @@ function HomeContent(): React.JSX.Element {
           options.liveSessionActive ? "true" : undefined
         }
         data-dev-panel-safe-area="top"
+        data-zen-live-bot-drag-exclusion={
+          options.zenDragExclusion ? "top-bar" : undefined
+        }
       >
         <div className={styles.chatHeaderIdentityGroup}>
           {options.brandAppletId ? (
             <span className={styles.sharedAppletNavbarBrand}>
-              {renderSharedAppletSidebarHeader(options.brandAppletId)}
+              {renderSharedAppletBrand(options.brandAppletId)}
             </span>
           ) : null}
           {options.liveSessionActive && options.liveSessionExit ? (
@@ -104713,7 +103388,8 @@ function HomeContent(): React.JSX.Element {
             })
           )}
         </div>
-        {options.recordedReplay ? (
+        {options.controlRail ??
+          (options.recordedReplay ? (
           <div
             className={styles.recordedReplayBadge}
             data-recorded-replay="true"
@@ -104731,9 +103407,10 @@ function HomeContent(): React.JSX.Element {
           </div>
         ) : options.showVoiceSelector ? (
           renderVoiceModeSelector(voiceSelectorOptions)
-        ) : null}
+          ) : null)}
         <h2 className={styles.chatHeaderTitlePlaceholder} aria-hidden="true" />
         <div className={styles.chatHeaderActions} aria-label={toolsLabel}>
+          {options.utilityLead}
           {renderUniversalNavbarButtons({
             disabledActions: liveChromePolicy?.disabledNavbarActions,
             disabledActionTooltips:
@@ -104964,15 +103641,7 @@ function HomeContent(): React.JSX.Element {
       },
       ...VOICE_PLAYBACK_CHOICES.map((choice): PrismMenuEntry => {
         const voiceOnlineBlocked = blocksOnlineCapabilities(
-          autoResponseModeForProvider(
-            effectivePreferredProvider,
-            settings?.autoModeEnabled === true,
-            isZenSurfaceView(view) &&
-              detail?.mode !== "chat" &&
-              detail?.hubRole !== "side" &&
-              (view === "chat" ? zenPersonaBot : activeBot)?.online_enabled !==
-                0,
-          ),
+          responseModeForProvider(effectivePreferredProvider),
         );
         return {
           id: `voice-${choice}`,
@@ -111663,8 +110332,6 @@ function HomeContent(): React.JSX.Element {
                         minMenuWidthPx={260}
                         autoOptionLabel="Auto"
                         autoOptionMetaOverride={`Prism auxiliary · ${commandCenterAutoModelId}`}
-                        showDisabledOption
-                        settingsDefaultModelId={null}
                         dismissPopoversSignal={composerPopoverDismissSignal}
                       />
                     </div>
@@ -114913,6 +113580,9 @@ function HomeContent(): React.JSX.Element {
                                   or .local host.
                                 </small>
                               </label>
+                              <div className={styles.settingsHostField}>
+                                {renderComfyUiWorkflowVisibilityControls()}
+                              </div>
                             </div>
                           </section>
                         )}
@@ -115011,148 +113681,69 @@ function HomeContent(): React.JSX.Element {
                                   Models
                                 </span>
                                 <h4 id="settings-models-title">
-                                  Defaults &amp; Fallbacks
+                                  Prism &amp; Recovery
                                 </h4>
                               </div>
                               <div
                                 className={styles.settingsSectionHeaderAside}
                               >
-                                <small>
-                                  Some image choices save immediately.
-                                </small>
                                 <PanelSectionInfo
                                   id="settings-section-info-models"
-                                  label="About model default settings"
+                                  label="About Prism and recovery models"
                                 >
-                                  Sets default chat and image model choices,
-                                  fallback behavior, and which models appear
-                                  elsewhere.
+                                  Chooses Prism&apos;s local model and optional
+                                  recovery paths. Image models are selected in
+                                  Images.
                                 </PanelSectionInfo>
                               </div>
                             </header>
-                            <p
-                              className={styles.settingsModelDiscoveryNotice}
-                              data-model-variability-notice="true"
-                            >
-                              {PRISM_MODEL_VARIABILITY_NOTICE}
-                            </p>
-                            <div className={styles.settingsEffortProfiles}>
-                              <div
-                                className={styles.settingsEffortProfilesHeader}
-                              >
-                                <span>
-                                  Saved effort profiles
+                            {renderDefaultsAndFallbacksControls("settings")}
+                            <details className={styles.settingsModelDropdown}>
+                              <summary>
+                                <span>Manage model list</span>
                                   <small>
-                                    {settings.modelEffortPreferences.length ===
-                                    0
-                                      ? "No model overrides"
-                                      : `${settings.modelEffortPreferences.length} model${
-                                          settings.modelEffortPreferences
-                                            .length === 1
-                                            ? ""
-                                            : "s"
-                                        } customized`}
+                                  {settingsModelGroups.length} provider
+                                  {settingsModelGroups.length === 1 ? "" : "s"}
                                   </small>
-                                </span>
-                                <button
-                                  type="button"
-                                  className={styles.linkButton}
-                                  disabled={
-                                    settings.modelEffortPreferences.length === 0
-                                  }
-                                  onClick={resetAllModelEffortPreferences}
-                                >
-                                  Reset all
-                                </button>
-                              </div>
-                              {settings.modelEffortPreferences.length > 0 ? (
-                                <div
-                                  className={styles.settingsEffortProfileList}
-                                >
-                                  {settings.modelEffortPreferences.map(
-                                    (preference) => (
+                              </summary>
                                       <div
-                                        key={modelReasoningEffortPreferenceKey(
-                                          preference.provider,
-                                          preference.modelId,
-                                        )}
                                         className={
-                                          styles.settingsEffortProfileRow
+                                  styles.settingsAdvancedModelManagement
                                         }
-                                        data-provider={preference.provider}
                                       >
-                                        <span>
-                                          <strong>
-                                            {modelLabelFromId(
-                                              preference.modelId,
-                                            )}
-                                          </strong>
-                                          <small>{preference.provider}</small>
-                                        </span>
-                                        <output>
-                                          {
-                                            REASONING_EFFORT_LABELS[
-                                              preference.effort
-                                            ]
-                                          }
-                                        </output>
                                         <button
                                           type="button"
                                           className={styles.linkButton}
-                                          onClick={() =>
-                                            persistModelEffortPreference(
-                                              {
-                                                provider: preference.provider,
-                                                modelId: preference.modelId,
-                                                modelLabel: modelLabelFromId(
-                                                  preference.modelId,
-                                                ),
-                                                capability:
-                                                  resolveModelReasoningEffortCapability(
-                                                    {
-                                                      provider:
-                                                        preference.provider,
-                                                      modelId:
-                                                        preference.modelId,
-                                                      simulatedEffortEnabled:
-                                                        settings.experimentalAllModelEffortEnabled ===
-                                                        true,
-                                                    },
-                                                  ),
-                                              },
-                                              "auto",
-                                            )
+                                  disabled={
+                                    settings.modelEffortPreferences.length === 0
                                           }
+                                  onClick={resetAllModelEffortPreferences}
                                         >
-                                          Reset
+                                  Reset all saved model efforts
                                         </button>
-                                      </div>
-                                    ),
-                                  )}
-                                </div>
-                              ) : null}
-                            </div>
-                            {renderDefaultsAndFallbacksControls("settings", {
-                              includeZenAtmosphere: false,
-                            })}
                             {modelCatalogStatus === "checking" ||
                             (modelCatalogStatus === "idle" &&
                               modelCatalog === null) ? (
                               <div
-                                className={styles.settingsModelDiscoveryNotice}
+                                    className={
+                                      styles.settingsModelDiscoveryNotice
+                                    }
                                 role="status"
                               >
-                                Checking model providers. Some chat models may
-                                appear a moment after local or image models.
+                                    Checking model providers. Some chat models
+                                    may appear a moment after local or image
+                                    models.
                               </div>
                             ) : modelCatalogStatus === "error" ? (
                               <div
-                                className={styles.settingsModelDiscoveryNotice}
+                                    className={
+                                      styles.settingsModelDiscoveryNotice
+                                    }
                                 role="status"
                               >
-                                Model refresh is delayed. Prism is keeping saved
-                                providers visible and will try again when models
-                                refresh.
+                                    Model refresh is delayed. Prism is keeping
+                                    saved providers visible and will try again
+                                    when models refresh.
                               </div>
                             ) : null}
                             <div
@@ -115211,20 +113802,26 @@ function HomeContent(): React.JSX.Element {
                                           variant="control"
                                         >
                                           Controls which models from this
-                                          provider appear in bot customizers and
-                                          model pickers.
+                                              provider appear in bot customizers
+                                              and model pickers.
                                         </PanelSectionInfo>
                                       </span>
-                                      <small>{providerVisibilityMeta}</small>
+                                          <small>
+                                            {providerVisibilityMeta}
+                                          </small>
                                     </summary>
-                                    <div className={styles.settingsModelList}>
+                                        <div
+                                          className={styles.settingsModelList}
+                                        >
                                       {group.notice ? (
                                         <div
                                           className={
                                             styles.settingsModelProviderNotice
                                           }
                                           role={
-                                            group.pending ? "status" : undefined
+                                                group.pending
+                                                  ? "status"
+                                                  : undefined
                                           }
                                         >
                                           {group.notice}
@@ -115232,7 +113829,9 @@ function HomeContent(): React.JSX.Element {
                                       ) : null}
                                       {group.models.map((model) => {
                                         const required =
-                                          isRequiredPrimaryLocalModel(model);
+                                              isRequiredPrimaryLocalModel(
+                                                model,
+                                              );
                                         const visible =
                                           required ||
                                           !settings.hiddenBotModelIds.includes(
@@ -115252,7 +113851,8 @@ function HomeContent(): React.JSX.Element {
                                               onChange={(event) =>
                                                 setBotCustomizerModelVisible(
                                                   model.id,
-                                                  event.currentTarget.checked,
+                                                      event.currentTarget
+                                                        .checked,
                                                 )
                                               }
                                             />
@@ -115277,80 +113877,7 @@ function HomeContent(): React.JSX.Element {
                                 </div>
                               ) : null}
                             </div>
-                            <details className={styles.settingsModelDropdown}>
-                              <summary>
-                                <span
-                                  className={styles.settingsDropdownSummaryRow}
-                                >
-                                  <span>ComfyUI workflow list</span>
-                                  <PanelSectionInfo
-                                    id="settings-control-info-comfyui-workflow-list"
-                                    label="About ComfyUI workflow list"
-                                    variant="control"
-                                  >
-                                    Controls which detected ComfyUI workflows
-                                    appear in Images.
-                                  </PanelSectionInfo>
-                                </span>
-                                <small>
-                                  {allComfyUiWorkflowCatalogEntries.length === 0
-                                    ? "No workflows detected"
-                                    : settings.hiddenComfyUiWorkflowIds
-                                          .length === 0
-                                      ? "All visible"
-                                      : `${settings.hiddenComfyUiWorkflowIds.length} hidden`}
-                                </small>
-                              </summary>
-                              {allComfyUiWorkflowCatalogEntries.length > 0 ? (
-                                <div className={styles.settingsModelList}>
-                                  {allComfyUiWorkflowCatalogEntries.map(
-                                    (model) => {
-                                      const visible =
-                                        !settings.hiddenComfyUiWorkflowIds.includes(
-                                          model.id,
-                                        );
-                                      const remotePath =
-                                        parseComfyUiRemoteWorkflowPath(
-                                          model.id,
-                                        );
-                                      return (
-                                        <label
-                                          key={model.id}
-                                          className={styles.settingsModelToggle}
-                                        >
-                                          <input
-                                            type="checkbox"
-                                            checked={visible}
-                                            onChange={(event) =>
-                                              setComfyUiWorkflowVisible(
-                                                model.id,
-                                                event.currentTarget.checked,
-                                              )
-                                            }
-                                          />
-                                          <span>{model.label}</span>
-                                          <small>
-                                            {visible
-                                              ? "Visible in Images"
-                                              : "Hidden from Images"}
-                                            {remotePath
-                                              ? ` · ${remotePath}`
-                                              : ""}
-                                          </small>
-                                        </label>
-                                      );
-                                    },
-                                  )}
                                 </div>
-                              ) : (
-                                <p
-                                  className={styles.muted}
-                                  style={{ margin: "10px 0 0" }}
-                                >
-                                  Connect ComfyUI and refresh models to choose
-                                  which workflows appear in Images.
-                                </p>
-                              )}
                             </details>
                           </section>
                         )}
@@ -115646,7 +114173,7 @@ function HomeContent(): React.JSX.Element {
                                 </button>
                               </div>
                               <PronunciationAtlas
-                                label="Zen Pronunciation Atlas"
+                                label="Zen accent map"
                                 color="#ff7972"
                                 selection={pronunciationAtlasSelectionForProfile(
                                   playerVoiceProfile,
@@ -116605,30 +115132,28 @@ function HomeContent(): React.JSX.Element {
                   className={styles.settingsAboutModal}
                   role="dialog"
                   aria-modal="true"
-                  aria-label="Defaults and fallbacks"
+                  aria-label="Prism and recovery models"
                   onClick={(event) => event.stopPropagation()}
                 >
                   <header className={styles.settingsAboutModalHeader}>
                     <div>
                       <span>Models</span>
-                      <h4>Defaults &amp; fallbacks</h4>
+                      <h4>Prism &amp; recovery</h4>
                       <p>
-                        Hub-wide chat routing, a quiet retry path for strict
-                        refusals, and your image panel defaults.
+                        Choose Prism&apos;s dedicated local model and optional
+                        recovery paths.
                       </p>
                     </div>
                     <button
                       type="button"
                       onClick={() => setSettingsDefaultsModalOpen(false)}
-                      aria-label="Close defaults and fallbacks"
+                      aria-label="Close Prism and recovery models"
                     >
                       ×
                     </button>
                   </header>
                   <div className={styles.settingsAboutModalBody}>
-                    {renderDefaultsAndFallbacksControls("modal", {
-                      includeZenAtmosphere: false,
-                    })}
+                    {renderDefaultsAndFallbacksControls("modal")}
                   </div>
                 </div>
               </div>,
@@ -117174,7 +115699,6 @@ function HomeContent(): React.JSX.Element {
             visibleOpenAiImageModelChoice,
             "openai",
           );
-          const effectiveBotModelRoutingPage = botModelRoutingPage;
           const botLibraryTotal = bots.length + 1;
           const botLibrarySummary =
             botLibraryTotal === 1 ? "Default only" : `${botLibraryTotal} bots`;
@@ -118285,7 +116809,6 @@ function HomeContent(): React.JSX.Element {
                             onClick={() => {
                               setBotProfileBuilderOpen(false);
                               setBotAiParametersModalOpen(false);
-                              setBotPreferredModelsModalOpen(false);
                               setBotAvatarCustomizerOpen(true);
                             }}
                           >
@@ -118349,9 +116872,7 @@ function HomeContent(): React.JSX.Element {
                       <BotAvatarCustomizerModal
                         open={botAvatarCustomizerOpen}
                         profileEditorLayerOpen={
-                          botProfileBuilderOpen ||
-                          botAiParametersModalOpen ||
-                          botPreferredModelsModalOpen
+                          botProfileBuilderOpen || botAiParametersModalOpen
                         }
                         profileEditorLayer={
                           !editingDefaultBot ? (
@@ -119415,508 +117936,6 @@ function HomeContent(): React.JSX.Element {
                       </div>
                     </section>
                   ) : null}
-                  {botPanelShowResponseSettings &&
-                    botPreferredModelsModalOpen &&
-                    importBotModalPhase === "closed" &&
-                    (mobileBotsPanel ? (
-                      <div
-                        className={styles.botPreferredModelsModalBackdrop}
-                        data-avatar-studio-layer={
-                          botAvatarCustomizerOpen ? "true" : undefined
-                        }
-                        role="presentation"
-                        onClick={() => setBotPreferredModelsModalOpen(false)}
-                      >
-                        <div
-                          className={styles.botPreferredModelsModal}
-                          role="dialog"
-                          aria-modal="true"
-                          aria-labelledby="bot-model-routing-title"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <header
-                            className={styles.botPreferredModelsModalHeader}
-                          >
-                            <div>
-                              <span>Bot editor</span>
-                              <h4 id="bot-model-routing-title">
-                                Models & routing
-                              </h4>
-                              <p>
-                                Chat routing and image defaults for this bot.
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setBotPreferredModelsModalOpen(false)
-                              }
-                              aria-label="Close models and routing"
-                            >
-                              ×
-                            </button>
-                          </header>
-                          <div
-                            className={
-                              styles.botPreferredModelsModalRoutingGrid
-                            }
-                          >
-                            <nav
-                              className={
-                                styles.botPreferredModelsModalRoutingNav
-                              }
-                              aria-label="Model submenus"
-                            >
-                              <button
-                                type="button"
-                                data-active={
-                                  botModelRoutingPage === "chat"
-                                    ? "true"
-                                    : undefined
-                                }
-                                onClick={() => setBotModelRoutingPage("chat")}
-                              >
-                                <span>Chat models</span>
-                                <small>Offline / online</small>
-                              </button>
-                              <button
-                                type="button"
-                                data-active={
-                                  botModelRoutingPage === "image"
-                                    ? "true"
-                                    : undefined
-                                }
-                                onClick={() => setBotModelRoutingPage("image")}
-                              >
-                                <span>Image models</span>
-                                <small>Local & OpenAI</small>
-                              </button>
-                            </nav>
-                            <div
-                              className={
-                                styles.botPreferredModelsModalRoutingBody
-                              }
-                            >
-                              {botModelRoutingPage === "chat" ? (
-                                <div className={styles.botParameterModelRow}>
-                                  <div
-                                    className={`${styles.botParameterField} ${styles.botParameterModelField}`}
-                                  >
-                                    <span>Preferred offline model</span>
-                                    <ComposerModelPicker
-                                      value={visibleLocalModelChoice}
-                                      onChange={setNewBotLocalModel}
-                                      options={localModelOptions}
-                                      provider="local"
-                                      loading={modelCatalogLoading}
-                                      ariaLabel="Preferred offline model for this bot"
-                                      placement="down"
-                                      minMenuWidthPx={260}
-                                      showAutoOption={false}
-                                      showDisabledOption
-                                      dismissPopoversSignal={
-                                        composerPopoverDismissSignal
-                                      }
-                                    />
-                                    <small>
-                                      Used when this bot replies while the
-                                      editor is set to LOCAL.
-                                    </small>
-                                  </div>
-                                  <div
-                                    className={`${styles.botParameterField} ${styles.botParameterModelField}`}
-                                  >
-                                    <span>Preferred online model</span>
-                                    <ComposerModelPicker
-                                      value={visibleOnlineModelChoice}
-                                      onChange={setNewBotOnlineModel}
-                                      options={onlineModelPickerOptions}
-                                      provider="online"
-                                      loading={modelCatalogLoading}
-                                      ariaLabel="Preferred online model for this bot"
-                                      disabled={!newBotOnlineEnabled}
-                                      placement="down"
-                                      minMenuWidthPx={260}
-                                      showAutoOption={false}
-                                      showDisabledOption
-                                      dismissPopoversSignal={
-                                        composerPopoverDismissSignal
-                                      }
-                                    />
-                                    <small>
-                                      {newBotOnlineEnabled
-                                        ? "Used when this bot replies while the editor is set to ONLINE."
-                                        : "Disabled while online capability is off."}
-                                    </small>
-                                  </div>
-                                </div>
-                              ) : null}
-                              {botModelRoutingPage === "image" ? (
-                                <div className={styles.botParameterModelRow}>
-                                  <div
-                                    className={`${styles.botParameterField} ${styles.botParameterModelField}`}
-                                  >
-                                    <span>Preferred offline image model</span>
-                                    <ComposerModelPicker
-                                      value={newBotLocalImageModel}
-                                      onChange={setNewBotLocalImageModel}
-                                      options={localImageModelOptionsForBot}
-                                      provider="local"
-                                      loading={modelCatalogLoading}
-                                      ariaLabel="Preferred offline image model for this bot"
-                                      disabled={
-                                        localImageModelCatalogEntries.length ===
-                                        0
-                                      }
-                                      placement="down"
-                                      minMenuWidthPx={260}
-                                      autoOptionLabel="Account default"
-                                      autoOptionMetaOverride="Settings"
-                                      settingsDefaultModelId={imageSettingsSavedDefaultModelId(
-                                        settings,
-                                        "local",
-                                      )}
-                                      dismissPopoversSignal={
-                                        composerPopoverDismissSignal
-                                      }
-                                    />
-                                    <small>
-                                      Local / ComfyUI images when this bot is in
-                                      scope. “Account default” follows Settings.
-                                    </small>
-                                  </div>
-                                  <div
-                                    className={`${styles.botParameterField} ${styles.botParameterModelField}`}
-                                  >
-                                    <span>Preferred online image model</span>
-                                    <ComposerModelPicker
-                                      value={visibleOpenAiImageModelChoice}
-                                      onChange={setNewBotOpenAiImageModel}
-                                      options={openAiImageModelOptionsForBot}
-                                      provider="openai"
-                                      loading={modelCatalogLoading}
-                                      ariaLabel="Preferred online image model for this bot"
-                                      disabled={
-                                        !newBotOnlineEnabled ||
-                                        !hasVisibleOnlineImageModels
-                                      }
-                                      title={
-                                        hasRunnableOnlineImageModels
-                                          ? "Preferred online image model for this bot"
-                                          : hasVisibleOnlineImageModels
-                                            ? "Online image models are visible, but no runnable model is available yet."
-                                            : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
-                                      }
-                                      placement="down"
-                                      minMenuWidthPx={260}
-                                      autoOptionLabel="Account default"
-                                      autoOptionMetaOverride={
-                                        hasRunnableOnlineImageModels
-                                          ? "Settings"
-                                          : hasVisibleOnlineImageModels
-                                            ? "no runnable online image model"
-                                            : "add online image key to enable"
-                                      }
-                                      settingsDefaultModelId={imageSettingsSavedDefaultModelId(
-                                        settings,
-                                        "openai",
-                                      )}
-                                      dismissPopoversSignal={
-                                        composerPopoverDismissSignal
-                                      }
-                                    />
-                                    <small>
-                                      {!newBotOnlineEnabled
-                                        ? "Disabled while online capability is off."
-                                        : !hasVisibleOnlineImageModels
-                                          ? "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
-                                          : !hasRunnableOnlineImageModels
-                                            ? "Online image models are visible, but no runnable model is available yet."
-                                            : "Online image models when this bot is in scope."}
-                                    </small>
-                                  </div>
-                                </div>
-                              ) : null}
-                            </div>
-                          </div>
-                        </div>
-                      </div>
-                    ) : (
-                      <div
-                        className={styles.botModelRoutingBackdrop}
-                        data-avatar-studio-layer={
-                          botAvatarCustomizerOpen ? "true" : undefined
-                        }
-                        role="presentation"
-                        onClick={() => setBotPreferredModelsModalOpen(false)}
-                      >
-                        <section
-                          className={styles.botModelRoutingSheet}
-                          role="dialog"
-                          aria-modal="true"
-                          aria-labelledby="bot-model-routing-desktop-title"
-                          onClick={(event) => event.stopPropagation()}
-                        >
-                          <header className={styles.botModelRoutingSheetHeader}>
-                            <div>
-                              <span>Bot editor</span>
-                              <h4 id="bot-model-routing-desktop-title">
-                                Model & image routing
-                              </h4>
-                              <p>
-                                Chat models and image-generation defaults for
-                                this bot.
-                              </p>
-                            </div>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setBotPreferredModelsModalOpen(false)
-                              }
-                              aria-label="Close model routing"
-                            >
-                              ×
-                            </button>
-                          </header>
-                          <nav
-                            className={styles.botModelRoutingNav}
-                            aria-label="Model submenus"
-                          >
-                            <button
-                              type="button"
-                              data-active={
-                                effectiveBotModelRoutingPage === "chat"
-                                  ? "true"
-                                  : undefined
-                              }
-                              onClick={() => setBotModelRoutingPage("chat")}
-                            >
-                              <span>Chat models</span>
-                              <small>Offline / online</small>
-                            </button>
-                            <button
-                              type="button"
-                              data-active={
-                                effectiveBotModelRoutingPage === "image"
-                                  ? "true"
-                                  : undefined
-                              }
-                              onClick={() => setBotModelRoutingPage("image")}
-                            >
-                              <span>Image models</span>
-                              <small>Local & OpenAI</small>
-                            </button>
-                          </nav>
-                          <div className={styles.botModelRoutingBody}>
-                            {effectiveBotModelRoutingPage === "chat" ? (
-                              <div className={styles.botParameterModelRow}>
-                                <div
-                                  className={`${styles.botParameterField} ${styles.botParameterModelField}`}
-                                  onMouseEnter={(event) =>
-                                    showFieldHelp(
-                                      "Used when this bot replies while the editor is set to LOCAL.",
-                                      event.currentTarget,
-                                    )
-                                  }
-                                  onMouseLeave={hideFieldHelp}
-                                  onFocus={(event) =>
-                                    showFieldHelp(
-                                      "Used when this bot replies while the editor is set to LOCAL.",
-                                      event.currentTarget,
-                                    )
-                                  }
-                                  onBlur={hideFieldHelp}
-                                >
-                                  <span>Preferred offline model</span>
-                                  <ComposerModelPicker
-                                    value={visibleLocalModelChoice}
-                                    onChange={setNewBotLocalModel}
-                                    options={localModelOptions}
-                                    provider="local"
-                                    loading={modelCatalogLoading}
-                                    ariaLabel="Preferred offline model for this bot"
-                                    placement="down"
-                                    minMenuWidthPx={260}
-                                    showAutoOption={false}
-                                    showDisabledOption
-                                    dismissPopoversSignal={
-                                      composerPopoverDismissSignal
-                                    }
-                                  />
-                                  <small>
-                                    Used when this bot replies while the editor
-                                    is set to LOCAL.
-                                  </small>
-                                </div>
-                                <div
-                                  className={`${styles.botParameterField} ${styles.botParameterModelField}`}
-                                  onMouseEnter={(event) =>
-                                    showFieldHelp(
-                                      "Used when this bot replies while the editor is set to ONLINE.",
-                                      event.currentTarget,
-                                    )
-                                  }
-                                  onMouseLeave={hideFieldHelp}
-                                  onFocus={(event) =>
-                                    showFieldHelp(
-                                      "Used when this bot replies while the editor is set to ONLINE.",
-                                      event.currentTarget,
-                                    )
-                                  }
-                                  onBlur={hideFieldHelp}
-                                >
-                                  <span>Preferred online model</span>
-                                  <ComposerModelPicker
-                                    value={visibleOnlineModelChoice}
-                                    onChange={setNewBotOnlineModel}
-                                    options={onlineModelPickerOptions}
-                                    provider="online"
-                                    loading={modelCatalogLoading}
-                                    ariaLabel="Preferred online model for this bot"
-                                    disabled={!newBotOnlineEnabled}
-                                    placement="down"
-                                    minMenuWidthPx={260}
-                                    showAutoOption={false}
-                                    showDisabledOption
-                                    dismissPopoversSignal={
-                                      composerPopoverDismissSignal
-                                    }
-                                  />
-                                  <small>
-                                    {newBotOnlineEnabled
-                                      ? "Used when this bot replies while the editor is set to ONLINE."
-                                      : "Disabled while online capability is off."}
-                                  </small>
-                                </div>
-                              </div>
-                            ) : null}
-                            {effectiveBotModelRoutingPage === "image" ? (
-                              <div className={styles.botParameterModelRow}>
-                                <div
-                                  className={`${styles.botParameterField} ${styles.botParameterModelField}`}
-                                  onMouseEnter={(event) =>
-                                    showFieldHelp(
-                                      "Local / ComfyUI images when this bot is in scope.",
-                                      event.currentTarget,
-                                    )
-                                  }
-                                  onMouseLeave={hideFieldHelp}
-                                  onFocus={(event) =>
-                                    showFieldHelp(
-                                      "Local / ComfyUI images when this bot is in scope.",
-                                      event.currentTarget,
-                                    )
-                                  }
-                                  onBlur={hideFieldHelp}
-                                >
-                                  <span>Preferred offline image model</span>
-                                  <ComposerModelPicker
-                                    value={newBotLocalImageModel}
-                                    onChange={setNewBotLocalImageModel}
-                                    options={localImageModelOptionsForBot}
-                                    provider="local"
-                                    loading={modelCatalogLoading}
-                                    ariaLabel="Preferred offline image model for this bot"
-                                    disabled={
-                                      localImageModelCatalogEntries.length === 0
-                                    }
-                                    placement="down"
-                                    minMenuWidthPx={260}
-                                    autoOptionLabel="Account default"
-                                    autoOptionMetaOverride="Settings"
-                                    settingsDefaultModelId={imageSettingsSavedDefaultModelId(
-                                      settings,
-                                      "local",
-                                    )}
-                                    dismissPopoversSignal={
-                                      composerPopoverDismissSignal
-                                    }
-                                  />
-                                  <small>
-                                    “Account default” follows Settings when no
-                                    catalog pick is stored here.
-                                  </small>
-                                </div>
-                                <div
-                                  className={`${styles.botParameterField} ${styles.botParameterModelField}`}
-                                  onMouseEnter={(event) =>
-                                    showFieldHelp(
-                                      "Online image models when this bot is in scope.",
-                                      event.currentTarget,
-                                    )
-                                  }
-                                  onMouseLeave={hideFieldHelp}
-                                  onFocus={(event) =>
-                                    showFieldHelp(
-                                      "Online image models when this bot is in scope.",
-                                      event.currentTarget,
-                                    )
-                                  }
-                                  onBlur={hideFieldHelp}
-                                >
-                                  <span>Preferred online image model</span>
-                                  <ComposerModelPicker
-                                    value={visibleOpenAiImageModelChoice}
-                                    onChange={setNewBotOpenAiImageModel}
-                                    options={openAiImageModelOptionsForBot}
-                                    provider="openai"
-                                    loading={modelCatalogLoading}
-                                    ariaLabel="Preferred online image model for this bot"
-                                    disabled={
-                                      !newBotOnlineEnabled ||
-                                      !hasVisibleOnlineImageModels
-                                    }
-                                    title={
-                                      hasRunnableOnlineImageModels
-                                        ? "Preferred online image model for this bot"
-                                        : hasVisibleOnlineImageModels
-                                          ? "Online image models are visible, but no runnable model is available yet."
-                                          : "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
-                                    }
-                                    placement="down"
-                                    minMenuWidthPx={260}
-                                    autoOptionLabel="Account default"
-                                    autoOptionMetaOverride={
-                                      hasRunnableOnlineImageModels
-                                        ? "Settings"
-                                        : hasVisibleOnlineImageModels
-                                          ? "no runnable online image model"
-                                          : "add online image key to enable"
-                                    }
-                                    settingsDefaultModelId={imageSettingsSavedDefaultModelId(
-                                      settings,
-                                      "openai",
-                                    )}
-                                    dismissPopoversSignal={
-                                      composerPopoverDismissSignal
-                                    }
-                                  />
-                                  <small>
-                                    {!newBotOnlineEnabled
-                                      ? "Disabled while online capability is off."
-                                      : !hasVisibleOnlineImageModels
-                                        ? "Add an OpenAI or ElevenLabs key in Settings to enable online image models."
-                                        : !hasRunnableOnlineImageModels
-                                          ? "Online image models are visible, but no runnable model is available yet."
-                                          : "Uses your online image key from Settings when online images run."}
-                                  </small>
-                                </div>
-                              </div>
-                            ) : null}
-                          </div>
-                          <footer className={styles.botModelRoutingFooter}>
-                            <button
-                              type="button"
-                              onClick={() =>
-                                setBotPreferredModelsModalOpen(false)
-                              }
-                            >
-                              Done
-                            </button>
-                          </footer>
-                        </section>
-                      </div>
-                    ))}
                   {editingBotId && editingBot ? (
                     <div
                       className={styles.botEditorActionStrip}
@@ -120406,14 +118425,9 @@ function HomeContent(): React.JSX.Element {
                       <BotCreationRitual
                         phase={botFoundryPhase}
                         prompt={botGeneratorPrompt}
-                        responseMode={
-                          settings?.autoModeEnabled &&
-                          settings.autoFallbackChain
-                            ? "auto"
-                            : responseModeForProvider(
+                        responseMode={responseModeForProvider(
                                 settings?.preferredProvider ?? "local",
-                              )
-                        }
+                        )}
                         completedDraft={botGeneratorCompletedDraft}
                         theme={resolvedTheme}
                         companionOrigin={botFoundryCompanionOrigin}
@@ -120502,19 +118516,11 @@ function HomeContent(): React.JSX.Element {
                         <div className={styles.botGeneratorHeaderActions}>
                           <span
                             className={styles.botGeneratorModeBadge}
-                            data-mode={
-                              settings?.autoModeEnabled &&
-                              settings.autoFallbackChain
-                                ? "auto"
-                                : responseModeForProvider(
+                            data-mode={responseModeForProvider(
                                     settings?.preferredProvider ?? "local",
-                                  )
-                            }
+                            )}
                           >
-                            {settings?.autoModeEnabled &&
-                            settings.autoFallbackChain
-                              ? "AUTO"
-                              : responseModeForProvider(
+                            {responseModeForProvider(
                                   settings?.preferredProvider ?? "local",
                                 ).toUpperCase()}
                           </span>
@@ -134548,7 +132554,6 @@ function HomeContent(): React.JSX.Element {
     /** Same global utility affordances as the chat pane header. */
     // Unlike the main chat header, keep coffee toolbar visible while a right
     // panel is open so Settings / Memories / Images / Bots remain reachable.
-    const coffeeToolbarGearHidden = sidebarOpen;
     const coffeeMainSurfaceStyle: React.CSSProperties = {
       ...(appShellStyle ?? {}),
       ...(composeStyle ?? {}),
@@ -134619,27 +132624,45 @@ function HomeContent(): React.JSX.Element {
                 : coffeeWorkspaceRef
           }
         />
+        {renderSharedAppletNavbar("Coffee tools", {
+          brandAppletId: "coffee",
+          liveSessionActive: coffeeChromePolicy.liveSessionActive,
+          liveSessionName: "Coffee",
+          liveSessionExit: coffeeChromePolicy.showEndSessionInSwitcher
+            ? {
+                label: "End session",
+                title: "End Coffee Session and stop autonomous replies",
+                onClick: () => void exitCoffeeSessionToSelectedView(),
+              }
+            : undefined,
+          recordedReplay: coffeeChromePolicy.reviewActive,
+          showVoiceSelector: !coffeeChromePolicy.reviewActive,
+          voiceLocalPremiumFallback: coffeeBlocksOnlineCapabilities,
+          modelControls: coffeeChromePolicy.reviewActive ? undefined : (
+            <>
+              {renderCoffeeProviderModeToggle()}
+              {renderCoffeeHeaderModelPicker()}
+            </>
+          ),
+          utilityLead:
+            coffeeSessionPhase === "preview" && coffeePreviewCanResume ? (
+              <button
+                type="button"
+                className={styles.coffeeExitSessionButton}
+                disabled={coffeeBusy}
+                onClick={joinPreviewedCoffeeSession}
+                title="Join this Coffee Session"
+              >
+                Join session
+              </button>
+            ) : null,
+        })}
         {!coffeeSessionSurfaceActive && (
           <aside
             className={styles.coffeeSidebar}
             data-tutorial-target="coffee-groups"
             data-dev-panel-safe-area="left"
           >
-            <button
-              type="button"
-              className={`${styles.coffeeHubButton} ${styles.sidebarWordmarkButton}`}
-              onClick={openLivingShellHome}
-              aria-label="Open All Bots Home"
-              title="All Bots Home"
-            >
-              <span className={styles.chatHubWordmarkStack}>
-                <PrismWordmarkWithVersion
-                  size="sm"
-                  className={styles.hubHomeWordmark}
-                />
-                <AppletHeaderLabel appletId="coffee" />
-              </span>
-            </button>
             <div className={styles.coffeeSidebarHeader}>
               <span className={styles.sectionLabel}>Coffee Groups</span>
               <div className={styles.coffeeSidebarHeaderActions}>
@@ -134697,68 +132720,6 @@ function HomeContent(): React.JSX.Element {
 
         <section className={styles.coffeeMain}>
           <div className={styles.coffeeMainChrome}>
-            <header
-              className={`${styles.chatHeader} ${styles.coffeeHeader}`}
-              data-live-session-locked={
-                coffeeChromePolicy.liveSessionActive ? "true" : undefined
-              }
-              data-dev-panel-safe-area="top"
-            >
-              <div className={styles.chatHeaderIdentityGroup}>
-                {coffeeChromePolicy.showEndSessionInSwitcher ? (
-                  <button
-                    type="button"
-                    className={styles.coffeeExitSessionButton}
-                    onClick={() => void exitCoffeeSessionToSelectedView()}
-                    title="End Coffee Session and stop autonomous replies"
-                  >
-                    End session
-                  </button>
-                ) : (
-                  renderAppSwitcher()
-                )}
-              </div>
-              {renderCoffeeHeaderModelChrome({
-                localPremiumFallback: coffeeBlocksOnlineCapabilities,
-                recordedReplay: coffeeChromePolicy.reviewActive,
-                voiceDisabled:
-                  coffeeChromePolicy.disabledNavbarActions.voice === true,
-                voiceDisabledReason:
-                  coffeeChromePolicy.disabledNavbarActionTooltips.voice,
-              })}
-              <h2
-                className={styles.chatHeaderTitlePlaceholder}
-                aria-hidden="true"
-              />
-              <div
-                className={`${styles.chatHeaderActions} ${styles.coffeeHeaderActions} ${
-                  coffeeToolbarGearHidden ? styles.chatHeaderActionsHidden : ""
-                }`}
-                aria-label="Conversation tools"
-              >
-                {renderMemoryToasts()}
-                {coffeeSessionPhase === "preview" && coffeePreviewCanResume ? (
-                  <button
-                    type="button"
-                    className={styles.coffeeExitSessionButton}
-                    disabled={coffeeBusy}
-                    onClick={joinPreviewedCoffeeSession}
-                    title="Join this Coffee Session"
-                  >
-                    Join session
-                  </button>
-                ) : null}
-                {renderUniversalNavbarButtons({
-                  disabledActions: coffeeChromePolicy.disabledNavbarActions,
-                  disabledActionTooltips:
-                    coffeeChromePolicy.disabledNavbarActionTooltips,
-                  onHub: () => {
-                    void exitCoffeeToChat();
-                  },
-                })}
-              </div>
-            </header>
-
             {coffeeSessionSurfaceActive &&
             !(coffeeSessionPhase === "finished" && !coffeeReplayActive) &&
             coffeeConversation?.coffeeTopic?.trim() ? (
@@ -135436,11 +133397,6 @@ function HomeContent(): React.JSX.Element {
         placement="down"
         minMenuWidthPx={180}
         showAutoOption={storyResponseMode !== "local"}
-        showDisabledOption
-        settingsDefaultModelId={chatSettingsSavedDefaultModelId(
-          settings,
-          storyResponseMode === "local" ? "local" : "online",
-        )}
         effortControl={effortControlForTarget(storyEffortTarget)}
         dismissPopoversSignal={composerPopoverDismissSignal}
       />
@@ -136207,72 +134163,9 @@ function HomeContent(): React.JSX.Element {
       debateModelProvider,
       debateModelChoice,
     );
-    const debateRunnableAutoModels = settings
-      ? [
-          ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
-          ...onlineChatModelOptions,
-        ]
-          .filter(
-            (model) =>
-              !model.disabledReason && !isDisabledModelChoice(model.id),
-          )
-          .map((model) => ({ provider: model.provider, model: model.id }))
-      : [];
-    const debateResponseMode =
-      settings && debatePrimaryForAuto
-        ? autoFallbackResponseModeForSend({
-            autoEnabled: settings.autoModeEnabled,
-            primary: debatePrimaryForAuto,
-            chain: settings.autoFallbackChain,
-            runnable: debateRunnableAutoModels,
-          })
-        : debateBinaryResponseMode;
-    const debateAutoPrimaryCandidate = settings
-      ? autoFallbackSelectablePrimary({
-          chain: settings.autoFallbackChain,
-          runnable: debatePrimaryForAuto
-            ? [
-                debatePrimaryForAuto,
-                ...debateRunnableAutoModels.filter(
-                  (candidate) =>
-                    candidate.provider !== debatePrimaryForAuto.provider ||
-                    candidate.model !== debatePrimaryForAuto.model,
-                ),
-              ]
-            : debateRunnableAutoModels,
-        })
-      : null;
-    const debateAutoSelectable = debateAutoPrimaryCandidate !== null;
-    const debateNavbarResponseMode = autoResponseModeForProvider(
-      debateProvider,
-      settings?.autoModeEnabled === true,
-      debateAutoSelectable,
-    );
-    const debateAccountDefaultModel = settings
-      ? debateModelProvider === "local"
-        ? visibleConcreteModelChoiceForProvider(
-            modelCatalog,
-            settings,
-            "local",
-            settings.preferredLocalModel,
-          )
-        : visibleConcreteOnlineModelChoice(
-            modelCatalog,
-            settings,
-            settings.preferredOnlineModel,
-          )
-      : AUTO_MODEL_CHOICE;
-    const debateAccountDefaultProvider =
-      debateModelProvider === "local"
-        ? "local"
-        : (onlineChatModelOptions.find(
-            (model) => model.id === debateAccountDefaultModel,
-          )?.provider ??
-          inferOnlineProviderForModelId(debateAccountDefaultModel));
-    const debateEffectiveProvider =
-      debateModelChoice === AUTO_MODEL_CHOICE
-        ? debateAccountDefaultProvider
-        : debateModelProvider;
+    const debateResponseMode = debateBinaryResponseMode;
+    const debateNavbarResponseMode = debateBinaryResponseMode;
+    const debateEffectiveProvider = debateModelProvider;
     const debateModelOptions = includeSelectedResponseModeModelOption(
       modelCatalog,
       settings,
@@ -136285,19 +134178,9 @@ function HomeContent(): React.JSX.Element {
       debateModelChoice,
       debateModelProvider,
     );
-    const debateAccountDefaultModelLabel =
-      debateAccountDefaultModel === AUTO_MODEL_CHOICE
-        ? "Account default"
-        : (debateModelOptions.find(
-            (option) => option.id === debateAccountDefaultModel,
-          )?.label ?? modelLabelFromId(debateAccountDefaultModel));
     const debateEffortTarget = modelEffortTargetForSelection({
       provider: debatePrimaryForAuto?.provider ?? debateModelProvider,
-      modelId:
-        debatePrimaryForAuto?.model ??
-        (debateModelChoice === AUTO_MODEL_CHOICE
-          ? debateAccountDefaultModel
-          : debateModelChoice),
+      modelId: debatePrimaryForAuto?.model ?? debateModelChoice,
       options: debateModelOptions,
       simulatedEffortEnabled:
         settings?.experimentalAllModelEffortEnabled === true,
@@ -136533,7 +134416,7 @@ function HomeContent(): React.JSX.Element {
                   data-tutorial-target="auto-response-mode"
                   data-response-mode={debateNavbarResponseMode}
                 >
-                  {(["local", "auto", "online"] as const).map((mode) => (
+                  {(["local", "online"] as const).map((mode) => (
                     <button
                       key={mode}
                       type="button"
@@ -136542,36 +134425,9 @@ function HomeContent(): React.JSX.Element {
                           ? styles.autoModeOptionActive
                           : ""
                       }`}
-                      disabled={
-                        Boolean(debateLiveChromePolicy?.lockMessage) ||
-                        (mode === "auto" && !debateAutoSelectable)
-                      }
+                      disabled={Boolean(debateLiveChromePolicy?.lockMessage)}
                       onClick={() => {
-                        if (
-                          debateLiveChromePolicy?.lockMessage ||
-                          (mode === "auto" && !debateAutoSelectable)
-                        ) {
-                          return;
-                        }
-                        void persistAutoModeEnabled(mode === "auto");
-                        if (
-                          mode === "auto" &&
-                          debateAutoPrimaryCandidate &&
-                          (!debatePrimaryForAuto ||
-                            debatePrimaryForAuto.provider !==
-                              debateAutoPrimaryCandidate.provider ||
-                            debatePrimaryForAuto.model !==
-                              debateAutoPrimaryCandidate.model)
-                        ) {
-                          setDebateModelChoiceByProvider((previous) => ({
-                            ...previous,
-                            [debateAutoPrimaryCandidate.provider]:
-                              debateAutoPrimaryCandidate.model,
-                          }));
-                          void switchProvider(
-                            debateAutoPrimaryCandidate.provider,
-                          );
-                        }
+                        if (debateLiveChromePolicy?.lockMessage) return;
                         if (mode === "local") {
                           void switchProvider("local");
                         } else if (mode === "online") {
@@ -136592,9 +134448,7 @@ function HomeContent(): React.JSX.Element {
                       aria-pressed={debateNavbarResponseMode === mode}
                       title={
                         debateLiveChromePolicy?.lockMessage ??
-                        (mode === "auto" && !debateAutoSelectable
-                          ? "Choose at least one runnable fallback model in Settings."
-                          : `${responseModeDisplayLabel(mode)} Debate responses`)
+                        `${responseModeDisplayLabel(mode)} Debate responses`
                       }
                     >
                       {responseModeShortLabel(mode)}
@@ -136630,29 +134484,19 @@ function HomeContent(): React.JSX.Element {
                   }}
                   options={debateModelOptions}
                   provider={
-                    debateNavbarResponseMode === "auto"
-                      ? "all"
-                      : debateModelProvider === "local"
-                        ? "local"
-                        : "online"
+                    debateModelProvider === "local" ? "local" : "online"
                   }
                   selectedProvider={debateModelProvider}
                   loading={modelCatalogLoading}
                   disabled={!settings || debateLiveSessionActive}
                   title={
                     debateLiveChromePolicy?.lockMessage ??
-                    "One model for motion synthesis, role consent, every speaker, and every ballot in the next Debate."
+                    "Auto may choose a fresh model and effort for each Debate generation."
                   }
                   ariaLabel="Debate model"
                   placement="down"
                   minMenuWidthPx={180}
-                  autoOptionLabel="Account default"
-                  autoOptionTriggerLabel={debateAccountDefaultModelLabel}
-                  autoOptionMetaOverride="Uses the account model for the entire Debate."
-                  settingsDefaultModelId={chatSettingsSavedDefaultModelId(
-                    settings,
-                    debateModelProvider === "local" ? "local" : "online",
-                  )}
+                  autoOptionMetaOverride="PRISM chooses the best in-lane model and effort for each Debate generation."
                   effortControl={effortControlForTarget(debateEffortTarget)}
                   dismissPopoversSignal={composerPopoverDismissSignal}
                 />
@@ -137131,32 +134975,9 @@ function HomeContent(): React.JSX.Element {
   if (view === "botcast") {
     const signalProvider = settings?.preferredProvider ?? "local";
     const signalResponseMode = responseModeForProvider(signalProvider);
-    const signalAccountDefaultModel = settings
-      ? signalResponseMode === "local"
-        ? visibleConcreteModelChoiceForProvider(
-            modelCatalog,
-            settings,
-            "local",
-            settings.preferredLocalModel,
-          )
-        : visibleConcreteOnlineModelChoice(
-            modelCatalog,
-            settings,
-            settings.preferredOnlineModel,
-          )
-      : AUTO_MODEL_CHOICE;
-    const signalAccountDefaultProvider =
-      signalResponseMode === "local"
-        ? "local"
-        : (onlineChatModelOptions.find(
-            (model) => model.id === signalAccountDefaultModel,
-          )?.provider ??
-          inferOnlineProviderForModelId(signalAccountDefaultModel));
     const signalOnlineProviderCandidate =
-      onlineChatModelOptions.find(
-        (model) => model.id === settings?.preferredOnlineModel,
-      )?.provider ??
-      inferOnlineProviderForModelId(settings?.preferredOnlineModel ?? "");
+      (signalProvider !== "local" ? signalProvider : null) ??
+      onlineChatModelOptions.find((model) => !model.disabledReason)?.provider;
     const signalOnlineProvider: "openai" | "anthropic" =
       signalOnlineProviderCandidate === "anthropic" ? "anthropic" : "openai";
     const signalHostChatProvider = resolveEphemeralChatProvider({
@@ -137165,51 +134986,12 @@ function HomeContent(): React.JSX.Element {
       globalProvider: signalProvider,
       onlineProvider: signalOnlineProvider,
     });
-    const signalRunnableAutoModels = settings
-      ? [
-          ...chatModelOptionsForProvider(modelCatalog, settings, "local"),
-          ...onlineChatModelOptions,
-        ]
-          .filter(
-            (model) =>
-              !model.disabledReason && !isDisabledModelChoice(model.id),
-          )
-          .map((model) => ({ provider: model.provider, model: model.id }))
-      : [];
-    const signalEpisodeResponseMode = settings
-      ? autoFallbackResponseModeForSend({
-          autoEnabled: settings.autoModeEnabled,
-          primary: {
-            provider: signalAccountDefaultProvider,
-            model: signalAccountDefaultModel,
-          },
-          chain: settings.autoFallbackChain,
-          runnable: signalRunnableAutoModels,
-        })
-      : signalResponseMode;
-    const signalAutoSelectable = Boolean(
-      settings &&
-      autoFallbackModeSelectable({
-        chain: settings.autoFallbackChain,
-        runnable: signalRunnableAutoModels,
-      }),
-    );
-    const signalNavbarResponseMode = autoResponseModeForProvider(
-      signalProvider,
-      settings?.autoModeEnabled === true,
-      signalAutoSelectable,
-    );
-    const signalNavbarModelOptions = includeSelectedResponseModeModelOption(
-      modelCatalog,
-      settings,
-      signalNavbarResponseMode,
-      modelOptionsForResponseMode(
+    const signalEpisodeResponseMode = signalResponseMode;
+    const signalNavbarResponseMode = signalResponseMode;
+    const signalNavbarModelOptions = modelOptionsForResponseMode(
         modelCatalog,
         settings,
         signalNavbarResponseMode,
-      ),
-      signalAccountDefaultModel,
-      signalAccountDefaultProvider,
     );
     const signalModelOptions = signalNavbarModelOptions
       .filter((model) => !model.disabledReason)
@@ -137252,12 +135034,6 @@ function HomeContent(): React.JSX.Element {
           responseMode={signalEpisodeResponseMode}
           recordingVoiceSelection={voicePlaybackSelectionRef.current}
           onRecordingStateChange={handleSignalRecordingStateChange}
-          accountDefaultModel={
-            signalAccountDefaultModel === AUTO_MODEL_CHOICE ||
-            modelChoiceIsDisabled(signalAccountDefaultModel)
-              ? null
-              : signalAccountDefaultModel
-          }
           theme={resolvedTheme}
           renderBotGlyph={(glyph, options) => (
             <BotGlyph
@@ -137724,7 +135500,6 @@ function HomeContent(): React.JSX.Element {
               </span>
             );
           }}
-          sidebarHeader={renderSharedAppletSidebarHeader("botcast")}
           navigationHeader={({
             liveSessionActive,
             showLiveExit,
@@ -137736,23 +135511,19 @@ function HomeContent(): React.JSX.Element {
             const liveChromePolicy = liveSessionActive
               ? liveSessionChromePolicy("Signal")
               : null;
-            const accountDefaultModelLabel = signalAccountDefaultModel
-              ? (signalNavbarModelOptions.find(
-                  (option) => option.id === signalAccountDefaultModel,
-                )?.label ?? signalAccountDefaultModel)
-              : "Account default";
             const episodeSelectedModelProvider =
               signalNavbarModelOptions.find(
                 (option) => option.id === episodeModelControl.value,
-              )?.provider ?? signalAccountDefaultProvider;
+              )?.provider ?? signalProvider;
             const episodeEffortTarget = modelEffortTargetForSelection({
               provider: episodeSelectedModelProvider,
-              modelId: episodeModelControl.value || signalAccountDefaultModel,
+              modelId: episodeModelControl.value || AUTO_MODEL_CHOICE,
               options: signalNavbarModelOptions,
               simulatedEffortEnabled:
                 settings?.experimentalAllModelEffortEnabled === true,
             });
             return renderSharedAppletNavbar("Signal tools", {
+              brandAppletId: "botcast",
               showVoiceSelector: !replayActive,
               liveSessionActive,
               recordedReplay: replayActive,
@@ -137772,7 +135543,6 @@ function HomeContent(): React.JSX.Element {
                 <>
                   {renderProviderModeToggle(
                     styles.chatHeaderModeToggle,
-                    true,
                     liveChromePolicy?.lockMessage ?? null,
                     false,
                   )}
@@ -137785,36 +135555,19 @@ function HomeContent(): React.JSX.Element {
                     }
                     options={signalNavbarModelOptions}
                     provider={
-                      signalNavbarResponseMode === "auto"
-                        ? "all"
-                        : signalResponseMode === "local"
-                          ? "local"
-                          : "online"
+                      signalResponseMode === "local" ? "local" : "online"
                     }
                     selectedProvider={episodeSelectedModelProvider}
                     loading={modelCatalogLoading}
                     disabled={!settings || episodeModelControl.disabled}
                     title={
                       episodeModelControl.disabledReason ??
-                      (signalNavbarResponseMode === "auto"
-                        ? "Primary model for the next Signal episode"
-                        : "Model for the next Signal episode")
+                      "Model policy for the next Signal episode"
                     }
-                    ariaLabel={
-                      signalNavbarResponseMode === "auto"
-                        ? "Signal episode primary model; includes all local and online models"
-                        : "Signal episode model"
-                    }
+                    ariaLabel="Signal episode model"
                     placement="down"
                     minMenuWidthPx={180}
-                    autoOptionLabel="Account default"
-                    autoOptionTriggerLabel={accountDefaultModelLabel}
-                    autoOptionMetaOverride={
-                      signalNavbarResponseMode === "auto"
-                        ? "Uses the account model as Primary, then the configured Auto fallbacks."
-                        : "Uses the account model for the selected response mode."
-                    }
-                    settingsDefaultModelId={signalAccountDefaultModel}
+                    autoOptionMetaOverride="PRISM chooses the best in-lane model and effort for each Signal generation."
                     effortControl={effortControlForTarget(episodeEffortTarget)}
                     dismissPopoversSignal={composerPopoverDismissSignal}
                   />
@@ -137840,8 +135593,8 @@ function HomeContent(): React.JSX.Element {
         <SlateWorkspace
           className={themeClass}
           theme={resolvedTheme}
-          sidebarHeader={renderSharedAppletSidebarHeader("slate")}
           navigationHeader={renderSharedAppletNavbar("Slate tools", {
+            brandAppletId: "slate",
             modelControls: renderSharedAccountRoutingControls("Slate"),
           })}
           onHemisphereSettingsSnapshot={setSlateHemisphereSettingsSnapshot}
@@ -138189,7 +135942,8 @@ function HomeContent(): React.JSX.Element {
     const zenHeroSurfaceVisible = chatLikeSurface && emptyHomeHeroMounted;
     const zenCanvasModelPickerActive =
       chatLikeSurface && zenHeroSurfaceVisible && !emptyStateSearchActive;
-    const zenHeaderModelPickerActive = view === "chat" && !zenFirstReplyPending;
+    const zenHeaderModelPickerActive =
+      view === "chat" && detail !== null && !zenFirstReplyPending;
     const activeSideChatSurface =
       detail?.hubRole === "side" && detail.mode === "chat";
     return (
@@ -138219,11 +135973,6 @@ function HomeContent(): React.JSX.Element {
         }
         data-hub-atmosphere-active={hubAtmosphereMounted ? "true" : undefined}
         data-chat-overflow-menu-open={chatOverflowMenuOpen ? "true" : undefined}
-        data-zen-header-hidden={
-          sidebarOpen || zenHeaderVisible || zenHeaderPinned
-            ? undefined
-            : "true"
-        }
         data-zen-initial-thinking={
           zenInitialThinkingActive ? "true" : undefined
         }
@@ -138238,8 +135987,6 @@ function HomeContent(): React.JSX.Element {
         inert={relationshipDepthSurfaceLocked ? true : undefined}
         style={appShellStyle}
         onContextMenu={handleAppContextMenu}
-        onPointerMove={handleZenSurfacePointerMove}
-        onPointerDownCapture={handleZenSurfacePointerDownCapture}
         onTouchStart={beginSidebarEdgeSwipe}
         onTouchMove={continueSidebarEdgeSwipe}
         onTouchEnd={endSidebarEdgeSwipe}
@@ -138294,7 +136041,7 @@ function HomeContent(): React.JSX.Element {
                 size="sm"
                 className={styles.hubHomeWordmark}
               />
-              <AppletHeaderLabel appletId="chat" />
+              <AppletHeaderLabel appletId="zen" />
             </span>
           </button>
 
@@ -138372,204 +136119,14 @@ function HomeContent(): React.JSX.Element {
           <p className={styles.srOnly} role="status" aria-live="polite">
             {relationshipDepthAnnouncement}
           </p>
-          <header
-            ref={chatHeaderRef}
-            className={styles.chatHeader}
-            data-app-shell-header="true"
-            data-dev-panel-safe-area="top"
-            data-zen-live-bot-drag-exclusion="top-bar"
-            onPointerEnter={handleZenHeaderPointerEnter}
-            onPointerLeave={handleZenHeaderPointerLeave}
-            onFocusCapture={handleZenHeaderFocusCapture}
-            onBlurCapture={handleZenHeaderBlurCapture}
-          >
-            <div className={styles.chatHeaderIdentityGroup}>
-              <div className={styles.chatHeaderWordmarkColumn}>
-                <button
-                  type="button"
-                  className={`${styles.hubWordmark} ${styles.wordmarkHomeButton}`}
-                  onClick={openLivingShellHome}
-                  data-home-affordance="wordmark"
-                  aria-label="Open All Bots Home"
-                  title="All Bots Home"
-                >
-                  <span className={styles.chatHubWordmarkStack}>
-                    <PrismWordmarkWithVersion
-                      size="sm"
-                      className={styles.hubHomeWordmark}
-                    />
-                  </span>
-                </button>
-              </div>
-              {renderAppSwitcher()}
-              {viewportWidth <= PHONE_MENU_BREAKPOINT && !chatLikeSurface
-                ? renderMemoryToasts()
-                : null}
-            </div>
-            {zenHeaderModelPickerActive
-              ? renderHeaderModelPicker()
-              : renderVoiceModeSelector()}
-            {!chatLikeSurface && view !== "chat" ? (
-              <div className={styles.chatHeaderComposeToolsRow}>
-                <div className={styles.composeTools}>
-                  {(() => {
-                    const botHasCommenced =
-                      !!detail && detail.messages.length > 0;
-                    const botDisabled = !detail;
-                    return (
-                      <>
-                        {/* Pre-chat (!detail): dropdown is disabled so the tile
-                          picker above is the sole bot-arming path. The dropdown
-                          still mirrors selectedBotId visually — clicking a tile
-                          populates it automatically.
-                          Post-chat (detail set): dropdown becomes the mid-thread
-                          bot switcher. Consecutive sends reuse whatever bot is
-                          currently in selectedBotId; the user explicitly switches
-                          by changing this dropdown. */}
-                        {bots.length > 0 && (
-                          <ComposerBotPicker
-                            value={selectedBotId ?? ""}
-                            onChange={handleComposerBotSelectionChange}
-                            bots={botHasCommenced ? bots : filteredBots}
-                            resolvedTheme={resolvedTheme}
-                            disabled={botDisabled}
-                            title={
-                              !detail
-                                ? "Pick a bot from the grid above to start the chat. You can swap here between sends once it begins."
-                                : undefined
-                            }
-                            ariaLabel="Bot for the next message"
-                            // Same "hide name until a message exists" policy as Chat
-                            // mode. The grid picker above is the loud identity
-                            // affordance pre-send; the compose rail just reflects the
-                            // choice as a tinted glyph. Once a message is in the
-                            // thread, the pill becomes a full "[glyph] [name]" pick.
-                            showName={botHasCommenced}
-                            enableFilters={botHasCommenced}
-                            hueFilterCenter={hueFilterCenter}
-                            onHueChange={setHueFilterCenter}
-                            hueLensAvailable={hueLensAvailable}
-                            hueLensTrackGradient={hueLensTrackGradient}
-                            hueLensTrackSegments={hueLensTrackSegments}
-                            dismissPopoversSignal={composerPopoverDismissSignal}
-                            placement="down"
-                            privateTone={appWidePrivateMode}
-                          />
-                        )}
-                      </>
-                    );
-                  })()}
-                  {/* Composer-tools toggle: route through the helper so the
-                    "active bot is offline-only" lock applies here too. The
-                    previous inline copy of this JSX was the reason flipping
-                    still appeared to work even though the API enforced the
-                    offline-only rule. */}
-                  {renderProviderModeToggle()}
-                  {(() => {
-                    // Use the effective provider so this picker also reflects
-                    // the offline-only lock when the active chat bot is
-                    // protected (matches what `renderProviderModeToggle` shows).
-                    const responseMode = responseModeForProvider(
-                      effectivePreferredProvider,
-                    );
-                    const isLocal = responseMode === "local";
-                    const resolvedChoice = resolveModelChoiceForResponseMode({
-                      responseMode,
-                      providerPreference: effectivePreferredProvider,
-                      choices: visibleModelChoicesByProvider(
-                        modelCatalog,
-                        settings,
-                        chatModelChoiceByProvider,
-                      ),
-                      onlineOptions: onlineChatModelOptions,
-                    });
-                    const modelProvider = resolvedChoice.provider;
-                    const visibleModelChoice = resolvedChoice.modelChoice;
-                    const primaryForAuto = resolvedAutoPrimaryForComposer(
-                      modelCatalog,
-                      settings,
-                      modelProvider,
-                      visibleModelChoice,
-                    );
-                    const modelOptions = includeSelectedResponseModeModelOption(
-                      modelCatalog,
-                      settings,
-                      responseMode,
-                      modelOptionsForResponseMode(
-                        modelCatalog,
-                        settings,
-                        responseMode,
-                      ),
-                      visibleModelChoice,
-                      modelProvider,
-                    );
-                    const effortTarget = modelEffortTargetForSelection({
-                      provider: primaryForAuto?.provider ?? modelProvider,
-                      modelId: primaryForAuto?.model ?? visibleModelChoice,
-                      options: modelOptions,
-                      simulatedEffortEnabled:
-                        settings?.experimentalAllModelEffortEnabled === true,
-                    });
-                    return (
-                      <>
-                        <ComposerModelPicker
-                          value={visibleModelChoice}
-                          onChange={(nextChoice) => {
-                            const appliedOnline =
-                              responseMode === "online"
-                                ? applyOnlineModelChoice({
-                                    currentChoices: chatModelChoiceByProvider,
-                                    nextChoice,
-                                    onlineOptions: onlineChatModelOptions,
-                                    providerPreference:
-                                      effectivePreferredProvider,
-                                  })
-                                : null;
-                            setChatModelChoiceByProvider((previous) => {
-                              const next =
-                                responseMode === "local"
-                                  ? { ...previous, local: nextChoice }
-                                  : applyOnlineModelChoice({
-                                      currentChoices: previous,
-                                      nextChoice,
-                                      onlineOptions: onlineChatModelOptions,
-                                      providerPreference:
-                                        effectivePreferredProvider,
-                                    }).choices;
-                              persistChatModelChoicesForActiveScope(next);
-                              return next;
-                            });
-                            if (appliedOnline) {
-                              void switchProvider(appliedOnline.provider);
-                            }
-                          }}
-                          options={modelOptions}
-                          provider={isLocal ? "local" : "online"}
-                          loading={modelCatalogLoading}
-                          disabled={!settings || pendingReply}
-                          generating={pendingReplyVisible}
-                          title={`Model for ${responseModeShortLabel(responseMode)} replies`}
-                          ariaLabel={`Model for ${
-                            isLocal ? "local" : "online"
-                          } replies`}
-                          settingsDefaultModelId={chatSettingsSavedDefaultModelId(
-                            settings,
-                            isLocal ? "local" : "online",
-                          )}
-                          placement="down"
-                          minMenuWidthPx={180}
-                          effortControl={effortControlForTarget(effortTarget)}
-                          dismissPopoversSignal={composerPopoverDismissSignal}
-                        />
-                        {renderComposeUtilityActions()}
-                      </>
-                    );
-                  })()}
-                </div>
-              </div>
-            ) : null}
-            {renderChatOverflowGear()}
-          </header>
+          {renderSharedAppletNavbar("Zen tools", {
+            brandAppletId: "zen",
+            headerRef: chatHeaderRef,
+            controlRail: renderHeaderModelPicker({
+              showModelControls: zenHeaderModelPickerActive,
+            }),
+            zenDragExclusion: true,
+          })}
           {renderZenMemoryToasts()}
           {chatLikeSurface && zenPersonaContinuityWashStyle ? (
             <div
@@ -141749,10 +139306,7 @@ function HomeContent(): React.JSX.Element {
                                 "button, a, input, textarea, select, [role='button']",
                               )
                             : null;
-                        if (
-                          psychicDisclosureAvailable &&
-                          !interactiveTarget
-                        ) {
+                        if (psychicDisclosureAvailable && !interactiveTarget) {
                           setExpandedPsychicAssistantMessageId((current) =>
                             current === msg.id ? null : msg.id,
                           );
@@ -141952,10 +139506,7 @@ function HomeContent(): React.JSX.Element {
                           : undefined
                       }
                     />
-                    {renderMessageGenerationMetadata(
-                      msg,
-                      psychicSourceMessage,
-                    )}
+                    {renderMessageGenerationMetadata(msg, psychicSourceMessage)}
                     {renderAssistantPsychicDisclosure(
                       msg,
                       psychicSourceMessage,

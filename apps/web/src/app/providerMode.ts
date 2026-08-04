@@ -21,7 +21,7 @@ export function normalizeProviderModeModelChoice(
   value: string | null | undefined
 ): string {
   const trimmed = value?.trim() ?? "";
-  if (isDisabledModelChoice(trimmed)) return DISABLED_MODEL_CHOICE;
+  if (isDisabledModelChoice(trimmed)) return AUTO_MODEL_CHOICE;
   return trimmed.length > 0 ? trimmed : AUTO_MODEL_CHOICE;
 }
 
@@ -35,16 +35,15 @@ export function nextResponseMode(mode: ResponseMode): ResponseMode {
 
 export function autoResponseModeForProvider(
   provider: Provider,
-  autoEnabled: boolean,
-  autoAllowed = true
+  _autoEnabled: boolean,
+  _autoAllowed = true
 ): AutoResponseMode {
-  return autoEnabled && autoAllowed ? "auto" : responseModeForProvider(provider);
+  return responseModeForProvider(provider);
 }
 
 /**
  * Hard LOCAL privacy blocks online capabilities (Premium voice, ElevenLabs
- * credit checks, etc.). AUTO and ONLINE may use them — AUTO still routes
- * through the user's primary + fallback chain.
+ * credit checks, etc.). Auto model selection stays inside the active lane.
  */
 export function blocksOnlineCapabilities(mode: AutoResponseMode): boolean {
   return mode === "local";
@@ -235,7 +234,7 @@ export function applyModelChoiceForResponseMode(args: {
 }): { provider: Provider; choices: Record<Provider, string> } {
   const normalized = normalizeProviderModeModelChoice(args.nextChoice);
   const selectedOption =
-    normalized === AUTO_MODEL_CHOICE || normalized === DISABLED_MODEL_CHOICE
+    normalized === AUTO_MODEL_CHOICE
       ? null
       : (args.options.find(
           (option) => option.id === normalized && !option.disabledReason,

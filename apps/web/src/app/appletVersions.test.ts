@@ -38,7 +38,7 @@ describe("applet version helpers", () => {
   it("keeps the app switcher focused on usable top-level applets", () => {
     assert.deepEqual(
       prismTopLevelSwitcherApplets().map((applet) => applet.id),
-      ["chat", "coffee", "debate", "botcast", "slate"]
+      ["chat", "zen", "coffee", "debate", "botcast", "slate"]
     );
     assert.deepEqual(
       new Set(prismTopLevelSwitcherApplets().map((applet) => applet.status)),
@@ -59,30 +59,30 @@ describe("applet version helpers", () => {
       "pseudo",
       "surf",
     ]);
-    assert.equal(switcherIds.includes("zen"), false);
+    assert.equal(switcherIds.includes("zen"), true);
     assert.equal(switcherIds.includes("story"), false);
     assert.equal(switcherIds.some((id) => plannedIds.includes(id)), false);
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
     assert.equal(PRISM_APPLETS.chat.version, "1.37");
-    assert.equal(PRISM_APPLETS.zen.version, "1.35");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.43");
+    assert.equal(PRISM_APPLETS.zen.version, "1.36");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.44");
     assert.equal(PRISM_APPLETS.debate.version, "0.6");
     assert.equal(PRISM_APPLETS.debate.status, "preview");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.54");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.55");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
     assert.equal(PRISM_APPLETS.story.version, "0.31");
     assert.equal(PRISM_APPLETS.story.status, "planned");
-    assert.equal(PRISM_APPLETS.slate.version, "0.8");
+    assert.equal(PRISM_APPLETS.slate.version, "0.9");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
     assert.equal(prismAppletVersionLabel("chat"), "v1.37");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.35");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.43");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.36");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.44");
     assert.equal(prismAppletVersionLabel("debate"), "v0.6");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.54");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.55");
     assert.equal(prismAppletVersionLabel("story"), "v0.31");
-    assert.equal(prismAppletVersionLabel("slate"), "v0.8");
+    assert.equal(prismAppletVersionLabel("slate"), "v0.9");
   });
 
   it("declares holder-scoped bot-naming support for every applet", () => {

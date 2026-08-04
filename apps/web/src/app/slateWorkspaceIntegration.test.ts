@@ -344,11 +344,7 @@ describe("Slate workspace integration", () => {
     );
     assert.match(
       slateBranch,
-      /sidebarHeader=\{renderSharedAppletSidebarHeader\("slate"\)\}/,
-    );
-    assert.match(
-      slateBranch,
-      /navigationHeader=\{renderSharedAppletNavbar\("Slate tools", \{[\s\S]*modelControls: renderSharedAccountRoutingControls\("Slate"\),[\s\S]*\}\)\}/u,
+      /navigationHeader=\{renderSharedAppletNavbar\("Slate tools", \{[\s\S]*brandAppletId: "slate",[\s\S]*modelControls: renderSharedAccountRoutingControls\("Slate"\),[\s\S]*\}\)\}/u,
     );
     assert.match(
       slateBranch,
@@ -356,7 +352,7 @@ describe("Slate workspace integration", () => {
     );
     assert.match(slateBranch, /renderSharedPanels\(\)/);
     assert.match(slateBranch, /renderModeTutorialOverlay\(\)/);
-    assert.match(source, /sidebarHeader:\s*ReactNode/);
+    assert.doesNotMatch(source, /sidebarHeader:\s*ReactNode/);
     assert.match(source, /navigationHeader:\s*ReactNode/);
     assert.match(source, /data-theme=\{theme\}/);
   });

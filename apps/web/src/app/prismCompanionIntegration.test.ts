@@ -82,6 +82,23 @@ test("gives full-size Prism Home the same orchestration, activity, and undo APIs
   assert.match(api, /ctx\.res\.statusCode = 204/u);
 });
 
+test("shows Prism's dedicated local model without inheriting the applet picker", () => {
+  assert.match(page, /<span>Prism model<\/span>/u);
+  assert.match(
+    page,
+    /Prism Home, the floating[\s\S]*Applet model pickers do not[\s\S]*change it/u,
+  );
+  assert.match(page, /const prismHomeUsesDedicatedLocalModel/u);
+  assert.match(
+    page,
+    /Prism uses this dedicated local model\. Change it in Settings → Models\./u,
+  );
+  assert.match(
+    tutorials,
+    /Prism Home, the floating companion, Wield, and Refract always use the local Prism model/u,
+  );
+});
+
 test("hands synthesized Signal bookings to the normal warmup and playback path", () => {
   const signal = readFileSync(
     new URL("./BotcastExperience.tsx", import.meta.url),

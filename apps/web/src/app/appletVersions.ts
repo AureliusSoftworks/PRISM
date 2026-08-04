@@ -80,7 +80,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.35",
+    version: "1.36",
     status: "active",
   },
   debate: {
@@ -98,13 +98,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.43",
+    version: "2.44",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.54",
+    version: "1.55",
     status: "active",
   },
   feed: {
@@ -134,7 +134,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   slate: {
     id: "slate",
     name: "Slate",
-    version: "0.8",
+    version: "0.9",
     status: "preview",
   },
   pseudo: {
@@ -667,6 +667,7 @@ export const BOT_POWER_INTERRUPTION_MODE_POLICY: Record<
 
 export const PRISM_TOP_LEVEL_SWITCHER_APPLET_IDS = [
   "chat",
+  "zen",
   "coffee",
   "debate",
   "botcast",

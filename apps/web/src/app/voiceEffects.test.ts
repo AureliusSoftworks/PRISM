@@ -341,14 +341,14 @@ describe("voice performance", () => {
         currentTime: 10,
         outputLatency: 0.085,
       }),
-      85,
+      91,
     );
     assert.equal(
       estimateVoiceOutputLatencyMs({
         baseLatency: 0.5,
         currentTime: 10,
       }),
-      250,
+      500,
     );
 
     const englishSource = readFileSync(
@@ -358,6 +358,15 @@ describe("voice performance", () => {
     assert.match(
       englishSource,
       /compensateLifecycleForOutputLatency: true/,
+    );
+    assert.equal(
+      englishSource.match(/startDelayMs: englishMediaOutputLatencyMs\(\)/g)
+        ?.length,
+      2,
+    );
+    assert.equal(
+      englishSource.match(/naturalEndTimer = window\.setTimeout/g)?.length,
+      2,
     );
     const bottishSource = readFileSync(
       new URL("./bottishVoice.ts", import.meta.url),

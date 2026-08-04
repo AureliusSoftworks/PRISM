@@ -283,7 +283,7 @@ export interface VoicePlaybackProgressOptions {
   startDelayMs?: number;
 }
 
-const VOICE_OUTPUT_LATENCY_MAX_MS = 250;
+const VOICE_OUTPUT_LATENCY_MAX_MS = 500;
 /**
  * Keep the playback graph connected briefly after the buffer source ends so
  * formant/time-stretch worklets can flush their last phoneme instead of
@@ -304,9 +304,15 @@ export function estimateVoiceOutputLatencyMs(
   performanceNowMs =
     typeof performance === "undefined" ? 0 : performance.now(),
 ): number {
+  const baseLatencySeconds = Number.isFinite(context.baseLatency)
+    ? context.baseLatency
+    : 0;
+  const outputLatencySeconds = Number.isFinite(context.outputLatency)
+    ? (context.outputLatency ?? 0)
+    : 0;
   const fallbackSeconds = Math.max(
-    Number.isFinite(context.baseLatency) ? context.baseLatency : 0,
-    Number.isFinite(context.outputLatency) ? (context.outputLatency ?? 0) : 0,
+    0,
+    baseLatencySeconds + outputLatencySeconds,
   );
   let measuredSeconds = 0;
   if (context.getOutputTimestamp && performanceNowMs > 0) {
@@ -327,10 +333,14 @@ export function estimateVoiceOutputLatencyMs(
       measuredSeconds = 0;
     }
   }
+  const latencySeconds =
+    measuredSeconds > 0
+      ? Math.max(outputLatencySeconds, measuredSeconds)
+      : fallbackSeconds;
   return Math.round(
     Math.min(
       VOICE_OUTPUT_LATENCY_MAX_MS,
-      Math.max(fallbackSeconds, measuredSeconds) * 1_000,
+      latencySeconds * 1_000,
     ),
   );
 }

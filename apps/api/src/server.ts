@@ -246,6 +246,7 @@ import {
   botcastEpisodeCanPrepareAdvance,
   botcastEpisodePowerSnapshotForRole,
   botcastPreparedTurnCursor,
+  botcastRoutingSnapshot,
   cancelBotcastEpisode,
   chatWithBotcastShowHost,
   createBotcastShow,
@@ -273,6 +274,7 @@ import {
   projectBotcastAdvanceResponseForAudienceV1,
   projectBotcastEpisodeForAudienceV1,
   projectBotcastEpisodeForObserverV2,
+  recordBotcastRoutingSnapshot,
   readBotcastShowAtmosphereAudio,
   readBotcastShowIntroAudio,
   readBotcastShowOutdentAudio,
@@ -360,6 +362,7 @@ import type {
   ReplayVoiceTakeV1,
   ResolvedLocalVoicePronunciationV1,
   ResolvedLocalVoiceSpeechprintV1,
+  ReasoningEffort,
   SlateClarificationAnswerRequest,
   SlateDirectionIntentPatch,
   SlateLockedRange,
@@ -426,7 +429,6 @@ import {
   listSlateProjects,
   proposeSlateRevision,
   rejectSlateRevision,
-  resolveSlateAccountDefaults,
   resolveSlateProjectSparkWildcards,
   setSlateProjectCover,
   SlateShapeWriteConflictError,
@@ -451,7 +453,6 @@ import {
   buildPrismCompanionAuthoritativeContext,
   chatWithPrismCompanion,
   prismCompanionEphemeralMode,
-  resolvePrismCompanionProvider,
 } from "./prism-companion.ts";
 import {
   importLegacyLibraryGroupsOnce,
@@ -638,7 +639,7 @@ import {
 import {
   BOT_PROFILE_PICTURE_IMAGE_PURPOSE,
   BOT_PROFILE_PICTURE_SIZE,
-  GALLERY_EXCLUDED_PURPOSE_SQL,
+  GENERAL_IMAGE_LIBRARY_SQL,
   deleteBotProfilePictureImageIfOwned,
   normalizeBotProfilePicturePngBytes,
   parseBotProfilePictureDataUrl,
@@ -928,6 +929,7 @@ import {
   type PrismCompanionSurfaceReference,
   type PrismRefractSignalTextTarget,
   type AutoFallbackModelRef,
+  type AutoRoutingContextV1,
 } from "@localai/shared";
 import { editImage, generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
@@ -958,6 +960,13 @@ import {
   reconcileAssetCleanupRecoveryForUser,
   restoreImageAssetCleanupRecovery,
 } from "./image-asset-cleanup.ts";
+import {
+  deleteUnusedImageAssetSet,
+  imageAssetStorageSummary,
+  ImageAssetLibraryError,
+  listImageAssetCatalog,
+  updateImageAssetPlayerTags,
+} from "./image-asset-library.ts";
 import {
   DEBATE_EXHIBIT_IMAGE_PURPOSE,
   IMAGE_BOT_MEMBERSHIP_SQL,
@@ -1311,30 +1320,38 @@ async function startPrismStorySession(
     context.hardLocal || anyOfflineProtected
       ? null
       : readModelOverride(input.modelOverride);
-  const storyModelOverride =
-    effectiveProvider === "local"
-      ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
-      : explicitModelOverride;
+  const storyModelOverride = explicitModelOverride;
+  const premise = readOptionalString(input.premise);
+  const responseLane = effectiveProvider === "local" ? "local" : "online";
   const openAiApiKey =
-    getOpenAiApiKeyForUser(context.userId, context.userKey) ??
-    config.openAiApiKey;
+    responseLane === "online"
+      ? (getOpenAiApiKeyForUser(context.userId, context.userKey) ??
+        config.openAiApiKey)
+      : undefined;
   const anthropicApiKey =
-    getAnthropicApiKeyForUser(context.userId, context.userKey) ??
-    config.anthropicApiKey;
+    responseLane === "online"
+      ? (getAnthropicApiKeyForUser(context.userId, context.userKey) ??
+        config.anthropicApiKey)
+      : undefined;
   const catalog = await buildModelCatalog(
-    context.hardLocal ? undefined : openAiApiKey,
+    responseLane === "online" ? openAiApiKey : undefined,
     user.secondary_ollama_host,
-    context.hardLocal ? undefined : anthropicApiKey,
+    responseLane === "online" ? anthropicApiKey : undefined,
   );
+  const hiddenModelIds = parseHiddenBotModelIds(user.hidden_bot_model_ids);
   const resolvedAuto = resolveAutoModel({
     provider: effectiveProvider,
+    lane: responseLane,
     explicitModelOverride: storyModelOverride,
-    preferredModel:
-      effectiveProvider === "local"
-        ? REQUIRED_PRIMARY_LOCAL_MODEL_ID
-        : readOptionalString(user.preferred_online_model),
-    hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+    hiddenModelIds,
     catalog,
+    routingContext: {
+      surface: "story",
+      inputText: premise ?? "",
+      outputTokens: 2_048,
+      simulatedEffortEnabled:
+        user.experimental_all_model_effort_enabled === 1,
+    },
   });
   effectiveProvider = resolvedAuto.provider;
   const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
@@ -1342,18 +1359,43 @@ async function startPrismStorySession(
     provider: resolvedAuto.provider,
     modelId: resolvedAuto.model,
   });
-  const provider = selectProvider(
-    effectiveProvider,
-    context.hardLocal ? undefined : openAiApiKey,
-    user.secondary_ollama_host,
-    context.hardLocal ? undefined : anthropicApiKey,
+  const hiddenModels = new Set(hiddenModelIds);
+  const candidateAllowlist = (
+    responseLane === "local" ? catalog.local : catalog.online
+  )
+    .filter((entry) => !hiddenModels.has(entry.id))
+    .map((entry): AutoFallbackModelRef => ({
+      provider:
+        entry.provider === "anthropic"
+          ? "anthropic"
+          : entry.provider === "local"
+            ? "local"
+            : "openai",
+      model: entry.id,
+    }));
+  const primaryRef: AutoFallbackModelRef = {
+    provider: resolvedAuto.provider,
+    model: resolvedAuto.model,
+  };
+  const configuredFallbacks = parseStoredAutoFallbackChain(
+    user.auto_fallback_chain,
   );
-  const premise = readOptionalString(input.premise);
+  const generationChain =
+    autoFallbackResolvedChain(primaryRef, configuredFallbacks) ?? [primaryRef];
   const session = createStorySession(db, context.userId, {
     botIds,
     premise,
     provider: effectiveProvider,
     model: resolvedAuto.model,
+    routing: {
+      v: 1,
+      lane: responseLane,
+      modelSelectionKind: resolvedAuto.autoRoute ? "auto" : "fixed",
+      candidateAllowlist,
+      fallbackChain: generationChain.slice(1),
+      policyVersion: resolvedAuto.autoRoute?.v ?? 1,
+      ...(resolvedAuto.autoRoute ? { autoRoute: resolvedAuto.autoRoute } : {}),
+    },
   });
   void Promise.resolve(
     runWithUsageSession(
@@ -1364,18 +1406,43 @@ async function startPrismStorySession(
         mode: "story",
         surface: "story",
       },
-      () =>
-        generateStorySessionEpisode(db, context.userId, session.id, {
-          provider,
-          providerName: effectiveProvider,
-          model: resolvedAuto.model,
-          bots: storyBots,
-          premise,
-          ...(powerTheme ? { theme: powerTheme } : {}),
-          ...(storedReasoningEffort
-            ? { reasoningEffort: storedReasoningEffort }
-            : {}),
-        }),
+      async () => {
+        let generated = session;
+        for (const [index, attempt] of generationChain.entries()) {
+          generated = await generateStorySessionEpisode(
+            db,
+            context.userId,
+            session.id,
+            {
+              provider: providerFactoryOverride(
+                attempt.provider,
+                attempt.provider === "openai" ? openAiApiKey : undefined,
+                user.secondary_ollama_host,
+                attempt.provider === "anthropic"
+                  ? anthropicApiKey
+                  : undefined,
+              ),
+              providerName: attempt.provider,
+              model: attempt.model,
+              bots: storyBots,
+              premise,
+              ...(powerTheme ? { theme: powerTheme } : {}),
+              ...(index === 0
+                ? resolvedAuto.autoRoute?.reasoningEffort ??
+                  storedReasoningEffort
+                  ? {
+                      reasoningEffort:
+                        resolvedAuto.autoRoute?.reasoningEffort ??
+                        storedReasoningEffort,
+                    }
+                  : {}
+                : { reasoningEffort: "none" }),
+            },
+          );
+          if (generated.status !== "failed") return generated;
+        }
+        return generated;
+      },
     ),
   ).catch((error) => {
     console.warn("[story] generation job failed", error);
@@ -2760,10 +2827,10 @@ function getOrCreateLocalOwnerUser(): string {
     INSERT INTO users (
       id, email, display_name, password_hash, password_salt,
       wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
-      theme, preferred_provider, auto_memory, auto_switch_model,
+      theme, preferred_provider, auto_memory,
       prism_default_bot_face_mouth_coffee_pucker,
       english_voice_engine, created_at, last_active_at
-    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, 0, ?, 'builtin', ?, ?)
+    ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'system', 'local', 1, ?, 'builtin', ?, ?)
   `,
   ).run(
     userId,
@@ -2785,13 +2852,13 @@ function getOrCreateLocalOwnerUser(): string {
 
 /**
  * Hard LOCAL privacy blocks online capabilities (ElevenLabs credits, Premium
- * enhance, Signal audio packages, etc.). AUTO keeps the local/online primary
- * but must not inherit LOCAL's outbound blockers.
+ * enhance, Signal audio packages, etc.). The retired AUTO response mode no
+ * longer weakens the selected privacy lane.
  */
 function userBlocksOnlineCapabilities(
-  user: Pick<UserDbRow, "preferred_provider" | "auto_switch_model">,
+  user: Pick<UserDbRow, "preferred_provider">,
 ): boolean {
-  return user.preferred_provider === "local" && user.auto_switch_model !== 1;
+  return user.preferred_provider === "local";
 }
 
 function getUserRow(userId: string): UserDbRow {
@@ -3465,21 +3532,18 @@ function getAnthropicApiKeyForUser(
   );
 }
 
-function slateAiForUser(
+async function slateAiForUser(
   userId: string,
   projectId?: string,
   deliberationSpeaker?: SlateDeliberationSpeaker,
 ) {
   const user = getUserRow(userId);
-  const accountDefault = resolveSlateAccountDefaults({
-    preferredProvider: user.preferred_provider,
-    preferredLocalModel: user.preferred_local_model,
-    preferredOnlineModel: user.preferred_online_model,
-  });
   const projectSettings = projectId
     ? (db
         .prepare(
-          `SELECT prose_mode, prose_model, prose_provider, deliberation_config_json
+          `SELECT prose_mode, prose_model, prose_provider,
+                  deliberation_config_json, title, direction, manuscript,
+                  last_provider
            FROM slate_projects WHERE id = ? AND user_id = ?`,
         )
         .get(projectId, userId) as
@@ -3488,12 +3552,16 @@ function slateAiForUser(
             prose_model: string | null;
             prose_provider: string | null;
             deliberation_config_json: string;
+            title: string;
+            direction: string;
+            manuscript: string;
+            last_provider: string | null;
           }
         | undefined)
     : undefined;
   if (projectId && !projectSettings)
     throw new Error("Slate project not found.");
-  const mode =
+  const storedMode =
     projectSettings?.prose_mode === "offline" ||
     projectSettings?.prose_mode === "online"
       ? projectSettings.prose_mode
@@ -3509,53 +3577,71 @@ function slateAiForUser(
     const override = resolveSlateDeliberationModelOverride(
       projectSettings.deliberation_config_json,
       deliberationSpeaker,
-      mode,
+      storedMode,
     );
     if (override) {
       selectedProvider = override.provider;
       selectedModel = override.model;
     }
   }
-  let providerName: ProviderName;
-  let model: string;
-  if (mode === "offline") {
-    providerName = "local";
-    model =
-      selectedModel ||
-      user.preferred_local_model?.trim() ||
-      defaultModelIdForProvider("local");
-  } else if (mode === "online") {
-    const preferredOnlineModel =
-      selectedModel ||
-      user.preferred_online_model?.trim() ||
-      defaultModelIdForProvider("openai");
-    providerName =
-      selectedProvider && selectedProvider !== "local"
+  const legacyProvider = readProvider(projectSettings?.last_provider);
+  const responseMode =
+    storedMode === "offline"
+      ? "local"
+      : storedMode === "online"
+        ? "online"
+        : (selectedProvider ?? legacyProvider ?? user.preferred_provider) ===
+            "local"
+          ? "local"
+          : "online";
+  const modelImpliedProvider: ProviderName | undefined = selectedModel
+    ? selectedModel.toLocaleLowerCase().startsWith("claude-")
+      ? "anthropic"
+      : /^(?:gpt-|chatgpt-|o1|o3|o4|o5)/u.test(
+            selectedModel.toLocaleLowerCase(),
+          )
+        ? "openai"
+        : undefined
+    : undefined;
+  const requestedProvider: ProviderName =
+    responseMode === "local"
+      ? "local"
+      : selectedProvider && selectedProvider !== "local"
         ? selectedProvider
-        : preferredOnlineModel.toLocaleLowerCase().startsWith("claude")
-          ? "anthropic"
-          : user.preferred_provider !== "local"
-            ? user.preferred_provider
-            : "openai";
-    model = preferredOnlineModel;
-  } else {
-    providerName = selectedProvider ?? accountDefault.provider;
-    model = selectedModel ?? accountDefault.model;
-  }
-  const userKey = decryptUserKey(userId);
-  const openAiApiKey =
-    getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-  const anthropicApiKey =
-    getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
+        : modelImpliedProvider
+          ? modelImpliedProvider
+          : legacyProvider && legacyProvider !== "local"
+            ? legacyProvider
+            : user.preferred_provider !== "local"
+              ? user.preferred_provider
+              : "openai";
+  const runtime = await contextualTextRuntimeForUser({
+    userId,
+    user,
+    requestedProvider,
+    requestedResponseMode: responseMode,
+    modelOverride: selectedModel,
+    routingContext: {
+      surface: "slate",
+      inputText: [
+        projectSettings?.title ?? "",
+        projectSettings?.direction ?? "",
+        projectSettings?.manuscript ?? "",
+      ].join("\n").slice(-120_000),
+      outputTokens: 5_000,
+      highStakes: true,
+    },
+  });
   return {
     provider: providerFactoryOverride(
-      providerName,
-      openAiApiKey,
+      runtime.provider,
+      runtime.openAiApiKey,
       user.secondary_ollama_host,
-      anthropicApiKey,
+      runtime.anthropicApiKey,
     ),
-    providerName,
-    model,
+    providerName: runtime.provider,
+    model: runtime.model,
+    reasoningEffort: runtime.reasoningEffort,
   };
 }
 
@@ -3627,7 +3713,7 @@ async function compileSlateCustomVibe(
   operation: SlateWritingOperationView["operation"],
   vibe: string,
 ): Promise<SlateDirectionIntentPatch> {
-  const ai = slateAiForUser(userId, projectId);
+  const ai = await slateAiForUser(userId, projectId);
   const raw = await runWithUsageSession(
     {
       db,
@@ -3657,6 +3743,9 @@ async function compileSlateCustomVibe(
         ],
         {
           model: ai.model,
+          ...(ai.reasoningEffort
+            ? { reasoningEffort: ai.reasoningEffort }
+            : {}),
           temperature: 0.25,
           maxTokens: 500,
           usagePurpose: "slate_deliberation",
@@ -3868,7 +3957,7 @@ async function preflightSlateWritingDirection(
     focusedReplacementRange: operation.intent.target.selection,
   });
   if (evidence.length === 0) return view;
-  const ai = slateAiForUser(userId, projectId);
+  const ai = await slateAiForUser(userId, projectId);
   let audit: SlateProposalContinuityAudit;
   try {
     audit = await runWithUsageSession(
@@ -3991,7 +4080,7 @@ async function auditAndRepairSlateComposerProposal(args: {
   projectId: string;
   operation: SlateWritingOperationView["operation"];
   prose: string;
-  ai: ReturnType<typeof slateAiForUser>;
+  ai: Awaited<ReturnType<typeof slateAiForUser>>;
   mirrorBrief: string | null;
   signal: AbortSignal;
 }): Promise<string> {
@@ -4111,6 +4200,9 @@ async function auditAndRepairSlateComposerProposal(args: {
         ],
         {
           model: args.ai.model,
+          ...(args.ai.reasoningEffort
+            ? { reasoningEffort: args.ai.reasoningEffort }
+            : {}),
           temperature: 0.45,
           maxTokens: Math.max(
             800,
@@ -4191,7 +4283,7 @@ async function fitSlateComposerProposalLength(args: {
   projectId: string;
   operation: SlateWritingOperationView["operation"];
   prose: string;
-  ai: ReturnType<typeof slateAiForUser>;
+  ai: Awaited<ReturnType<typeof slateAiForUser>>;
   mirrorBrief: string | null;
   signal: AbortSignal;
 }): Promise<string> {
@@ -4247,6 +4339,9 @@ async function fitSlateComposerProposalLength(args: {
         ],
         {
           model: args.ai.model,
+          ...(args.ai.reasoningEffort
+            ? { reasoningEffort: args.ai.reasoningEffort }
+            : {}),
           temperature: 0.4,
           maxTokens: Math.max(800, Math.min(8_000, Math.ceil(target * 2.2))),
           usagePurpose: "slate_revision",
@@ -4536,7 +4631,7 @@ async function generateSlateWritingOperation(
   if (!activeController) {
     slateWritingAbortControllers.set(abortKey, controller);
   }
-  const ai = slateAiForUser(userId, projectId);
+  const ai = await slateAiForUser(userId, projectId);
   const mirror = slateComposerMirrorBrief(
     userId,
     projectId,
@@ -4748,6 +4843,9 @@ async function generateSlateWritingOperation(
           ],
           {
             model: ai.model,
+            ...(ai.reasoningEffort
+              ? { reasoningEffort: ai.reasoningEffort }
+              : {}),
             temperature: 0.76,
             maxTokens: Math.max(
               800,
@@ -5001,7 +5099,7 @@ async function synthesizeSlateMirrorVoiceCard(
     })
     .filter((sample) => sample.length > 0)
     .join("\n\n---\n\n");
-  const ai = slateAiForUser(userId, projectId);
+  const ai = await slateAiForUser(userId, projectId);
   const raw = await runWithUsageSession(
     {
       db,
@@ -5036,6 +5134,9 @@ async function synthesizeSlateMirrorVoiceCard(
         ],
         {
           model: ai.model,
+          ...(ai.reasoningEffort
+            ? { reasoningEffort: ai.reasoningEffort }
+            : {}),
           temperature: 0.2,
           maxTokens: 1_600,
           jsonMode: true,
@@ -5255,95 +5356,206 @@ function readProvider(value: unknown): ProviderName | undefined {
     : undefined;
 }
 
-function debateAiRuntimeForUser(
+function frozenDebateModelOverride(session: {
+  model: string;
+  modelSelectionKind?: "auto" | "fixed";
+}): string | null {
+  return session.modelSelectionKind === "auto" ? null : session.model;
+}
+
+function debateAutoRoutingContext(
+  session: Pick<
+    ReturnType<typeof getDebateSession>,
+    "motion" | "evidence" | "stepKey" | "events"
+  >,
+): AutoRoutingContextV1 {
+  const evidenceSources = session.evidence.sources.flatMap((source) => [
+    source.title,
+    source.snippet,
+  ]);
+  const exhibits = (session.evidence.exhibits ?? []).flatMap((exhibit) => [
+    exhibit.title,
+    exhibit.observation,
+  ]);
+  const inputText = [
+    session.motion.title ?? "",
+    session.motion.motion,
+    session.motion.forSide.brief,
+    session.motion.againstSide.brief,
+    session.evidence.notes,
+    ...evidenceSources,
+    ...exhibits,
+    ...session.events.map((event) => event.content),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const shortTurn = /(?:interject|objection|gavel|reaction)/u.test(
+    session.stepKey,
+  );
+
+  return {
+    surface: "debate",
+    inputText,
+    // Account for the frozen personas and procedural instructions that wrap
+    // the visible record in every Debate generation prompt.
+    inputTokens: 1_200 + Math.ceil(inputText.length / 4),
+    outputTokens: shortTurn ? 900 : 2_400,
+    structuredOutput: true,
+    highStakes: true,
+  };
+}
+
+async function debateAiRuntimeForUser(
   userId: string,
   requestedProvider: unknown,
   requestedModelOverride?: unknown,
   requestedResponseMode?: unknown,
   requestedFrozenChain?: unknown,
-): DebateAiRuntime {
+  requestedFrozenCandidates?: unknown,
+  requestedRoutingContext?: AutoRoutingContextV1,
+): Promise<DebateAiRuntime> {
   const user = getUserRow(userId);
-  const hardLocal = userBlocksOnlineCapabilities(user);
-  const requested =
-    requestedProvider === "local" ||
-    requestedProvider === "openai" ||
-    requestedProvider === "anthropic"
-      ? requestedProvider
-      : user.preferred_provider === "local"
-        ? "local"
-        : user.preferred_provider;
-  const preferredProvider = hardLocal ? "local" : requested;
-  const requestedModel = readModelOverride(requestedModelOverride);
-  const modelOverride =
-    requestedModel && (!hardLocal || requested === "local")
-      ? requestedModel
-      : null;
+  const requestedProviderName = readProvider(requestedProvider);
+  const legacyDefaultLane =
+    requestedProviderName === "local" ||
+    (!requestedProviderName && user.preferred_provider === "local")
+      ? "local"
+      : "online";
+  const requestedMode = normalizeResponseMode(
+    requestedResponseMode,
+    legacyDefaultLane,
+  );
+  const responseLane =
+    requestedMode === "auto" ? legacyDefaultLane : requestedMode;
+  const preferredProvider: ProviderName =
+    responseLane === "local"
+      ? "local"
+      : requestedProviderName && requestedProviderName !== "local"
+        ? requestedProviderName
+        : user.preferred_provider === "anthropic"
+          ? "anthropic"
+          : "openai";
+  const modelOverride = readModelOverride(requestedModelOverride);
+  const userKey = responseLane === "online" ? decryptUserKey(userId) : null;
+  const openAiApiKey =
+    responseLane === "online"
+      ? (getOpenAiApiKeyForUser(userId, userKey!) ?? config.openAiApiKey)
+      : undefined;
+  const anthropicApiKey =
+    responseLane === "online"
+      ? (getAnthropicApiKeyForUser(userId, userKey!) ?? config.anthropicApiKey)
+      : undefined;
+  const catalog = await buildModelCatalog(
+    openAiApiKey,
+    user.secondary_ollama_host,
+    anthropicApiKey,
+  );
+  const frozenCandidateKeys = new Set(
+    (Array.isArray(requestedFrozenCandidates)
+      ? requestedFrozenCandidates
+          .map(normalizeAutoFallbackModelRef)
+          .filter((entry): entry is AutoFallbackModelRef => entry !== null)
+      : []
+    ).map((entry) => `${entry.provider}:${entry.model.toLowerCase()}`),
+  );
+  const routingCatalog =
+    frozenCandidateKeys.size === 0
+      ? catalog
+      : {
+          local: catalog.local.filter((entry) =>
+            frozenCandidateKeys.has(`local:${entry.id.toLowerCase()}`),
+          ),
+          online: catalog.online.filter((entry) =>
+            frozenCandidateKeys.has(
+              `${entry.provider === "anthropic" ? "anthropic" : "openai"}:${entry.id.toLowerCase()}`,
+            ),
+          ),
+        };
+  const hiddenModelIds = parseHiddenBotModelIds(user.hidden_bot_model_ids);
+  const resolvedPrimary = resolveAutoModel({
+    provider: preferredProvider,
+    lane: responseLane,
+    explicitModelOverride: modelOverride,
+    hiddenModelIds,
+    catalog: routingCatalog,
+    routingContext: {
+      surface: "debate",
+      structuredOutput: true,
+      highStakes: true,
+      outputTokens: 2_400,
+      ...requestedRoutingContext,
+    },
+  });
+  const primaryEffort =
+    resolvedPrimary.autoRoute?.reasoningEffort ??
+    resolveUserModelReasoningEffort(db, {
+      userId,
+      provider: resolvedPrimary.provider,
+      modelId: resolvedPrimary.model,
+    });
   const localModel =
-    preferredProvider === "local" && modelOverride
-      ? modelOverride
-      : user.preferred_local_model?.trim() ||
+    resolvedPrimary.provider === "local"
+      ? resolvedPrimary.model
+      : routingCatalog.local[0]?.id ??
         defaultModelIdForProvider("local");
-  const local = {
+  const local: DebateAiRuntime["local"] = {
     provider: providerFactoryOverride(
       "local",
       undefined,
       user.secondary_ollama_host,
       undefined,
     ),
-    providerName: "local" as const,
+    providerName: "local",
     model: localModel,
-    reasoningEffort: resolveUserModelReasoningEffort(db, {
-      userId,
-      provider: "local",
-      modelId: localModel,
-    }),
+    reasoningEffort:
+      resolvedPrimary.provider === "local"
+        ? primaryEffort
+        : resolveUserModelReasoningEffort(db, {
+            userId,
+            provider: "local",
+            modelId: localModel,
+          }),
   };
   const auxiliary = auxiliaryProviderFactoryOverride(
     user.prism_default_llm_model,
     dualOllamaWorkloadOptions(user),
   );
-  const userKey = hardLocal ? null : decryptUserKey(userId);
   const onlineLane = (
     providerName: "openai" | "anthropic",
     model: string,
+    reasoningEffort?: ReasoningEffort,
   ): NonNullable<DebateAiRuntime["online"]> => {
     const apiKey =
-      providerName === "anthropic"
-        ? (getAnthropicApiKeyForUser(userId, userKey!) ??
-          config.anthropicApiKey)
-        : (getOpenAiApiKeyForUser(userId, userKey!) ?? config.openAiApiKey);
+      providerName === "anthropic" ? anthropicApiKey : openAiApiKey;
     return {
       provider: providerFactoryOverride(
         providerName,
-        apiKey,
+        providerName === "openai" ? apiKey : undefined,
         user.secondary_ollama_host,
         providerName === "anthropic" ? apiKey : undefined,
       ),
       providerName,
       model,
-      reasoningEffort: resolveUserModelReasoningEffort(db, {
-        userId,
-        provider: providerName,
-        modelId: model,
-      }),
+      reasoningEffort:
+        reasoningEffort ??
+        resolveUserModelReasoningEffort(db, {
+          userId,
+          provider: providerName,
+          modelId: model,
+        }),
       available: providerFactoryOverride !== selectProvider || Boolean(apiKey),
     };
   };
   const primary =
-    preferredProvider === "local"
-      ? local
+    resolvedPrimary.provider === "local"
+      ? { ...local, reasoningEffort: primaryEffort }
       : onlineLane(
-          preferredProvider === "anthropic" ? "anthropic" : "openai",
-          modelOverride ||
-            user.preferred_online_model?.trim() ||
-            defaultModelIdForProvider(preferredProvider),
+          resolvedPrimary.provider,
+          resolvedPrimary.model,
+          primaryEffort,
         );
-  const binaryMode = preferredProvider === "local" ? "local" : "online";
-  const requestedMode = normalizeResponseMode(
-    requestedResponseMode,
-    binaryMode,
-  );
-  const frozenChain = Array.isArray(requestedFrozenChain)
+  const hasFrozenChain = Array.isArray(requestedFrozenChain);
+  const frozenChain = hasFrozenChain
     ? requestedFrozenChain
         .map(normalizeAutoFallbackModelRef)
         .filter((entry): entry is AutoFallbackModelRef => entry !== null)
@@ -5351,41 +5563,72 @@ function debateAiRuntimeForUser(
   const configuredChain = parseStoredAutoFallbackChain(
     user.auto_fallback_chain,
   );
-  const resolvedAutoChain =
-    requestedMode === "auto" && !hardLocal
-      ? frozenChain.length > 1
-        ? frozenChain
-        : user.auto_switch_model === 1
-          ? (autoFallbackResolvedChain(
-              { provider: primary.providerName, model: primary.model },
-              configuredChain,
-            ) ?? [])
-          : []
-      : [];
-  const lanes =
-    resolvedAutoChain.length > 1
-      ? resolvedAutoChain.map((entry) =>
-          entry.provider === "local"
-            ? {
-                ...local,
-                model: entry.model,
-                reasoningEffort: resolveUserModelReasoningEffort(db, {
-                  userId,
-                  provider: "local",
-                  modelId: entry.model,
-                }),
-              }
-            : onlineLane(entry.provider, entry.model),
+  const primaryRef: AutoFallbackModelRef = {
+    provider: primary.providerName,
+    model: primary.model,
+  };
+  const frozenFallbacks =
+    frozenChain.length > 1
+      ? frozenChain.slice(1).filter(
+          (entry) =>
+            (entry.provider === "local" ? "local" : "online") === responseLane,
         )
-      : [primary];
+      : [];
+  const resolvedChain =
+    hasFrozenChain
+      ? [primaryRef, ...frozenFallbacks]
+      : (autoFallbackResolvedChain(primaryRef, configuredChain) ?? [primaryRef]);
+  const seen = new Set<string>();
+  const lanes = resolvedChain
+    .filter((entry) => {
+      const key = `${entry.provider}:${entry.model.toLowerCase()}`;
+      if (seen.has(key)) return false;
+      seen.add(key);
+      return true;
+    })
+    .map((entry, index) =>
+      entry.provider === "local"
+        ? {
+            ...local,
+            model: entry.model,
+            reasoningEffort:
+              index === 0
+                ? primaryEffort
+                : ("none" satisfies ReasoningEffort),
+          }
+        : onlineLane(
+            entry.provider,
+            entry.model,
+            index === 0
+              ? primaryEffort
+              : ("none" satisfies ReasoningEffort),
+          ),
+    );
   return {
     local,
     ...(primary.providerName !== "local" ? { online: primary } : {}),
     auxiliary,
-    preferredProvider,
-    responseMode:
-      requestedMode === "auto" && lanes.length > 1 ? "auto" : binaryMode,
+    preferredProvider: primary.providerName,
+    responseMode: responseLane,
     lanes,
+    modelSelectionKind: resolvedPrimary.autoRoute ? "auto" : "fixed",
+    autoCandidateAllowlist: (
+      responseLane === "local"
+        ? routingCatalog.local.map((entry) => ({
+            provider: "local" as const,
+            model: entry.id,
+          }))
+        : routingCatalog.online.map((entry) => ({
+            provider:
+              entry.provider === "anthropic"
+                ? ("anthropic" as const)
+                : ("openai" as const),
+            model: entry.id,
+          }))
+    ).filter((entry) => !hiddenModelIds.includes(entry.model)),
+    ...(resolvedPrimary.autoRoute
+      ? { autoRoute: resolvedPrimary.autoRoute }
+      : {}),
   };
 }
 
@@ -5535,18 +5778,187 @@ function readManualChatTool(value: unknown): ManualChatToolRequest | undefined {
 
 function readModelOverride(value: unknown): string | null {
   const model = readOptionalString(value);
-  if (model && isDisabledModelChoice(model)) {
-    throw new HttpError(
-      400,
-      "This model lane is disabled. Choose Auto or a model before sending.",
-    );
-  }
+  // Legacy text selections used `disabled` as a synthetic model. Text lanes
+  // can no longer be disabled, so importing or replaying that value means Auto.
+  if (model && isDisabledModelChoice(model)) return null;
   return model;
 }
 
 function readCoffeeSessionSpeakerModel(value: unknown): string | null {
   const model = readModelOverride(value);
   return model?.toLowerCase() === "auto" ? null : model;
+}
+
+/**
+ * Resolves one text generation against the selected privacy lane. Legacy AUTO
+ * inputs are accepted only as reads and collapse to the lane implied by the
+ * frozen/requested provider; new callers receive a concrete binary lane.
+ */
+async function contextualTextRuntimeForUser(args: {
+  userId: string;
+  user: UserDbRow;
+  requestedProvider?: unknown;
+  requestedResponseMode?: unknown;
+  modelOverride?: unknown;
+  frozenCandidateAllowlist?: unknown;
+  frozenFallbackChain?: unknown;
+  routingContext: AutoRoutingContextV1;
+}) {
+  const requestedProvider = readProvider(args.requestedProvider);
+  const legacyDefaultLane =
+    requestedProvider === "local" ||
+    (!requestedProvider && args.user.preferred_provider === "local")
+      ? "local"
+      : "online";
+  const normalizedMode = normalizeResponseMode(
+    args.requestedResponseMode,
+    legacyDefaultLane,
+  );
+  const responseMode =
+    normalizedMode === "auto" ? legacyDefaultLane : normalizedMode;
+  const primaryProvider: ProviderName =
+    responseMode === "local"
+      ? "local"
+      : requestedProvider && requestedProvider !== "local"
+        ? requestedProvider
+        : args.user.preferred_provider === "anthropic"
+          ? "anthropic"
+          : "openai";
+  const userKey = responseMode === "online" ? decryptUserKey(args.userId) : null;
+  const openAiApiKey =
+    responseMode === "online"
+      ? (getOpenAiApiKeyForUser(args.userId, userKey!) ?? config.openAiApiKey)
+      : undefined;
+  const anthropicApiKey =
+    responseMode === "online"
+      ? (getAnthropicApiKeyForUser(args.userId, userKey!) ??
+        config.anthropicApiKey)
+      : undefined;
+  const catalog = await buildModelCatalog(
+    openAiApiKey,
+    args.user.secondary_ollama_host,
+    anthropicApiKey,
+  );
+  const frozenCandidateKeys = new Set(
+    (Array.isArray(args.frozenCandidateAllowlist)
+      ? args.frozenCandidateAllowlist
+          .map(normalizeAutoFallbackModelRef)
+          .filter((entry): entry is AutoFallbackModelRef => entry !== null)
+      : []
+    ).map((entry) => `${entry.provider}:${entry.model.toLowerCase()}`),
+  );
+  const routingCatalog =
+    frozenCandidateKeys.size === 0
+      ? catalog
+      : {
+          ...catalog,
+          local: catalog.local.filter((entry) =>
+            frozenCandidateKeys.has(`local:${entry.id.toLowerCase()}`),
+          ),
+          online: catalog.online.filter((entry) =>
+            frozenCandidateKeys.has(
+              `${entry.provider === "anthropic" ? "anthropic" : "openai"}:${entry.id.toLowerCase()}`,
+            ),
+          ),
+        };
+  const hiddenModelIds = parseHiddenBotModelIds(args.user.hidden_bot_model_ids);
+  const hiddenModels = new Set(hiddenModelIds);
+  const resolved = resolveAutoModel({
+    provider: primaryProvider,
+    lane: responseMode,
+    explicitModelOverride: readCoffeeSessionSpeakerModel(args.modelOverride),
+    hiddenModelIds,
+    catalog: routingCatalog,
+    routingContext: {
+      ...args.routingContext,
+      simulatedEffortEnabled:
+        args.user.experimental_all_model_effort_enabled === 1,
+    },
+  });
+  const reasoningEffort =
+    resolved.autoRoute?.reasoningEffort ??
+    resolveUserModelReasoningEffort(db, {
+      userId: args.userId,
+      provider: resolved.provider,
+      modelId: resolved.model,
+      simulatedEffortEnabled:
+        args.user.experimental_all_model_effort_enabled === 1,
+    });
+  const candidateAllowlist = (
+    responseMode === "local" ? routingCatalog.local : routingCatalog.online
+  )
+    .filter((entry) => !hiddenModels.has(entry.id))
+    .map((entry): AutoFallbackModelRef => ({
+      provider:
+        entry.provider === "anthropic"
+          ? "anthropic"
+          : entry.provider === "local"
+            ? "local"
+            : "openai",
+      model: entry.id,
+    }));
+  const frozenFallbacks =
+    args.frozenFallbackChain !== undefined
+      ? (Array.isArray(args.frozenFallbackChain)
+          ? args.frozenFallbackChain
+              .map(normalizeAutoFallbackModelRef)
+              .filter(
+                (entry): entry is AutoFallbackModelRef =>
+                  entry !== null &&
+                  (entry.provider === "local" ? "local" : "online") ===
+                    responseMode,
+              )
+          : [])
+      : null;
+  return {
+    responseMode,
+    provider: resolved.provider,
+    model: resolved.model,
+    reasoningEffort,
+    autoRoute: resolved.autoRoute,
+    candidateAllowlist,
+    openAiApiKey,
+    anthropicApiKey,
+    autoFallbackChain:
+      frozenFallbacks !== null
+        ? frozenFallbacks.length > 0
+          ? { v: 1 as const, fallbacks: frozenFallbacks }
+          : null
+        : parseStoredAutoFallbackChain(args.user.auto_fallback_chain),
+  };
+}
+
+async function contextualSignalRuntimeForEpisode(args: {
+  userId: string;
+  user: UserDbRow;
+  episode: ReturnType<typeof getBotcastEpisode>;
+}) {
+  const snapshot = botcastRoutingSnapshot(args.episode);
+  const autoSelected = snapshot?.modelSelectionKind === "auto";
+  return contextualTextRuntimeForUser({
+    userId: args.userId,
+    user: args.user,
+    requestedProvider: args.episode.provider,
+    requestedResponseMode:
+      args.episode.provider === "local" ? "local" : "online",
+    modelOverride: autoSelected ? null : args.episode.model,
+    ...(snapshot
+      ? { frozenCandidateAllowlist: snapshot.candidateAllowlist }
+      : {}),
+    // Legacy sessions had no frozen fallback provenance; keep them to their
+    // recorded primary instead of applying today's account configuration.
+    frozenFallbackChain: snapshot?.fallbackChain ?? [],
+    routingContext: {
+      surface: "signal",
+      inputText: [
+        args.episode.topic,
+        args.episode.producerBrief,
+        ...args.episode.messages.slice(-12).map((message) => message.content),
+      ].join("\n"),
+      outputTokens: 900,
+      highStakes: true,
+    },
+  });
 }
 
 function readCoffeeTeamCreateInput(value: unknown):
@@ -7761,10 +8173,10 @@ function buildRoutes(): RouteDefinition[] {
           INSERT INTO users (
             id, email, display_name, password_hash, password_salt,
             wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
-            theme, preferred_provider, auto_memory, auto_switch_model,
+            theme, preferred_provider, auto_memory,
             prism_default_bot_face_mouth_coffee_pucker,
             english_voice_engine, created_at, last_active_at
-          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, 0, ?, 'builtin', ?, ?)
+          ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 'local', 1, ?, 'builtin', ?, ?)
         `,
         ).run(
           userId,
@@ -8574,7 +8986,7 @@ function buildRoutes(): RouteDefinition[] {
         !Array.isArray(body.guest)
           ? (body.guest as { name: string; readerBrief: string })
           : null;
-      const ai = slateAiForUser(userId, ctx.params.id);
+      const ai = await slateAiForUser(userId, ctx.params.id);
       const room = await runWithUsageSession(
         {
           db,
@@ -8613,7 +9025,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/wildcards/resolve", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const ai = slateAiForUser(userId);
+      const ai = await slateAiForUser(userId);
       const botCandidates = promptBotWildcardCandidates(db, userId);
       const resolution = await runWithUsageSession(
         { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
@@ -8625,7 +9037,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/title-suggestions", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const ai = slateAiForUser(userId);
+      const ai = await slateAiForUser(userId);
       const suggestion = await runWithUsageSession(
         { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
         () =>
@@ -8833,7 +9245,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/projects/:id/deliberation/turn", async (ctx) => {
       const userId = requireAuth(ctx);
       const speaker = slateDeliberationSpeakerForRequest(ctx.body);
-      const ai = slateAiForUser(userId, ctx.params.id, speaker);
+      const ai = await slateAiForUser(userId, ctx.params.id, speaker);
       const deliberationAbort = new AbortController();
       const onDeliberationClientClose = () => {
         if (!ctx.res.writableEnded) deliberationAbort.abort();
@@ -8870,7 +9282,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/projects/:id/title-suggestions", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const ai = slateAiForUser(userId, ctx.params.id);
+      const ai = await slateAiForUser(userId, ctx.params.id);
       const project = await runWithUsageSession(
         {
           db,
@@ -9842,7 +10254,7 @@ function buildRoutes(): RouteDefinition[] {
               ctx.params.concernId,
               body.direction,
             );
-            const ai = slateAiForUser(userId, ctx.params.id);
+            const ai = await slateAiForUser(userId, ctx.params.id);
             const project = await runWithUsageSession(
               {
                 db,
@@ -10015,7 +10427,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/projects/:id/shape", async (ctx) => {
       const userId = requireAuth(ctx);
       protectSlateBeforeRisk(userId, ctx.params.id);
-      const ai = slateAiForUser(userId, ctx.params.id);
+      const ai = await slateAiForUser(userId, ctx.params.id);
       try {
         const project = await runWithUsageSession(
           {
@@ -10055,7 +10467,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/slate/projects/:id/draft", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const ai = slateAiForUser(userId, ctx.params.id);
+      const ai = await slateAiForUser(userId, ctx.params.id);
       try {
         const project = await runWithUsageSession(
           {
@@ -10103,7 +10515,7 @@ function buildRoutes(): RouteDefinition[] {
     }),
     route("POST", "/api/slate/projects/:id/revisions", async (ctx) => {
       const userId = requireAuth(ctx);
-      const ai = slateAiForUser(userId, ctx.params.id);
+      const ai = await slateAiForUser(userId, ctx.params.id);
       const project = await runWithUsageSession(
         { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
         () => proposeSlateRevision(db, userId, ctx.params.id, ctx.body, ai),
@@ -11265,7 +11677,9 @@ function buildRoutes(): RouteDefinition[] {
         const apiKey =
           getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
         const lenientImageFbOnline =
-          user.lenient_local_image_fallback_model?.trim() ?? "";
+          user.lenient_local_image_fallback_model?.trim() ||
+          user.preferred_local_image_model?.trim() ||
+          "";
         let openAiResult: Awaited<ReturnType<typeof generateImage>> | null =
           null;
         try {
@@ -12211,38 +12625,28 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(400, "Preview prompt is empty.");
       }
       const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
-      let effectiveProvider =
-        readProvider(body.preferredProvider) ?? user.preferred_provider;
-      const explicitModelOverride = readModelOverride(body.modelOverride);
-      const openAiApiKey =
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const anthropicApiKey =
-        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
-      const catalog = await buildModelCatalog(
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey,
-      );
-      const resolvedAuto = resolveAutoModel({
-        provider: effectiveProvider,
-        explicitModelOverride,
-        preferredModel:
-          effectiveProvider === "local"
-            ? readOptionalString(user.preferred_local_model)
-            : readOptionalString(user.preferred_online_model),
-        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
-        catalog,
+      const runtime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider: body.preferredProvider,
+        requestedResponseMode: body.responseMode,
+        modelOverride: body.modelOverride,
+        routingContext: {
+          surface: "sandbox",
+          inputText: prompt,
+          outputTokens: 500,
+          structuredOutput: true,
+        },
       });
-      effectiveProvider = resolvedAuto.provider;
       const provider = selectProvider(
-        effectiveProvider,
-        openAiApiKey,
+        runtime.provider,
+        runtime.openAiApiKey,
         user.secondary_ollama_host,
-        anthropicApiKey,
+        runtime.anthropicApiKey,
       );
       const generationOverrides: GenerateOptions = {
-        model: resolvedAuto.model,
+        model: runtime.model,
+        reasoningEffort: runtime.reasoningEffort,
         temperature: 0.72,
         maxTokens: 500,
         usagePurpose: "prompt_wildcard",
@@ -12270,8 +12674,8 @@ function buildRoutes(): RouteDefinition[] {
       );
       json(ctx.res, 200, {
         ok: true,
-        provider: effectiveProvider,
-        model: resolvedAuto.model,
+        provider: runtime.provider,
+        model: runtime.model,
         prompt: resolution.prompt,
         replacements: resolution.replacements,
       });
@@ -12365,45 +12769,31 @@ function buildRoutes(): RouteDefinition[] {
         }
       }
 
-      const openAiApiKey =
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const anthropicApiKey =
-        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
-      const catalog = await buildModelCatalog(
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey,
-      );
-      const accountPreferredModel =
-        effectiveProvider === "local"
-          ? readOptionalString(user.preferred_local_model)
-          : readOptionalString(user.preferred_online_model);
-      const preferredModelForAuto = accountPreferredModel;
       const explicitModelForAuto = botForcesLocalProvider
         ? null
         : explicitModelOverride;
-      if (
-        !explicitModelForAuto &&
-        isDisabledModelChoice(preferredModelForAuto)
-      ) {
-        throw new HttpError(
-          400,
-          `${effectiveProvider === "local" ? "Local" : "Online"} replies are disabled. Choose a model before sending.`,
-        );
-      }
-      const resolvedAuto = resolveAutoModel({
-        provider: effectiveProvider,
-        explicitModelOverride: explicitModelForAuto,
-        preferredModel: preferredModelForAuto,
-        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
-        catalog,
+      const runtime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider: effectiveProvider,
+        requestedResponseMode:
+          effectiveProvider === "local" ? "local" : "online",
+        modelOverride: explicitModelForAuto,
+        routingContext: {
+          surface: mode,
+          inputText: [
+            ...recentMessages.map((message) => message.content),
+            botSystemPrompt ?? "",
+          ].join("\n"),
+          outputTokens: 220,
+          structuredOutput: true,
+        },
       });
-      effectiveProvider = resolvedAuto.provider;
       const provider = selectProvider(
-        effectiveProvider,
-        openAiApiKey,
+        runtime.provider,
+        runtime.openAiApiKey,
         user.secondary_ollama_host,
-        anthropicApiKey,
+        runtime.anthropicApiKey,
       );
       const memoryLines = retrieveRecentMemoriesForStarter(
         db,
@@ -12495,7 +12885,8 @@ function buildRoutes(): RouteDefinition[] {
         () =>
           provider.generateResponse(promptMessages, {
             ...generationOverrides,
-            model: resolvedAuto.model,
+            model: runtime.model,
+            reasoningEffort: runtime.reasoningEffort,
             temperature: Math.max(
               0.72,
               generationOverrides.temperature ?? 0.78,
@@ -12509,8 +12900,8 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         prompt,
-        provider: effectiveProvider,
-        model: resolvedAuto.model,
+        provider: runtime.provider,
+        model: runtime.model,
       });
     }),
     route("POST", "/api/zen/live-action-reaction", async (ctx) => {
@@ -12830,6 +13221,10 @@ function buildRoutes(): RouteDefinition[] {
             ? personaTransition.fromBotId
             : personaTransition.toBotId
           : effectiveBotId;
+      const prismHomeTurn = mode === "zen" && runtimeBotId == null;
+      if (prismHomeTurn) {
+        effectiveProvider = "local";
+      }
       patchUsageSession({ botId: runtimeBotId ?? null });
 
       let botSystemPrompt: string | undefined;
@@ -12953,23 +13348,34 @@ function buildRoutes(): RouteDefinition[] {
       const braveSearchApiKey =
         getBraveSearchApiKeyForUser(userId, userKey) ??
         config.braveSearchApiKey;
-      const catalog = await buildModelCatalog(
-        openAiApiKey,
-        user.secondary_ollama_host,
-        anthropicApiKey,
-      );
-      const resolvedAuto = resolveAutoModel({
-        provider: effectiveProvider,
-        explicitModelOverride: botForcesLocalProvider
-          ? null
-          : explicitModelOverride,
-        preferredModel:
-          effectiveProvider === "local"
-            ? readOptionalString(user.preferred_local_model)
-            : readOptionalString(user.preferred_online_model),
-        hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
-        catalog,
-      });
+      const responseLane = effectiveProvider === "local" ? "local" : "online";
+      const resolvedAuto = prismHomeTurn
+        ? {
+            provider: "local" as const,
+            model: resolveAuxiliaryOllamaModel(user.prism_default_llm_model),
+            usedRequiredLocalFallback: false,
+          }
+        : resolveAutoModel({
+            provider: effectiveProvider,
+            lane: responseLane,
+            explicitModelOverride: botForcesLocalProvider
+              ? null
+              : explicitModelOverride,
+            hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+            catalog: await buildModelCatalog(
+              responseLane === "online" ? openAiApiKey : undefined,
+              user.secondary_ollama_host,
+              responseLane === "online" ? anthropicApiKey : undefined,
+            ),
+            routingContext: {
+              surface: mode,
+              inputText: message,
+              outputTokens: generationOverrides.maxTokens,
+              toolUse: Boolean(manualTool),
+              simulatedEffortEnabled:
+                user.experimental_all_model_effort_enabled === 1,
+            },
+          });
       effectiveProvider = resolvedAuto.provider;
       generationOverrides.model = resolvedAuto.model;
       const storedReasoningEffort = resolveUserModelReasoningEffort(db, {
@@ -12977,8 +13383,10 @@ function buildRoutes(): RouteDefinition[] {
         provider: resolvedAuto.provider,
         modelId: resolvedAuto.model,
       });
-      if (storedReasoningEffort) {
-        generationOverrides.reasoningEffort = storedReasoningEffort;
+      const effectiveReasoningEffort =
+        resolvedAuto.autoRoute?.reasoningEffort ?? storedReasoningEffort;
+      if (effectiveReasoningEffort) {
+        generationOverrides.reasoningEffort = effectiveReasoningEffort;
       }
       const botOverrides =
         Object.keys(generationOverrides).length > 0
@@ -13104,7 +13512,7 @@ function buildRoutes(): RouteDefinition[] {
           userKey,
           {
             preferredProvider: effectiveProvider,
-            preferredImageProvider: botForcesLocalProvider
+            preferredImageProvider: botForcesLocalProvider || prismHomeTurn
               ? "local"
               : user.preferred_image_provider,
             providerFactory: providerFactoryOverride,
@@ -13119,20 +13527,24 @@ function buildRoutes(): RouteDefinition[] {
             starterPromptWarrantsIntro,
             starterPromptLabel,
             secondaryOllamaHost: user.secondary_ollama_host,
-            responseMode: botForcesLocalProvider
-              ? "local"
-              : requestedResponseMode,
+            responseMode: effectiveProvider === "local" ? "local" : "online",
             autoFallbackChain: parseStoredAutoFallbackChain(
               user.auto_fallback_chain,
             ),
             resolveReasoningEffort: (provider, model) =>
-              resolveUserModelReasoningEffort(db, {
-                userId,
-                provider,
-                modelId: model,
-              }),
+              resolvedAuto.autoRoute?.provider === provider &&
+              resolvedAuto.autoRoute.model === model
+                ? resolvedAuto.autoRoute.reasoningEffort
+                : resolveUserModelReasoningEffort(db, {
+                    userId,
+                    provider,
+                    modelId: model,
+                  }),
+            autoRouteDecision: resolvedAuto.autoRoute,
             prismDefaultLlmModel: user.prism_default_llm_model,
-            prismImageToolLlmModel: user.prism_image_tool_llm_model,
+            // Image-intent orchestration is Prism-owned implementation work;
+            // it follows the same dedicated local Prism model.
+            prismImageToolLlmModel: user.prism_default_llm_model,
             recentContextMessageLimit: normalizeZenRecentContextMessages(
               user.zen_recent_context_messages,
             ),
@@ -13354,7 +13766,6 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/prism/refract", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
       let request;
       try {
         request = normalizePrismRefractRequest(ctx.body);
@@ -13366,44 +13777,13 @@ function buildRoutes(): RouteDefinition[] {
             : "A valid Prism Refract request is required.",
         );
       }
-      const autoFallbackChain = parseStoredAutoFallbackChain(
-        user.auto_fallback_chain,
+      // Wield/Refract belongs to Prism, not to the active applet picker.
+      // Keep the entire draft pass on the dedicated local Prism model.
+      const preferredProvider = "local" as const;
+      const modelOverride = resolveAuxiliaryOllamaModel(
+        user.prism_default_llm_model,
       );
-      const requestedResponseMode = normalizeResponseMode(
-        request.responseMode,
-        user.preferred_provider === "local" ? "local" : "online",
-      );
-      const localModeLocked = user.preferred_provider === "local";
-      const autoEnabled =
-        !localModeLocked &&
-        requestedResponseMode === "auto" &&
-        user.auto_switch_model === 1 &&
-        autoFallbackChain !== null;
-      const preferredProvider = localModeLocked
-        ? "local"
-        : (request.preferredProvider ?? user.preferred_provider);
-      const requestedModelOverride = readCoffeeSessionSpeakerModel(
-        request.modelOverride,
-      );
-      const accountModel =
-        preferredProvider === "local"
-          ? user.preferred_local_model
-          : user.preferred_online_model;
-      const availableAccountModel =
-        accountModel && !isDisabledModelChoice(accountModel)
-          ? accountModel
-          : null;
-      const modelOverride =
-        localModeLocked &&
-        request.preferredProvider !== undefined &&
-        request.preferredProvider !== "local"
-          ? availableAccountModel
-          : (requestedModelOverride ?? availableAccountModel);
-      const effectiveResponseMode = autoEnabled
-        ? "auto"
-        : preferredProvider === "local"
-          ? "local"
-          : "online";
+      const effectiveResponseMode = "local" as const;
       const debateTarget = isPrismRefractDebateTextTarget(request.target)
         ? request.target
         : null;
@@ -13419,14 +13799,14 @@ function buildRoutes(): RouteDefinition[] {
               mode: "debate",
               surface: "debate",
             },
-            () =>
+            async () =>
               generateDebateRefractDraft(
                 db,
                 userId,
                 debateTarget,
                 request.currentValue,
                 request.rejectedValues,
-                debateAiRuntimeForUser(
+                await debateAiRuntimeForUser(
                   userId,
                   preferredProvider,
                   modelOverride,
@@ -13444,16 +13824,11 @@ function buildRoutes(): RouteDefinition[] {
             {
               preferredProvider,
               responseMode: effectiveResponseMode,
-              openAiApiKey:
-                getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-              anthropicApiKey:
-                getAnthropicApiKeyForUser(userId, userKey) ??
-                config.anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
               prismDefaultLlmModel: user.prism_default_llm_model,
               preferredLocalModel: user.preferred_local_model,
               preferredOnlineModel: user.preferred_online_model,
-              autoFallbackChain,
+              autoFallbackChain: null,
               providerFactory: providerFactoryOverride,
             },
           );
@@ -13475,7 +13850,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates/synthesize", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         body.preferredProvider,
         body.modelOverride,
@@ -13504,7 +13879,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates/title", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         body.preferredProvider,
         body.modelOverride,
@@ -13693,7 +14068,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates/role-checks", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         body.preferredProvider,
         body.modelOverride,
@@ -13728,7 +14103,7 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         body.preferredProvider,
         body.modelOverride,
@@ -13775,12 +14150,14 @@ function buildRoutes(): RouteDefinition[] {
       if (!debateSessionCanPrepareAdvance(frozen)) {
         throw new HttpError(409, "This Debate is waiting for a player or procedure.");
       }
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         frozen.provider,
-        frozen.model,
+        frozenDebateModelOverride(frozen),
         frozen.responseMode,
         frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
       );
       const preparation = turnPreparationRegistry.create<DebateAdvancePreparation>({
         userId,
@@ -13947,12 +14324,14 @@ function buildRoutes(): RouteDefinition[] {
                 userId,
                 publicPreparation.sessionId,
               );
-              const runtime = debateAiRuntimeForUser(
+              const runtime = await debateAiRuntimeForUser(
                 userId,
                 current.provider,
-                current.model,
+                frozenDebateModelOverride(current),
                 current.responseMode,
                 current.generationChain,
+                current.autoCandidateAllowlist,
+                debateAutoRoutingContext(current),
               );
               const session = commitDebateAdvancePreparation(
                 db,
@@ -14063,12 +14442,14 @@ function buildRoutes(): RouteDefinition[] {
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "Just-in-time advance replaced the prepared turn.");
       const body = ctx.body as Record<string, unknown>;
       const frozen = getDebateSession(db, userId, ctx.params.id);
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         frozen.provider,
-        frozen.model,
+        frozenDebateModelOverride(frozen),
         frozen.responseMode,
         frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
       );
       const session = await runWithUsageSession(
         {
@@ -14096,12 +14477,14 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "Player speech interrupted the prepared turn.");
       const frozen = getDebateSession(db, userId, ctx.params.id);
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         frozen.provider,
-        frozen.model,
+        frozenDebateModelOverride(frozen),
         frozen.responseMode,
         frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
       );
       const session = await runWithUsageSession(
         {
@@ -14146,12 +14529,14 @@ function buildRoutes(): RouteDefinition[] {
         const userId = requireAuth(ctx);
         invalidateTurnPreparation(userId, "debate", ctx.params.id, "Participant objection resolution changed the floor.");
         const frozen = getDebateSession(db, userId, ctx.params.id);
-        const runtime = debateAiRuntimeForUser(
+        const runtime = await debateAiRuntimeForUser(
           userId,
           frozen.provider,
-          frozen.model,
+          frozenDebateModelOverride(frozen),
           frozen.responseMode,
           frozen.generationChain,
+          frozen.autoCandidateAllowlist,
+          debateAutoRoutingContext(frozen),
         );
         const session = await runWithUsageSession(
           {
@@ -14210,12 +14595,14 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Judge addressed the floor.");
       const frozen = getDebateSession(db, userId, ctx.params.id);
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         frozen.provider,
-        frozen.model,
+        frozenDebateModelOverride(frozen),
         frozen.responseMode,
         frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
       );
       const session = await runWithUsageSession(
         {
@@ -14243,12 +14630,14 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "An objection ruling changed the floor.");
       const frozen = getDebateSession(db, userId, ctx.params.id);
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         frozen.provider,
-        frozen.model,
+        frozenDebateModelOverride(frozen),
         frozen.responseMode,
         frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
       );
       const session = await runWithUsageSession(
         {
@@ -14276,12 +14665,14 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "A Turnabout action changed the record.");
       const frozen = getDebateSession(db, userId, ctx.params.id);
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         frozen.provider,
-        frozen.model,
+        frozenDebateModelOverride(frozen),
         frozen.responseMode,
         frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
       );
       const session = await runWithUsageSession(
         {
@@ -14308,13 +14699,23 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates/:id/player-turn", async (ctx) => {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "A player turn changed the Debate.");
-      const runtime = debateAiRuntimeForUser(userId, "local");
-      const session = submitDebatePlayerTurn(
-        db,
-        userId,
-        ctx.params.id,
-        ctx.body as Parameters<typeof submitDebatePlayerTurn>[3],
-        runtime.auxiliary,
+      const runtime = await debateAiRuntimeForUser(userId, "local");
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          submitDebatePlayerTurn(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.body as Parameters<typeof submitDebatePlayerTurn>[3],
+            runtime.auxiliary,
+          ),
       );
       json(ctx.res, 200, {
         ok: true,
@@ -14339,12 +14740,14 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Debate was paused.");
       const frozen = getDebateSession(db, userId, ctx.params.id);
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         frozen.provider,
-        frozen.model,
+        frozenDebateModelOverride(frozen),
         frozen.responseMode,
         frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
       );
       const session = await pauseDebateSessionWithPersona(
         db,
@@ -14376,12 +14779,14 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Debate resumed from a new floor state.");
       const frozen = getDebateSession(db, userId, ctx.params.id);
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         frozen.provider,
-        frozen.model,
+        frozenDebateModelOverride(frozen),
         frozen.responseMode,
         frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
       );
       const session = await resumeDebateSessionWithPersona(
         db,
@@ -14400,12 +14805,16 @@ function buildRoutes(): RouteDefinition[] {
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "Session metadata changed.");
       const body = ctx.body as Record<string, unknown>;
       const frozen = getDebateSession(db, userId, ctx.params.id);
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         body.preferredProvider ?? frozen.provider,
-        body.modelOverride ?? frozen.model,
+        body.modelOverride !== undefined
+          ? body.modelOverride
+          : frozenDebateModelOverride(frozen),
         body.responseMode ?? frozen.responseMode,
         frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
       );
       const session = await runWithUsageSession(
         {
@@ -14447,7 +14856,7 @@ function buildRoutes(): RouteDefinition[] {
         user.preferred_provider === "local"
           ? "local"
           : (requestedProvider ?? ephemeralProvider);
-      const runtime = debateAiRuntimeForUser(
+      const runtime = await debateAiRuntimeForUser(
         userId,
         preferredProvider,
         body.modelOverride,
@@ -14773,31 +15182,35 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/botcast/shows/:id/brand", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
-      const requestedProvider = body.preferredProvider;
-      const preferredProvider: ProviderName =
-        user.preferred_provider === "local"
-          ? "local"
-          : requestedProvider === "local" ||
-              requestedProvider === "openai" ||
-              requestedProvider === "anthropic"
-            ? requestedProvider
-            : user.preferred_provider;
+      const runtime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider: body.preferredProvider,
+        requestedResponseMode: body.responseMode,
+        modelOverride: body.modelOverride,
+        routingContext: {
+          surface: "signal-brand",
+          inputText: normalizePrismRefractDirection(body.direction),
+          structuredOutput: true,
+          outputTokens: 2_400,
+        },
+      });
       const result = await generateBotcastShowIdentity(
         db,
         userId,
         ctx.params.id,
         {
-          preferredProvider,
-          openAiApiKey:
-            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-          anthropicApiKey:
-            getAnthropicApiKeyForUser(userId, userKey) ??
-            config.anthropicApiKey,
+          preferredProvider: runtime.provider,
+          responseMode: runtime.responseMode,
+          openAiApiKey: runtime.openAiApiKey,
+          anthropicApiKey: runtime.anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
-          preferredLocalModel: user.preferred_local_model,
-          preferredOnlineModel: user.preferred_online_model,
+          preferredLocalModel:
+            runtime.provider === "local" ? runtime.model : null,
+          preferredOnlineModel:
+            runtime.provider === "local" ? null : runtime.model,
+          autoFallbackChain: runtime.autoFallbackChain,
           providerFactory: providerFactoryOverride,
           preserveArtwork: body.preserveArtwork === true,
           keywords: normalizeSignalGenerationKeywords(body.keywords),
@@ -14847,31 +15260,35 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/botcast/shows/:id/blurbs", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
-      const requestedProvider = body.preferredProvider;
-      const preferredProvider: ProviderName =
-        user.preferred_provider === "local"
-          ? "local"
-          : requestedProvider === "local" ||
-              requestedProvider === "openai" ||
-              requestedProvider === "anthropic"
-            ? requestedProvider
-            : user.preferred_provider;
+      const runtime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider: body.preferredProvider,
+        requestedResponseMode: body.responseMode,
+        modelOverride: body.modelOverride,
+        routingContext: {
+          surface: "signal-blurbs",
+          inputText: normalizePrismRefractDirection(body.direction),
+          structuredOutput: true,
+          outputTokens: 900,
+        },
+      });
       const result = await generateBotcastShowDashboardBlurbs(
         db,
         userId,
         ctx.params.id,
         {
-          preferredProvider,
-          openAiApiKey:
-            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-          anthropicApiKey:
-            getAnthropicApiKeyForUser(userId, userKey) ??
-            config.anthropicApiKey,
+          preferredProvider: runtime.provider,
+          responseMode: runtime.responseMode,
+          openAiApiKey: runtime.openAiApiKey,
+          anthropicApiKey: runtime.anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
-          preferredLocalModel: user.preferred_local_model,
-          preferredOnlineModel: user.preferred_online_model,
+          preferredLocalModel:
+            runtime.provider === "local" ? runtime.model : null,
+          preferredOnlineModel:
+            runtime.provider === "local" ? null : runtime.model,
+          autoFallbackChain: runtime.autoFallbackChain,
           providerFactory: providerFactoryOverride,
           keywords: normalizeSignalGenerationKeywords(body.keywords),
           direction: normalizePrismRefractDirection(body.direction),
@@ -14882,41 +15299,32 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/botcast/shows/:id/name", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
-      const requestedProvider = readProvider(body.preferredProvider);
-      const autoFallbackChain = parseStoredAutoFallbackChain(
-        user.auto_fallback_chain,
-      );
-      const requestedResponseMode = normalizeResponseMode(
-        body.responseMode,
-        user.preferred_provider === "local" ? "local" : "online",
-      );
-      const autoEnabled =
-        requestedResponseMode === "auto" &&
-        user.auto_switch_model === 1 &&
-        autoFallbackChain !== null;
-      const localModeLocked =
-        user.preferred_provider === "local" && !autoEnabled;
-      const preferredProvider = localModeLocked
-        ? "local"
-        : (requestedProvider ?? user.preferred_provider);
+      const runtime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider: body.preferredProvider,
+        requestedResponseMode: body.responseMode,
+        modelOverride: body.modelOverride,
+        routingContext: {
+          surface: "signal-name",
+          inputText: normalizeSignalGenerationKeywords(body.keywords).join(" "),
+          structuredOutput: true,
+          outputTokens: 160,
+        },
+      });
       const result = await generateBotcastShowName(db, userId, ctx.params.id, {
-        preferredProvider,
-        responseMode: autoEnabled
-          ? "auto"
-          : preferredProvider === "local"
-            ? "local"
-            : "online",
-        openAiApiKey:
-          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-        anthropicApiKey:
-          getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey,
+        preferredProvider: runtime.provider,
+        responseMode: runtime.responseMode,
+        openAiApiKey: runtime.openAiApiKey,
+        anthropicApiKey: runtime.anthropicApiKey,
         secondaryOllamaHost: user.secondary_ollama_host,
         prismDefaultLlmModel: user.prism_default_llm_model,
-        preferredLocalModel: user.preferred_local_model,
-        preferredOnlineModel: user.preferred_online_model,
-        autoFallbackChain,
+        preferredLocalModel:
+          runtime.provider === "local" ? runtime.model : null,
+        preferredOnlineModel:
+          runtime.provider === "local" ? null : runtime.model,
+        autoFallbackChain: runtime.autoFallbackChain,
         providerFactory: providerFactoryOverride,
         keywords: normalizeSignalGenerationKeywords(body.keywords),
       });
@@ -14925,48 +15333,38 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/botcast/shows/:id/premise", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const inspiration = readOptionalString(body.inspiration)?.slice(0, 360);
-      const requestedProvider = readProvider(body.preferredProvider);
-      const autoFallbackChain = parseStoredAutoFallbackChain(
-        user.auto_fallback_chain,
-      );
-      const requestedResponseMode = normalizeResponseMode(
-        body.responseMode,
-        user.preferred_provider === "local" ? "local" : "online",
-      );
-      const autoEnabled =
-        requestedResponseMode === "auto" &&
-        user.auto_switch_model === 1 &&
-        autoFallbackChain !== null;
-      const localModeLocked =
-        user.preferred_provider === "local" && !autoEnabled;
-      const preferredProvider = localModeLocked
-        ? "local"
-        : (requestedProvider ?? user.preferred_provider);
+      const runtime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider: body.preferredProvider,
+        requestedResponseMode: body.responseMode,
+        modelOverride: body.modelOverride,
+        routingContext: {
+          surface: "signal-premise",
+          inputText: inspiration ?? "",
+          structuredOutput: true,
+          outputTokens: 420,
+        },
+      });
       const result = await generateBotcastShowPremise(
         db,
         userId,
         ctx.params.id,
         inspiration,
         {
-          preferredProvider,
-          responseMode: autoEnabled
-            ? "auto"
-            : preferredProvider === "local"
-              ? "local"
-              : "online",
-          openAiApiKey:
-            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-          anthropicApiKey:
-            getAnthropicApiKeyForUser(userId, userKey) ??
-            config.anthropicApiKey,
+          preferredProvider: runtime.provider,
+          responseMode: runtime.responseMode,
+          openAiApiKey: runtime.openAiApiKey,
+          anthropicApiKey: runtime.anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
           prismDefaultLlmModel: user.prism_default_llm_model,
-          preferredLocalModel: user.preferred_local_model,
-          preferredOnlineModel: user.preferred_online_model,
-          autoFallbackChain,
+          preferredLocalModel:
+            runtime.provider === "local" ? runtime.model : null,
+          preferredOnlineModel:
+            runtime.provider === "local" ? null : runtime.model,
+          autoFallbackChain: runtime.autoFallbackChain,
           providerFactory: providerFactoryOverride,
           keywords: normalizeSignalGenerationKeywords(body.keywords),
         },
@@ -15046,7 +15444,6 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/botcast/shows/:id/booking-suggestion", async (ctx) => {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const field =
         body.field === "topic" ||
@@ -15060,40 +15457,6 @@ function buildRoutes(): RouteDefinition[] {
           "Choose a Signal booking field to synthesize.",
         );
       }
-      const requestedProvider = readProvider(body.preferredProvider);
-      const autoFallbackChain = parseStoredAutoFallbackChain(
-        user.auto_fallback_chain,
-      );
-      const requestedResponseMode = normalizeResponseMode(
-        body.responseMode,
-        user.preferred_provider === "local" ? "local" : "online",
-      );
-      const localModeLocked = user.preferred_provider === "local";
-      const autoEnabled =
-        !localModeLocked &&
-        requestedResponseMode === "auto" &&
-        user.auto_switch_model === 1 &&
-        autoFallbackChain !== null;
-      const preferredProvider = localModeLocked
-        ? "local"
-        : (requestedProvider ?? user.preferred_provider);
-      const requestedModelOverride = readCoffeeSessionSpeakerModel(
-        body.modelOverride,
-      );
-      const accountModel =
-        preferredProvider === "local"
-          ? user.preferred_local_model
-          : user.preferred_online_model;
-      const availableAccountModel =
-        accountModel && !isDisabledModelChoice(accountModel)
-          ? accountModel
-          : null;
-      const modelOverride =
-        localModeLocked &&
-        requestedProvider !== undefined &&
-        requestedProvider !== "local"
-          ? availableAccountModel
-          : (requestedModelOverride ?? availableAccountModel);
       const generationKeywords = normalizeSignalGenerationKeywords(
         body.keywords,
       );
@@ -15101,21 +15464,37 @@ function buildRoutes(): RouteDefinition[] {
         normalizePrismRefractDirection(body.direction) ||
         generationKeywords[0] ||
         "";
+      const runtime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider: body.preferredProvider,
+        requestedResponseMode: body.responseMode,
+        modelOverride: body.modelOverride,
+        routingContext: {
+          surface: "signal-booking",
+          inputText: [
+            direction,
+            typeof body.currentTopic === "string" ? body.currentTopic : "",
+            typeof body.currentProducerBrief === "string"
+              ? body.currentProducerBrief
+              : "",
+          ].join("\n"),
+          structuredOutput: true,
+          outputTokens: field === "booking" ? 900 : 420,
+        },
+      });
+      const modelOverride = runtime.model;
       const generationOptions: BotcastGenerationOptions = {
-        preferredProvider,
-        responseMode: autoEnabled
-          ? "auto"
-          : preferredProvider === "local"
-            ? "local"
-            : "online",
-        openAiApiKey:
-          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-        anthropicApiKey:
-          getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey,
+        preferredProvider: runtime.provider,
+        responseMode: runtime.responseMode,
+        openAiApiKey: runtime.openAiApiKey,
+        anthropicApiKey: runtime.anthropicApiKey,
         secondaryOllamaHost: user.secondary_ollama_host,
-        preferredLocalModel: user.preferred_local_model,
-        preferredOnlineModel: user.preferred_online_model,
-        autoFallbackChain,
+        preferredLocalModel:
+          runtime.provider === "local" ? runtime.model : null,
+        preferredOnlineModel:
+          runtime.provider === "local" ? null : runtime.model,
+        autoFallbackChain: runtime.autoFallbackChain,
         providerFactory: providerFactoryOverride,
         keywords: generationKeywords,
         direction,
@@ -15953,36 +16332,28 @@ function buildRoutes(): RouteDefinition[] {
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
-      const requestedProvider = readProvider(body.preferredProvider);
-      const autoFallbackChain = parseStoredAutoFallbackChain(
-        user.auto_fallback_chain,
-      );
-      const requestedResponseMode = normalizeResponseMode(
-        body.responseMode,
-        user.preferred_provider === "local" ? "local" : "online",
-      );
-      const autoEnabled =
-        requestedResponseMode === "auto" &&
-        user.auto_switch_model === 1 &&
-        autoFallbackChain !== null;
-      const localModeLocked =
-        user.preferred_provider === "local" && !autoEnabled;
-      const preferredProvider = localModeLocked
-        ? "local"
-        : (requestedProvider ?? user.preferred_provider);
-      const requestedModelOverride = readCoffeeSessionSpeakerModel(
+      const explicitModelOverride = readCoffeeSessionSpeakerModel(
         body.modelOverride,
       );
-      const modelOverride =
-        localModeLocked &&
-        requestedProvider !== undefined &&
-        requestedProvider !== "local"
-          ? null
-          : requestedModelOverride;
-      const accountModel =
-        preferredProvider === "local"
-          ? user.preferred_local_model
-          : user.preferred_online_model;
+      const runtime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider: body.preferredProvider,
+        requestedResponseMode: body.responseMode,
+        modelOverride: explicitModelOverride,
+        routingContext: {
+          surface: "signal",
+          inputText: [
+            typeof body.topic === "string" ? body.topic : "",
+            typeof body.producerBrief === "string" ? body.producerBrief : "",
+            typeof body.guestContext === "string" ? body.guestContext : "",
+          ].join("\n"),
+          outputTokens: 1_200,
+          highStakes: true,
+        },
+      });
+      const preferredProvider = runtime.provider;
+      const modelOverride = runtime.model;
       const producerGuest = body.guestKind === "producer";
       const producerGuestName = producerGuest
         ? resolveBotcastProducerGuestName(
@@ -16003,28 +16374,19 @@ function buildRoutes(): RouteDefinition[] {
             {
               guestName: producerGuestName!,
               guestContext,
-              modelOverride:
-                modelOverride ??
-                (accountModel && !isDisabledModelChoice(accountModel)
-                  ? accountModel
-                  : null),
+              modelOverride,
             },
             {
               preferredProvider,
-              responseMode: autoEnabled
-                ? "auto"
-                : preferredProvider === "local"
-                  ? "local"
-                  : "online",
-              openAiApiKey:
-                getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-              anthropicApiKey:
-                getAnthropicApiKeyForUser(userId, userKey) ??
-                config.anthropicApiKey,
+              responseMode: runtime.responseMode,
+              openAiApiKey: runtime.openAiApiKey,
+              anthropicApiKey: runtime.anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
-              preferredLocalModel: user.preferred_local_model,
-              preferredOnlineModel: user.preferred_online_model,
-              autoFallbackChain,
+              preferredLocalModel:
+                runtime.provider === "local" ? runtime.model : null,
+              preferredOnlineModel:
+                runtime.provider === "local" ? null : runtime.model,
+              autoFallbackChain: runtime.autoFallbackChain,
               providerFactory: providerFactoryOverride,
             },
           )
@@ -16058,22 +16420,13 @@ function buildRoutes(): RouteDefinition[] {
           promptWildcardNames(episodeProducerBrief).length > 0)
       ) {
         const botCandidates = promptBotWildcardCandidates(db, userId);
-        const openAiApiKey =
-          getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-        const anthropicApiKey =
-          getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
         const wildcardProvider = providerFactoryOverride(
           preferredProvider,
-          openAiApiKey,
+          runtime.openAiApiKey,
           user.secondary_ollama_host,
-          anthropicApiKey,
+          runtime.anthropicApiKey,
         );
-        const wildcardModel =
-          modelOverride ??
-          (accountModel && !isDisabledModelChoice(accountModel)
-            ? accountModel
-            : null) ??
-          defaultModelIdForProvider(preferredProvider);
+        const wildcardModel = modelOverride;
         const wildcardOverrides = {
           model: wildcardModel,
           temperature: 0.72,
@@ -16124,16 +16477,8 @@ function buildRoutes(): RouteDefinition[] {
           topic: episodeTopic,
           producerBrief: episodeProducerBrief,
           preferredProvider,
-          responseMode: autoEnabled
-            ? "auto"
-            : preferredProvider === "local"
-              ? "local"
-              : "online",
-          modelOverride:
-            modelOverride ??
-            (accountModel && !isDisabledModelChoice(accountModel)
-              ? accountModel
-              : null),
+          responseMode: runtime.responseMode,
+          modelOverride,
           durationMinutes:
             body.durationMinutes === null || body.durationMinutes === undefined
               ? null
@@ -16162,7 +16507,27 @@ function buildRoutes(): RouteDefinition[] {
           run.error ?? "Signal could not create the episode.",
         );
       }
-      const episode = getBotcastEpisode(db, userId, run.result.episodeId);
+      const createdEpisode = getBotcastEpisode(db, userId, run.result.episodeId);
+      const episode = recordBotcastRoutingSnapshot(
+        db,
+        userId,
+        createdEpisode.id,
+        {
+          v: 1,
+          lane: runtime.responseMode,
+          modelSelectionKind: explicitModelOverride ? "fixed" : "auto",
+          candidateAllowlist: runtime.candidateAllowlist,
+          fallbackChain: (runtime.autoFallbackChain?.fallbacks ?? []).filter(
+            (entry) =>
+              (entry.provider === "local" ? "local" : "online") ===
+              runtime.responseMode,
+          ),
+          policyVersion: runtime.autoRoute?.v ?? 1,
+          ...(runtime.autoRoute
+            ? { initialAutoRoute: runtime.autoRoute }
+            : {}),
+        },
+      );
       json(ctx.res, 201, {
         ok: true,
         episode: projectBotcastEpisodeForAudienceV1(episode),
@@ -16279,24 +16644,25 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(409, "This Signal episode has already ended.");
       }
       const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
+      const runtime = await contextualSignalRuntimeForEpisode({
+        userId,
+        user,
+        episode: currentEpisode,
+      });
       const result = await endBotcastEpisodeOnProducerCut(
         db,
         userId,
         currentEpisode.id,
         {
-          preferredProvider: currentEpisode.provider,
-          openAiApiKey:
-            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-          anthropicApiKey:
-            getAnthropicApiKeyForUser(userId, userKey) ??
-            config.anthropicApiKey,
+          preferredProvider: runtime.provider,
+          responseMode: runtime.responseMode,
+          openAiApiKey: runtime.openAiApiKey,
+          anthropicApiKey: runtime.anthropicApiKey,
           secondaryOllamaHost: user.secondary_ollama_host,
-          preferredLocalModel: user.preferred_local_model,
-          preferredOnlineModel: user.preferred_online_model,
-          autoFallbackChain: parseStoredAutoFallbackChain(
-            user.auto_fallback_chain,
-          ),
+          contextualModel: runtime.model,
+          contextualReasoningEffort: runtime.reasoningEffort,
+          autoRouteDecision: runtime.autoRoute,
+          autoFallbackChain: runtime.autoFallbackChain,
           providerFactory: providerFactoryOverride,
         },
         {
@@ -16522,7 +16888,11 @@ function buildRoutes(): RouteDefinition[] {
           );
         }
         const user = getUserRow(userId);
-        const userKey = decryptUserKey(userId);
+        const runtime = await contextualSignalRuntimeForEpisode({
+          userId,
+          user,
+          episode: frozen,
+        });
         const powerTheme = readResolvedPowerTheme(body.theme);
         const stateCursor = botcastPreparedTurnCursor(
           db,
@@ -16557,19 +16927,15 @@ function buildRoutes(): RouteDefinition[] {
                     frozen.id,
                     {},
                     {
-                      preferredProvider: frozen.provider,
-                      openAiApiKey:
-                        getOpenAiApiKeyForUser(userId, userKey) ??
-                        config.openAiApiKey,
-                      anthropicApiKey:
-                        getAnthropicApiKeyForUser(userId, userKey) ??
-                        config.anthropicApiKey,
+                      preferredProvider: runtime.provider,
+                      responseMode: runtime.responseMode,
+                      openAiApiKey: runtime.openAiApiKey,
+                      anthropicApiKey: runtime.anthropicApiKey,
                       secondaryOllamaHost: user.secondary_ollama_host,
-                      preferredLocalModel: user.preferred_local_model,
-                      preferredOnlineModel: user.preferred_online_model,
-                      autoFallbackChain: parseStoredAutoFallbackChain(
-                        user.auto_fallback_chain,
-                      ),
+                      contextualModel: runtime.model,
+                      contextualReasoningEffort: runtime.reasoningEffort,
+                      autoRouteDecision: runtime.autoRoute,
+                      autoFallbackChain: runtime.autoFallbackChain,
                       experimentalAllModelEffortEnabled:
                         user.experimental_all_model_effort_enabled === 1,
                       signal,
@@ -16620,7 +16986,6 @@ function buildRoutes(): RouteDefinition[] {
         "Just-in-time Signal advance replaced the prepared turn.",
       );
       const user = getUserRow(userId);
-      const userKey = decryptUserKey(userId);
       const body = ctx.body as Record<string, unknown>;
       const powerTheme = readResolvedPowerTheme(body.theme);
       const cueRecord =
@@ -16742,13 +17107,12 @@ function buildRoutes(): RouteDefinition[] {
           "Signal guest thinking time requires a Producer guest answer.",
         );
       }
-      const requestedProvider = body.preferredProvider;
-      const preferredProvider: ProviderName =
-        requestedProvider === "local" ||
-        requestedProvider === "openai" ||
-        requestedProvider === "anthropic"
-          ? requestedProvider
-          : user.preferred_provider;
+      const frozenEpisode = getBotcastEpisode(db, userId, ctx.params.id);
+      const runtime = await contextualSignalRuntimeForEpisode({
+        userId,
+        user,
+        episode: frozenEpisode,
+      });
       const signalAdvanceAbort = new AbortController();
       const onSignalAdvanceClientClose = () => {
         if (!ctx.res.writableEnded) signalAdvanceAbort.abort();
@@ -16778,18 +17142,15 @@ function buildRoutes(): RouteDefinition[] {
                 }
               : {},
           {
-            preferredProvider,
-            openAiApiKey:
-              getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey,
-            anthropicApiKey:
-              getAnthropicApiKeyForUser(userId, userKey) ??
-              config.anthropicApiKey,
+            preferredProvider: runtime.provider,
+            responseMode: runtime.responseMode,
+            openAiApiKey: runtime.openAiApiKey,
+            anthropicApiKey: runtime.anthropicApiKey,
             secondaryOllamaHost: user.secondary_ollama_host,
-            preferredLocalModel: user.preferred_local_model,
-            preferredOnlineModel: user.preferred_online_model,
-            autoFallbackChain: parseStoredAutoFallbackChain(
-              user.auto_fallback_chain,
-            ),
+            contextualModel: runtime.model,
+            contextualReasoningEffort: runtime.reasoningEffort,
+            autoRouteDecision: runtime.autoRoute,
+            autoFallbackChain: runtime.autoFallbackChain,
             experimentalAllModelEffortEnabled:
               user.experimental_all_model_effort_enabled === 1,
             signal: signalAdvanceAbort.signal,
@@ -17852,14 +18213,18 @@ function buildRoutes(): RouteDefinition[] {
       const requestedProvider = readProvider(body.preferredProvider);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
-      const openAiApiKey =
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const anthropicApiKey =
-        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
-      const effectiveProvider = requestedProvider ?? user.preferred_provider;
-      const sessionSpeakerModel = readCoffeeSessionSpeakerModel(
-        body.modelOverride,
-      );
+      const runtime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider,
+        requestedResponseMode: body.responseMode,
+        modelOverride: body.modelOverride,
+        routingContext: {
+          surface: "coffee",
+          inputText: message,
+          outputTokens: 900,
+        },
+      });
       const result = await runWithUsageSession(
         {
           db,
@@ -17883,19 +18248,12 @@ function buildRoutes(): RouteDefinition[] {
               presentBotIds,
             },
             {
-              preferredProvider: effectiveProvider,
+              preferredProvider: runtime.provider,
               ...(powerTheme ? { theme: powerTheme } : {}),
-              preferredLocalModel: user.preferred_local_model,
-              preferredOnlineModel: user.preferred_online_model,
-              responseMode: normalizeResponseMode(
-                body.responseMode,
-                effectiveProvider === "local" ? "local" : "online",
-              ),
-              autoFallbackChain: parseStoredAutoFallbackChain(
-                user.auto_fallback_chain,
-              ),
-              openAiApiKey,
-              anthropicApiKey,
+              responseMode: runtime.responseMode,
+              autoFallbackChain: runtime.autoFallbackChain,
+              openAiApiKey: runtime.openAiApiKey,
+              anthropicApiKey: runtime.anthropicApiKey,
               secondaryOllamaHost: user.secondary_ollama_host,
               experimentalDualOllamaEnabled:
                 user.experimental_dual_ollama_enabled === 1,
@@ -17916,7 +18274,9 @@ function buildRoutes(): RouteDefinition[] {
                 secondaryOllamaHost: user.secondary_ollama_host,
               },
               sessionRemainingMs,
-              ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+              sessionSpeakerModel: runtime.model,
+              reasoningEffort: runtime.reasoningEffort,
+              autoRouteDecision: runtime.autoRoute,
             },
           ),
       );
@@ -17957,16 +18317,24 @@ function buildRoutes(): RouteDefinition[] {
         const requestedProvider = readProvider(body.preferredProvider);
         const user = getUserRow(userId);
         const userKey = decryptUserKey(userId);
-        const effectiveProvider = requestedProvider ?? user.preferred_provider;
         const powerTheme = readResolvedPowerTheme(body.theme);
-        const sessionSpeakerModel = readCoffeeSessionSpeakerModel(
-          body.modelOverride,
-        );
         const sessionRemainingMs =
           typeof body.sessionRemainingMs === "number" &&
           Number.isFinite(body.sessionRemainingMs)
             ? Math.max(0, body.sessionRemainingMs)
             : null;
+        const runtime = await contextualTextRuntimeForUser({
+          userId,
+          user,
+          requestedProvider,
+          requestedResponseMode: body.responseMode,
+          modelOverride: body.modelOverride,
+          routingContext: {
+            surface: "coffee",
+            inputText: directedUserMessage ?? "",
+            outputTokens: 900,
+          },
+        });
         const preparation = turnPreparationRegistry.create<PreparedCoffeeTurnPayload>({
           userId,
           surface: "coffee",
@@ -17996,23 +18364,12 @@ function buildRoutes(): RouteDefinition[] {
                     userId,
                     conversationId,
                     {
-                      preferredProvider: effectiveProvider,
+                      preferredProvider: runtime.provider,
                       ...(powerTheme ? { theme: powerTheme } : {}),
-                      preferredLocalModel: user.preferred_local_model,
-                      preferredOnlineModel: user.preferred_online_model,
-                      responseMode: normalizeResponseMode(
-                        body.responseMode,
-                        effectiveProvider === "local" ? "local" : "online",
-                      ),
-                      autoFallbackChain: parseStoredAutoFallbackChain(
-                        user.auto_fallback_chain,
-                      ),
-                      openAiApiKey:
-                        getOpenAiApiKeyForUser(userId, userKey) ??
-                        config.openAiApiKey,
-                      anthropicApiKey:
-                        getAnthropicApiKeyForUser(userId, userKey) ??
-                        config.anthropicApiKey,
+                      responseMode: runtime.responseMode,
+                      autoFallbackChain: runtime.autoFallbackChain,
+                      openAiApiKey: runtime.openAiApiKey,
+                      anthropicApiKey: runtime.anthropicApiKey,
                       secondaryOllamaHost: user.secondary_ollama_host,
                       experimentalDualOllamaEnabled:
                         user.experimental_dual_ollama_enabled === 1,
@@ -18036,7 +18393,9 @@ function buildRoutes(): RouteDefinition[] {
                       },
                       sessionRemainingMs,
                       signal,
-                      ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+                      sessionSpeakerModel: runtime.model,
+                      reasoningEffort: runtime.reasoningEffort,
+                      autoRouteDecision: runtime.autoRoute,
                     },
                     body.userIsComposing === true,
                     directedSpeakerBotId,
@@ -18118,10 +18477,6 @@ function buildRoutes(): RouteDefinition[] {
       const requestedProvider = readProvider(body.preferredProvider);
       const user = getUserRow(userId);
       const userKey = decryptUserKey(userId);
-      const effectiveProvider = requestedProvider ?? user.preferred_provider;
-      const sessionSpeakerModel = readCoffeeSessionSpeakerModel(
-        body.modelOverride,
-      );
       const sessionRemainingMs =
         typeof body.sessionRemainingMs === "number" &&
         Number.isFinite(body.sessionRemainingMs)
@@ -18144,10 +18499,6 @@ function buildRoutes(): RouteDefinition[] {
                   : 1,
             }
           : undefined;
-      const openAiApiKey =
-        getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-      const anthropicApiKey =
-        getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey;
       if (kind === "autonomous") {
         const activeJob = getActiveCoffeeTurnJobForConversation(
           userId,
@@ -18158,6 +18509,18 @@ function buildRoutes(): RouteDefinition[] {
           return;
         }
       }
+      const runtime = await contextualTextRuntimeForUser({
+        userId,
+        user,
+        requestedProvider,
+        requestedResponseMode: body.responseMode,
+        modelOverride: body.modelOverride,
+        routingContext: {
+          surface: "coffee",
+          inputText: [message, directedUserMessage ?? ""].join("\n"),
+          outputTokens: 900,
+        },
+      });
       const jobDb = db;
       const status = startCoffeeTurnJob({
         userId,
@@ -18176,19 +18539,12 @@ function buildRoutes(): RouteDefinition[] {
             },
             async () => {
               const settings = {
-                preferredProvider: effectiveProvider,
+                preferredProvider: runtime.provider,
                 ...(powerTheme ? { theme: powerTheme } : {}),
-                preferredLocalModel: user.preferred_local_model,
-                preferredOnlineModel: user.preferred_online_model,
-                responseMode: normalizeResponseMode(
-                  body.responseMode,
-                  effectiveProvider === "local" ? "local" : "online",
-                ),
-                autoFallbackChain: parseStoredAutoFallbackChain(
-                  user.auto_fallback_chain,
-                ),
-                openAiApiKey,
-                anthropicApiKey,
+                responseMode: runtime.responseMode,
+                autoFallbackChain: runtime.autoFallbackChain,
+                openAiApiKey: runtime.openAiApiKey,
+                anthropicApiKey: runtime.anthropicApiKey,
                 secondaryOllamaHost: user.secondary_ollama_host,
                 experimentalDualOllamaEnabled:
                   user.experimental_dual_ollama_enabled === 1,
@@ -18211,7 +18567,9 @@ function buildRoutes(): RouteDefinition[] {
                 sessionRemainingMs,
                 signal,
                 onPhase: setPhase,
-                ...(sessionSpeakerModel ? { sessionSpeakerModel } : {}),
+                sessionSpeakerModel: runtime.model,
+                reasoningEffort: runtime.reasoningEffort,
+                autoRouteDecision: runtime.autoRoute,
               };
               if (kind !== "autonomous") {
                 return processCoffeeTurn(
@@ -21109,44 +21467,16 @@ function buildRoutes(): RouteDefinition[] {
       const ephemeralMode = prismCompanionEphemeralMode(
         request.surface.surfaceId,
       );
-      const preferences = normalizeEphemeralChatProviderPreferences(
-        user.ephemeral_chat_provider_preferences,
+      // The floating companion and full Prism share one local identity/model.
+      // Applet and account response pickers never redirect this request online.
+      const providerName = "local" as const;
+      const model = resolveAuxiliaryOllamaModel(
+        user.prism_default_llm_model,
       );
-      const preferredOnlineModel = user.preferred_online_model?.trim() || null;
-      const onlineProvider: Exclude<ProviderName, "local"> =
-        user.preferred_provider === "anthropic" ||
-        preferredOnlineModel?.toLocaleLowerCase().startsWith("claude")
-          ? "anthropic"
-          : "openai";
-      const providerName = resolvePrismCompanionProvider({
-        surfaceId: request.surface.surfaceId,
-        preferences,
-        globalProvider: user.preferred_provider,
-        onlineProvider,
-      });
-      const model =
-        providerName === "local"
-          ? user.preferred_local_model?.trim() ||
-            defaultModelIdForProvider("local")
-          : preferredOnlineModel || defaultModelIdForProvider(providerName);
-      let openAiApiKey: string | undefined;
-      let anthropicApiKey: string | undefined;
-      if (providerName !== "local") {
-        const userKey = decryptUserKey(userId);
-        if (providerName === "openai") {
-          openAiApiKey =
-            getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
-        } else {
-          anthropicApiKey =
-            getAnthropicApiKeyForUser(userId, userKey) ??
-            config.anthropicApiKey;
-        }
-      }
       const provider = providerFactoryOverride(
         providerName,
-        openAiApiKey,
+        undefined,
         user.secondary_ollama_host,
-        anthropicApiKey,
       );
       const controller = new AbortController();
       const onClose = () => controller.abort();
@@ -22055,7 +22385,11 @@ function buildRoutes(): RouteDefinition[] {
 
       // Validation + merge live in `./settings.ts` so the semantics are pinned
       // by unit tests. See `__tests__/settings.test.ts` for the contract.
-      const next = resolveNextSettings(body, {
+      const routingCompatibilityBody = { ...body };
+      delete routingCompatibilityBody.autoModeEnabled;
+      delete routingCompatibilityBody.preferredLocalModel;
+      delete routingCompatibilityBody.preferredOnlineModel;
+      const next = resolveNextSettings(routingCompatibilityBody, {
         displayName: user.display_name,
         theme: user.theme,
         graphicsQuality: user.graphics_quality,
@@ -22916,7 +23250,9 @@ function buildRoutes(): RouteDefinition[] {
         const apiKey =
           getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey;
         const lenientImageFbOnline =
-          user.lenient_local_image_fallback_model?.trim() ?? "";
+          user.lenient_local_image_fallback_model?.trim() ||
+          user.preferred_local_image_model?.trim() ||
+          "";
         const onlinePromptAttempts = buildImagePromptAttempts({
           prompt: onlinePromptForModel,
           useSourceImage: Boolean(sourceImageBytes),
@@ -23301,6 +23637,109 @@ function buildRoutes(): RouteDefinition[] {
       ).map((row) => mapImageRowToClient(row));
       json(ctx.res, 200, { ok: true, images });
     }),
+    route("GET", "/api/assets", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const kind = ctx.query.get("kind") ?? "";
+      const sourceValue = ctx.query.get("source");
+      const usageValue = ctx.query.get("usage");
+      const sortValue = ctx.query.get("sort");
+      const limitValue = Number(ctx.query.get("limit") ?? "24");
+      try {
+        const page = listImageAssetCatalog(db, userId, {
+          kind: kind as Parameters<typeof listImageAssetCatalog>[2]["kind"],
+          query: ctx.query.get("q"),
+          cursor: ctx.query.get("cursor"),
+          limit: Number.isFinite(limitValue) ? limitValue : 24,
+          context: ctx.query.get("context"),
+          source:
+            sourceValue === "generated" || sourceValue === "uploaded"
+              ? sourceValue
+              : null,
+          usage:
+            usageValue === "used" || usageValue === "unused"
+              ? usageValue
+              : null,
+          sort: sortValue === "recency" ? "recency" : "relevance",
+          includeIncomplete: ctx.query.get("includeIncomplete") === "1",
+        });
+        json(ctx.res, 200, { ok: true, ...page });
+      } catch (error) {
+        if (error instanceof ImageAssetLibraryError) {
+          throw new HttpError(
+            error.code === "not_found" ? 404 : 400,
+            error.message,
+          );
+        }
+        throw error;
+      }
+    }),
+    route("GET", "/api/assets/storage", async (ctx) => {
+      const userId = requireAuth(ctx);
+      reconcileAssetCleanupRecoveryForUser(db, userId);
+      json(ctx.res, 200, {
+        ok: true,
+        storage: imageAssetStorageSummary(db, userId),
+      });
+    }),
+    route("PATCH", "/api/assets/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (
+        !Array.isArray(body.tags) ||
+        body.tags.some((tag) => typeof tag !== "string")
+      ) {
+        throw new HttpError(400, "tags must be an array of text labels.");
+      }
+      try {
+        const asset = updateImageAssetPlayerTags(
+          db,
+          userId,
+          ctx.params.id,
+          body.tags,
+        );
+        json(ctx.res, 200, { ok: true, asset });
+      } catch (error) {
+        if (error instanceof ImageAssetLibraryError) {
+          throw new HttpError(
+            error.code === "not_found" ? 404 : 400,
+            error.message,
+          );
+        }
+        throw error;
+      }
+    }),
+    route("DELETE", "/api/assets/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (peekActiveImageJobForUser(userId)) {
+        throw new HttpError(
+          409,
+          "Image generation is still finishing. Wait before deleting assets.",
+        );
+      }
+      reconcileAssetCleanupRecoveryForUser(db, userId);
+      try {
+        const result = deleteUnusedImageAssetSet(
+          db,
+          userId,
+          ctx.params.id,
+        );
+        json(ctx.res, 200, { ok: true, result });
+      } catch (error) {
+        if (error instanceof ImageAssetLibraryError) {
+          json(
+            ctx.res,
+            error.code === "not_found"
+              ? 404
+              : error.code === "invalid"
+                ? 400
+                : 409,
+            { ok: false, error: error.message, usage: error.usage },
+          );
+          return;
+        }
+        throw error;
+      }
+    }),
     route("GET", "/api/images", async (ctx) => {
       const userId = requireAuth(ctx);
       const filterBotId = readOptionalString(ctx.query.get("botId"));
@@ -23332,7 +23771,7 @@ function buildRoutes(): RouteDefinition[] {
                     ELSE '[]'
                   END
                 ) = 0
-                AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
+                AND ${GENERAL_IMAGE_LIBRARY_SQL}
                ORDER BY created_at DESC LIMIT ?`,
             )
             .all(userId, limit)
@@ -23340,14 +23779,14 @@ function buildRoutes(): RouteDefinition[] {
           ? db
               .prepare(
                 `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, related_bot_ids, origin, created_at, local_rel_path, model, purpose
-                 FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
+                 FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GENERAL_IMAGE_LIBRARY_SQL}
                  ORDER BY created_at DESC LIMIT ?`,
               )
               .all(userId, filterBotId, filterBotId, limit)
           : db
               .prepare(
                 `SELECT id, prompt, revised_prompt, url, size, quality, provider, bot_id, related_bot_ids, origin, created_at, local_rel_path, model, purpose
-                 FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}
+                 FROM images WHERE user_id = ? AND ${GENERAL_IMAGE_LIBRARY_SQL}
                  ORDER BY created_at DESC LIMIT ?`,
               )
               .all(userId, limit);
@@ -23574,12 +24013,12 @@ function buildRoutes(): RouteDefinition[] {
         filterBotId
           ? db
               .prepare(
-                `SELECT id, local_rel_path FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`,
+                `SELECT id, local_rel_path FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GENERAL_IMAGE_LIBRARY_SQL}`,
               )
               .all(userId, filterBotId, filterBotId)
           : db
               .prepare(
-                `SELECT id, local_rel_path FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`,
+                `SELECT id, local_rel_path FROM images WHERE user_id = ? AND ${GENERAL_IMAGE_LIBRARY_SQL}`,
               )
               .all(userId)
       ) as Array<{ id: string; local_rel_path: string | null }>;
@@ -23589,11 +24028,11 @@ function buildRoutes(): RouteDefinition[] {
       }
       if (filterBotId) {
         db.prepare(
-          `DELETE FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`,
+          `DELETE FROM images WHERE user_id = ? AND ${IMAGE_BOT_MEMBERSHIP_SQL} AND ${GENERAL_IMAGE_LIBRARY_SQL}`,
         ).run(userId, filterBotId, filterBotId);
       } else {
         db.prepare(
-          `DELETE FROM images WHERE user_id = ? AND ${GALLERY_EXCLUDED_PURPOSE_SQL}`,
+          `DELETE FROM images WHERE user_id = ? AND ${GENERAL_IMAGE_LIBRARY_SQL}`,
         ).run(userId);
       }
       for (const row of rows) {
@@ -23768,22 +24207,16 @@ function buildRoutes(): RouteDefinition[] {
         user.preferred_provider === "local" ? "local" : "online",
       );
       const responseMode =
-        requestedResponseMode === "auto" &&
-        user.auto_switch_model === 1 &&
-        storedAutoFallbackChain
-          ? "auto"
-          : requestedResponseMode === "auto"
-            ? user.preferred_provider === "local"
-              ? "local"
-              : "online"
-            : requestedResponseMode;
+        requestedResponseMode === "auto"
+          ? user.preferred_provider === "local"
+            ? "local"
+            : "online"
+          : requestedResponseMode;
       const requestedProvider = readProvider(body.preferredProvider);
       const primaryProvider: ProviderName =
         responseMode === "local"
           ? "local"
-          : responseMode === "auto"
-            ? (requestedProvider ?? user.preferred_provider)
-            : requestedProvider && requestedProvider !== "local"
+          : requestedProvider && requestedProvider !== "local"
               ? requestedProvider
               : user.preferred_provider === "anthropic"
                 ? "anthropic"
@@ -23801,22 +24234,18 @@ function buildRoutes(): RouteDefinition[] {
         user.secondary_ollama_host,
         anthropicApiKey,
       );
-      const preferredModel =
-        primaryProvider === "local"
-          ? readOptionalString(user.preferred_local_model)
-          : readOptionalString(user.preferred_online_model);
-      if (isDisabledModelChoice(preferredModel)) {
-        throw new HttpError(
-          400,
-          `${primaryProvider === "local" ? "Local" : "Online"} replies are disabled. Choose a model before rerolling this field.`,
-        );
-      }
       const resolved = resolveAutoModel({
         provider: primaryProvider,
+        lane: responseMode,
         explicitModelOverride: null,
-        preferredModel,
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
+        routingContext: {
+          surface: "bot-field",
+          inputText: JSON.stringify(body.context ?? {}),
+          structuredOutput: true,
+          outputTokens: 600,
+        },
       });
       const provider = providerFactoryOverride(
         resolved.provider,
@@ -23845,8 +24274,7 @@ function buildRoutes(): RouteDefinition[] {
               providerName: resolved.provider,
               model: resolved.model,
               responseMode,
-              autoFallbackChain:
-                responseMode === "auto" ? storedAutoFallbackChain : null,
+              autoFallbackChain: storedAutoFallbackChain,
               providerFactory: providerFactoryOverride,
               openAiApiKey,
               anthropicApiKey,
@@ -23888,22 +24316,16 @@ function buildRoutes(): RouteDefinition[] {
         user.preferred_provider === "local" ? "local" : "online",
       );
       const responseMode =
-        requestedResponseMode === "auto" &&
-        user.auto_switch_model === 1 &&
-        storedAutoFallbackChain
-          ? "auto"
-          : requestedResponseMode === "auto"
-            ? user.preferred_provider === "local"
-              ? "local"
-              : "online"
-            : requestedResponseMode;
+        requestedResponseMode === "auto"
+          ? user.preferred_provider === "local"
+            ? "local"
+            : "online"
+          : requestedResponseMode;
       const requestedProvider = readProvider(body.preferredProvider);
       const primaryProvider: ProviderName =
         responseMode === "local"
           ? "local"
-          : responseMode === "auto"
-            ? (requestedProvider ?? user.preferred_provider)
-            : requestedProvider && requestedProvider !== "local"
+          : requestedProvider && requestedProvider !== "local"
               ? requestedProvider
               : user.preferred_provider === "anthropic"
                 ? "anthropic"
@@ -23924,22 +24346,19 @@ function buildRoutes(): RouteDefinition[] {
         user.secondary_ollama_host,
         anthropicApiKey,
       );
-      const preferredModel =
-        primaryProvider === "local"
-          ? readOptionalString(user.preferred_local_model)
-          : readOptionalString(user.preferred_online_model);
-      if (isDisabledModelChoice(preferredModel)) {
-        throw new HttpError(
-          400,
-          `${primaryProvider === "local" ? "Local" : "Online"} replies are disabled. Choose a model before generating a bot.`,
-        );
-      }
       const resolved = resolveAutoModel({
         provider: primaryProvider,
+        lane: responseMode,
         explicitModelOverride: null,
-        preferredModel,
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
+        routingContext: {
+          surface: "bot-generation",
+          inputText: prompt,
+          structuredOutput: true,
+          outputTokens: 6_000,
+          highStakes: true,
+        },
       });
       const provider = providerFactoryOverride(
         resolved.provider,
@@ -23993,8 +24412,7 @@ function buildRoutes(): RouteDefinition[] {
               model: resolved.model,
               responseMode,
               voiceCatalog,
-              autoFallbackChain:
-                responseMode === "auto" ? storedAutoFallbackChain : null,
+              autoFallbackChain: storedAutoFallbackChain,
               providerFactory: providerFactoryOverride,
               openAiApiKey,
               anthropicApiKey,

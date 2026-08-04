@@ -1481,12 +1481,10 @@ describe("Coffee seat arrival CSS", () => {
     const overviewSource = pageSource.slice(overviewStart, shellStart);
     assert.doesNotMatch(overviewSource, /renderCoffeeProviderModeToggle/);
     assert.doesNotMatch(overviewSource, /renderCoffeeHeaderModelPicker/);
-    assert.doesNotMatch(overviewSource, /renderCoffeeHeaderModelChrome/);
     assert.match(
       pageSource,
-      /const renderCoffeeHeaderModelChrome = \([\s\S]{0,120}\): React\.ReactNode => \(/,
+      /renderSharedAppletNavbar\("Coffee tools", \{[\s\S]*renderCoffeeProviderModeToggle\(\)[\s\S]*renderCoffeeHeaderModelPicker\(\)/u,
     );
-    assert.match(pageSource, /\{renderCoffeeHeaderModelChrome\(\{/);
 
     const startPanelRule = ruleForExactSelector(".coffeeGroupStartPanel");
     assert.match(

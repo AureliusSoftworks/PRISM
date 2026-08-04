@@ -24,9 +24,9 @@ const slateCss = readFileSync(
   "utf8",
 );
 
-test("Slate, Signal, and Debate consume one shared PRISM navbar contract", () => {
-  const sidebarHelper = pageSource.slice(
-    pageSource.indexOf("const renderSharedAppletSidebarHeader"),
+test("every active applet consumes the Debate PRISM navbar contract", () => {
+  const brandHelper = pageSource.slice(
+    pageSource.indexOf("const renderSharedAppletBrand"),
     pageSource.indexOf("const renderSharedAppletNavbar"),
   );
   const navbarHelper = pageSource.slice(
@@ -34,9 +34,9 @@ test("Slate, Signal, and Debate consume one shared PRISM navbar contract", () =>
     pageSource.indexOf("/** Conversation tools"),
   );
 
-  assert.match(sidebarHelper, /PrismWordmarkWithVersion/);
-  assert.match(sidebarHelper, /AppletHeaderLabel appletId=\{appletId\}/);
-  assert.match(sidebarHelper, /data-shared-app-sidebar-brand=\{appletId\}/);
+  assert.match(brandHelper, /PrismWordmarkWithVersion/);
+  assert.match(brandHelper, /AppletHeaderLabel appletId=\{appletId\}/);
+  assert.match(brandHelper, /data-shared-applet-brand=\{appletId\}/);
   assert.match(navbarHelper, /styles\.chatHeader/);
   assert.match(navbarHelper, /styles\.sharedAppletHeader/);
   assert.match(
@@ -60,16 +60,11 @@ test("Slate, Signal, and Debate consume one shared PRISM navbar contract", () =>
   assert.match(navbarHelper, /data-live-session-locked=/);
   assert.match(
     navbarHelper,
-    /options\.brandAppletId[\s\S]*renderSharedAppletSidebarHeader\(options\.brandAppletId\)/u,
+    /options\.brandAppletId[\s\S]*renderSharedAppletBrand\(options\.brandAppletId\)/u,
   );
 
-  for (const appletId of ["botcast", "slate"]) {
-    assert.match(
-      pageSource,
-      new RegExp(
-        `sidebarHeader=\\{renderSharedAppletSidebarHeader\\("${appletId}"\\)\\}`,
-      ),
-    );
+  for (const appletId of ["zen", "coffee", "debate", "botcast", "slate"]) {
+    assert.match(pageSource, new RegExp(`brandAppletId:\\s*"${appletId}"`));
   }
   assert.match(
     pageSource,
@@ -77,7 +72,7 @@ test("Slate, Signal, and Debate consume one shared PRISM navbar contract", () =>
   );
   assert.match(
     pageSource,
-    /modelControls:\s*\([\s\S]*renderProviderModeToggle\([\s\S]*styles\.chatHeaderModeToggle,[\s\S]*true,[\s\S]*liveChromePolicy\?\.lockMessage[\s\S]*<ComposerModelPicker/u,
+    /modelControls:\s*\([\s\S]*renderProviderModeToggle\([\s\S]*styles\.chatHeaderModeToggle,[\s\S]*liveChromePolicy\?\.lockMessage[\s\S]*false[\s\S]*<ComposerModelPicker/u,
   );
   assert.doesNotMatch(signalSource, /providerModeToggle/u);
   assert.doesNotMatch(signalSource, /signalGlobalProviderControl/u);
@@ -92,16 +87,27 @@ test("Slate, Signal, and Debate consume one shared PRISM navbar contract", () =>
   );
   assert.match(
     pageSource,
-    /const renderSharedAccountRoutingControls =[\s\S]*renderProviderModeToggle\([\s\S]*styles\.chatHeaderModeToggle,[\s\S]*true,[\s\S]*null,[\s\S]*false,[\s\S]*<ComposerModelPicker/u,
+    /renderSharedAppletNavbar\("Zen tools", \{[\s\S]*brandAppletId: "zen"[\s\S]*headerRef: chatHeaderRef[\s\S]*showModelControls: zenHeaderModelPickerActive/u,
+  );
+  assert.doesNotMatch(pageSource, /data-zen-header-hidden=/u);
+  assert.match(
+    pageCss,
+    /\.appLayout\[data-zen-surface="true"\] \.chatHeader\.sharedAppletHeader\s*\{[\s\S]*position:\s*relative;[\s\S]*inset:\s*auto;/u,
   );
   assert.match(
     pageSource,
-    /async function persistSharedAppletAccountModelChoice[\s\S]*preferredLocalModel[\s\S]*preferredOnlineModel[\s\S]*api\("\/api\/settings"/u,
+    /renderSharedAppletNavbar\("Coffee tools", \{[\s\S]*brandAppletId: "coffee"[\s\S]*liveSessionName: "Coffee"/u,
+  );
+  assert.match(
+    pageCss,
+    /\.coffeeShell > \.sharedAppletHeader\s*\{[\s\S]*grid-column:\s*1 \/ -1;[\s\S]*grid-row:\s*1;/u,
   );
   assert.match(
     pageSource,
-    /async function persistSharedAppletResponseMode[\s\S]*autoModeEnabled:[\s\S]*preferredProvider,[\s\S]*api\("\/api\/settings"/u,
+    /const renderSharedAccountRoutingControls =[\s\S]*renderProviderModeToggle\([\s\S]*styles\.chatHeaderModeToggle,[\s\S]*null,[\s\S]*false[\s\S]*<ComposerModelPicker/u,
   );
+  assert.match(pageSource, /sharedAppletModelChoiceByProvider/u);
+  assert.doesNotMatch(pageSource, /persistSharedAppletAccountModelChoice/u);
 });
 
 test("contextual Signal entry preserves the chosen cast", () => {
@@ -118,14 +124,11 @@ test("contextual Signal entry preserves the chosen cast", () => {
     signalSource,
     /nextShows\.find\(\(show\) => show\.hostBotId === initialHostBotId\)/u,
   );
-  assert.match(
-    signalSource,
-    /useState\(initialCast\[1\] \?\? ""\)/u,
-  );
+  assert.match(signalSource, /useState\(initialCast\[1\] \?\? ""\)/u);
 });
 
-test("Signal gives shared navigation its own aligned shell row", () => {
-  assert.match(signalSource, /sidebarHeader:\s*ReactNode/);
+test("Signal gives the shared navbar the complete full-width shell row", () => {
+  assert.doesNotMatch(signalSource, /sidebarHeader:\s*ReactNode/);
   assert.match(
     signalSource,
     /navigationHeader:[\s\S]*ReactNode[\s\S]*liveSessionActive: boolean[\s\S]*showLiveExit: boolean/u,
@@ -134,10 +137,8 @@ test("Signal gives shared navigation its own aligned shell row", () => {
     signalSource,
     /typeof navigationHeader === "function"[\s\S]*navigationHeader\(\{[\s\S]*liveSessionActive,[\s\S]*showLiveExit,[\s\S]*cuttingShow,[\s\S]*onCutShow:[\s\S]*episodeModelControl:/u,
   );
-  assert.match(
-    signalSource,
-    /styles\.sidebarNavigation\}[\s\S]*styles\.mainNavigation\}/,
-  );
+  assert.doesNotMatch(signalSource, /styles\.sidebarNavigation/);
+  assert.match(signalSource, /styles\.mainNavigation/);
   assert.doesNotMatch(signalSource, /libraryBrand|headerActions/);
   assert.match(
     signalCss,
@@ -145,20 +146,20 @@ test("Signal gives shared navigation its own aligned shell row", () => {
   );
   assert.match(
     signalCss,
-    /\.sidebarNavigation\s*\{[\s\S]*grid-column:\s*1;[\s\S]*border-right:[\s\S]*border-bottom:/,
-  );
-  assert.match(
-    signalCss,
-    /\.mainNavigation\s*\{[\s\S]*grid-column:\s*2;[\s\S]*grid-row:\s*1;/,
+    /\.mainNavigation\s*\{[\s\S]*grid-column:\s*1 \/ -1;[\s\S]*grid-row:\s*1;/,
   );
 });
 
-test("Slate aligns the shared navigation row to its structure rail", () => {
-  assert.match(slateSource, /sidebarHeader:\s*ReactNode/);
+test("Slate aligns the complete shared navbar above its structure rail", () => {
+  assert.doesNotMatch(slateSource, /sidebarHeader:\s*ReactNode/);
   assert.match(slateSource, /navigationHeader:\s*ReactNode/);
   assert.match(
     slateCss,
     /\.shell\s*\{[\s\S]*grid-template-columns:\s*minmax\(250px, 320px\) minmax\(0, 1fr\);[\s\S]*grid-template-rows:\s*66px minmax\(0, 1fr\);/,
+  );
+  assert.match(
+    slateCss,
+    /\.mainNavigation\s*\{[\s\S]*grid-column:\s*1 \/ -1;[\s\S]*grid-row:\s*1;/,
   );
   assert.match(
     slateCss,
@@ -174,11 +175,7 @@ test("shared sidebar and navbar materials remain owned by the active theme", () 
   for (const css of [signalCss, slateCss]) {
     assert.match(
       css,
-      /\.sidebarNavigation,\s*\.mainNavigation\s*\{[\s\S]*background:\s*var\(--bg-surface/,
-    );
-    assert.match(
-      css,
-      /\.sidebarNavigation\s*\{[\s\S]*border-right:\s*1px solid var\(--line/,
+      /\.mainNavigation\s*\{[\s\S]*background:\s*var\(--bg-surface/,
     );
   }
   assert.match(pageCss, /\.themeDark\s*\{[\s\S]*--bg-surface:/);

@@ -117,6 +117,39 @@ class DebateProviderStub implements LlmProvider {
   }
 }
 
+class StageDirectionDebateProvider extends DebateProviderStub {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes('"content":"your public statement"')) {
+      return JSON.stringify({
+        content:
+          "*yells over the audience* The implementation gap is decisive. *raises voice* That rebuttal does not answer it.",
+        deliveryCue: "excited",
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class GalleryDirectorProvider extends DebateProviderStub {
+  public prompt = "";
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("silent live gallery director")) {
+      this.prompt = text;
+      return JSON.stringify({ kind: "impressed", intensity: 2 });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
 class IneptPromptProvider extends DebateProviderStub {
   public prompts: string[] = [];
 
@@ -791,12 +824,12 @@ function autoRuntime(
   };
   const online = {
     provider: fallback,
-    providerName: "openai" as const,
+    providerName: "local" as const,
     model: "debate-fallback",
   };
   return {
     preferredProvider: "local",
-    responseMode: "auto",
+    responseMode: "local",
     personaReactionRoll: () => 1,
     local,
     online,
@@ -1578,6 +1611,52 @@ describe("Debate engine", () => {
       source,
       /chatWithDebateDebriefBot[\s\S]{0,2500}INSERT INTO (?:messages|memories|memory_summaries)/u,
     );
+  });
+
+  it("freezes Auto candidates but records the fresh route on generated events", async () => {
+    const db = createTestDb();
+    try {
+      const debateRuntime = runtime();
+      debateRuntime.modelSelectionKind = "auto";
+      debateRuntime.autoCandidateAllowlist = [
+        { provider: "local", model: "debate-test" },
+        { provider: "local", model: "debate-backup" },
+      ];
+      debateRuntime.autoRoute = {
+        v: 1,
+        lane: "local",
+        provider: "local",
+        model: "debate-test",
+        reasoningEffort: "low",
+        reasonCodes: ["surface_complexity"],
+      };
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+      });
+      assert.equal(session.modelSelectionKind, "auto");
+      assert.deepEqual(
+        session.autoCandidateAllowlist,
+        debateRuntime.autoCandidateAllowlist,
+      );
+      for (let turn = 0; turn < 2; turn += 1) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `auto-route:${turn}`,
+          },
+          debateRuntime,
+        );
+      }
+      const generatedEvent = session.events.find(
+        (event) => event.provider && event.model,
+      );
+      assert.deepEqual(generatedEvent?.autoRoute, debateRuntime.autoRoute);
+    } finally {
+      db.close();
+    }
   });
 
   it("lists active presentation duration only for completed Debate records", async () => {
@@ -3283,7 +3362,7 @@ describe("Debate engine", () => {
       assert.equal(session.stepKey, "challenge_judge_question");
       assert.equal(session.status, "waiting_for_player");
 
-      session = submitDebatePlayerTurn(db, "user-1", session.id, {
+      session = await submitDebatePlayerTurn(db, "user-1", session.id, {
         expectedRevision: session.revision,
         idempotencyKey: "debate.turn:inactive-judge:pass",
         content: "",
@@ -3545,7 +3624,7 @@ describe("Debate engine", () => {
         );
       }
       assert.equal(session.stepKey, "opening_against_player");
-      session = submitDebatePlayerTurn(db, "user-1", session.id, {
+      session = await submitDebatePlayerTurn(db, "user-1", session.id, {
         expectedRevision: session.revision,
         idempotencyKey: "debate.turn:participant-floor-time:opening",
         content: "The implementation gap is the central risk.",
@@ -3567,7 +3646,7 @@ describe("Debate engine", () => {
       );
       assert.doesNotMatch(provider.speechPrompt, /12 seconds/u);
 
-      session = submitDebatePlayerTurn(db, "user-1", session.id, {
+      session = await submitDebatePlayerTurn(db, "user-1", session.id, {
         expectedRevision: session.revision,
         idempotencyKey: "debate.turn:participant-floor-time:pass",
         content: "",
@@ -3900,19 +3979,19 @@ describe("Debate engine", () => {
     }
   });
 
-  it("gives the next advocate a saved delivery cue when the Judge gallery is rowdy", async () => {
+  it("keeps debater prose clean and saves a contextual local gallery direction", async () => {
     const db = createTestDb();
-    const debateRuntime = runtimeWith(new JudgeGavelProvider());
+    const director = new GalleryDirectorProvider();
+    const debateRuntime: DebateAiRuntime = {
+      ...runtimeWith(new StageDirectionDebateProvider()),
+      auxiliary: director,
+    };
     try {
       let session = await createJudgeDebate(db, debateRuntime, {
         formality: "free_for_all",
         playerJudgeUsesPrism: true,
       });
-      for (const idempotencyKey of [
-        "audience-delivery:intro",
-        "audience-delivery:opening-for",
-        "audience-delivery:opening-against",
-      ]) {
+      for (const idempotencyKey of ["gallery-director:intro", "gallery-director:opening-for"]) {
         session = await advanceDebateSession(
           db,
           "user-1",
@@ -3924,14 +4003,19 @@ describe("Debate engine", () => {
       const openingFor = session.events.find(
         (event) => event.stepKey === "opening_for" && event.kind === "speech",
       );
-      const openingAgainst = session.events.find(
-        (event) =>
-          event.stepKey === "opening_against" && event.kind === "speech",
-      );
       assert.ok(openingFor);
-      assert.ok(openingAgainst);
-      assert.doesNotMatch(openingFor.content, /^\*speaks loudly\*/u);
-      assert.match(openingAgainst.content, /^\*speaks loudly\*/u);
+      assert.equal(
+        openingFor.content,
+        "The implementation gap is decisive. That rebuttal does not answer it.",
+      );
+      assert.equal(openingFor.voicePerformanceCue, "excited");
+      assert.deepEqual(openingFor.audienceReaction, {
+        kind: "impressed",
+        intensity: 2,
+        source: "director",
+      });
+      assert.match(director.prompt, /Recent public debate:/u);
+      assert.match(director.prompt, /Most lines earn no audible reaction/u);
     } finally {
       db.close();
     }
@@ -6450,7 +6534,7 @@ describe("Debate engine", () => {
           "Debate should complete within a bounded turn count.",
         );
         if (session.stepKey === "challenge_judge_question") {
-          session = submitDebatePlayerTurn(db, "user-1", session.id, {
+          session = await submitDebatePlayerTurn(db, "user-1", session.id, {
             expectedRevision: session.revision,
             idempotencyKey: `player-question:${mutation}`,
             targetSideId: "for",
@@ -6524,7 +6608,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("replays duplicate mutations and silently resumes the exact saved presentation line", async () => {
+  it("replays duplicate mutations, announces lifecycle calls off-record, and resumes the exact saved presentation line", async () => {
     const db = createTestDb();
     try {
       const created = await createJudgeDebate(db);
@@ -6604,7 +6688,11 @@ describe("Debate engine", () => {
       });
       assert.equal(paused.status, "paused");
       assert.equal(paused.stepKey, first.stepKey);
-      assert.equal(paused.events.length, first.events.length);
+      assert.equal(paused.events.length, first.events.length + 1);
+      assert.partialDeepStrictEqual(paused.events.at(-1), {
+        speakerBotId: paused.moderator.id,
+        stepKey: "pause",
+      });
       assert.equal(paused.pausedPresentationEventId, presentationEventId);
       assert.ok(paused.pausedAt);
       assert.equal(paused.pausedDurationMs, 0);
@@ -6620,7 +6708,13 @@ describe("Debate engine", () => {
       );
       assert.equal(resumed.status, "live");
       assert.equal(resumed.stepKey, first.stepKey);
-      assert.equal(resumed.events.length, paused.events.length);
+      assert.equal(resumed.events.length, paused.events.length + 1);
+      assert.partialDeepStrictEqual(resumed.events.at(-1), {
+        kind: "judge_gavel",
+        speakerBotId: resumed.moderator.id,
+        stepKey: "resume",
+        gavelReason: "resume",
+      });
       assert.equal(resumed.pausedPresentationEventId, presentationEventId);
       assert.equal(resumed.judgeGavelCooldownUntil, null);
       assert.equal(resumed.pausedAt, null);
@@ -6634,13 +6728,13 @@ describe("Debate engine", () => {
         idempotencyKey: "resume:pause-immediately",
       });
       assert.equal(pausedAgain.status, "paused");
-      assert.equal(pausedAgain.events.length, resumed.events.length);
+      assert.equal(pausedAgain.events.length, resumed.events.length + 1);
     } finally {
       db.close();
     }
   });
 
-  it("lets bot-moderated roles pause again immediately after silent resume", async () => {
+  it("lets bot-moderated roles announce and pause again immediately without a cooldown", async () => {
     const db = createTestDb();
     try {
       const created = await createDebateForRole(db, "spectator");
@@ -6650,9 +6744,10 @@ describe("Debate engine", () => {
       });
       const resumed = resumeDebateSession(db, "user-1", created.id, {
         expectedRevision: paused.revision,
-        idempotencyKey: "spectator:silent-resume",
+        idempotencyKey: "spectator:announced-resume",
       });
-      assert.equal(resumed.events.length, paused.events.length);
+      assert.equal(resumed.events.length, paused.events.length + 1);
+      assert.equal(resumed.events.at(-1)?.stepKey, "resume");
       assert.equal(resumed.judgeGavelCooldownUntil, null);
 
       const pausedAgain = pauseDebateSession(db, "user-1", created.id, {
@@ -6660,12 +6755,13 @@ describe("Debate engine", () => {
         idempotencyKey: "spectator:pause-after-resume",
       });
       assert.equal(pausedAgain.status, "paused");
+      assert.equal(pausedAgain.events.at(-1)?.stepKey, "pause");
     } finally {
       db.close();
     }
   });
 
-  it("keeps pause and resume silent without invoking the frozen moderator persona", async () => {
+  it("voices off-record pause and resume lines in the frozen moderator persona", async () => {
     const db = createTestDb();
     try {
       const provider = new ModeratorLifecycleProvider();
@@ -6686,7 +6782,11 @@ describe("Debate engine", () => {
         },
         debateRuntime,
       );
-      assert.equal(paused.events.length, created.events.length);
+      assert.equal(
+        paused.events.at(-1)?.content,
+        "Yeah, yeah, recess. I need a portal-fluid break.",
+      );
+      assert.equal(paused.events.at(-1)?.stepKey, "pause");
 
       const resumed = await resumeDebateSessionWithPersona(
         db,
@@ -6698,8 +6798,101 @@ describe("Debate engine", () => {
         },
         debateRuntime,
       );
-      assert.equal(resumed.events.length, created.events.length);
+      assert.equal(
+        resumed.events.at(-1)?.content,
+        "All right, portals closed. Back to the argument.",
+      );
+      assert.equal(resumed.events.at(-1)?.stepKey, "resume");
+      assert.equal(resumed.events.at(-1)?.gavelReason, "resume");
+      assert.equal(provider.lifecyclePrompts.length, 2);
+      assert.match(
+        provider.lifecyclePrompts[0] ?? "",
+        /irreverent dimension-hopping scientist/iu,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps recovery pause silent and calls a returned archive back to order", async () => {
+    const db = createTestDb();
+    try {
+      const provider = new ModeratorLifecycleProvider();
+      const debateRuntime = runtimeWith(provider);
+      const created = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+        moderatorSystemPrompt:
+          "Mira is an irreverent dimension-hopping scientist who hates ceremony.",
+      });
+      const recovered = await pauseDebateSessionWithPersona(
+        db,
+        "user-1",
+        created.id,
+        {
+          expectedRevision: created.revision,
+          idempotencyKey: "archive-recovery:pause",
+          exitRecovery: true,
+        },
+        debateRuntime,
+      );
+      assert.equal(recovered.status, "paused");
+      assert.equal(recovered.events.length, created.events.length);
       assert.equal(provider.lifecyclePrompts.length, 0);
+
+      const resumed = await resumeDebateSessionWithPersona(
+        db,
+        "user-1",
+        recovered.id,
+        {
+          expectedRevision: recovered.revision,
+          idempotencyKey: "archive-recovery:resume",
+        },
+        debateRuntime,
+      );
+      assert.equal(resumed.events.length, recovered.events.length + 1);
+      assert.equal(resumed.events.at(-1)?.stepKey, "resume");
+      assert.equal(
+        resumed.events.at(-1)?.content,
+        "All right, portals closed. Back to the argument.",
+      );
+      assert.equal(provider.lifecyclePrompts.length, 1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps pause and resume instantaneous while the Jury chamber is visible", async () => {
+    const db = createTestDb();
+    try {
+      const created = await createJuryDebateForRole(db, "spectator");
+      const paused = await pauseDebateSessionWithPersona(
+        db,
+        "user-1",
+        created.session.id,
+        {
+          expectedRevision: created.session.revision,
+          idempotencyKey: "jury-visible:pause",
+          juryVisible: true,
+        },
+        created.runtime,
+      );
+      assert.equal(paused.status, "paused");
+      assert.equal(paused.events.length, created.session.events.length);
+
+      const resumed = await resumeDebateSessionWithPersona(
+        db,
+        "user-1",
+        paused.id,
+        {
+          expectedRevision: paused.revision,
+          idempotencyKey: "jury-visible:resume",
+          juryVisible: true,
+        },
+        created.runtime,
+      );
+      assert.notEqual(resumed.status, "paused");
+      assert.equal(resumed.events.length, paused.events.length);
+      assert.equal(resumed.judgeGavelCooldownUntil, null);
     } finally {
       db.close();
     }
@@ -6786,7 +6979,7 @@ describe("Debate engine", () => {
           assert.ok(mutation < 40);
           session =
             session.status === "waiting_for_player"
-              ? submitDebatePlayerTurn(db, "user-1", session.id, {
+              ? await submitDebatePlayerTurn(db, "user-1", session.id, {
                   expectedRevision: session.revision,
                   idempotencyKey: `solo-participant:${playerSideId}:pass:${mutation}`,
                   pass: true,
@@ -6895,7 +7088,7 @@ describe("Debate engine", () => {
       let session = getDebateSession(db, "user-1", legacy.id);
       assert.equal(session.againstAdvocate.id, "against");
       assert.equal(session.stepKey, "challenge_participant_turn");
-      session = submitDebatePlayerTurn(db, "user-1", session.id, {
+      session = await submitDebatePlayerTurn(db, "user-1", session.id, {
         expectedRevision: session.revision,
         idempotencyKey: "legacy-participant:pass",
         pass: true,
@@ -6979,7 +7172,7 @@ describe("Debate engine", () => {
           mutation += 1;
           assert.ok(mutation < 40);
           if (session.status === "waiting_for_player") {
-            session = submitDebatePlayerTurn(db, "user-1", session.id, {
+            session = await submitDebatePlayerTurn(db, "user-1", session.id, {
               expectedRevision: session.revision,
               idempotencyKey: `${role}:player:${mutation}`,
               content:
@@ -7333,7 +7526,7 @@ describe("Debate engine", () => {
           runtime(),
         );
       }
-      session = submitDebatePlayerTurn(speechDb, "user-1", session.id, {
+      session = await submitDebatePlayerTurn(speechDb, "user-1", session.id, {
         expectedRevision: session.revision,
         idempotencyKey: "participant-objection:stale:player-opening",
         content: "The opponent's opening still leaves the safeguard unclear.",
@@ -7348,7 +7541,7 @@ describe("Debate engine", () => {
         },
         runtime(),
       );
-      session = submitDebatePlayerTurn(speechDb, "user-1", session.id, {
+      session = await submitDebatePlayerTurn(speechDb, "user-1", session.id, {
         expectedRevision: session.revision,
         idempotencyKey: "participant-objection:stale:challenge-answer",
         content: "The safeguard must operate before approval.",
@@ -8047,12 +8240,25 @@ describe("Debate engine", () => {
         expectedRevision: reloaded.revision,
         idempotencyKey: "pause:muted:0001",
       });
-      assert.equal(paused.events.length, reloaded.events.length);
+      assert.partialDeepStrictEqual(paused.events.at(-1), {
+        kind: "silence",
+        speakerKind: "moderator",
+        speakerBotId: paused.moderator.id,
+        stepKey: "pause",
+        content: "...",
+      });
       const resumed = resumeDebateSession(db, "user-1", paused.id, {
         expectedRevision: paused.revision,
         idempotencyKey: "resume:muted:0001",
       });
-      assert.equal(resumed.events.length, reloaded.events.length);
+      assert.partialDeepStrictEqual(resumed.events.at(-1), {
+        kind: "judge_gavel",
+        speakerKind: "moderator",
+        speakerBotId: resumed.moderator.id,
+        stepKey: "resume",
+        content: "...",
+        gavelReason: "resume",
+      });
       session = endDebateSessionEarly(db, "user-1", resumed.id, {
         expectedRevision: resumed.revision,
         idempotencyKey: "muted:end-early",
@@ -8845,7 +9051,7 @@ describe("Debate engine", () => {
         mutation += 1;
         session =
           session.stepKey === "challenge_judge_question"
-            ? submitDebatePlayerTurn(db, "user-1", session.id, {
+            ? await submitDebatePlayerTurn(db, "user-1", session.id, {
                 expectedRevision: session.revision,
                 idempotencyKey: `aftermath-failure:pass:${mutation}`,
                 content: "",
@@ -8925,10 +9131,10 @@ describe("Debate engine", () => {
       const created = await createDebateForRole(db, "spectator", {
         debateRuntime: recoveringRuntime,
       });
-      assert.equal(created.responseMode, "auto");
+      assert.equal(created.responseMode, "local");
       assert.deepEqual(created.generationChain, [
         { provider: "local", model: "debate-primary" },
-        { provider: "openai", model: "debate-fallback" },
+        { provider: "local", model: "debate-fallback" },
       ]);
 
       const recovered = await advanceDebateSession(
@@ -8944,10 +9150,10 @@ describe("Debate engine", () => {
       const generated = recovered.events.find(
         (event) => event.kind === "intro",
       );
-      assert.equal(generated?.provider, "openai");
+      assert.equal(generated?.provider, "local");
       assert.equal(generated?.model, "debate-fallback");
       assert.equal(generated?.autoRecovery?.attempts.length, 2);
-      assert.equal(generated?.autoRecovery?.crossedOnline, true);
+      assert.equal(generated?.autoRecovery?.crossedOnline, false);
 
       const exhausted = await advanceDebateSession(
         db,

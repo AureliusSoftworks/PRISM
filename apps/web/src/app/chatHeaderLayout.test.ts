@@ -32,10 +32,7 @@ describe("Chat shell header layout", () => {
       pageSource,
       /shell\.style\.setProperty\(\s*"--app-shell-top-nav-height"/,
     );
-    assert.equal(
-      pageSource.match(/data-app-shell-header="true"/g)?.length,
-      3,
-    );
+    assert.equal(pageSource.match(/data-app-shell-header="true"/g)?.length, 2);
   });
 
   it("moves Home navigation onto the PRISM wordmarks", () => {
@@ -44,15 +41,13 @@ describe("Chat shell header layout", () => {
     assert.doesNotMatch(cssSource, /\.locationStrip(?:Home|Copy|Status)?\b/);
     assert.match(
       pageSource,
-      /className=\{`\$\{styles\.hubWordmark\} \$\{styles\.wordmarkHomeButton\}`\}[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?data-home-affordance="wordmark"[\s\S]*?aria-label="Open All Bots Home"/,
+      /const renderSharedAppletBrand =[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?data-shared-applet-brand=\{appletId\}[\s\S]*?aria-label="Open All Bots Home"/,
     );
     assert.match(
       pageSource,
       /className=\{`\$\{styles\.hubWordmark\} \$\{styles\.sidebarWordmarkButton\} \$\{styles\.wordmarkHomeButton\}`\}[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?aria-label="Open All Bots Home"/,
     );
-    const openHomeStart = pageSource.indexOf(
-      "const openLivingShellHome =",
-    );
+    const openHomeStart = pageSource.indexOf("const openLivingShellHome =");
     const openHomeEnd = pageSource.indexOf(
       "const prismCompanionSurfaceReference =",
       openHomeStart,
@@ -64,20 +59,21 @@ describe("Chat shell header layout", () => {
     assert.match(openHomeSource, /void openZenMode\(\)/);
   });
 
-  it("keeps one full Zen toolbar across All Bots and relationship Homes", () => {
+  it("keeps the Zen navbar but reserves model controls for a bot chat", () => {
     assert.match(
       pageSource,
-      /const zenHeaderModelPickerActive =\s*view === "chat" && !zenFirstReplyPending;/,
+      /renderSharedAppletNavbar\("Zen tools", \{[\s\S]*brandAppletId: "zen"/,
     );
     assert.match(
       pageSource,
-      /\{zenHeaderModelPickerActive\s*\? renderHeaderModelPicker\(\)\s*: renderVoiceModeSelector\(\)\}/,
+      /const zenHeaderModelPickerActive =\s*view === "chat" && detail !== null && !zenFirstReplyPending;/,
     );
+    assert.match(
+      pageSource,
+      /controlRail: renderHeaderModelPicker\(\{\s*showModelControls: zenHeaderModelPickerActive,\s*\}\)/,
+    );
+    assert.doesNotMatch(pageSource, /data-zen-header-hidden=/u);
     assert.doesNotMatch(pageSource, /zenHeaderBotPickerActive/);
-    assert.doesNotMatch(
-      pageSource,
-      /renderHeaderModelPicker\(\{ showModelControls: false \}\)/,
-    );
   });
 
   it("lists saved default PRISM chats beside persona conversation groups", () => {
@@ -127,28 +123,12 @@ describe("Chat shell header layout", () => {
     assert.match(pageSource, /: "triangle",/);
   });
 
-  it("distinguishes the account model default from Auto response routing", () => {
-    assert.match(
-      pageSource,
-      /const ACCOUNT_DEFAULT_MODEL_LABEL = "Account default";/,
-    );
-    assert.match(
-      pageSource,
-      /autoOptionLabel = ACCOUNT_DEFAULT_MODEL_LABEL/,
-    );
-    assert.match(
-      pageSource,
-      /const AUTO_MODEL_SETTINGS_SUBTEXT = "uses the model saved in Settings";/,
-    );
-    assert.match(
-      pageSource,
-      /value === autoOptionValue\s*\? \(autoOptionTriggerLabel \?\? autoOptionLabel\)/,
-    );
-    assert.equal(
-      pageSource.match(/autoOptionTriggerLabel=\{primaryTriggerLabel\}/g)
-        ?.length,
-      2,
-    );
+  it("makes contextual Auto the model default inside a binary privacy lane", () => {
+    assert.match(pageSource, /const autoLabelShown = "Auto";/u);
+    assert.match(pageSource, /function HollowTriangleEffortIcon/u);
+    assert.match(pageSource, /Effort chosen automatically/u);
+    assert.doesNotMatch(pageSource, /Account default/u);
+    assert.match(pageSource, /\(\["local", "online"\] as const\)\.map/u);
   });
 
   it("offsets the collapsed Chat hero while sidebar-open layout stays in flow", () => {
@@ -168,18 +148,13 @@ describe("Chat shell header layout", () => {
 
   it("keeps content below normal and wrapped headers at short and tall heights", () => {
     for (const viewportHeight of [480, 900, 1_440]) {
-      const responsiveGap = Math.max(
-        16,
-        Math.min(36, viewportHeight * 0.03),
-      );
+      const responsiveGap = Math.max(16, Math.min(36, viewportHeight * 0.03));
       for (const measuredHeaderHeight of [60, 84, 112.25]) {
         const roundedHeaderHeight = Number.parseInt(
           appShellTopNavHeightCssValue(measuredHeaderHeight),
           10,
         );
-        assert.ok(
-          roundedHeaderHeight + responsiveGap > measuredHeaderHeight,
-        );
+        assert.ok(roundedHeaderHeight + responsiveGap > measuredHeaderHeight);
       }
     }
   });

@@ -32,7 +32,6 @@ import {
   DEBATE_SCHEMA_VERSION,
   DEBATE_SETUP_PRESETS,
   botPowerObserverProjectionFromEffectsV1,
-  debateAudienceEventIsShocking,
   debateEventIsAtmosphericVocalFoley,
   debateEventIsTranscriptHousekeeping,
   debateEvidenceExhibitTitle,
@@ -277,6 +276,7 @@ import {
   DEBATE_GAVEL_FOLEY_URLS,
   DEBATE_GAVEL_ORDER_CAMERA_CUT_MS,
   debateAudienceBeatForEvent,
+  debateDirectedAudiencePlayback,
   debateModeratorGavelCue,
   debateModeratorGavelSpeechLeadMs,
   debateVocalFoleyTargetId,
@@ -3256,7 +3256,6 @@ export function DebateExperience(
   const audienceRoomToneReturnTimerRef = useRef<number | null>(null);
   const audienceOrderSavingRef = useRef(false);
   const playedAudienceOrderCueIdsRef = useRef<ReadonlySet<string>>(new Set());
-  const playedAudienceGaspEventIdsRef = useRef<ReadonlySet<string>>(new Set());
   const previousAudiencePressureBandRef = useRef<{
     band: DebateAudiencePressureBand;
     sessionId: string;
@@ -3571,7 +3570,6 @@ export function DebateExperience(
   }, [activeSession?.id, activeSession?.stepKey]);
   useEffect(() => {
     playedAudienceOrderCueIdsRef.current = new Set();
-    playedAudienceGaspEventIdsRef.current = new Set();
     previousAudiencePressureBandRef.current = null;
     setAudienceOrderResponse(null);
     setAudiencePressureReset(null);
@@ -3627,43 +3625,6 @@ export function DebateExperience(
       band: currentAudiencePressureBand,
       sessionId: session.id,
     };
-    const activePressureEvent = judgeGavelActiveTarget;
-    const lastPlayedGaspSequence = [...session.events]
-      .reverse()
-      .find((event) =>
-        playedAudienceGaspEventIdsRef.current.has(event.id),
-      )?.sequence;
-    const gaspCooldownClear =
-      lastPlayedGaspSequence === undefined ||
-      !activePressureEvent ||
-      activePressureEvent.sequence - lastPlayedGaspSequence >= 4;
-    const newlyRowdy =
-      previous?.sessionId === session.id &&
-      (previous.band === "settled" || previous.band === "murmuring") &&
-      (currentAudiencePressureBand === "restless" ||
-        currentAudiencePressureBand === "disruptive");
-    if (
-      newlyRowdy &&
-      activePressureEvent &&
-      debateAudienceEventIsShocking(activePressureEvent) &&
-      gaspCooldownClear &&
-      !playedAudienceGaspEventIdsRef.current.has(activePressureEvent.id) &&
-      props.audioEnabled &&
-      props.audioVolume > 0
-    ) {
-      const played = new Set(playedAudienceGaspEventIdsRef.current);
-      played.add(activePressureEvent.id);
-      playedAudienceGaspEventIdsRef.current = played;
-      const gasp = DEBATE_AUDIENCE_REACTIONS.gasp;
-      debateAtmosphereControllerRef.current?.playFoley(gasp.url, {
-        trim: gasp.trim,
-        lowCutHz: 90,
-        highCutHz: 8_200,
-        stereoPan: 0.04,
-        tag: `debate-audience-gasp:${session.id}:${activePressureEvent.id}`,
-      });
-      return;
-    }
     if (
       previous?.sessionId !== session.id ||
       previous.band === "disruptive" ||
@@ -3686,7 +3647,6 @@ export function DebateExperience(
   }, [
     activeSession,
     currentAudiencePressureBand,
-    judgeGavelActiveTarget,
     props.audioEnabled,
     props.audioVolume,
   ]);
@@ -5770,6 +5730,7 @@ export function DebateExperience(
     (
       reactionKind: keyof typeof DEBATE_AUDIENCE_REACTIONS,
       eventId: string,
+      intensity?: 1 | 2 | 3,
     ): void => {
       if (!props.audioEnabled || props.audioVolume <= 0) return;
       if (juryCameraActive) return;
@@ -5784,11 +5745,12 @@ export function DebateExperience(
         return;
       }
       const reaction = DEBATE_AUDIENCE_REACTIONS[reactionKind];
-      audienceReactionFoleyUntilRef.current =
-        now + reaction.durationMs * reaction.trim;
+      const intensityScale =
+        intensity === 1 ? 0.5 : intensity === 2 ? 0.76 : 1;
+      audienceReactionFoleyUntilRef.current = now + reaction.durationMs * 0.9;
       audienceReactionFoleyStartsRef.current += 1;
       debateAtmosphereControllerRef.current?.playFoley(reaction.url, {
-        trim: reaction.trim,
+        trim: reaction.trim * intensityScale,
         lowCutHz: 110,
         highCutHz: 7_000,
         stereoPan: -0.08,
@@ -6026,6 +5988,9 @@ export function DebateExperience(
           ),
         });
         const semanticAudienceReaction = audienceBeat?.foleyCue ?? null;
+        const directedAudienceReaction = debateDirectedAudiencePlayback(
+          event.audienceReaction,
+        );
         const audienceReaction =
           semanticAudienceReaction === null
             ? (gavelCue?.audienceReaction ?? null)
@@ -6537,7 +6502,13 @@ export function DebateExperience(
                 },
           );
         }
-        if (audienceReaction) {
+        if (directedAudienceReaction) {
+          playDebateAudienceReaction(
+            directedAudienceReaction.kind,
+            event.id,
+            directedAudienceReaction.intensity,
+          );
+        } else if (audienceReaction) {
           playDebateAudienceReaction(audienceReaction, event.id);
         }
       }
@@ -8102,6 +8073,8 @@ export function DebateExperience(
     setPauseQueued(false);
     debateFloorMutationInFlightRef.current = true;
     const resume = previous.status === "paused";
+    const lifecycleCutscene = !juryCameraActive;
+    const previousEventIds = new Set(previous.events.map((event) => event.id));
     let replayEventId = resume
       ? (previous.pausedPresentationEventId ?? null)
       : interruptedPresentationEventId(previous);
@@ -8121,6 +8094,7 @@ export function DebateExperience(
           requestBody({
             expectedRevision: session.revision,
             idempotencyKey: lifecycleIdempotencyKey,
+            juryVisible: !lifecycleCutscene,
             ...(!resume ? { presentationEventId: replayEventId } : {}),
           }),
         );
@@ -8157,24 +8131,36 @@ export function DebateExperience(
           result = await requestLifecycle(refreshed.session);
         }
       }
+      const lifecycleEvent = result.session.events.find(
+        (event) =>
+          !previousEventIds.has(event.id) &&
+          event.stepKey === (resume ? "resume" : "pause"),
+      );
       if (resume) {
         if (mountedRef.current) setBusy(false);
         const pausedPresentationEvent = result.session.events.find(
           (event) => event.id === result.session.pausedPresentationEventId,
         );
-        const judgeResumedWithGavel = result.session.playerRole === "judge";
+        const judgeResumedWithGavel =
+          lifecycleEvent !== undefined &&
+          lifecycleCutscene &&
+          result.session.playerRole === "judge";
         if (judgeResumedWithGavel) {
-          const resumeGavelEventId = `resume-gavel:${result.session.id}:${result.session.revision}`;
-          triggerJudgeGavelSmash("order", resumeGavelEventId);
+          triggerJudgeGavelSmash("order", lifecycleEvent.id);
           triggerAudienceOrderResponse({
-            eventId: resumeGavelEventId,
+            eventId: lifecycleEvent.id,
             kind: "hush",
             performGavel: false,
             resetAfterSequence:
-              pausedPresentationEvent?.sequence ??
-              result.session.events.at(-1)?.sequence ??
-              0,
+              lifecycleEvent.sequence,
             sessionId: result.session.id,
+          });
+        }
+        if (lifecycleEvent) {
+          await adoptSession(previous, result.session, {
+            resumedJudgeGavelPresentationEventId: judgeResumedWithGavel
+              ? lifecycleEvent.id
+              : null,
           });
         }
         if (pausedPresentationEvent) {
@@ -8191,16 +8177,19 @@ export function DebateExperience(
                 (event) => event.sequence <= pausedPresentationEvent.sequence,
               ),
             },
-            {
-              resumedJudgeGavelPresentationEventId: judgeResumedWithGavel
-                ? pausedPresentationEvent.id
-                : null,
-            },
+            { automaticJudgeGavel: true },
           );
-        } else {
-          setActiveSession(result.session);
         }
+        setActiveSession(result.session);
       } else {
+        if (lifecycleEvent) {
+          if (mountedRef.current) setBusy(false);
+          await adoptSession(
+            previous,
+            { ...result.session, status: previous.status },
+            { automaticJudgeGavel: true },
+          );
+        }
         setActiveSession(result.session);
       }
       void loadSessions();
@@ -11893,7 +11882,10 @@ export function DebateExperience(
   ): React.JSX.Element | null => {
     if (session.jury.enabled) {
       const participantView = session.playerRole === "participant";
-      const activeJurorId = presentationEventId
+      const activeJurorId =
+        presentationEventId &&
+        liveReveal?.eventId === presentationEventId &&
+        (liveReveal.speechTiming ?? null) !== null
         ? session.events.find((event) => event.id === presentationEventId)
             ?.speakerBotId
         : null;
@@ -12073,17 +12065,16 @@ export function DebateExperience(
             const appearanceBot =
               debateBotSnapshot(session, presentation.voiceSourceBotId) ??
               juror;
+            const speechTiming =
+              liveReveal !== null && liveReveal.eventId === activeEvent?.id
+                ? (liveReveal.speechTiming ?? null)
+                : null;
             const talking =
               silentDeliberationPreparing ||
               (presenting &&
                 activeJurorId === juror.id &&
-                activeEvent?.kind !== "silence");
-            const speechTiming =
-              talking &&
-              liveReveal !== null &&
-              liveReveal.eventId === activeEvent?.id
-                ? (liveReveal.speechTiming ?? null)
-                : null;
+                activeEvent?.kind !== "silence" &&
+                speechTiming !== null);
             const listenerReaction =
               presenting &&
               activeJurorId !== juror.id &&
@@ -14428,7 +14419,8 @@ export function DebateExperience(
                           (presenting &&
                             speakerHandoff === null &&
                             activeSpeakerId === bot.id &&
-                            activeEvent?.kind !== "silence");
+                            activeEvent?.kind !== "silence" &&
+                            activeSpeechTiming !== null);
                         const speechTiming =
                           talking &&
                           liveReveal &&

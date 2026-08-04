@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   AutoFallbackExhaustedError,
+  autoFallbackReasoningEffort,
   runAutoFallbackChain,
   validateAutoFallbackText,
 } from "../auto-fallback.ts";
@@ -17,6 +18,12 @@ function attempt(
 }
 
 describe("Auto fallback runner", () => {
+  it("preserves primary effort and disables thinking on every fallback", () => {
+    assert.equal(autoFallbackReasoningEffort(0, "high"), "high");
+    assert.equal(autoFallbackReasoningEffort(1, "high"), "none");
+    assert.equal(autoFallbackReasoningEffort(5, "xhigh"), "none");
+  });
+
   it("returns the primary without recovery metadata when it succeeds", async () => {
     const result = await runAutoFallbackChain({
       attempts: [

@@ -43,9 +43,9 @@ describe("provider mode helpers", () => {
     assert.equal(nextResponseMode("online"), "local");
   });
 
-  it("adds Auto only for surfaces that explicitly allow it", () => {
-    assert.equal(autoResponseModeForProvider("local", true), "auto");
-    assert.equal(autoResponseModeForProvider("openai", true), "auto");
+  it("keeps response routing binary even when legacy Auto flags are present", () => {
+    assert.equal(autoResponseModeForProvider("local", true), "local");
+    assert.equal(autoResponseModeForProvider("openai", true), "online");
     assert.equal(autoResponseModeForProvider("openai", true, false), "online");
   });
 
@@ -241,7 +241,7 @@ describe("provider mode helpers", () => {
     );
   });
 
-  it("keeps a disabled local choice explicit for local response mode", () => {
+  it("normalizes a legacy disabled local text selection to Auto", () => {
     assert.deepEqual(
       resolveModelChoiceForResponseMode({
         responseMode: "local",
@@ -253,11 +253,11 @@ describe("provider mode helpers", () => {
         },
         onlineOptions: combinedOnlineModelOptions(openAiModels, anthropicModels),
       }),
-      { provider: "local", modelChoice: DISABLED_MODEL_CHOICE }
+      { provider: "local", modelChoice: "auto" }
     );
   });
 
-  it("keeps a disabled online choice attached to the selected online provider", () => {
+  it("normalizes a legacy disabled online text selection to Auto", () => {
     const combined = combinedOnlineModelOptions(openAiModels, anthropicModels);
     assert.deepEqual(
       applyOnlineModelChoice({
@@ -271,11 +271,11 @@ describe("provider mode helpers", () => {
         providerPreference: "anthropic",
       }),
       {
-        provider: "anthropic",
+        provider: "openai",
         choices: {
           local: "llama3.2",
           openai: "auto",
-          anthropic: DISABLED_MODEL_CHOICE,
+          anthropic: "auto",
         },
       }
     );
@@ -289,7 +289,7 @@ describe("provider mode helpers", () => {
         },
         onlineOptions: combined,
       }),
-      { provider: "anthropic", modelChoice: DISABLED_MODEL_CHOICE }
+      { provider: "openai", modelChoice: "auto" }
     );
   });
 

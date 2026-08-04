@@ -79,12 +79,23 @@ describe("shared bot picker", () => {
     );
   });
 
-  it("keeps dropdown ordering tied to explicit hue-lens state", () => {
+  it("engages dropdown hue ordering locally and resets it on close", () => {
     assert.match(
       pageSource,
-      /sortBotPickerItems\(\s*bots,\s*filtersEnabled && hueFilterCenter !== null/u,
+      /sortBotPickerItems\(\s*bots,\s*filtersEnabled && hueSortEngaged && hueFilterCenter !== null/u,
     );
-    assert.doesNotMatch(pageSource, /randomizeHueOnOpen/u);
+    assert.match(
+      pageSource,
+      /const \[hueSortEngaged, setHueSortEngaged\] = useState\(false\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const closeMenu = useCallback\(\(\): void => \{\s*setOpen\(false\);\s*setHueSortEngaged\(false\);/u,
+    );
+    assert.match(
+      pageSource,
+      /const handleMenuHueChange = useCallback\([\s\S]*?setHueSortEngaged\(next !== null\);[\s\S]*?onHueChange\?\.\(next\);/u,
+    );
     assert.match(
       signalSource,
       /sortBotPickerItems\(\s*filteredBots,\s*hueLensCenter !== null/u,

@@ -1139,26 +1139,26 @@ describe("Slate persistence and writing operations", () => {
 });
 
 describe("Slate provider inheritance", () => {
-  it("uses the account LOCAL model and ignores online defaults", () => {
+  it("uses the provider default and ignores retired account text-model fields", () => {
     const resolved = resolveSlateAccountDefaults({
         preferredProvider: "local",
         preferredLocalModel: "qwen3:8b",
         preferredOnlineModel: "gpt-5.4",
       });
-    assert.deepEqual(resolved, { provider: "local", model: "qwen3:8b" });
+    assert.deepEqual(resolved, { provider: "local", model: "llama3.2" });
     const provider = selectProvider(resolved.provider, "sk-present-but-must-stay-unused");
     assert.ok(provider instanceof LocalOllamaProvider);
     assert.ok(!(provider instanceof OpenAiProvider));
   });
 
-  it("uses the account online default only when the account is online", () => {
+  it("does not revive the retired online account model", () => {
     assert.deepEqual(
       resolveSlateAccountDefaults({
         preferredProvider: "openai",
         preferredLocalModel: "qwen3:8b",
         preferredOnlineModel: "gpt-5.4",
       }),
-      { provider: "openai", model: "gpt-5.4" },
+      { provider: "openai", model: "gpt-4o-mini" },
     );
   });
 });

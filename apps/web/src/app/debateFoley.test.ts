@@ -14,6 +14,7 @@ import {
   DEBATE_GAVEL_ORDER_CAMERA_CUT_MS,
   DEBATE_GAVEL_VISUAL_IMPACT_MS,
   debateAudienceBeatForEvent,
+  debateDirectedAudiencePlayback,
   debateModeratorGavelCue,
   debateModeratorGavelSpeechLeadMs,
   debateVocalFoleyTargetId,
@@ -290,6 +291,29 @@ describe("Debate audience beats", () => {
       maxReactingSeats: 1,
     });
     assert.equal(capped?.seatIndices.length, 1);
+  });
+
+  it("maps saved gallery direction to explicit playback and visual intensity", () => {
+    const event = debateEvent("speech", {
+      speakerKind: "advocate",
+      audienceReaction: {
+        kind: "impressed",
+        intensity: 3,
+        source: "director",
+      },
+    });
+    assert.deepEqual(
+      debateDirectedAudiencePlayback(event.audienceReaction),
+      { kind: "impressed", intensity: 3 },
+    );
+    const beat = debateAudienceBeatForEvent({
+      event,
+      publicContent: event.content,
+      seatCount: 7,
+    });
+    assert.equal(beat?.listenerReaction, "evidence");
+    assert.equal(beat?.seatIndices.length, 3);
+    assert.equal(beat?.foleyCue, null);
   });
 
   it("keeps generic questions and concessions visual while reserving audio for procedural events", () => {
@@ -667,6 +691,16 @@ describe("Debate moderator gavel", () => {
         url: "/audio/debate/courtroom-audience-order-hush.mp3",
         durationMs: 2_300,
         trim: 0.62,
+      },
+      laugh: {
+        url: "/audio/signal/soundboard/laughter.mp3",
+        durationMs: 1_760,
+        trim: 0.62,
+      },
+      impressed: {
+        url: "/audio/signal/soundboard/applause.mp3",
+        durationMs: 2_200,
+        trim: 0.58,
       },
     });
 

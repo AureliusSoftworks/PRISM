@@ -110,6 +110,11 @@ type TextPrice = {
   note: string;
 };
 
+export interface RoutingTextPrice {
+  inputUsdPerMillion: number;
+  outputUsdPerMillion: number;
+}
+
 type ImagePrice = {
   outputUsdPerMillion: number;
   source: "builtin";
@@ -602,6 +607,20 @@ function priceForTextModel(provider: UsageProviderName, model: string): TextPric
     return TEXT_PRICING["claude-haiku-4-5"] ?? null;
   }
   return null;
+}
+
+/** Shared source of truth for contextual routing and usage-cost reporting. */
+export function routingTextPriceForModel(
+  provider: UsageProviderName,
+  model: string,
+): RoutingTextPrice | null {
+  const price = priceForTextModel(provider, model);
+  return price
+    ? {
+        inputUsdPerMillion: price.inputUsdPerMillion,
+        outputUsdPerMillion: price.outputUsdPerMillion,
+      }
+    : null;
 }
 
 function priceForImageModel(provider: UsageProviderName, model: string): ImagePrice | null {

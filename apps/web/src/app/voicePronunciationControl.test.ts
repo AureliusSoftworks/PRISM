@@ -21,18 +21,19 @@ describe("cross-accent local voice pronunciation controls", () => {
   it("uses the Foundry adjustment console for bots and Default PRISM", () => {
     assert.match(pageSource, /value: "pronunciation", label: "Accent"/u);
     assert.match(pageSource, /<PronunciationAtlas/u);
-    assert.match(pageSource, /data-bot-pronunciation-atlas-summary="true"/u);
+    assert.match(pageSource, /data-adjustment-target=/u);
+    assert.match(atlasSource, /label = "Accent map"/u);
   });
 
   it("offers the same control for the Zen player voice", () => {
-    assert.match(pageSource, /label="Zen Pronunciation Atlas"/u);
+    assert.match(pageSource, /label="Zen accent map"/u);
     assert.match(pageSource, /playerAudioVoiceProfile: nextProfile/u);
   });
 
   it("compares the authored source against the current phoneme stack", () => {
     assert.match(pageSource, /pronunciationBase: "follow-voice"/u);
-    assert.match(atlasSource, />\s*Source\s*</u);
-    assert.match(atlasSource, />\s*Current\s*</u);
+    assert.match(atlasSource, />\s*Original\s*</u);
+    assert.match(atlasSource, />\s*With accent\s*</u);
   });
 
   it("offers Russian-influenced English through the shared Speechprint catalog", () => {
@@ -59,6 +60,29 @@ describe("cross-accent local voice pronunciation controls", () => {
     }
     assert.doesNotMatch(atlasSource, /PRONUNCIATION_ATLAS_ANCHORS\.map/u);
     assert.doesNotMatch(atlasCssSource, /\.anchor\b/u);
+  });
+
+  it("offers broadly local coverage across every inhabited continent", () => {
+    for (const id of [
+      "latin-american-spanish-influenced-english",
+      "north-african-arabic-influenced-english",
+      "nigerian-english",
+      "east-african-english",
+      "south-african-english",
+      "pakistani-english",
+      "cantonese-influenced-english",
+      "filipino-english",
+      "indonesian-influenced-english",
+      "new-zealand-english",
+      "pacific-island-english",
+    ]) {
+      assert.ok(
+        LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.some(
+          (capability) => capability.id === id,
+        ),
+        id,
+      );
+    }
   });
 
   it("uses the generated Earth raster instead of procedural land polygons", () => {

@@ -19,7 +19,7 @@ function sourceBetween(start: string, end: string): string {
 test("navbar dropdowns escape header stacking contexts through body portals", () => {
   const voiceSelector = sourceBetween(
     "const renderVoiceModeSelector",
-    "const renderCoffeeHeaderModelChrome",
+    "const renderHeaderModelPicker",
   );
   const appSwitcher = sourceBetween(
     "const renderAppSwitcher",

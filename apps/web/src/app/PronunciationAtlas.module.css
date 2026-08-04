@@ -5,6 +5,10 @@
   gap: 9px;
 }
 
+.pad {
+  width: 100%;
+}
+
 .heading {
   min-width: 0;
   display: flex;
@@ -138,7 +142,7 @@
 .previewBar button,
 .listFallback summary {
   appearance: none;
-  min-height: 28px;
+  min-height: 34px;
   border: 1px solid
     color-mix(
       in srgb,
@@ -148,14 +152,14 @@
   border-radius: 7px;
   color: var(--fg-muted, #8e9bab);
   background: rgba(255, 255, 255, 0.025);
-  font-size: 9.5px;
+  font-size: 10px;
   font-weight: 750;
   cursor: pointer;
 }
 
 .strength button,
 .previewBar button {
-  padding: 4px 9px;
+  padding: 5px 11px;
 }
 
 .strength button[data-active="true"],
@@ -280,5 +284,30 @@
 
   .scan {
     display: none;
+  }
+}
+
+@media (max-width: 520px) {
+  .heading {
+    align-items: start;
+    flex-direction: column;
+    gap: 5px;
+  }
+
+  .heading output {
+    max-width: 100%;
+    text-align: left;
+  }
+
+  .controls {
+    align-items: stretch;
+  }
+
+  .strength {
+    flex: 1 1 auto;
+  }
+
+  .strength button {
+    flex: 1 1 0;
   }
 }

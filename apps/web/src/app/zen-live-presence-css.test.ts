@@ -2680,7 +2680,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /className=\{`\$\{styles\.hubWordmark\} \$\{styles\.wordmarkHomeButton\}`\}[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?data-home-affordance="wordmark"/
+      /const renderSharedAppletBrand =[\s\S]*?onClick=\{openLivingShellHome\}[\s\S]*?data-shared-applet-brand=\{appletId\}/
     );
     assert.match(css, /\.hubWordmark\s*\{/);
     assert.doesNotMatch(pageSource, /handleChatHeaderWordmarkClick/);

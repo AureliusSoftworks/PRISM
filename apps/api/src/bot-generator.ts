@@ -44,6 +44,7 @@ import {
 } from "@localai/shared";
 import {
   AutoFallbackExhaustedError,
+  autoFallbackReasoningEffort,
   runAutoFallbackChain,
 } from "./auto-fallback.ts";
 import {
@@ -558,17 +559,11 @@ export async function generateBotDraft(
       : { ok: false as const, reason: "invalid_output" as const };
   };
 
-  if (args.responseMode === "auto") {
-    const attempts = autoFallbackResolvedChain(
-      { provider: args.providerName, model: args.model },
-      args.autoFallbackChain,
-    );
-    if (!attempts) {
-      throw new BotGenerationError(
-        "providers_exhausted",
-        "Auto needs at least one available fallback model before it can generate a bot.",
-      );
-    }
+  const attempts = autoFallbackResolvedChain(
+    { provider: args.providerName, model: args.model },
+    args.autoFallbackChain,
+  );
+  if (attempts) {
     try {
       const result = await runAutoFallbackChain({
         attempts: attempts.map((attempt, index) => ({
@@ -590,7 +585,10 @@ export async function generateBotDraft(
                 );
             return provider.generateResponse(
               messages,
-              generationOptions(attempt.model, schema, signal),
+              {
+                ...generationOptions(attempt.model, schema, signal),
+                reasoningEffort: autoFallbackReasoningEffort(index, undefined),
+              },
             );
           },
         })),
@@ -693,14 +691,11 @@ export async function generateBotField(
       : { ok: true as const, value };
   };
 
-  if (args.responseMode === "auto") {
-    const attempts = autoFallbackResolvedChain(
-      { provider: args.providerName, model: args.model },
-      args.autoFallbackChain,
-    );
-    if (!attempts) {
-      throw new BotGenerationError("providers_exhausted", "Auto needs an available model before rerolling this field.");
-    }
+  const attempts = autoFallbackResolvedChain(
+    { provider: args.providerName, model: args.model },
+    args.autoFallbackChain,
+  );
+  if (attempts) {
     try {
       const result = await runAutoFallbackChain({
         attempts: attempts.map((attempt, index) => ({
@@ -717,7 +712,10 @@ export async function generateBotField(
                   args.secondaryOllamaHost,
                   args.anthropicApiKey,
                 );
-            return provider.generateResponse(messages, options(attempt.model, signal));
+            return provider.generateResponse(messages, {
+              ...options(attempt.model, signal),
+              reasoningEffort: autoFallbackReasoningEffort(index, undefined),
+            });
           },
         })),
         perAttemptTimeoutMs: 60_000,

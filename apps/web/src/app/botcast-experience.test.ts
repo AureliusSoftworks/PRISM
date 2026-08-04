@@ -105,7 +105,7 @@ describe("Signal experience shell", () => {
     assert.match(source, /aria-label="Signal replay playback"/u);
     assert.match(
       pageSource,
-      /sidebarHeader=\{renderSharedAppletSidebarHeader\("botcast"\)\}/u,
+      /renderSharedAppletNavbar\("Signal tools", \{[\s\S]*brandAppletId: "botcast"/u,
     );
     assert.doesNotMatch(source, />BOTCAST</u);
   });
@@ -765,7 +765,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /\.shell\[data-live-episode="true"\] \.sidebarNavigation[\s\S]{0,80}\.library\s*\{[^}]*display:\s*none/iu,
+      /\.shell\[data-live-episode="true"\] \.library\s*\{[^}]*display:\s*none/iu,
     );
     assert.match(
       css,
@@ -882,7 +882,7 @@ describe("Signal experience shell", () => {
       source,
       /openingMessageReceived = true;[\s\S]{0,120}setTopicDraft\(""\)/u,
     );
-    assert.match(source, /SIGNAL_VOICE_START_TIMEOUT_MS = 12_000/u);
+    assert.match(source, /signalVoiceStartTimeoutMs\(\{/u);
     assert.match(source, /voicePreparationTimer = window\.setTimeout/u);
     assert.match(source, /signalSilentCaptionRevealDurationMs\(/u);
     assert.match(
@@ -1035,6 +1035,17 @@ describe("Signal experience shell", () => {
     assert.match(
       pageSource,
       /introAudioVolume=\{settings\?\.voiceVolume \?\? 1\}/u,
+    );
+  });
+
+  it("keeps the locked Signal model control aligned with the frozen episode", () => {
+    assert.match(
+      source,
+      /const episodeModelControlValue =[\s\S]{0,240}liveSessionActive[\s\S]{0,160}episode\?\.model[\s\S]{0,220}: episodeModelDraft/u,
+    );
+    assert.match(
+      source,
+      /episodeModelControl: \{[\s\S]{0,120}value: episodeModelControlValue/u,
     );
   });
 
@@ -2309,10 +2320,7 @@ describe("Signal experience shell", () => {
   });
 
   it("reuses generated Signal artwork before offering another generation pass", () => {
-    assert.match(
-      source,
-      /aria-label="Previously generated Signal artwork"/u,
-    );
+    assert.match(source, /aria-label="Previously generated Signal artwork"/u);
     assert.match(
       source,
       /\/api\/images\/tool-assets\?scope=\$\{scope\}&botId=/u,
@@ -2702,7 +2710,7 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("locks one account or episode model before recording", () => {
+  it("defaults each Signal episode to contextual Auto and freezes actual provenance", () => {
     assert.doesNotMatch(source, /aria-label="Signal episode model"/u);
     assert.doesNotMatch(source, />Episode model</u);
     assert.doesNotMatch(source, /Account default ·/u);
@@ -2726,8 +2734,9 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /guestBotId: guestDraftId,[\s\S]{0,500}preferredProvider: episodeProvider,[\s\S]{0,120}responseMode,[\s\S]{0,120}modelOverride: selectedModelOption\?\.id \?\? accountDefaultModel/u,
+      /preferredProvider: episodeProvider,[\s\S]{0,160}responseMode,[\s\S]{0,160}modelOverride: selectedModelOption\?\.id \?\? null/u,
     );
+    assert.doesNotMatch(source, /accountDefaultModel/u);
     assert.match(source, /provider: "local" \| "openai" \| "anthropic"/u);
     assert.match(source, /episodeModeLabel\(episode\)/u);
     assert.match(source, /episodeModeLabel\(replayEpisode\)/u);
@@ -2749,12 +2758,12 @@ describe("Signal experience shell", () => {
     assert.match(pageSource, /provider: model\.provider/u);
     assert.match(pageSource, /modelOptions=\{signalModelOptions\}/u);
     assert.match(pageSource, /responseMode=\{signalEpisodeResponseMode\}/u);
-    assert.match(pageSource, /accountDefaultModel=/u);
+    assert.doesNotMatch(pageSource, /accountDefaultModel=/u);
     assert.match(
       pageSource,
-      /modelControls:\s*\([\s\S]*renderProviderModeToggle\([\s\S]*styles\.chatHeaderModeToggle,[\s\S]*true,[\s\S]*liveChromePolicy\?\.lockMessage[\s\S]*<ComposerModelPicker/u,
+      /modelControls:\s*\([\s\S]*renderProviderModeToggle\([\s\S]*styles\.chatHeaderModeToggle,[\s\S]*liveChromePolicy\?\.lockMessage[\s\S]*false[\s\S]*<ComposerModelPicker/u,
     );
-    assert.match(pageSource, /Primary model for the next Signal episode/u);
+    assert.match(pageSource, /Model policy for the next Signal episode/u);
     assert.doesNotMatch(pageSource, /providerModeToggle=/u);
     assert.doesNotMatch(source, /providerModeToggle/u);
     assert.doesNotMatch(source, /Global response mode/u);

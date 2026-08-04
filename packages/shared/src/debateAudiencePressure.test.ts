@@ -2,9 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import { DEBATE_SCHEMA_VERSION, type DebateEventV1 } from "./debate.ts";
 import {
-  applyDebateAudienceDeliveryCue,
   debateAudienceEventIsShocking,
-  debateAudienceDeliveryCue,
   debateAudienceModeratorOrderPlan,
   debateAudiencePressureScore,
 } from "./debateAudiencePressure.ts";
@@ -26,39 +24,7 @@ function speech(id: string, sequence: number): DebateEventV1 {
   };
 }
 
-describe("Debate audience delivery pressure", () => {
-  it("adds stronger actor directions as the gallery grows rowdy", () => {
-    assert.equal(debateAudienceDeliveryCue(44), null);
-    assert.equal(debateAudienceDeliveryCue(45), "*speaks loudly*");
-    assert.equal(debateAudienceDeliveryCue(70), "*shouts*");
-    assert.equal(
-      applyDebateAudienceDeliveryCue("The record is clear.", 45),
-      "*speaks loudly* The record is clear.",
-    );
-    assert.equal(
-      applyDebateAudienceDeliveryCue("The record is clear.", 70),
-      "*shouts* The record is clear.",
-    );
-    assert.equal(
-      applyDebateAudienceDeliveryCue(
-        "*yells over the crowd* The record is clear.",
-        70,
-      ),
-      "*shouts* The record is clear.",
-    );
-  });
-
-  it("preserves authored delivery and objections", () => {
-    assert.equal(
-      applyDebateAudienceDeliveryCue("*whispers* Listen.", 100),
-      "*whispers* Listen.",
-    );
-    assert.equal(
-      applyDebateAudienceDeliveryCue("Objection! That misstates it.", 100),
-      "Objection! That misstates it.",
-    );
-  });
-
+describe("Debate audience pressure", () => {
   it("settles after a saved order strike", () => {
     const events = [speech("one", 1), speech("two", 2)];
     const hot = debateAudiencePressureScore({

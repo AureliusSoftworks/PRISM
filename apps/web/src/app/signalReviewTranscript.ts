@@ -59,7 +59,7 @@ function payloadString(
 }
 
 function episodeModelLabel(args: SignalReviewTranscriptInput): string {
-  if (!args.episode.model) return args.modelLabel?.trim() || "Provider default";
+  if (!args.episode.model) return args.modelLabel?.trim() || "Auto";
   const label = args.modelLabel?.trim();
   return label && label !== args.episode.model
     ? `${label} (${args.episode.model})`

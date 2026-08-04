@@ -60,12 +60,10 @@ describe("signup EULA integration", () => {
     assert.match(PRISM_EULA_VERSION, /^\d{4}-\d{2}-\d{2}$/u);
   });
 
-  it("puts the same model-variability warning beside model choices", () => {
+  it("keeps the model-variability warning in the agreement without cluttering settings", () => {
     assert.match(PRISM_MODEL_VARIABILITY_NOTICE, /Results vary by model/u);
     assert.match(PRISM_MODEL_VARIABILITY_NOTICE, /Every PRISM experience/u);
-    assert.ok(
-      pageSource.match(/data-model-variability-notice="true"/gu)?.length === 3,
-    );
-    assert.match(pageSource, /\{PRISM_MODEL_VARIABILITY_NOTICE\}/u);
+    assert.doesNotMatch(pageSource, /data-model-variability-notice="true"/u);
+    assert.doesNotMatch(pageSource, /\{PRISM_MODEL_VARIABILITY_NOTICE\}/u);
   });
 });

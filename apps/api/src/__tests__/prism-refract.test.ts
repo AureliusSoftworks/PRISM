@@ -12,7 +12,7 @@ const botcastSource = readFileSync(
 );
 
 describe("Prism Refract API contract", () => {
-  it("requires auth, normalizes the bounded target union, and locks LOCAL accounts", () => {
+  it("requires auth, normalizes the bounded target union, and always uses the dedicated local Prism model", () => {
     const route = serverSource.match(
       /route\("POST", "\/api\/prism\/refract"[\s\S]*?route\("GET", "\/api\/botcast\/shows"/u,
     )?.[0] ?? "";
@@ -20,15 +20,54 @@ describe("Prism Refract API contract", () => {
     assert.match(route, /normalizePrismRefractRequest\(ctx\.body\)/u);
     assert.match(
       route,
-      /const localModeLocked = user\.preferred_provider === "local"/u,
+      /const preferredProvider = "local" as const/u,
     );
     assert.match(
       route,
-      /const preferredProvider = localModeLocked[\s\S]*\? "local"/u,
+      /const modelOverride = resolveAuxiliaryOllamaModel\([\s\S]*user\.prism_default_llm_model/u,
     );
+    assert.match(route, /const effectiveResponseMode = "local" as const/u);
+    assert.doesNotMatch(route, /request\.preferredProvider/u);
+    assert.doesNotMatch(route, /request\.modelOverride/u);
+    assert.doesNotMatch(route, /getOpenAiApiKeyForUser/u);
+    assert.doesNotMatch(route, /getAnthropicApiKeyForUser/u);
     assert.match(route, /isPrismRefractDebateTextTarget\(request\.target\)/u);
     assert.match(route, /generateDebateRefractDraft/u);
     assert.match(route, /generateBotcastRefractDraft/u);
+  });
+
+  it("keeps Prism Home and the floating companion on the same dedicated local model", () => {
+    const chatRoute = serverSource.match(
+      /route\("POST", "\/api\/chat"[\s\S]*?route\("GET", "\/api\/image-jobs\/:id"/u,
+    )?.[0] ?? "";
+    assert.match(
+      chatRoute,
+      /const prismHomeTurn = mode === "zen" && runtimeBotId == null/u,
+    );
+    assert.match(
+      chatRoute,
+      /prismHomeTurn[\s\S]*provider: "local" as const[\s\S]*resolveAuxiliaryOllamaModel\(user\.prism_default_llm_model\)/u,
+    );
+    assert.match(
+      chatRoute,
+      /if \(prismHomeTurn\) \{[\s\S]*effectiveProvider = "local"/u,
+    );
+    assert.match(
+      chatRoute,
+      /responseMode: effectiveProvider === "local" \? "local" : "online"/u,
+    );
+
+    const companionRoute = serverSource.match(
+      /route\("POST", "\/api\/prism-companion"[\s\S]*?route\("GET", "\/api\/library\/groups"/u,
+    )?.[0] ?? "";
+    assert.match(companionRoute, /const providerName = "local" as const/u);
+    assert.match(
+      companionRoute,
+      /const model = resolveAuxiliaryOllamaModel\([\s\S]*user\.prism_default_llm_model/u,
+    );
+    assert.doesNotMatch(companionRoute, /preferred_online_model/u);
+    assert.doesNotMatch(companionRoute, /getOpenAiApiKeyForUser/u);
+    assert.doesNotMatch(companionRoute, /getAnthropicApiKeyForUser/u);
   });
 
   it("keeps name and premise candidates draft-only until existing PATCH paths accept them", () => {

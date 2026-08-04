@@ -18,7 +18,7 @@ import {
   DEBATE_VOICE_PERFORMANCE_CUES,
   DEBATE_PERSONA_SURPRISE_STEP_PREFIX,
   DEBATE_TURNABOUT_STATEMENTS_PER_SIDE,
-  applyDebateAudienceDeliveryCue,
+  debateAudienceEventIsShocking,
   debateAudienceModeratorOrderPlan,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
@@ -63,6 +63,8 @@ import {
   normalizeDebateVoicePerformanceCue,
   normalizeDebateTitle,
   normalizeDebateSetupPresetId,
+  normalizeAutoRouteDecisionV1,
+  normalizeAutoFallbackModelRef,
   resolveDebateForumRoundPlan,
   normalizeBotAudioVoiceProfileV1,
   parseStoredBotPrompt,
@@ -70,14 +72,17 @@ import {
   parseStoredBotAvatarDetailsV1,
   parseStoredBotPowersV1,
   sanitizeDebateStatementSources,
+  sanitizeDebateDebaterText,
   stripBotProfileMetaSuffix,
   strongestBotPowerResponseBudgetEffectV1,
   type AutoFallbackModelRef,
+  type AutoRouteDecisionV1,
   type AutoRecoveryTraceV1,
   type BotAudioVoiceProfileV1,
   type BotPowerTargetV1,
   type DebateAdvocacyConsent,
   type DebateAdvanceRequest,
+  type DebateAudienceReactionV1,
   type DebateBallotV1,
   type DebateBotPowerPlanV1,
   type DebateBotSnapshotV1,
@@ -135,6 +140,7 @@ import {
 } from "@localai/shared";
 import {
   AutoFallbackExhaustedError,
+  autoFallbackReasoningEffort,
   runAutoFallbackChain,
   type AutoFallbackValidationResult,
 } from "./auto-fallback.ts";
@@ -219,11 +225,14 @@ export interface DebateAiRuntime {
   local: DebateGenerationLane;
   online?: DebateGenerationLane;
   responseMode?: ResponseMode;
-  /** Ordered primary + fallback lanes for AUTO; otherwise the selected lane. */
+  /** Ordered primary + same-lane fallback models. */
   lanes?: DebateGenerationLane[];
   /** Always local; used only for asynchronous, non-blocking case-board distillation. */
   auxiliary?: LlmProvider;
   preferredProvider: ProviderName;
+  modelSelectionKind?: "auto" | "fixed";
+  autoCandidateAllowlist?: AutoFallbackModelRef[];
+  autoRoute?: AutoRouteDecisionV1;
   /** Test seam for the otherwise replay-stable persona surprise roll. */
   personaReactionRoll?: (key: string) => number;
 }
@@ -907,7 +916,7 @@ async function generateJson(
     };
   }
   const result = await runAutoFallbackChain({
-    attempts: ordered.map((lane) => ({
+    attempts: ordered.map((lane, index) => ({
       provider: lane.providerName,
       model: lane.model,
       available: lane.available,
@@ -916,14 +925,24 @@ async function generateJson(
           await generateJsonOnLane(
             lane,
             messages,
-            { ...options, model: lane.model },
+            {
+              ...options,
+              model: lane.model,
+              reasoningEffort: autoFallbackReasoningEffort(
+                index,
+                options.reasoningEffort ?? lane.reasoningEffort,
+              ) ?? undefined,
+            },
             signal,
           ),
         ),
     })),
     perAttemptTimeoutMs: (attempt, index) =>
       reasoningGenerationBudgetMs(
-        options.reasoningEffort ?? ordered[index]?.reasoningEffort,
+        autoFallbackReasoningEffort(
+          index,
+          options.reasoningEffort ?? ordered[index]?.reasoningEffort,
+        ),
         { provider: attempt.provider, modelId: attempt.model },
       ),
     totalTimeoutMs: REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
@@ -1752,6 +1771,26 @@ function parseSessionRow(
     ...parsed,
     provider: parsed.provider ?? parsed.moderator.provider,
     model: parsed.model ?? parsed.moderator.model,
+    modelSelectionKind:
+      parsed.modelSelectionKind === "auto" ? "auto" : "fixed",
+    ...(Array.isArray(parsed.autoCandidateAllowlist)
+      ? {
+          autoCandidateAllowlist: parsed.autoCandidateAllowlist
+            .map(normalizeAutoFallbackModelRef)
+            .filter((entry): entry is AutoFallbackModelRef => entry !== null),
+        }
+      : {}),
+    ...(typeof parsed.routingPolicyVersion === "number" &&
+    Number.isFinite(parsed.routingPolicyVersion)
+      ? { routingPolicyVersion: parsed.routingPolicyVersion }
+      : {}),
+    ...(normalizeAutoRouteDecisionV1(parsed.latestAutoRoute)
+      ? {
+          latestAutoRoute: normalizeAutoRouteDecisionV1(
+            parsed.latestAutoRoute,
+          )!,
+        }
+      : {}),
     responseMode:
       parsed.responseMode ??
       ((parsed.provider ?? parsed.moderator.provider) === "local"
@@ -2270,12 +2309,19 @@ export function createDebateSession(
     [...castIds, ...jury.jurors.map((juror) => juror.id)],
     request.theme === "dark" ? "dark" : "light",
   );
+  const frozenLane = lane.providerName === "local" ? "local" : "online";
   const generationChain: AutoFallbackModelRef[] = (
     runtime.lanes?.length ? runtime.lanes : [lane]
-  ).map((candidate) => ({
-    provider: candidate.providerName,
-    model: candidate.model,
-  }));
+  )
+    .filter(
+      (candidate) =>
+        (candidate.providerName === "local" ? "local" : "online") ===
+        frozenLane,
+    )
+    .map((candidate) => ({
+      provider: candidate.providerName,
+      model: candidate.model,
+    }));
   if (
     format === "forum" &&
     request.forumRounds?.mode === "fixed" &&
@@ -2311,12 +2357,17 @@ export function createDebateSession(
     stepKey: format === "turnabout" ? "turnabout_intro" : "intro",
     provider: lane.providerName,
     model: lane.model,
-    responseMode:
-      runtime.responseMode === "auto" && generationChain.length > 1
-        ? "auto"
-        : lane.providerName === "local"
-          ? "local"
-          : "online",
+    modelSelectionKind: runtime.modelSelectionKind ?? "fixed",
+    ...(runtime.autoCandidateAllowlist
+      ? { autoCandidateAllowlist: runtime.autoCandidateAllowlist }
+      : {}),
+    ...(runtime.autoRoute
+      ? {
+          routingPolicyVersion: runtime.autoRoute.v,
+          latestAutoRoute: runtime.autoRoute,
+        }
+      : {}),
+    responseMode: lane.providerName === "local" ? "local" : "online",
     generationChain,
     format,
     formatVersion: DEBATE_FORMAT_SCHEMA_VERSION,
@@ -2733,6 +2784,7 @@ function makeEvent(
     model?: string;
     autoRecovery?: AutoRecoveryTraceV1;
     voicePerformanceCue?: DebateVoicePerformanceCue;
+    audienceReaction?: DebateAudienceReactionV1;
     statementId?: string | null;
     evidenceSourceId?: string | null;
     ruling?: "sustained" | "overruled" | null;
@@ -2769,9 +2821,15 @@ function makeEvent(
       : {}),
     ...(args.provider ? { provider: args.provider } : {}),
     ...(args.model ? { model: args.model } : {}),
+    ...(args.provider && args.model && session.latestAutoRoute
+      ? { autoRoute: session.latestAutoRoute }
+      : {}),
     ...(args.autoRecovery ? { autoRecovery: args.autoRecovery } : {}),
     ...(args.voicePerformanceCue
       ? { voicePerformanceCue: args.voicePerformanceCue }
+      : {}),
+    ...(args.audienceReaction
+      ? { audienceReaction: args.audienceReaction }
       : {}),
     ...(args.statementId !== undefined
       ? { statementId: args.statementId }
@@ -3560,6 +3618,166 @@ function publicTranscript(
   return lines.join("\n");
 }
 
+const DEBATE_AUDIENCE_DIRECTOR_EVENT_KINDS = new Set<DebateEventKind>([
+  "speech",
+  "testimony",
+  "player_turn",
+  "interjection",
+  "revelation",
+]);
+
+function debateAudienceReactionCooldownClear(
+  events: readonly DebateEventV1[],
+): boolean {
+  let debaterLinesSinceReaction = 0;
+  for (const event of [...events].reverse()) {
+    if (
+      (event.speakerKind !== "advocate" && event.speakerKind !== "player") ||
+      !DEBATE_AUDIENCE_DIRECTOR_EVENT_KINDS.has(event.kind) ||
+      !event.content.trim() ||
+      event.content.trim() === BOT_POWER_CANONICAL_SILENCE_V1
+    ) {
+      continue;
+    }
+    if (
+      event.audienceReaction &&
+      event.audienceReaction.kind !== "none" &&
+      event.audienceReaction.intensity > 0
+    ) {
+      return debaterLinesSinceReaction >= 1;
+    }
+    debaterLinesSinceReaction += 1;
+  }
+  return true;
+}
+
+function debateSpeechLooksLikeGibberish(content: string): boolean {
+  const tokens = content
+    .replace(/\[\[(?:source|exhibit):[^\]]+\]\]/giu, " ")
+    .match(/[\p{L}]{3,}/gu);
+  if (!tokens || tokens.length < 3) return false;
+  const suspicious = tokens.filter(
+    (token) =>
+      (token.length >= 4 && !/[aeiouy]/iu.test(token)) ||
+      /(.)\1{2,}/iu.test(token),
+  ).length;
+  const letters = tokens.join("");
+  const vowelCount = letters.match(/[aeiouy]/giu)?.length ?? 0;
+  return (
+    suspicious >= Math.max(2, Math.ceil(tokens.length * 0.55)) ||
+    (letters.length >= 18 && vowelCount / letters.length < 0.18)
+  );
+}
+
+function fallbackDebateAudienceReaction(
+  content: string,
+): DebateAudienceReactionV1 {
+  const syntheticEvent = {
+    content,
+    kind: "speech" as const,
+    speakerKind: "advocate" as const,
+  };
+  if (debateSpeechLooksLikeGibberish(content)) {
+    return { kind: "laugh", intensity: 2, source: "fallback" };
+  }
+  if (debateAudienceEventIsShocking(syntheticEvent)) {
+    return { kind: "gasp", intensity: 2, source: "fallback" };
+  }
+  return { kind: "none", intensity: 0, source: "fallback" };
+}
+
+function normalizedDirectedAudienceReaction(
+  value: Record<string, unknown>,
+): DebateAudienceReactionV1 | null {
+  const kind = value.kind;
+  if (
+    kind !== "none" &&
+    kind !== "laugh" &&
+    kind !== "gasp" &&
+    kind !== "impressed"
+  ) {
+    return null;
+  }
+  if (kind === "none") {
+    return { kind, intensity: 0, source: "director" };
+  }
+  const rawIntensity = Number(value.intensity);
+  if (!Number.isFinite(rawIntensity)) return null;
+  const intensity = Math.max(1, Math.min(3, Math.round(rawIntensity))) as
+    | 1
+    | 2
+    | 3;
+  return { kind, intensity, source: "director" };
+}
+
+async function directDebateAudienceReaction(args: {
+  session: DebateSessionV1;
+  speakerName: string;
+  content: string;
+  auxiliaryProvider?: LlmProvider;
+}): Promise<DebateAudienceReactionV1> {
+  const fallback = fallbackDebateAudienceReaction(args.content);
+  if (!debateAudienceReactionCooldownClear(args.session.events)) {
+    return { kind: "none", intensity: 0, source: "fallback" };
+  }
+  const provider = args.auxiliaryProvider;
+  if (!provider) return fallback;
+  const recentDirections = args.session.events
+    .filter(
+      (event) =>
+        event.audienceReaction && event.audienceReaction.kind !== "none",
+    )
+    .slice(-4)
+    .map(
+      (event) =>
+        `${event.sequence}: ${event.audienceReaction!.kind} ${event.audienceReaction!.intensity}/3`,
+    );
+  try {
+    const generation = await generateJson(
+      {
+        provider,
+        providerName: "local",
+        model: provider.diagnosticModel?.trim() || "auxiliary",
+      },
+      [
+        {
+          role: "system",
+          content: [
+            "You are PRISM's silent live gallery director for a public debate.",
+            "Watch only the audible public record. You never write dialogue, change the transcript, judge truth, favor a side, influence a ballot, or reveal hidden state.",
+            "Most lines earn no audible reaction. Choose laugh only for genuinely funny, absurd, or gibberish delivery; gasp only for a truly shocking reveal or accusation; impressed only for an unusually sharp, responsive rebuttal or decisive public point.",
+            "Use intensity 1 for a small pocket of listeners, 2 for a clear room reaction, and 3 only for a rare chamber-wide moment.",
+            "Avoid repeating a recent sound and do not reward mere confidence, insults, volume, citations, questions, or routine disagreement.",
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content: [
+            `Motion: ${args.session.motion.motion}`,
+            `Room formality: ${args.session.formality}`,
+            "Recent public debate:",
+            publicTranscript(args.session, undefined, false),
+            "",
+            `Current speaker: ${args.speakerName}`,
+            `Current audible line: ${args.content}`,
+            `Recent gallery directions: ${recentDirections.join(", ") || "none"}`,
+            "",
+            'Return JSON only: {"kind":"none|laugh|gasp|impressed","intensity":0|1|2|3}. kind none must use intensity 0.',
+          ].join("\n"),
+        },
+      ],
+      {
+        maxTokens: 60,
+        temperature: 0.15,
+        validate: (value) => normalizedDirectedAudienceReaction(value) !== null,
+      },
+    );
+    return normalizedDirectedAudienceReaction(generation.value) ?? fallback;
+  } catch {
+    return fallback;
+  }
+}
+
 function debatePeerBotNames(
   session: DebateSessionV1,
   speakerBotId: string,
@@ -3840,6 +4058,7 @@ async function generateSpeech(
   model?: string;
   autoRecovery?: AutoRecoveryTraceV1;
   voicePerformanceCue?: DebateVoicePerformanceCue;
+  audienceReaction?: DebateAudienceReactionV1;
   powerIntendedContent?: string;
 }> {
   if (snapshot.id === DEBATE_PLAYER_PARTICIPANT_BOT_ID) {
@@ -3994,31 +4213,14 @@ async function generateSpeech(
     intended = sanitizeDebateModeratorDelivery(intended);
     if (voicePerformanceCue === "shouts") voicePerformanceCue = null;
   }
+  if (snapshot.role === "advocate") {
+    intended =
+      sanitizeDebateDebaterText(intended) || BOT_POWER_CANONICAL_SILENCE_V1;
+  }
   const speechIsObfuscated = effects.some(
     (effect) => effect.type === "speech_obfuscation",
   );
   if (powerBot?.hardMuted) intended = applyBotPowerMuteResponseV1(intended);
-  const generatingBotFloorBreak = session.events.some(
-    (event) =>
-      event.stepKey === session.stepKey &&
-      event.speakerKind === "advocate" &&
-      event.interrupted === true &&
-      event.interruptedBy === "bot",
-  );
-  if (
-    snapshot.role === "advocate" &&
-    !generatingBotFloorBreak &&
-    botPowerVoicePresenceModeFromEffectsV1(effects) !== "quiet"
-  ) {
-    intended = applyDebateAudienceDeliveryCue(
-      intended,
-      debateAudiencePressureScore({
-        events: session.events,
-        formality: session.formality,
-        playerRole: session.playerRole,
-      }),
-    );
-  }
   const sanitized = sanitizeDebateStatementSources(intended, session.evidence);
   const clearlyNamed = sanitizeDebateSpeechNaming(
     session,
@@ -4028,6 +4230,17 @@ async function generateSpeech(
   const named = speechIsObfuscated
     ? applyBotPowerMumbledResponseV1(clearlyNamed)
     : clearlyNamed;
+  const audienceReaction =
+    snapshot.role === "advocate" &&
+    named !== BOT_POWER_CANONICAL_SILENCE_V1 &&
+    botPowerVoicePresenceModeFromEffectsV1(effects) !== "quiet"
+      ? await directDebateAudienceReaction({
+          session,
+          speakerName: snapshot.name,
+          content: named,
+          auxiliaryProvider: runtime.auxiliary,
+        })
+      : null;
   endDebatePerfSpan(speechSpan, {
     botId: snapshot.id,
     silent: named === BOT_POWER_CANONICAL_SILENCE_V1,
@@ -4048,6 +4261,7 @@ async function generateSpeech(
     ...(named !== BOT_POWER_CANONICAL_SILENCE_V1 && voicePerformanceCue
       ? { voicePerformanceCue }
       : {}),
+    ...(audienceReaction ? { audienceReaction } : {}),
   };
 }
 
@@ -4212,6 +4426,7 @@ async function moderatorBookendEvent(
     model: speech.model,
     autoRecovery: speech.autoRecovery,
     voicePerformanceCue: speech.voicePerformanceCue,
+    audienceReaction: speech.audienceReaction,
     powerIntendedContent: speech.powerIntendedContent,
     stepKey: args.stepKey,
   });
@@ -5759,6 +5974,7 @@ async function speechTransition(
     model: speech.model,
     autoRecovery: speech.autoRecovery,
     voicePerformanceCue: speech.voicePerformanceCue,
+    audienceReaction: speech.audienceReaction,
     powerIntendedContent: speech.powerIntendedContent,
     timing: debateTurnTiming(session, snapshot, speech.content),
   });
@@ -5943,6 +6159,7 @@ async function moderatorPhaseTransition(
     model: speech.model,
     autoRecovery: speech.autoRecovery,
     voicePerformanceCue: speech.voicePerformanceCue,
+    audienceReaction: speech.audienceReaction,
     powerIntendedContent: speech.powerIntendedContent,
   });
   return {
@@ -6407,6 +6624,7 @@ async function generateJurySidebarTurn(
     model: speech.model,
     autoRecovery: speech.autoRecovery,
     voicePerformanceCue: speech.voicePerformanceCue,
+    audienceReaction: speech.audienceReaction,
     powerIntendedContent: speech.powerIntendedContent,
   });
 }
@@ -6508,6 +6726,7 @@ async function juryAdvocateReactionTransition(
     model: reaction.model,
     autoRecovery: reaction.autoRecovery,
     voicePerformanceCue: reaction.voicePerformanceCue,
+    audienceReaction: reaction.audienceReaction,
     powerIntendedContent: reaction.powerIntendedContent,
   });
   const nextStep =
@@ -6607,6 +6826,7 @@ async function participantOpponentReactionTransition(
     model: reaction.model,
     autoRecovery: reaction.autoRecovery,
     voicePerformanceCue: reaction.voicePerformanceCue,
+    audienceReaction: reaction.audienceReaction,
     powerIntendedContent: reaction.powerIntendedContent,
   });
   return {
@@ -6754,6 +6974,7 @@ async function judgeAdvocateReactionTransition(
     model: reaction.model,
     autoRecovery: reaction.autoRecovery,
     voicePerformanceCue: reaction.voicePerformanceCue,
+    audienceReaction: reaction.audienceReaction,
     powerIntendedContent: reaction.powerIntendedContent,
     parentEventId: verdict.id,
   });
@@ -7121,6 +7342,7 @@ async function generateTurnaboutTestimony(
       model: speech.model,
       autoRecovery: speech.autoRecovery,
       voicePerformanceCue: speech.voicePerformanceCue,
+      audienceReaction: speech.audienceReaction,
       powerIntendedContent: speech.powerIntendedContent,
       statementId,
     });
@@ -8431,7 +8653,12 @@ export async function prepareDebateAdvance(
       "This Debate cannot prepare an automatic advance right now.",
     );
   }
-  const active = { ...session, status: "live" as const, error: null };
+  const active = {
+    ...session,
+    status: "live" as const,
+    error: null,
+    ...(runtime.autoRoute ? { latestAutoRoute: runtime.autoRoute } : {}),
+  };
   const stepSpan = startDebatePerfSpan("advance.step");
   const transitioned = isJudgeAftermathStep(session.stepKey)
     ? await advanceJudgeAftermathStep(active, runtime)
@@ -8536,7 +8763,10 @@ export async function advanceDebateSession(
 ): Promise<DebateSessionV1> {
   const checked = assertMutation(db, userId, sessionId, request);
   if (checked.replay) return checked.replay;
-  let session = checked.session;
+  let session = {
+    ...checked.session,
+    ...(runtime.autoRoute ? { latestAutoRoute: runtime.autoRoute } : {}),
+  };
   if (session.status === "completed" || session.status === "cancelled") {
     throw new HttpError(409, "This Debate is already finished.");
   }
@@ -8906,6 +9136,7 @@ export async function submitDebateTurnaboutAction(
     model: reversal.model,
     autoRecovery: reversal.autoRecovery,
     voicePerformanceCue: reversal.voicePerformanceCue,
+    audienceReaction: reversal.audienceReaction,
     powerIntendedContent: reversal.powerIntendedContent,
   });
   newEvents.push(revelationEvent);
@@ -8926,13 +9157,13 @@ export async function submitDebateTurnaboutAction(
   );
 }
 
-export function submitDebatePlayerTurn(
+export async function submitDebatePlayerTurn(
   db: DatabaseSync,
   userId: string,
   sessionId: string,
   request: DebatePlayerTurnRequest,
   auxiliaryProvider?: LlmProvider,
-): DebateSessionV1 {
+): Promise<DebateSessionV1> {
   const checked = assertMutation(db, userId, sessionId, request);
   if (checked.replay) return checked.replay;
   const session = checked.session;
@@ -8969,20 +9200,38 @@ export function submitDebatePlayerTurn(
     rawContent,
     session.evidence,
   );
+  const publicContent =
+    !pass && session.playerRole === "participant"
+      ? sanitizeDebateDebaterText(sanitized.content)
+      : sanitized.content;
+  if (!pass && !publicContent) {
+    throw new HttpError(400, "Enter spoken debate text or choose Pass.");
+  }
   const targetSideId =
     session.stepKey === "challenge_judge_question"
       ? isDebateSideId(request.targetSideId)
         ? request.targetSideId
         : "for"
       : session.playerSideId;
-  const event = makeEvent(session, {
+  let event = makeEvent(session, {
     kind: "player_turn",
     speakerKind: "player",
     speakerBotId: participantPlayerSpeakerBotId(session),
     sideId: targetSideId,
-    content: pass ? "Pass." : sanitized.content,
+    content: pass ? "Pass." : publicContent,
     sourceIds: pass ? [] : sanitized.sourceIds,
   });
+  if (!pass && session.playerRole === "participant") {
+    event = {
+      ...event,
+      audienceReaction: await directDebateAudienceReaction({
+        session,
+        speakerName: playerParticipantProxy(session)?.name ?? "Participant",
+        content: event.content,
+        auxiliaryProvider,
+      }),
+    };
+  }
   const caseBoard = updateCaseBoard(session, event);
   const boardEvent =
     caseBoard !== session.caseBoard
@@ -9667,6 +9916,7 @@ export async function resolveDebateParticipantObjection(
           model: continuationGeneration.model,
           autoRecovery: continuationGeneration.autoRecovery,
           voicePerformanceCue: continuationGeneration.voicePerformanceCue,
+          audienceReaction: continuationGeneration.audienceReaction,
           powerIntendedContent: continuationGeneration.powerIntendedContent,
         },
       )
@@ -10388,6 +10638,7 @@ export async function submitDebateJudgeGavelMessage(
     model: response.model,
     autoRecovery: response.autoRecovery,
     voicePerformanceCue: response.voicePerformanceCue,
+    audienceReaction: response.audienceReaction,
     powerIntendedContent: response.powerIntendedContent,
     timing: debateTurnTiming(session, respondent, response.content),
   });
@@ -10532,6 +10783,7 @@ export async function submitDebateObjectionRuling(
     model: continuation.model,
     autoRecovery: continuation.autoRecovery,
     voicePerformanceCue: continuation.voicePerformanceCue,
+    audienceReaction: continuation.audienceReaction,
     powerIntendedContent: continuation.powerIntendedContent,
     timing: debateTurnTiming(session, interruptedBot, continuation.content),
   });
@@ -10653,14 +10905,211 @@ function simpleMutation(
   );
 }
 
+type DebateLifecycleKind = "pause" | "resume";
+
+type DebateLifecycleSpeech = {
+  content: string;
+  provider?: ProviderName;
+  model?: string;
+  autoRecovery?: AutoRecoveryTraceV1;
+};
+
 type DebateLifecycleRequest = {
   expectedRevision: number;
   idempotencyKey: string;
   /** Recovery pauses preserve unresolved floor state when the player left. */
   exitRecovery?: boolean;
+  /** A visible Jury chamber keeps pause/resume instantaneous and off-camera. */
+  juryVisible?: boolean;
   /** Exact saved public line to replay from its beginning after resume. */
   presentationEventId?: string | null;
 };
+
+const DEBATE_PAUSE_FALLBACKS = {
+  free_for_all: [
+    "Hold it there. We are taking a break.",
+    "Everybody breathe. We will pick this up after recess.",
+    "Freeze the argument right there. We are stepping away for a moment.",
+  ],
+  heated: [
+    "Hold that thought. We are taking a short recess.",
+    "Break there. We will return once the room has cooled down.",
+    "Pause the fight for a minute. The floor is still yours when we return.",
+  ],
+  plainspoken: [
+    "We will pause here for a moment.",
+    "Let us take a short recess and return to this point.",
+    "We are taking a brief break. The floor will be held.",
+  ],
+  structured: [
+    "This Debate will stand in brief recess.",
+    "We will pause momentarily for recess.",
+    "The floor is held while we take a short recess.",
+  ],
+  parliamentary: [
+    "The proceeding will stand in recess.",
+    "We will pause momentarily for recess.",
+    "The chamber will take a brief recess with the floor preserved.",
+  ],
+} as const satisfies Record<DebateFormalityId, readonly string[]>;
+
+const DEBATE_RESUME_FALLBACKS = {
+  free_for_all: [
+    "All right, we are back. Let us get into it.",
+    "Break is over. Pick up the argument where we left it.",
+    "Back to it, everyone. The floor is live again.",
+  ],
+  heated: [
+    "We are back. Keep it sharp and return to the held point.",
+    "Break is over. Let us bring the argument back in.",
+    "All right, the floor is live again. Continue where we stopped.",
+  ],
+  plainspoken: [
+    "Welcome back. Let us continue where we left off.",
+    "All right, we are back. The Debate may continue.",
+    "Let us bring the room back and return to the floor.",
+  ],
+  structured: [
+    "The recess has ended. We will resume from the held floor.",
+    "The Debate is called back to order. We may continue.",
+    "We are back in session and will resume where we stopped.",
+  ],
+  parliamentary: [
+    "The proceeding is called back to order.",
+    "The chamber will come to order. The held floor may resume.",
+    "Recess is concluded. We will return to the matter before us.",
+  ],
+} as const satisfies Record<DebateFormalityId, readonly string[]>;
+
+function debateLifecycleFallback(
+  session: DebateSessionV1,
+  kind: DebateLifecycleKind,
+): string {
+  const candidates =
+    kind === "pause"
+      ? DEBATE_PAUSE_FALLBACKS[session.formality]
+      : DEBATE_RESUME_FALLBACKS[session.formality];
+  const chance = stablePowerChance(
+    `${session.id}:${session.revision}:${kind}:lifecycle-copy-v1`,
+  );
+  return candidates[
+    Math.min(candidates.length - 1, Math.floor(chance * candidates.length))
+  ]!;
+}
+
+function debateLifecycleIsInstant(
+  session: DebateSessionV1,
+  request: DebateLifecycleRequest,
+): boolean {
+  return request.juryVisible === true && session.jury.enabled;
+}
+
+async function generateDebateLifecycleSpeech(
+  session: DebateSessionV1,
+  kind: DebateLifecycleKind,
+  runtime: DebateAiRuntime,
+): Promise<DebateLifecycleSpeech> {
+  const fallback = debateLifecycleFallback(session, kind);
+  if (moderatorIsHardMuted(session)) return { content: fallback };
+  try {
+    const generation = await generateJson(
+      lanesForSession(runtime, session),
+      [
+        {
+          role: "system",
+          content: [
+            session.moderator.systemPrompt,
+            "",
+            `You are ${session.moderator.name}, moderating a PRISM Debate.`,
+            debateFormalityGuidance(session.formality),
+            personaVoicePrompt(session.moderator),
+            "Write one brief spoken housekeeping line in this Persona's natural diction.",
+            "This is an off-record room-control beat, not an argument: add no evidence, citations, verdict, ruling, or new claim about the motion.",
+            "You may be candid, irreverent, or idiosyncratic when that genuinely fits the Persona, but do not force a joke or imitate an unrelated character.",
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content:
+            kind === "pause"
+              ? [
+                  'Briefly announce a recess without saying the canned sentence "This debate is now paused." Preserve the exact floor for later.',
+                  'Return JSON only: {"content":"your one spoken line"}',
+                ].join("\n")
+              : [
+                  "Briefly call the room back to order and say the Debate is resuming from the held floor.",
+                  'Return JSON only: {"content":"your one spoken line"}',
+                ].join("\n"),
+        },
+      ],
+      {
+        maxTokens: 100,
+        temperature: 0.72,
+        validate: (value) =>
+          typeof value.content === "string" &&
+          value.content.trim().length > 0 &&
+          value.content.trim().length <= 280,
+      },
+    );
+    const content = compactText(
+      debateSpokenText(String(generation.value.content)),
+      280,
+    );
+    if (!content) return { content: fallback };
+    return {
+      content,
+      provider: generation.provider,
+      model: generation.model,
+      ...(generation.autoRecovery
+        ? { autoRecovery: generation.autoRecovery }
+        : {}),
+    };
+  } catch {
+    return { content: fallback };
+  }
+}
+
+function debatePauseAnnouncementEvent(
+  session: DebateSessionV1,
+  speech?: DebateLifecycleSpeech,
+): DebateEventV1 {
+  const hardMuted = moderatorIsHardMuted(session);
+  const playerControlled = humanJudgeOwnsModeratorActions(session);
+  return makeEvent(session, {
+    kind: hardMuted ? "silence" : "moderator_ruling",
+    speakerKind: playerControlled ? "player" : "moderator",
+    speakerBotId: session.moderator.id,
+    sideId: null,
+    stepKey: "pause",
+    content: hardMuted
+      ? BOT_POWER_CANONICAL_SILENCE_V1
+      : (speech?.content ?? debateLifecycleFallback(session, "pause")),
+    provider: speech?.provider,
+    model: speech?.model,
+    autoRecovery: speech?.autoRecovery,
+  });
+}
+
+function debateResumeGavelEvent(
+  session: DebateSessionV1,
+  speech?: DebateLifecycleSpeech,
+): DebateEventV1 {
+  const playerControlled = humanJudgeOwnsModeratorActions(session);
+  return makeEvent(session, {
+    kind: "judge_gavel",
+    speakerKind: playerControlled ? "player" : "moderator",
+    speakerBotId: session.moderator.id,
+    sideId: null,
+    stepKey: "resume",
+    content: moderatorIsHardMuted(session)
+      ? BOT_POWER_CANONICAL_SILENCE_V1
+      : (speech?.content ?? debateLifecycleFallback(session, "resume")),
+    provider: speech?.provider,
+    model: speech?.model,
+    autoRecovery: speech?.autoRecovery,
+    gavelReason: "resume",
+  });
+}
 
 function pausedPresentationEventId(
   session: DebateSessionV1,
@@ -10696,6 +11145,7 @@ export function pauseDebateSession(
   userId: string,
   sessionId: string,
   request: DebateLifecycleRequest,
+  speech?: DebateLifecycleSpeech,
 ): DebateSessionV1 {
   const checked = assertMutation(db, userId, sessionId, request);
   if (checked.replay) return checked.replay;
@@ -10728,6 +11178,10 @@ export function pauseDebateSession(
     session,
     request.presentationEventId,
   );
+  const lifecycleEvents =
+    request.exitRecovery || debateLifecycleIsInstant(session, request)
+      ? []
+      : [debatePauseAnnouncementEvent(session, speech)];
   return commitMutation(
     db,
     userId,
@@ -10740,7 +11194,7 @@ export function pauseDebateSession(
       pausedDurationMs: Math.max(0, session.pausedDurationMs ?? 0),
     },
     checked.idempotencyKey,
-    [],
+    lifecycleEvents,
   );
 }
 
@@ -10749,9 +11203,22 @@ export async function pauseDebateSessionWithPersona(
   userId: string,
   sessionId: string,
   request: DebateLifecycleRequest,
-  _runtime: DebateAiRuntime,
+  runtime: DebateAiRuntime,
 ): Promise<DebateSessionV1> {
-  return pauseDebateSession(db, userId, sessionId, request);
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  if (
+    request.exitRecovery ||
+    debateLifecycleIsInstant(checked.session, request)
+  ) {
+    return pauseDebateSession(db, userId, sessionId, request);
+  }
+  const speech = await generateDebateLifecycleSpeech(
+    checked.session,
+    "pause",
+    runtime,
+  );
+  return pauseDebateSession(db, userId, sessionId, request, speech);
 }
 
 export function endDebateSessionEarly(
@@ -10893,6 +11360,7 @@ export function resumeDebateSession(
   userId: string,
   sessionId: string,
   request: DebateLifecycleRequest,
+  speech?: DebateLifecycleSpeech,
 ): DebateSessionV1 {
   const checked = assertMutation(db, userId, sessionId, request);
   if (checked.replay) return checked.replay;
@@ -10906,6 +11374,9 @@ export function resumeDebateSession(
     session.participantObjection?.status === "awaiting_reason"
       ? "waiting_for_player"
       : statusForStep(session.stepKey);
+  const lifecycleEvents = debateLifecycleIsInstant(session, request)
+    ? []
+    : [debateResumeGavelEvent(session, speech)];
   return commitMutation(
     db,
     userId,
@@ -10917,7 +11388,7 @@ export function resumeDebateSession(
       ...resumedDebatePauseTiming(session),
     },
     checked.idempotencyKey,
-    [],
+    lifecycleEvents,
   );
 }
 
@@ -10926,9 +11397,22 @@ export async function resumeDebateSessionWithPersona(
   userId: string,
   sessionId: string,
   request: DebateLifecycleRequest,
-  _runtime: DebateAiRuntime,
+  runtime: DebateAiRuntime,
 ): Promise<DebateSessionV1> {
-  return resumeDebateSession(db, userId, sessionId, request);
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  if (checked.session.status !== "paused") {
+    throw new HttpError(409, "This Debate is not paused.");
+  }
+  if (debateLifecycleIsInstant(checked.session, request)) {
+    return resumeDebateSession(db, userId, sessionId, request);
+  }
+  const speech = await generateDebateLifecycleSpeech(
+    checked.session,
+    "resume",
+    runtime,
+  );
+  return resumeDebateSession(db, userId, sessionId, request, speech);
 }
 
 export function deleteDebateSession(

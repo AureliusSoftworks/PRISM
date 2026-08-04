@@ -8,6 +8,7 @@ import {
   pronunciationAtlasAnchorForSelection,
   pronunciationAtlasNaturalSelection,
   pronunciationAtlasSelectionAtPoint,
+  pronunciationAtlasLocationText,
   pronunciationAtlasValueText,
   type PronunciationAtlasSelection,
 } from "./pronunciationAtlasModel.ts";
@@ -80,6 +81,28 @@ describe("Pronunciation Atlas", () => {
     assert.equal(selected.influence, "japanese-influenced-english");
   });
 
+  it("resolves representative world regions to broadly local accents", () => {
+    const expectations = [
+      [{ x: 0.294, y: 0.474 }, "latin-american-spanish-influenced-english"],
+      [{ x: 0.528, y: 0.296 }, "north-african-arabic-influenced-english"],
+      [{ x: 0.509, y: 0.464 }, "nigerian-english"],
+      [{ x: 0.602, y: 0.507 }, "east-african-english"],
+      [{ x: 0.578, y: 0.646 }, "south-african-english"],
+      [{ x: 0.75, y: 0.368 }, "bengali-influenced-english"],
+      [{ x: 0.779, y: 0.424 }, "thai-influenced-english"],
+      [{ x: 0.836, y: 0.419 }, "filipino-english"],
+      [{ x: 0.788, y: 0.493 }, "singapore-english"],
+      [{ x: 0.996, y: 0.601 }, "pacific-island-english"],
+    ] as const;
+
+    for (const [point, expectedInfluence] of expectations) {
+      assert.equal(
+        pronunciationAtlasSelectionAtPoint(point, britishFrench).influence,
+        expectedInfluence,
+      );
+    }
+  });
+
   it("returns to the genuine source when its base beacon is selected", () => {
     const american = PRONUNCIATION_ATLAS_ANCHORS.find(
       (anchor) => anchor.base === "en-US",
@@ -98,5 +121,15 @@ describe("Pronunciation Atlas", () => {
     const right = nudgePronunciationAtlasSelection(natural, "right");
     assert.notEqual(right.influence, natural.influence);
     assert.deepEqual(nudgePronunciationAtlasSelection(natural, "right"), right);
+  });
+
+  it("summarizes the chosen place without pronunciation jargon", () => {
+    assert.equal(
+      pronunciationAtlasLocationText({
+        ...britishFrench,
+        influence: "latin-american-spanish-influenced-english",
+      }),
+      "Latin American Spanish · Balanced",
+    );
   });
 });

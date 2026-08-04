@@ -124,7 +124,6 @@ import styles from "./slateWorkspace.module.css";
 
 interface SlateWorkspaceProps {
   className?: string;
-  sidebarHeader: ReactNode;
   navigationHeader: ReactNode;
   theme: "light" | "dark";
   onHemisphereSettingsSnapshot?: (
@@ -488,7 +487,6 @@ function readSlateCompanionPosition(): SlateCompanionPosition {
 
 export default function SlateWorkspace({
   className = "",
-  sidebarHeader,
   navigationHeader,
   theme,
   onHemisphereSettingsSnapshot,
@@ -3080,12 +3078,21 @@ export default function SlateWorkspace({
     project,
     totalManuscriptLength,
   ]);
+  const proseLaneMode: "offline" | "online" =
+    project?.proseMode === "online" ||
+    (project?.proseMode === "auto" &&
+      (project.proseProvider === "openai" ||
+        project.proseProvider === "anthropic" ||
+        project.lastProvider === "openai" ||
+        project.lastProvider === "anthropic"))
+      ? "online"
+      : "offline";
   const proseModelOptions = useMemo(() => {
     if (!project || !modelCatalog) return [];
-    if (project.proseMode === "offline") return modelCatalog.local;
-    if (project.proseMode === "online") return modelCatalog.online;
-    return [...modelCatalog.local, ...modelCatalog.online];
-  }, [modelCatalog, project]);
+    return proseLaneMode === "offline"
+      ? modelCatalog.local
+      : modelCatalog.online;
+  }, [modelCatalog, project, proseLaneMode]);
   const proseModelValue =
     project?.proseModel && project.proseProvider
       ? `${project.proseProvider}:${project.proseModel}`
@@ -3229,7 +3236,6 @@ export default function SlateWorkspace({
     return (
       <main className={`${styles.shell} ${className}`} data-theme={theme}>
         <PrismCompanionPresenceBoundary reason="slate-loading" />
-        <div className={styles.sidebarNavigation}>{sidebarHeader}</div>
         <div className={styles.mainNavigation}>{navigationHeader}</div>
         <div className={styles.loading} role="status" aria-live="polite">
           <PrismOrb className={styles.loadingOrb} />
@@ -3246,7 +3252,6 @@ export default function SlateWorkspace({
       data-theme={theme}
       data-focus-mode={focusMode ? "true" : undefined}
     >
-      <div className={styles.sidebarNavigation}>{sidebarHeader}</div>
       <div className={styles.mainNavigation}>{navigationHeader}</div>
 
       <input
@@ -5030,15 +5035,15 @@ export default function SlateWorkspace({
                 ) : null}
               </div>
               <div className={styles.proseModePicker} role="group" aria-label="Prose routing">
-                {(["offline", "auto", "online"] as const).map((mode) => (
+                {(["offline", "online"] as const).map((mode) => (
                   <button
                     key={mode}
                     type="button"
-                    data-active={project.proseMode === mode ? "true" : undefined}
+                    data-active={proseLaneMode === mode ? "true" : undefined}
                     disabled={busy}
                     onClick={() => void saveProseMode(mode)}
                   >
-                    {mode === "offline" ? "Offline" : mode === "online" ? "Online" : "Auto"}
+                    {mode === "offline" ? "LOCAL" : "ONLINE"}
                   </button>
                 ))}
               </div>
@@ -5050,11 +5055,7 @@ export default function SlateWorkspace({
                   onChange={(event) => void saveProseModel(event.target.value)}
                 >
                   <option value={SLATE_AUTO_MODEL_VALUE}>
-                    {project.proseMode === "auto"
-                      ? "Auto-select from account defaults"
-                      : project.proseMode === "offline"
-                        ? "Account offline default"
-                        : "Account online default"}
+                    Auto — PRISM chooses model + effort
                   </option>
                   {proseModelOptions.map((model) => (
                     <option
@@ -5328,21 +5329,17 @@ export default function SlateWorkspace({
                     role="group"
                     aria-label="Prose routing"
                   >
-                    {(["offline", "auto", "online"] as const).map((mode) => (
+                    {(["offline", "online"] as const).map((mode) => (
                       <button
                         key={mode}
                         type="button"
                         data-active={
-                          project.proseMode === mode ? "true" : undefined
+                          proseLaneMode === mode ? "true" : undefined
                         }
                         disabled={busy}
                         onClick={() => void saveProseMode(mode)}
                       >
-                        {mode === "offline"
-                          ? "Offline"
-                          : mode === "online"
-                            ? "Online"
-                            : "Auto"}
+                        {mode === "offline" ? "LOCAL" : "ONLINE"}
                       </button>
                     ))}
                   </div>
@@ -5356,11 +5353,7 @@ export default function SlateWorkspace({
                       }
                     >
                       <option value={SLATE_AUTO_MODEL_VALUE}>
-                        {project.proseMode === "auto"
-                          ? "Auto-select from account defaults"
-                          : project.proseMode === "offline"
-                            ? "Account offline default"
-                            : "Account online default"}
+                        Auto — PRISM chooses model + effort
                       </option>
                       {proseModelOptions.map((model) => (
                         <option
@@ -5898,7 +5891,7 @@ export default function SlateWorkspace({
 
             <footer className={styles.deliberationFooter}>
               <span>
-                Ephemeral · project-aware · uses this project’s {project.proseMode.toUpperCase()} route
+                Ephemeral · project-aware · uses this project’s {proseLaneMode === "offline" ? "LOCAL" : "ONLINE"} route
               </span>
               <div>
                 {deliberationMessages.length > 0 ? (

@@ -22,21 +22,15 @@ const AUTO_MODEL_CHOICE = "auto";
 export function autoFallbackPrimaryForSelection(args: {
   provider: AutoFallbackModelRef["provider"];
   modelChoice: string | null | undefined;
-  preferredLocalModel: string | null | undefined;
-  preferredOnlineModel: string | null | undefined;
   hiddenModelIds: readonly string[];
   catalog: CatalogShapeForAuto | null | undefined;
 }): AutoFallbackModelRef | null {
-  const modelChoice = args.modelChoice?.trim() ?? "";
-  if (isDisabledModelChoice(modelChoice)) return null;
+  const storedChoice = args.modelChoice?.trim() ?? "";
+  const modelChoice = isDisabledModelChoice(storedChoice) ? AUTO_MODEL_CHOICE : storedChoice;
   const resolved = resolveAutoModel({
     provider: args.provider,
     explicitModelOverride:
       modelChoice && modelChoice !== AUTO_MODEL_CHOICE ? modelChoice : null,
-    preferredModel:
-      args.provider === "local"
-        ? args.preferredLocalModel
-        : args.preferredOnlineModel,
     hiddenModelIds: [...args.hiddenModelIds],
     catalog: args.catalog ?? { local: [], online: [] },
   });
@@ -84,6 +78,16 @@ export function autoFallbackChainWithEntry(args: {
   }
   const fallbacks = [...existing];
   fallbacks[args.index] = next;
+  const nextLane = next.provider === "local" ? "local" : "online";
+  if (
+    fallbacks.filter((entry) =>
+      nextLane === "local"
+        ? entry.provider === "local"
+        : entry.provider !== "local",
+    ).length > AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT
+  ) {
+    return args.chain ? normalizeAutoFallbackChain(args.chain) : null;
+  }
   if (new Set(fallbacks.map(autoFallbackModelKey)).size !== fallbacks.length) {
     return args.chain ? normalizeAutoFallbackChain(args.chain) : null;
   }
@@ -98,12 +102,17 @@ export function autoFallbackChainWithAddedEntry(args: {
   available: readonly AutoFallbackModelRef[];
 }): AutoFallbackChainV1 | null {
   const existing = normalizeAutoFallbackChain(args.chain)?.fallbacks ?? [];
-  if (existing.length >= AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT) {
-    return args.chain ? normalizeAutoFallbackChain(args.chain) : null;
-  }
   const used = new Set(existing.map(autoFallbackModelKey));
   const next = args.available.find(
-    (candidate) => !used.has(autoFallbackModelKey(candidate)),
+    (candidate) => {
+      if (used.has(autoFallbackModelKey(candidate))) return false;
+      const sameLaneCount = existing.filter((entry) =>
+        candidate.provider === "local"
+          ? entry.provider === "local"
+          : entry.provider !== "local",
+      ).length;
+      return sameLaneCount < AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT;
+    },
   );
   if (!next) return args.chain ? normalizeAutoFallbackChain(args.chain) : null;
   return {
@@ -178,9 +187,5 @@ export function autoFallbackResponseModeForSend(args: {
   chain: AutoFallbackChainV1 | null | undefined;
   runnable: readonly AutoFallbackModelRef[];
 }): AutoResponseMode {
-  return autoResponseModeForProvider(
-    args.primary.provider,
-    args.autoEnabled,
-    autoFallbackAvailableForPrimary(args),
-  );
+  return autoResponseModeForProvider(args.primary.provider, false);
 }

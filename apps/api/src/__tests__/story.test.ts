@@ -30,6 +30,7 @@ function createTestDb(): DatabaseSync {
       status TEXT NOT NULL DEFAULT 'generating',
       provider TEXT NOT NULL DEFAULT 'local',
       model TEXT,
+      routing_json TEXT,
       bot_ids TEXT NOT NULL DEFAULT '[]',
       premise TEXT,
       episode_json TEXT,
@@ -382,6 +383,54 @@ class SequenceProvider implements LlmProvider {
 }
 
 describe("Story API helpers", () => {
+  it("persists a frozen Auto routing snapshot and preserves Anthropic provenance", () => {
+    const db = createTestDb();
+    try {
+      const autoRoute = {
+        v: 1 as const,
+        lane: "online" as const,
+        provider: "anthropic" as const,
+        model: "claude-sonnet-4",
+        reasoningEffort: "medium" as const,
+        reasonCodes: ["surface_complexity" as const],
+      };
+      const created = createStorySession(db, "user-1", {
+        botIds: ["bot-a"],
+        provider: "anthropic",
+        model: "claude-sonnet-4",
+        routing: {
+          v: 1,
+          lane: "online",
+          modelSelectionKind: "auto",
+          candidateAllowlist: [
+            { provider: "anthropic", model: "claude-sonnet-4" },
+          ],
+          fallbackChain: [
+            { provider: "openai", model: "gpt-5.6-terra" },
+          ],
+          policyVersion: 1,
+          autoRoute,
+        },
+      });
+      assert.equal(created.provider, "anthropic");
+      assert.deepEqual(created.routing, {
+        v: 1,
+        lane: "online",
+        modelSelectionKind: "auto",
+        candidateAllowlist: [
+          { provider: "anthropic", model: "claude-sonnet-4" },
+        ],
+        fallbackChain: [
+          { provider: "openai", model: "gpt-5.6-terra" },
+        ],
+        policyVersion: 1,
+        autoRoute,
+      });
+    } finally {
+      db.close();
+    }
+  });
+
   it("keeps the holder identity while adapting names it says in Story", async () => {
     const db = createTestDb();
     seedBot(db, "bot-a", "Alice");

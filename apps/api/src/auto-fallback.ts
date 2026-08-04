@@ -3,6 +3,7 @@ import type {
   AutoFallbackFailureReason,
   AutoFallbackModelRef,
   AutoRecoveryTraceV1,
+  ReasoningEffort,
 } from "@localai/shared";
 import {
   AUTO_FALLBACK_CHAIN_MAX_ATTEMPT_COUNT,
@@ -24,6 +25,14 @@ export interface AutoFallbackRunResult<T> {
   model: string;
   attempts: AutoFallbackAttemptTraceV1[];
   recovery?: AutoRecoveryTraceV1;
+}
+
+/** The primary keeps its configured effort; recovery attempts prioritize speed. */
+export function autoFallbackReasoningEffort(
+  attemptIndex: number,
+  primaryEffort: ReasoningEffort | undefined,
+): ReasoningEffort | undefined {
+  return attemptIndex === 0 ? primaryEffort : "none";
 }
 
 export class AutoFallbackExhaustedError extends Error {

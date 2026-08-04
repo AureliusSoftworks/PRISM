@@ -11,6 +11,7 @@ import type {
   BotPowerV1,
 } from "./botPower.js";
 import type { LlmProviderName } from "./index.js";
+import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 
 export const DEBATE_SCHEMA_VERSION = 1 as const;
 export const DEBATE_FORMAT_SCHEMA_VERSION = 1 as const;
@@ -444,6 +445,7 @@ export interface DebateAdvocacyConsent {
   checkedAt: string;
   provider?: LlmProviderName;
   model?: string;
+  autoRoute?: AutoRouteDecisionV1;
   autoRecovery?: AutoRecoveryTraceV1;
 }
 
@@ -557,6 +559,24 @@ export function normalizeDebateVoicePerformanceCue(
 }
 
 export type DebateTurnTimingStatus = "within_limit" | "overtime";
+export type DebateAudienceReactionKind =
+  | "none"
+  | "laugh"
+  | "gasp"
+  | "impressed";
+export type DebateAudienceReactionSource = "director" | "fallback";
+
+/**
+ * Saved presentation-only gallery direction. It never enters Proceedings,
+ * case-board reasoning, evidence, ballots, or the verdict.
+ */
+export interface DebateAudienceReactionV1 {
+  kind: DebateAudienceReactionKind;
+  /** 0 means silence; audible reactions use the explicit 1-3 mix scale. */
+  intensity: 0 | 1 | 2 | 3;
+  source: DebateAudienceReactionSource;
+}
+
 export type DebateJudgeGavelReason =
   | "audience_order"
   | "intervention"
@@ -592,6 +612,7 @@ export interface DebateEventV1 {
   model?: string;
   autoRecovery?: AutoRecoveryTraceV1;
   voicePerformanceCue?: DebateVoicePerformanceCue;
+  audienceReaction?: DebateAudienceReactionV1;
   statementId?: string | null;
   evidenceSourceId?: string | null;
   ruling?: DebateTurnaboutRuling | null;
@@ -722,6 +743,14 @@ export interface DebateSessionV1 {
   provider: LlmProviderName;
   model: string;
   responseMode: ResponseMode;
+  /** Auto re-routes each generation; fixed preserves the chosen model. */
+  modelSelectionKind?: "auto" | "fixed";
+  /** Visible, runnable same-lane candidates frozen when the session starts. */
+  autoCandidateAllowlist?: AutoFallbackModelRef[];
+  /** Deterministic routing policy frozen when the session starts. */
+  routingPolicyVersion?: number;
+  /** Most recent contextual route; generated events carry their own copy. */
+  latestAutoRoute?: AutoRouteDecisionV1;
   /** Ordered primary + fallback lanes. One entry for LOCAL/ONLINE. */
   generationChain: AutoFallbackModelRef[];
   format: DebateFormatId;
@@ -756,7 +785,8 @@ export interface DebateSessionV1 {
   /**
    * Public event whose playback was interrupted by an explicit pause. The
    * presentation client replays this exact saved line from its beginning after
-   * resume; lifecycle controls themselves never become Debate events.
+   * resume. Off-record lifecycle announcements may be stored as housekeeping
+   * events, but never enter Proceedings or copied transcripts.
    */
   pausedPresentationEventId?: string | null;
   /** Silent lifecycle bookkeeping for the visible overall Debate timer. */
@@ -1486,6 +1516,21 @@ export function debateSpokenText(content: string): string {
   return content
     .replace(/\s*\[\[(?:source|exhibit):[^\]]+\]\]/giu, "")
     .replace(/\s+/gu, " ")
+    .trim();
+}
+
+/**
+ * Debate persists what was argued, not actor directions. Hidden voice
+ * performance remains available through voicePerformanceCue metadata.
+ */
+export function sanitizeDebateDebaterText(content: string): string {
+  return content
+    .replace(
+      /(?:\*{1,3}|\[)\s*(?:(?:angry|excited|nervous|sarcastic|solemn|whispers?)|(?:shouts?|yells?|screams?|speaks?\s+loudly|raises?\s+(?:(?:his|her|their|its|the)\s+)?voice|projects?\s+(?:(?:his|her|their|its|the)\s+)?voice)(?:\s+over\s+(?:(?:the)\s+)?(?:audience|crowd|gallery))?)\s*(?:\*{1,3}|\])/giu,
+      " ",
+    )
+    .replace(/[ \t]+/gu, " ")
+    .replace(/\s+([,.;:!?])/gu, "$1")
     .trim();
 }
 

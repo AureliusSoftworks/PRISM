@@ -1,6 +1,7 @@
 import {
   BOTCAST_IMMERSIVE_VOICE_TAGS,
   type BotcastImmersiveVoiceTag,
+  type DebateAudienceReactionV1,
   type DebateEventV1,
   type DebateFormatId,
 } from "@localai/shared";
@@ -27,7 +28,9 @@ export type DebateAudienceReactionKind =
   | "evidence"
   | "question"
   | "concession"
-  | "ruling";
+  | "ruling"
+  | "laugh"
+  | "impressed";
 
 export type DebateAudienceBeatKind =
   | "attentive"
@@ -108,6 +111,16 @@ export const DEBATE_AUDIENCE_REACTIONS = {
     durationMs: 2_300,
     trim: 0.62,
   },
+  laugh: {
+    url: "/audio/signal/soundboard/laughter.mp3",
+    durationMs: 1_760,
+    trim: 0.62,
+  },
+  impressed: {
+    url: "/audio/signal/soundboard/applause.mp3",
+    durationMs: 2_200,
+    trim: 0.58,
+  },
 } as const satisfies Record<
   DebateAudienceReactionKind,
   { url: string; durationMs: number; trim: number }
@@ -126,6 +139,30 @@ const DEBATE_AUDIENCE_REACTIVE_EVENT_KINDS = new Set<DebateEventV1["kind"]>([
   "verdict",
   "jury_verdict",
 ]);
+
+export interface DebateDirectedAudiencePlayback {
+  kind: "laugh" | "gasp" | "impressed";
+  intensity: 1 | 2 | 3;
+}
+
+export function debateDirectedAudiencePlayback(
+  reaction: DebateAudienceReactionV1 | null | undefined,
+): DebateDirectedAudiencePlayback | null {
+  if (
+    !reaction ||
+    reaction.kind === "none" ||
+    reaction.intensity < 1 ||
+    (reaction.kind !== "laugh" &&
+      reaction.kind !== "gasp" &&
+      reaction.kind !== "impressed")
+  ) {
+    return null;
+  }
+  return {
+    kind: reaction.kind,
+    intensity: Math.max(1, Math.min(3, reaction.intensity)) as 1 | 2 | 3,
+  };
+}
 
 export function debateAudienceBeatForEvent(args: {
   event: DebateEventV1 | null;
@@ -165,13 +202,41 @@ export function debateAudienceBeatForEvent(args: {
   ) {
     kind = "ruling";
   }
+  const directedReaction = debateDirectedAudiencePlayback(
+    event.audienceReaction,
+  );
+  if (directedReaction?.kind === "laugh") {
+    kind = "contention";
+    listenerReaction = "divided";
+  } else if (directedReaction?.kind === "gasp") {
+    kind = "question";
+    listenerReaction = "question";
+  } else if (directedReaction?.kind === "impressed") {
+    kind = "evidence";
+    listenerReaction = "evidence";
+  }
 
   const reactingIndices = debateGalleryReactingIndices(
     event.content || publicContent,
     event.sequence,
     seatCount,
   );
-  const defaultMaxSeats = kind === "attentive" ? 1 : 2;
+  if (directedReaction) {
+    for (
+      let offset = 1;
+      reactingIndices.length < directedReaction.intensity &&
+      reactingIndices.length < seatCount;
+      offset += 1
+    ) {
+      const candidate = (event.sequence + offset * 3) % seatCount;
+      if (!reactingIndices.includes(candidate)) reactingIndices.push(candidate);
+    }
+  }
+  const defaultMaxSeats = directedReaction
+    ? Math.min(seatCount, directedReaction.intensity)
+    : kind === "attentive"
+      ? 1
+      : 2;
   const maxReactingSeats = Math.max(
     1,
     Math.min(
@@ -181,11 +246,13 @@ export function debateAudienceBeatForEvent(args: {
   );
   const seatIndices = reactingIndices.slice(0, maxReactingSeats);
   const foleyCue: DebateAudienceReactionKind | null =
-    kind === "objection"
+    event.kind === "objection" || event.kind === "interjection"
       ? "objection"
-      : kind === "evidence"
+      : event.kind === "evidence" || event.kind === "revelation"
         ? "evidence"
-        : kind === "ruling"
+        : event.kind === "moderator_ruling" ||
+            event.kind === "verdict" ||
+            event.kind === "jury_verdict"
           ? "ruling"
           : null;
 

@@ -49,6 +49,8 @@ import {
   applyStoryTravel,
   createInitialStoryProgress,
   createInitialStoryTranscript,
+  normalizeAutoFallbackModelRef,
+  normalizeAutoRouteDecisionV1,
   parseStoredBotPowersV1,
   validateStoryEpisodeManifest,
   type StoryEpisodeManifest,
@@ -56,8 +58,10 @@ import {
   type StorySessionProgress,
   type StorySessionStatus,
   type StorySessionSummary,
+  type StoryRoutingSnapshotV1,
   type StoryTranscriptEntry,
   type ReasoningEffort,
+  type AutoFallbackModelRef,
   type BotPowerV1,
   type BotPowerTargetV1,
   type BotPowerResolvedThemeV1,
@@ -97,6 +101,7 @@ export interface CreateStorySessionInput {
   premise?: string | null;
   provider: ProviderName;
   model?: string | null;
+  routing?: StoryRoutingSnapshotV1 | null;
 }
 
 export interface StoryGenerationInput {
@@ -118,6 +123,7 @@ interface StorySessionRow {
   status: string;
   provider: string;
   model: string | null;
+  routing_json: string | null;
   bot_ids: string;
   premise: string | null;
   episode_json: string | null;
@@ -356,6 +362,50 @@ function parseBotIds(raw: string | null): string[] {
   return parseJsonArray(raw).filter((value): value is string => typeof value === "string");
 }
 
+function parseStoryRoutingSnapshot(
+  raw: string | null,
+): StoryRoutingSnapshotV1 | null {
+  const parsedValue = parseJsonObject(raw);
+  const parsed =
+    parsedValue && typeof parsedValue === "object" && !Array.isArray(parsedValue)
+      ? (parsedValue as Record<string, unknown>)
+      : null;
+  if (!parsed || parsed.v !== 1) return null;
+  const lane =
+    parsed.lane === "local" || parsed.lane === "online"
+      ? parsed.lane
+      : null;
+  const modelSelectionKind =
+    parsed.modelSelectionKind === "auto" ||
+    parsed.modelSelectionKind === "fixed"
+      ? parsed.modelSelectionKind
+      : null;
+  if (!lane || !modelSelectionKind) return null;
+  const refs = (value: unknown, limit: number): AutoFallbackModelRef[] =>
+    (Array.isArray(value) ? value : [])
+      .map(normalizeAutoFallbackModelRef)
+      .filter((entry): entry is AutoFallbackModelRef => entry !== null)
+      .filter(
+        (entry) =>
+          (entry.provider === "local" ? "local" : "online") === lane,
+      )
+      .slice(0, limit);
+  const autoRoute = normalizeAutoRouteDecisionV1(parsed.autoRoute);
+  return {
+    v: 1,
+    lane,
+    modelSelectionKind,
+    candidateAllowlist: refs(parsed.candidateAllowlist, 200),
+    fallbackChain: refs(parsed.fallbackChain, 5),
+    policyVersion:
+      typeof parsed.policyVersion === "number" &&
+      Number.isFinite(parsed.policyVersion)
+        ? parsed.policyVersion
+        : 1,
+    ...(autoRoute ? { autoRoute } : {}),
+  };
+}
+
 function storyDraftTitle(premise: string | null): string {
   return premise ? "Story Episode" : "Surprise Story";
 }
@@ -377,8 +427,12 @@ function rowToSummary(row: StorySessionRow): StorySessionSummary {
     title: row.title,
     themeId: row.theme_id,
     status: normalizeStoryStatus(row.status),
-    provider: row.provider === "openai" ? "openai" : "local",
+    provider:
+      row.provider === "openai" || row.provider === "anthropic"
+        ? row.provider
+        : "local",
     model: row.model,
+    routing: parseStoryRoutingSnapshot(row.routing_json),
     botIds: parseBotIds(row.bot_ids),
     premise: row.premise,
     currentSceneId:
@@ -526,8 +580,9 @@ export function createStorySession(
   db.prepare(
     `INSERT INTO story_sessions
        (id, user_id, title, theme_id, status, provider, model, bot_ids, premise,
-        episode_json, progress_json, transcript_json, error, created_at, updated_at)
-     VALUES (?, ?, ?, ?, 'generating', ?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?)`
+        routing_json, episode_json, progress_json, transcript_json, error,
+        created_at, updated_at)
+     VALUES (?, ?, ?, ?, 'generating', ?, ?, ?, ?, ?, NULL, NULL, ?, NULL, ?, ?)`
   ).run(
     id,
     userId,
@@ -537,6 +592,7 @@ export function createStorySession(
     input.model ?? null,
     JSON.stringify(botIds),
     premise,
+    input.routing ? JSON.stringify(input.routing) : null,
     JSON.stringify([]),
     now,
     now

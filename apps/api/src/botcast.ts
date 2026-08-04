@@ -59,6 +59,9 @@ import type {
   BotcastSpeakerRole,
   BotcastTensionState,
   AutoFallbackChainV1,
+  AutoFallbackModelRef,
+  AutoRouteDecisionV1,
+  ModelReasoningEffortPreference,
   BotPowerFrequency,
   BotPowerStrength,
   BotPowerResolvedThemeV1,
@@ -251,6 +254,8 @@ import {
   signalPersonaTemperamentFor,
   socialSilenceMessageIsMarkedV1,
   autoFallbackResolvedChain,
+  normalizeAutoFallbackModelRef,
+  normalizeAutoRouteDecisionV1,
   voicePerformanceTextFromActionCues,
   voiceSpokenText,
   planStageActionV1,
@@ -286,6 +291,7 @@ import {
 } from "./providers.ts";
 import {
   AutoFallbackExhaustedError,
+  autoFallbackReasoningEffort,
   runAutoFallbackChain,
   validateAutoFallbackText,
 } from "./auto-fallback.ts";
@@ -821,6 +827,12 @@ export interface BotcastGenerationOptions {
   preferredLocalModel?: string | null;
   preferredOnlineModel?: string | null;
   autoFallbackChain?: AutoFallbackChainV1 | null;
+  /** Concrete contextual selection for this individual generation. */
+  contextualModel?: string | null;
+  /** Concrete contextual effort for this individual generation. */
+  contextualReasoningEffort?: ModelReasoningEffortPreference;
+  /** Persisted with the generated Signal event when Auto selected the route. */
+  autoRouteDecision?: AutoRouteDecisionV1;
   /** Account consent gate for private multi-pass effort on local models. */
   experimentalAllModelEffortEnabled?: boolean;
   providerFactory?: typeof selectProvider;
@@ -5054,7 +5066,7 @@ export async function generateBotcastBookingSuggestion(
     );
     const selectedModel =
       selected.model ?? defaultModelIdForProvider(selected.providerName);
-    if (input.field === "booking" && generation.responseMode === "auto") {
+    if (input.field === "booking") {
       const resolvedChain = autoFallbackResolvedChain(
         { provider: selected.providerName, model: selectedModel },
         generation.autoFallbackChain,
@@ -5086,6 +5098,14 @@ export async function generateBotcastBookingSuggestion(
                   model: attempt.model,
                   temperature: 0.78,
                   ...botcastBookingGenerationOptions(attempt.provider, attempt.model, 260),
+                  reasoningEffort: autoFallbackReasoningEffort(
+                    index,
+                    botcastBookingGenerationOptions(
+                      attempt.provider,
+                      attempt.model,
+                      260,
+                    ).reasoningEffort,
+                  ),
                   usagePurpose: index === 0 ? "botcast_brand" : "chat_fallback",
                   jsonMode: true,
                   signal,
@@ -5415,21 +5435,13 @@ export async function generateBotcastProducerGuestBooking(
       generation.preferredProvider,
       input.modelOverride,
     );
-    if (generation.responseMode === "auto") {
-      const primaryModel =
-        selected.model ?? defaultModelIdForProvider(selected.providerName);
-      const resolvedChain = autoFallbackResolvedChain(
-        { provider: selected.providerName, model: primaryModel },
-        generation.autoFallbackChain,
-      );
-      if (!resolvedChain) {
-        return {
-          topic: "",
-          producerBrief: "",
-          generated: false,
-          failureReason: "provider_request_failed",
-        };
-      }
+    const primaryModel =
+      selected.model ?? defaultModelIdForProvider(selected.providerName);
+    const resolvedChain = autoFallbackResolvedChain(
+      { provider: selected.providerName, model: primaryModel },
+      generation.autoFallbackChain,
+    );
+    if (resolvedChain) {
       try {
         const providerFactory = generation.providerFactory ?? selectProvider;
         const result = await runAutoFallbackChain({
@@ -5459,6 +5471,13 @@ export async function generateBotcastProducerGuestBooking(
                   ...botcastBookingGenerationOptions(
                     attempt.provider,
                     attempt.model,
+                  ),
+                  reasoningEffort: autoFallbackReasoningEffort(
+                    index,
+                    botcastBookingGenerationOptions(
+                      attempt.provider,
+                      attempt.model,
+                    ).reasoningEffort,
                   ),
                   usagePurpose:
                     index === 0 ? "botcast_brand" : "chat_fallback",
@@ -7319,6 +7338,79 @@ function recordEvent(
   };
 }
 
+export interface BotcastRoutingSnapshotV1 {
+  v: 1;
+  lane: "local" | "online";
+  modelSelectionKind: "auto" | "fixed";
+  candidateAllowlist: AutoFallbackModelRef[];
+  fallbackChain: AutoFallbackModelRef[];
+  policyVersion: number;
+  initialAutoRoute?: AutoRouteDecisionV1;
+}
+
+/** Read the immutable contextual-routing boundary frozen when Signal began. */
+export function botcastRoutingSnapshot(
+  episode: BotcastEpisode,
+): BotcastRoutingSnapshotV1 | null {
+  const event = episode.events.find((entry) => entry.kind === "routing");
+  if (!event || event.payload.v !== 1) return null;
+  const lane =
+    event.payload.lane === "local" || event.payload.lane === "online"
+      ? event.payload.lane
+      : null;
+  const modelSelectionKind =
+    event.payload.modelSelectionKind === "auto" ||
+    event.payload.modelSelectionKind === "fixed"
+      ? event.payload.modelSelectionKind
+      : null;
+  if (!lane || !modelSelectionKind) return null;
+  const normalizeRefs = (value: unknown, limit: number) =>
+    (Array.isArray(value) ? value : [])
+      .map(normalizeAutoFallbackModelRef)
+      .filter((entry): entry is AutoFallbackModelRef => entry !== null)
+      .filter(
+        (entry) =>
+          (entry.provider === "local" ? "local" : "online") === lane,
+      )
+      .slice(0, limit);
+  const initialAutoRoute = normalizeAutoRouteDecisionV1(
+    event.payload.initialAutoRoute,
+  );
+  return {
+    v: 1,
+    lane,
+    modelSelectionKind,
+    candidateAllowlist: normalizeRefs(event.payload.candidateAllowlist, 200),
+    fallbackChain: normalizeRefs(event.payload.fallbackChain, 5),
+    policyVersion:
+      typeof event.payload.policyVersion === "number" &&
+      Number.isFinite(event.payload.policyVersion)
+        ? event.payload.policyVersion
+        : 1,
+    ...(initialAutoRoute ? { initialAutoRoute } : {}),
+  };
+}
+
+/** Persist Signal's frozen lane/candidates/fallbacks before the first turn. */
+export function recordBotcastRoutingSnapshot(
+  db: DatabaseSync,
+  userId: string,
+  episodeId: string,
+  snapshot: BotcastRoutingSnapshotV1,
+): BotcastEpisode {
+  const episode = getBotcastEpisode(db, userId, episodeId);
+  if (botcastRoutingSnapshot(episode)) return episode;
+  recordEvent(
+    db,
+    userId,
+    episodeId,
+    "routing",
+    { ...snapshot },
+    episode.createdAt,
+  );
+  return getBotcastEpisode(db, userId, episodeId);
+}
+
 export function createBotcastEpisode(
   db: DatabaseSync,
   userId: string,
@@ -7379,11 +7471,7 @@ export function createBotcastEpisode(
   const provider = input.preferredProvider ?? "local";
   const model = cleanText(input.modelOverride, "", 240) || null;
   const responseMode: BotcastEpisodeResponseMode =
-    input.responseMode === "auto"
-      ? "auto"
-      : provider === "local"
-        ? "local"
-        : "online";
+    provider === "local" ? "local" : "online";
   const durationMinutes =
     input.durationMinutes == null ? null : Number(input.durationMinutes);
   if (
@@ -10281,12 +10369,11 @@ async function generateAuxiliaryBotcastJson<T>(args: {
     | { ok: false; reason: "empty" | "refusal" | "invalid_output" };
 }): Promise<T | null> {
   const selected = auxiliaryGenerationProvider(args.generation);
-  if (args.generation.responseMode === "auto") {
-    const chain = autoFallbackResolvedChain(
-      { provider: selected.providerName, model: selected.model },
-      args.generation.autoFallbackChain,
-    );
-    if (!chain) return null;
+  const chain = autoFallbackResolvedChain(
+    { provider: selected.providerName, model: selected.model },
+    args.generation.autoFallbackChain,
+  );
+  if (chain) {
     const providerFactory = args.generation.providerFactory ?? selectProvider;
     try {
       const result = await runAutoFallbackChain({
@@ -10309,10 +10396,19 @@ async function generateAuxiliaryBotcastJson<T>(args: {
                     args.generation.secondaryOllamaHost,
                     args.generation.anthropicApiKey,
                   );
-            return provider.generateResponse(
-              args.messages,
-              args.options(attempt.provider, attempt.model, signal, index > 0),
+            const options = args.options(
+              attempt.provider,
+              attempt.model,
+              signal,
+              index > 0,
             );
+            return provider.generateResponse(args.messages, {
+              ...options,
+              reasoningEffort: autoFallbackReasoningEffort(
+                index,
+                options.reasoningEffort,
+              ),
+            });
           },
         })),
         perAttemptTimeoutMs: 60_000,
@@ -10556,8 +10652,12 @@ export async function ensureBotcastEpisodePersonaReview(
       : loadBotProfile(db, userId, episode.guestBotId);
   const selected = generationProvider(
     generation,
-    episode.provider,
-    episode.model,
+    generation.contextualModel !== undefined
+      ? generation.preferredProvider
+      : episode.provider,
+    generation.contextualModel !== undefined
+      ? generation.contextualModel
+      : episode.model,
   );
   try {
     const result = await runPrismReviewV1({
@@ -12456,18 +12556,24 @@ export async function advanceBotcastEpisode(
   const turnStartEventSequence = episode.events.at(-1)?.sequence ?? -1;
   const selected = generationProvider(
     generation,
-    episode.provider,
-    episode.model,
+    generation.contextualModel !== undefined
+      ? generation.preferredProvider
+      : episode.provider,
+    generation.contextualModel !== undefined
+      ? generation.contextualModel
+      : episode.model,
   );
   const selectedModelId =
     selected.model ?? defaultModelIdForProvider(selected.providerName);
-  const primaryReasoningEffort = resolveUserModelReasoningEffort(db, {
-    userId,
-    provider: selected.providerName,
-    modelId: selectedModelId,
-    simulatedEffortEnabled:
-      generation.experimentalAllModelEffortEnabled === true,
-  });
+  const primaryReasoningEffort =
+    generation.contextualReasoningEffort ??
+    resolveUserModelReasoningEffort(db, {
+      userId,
+      provider: selected.providerName,
+      modelId: selectedModelId,
+      simulatedEffortEnabled:
+        generation.experimentalAllModelEffortEnabled === true,
+    });
   const generationOptions = {
     temperature: Math.min(1.15, Math.max(0.2, speaker.temperature)),
     ...(primaryReasoningEffort
@@ -12498,6 +12604,10 @@ export async function advanceBotcastEpisode(
   >["recovery"];
   let onlineTurn: SignalOnlineTurnResult | undefined;
   let raw: string;
+  const resolvedFallbackChain = autoFallbackResolvedChain(
+    { provider: selected.providerName, model: modelUsed },
+    generation.autoFallbackChain,
+  );
   if (picklesBeatKind === "interjection") {
     const lines = [
       "One moment.",
@@ -12531,20 +12641,11 @@ export async function advanceBotcastEpisode(
     raw = applyBotPowerEchoResponseV1(addressedSpeechForEcho);
     providerUsed = "deterministic";
     modelUsed = "speech-copy-power";
-  } else if (episode.responseMode === "auto") {
-    const resolvedChain = autoFallbackResolvedChain(
-      { provider: episode.provider, model: modelUsed },
-      generation.autoFallbackChain,
-    );
-    if (!resolvedChain) {
-      throw new Error(
-        "Signal AUTO needs one primary model and one to five distinct fallbacks in Settings.",
-      );
-    }
+  } else if (resolvedFallbackChain) {
     const providerFactory = generation.providerFactory ?? selectProvider;
     try {
       const result = await runAutoFallbackChain({
-        attempts: resolvedChain.map((attempt, index) => ({
+        attempts: resolvedFallbackChain.map((attempt, index) => ({
           ...attempt,
           available:
             index === 0 ||
@@ -12563,15 +12664,17 @@ export async function advanceBotcastEpisode(
                     generation.secondaryOllamaHost,
                     generation.anthropicApiKey,
                   );
-            const attemptReasoningEffort = resolveUserModelReasoningEffort(
-              db,
-              {
-                userId,
-                provider: attempt.provider,
-                modelId: attempt.model,
-                simulatedEffortEnabled:
-                  generation.experimentalAllModelEffortEnabled === true,
-              },
+            const attemptReasoningEffort = autoFallbackReasoningEffort(
+              index,
+              index === 0
+                ? primaryReasoningEffort
+                : resolveUserModelReasoningEffort(db, {
+                    userId,
+                    provider: attempt.provider,
+                    modelId: attempt.model,
+                    simulatedEffortEnabled:
+                      generation.experimentalAllModelEffortEnabled === true,
+                  }),
             );
             const attemptOptions: GenerateOptions = {
               ...generationOptions,
@@ -12605,15 +12708,20 @@ export async function advanceBotcastEpisode(
             return provider.generateResponse(attemptPrompt, attemptOptions);
           },
         })),
-        perAttemptTimeoutMs: (attempt) =>
+        perAttemptTimeoutMs: (attempt, index) =>
           reasoningGenerationBudgetMs(
-            resolveUserModelReasoningEffort(db, {
-              userId,
-              provider: attempt.provider,
-              modelId: attempt.model,
-              simulatedEffortEnabled:
-                generation.experimentalAllModelEffortEnabled === true,
-            }),
+            autoFallbackReasoningEffort(
+              index,
+              index === 0
+                ? primaryReasoningEffort
+                : resolveUserModelReasoningEffort(db, {
+                    userId,
+                    provider: attempt.provider,
+                    modelId: attempt.model,
+                    simulatedEffortEnabled:
+                      generation.experimentalAllModelEffortEnabled === true,
+                  }),
+            ),
             { provider: attempt.provider, modelId: attempt.model },
           ),
         totalTimeoutMs: REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
@@ -12748,6 +12856,9 @@ export async function advanceBotcastEpisode(
             (total, attempt) => total + attempt.durationMs,
             0,
           ),
+          ...(generation.autoRouteDecision
+            ? { autoRoute: generation.autoRouteDecision }
+            : {}),
         });
         if (
           !firstHostOpening &&
@@ -12898,6 +13009,9 @@ export async function advanceBotcastEpisode(
         outcome: onlineTurn.validationFailureReason ? "rejected" : "succeeded",
         attempts: onlineTurn.attempts,
         totalDurationMs: onlineTurn.totalDurationMs,
+        ...(generation.autoRouteDecision
+          ? { autoRoute: generation.autoRouteDecision }
+          : {}),
       },
       now,
     );
@@ -13594,6 +13708,9 @@ export async function advanceBotcastEpisode(
     provider: providerUsed,
     model: modelUsed,
     responseMode: episode.responseMode,
+    ...(generation.autoRouteDecision
+      ? { autoRoute: generation.autoRouteDecision }
+      : {}),
     immersiveVoiceEffect: voicePerformanceText !== null,
     ...(speakerMumblesSpeech && !speakerIsMutedForTurn && !speakerEchoesForTurn
       ? {

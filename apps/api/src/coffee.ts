@@ -143,6 +143,7 @@ import type {
   PreparedTurnCursorV1,
   ReasoningEffort,
   AutoFallbackChainV1,
+  AutoRouteDecisionV1,
   AutoRecoveryTraceV1,
   BotIdentityMirrorStateV1,
   BotIdentityShapeshiftStateV1,
@@ -247,6 +248,7 @@ import {
 } from "@localai/shared";
 import {
   AutoFallbackExhaustedError,
+  autoFallbackReasoningEffort,
   runAutoFallbackChain,
   validateAutoFallbackText,
 } from "./auto-fallback.ts";
@@ -3518,6 +3520,7 @@ function serializeCoffeeAssistantToolPayload(args: {
   coffeeDebugTurnSnapshot?: CoffeeDebugTurnSnapshotPayload | null;
   coffeeReplayEvents?: CoffeeReplayEventPayload[] | null;
   autoRecovery?: AutoRecoveryTraceV1;
+  autoRoute?: AutoRouteDecisionV1;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
   /** Server-only clear speech used by a Power-immune bot's private prompt. */
   botPowerIntendedSpeech?: string | null;
@@ -3543,6 +3546,7 @@ function serializeCoffeeAssistantToolPayload(args: {
       coffeeStageAction ||
       coffeeReplayEvents ||
       args.autoRecovery ||
+      args.autoRoute ||
       args.botPowerExactResponse ||
       botPowerIntendedSpeech ||
       args.socialSilence ||
@@ -3554,6 +3558,7 @@ function serializeCoffeeAssistantToolPayload(args: {
       coffeeStageAction,
       coffeeReplayEvents,
       autoRecovery: args.autoRecovery,
+      autoRoute: args.autoRoute,
       botPowerExactResponse: args.botPowerExactResponse,
       socialSilence: args.socialSilence,
       crosstalkReclaim: args.crosstalkReclaim,
@@ -3566,6 +3571,7 @@ function serializeCoffeeAssistantToolPayload(args: {
     !coffeeStageAction &&
     !coffeeReplayEvents &&
     !args.autoRecovery &&
+    !args.autoRoute &&
     !args.botPowerExactResponse &&
     !botPowerIntendedSpeech &&
     !args.socialSilence &&
@@ -3581,6 +3587,7 @@ function serializeCoffeeAssistantToolPayload(args: {
     ...(coffeeReplayEvents && coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
     ...(coffeeDebugTurnSnapshot ? { coffeeDebugTurnSnapshot } : {}),
     ...(args.autoRecovery ? { autoRecovery: args.autoRecovery } : {}),
+    ...(args.autoRoute ? { autoRoute: args.autoRoute } : {}),
     ...(args.botPowerExactResponse
       ? { botPowerExactResponse: args.botPowerExactResponse }
       : {}),
@@ -5573,6 +5580,8 @@ export interface CoffeeTurnSettings {
    */
   sessionSpeakerModel?: string | null;
   reasoningEffort?: ReasoningEffort;
+  /** Contextual Auto decision frozen for this individual generation. */
+  autoRouteDecision?: AutoRouteDecisionV1;
   /** Account experiment that permits private multi-call effort for non-native models. */
   experimentalAllModelEffortEnabled?: boolean;
   /** Cancels router, private deliberation, and final speaker generation. */
@@ -14384,12 +14393,10 @@ async function generateCoffeePollStructuredBallot(args: {
       history: args.history,
     });
     const primaryModel = args.options?.model ?? defaultModelIdForProvider(args.effectiveProvider);
-    const resolvedAutoChain = args.settings.responseMode === "auto"
-      ? autoFallbackResolvedChain(
-          { provider: args.effectiveProvider, model: primaryModel },
-          args.settings.autoFallbackChain ?? null
-        )
-      : null;
+    const resolvedAutoChain = autoFallbackResolvedChain(
+      { provider: args.effectiveProvider, model: primaryModel },
+      args.settings.autoFallbackChain ?? null,
+    );
     if (resolvedAutoChain) {
       const providerFactory = args.settings.providerFactory ?? selectProvider;
       const result = await runAutoFallbackChain({
@@ -14412,6 +14419,10 @@ async function generateCoffeePollStructuredBallot(args: {
             return provider.generateResponse(messages, {
               ...args.options,
               model: attempt.model,
+              reasoningEffort: autoFallbackReasoningEffort(
+                index,
+                args.options?.reasoningEffort,
+              ),
               temperature: 0.1,
               maxTokens: 220,
               jsonMode: true,
@@ -15504,16 +15515,14 @@ function pickSpeakerModel(
   _speaker: CoffeeBotProfile,
   _effectiveProvider: ProviderName,
   sessionOverride?: string | null,
-  accountPreference?: string | null
+  _legacyAccountPreference?: string | null
 ): string | undefined {
   const trimmed =
     typeof sessionOverride === "string" ? sessionOverride.trim() : "";
   if (trimmed.length > 0 && trimmed.toLowerCase() !== "auto") {
     return trimmed;
   }
-  const accountModel =
-    typeof accountPreference === "string" ? accountPreference.trim() : "";
-  return accountModel.length > 0 ? accountModel : undefined;
+  return undefined;
 }
 
 export async function createCoffeeConversation(
@@ -17282,20 +17291,12 @@ async function generateCoffeeBotReply(args: {
   const primarySpeakerModel = speakerModel ?? defaultModelIdForProvider(effectiveProvider);
   const resolvedAutoChain =
     !speakerRepeatsForHearingPower && !speakerEchoesForTurn &&
-    settings.responseMode === "auto" && !offlineOnlyTable &&
     !cannedInterruptionReaction && !socialSilenceMarker
       ? autoFallbackResolvedChain(
           { provider: effectiveProvider, model: primarySpeakerModel },
           settings.autoFallbackChain ?? null
         )
       : null;
-  const autoRequested =
-    !speakerRepeatsForHearingPower && !speakerEchoesForTurn &&
-    settings.responseMode === "auto" && !offlineOnlyTable &&
-    !cannedInterruptionReaction && !socialSilenceMarker;
-  if (autoRequested && !resolvedAutoChain) {
-    throw new AutoFallbackExhaustedError([]);
-  }
   let autoRecovery: AutoRecoveryTraceV1 | undefined;
   let finalProvider = effectiveProvider;
   let finalModel = primarySpeakerModel;
@@ -17346,9 +17347,9 @@ async function generateCoffeeBotReply(args: {
                   settings.secondaryOllamaHost,
                   settings.anthropicApiKey
                 );
-            const attemptEffort = reasoningEffortForAttempt(
-              attempt.provider,
-              attempt.model,
+            const attemptEffort = autoFallbackReasoningEffort(
+              index,
+              reasoningEffortForAttempt(attempt.provider, attempt.model),
             );
             const attemptOptions: GenerateOptions = {
               ...speakerOptions,
@@ -17367,9 +17368,12 @@ async function generateCoffeeBotReply(args: {
             return provider.generateResponse(attemptMessages, attemptOptions);
           },
         })),
-        perAttemptTimeoutMs: (attempt) =>
+        perAttemptTimeoutMs: (attempt, index) =>
           reasoningGenerationBudgetMs(
-            reasoningEffortForAttempt(attempt.provider, attempt.model),
+            autoFallbackReasoningEffort(
+              index,
+              reasoningEffortForAttempt(attempt.provider, attempt.model),
+            ),
             { provider: attempt.provider, modelId: attempt.model },
           ),
         totalTimeoutMs: REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
@@ -18506,6 +18510,7 @@ async function generateCoffeeBotReply(args: {
     coffeeDebugTurnSnapshot,
     coffeeReplayEvents,
     autoRecovery,
+    autoRoute: settings.autoRouteDecision,
     socialSilence: socialSilenceMarker,
     crosstalkReclaim,
     botPowerExactResponse: speakerRepeatsForHearingPower

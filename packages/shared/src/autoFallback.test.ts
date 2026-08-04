@@ -3,7 +3,9 @@ import { describe, it } from "node:test";
 
 import {
   autoFallbackResolvedChain,
+  fallbackChainForLane,
   normalizeAutoFallbackChain,
+  normalizeFallbackChainsV2,
   normalizeAutoRecoveryTrace,
   normalizeResponseMode,
   parseStoredAutoFallbackChain,
@@ -26,10 +28,15 @@ describe("Auto fallback contracts", () => {
     assert.equal(normalizeResponseMode("bogus", "online"), "online");
   });
 
-  it("round-trips an existing distinct two-model fallback chain", () => {
+  it("migrates and round-trips an existing chain through lane-specific storage", () => {
     const normalized = normalizeAutoFallbackChain(chain);
     assert.deepEqual(normalized, chain);
     assert.deepEqual(parseStoredAutoFallbackChain(serializeAutoFallbackChain(chain)), chain);
+    assert.deepEqual(normalizeFallbackChainsV2(chain), {
+      v: 2,
+      local: [],
+      online: [...chain.fallbacks],
+    });
   });
 
   it("accepts one to five fallbacks and rejects empty, oversized, or duplicate chains", () => {
@@ -57,13 +64,10 @@ describe("Auto fallback contracts", () => {
     );
   });
 
-  it("skips a redundant fallback matching the contextual primary", () => {
-    assert.deepEqual(
+  it("keeps fallback attempts in the selected lane and skips duplicates", () => {
+    assert.equal(
       autoFallbackResolvedChain({ provider: "local", model: "qwen3:14b" }, chain),
-      [
-        { provider: "local", model: "qwen3:14b" },
-        ...chain.fallbacks,
-      ]
+      null,
     );
     assert.deepEqual(
       autoFallbackResolvedChain({ provider: "openai", model: "gpt-5-mini" }, chain),
@@ -79,6 +83,26 @@ describe("Auto fallback contracts", () => {
       ),
       null,
     );
+  });
+
+  it("partitions a mixed legacy chain into independent LOCAL and ONLINE chains", () => {
+    const mixed = {
+      v: 1 as const,
+      fallbacks: [
+        { provider: "openai" as const, model: "gpt-5-mini" },
+        { provider: "local" as const, model: "qwen3:9b" },
+        { provider: "anthropic" as const, model: "claude-sonnet" },
+        { provider: "local" as const, model: "gemma3:4b" },
+      ],
+    };
+    assert.deepEqual(fallbackChainForLane(mixed, "local")?.fallbacks, [
+      { provider: "local", model: "qwen3:9b" },
+      { provider: "local", model: "gemma3:4b" },
+    ]);
+    assert.deepEqual(fallbackChainForLane(mixed, "online")?.fallbacks, [
+      { provider: "openai", model: "gpt-5-mini" },
+      { provider: "anthropic", model: "claude-sonnet" },
+    ]);
   });
 
   it("normalizes privacy-safe recovery traces and rejects raw invalid shapes", () => {

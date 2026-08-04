@@ -182,13 +182,15 @@ export interface CurrentSettings {
   experimentalAllModelEffortEnabled: number;
   coffeeExperimentalTableAngleEnabled: number;
   psychicModeEnabled: number;
-  /** Saved preference only. Auto is still gated per Zen/Coffee context. */
+  /** @deprecated Import/backup compatibility only; runtime routing ignores it. */
   autoSwitchModel: number;
   /** Versioned JSON stored in `users.auto_fallback_chain`. */
   autoFallbackChain: string | null;
   hiddenBotModelIds: string;
   hiddenComfyUiWorkflowIds: string;
+  /** @deprecated Import/backup compatibility only; runtime routing ignores it. */
   preferredLocalModel: string | null;
+  /** @deprecated Import/backup compatibility only; runtime routing ignores it. */
   preferredOnlineModel: string | null;
   lenientLocalImageFallbackModel: string | null;
   secondaryOllamaHost: string | null;
@@ -934,10 +936,6 @@ export function resolveNextSettings(
     typeof body.psychicModeEnabled === "boolean"
       ? Number(body.psychicModeEnabled)
       : current.psychicModeEnabled;
-  const requestedAutoSwitchModel =
-    typeof body.autoModeEnabled === "boolean"
-      ? Number(body.autoModeEnabled)
-      : current.autoSwitchModel;
   const currentAutoFallbackChain = parseStoredAutoFallbackChain(
     current.autoFallbackChain
   );
@@ -954,7 +952,7 @@ export function resolveNextSettings(
       : currentAutoFallbackChain
         ? serializeAutoFallbackChain(currentAutoFallbackChain)
         : null;
-  const autoSwitchModel = autoFallbackChain ? requestedAutoSwitchModel : 0;
+  const autoSwitchModel = current.autoSwitchModel;
   const hiddenBotModelIds = readHiddenBotModelIds(
     body.hiddenBotModelIds,
     current.hiddenBotModelIds
@@ -963,14 +961,8 @@ export function resolveNextSettings(
     body.hiddenComfyUiWorkflowIds,
     current.hiddenComfyUiWorkflowIds
   );
-  const preferredLocalModel = readPreferredModel(
-    body.preferredLocalModel,
-    current.preferredLocalModel
-  );
-  const preferredOnlineModel = readPreferredModel(
-    body.preferredOnlineModel,
-    current.preferredOnlineModel
-  );
+  const preferredLocalModel = current.preferredLocalModel;
+  const preferredOnlineModel = current.preferredOnlineModel;
   const lenientLocalImageFallbackModel = readPreferredModel(
     body.lenientLocalImageFallbackModel,
     current.lenientLocalImageFallbackModel

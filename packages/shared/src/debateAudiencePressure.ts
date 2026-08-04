@@ -10,8 +10,6 @@ export type DebateAudiencePressureBand =
 export type DebateAudiencePressureReaction =
   "attentive" | "concession" | "divided" | "evidence" | "question" | null;
 
-export type DebateAudienceDeliveryCue = "*speaks loudly*" | "*shouts*";
-
 export type DebateAudienceModeratorOrderReason = "shock" | "disruptive";
 
 export interface DebateAudienceModeratorOrderPlan {
@@ -324,36 +322,4 @@ export function debateAudienceModeratorOrderPlan(args: {
     return { pressure, reason: "disruptive" };
   }
   return null;
-}
-
-/** Deterministic actor direction for the next advocate facing a rowdy gallery. */
-export function debateAudienceDeliveryCue(
-  score: number,
-): DebateAudienceDeliveryCue | null {
-  const band = debateAudiencePressureBand(score);
-  if (band === "disruptive") return "*shouts*";
-  if (band === "restless") return "*speaks loudly*";
-  return null;
-}
-
-export function applyDebateAudienceDeliveryCue(
-  content: string,
-  score: number,
-): string {
-  const cue = debateAudienceDeliveryCue(score);
-  const normalized = content.replace(
-    /^(\s*)\*{1,3}\s*(?:shouts?|yells?)(?:\s+over\s+(?:the\s+)?crowd)?\s*\*{1,3}\s*/iu,
-    "$1*shouts* ",
-  );
-  const trimmed = normalized.trim();
-  if (
-    !cue ||
-    !trimmed ||
-    trimmed === "..." ||
-    /^\*{1,3}[^*\r\n]{1,240}\*{1,3}/u.test(trimmed) ||
-    /^objection\b/iu.test(trimmed)
-  ) {
-    return normalized;
-  }
-  return `${cue} ${trimmed}`;
 }

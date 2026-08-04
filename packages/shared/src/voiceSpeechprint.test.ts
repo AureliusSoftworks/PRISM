@@ -9,8 +9,8 @@ import {
 const SAMPLE_IPA = "θɪs ɹɪvɚ wɪl ðɹaɪv vɛɹi faɹ";
 
 describe("local voice Speechprints", () => {
-  it("publishes twelve versioned Instant-compatible profiles for both bases", () => {
-    assert.equal(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length, 12);
+  it("publishes broad versioned Instant-compatible profiles for both bases", () => {
+    assert.equal(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length, 39);
     assert.match(LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256, /^[a-f0-9]{64}$/u);
     for (const capability of LOCAL_VOICE_SPEECHPRINT_CAPABILITIES) {
       assert.deepEqual(capability.supportedBaseLocales, ["en-US", "en-GB"]);
@@ -18,6 +18,46 @@ describe("local voice Speechprints", () => {
       assert.deepEqual(capability.supportedEngines, ["instant"]);
       assert.equal(capability.approximate, true);
     }
+  });
+
+  it("covers additional regions without collapsing them into distant profiles", () => {
+    for (const id of [
+      "latin-american-spanish-influenced-english",
+      "north-african-arabic-influenced-english",
+      "nigerian-english",
+      "south-african-english",
+      "bengali-influenced-english",
+      "filipino-english",
+      "vietnamese-influenced-english",
+      "pacific-island-english",
+    ]) {
+      assert.ok(
+        LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.some(
+          (capability) => capability.id === id,
+        ),
+        id,
+      );
+    }
+
+    const arabic = applyLocalVoiceSpeechprintToIpa({
+      ipa: "ɹɪvɚ",
+      speechprint: {
+        influence: "middle-eastern-arabic-influenced-english",
+        strength: "light",
+        variationSeed: "arabic-character",
+      },
+    });
+    const newZealand = applyLocalVoiceSpeechprintToIpa({
+      ipa: "fɪt faɹ",
+      speechprint: {
+        influence: "new-zealand-english",
+        strength: "balanced",
+        variationSeed: "new-zealand-character",
+      },
+    });
+    assert.equal(arabic.ipa.startsWith("ɾ"), true);
+    assert.equal(newZealand.ipa.includes("ɪ"), false);
+    assert.equal(newZealand.ipa.includes("ɹ"), false);
   });
 
   it("adds restrained Italian, Australian, and Canadian signatures", () => {

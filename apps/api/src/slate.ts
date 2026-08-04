@@ -4,6 +4,7 @@ import {
   normalizePromptWildcardRunMetadata,
   transformSlateLockedRangesForTextEdit,
   type PromptWildcardRunMetadata,
+  type ModelReasoningEffortPreference,
   type SlateAiProvider,
   type SlateCharacter,
   type SlateDeliberationConfig,
@@ -197,6 +198,7 @@ export interface SlateAiOperationInput {
   provider: LlmProvider;
   providerName: ProviderName;
   model: string;
+  reasoningEffort?: ModelReasoningEffortPreference;
 }
 
 export type SlateShapeWriteConflictReason =
@@ -232,7 +234,9 @@ export class SlateShapeWriteConflictError extends Error {
 
 export interface SlateAccountDefaults {
   preferredProvider: ProviderName;
+  /** @deprecated Retained only for older callers and backup compatibility. */
   preferredLocalModel?: string | null;
+  /** @deprecated Retained only for older callers and backup compatibility. */
   preferredOnlineModel?: string | null;
 }
 
@@ -240,13 +244,9 @@ export function resolveSlateAccountDefaults(
   defaults: SlateAccountDefaults,
 ): { provider: ProviderName; model: string } {
   const provider = defaults.preferredProvider;
-  const preferred =
-    provider === "local"
-      ? defaults.preferredLocalModel
-      : defaults.preferredOnlineModel;
   return {
     provider,
-    model: preferred?.trim() || defaultModelIdForProvider(provider),
+    model: defaultModelIdForProvider(provider),
   };
 }
 
@@ -825,8 +825,8 @@ export function createSlateProject(
     db.prepare(
       `INSERT INTO slate_projects
         (id, user_id, series_id, book_ordinal, title, title_origin, spark,
-         spark_wildcards_json, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+         spark_wildcards_json, prose_mode, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'offline', ?, ?)`,
     ).run(
       id,
       userId,
@@ -891,7 +891,9 @@ export function updateSlateProject(
     ) {
       throw new Error("Slate prose mode is invalid.");
     }
-    assign("prose_mode", patch.proseMode);
+    // Legacy clients used prose-mode Auto. New writes keep privacy as a
+    // concrete lane and use Auto only in the separate model selection.
+    assign("prose_mode", patch.proseMode === "auto" ? "offline" : patch.proseMode);
   }
   if (Object.hasOwn(patch, "proseModel")) {
     const model = boundedString(patch.proseModel, "Slate prose model", 240);
@@ -1004,6 +1006,9 @@ export async function resolveSlateProjectSparkWildcards(
     provider: ai.provider,
     generationOverrides: {
       model: ai.model,
+      ...(ai.reasoningEffort
+        ? { reasoningEffort: ai.reasoningEffort }
+        : {}),
       temperature: 0.72,
       maxTokens: 900,
       usagePurpose: "prompt_wildcard",
@@ -1178,6 +1183,9 @@ export async function generateSlateShape(
     ],
     {
       model: ai.model,
+      ...(ai.reasoningEffort
+        ? { reasoningEffort: ai.reasoningEffort }
+        : {}),
       temperature: 0.7,
       maxTokens: 3_000,
       jsonMode: true,
@@ -1384,6 +1392,9 @@ export async function generateSlateStructureItemProposal(
     ],
     {
       model: ai.model,
+      ...(ai.reasoningEffort
+        ? { reasoningEffort: ai.reasoningEffort }
+        : {}),
       temperature: 0.82,
       maxTokens: 4_000,
       usagePurpose: "slate_draft",
@@ -1566,6 +1577,9 @@ export async function proposeSlateRevision(
     ],
     {
       model: ai.model,
+      ...(ai.reasoningEffort
+        ? { reasoningEffort: ai.reasoningEffort }
+        : {}),
       temperature: 0.65,
       maxTokens: 5_000,
       usagePurpose: "slate_revision",

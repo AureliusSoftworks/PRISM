@@ -38,6 +38,7 @@ import {
   resolveDebateForumRoundPlan,
   normalizeDebateSetupPresetId,
   debateDebriefEligibleBots,
+  sanitizeDebateDebaterText,
   sanitizeDebateStatementSources,
   type DebateEventV1,
 } from "./debate.ts";
@@ -557,6 +558,23 @@ test("keeps valid source and exhibit markers, removes invalid markers, and omits
   assert.equal(
     debateSpokenText(sanitized.content),
     "Supply improved, but the utensil is bent and this claim is unsupported.",
+  );
+});
+
+test("persists debater arguments without stage or delivery modifiers", () => {
+  assert.equal(
+    sanitizeDebateDebaterText(
+      "*yells over the audience* The record is clear. *raises voice* Read the source [[source:housing-1]].",
+    ),
+    "The record is clear. Read the source [[source:housing-1]].",
+  );
+  assert.equal(
+    sanitizeDebateDebaterText("[excited] This *important* point survives."),
+    "This *important* point survives.",
+  );
+  assert.equal(
+    sanitizeDebateDebaterText("The point lands. *burp* Excuse me."),
+    "The point lands. *burp* Excuse me.",
   );
 });
 

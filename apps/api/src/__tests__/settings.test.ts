@@ -706,7 +706,7 @@ describe("resolveNextSettings — retired text fallback settings", () => {
 });
 
 describe("resolveNextSettings — Auto model chain", () => {
-  it("stores Auto-off by default and accepts a versioned two-model chain", () => {
+  it("stores separate lane chains without reviving the retired Auto switch", () => {
     const next = resolveNextSettings(
       {
         autoModeEnabled: true,
@@ -720,13 +720,11 @@ describe("resolveNextSettings — Auto model chain", () => {
       },
       baseline()
     );
-    assert.equal(next.autoSwitchModel, 1);
+    assert.equal(next.autoSwitchModel, 0);
     assert.deepEqual(JSON.parse(next.autoFallbackChain ?? "null"), {
-      v: 1,
-      fallbacks: [
-        { provider: "local", model: "qwen3:8b" },
-        { provider: "openai", model: "gpt-5-mini" },
-      ],
+      v: 2,
+      local: [{ provider: "local", model: "qwen3:8b" }],
+      online: [{ provider: "openai", model: "gpt-5-mini" }],
     });
   });
 
@@ -746,10 +744,11 @@ describe("resolveNextSettings — Auto model chain", () => {
       baseline(),
     );
 
-    assert.equal(next.autoSwitchModel, 1);
+    assert.equal(next.autoSwitchModel, 0);
     assert.deepEqual(JSON.parse(next.autoFallbackChain ?? "null"), {
-      v: 1,
-      fallbacks,
+      v: 2,
+      local: [fallbacks[0], fallbacks[3]],
+      online: [fallbacks[1], fallbacks[2], fallbacks[4]],
     });
   });
 
@@ -773,7 +772,14 @@ describe("resolveNextSettings — Auto model chain", () => {
       },
       baseline({ autoFallbackChain: stored })
     );
-    assert.equal(next.autoFallbackChain, stored);
+    assert.equal(
+      next.autoFallbackChain,
+      JSON.stringify({
+        v: 2,
+        local: [{ provider: "local", model: "qwen3:8b" }],
+        online: [{ provider: "openai", model: "gpt-5-mini" }],
+      }),
+    );
   });
 
   it("cannot enable Auto without a valid saved chain", () => {
@@ -861,17 +867,17 @@ describe("resolveNextSettings — prismImageToolLlmModel", () => {
   });
 });
 
-describe("resolveNextSettings — preferred auto models", () => {
-  it("stores trimmed values for local + online model hints", () => {
+describe("resolveNextSettings — retired account text models", () => {
+  it("ignores new local and online account-model writes", () => {
     const next = resolveNextSettings(
       { preferredLocalModel: " llama3.2 ", preferredOnlineModel: " gpt-4o-mini " },
       baseline()
     );
-    assert.equal(next.preferredLocalModel, "llama3.2");
-    assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
+    assert.equal(next.preferredLocalModel, null);
+    assert.equal(next.preferredOnlineModel, null);
   });
 
-  it("stores disabled as an explicit local + online model hint", () => {
+  it("does not revive disabled through retired account fields", () => {
     const next = resolveNextSettings(
       {
         preferredLocalModel: DISABLED_MODEL_CHOICE,
@@ -879,11 +885,11 @@ describe("resolveNextSettings — preferred auto models", () => {
       },
       baseline()
     );
-    assert.equal(next.preferredLocalModel, DISABLED_MODEL_CHOICE);
-    assert.equal(next.preferredOnlineModel, DISABLED_MODEL_CHOICE);
+    assert.equal(next.preferredLocalModel, null);
+    assert.equal(next.preferredOnlineModel, null);
   });
 
-  it("clears each preference independently with empty string", () => {
+  it("preserves imported compatibility values until backup or account reset", () => {
     const current = baseline({
       preferredLocalModel: "llama3.2",
       preferredOnlineModel: "gpt-4o-mini",
@@ -892,8 +898,8 @@ describe("resolveNextSettings — preferred auto models", () => {
       { preferredLocalModel: "", preferredOnlineModel: " " },
       current
     );
-    assert.equal(next.preferredLocalModel, null);
-    assert.equal(next.preferredOnlineModel, null);
+    assert.equal(next.preferredLocalModel, "llama3.2");
+    assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
   });
 
   it("keeps existing values when invalid types are sent", () => {

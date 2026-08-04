@@ -947,6 +947,23 @@ describe("hydrateAssistantMessageParts", () => {
     assert.equal(stored.includes("rawError"), false);
   });
 
+  it("round-trips the actual contextual Auto route", () => {
+    const autoRoute = {
+      v: 1 as const,
+      lane: "online" as const,
+      provider: "anthropic" as const,
+      model: "claude-haiku-4-5",
+      reasoningEffort: "low" as const,
+      reasonCodes: ["light_request", "known_cost_preferred"] as const,
+    };
+    const stored = serializeAssistantToolPayload({ autoRoute });
+    assert.deepEqual(
+      hydrateAssistantMessageParts({ content: "Done.", toolPayload: stored })
+        .autoRoute,
+      autoRoute,
+    );
+  });
+
   it("round-trips provenance-marked social silence independently of Power silence", () => {
     const socialSilence = {
       v: 1 as const,

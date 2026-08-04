@@ -95,11 +95,20 @@ describe("universal voice selector", () => {
       /const renderZenSplashControls[\s\S]*?showVoiceSelector: false/,
     );
 
-    const chatHeader = pageSource.slice(
-      pageSource.indexOf('className={styles.chatHeader}'),
-      pageSource.indexOf("{!chatLikeSurface && view !== \"chat\" ?"),
+    const zenHeader = pageSource.slice(
+      pageSource.indexOf('renderSharedAppletNavbar("Zen tools"'),
+      pageSource.indexOf("renderZenMemoryToasts()"),
     );
-    assert.match(chatHeader, /renderVoiceModeSelector\(\)/);
+    assert.match(zenHeader, /renderHeaderModelPicker\(/);
+    const headerModelPicker = pageSource.slice(
+      pageSource.indexOf("const renderHeaderModelPicker ="),
+      pageSource.indexOf("const renderImagesPanelModelPicker ="),
+    );
+    assert.match(
+      headerModelPicker,
+      /const showVoiceSelector = options\.showVoiceSelector \?\? true/,
+    );
+    assert.match(headerModelPicker, /renderVoiceModeSelector\(/);
   });
 
   it("snapshots the five-choice selection when each spoken surface starts an utterance", () => {

@@ -1966,9 +1966,10 @@ export class AnthropicProvider implements LlmProvider {
 }
 
 /**
- * Resolved local model for Prism-only lanes (titles, summarization, memory
- * inference, Coffee router, image prompt suggestions). Per-user Settings
- * override wins; otherwise `OLLAMA_AUXILIARY_MODEL` (default llama3.2).
+ * Resolved local model for Prism-owned lanes (Prism Home, companion,
+ * Wield/Refract, orchestration, titles, summarization, memory inference,
+ * Coffee routing, and helper suggestions). Per-user Settings override wins;
+ * otherwise `OLLAMA_AUXILIARY_MODEL` (default llama3.2).
  */
 export function resolveAuxiliaryOllamaModel(prismDefaultLlmModel?: string | null): string {
   const trimmed = typeof prismDefaultLlmModel === "string" ? prismDefaultLlmModel.trim() : "";

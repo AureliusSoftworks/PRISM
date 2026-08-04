@@ -47,18 +47,16 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Save or Create bot/u);
   });
 
-  it("explains the holographic Pronunciation Atlas and private phonemes", () => {
+  it("explains the full-width Accent map in plain language", () => {
     const step = MODE_TUTORIALS.chat.steps.find(
       (candidate) => candidate.heading === "Shape an offline voice",
     );
     assert.ok(step);
-    assert.match(step.body, /Pronunciation Atlas/u);
-    assert.match(step.body, /holographic world projection/u);
-    assert.match(step.body, /unlabeled/u);
-    assert.match(step.body, /without cluttering the Earth with region nodes/u);
-    assert.match(step.body, /American and British English foundations/u);
-    assert.match(step.body, /collapsed List view/u);
-    assert.match(step.body, /private local phonemes/u);
+    assert.match(step.body, /full-width Accent map/u);
+    assert.match(step.body, /anywhere in the world/u);
+    assert.match(step.body, /nearest broadly regional pronunciation/u);
+    assert.match(step.body, /All accents/u);
+    assert.match(step.body, /Original and With accent/u);
   });
 
   it("teaches Zen Atmosphere from Settings, on by default with gradient fallback", () => {
@@ -198,11 +196,7 @@ describe("mode tutorials", () => {
     assert.doesNotMatch(copy, /neutral floor marker/u);
     assert.match(
       copy,
-      /recognized asterisk cue such as \*yells\*[\s\S]*ElevenLabs performance direction/u,
-    );
-    assert.match(
-      copy,
-      /fart, burp, and cough actions play their bundled Foley/u,
+      /captions and saved Proceedings contain only the words being argued[\s\S]*voice-performance metadata/u,
     );
     assert.match(copy, /one strike calls attention at every phase change/u);
     assert.match(copy, /two restore order for moderator rulings and verdicts/u);
@@ -288,19 +282,22 @@ describe("mode tutorials", () => {
     assert.match(copy, /Pause takes effect immediately/u);
     assert.match(
       copy,
-      /without adding dialogue, audio, or a housekeeping event/u,
+      /moderator uses a short Persona-shaped recess line/u,
     );
+    assert.match(copy, /Jury chamber is visible, Pause stays instantaneous/u);
     assert.match(copy, /Leaving an unfinished Debate by any route/u);
-    assert.match(copy, /reopening returns to the same paused point/u);
+    assert.match(copy, /Continuing begins with the moderator calling/u);
     assert.match(copy, /Resume is the return-to-order gavel strike/u);
     assert.match(copy, /without asking for a second slam/u);
-    assert.match(copy, /Other roles resume silently/u);
+    assert.match(copy, /Bot-moderated roles receive that moderator call/u);
+    assert.match(copy, /Resume stays instantaneous without a cutscene/u);
     assert.match(copy, /replays that exact saved line from its beginning/u);
     assert.match(copy, /exact next Jury preparation, ballot/u);
     assert.match(
       copy,
-      /audiovisual room control, not a spoken beat or transcript event/u,
+      /neither housekeeping beat enters the readable proceedings/u,
     );
+    assert.match(copy, /neither has a cooldown/u);
     assert.match(
       copy,
       /cooldown governs semantic interventions within that gavel control, not audience order/u,
@@ -346,11 +343,11 @@ describe("mode tutorials", () => {
       copy,
       /After a Participant verdict, only the bot opponent may react before the bot Moderator\/Judge closes/u,
     );
-    assert.match(copy, /Choose LOCAL, AUTO, or ONLINE/u);
-    assert.match(copy, /fallback chain saved in Settings/u);
-    assert.match(copy, /LOCAL disables online rows/u);
-    assert.match(copy, /ONLINE disables local rows/u);
-    assert.match(copy, /enter AUTO directly/u);
+    assert.match(copy, /Choose LOCAL or ONLINE in the navbar/u);
+    assert.match(copy, /only that lane’s saved fallback chain/u);
+    assert.match(copy, /LOCAL evaluates only local Ollama models/u);
+    assert.match(copy, /ONLINE evaluates only configured OpenAI and Anthropic models/u);
+    assert.match(copy, /hollow triangle is an accessible, noninteractive Effort state/u);
     assert.match(copy, /every generated statement and ballot records/u);
     assert.match(copy, /short title synthesized in the selected Rowdiness/u);
     assert.match(
@@ -419,7 +416,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /End, and Skip actions are put away/u);
     assert.match(
       copy,
-      /Pause remains silent; when a human Judge resumes/u,
+      /Pause and Resume remain instantaneous and silent while the Jury chamber is visible/u,
     );
     assert.match(
       copy,
@@ -511,12 +508,16 @@ describe("mode tutorials", () => {
     assert.match(gavelCopy, /from every seat in the room/u);
     assert.match(
       gavelCopy,
-      /genuinely shocking advocate claim can draw one sparse gasp/u,
+      /silent local gallery director watches only the recent audible public debate/u,
     );
+    assert.match(gavelCopy, /none, laugh, gasp, or impressed/u);
+    assert.match(gavelCopy, /explicit 1–3 intensity controls/u);
+    assert.match(gavelCopy, /Most lines stay quiet/u);
+    assert.match(gavelCopy, /LOCAL remains fully local/u);
     assert.match(gavelCopy, /bot Moderator sparsely strikes the gavel/u);
     assert.match(gavelCopy, /PRISM never takes that authority from you/u);
     assert.match(gavelCopy, /protected mix headroom/u);
-    assert.match(gavelCopy, /\*speaks loudly\* or \*shouts\*/u);
+    assert.match(gavelCopy, /never inserts \*speaks loudly\*/u);
     assert.match(gavelCopy, /never needs to shout/u);
     assert.match(gavelCopy, /control attached directly to the gallery/u);
     assert.match(gavelCopy, /Space serves that ceremonial cue first/u);
@@ -751,9 +752,9 @@ describe("mode tutorials", () => {
     assert.match(copy, /writer-approved canon/u);
     assert.match(copy, /lock it against inference/u);
     assert.match(copy, /Observed track remains accepted-prose evidence/u);
-    assert.match(copy, /LOCAL, AUTO, and ONLINE/u);
-    assert.match(copy, /other applets see the same default/u);
-    assert.match(copy, /Leave routing on Auto/u);
+    assert.match(copy, /LOCAL and ONLINE control sets the hard privacy lane/u);
+    assert.match(copy, /Model defaults to Auto/u);
+    assert.match(copy, /suitable model and Effort for each request/u);
     assert.match(copy, /Slate Review export/u);
     assert.match(copy, /never hidden reasoning/u);
     assert.match(copy, /it never edits the document/u);
@@ -782,7 +783,7 @@ describe("mode tutorials", () => {
     );
     assert.deepEqual(continueHome, {
       heading: "Continue this Home",
-      body: "Opening a persona Home from All Bots, the header picker, or its grouped conversation heading continues that Home's latest saved chat. Expand the group to choose an exact older chat; use its + or New chat only when you deliberately want a separate conversation. Only the selected conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. In Zen, choosing Mute lets the live avatar step out and reveals each completed reply in a near-instant sweep. Chat keeps dialogue, vocal Actions, response cues, and manual replay text-only; it never synthesizes or plays a voice. When Shh appears, it stops the current reply without replacing the draft you are writing.",
+      body: "Opening a persona Home from All Bots, the header picker, or its grouped conversation heading continues that Home's latest saved chat. Expand the group to choose an exact older chat; use its + or New chat only when you deliberately want a separate conversation. Only the selected conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. In Chat or Zen, choose Mute for a text-only exchange or select English, Premium, Babble, or Bottish for spoken replies. In Zen, Mute also lets the live avatar step out and reveals each completed reply in a near-instant sweep. When Shh appears, it stops the current reply without replacing the draft you are writing.",
       clickLabel: "the message box at the bottom",
       targetSelector: '[data-tutorial-target="composer"]',
     });
@@ -837,7 +838,7 @@ describe("mode tutorials", () => {
     );
   });
 
-  it("distinguishes Coffee response routing from the account default model", () => {
+  it("distinguishes Coffee privacy routing from contextual Auto", () => {
     const setup = MODE_TUTORIALS.coffee.steps.find(
       (step) => step.heading === "Set the table",
     );
@@ -847,11 +848,11 @@ describe("mode tutorials", () => {
 
     assert.match(
       setup?.body ?? "",
-      /Account default uses the model saved in Settings/,
+      /Auto is the default model/,
     );
     assert.match(
       setup?.body ?? "",
-      /AUTO is the separate response-routing control/,
+      /selected LOCAL or ONLINE privacy lane/,
     );
     assert.match(setup?.body ?? "", /Use setup restores/);
     assert.match(setup?.body ?? "", /topic for an editable retry/);
@@ -859,15 +860,15 @@ describe("mode tutorials", () => {
       setup?.body ?? "",
       /current model and response routing stay selected/,
     );
-    assert.match(setup?.body ?? "", /one to five local or online fallbacks/);
+    assert.match(setup?.body ?? "", /that lane’s optional ordered fallback chain/);
     assert.match(setup?.body ?? "", /Auto has no visible countdown/);
     assert.doesNotMatch(setup?.body ?? "", /hidden 30-minute ceiling/);
     assert.match(
       routing?.body ?? "",
-      /model picker stays active and shows every model/,
+      /Leave Model on Auto/,
     );
-    assert.match(routing?.body ?? "", /selection becomes Primary/);
-    assert.match(routing?.body ?? "", /fallback chain saved in Settings/);
+    assert.match(routing?.body ?? "", /suitable model and Effort for each table turn/);
+    assert.match(routing?.body ?? "", /only that lane’s fallback chain/);
     assert.match(routing?.body ?? "", /separate Images provider/);
     assert.match(routing?.body ?? "", /voice preference/);
     assert.match(
@@ -899,26 +900,25 @@ describe("mode tutorials", () => {
     );
     assert.match(
       routing?.body ?? "",
-      /one to five saved local or online fallbacks/,
+      /only that lane’s ordered fallback chain/,
+    );
+    assert.match(routing?.body ?? "", /Auto is the default model inside either lane/u);
+    assert.match(
+      routing?.body ?? "",
+      /Every fallback uses None for speed/u,
     );
     assert.match(
       routing?.body ?? "",
       /Image generation keeps its own LOCAL\/ONLINE choice/,
     );
-    assert.match(routing?.body ?? "", /Chat itself is deliberately text-only/u);
-    assert.match(routing?.body ?? "", /Voice selector stays locked to Mute/u);
-    assert.match(routing?.body ?? "", /entering Chat stops foreground speech/u);
+    assert.match(routing?.body ?? "", /Voice remains independently selectable in Chat/u);
     assert.match(
       routing?.body ?? "",
-      /neither player nor bot messages request voice synthesis/u,
+      /Changing the text model or Auto never disables the Voice picker/u,
     );
     assert.match(
       routing?.body ?? "",
-      /never overwrites your saved Voice preference/u,
-    );
-    assert.match(
-      routing?.body ?? "",
-      /Coffee, Signal, Debate, Story, and other voiced surfaces/u,
+      /LOCAL disables only Premium while leaving Mute, English, Babble, and Bottish available/u,
     );
     const automaticThinkingSfx = MODE_TUTORIALS.zen.steps.find(
       (step) => step.heading === "Hear each bot think",
@@ -1424,7 +1424,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /Pick LOCAL, AUTO, or ONLINE/u,
+      /Pick LOCAL or ONLINE/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -1449,11 +1449,19 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /choose the model there for tonight’s recording/u,
+      /Zen, Coffee, Signal, Debate, and Slate use the same persistent PRISM navbar/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /AUTO uses that choice as Primary/u,
+      /Zen Home keeps its bot and Voice choices uncluttered; privacy, Model, and Effort appear once you open a bot chat/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /a fixed model bypasses Auto/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /Leave Model on Auto to let Prism choose a suitable model and Effort/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",

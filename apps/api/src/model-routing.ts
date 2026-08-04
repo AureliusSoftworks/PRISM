@@ -7,6 +7,22 @@ export {
   isDisabledModelChoice,
   reconcileHiddenModelIdsForCatalog,
   sanitizeHiddenModelIds,
-  resolveAutoModel,
 } from "@localai/shared";
 export type { ResolvedAutoModel } from "@localai/shared";
+
+import {
+  resolveAutoModel as resolveSharedAutoModel,
+  type ResolveAutoModelInput,
+  type ResolvedAutoModel,
+} from "@localai/shared";
+import { routingTextPriceForModel } from "./usage.ts";
+
+/** API resolver adds the same pricing catalog used by Usage reporting. */
+export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoModel {
+  return resolveSharedAutoModel({
+    ...input,
+    priceForModel:
+      input.priceForModel ??
+      ((provider, modelId) => routingTextPriceForModel(provider, modelId)),
+  });
+}

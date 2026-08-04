@@ -123,6 +123,7 @@ export interface ImageAssetCleanupRecoveryRestoreResult {
 interface ImageAssetCleanupGraph {
   preview: ImageAssetCleanupPreview;
   candidateRows: Map<string, ImageAssetRow & { local_rel_path: string }>;
+  references: Map<string, Set<string>>;
 }
 
 export interface ImageAssetCleanupFileOperations {
@@ -611,7 +612,26 @@ function buildImageAssetCleanupGraph(
       "Images generated within the last 15 minutes",
     ],
   };
-  return { preview, candidateRows };
+  return { preview, candidateRows, references };
+}
+
+/**
+ * Returns the same conservative usage evidence used by smart cleanup. Catalog
+ * deletion calls this instead of maintaining a second, drift-prone reference
+ * scanner.
+ */
+export function imageAssetUsageLabels(
+  db: DatabaseSync,
+  userId: string,
+  imageIds: readonly string[],
+): Map<string, string[]> {
+  const references = buildImageAssetCleanupGraph(db, userId).references;
+  return new Map(
+    imageIds.map((imageId) => [
+      imageId,
+      [...(references.get(imageId) ?? [])].sort(),
+    ]),
+  );
 }
 
 export function previewUnreferencedImageAssets(
@@ -776,6 +796,80 @@ function recoveryBatchById(
   );
 }
 
+function restoreRecoveryImageAssetSetMetadata(
+  db: DatabaseSync,
+  userId: string,
+  batch: GeneratedImageRecoveryBatch,
+): void {
+  const rawSet = batch.journal.imageAssetSet;
+  const rawItems = batch.journal.imageAssetSetItems;
+  if (rawSet === undefined && rawItems === undefined) return;
+  if (
+    !rawSet ||
+    typeof rawSet !== "object" ||
+    Array.isArray(rawSet) ||
+    !Array.isArray(rawItems)
+  ) {
+    throw new ImageAssetCleanupError(
+      "unsafe_selection",
+      "This recovery batch has invalid asset-set metadata.",
+    );
+  }
+  const set = rawSet as Record<string, unknown>;
+  const requiredFields = [
+    "id",
+    "user_id",
+    "kind",
+    "status",
+    "title",
+    "source",
+    "source_context_json",
+    "automatic_tags_json",
+    "player_tags_json",
+    "created_at",
+    "updated_at",
+  ] as const;
+  if (
+    requiredFields.some((field) => typeof set[field] !== "string") ||
+    set.user_id !== userId
+  ) {
+    throw new ImageAssetCleanupError(
+      "unsafe_selection",
+      "This recovery batch does not belong to this asset library.",
+    );
+  }
+  db.prepare(
+    `INSERT INTO image_asset_sets
+       (id, user_id, kind, status, title, source, source_context_json,
+        automatic_tags_json, player_tags_json, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  ).run(...requiredFields.map((field) => set[field] as string));
+  const insertItem = db.prepare(
+    `INSERT INTO image_asset_set_items (set_id, image_id, role, ordinal)
+     VALUES (?, ?, ?, ?)`,
+  );
+  for (const rawItem of rawItems) {
+    if (!rawItem || typeof rawItem !== "object" || Array.isArray(rawItem)) {
+      throw new ImageAssetCleanupError(
+        "unsafe_selection",
+        "This recovery batch has invalid asset membership.",
+      );
+    }
+    const item = rawItem as Record<string, unknown>;
+    if (
+      typeof item.image_id !== "string" ||
+      typeof item.role !== "string" ||
+      (typeof item.ordinal !== "number" && typeof item.ordinal !== "bigint")
+    ) {
+      throw new ImageAssetCleanupError(
+        "unsafe_selection",
+        "This recovery batch has invalid asset membership.",
+      );
+    }
+    insertItem.run(set.id as string, item.image_id, item.role, item.ordinal);
+  }
+}
+
 export function restoreImageAssetCleanupRecovery(
   db: DatabaseSync,
   userId: string,
@@ -838,6 +932,7 @@ export function restoreImageAssetCleanupRecovery(
         row.created_at,
       );
     }
+    restoreRecoveryImageAssetSetMetadata(db, userId, batch);
     restoreQuarantinedGeneratedImageFiles(batch.quarantine, {
       keepManifest: true,
     });

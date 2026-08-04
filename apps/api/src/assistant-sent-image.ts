@@ -500,7 +500,9 @@ export async function runAssistantSentImageGeneration(args: {
   const resolvedOpenAiImageModel = onlineImageDisabled
     ? ""
     : preferredOpenAiImageModel;
-  const lenientFbRaw = args.prefs.lenientLocalImageFallbackModel?.trim() ?? "";
+  const lenientFbRaw =
+    args.prefs.lenientLocalImageFallbackModel?.trim() ||
+    resolvedLocalImageModel;
   const lenientFb = isDisabledModelChoice(lenientFbRaw) ? "" : lenientFbRaw;
 
   const imageId = randomId(12);

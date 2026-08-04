@@ -16,17 +16,17 @@ const tutorialSource = readFileSync(
 );
 
 describe("Chat voice policy", () => {
-  it("forces transcript Chat to mute without changing the configured mode", () => {
-    assert.equal(chatPresentationForcesVoiceMute("chat", true), true);
+  it("preserves the configured voice in transcript Chat", () => {
+    assert.equal(chatPresentationForcesVoiceMute("chat", true), false);
     assert.equal(
       effectiveVoiceModeForPresentation("chat", true, "english"),
-      "mute",
+      "english",
     );
     assert.equal(
       effectiveVoiceModeForPresentation("chat", true, "bottish"),
-      "mute",
+      "bottish",
     );
-    assert.match(CHAT_FORCED_MUTE_REASON, /saved Voice preference resumes/u);
+    assert.match(CHAT_FORCED_MUTE_REASON, /surface is locked/u);
   });
 
   it("preserves configured voices on the immersive Zen canvas", () => {
@@ -41,7 +41,7 @@ describe("Chat voice policy", () => {
     );
   });
 
-  it("identifies user-muted Zen without conflating forced-mute Chat", () => {
+  it("identifies user-muted Zen without treating transcript Chat as Zen", () => {
     assert.equal(zenPresentationIsVoiceMuted("chat", false, "mute"), true);
     assert.equal(zenPresentationIsVoiceMuted("chat", false, "english"), false);
     assert.equal(zenPresentationIsVoiceMuted("chat", true, "mute"), false);
@@ -68,7 +68,7 @@ describe("Chat voice policy", () => {
     }
   });
 
-  it("enforces Chat silence across playback, requests, replay, and chrome", () => {
+  it("keeps Chat voice plumbing available while preserving explicit Mute behavior", () => {
     assert.match(
       pageSource,
       /voiceMode:\s*effectiveVoiceModeForPresentation\(\s*view,\s*sidebarOpen,\s*normalizeVoiceMode\(settings\?\.voiceMode\)/u,
@@ -119,7 +119,11 @@ describe("Chat voice policy", () => {
     );
     assert.match(
       tutorialSource,
-      /In Zen, choosing Mute lets the live avatar step out and reveals each completed reply in a near-instant sweep\./u,
+      /In Zen, Mute also lets the live avatar step out and reveals each completed reply in a near-instant sweep\./u,
+    );
+    assert.match(
+      tutorialSource,
+      /Changing the text model or Auto never disables the Voice picker\./u,
     );
   });
 });

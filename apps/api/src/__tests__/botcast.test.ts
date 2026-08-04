@@ -47,6 +47,7 @@ import {
   botcastIdentityMirrorCanTriggerV1,
   botcastIdentityMirrorStatesV1,
   botcastIdentityShapeshiftStatesV1,
+  botcastRoutingSnapshot,
   botcastGuestClaimsSilentHostSpoke,
   botcastHostClaimsSilentGuestAnswered,
   botcastHostClosingHasFormalThanks,
@@ -90,6 +91,7 @@ import {
   readBotcastShowIntroAudio,
   readBotcastShowOutdentAudio,
   recordBotcastAudioCue,
+  recordBotcastRoutingSnapshot,
   recordBotcastSoundboardCue,
   resolveBotcastProducerGuestName,
   runSignalLocalTurn,
@@ -997,7 +999,7 @@ describe("Botcast persistence and isolation", () => {
       name: providerName,
       async generateResponse(_messages, options) {
         attempts.push({ provider: providerName, model: options.model });
-        return providerName === "local"
+        return options.model === "gemma3:latest"
           ? JSON.stringify({
               topic: "What Do You Want?",
               producerBrief:
@@ -1039,7 +1041,7 @@ describe("Botcast persistence and isolation", () => {
           autoFallbackChain: {
             v: 1,
             fallbacks: [
-              { provider: "openai", model: "gpt-5.6-terra" },
+              { provider: "local", model: "qwen3.5:9b" },
             ],
           },
         },
@@ -1047,7 +1049,7 @@ describe("Botcast persistence and isolation", () => {
 
       assert.deepEqual(attempts, [
         { provider: "local", model: "gemma3:latest" },
-        { provider: "openai", model: "gpt-5.6-terra" },
+        { provider: "local", model: "qwen3.5:9b" },
       ]);
       assert.deepEqual(booking, {
         topic: "The Price of Tiny Ambitions",
@@ -10020,7 +10022,7 @@ describe("Botcast persistence and isolation", () => {
       name: providerName,
       async generateResponse(_messages, options) {
         attempts.push({ provider: providerName, model: options.model });
-        return providerName === "local"
+        return options.model === "local-primary"
           ? '{"topic":"What Should You Build?","producerBrief":"Ask the host about tools."}'
           : '{"topic":"The Cost of Better Tools","producerComments":"Open with the practical tradeoff, then follow what the guest actually claims."}';
       },
@@ -10039,12 +10041,12 @@ describe("Botcast persistence and isolation", () => {
           preferredProvider: "local",
           responseMode: "auto",
           providerFactory,
-          autoFallbackChain: { v: 1, fallbacks: [{ provider: "openai", model: "gpt-5.6-terra" }] },
+          autoFallbackChain: { v: 1, fallbacks: [{ provider: "local", model: "local-fallback" }] },
         },
       );
       assert.deepEqual(attempts, [
         { provider: "local", model: "local-primary" },
-        { provider: "openai", model: "gpt-5.6-terra" },
+        { provider: "local", model: "local-fallback" },
       ]);
       assert.equal(booking.generated, true);
       assert.equal("topic" in booking ? booking.topic : "", "The Cost of Better Tools");
@@ -11368,8 +11370,8 @@ describe("Botcast persistence and isolation", () => {
     const db = fixture();
     const providerFactory: typeof selectProvider = (providerName) => ({
       name: providerName,
-      async generateResponse() {
-        if (providerName === "local") {
+      async generateResponse(_messages, options) {
+        if (options.model === "gemma3:latest") {
           throw new Error("Local auxiliary model unavailable");
         }
         return '{"name":"The Recovered Prism"}';
@@ -11394,15 +11396,15 @@ describe("Botcast persistence and isolation", () => {
           autoFallbackChain: {
             v: 1,
             fallbacks: [
-              { provider: "anthropic", model: "claude-haiku-4-5" },
+              { provider: "local", model: "qwen3.5:9b" },
             ],
           },
           providerFactory,
         },
       );
       assert.equal(result.generated, true);
-      assert.equal(result.provider, "anthropic");
-      assert.equal(result.model, "claude-haiku-4-5");
+      assert.equal(result.provider, "local");
+      assert.equal(result.model, "qwen3.5:9b");
       assert.equal(getBotcastShow(db, "user-1", show.id).name, show.name);
     } finally {
       db.close();
@@ -11512,7 +11514,7 @@ describe("Botcast persistence and isolation", () => {
         name: providerName,
         async generateResponse(_messages, options) {
           attempts.push({ provider: providerName, model: options.model });
-          if (providerName === "local") {
+          if (options.model === "gemma3:latest") {
             throw new Error("auxiliary model unavailable");
           }
           return '{"name":"The Recovered Frequency"}';
@@ -11527,7 +11529,7 @@ describe("Botcast persistence and isolation", () => {
         prismDefaultLlmModel: "gemma3:latest",
         autoFallbackChain: {
           v: 1,
-          fallbacks: [{ provider: "anthropic", model: "claude-haiku-4-5" }],
+          fallbacks: [{ provider: "local", model: "qwen3.5:9b" }],
         },
         providerFactory,
       });
@@ -11536,7 +11538,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(result.show.name, "The Recovered Frequency");
       assert.deepEqual(attempts, [
         { provider: "local", model: "gemma3:latest" },
-        { provider: "anthropic", model: "claude-haiku-4-5" },
+        { provider: "local", model: "qwen3.5:9b" },
       ]);
     } finally {
       db.close();
@@ -12994,7 +12996,93 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("locks one provider and model to every turn in an episode", async () => {
+  it("freezes Signal Auto routing and records the fresh per-turn decision", async () => {
+    const db = fixture();
+    const captures: GenerateOptions[] = [];
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse(_messages, options) {
+        captures.push(options);
+        return "Welcome to Signal Test. I'm Mara Vale, joined by Ivo Stone to examine adaptive routing. Ivo, what changes first?";
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    try {
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "Signal Test",
+      });
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Adaptive routing",
+        preferredProvider: "local",
+        modelOverride: "initial-local",
+      });
+      const frozen = recordBotcastRoutingSnapshot(
+        db,
+        "user-1",
+        created.id,
+        {
+          v: 1,
+          lane: "local",
+          modelSelectionKind: "auto",
+          candidateAllowlist: [
+            { provider: "local", model: "initial-local" },
+            { provider: "local", model: "fresh-local" },
+          ],
+          fallbackChain: [
+            { provider: "local", model: "backup-local" },
+          ],
+          policyVersion: 1,
+        },
+      );
+      const autoRoute = {
+        v: 1 as const,
+        lane: "local" as const,
+        provider: "local" as const,
+        model: "fresh-local",
+        reasoningEffort: "low" as const,
+        reasonCodes: ["surface_complexity" as const],
+      };
+      const result = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        frozen.id,
+        {},
+        {
+          preferredProvider: "local",
+          providerFactory: () => provider,
+          contextualModel: "fresh-local",
+          contextualReasoningEffort: "low",
+          autoRouteDecision: autoRoute,
+        },
+      );
+      assert.equal(captures[0]?.model, "fresh-local");
+      assert.equal(captures[0]?.reasoningEffort, "low");
+      assert.deepEqual(botcastRoutingSnapshot(result.episode), {
+        v: 1,
+        lane: "local",
+        modelSelectionKind: "auto",
+        candidateAllowlist: [
+          { provider: "local", model: "initial-local" },
+          { provider: "local", model: "fresh-local" },
+        ],
+        fallbackChain: [{ provider: "local", model: "backup-local" }],
+        policyVersion: 1,
+      });
+      assert.deepEqual(
+        result.episode.events.find((event) => event.kind === "utterance")
+          ?.payload.autoRoute,
+        autoRoute,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("locks one provider and model to every turn in a fixed legacy episode", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const models: Array<string | undefined> = [];
@@ -13592,7 +13680,7 @@ describe("Botcast persistence and isolation", () => {
       name: providerName,
       async generateResponse(_messages, options) {
         attempts.push({ provider: providerName, model: options.model });
-        if (providerName === "local") {
+        if (options.model === "primary-local") {
           throw new Error("Primary model unavailable");
         }
         return "Recovered with a specific answer.";
@@ -13622,8 +13710,7 @@ describe("Botcast persistence and isolation", () => {
         autoFallbackChain: {
           v: 1,
           fallbacks: [
-            { provider: "openai", model: "gpt-signal-fallback" },
-            { provider: "anthropic", model: "claude-signal-fallback" },
+            { provider: "local", model: "qwen-signal-fallback" },
           ],
         },
         },
@@ -13631,21 +13718,21 @@ describe("Botcast persistence and isolation", () => {
 
       assert.deepEqual(attempts, [
         { provider: "local", model: "primary-local" },
-        { provider: "openai", model: "gpt-signal-fallback" },
+        { provider: "local", model: "qwen-signal-fallback" },
       ]);
       assert.equal(result.episode.provider, "local");
       assert.equal(result.episode.model, "primary-local");
-      assert.equal(result.episode.responseMode, "auto");
+      assert.equal(result.episode.responseMode, "local");
       const utterance = result.episode.events.find(
         (event) => event.kind === "utterance",
       );
-      assert.equal(utterance?.payload.provider, "openai");
-      assert.equal(utterance?.payload.model, "gpt-signal-fallback");
-      assert.equal(utterance?.payload.responseMode, "auto");
+      assert.equal(utterance?.payload.provider, "local");
+      assert.equal(utterance?.payload.model, "qwen-signal-fallback");
+      assert.equal(utterance?.payload.responseMode, "local");
       assert.equal(
         (utterance?.payload.autoRecovery as { finalProvider?: unknown })
           ?.finalProvider,
-        "openai",
+        "local",
       );
     } finally {
       db.close();
@@ -13664,13 +13751,14 @@ describe("Botcast persistence and isolation", () => {
         if (callCount === 1) {
           return "Welcome to Signal Test. I'm Mara Vale, joined by Ivo Stone to examine whether spectacle can preserve agency. Ivo, where should we begin?";
         }
-        if (providerName === "openai") {
+        if (
+          providerName === "openai" &&
+          options.model !== "gpt-signal-recovery"
+        ) {
           return "I cannot help with that request.";
         }
-        if (providerName === "local") {
-          return options.model === "local-signal-recovery"
-            ? "Begin with one physical choice the overlooked person controls, then make the audience answer that choice directly."
-            : "It is the medium's convention, not an affectation.";
+        if (options.model === "gpt-signal-recovery") {
+          return "Begin with one physical choice the overlooked person controls, then make the audience answer that choice directly.";
         }
         return "I do not accept the premise as stated, but I will answer the part that matters.";
       },
@@ -13696,14 +13784,14 @@ describe("Botcast persistence and isolation", () => {
         autoFallbackChain: {
           v: 1 as const,
           fallbacks: [
-            { provider: "local" as const, model: "local-signal-fallback" },
+            { provider: "openai" as const, model: "gpt-signal-fallback" },
             {
               provider: "anthropic" as const,
               model: "claude-signal-fallback",
             },
             {
-              provider: "local" as const,
-              model: "local-signal-recovery",
+              provider: "openai" as const,
+              model: "gpt-signal-recovery",
             },
           ],
         },
@@ -13730,9 +13818,9 @@ describe("Botcast persistence and isolation", () => {
       );
       assert.deepEqual(attempts.slice(1), [
         { provider: "openai", model: "gpt-signal-primary" },
-        { provider: "local", model: "local-signal-fallback" },
+        { provider: "openai", model: "gpt-signal-fallback" },
         { provider: "anthropic", model: "claude-signal-fallback" },
-        { provider: "local", model: "local-signal-recovery" },
+        { provider: "openai", model: "gpt-signal-recovery" },
       ]);
       const utterance = result.episode.events
         .filter((event) => event.kind === "utterance")
@@ -13751,16 +13839,16 @@ describe("Botcast persistence and isolation", () => {
         })),
         [
           { provider: "openai", outcome: "failed", reason: "refusal" },
-          { provider: "local", outcome: "failed", reason: "invalid_output" },
+          { provider: "openai", outcome: "failed", reason: "refusal" },
           {
             provider: "anthropic",
             outcome: "failed",
             reason: "invalid_output",
           },
-          { provider: "local", outcome: "succeeded", reason: undefined },
+          { provider: "openai", outcome: "succeeded", reason: undefined },
         ],
       );
-      assert.equal(recovery?.finalProvider, "local");
+      assert.equal(recovery?.finalProvider, "openai");
     } finally {
       db.close();
     }
@@ -18094,7 +18182,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(snapshot.botcast?.episodes[0]?.durationMinutes, 12);
       assert.equal(snapshot.botcast?.episodes[0]?.provider, "openai");
       assert.equal(snapshot.botcast?.episodes[0]?.model, "gpt-archive");
-      assert.equal(snapshot.botcast?.episodes[0]?.responseMode, "auto");
+      assert.equal(snapshot.botcast?.episodes[0]?.responseMode, "online");
       assert.equal(snapshot.botcast?.episodes[0]?.personaReview?.rating, 2.9);
       assert.equal(snapshot.botcast?.shows[0]?.introAudio?.model, "music_v2");
       assert.equal(
@@ -18178,7 +18266,7 @@ describe("Botcast persistence and isolation", () => {
       assert.equal(restored.topic, "What survives an edit");
       assert.equal(restored.provider, "openai");
       assert.equal(restored.model, "gpt-archive");
-      assert.equal(restored.responseMode, "auto");
+      assert.equal(restored.responseMode, "online");
       assert.equal(restored.durationMinutes, 12);
       assert.deepEqual(restored.personaReview, {
         reviewerBotId: "archive-critic",

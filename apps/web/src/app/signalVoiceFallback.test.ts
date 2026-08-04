@@ -4,8 +4,11 @@ import {
   requestSignalVoiceWithFallback,
   SIGNAL_ONLINE_VOICE_TIMEOUT_MAX_MS,
   SIGNAL_ONLINE_VOICE_TIMEOUT_MS,
+  SIGNAL_BUILTIN_VOICE_TIMEOUT_MS,
+  SIGNAL_VOICE_START_SETTLE_GRACE_MS,
   signalOnlineVoiceTimeoutMs,
   signalPreferredVoiceClipReady,
+  signalVoiceStartTimeoutMs,
 } from "./signalVoiceFallback.ts";
 
 test("Signal keeps a healthy preferred voice without invoking fallback", async () => {
@@ -100,6 +103,41 @@ test("Signal gives long closing lines more preferred-voice patience", () => {
   assert.equal(
     signalOnlineVoiceTimeoutMs(10_000),
     SIGNAL_ONLINE_VOICE_TIMEOUT_MAX_MS,
+  );
+});
+
+test("Signal voice startup waits for the bounded built-in synthesis budget", () => {
+  assert.equal(
+    signalVoiceStartTimeoutMs({
+      textLength: 120,
+      voiceMode: "english",
+      englishVoiceEngine: "builtin",
+    }),
+    SIGNAL_BUILTIN_VOICE_TIMEOUT_MS + SIGNAL_VOICE_START_SETTLE_GRACE_MS,
+  );
+});
+
+test("Signal voice startup includes Premium timeout before built-in recovery", () => {
+  assert.equal(
+    signalVoiceStartTimeoutMs({
+      textLength: 120,
+      voiceMode: "english",
+      englishVoiceEngine: "elevenlabs",
+    }),
+    signalOnlineVoiceTimeoutMs(120) +
+      SIGNAL_BUILTIN_VOICE_TIMEOUT_MS +
+      SIGNAL_VOICE_START_SETTLE_GRACE_MS,
+  );
+});
+
+test("Signal procedural voices keep a short bounded startup watchdog", () => {
+  assert.equal(
+    signalVoiceStartTimeoutMs({
+      textLength: 120,
+      voiceMode: "bottish",
+      englishVoiceEngine: "builtin",
+    }),
+    SIGNAL_ONLINE_VOICE_TIMEOUT_MS,
   );
 });
 

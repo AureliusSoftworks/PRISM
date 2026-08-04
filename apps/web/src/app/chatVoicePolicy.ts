@@ -3,15 +3,16 @@ import type { VoiceMode } from "@localai/shared";
 import type { PrismSurfaceView } from "./viewRouting";
 
 export const CHAT_FORCED_MUTE_REASON =
-  "Chat is always silent. Your saved Voice preference resumes in other modes.";
+  "Voice is temporarily unavailable while this surface is locked.";
 
 export function chatPresentationForcesVoiceMute(
-  view: PrismSurfaceView,
-  sidebarOpen: boolean,
+  _view: PrismSurfaceView,
+  _sidebarOpen: boolean,
 ): boolean {
-  // Chat and Zen share the `chat` route. The open conversation rail selects
-  // the transcript-style Chat presentation; the rail-free canvas is Zen.
-  return view === "chat" && sidebarOpen;
+  // Chat and Zen share the `chat` route, but both honor the account Voice
+  // choice. LOCAL privacy disables only Premium; it must not lock Mute,
+  // English, Babble, or Bottish.
+  return false;
 }
 
 export function effectiveVoiceModeForPresentation(

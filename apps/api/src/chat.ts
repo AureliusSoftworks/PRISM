@@ -72,6 +72,7 @@ import type {
   WebSearchPayload,
   WebSearchRequestPayload,
   AutoFallbackChainV1,
+  AutoRouteDecisionV1,
   AutoRecoveryTraceV1,
   BotFalseNameStateV1,
   BotIdentityShapeshiftStateV1,
@@ -155,6 +156,7 @@ import {
 } from "@localai/shared";
 import {
   AutoFallbackExhaustedError,
+  autoFallbackReasoningEffort,
   runAutoFallbackChain,
   validateAutoFallbackText,
 } from "./auto-fallback.ts";
@@ -1728,11 +1730,14 @@ async function generateChatResponse(args: {
     model: string,
     botOverrides: GenerateOptions | undefined,
     signal: AbortSignal | undefined,
+    forcedReasoningEffort?: ReasoningEffort,
   ): Promise<{
     messages: ProviderMessage[];
     overrides: GenerateOptions | undefined;
   }> => {
-    const savedEffort = args.resolveReasoningEffort?.(provider.name, model);
+    const savedEffort =
+      forcedReasoningEffort ??
+      args.resolveReasoningEffort?.(provider.name, model);
     const effort = normalizeReasoningEffort(
       savedEffort ?? botOverrides?.reasoningEffort,
     );
@@ -1795,15 +1800,10 @@ async function generateChatResponse(args: {
     ...(planningTrace?.debug ? { psychicDebug: planningTrace.debug } : {}),
   });
 
-  const resolvedChain = args.responseMode === "auto"
-    ? autoFallbackResolvedChain(
-        { provider: args.provider.name, model: primaryModel },
-        args.autoFallbackChain
-      )
-    : null;
-  if (args.responseMode === "auto" && !resolvedChain) {
-    throw new AutoFallbackExhaustedError([]);
-  }
+  const resolvedChain = autoFallbackResolvedChain(
+    { provider: args.provider.name, model: primaryModel },
+    args.autoFallbackChain,
+  );
   if (resolvedChain) {
     const providerFactory = args.providerFactory ?? selectProvider;
     const result = await runAutoFallbackChain({
@@ -1823,11 +1823,17 @@ async function generateChatResponse(args: {
                 args.secondaryOllamaHost,
                 args.anthropicApiKey
               );
+          const fallbackEffort = autoFallbackReasoningEffort(
+            index,
+            args.resolveReasoningEffort?.(attempt.provider, attempt.model) ??
+              args.botOverrides?.reasoningEffort,
+          );
           const prepared = await prepareAttempt(
             provider,
             attempt.model,
             args.botOverrides,
             signal,
+            fallbackEffort ?? undefined,
           );
           return provider.generateResponse(prepared.messages, {
             ...prepared.overrides,
@@ -1836,10 +1842,13 @@ async function generateChatResponse(args: {
           });
         },
       })),
-      perAttemptTimeoutMs: (attempt) =>
+      perAttemptTimeoutMs: (attempt, index) =>
         reasoningGenerationBudgetMs(
-          args.resolveReasoningEffort?.(attempt.provider, attempt.model) ??
-            args.botOverrides?.reasoningEffort,
+          autoFallbackReasoningEffort(
+            index,
+            args.resolveReasoningEffort?.(attempt.provider, attempt.model) ??
+              args.botOverrides?.reasoningEffort,
+          ),
           { provider: attempt.provider, modelId: attempt.model },
         ),
       totalTimeoutMs: REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
@@ -2829,6 +2838,8 @@ export interface UserChatSettings {
   /** Auto is a Zen-only response mode. Traditional Chat ignores it. */
   responseMode?: ResponseMode;
   autoFallbackChain?: AutoFallbackChainV1 | null;
+  /** Contextual route selected before prompt assembly for this turn. */
+  autoRouteDecision?: AutoRouteDecisionV1;
   /** Resolves the saved effort independently for every concrete AUTO attempt. */
   resolveReasoningEffort?: (
     provider: ProviderName,
@@ -5646,6 +5657,7 @@ function hydrateMessages(
         ? { coffeeAmbientAction: assembled.coffeeAmbientAction }
         : {}),
       ...(assembled.autoRecovery ? { autoRecovery: assembled.autoRecovery } : {}),
+      ...(assembled.autoRoute ? { autoRoute: assembled.autoRoute } : {}),
       ...(assembled.botPowerExactResponse
         ? { botPowerExactResponse: assembled.botPowerExactResponse }
         : {}),
@@ -9327,6 +9339,7 @@ export async function processChatMessage(
 	    zenTurn: zenTurnMarker,
 	    webSearch: webSearchForTurn,
 	    autoRecovery,
+	    autoRoute: settings.autoRouteDecision,
 	    botPowerExactResponse: botPowerQuietIgnoredTurn
 	      ? "intermittent_mute"
         : botPowerEchoEnforcedTurn

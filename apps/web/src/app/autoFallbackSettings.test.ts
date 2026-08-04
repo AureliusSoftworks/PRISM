@@ -37,25 +37,26 @@ describe("Auto fallback settings", () => {
     );
   });
 
-  it("renders an ordered 1–5 slot Settings chain with add and remove controls", () => {
-    assert.match(pageSource, /autoFallbackEntries\.map\(\(fallback, index\)/);
+  it("renders separate ordered LOCAL and ONLINE fallback chains", () => {
+    assert.match(pageSource, /fallbackRowsForLane/);
+    assert.match(pageSource, /\["local", "online"\] as const/);
     assert.match(pageSource, /AUTO_FALLBACK_CHAIN_MAX_FALLBACK_COUNT/);
     assert.match(pageSource, /autoFallbackChainWithAddedEntry/);
     assert.match(pageSource, /autoFallbackChainWithoutEntry/);
-    assert.match(pageSource, /\+ Add fallback/);
+    assert.match(pageSource, /\+ Add \$\{laneLabel\} fallback/);
   });
 
-  it("keeps Auto pickers active with every model and routes a selection as Primary", () => {
+  it("keeps Auto inside the selected lane and lets fixed models override it", () => {
     assert.match(
       pageSource,
       /modeAwareModelOptions\(\{[\s\S]{0,260}local: chatModelOptionsForProvider\(catalog, settings, "local"\)[\s\S]{0,320}online: onlineModelOptionsForPicker\(catalog, settings\)[\s\S]{0,80}responseMode/u,
     );
     assert.match(
       pageSource,
-      /provider=\{[\s\S]{0,80}responseMode === "auto" \? "all"/u,
+      /provider=\{isLocal \? "local" : "online"\}/u,
     );
     assert.match(pageSource, /applyModelChoiceForResponseMode\(\{/u);
-    assert.match(pageSource, /Primary model for AUTO replies/u);
+    assert.match(pageSource, /Effort chosen automatically/u);
   });
 
   it("builds, extends, and trims a customizable fallback chain", () => {
@@ -103,13 +104,11 @@ describe("Auto fallback settings", () => {
     );
   });
 
-  it("resolves Account default to the saved model the server will use", () => {
+  it("ignores retired account defaults when resolving contextual Auto", () => {
     assert.deepEqual(
       autoFallbackPrimaryForSelection({
         provider: "openai",
         modelChoice: "auto",
-        preferredLocalModel: "qwen3:8b",
-        preferredOnlineModel: "claude-haiku-4-5",
         hiddenModelIds: [],
         catalog,
       }),
@@ -117,13 +116,11 @@ describe("Auto fallback settings", () => {
     );
   });
 
-  it("keeps an explicit surface model ahead of the account default", () => {
+  it("keeps an explicit surface model ahead of contextual Auto", () => {
     assert.deepEqual(
       autoFallbackPrimaryForSelection({
         provider: "openai",
         modelChoice: "gpt-4o-mini",
-        preferredLocalModel: "qwen3:8b",
-        preferredOnlineModel: "claude-haiku-4-5",
         hiddenModelIds: [],
         catalog,
       }),
@@ -131,17 +128,15 @@ describe("Auto fallback settings", () => {
     );
   });
 
-  it("does not treat a disabled primary lane as Auto-ready", () => {
-    assert.equal(
+  it("normalizes a legacy disabled text selection to Auto", () => {
+    assert.deepEqual(
       autoFallbackPrimaryForSelection({
         provider: "local",
         modelChoice: "disabled",
-        preferredLocalModel: "qwen3:8b",
-        preferredOnlineModel: "gpt-4o-mini",
         hiddenModelIds: [],
         catalog,
       }),
-      null,
+      local,
     );
   });
 
@@ -156,7 +151,7 @@ describe("Auto fallback settings", () => {
         chain,
         runnable: [local, openai, anthropic],
       }),
-      true,
+      false,
     );
     assert.equal(
       autoFallbackAvailableForPrimary({
@@ -176,20 +171,20 @@ describe("Auto fallback settings", () => {
     );
   });
 
-  it("allows entering AUTO when the current primary duplicates its runnable fallback", () => {
+  it("does not require a fallback chain in order to use contextual Auto", () => {
     assert.equal(
       autoFallbackModeSelectable({
         chain: { v: 1, fallbacks: [local] },
         runnable: [local, openai],
       }),
-      true,
+      false,
     );
     assert.deepEqual(
       autoFallbackSelectablePrimary({
         chain: { v: 1, fallbacks: [local] },
         runnable: [local, openai],
       }),
-      openai,
+      null,
     );
     assert.equal(
       autoFallbackAvailableForPrimary({
@@ -215,7 +210,7 @@ describe("Auto fallback settings", () => {
     );
   });
 
-  it("keeps Auto active by skipping a fallback that duplicates the contextual primary", () => {
+  it("sends the binary privacy lane independently of contextual Auto", () => {
     const chain = {
       v: 1 as const,
       fallbacks: [openai, anthropic] as [typeof openai, typeof anthropic],
@@ -229,7 +224,7 @@ describe("Auto fallback settings", () => {
         chain,
         runnable,
       }),
-      "auto",
+      "local",
     );
     assert.equal(
       autoFallbackResponseModeForSend({
@@ -238,7 +233,7 @@ describe("Auto fallback settings", () => {
         chain,
         runnable,
       }),
-      "auto",
+      "online",
     );
   });
 });

@@ -3,6 +3,11 @@
  * what the server actually runs.
  */
 
+import {
+  resolveModelReasoningEffortCapability,
+  type ModelReasoningEffortPreference,
+} from "./reasoningEffort.ts";
+
 export const REQUIRED_LOCAL_MODELS = {
   chat: "llama3.2",
   embedding: "nomic-embed-text",
@@ -13,6 +18,106 @@ export const DISABLED_MODEL_CHOICE = "disabled";
 const REQUIRED_VISIBLE_LOCAL_MODEL_ID_SET = new Set<string>([REQUIRED_PRIMARY_LOCAL_MODEL_ID]);
 
 export type AutoModelProvider = "local" | "openai" | "anthropic";
+export type ResponseLane = "local" | "online";
+
+export const AUTO_MODEL_ROUTING_POLICY_VERSION = 1 as const;
+
+export type ModelSelectionV1 =
+  | { kind: "auto" }
+  | { kind: "fixed"; provider: AutoModelProvider; modelId: string };
+
+export type AutoRouteReasonCode =
+  | "light_request"
+  | "standard_request"
+  | "deep_request"
+  | "structured_output"
+  | "tool_use"
+  | "research"
+  | "long_context"
+  | "high_stakes"
+  | "surface_complexity"
+  | "known_cost_preferred"
+  | "only_viable_candidate";
+
+export interface AutoRoutingContextV1 {
+  surface?: string;
+  inputText?: string;
+  inputTokens?: number;
+  outputTokens?: number;
+  structuredOutput?: boolean;
+  toolUse?: boolean;
+  research?: boolean;
+  highStakes?: boolean;
+  simulatedEffortEnabled?: boolean;
+}
+
+export interface AutoRouteDecisionV1 {
+  v: typeof AUTO_MODEL_ROUTING_POLICY_VERSION;
+  lane: ResponseLane;
+  provider: AutoModelProvider;
+  model: string;
+  reasoningEffort: ModelReasoningEffortPreference;
+  reasonCodes: AutoRouteReasonCode[];
+}
+
+export function normalizeAutoRouteDecisionV1(
+  value: unknown,
+): AutoRouteDecisionV1 | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const record = value as Record<string, unknown>;
+  if (record.v !== AUTO_MODEL_ROUTING_POLICY_VERSION) return undefined;
+  if (record.lane !== "local" && record.lane !== "online") return undefined;
+  if (
+    record.provider !== "local" &&
+    record.provider !== "openai" &&
+    record.provider !== "anthropic"
+  ) {
+    return undefined;
+  }
+  const model =
+    typeof record.model === "string" ? record.model.trim().slice(0, 240) : "";
+  if (!model) return undefined;
+  const reasoningEffort =
+    typeof record.reasoningEffort === "string" &&
+    ["none", "minimal", "low", "medium", "high"].includes(
+      record.reasoningEffort,
+    )
+      ? (record.reasoningEffort as ModelReasoningEffortPreference)
+      : null;
+  if (!reasoningEffort || !Array.isArray(record.reasonCodes)) return undefined;
+  const allowedReasons = new Set<AutoRouteReasonCode>([
+    "light_request",
+    "standard_request",
+    "deep_request",
+    "structured_output",
+    "tool_use",
+    "research",
+    "long_context",
+    "high_stakes",
+    "surface_complexity",
+    "known_cost_preferred",
+    "only_viable_candidate",
+  ]);
+  const reasonCodes = record.reasonCodes.filter(
+    (reason): reason is AutoRouteReasonCode =>
+      typeof reason === "string" &&
+      allowedReasons.has(reason as AutoRouteReasonCode),
+  );
+  if (reasonCodes.length === 0) return undefined;
+  return {
+    v: AUTO_MODEL_ROUTING_POLICY_VERSION,
+    lane: record.lane,
+    provider: record.provider,
+    model,
+    reasoningEffort,
+    reasonCodes: Array.from(new Set(reasonCodes)),
+  };
+}
+
+export interface AutoModelPriceV1 {
+  inputUsdPerMillion: number;
+  outputUsdPerMillion: number;
+}
 
 export const MODEL_VISIBILITY_DEFAULTS_VERSION = 5;
 
@@ -24,16 +129,24 @@ export interface CatalogShapeForAuto {
 
 export interface ResolveAutoModelInput {
   provider: AutoModelProvider;
+  lane?: ResponseLane;
   explicitModelOverride?: string | null;
+  /** @deprecated Account defaults no longer participate in contextual Auto. */
   preferredModel?: string | null;
   hiddenModelIds: string[];
   catalog: CatalogShapeForAuto;
+  routingContext?: AutoRoutingContextV1;
+  priceForModel?: (
+    provider: AutoModelProvider,
+    modelId: string,
+  ) => AutoModelPriceV1 | null;
 }
 
 export interface ResolvedAutoModel {
   provider: AutoModelProvider;
   model: string;
   usedRequiredLocalFallback: boolean;
+  autoRoute?: AutoRouteDecisionV1;
 }
 
 export interface ModelForDefaultVisibility {
@@ -152,13 +265,17 @@ export function reconcileHiddenModelIdsForCatalog(
   );
 }
 
-function providerCatalogIds(catalog: CatalogShapeForAuto, provider: AutoModelProvider): string[] {
-  if (provider === "local") {
-    return catalog.local.map((model) => model.id);
+function laneCatalogModels(
+  catalog: CatalogShapeForAuto,
+  lane: ResponseLane,
+): Array<{ id: string; provider: AutoModelProvider }> {
+  if (lane === "local") {
+    return catalog.local.map((model) => ({ id: model.id, provider: "local" }));
   }
-  return catalog.online
-    .filter((model) => (model.provider ?? "openai") === provider)
-    .map((model) => model.id);
+  return catalog.online.map((model) => ({
+    id: model.id,
+    provider: model.provider === "anthropic" ? "anthropic" : "openai",
+  }));
 }
 
 function inferOnlineProviderFromModelId(modelId: string): Exclude<AutoModelProvider, "local"> | null {
@@ -220,33 +337,242 @@ function firstVisibleRoutableModel(
   return null;
 }
 
+const ROUTING_EFFORT_ORDER = [
+  "none",
+  "minimal",
+  "low",
+  "medium",
+  "high",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+
+function estimatedInputTokens(context: AutoRoutingContextV1 | undefined): number {
+  if (typeof context?.inputTokens === "number" && Number.isFinite(context.inputTokens)) {
+    return Math.max(0, Math.round(context.inputTokens));
+  }
+  return Math.ceil((context?.inputText?.trim().length ?? 0) / 4);
+}
+
+function routingComplexity(context: AutoRoutingContextV1 | undefined): {
+  score: number;
+  reasons: AutoRouteReasonCode[];
+} {
+  let score = 0;
+  const reasons: AutoRouteReasonCode[] = [];
+  const inputTokens = estimatedInputTokens(context);
+  if (inputTokens >= 8_000) {
+    score += 2;
+    reasons.push("long_context");
+  } else if (inputTokens >= 2_000) {
+    score += 1;
+    reasons.push("long_context");
+  }
+  if (context?.structuredOutput) {
+    score += 1;
+    reasons.push("structured_output");
+  }
+  if (context?.toolUse) {
+    score += 1;
+    reasons.push("tool_use");
+  }
+  if (context?.research) {
+    score += 2;
+    reasons.push("research");
+  }
+  if (context?.highStakes) {
+    score += 2;
+    reasons.push("high_stakes");
+  }
+  if (/^(?:debate|signal|story|slate|continuity)$/u.test(context?.surface ?? "")) {
+    score += 1;
+    reasons.push("surface_complexity");
+  }
+  reasons.unshift(score <= 0 ? "light_request" : score <= 2 ? "standard_request" : "deep_request");
+  return { score, reasons };
+}
+
+function modelSizeBillions(modelId: string): number | null {
+  const normalized = modelId.trim().toLowerCase();
+  const match = normalized.match(/(?:^|[-_:])([0-9]+(?:\.[0-9]+)?)b(?:$|[-_:])/u);
+  return match ? Number(match[1]) : null;
+}
+
+function routingProfile(provider: AutoModelProvider, modelId: string): {
+  capability: number;
+  latency: number;
+  known: boolean;
+} {
+  const id = modelId.trim().toLowerCase();
+  if (provider === "local") {
+    const size = modelSizeBillions(id);
+    if (size !== null) {
+      if (size <= 4) return { capability: 1, latency: 1, known: true };
+      if (size <= 10) return { capability: 2, latency: 2, known: true };
+      if (size <= 35) return { capability: 3, latency: 3, known: true };
+      return { capability: 4, latency: 4, known: true };
+    }
+    if (/llama3\.2|gemma3|qwen/u.test(id)) {
+      return { capability: 2, latency: 2, known: true };
+    }
+    return { capability: 2, latency: 5, known: false };
+  }
+  if (/nano|haiku|4o-mini/u.test(id)) {
+    return { capability: 1, latency: 1, known: true };
+  }
+  if (/mini|luna/u.test(id)) {
+    return { capability: 2, latency: 2, known: true };
+  }
+  if (/opus|pro|sol|(?:^|-)o[345](?:-|$)/u.test(id)) {
+    return { capability: 4, latency: 4, known: true };
+  }
+  if (/sonnet|terra|gpt-5|gpt-4\.1|gpt-4o/u.test(id)) {
+    return { capability: 3, latency: 3, known: true };
+  }
+  return { capability: 2, latency: 5, known: false };
+}
+
+function clampAutoEffort(args: {
+  provider: AutoModelProvider;
+  modelId: string;
+  target: ModelReasoningEffortPreference;
+  simulatedEffortEnabled: boolean;
+}): ModelReasoningEffortPreference {
+  const capability = resolveModelReasoningEffortCapability({
+    provider: args.provider,
+    modelId: args.modelId,
+    simulatedEffortEnabled: args.simulatedEffortEnabled,
+  });
+  if (capability.mode === "unavailable" || capability.levels.length === 0) {
+    return "none";
+  }
+  const targetIndex = Math.max(
+    0,
+    Math.min(
+      ROUTING_EFFORT_ORDER.length - 1,
+      ROUTING_EFFORT_ORDER.indexOf(
+        args.target as (typeof ROUTING_EFFORT_ORDER)[number],
+      ),
+    ),
+  );
+  const supported = capability.levels.filter(
+    (level): level is (typeof ROUTING_EFFORT_ORDER)[number] =>
+      level !== "xhigh",
+  );
+  const atOrBelow = supported.filter(
+    (level) => ROUTING_EFFORT_ORDER.indexOf(level) <= targetIndex,
+  );
+  return atOrBelow.at(-1) ?? supported[0] ?? "none";
+}
+
+function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 | null {
+  const lane: ResponseLane = input.lane ?? (input.provider === "local" ? "local" : "online");
+  const hidden = new Set(sanitizeHiddenModelIds(input.hiddenModelIds));
+  const candidates = laneCatalogModels(input.catalog, lane)
+    .map((candidate) => ({ ...candidate, id: candidate.id.trim() }))
+    .filter((candidate) => candidate.id && !hidden.has(candidate.id));
+  if (candidates.length === 0) return null;
+
+  const complexity = routingComplexity(input.routingContext);
+  const capabilityFloor = complexity.score <= 0 ? 1 : complexity.score <= 2 ? 2 : complexity.score <= 4 ? 3 : 4;
+  const profiled = candidates.map((candidate) => ({
+    ...candidate,
+    profile: routingProfile(candidate.provider, candidate.id),
+  }));
+  const capable = profiled.filter((candidate) => candidate.profile.capability >= capabilityFloor);
+  const viable = capable.length > 0
+    ? capable
+    : profiled.filter(
+        (candidate) => candidate.profile.capability === Math.max(...profiled.map((entry) => entry.profile.capability)),
+      );
+  const inputTokens = estimatedInputTokens(input.routingContext);
+  const outputTokens = Math.max(1, Math.round(input.routingContext?.outputTokens ?? 800));
+  const ranked = viable
+    .map((candidate) => {
+      const price = input.priceForModel?.(candidate.provider, candidate.id) ?? null;
+      const estimatedCost = price
+        ? inputTokens * price.inputUsdPerMillion + outputTokens * price.outputUsdPerMillion
+        : candidate.provider === "local"
+          ? 0
+          : Number.MAX_SAFE_INTEGER / 4;
+      return {
+        ...candidate,
+        price,
+        score:
+          estimatedCost +
+          candidate.profile.latency * 10_000 +
+          (candidate.profile.known ? 0 : 1_000_000_000),
+      };
+    })
+    .sort((left, right) =>
+      left.score - right.score ||
+      left.provider.localeCompare(right.provider) ||
+      left.id.localeCompare(right.id),
+    );
+  const selected = ranked[0];
+  if (!selected) return null;
+  const targetEffort: ModelReasoningEffortPreference =
+    complexity.score <= 0
+      ? "none"
+      : complexity.score <= 2
+        ? "low"
+        : complexity.score <= 4
+          ? "medium"
+          : "high";
+  const reasonCodes = [...complexity.reasons];
+  if (selected.price) reasonCodes.push("known_cost_preferred");
+  if (ranked.length === 1) reasonCodes.push("only_viable_candidate");
+  return {
+    v: AUTO_MODEL_ROUTING_POLICY_VERSION,
+    lane,
+    provider: selected.provider,
+    model: selected.id,
+    reasoningEffort: clampAutoEffort({
+      provider: selected.provider,
+      modelId: selected.id,
+      target: targetEffort,
+      simulatedEffortEnabled: input.routingContext?.simulatedEffortEnabled === true,
+    }),
+    reasonCodes: Array.from(new Set(reasonCodes)),
+  };
+}
+
 export function resolveAutoModel(input: ResolveAutoModelInput): ResolvedAutoModel {
   const hidden = new Set(sanitizeHiddenModelIds(input.hiddenModelIds));
   const explicit = input.explicitModelOverride?.trim() || null;
-  const preferred = input.preferredModel?.trim() || null;
-  const providerCatalog = providerCatalogIds(input.catalog, input.provider);
-  const leadingCandidates = [explicit, preferred].filter(
-    (model): model is string => Boolean(model)
-  );
-  const leadingCandidateSet = new Set(leadingCandidates);
-  const providerCandidates = [
-    ...leadingCandidates,
-    ...providerCatalog.filter((model) => !leadingCandidateSet.has(model)),
-  ];
-  const providerModel = firstVisibleRoutableModel(
-    providerCandidates,
-    hidden,
-    input.provider,
-    input.catalog
-  );
-  if (providerModel) {
+  if (explicit) {
+    const fixed = firstVisibleRoutableModel(
+      [explicit],
+      hidden,
+      input.provider,
+      input.catalog,
+    );
+    if (fixed) {
+      return {
+        provider: fixed.provider,
+        model: fixed.model,
+        usedRequiredLocalFallback: false,
+      };
+    }
+  }
+
+  const autoRoute = contextualAutoRoute(input);
+  if (autoRoute) {
     return {
-      provider: providerModel.provider,
-      model: providerModel.model,
+      provider: autoRoute.provider,
+      model: autoRoute.model,
       usedRequiredLocalFallback: false,
+      autoRoute,
     };
   }
 
+  const lane: ResponseLane = input.lane ?? (input.provider === "local" ? "local" : "online");
+  if (lane === "online") {
+    const provider = input.provider === "anthropic" ? "anthropic" : "openai";
+    return {
+      provider,
+      model: provider === "anthropic" ? "claude-sonnet-4-6" : "gpt-4o-mini",
+      usedRequiredLocalFallback: false,
+    };
+  }
   return {
     provider: "local",
     model: REQUIRED_PRIMARY_LOCAL_MODEL_ID,

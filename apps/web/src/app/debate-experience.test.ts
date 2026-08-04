@@ -952,7 +952,15 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /const talking =[\s\S]{0,140}speakerHandoff === null/u,
+      /const talking =[\s\S]{0,180}speakerHandoff === null[\s\S]{0,180}activeSpeechTiming !== null/u,
+    );
+    assert.match(
+      source,
+      /const talking =\s*silentDeliberationPreparing \|\|[\s\S]{0,180}speechTiming !== null/u,
+    );
+    assert.match(
+      source,
+      /presentationEventId &&\s*liveReveal\?\.eventId === presentationEventId &&\s*\(liveReveal\.speechTiming \?\? null\) !== null/u,
     );
     assert.match(
       css,
@@ -1795,17 +1803,31 @@ describe("Debate experience", () => {
     assert.match(source, /debateRequestIsRevisionConflict\(caught\)/u);
     assert.match(source, /const lifecycleIdempotencyKey = nextMutationKey/u);
     assert.match(source, /idempotencyKey: lifecycleIdempotencyKey/u);
+    assert.match(source, /const lifecycleCutscene = !juryCameraActive/u);
+    assert.match(source, /juryVisible: !lifecycleCutscene/u);
     assert.match(
       source,
-      /const judgeResumedWithGavel = result\.session\.playerRole === "judge"/u,
+      /event\.stepKey === \(resume \? "resume" : "pause"\)/u,
     );
     assert.match(
       source,
-      /triggerJudgeGavelSmash\("order", resumeGavelEventId\)/u,
+      /const judgeResumedWithGavel =\s*lifecycleEvent !== undefined &&\s*lifecycleCutscene &&\s*result\.session\.playerRole === "judge"/u,
     );
     assert.match(
       source,
-      /resumedJudgeGavelPresentationEventId: judgeResumedWithGavel[\s\S]{0,100}pausedPresentationEvent\.id/u,
+      /triggerJudgeGavelSmash\("order", lifecycleEvent\.id\)/u,
+    );
+    assert.match(
+      source,
+      /resumedJudgeGavelPresentationEventId: judgeResumedWithGavel[\s\S]{0,100}lifecycleEvent\.id/u,
+    );
+    assert.match(
+      source,
+      /await adoptSession\(\s*previous,\s*\{ \.\.\.result\.session, status: previous\.status \}/u,
+    );
+    assert.match(
+      source,
+      /await adoptSession\(previous, result\.session,[\s\S]{0,180}lifecycleEvent\.id/u,
     );
     assert.match(
       source,
@@ -2704,13 +2726,9 @@ describe("Debate experience", () => {
       /debateAudiencePressureMix\(audiencePressureBandTrue\)/u,
     );
     assert.match(source, /DEBATE_AUDIENCE_AGITATION_URL/u);
-    assert.match(
-      source,
-      /debateAudienceEventIsShocking\(activePressureEvent\)/u,
-    );
-    assert.match(source, /gaspCooldownClear/u);
-    assert.match(source, /DEBATE_AUDIENCE_REACTIONS\.gasp/u);
-    assert.match(source, /debate-audience-gasp:/u);
+    assert.doesNotMatch(source, /debateAudienceEventIsShocking/u);
+    assert.doesNotMatch(source, /gaspCooldownClear/u);
+    assert.doesNotMatch(source, /debate-audience-gasp:/u);
     assert.doesNotMatch(
       source,
       /const audiencePressureActive =\s*session\.playerRole === "judge"/u,
@@ -2768,6 +2786,12 @@ describe("Debate experience", () => {
 
   it("lets the public gallery react live without stalling the floor", () => {
     assert.match(source, /debateAudienceBeatForEvent\(\{/u);
+    assert.match(source, /debateDirectedAudiencePlayback\(/u);
+    assert.match(source, /directedAudienceReaction\.intensity/u);
+    assert.match(
+      source,
+      /intensity === 1 \? 0\.5 : intensity === 2 \? 0\.76 : 1/u,
+    );
     assert.match(
       source,
       /publicContent,\s*seatCount:\s*props\.audienceSeats\.length/u,
@@ -3791,19 +3815,22 @@ describe("Debate experience", () => {
     assert.match(page, /data-debate-shell="true"/u);
     assert.match(
       page,
-      /renderSharedAppletNavbar\("Debate tools",\s*\{[\s\S]*brandAppletId:\s*"debate"[\s\S]*showVoiceSelector:\s*true[\s\S]*liveSessionName:\s*"Debate"[\s\S]*\(\["local", "auto", "online"\] as const\)\.map[\s\S]*<ComposerModelPicker/u,
+      /renderSharedAppletNavbar\("Debate tools",\s*\{[\s\S]*brandAppletId:\s*"debate"[\s\S]*showVoiceSelector:\s*true[\s\S]*liveSessionName:\s*"Debate"[\s\S]*\(\["local", "online"\] as const\)\.map[\s\S]*<ComposerModelPicker/u,
     );
     assert.match(
       page,
-      /options\.brandAppletId[\s\S]*renderSharedAppletSidebarHeader\(options\.brandAppletId\)/u,
+      /options\.brandAppletId[\s\S]*renderSharedAppletBrand\(options\.brandAppletId\)/u,
     );
     assert.match(page, /data-response-mode=\{debateNavbarResponseMode\}/u);
     assert.match(page, /responseMode=\{debateResponseMode\}/u);
     assert.match(source, /responseMode:\s*props\.responseMode/u);
     assert.match(source, /event\.autoRecovery/u);
     assert.match(source, /All configured Auto models failed|Recovered with/u);
-    assert.match(page, /autoOptionLabel="Account default"/u);
-    assert.match(page, /Uses the account model for the entire Debate\./u);
+    assert.match(
+      page,
+      /PRISM chooses the best in-lane model and effort for each Debate generation\./u,
+    );
+    assert.doesNotMatch(page, /Account default|Uses the account model/u);
     assert.doesNotMatch(page, /Cast models/u);
     assert.match(
       page,

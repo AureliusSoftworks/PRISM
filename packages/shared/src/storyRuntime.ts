@@ -1,4 +1,6 @@
 import type { LlmProviderName } from "./index.js";
+import type { AutoFallbackModelRef } from "./autoFallback.js";
+import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type { StoryItemGlyphCategory, StorySpritePose } from "./storyThemes.js";
 
 export type StorySessionStatus = "generating" | "playing" | "complete" | "failed";
@@ -120,12 +122,23 @@ export interface StorySessionSummary {
   status: StorySessionStatus;
   provider: LlmProviderName;
   model: string | null;
+  routing?: StoryRoutingSnapshotV1 | null;
   botIds: string[];
   premise: string | null;
   currentSceneId?: string | null;
   error?: string | null;
   createdAt: string;
   updatedAt: string;
+}
+
+export interface StoryRoutingSnapshotV1 {
+  v: 1;
+  lane: "local" | "online";
+  modelSelectionKind: "auto" | "fixed";
+  candidateAllowlist: AutoFallbackModelRef[];
+  fallbackChain: AutoFallbackModelRef[];
+  policyVersion: number;
+  autoRoute?: AutoRouteDecisionV1;
 }
 
 export interface StorySessionDetail extends StorySessionSummary {

@@ -19,6 +19,7 @@ import {
 } from "@localai/shared";
 import {
   beginVoicePlaybackProgress,
+  estimateVoiceOutputLatencyMs,
   playPreSpeechBreath,
   playRealtimeVoiceBytes,
   prepareRealtimeVoiceAudio,
@@ -30,6 +31,7 @@ import {
 import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
 import type { RoomAcousticsSend } from "./roomAcoustics.ts";
 import {
+  prismAudioContext,
   replayAudioMasterCaptureActive,
   routeAudioElementToPrismOutput,
 } from "./replayAudioMasterCapture.ts";
@@ -385,6 +387,11 @@ function routeEnglishMediaOutput(audio: HTMLMediaElement): void {
   }
   if (cleanup) mediaOutputCleanup.set(audio, cleanup);
 }
+
+function englishMediaOutputLatencyMs(): number {
+  const context = prismAudioContext();
+  return context ? estimateVoiceOutputLatencyMs(context) : 0;
+}
 let preparedMedia: HTMLAudioElement | null = null;
 let preparedMediaUrl: string | null = null;
 let generation = 0;
@@ -579,6 +586,7 @@ async function playBytesWithMedia(
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     let started = false;
+    let naturalEndTimer: number | null = null;
     let progress: ReturnType<typeof beginVoicePlaybackProgress> | null = null;
     const beginAudiblePlayback = () => {
       if (started) return;
@@ -596,6 +604,8 @@ async function playBytesWithMedia(
           lifecycle,
           durationMs,
           () => englishVoiceMediaElapsedMs(audio.currentTime, playbackTempo),
+          null,
+          { startDelayMs: englishMediaOutputLatencyMs() },
         );
       } else {
         lifecycle?.onStart?.(null);
@@ -608,6 +618,10 @@ async function playBytesWithMedia(
     const finish = (error?: Error, completed = true) => {
       if (settled) return;
       settled = true;
+      if (naturalEndTimer !== null) {
+        window.clearTimeout(naturalEndTimer);
+        naturalEndTimer = null;
+      }
       if (activeMediaResolve === cancel) activeMediaResolve = null;
       if (error || !completed) progress?.cancel();
       else progress?.finish();
@@ -620,7 +634,21 @@ async function playBytesWithMedia(
     };
     const cancel = () => finish(undefined, false);
     activeMediaResolve = cancel;
-    audio.addEventListener("ended", () => finish(), { once: true });
+    audio.addEventListener(
+      "ended",
+      () => {
+        const outputLatencyMs = englishMediaOutputLatencyMs();
+        if (outputLatencyMs <= 0) {
+          finish();
+          return;
+        }
+        naturalEndTimer = window.setTimeout(() => {
+          naturalEndTimer = null;
+          finish();
+        }, outputLatencyMs);
+      },
+      { once: true },
+    );
     audio.addEventListener("error", () => finish(new Error("English audio could not play.")), {
       once: true,
     });
@@ -760,6 +788,7 @@ async function playStreamingResponseWithMedia(
   await new Promise<void>((resolve, reject) => {
     let settled = false;
     let started = false;
+    let naturalEndTimer: number | null = null;
     let progress: ReturnType<typeof beginVoicePlaybackProgress> | null = null;
     let sourceBuffer: SourceBuffer | null = null;
     const playbackTempo = resolveVoicePlaybackTransform(profile).tempo;
@@ -767,6 +796,10 @@ async function playStreamingResponseWithMedia(
     const finish = (error?: Error, completed = true) => {
       if (settled) return;
       settled = true;
+      if (naturalEndTimer !== null) {
+        window.clearTimeout(naturalEndTimer);
+        naturalEndTimer = null;
+      }
       if (activeMediaResolve === cancel) activeMediaResolve = null;
       if (activeMediaStartTimer !== null) {
         window.clearTimeout(activeMediaStartTimer);
@@ -784,7 +817,21 @@ async function playStreamingResponseWithMedia(
     };
     const cancel = () => finish(undefined, false);
     activeMediaResolve = cancel;
-    audio.addEventListener("ended", () => finish(), { once: true });
+    audio.addEventListener(
+      "ended",
+      () => {
+        const outputLatencyMs = englishMediaOutputLatencyMs();
+        if (outputLatencyMs <= 0) {
+          finish();
+          return;
+        }
+        naturalEndTimer = window.setTimeout(() => {
+          naturalEndTimer = null;
+          finish();
+        }, outputLatencyMs);
+      },
+      { once: true },
+    );
     audio.addEventListener(
       "error",
       () => finish(new Error("English audio stream could not play.")),
@@ -799,6 +846,8 @@ async function playStreamingResponseWithMedia(
           lifecycle,
           safeEstimatedDurationMs,
           () => englishVoiceMediaElapsedMs(audio.currentTime, playbackTempo),
+          null,
+          { startDelayMs: englishMediaOutputLatencyMs() },
         );
         if (activeMediaStartTimer !== null) {
           window.clearTimeout(activeMediaStartTimer);

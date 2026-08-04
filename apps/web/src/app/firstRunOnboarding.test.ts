@@ -24,8 +24,6 @@ describe("first-run onboarding", () => {
         "openai",
         "anthropic",
         "elevenlabs",
-        "local-model",
-        "online-model",
         "auto-models",
         "ready",
       ],
@@ -46,13 +44,11 @@ describe("first-run onboarding", () => {
     assert.match(pageSource, /disable it later in Appearance settings/u);
   });
 
-  it("marks credentials and model choices as skippable", () => {
+  it("marks credentials and contextual Auto guidance as skippable", () => {
     for (const stepId of [
       "openai",
       "anthropic",
       "elevenlabs",
-      "local-model",
-      "online-model",
       "auto-models",
     ]) {
       assert.equal(
@@ -62,11 +58,13 @@ describe("first-run onboarding", () => {
     }
   });
 
-  it("introduces the customizable mixed-provider Auto chain", () => {
-    assert.match(pageSource, /Zen, Coffee, Signal, and Debate/u);
-    assert.match(pageSource, /ordered chain of\s*one to five fallbacks/u);
-    assert.match(pageSource, /every local and online model/u);
-    assert.match(pageSource, /at least one fallback in\s*Settings/u);
+  it("introduces contextual Auto and lane-specific recovery", () => {
+    assert.match(pageSource, /Auto is the default text model/u);
+    assert.match(pageSource, /fastest\s*suitable model and Effort/u);
+    assert.match(pageSource, /hollow\s*triangle/u);
+    assert.match(pageSource, /LOCAL and ONLINE have separate optional fallback chains/u);
+    assert.match(pageSource, /fallback uses no thinking/u);
+    assert.match(pageSource, /LOCAL never evaluates or calls an online model/u);
   });
 
   it("introduces Debate as one guided path with optional tuning", () => {

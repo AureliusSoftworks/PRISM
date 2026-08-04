@@ -3505,7 +3505,7 @@ describe("processChatMessage Auto response mode", () => {
     assert.equal(result.autoRecovery, undefined);
   });
 
-  it("retries a Zen turn once and persists only the winning reply and safe trace", async () => {
+  it("retries a LOCAL Zen turn in-lane and persists only the winning reply and safe trace", async () => {
     const db = createChatTestDb();
     const calls: string[] = [];
     const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
@@ -3533,8 +3533,8 @@ describe("processChatMessage Auto response mode", () => {
         autoFallbackChain: {
           v: 1,
           fallbacks: [
-            { provider: "openai", model: "fallback-one" },
-            { provider: "anthropic", model: "fallback-two" },
+            { provider: "local", model: "fallback-one" },
+            { provider: "local", model: "fallback-two" },
           ],
         },
         mode: "zen",
@@ -3543,19 +3543,19 @@ describe("processChatMessage Auto response mode", () => {
 
     assert.deepEqual(calls.slice(0, 2), [
       "local:primary-model",
-      "openai:fallback-one",
+      "local:fallback-one",
     ]);
     assert.equal(result.conversation.messages.filter((message) => message.role === "user").length, 1);
     assert.equal(result.conversation.messages.filter((message) => message.role === "assistant").length, 1);
     const assistant = result.conversation.messages.find((message) => message.role === "assistant");
     assert.equal(assistant?.content, "Recovered Zen reply.");
-    assert.equal(assistant?.provider, "openai");
+    assert.equal(assistant?.provider, "local");
     assert.equal(assistant?.model, "fallback-one");
     assert.equal(assistant?.autoRecovery?.attempts[0]?.reason, "refusal");
-    assert.equal(result.autoRecovery?.crossedOnline, true);
+    assert.equal(result.autoRecovery?.crossedOnline, false);
   });
 
-  it("resolves effort independently for each concrete AUTO attempt", async () => {
+  it("preserves primary effort and disables thinking on AUTO fallbacks", async () => {
     const db = createChatTestDb();
     const calls: Array<{
       provider: string;
@@ -3585,8 +3585,8 @@ describe("processChatMessage Auto response mode", () => {
       autoFallbackChain: {
         v: 1,
         fallbacks: [
-          { provider: "openai", model: "fallback-one" },
-          { provider: "anthropic", model: "fallback-two" },
+          { provider: "local", model: "fallback-one" },
+          { provider: "local", model: "fallback-two" },
         ],
       },
       resolveReasoningEffort: (_provider, model) =>
@@ -3596,11 +3596,11 @@ describe("processChatMessage Auto response mode", () => {
 
     assert.deepEqual(calls.slice(0, 2), [
       { provider: "local", model: "primary-model", effort: "minimal" },
-      { provider: "openai", model: "fallback-one", effort: "high" },
+      { provider: "local", model: "fallback-one", effort: "none" },
     ]);
   });
 
-  it("walks all five ordered mixed-provider fallbacks when earlier Zen attempts fail", async () => {
+  it("walks all five ordered same-lane fallbacks when earlier Zen attempts fail", async () => {
     const db = createChatTestDb();
     const calls: string[] = [];
     const providerFactory = ((provider: "local" | "openai" | "anthropic") => ({
@@ -3626,10 +3626,10 @@ describe("processChatMessage Auto response mode", () => {
         autoFallbackChain: {
           v: 1,
           fallbacks: [
-            { provider: "openai", model: "fallback-one" },
+            { provider: "local", model: "fallback-one" },
             { provider: "local", model: "fallback-two" },
-            { provider: "anthropic", model: "fallback-three" },
-            { provider: "openai", model: "fallback-four" },
+            { provider: "local", model: "fallback-three" },
+            { provider: "local", model: "fallback-four" },
             { provider: "local", model: "fallback-five" },
           ],
         },
@@ -3639,10 +3639,10 @@ describe("processChatMessage Auto response mode", () => {
 
     assert.deepEqual(calls, [
       "local:primary-model",
-      "openai:fallback-one",
+      "local:fallback-one",
       "local:fallback-two",
-      "anthropic:fallback-three",
-      "openai:fallback-four",
+      "local:fallback-three",
+      "local:fallback-four",
       "local:fallback-five",
     ]);
     assert.equal(result.autoRecovery?.attempts.length, 6);
@@ -3674,8 +3674,8 @@ describe("processChatMessage Auto response mode", () => {
         autoFallbackChain: {
           v: 1,
           fallbacks: [
-            { provider: "openai", model: "fallback-one" },
-            { provider: "anthropic", model: "fallback-two" },
+            { provider: "local", model: "fallback-one" },
+            { provider: "local", model: "fallback-two" },
           ],
         },
         mode: "zen",
@@ -3713,8 +3713,8 @@ describe("processChatMessage Auto response mode", () => {
           autoFallbackChain: {
             v: 1,
             fallbacks: [
-              { provider: "openai", model: "fallback-one" },
-              { provider: "anthropic", model: "fallback-two" },
+              { provider: "local", model: "fallback-one" },
+              { provider: "local", model: "fallback-two" },
             ],
           },
           mode: "zen",

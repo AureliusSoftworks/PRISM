@@ -76,16 +76,28 @@ function lightEffortSliderColors(level: string): string[] {
 }
 
 describe("shared routing model picker integration", () => {
-  it("can enter AUTO from a duplicate current fallback by selecting a valid Primary", () => {
-    assert.match(pageSource, /autoFallbackSelectablePrimary\(\{/u);
+  it("keeps response routing binary and makes Auto a model choice", () => {
+    assert.match(pageSource, /const autoSelected = normalizedValue === autoOptionValue/u);
+    assert.match(pageSource, /\(\["local", "online"\] as const\)\.map/u);
+    assert.doesNotMatch(pageSource, /\["local", "auto", "online"\]/u);
+  });
+
+  it("never renders or emits the legacy Disabled model sentinel", () => {
+    assert.match(pageSource, /isDisabledModelChoice\(value\)[\s\S]{0,80}autoOptionValue/u);
+    assert.match(pageSource, /if \(isDisabledModelChoice\(nextValue\)\) return/u);
+    assert.doesNotMatch(pageSource, /showDisabledOption|disabledOptionLabel/u);
+    assert.doesNotMatch(pageSource, /Account default/u);
+  });
+
+  it("shows a noninteractive hollow Effort glyph while Auto is selected", () => {
+    assert.match(pageSource, /function HollowTriangleEffortIcon/u);
     assert.match(
       pageSource,
-      /nextMode === "auto"[\s\S]{0,900}switchProvider\(autoPrimaryCandidate\.provider\)/u,
+      /const effortInteractionDisabled =[\s\S]{0,100}autoSelected/u,
     );
-    assert.match(
-      pageSource,
-      /mode === "auto"[\s\S]{0,900}switchProvider\([\s\S]{0,80}debateAutoPrimaryCandidate\.provider/u,
-    );
+    assert.match(pageSource, /Effort chosen automatically/u);
+    assert.match(pageSource, /<HollowTriangleEffortIcon \/>/u);
+    assert.match(pageSource, /!autoSelected && effortControl\.capability\.mode/u);
   });
 
   it("shares the full mode-aware catalog with Chat, Coffee, Signal, and Debate", () => {
@@ -181,7 +193,7 @@ describe("shared routing model picker integration", () => {
       /data-generating=\{generating \? "true" : undefined\}/u,
     );
     assert.ok(
-      (pageSource.match(/generating=\{pendingReplyVisible\}/gu) ?? []).length >= 2,
+      (pageSource.match(/generating=\{pendingReplyVisible\}/gu) ?? []).length >= 1,
     );
     assert.match(
       cssSource,
@@ -226,7 +238,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       pageSource,
-      /className=\{styles\.composeModelEffortTrigger\}[\s\S]{0,300}onClick=\{\(event\) => \{[\s\S]{0,100}event\.currentTarget\.focus\(\)/u,
+      /className=\{styles\.composeModelEffortTrigger\}[\s\S]{0,700}onClick=\{\(event\) => \{[\s\S]{0,100}event\.currentTarget\.focus\(\)/u,
     );
     assert.match(
       pageSource,

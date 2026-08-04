@@ -24,16 +24,14 @@ export const VOICE_EFFECT_LABELS: Record<VoiceEffect, string> = {
   "deep-space": "Deep Space",
 };
 
-export const VOICE_EFFECT_DESCRIPTIONS: Record<
-  VoiceEffect,
-  string
-> = {
+export const VOICE_EFFECT_DESCRIPTIONS: Record<VoiceEffect, string> = {
   clean: "Unprocessed voice.",
   radio: "Narrow-band broadcast tone with a trace of radio noise.",
   robot: "Mechanical pulse and a subtly doubled synthetic carrier.",
   echo: "Two level-controlled repeats behind the original voice.",
   chorus: "PRISM's subtle tuned voice with a gently refracted double.",
-  resonance: "A dark, weighty mechanical double with a restrained low reflection.",
+  resonance:
+    "A dark, weighty mechanical double with a restrained low reflection.",
   "deep-space": "A lower spectral double with a distant trailing reflection.",
 };
 
@@ -80,8 +78,7 @@ export const BOT_AUDIO_VOICE_IDS = [
 export type BotAudioVoiceId = (typeof BOT_AUDIO_VOICE_IDS)[number];
 
 export const LOCAL_VOICE_PRESENTATIONS = ["feminine", "masculine"] as const;
-export type LocalVoicePresentation =
-  (typeof LOCAL_VOICE_PRESENTATIONS)[number];
+export type LocalVoicePresentation = (typeof LOCAL_VOICE_PRESENTATIONS)[number];
 
 /** PRISM's portable, always-local English voice pack. The engine voice IDs are
  * implementation details; profiles continue to persist only the stable
@@ -326,9 +323,10 @@ export type PrismBuiltinEnglishVoice =
 export function prismBuiltinEnglishVoice(
   voiceId: BotAudioVoiceId,
 ): PrismBuiltinEnglishVoice {
-  return PRISM_BUILTIN_ENGLISH_VOICES.find(
-    (voice) => voice.voiceId === voiceId,
-  ) ?? PRISM_BUILTIN_ENGLISH_VOICES[0];
+  return (
+    PRISM_BUILTIN_ENGLISH_VOICES.find((voice) => voice.voiceId === voiceId) ??
+    PRISM_BUILTIN_ENGLISH_VOICES[0]
+  );
 }
 
 export const BOT_VOICE_TEXTURE_PRESETS = [
@@ -427,7 +425,10 @@ export type LocalVoiceEnginePreference =
 export const LOCAL_VOICE_SOURCES = ["portable", "system", "reference"] as const;
 export type LocalVoiceSource = (typeof LOCAL_VOICE_SOURCES)[number];
 
-export const LOCAL_VOICE_ACCENT_MODES = ["prefer-genuine", "approximate"] as const;
+export const LOCAL_VOICE_ACCENT_MODES = [
+  "prefer-genuine",
+  "approximate",
+] as const;
 export type LocalVoiceAccentMode = (typeof LOCAL_VOICE_ACCENT_MODES)[number];
 
 export const LOCAL_VOICE_PRONUNCIATION_BASES = [
@@ -441,17 +442,44 @@ export type LocalVoicePronunciationBase =
 export const LOCAL_VOICE_SPEECHPRINT_INFLUENCES = [
   "none",
   "spanish-influenced-english",
+  "latin-american-spanish-influenced-english",
   "brazilian-portuguese-influenced-english",
+  "european-portuguese-influenced-english",
   "mandarin-influenced-english",
+  "cantonese-influenced-english",
   "japanese-influenced-english",
   "korean-influenced-english",
   "indian-english",
+  "pakistani-english",
+  "bengali-influenced-english",
+  "sri-lankan-english",
   "french-influenced-english",
   "german-influenced-english",
+  "dutch-influenced-english",
+  "nordic-influenced-english",
+  "polish-influenced-english",
+  "greek-influenced-english",
   "russian-influenced-english",
   "italian-influenced-english",
+  "irish-english",
+  "scottish-english",
   "australian-english",
+  "new-zealand-english",
   "canadian-english",
+  "caribbean-english",
+  "north-african-arabic-influenced-english",
+  "middle-eastern-arabic-influenced-english",
+  "persian-influenced-english",
+  "turkish-influenced-english",
+  "nigerian-english",
+  "east-african-english",
+  "south-african-english",
+  "filipino-english",
+  "vietnamese-influenced-english",
+  "thai-influenced-english",
+  "indonesian-influenced-english",
+  "singapore-english",
+  "pacific-island-english",
 ] as const;
 export type LocalVoiceSpeechprintInfluence =
   (typeof LOCAL_VOICE_SPEECHPRINT_INFLUENCES)[number];
@@ -557,11 +585,7 @@ export type NormalizedBotAudioVoiceProfileV1 = BotAudioVoiceProfileV2;
 
 /** Shared emotional delivery state for every spoken assistant surface. */
 export type VoiceDeliveryMood =
-  | "joyful"
-  | "warm"
-  | "neutral"
-  | "guarded"
-  | "strained";
+  "joyful" | "warm" | "neutral" | "guarded" | "strained";
 
 /** A modest performance layer over the bot's authored base pace. Normal
  * delivery is intentionally a little brisk so long-form spoken experiences
@@ -623,17 +647,16 @@ export interface CoffeeVoiceDeliveryEnvelope {
   emphasisStrength: number;
 }
 
-export const NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE: CoffeeVoiceDeliveryEnvelope = {
-  paceMultiplier: 1,
-  pitchDeltaCents: 0,
-  liltDelta: 0,
-  warmthDelta: 0,
-  emphasisStrength: 0,
-};
+export const NEUTRAL_COFFEE_VOICE_DELIVERY_ENVELOPE: CoffeeVoiceDeliveryEnvelope =
+  {
+    paceMultiplier: 1,
+    pitchDeltaCents: 0,
+    liltDelta: 0,
+    warmthDelta: 0,
+    emphasisStrength: 0,
+  };
 
-export function normalizeVoiceDeliveryMood(
-  value: unknown,
-): VoiceDeliveryMood {
+export function normalizeVoiceDeliveryMood(value: unknown): VoiceDeliveryMood {
   return value === "joyful" ||
     value === "warm" ||
     value === "guarded" ||
@@ -678,7 +701,9 @@ export function resolveVoicePlaybackTransform(
 ): VoicePlaybackTransformV1 {
   const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
   return {
-    tempo: Number((1 + profile.pace * BOT_AUDIO_VOICE_PACE_RATE_DEPTH).toFixed(3)),
+    tempo: Number(
+      (1 + profile.pace * BOT_AUDIO_VOICE_PACE_RATE_DEPTH).toFixed(3),
+    ),
     pitchCents: Math.round(profile.pitch * BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS),
   };
 }
@@ -687,8 +712,13 @@ export function expectedVoicePlaybackDurationMs(
   sourceDurationMs: number,
   rawProfile: BotAudioVoiceProfileV1,
 ): number {
-  const source = Number.isFinite(sourceDurationMs) ? Math.max(0, sourceDurationMs) : 0;
-  return Math.max(1, Math.round(source / resolveVoicePlaybackTransform(rawProfile).tempo));
+  const source = Number.isFinite(sourceDurationMs)
+    ? Math.max(0, sourceDurationMs)
+    : 0;
+  return Math.max(
+    1,
+    Math.round(source / resolveVoicePlaybackTransform(rawProfile).tempo),
+  );
 }
 
 /** Resolve the portable two-axis Voice Character pad into the three playback
@@ -713,7 +743,8 @@ export function resolveBotVoiceCharacter(
 }
 
 export const BOT_NAME_PRONUNCIATION_MAX_LENGTH = 120;
-export const BOT_NAME_SELF_REFERRAL_MAX_LENGTH = BOT_NAME_PRONUNCIATION_MAX_LENGTH;
+export const BOT_NAME_SELF_REFERRAL_MAX_LENGTH =
+  BOT_NAME_PRONUNCIATION_MAX_LENGTH;
 
 export interface BotNamePronunciationEntry {
   id?: string | null | undefined;
@@ -764,7 +795,8 @@ export function applyBotNamePronunciations(
     const isSpeaker =
       normalizedSpeakerBotId.length > 0 && entry.id === normalizedSpeakerBotId;
     const spoken = isSpeaker
-      ? normalizeBotSelfReferral(entry.selfReferral ?? entry.self_referral) || written
+      ? normalizeBotSelfReferral(entry.selfReferral ?? entry.self_referral) ||
+        written
       : normalizeBotNamePronunciation(
           entry.namePronunciation ?? entry.name_pronunciation,
         );
@@ -787,22 +819,26 @@ export function applyBotNamePronunciations(
     `(?<![\\p{L}\\p{N}])(?:${alternatives.join("|")})(?![\\p{L}\\p{N}])`,
     "giu",
   );
-  return text.replace(pattern, (match) =>
-    replacements.get(match.toLocaleLowerCase())?.spoken ?? match,
+  return text.replace(
+    pattern,
+    (match) => replacements.get(match.toLocaleLowerCase())?.spoken ?? match,
   );
 }
 
 export function applyPlayerNamePronunciation(
   text: unknown,
   displayName: string | null | undefined,
-  pronunciation: string | null | undefined
+  pronunciation: string | null | undefined,
 ): unknown {
   return applyBotNamePronunciations(text, [
     { name: displayName, namePronunciation: pronunciation },
   ]);
 }
 
-export const BOT_VOICE_TEXTURE_PRESET_LABELS: Record<BotVoiceTexturePreset, string> = {
+export const BOT_VOICE_TEXTURE_PRESET_LABELS: Record<
+  BotVoiceTexturePreset,
+  string
+> = {
   clean: "Clean",
   "crt-speaker": "CRT Speaker",
   lofi: "Lo-Fi",
@@ -862,76 +898,86 @@ export const BOT_VOICE_TEXTURE_RECIPES: Readonly<
 
 export const DEFAULT_VOICE_MODE: VoiceMode = "mute";
 export const DEFAULT_ENGLISH_VOICE_ENGINE: EnglishVoiceEngine = "builtin";
-export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2> = {
-  v: 2,
-  enabled: true,
-  baseVoiceId: "voice-1",
-  elevenLabsEffect: DEFAULT_VOICE_EFFECT,
-  pitch: 0,
-  warmth: 0,
-  openness: 0,
-  weight: 0,
-  brightness: 0,
-  resonance: 0,
-  localEnginePreference: "inherit",
-  localVoiceSource: "portable",
-  accentLocale: "en-US",
-  accentMode: "prefer-genuine",
-  pronunciationBase: "follow-voice",
-  speechprintInfluence: "none",
-  speechprintStrength: "balanced",
-  speechprintVariationSeed: "natural-v1",
-  pace: 0,
-  lilt: 0,
-  bottishTone: 0.45,
-  eqTilt: 0,
-  gainDb: 0,
-  volume: 1,
-  texture: BOT_VOICE_TEXTURE_RECIPES.clean,
-};
-export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3: Readonly<BotAudioVoiceProfileV3> = {
-  v: 3,
-  enabled: true,
-  local: {
-    enginePreference: "inherit",
-    source: "portable",
-    archetypeId: "voice-1",
-    accent: { locale: "en-US", mode: "prefer-genuine" },
-    pronunciation: { base: "follow-voice" },
-    speechprint: {
-      influence: "none",
-      strength: "balanced",
-      variationSeed: "natural-v1",
-    },
-    tone: {
-      pitch: 0,
-      warmth: 0,
-      openness: 0,
-      weight: 0,
-      brightness: 0,
-      resonance: 0,
-      gainDb: 0,
-    },
-  },
-  premium: {},
-  delivery: {
-    effect: DEFAULT_VOICE_EFFECT,
+export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2> =
+  {
+    v: 2,
+    enabled: true,
+    baseVoiceId: "voice-1",
+    elevenLabsEffect: DEFAULT_VOICE_EFFECT,
+    pitch: 0,
+    warmth: 0,
+    openness: 0,
+    weight: 0,
+    brightness: 0,
+    resonance: 0,
+    localEnginePreference: "inherit",
+    localVoiceSource: "portable",
+    accentLocale: "en-US",
+    accentMode: "prefer-genuine",
+    pronunciationBase: "follow-voice",
+    speechprintInfluence: "none",
+    speechprintStrength: "balanced",
+    speechprintVariationSeed: "natural-v1",
     pace: 0,
     lilt: 0,
+    bottishTone: 0.45,
+    eqTilt: 0,
+    gainDb: 0,
     volume: 1,
     texture: BOT_VOICE_TEXTURE_RECIPES.clean,
-  },
-  bottishTone: 0.45,
-};
-export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 = DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2;
+  };
+export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3: Readonly<BotAudioVoiceProfileV3> =
+  {
+    v: 3,
+    enabled: true,
+    local: {
+      enginePreference: "inherit",
+      source: "portable",
+      archetypeId: "voice-1",
+      accent: { locale: "en-US", mode: "prefer-genuine" },
+      pronunciation: { base: "follow-voice" },
+      speechprint: {
+        influence: "none",
+        strength: "balanced",
+        variationSeed: "natural-v1",
+      },
+      tone: {
+        pitch: 0,
+        warmth: 0,
+        openness: 0,
+        weight: 0,
+        brightness: 0,
+        resonance: 0,
+        gainDb: 0,
+      },
+    },
+    premium: {},
+    delivery: {
+      effect: DEFAULT_VOICE_EFFECT,
+      pace: 0,
+      lilt: 0,
+      volume: 1,
+      texture: BOT_VOICE_TEXTURE_RECIPES.clean,
+    },
+    bottishTone: 0.45,
+  };
+export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 =
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2;
 
 export function isBotAudioVoiceId(value: unknown): value is BotAudioVoiceId {
-  return typeof value === "string" && (BOT_AUDIO_VOICE_IDS as readonly string[]).includes(value);
+  return (
+    typeof value === "string" &&
+    (BOT_AUDIO_VOICE_IDS as readonly string[]).includes(value)
+  );
 }
 
-export function isBotVoiceTexturePreset(value: unknown): value is BotVoiceTexturePreset {
-  return typeof value === "string" &&
-    (BOT_VOICE_TEXTURE_PRESETS as readonly string[]).includes(value);
+export function isBotVoiceTexturePreset(
+  value: unknown,
+): value is BotVoiceTexturePreset {
+  return (
+    typeof value === "string" &&
+    (BOT_VOICE_TEXTURE_PRESETS as readonly string[]).includes(value)
+  );
 }
 
 export function normalizeLocalVoiceEnginePreference(
@@ -1000,9 +1046,11 @@ export function localVoicePronunciationOverrideIsActive(
   genuineLocale: unknown,
 ): boolean {
   const base = normalizeLocalVoicePronunciationBase(pronunciationBase);
-  return base !== "follow-voice" &&
+  return (
+    base !== "follow-voice" &&
     resolveLocalVoicePronunciationLocale(base, genuineLocale) !==
-      resolveLocalVoicePronunciationLocale("follow-voice", genuineLocale);
+      resolveLocalVoicePronunciationLocale("follow-voice", genuineLocale)
+  );
 }
 
 export function normalizeLocalVoiceSpeechprintInfluence(
@@ -1066,15 +1114,21 @@ export function normalizeLocalVoiceSpeechprintV1(
   };
 }
 
-export function normalizeVoiceMode(value: unknown, fallback = DEFAULT_VOICE_MODE): VoiceMode {
-  return value === "mute" || value === "english" || value === "babble" || value === "bottish"
+export function normalizeVoiceMode(
+  value: unknown,
+  fallback = DEFAULT_VOICE_MODE,
+): VoiceMode {
+  return value === "mute" ||
+    value === "english" ||
+    value === "babble" ||
+    value === "bottish"
     ? value
     : fallback;
 }
 
 export function normalizeEnglishVoiceEngine(
   value: unknown,
-  fallback = DEFAULT_ENGLISH_VOICE_ENGINE
+  fallback = DEFAULT_ENGLISH_VOICE_ENGINE,
 ): EnglishVoiceEngine {
   return value === "builtin" || value === "elevenlabs" ? value : fallback;
 }
@@ -1096,7 +1150,7 @@ export function normalizeVoiceEffect(
   }
   return typeof value === "string" &&
     (VOICE_EFFECTS as readonly string[]).includes(value)
-    ? value as VoiceEffect
+    ? (value as VoiceEffect)
     : fallback;
 }
 
@@ -1107,7 +1161,7 @@ export function normalizeElevenLabsVoiceEffect(value: unknown): VoiceEffect {
 
 export function normalizeElevenLabsVoiceDirection(
   value: unknown,
-  fallback: string | null = null
+  fallback: string | null = null,
 ): string | null {
   if (value === null) return null;
   if (typeof value !== "string") return fallback;
@@ -1132,17 +1186,33 @@ export function normalizeElevenLabsVoiceDirection(
 }
 
 /** Clamp finite values to the portable [-1, 1] performance range. */
-export function normalizeBotAudioVoiceControl(value: unknown, fallback = 0): number {
-  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+export function normalizeBotAudioVoiceControl(
+  value: unknown,
+  fallback = 0,
+): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
   const safe = Number.isFinite(parsed) ? parsed : fallback;
   return Number(Math.min(1, Math.max(-1, safe)).toFixed(3));
 }
 
 export function normalizeBotVoiceGainDb(value: unknown, fallback = 0): number {
-  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
   const safe = Number.isFinite(parsed) ? parsed : fallback;
   return Number(
-    Math.min(BOT_VOICE_GAIN_DB_MAX, Math.max(BOT_VOICE_GAIN_DB_MIN, safe)).toFixed(3),
+    Math.min(
+      BOT_VOICE_GAIN_DB_MAX,
+      Math.max(BOT_VOICE_GAIN_DB_MIN, safe),
+    ).toFixed(3),
   );
 }
 
@@ -1152,34 +1222,61 @@ export function normalizeElevenLabsVoiceStability(
   value: unknown,
   fallback = ELEVENLABS_VOICE_STABILITY_DEFAULT,
 ): number {
-  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
   const safe = Number.isFinite(parsed) ? parsed : fallback;
   return Number(Math.min(1, Math.max(0, safe)).toFixed(3));
 }
 
-export function normalizeBotVoiceTextureUnit(value: unknown, fallback = 0): number {
-  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+export function normalizeBotVoiceTextureUnit(
+  value: unknown,
+  fallback = 0,
+): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
   const safe = Number.isFinite(parsed) ? parsed : fallback;
   return Number(Math.min(1, Math.max(0, safe)).toFixed(3));
 }
 
-export function botVoiceTextureForPreset(preset: BotVoiceTexturePreset): BotVoiceTextureV1 {
+export function botVoiceTextureForPreset(
+  preset: BotVoiceTexturePreset,
+): BotVoiceTextureV1 {
   return { ...BOT_VOICE_TEXTURE_RECIPES[preset] };
 }
 
 export function normalizeBotVoiceTexture(value: unknown): BotVoiceTextureV1 {
-  const record = value && typeof value === "object" && !Array.isArray(value)
-    ? value as Record<string, unknown>
-    : {};
-  const preset = isBotVoiceTexturePreset(record.preset) ? record.preset : "clean";
+  const record =
+    value && typeof value === "object" && !Array.isArray(value)
+      ? (value as Record<string, unknown>)
+      : {};
+  const preset = isBotVoiceTexturePreset(record.preset)
+    ? record.preset
+    : "clean";
   const fallback = BOT_VOICE_TEXTURE_RECIPES[preset];
   return {
     preset,
     amount: normalizeBotVoiceTextureUnit(record.amount, fallback.amount),
-    bandwidth: normalizeBotVoiceTextureUnit(record.bandwidth, fallback.bandwidth),
+    bandwidth: normalizeBotVoiceTextureUnit(
+      record.bandwidth,
+      fallback.bandwidth,
+    ),
     noise: normalizeBotVoiceTextureUnit(record.noise, fallback.noise),
-    instability: normalizeBotVoiceTextureUnit(record.instability, fallback.instability),
-    distortion: normalizeBotVoiceTextureUnit(record.distortion, fallback.distortion),
+    instability: normalizeBotVoiceTextureUnit(
+      record.instability,
+      fallback.instability,
+    ),
+    distortion: normalizeBotVoiceTextureUnit(
+      record.distortion,
+      fallback.distortion,
+    ),
     damage: normalizeBotVoiceTextureUnit(record.damage, fallback.damage),
   };
 }
@@ -1187,12 +1284,14 @@ export function normalizeBotVoiceTexture(value: unknown): BotVoiceTextureV1 {
 export function botVoiceTextureIsModified(texture: BotVoiceTextureV1): boolean {
   const normalized = normalizeBotVoiceTexture(texture);
   const canonical = BOT_VOICE_TEXTURE_RECIPES[normalized.preset];
-  return normalized.amount !== canonical.amount ||
+  return (
+    normalized.amount !== canonical.amount ||
     normalized.bandwidth !== canonical.bandwidth ||
     normalized.noise !== canonical.noise ||
     normalized.instability !== canonical.instability ||
     normalized.distortion !== canonical.distortion ||
-    normalized.damage !== canonical.damage;
+    normalized.damage !== canonical.damage
+  );
 }
 
 function voiceProfileObject(value: unknown): Record<string, unknown> {
@@ -1256,7 +1355,7 @@ function flattenBotAudioVoiceProfileV3Record(
 
 export function normalizeBotAudioVoiceProfileV1(
   value: unknown,
-  fallback: BotAudioVoiceProfile = DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2
+  fallback: BotAudioVoiceProfile = DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
 ): BotAudioVoiceProfileV2 {
   const fallbackProfile = normalizeBotAudioVoiceProfileFallback(fallback);
   const inputRecord = voiceProfileObject(value);
@@ -1264,30 +1363,31 @@ export function normalizeBotAudioVoiceProfileV1(
   const legacy = inputRecord.v !== 2 && inputRecord.v !== 3;
   const systemVoiceName = normalizeOptionalVoiceSelection(
     record.systemVoiceName,
-    fallbackProfile.systemVoiceName ?? null
+    fallbackProfile.systemVoiceName ?? null,
   );
   const elevenLabsVoiceId = normalizeOptionalVoiceSelection(
     record.elevenLabsVoiceId,
-    fallbackProfile.elevenLabsVoiceId ?? null
+    fallbackProfile.elevenLabsVoiceId ?? null,
   );
   const elevenLabsVoiceIdOverride = normalizeOptionalVoiceSelection(
     record.elevenLabsVoiceIdOverride,
-    fallbackProfile.elevenLabsVoiceIdOverride ?? null
+    fallbackProfile.elevenLabsVoiceIdOverride ?? null,
   );
   const elevenLabsVoiceInitialized = record.elevenLabsVoiceInitialized === true;
-  const voiceEffectExplicit = record.voiceEffectExplicit === true ||
-    (record.elevenLabsEffect === "clean" && Boolean(
-      elevenLabsVoiceId || elevenLabsVoiceIdOverride,
-    ));
-  const voiceEffect = record.elevenLabsEffect === "clean" && !voiceEffectExplicit
-    ? fallbackProfile.elevenLabsEffect
-    : normalizeVoiceEffect(
-        record.elevenLabsEffect,
-        fallbackProfile.elevenLabsEffect,
-      );
+  const voiceEffectExplicit =
+    record.voiceEffectExplicit === true ||
+    (record.elevenLabsEffect === "clean" &&
+      Boolean(elevenLabsVoiceId || elevenLabsVoiceIdOverride));
+  const voiceEffect =
+    record.elevenLabsEffect === "clean" && !voiceEffectExplicit
+      ? fallbackProfile.elevenLabsEffect
+      : normalizeVoiceEffect(
+          record.elevenLabsEffect,
+          fallbackProfile.elevenLabsEffect,
+        );
   const elevenLabsDirection = normalizeElevenLabsVoiceDirection(
     record.elevenLabsDirection,
-    fallbackProfile.elevenLabsDirection ?? null
+    fallbackProfile.elevenLabsDirection ?? null,
   );
   const elevenLabsStability = normalizeElevenLabsVoiceStability(
     record.elevenLabsStability,
@@ -1297,9 +1397,10 @@ export function normalizeBotAudioVoiceProfileV1(
     record.avatarSfx,
     fallbackProfile.avatarSfx ?? null,
   );
-  const avatarSfxMuted = record.avatarSfxMuted === undefined
-    ? fallbackProfile.avatarSfxMuted === true
-    : record.avatarSfxMuted === true;
+  const avatarSfxMuted =
+    record.avatarSfxMuted === undefined
+      ? fallbackProfile.avatarSfxMuted === true
+      : record.avatarSfxMuted === true;
   const baseVoiceId = isBotAudioVoiceId(record.baseVoiceId)
     ? record.baseVoiceId
     : fallbackProfile.baseVoiceId;
@@ -1322,9 +1423,14 @@ export function normalizeBotAudioVoiceProfileV1(
     elevenLabsEffect: voiceEffect,
     ...(voiceEffectExplicit ? { voiceEffectExplicit: true } : {}),
     ...(elevenLabsDirection ? { elevenLabsDirection } : {}),
-    ...(record.elevenLabsStability !== undefined ? { elevenLabsStability } : {}),
+    ...(record.elevenLabsStability !== undefined
+      ? { elevenLabsStability }
+      : {}),
     pitch: normalizeBotAudioVoiceControl(record.pitch, fallbackProfile.pitch),
-    warmth: normalizeBotAudioVoiceControl(record.warmth, fallbackProfile.warmth),
+    warmth: normalizeBotAudioVoiceControl(
+      record.warmth,
+      fallbackProfile.warmth,
+    ),
     openness: normalizeBotAudioVoiceControl(
       record.openness,
       fallbackProfile.openness ?? 0,
@@ -1388,9 +1494,12 @@ export function normalizeBotAudioVoiceProfileV1(
     lilt: normalizeBotAudioVoiceControl(record.lilt, fallbackProfile.lilt),
     bottishTone: normalizeBotAudioVoiceControl(
       legacy ? record.signal : record.bottishTone,
-      fallbackProfile.bottishTone
+      fallbackProfile.bottishTone,
     ),
-    eqTilt: normalizeBotAudioVoiceControl(record.eqTilt, fallbackProfile.eqTilt),
+    eqTilt: normalizeBotAudioVoiceControl(
+      record.eqTilt,
+      fallbackProfile.eqTilt,
+    ),
     gainDb: normalizeBotVoiceGainDb(record.gainDb, fallbackProfile.gainDb),
     volume: normalizeBotVoiceVolume(record.volume, fallbackProfile.volume),
     // Voice texture presets are retired. Keep the field canonical for export
@@ -1401,7 +1510,9 @@ export function normalizeBotAudioVoiceProfileV1(
   };
 }
 
-function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): BotAudioVoiceProfileV2 {
+function normalizeBotAudioVoiceProfileFallback(
+  value: BotAudioVoiceProfile,
+): BotAudioVoiceProfileV2 {
   if (value.v === 3) {
     return normalizeBotAudioVoiceProfileFallback({
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
@@ -1417,10 +1528,13 @@ function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): Bot
       avatarSfxMuted: rawAvatarSfxMuted,
       ...voiceProfile
     } = value;
-    const elevenLabsDirection = normalizeElevenLabsVoiceDirection(value.elevenLabsDirection);
-    const elevenLabsStability = value.elevenLabsStability === undefined
-      ? undefined
-      : normalizeElevenLabsVoiceStability(value.elevenLabsStability);
+    const elevenLabsDirection = normalizeElevenLabsVoiceDirection(
+      value.elevenLabsDirection,
+    );
+    const elevenLabsStability =
+      value.elevenLabsStability === undefined
+        ? undefined
+        : normalizeElevenLabsVoiceStability(value.elevenLabsStability);
     const avatarSfx = normalizeBotAvatarSfxV1(rawAvatarSfx);
     return {
       ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2,
@@ -1489,7 +1603,7 @@ function normalizeBotAudioVoiceProfileFallback(value: BotAudioVoiceProfile): Bot
     lilt: normalizeBotAudioVoiceControl(value.lilt),
     bottishTone: normalizeBotAudioVoiceControl(
       value.signal,
-      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2.bottishTone
+      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2.bottishTone,
     ),
   };
 }
@@ -1511,7 +1625,9 @@ export function normalizeBotAudioVoiceProfileV3(
         ? "system"
         : "portable";
   const referenceId = normalizeOptionalVoiceSelection(profile.localReferenceId);
-  const systemVoiceName = normalizeOptionalVoiceSelection(profile.systemVoiceName);
+  const systemVoiceName = normalizeOptionalVoiceSelection(
+    profile.systemVoiceName,
+  );
   const voiceId = normalizeOptionalVoiceSelection(profile.elevenLabsVoiceId);
   const voiceIdOverride = normalizeOptionalVoiceSelection(
     profile.elevenLabsVoiceIdOverride,
@@ -1539,9 +1655,7 @@ export function normalizeBotAudioVoiceProfileV3(
         mode: normalizeLocalVoiceAccentMode(profile.accentMode),
       },
       pronunciation: {
-        base: normalizeLocalVoicePronunciationBase(
-          profile.pronunciationBase,
-        ),
+        base: normalizeLocalVoicePronunciationBase(profile.pronunciationBase),
       },
       speechprint: normalizeLocalVoiceSpeechprintV1({
         influence: profile.speechprintInfluence,
@@ -1564,9 +1678,7 @@ export function normalizeBotAudioVoiceProfileV3(
     premium: {
       ...(voiceId ? { voiceId } : {}),
       ...(voiceIdOverride ? { voiceIdOverride } : {}),
-      ...(profile.elevenLabsVoiceInitialized
-        ? { initialized: true }
-        : {}),
+      ...(profile.elevenLabsVoiceInitialized ? { initialized: true } : {}),
       ...(direction ? { direction } : {}),
       ...(profile.elevenLabsStability === undefined
         ? {}
@@ -1591,7 +1703,12 @@ export function normalizeBotAudioVoiceProfileV3(
 }
 
 export function normalizeBotVoiceVolume(value: unknown, fallback = 1): number {
-  const parsed = typeof value === "number" ? value : typeof value === "string" ? Number(value) : NaN;
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
   const safe = Number.isFinite(parsed) ? parsed : fallback;
   return Number(Math.min(1.25, Math.max(0, safe)).toFixed(3));
 }
@@ -1636,9 +1753,8 @@ export function normalizeBotAvatarSfxV1(
     return fallback;
   }
   const record = value as Record<string, unknown>;
-  const rawDataUrl = typeof record.audioDataUrl === "string"
-    ? record.audioDataUrl.trim()
-    : "";
+  const rawDataUrl =
+    typeof record.audioDataUrl === "string" ? record.audioDataUrl.trim() : "";
   if (!botAvatarSfxDataUrlIsValid(rawDataUrl)) return fallback;
   const fileName = normalizeBotAvatarSfxText(
     record.fileName,
@@ -1663,7 +1779,7 @@ export function normalizeBotAvatarSfxV1(
 
 function normalizeOptionalVoiceSelection(
   value: unknown,
-  fallback: string | null = null
+  fallback: string | null = null,
 ): string | null {
   if (value === null) return null;
   if (typeof value !== "string") return fallback;
@@ -1672,22 +1788,29 @@ function normalizeOptionalVoiceSelection(
 }
 
 /** Null is a deliberate absence for per-user overrides; malformed values are ignored. */
-export function normalizeOptionalBotAudioVoiceProfileV1(value: unknown): BotAudioVoiceProfileV2 | null {
+export function normalizeOptionalBotAudioVoiceProfileV1(
+  value: unknown,
+): BotAudioVoiceProfileV2 | null {
   if (value === null || value === undefined) return null;
   let candidate = value;
   if (typeof candidate === "string") {
-    try { candidate = JSON.parse(candidate); } catch { return null; }
+    try {
+      candidate = JSON.parse(candidate);
+    } catch {
+      return null;
+    }
   }
-  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate)) return null;
+  if (!candidate || typeof candidate !== "object" || Array.isArray(candidate))
+    return null;
   const record = candidate as Record<string, unknown>;
   const version = record.v;
-  const recognizableUnversionedProfile = version === undefined && (
-    isBotAudioVoiceId(record.baseVoiceId) ||
-    typeof record.systemVoiceName === "string" ||
-    typeof record.elevenLabsVoiceId === "string" ||
-    typeof record.elevenLabsVoiceIdOverride === "string" ||
-    record.elevenLabsVoiceInitialized === true
-  );
+  const recognizableUnversionedProfile =
+    version === undefined &&
+    (isBotAudioVoiceId(record.baseVoiceId) ||
+      typeof record.systemVoiceName === "string" ||
+      typeof record.elevenLabsVoiceId === "string" ||
+      typeof record.elevenLabsVoiceIdOverride === "string" ||
+      record.elevenLabsVoiceInitialized === true);
   if (
     version !== 1 &&
     version !== 2 &&
@@ -1717,9 +1840,11 @@ export function resolveBotAudioVoiceProfileV1(
     authored.elevenLabsVoiceIdOverride ?? authored.elevenLabsVoiceId ?? null;
   if (!authoredElevenLabsVoiceId) return override;
 
-  if (override.elevenLabsVoiceInitialized === true &&
-      !override.elevenLabsVoiceIdOverride &&
-      !override.elevenLabsVoiceId) {
+  if (
+    override.elevenLabsVoiceInitialized === true &&
+    !override.elevenLabsVoiceIdOverride &&
+    !override.elevenLabsVoiceId
+  ) {
     return override;
   }
 
@@ -1742,9 +1867,15 @@ export function resolveBotAudioVoiceProfileV1(
   });
 }
 
-export function parseStoredBotAudioVoiceProfileV1(value: unknown): BotAudioVoiceProfileV2 | null {
+export function parseStoredBotAudioVoiceProfileV1(
+  value: unknown,
+): BotAudioVoiceProfileV2 | null {
   if (typeof value !== "string" || value.trim().length === 0) return null;
-  try { return normalizeOptionalBotAudioVoiceProfileV1(JSON.parse(value)); } catch { return null; }
+  try {
+    return normalizeOptionalBotAudioVoiceProfileV1(JSON.parse(value));
+  } catch {
+    return null;
+  }
 }
 
 export function parseStoredBotAudioVoiceProfileV3(

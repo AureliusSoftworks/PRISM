@@ -21,6 +21,7 @@ import {
   normalizePronunciationAtlasSelection,
   pronunciationAtlasAnchorForSelection,
   pronunciationAtlasNaturalSelection,
+  pronunciationAtlasLocationText,
   pronunciationAtlasResolvedBase,
   pronunciationAtlasSelectionAtPoint,
   pronunciationAtlasValueText,
@@ -83,7 +84,7 @@ export function PronunciationAtlas({
   color,
   disabled = false,
   className,
-  label = "Pronunciation Atlas",
+  label = "Accent map",
 }: PronunciationAtlasProps): ReactElement {
   const normalizedSelection = normalizePronunciationAtlasSelection(selection);
   const [draftValue, setDraftValue] =
@@ -112,7 +113,7 @@ export function PronunciationAtlas({
   const restoreValue = padValueForSelection(
     pronunciationAtlasNaturalSelection(normalizedSelection.sourceLocale),
   );
-  const summary = pronunciationAtlasValueText(padValue.selection);
+  const summary = pronunciationAtlasLocationText(padValue.selection);
   const sourceBase =
     pronunciationAtlasResolvedBase({
       ...padValue.selection,
@@ -143,7 +144,7 @@ export function PronunciationAtlas({
       <div className={styles.heading}>
         <span>
           <strong>{label}</strong>
-          <small>Approximate · private phonemes only</small>
+          <small>Choose where this voice comes from</small>
         </span>
         <output aria-live="polite">{summary}</output>
       </div>
@@ -152,6 +153,7 @@ export function PronunciationAtlas({
         value={padValue}
         restoreValue={restoreValue}
         adapter={adapter}
+        className={styles.pad}
         color={color}
         disabled={disabled}
         onPreview={(next) => {
@@ -201,11 +203,11 @@ export function PronunciationAtlas({
           </div>
         ) : (
           <small className={styles.naturalHint}>
-            Drag across the map to introduce a pronunciation influence.
+            Choose a place on the map.
           </small>
         )}
         <details className={styles.listFallback} id={fallbackId}>
-          <summary>List view</summary>
+          <summary>All accents</summary>
           <div>
             <label>
               English foundation
@@ -240,7 +242,7 @@ export function PronunciationAtlas({
                   })
                 }
               >
-                <option value="none">Natural</option>
+                <option value="none">Natural voice</option>
                 {LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.map((capability) => (
                   <option key={capability.id} value={capability.id}>
                     {capability.label}
@@ -279,7 +281,7 @@ export function PronunciationAtlas({
               disabled={disabled || previewDisabled}
               onClick={onPreviewSource}
             >
-              Source
+              Original
             </button>
           ) : null}
           {onPreviewCurrent ? (
@@ -289,7 +291,7 @@ export function PronunciationAtlas({
               data-primary="true"
               onClick={onPreviewCurrent}
             >
-              Current
+              With accent
             </button>
           ) : null}
         </div>
