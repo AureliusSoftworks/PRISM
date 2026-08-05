@@ -47,6 +47,15 @@ export function coffeeVoiceRevealFallbackDelayMs(
   return safeDurationMs + (voiced ? COFFEE_VOICE_REVEAL_TAIL_GRACE_MS : 0);
 }
 
+/**
+ * Stall heartbeat for Coffee reveal: while voice progress keeps arriving,
+ * reschedule applyReveal this far in the future instead of using a fixed
+ * estimate that can cut monologues short after clause pauses.
+ */
+export function coffeeVoiceRevealStallWatchdogDelayMs(): number {
+  return COFFEE_VOICE_REVEAL_TAIL_GRACE_MS;
+}
+
 /** Resolve the delivery duration only after playback's real start callback. */
 export function coffeeVoiceStartedDurationMs(
   durationMs: number | null | undefined,

@@ -1620,6 +1620,7 @@ import {
   coffeeDeliveryVisibleLengthAtMs,
   coffeeVoiceStartedDurationMs,
   coffeeVoiceRevealFallbackDelayMs,
+  coffeeVoiceRevealStallWatchdogDelayMs,
 } from "./coffee-speech-delivery";
 import { coffeeAutonomousTurnDelayMs } from "./coffee-turn-pacing";
 import {
@@ -120806,6 +120807,30 @@ function HomeContent(): React.JSX.Element {
           settle(resolvedDurationMs);
         },
         onProgress: (elapsedMs: number, durationMs: number) => {
+          if (
+            coffeeActiveVoiceMessageIdRef.current === message.id &&
+            coffeeRevealCompleteFnRef.current
+          ) {
+            if (coffeeRevealTimerRef.current) {
+              clearTimeout(coffeeRevealTimerRef.current);
+            }
+            // Heartbeat: keep the table reveal timer behind live speech so a
+            // short initial estimate cannot stop still-playing audio.
+            coffeeRevealTimerRef.current = setTimeout(() => {
+              coffeeRevealCompleteFnRef.current?.();
+            }, coffeeVoiceRevealStallWatchdogDelayMs());
+          }
+          if (
+            coffeeVoiceRevealClockRef.current?.messageId === message.id &&
+            Number.isFinite(durationMs) &&
+            durationMs >
+              coffeeVoiceRevealClockRef.current.durationMs
+          ) {
+            coffeeVoiceRevealClockRef.current = {
+              ...coffeeVoiceRevealClockRef.current,
+              durationMs,
+            };
+          }
           setCoffeeLiveAvatarSpeech((current) => {
             if (current?.messageId !== message.id) return current;
             const nextElapsedMs = Math.max(0, Math.min(durationMs, elapsedMs));

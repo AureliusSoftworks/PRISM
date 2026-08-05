@@ -8,6 +8,7 @@ import {
   coffeeDeliveryVisibleLengthAtMs,
   coffeeVoiceStartedDurationMs,
   coffeeVoiceRevealFallbackDelayMs,
+  coffeeVoiceRevealStallWatchdogDelayMs,
 } from "./coffee-speech-delivery.ts";
 
 describe("Coffee speech delivery", () => {
@@ -19,6 +20,10 @@ describe("Coffee speech delivery", () => {
     assert.equal(coffeeVoiceRevealFallbackDelayMs(1_000, false), 1_000);
     assert.equal(
       coffeeVoiceRevealFallbackDelayMs(Number.NaN, true),
+      COFFEE_VOICE_REVEAL_TAIL_GRACE_MS,
+    );
+    assert.equal(
+      coffeeVoiceRevealStallWatchdogDelayMs(),
       COFFEE_VOICE_REVEAL_TAIL_GRACE_MS,
     );
   });

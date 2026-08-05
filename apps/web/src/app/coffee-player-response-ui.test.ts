@@ -119,6 +119,14 @@ describe("Coffee player response UI wiring", () => {
       pageSource,
       /coffeeVoiceRevealFallbackDelayMs\(durationMs, voiced\)/,
     );
+    assert.match(
+      pageSource,
+      /coffeeVoiceRevealStallWatchdogDelayMs\(\)/u,
+    );
+    assert.match(
+      pageSource,
+      /coffeeRevealTimerRef\.current = setTimeout\(\(\) => \{\s*coffeeRevealCompleteFnRef\.current\?\.\(\);/u,
+    );
   });
 
   it("starts the speaking reveal only from real voice playback start", () => {

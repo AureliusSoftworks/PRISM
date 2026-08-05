@@ -29,6 +29,7 @@ import {
 import {
   readEnglishVoiceWaveStream,
   readEnglishVoiceSynthesisClip,
+  reportedChunkedVoiceDurationMs,
   type EnglishVoiceSynthesisClip,
 } from "./englishVoice.ts";
 
@@ -1155,6 +1156,26 @@ async function playChunkedBabbleResponse(
   let consumedCharacters = 0;
   let playedChunks = 0;
   let playbackStarted = false;
+  let audibleSegmentCursorMs = 0;
+
+  const remainingEstimateAfterCharacters = (charactersHeard: number): number =>
+    estimatedDurationMs *
+    Math.max(0, totalCharacters - charactersHeard) /
+    totalCharacters;
+
+  const reportLifecycleProgress = (
+    audibleElapsedMs: number,
+    remainingEstimateMs: number,
+  ): void => {
+    lifecycle?.onProgress?.(
+      Math.max(0, Math.round(audibleElapsedMs)),
+      reportedChunkedVoiceDurationMs({
+        estimatedDurationMs,
+        audibleElapsedMs,
+        remainingEstimateMs,
+      }),
+    );
+  };
 
   for await (const chunk of readEnglishVoiceWaveStream(response)) {
     if (expectedGeneration !== generation) return;
@@ -1165,6 +1186,9 @@ async function playChunkedBabbleResponse(
       (Math.min(totalCharacters, consumedCharacters + chunk.characterCount) /
         totalCharacters);
     const segmentDurationMs = Math.max(1, segmentEndMs - segmentStartMs);
+    const remainingAfterChunk = remainingEstimateAfterCharacters(
+      consumedCharacters + chunk.characterCount,
+    );
     const playbackProfile = {
       ...resolveBabblePlaybackProfile(profile, chunk.bytes, {
         deliveryRate: timing?.deliveryRate,
@@ -1173,6 +1197,7 @@ async function playChunkedBabbleResponse(
       volume: normalizeBotVoiceVolume(globalVolume),
     };
     let actualChunkDurationMs: number | null = null;
+    let actualChunkElapsedMs = 0;
     await playBabble(
       chunk.bytes,
       chunk.text ?? sourceText,
@@ -1183,18 +1208,27 @@ async function playChunkedBabbleResponse(
       {
         onStart: (durationMs) => {
           actualChunkDurationMs = durationMs;
+          const chunkFloor = Math.max(1, durationMs ?? segmentDurationMs);
+          const reported = reportedChunkedVoiceDurationMs({
+            estimatedDurationMs,
+            audibleElapsedMs: audibleSegmentCursorMs,
+            remainingEstimateMs: chunkFloor + remainingAfterChunk,
+          });
           if (!playbackStarted) {
             playbackStarted = true;
-            lifecycle?.onStart?.(estimatedDurationMs);
+            lifecycle?.onStart?.(reported);
+          } else {
+            lifecycle?.onProgress?.(audibleSegmentCursorMs, reported);
           }
         },
         onProgress: (elapsedMs) => {
-          const progress = actualChunkDurationMs
-            ? Math.min(1, elapsedMs / actualChunkDurationMs)
-            : Math.min(1, elapsedMs / segmentDurationMs);
-          lifecycle?.onProgress?.(
-            segmentStartMs + segmentDurationMs * progress,
-            estimatedDurationMs,
+          actualChunkElapsedMs = Math.max(actualChunkElapsedMs, elapsedMs);
+          reportLifecycleProgress(
+            audibleSegmentCursorMs + elapsedMs,
+            Math.max(
+              0,
+              (actualChunkDurationMs ?? segmentDurationMs) - elapsedMs,
+            ) + remainingAfterChunk,
           );
         },
         onEnd: () => undefined,
@@ -1203,16 +1237,35 @@ async function playChunkedBabbleResponse(
       playedChunks === 0 ? preSpeechBreath : null,
       stereoPan,
     );
+    const speechHeardMs = Math.max(
+      actualChunkElapsedMs,
+      expectedGeneration === generation
+        ? (actualChunkDurationMs ?? segmentDurationMs)
+        : 0,
+    );
+    audibleSegmentCursorMs += speechHeardMs;
+    if (expectedGeneration !== generation) return;
     playedChunks += 1;
     consumedCharacters += chunk.characterCount;
-    lifecycle?.onProgress?.(segmentEndMs, estimatedDurationMs);
+    reportLifecycleProgress(
+      audibleSegmentCursorMs,
+      remainingEstimateAfterCharacters(consumedCharacters),
+    );
   }
 
   if (expectedGeneration !== generation) return;
   if (playedChunks === 0 || !playbackStarted) {
     throw new Error("Babble voice stream returned no playable audio.");
   }
-  lifecycle?.onProgress?.(estimatedDurationMs, estimatedDurationMs);
+  const finalDurationMs = reportedChunkedVoiceDurationMs({
+    estimatedDurationMs,
+    audibleElapsedMs: audibleSegmentCursorMs,
+    remainingEstimateMs: 0,
+  });
+  lifecycle?.onProgress?.(
+    Math.max(audibleSegmentCursorMs, finalDurationMs),
+    finalDurationMs,
+  );
   lifecycle?.onEnd?.();
 }
 

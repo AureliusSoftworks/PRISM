@@ -1800,7 +1800,11 @@ describe("Signal experience shell", () => {
     assert.match(source, /const SIGNAL_VOICE_COMPLETION_GRACE_MS = 4_000/u);
     assert.match(
       source,
-      /normalizedDurationMs - elapsedMs\) \+ SIGNAL_VOICE_COMPLETION_GRACE_MS/u,
+      /options\?\.heartbeat[\s\S]{0,120}SIGNAL_VOICE_COMPLETION_GRACE_MS/u,
+    );
+    assert.match(
+      source,
+      /armVoiceCompletionWatchdog\(durationMs, elapsedMs, \{\s*heartbeat: true,/u,
     );
     assert.match(source, /armVoiceCompletionWatchdog\(/u);
     assert.match(source, /signalVoiceCompletionFallbackDurationMs\(/u);

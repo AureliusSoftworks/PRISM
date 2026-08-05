@@ -11,6 +11,7 @@ import {
   elevenLabsEffectForEngine,
   readEnglishVoiceSynthesisClip,
   parseEnglishVoiceWaveStreamChunk,
+  reportedChunkedVoiceDurationMs,
   resolveEnglishVoicePlaybackDetuneCents,
   resolveEnglishVoicePostProcessing,
   scaleEnglishVoiceAlignmentForPlayback,
@@ -19,6 +20,33 @@ import {
 } from "./englishVoice.ts";
 
 describe("English voice post processing", () => {
+  it("grows chunked voice duration above the text estimate when audible time overruns", () => {
+    assert.equal(
+      reportedChunkedVoiceDurationMs({
+        estimatedDurationMs: 1_000,
+        audibleElapsedMs: 400,
+        remainingEstimateMs: 600,
+      }),
+      1_000,
+    );
+    assert.equal(
+      reportedChunkedVoiceDurationMs({
+        estimatedDurationMs: 1_000,
+        audibleElapsedMs: 900,
+        remainingEstimateMs: 400,
+      }),
+      1_300,
+    );
+    assert.equal(
+      reportedChunkedVoiceDurationMs({
+        estimatedDurationMs: 500,
+        audibleElapsedMs: 800,
+        remainingEstimateMs: 0,
+      }),
+      800,
+    );
+  });
+
   it("derives visible playback progress from the media clock at the active tempo", () => {
     assert.equal(englishVoiceMediaElapsedMs(0.62, 1.24), 500);
     assert.equal(englishVoiceMediaElapsedMs(Number.NaN, 1), 0);

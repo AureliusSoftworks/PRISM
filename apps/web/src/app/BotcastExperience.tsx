@@ -6173,12 +6173,23 @@ export function BotcastExperience({
       const armVoiceCompletionWatchdog = (
         durationMs: number,
         elapsedMs = 0,
+        options?: { heartbeat?: boolean },
       ): void => {
-        const normalizedDurationMs = Math.max(1, Math.round(durationMs));
-        if (normalizedDurationMs <= armedVoiceCompletionDurationMs) return;
-        armedVoiceCompletionDurationMs = normalizedDurationMs;
+        // Heartbeat mode: progress keeps pushing a stall deadline so long
+        // monologues (clause pauses, slow TTS) are never cut on the initial
+        // text estimate. Estimate mode is only used at onStart.
         if (voiceCompletionTimer !== null) {
           window.clearTimeout(voiceCompletionTimer);
+        }
+        const delayMs = options?.heartbeat
+          ? SIGNAL_VOICE_COMPLETION_GRACE_MS
+          : Math.max(0, Math.round(durationMs) - Math.round(elapsedMs)) +
+            SIGNAL_VOICE_COMPLETION_GRACE_MS;
+        if (!options?.heartbeat) {
+          armedVoiceCompletionDurationMs = Math.max(
+            armedVoiceCompletionDurationMs,
+            Math.max(1, Math.round(durationMs)),
+          );
         }
         voiceCompletionTimer = window.setTimeout(
           () => {
@@ -6186,8 +6197,7 @@ export function BotcastExperience({
           onStopUtterance?.();
           settleVoicePlayback?.(false);
           },
-          Math.max(0, normalizedDurationMs - elapsedMs) +
-            SIGNAL_VOICE_COMPLETION_GRACE_MS,
+          delayMs,
         );
       };
       const lifecycle: VoicePlaybackLifecycle = {
@@ -6256,7 +6266,9 @@ export function BotcastExperience({
             !episodeOperationIsCurrent(controller, runId)
           )
             return;
-          armVoiceCompletionWatchdog(durationMs, elapsedMs);
+          armVoiceCompletionWatchdog(durationMs, elapsedMs, {
+            heartbeat: true,
+          });
           if (
             elapsedMs / Math.max(1, durationMs) >=
             SIGNAL_HOST_CUE_REDIRECT_LATEST_PROGRESS

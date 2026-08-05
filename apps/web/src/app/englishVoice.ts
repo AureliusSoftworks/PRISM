@@ -1069,6 +1069,22 @@ async function playEnglishClauseGap(args: {
   return waitEnglishClausePauseMs(gap.pauseMs, args.expectedGeneration);
 }
 
+/**
+ * Report a duration floor that grows with real audible time so mode watchdogs
+ * (Signal/Coffee) do not hard-stop still-playing chunked speech when clause
+ * pauses or slow TTS overrun the initial text estimate.
+ */
+export function reportedChunkedVoiceDurationMs(args: {
+  estimatedDurationMs: number;
+  audibleElapsedMs: number;
+  remainingEstimateMs: number;
+}): number {
+  const estimated = Math.max(1, Math.round(args.estimatedDurationMs));
+  const audible = Math.max(0, Math.round(args.audibleElapsedMs));
+  const remaining = Math.max(0, Math.round(args.remainingEstimateMs));
+  return Math.max(estimated, audible + remaining, 1);
+}
+
 async function playChunkedEnglishResponse(
   response: Response,
   profile: BotAudioVoiceProfileV1,
@@ -1097,6 +1113,25 @@ async function playChunkedEnglishResponse(
     index: number;
   } | null = null;
 
+  const remainingEstimateAfterCharacters = (charactersHeard: number): number =>
+    safeEstimatedDurationMs *
+    Math.max(0, totalCharacters - charactersHeard) /
+    totalCharacters;
+
+  const reportLifecycleProgress = (
+    audibleElapsedMs: number,
+    remainingEstimateMs: number,
+  ): void => {
+    lifecycle?.onProgress?.(
+      Math.max(0, Math.round(audibleElapsedMs)),
+      reportedChunkedVoiceDurationMs({
+        estimatedDurationMs: safeEstimatedDurationMs,
+        audibleElapsedMs,
+        remainingEstimateMs,
+      }),
+    );
+  };
+
   for await (const chunk of readEnglishVoiceWaveStream(response)) {
     if (expectedGeneration !== generation) return;
     if (chunk.kind === "vocal-action" && chunk.action) {
@@ -1111,6 +1146,9 @@ async function playChunkedEnglishResponse(
         sourceStart: chunk.sourceStart ?? 0,
         sourceEnd: chunk.sourceEnd ?? 0,
       };
+      const remainingAfterAction = remainingEstimateAfterCharacters(
+        consumedCharacters,
+      );
       await playAudio(
         localVocalActionWave({
           segment: actionSegment,
@@ -1125,15 +1163,26 @@ async function playChunkedEnglishResponse(
         {
           onStart: (durationMs) => {
             actualActionDurationMs = durationMs;
+            const reported = reportedChunkedVoiceDurationMs({
+              estimatedDurationMs: safeEstimatedDurationMs,
+              audibleElapsedMs: audibleSegmentCursorMs,
+              remainingEstimateMs:
+                Math.max(1, durationMs ?? 1) + remainingAfterAction,
+            });
             if (!playbackStarted) {
               playbackStarted = true;
-              lifecycle?.onStart?.(safeEstimatedDurationMs);
+              lifecycle?.onStart?.(reported);
+            } else {
+              lifecycle?.onProgress?.(audibleSegmentCursorMs, reported);
             }
           },
           onProgress: (elapsedMs) => {
             actualActionElapsedMs = Math.max(actualActionElapsedMs, elapsedMs);
-            // A vocal action holds the current visible text rather than
-            // revealing unheard speech underneath it.
+            reportLifecycleProgress(
+              audibleSegmentCursorMs + elapsedMs,
+              Math.max(0, (actualActionDurationMs ?? 1) - elapsedMs) +
+                remainingAfterAction,
+            );
           },
           onEnd: () => undefined,
         },
@@ -1156,6 +1205,10 @@ async function playChunkedEnglishResponse(
       });
       audibleSegmentCursorMs += actionHeardMs;
       if (expectedGeneration !== generation) return;
+      reportLifecycleProgress(
+        audibleSegmentCursorMs,
+        remainingEstimateAfterCharacters(consumedCharacters),
+      );
       playedChunks += 1;
       continue;
     }
@@ -1175,6 +1228,10 @@ async function playChunkedEnglishResponse(
       if (expectedGeneration !== generation) return;
       if (gapHeardMs > 0) {
         audibleSegmentCursorMs += gapHeardMs;
+        reportLifecycleProgress(
+          audibleSegmentCursorMs,
+          remainingEstimateAfterCharacters(consumedCharacters),
+        );
       }
     }
 
@@ -1185,6 +1242,9 @@ async function playChunkedEnglishResponse(
       (Math.min(totalCharacters, consumedCharacters + chunk.characterCount) /
         totalCharacters);
     const segmentDurationMs = Math.max(1, segmentEndMs - segmentStartMs);
+    const remainingAfterChunk = remainingEstimateAfterCharacters(
+      consumedCharacters + chunk.characterCount,
+    );
     let actualChunkDurationMs: number | null = null;
     let actualChunkElapsedMs = 0;
     await playAudio(
@@ -1197,19 +1257,27 @@ async function playChunkedEnglishResponse(
       {
         onStart: (durationMs) => {
           actualChunkDurationMs = durationMs;
+          const chunkFloor = Math.max(1, durationMs ?? segmentDurationMs);
+          const reported = reportedChunkedVoiceDurationMs({
+            estimatedDurationMs: safeEstimatedDurationMs,
+            audibleElapsedMs: audibleSegmentCursorMs,
+            remainingEstimateMs: chunkFloor + remainingAfterChunk,
+          });
           if (!playbackStarted) {
             playbackStarted = true;
-            lifecycle?.onStart?.(safeEstimatedDurationMs);
+            lifecycle?.onStart?.(reported);
+          } else {
+            lifecycle?.onProgress?.(audibleSegmentCursorMs, reported);
           }
         },
         onProgress: (elapsedMs) => {
           actualChunkElapsedMs = Math.max(actualChunkElapsedMs, elapsedMs);
-          const progress = actualChunkDurationMs
-            ? Math.min(1, elapsedMs / actualChunkDurationMs)
-            : Math.min(1, elapsedMs / segmentDurationMs);
-          lifecycle?.onProgress?.(
-            segmentStartMs + segmentDurationMs * progress,
-            safeEstimatedDurationMs,
+          reportLifecycleProgress(
+            audibleSegmentCursorMs + elapsedMs,
+            Math.max(
+              0,
+              (actualChunkDurationMs ?? segmentDurationMs) - elapsedMs,
+            ) + remainingAfterChunk,
           );
         },
         // The outer stream owns the single lifecycle end event.
@@ -1241,14 +1309,25 @@ async function playChunkedEnglishResponse(
     };
     playedChunks += 1;
     consumedCharacters += chunk.characterCount;
-    lifecycle?.onProgress?.(segmentEndMs, safeEstimatedDurationMs);
+    reportLifecycleProgress(
+      audibleSegmentCursorMs,
+      remainingEstimateAfterCharacters(consumedCharacters),
+    );
   }
 
   if (expectedGeneration !== generation) return;
   if (playedChunks === 0 || !playbackStarted) {
     throw new Error("Local voice stream returned no playable audio.");
   }
-  lifecycle?.onProgress?.(safeEstimatedDurationMs, safeEstimatedDurationMs);
+  const finalDurationMs = reportedChunkedVoiceDurationMs({
+    estimatedDurationMs: safeEstimatedDurationMs,
+    audibleElapsedMs: audibleSegmentCursorMs,
+    remainingEstimateMs: 0,
+  });
+  lifecycle?.onProgress?.(
+    Math.max(audibleSegmentCursorMs, finalDurationMs),
+    finalDurationMs,
+  );
   lifecycle?.onEnd?.();
 }
 
