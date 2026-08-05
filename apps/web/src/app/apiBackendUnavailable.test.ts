@@ -1,20 +1,66 @@
 import assert from "node:assert/strict";
+import http from "node:http";
 import { afterEach, describe, it } from "node:test";
 import { NextRequest } from "next/server.js";
 import { BACKEND_UNAVAILABLE_CODE } from "./backendUnavailable.ts";
 import { GET, POST } from "./api/[[...path]]/route.ts";
 
-const originalFetch = globalThis.fetch;
+type MockHandler = (
+  req: http.IncomingMessage,
+  res: http.ServerResponse,
+  body: Buffer
+) => void | Promise<void>;
 
-afterEach(() => {
-  globalThis.fetch = originalFetch;
+let mockServer: http.Server | null = null;
+let previousApiOrigin: string | undefined;
+
+async function startMockApi(handler: MockHandler): Promise<string> {
+  mockServer = http.createServer((req, res) => {
+    const chunks: Buffer[] = [];
+    req.on("data", (chunk: Buffer) => {
+      chunks.push(chunk);
+    });
+    req.on("end", () => {
+      void Promise.resolve(handler(req, res, Buffer.concat(chunks))).catch(
+        (err) => {
+          res.statusCode = 500;
+          res.end(err instanceof Error ? err.message : "mock error");
+        }
+      );
+    });
+  });
+  await new Promise<void>((resolve) => {
+    mockServer!.listen(0, "127.0.0.1", () => resolve());
+  });
+  const address = mockServer.address();
+  assert.ok(address && typeof address === "object");
+  const origin = `http://127.0.0.1:${address.port}`;
+  previousApiOrigin = process.env.LOCALAI_API_ORIGIN;
+  process.env.LOCALAI_API_ORIGIN = origin;
+  return origin;
+}
+
+afterEach(async () => {
+  if (previousApiOrigin === undefined) {
+    delete process.env.LOCALAI_API_ORIGIN;
+  } else {
+    process.env.LOCALAI_API_ORIGIN = previousApiOrigin;
+  }
+  previousApiOrigin = undefined;
+  if (mockServer) {
+    const server = mockServer;
+    mockServer = null;
+    await new Promise<void>((resolve, reject) => {
+      server.close((err) => (err ? reject(err) : resolve()));
+    });
+  }
 });
 
 describe("Prism API proxy backend-down behavior", () => {
   it("returns a deliberate 503 JSON payload when the upstream API is unreachable", async () => {
-    globalThis.fetch = async () => {
-      throw new Error("connect ECONNREFUSED 127.0.0.1:18787");
-    };
+    previousApiOrigin = process.env.LOCALAI_API_ORIGIN;
+    // Bind nothing on this port — connection must refuse.
+    process.env.LOCALAI_API_ORIGIN = "http://127.0.0.1:9";
 
     const response = await GET(new NextRequest("http://127.0.0.1:18788/api/health"), {
       params: Promise.resolve({ path: ["health"] }),
@@ -39,20 +85,21 @@ describe("Prism API proxy backend-down behavior", () => {
   });
 
   it("buffers POST bodies and preserves a delayed API error response", async () => {
-    globalThis.fetch = async (_input, init) => {
-      assert.ok(init?.body instanceof ArrayBuffer);
-      assert.equal(
-        new TextDecoder().decode(init.body),
-        JSON.stringify({ text: "Preview Sheldon" }),
-      );
-      return Response.json(
-        {
+    await startMockApi(async (req, res, body) => {
+      assert.equal(req.method, "POST");
+      assert.equal(req.url, "/api/voices/synthesize");
+      assert.equal(body.toString("utf8"), JSON.stringify({ text: "Preview Sheldon" }));
+      // Simulate a slow local backend that still eventually answers.
+      await new Promise((resolve) => setTimeout(resolve, 25));
+      res.statusCode = 429;
+      res.setHeader("content-type", "application/json");
+      res.end(
+        JSON.stringify({
           ok: false,
           error: "ElevenLabs does not have enough voice credits.",
-        },
-        { status: 429 },
+        })
       );
-    };
+    });
 
     const response = await POST(
       new NextRequest("http://127.0.0.1:18788/api/voices/synthesize", {
@@ -71,11 +118,12 @@ describe("Prism API proxy backend-down behavior", () => {
   });
 
   it("does not report a cancelled browser request as an API outage", async () => {
+    await startMockApi((_req, res) => {
+      res.statusCode = 200;
+      res.end("should not matter");
+    });
     const controller = new AbortController();
     controller.abort();
-    globalThis.fetch = async () => {
-      throw new DOMException("Aborted", "AbortError");
-    };
 
     const response = await GET(
       new NextRequest("http://127.0.0.1:18788/api/voices/synthesize", {

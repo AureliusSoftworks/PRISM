@@ -5,6 +5,16 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 ---
 
 ### 2026-08-05 · [UX]
+**Trigger**: Spectator Gallery ready showed Forum · Verdict and “Jury has returned 5–0” after bake.
+**Lesson**: Baked Spectator sessions finish the floor server-side (`stepKey: completed`, jury phase complete) before Start. Live chrome must follow presentation progress (`debateLivePhaseLabel`, `debateJuryOutcomeRevealed`) — never the baked end-state — until the matching events are heard.
+**Applies to**: `debatePresentation.ts`, Debate live header, Jury roster/chamber, Spectator bake hold
+
+### 2026-08-05 · [UX]
+**Trigger**: Effort glyph spin was inconsistent during LLM calls — especially new chats with progressive/psychic streaming.
+**Lesson**: `pendingReplyVisible` must survive the mid-request upgrade from optimistic `detail.id === "pending"` to the real conversation id. Adopt the real id into `pendingReplyConversationId` on first progressive segment, and keep `isPendingReplyVisible` tolerant of that upgrade. Wire `generating` on every live model picker that owns LLM work (Chat/Zen + Coffee `botThinking`). Prefer `transform: rotate()` for the spin so hover `transform: scale` cannot fight it.
+**Applies to**: `pendingReplyVisible.ts`, `ComposerModelPicker` `data-generating`, Coffee header picker, effort glyph CSS
+
+### 2026-08-05 · [UX]
 **Trigger**: User asked that summoning Prism keep the navbar clear, Wield hide it, and auto-hide return app-wide like old Zen; then disabled idle auto-hide for Signal and Debate.
 **Lesson**: Drive shared chrome through `appNavbarChrome.ts`. Summon sets `data-prism-companion-open` and raises navbar above the companion backdrop (z 860 > 854). Idle auto-hide and Wield tuck are Zen-only (`chatPresentation === "zen"`); Chat, Signal, Debate, and every other shell keep a persistent bar even while Wielding. Do not put the summon blur over the navbar.
 **Applies to**: `PrismCompanion`, `globals.css`, shared applet navbar, conversation hide/reveal seams
