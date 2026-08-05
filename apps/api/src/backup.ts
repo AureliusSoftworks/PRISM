@@ -120,6 +120,10 @@ import {
   type ProjectOwnedAssetArchiveBundleV1,
 } from "./project-owned-assets.ts";
 import {
+  listActionSfxPackClipsForBackup,
+  restoreActionSfxPackClipsFromBackup,
+} from "./action-sfx-pack.ts";
+import {
   listLibraryGroups,
   replaceLibraryGroups,
   type LibraryGroupV1,
@@ -556,6 +560,21 @@ export interface BackupSnapshot {
       updatedAt: string;
     }>;
   };
+  /**
+   * Local action Foley packs (bot + player). Not part of bot Marketplace export.
+   * Optional in older v1 snapshots.
+   */
+  actionSfxPacks?: Array<{
+    ownerKind: "bot" | "player";
+    ownerId: string;
+    kind: string;
+    variantIndex: number;
+    contentType: string;
+    audioBase64: string;
+    promptSeed: string;
+    packGenerationId: string;
+    createdAt: string;
+  }>;
 }
 
 function backupJsonObject(value: unknown): Record<string, unknown> {
@@ -2765,6 +2784,7 @@ export function exportUserSnapshot(
         updatedAt: String(row.updated_at),
       })),
     },
+    actionSfxPacks: listActionSfxPackClipsForBackup(db, userId),
     memories: memories.map((memory) => ({
       id: memory.id,
       conversationId: memory.conversation_id ?? undefined,
@@ -4239,6 +4259,13 @@ function importUserSnapshotWithinTransaction(
         take.updatedAt,
       );
     }
+  }
+
+  if (Array.isArray(snapshot.actionSfxPacks)) {
+    db.prepare("DELETE FROM action_sfx_pack_clips WHERE user_id = ?").run(
+      userId,
+    );
+    restoreActionSfxPackClipsFromBackup(db, userId, snapshot.actionSfxPacks);
   }
 
   for (const memory of snapshot.memories) {

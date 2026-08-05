@@ -57,41 +57,44 @@ export interface BotAvatarFoundryUpgradeNode {
   color: string;
 }
 
+/** Shared foundry accent for module chrome (lamps/tabs inherit bot color at render). */
+export const BOT_AVATAR_FOUNDRY_MODULE_ACCENT = "#91a8bd";
+
 export const BOT_AVATAR_FOUNDRY_UPGRADE_NODES = [
   {
     id: "eyes",
     module: "Module 01",
     label: "Optics",
     ariaLabel: "Open Optics module controls",
-    color: "#ffb25f",
+    color: BOT_AVATAR_FOUNDRY_MODULE_ACCENT,
   },
   {
     id: "mouth",
     module: "Module 02",
     label: "Vocalizer",
     ariaLabel: "Open Vocalizer module controls",
-    color: "#ff7972",
+    color: BOT_AVATAR_FOUNDRY_MODULE_ACCENT,
   },
   {
     id: "screen",
     module: "Module 03",
     label: "Ink display",
     ariaLabel: "Open Ink Display module editor",
-    color: "#6bcaff",
+    color: BOT_AVATAR_FOUNDRY_MODULE_ACCENT,
   },
   {
     id: "glyph",
     module: "Module 04",
     label: "Identity core",
     ariaLabel: "Open Identity Core module controls",
-    color: "#9eaaff",
+    color: BOT_AVATAR_FOUNDRY_MODULE_ACCENT,
   },
   {
     id: "chassis",
     module: "Module 05",
     label: "Shell",
     ariaLabel: "Open Shell module controls",
-    color: "#c982ff",
+    color: BOT_AVATAR_FOUNDRY_MODULE_ACCENT,
   },
 ] as const satisfies readonly BotAvatarFoundryUpgradeNode[];
 

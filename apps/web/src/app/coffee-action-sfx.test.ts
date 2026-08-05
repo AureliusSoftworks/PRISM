@@ -41,7 +41,7 @@ describe("Coffee action sound effects", () => {
     assert.equal(coffeeActionSfxKindForAction("sets his cup down on the table"), "cup_set_down");
     assert.equal(coffeeActionSfxKindForAction("taps twice on the tabletop"), "table_knock");
     assert.equal(coffeeActionSfxKindForAction("takes a long sip"), null);
-    assert.equal(coffeeActionSfxKindForAction("laughs and whispers"), null);
+    assert.equal(coffeeActionSfxKindForAction("laughs and whispers"), "laugh");
   });
 
   it("recognizes semantic action families instead of exact keywords only", () => {
@@ -53,7 +53,7 @@ describe("Coffee action sound effects", () => {
     assert.equal(coffeeActionReactionKindForAction("passes some gas"), "fart");
     assert.equal(coffeeActionReactionKindForAction("belches into one hand"), "burp");
     assert.equal(coffeeActionReactionKindForAction("eructates loudly"), "burp");
-    assert.equal(coffeeActionReactionKindForAction("clears her throat"), "cough");
+    assert.equal(coffeeActionReactionKindForAction("clears her throat"), "throat_clear");
     assert.equal(coffeeActionReactionKindForAction("hacks twice"), "cough");
     assert.equal(coffeeActionReactionKindForAction("shakes the cocktail tin"), null);
   });
@@ -246,6 +246,10 @@ describe("Coffee action sound effects", () => {
 
   it("plays player-authored bundled Foley from every live mode", () => {
     const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+    const coffeeSource = readFileSync(
+      new URL("./coffee-action-sfx.ts", import.meta.url),
+      "utf8",
+    );
     assert.match(
       pageSource,
       /const playChatPlayerActionSfx = useCallback\([\s\S]{0,420}buildBundledActionSfxPlan\(messageText\)/u,
@@ -270,10 +274,12 @@ describe("Coffee action sound effects", () => {
     assert.ok(bufferedFollowupDispatch > bufferedFollowupPlayback);
     assert.match(
       pageSource,
-      /!options\.zenFollowupDispatch\s*\) \{\s*playChatPlayerActionSfx\(displayTrimmed\);/u,
+      /!options\.zenFollowupDispatch\s*\) \{\s*if \(!\(\s*!chatVoiceForcedMuted[\s\S]{0,180}playChatPlayerActionSfx\(displayTrimmed\);/u,
     );
     assert.match(pageSource, /playCoffeeActionSfxOnce\(/u);
     assert.match(pageSource, /playSignalProducerGuestActionSfx/u);
     assert.match(pageSource, /playDebatePlayerActionSfx/u);
+    assert.match(coffeeSource, /resolveBodilyActionSfxPlayback/u);
+    assert.match(coffeeSource, /playBodilyFoleyThroughVoiceBus/u);
   });
 });

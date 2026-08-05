@@ -8,9 +8,16 @@ import type {
   ReplayTimelineV1,
   BotcastSoundboardCueKind,
 } from "@localai/shared";
-import { normalizeBotcastStudioAtmosphereMix } from "@localai/shared";
+import {
+  normalizeBotcastStudioAtmosphereMix,
+  normalizeCorporality,
+} from "@localai/shared";
 import { replayFetch } from "./replayClient";
-import { bundledCoffeeActionSfxPlaybackForSeed } from "./coffee-action-sfx";
+import {
+  resolveBodilyActionSfxPlayback,
+  resolveLegacyBodilyActionSfxPlayback,
+} from "./corporality-action-sfx";
+import { resolveActionSfxPackPlayback } from "./action-sfx-pack-client";
 import { resolvePreSpeechBreathPlan } from "./preSpeechBreath";
 import {
   connectRoomAcoustics,
@@ -23,6 +30,10 @@ import { signalSoundboardPlaybackPlan } from "./signalSoundboard";
 import { SIGNAL_REPLAY_DEFAULT_INTRO_DURATION_MS } from "./signalReplayVideoFrame";
 import { compactSignalStudioCutMouthCues } from "./signalStudioCutMouth";
 import { renderOfflineVoiceTake } from "./voiceEffects";
+import {
+  isSignalActionSfxDirectionPayload,
+  synthesizeSignalActionSfxDirection,
+} from "./signalActionSfxDirection";
 
 const SAMPLE_RATE = 48_000;
 const SEGMENT_GAP_MS = 320;
@@ -80,6 +91,13 @@ export async function prepareSignalStudioCut(
     throw new Error("Premium audio requires a Replay V2 Signal manifest.");
   }
   const sourceManifest = recording.manifest;
+  const synthesizedActionDirection = synthesizeSignalActionSfxDirection(
+    sourceManifest,
+  );
+  const directionWithActionFoley =
+    synthesizedActionDirection.length === 0
+      ? sourceManifest.direction
+      : [...sourceManifest.direction, ...synthesizedActionDirection];
   const sortedSegments = [...segments].sort((left, right) => left.index - right.index);
   if (sortedSegments.length === 0) {
     throw new Error("Premium replacement voice segments are missing.");
@@ -281,7 +299,7 @@ export async function prepareSignalStudioCut(
     cursorMs += rendered.speechDurationMs;
     scheduledSpeechCount += 1;
   }
-  for (const event of sourceManifest.direction) {
+  for (const event of directionWithActionFoley) {
     if (event.kind !== "action" || !event.sourceMessageId) continue;
     const messageTiming = timingByMessageId.get(event.sourceMessageId);
     if (!messageTiming) continue;
@@ -300,19 +318,98 @@ export async function prepareSignalStudioCut(
       playbackRate = plan?.playbackRate ?? 1;
     } else if (
       cueKind === "action_sfx" &&
-      (event.payload.actionKind === "fart" ||
-        event.payload.actionKind === "burp" ||
-        event.payload.actionKind === "cough")
+      isSignalActionSfxDirectionPayload(event.payload)
     ) {
-      const plan = bundledCoffeeActionSfxPlaybackForSeed(
-        event.payload.actionKind,
-        typeof event.payload.seed === "string"
-          ? event.payload.seed
-          : `${event.sequence}:${event.sourceMessageId}`,
-      );
-      url = plan.source;
-      gain = 0.42;
-      playbackRate = plan.playbackRate;
+      const actionKind = event.payload.actionKind;
+      if (
+        actionKind !== "fart" &&
+        actionKind !== "burp" &&
+        actionKind !== "cough" &&
+        actionKind !== "laugh" &&
+        actionKind !== "sigh" &&
+        actionKind !== "gasp" &&
+        actionKind !== "throat_clear"
+      ) {
+        continue;
+      }
+      const packOwnerKind =
+        event.payload.packOwnerKind === "bot" ||
+        event.payload.packOwnerKind === "player"
+          ? event.payload.packOwnerKind
+          : "player";
+      const packOwnerId =
+        typeof event.payload.packOwnerId === "string"
+          ? event.payload.packOwnerId
+          : null;
+      const packUrl =
+        typeof window !== "undefined"
+          ? (
+              await resolveActionSfxPackPlayback({
+                origin: window.location.origin,
+                ownerKind: packOwnerKind,
+                ownerId: packOwnerId,
+                kind: actionKind,
+                random: () =>
+                  Number(
+                    `0.${String(event.sequence).replace(/\D/gu, "") || "5"}`,
+                  ) || 0.5,
+              })
+            )?.source ?? null
+          : null;
+      if (packUrl) {
+        url = packUrl;
+        gain = 0.42;
+        playbackRate = 1;
+      } else if (
+        actionKind === "fart" ||
+        actionKind === "burp" ||
+        actionKind === "cough"
+      ) {
+        const seed =
+          typeof event.payload.seed === "string"
+            ? event.payload.seed
+            : `${event.sequence}:${event.sourceMessageId}`;
+        let unitIndex = 0;
+        const random = (): number => {
+          let hash = 2166136261;
+          const value = `${seed}:${unitIndex++}`;
+          for (let offset = 0; offset < value.length; offset += 1) {
+            hash ^= value.charCodeAt(offset);
+            hash = Math.imul(hash, 16777619);
+          }
+          return (hash >>> 0) / 0xffffffff;
+        };
+        const corporality = normalizeCorporality(event.payload.corporality);
+        const resolved =
+          resolveBodilyActionSfxPlayback({
+            kind: actionKind,
+            corporality,
+            packSource: null,
+            random,
+          }) ?? resolveLegacyBodilyActionSfxPlayback(actionKind, random);
+        // Crossfaded bins: schedule the dominant clip for offline cut mix.
+        url = resolved.urls[0] ?? null;
+        gain = 0.42 * (resolved.gains[0] ?? 1);
+        playbackRate = resolved.playbackRate;
+        if (resolved.urls.length > 1 && resolved.urls[1]) {
+          const secondary = await decodeAudio(resolved.urls[1]).catch(
+            () => null,
+          );
+          if (secondary) {
+            scheduled.push({
+              buffer: secondary,
+              startMs: messageTiming.startMs,
+              gain:
+                0.42 *
+                (resolved.gains[1] ?? 0) *
+                masterVolume *
+                atmosphereMix.foley,
+              playbackRate,
+              roomAcoustics: SIGNAL_STUDIO_FOLEY_ROOM_SEND,
+            });
+          }
+        }
+      }
     }
     if (!url) continue;
     const buffer = await decodeAudio(url).catch(() => null);
@@ -434,7 +531,7 @@ export async function prepareSignalStudioCut(
     const unit = (sourceAt - before.sourceAt) / (after.sourceAt - before.sourceAt);
     return Math.max(0, Math.round(before.targetAt + unit * (after.targetAt - before.targetAt)));
   };
-  const remappedDirection = sourceManifest.direction.flatMap((event) => {
+  const remappedDirection = directionWithActionFoley.flatMap((event) => {
     if (event.kind === "thinking" || event.kind === "overlap") return [];
     if (event.kind === "intro") {
       return [{

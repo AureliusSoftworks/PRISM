@@ -1221,8 +1221,20 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(pageSource, /activeControlTab === "voice"/);
   assert.match(pageSource, /activeControlTab === "sfx"/);
+  assert.match(pageSource, /<BotVoiceFeelStage/);
+  assert.match(pageSource, /variant="identity"/);
   assert.match(pageSource, /<BotVoiceCharacterEditor/);
+  assert.doesNotMatch(
+    pageSource,
+    /activeControlTab === "voice" \? \(\s*<>\s*\{isDefaultPrismBot/,
+  );
   assert.match(pageSource, /<BotAvatarSfxEditor/);
+  assert.match(pageSource, /ActionSfxPackMagicButton/);
+  assert.match(pageSource, /actionSfxPackBotId=/);
+  assert.match(pageSource, /packOwnerId=\{actionSfxPackBotId\}/);
+  assert.doesNotMatch(pageSource, /packOwnerId=\{scheduleKey\}/);
+  assert.match(pageSource, /Corporality/);
+  assert.match(pageSource, /data-tutorial-target="avatar-corporality"/);
   assert.match(pageSource, /Play while talking/);
   assert.match(pageSource, /Play while not talking/);
   assert.match(pageSource, /Play while thinking/);
@@ -1770,10 +1782,13 @@ test("avatar customizer preview uses full-stage foundry framing", () => {
   );
 });
 
-test("avatar foundry uses light-linked upgrade nodes and view-only camera navigation", () => {
-  assert.match(pageSource, /data-avatar-upgrade-node=\{node\.id\}/);
-  assert.match(pageSource, /BOT_AVATAR_FOUNDRY_UPGRADE_NODES\.filter/);
-  assert.match(pageSource, /"--foundry-module-color": node\.color/);
+test("avatar foundry uses bottom-bar navigation and view-only camera navigation", () => {
+  assert.doesNotMatch(pageSource, /data-avatar-upgrade-node=\{node\.id\}/);
+  assert.doesNotMatch(pageSource, /BOT_AVATAR_FOUNDRY_UPGRADE_NODES\.filter/);
+  assert.doesNotMatch(pageSource, /"--foundry-module-color": node\.color/);
+  assert.match(pageSource, /botAvatarIdentitySurfaceToggle/);
+  assert.match(pageSource, /onIdentitySurfaceChange/);
+  assert.match(pageSource, /muteLiveAvatarSfx=\{botAvatarCustomizerOpen\}/);
   assert.match(pageSource, /className=\{styles\.botAvatarFoundryCameraRig\}/);
   assert.match(pageSource, /className=\{styles\.botAvatarFoundryPlatform\}/);
   assert.match(pageSource, /className=\{styles\.botAvatarFoundryBotAssembly\}/);
@@ -1789,10 +1804,14 @@ test("avatar foundry uses light-linked upgrade nodes and view-only camera naviga
   );
   assert.match(pageSource, /setFoundryViewport\(viewport\);/);
   assert.match(pageSource, /data-tutorial-target="avatar-foundry-controls"/);
+  assert.match(pageSource, /data-tutorial-target="avatar-foundry-eyes-tab"/);
   assert.doesNotMatch(pageSource, /BotAvatarFoundryFeatureHandle/);
   assert.doesNotMatch(pageSource, /data-avatar-hotspot/);
-  assert.match(cssSource, /\.botAvatarFoundryNode::before\s*\{/);
-  assert.match(cssSource, /\.botAvatarFoundryNodePoint\s*\{/);
+  assert.match(
+    cssSource,
+    /\.botAvatarCustomizer\[data-foundry="true"\] \.botAvatarPreviewToolbar\s*\{[\s\S]*bottom:\s*78px;/,
+  );
+  assert.match(cssSource, /\.botAvatarIdentitySurfaceToggle\s*\{/);
   assert.match(
     cssSource,
     /\.botAvatarMannequinStage\[data-foundry-camera-surface="true"\]\s*\{[\s\S]*cursor:\s*grab;/,
@@ -1812,7 +1831,7 @@ test("avatar foundry powers module lights only when draft sections are populated
     pageSource,
     /screen:\s*avatarDetailsHasVisuals\(avatarDetailsPreview\)/,
   );
-  assert.match(pageSource, /modulePopulation\[node\.id\]/);
+  assert.doesNotMatch(pageSource, /modulePopulation\[node\.id\]/);
   assert.match(pageSource, /frameModulePopulation=\{/);
   assert.match(pageSource, /data-avatar-foundry-frame-module-lights="true"/);
   assert.match(
@@ -1820,18 +1839,13 @@ test("avatar foundry powers module lights only when draft sections are populated
     /"--bot-face-frame-led-glow-opacity" as string\]: 0/,
   );
   assert.match(pageSource, /data-populated=\{/);
-  assert.match(pageSource, /Module unconfigured\./);
+  assert.match(
+    pageSource,
+    /"--foundry-module-color":\s*"var\(--editor-bot-color, var\(--accent(?:, #91a8bd)?\)\)"/,
+  );
   assert.match(
     pageSource,
     /activeFoundryModulePopulated \? "Ready" : "Unconfigured"/,
-  );
-  assert.match(
-    cssSource,
-    /\.botAvatarFoundryNode\[data-populated="false"\]::before\s*\{[\s\S]*?box-shadow:\s*none;/,
-  );
-  assert.match(
-    cssSource,
-    /\.botAvatarFoundryNode\[data-populated="true"\] \.botAvatarFoundryNodePoint\s*\{[\s\S]*?0 0 14px currentColor/,
   );
   assert.match(cssSource, /@keyframes botAvatarFoundryModuleEnergize/);
   assert.match(
@@ -1895,6 +1909,10 @@ test("desktop Avatar Foundry uses a wide two-dimensional control workbench", () 
   assert.match(
     cssSource,
     /@media \(min-width: 1280px\)[\s\S]*?\.botAvatarCustomizer\[data-foundry="true"\] \.botAvatarFaceControls\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 0\.9fr\) minmax\(0, 1\.1fr\);/,
+  );
+  assert.match(
+    cssSource,
+    /@media \(min-width: 1280px\)[\s\S]*?\.botAvatarFaceControls\[data-identity-surface="identity-core"\]\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0, 1fr\);/,
   );
   assert.match(
     cssSource,

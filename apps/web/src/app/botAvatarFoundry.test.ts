@@ -76,7 +76,7 @@ describe("Avatar Foundry presentation contracts", () => {
     );
     assert.equal(
       new Set(BOT_AVATAR_FOUNDRY_UPGRADE_NODES.map((node) => node.color)).size,
-      BOT_AVATAR_FOUNDRY_UPGRADE_NODES.length,
+      1,
     );
   });
 

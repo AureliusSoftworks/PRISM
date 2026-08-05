@@ -506,7 +506,13 @@ function replayDirectionKindFromSavedEvent(
   if (normalized.includes("mood")) return "mood";
   if (normalized.includes("topoff") || normalized.includes("refill")) return "top_off";
   if (normalized.includes("sip")) return "sip";
-  if (normalized.includes("action") || normalized.includes("soundboard")) return "action";
+  if (
+    normalized.includes("action") ||
+    normalized.includes("soundboard") ||
+    normalized === "audiocue"
+  ) {
+    return "action";
+  }
   if (normalized.includes("reaction")) return "reaction";
   if (normalized.includes("overlap") || normalized.includes("crosstalk")) return "overlap";
   if (normalized.includes("departure") || normalized.includes("departed")) return "departure";

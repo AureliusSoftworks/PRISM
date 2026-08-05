@@ -307,7 +307,11 @@ describe("Signal experience shell", () => {
   it("times Producer guest bodily Foley to the authored live and replay cue", () => {
     assert.match(
       source,
-      /const producerGuestActionSfxPlan =[\s\S]{0,500}buildBundledActionSfxPlan\(message\.content\)/u,
+      /signalFancyActionCueText\(message\.stageActionText\)/u,
+    );
+    assert.match(
+      source,
+      /buildBundledActionSfxPlan\(producerGuestActionCueText\)/u,
     );
     assert.match(
       source,
@@ -315,15 +319,23 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /bundledActionSfxCueAtMs\(\s*replayActiveMessage\.content,[\s\S]{0,260}elapsedMs >= cueAtMs[\s\S]{0,160}onProducerGuestActionSfx\?\.\(replayActiveMessage\)/u,
+      /signalFancyActionCueText\(replayActiveMessage\.stageActionText\)/u,
     );
     assert.match(
       pageSource,
-      /buildBundledActionSfxPlan\(message\.content\)[\s\S]{0,500}bundledActionSfxIsEligible\([\s\S]{0,800}playPreparedCoffeeActionSfx\(/u,
+      /signalFancyActionCueText\(message\.stageActionText\)/u,
     );
     assert.match(
       pageSource,
       /onProducerGuestActionSfx=\{playSignalProducerGuestActionSfx\}/u,
+    );
+    assert.match(
+      source,
+      /classifySignalFancyActionV1\(args\.activeMessage\.stageActionText\)/u,
+    );
+    assert.match(
+      source,
+      /producerStageGesture/u,
     );
   });
 
@@ -1038,14 +1050,22 @@ describe("Signal experience shell", () => {
     );
   });
 
-  it("keeps the locked Signal model control aligned with the frozen episode", () => {
+  it("keeps Auto labeled Auto on the locked Signal model control", () => {
     assert.match(
       source,
-      /const episodeModelControlValue =[\s\S]{0,240}liveSessionActive[\s\S]{0,160}episode\?\.model[\s\S]{0,220}: episodeModelDraft/u,
+      /const episodeModelControlValue = signalEpisodeModelPickerValue\(\{/u,
+    );
+    assert.match(
+      source,
+      /signalEpisodeModelPickerValue\(\{[\s\S]{0,220}liveSessionActive[\s\S]{0,220}draft: episodeModelDraft/u,
     );
     assert.match(
       source,
       /episodeModelControl: \{[\s\S]{0,120}value: episodeModelControlValue/u,
+    );
+    assert.match(
+      source,
+      /botcastEpisodeModelSelectionKind\(detail\) === "auto"/u,
     );
   });
 

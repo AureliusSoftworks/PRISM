@@ -108,6 +108,8 @@ describe("Signal Premium audio contract", () => {
     assert.match(mixer, /stereoPan: take\.snapshot\.stereoPan/u);
     assert.match(mixer, /SIGNAL_STUDIO_VOICE_ROOM_SEND/u);
     assert.match(mixer, /SIGNAL_STUDIO_FOLEY_ROOM_SEND/u);
+    assert.match(mixer, /synthesizeSignalActionSfxDirection/u);
+    assert.match(mixer, /directionWithActionFoley/u);
     assert.match(mixer, /resolvePreSpeechBreathPlan/u);
     assert.match(mixer, /sessionAtmosphereBusVolume/u);
     assert.match(voiceEffects, /applyVoiceDeliveryMoodToProfile/u);

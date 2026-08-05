@@ -30,6 +30,8 @@ import {
   BOTCAST_PRODUCER_GUEST_ID,
   BOTCAST_PRODUCER_GUEST_NAME,
   BOTCAST_PRODUCER_GUEST_THINKING_TIME_SCALE,
+  classifySignalFancyActionV1,
+  signalFancyActionCueText,
   BOTCAST_SESSION_DURATION_MINUTES_MAX,
   BOTCAST_SESSION_DURATION_MINUTES_MIN,
   BOTCAST_STUDIO_FILM_GRAIN_MAX,
@@ -56,6 +58,7 @@ import {
   botcastCameraShotAt,
   botcastDepartureSpeakerRole,
   botcastEchoHostInterruptPhrase,
+  botcastEpisodeModelSelectionKind,
   botcastGuestHasDepartedAt,
   botcastHostHasDepartedAt,
   botcastHostInterruptionLineAt,
@@ -80,6 +83,7 @@ import {
   botcastSnapshotPowersForRoleV1,
   botcastVoiceLevelForBot,
   buildReplaySceneCheckpointsV2,
+  signalEpisodeModelPickerValue,
   botIdentityMirrorTransitionActiveV1,
   botIdentityShapeshiftTransitionActiveV1,
   createBotIdentityMirrorStateV1,
@@ -177,7 +181,6 @@ import { PrismBlockingLoader } from "./PrismBlockingLoader";
 import { AssetRail } from "./AssetLibrary";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import { PrismRefractTarget } from "./prismRefract";
-import { useRevealSynthesizedAssetContextMenu } from "./revealSynthesizedAssetInFinder";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import { SIGNAL_STUDIO_FOLEY_ROOM_SEND } from "./roomAcoustics";
 import {
@@ -1884,13 +1887,6 @@ export function BotcastExperience({
     );
   }, [bots, initialCastBotIds]);
   const initialHostBotId = initialCast[0] ?? "";
-  const {
-    revealSynthesizedAssetContextMenuEnabled,
-    onRevealSynthesizedAssetContextMenu,
-  } = useRevealSynthesizedAssetContextMenu({
-    request,
-    theme,
-  });
   const botsById = useMemo(
     () => new Map(eligibleBots.map((bot) => [bot.id, bot])),
     [eligibleBots],
@@ -6130,11 +6126,13 @@ export function BotcastExperience({
       );
       const configuredVoicePlaybackAttempted =
         voicePlaybackEligible && recordingVoiceSelection.voiceMode !== "mute";
+      const producerGuestActionCueText =
+        signalFancyActionCueText(message.stageActionText) ?? message.content;
       const producerGuestActionSfxPlan =
         currentEpisode.guestKind === "producer" &&
         message.speakerRole === "guest" &&
         message.botId === BOTCAST_PRODUCER_GUEST_ID
-          ? buildBundledActionSfxPlan(message.content)
+          ? buildBundledActionSfxPlan(producerGuestActionCueText)
           : null;
       let producerGuestActionSfxPlayed = false;
       let producerGuestActionSfxResolvedCueAtMs: number | null = null;
@@ -6146,7 +6144,11 @@ export function BotcastExperience({
         if (producerGuestActionSfxPlayed || !producerGuestActionSfxPlan) return;
         const cueAtMs =
           alignment || producerGuestActionSfxResolvedCueAtMs === null
-            ? bundledActionSfxCueAtMs(message.content, durationMs, alignment)
+            ? bundledActionSfxCueAtMs(
+                producerGuestActionCueText,
+                durationMs,
+                alignment,
+              )
             : producerGuestActionSfxResolvedCueAtMs;
         producerGuestActionSfxResolvedCueAtMs = cueAtMs;
         if (cueAtMs === null || elapsedMs < cueAtMs) return;
@@ -7784,7 +7786,8 @@ export function BotcastExperience({
           };
     clock.lastElapsedMs = elapsedMs;
     const cueAtMs = bundledActionSfxCueAtMs(
-      replayActiveMessage.content,
+      signalFancyActionCueText(replayActiveMessage.stageActionText) ??
+        replayActiveMessage.content,
       replayMessageDurationMs,
     );
     if (!clock.played && cueAtMs !== null && elapsedMs >= cueAtMs) {
@@ -8606,6 +8609,15 @@ export function BotcastExperience({
             speechProgress,
           )
         : null;
+    const producerStageGesture =
+      args.currentEpisode.guestKind === "producer" &&
+      args.activeMessage?.speakerRole === "guest" &&
+      args.activeMessage.botId === BOTCAST_PRODUCER_GUEST_ID &&
+      args.activeMessage.stageActionText &&
+      (args.replay || speechReveal)
+        ? classifySignalFancyActionV1(args.activeMessage.stageActionText)
+            ?.avatarReaction ?? null
+        : null;
     const listenerReactionPlan = args.activeMessage
       ? (listenerReactionPlanByMessageIdRef.current.get(
           args.activeMessage.id,
@@ -9273,7 +9285,7 @@ export function BotcastExperience({
                 data-listener-reaction={
                   roleIsListenerReacting("guest")
                     ? listenerReactionPlan?.visualAction
-                    : undefined
+                    : (producerStageGesture ?? undefined)
                 }
               >
                 <span className={styles.avatarEmbodiment} aria-hidden="true">
@@ -10459,10 +10471,12 @@ export function BotcastExperience({
           setTopicDraft("");
           setProducerBriefDraft("");
           setEpisodeModelDraft(
-            detail.model &&
-              modelOptions.some((option) => option.id === detail.model)
-              ? detail.model
-              : "",
+            botcastEpisodeModelSelectionKind(detail) === "auto"
+              ? ""
+              : detail.model &&
+                  modelOptions.some((option) => option.id === detail.model)
+                ? detail.model
+                : "",
           );
           setEpisodeDurationDraft(detail.durationMinutes);
           setNotice(
@@ -11688,12 +11702,13 @@ export function BotcastExperience({
     : liveSessionActive
       ? "Return to the show before changing its model."
       : undefined;
-  const episodeModelControlValue =
-    liveSessionActive &&
-    episode?.model &&
-    modelOptions.some((option) => option.id === episode.model)
-      ? episode.model
-      : episodeModelDraft;
+  // Auto stays labeled Auto even while the episode runs a concrete model.
+  const episodeModelControlValue = signalEpisodeModelPickerValue({
+    liveSessionActive,
+    episode,
+    draft: episodeModelDraft,
+    availableModelIds: modelOptions.map((option) => option.id),
+  });
   const resolvedNavigationHeader =
     typeof navigationHeader === "function"
       ? navigationHeader({
@@ -13351,15 +13366,6 @@ export function BotcastExperience({
                         onSelect={(asset) =>
                           reuseShowAssetSet(asset, "studio pair")
                         }
-                        onRevealImage={
-                          revealSynthesizedAssetContextMenuEnabled
-                            ? (imageId, event) =>
-                                onRevealSynthesizedAssetContextMenu(
-                                  event,
-                                  imageId,
-                                )
-                            : undefined
-                        }
                       />
                       <AssetRail
                         kind="signal_logo"
@@ -13371,15 +13377,6 @@ export function BotcastExperience({
                         onUpload={() => logoUploadRef.current?.click()}
                         onSynthesize={regenerateLogo}
                         onSelect={(asset) => reuseShowAssetSet(asset, "logo")}
-                        onRevealImage={
-                          revealSynthesizedAssetContextMenuEnabled
-                            ? (imageId, event) =>
-                                onRevealSynthesizedAssetContextMenu(
-                                  event,
-                                  imageId,
-                                )
-                            : undefined
-                        }
                       />
                     </div>
                     <div className={styles.showLookControlGrid}>
