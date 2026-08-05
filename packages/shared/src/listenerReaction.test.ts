@@ -6,6 +6,7 @@ import {
   buildBotCrosstalkListenerReactionPlanV1,
   buildCoffeeListenerReactionPlanV1,
   buildSignalListenerReactionPlanV1,
+  buildZenPlayerListenerReactionPlanV1,
   crosstalkInterruptionIsMeaningfulV1,
   normalizeBotCrosstalkInterruptedSpeakerCue,
   normalizeCrosstalkFloorOutcome,
@@ -621,5 +622,40 @@ describe("listener reaction validation and timing", () => {
       targetProgress: 0.4,
     });
     assert.ok(fallback >= 600 && fallback <= 1_500);
+  });
+
+  it("plans sparse Zen player-listening reactions with player as speaker", () => {
+    const plans = Array.from({ length: 40 }, (_, index) =>
+      buildZenPlayerListenerReactionPlanV1({
+        conversationId: "zen-convo",
+        messageId: `msg-${index}`,
+        listenerBotId: "bot-a",
+        listenerPersona: "A calm attentive companion who listens closely.",
+      }),
+    );
+    const present = plans.filter(
+      (plan): plan is NonNullable<typeof plan> => plan != null,
+    );
+    assert.ok(present.length >= 20);
+    assert.ok(present.length < 40);
+    for (const plan of present) {
+      assert.equal(plan.speakerBotId, "player");
+      assert.equal(plan.listenerBotId, "bot-a");
+      assert.equal(plan.cameraCutEligible, false);
+      assert.ok(plan.targetProgress > 0 && plan.targetProgress < 1);
+      assert.match(plan.seed, /^zen-player-listener-v1:/u);
+    }
+    const withAudio = present.filter(
+      (plan) => Boolean(plan.vocalFoley) || Boolean(plan.spokenCue),
+    );
+    assert.ok(withAudio.length >= 1);
+    assert.equal(
+      buildZenPlayerListenerReactionPlanV1({
+        conversationId: "zen",
+        messageId: "",
+        listenerBotId: "bot-a",
+      }),
+      null,
+    );
   });
 });

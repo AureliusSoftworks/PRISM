@@ -134,3 +134,53 @@ test("Zen uses one audio-owned reveal while muted Chat uses one fast reveal", ()
     /: !zenPlayerMessageRevealActive &&\s*\(zenFollowupActive \|\|/u,
   );
 });
+
+test("Zen keeps the player speech clock across message updates and holds text until it exists", () => {
+  assert.match(
+    source,
+    /for \(const temporalKey of chatSpeechRevealByKeyRef\.current\.keys\(\)\) \{[\s\S]*?if \(temporalKey\.startsWith\("zen-player:"\)\) continue;[\s\S]*?!activeMessageKeys\.has\(temporalKey\)/u,
+  );
+  assert.match(
+    source,
+    /const forcedVisibleTokenCount = zenPlayerRevealMatches[\s\S]*?zenPlayerRevealTimeline[\s\S]*?speechRevealVisibleTokenCount\(zenPlayerRevealTimeline\)[\s\S]*?: 0/u,
+  );
+  assert.match(
+    source,
+    /const finishReveal = \(\): void => \{[\s\S]*?finishChatSpeechReveal\(revealKey\);[\s\S]*?setZenPlayerSpeechReveal\(\(current\) =>[\s\S]*?current\?\.revealKey === revealKey \? null : current/u,
+  );
+});
+
+test("Zen arms sparse listening reactions on the player speech clock", () => {
+  const start = source.indexOf("const presentChatPlayerMessage =");
+  const end = source.indexOf("const playSignalProducerGuestActionSfx", start);
+  const playerPlayback = source.slice(start, end);
+
+  assert.match(source, /buildZenPlayerListenerReactionPlanV1/);
+  assert.match(source, /zenLiveBotActionFromPlayerListenerReaction/);
+  assert.match(source, /zenPlayerListenerVocalFoleyToActionSfxKind/);
+  assert.match(source, /isZenPlayerListeningReactionAction/);
+  assert.match(
+    playerPlayback,
+    /buildZenPlayerListenerReactionPlanV1\(\{[\s\S]*?listenerBotId: listeningBot\.id/u,
+  );
+  assert.match(
+    playerPlayback,
+    /listeningReactionAtMs = resolveListenerReactionAtMs\(/u,
+  );
+  assert.match(
+    playerPlayback,
+    /setZenLiveBotAction\(\s*zenLiveBotActionFromPlayerListenerReaction\(/u,
+  );
+  assert.match(
+    playerPlayback,
+    /playPreparedCoffeeActionSfx\(\{[\s\S]*?kind,[\s\S]*?ownerKind: "bot"/u,
+  );
+  assert.match(
+    playerPlayback,
+    /finishChatSpeechReveal\(revealKey\);[\s\S]*?clearListeningReaction\(\)/u,
+  );
+  assert.doesNotMatch(
+    playerPlayback,
+    /zenPlayerMessageRevealActive\s*=\s*false/u,
+  );
+});

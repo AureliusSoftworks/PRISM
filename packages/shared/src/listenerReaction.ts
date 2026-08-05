@@ -1064,3 +1064,60 @@ export function listenerReactionActionLabel(
   if (action === "thoughtful_hmm") return "considers";
   return "nods";
 }
+
+/** Attentive presence while the player speaks in Zen (sparse, not metronomic). */
+const ZEN_PLAYER_VISUAL_REACTION_CHANCE = 0.78;
+const ZEN_PLAYER_AUDIO_REACTION_CHANCE = 0.62;
+
+/**
+ * Plan a sparse listening reaction for the visible Zen bot while a player
+ * message streams. Prefer vocal Foley; soft spoken cues stay rare.
+ */
+export function buildZenPlayerListenerReactionPlanV1(args: {
+  conversationId: string;
+  messageId: string;
+  listenerBotId: string;
+  listenerPersona?: string | null;
+}): ListenerReactionPlanV1 | null {
+  if (!args.messageId || !args.listenerBotId) return null;
+  const seed = [
+    "zen-player-listener-v1",
+    args.conversationId || "zen",
+    args.messageId,
+    args.listenerBotId,
+  ].join(":");
+  if (stableUnit(`${seed}:visual-roll`) >= ZEN_PLAYER_VISUAL_REACTION_CHANCE) {
+    return null;
+  }
+  const audible =
+    stableUnit(`${seed}:audio-roll`) < ZEN_PLAYER_AUDIO_REACTION_CHANCE;
+  const vocalFoley = audible
+    ? signalVocalFoley(seed, "neutral", 0)
+    : undefined;
+  const spokenCue =
+    audible &&
+    !vocalFoley &&
+    stableUnit(`${seed}:spoken-roll`) < 0.28
+      ? signalSpokenBackchannel(
+          seed,
+          "neutral",
+          0,
+          [],
+          args.listenerPersona,
+        )
+      : undefined;
+  return {
+    v: LISTENER_REACTION_PLAN_VERSION,
+    name: "listenerReaction",
+    speakerBotId: "player",
+    listenerBotId: args.listenerBotId,
+    messageId: args.messageId,
+    targetSource: "role",
+    visualAction: signalVisualAction(seed, "neutral", 0),
+    ...(spokenCue ? { spokenCue } : {}),
+    ...(vocalFoley ? { vocalFoley } : {}),
+    targetProgress: targetProgress(seed),
+    seed,
+    cameraCutEligible: false,
+  };
+}
