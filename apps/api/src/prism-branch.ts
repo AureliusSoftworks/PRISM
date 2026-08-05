@@ -34,14 +34,3 @@ export function prismBranchIsDev(
 ): boolean {
   return (branchName ?? "").trim().toLowerCase() === "dev";
 }
-
-/**
- * Local file-manager actions are available in the native desktop runtime and
- * in exact-dev browser builds. Bundled desktop APIs do not retain Git metadata,
- * so branch detection alone resolves to `unknown` there.
- */
-export function prismLocalFileRevealEnabled(
-  env: NodeJS.ProcessEnv = process.env,
-): boolean {
-  return env.PRISM_DESKTOP_MODE === "1" || prismBranchIsDev(resolvePrismBranchName(env));
-}
