@@ -64,8 +64,21 @@ test("suppresses the floating assistant only during live Signal, Coffee, and Deb
   );
   assert.match(
     page,
-    /debateLiveSessionActive \|\| debateCompanionContext === null \? \(\s*<PrismCompanionPresenceBoundary reason="debate-live-session" \/>[\s\S]{0,180}\{renderGlobalPrismCompanion\(\)\}/u,
+    /debateLiveSessionActive \|\| debateCompanionContext === null \? \(\s*<PrismCompanionPresenceBoundary reason="debate-live-session" \/>[\s\S]*?\{renderGlobalPrismCompanion\(\)\}/u,
   );
+  // Debate must mount Ask Prism once — a second call paints a duplicate orb.
+  {
+    const debateCompanionTail =
+      page.match(
+        /reason="debate-live-session"[\s\S]*?<GlyphTooltipLayer \/>/u,
+      )?.[0] ?? "";
+    assert.equal(
+      (
+        debateCompanionTail.match(/\{renderGlobalPrismCompanion\(\)\}/gu) ?? []
+      ).length,
+      1,
+    );
+  }
   assert.match(
     companion,
     /const onKeyDown = \(event: KeyboardEvent\): void => \{\s*if \(companionSuppressed\) return;/u,

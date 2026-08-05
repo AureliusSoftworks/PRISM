@@ -40,7 +40,7 @@ export function liveSessionChromePolicy(
         ? "Return to the Debate lobby"
       : "Cut or finish the Signal session";
   return {
-    lockMessage: `${exitInstruction} before changing session chrome.`,
+    lockMessage: `${exitInstruction} before changing LOCAL/ONLINE, model, Effort, or other session chrome. Auto still picks model and Effort for each generation when selected.`,
     disabledNavbarActions: {
       promptCenter: true,
       refresh: true,

@@ -184,6 +184,11 @@ import {
   liveBakeStatusCopy,
   liveBakeSurfaceTitle,
 } from "./liveBakeLoading";
+import {
+  LIVE_BAKE_POLL_INTERVAL_MS,
+  liveBakeMayStartWatch,
+  liveBakeProgressRatio,
+} from "./liveBakeClient";
 import { AssetRail } from "./AssetLibrary";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import { PrismRefractTarget } from "./prismRefract";
@@ -2001,6 +2006,12 @@ export function BotcastExperience({
     "live",
   );
   const [watchBakeLabel, setWatchBakeLabel] = useState<string | null>(null);
+  const [watchBakeArtifact, setWatchBakeArtifact] =
+    useState<LiveBakeArtifactV1 | null>(null);
+  const [watchBakeStartedAt, setWatchBakeStartedAt] = useState<string | null>(
+    null,
+  );
+  const [watchBakeLiveFallback, setWatchBakeLiveFallback] = useState(false);
   const [episodeSetupLoadingId, setEpisodeSetupLoadingId] = useState<
     string | null
   >(null);
@@ -2951,6 +2962,22 @@ export function BotcastExperience({
     if (!controller || controller.signal.aborted) return;
     controller.abort();
     setBlockingOperation(null);
+    setBusy(false);
+  };
+
+  const cancelWatchBake = (): void => {
+    const episodeId = episode?.id ?? watchBakeArtifact?.sourceId ?? null;
+    invalidateEpisodeOperation();
+    if (episodeId) {
+      void request(
+        `/api/botcast/episodes/${encodeURIComponent(episodeId)}/bake/cancel`,
+        { method: "POST", body: JSON.stringify({}) },
+      ).catch(() => undefined);
+    }
+    setWatchBakeLabel(null);
+    setWatchBakeArtifact(null);
+    setWatchBakeStartedAt(null);
+    setWatchBakeLiveFallback(false);
     setBusy(false);
   };
 
@@ -5552,9 +5579,14 @@ export function BotcastExperience({
       }
       if (watchMode) {
         setWatchBakeLabel(liveBakeSurfaceTitle("signal"));
-        const baked = await request<{
+        setWatchBakeStartedAt(new Date().toISOString());
+        setWatchBakeLiveFallback(false);
+        let bakedEpisode = response.episode;
+        let artifact: LiveBakeArtifactV1 | null = null;
+        const startBake = await request<{
           episode: BotcastEpisode;
           liveBake: LiveBakeArtifactV1;
+          baking?: boolean;
         }>(
           `/api/botcast/episodes/${encodeURIComponent(response.episode.id)}/bake`,
           {
@@ -5564,43 +5596,125 @@ export function BotcastExperience({
           },
         );
         if (!episodeOperationIsCurrent(controller, runId)) return;
-        setWatchBakeLabel(liveBakeStatusCopy(baked.liveBake));
-        latestCaptureEpisode = baked.episode;
-        openingMessageReceived = baked.episode.messages.length > 0;
+        bakedEpisode = startBake.episode;
+        artifact = startBake.liveBake;
+        setWatchBakeArtifact(artifact);
+        setWatchBakeLabel(liveBakeStatusCopy(artifact));
+        while (
+          episodeOperationIsCurrent(controller, runId) &&
+          artifact &&
+          !liveBakeMayStartWatch(artifact, 0) &&
+          artifact.status !== "ready" &&
+          artifact.status !== "failed"
+        ) {
+          await new Promise((resolve) =>
+            window.setTimeout(resolve, LIVE_BAKE_POLL_INTERVAL_MS),
+          );
+          if (!episodeOperationIsCurrent(controller, runId)) return;
+          const polled = await request<{
+            episode: BotcastEpisode;
+            liveBake: LiveBakeArtifactV1;
+            baking?: boolean;
+          }>(
+            `/api/botcast/episodes/${encodeURIComponent(response.episode.id)}/bake`,
+            {
+              method: "POST",
+              signal: controller.signal,
+              body: JSON.stringify({ theme }),
+            },
+          );
+          bakedEpisode = polled.episode;
+          artifact = polled.liveBake;
+          setWatchBakeArtifact(artifact);
+          setWatchBakeLabel(liveBakeStatusCopy(artifact));
+          if (artifact.status === "cancelled") {
+            throw new DOMException("Bake cancelled", "AbortError");
+          }
+          if (artifact.status === "failed") {
+            throw new Error(artifact.error || "Signal bake failed.");
+          }
+        }
+        if (!episodeOperationIsCurrent(controller, runId) || !artifact) return;
+        latestCaptureEpisode = bakedEpisode;
+        openingMessageReceived = bakedEpisode.messages.length > 0;
         setTopicDraft("");
         setProducerBriefDraft("");
         setProducerGuestContextDraft("");
         setEpisodeModelDraft("");
         setAskAboutDraft("");
         void loadEpisodes(selectedShow.id).catch(() => undefined);
-        setEpisode(baked.episode);
+        setEpisode(bakedEpisode);
         setAutoRun(false);
-        await releaseSignalModelWarmup(baked.episode.id);
+        await releaseSignalModelWarmup(bakedEpisode.id);
         if (!episodeOperationIsCurrent(controller, runId)) return;
         setWatchBakeLabel(null);
+        setWatchBakeArtifact(null);
+        setWatchBakeStartedAt(null);
         await beginEpisodeIntroBookend(
           {
             ...preRoll,
             guestName:
-              baked.episode.guestName ?? guest?.name ?? preRoll.guestName,
-            topic: baked.episode.topic.trim() || preRoll.topic,
+              bakedEpisode.guestName ?? guest?.name ?? preRoll.guestName,
+            topic: bakedEpisode.topic.trim() || preRoll.topic,
             phase: "preparing",
           },
-          baked.episode.id,
+          bakedEpisode.id,
         );
         await Promise.all([introPlayback.finished, visualMinimum]);
         if (!episodeOperationIsCurrent(controller, runId)) return;
         setEpisodePreRoll(null);
-        for (const message of baked.episode.messages) {
+        // Held at Start: Watch unlocks paused until the player presses play.
+        // Present only the already-baked opening buffer; baker continues in background.
+        for (const message of bakedEpisode.messages) {
           if (!episodeOperationIsCurrent(controller, runId)) return;
-          prepareEpisodeMessage(message, baked.episode);
+          prepareEpisodeMessage(message, bakedEpisode);
           await playPreparedEpisodeMessage(
             message,
-            baked.episode,
+            bakedEpisode,
             controller,
             runId,
             true,
           );
+        }
+        // Keep baking ahead while watching if not fully ready.
+        if (artifact.status === "baking") {
+          void (async () => {
+            while (
+              episodeOperationIsCurrent(controller, runId) &&
+              !watchBakeLiveFallback
+            ) {
+              await new Promise((resolve) =>
+                window.setTimeout(resolve, LIVE_BAKE_POLL_INTERVAL_MS),
+              );
+              if (!episodeOperationIsCurrent(controller, runId)) return;
+              try {
+                const polled = await request<{
+                  episode: BotcastEpisode;
+                  liveBake: LiveBakeArtifactV1;
+                }>(
+                  `/api/botcast/episodes/${encodeURIComponent(bakedEpisode.id)}/bake`,
+                  {
+                    method: "POST",
+                    signal: controller.signal,
+                    body: JSON.stringify({ theme }),
+                  },
+                );
+                setEpisode(polled.episode);
+                if (
+                  polled.liveBake.status === "ready" ||
+                  polled.liveBake.status === "failed" ||
+                  polled.liveBake.status === "cancelled"
+                ) {
+                  if (polled.liveBake.status !== "ready") {
+                    setWatchBakeLiveFallback(true);
+                  }
+                  return;
+                }
+              } catch {
+                return;
+              }
+            }
+          })();
         }
         return;
       }
@@ -11917,19 +12031,24 @@ export function BotcastExperience({
     queuedCueCanInterruptGuest,
     studioLayoutEditorOpen,
   ]);
-  // Keep the shows rail and live chrome locked through intro, on-air, and the
-  // closing card. Restore them only after Return to show clears the episode.
+  // Keep the shows rail and live chrome locked through intro, bake, on-air, and
+  // the closing card. Restore them only after Return to show clears the episode.
+  // Model/effort stay locked while paused or baking so routing cannot change mid-sit.
   const showLiveExit = episode?.status === "live" || episodePreRoll !== null;
+  const watchBakeActive = watchBakeLabel !== null;
   const liveSessionActive =
     showLiveExit ||
+    watchBakeActive ||
     episodeOutro !== null ||
     episode?.status === "completed" ||
     episode?.status === "cancelled";
   const episodeModelControlDisabled = liveSessionActive;
-  const episodeModelControlDisabledReason = showLiveExit
-    ? "End the live Signal episode before changing its model."
+  const episodeModelControlDisabledReason = watchBakeActive
+    ? "Wait for Watch prepare to finish or cancel before changing the model picker. Auto still chooses model and Effort for each bake step when selected."
+    : showLiveExit
+    ? "End the live Signal episode before changing the model picker. Auto still chooses model and Effort for each turn when selected."
     : liveSessionActive
-      ? "Return to the show before changing its model."
+      ? "Return to the show before changing the model picker. Auto still chooses model and Effort for each turn when selected."
       : undefined;
   // Auto stays labeled Auto even while the episode runs a concrete model.
   const episodeModelControlValue = signalEpisodeModelPickerValue({
@@ -14219,22 +14338,46 @@ export function BotcastExperience({
       }
       detail={
         blockingOperation?.detail ??
-        "The episode is being prepared ahead of time so watching stays seamless."
+        "Prism is preparing the opening stretch so watching can begin once enough of the broadcast is ready. You can leave anytime — progress is saved."
       }
       stepLabel={
-        blockingOperation?.stepLabel ?? watchBakeLabel ?? "Working"
+        blockingOperation?.stepLabel ??
+        liveBakeStatusCopy(watchBakeArtifact) ??
+        watchBakeLabel ??
+        "Working"
       }
-      progress={blockingOperation?.progress}
+      progress={
+        blockingOperation?.progress ?? liveBakeProgressRatio(watchBakeArtifact)
+      }
+      startedAt={
+        blockingOperation ? null : watchBakeStartedAt
+      }
       theme={theme}
       footer={
         blockingOperation
           ? "Keep this window open while the light takes shape."
-          : "Keep this window open while Prism bakes the broadcast."
+          : "Watching unlocks when the opening buffer is ready. Model thinking can stretch the wait."
       }
-        onCancel={
-          blockingOperation?.cancellable ? cancelBlockingOperation : undefined
-        }
-      cancelLabel="Cancel synthesis"
+      onCancel={
+        blockingOperation?.cancellable
+          ? cancelBlockingOperation
+          : watchBakeLabel !== null
+            ? cancelWatchBake
+            : undefined
+      }
+      cancelLabel={
+        watchBakeLabel !== null ? "Stop preparing" : "Cancel synthesis"
+      }
+      cancelConfirmTitle={
+        watchBakeLabel !== null
+          ? "Stop preparing this broadcast?"
+          : "Stop synthesizing?"
+      }
+      cancelConfirmDetail={
+        watchBakeLabel !== null
+          ? "Your progress stays saved. You can reopen later and Prism will continue from where it left off."
+          : "This request will stop. You can try again whenever you are ready."
+      }
     />
     </>
   );

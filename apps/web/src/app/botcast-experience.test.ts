@@ -777,8 +777,9 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /const liveSessionActive =\s*showLiveExit \|\|[\s\S]{0,120}episodeOutro !== null \|\|[\s\S]{0,80}episode\?\.status === "completed" \|\|[\s\S]{0,80}episode\?\.status === "cancelled"/u,
+      /const liveSessionActive =\s*showLiveExit \|\|[\s\S]{0,80}watchBakeActive \|\|[\s\S]{0,120}episodeOutro !== null \|\|[\s\S]{0,80}episode\?\.status === "completed" \|\|[\s\S]{0,80}episode\?\.status === "cancelled"/u,
     );
+    assert.match(source, /const watchBakeActive = watchBakeLabel !== null/u);
     assert.match(source, /data-live-episode=\{liveSessionActive/u);
     assert.match(source, /!liveSessionActive \? renderLibrary\(\) : null/u);
     assert.match(
@@ -1026,7 +1027,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       source,
-      /const liveSessionActive =\s*showLiveExit \|\|[\s\S]{0,120}episodeOutro !== null/u,
+      /const liveSessionActive =\s*showLiveExit \|\|[\s\S]{0,80}watchBakeActive \|\|[\s\S]{0,120}episodeOutro !== null/u,
     );
     assert.match(
       css,
@@ -2253,6 +2254,9 @@ describe("Signal experience shell", () => {
       source,
       /open=\{blockingOperation !== null \|\| watchBakeLabel !== null\}/u,
     );
+    assert.match(source, /liveBakeMayStartWatch/u);
+    assert.match(source, /\/bake\/cancel/u);
+    assert.match(source, /LIVE_BAKE_POLL_INTERVAL_MS/u);
     assert.match(
       source,
       /if \(watchMode\) \{\s*setWatchBakeLabel\(liveBakeSurfaceTitle\("signal"\)\);/u,
@@ -2272,9 +2276,13 @@ describe("Signal experience shell", () => {
     assert.match(source, /setBlockingOperation\(null\);\s*setBusy\(false\)/u);
     assert.match(
       source,
-      /onCancel=\{[\s\S]{0,80}blockingOperation\?\.cancellable \? cancelBlockingOperation : undefined[\s\S]{0,20}\}/u,
+      /onCancel=\{[\s\S]{0,200}blockingOperation\?\.cancellable[\s\S]{0,200}cancelWatchBake[\s\S]{0,80}\}/u,
     );
-    assert.match(source, /cancelLabel="Cancel synthesis"/u);
+    assert.match(source, /cancelWatchBake/u);
+    assert.match(
+      source,
+      /cancelLabel=\{\s*watchBakeLabel !== null \? "Stop preparing" : "Cancel synthesis"\s*\}/u,
+    );
     assert.match(pageSource, /<SignalArtworkJobActivity/u);
     assert.match(
       artworkActivitySource,
