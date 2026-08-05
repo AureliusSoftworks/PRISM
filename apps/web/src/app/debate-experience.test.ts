@@ -719,6 +719,22 @@ describe("Debate experience", () => {
     assert.match(source, /Statement-bound · frozen evidence only/u);
     assert.match(source, /session\.formatState\.floorOwnerBotId/u);
     assert.match(source, /Return to a proceeding/u);
+    assert.match(source, /data-archive-group="open"/u);
+    assert.match(source, /data-archive-group="completed"/u);
+    assert.match(
+      source,
+      /session\.status !== "completed"/u,
+    );
+    assert.match(
+      source,
+      /session\.status === "completed"/u,
+    );
+    assert.match(css, /\.archiveGroups/u);
+    assert.match(css, /\.archiveGroupHeading/u);
+    assert.match(
+      css,
+      /\[data-archive-group="completed"\]/u,
+    );
     assert.match(
       source,
       /debateActiveDurationLabel\(session\.activeDurationMs\)/u,

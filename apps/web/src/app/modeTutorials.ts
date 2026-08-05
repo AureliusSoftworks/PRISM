@@ -161,7 +161,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: [
       {
         heading: "Enter the Debate Studio",
-        body: "A Debate is a saved exchange between two advocates. The Studio follows one clear path: shape the motion, cast the proceeding, then add or skip evidence. It opens as a Plainspoken Forum with Auto rounds, you in the Judge seat, and the Jury off. During live bot-controlled speech, Debate can privately prepare the next automatic floor transition, but any objection, gavel, pause, input gate, or changed floor discards it before it reaches Proceedings. New Duel clears the active workbench without touching archived proceedings.",
+        body: "A Debate is a saved exchange between two advocates. The Studio follows one clear path: shape the motion, cast the proceeding, then add or skip evidence. It opens as a Plainspoken Forum with Auto rounds, you in the Judge seat, and the Jury off. During live bot-controlled speech, Debate can privately prepare the next automatic floor transition, but any objection, gavel, pause, input gate, or changed floor discards it before it reaches Proceedings. New Duel clears the active workbench without touching archived proceedings. The Archive keeps open and paused Duels above a quieter Completed section.",
         clickLabel: "New Duel",
         targetSelector: '[data-tutorial-target="debate-new"]',
       },

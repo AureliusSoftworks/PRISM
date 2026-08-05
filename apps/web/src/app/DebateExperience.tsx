@@ -8516,7 +8516,71 @@ export function DebateExperience(
     }
   };
 
-  const renderArchive = (): React.JSX.Element => (
+  const renderArchiveSessionRow = (
+    session: DebateSessionListItemV1,
+    index: number,
+  ): React.JSX.Element => (
+    <li key={session.id} data-status={session.status}>
+      <span className={styles.archiveIndex} aria-hidden="true">
+        {String(index + 1).padStart(2, "0")}
+      </span>
+      <button
+        type="button"
+        className={styles.sessionOpen}
+        onClick={() => void openSession(session)}
+        disabled={busy}
+      >
+        <strong>{session.title}</strong>
+        <span>
+          {session.motion} ·{" "}
+          {session.format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
+          {debateProductionName(session.format, session.formality)} ·{" "}
+          {debateFormalityDescriptor(session.formality).title} ·{" "}
+          {session.moderatorTitle} · {sessionStatusLabel(session)} ·{" "}
+          {session.playerRole}
+          {session.activeDurationMs === null
+            ? ""
+            : ` · ${debateActiveDurationLabel(session.activeDurationMs)}`}
+        </span>
+        {session.synopsisText ? (
+          <em className={styles.archiveSynopsis}>
+            {session.synopsisText}
+          </em>
+        ) : null}
+      </button>
+      <div className={styles.archiveActions}>
+        <button
+          type="button"
+          className={styles.archiveReuseButton}
+          onClick={() => void reuseSessionSetup(session)}
+          disabled={busy}
+          aria-label={`Use setup from ${session.title}`}
+        >
+          {setupRestoreLoadingId === session.id
+            ? "Loading…"
+            : "Use setup"}
+        </button>
+        <button
+          type="button"
+          className={styles.deleteButton}
+          onClick={() => setPendingDeleteSession(session)}
+          aria-label={`Delete ${session.motion}`}
+          disabled={busy}
+        >
+          Remove
+        </button>
+      </div>
+    </li>
+  );
+
+  const renderArchive = (): React.JSX.Element => {
+    const openSessions = sessions.filter(
+      (session) => session.status !== "completed",
+    );
+    const completedSessions = sessions.filter(
+      (session) => session.status === "completed",
+    );
+    return (
     <section className={`${styles.historySection} ${styles.archivePanel}`}>
       <div className={styles.sectionHeading}>
         <div>
@@ -8524,7 +8588,8 @@ export function DebateExperience(
           <h2>Return to a proceeding</h2>
           <p>
             Open the proceeding itself, or restore its setup into a fresh
-            editable workbench.
+            editable workbench. Open and paused Duels stay above the completed
+            record.
           </p>
         </div>
         <button
@@ -8542,64 +8607,52 @@ export function DebateExperience(
           <p>Your first completed or paused Duel will wait here.</p>
         </div>
       ) : (
-        <ul className={styles.sessionList}>
-          {sessions.map((session, index) => (
-            <li key={session.id} data-status={session.status}>
-              <span className={styles.archiveIndex} aria-hidden="true">
-                {String(index + 1).padStart(2, "0")}
-              </span>
-              <button
-                type="button"
-                className={styles.sessionOpen}
-                onClick={() => void openSession(session)}
-                disabled={busy}
-              >
-                <strong>{session.title}</strong>
+        <div className={styles.archiveGroups}>
+          {openSessions.length > 0 ? (
+            <section
+              className={styles.archiveGroup}
+              data-archive-group="open"
+              aria-labelledby="debate-archive-open-heading"
+            >
+              <header className={styles.archiveGroupHeading}>
+                <h3 id="debate-archive-open-heading">Open</h3>
                 <span>
-                  {session.motion} ·{" "}
-                  {session.format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
-                  {debateProductionName(session.format, session.formality)} ·{" "}
-                  {debateFormalityDescriptor(session.formality).title} ·{" "}
-                  {session.moderatorTitle} · {sessionStatusLabel(session)} ·{" "}
-                  {session.playerRole}
-                  {session.activeDurationMs === null
-                    ? ""
-                    : ` · ${debateActiveDurationLabel(session.activeDurationMs)}`}
+                  {openSessions.length} proceeding
+                  {openSessions.length === 1 ? "" : "s"}
                 </span>
-                {session.synopsisText ? (
-                  <em className={styles.archiveSynopsis}>
-                    {session.synopsisText}
-                  </em>
-                ) : null}
-              </button>
-              <div className={styles.archiveActions}>
-                <button
-                  type="button"
-                  className={styles.archiveReuseButton}
-                  onClick={() => void reuseSessionSetup(session)}
-                  disabled={busy}
-                  aria-label={`Use setup from ${session.title}`}
-                >
-                  {setupRestoreLoadingId === session.id
-                    ? "Loading…"
-                    : "Use setup"}
-                </button>
-                <button
-                  type="button"
-                  className={styles.deleteButton}
-                  onClick={() => setPendingDeleteSession(session)}
-                  aria-label={`Delete ${session.motion}`}
-                  disabled={busy}
-                >
-                  Remove
-                </button>
-              </div>
-            </li>
-          ))}
-        </ul>
+              </header>
+              <ul className={styles.sessionList}>
+                {openSessions.map((session, index) =>
+                  renderArchiveSessionRow(session, index),
+                )}
+              </ul>
+            </section>
+          ) : null}
+          {completedSessions.length > 0 ? (
+            <section
+              className={styles.archiveGroup}
+              data-archive-group="completed"
+              aria-labelledby="debate-archive-completed-heading"
+            >
+              <header className={styles.archiveGroupHeading}>
+                <h3 id="debate-archive-completed-heading">Completed</h3>
+                <span>
+                  {completedSessions.length} proceeding
+                  {completedSessions.length === 1 ? "" : "s"}
+                </span>
+              </header>
+              <ul className={styles.sessionList}>
+                {completedSessions.map((session, index) =>
+                  renderArchiveSessionRow(session, index),
+                )}
+              </ul>
+            </section>
+          ) : null}
+        </div>
       )}
     </section>
-  );
+    );
+  };
 
   const renderForumReadout = (): React.JSX.Element => {
     const seats = [
