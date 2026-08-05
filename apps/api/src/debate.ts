@@ -30,6 +30,7 @@ import {
   botPowerIneptitudeRoleCueFromEffectsV1,
   botPowerIneptRoleMisdirectionFromEffectsV1,
   botPowerObserverProjectionFromEffectsV1,
+  botPowerSpeechObfuscationAuthoringCueV1,
   botPowerSubjectEffectsForObserverFromEffectsV1,
   botPowerTargetNameFromEffectsV1,
   botPowerVoicePresenceModeFromEffectsV1,
@@ -4067,7 +4068,7 @@ function powerPrompt(session: DebateSessionV1, botId: string): string {
     }
     if (effect.type === "speech_obfuscation") {
       return [
-        `- ${powerName} (${policy}): HARD — author fully intelligible natural-language intent. Do not imitate mumbling, gibberish, slurring, or phonetic spelling in your draft; PRISM applies the public speech transformation after generation.`,
+        `- ${powerName} (${policy}): ${botPowerSpeechObfuscationAuthoringCueV1()}`,
       ];
     }
     return [`- ${powerName} (${policy}): ${JSON.stringify(effect)}`];
@@ -4399,41 +4400,104 @@ function moderatorClosingFallback(
   return `${sideLabel(session, winnerSideId)} prevails. This ${session.format === "turnabout" ? "Turnabout" : "Debate"} is concluded.`;
 }
 
+/**
+ * Apply hard moderator speech Powers to clear procedural text.
+ * Keeps bookend/fallback injection from publishing intelligible speech when
+ * the moderator's Power requires silence or public gibberish.
+ */
+function deliverModeratorProceduralSpeech(
+  session: DebateSessionV1,
+  intended: string,
+): {
+  content: string;
+  silent: boolean;
+  powerIntendedContent?: string;
+} {
+  const clear = intended.trim();
+  if (!clear || moderatorIsHardMuted(session)) {
+    return {
+      content: BOT_POWER_CANONICAL_SILENCE_V1,
+      silent: true,
+    };
+  }
+  if (clear === BOT_POWER_CANONICAL_SILENCE_V1) {
+    return {
+      content: BOT_POWER_CANONICAL_SILENCE_V1,
+      silent: true,
+    };
+  }
+  if (moderatorSpeechIsObfuscated(session)) {
+    return {
+      content: applyBotPowerMumbledResponseV1(clear),
+      silent: false,
+      powerIntendedContent: clear,
+    };
+  }
+  return { content: clear, silent: false };
+}
+
 function ensureModeratorOpeningContent(
   session: DebateSessionV1,
   event: DebateEventV1,
 ): DebateEventV1 {
-  if (event.content === BOT_POWER_CANONICAL_SILENCE_V1) return event;
-  if (session.playerRole === "participant") {
-    const devils = devilAdvocateNames(session);
+  if (
+    event.content === BOT_POWER_CANONICAL_SILENCE_V1 ||
+    moderatorIsHardMuted(session)
+  ) {
+    if (event.content === BOT_POWER_CANONICAL_SILENCE_V1) return event;
+    const { powerIntendedContent: _privateIntended, ...rest } = event;
     return {
-      ...event,
-      content: [
-        moderatorOpeningFallback(session),
-        devils.length > 0
-          ? `Moderator’s disclosure: ${devils.join(" and ")} ${
-              devils.length === 1 ? "is" : "are"
-            } serving as an explicit Devil’s Advocate.`
-          : "",
-      ]
-        .filter(Boolean)
-        .join("\n\n"),
+      ...rest,
+      kind: "silence",
+      content: BOT_POWER_CANONICAL_SILENCE_V1,
     };
   }
-  const normalized = event.content.toLocaleLowerCase();
-  const namesTheDocket = [
-    session.motion.motion,
-    session.forAdvocate.name,
-    session.againstAdvocate.name,
-  ].every((required) =>
-    normalized.includes(required.trim().toLocaleLowerCase()),
-  );
-  return namesTheDocket
-    ? event
-    : {
-        ...event,
-        content: `${moderatorOpeningFallback(session)}\n\n${event.content}`,
-      };
+
+  const obfuscated = moderatorSpeechIsObfuscated(session);
+  let clear =
+    event.powerIntendedContent ??
+    (obfuscated ? moderatorOpeningFallback(session) : event.content);
+
+  if (session.playerRole === "participant") {
+    const devils = devilAdvocateNames(session);
+    clear = [
+      moderatorOpeningFallback(session),
+      devils.length > 0
+        ? `Moderator’s disclosure: ${devils.join(" and ")} ${
+            devils.length === 1 ? "is" : "are"
+          } serving as an explicit Devil’s Advocate.`
+        : "",
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+  } else {
+    const normalized = clear.toLocaleLowerCase();
+    const namesTheDocket = [
+      session.motion.motion,
+      session.forAdvocate.name,
+      session.againstAdvocate.name,
+    ].every((required) =>
+      normalized.includes(required.trim().toLocaleLowerCase()),
+    );
+    if (!namesTheDocket) {
+      clear = `${moderatorOpeningFallback(session)}\n\n${clear}`;
+    }
+  }
+
+  const delivery = deliverModeratorProceduralSpeech(session, clear);
+  const { powerIntendedContent: _privateIntended, ...rest } = event;
+  return {
+    ...rest,
+    kind: delivery.silent
+      ? "silence"
+      : event.kind === "silence"
+        ? "intro"
+        : event.kind,
+    content: delivery.content,
+    ...(delivery.powerIntendedContent
+      ? { powerIntendedContent: delivery.powerIntendedContent }
+      : {}),
+  };
 }
 
 function ensureModeratorClosingContent(
@@ -4441,21 +4505,51 @@ function ensureModeratorClosingContent(
   event: DebateEventV1,
   winnerSideId: DebateSideId,
 ): DebateEventV1 {
-  if (event.content === BOT_POWER_CANONICAL_SILENCE_V1) return event;
-  const normalized = event.content.toLocaleLowerCase();
+  if (
+    event.content === BOT_POWER_CANONICAL_SILENCE_V1 ||
+    moderatorIsHardMuted(session)
+  ) {
+    if (event.content === BOT_POWER_CANONICAL_SILENCE_V1) return event;
+    const { powerIntendedContent: _privateIntended, ...rest } = event;
+    return {
+      ...rest,
+      kind: "silence",
+      content: BOT_POWER_CANONICAL_SILENCE_V1,
+    };
+  }
+
+  const obfuscated = moderatorSpeechIsObfuscated(session);
+  let clear =
+    event.powerIntendedContent ??
+    (obfuscated
+      ? moderatorClosingFallback(session, winnerSideId)
+      : event.content);
+  const normalized = clear.toLocaleLowerCase();
   const namesResult = normalized.includes(
     sideLabel(session, winnerSideId).trim().toLocaleLowerCase(),
   );
   const endsProceeding =
     /\b(?:adjourn(?:ed|s)?|clos(?:e|ed|es|ing)|conclud(?:e|ed|es|ing)|end(?:ed|s|ing)?|over)\b/iu.test(
-      event.content,
+      clear,
     );
-  return namesResult && endsProceeding
-    ? event
-    : {
-        ...event,
-        content: `${event.content}\n\n${moderatorClosingFallback(session, winnerSideId)}`,
-      };
+  if (!(namesResult && endsProceeding)) {
+    clear = `${clear}\n\n${moderatorClosingFallback(session, winnerSideId)}`;
+  }
+
+  const delivery = deliverModeratorProceduralSpeech(session, clear);
+  const { powerIntendedContent: _privateIntended, ...rest } = event;
+  return {
+    ...rest,
+    kind: delivery.silent
+      ? "silence"
+      : event.kind === "silence"
+        ? "phase"
+        : event.kind,
+    content: delivery.content,
+    ...(delivery.powerIntendedContent
+      ? { powerIntendedContent: delivery.powerIntendedContent }
+      : {}),
+  };
 }
 
 function hasModeratorOpeningBookend(session: DebateSessionV1): boolean {
@@ -4526,12 +4620,17 @@ async function moderatorBookendEvent(
       runtime,
     );
   } catch {
+    const delivery = deliverModeratorProceduralSpeech(
+      session,
+      args.fallback,
+    );
     speech = {
-      content: moderatorIsHardMuted(session)
-        ? BOT_POWER_CANONICAL_SILENCE_V1
-        : args.fallback,
+      content: delivery.content,
       sourceIds: [],
-      silent: moderatorIsHardMuted(session),
+      silent: delivery.silent,
+      ...(delivery.powerIntendedContent
+        ? { powerIntendedContent: delivery.powerIntendedContent }
+        : {}),
     };
   }
   return makeEvent(session, {
@@ -5948,12 +6047,19 @@ async function moderatorOvertimeCorrection(
       runtime,
     );
   } catch {
-    correction = {
-      content: audienceOrderFallback
+    const delivery = deliverModeratorProceduralSpeech(
+      session,
+      audienceOrderFallback
         ? `${audienceOrderFallback} ${guidance.fallback}`
         : guidance.fallback,
+    );
+    correction = {
+      content: delivery.content,
       sourceIds: [],
-      silent: false,
+      silent: delivery.silent,
+      ...(delivery.powerIntendedContent
+        ? { powerIntendedContent: delivery.powerIntendedContent }
+        : {}),
     };
   }
   return makeEvent(session, {
@@ -6029,15 +6135,37 @@ async function moderatorAudienceOrderCorrection(
       silent: false,
     };
   }
-  const content = correction.silent
-    ? correction.content
-    : compactText(correction.content, 180) || fallback;
+  if (correction.silent) {
+    return makeEvent(session, {
+      kind: "judge_gavel",
+      speakerKind: "moderator",
+      speakerBotId: session.moderator.id,
+      sideId: null,
+      content: BOT_POWER_CANONICAL_SILENCE_V1,
+      sourceIds: [],
+      stepKey: "audience_order",
+      parentEventId: speechEvent.id,
+      gavelReason: "audience_order",
+      gavelStrikeCount: 1,
+      provider: correction.provider,
+      model: correction.model,
+      autoRecovery: correction.autoRecovery,
+    });
+  }
+  // Compact the clear intended line, then re-apply speech Powers so a mumbled
+  // moderator never publishes a truncated clear fallback on failure paths.
+  const clear =
+    compactText(
+      correction.powerIntendedContent ?? correction.content,
+      180,
+    ) || fallback;
+  const delivery = deliverModeratorProceduralSpeech(session, clear);
   return makeEvent(session, {
-    kind: correction.silent ? "judge_gavel" : "moderator_ruling",
+    kind: delivery.silent ? "judge_gavel" : "moderator_ruling",
     speakerKind: "moderator",
     speakerBotId: session.moderator.id,
     sideId: null,
-    content,
+    content: delivery.content,
     sourceIds: [],
     stepKey: "audience_order",
     parentEventId: speechEvent.id,
@@ -6047,7 +6175,7 @@ async function moderatorAudienceOrderCorrection(
     model: correction.model,
     autoRecovery: correction.autoRecovery,
     voicePerformanceCue: correction.voicePerformanceCue,
-    powerIntendedContent: correction.powerIntendedContent,
+    powerIntendedContent: delivery.powerIntendedContent,
   });
 }
 

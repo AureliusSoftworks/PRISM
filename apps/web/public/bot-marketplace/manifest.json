@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
   "version": 18,
-  "updatedAt": "2026-08-02T18:45:00.000Z",
+  "updatedAt": "2026-07-26T20:48:31.000Z",
   "themes": [
     {
       "id": "originals",
@@ -112,27 +112,6 @@
       ]
     },
     {
-      "id": "power-collection",
-      "name": "Power Collection",
-      "description": "A growing cast built around one unmistakable PRISM Power apiece—hard curses, social glitches, strange gifts, and persistent conditions. New Power bots join this collection as they are made.",
-      "botIds": [
-        "silent-jack",
-        "lazy-cameron",
-        "tiny-bill",
-        "interrupting-tom",
-        "copycat-calvin",
-        "joyful-nora",
-        "crazy-brenda",
-        "mumbling-jim",
-        "obsessed-kevin",
-        "identity-crisis-ian",
-        "sad-sally",
-        "forgetful-freddie",
-        "alias-avery",
-        "shapeshifter-sam"
-      ]
-    },
-    {
       "id": "library-dev-backup",
       "name": "Library Dev Backup",
       "description": "Personal backup shelf for Library bots that are not on the public Marketplace. Visible only on the dev branch.",
@@ -180,6 +159,27 @@
         "spongebob-squarepants",
         "squidward",
         "stewie-griffin"
+      ]
+    },
+    {
+      "id": "power-collection",
+      "name": "Power Collection",
+      "description": "A growing cast built around one unmistakable PRISM Power apiece—hard curses, social glitches, strange gifts, and persistent conditions. New Power bots join this collection as they are made.",
+      "botIds": [
+        "silent-jack",
+        "lazy-cameron",
+        "tiny-bill",
+        "interrupting-tom",
+        "copycat-calvin",
+        "joyful-nora",
+        "crazy-brenda",
+        "mumbling-jim",
+        "obsessed-kevin",
+        "identity-crisis-ian",
+        "sad-sally",
+        "forgetful-freddie",
+        "alias-avery",
+        "shapeshifter-sam"
       ]
     }
   ],
@@ -1270,27 +1270,6 @@
         "joy",
         "uplift",
         "radiant"
-      ]
-    },
-    {
-      "id": "mumbling-jim",
-      "name": "Mumbling Jim",
-      "subtitle": "Clear thoughts, impossible speech",
-      "description": "An earnest problem-solver whose rational words become full-volume gibberish that nobody can understand.",
-      "botHash": "b73051f75d47d57130ebb186e8da6ac7",
-      "bundlePath": "/bot-marketplace/bots/bot-mumbling-jim.bot",
-      "memoryCount": 0,
-      "color": "#a77b55",
-      "glyph": "lucideAudioLines",
-      "themeIds": [
-        "power-collection"
-      ],
-      "tags": [
-        "power",
-        "showcase",
-        "mumbling",
-        "gibberish",
-        "misunderstood"
       ]
     },
     {
@@ -2999,6 +2978,27 @@
           "compileError": "Local power compilation failed: invalid compiler output. Provider: local; model: gemma3:latest; try one short description with one effect.",
           "compiled": null
         }
+      ]
+    },
+    {
+      "id": "mumbling-jim",
+      "name": "Mumbling Jim",
+      "subtitle": "Clear thoughts, impossible speech",
+      "description": "An earnest problem-solver whose rational words become full-volume gibberish that nobody can understand.",
+      "botHash": "b73051f75d47d57130ebb186e8da6ac7",
+      "bundlePath": "/bot-marketplace/bots/bot-mumbling-jim.bot",
+      "memoryCount": 0,
+      "color": "#a77b55",
+      "glyph": "lucideAudioLines",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "mumbling",
+        "gibberish",
+        "misunderstood"
       ]
     }
   ]

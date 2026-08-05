@@ -13,6 +13,7 @@ import {
   botPowerForgetfulPriorMessagesV1,
   botPowerObserverCueLinesV1,
   botPowerSelfCueLinesV1,
+  botPowerSpeechObfuscationAuthoringCueV1,
   botPowerThemeMoodCueFromEffectsV1,
   botPowerResponseIsSilentV1,
   botPowerIntermittentMuteEffectFromEffectsV1,
@@ -1148,6 +1149,11 @@ export function coffeePowersPromptForSpeaker(
     if (cue) lines.push(cue);
   }
   if (own?.selfCue && !ownHasLegacyIdentityOnlyCue) lines.push(own.selfCue);
+  if (
+    (own?.effects ?? []).some((effect) => effect.type === "speech_obfuscation")
+  ) {
+    lines.push(botPowerSpeechObfuscationAuthoringCueV1());
+  }
   for (const effect of own?.effects ?? []) {
     const targetNames = effect.type === "response_bond" || effect.type === "selective_memory"
       ? effect.targets.flatMap((target) => target.kind === "bot" ? [target.name] : [])

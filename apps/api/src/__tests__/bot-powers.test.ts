@@ -283,7 +283,8 @@ test("Mumbling Jim compiles deterministic normal-volume gibberish without using 
     type: "speech_obfuscation",
     mode: "gibberish",
   }]);
-  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /answer rationally/u);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /HARD speech obfuscation|answer rationally/iu);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Never write mumbling|clear natural language/iu);
   assert.match(result.powers[0]?.compiled?.observerCue ?? "", /normal-volume gibberish/u);
 });
 

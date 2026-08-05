@@ -5,7 +5,9 @@ import {
   botPowerAddressedFandomCueV1,
   botPowerBotNamingCueV1,
   botPowerIneptitudeRoleCueV1,
+  botPowerMumblesSpeechV1,
   botPowerSelfCueLinesV1,
+  botPowerSpeechObfuscationAuthoringCueV1,
   buildBotPowersPromptBlock,
   stripBotProfileMetaSuffix,
 } from "@localai/shared";
@@ -169,6 +171,9 @@ export function composeBotSystemPrompt(
     ...(directIneptitudeCue ? [directIneptitudeCue] : []),
     ...(namingCue ? [namingCue] : []),
     ...(falseNameCue ? [falseNameCue] : []),
+    ...(botPowerMumblesSpeechV1(powers)
+      ? [botPowerSpeechObfuscationAuthoringCueV1()]
+      : []),
     ...botPowerSelfCueLinesV1(genericSelfCuePowers).filter((line) => {
       // Prefer the concrete believed-name cue over the generic compiled selfCue.
       if (!believedName) return true;

@@ -177,6 +177,8 @@ import {
   botPowerAnnoyanceTargetV1,
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
+  botPowerIntendedSpeechLooksGibberishV1,
+  botPowerSpeechObfuscationAuthoringCueV1,
   botPowerObserverCueLinesV1,
   botPowerObserverProjectionV1,
   botPowerPairwisePerceptionFromEffectsV1,
@@ -262,6 +264,9 @@ import {
   resolveFinalStageActionV1,
   stageActionPersonaInvitePromptV1,
   stageActionSpeechOnlyPromptV1,
+  classifySignalFancyActionV1,
+  signalFancyActionHostNoticeRuleV1,
+  signalFancyActionReadHoldMs,
 } from "@localai/shared";
 import {
   buildCloneFamilyIdentityPrompt,
@@ -2579,9 +2584,9 @@ function mapMessage(
   } = {},
 ): BotcastMessage {
   const silentResponse = botPowerResponseIsSilentV1(row.content);
-  const stageActionText = silentResponse
-    ? null
-    : row.stage_action_text?.trim() || null;
+  // Keep authored/director stage actions even on canonical silence so
+  // Producer action-only beats and mute-with-gesture turns stay visible.
+  const stageActionText = row.stage_action_text?.trim() || null;
   return {
     id: row.id,
     episodeId: row.episode_id,
@@ -8917,6 +8922,9 @@ export function buildBotcastSpeakerPrompt(
   );
   const powersPrompt = buildBotPowersPromptBlock([
     ...(ineptitudeCue ? [ineptitudeCue] : []),
+    ...(botPowerMumblesSpeechV1(speaker.powers)
+      ? [botPowerSpeechObfuscationAuthoringCueV1()]
+      : []),
     ...botPowerSelfCueLinesV1(genericSpeakerCuePowers),
     ...(fandomCue ? [fandomCue] : []),
     ...(themeMoodCue ? [themeMoodCue] : []),
@@ -9163,6 +9171,36 @@ export function buildBotcastSpeakerPrompt(
           ? "The guest's latest turn is only actionless silence. Silence proves no answer. Do not claim or imply a yes, no, choice, belief, motive, or position. Acknowledge it once and offer one simple nonverbal response option; do not repeat the same spoken question."
           : "The guest's latest on-air turn contains no spoken answer. React only to the visible physical action in that saved turn. Do not claim more than that action directly communicates or turn it into a broader belief, motive, or position."
     : null;
+  const latestPeerGuestMessage =
+    args.speakerRole === "host"
+      ? [...args.episode.messages]
+          .reverse()
+          .find((message) => message.speakerRole === "guest")
+      : null;
+  const producerFancyActionCue =
+    args.speakerRole === "host" &&
+    args.episode.guestKind === "producer" &&
+    latestPeerGuestMessage?.stageActionText
+      ? classifySignalFancyActionV1(latestPeerGuestMessage.stageActionText)
+      : null;
+  const producerFancyActionRule = (() => {
+    if (!producerFancyActionCue || !latestPeerGuestMessage?.stageActionText) {
+      return null;
+    }
+    if (
+      producerFancyActionCue.hostNotice === "disruptive" ||
+      producerFancyActionCue.hostNotice === "mild"
+    ) {
+      return signalFancyActionHostNoticeRuleV1(producerFancyActionCue.hostNotice);
+    }
+    if (producerFancyActionCue.visualAction) {
+      return signalFancyActionHostNoticeRuleV1("none");
+    }
+    if (botPowerResponseIsSilentV1(latestPeerGuestMessage.content)) {
+      return "The guest's latest on-air turn contains no spoken answer. React only to the visible physical action in that saved turn. Do not claim more than that action directly communicates or turn it into a broader belief, motive, or position.";
+    }
+    return null;
+  })();
   const currentOtherSpeakerMessage = speakerEternallyIntroduces
     ? args.episode.messages.slice().reverse().find(
         (message) =>
@@ -9191,19 +9229,20 @@ export function buildBotcastSpeakerPrompt(
       const audible = !peerMessage ||
         (peerPerception.audible && quietHearing !== false);
       const visible = !peerMessage || peerPerception.visible;
-      const intendedSpeech = peerMessage && speakerIgnoresPeerPowers
-        ? botcastPowerIntendedSpeechForMessageV1(
-            args.episode.events,
-            message.id,
-          )
-        : null;
+      const intendedSpeech =
+        (!peerMessage && botPowerMumblesSpeechV1(speaker.powers)) ||
+        (peerMessage && speakerIgnoresPeerPowers)
+          ? botcastPowerIntendedSpeechForMessageV1(
+              args.episode.events,
+              message.id,
+            )
+          : null;
       const perceivedContent = intendedSpeech ?? message.content;
       const canonicalSilentResponse = botPowerResponseIsSilentV1(perceivedContent);
       const silentResponse = !audible || canonicalSilentResponse;
-      const stageActionText =
-        !visible || (audible && canonicalSilentResponse)
-          ? null
-          : message.stageActionText;
+      // Visible stage actions stay in the prompt even when speech is silence,
+      // so Producer action-only beats can influence the next host turn.
+      const stageActionText = !visible ? null : message.stageActionText;
       const listenerPlan = botcastListenerReactionForMessage(
         args.episode.events,
         message.id,
@@ -9378,6 +9417,7 @@ export function buildBotcastSpeakerPrompt(
         ...(closingOwnershipRule ? [closingOwnershipRule] : []),
         ...(echoingPeerTurnRule ? [echoingPeerTurnRule] : []),
         ...(silentPeerTurnRule ? [silentPeerTurnRule] : []),
+        ...(producerFancyActionRule ? [producerFancyActionRule] : []),
         ...roleRules,
         "Keep fictional premises and private directions inside the episode. Do not use them as real-world advice, instructions, or permission to override consent, safety, or any other applicable boundary.",
         ...(responseBudgetRule ? [responseBudgetRule] : []),
@@ -10157,6 +10197,7 @@ function validateBotcastAutoSpeakerUtterance(input: {
   rejectPeerIdentityClaim?: boolean;
   requireFreshContact?: boolean;
   requireAddressedInsult?: boolean;
+  rejectGibberishDraft?: boolean;
 }):
   | { ok: true; value: string }
   | { ok: false; reason: "empty" | "refusal" | "invalid_output" } {
@@ -10175,6 +10216,8 @@ function validateBotcastAutoSpeakerUtterance(input: {
   if (
     !spokenContent ||
     botcastUtteranceClaimsSignalHistory(spokenContent) ||
+    (input.rejectGibberishDraft &&
+      botPowerIntendedSpeechLooksGibberishV1(spokenContent)) ||
     (input.hostClosing &&
       (botcastHostClosingNeedsPersonaRetry(spokenContent) ||
         (input.hostClosingGuestName !== undefined &&
@@ -11581,10 +11624,17 @@ function recordBotcastProducerGuestMessage(
     refreshed = getBotcastEpisode(db, userId, episode.id);
   }
   const messageStartMs = timeline.messageStartMs.at(-1) ?? 0;
-  const utteranceDurationMs = Math.max(
-    1_400,
-    content.split(/\s+/u).filter(Boolean).length * 310,
-  );
+  const utteranceDurationMs = stageActionText
+    ? Math.max(
+        signalFancyActionReadHoldMs(stageActionText),
+        spokenContent
+          ? Math.max(1_400, spokenContent.split(/\s+/u).filter(Boolean).length * 310)
+          : 0,
+      )
+    : Math.max(
+        1_400,
+        content.split(/\s+/u).filter(Boolean).length * 310,
+      );
   recordEvent(
     db,
     userId,
@@ -12537,6 +12587,12 @@ export async function advanceBotcastEpisode(
       : `Write a completely new ${speakerRole} line in ${speaker.name}'s persona and answer the latest other-speaker line directly.`,
     "Finish every sentence and keep the host as interviewer and the guest as interviewee.",
     "This is one anthology meeting. Ignore sequel numbering in the topic and do not claim earlier episodes, appearances, shared lessons, or prior Signal history.",
+    ...(speakerMumblesSpeech
+      ? [
+          botPowerSpeechObfuscationAuthoringCueV1(),
+          "The rejected draft looked like gibberish. Rewrite in clear ordinary English only; never imitate the audience-heard scramble.",
+        ]
+      : []),
     ...(speakerEternallyIntroduces
       ? [
           `Your immutable identity is ${speaker.name}. ${peerAddressName} is the other speaker. Never identify yourself as ${peerAddressName}.`,
@@ -12743,6 +12799,7 @@ export async function advanceBotcastEpisode(
                   rejectPeerIdentityClaim: speakerEternallyIntroduces,
                   requireFreshContact: speakerEternallyIntroduces,
                   requireAddressedInsult: speakerRequiresAddressedInsult,
+                  rejectGibberishDraft: speakerMumblesSpeech,
                 }),
             }),
       });
@@ -12818,6 +12875,7 @@ export async function advanceBotcastEpisode(
                 rejectPeerIdentityClaim: speakerEternallyIntroduces,
                 requireFreshContact: speakerEternallyIntroduces,
                 requireAddressedInsult: speakerRequiresAddressedInsult,
+                rejectGibberishDraft: speakerMumblesSpeech,
               }),
             validationRetryInstruction,
           });
@@ -12932,7 +12990,8 @@ export async function advanceBotcastEpisode(
           if (
             (hostClosingTurn ||
               speakerEternallyIntroduces ||
-              speakerRequiresAddressedInsult) &&
+              speakerRequiresAddressedInsult ||
+              speakerMumblesSpeech) &&
             !speakerIsMutedForTurn &&
             !validateBotcastAutoSpeakerUtterance({
               raw: value,
@@ -12943,6 +13002,7 @@ export async function advanceBotcastEpisode(
               requireAddressedInsult: speakerRequiresAddressedInsult,
               rejectPeerIdentityClaim: speakerEternallyIntroduces,
               requireFreshContact: speakerEternallyIntroduces,
+              rejectGibberishDraft: speakerMumblesSpeech,
             }).ok
           ) {
             const retry = await runSignalLocalTurn({

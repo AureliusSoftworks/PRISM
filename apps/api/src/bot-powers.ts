@@ -466,7 +466,7 @@ function deterministicMumblingPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue:
-      "Think and answer rationally in ordinary clear language. Runtime turns every spoken word into gibberish for everyone else, while you believe you expressed the intended meaning; repeated misunderstanding may frustrate you naturally, but never force an emotion.",
+      "HARD speech obfuscation: Think and answer rationally in ordinary clear natural language only. Never write mumbling, gibberish, slurring, phonetic spelling, or nonsense syllables in your draft—PRISM turns every spoken word into gibberish for everyone else after generation. You believe you expressed the intended meaning; repeated misunderstanding may frustrate you naturally, but never force an emotion.",
     observerCue:
       `${subject}'s speech reaches you only as literal normal-volume gibberish. Never reconstruct, infer, or respond to hidden intended meaning; react only to what is publicly observable, and nobody understands the words.`,
     effects: [{ type: "speech_obfuscation", mode: "gibberish" }],

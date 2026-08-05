@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { createDeterministicProvider } from "../test-support.ts";
 import {
@@ -9,6 +10,21 @@ import {
   sanitizeBotGenerationFieldContext,
 } from "../bot-generator.ts";
 import type { GenerateOptions, ProviderMessage } from "../providers.ts";
+
+const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
+
+describe("bot generation route", () => {
+  it("honors an explicit per-draft model while preserving Auto routing", () => {
+    const routeSource = serverSource.slice(
+      serverSource.indexOf('route("POST", "/api/bots/generate-draft"'),
+      serverSource.indexOf('route("POST", "/api/bots"'),
+    );
+
+    assert.match(routeSource, /readModelOverride\(body\.modelOverride\)/u);
+    assert.match(routeSource, /requestedModelOverride\?\.toLowerCase\(\) === "auto"/u);
+    assert.match(routeSource, /explicitModelOverride,/u);
+  });
+});
 
 function rawDraft(voiceId: string | null = null): Record<string, unknown> {
   return {

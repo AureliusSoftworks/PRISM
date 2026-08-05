@@ -8126,6 +8126,111 @@ describe("Debate engine", () => {
     }
   });
 
+  it("keeps a mumbled moderator's intro gibberish after procedural bookend injection", async () => {
+    const db = createTestDb();
+    try {
+      const mumblePower = readyPower(
+        "moderator-mumbling",
+        "Mumbling",
+        "He mumbles at normal volume; everyone else hears only gibberish.",
+        [{ type: "speech_obfuscation", mode: "gibberish" }],
+      );
+      let session = await createDebateForRole(db, "spectator", {
+        moderatorPowers: [mumblePower],
+      });
+      assert.equal(
+        session.powerPlan.bots[session.moderator.id]?.effects.some(
+          ({ effect }) => effect.type === "speech_obfuscation",
+        ),
+        true,
+      );
+
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "advance:mumbled-moderator-intro:0001",
+        },
+        runtime(),
+      );
+
+      const intro = session.events.find(
+        (event) =>
+          event.stepKey === "intro" &&
+          event.speakerBotId === session.moderator.id,
+      );
+      assert.ok(intro);
+      assert.ok(intro.powerIntendedContent);
+      assert.match(intro.powerIntendedContent ?? "", /called to order/iu);
+      assert.match(
+        intro.powerIntendedContent ?? "",
+        new RegExp(session.motion.motion.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+      );
+      assert.equal(
+        intro.content,
+        applyBotPowerMumbledResponseV1(intro.powerIntendedContent!),
+      );
+      assert.doesNotMatch(intro.content, /called to order/iu);
+      assert.doesNotMatch(
+        intro.content,
+        new RegExp(session.motion.motion.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "iu"),
+      );
+
+      const publicSession = debateSessionForPlayer(session);
+      const publicIntro = publicSession.events.find(
+        (event) => event.id === intro.id,
+      );
+      assert.equal(publicIntro?.content, intro.content);
+      assert.equal(publicIntro?.powerIntendedContent, undefined);
+      assert.doesNotMatch(JSON.stringify(publicSession), /called to order/iu);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a Participant-role mumbled moderator opening fully obfuscated", async () => {
+    const db = createTestDb();
+    try {
+      const mumblePower = readyPower(
+        "participant-moderator-mumbling",
+        "Mumbling",
+        "He mumbles at normal volume; everyone else hears only gibberish.",
+        [{ type: "speech_obfuscation", mode: "gibberish" }],
+      );
+      let session = await createDebateForRole(db, "participant", {
+        moderatorPowers: [mumblePower],
+      });
+
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "advance:participant-mumbled-intro:0001",
+        },
+        runtime(),
+      );
+
+      const intro = session.events.find(
+        (event) =>
+          event.stepKey === "intro" &&
+          event.speakerBotId === session.moderator.id,
+      );
+      assert.ok(intro?.powerIntendedContent);
+      assert.match(intro?.powerIntendedContent ?? "", /called to order/iu);
+      assert.equal(
+        intro?.content,
+        applyBotPowerMumbledResponseV1(intro!.powerIntendedContent!),
+      );
+      assert.doesNotMatch(intro?.content ?? "", /called to order/iu);
+    } finally {
+      db.close();
+    }
+  });
+
   it("starts with a hard-muted moderator and lets the advocates encounter the silence", async () => {
     const db = createTestDb();
     try {

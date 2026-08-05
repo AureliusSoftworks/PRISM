@@ -1416,6 +1416,54 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("preserves Producer action-only stage text, camera hold, and host notice", async () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", {
+        hostBotId: "host-1",
+        name: "The Live Edge",
+      });
+      const captures: ProviderMessage[][] = [];
+      const provider = recordingProvider(
+        [
+          "Welcome. Jared, what did you discover first?",
+          "Alright then. We'll pick up from that little interruption — what changed after launch?",
+        ],
+        captures,
+      );
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestKind: "producer",
+        guestName: "Jared",
+        topic: "When prototypes meet people",
+      });
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      const actionOnly = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {
+          guestMessage: "*farts*",
+          guestThinkingMs: 0,
+        },
+        generation(provider),
+      );
+      assert.equal(actionOnly.episode.messages[1]?.content, "...");
+      assert.equal(actionOnly.episode.messages[1]?.stageActionText, "farts");
+      const hostPrompt =
+        captures[1]?.map((message) => message.content).join("\n") ?? "";
+      assert.match(hostPrompt, /\*farts\* \.\.\./u);
+      assert.match(hostPrompt, /socially disruptive audible bodily event/u);
+    } finally {
+      db.close();
+    }
+  });
+
   it("cuts a live host to the audience-heard prefix before saving an immediate Producer answer", async () => {
     const db = fixture();
     try {
@@ -2314,6 +2362,126 @@ describe("Botcast persistence and isolation", () => {
     assert.match(instruction, /"Mara" is your clone/);
     assert.match(instruction, /PRISM is local-first, self-hosted AI workspace software/u);
     assert.match(instruction, /not a corporation, employer, or corporate network/u);
+  });
+
+  it("keeps Producer action-only stage text visible and tiers host notice", () => {
+    const disruptivePrompt = buildBotcastSpeakerPrompt({
+      show: {
+        name: "Live Desk",
+        premise: "Unscripted interviews.",
+        hostingStyle: "dry",
+      } as never,
+      episode: {
+        id: "episode-fancy-fart",
+        topic: "Product taste",
+        producerBrief: "Find the decision they still regret.",
+        guestKind: "producer",
+        segment: "interview",
+        messages: [
+          {
+            id: "host-1",
+            episodeId: "episode-fancy-fart",
+            speakerRole: "host",
+            botId: "host-1",
+            content: "What changed after launch?",
+            stageActionText: null,
+            voicePerformanceText: null,
+            moodKey: "neutral",
+            createdAt: "2026-08-04T00:00:00.000Z",
+          },
+          {
+            id: "guest-1",
+            episodeId: "episode-fancy-fart",
+            speakerRole: "guest",
+            botId: BOTCAST_PRODUCER_GUEST_ID,
+            content: "...",
+            stageActionText: "farts",
+            voicePerformanceText: null,
+            moodKey: "neutral",
+            createdAt: "2026-08-04T00:00:01.000Z",
+          },
+        ],
+        events: [],
+        tensionStage: "calm",
+        guestPresenceMode: "present",
+      } as never,
+      host: {
+        id: "host-1",
+        name: "Mara",
+        systemPrompt: "A dry host.",
+      },
+      guest: {
+        id: BOTCAST_PRODUCER_GUEST_ID,
+        name: "Jared",
+        systemPrompt: "The producer guest.",
+      },
+      speakerRole: "host",
+    });
+    const disruptiveInstruction = disruptivePrompt
+      .map((message) => message.content)
+      .join("\n");
+    assert.match(disruptiveInstruction, /\*farts\* \.\.\./u);
+    assert.match(disruptiveInstruction, /socially disruptive audible bodily event/u);
+    assert.doesNotMatch(disruptiveInstruction, /Leave it stage-only/u);
+
+    const ambientPrompt = buildBotcastSpeakerPrompt({
+      show: {
+        name: "Live Desk",
+        premise: "Unscripted interviews.",
+        hostingStyle: "dry",
+      } as never,
+      episode: {
+        id: "episode-fancy-nod",
+        topic: "Product taste",
+        producerBrief: "Find the decision they still regret.",
+        guestKind: "producer",
+        segment: "interview",
+        messages: [
+          {
+            id: "host-1",
+            episodeId: "episode-fancy-nod",
+            speakerRole: "host",
+            botId: "host-1",
+            content: "What changed after launch?",
+            stageActionText: null,
+            voicePerformanceText: null,
+            moodKey: "neutral",
+            createdAt: "2026-08-04T00:00:00.000Z",
+          },
+          {
+            id: "guest-1",
+            episodeId: "episode-fancy-nod",
+            speakerRole: "guest",
+            botId: BOTCAST_PRODUCER_GUEST_ID,
+            content: "...",
+            stageActionText: "nods",
+            voicePerformanceText: null,
+            moodKey: "neutral",
+            createdAt: "2026-08-04T00:00:01.000Z",
+          },
+        ],
+        events: [],
+        tensionStage: "calm",
+        guestPresenceMode: "present",
+      } as never,
+      host: {
+        id: "host-1",
+        name: "Mara",
+        systemPrompt: "A dry host.",
+      },
+      guest: {
+        id: BOTCAST_PRODUCER_GUEST_ID,
+        name: "Jared",
+        systemPrompt: "The producer guest.",
+      },
+      speakerRole: "host",
+    });
+    const ambientInstruction = ambientPrompt
+      .map((message) => message.content)
+      .join("\n");
+    assert.match(ambientInstruction, /\*nods\* \.\.\./u);
+    assert.match(ambientInstruction, /Leave it stage-only/u);
+    assert.doesNotMatch(ambientInstruction, /socially disruptive audible bodily event/u);
   });
 
   it("keeps Signal's holder identity while changing how the holder names its guest", () => {
@@ -3768,6 +3936,33 @@ describe("Botcast persistence and isolation", () => {
         .join("\n");
       assert.match(observantContext, /rational explanation for the missing map/iu);
       assert.doesNotMatch(observantContext, /normal-volume gibberish|hidden meaning/iu);
+
+      const hostPrompt = buildBotcastSpeakerPrompt({
+        show,
+        episode: advanced.episode,
+        host: {
+          id: "host-1",
+          name: "Mara Vale",
+          systemPrompt: "A careful host.",
+          cloneFamilyId: null,
+          powers: JSON.parse(mumblingPowers()),
+        },
+        guest: {
+          id: "guest-1",
+          name: "Ivo Stone",
+          systemPrompt: "A skeptical guest.",
+          cloneFamilyId: null,
+          powers: [],
+        },
+        speakerRole: "host",
+      });
+      const hostContext = hostPrompt.map((message) => message.content).join("\n");
+      assert.match(hostContext, /author fully intelligible natural-language intent only/iu);
+      assert.match(hostContext, /rational explanation for the missing map/iu);
+      assert.doesNotMatch(
+        hostContext,
+        new RegExp(expectedPublic.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&"), "u"),
+      );
     } finally {
       db.close();
     }
