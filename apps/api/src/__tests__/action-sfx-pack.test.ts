@@ -177,6 +177,7 @@ describe("action-sfx-pack", () => {
       "utf8",
     );
     assert.doesNotMatch(marketplace, /action_sfx_pack/u);
+    assert.doesNotMatch(marketplace, /english_pacing/u);
   });
 
   it("wires backup export/import and generate routes for TTS packs", () => {
@@ -186,6 +187,11 @@ describe("action-sfx-pack", () => {
     );
     assert.match(backup, /actionSfxPacks:\s*listActionSfxPackClipsForBackup/u);
     assert.match(backup, /restoreActionSfxPackClipsFromBackup/u);
+    assert.match(
+      backup,
+      /englishPacingProfiles:\s*listEnglishPacingProfilesForBackup/u,
+    );
+    assert.match(backup, /restoreEnglishPacingProfilesFromBackup/u);
 
     const server = readFileSync(
       fileURLToPath(new URL("../server.ts", import.meta.url)),
@@ -197,7 +203,13 @@ describe("action-sfx-pack", () => {
     assert.match(server, /x-prism-action-sfx-pack-progress/u);
     assert.match(server, /ACTION_SFX_PACK_MISSING_VOICE_MESSAGE/u);
     assert.match(server, /resolveElevenLabsVoiceId\(voiceProfile\)/u);
+    assert.match(server, /authoredOnly/u);
     assert.match(server, /voiceId,/u);
     assert.match(server, /ACTION_SFX_PACK_CLIP_COUNT/u);
+    assert.match(server, /route\("GET", "\/api\/english-pacing-profile"/u);
+    assert.match(
+      server,
+      /route\("POST", "\/api\/english-pacing-profile\/calibrate"/u,
+    );
   });
 });

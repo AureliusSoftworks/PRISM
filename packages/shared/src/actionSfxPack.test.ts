@@ -33,20 +33,28 @@ describe("actionSfxPack", () => {
   it("builds short ElevenLabs audio-tag TTS text per vocal take", () => {
     assert.equal(
       buildActionSfxPackTtsText({ kind: "laugh", variantIndex: 0 }),
-      "[laughs]",
+      "[laughs] ha",
     );
     assert.equal(
       buildActionSfxPackTtsText({ kind: "laugh", variantIndex: 1 }),
-      "[laughs softly]",
+      "[laughs softly] heh",
     );
     assert.equal(
       buildActionSfxPackTtsText({ kind: "throat_clear", variantIndex: 0 }),
-      "[clears throat]",
+      "[clears throat] ahem",
     );
     assert.match(
       buildActionSfxPackTtsText({ kind: "gasp", variantIndex: 2 }),
-      /^\[.+\]$/u,
+      /^\[[^\]]+\]\s+\S+$/u,
     );
+    // Carrier must survive tag stripping so ElevenLabs does not reject empty text.
+    for (const kind of ACTION_SFX_PACK_KINDS) {
+      for (let variantIndex = 0; variantIndex < 3; variantIndex += 1) {
+        const text = buildActionSfxPackTtsText({ kind, variantIndex });
+        const withoutTags = text.replace(/\[[^\]]+\]/gu, " ").replace(/\s+/gu, " ").trim();
+        assert.ok(withoutTags.length > 0, `${kind}:${variantIndex} needs carrier`);
+      }
+    }
   });
 
   it("derives a stable non-negative TTS seed", () => {

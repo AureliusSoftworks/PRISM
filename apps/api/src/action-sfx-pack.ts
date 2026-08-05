@@ -68,9 +68,11 @@ function randomId(bytes = 12): string {
   return randomBytes(bytes).toString("hex");
 }
 
-/** v2 TTS takes store short audio-tag seeds; reject legacy sound-gen prompts. */
+/** v2 TTS takes store audio-tag seeds (optionally with a carrier syllable). */
 function looksLikeVocalTtsPromptSeed(seed: string): boolean {
-  return /^\[[^\]]{2,48}\]$/u.test(seed.trim());
+  const trimmed = seed.trim();
+  // Tag-only (legacy during migration) or tag + carrier syllable.
+  return /^\[[^\]]{2,48}\](?:\s+[A-Za-z]{1,12})?$/u.test(trimmed);
 }
 
 export function getActionSfxPackSummary(

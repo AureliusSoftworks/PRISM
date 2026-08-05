@@ -80,9 +80,19 @@ const VOCAL_TTS_TAGS: Record<ActionSfxPackKind, readonly [string, string, string
   ],
 };
 
+/** Speakable residue after ElevenLabs strips audio tags — required by the API. */
+const VOCAL_TTS_CARRIERS: Record<ActionSfxPackKind, readonly [string, string, string]> = {
+  laugh: ["ha", "heh", "hm"],
+  sigh: ["ahh", "oh", "mm"],
+  gasp: ["ah", "oh", "huh"],
+  throat_clear: ["ahem", "hm", "uh"],
+};
+
 /**
  * Speakable ElevenLabs v3 audio-tag text for a vocal pack take.
  * The owner's Premium voice identity carries the persona; tags stay short.
+ * A tiny carrier syllable is required — ElevenLabs rejects tag-only inputs
+ * after stripping speaker/audio tags ("input_text_empty").
  */
 export function buildActionSfxPackTtsText(args: {
   kind: ActionSfxPackKind;
@@ -92,7 +102,10 @@ export function buildActionSfxPackTtsText(args: {
     0,
     Math.min(ACTION_SFX_PACK_VARIANT_COUNT - 1, Math.floor(args.variantIndex)),
   );
-  return VOCAL_TTS_TAGS[args.kind][variant] ?? VOCAL_TTS_TAGS[args.kind][0]!;
+  const tag = VOCAL_TTS_TAGS[args.kind][variant] ?? VOCAL_TTS_TAGS[args.kind][0]!;
+  const carrier =
+    VOCAL_TTS_CARRIERS[args.kind][variant] ?? VOCAL_TTS_CARRIERS[args.kind][0]!;
+  return `${tag} ${carrier}`;
 }
 
 /**

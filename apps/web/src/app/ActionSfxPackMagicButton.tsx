@@ -59,19 +59,22 @@ export function ActionSfxPackMagicButton({
   ownerId?: string | null;
   ownerLabel: string;
   personaSnippet?: string | null;
-  /** When false, generation is disabled until a Premium ElevenLabs voice is set. */
+  /** Hint only — server still resolves authored Premium voice as fallback. */
   hasPremiumVoice?: boolean;
   className?: string;
 }): React.JSX.Element {
   const sampleSelectId = useId();
   const [pack, setPack] = useState<ActionSfxPackSummaryV1 | null>(null);
   const [busy, setBusy] = useState(false);
+  const [awaitingRegenerateConfirm, setAwaitingRegenerateConfirm] =
+    useState(false);
   const [progressLabel, setProgressLabel] = useState<string | null>(null);
   const [status, setStatus] = useState<string | null>(null);
   const [sampleClip, setSampleClip] = useState(SAMPLE_CLIP_OPTIONS[0]!.value);
   const [samplePlaying, setSamplePlaying] = useState(false);
   const sampleAudioRef = useRef<HTMLAudioElement | null>(null);
   const sampleCleanupRef = useRef<(() => void) | null>(null);
+  const regenerateConfirmTimerRef = useRef<number | null>(null);
 
   const stopSample = useCallback((): void => {
     const audio = sampleAudioRef.current;
@@ -86,7 +89,16 @@ export function ActionSfxPackMagicButton({
     setSamplePlaying(false);
   }, []);
 
+  const clearRegenerateConfirm = useCallback((): void => {
+    if (regenerateConfirmTimerRef.current !== null) {
+      window.clearTimeout(regenerateConfirmTimerRef.current);
+      regenerateConfirmTimerRef.current = null;
+    }
+    setAwaitingRegenerateConfirm(false);
+  }, []);
+
   useEffect(() => () => stopSample(), [stopSample]);
+  useEffect(() => () => clearRegenerateConfirm(), [clearRegenerateConfirm]);
 
   const refresh = useCallback(async () => {
     if (typeof window === "undefined") return;
@@ -106,25 +118,9 @@ export function ActionSfxPackMagicButton({
     void refresh();
   }, [refresh]);
 
-  const generate = async (): Promise<void> => {
-    if (busy || typeof window === "undefined") return;
-    if (ownerKind === "bot" && !ownerId?.trim()) {
-      setStatus("Save this bot before generating a vocal action pack.");
-      return;
-    }
-    if (!hasPremiumVoice) {
-      setStatus("Assign a Premium voice before generating a vocal action pack.");
-      return;
-    }
-    if (
-      pack &&
-      !window.confirm(
-        `Regenerate replaces all ${ACTION_SFX_PACK_CLIP_COUNT} local vocal reaction takes for this owner. Continue?`,
-      )
-    ) {
-      return;
-    }
+  const runGenerate = async (): Promise<void> => {
     stopSample();
+    clearRegenerateConfirm();
     setBusy(true);
     setStatus(null);
     setProgressLabel(`0/${ACTION_SFX_PACK_CLIP_COUNT}…`);
@@ -160,6 +156,39 @@ export function ActionSfxPackMagicButton({
       setBusy(false);
       setProgressLabel(null);
     }
+  };
+
+  const generate = async (): Promise<void> => {
+    if (busy || typeof window === "undefined") return;
+    if (ownerKind === "bot" && !ownerId?.trim()) {
+      setStatus("Save this bot before generating a vocal action pack.");
+      return;
+    }
+    if (!hasPremiumVoice) {
+      // Still attempt — server can use authored Premium voice when the draft
+      // override looks local-only. Warn first so the player knows why it may fail.
+      setStatus(
+        "No Premium voice selected in this editor — trying the bot's saved Premium voice…",
+      );
+    }
+    if (pack && !awaitingRegenerateConfirm) {
+      setAwaitingRegenerateConfirm(true);
+      setStatus(
+        `Click again to replace all ${ACTION_SFX_PACK_CLIP_COUNT} local vocal takes.`,
+      );
+      if (regenerateConfirmTimerRef.current !== null) {
+        window.clearTimeout(regenerateConfirmTimerRef.current);
+      }
+      regenerateConfirmTimerRef.current = window.setTimeout(() => {
+        regenerateConfirmTimerRef.current = null;
+        setAwaitingRegenerateConfirm(false);
+        setStatus((current) =>
+          current?.startsWith("Click again to replace") ? null : current,
+        );
+      }, 5000);
+      return;
+    }
+    await runGenerate();
   };
 
   const playSample = async (): Promise<void> => {
@@ -201,8 +230,8 @@ export function ActionSfxPackMagicButton({
   const readyLabel = pack
     ? `Ready · ${new Date(pack.createdAt).toLocaleDateString()}`
     : null;
-  const canGenerate =
-    hasPremiumVoice && !(ownerKind === "bot" && !ownerId?.trim());
+  const needsSavedBot = ownerKind === "bot" && !ownerId?.trim();
+  const canGenerate = !needsSavedBot;
 
   return (
     <div
@@ -211,6 +240,9 @@ export function ActionSfxPackMagicButton({
       data-owner-kind={ownerKind}
       data-pack-ready={pack ? "true" : undefined}
       data-has-premium-voice={hasPremiumVoice ? "true" : "false"}
+      data-awaiting-regenerate-confirm={
+        awaitingRegenerateConfirm ? "true" : undefined
+      }
     >
       <div className={styles.actionSfxPackMagicRow}>
         <button
@@ -219,23 +251,29 @@ export function ActionSfxPackMagicButton({
           disabled={busy || !canGenerate}
           onClick={() => void generate()}
           aria-label={
-            pack
-              ? "Regenerate local vocal action pack"
-              : "Generate local vocal action pack"
+            awaitingRegenerateConfirm
+              ? "Confirm regenerate local vocal action pack"
+              : pack
+                ? "Regenerate local vocal action pack"
+                : "Generate local vocal action pack"
           }
           title={
-            hasPremiumVoice
-              ? "Generate laughs, sighs, gasps, and throat clears in this Premium voice. Stays on this machine; not exported with the bot."
-              : "Assign a Premium ElevenLabs voice before generating a vocal action pack."
+            needsSavedBot
+              ? "Save this bot before generating a vocal action pack."
+              : hasPremiumVoice
+                ? "Generate laughs, sighs, gasps, and throat clears in this Premium voice. Stays on this machine; not exported with the bot."
+                : "Uses the bot's saved Premium ElevenLabs voice when available."
           }
         >
           <Sparkles size={13} strokeWidth={2.3} aria-hidden="true" />
           <span>
             {busy
               ? (progressLabel ?? "Generating…")
-              : pack
-                ? "Regenerate vocal action pack"
-                : "Generate vocal action pack"}
+              : awaitingRegenerateConfirm
+                ? "Confirm regenerate"
+                : pack
+                  ? "Regenerate vocal action pack"
+                  : "Generate vocal action pack"}
           </span>
         </button>
         {pack ? (
@@ -284,9 +322,11 @@ export function ActionSfxPackMagicButton({
         <small className={styles.actionSfxPackMagicReady}>{readyLabel}</small>
       ) : (
         <small className={styles.actionSfxPackMagicHint}>
-          {hasPremiumVoice
-            ? "Optional · laughs, sighs, gasps & throat clears in this voice"
-            : "Assign a Premium voice to unlock vocal action packs"}
+          {needsSavedBot
+            ? "Save this bot to unlock vocal action packs"
+            : hasPremiumVoice
+              ? "Optional · laughs, sighs, gasps & throat clears in this voice"
+              : "Uses saved Premium voice · laughs, sighs, gasps & throat clears"}
         </small>
       )}
       {status ? (
