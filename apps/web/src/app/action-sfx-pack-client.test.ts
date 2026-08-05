@@ -61,6 +61,15 @@ describe("action sfx pack playback wiring", () => {
     assert.match(page, /packOwnerId=\{actionSfxPackBotId\}/u);
     assert.doesNotMatch(page, /packOwnerId=\{scheduleKey\}/u);
 
+    const magic = readFileSync(
+      fileURLToPath(new URL("./ActionSfxPackMagicButton.tsx", import.meta.url)),
+      "utf8",
+    );
+    assert.match(magic, /data-action-sfx-pack-sample="true"/u);
+    assert.match(magic, /actionSfxPackClipUrl/u);
+    assert.match(magic, /Choose an action pack clip to sample/u);
+    assert.match(magic, /ACTION_SFX_PACK_KIND_LABELS/u);
+
     const cut = readFileSync(
       fileURLToPath(new URL("./signalStudioCutAudio.ts", import.meta.url)),
       "utf8",

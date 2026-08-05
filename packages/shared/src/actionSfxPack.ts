@@ -19,6 +19,16 @@ export const ACTION_SFX_PACK_KINDS = [
 
 export type ActionSfxPackKind = (typeof ACTION_SFX_PACK_KINDS)[number];
 
+export const ACTION_SFX_PACK_KIND_LABELS: Record<ActionSfxPackKind, string> = {
+  fart: "Fart",
+  burp: "Burp",
+  cough: "Cough",
+  laugh: "Laugh",
+  sigh: "Sigh",
+  gasp: "Gasp",
+  throat_clear: "Throat clear",
+};
+
 export type ActionSfxPackOwnerKind = "bot" | "player";
 
 export const ACTION_SFX_PACK_CLIP_COUNT =

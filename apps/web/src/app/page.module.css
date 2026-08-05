@@ -52874,6 +52874,13 @@ a.settingsCreditItem:focus-visible {
     color-mix(in srgb, var(--editor-bot-color, var(--accent)) 22%, var(--line));
 }
 
+.actionSfxPackMagicRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
 .actionSfxPackMagicButton {
   display: inline-flex;
   align-items: center;
@@ -52916,6 +52923,79 @@ a.settingsCreditItem:focus-visible {
 }
 
 .actionSfxPackMagicButton:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.actionSfxPackSample {
+  display: inline-flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.actionSfxPackSampleLabel {
+  color: color-mix(in srgb, var(--muted) 88%, var(--fg));
+  font-size: 0.72rem;
+  font-weight: 650;
+}
+
+.actionSfxPackSampleSelect {
+  min-width: 9.5rem;
+  max-width: min(100%, 14rem);
+  padding: 5px 8px;
+  border-radius: 8px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 28%, var(--line));
+  background: color-mix(in srgb, var(--panel) 92%, transparent);
+  color: var(--fg);
+  font: inherit;
+  font-size: 0.75rem;
+}
+
+.actionSfxPackSampleSelect:focus-visible {
+  outline: 2px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 55%, transparent);
+  outline-offset: 1px;
+}
+
+.actionSfxPackSampleButton {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 9px;
+  border-radius: 999px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 30%, var(--line));
+  background: color-mix(in srgb, var(--panel) 90%, transparent);
+  color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 68%,
+    var(--fg)
+  );
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 600;
+  cursor: pointer;
+}
+
+.actionSfxPackSampleButton:hover:not(:disabled),
+.actionSfxPackSampleButton:focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 50%,
+    var(--line)
+  );
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 12%,
+    var(--panel)
+  );
+}
+
+.actionSfxPackSampleButton:disabled,
+.actionSfxPackSampleSelect:disabled {
   opacity: 0.55;
   cursor: not-allowed;
 }
