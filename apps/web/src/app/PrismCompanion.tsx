@@ -80,6 +80,10 @@ import {
 } from "./prismCompanionPresence";
 import { publishPrismCompanionVisualSnapshot } from "./prismCompanionVisualSnapshot";
 import {
+  setAppNavbarCompanionOpen,
+  setAppNavbarWielding,
+} from "./appNavbarChrome";
+import {
   PRISM_REFRACT_TARGET_ATTRIBUTE,
   focusedPrismRefractTargetId,
   nextPrismRefractChoice,
@@ -92,6 +96,10 @@ import {
   type PrismRefractOrigin,
   type RegisteredPrismRefractTarget,
 } from "./prismRefract";
+import {
+  modelPreparationExperienceForSurface,
+  usePrismRefractionGate,
+} from "./prismRefractionGate";
 import {
   PRISM_WIELD_ARM_DELAY_MS,
   createPrismWieldState,
@@ -317,7 +325,11 @@ export default function PrismCompanion({
   onRefractTutorialSkip,
   onRefractTutorialRemind,
 }: PrismCompanionProps): React.JSX.Element | null {
+  const refractionGate = usePrismRefractionGate();
   const surfaceScope = prismCompanionSurfaceScope(surface);
+  const preparationExperience = modelPreparationExperienceForSurface(
+    surface.surfaceId,
+  );
   const recoveryKey = useMemo(
     () => prismCompanionRecoveryStorageKey(accountKey, surface),
     // The serialized scope is the authoritative identity; callers may create
@@ -713,6 +725,7 @@ export default function PrismCompanion({
       }
       clearPrismWieldHover();
       document.documentElement.removeAttribute(PRISM_WIELD_CURSOR_ATTRIBUTE);
+      setAppNavbarWielding(false);
       anchorRef.current?.removeAttribute("data-wielding");
       backdropRef.current?.removeAttribute("data-wielding");
       anchorRef.current?.style.removeProperty("transform");
@@ -809,6 +822,7 @@ export default function PrismCompanion({
         PRISM_WIELD_CURSOR_ATTRIBUTE,
         "true",
       );
+      setAppNavbarWielding(true);
       anchorRef.current?.setAttribute("data-wielding", "true");
       backdropRef.current?.setAttribute("data-wielding", "true");
       if (
@@ -877,6 +891,11 @@ export default function PrismCompanion({
   useEffect(() => {
     setSpeechEnabled(readSpeechEnabled(accountKey));
   }, [accountKey]);
+
+  useEffect(() => {
+    setAppNavbarCompanionOpen(open);
+    return () => setAppNavbarCompanionOpen(false);
+  }, [open]);
 
   useEffect(() => {
     if (!open) {
@@ -1213,13 +1232,45 @@ export default function PrismCompanion({
       const controller = new AbortController();
       refractAbortRef.current = controller;
       const runId = ++refractRunRef.current;
-      void target
-        .generate({
-          currentValue: target.read(),
-          rejectedValues,
-          signal: controller.signal,
-        })
-        .then((rawValue) => {
+      void (async () => {
+        try {
+          if (refractionGate) {
+            const preparation = await refractionGate.prepareLocalModel({
+              provider: "local",
+              experience: preparationExperience,
+              context: "refract",
+              signal: controller.signal,
+            });
+            if (
+              controller.signal.aborted ||
+              runId !== refractRunRef.current ||
+              refractSessionRef.current?.registration.element !== element
+            ) {
+              return;
+            }
+            if (preparation.state === "unavailable") {
+              throw new Error(
+                `The local model could not get ready for ${target.label}.`,
+              );
+            }
+          }
+          const generateWork = () =>
+            target.generate({
+              currentValue: target.read(),
+              rejectedValues,
+              signal: controller.signal,
+            });
+          const rawValue = refractionGate
+            ? await refractionGate.withRefractionLoader({
+                loader: {
+                  title: `Refracting ${target.label}`,
+                  detail:
+                    "Prism is shaping a fresh reading for this field. Space will still reroll after it lands.",
+                  stepLabel: "Refracting",
+                },
+                work: generateWork,
+              })
+            : await generateWork();
           if (
             controller.signal.aborted ||
             runId !== refractRunRef.current ||
@@ -1249,8 +1300,7 @@ export default function PrismCompanion({
           setRefractStatus(
             `${target.label} is ready. Click away, Enter, or Tab keeps it. Space rerolls. Escape restores.`,
           );
-        })
-        .catch((error) => {
+        } catch (error) {
           if (
             controller.signal.aborted ||
             runId !== refractRunRef.current
@@ -1273,12 +1323,14 @@ export default function PrismCompanion({
             `${message} Space retries and Escape restores the field.`,
           );
           onError?.(message);
-        });
+        }
+      })();
     },
     [
       markRefractTarget,
-      modifierPresentation.modifierLabel,
       onError,
+      preparationExperience,
+      refractionGate,
       updateRefractSession,
     ],
   );
@@ -1473,15 +1525,42 @@ export default function PrismCompanion({
     releasePrismRefract(false);
     refractMagicHandoffFrameRef.current = window.requestAnimationFrame(() => {
       refractMagicHandoffFrameRef.current = null;
-      void Promise.resolve(target.run(direction)).catch((error) => {
-        onError?.(
-          error instanceof Error
-            ? error.message
-            : `Prism could not start ${target.label}.`,
-        );
-      });
+      void (async () => {
+        try {
+          if (refractionGate && !target.ownsPresentation) {
+            await refractionGate.runLocalRefraction({
+              provider: "local",
+              experience: preparationExperience,
+              context: "refract",
+              loader: {
+                title: target.label,
+                detail:
+                  "Prism is running this Wield action with a fullscreen hold so cold local starts stay visible.",
+                stepLabel: "Refracting",
+              },
+              work: async () => {
+                await Promise.resolve(target.run(direction));
+              },
+            });
+            return;
+          }
+          await Promise.resolve(target.run(direction));
+        } catch (error) {
+          onError?.(
+            error instanceof Error
+              ? error.message
+              : `Prism could not start ${target.label}.`,
+          );
+        }
+      })();
     });
-  }, [onError, refractPrompt, releasePrismRefract]);
+  }, [
+    onError,
+    preparationExperience,
+    refractPrompt,
+    refractionGate,
+    releasePrismRefract,
+  ]);
 
   const dismissRefractTutorial = useCallback(
     (resolution: "skip" | "remind"): void => {

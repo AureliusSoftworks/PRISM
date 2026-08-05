@@ -9762,7 +9762,13 @@ export async function suggestCoffeeGroupSetup(args: {
   direction?: unknown;
   roster: readonly CoffeeGroupSetupSuggestionRosterBot[];
   provider: LlmProvider;
-}): Promise<CoffeeGroupSetupSuggestionV1> {
+  providerName: "local" | "openai" | "anthropic";
+  model: string;
+}): Promise<{
+  suggestion: CoffeeGroupSetupSuggestionV1;
+  provider: "local" | "openai" | "anthropic";
+  model: string;
+}> {
   const roster = args.roster
     .map((bot) => ({
       id: typeof bot.id === "string" ? bot.id.trim() : "",
@@ -9836,7 +9842,13 @@ export async function suggestCoffeeGroupSetup(args: {
         raw,
         allowedBotIds,
       );
-      if (suggestion) return suggestion;
+      if (suggestion) {
+        return {
+          suggestion,
+          provider: args.providerName,
+          model: args.model,
+        };
+      }
     } catch {
       // Non-fatal retry.
     }

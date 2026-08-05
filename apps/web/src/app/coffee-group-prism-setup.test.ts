@@ -29,6 +29,10 @@ describe("Coffee Group Prism setup invent", () => {
       serverSource,
       /setup-suggestion[\s\S]{0,1600}suggestCoffeeGroupSetup/u,
     );
+    assert.match(
+      serverSource,
+      /coffee\/groups\/setup-suggestion[\s\S]{0,2200}provider:\s*invent\.provider[\s\S]{0,80}model:\s*invent\.model/u,
+    );
     assert.match(coffeeSource, /export async function suggestCoffeeGroupSetup/u);
   });
 
@@ -46,6 +50,15 @@ describe("Coffee Group Prism setup invent", () => {
     assert.match(
       pageSource,
       /data-tutorial-target="coffee-new-group"/u,
+    );
+    assert.match(
+      pageSource,
+      /ensureCoffeeModelReady\(true\)[\s\S]{0,1200}\/api\/coffee\/groups\/setup-suggestion/u,
+    );
+    assert.match(pageSource, /Refraction complete/u);
+    assert.match(
+      pageSource,
+      /coffeeNewGroupGenerateBusy && coffeeModelWarmup/u,
     );
   });
 

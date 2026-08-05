@@ -5435,7 +5435,22 @@ describe("Debate engine", () => {
       serverSource,
       /setup-suggestion[\s\S]{0,2200}allowOnlineResearch/u,
     );
+    assert.match(
+      serverSource,
+      /setup-suggestion[\s\S]{0,2800}provider:\s*invent\.provider[\s\S]{0,80}model:\s*invent\.model/u,
+    );
     assert.match(debateSource, /export async function suggestDebateSetup/u);
+    assert.match(
+      debateSource,
+      /provider:\s*generation\.provider[\s\S]{0,40}model:\s*generation\.model/u,
+    );
+  });
+
+  it("accepts debate as a model-preparation experience", () => {
+    assert.match(
+      serverSource,
+      /body\.experience === "coffee"[\s\S]{0,80}body\.experience === "signal"[\s\S]{0,80}body\.experience === "debate"/u,
+    );
   });
 
   it("suggests a full New Duel draft and skips research in LOCAL", async () => {
@@ -5491,7 +5506,7 @@ describe("Debate engine", () => {
         return [];
       },
     };
-    const suggestion = await suggestDebateSetup({
+    const invent = await suggestDebateSetup({
       direction: "",
       roster: [
         { id: "bot-a", name: "Ada", personaSnippet: "careful ecologist" },
@@ -5510,6 +5525,7 @@ describe("Debate engine", () => {
         },
       },
     });
+    const suggestion = invent.suggestion;
     assert.equal(suggestion.forAdvocateBotId, "bot-a");
     assert.equal(suggestion.exhibits.length, 2);
     assert.equal(suggestion.sources.length, 0);
@@ -5517,6 +5533,8 @@ describe("Debate engine", () => {
     assert.equal(suggestion.playerRole, "judge");
     assert.equal(suggestion.moderatorBotId, null);
     assert.equal(suggestion.moderatorTitle, "Keeper of the Lots");
+    assert.ok(invent.provider);
+    assert.ok(invent.model);
     assert.equal(webCalls, 0);
     assert.equal(scholarCalls, 0);
   });
@@ -5587,7 +5605,7 @@ describe("Debate engine", () => {
         return [];
       },
     };
-    const suggestion = await suggestDebateSetup({
+    const invent = await suggestDebateSetup({
       roster: [
         { id: "bot-a", name: "Ada", personaSnippet: "careful ecologist" },
         { id: "bot-b", name: "Bea", personaSnippet: "housing advocate" },
@@ -5622,11 +5640,13 @@ describe("Debate engine", () => {
         ],
       },
     });
+    const suggestion = invent.suggestion;
     assert.equal(suggestion.sources.length, 3);
     assert.equal(suggestion.sources[0]?.id, "brave-1");
     assert.equal(suggestion.sources[2]?.id, "scholar-1");
     assert.equal(suggestion.researchMeta.sourcesSkippedReason, null);
     assert.equal(suggestion.exhibits.length, 3);
+    assert.ok(invent.model);
   });
 
   it("makes Free-for-all Turnabout a feisty confrontation without forcing Court-of-Record language", async () => {

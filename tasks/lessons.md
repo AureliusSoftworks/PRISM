@@ -5,6 +5,21 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 ---
 
 ### 2026-08-05 · [UX]
+**Trigger**: User asked that summoning Prism keep the navbar clear, Wield hide it, and auto-hide return app-wide like old Zen; then disabled idle auto-hide for Signal and Debate.
+**Lesson**: Drive shared chrome through `appNavbarChrome.ts`. Summon sets `data-prism-companion-open` and raises navbar above the companion backdrop (z 860 > 854). Idle auto-hide and Wield tuck are Zen-only (`chatPresentation === "zen"`); Chat, Signal, Debate, and every other shell keep a persistent bar even while Wielding. Do not put the summon blur over the navbar.
+**Applies to**: `PrismCompanion`, `globals.css`, shared applet navbar, conversation hide/reveal seams
+
+### 2026-08-05 · [UX]
+**Trigger**: User asked whether invent warmup was app-wide; chose to make desaturated fullscreen warm + fullscreen refraction loader the global Wield/Refract rule.
+**Lesson**: Every text Wield Prism / Refract path must (1) warm a cold local model behind a desaturated fullscreen prepare modal, then (2) show `PrismBlockingLoader` while synthesis runs. Invent magics that already own their UI set `ownsPresentation: true`. Field Refract and other magics go through `PrismRefractionGateProvider`. Image synthesis is out of scope unless explicitly expanded.
+**Applies to**: `ModelWarmupIntermission`, `prismRefractionGate.tsx`, Companion field Refract, Debate/Coffee invent, Debate synthesize
+
+### 2026-08-05 · [UX]
+**Trigger**: Favorites hero only showed Group actions — Atmosphere was hidden because the group is `builtIn`.
+**Lesson**: Favorites stays built-in (fixed name, always seeded, no Edit/Delete/Add-bots dialog), but it still owns a room. Use `botLibraryGroupAllowsRoomAtmosphere` so Atmosphere, wallpaper writers, image bubbles, and waiting-room eligibility work for `builtin:favorites` while other built-ins stay locked out.
+**Applies to**: Bot Library group hero, room atmosphere dialog, waiting room, Coffee return from Favorites
+
+### 2026-08-05 · [UX]
 **Trigger**: Debate Studio Forum Cast bot chips had no right-click menu, unlike Zen/Chat library chips.
 **Lesson**: Any `BotPickerTile` grid (Debate cast, Signal host/guest pickers, Coffee canvas cast, Chat/Zen) must open the shared Library bot context menu. Prefer `data-bot-id` + shell `handleAppContextMenu` / `openBotContextMenuById`, and never use the native `disabled` attribute on “already cast” chips if that would block contextmenu — use `aria-disabled` and ignore the click instead. Mount `renderBotContextMenu()` in that shell.
 **Applies to**: Debate/Signal/Coffee bot pickers, `BotPickerTile`, `page.tsx` context menu portal

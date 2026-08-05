@@ -54,13 +54,13 @@ describe("bot group waiting-room eligibility", () => {
     );
   });
 
-  it("excludes built-in and special groups, including the starter pack", () => {
+  it("excludes other built-in and special groups, but allows Favorites", () => {
     assert.equal(
       botGroupWaitingRoomIsEligible(
         { id: "builtin:favorites", builtIn: true },
         botIds(12),
       ),
-      false,
+      true,
     );
     assert.equal(
       botGroupWaitingRoomIsEligible(

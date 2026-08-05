@@ -207,7 +207,7 @@ export function botGroupWaitingRoomIsEligible(
 ): boolean {
   return Boolean(
     group &&
-      !group.builtIn &&
+      (!group.builtIn || group.id === "builtin:favorites") &&
       !group.special &&
       uniqueBotIds(validBotIds).length >= BOT_GROUP_WAITING_ROOM_MIN_BOTS,
   );

@@ -101,6 +101,11 @@ describe("bot group canvas filtering", () => {
       heroSource,
       /if \(!focusedBotLibraryGroup\.builtIn\) \{[\s\S]*?label: "Edit details"[\s\S]*?label: "Delete group"/,
     );
+    assert.match(
+      heroSource,
+      /botLibraryGroupAllowsRoomAtmosphere\(focusedBotLibraryGroup\)[\s\S]*?>Atmosphere</,
+    );
+    assert.match(heroSource, />Group actions</);
   });
 
   it("suppresses compact grid placeholders while a group filter is active", () => {

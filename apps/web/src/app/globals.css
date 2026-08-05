@@ -85,6 +85,41 @@ html[data-prism-system-paused="true"]
   animation-play-state: paused !important;
 }
 
+/* Shared applet navbar: tuck away for immersion; summon Prism keeps it clear. */
+html[data-app-navbar-hidden="true"] [data-shared-app-navbar="true"],
+html[data-app-navbar-hidden="true"] [data-app-shell-header="true"] {
+  transform: translateY(
+    calc(-100% - max(16px, env(safe-area-inset-top, 0px)))
+  ) !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+}
+
+html[data-prism-companion-open="true"] [data-shared-app-navbar="true"],
+html[data-prism-companion-open="true"] [data-app-shell-header="true"] {
+  /* Above the companion backdrop (z-index 854) so summon never blurs/blocks chrome. */
+  z-index: 860 !important;
+  transform: none !important;
+  opacity: 1 !important;
+  pointer-events: auto !important;
+}
+
+[data-shared-app-navbar="true"],
+[data-app-shell-header="true"] {
+  transition:
+    transform 0.32s cubic-bezier(0.32, 0.72, 0, 1),
+    opacity 0.22s ease;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  [data-shared-app-navbar="true"],
+  [data-app-shell-header="true"] {
+    transition:
+      opacity 0.01s linear,
+      transform 0.01s linear;
+  }
+}
+
 /* Player-selected graphics ceilings. High intentionally adds no overrides and
    preserves today's adaptive rendering. Medium bounds expensive scene paint;
    Low also freezes explicitly decorative motion and drops authored GPU filters.

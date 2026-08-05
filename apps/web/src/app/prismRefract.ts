@@ -61,6 +61,11 @@ export interface PrismRefractChoiceTarget extends PrismRefractTargetBase {
 
 export interface PrismRefractMagicTarget extends PrismRefractTargetBase {
   kind: "magic";
+  /**
+   * When true, the magic owns its own warmup + fullscreen loader
+   * (e.g. New Duel / New Group invent). Companion skips the shared gate.
+   */
+  ownsPresentation?: boolean;
   run: (direction: string) => void | Promise<void>;
 }
 

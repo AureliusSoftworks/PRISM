@@ -155,6 +155,16 @@ import {
 } from "./prismBrand";
 import SlateWorkspace from "./SlateWorkspace";
 import PrismCompanion from "./PrismCompanion";
+import {
+  armAppNavbarAutoHide,
+  hideAppNavbarForImmersion,
+  pinAppNavbar,
+  revealAppNavbarForFreshSurface,
+  revealAppNavbarFromPointerClientY,
+  scheduleAppNavbarAutoHide,
+  setAppNavbarAutoHideEnabled,
+  showAppNavbarWhileInteracting,
+} from "./appNavbarChrome";
 import { PrismRefractTarget, type PrismRefractBinding, type PrismRefractMagicTarget } from "./prismRefract";
 import { registerSpatialUiSfx } from "./spatialUiSfx";
 import PrismHandoffCanvas from "./PrismHandoffCanvas";
@@ -1866,6 +1876,19 @@ const COMMAND_CENTER_STATE_STORAGE_KEY = "prism_command_center_state";
 const LAST_WORKSPACE_STORAGE_KEY_PREFIX = "prism_last_workspace_v1";
 const COMMAND_CENTER_PROMPT_DELETE_KEY_PREFIX = "cmdprompt:";
 const COMMAND_CENTER_WILDCARD_DELETE_KEY_PREFIX = "cmdwildcard:";
+
+/**
+ * Favorites is built-in (fixed name, always seeded) but still owns a room —
+ * atmosphere wallpaper / image bubbles / waiting-room presence. Other built-ins
+ * stay closed to room customization.
+ */
+function botLibraryGroupAllowsRoomAtmosphere(group: {
+  id: string;
+  builtIn: boolean;
+}): boolean {
+  if (group.id === BOT_LIBRARY_FAVORITES_GROUP_ID) return true;
+  return !group.builtIn;
+}
 
 function commandCenterPromptDeleteKey(commandId: string): string {
   return `${COMMAND_CENTER_PROMPT_DELETE_KEY_PREFIX}${commandId}`;
@@ -19663,6 +19686,9 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
         : String(err ?? "");
     if (looksLikeDisconnectedFetchFailure(err, path)) {
       const backendError = prismApiTransportHint(path, rawMsg || "network");
+      // #region agent log
+      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc245c'},body:JSON.stringify({sessionId:'fc245c',runId:'pre-fix',hypothesisId:'B',location:'page.tsx:api-fetch-catch',message:'client classified disconnected fetch as backend unavailable',data:{path,method:options?.method??'GET',rawMsg:rawMsg.slice(0,400),errName:err instanceof Error ? err.name : typeof err},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       if (isPrismBackendUnavailableError(backendError)) {
         dispatchBackendUnavailableEvent(backendError);
       }
@@ -19716,6 +19742,9 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
         path,
         status: res.status,
       });
+      // #region agent log
+      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc245c'},body:JSON.stringify({sessionId:'fc245c',runId:'pre-fix',hypothesisId:'A',location:'page.tsx:api-payload-503',message:'api() received backend_unavailable payload',data:{path,method:options?.method??'GET',status:res.status,error:payload?.error,detail:typeof (payload as {detail?:unknown}).detail==='string'?(payload as {detail:string}).detail.slice(0,400):null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       dispatchBackendUnavailableEvent(backendError);
       throw apiErrorWithDiagnostic(backendError, path, options, res.status);
     }
@@ -45256,13 +45285,28 @@ function HomeContent(): React.JSX.Element {
   const disarmPrivateModeForAppletSwitchRef = useRef<(next: View) => void>(
     () => {},
   );
-  // Kept as call-site seams while the surrounding conversation transitions
-  // settle; the canonical applet navbar is persistent and never auto-hides.
+  // Kept as call-site seams for conversation transitions and shared chrome.
   const revealZenHeaderForFreshSurface = useCallback(() => {
-    // Persistent by design.
+    revealAppNavbarForFreshSurface();
   }, []);
   const hideZenHeaderForConversationAction = useCallback(() => {
-    // Persistent by design.
+    hideAppNavbarForImmersion();
+  }, []);
+  useEffect(() => {
+    const onPointerMove = (event: PointerEvent): void => {
+      if (event.pointerType && event.pointerType !== "mouse") return;
+      revealAppNavbarFromPointerClientY(event.clientY);
+    };
+    const onPointerDown = (event: PointerEvent): void => {
+      if (event.pointerType === "mouse") return;
+      revealAppNavbarFromPointerClientY(event.clientY);
+    };
+    window.addEventListener("pointermove", onPointerMove, { passive: true });
+    window.addEventListener("pointerdown", onPointerDown, { passive: true });
+    return () => {
+      window.removeEventListener("pointermove", onPointerMove);
+      window.removeEventListener("pointerdown", onPointerDown);
+    };
   }, []);
   const clearViewSwitchOverlayTimers = useCallback(() => {
     if (viewSwitchOverlayHideTimerRef.current) {
@@ -47052,6 +47096,10 @@ function HomeContent(): React.JSX.Element {
   const [sidebarOpen, setSidebarOpen] = useState(false);
   /** Memories / Edit bot / Export / Delete overflow — mirrors ☰ toggle styling on mobile. */
   const [chatOverflowMenuOpen, setChatOverflowMenuOpen] = useState(false);
+  useEffect(() => {
+    pinAppNavbar(chatOverflowMenuOpen);
+    return () => pinAppNavbar(false);
+  }, [chatOverflowMenuOpen]);
   const chatOverflowMenuRef = useRef<HTMLDivElement>(null);
   const chatHeaderRef = useRef<HTMLElement | null>(null);
   const chatHeaderInlineActionsRef = useRef<HTMLDivElement | null>(null);
@@ -47185,6 +47233,13 @@ function HomeContent(): React.JSX.Element {
   }, []);
   const configuredVoiceMode = normalizeVoiceMode(settings?.voiceMode);
   const chatPresentation = chatPresentationForSurface(view, sidebarOpen);
+  useEffect(() => {
+    revealAppNavbarForFreshSurface();
+    // Auto-hide (idle + Wield tuck) is Zen-only for now.
+    const zenAutoHide = chatPresentation === "zen";
+    setAppNavbarAutoHideEnabled(zenAutoHide);
+    if (zenAutoHide) armAppNavbarAutoHide();
+  }, [chatPresentation, view]);
   const zenVoiceMuted = zenPresentationIsVoiceMuted(
     view,
     sidebarOpen,
@@ -56465,6 +56520,7 @@ function HomeContent(): React.JSX.Element {
   const hideChatChromeAfterThreadScroll = useCallback(() => {
     if (!effectiveChatPresentation) return;
     chatChromeAutoHiddenRef.current = true;
+    hideAppNavbarForImmersion();
     if (!chatHeaderChromePinned) {
       setChatHeaderChromeVisibleState(false);
     }
@@ -67263,10 +67319,11 @@ function HomeContent(): React.JSX.Element {
       : 0;
     if (
       group &&
-      !group.builtIn &&
+      botLibraryGroupAllowsRoomAtmosphere(group) &&
       group.id !== BOT_LIBRARY_STARTER_GROUP_ID &&
       validMemberCount >= BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS &&
-      validMemberCount <= BOT_LIBRARY_GROUP_BOT_CAP
+      (group.id === BOT_LIBRARY_FAVORITES_GROUP_ID ||
+        validMemberCount <= BOT_LIBRARY_GROUP_BOT_CAP)
     ) {
       return;
     }
@@ -69983,7 +70040,7 @@ function HomeContent(): React.JSX.Element {
   );
   const botGroupImageBubblesEnabled = Boolean(
     activeBotLibraryGroupFilter &&
-    !activeBotLibraryGroupFilter.builtIn &&
+    botLibraryGroupAllowsRoomAtmosphere(activeBotLibraryGroupFilter) &&
     view === "chat" &&
     (!detail || detail.messages.length === 0) &&
     !pendingReplyVisible &&
@@ -91282,9 +91339,10 @@ function HomeContent(): React.JSX.Element {
         ? `Every Library bot is already in ${focusedBotLibraryGroup.name}`
         : `Add Library bots to ${focusedBotLibraryGroup.name}`;
     const groupAtmosphereAvailable =
-      !focusedBotLibraryGroup.builtIn &&
+      botLibraryGroupAllowsRoomAtmosphere(focusedBotLibraryGroup) &&
       groupHeroBots.length >= BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS &&
-      groupHeroBots.length <= BOT_LIBRARY_GROUP_BOT_CAP;
+      (focusedBotLibraryGroup.id === BOT_LIBRARY_FAVORITES_GROUP_ID ||
+        groupHeroBots.length <= BOT_LIBRARY_GROUP_BOT_CAP);
     const groupMarketplaceAtmosphere = resolveBotMarketplaceGroupAtmosphere(
       focusedBotLibraryGroup.marketplaceThemeId,
     );
@@ -91404,7 +91462,7 @@ function HomeContent(): React.JSX.Element {
               {groupDescription ? <p>{groupDescription}</p> : null}
             </div>
             <div className={styles.botGroupHeroActions}>
-              {!focusedBotLibraryGroup.builtIn ? (
+              {botLibraryGroupAllowsRoomAtmosphere(focusedBotLibraryGroup) ? (
                 <button
                   type="button"
                   className={styles.botGroupHeroAction}
@@ -94266,10 +94324,11 @@ function HomeContent(): React.JSX.Element {
     );
     if (
       !target ||
-      target.builtIn ||
+      !botLibraryGroupAllowsRoomAtmosphere(target) ||
       !memberBotIds ||
       memberBotIds.length < BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS ||
-      memberBotIds.length > BOT_LIBRARY_GROUP_BOT_CAP ||
+      (target.id !== BOT_LIBRARY_FAVORITES_GROUP_ID &&
+        memberBotIds.length > BOT_LIBRARY_GROUP_BOT_CAP) ||
       appWidePrivateMode
     ) {
       return;
@@ -94293,7 +94352,7 @@ function HomeContent(): React.JSX.Element {
     prompt?: string,
   ): void {
     const target = botLibraryGroups.find((group) => group.id === groupId);
-    if (!target || target.builtIn) return;
+    if (!target || !botLibraryGroupAllowsRoomAtmosphere(target)) return;
     const updatedAt = new Date().toISOString();
     setBotLibraryGroups((current) =>
       normalizeBotLibraryGroups(
@@ -94317,7 +94376,7 @@ function HomeContent(): React.JSX.Element {
 
   function removeBotGroupRoomAtmosphere(groupId: string): void {
     const target = botLibraryGroups.find((group) => group.id === groupId);
-    if (!target || target.builtIn) return;
+    if (!target || !botLibraryGroupAllowsRoomAtmosphere(target)) return;
     setBotLibraryGroups((current) =>
       normalizeBotLibraryGroups(
         clearBotGroupRoomAtmosphere(current, {
@@ -94335,7 +94394,12 @@ function HomeContent(): React.JSX.Element {
     file: File,
   ): Promise<void> {
     const target = botLibraryGroups.find((group) => group.id === groupId);
-    if (!target || target.builtIn || appWidePrivateMode) return;
+    if (
+      !target ||
+      !botLibraryGroupAllowsRoomAtmosphere(target) ||
+      appWidePrivateMode
+    )
+      return;
     if (
       !BOT_GROUP_ROOM_ATMOSPHERE_UPLOAD_ACCEPT.split(",").includes(file.type)
     ) {
@@ -94414,10 +94478,11 @@ function HomeContent(): React.JSX.Element {
     );
     if (
       !target ||
-      target.builtIn ||
+      !botLibraryGroupAllowsRoomAtmosphere(target) ||
       !memberBotIds ||
       memberBotIds.length < BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS ||
-      memberBotIds.length > BOT_LIBRARY_GROUP_BOT_CAP
+      (target.id !== BOT_LIBRARY_FAVORITES_GROUP_ID &&
+        memberBotIds.length > BOT_LIBRARY_GROUP_BOT_CAP)
     ) {
       setBotGroupRoomAtmosphereDialog((current) =>
         current?.groupId === groupId
@@ -101391,7 +101456,7 @@ function HomeContent(): React.JSX.Element {
     const group = botLibraryGroups.find(
       (candidate) => candidate.id === dialog.groupId,
     );
-    if (!group || group.builtIn) return null;
+    if (!group || !botLibraryGroupAllowsRoomAtmosphere(group)) return null;
     const selectedAtmosphere = group.roomAtmosphere ?? null;
     const marketplaceAtmosphere = resolveBotMarketplaceGroupAtmosphere(
       group.marketplaceThemeId,
@@ -103883,6 +103948,25 @@ function HomeContent(): React.JSX.Element {
         data-zen-live-bot-drag-exclusion={
           options.zenDragExclusion ? "top-bar" : undefined
         }
+        onPointerEnter={(event) => {
+          if (event.pointerType !== "mouse") return;
+          showAppNavbarWhileInteracting();
+        }}
+        onPointerLeave={(event) => {
+          if (event.pointerType !== "mouse") return;
+          scheduleAppNavbarAutoHide();
+        }}
+        onFocusCapture={() => showAppNavbarWhileInteracting()}
+        onBlurCapture={(event) => {
+          const nextFocus = event.relatedTarget;
+          if (
+            nextFocus instanceof Node &&
+            event.currentTarget.contains(nextFocus)
+          ) {
+            return;
+          }
+          scheduleAppNavbarAutoHide();
+        }}
       >
         <div className={styles.chatHeaderIdentityGroup}>
           {options.brandAppletId ? (
@@ -123882,17 +123966,29 @@ function HomeContent(): React.JSX.Element {
     setCoffeeBusy(true);
     setCoffeeNewGroupGenerateBusy(true);
     setCoffeeError(null);
-    setCoffeeGroupCreationOperation({
-      title: "Inventing your Coffee Group",
-      detail:
-        "Prism is casting a café circle from your Library. You can edit seats, ethos, and topics after it lands.",
-      stepLabel: "Listening for the table",
-      progress: null,
-    });
+    setCoffeeGroupCreationOperation(null);
+    coffeeModelWarmupRetryActionRef.current = () => {
+      void generateCoffeeGroupFromPrism(direction);
+    };
+    let keepWarmupUi = false;
     try {
+      if (!(await ensureCoffeeModelReady(true))) {
+        keepWarmupUi = true;
+        return;
+      }
+      await releaseCoffeeModelWarmup();
+      setCoffeeGroupCreationOperation({
+        title: "Inventing your Coffee Group",
+        detail:
+          "Prism is casting a café circle from your Library. You can edit seats, ethos, and topics after it lands.",
+        stepLabel: "Listening for the table",
+        progress: null,
+      });
       const suggestionResult = await api<{
         ok: true;
         suggestion: CoffeeGroupSetupSuggestionV1;
+        provider?: string;
+        model?: string | null;
       }>("/api/coffee/groups/setup-suggestion", {
         method: "POST",
         body: JSON.stringify({
@@ -123959,6 +124055,12 @@ function HomeContent(): React.JSX.Element {
       openCoffeeGroup(response.group);
       void copyCoffeeGroupStarterTopicsToClipboard(response.group);
       void refreshCoffeeGroups({ quiet: true });
+      const usedModel =
+        (typeof suggestionResult.model === "string" &&
+          suggestionResult.model.trim()) ||
+        coffeePreparationModel ||
+        coffeeSessionProvider;
+      showLocalCommandToast("Refraction complete", `Used ${usedModel}.`);
     } catch (err) {
       setCoffeeError(
         err instanceof Error
@@ -123967,14 +124069,17 @@ function HomeContent(): React.JSX.Element {
       );
     } finally {
       setCoffeeGroupCreationOperation(null);
-      setCoffeeNewGroupGenerateBusy(false);
-      setCoffeeBusy(false);
+      if (!keepWarmupUi) {
+        setCoffeeNewGroupGenerateBusy(false);
+        setCoffeeBusy(false);
+      }
     }
   };
   const newCoffeeGroupMagic: PrismRefractMagicTarget = {
     id: "coffee:new-group-generate",
     label: "Generate a Coffee Group",
     kind: "magic",
+    ownsPresentation: true,
     disabled: () =>
       bots.length < COFFEE_GROUP_MIN_SIZE_CLIENT ||
       coffeeBusy ||
@@ -134164,6 +134269,25 @@ function HomeContent(): React.JSX.Element {
         {renderModeTutorialOverlay()}
         {renderDesktopFirstRunChecklist()}
         {renderGlobalPrismCompanion()}
+        {coffeeNewGroupGenerateBusy && coffeeModelWarmup ? (
+          <ModelWarmupIntermission
+            phase={coffeeModelWarmup.phase}
+            experience="coffee"
+            context="invent"
+            model={coffeeModelWarmup.model}
+            startedAt={coffeeModelWarmup.startedAt}
+            failure={coffeeModelWarmup.failure}
+            initial={coffeeModelWarmup.initial}
+            onRetry={() => void retryCoffeeModelWarmup()}
+            onExit={() => {
+              clearCoffeeModelWarmup();
+              setCoffeeGroupCreationOperation(null);
+              setCoffeeNewGroupGenerateBusy(false);
+              setCoffeeBusy(false);
+            }}
+            exitLabel="Cancel"
+          />
+        ) : null}
         <PrismBlockingLoader
           open={coffeeGroupCreationOperation !== null}
           title={
@@ -138896,8 +139020,29 @@ function HomeContent(): React.JSX.Element {
           data-app-shell-header="true"
           data-dev-panel-safe-area="top"
           data-zen-live-bot-drag-exclusion="top-bar"
-          onPointerEnter={revealChatHeaderChrome}
-          onFocusCapture={revealChatHeaderChrome}
+          onPointerEnter={(event) => {
+            if (event.pointerType !== "mouse") return;
+            showAppNavbarWhileInteracting();
+            revealChatHeaderChrome();
+          }}
+          onPointerLeave={(event) => {
+            if (event.pointerType !== "mouse") return;
+            scheduleAppNavbarAutoHide();
+          }}
+          onFocusCapture={() => {
+            showAppNavbarWhileInteracting();
+            revealChatHeaderChrome();
+          }}
+          onBlurCapture={(event) => {
+            const nextFocus = event.relatedTarget;
+            if (
+              nextFocus instanceof Node &&
+              event.currentTarget.contains(nextFocus)
+            ) {
+              return;
+            }
+            scheduleAppNavbarAutoHide();
+          }}
         >
           <div className={styles.chatHeaderIdentityGroup}>
             {headerIdentity ? (

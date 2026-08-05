@@ -74,6 +74,14 @@ describe("saved group room atmosphere integration", () => {
     assert.match(pageSource, /data-room-atmosphere-dialog="true"/u);
     assert.match(
       pageSource,
+      /function botLibraryGroupAllowsRoomAtmosphere\([\s\S]*?BOT_LIBRARY_FAVORITES_GROUP_ID/u,
+    );
+    assert.match(
+      pageSource,
+      /botLibraryGroupAllowsRoomAtmosphere\(focusedBotLibraryGroup\)[\s\S]*?>Atmosphere</u,
+    );
+    assert.match(
+      pageSource,
       /accept=\{BOT_GROUP_ROOM_ATMOSPHERE_UPLOAD_ACCEPT\}[\s\S]*?uploadBotGroupRoomAtmosphere\(group\.id, file\)/u,
     );
     assert.match(

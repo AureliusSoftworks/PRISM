@@ -15,6 +15,7 @@ import { DisableNativeTooltips } from "./DisableNativeTooltips";
 import { PrismIntroSequenceProvider } from "./PrismIntroSequence";
 import { PRISM_BRAND_COPY } from "./prismBrand";
 import { PrismMenuProvider } from "./PrismMenu";
+import { PrismRefractionGateProvider } from "./prismRefractionGate";
 import { RenderPlatformAttribute } from "./RenderPlatformAttribute";
 import { ReplayRenderCoordinator } from "./ReplayRenderCoordinator";
 import { TextFieldContextMenu } from "./TextFieldContextMenu";
@@ -107,13 +108,15 @@ export default function RootLayout({
       <body>
         <PrismMenuProvider>
           <PrismIntroSequenceProvider>
-            <RenderPlatformAttribute />
-            <TextFieldContextMenu />
-            <BlockBrowserInspection />
-            <DisableNativeTooltips />
-            <ReplayRenderCoordinator />
-            {children}
-            <ClientInstallCoach />
+            <PrismRefractionGateProvider>
+              <RenderPlatformAttribute />
+              <TextFieldContextMenu />
+              <BlockBrowserInspection />
+              <DisableNativeTooltips />
+              <ReplayRenderCoordinator />
+              {children}
+              <ClientInstallCoach />
+            </PrismRefractionGateProvider>
           </PrismIntroSequenceProvider>
         </PrismMenuProvider>
       </body>

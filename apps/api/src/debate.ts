@@ -1453,7 +1453,11 @@ export async function suggestDebateSetup(args: {
   roster: readonly DebateSetupSuggestionRosterBot[];
   runtime: DebateAiRuntime;
   research: DebateSetupSuggestionResearchHooks;
-}): Promise<DebateSetupSuggestionV1> {
+}): Promise<{
+  suggestion: DebateSetupSuggestionV1;
+  provider: ProviderName;
+  model: string;
+}> {
   const roster = args.roster
     .map((bot) => ({
       id: compactText(bot.id, 80),
@@ -1630,13 +1634,17 @@ export async function suggestDebateSetup(args: {
   );
   // Stamp a stable public title if the model left one thin.
   return {
-    ...completed,
-    motion: {
-      ...completed.motion,
-      title:
-        completed.motion.title ||
-        debateTitleForMotion(completed.motion, completed.formality),
+    suggestion: {
+      ...completed,
+      motion: {
+        ...completed.motion,
+        title:
+          completed.motion.title ||
+          debateTitleForMotion(completed.motion, completed.formality),
+      },
     },
+    provider: generation.provider,
+    model: generation.model,
   };
 }
 

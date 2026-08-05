@@ -196,6 +196,9 @@ test("desaturates and pauses every app shell behind the open companion", () => {
     component,
     /setPrismSystemPause\(PRISM_COMPANION_SYSTEM_PAUSE_REASON, true\)/u,
   );
+  assert.match(component, /setAppNavbarCompanionOpen\(open\)/u);
+  assert.match(component, /setAppNavbarWielding\(true\)/u);
+  assert.match(component, /setAppNavbarWielding\(false\)/u);
   assert.match(component, /document\.getAnimations\(\)/u);
   assert.match(
     component,
@@ -216,6 +219,14 @@ test("desaturates and pauses every app shell behind the open companion", () => {
     /html\[data-prism-system-paused="true"\][\s\S]*data-prism-system-pause-exempt[\s\S]*animation-play-state: paused !important/u,
   );
   assert.match(
+    globalCss,
+    /html\[data-prism-companion-open="true"\][\s\S]*z-index: 860/u,
+  );
+  assert.match(
+    globalCss,
+    /html\[data-app-navbar-hidden="true"\][\s\S]*pointer-events: none/u,
+  );
+  assert.match(
     page,
     /document\.visibilityState === "visible" && !prismSystemPaused/u,
   );
@@ -227,6 +238,10 @@ test("desaturates and pauses every app shell behind the open companion", () => {
   assert.match(page, /const prismPresentationSuspended = useSyncExternalStore\(/u);
   assert.match(page, /prismPresentationSuspendedRef\.current/u);
   assert.match(page, /<PrismVisualLifecycleBridge \/>/u);
+  assert.match(page, /armAppNavbarAutoHide\(\)/u);
+  assert.match(page, /hideAppNavbarForImmersion\(\)/u);
+  assert.match(page, /zenAutoHide = chatPresentation === "zen"/u);
+  assert.match(page, /setAppNavbarAutoHideEnabled\(zenAutoHide\)/u);
 });
 
 test("gives only the companion orb momentum", () => {

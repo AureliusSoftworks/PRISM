@@ -243,7 +243,8 @@ export function resolveBotGroupCoffeeReturn({
     validBotIds,
   );
   if (
-    sourceGroup.builtIn !== false ||
+    (sourceGroup.builtIn !== false &&
+      checkpoint.sourceGroupId !== "builtin:favorites") ||
     !botGroupWaitingRoomIsEligible(
       {
         id: checkpoint.sourceGroupId,

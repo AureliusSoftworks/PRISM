@@ -1,4 +1,8 @@
-export type ModelPreparationExperience = "coffee" | "signal";
+export type ModelPreparationExperience =
+  | "coffee"
+  | "signal"
+  | "debate"
+  | "prism";
 
 export type ModelPreparationState =
   | "ready"

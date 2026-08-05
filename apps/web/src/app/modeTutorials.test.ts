@@ -138,7 +138,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /Studio follows one clear path/u);
     assert.match(copy, /opens as a Plainspoken Forum with Auto rounds/u);
     assert.match(copy, /Plain New Duel clears the active workbench/u);
-    assert.match(copy, /Wield Prism onto New Duel invents a full editable duel/u);
+    assert.match(copy, /Wield Prism onto New Duel desaturates the screen while a cold local model warms/u);
     assert.match(copy, /Tune the room keeps the proceeding preset/u);
     assert.match(copy, /leave it closed and trust the defaults/u);
     assert.match(copy, /University Union to Daytime Showdown/u);

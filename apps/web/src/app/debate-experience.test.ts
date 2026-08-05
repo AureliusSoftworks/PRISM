@@ -632,6 +632,13 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
+      /waitForModelPreparation\([\s\S]{0,220}experience:\s*"debate"/u,
+    );
+    assert.match(source, /ModelWarmupIntermission/u);
+    assert.match(source, /Refraction complete/u);
+    assert.match(source, /DebateNoticeToast/u);
+    assert.match(
+      source,
       /playerRole:\s*applied\.playerRole[\s\S]{0,220}playerSideId:[\s\S]{0,120}applied\.playerRole === "participant"/u,
     );
     assert.doesNotMatch(

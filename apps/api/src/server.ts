@@ -14092,7 +14092,7 @@ function buildRoutes(): RouteDefinition[] {
           };
         })
         .filter((bot) => bot.id.trim());
-      const suggestion = await runWithUsageSession(
+      const invent = await runWithUsageSession(
         {
           db,
           userId,
@@ -14125,7 +14125,12 @@ function buildRoutes(): RouteDefinition[] {
             },
           }),
       );
-      json(ctx.res, 200, { ok: true, suggestion });
+      json(ctx.res, 200, {
+        ok: true,
+        suggestion: invent.suggestion,
+        provider: invent.provider,
+        model: invent.model,
+      });
     }),
     route("POST", "/api/debates/title", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -17998,7 +18003,7 @@ function buildRoutes(): RouteDefinition[] {
           };
         })
         .filter((bot) => bot.id.trim());
-      const suggestion = await runWithUsageSession(
+      const invent = await runWithUsageSession(
         {
           db,
           userId,
@@ -18011,9 +18016,16 @@ function buildRoutes(): RouteDefinition[] {
             direction: body.direction,
             roster,
             provider: lane.provider,
+            providerName: lane.providerName,
+            model: lane.model,
           }),
       );
-      json(ctx.res, 200, { ok: true, suggestion });
+      json(ctx.res, 200, {
+        ok: true,
+        suggestion: invent.suggestion,
+        provider: invent.provider,
+        model: invent.model,
+      });
     }),
     route("PATCH", "/api/coffee/groups/:id", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -23181,7 +23193,10 @@ function buildRoutes(): RouteDefinition[] {
           ? body.provider
           : null;
       const experience =
-        body.experience === "coffee" || body.experience === "signal"
+        body.experience === "coffee" ||
+        body.experience === "signal" ||
+        body.experience === "debate" ||
+        body.experience === "prism"
           ? body.experience
           : null;
       if (!provider || !experience) {

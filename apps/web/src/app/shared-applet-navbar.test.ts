@@ -102,6 +102,18 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
     /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: sidebarOpen \? undefined : "zen"[\s\S]*headerRef: chatHeaderRef[\s\S]*controlRail: renderHeaderModelPicker\(\)/u,
   );
   assert.doesNotMatch(pageSource, /data-zen-header-hidden=/u);
+  assert.match(pageSource, /armAppNavbarAutoHide\(\)/u);
+  assert.match(pageSource, /hideAppNavbarForImmersion\(\)/u);
+  assert.match(pageSource, /showAppNavbarWhileInteracting\(\)/u);
+  assert.match(
+    pageSource,
+    /zenAutoHide = chatPresentation === "zen"/u,
+  );
+  assert.match(pageSource, /setAppNavbarAutoHideEnabled\(zenAutoHide\)/u);
+  assert.match(
+    pageSource,
+    /onPointerEnter=\{[\s\S]*showAppNavbarWhileInteracting\(\)/u,
+  );
   assert.match(
     pageCss,
     /\.appLayout\[data-zen-surface="true"\] \.chatHeader\.sharedAppletHeader\s*\{[\s\S]*position:\s*relative;[\s\S]*inset:\s*auto;/u,

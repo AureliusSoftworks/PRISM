@@ -542,6 +542,24 @@
   border-color: color-mix(in srgb, #8fd6c8 58%, #a64f69);
 }
 
+.noticeToast {
+  display: grid;
+  width: min(900px, calc(100% - 32px));
+  gap: 4px;
+  border-color: color-mix(in srgb, #8fd6c8 42%, #4a425c);
+  color: #e8fff8;
+  background: color-mix(in srgb, #1b1725 82%, #244038);
+}
+
+.noticeToast strong {
+  font-weight: 650;
+}
+
+.noticeToast span {
+  color: color-mix(in srgb, currentColor 72%, transparent);
+  font-size: 12px;
+}
+
 .warning {
   border-color: #9d7e38;
   color: #ffe6a8;

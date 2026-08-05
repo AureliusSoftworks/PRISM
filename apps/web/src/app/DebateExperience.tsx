@@ -79,6 +79,7 @@ import {
   type DebateTurnaboutStatementV1,
   type BotPowerAvatarScaleMode,
   type GraphicsQuality,
+  type ModelPreparationFailure,
   type PrismCompanionDebateDraft,
   type PrismRefractDebateTextTargetKind,
   type PrismRefractResponse,
@@ -97,6 +98,14 @@ import {
   type PrismRefractMagicTarget,
 } from "./prismRefract";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import {
+  ModelWarmupIntermission,
+  type ModelWarmupIntermissionPhase,
+} from "./ModelWarmupIntermission";
+import {
+  modelPreparationFailureMessage,
+  waitForModelPreparation,
+} from "./modelPreparation";
 import { AssetRail } from "./AssetLibrary";
 import styles from "./DebateExperience.module.css";
 import { debateLiveCaptionPage } from "./debateLiveCaption";
@@ -2364,6 +2373,9 @@ function DebateErrorToast(props: { message: string }): React.JSX.Element {
       role="alert"
       data-copy-state={copyState}
       onClick={() => {
+        // #region agent log
+        fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc245c'},body:JSON.stringify({sessionId:'fc245c',runId:'pre-fix',hypothesisId:'D',location:'DebateExperience.tsx:DebateErrorToast',message:'debate error toast copy clicked',data:{message:props.message.slice(0,500),messageLength:props.message.length},timestamp:Date.now()})}).catch(()=>{});
+        // #endregion
         void writeDebateClipboardText(props.message)
           .then(() => setCopyState("copied"))
           .catch(() => setCopyState("failed"));
@@ -2385,6 +2397,32 @@ function DebateErrorToast(props: { message: string }): React.JSX.Element {
             : "Click to copy error."}
       </small>
     </button>
+  );
+}
+
+const DEBATE_REFRACTION_NOTICE_DISMISS_MS = 4_500;
+
+function DebateNoticeToast(props: {
+  title: string;
+  detail: string;
+  onDismiss: () => void;
+}): React.JSX.Element {
+  useEffect(() => {
+    const timer = window.setTimeout(
+      props.onDismiss,
+      DEBATE_REFRACTION_NOTICE_DISMISS_MS,
+    );
+    return () => window.clearTimeout(timer);
+  }, [props.detail, props.onDismiss, props.title]);
+  return (
+    <div
+      className={`${styles.notice} ${styles.noticeToast}`}
+      role="status"
+      aria-live="polite"
+    >
+      <strong>{props.title}</strong>
+      <span>{props.detail}</span>
+    </div>
   );
 }
 
@@ -3439,6 +3477,22 @@ export function DebateExperience(
   ] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [newDuelGenerateBusy, setNewDuelGenerateBusy] = useState(false);
+  const [motionOptionsBusy, setMotionOptionsBusy] = useState(false);
+  const [inventWarmup, setInventWarmup] = useState<{
+    phase: ModelWarmupIntermissionPhase;
+    context: "invent" | "refract";
+    model: string | null;
+    startedAt: string | null;
+    failure: ModelPreparationFailure | null;
+  } | null>(null);
+  const [refractionNotice, setRefractionNotice] = useState<{
+    title: string;
+    detail: string;
+  } | null>(null);
+  const inventWarmupAbortRef = useRef<AbortController | null>(null);
+  const dismissRefractionNotice = useCallback(() => {
+    setRefractionNotice(null);
+  }, []);
   const [error, setError] = useState<string | null>(null);
   const [setupRestoreLoadingId, setSetupRestoreLoadingId] = useState<
     string | null
@@ -5422,16 +5476,60 @@ export function DebateExperience(
     async (direction = ""): Promise<void> => {
       const resolvedTopic = (await expandDebateSeedDraft(topic)).trim();
       if (!resolvedTopic || busy) return;
+      inventWarmupAbortRef.current?.abort();
+      const warmupController = new AbortController();
+      inventWarmupAbortRef.current = warmupController;
       setBusy(true);
       setError(null);
+      setInventWarmup(null);
+      setMotionOptionsBusy(false);
+      const preferred =
+        props.modelOverride?.provider ?? preferredProvider;
+      const preparationModel = props.modelOverride?.model ?? null;
       try {
+        const preparation = await waitForModelPreparation({
+          request: props.request,
+          provider: preferred,
+          model: preparationModel,
+          experience: "debate",
+          signal: warmupController.signal,
+          onStatus: (status) => {
+            if (status.state === "warming") {
+              setInventWarmup({
+                phase: "held",
+                context: "refract",
+                model: status.model,
+                startedAt: status.startedAt,
+                failure: null,
+              });
+            } else if (status.state === "unavailable") {
+              setInventWarmup({
+                phase: "failed",
+                context: "refract",
+                model: status.model,
+                startedAt: status.startedAt,
+                failure: status.failure,
+              });
+            }
+          },
+        });
+        if (preparation.state === "unavailable") {
+          setError(
+            modelPreparationFailureMessage({
+              failure: preparation.failure,
+            }),
+          );
+          setInventWarmup(null);
+          return;
+        }
+        setInventWarmup(null);
+        setMotionOptionsBusy(true);
         const result = await request<{ slates: DebateMotionSlateV1[] }>(
           "/api/debates/synthesize",
           requestBody({
             topic: resolvedTopic,
             formality,
-            preferredProvider:
-              props.modelOverride?.provider ?? preferredProvider,
+            preferredProvider: preferred,
             modelOverride: props.modelOverride?.model,
             responseMode: props.responseMode,
             direction,
@@ -5439,13 +5537,34 @@ export function DebateExperience(
         );
         setSlates(result.slates);
         setMotion(result.slates[0] ?? EMPTY_SLATE);
+        const usedModel =
+          typeof preparation.model === "string" && preparation.model.trim()
+            ? preparation.model.trim()
+            : preferred === "local"
+              ? "local model"
+              : preferred;
+        setRefractionNotice({
+          title: "Refraction complete",
+          detail: `Used ${usedModel}.`,
+        });
       } catch (caught) {
+        if (
+          caught instanceof DOMException &&
+          caught.name === "AbortError"
+        ) {
+          return;
+        }
         setError(
           caught instanceof Error
             ? caught.message
             : "Synthesis was unavailable.",
         );
       } finally {
+        if (inventWarmupAbortRef.current === warmupController) {
+          inventWarmupAbortRef.current = null;
+        }
+        setInventWarmup(null);
+        setMotionOptionsBusy(false);
         setBusy(false);
       }
     },
@@ -5455,6 +5574,7 @@ export function DebateExperience(
       preferredProvider,
       props.modelOverride?.model,
       props.modelOverride?.provider,
+      props.request,
       props.responseMode,
       request,
       formality,
@@ -5467,10 +5587,11 @@ export function DebateExperience(
       id: "debate:synthesize-motion-options",
       label: "Synthesize debate options",
       kind: "magic",
-      disabled: () => !topic.trim() || busy,
+      disabled: () =>
+        !topic.trim() || busy || motionOptionsBusy || inventWarmup !== null,
       run: (direction) => synthesize(direction),
     }),
-    [busy, synthesize, topic],
+    [busy, inventWarmup, motionOptionsBusy, synthesize, topic],
   );
 
   const generateNewDuelFromPrism = useCallback(
@@ -5479,14 +5600,64 @@ export function DebateExperience(
         setError("Create at least two Library bots to start a Debate.");
         return;
       }
-      startNewDebate();
+      inventWarmupAbortRef.current?.abort();
+      const warmupController = new AbortController();
+      inventWarmupAbortRef.current = warmupController;
       setBusy(true);
-      setNewDuelGenerateBusy(true);
+      setNewDuelGenerateBusy(false);
+      setInventWarmup(null);
       setSetupRestoreNotice(null);
       setError(null);
+      setRefractionNotice(null);
+      const preferredProvider =
+        props.modelOverride?.provider ?? props.preferredProvider;
+      const preparationModel =
+        preferredProvider === "local"
+          ? (props.modelOverride?.model ?? null)
+          : (props.modelOverride?.model ?? null);
       try {
+        const preparation = await waitForModelPreparation({
+          request: props.request,
+          provider: preferredProvider,
+          model: preparationModel,
+          experience: "debate",
+          signal: warmupController.signal,
+          onStatus: (status) => {
+            if (status.state === "warming") {
+              setInventWarmup({
+                phase: "held",
+                context: "invent",
+                model: status.model,
+                startedAt: status.startedAt,
+                failure: null,
+              });
+            } else if (status.state === "unavailable") {
+              setInventWarmup({
+                phase: "failed",
+                context: "invent",
+                model: status.model,
+                startedAt: status.startedAt,
+                failure: status.failure,
+              });
+            }
+          },
+        });
+        if (preparation.state === "unavailable") {
+          setError(
+            modelPreparationFailureMessage({
+              failure: preparation.failure,
+            }),
+          );
+          setInventWarmup(null);
+          return;
+        }
+        setInventWarmup(null);
+        startNewDebate();
+        setNewDuelGenerateBusy(true);
         const result = await props.request<{
           suggestion: DebateSetupSuggestionV1;
+          provider?: string;
+          model?: string | null;
         }>(
           "/api/debates/setup-suggestion",
           requestBody({
@@ -5496,8 +5667,7 @@ export function DebateExperience(
               name: bot.name,
               personaSnippet: (bot.systemPrompt ?? "").slice(0, 280),
             })),
-            preferredProvider:
-              props.modelOverride?.provider ?? props.preferredProvider,
+            preferredProvider,
             modelOverride: props.modelOverride?.model,
             responseMode: props.responseMode,
           }),
@@ -5536,6 +5706,15 @@ export function DebateExperience(
         if (applied.sourcesSkippedNotice) {
           setSetupRestoreNotice(applied.sourcesSkippedNotice);
         }
+        const usedModel =
+          (typeof result.model === "string" && result.model.trim()) ||
+          preparation.model ||
+          preparationModel ||
+          preferredProvider;
+        setRefractionNotice({
+          title: "Refraction complete",
+          detail: `Used ${usedModel}.`,
+        });
         const roleChecksReady =
           applied.playerRole === "participant"
             ? Boolean(
@@ -5576,22 +5755,33 @@ export function DebateExperience(
               applied.playerSideId === "against"
                 ? undefined
                 : applied.cast.againstAdvocate,
-            preferredProvider:
-              props.modelOverride?.provider ?? props.preferredProvider,
+            preferredProvider,
             modelOverride: props.modelOverride?.model,
             responseMode: props.responseMode,
           }),
         );
         setRoleChecks(roleResult.checks);
       } catch (caught) {
+        if (
+          caught instanceof Error &&
+          (caught.name === "AbortError" || /abort/iu.test(caught.message))
+        ) {
+          return;
+        }
         setError(
           caught instanceof Error
             ? caught.message
             : "Prism could not invent a New Duel.",
         );
       } finally {
+        if (inventWarmupAbortRef.current === warmupController) {
+          inventWarmupAbortRef.current = null;
+        }
         setBusy(false);
         setNewDuelGenerateBusy(false);
+        setInventWarmup((current) =>
+          current?.phase === "failed" ? current : null,
+        );
       }
     },
     [
@@ -5609,10 +5799,15 @@ export function DebateExperience(
       id: "debate:new-duel-generate",
       label: "Generate a full New Duel",
       kind: "magic",
-      disabled: () => props.bots.length < 2 || busy || newDuelGenerateBusy,
+      ownsPresentation: true,
+      disabled: () =>
+        props.bots.length < 2 ||
+        busy ||
+        newDuelGenerateBusy ||
+        inventWarmup !== null,
       run: (direction) => void generateNewDuelFromPrism(direction),
     }),
-    [busy, generateNewDuelFromPrism, newDuelGenerateBusy, props.bots.length],
+    [busy, generateNewDuelFromPrism, inventWarmup, newDuelGenerateBusy, props.bots.length],
   );
 
   const selectSlate = (slate: DebateMotionSlateV1): void => {
@@ -8004,6 +8199,9 @@ export function DebateExperience(
       setView("live");
       await adoptSession(null, result.session, { playIntro: true });
     } catch (caught) {
+      // #region agent log
+      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc245c'},body:JSON.stringify({sessionId:'fc245c',runId:'pre-fix',hypothesisId:'C',location:'DebateExperience.tsx:startDebate-catch',message:'startDebate failed',data:{message:caught instanceof Error?caught.message.slice(0,400):String(caught),name:caught instanceof Error?caught.name:typeof caught,detail:caught&&typeof caught==='object'&&'detail' in caught&&typeof (caught as {detail?:unknown}).detail==='string'?(caught as {detail:string}).detail.slice(0,400):null,path:caught&&typeof caught==='object'&&'path' in caught?String((caught as {path?:unknown}).path):null,status:caught&&typeof caught==='object'&&'status' in caught?(caught as {status?:unknown}).status:null,code:caught&&typeof caught==='object'&&'code' in caught?String((caught as {code?:unknown}).code):null},timestamp:Date.now()})}).catch(()=>{});
+      // #endregion
       setError(
         caught instanceof Error
           ? caught.message
@@ -10223,6 +10421,14 @@ export function DebateExperience(
         </p>
       ) : null}
       {error ? <DebateErrorToast key={error} message={error} /> : null}
+      {refractionNotice ? (
+        <DebateNoticeToast
+          key={`${refractionNotice.title}:${refractionNotice.detail}`}
+          title={refractionNotice.title}
+          detail={refractionNotice.detail}
+          onDismiss={dismissRefractionNotice}
+        />
+      ) : null}
       {setupRestoreNotice ? (
         <p className={styles.notice} role="status">
           {setupRestoreNotice}
@@ -17347,6 +17553,39 @@ export function DebateExperience(
   return (
     <>
       {experience}
+      {inventWarmup ? (
+        <ModelWarmupIntermission
+          phase={inventWarmup.phase}
+          experience="debate"
+          context={inventWarmup.context}
+          model={inventWarmup.model}
+          startedAt={inventWarmup.startedAt}
+          failure={inventWarmup.failure}
+          initial
+          exitLabel="Cancel"
+          onExit={() => {
+            inventWarmupAbortRef.current?.abort();
+            inventWarmupAbortRef.current = null;
+            setInventWarmup(null);
+            setBusy(false);
+            setNewDuelGenerateBusy(false);
+            setMotionOptionsBusy(false);
+          }}
+          onRetry={
+            inventWarmup.phase === "failed"
+              ? () => {
+                  const context = inventWarmup.context;
+                  setInventWarmup(null);
+                  if (context === "refract") {
+                    void synthesize("");
+                  } else {
+                    void generateNewDuelFromPrism("");
+                  }
+                }
+              : undefined
+          }
+        />
+      ) : null}
       <PrismBlockingLoader
         open={newDuelGenerateBusy}
         title="Inventing a New Duel"
@@ -17355,6 +17594,15 @@ export function DebateExperience(
         progress={null}
         theme={props.theme}
         footer="Start stays unpressed until you review the draft."
+      />
+      <PrismBlockingLoader
+        open={motionOptionsBusy}
+        title="Synthesizing debate options"
+        detail="Prism is refracting motion options for this topic into editable slates."
+        stepLabel="Building motion options"
+        progress={null}
+        theme={props.theme}
+        footer="Keep this window open while the light takes shape."
       />
       <PrismBlockingLoader
         open={evidenceObjectVisualBusy === "synthesize"}
