@@ -186,6 +186,22 @@
 
 .avatar:active { cursor: grabbing; }
 
+.anchor[data-idle-dimmed="true"]:not([data-wielding="true"]):not([data-inertial="true"]):not([data-open="true"]) .avatar,
+.anchor[data-idle-dimmed="true"]:not([data-wielding="true"]):not([data-inertial="true"]):not([data-open="true"]) .orb {
+  opacity: 0.5;
+}
+
+.anchor[data-idle-dimmed="true"]:not([data-wielding="true"]):not([data-inertial="true"]):not([data-open="true"]) .avatar {
+  cursor: pointer;
+  filter: none;
+}
+
+.anchor[data-idle-dimmed="true"]:not([data-wielding="true"]):not([data-inertial="true"]):not([data-open="true"]) .avatar::before {
+  opacity: 0;
+  animation: none;
+  filter: none;
+}
+
 .orb {
   --prism-orb-size: 58px;
 }

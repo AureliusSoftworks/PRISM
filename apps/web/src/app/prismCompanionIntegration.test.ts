@@ -237,6 +237,39 @@ test("gives only the companion orb momentum", () => {
   assert.doesNotMatch(page, /startAvatarMomentum|data-flinging/u);
 });
 
+test("docks the orb at the cursor on wield release and can fling with drag inertia", () => {
+  assert.match(component, /wieldVelocitySampleRef/u);
+  assert.match(component, /samplePrismCompanionDragVelocity\(/u);
+  assert.match(component, /createPrismCompanionDragVelocitySample\(/u);
+  assert.match(
+    component,
+    /releasePointer\.x \/ window\.innerWidth/u,
+  );
+  assert.match(component, /startInertia\(releaseVelocity\)/u);
+  assert.match(component, /preserveCaptureReturn &&/u);
+});
+
+test("dims the idle orb after settle and clears dim on open or wield", () => {
+  assert.match(component, /PRISM_COMPANION_IDLE_DIM_MS = 3_000/u);
+  assert.match(component, /data-idle-dimmed=\{idleDimmed \? "true" : undefined\}/u);
+  assert.match(component, /const scheduleIdleDim = useCallback/u);
+  assert.match(component, /const clearIdleDim = useCallback/u);
+  assert.match(component, /clearIdleDim\(\);\s*setOpen\(true\)/u);
+  assert.match(component, /clearIdleDim\(\);\s*stopInertia\(false\)/u);
+  assert.match(
+    component,
+    /idleDimmedRef\.current[\s\S]*playPrismCompanionGlassTap\(\);\s*return;/u,
+  );
+  assert.match(
+    companionCss,
+    /\[data-idle-dimmed="true"\][\s\S]*opacity:\s*0\.5/u,
+  );
+  assert.match(
+    companionCss,
+    /\[data-idle-dimmed="true"\][\s\S]*\.avatar::before[\s\S]*opacity:\s*0/u,
+  );
+});
+
 test("plays varied glass taps on orb activation and wall rebounds", () => {
   assert.match(component, /if \(next\.bounced\) playPrismCompanionGlassTap\(\)/u);
   assert.ok(

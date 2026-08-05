@@ -4,6 +4,7 @@ import test from "node:test";
 import {
   boundedPrismCompanionReleaseVelocity,
   clampPrismCompanionPosition,
+  createPrismCompanionDragVelocitySample,
   resolvePrismCompanionSurfaceGlare,
   samplePrismCompanionDragVelocity,
   stepPrismCompanionInertia,
@@ -43,6 +44,37 @@ test("gives the orb a weighted sampled release velocity", () => {
     y: 0,
   });
   assert.equal(Math.round(Math.hypot(bounded.x, bounded.y)), 1_650);
+});
+
+test("samples wield-style pointer motion into bounded release velocity", () => {
+  const sample = createPrismCompanionDragVelocitySample(200, 300, 1_000);
+  assert.equal(sample.velocityX, 0);
+  assert.equal(sample.velocityY, 0);
+  samplePrismCompanionDragVelocity(sample, 240, 330, 1_020);
+  assert.ok(sample.velocityX > 0);
+  assert.ok(sample.velocityY > 0);
+  const bounded = boundedPrismCompanionReleaseVelocity({
+    x: sample.velocityX,
+    y: sample.velocityY,
+  });
+  assert.ok(Math.hypot(bounded.x, bounded.y) > 0);
+  assert.ok(Math.hypot(bounded.x, bounded.y) <= 1_650);
+
+  const parked = createPrismCompanionDragVelocitySample(100, 100, 2_000);
+  samplePrismCompanionDragVelocity(parked, 100, 100, 2_016);
+  assert.equal(
+    Math.hypot(
+      boundedPrismCompanionReleaseVelocity({
+        x: parked.velocityX,
+        y: parked.velocityY,
+      }).x,
+      boundedPrismCompanionReleaseVelocity({
+        x: parked.velocityX,
+        y: parked.velocityY,
+      }).y,
+    ),
+    0,
+  );
 });
 
 test("carries momentum, loses energy, and rebounds inside bounds", () => {

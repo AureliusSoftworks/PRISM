@@ -74,6 +74,20 @@ export function resolvePrismCompanionSurfaceGlare(
   };
 }
 
+export function createPrismCompanionDragVelocitySample(
+  clientX: number,
+  clientY: number,
+  timeMs: number,
+): PrismCompanionDragVelocitySample {
+  return {
+    lastX: clientX,
+    lastY: clientY,
+    lastTimeMs: timeMs,
+    velocityX: 0,
+    velocityY: 0,
+  };
+}
+
 export function samplePrismCompanionDragVelocity(
   sample: PrismCompanionDragVelocitySample,
   clientX: number,

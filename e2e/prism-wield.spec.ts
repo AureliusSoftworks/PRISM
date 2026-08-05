@@ -98,8 +98,15 @@ for (const checkpoint of [
     );
     const returned = await orb.boundingBox();
     expect(returned?.width).toBeCloseTo(before?.width ?? 68, 0);
-    expect(returned?.x).toBeCloseTo(before?.x ?? 0, 0);
-    expect(returned?.y).toBeCloseTo(before?.y ?? 0, 0);
+    // Stationary release docks the full-size orb at the cursor, not the pre-wield dock.
+    expect(returned?.x).toBeCloseTo(pointer.x - (returned?.width ?? 68) / 2, 2);
+    expect(returned?.y).toBeCloseTo(pointer.y - (returned?.height ?? 68) / 2, 2);
+    expect(
+      Math.hypot(
+        (returned?.x ?? 0) - (before?.x ?? 0),
+        (returned?.y ?? 0) - (before?.y ?? 0),
+      ),
+    ).toBeGreaterThan(20);
   });
 }
 
