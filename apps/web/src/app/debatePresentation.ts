@@ -625,3 +625,179 @@ export function debateGalleryReactingIndices(
     (first + 2 + (content.length % Math.max(2, seatCount - 1))) % seatCount;
   return first === second ? [first] : [first, second];
 }
+
+/**
+ * True while a Spectator bake is held or playing but not yet sealed. The
+ * session floor is already complete on the server, so chrome must follow
+ * presentation progress instead of the baked end-state.
+ */
+export function debateSpectatorBakeUnsealed(
+  session: Pick<
+    DebateSessionV1,
+    "playerRole" | "stepKey" | "completedAt" | "status"
+  >,
+): boolean {
+  return (
+    session.playerRole === "spectator" &&
+    session.stepKey === "completed" &&
+    session.completedAt === null &&
+    (session.status === "live" || session.status === "paused")
+  );
+}
+
+/** Canonical phase label from session state (live Judge/Participant flows). */
+export function debateSessionPhaseLabel(
+  session: Pick<DebateSessionV1, "phase" | "formatState">,
+): string {
+  if (session.formatState.format === "turnabout") {
+    const phase = session.formatState.phase;
+    return `${phase.charAt(0).toUpperCase()}${phase.slice(1)}`;
+  }
+  if (session.phase === "rebuttal" && session.formatState.format === "forum") {
+    return `Rebuttal ${session.formatState.rebuttalRound} of ${session.formatState.rebuttalRoundTarget}`;
+  }
+  return `${session.phase.charAt(0).toUpperCase()}${session.phase.slice(1)}`;
+}
+
+/** Map a floor/step key to the phase chip without reading baked end-state. */
+export function debatePhaseLabelFromStepKey(
+  session: Pick<DebateSessionV1, "format">,
+  stepKey: string,
+): string {
+  if (session.format === "turnabout") {
+    if (
+      stepKey.startsWith("jury") ||
+      stepKey.includes("verdict") ||
+      stepKey.includes("ballot") ||
+      stepKey === "moderator_to_jury" ||
+      stepKey.includes("resolution")
+    ) {
+      return "Resolution";
+    }
+    if (stepKey.includes("reversal")) return "Reversal";
+    if (
+      stepKey.includes("examination") ||
+      stepKey.includes("press") ||
+      stepKey.includes("object") ||
+      stepKey.includes("ruling")
+    ) {
+      return "Examination";
+    }
+    return "Testimony";
+  }
+  if (stepKey === "intro" || stepKey.startsWith("opening")) return "Opening";
+  if (stepKey.startsWith("challenge")) return "Challenge";
+  if (stepKey.startsWith("rebuttal") || stepKey === "moderator_to_rebuttal") {
+    return "Rebuttal";
+  }
+  if (stepKey.startsWith("closing") || stepKey === "moderator_to_closing") {
+    return "Closing";
+  }
+  if (
+    stepKey.startsWith("jury") ||
+    stepKey.includes("verdict") ||
+    stepKey.includes("ballot") ||
+    stepKey === "moderator_to_jury" ||
+    stepKey === "closing_moderator" ||
+    stepKey === "judge_closing_moderator"
+  ) {
+    return "Verdict";
+  }
+  return "Opening";
+}
+
+/**
+ * Phase chip for the live header. Baked Spectator sessions stay on Opening /
+ * Testimony until Start, then follow the heard/presenting event — never the
+ * baked Verdict/Resolution end-state.
+ */
+export function debateLivePhaseLabel(
+  session: DebateSessionV1,
+  args: {
+    awaitingFirstWatch: boolean;
+    activeEvent: DebateEventV1 | null;
+    heardThroughSequence: number | null;
+  },
+): string {
+  if (!debateSpectatorBakeUnsealed(session)) {
+    return debateSessionPhaseLabel(session);
+  }
+  if (args.awaitingFirstWatch || args.heardThroughSequence === null) {
+    return session.format === "turnabout" ? "Testimony" : "Opening";
+  }
+  const anchor =
+    args.activeEvent ??
+    [...session.events]
+      .reverse()
+      .find((event) => event.sequence <= args.heardThroughSequence!);
+  if (!anchor) {
+    return session.format === "turnabout" ? "Testimony" : "Opening";
+  }
+  return debatePhaseLabelFromStepKey(session, anchor.stepKey);
+}
+
+/** Whether the Jury split may appear in Spectator chrome. */
+export function debateJuryOutcomeRevealed(
+  session: Pick<
+    DebateSessionV1,
+    "status" | "playerRole" | "stepKey" | "completedAt" | "events" | "jury"
+  >,
+  heardThroughSequence: number | null,
+): boolean {
+  if (!session.jury.enabled || session.jury.phase !== "complete") {
+    return false;
+  }
+  if (!debateSpectatorBakeUnsealed(session)) {
+    return true;
+  }
+  if (heardThroughSequence === null) return false;
+  return session.events.some(
+    (event) =>
+      event.sequence <= heardThroughSequence && event.kind === "jury_verdict",
+  );
+}
+
+/** Whether Jury deliberation chrome may open during a Spectator bake watch. */
+export function debateJuryChamberOpenedInPresentation(
+  session: Pick<DebateSessionV1, "events" | "jury">,
+  heardThroughSequence: number | null,
+): boolean {
+  if (!session.jury.enabled || heardThroughSequence === null) return false;
+  return session.events.some(
+    (event) =>
+      event.sequence <= heardThroughSequence &&
+      (event.kind === "jury_deliberation" ||
+        event.kind === "jury_verdict" ||
+        event.stepKey === "moderator_to_jury" ||
+        (event.kind === "ballot" && event.speakerKind === "juror")),
+  );
+}
+
+export function debateJuryRosterStatusLabel(args: {
+  participantView: boolean;
+  juryOutcomeRevealed: boolean;
+  juryChamberOpened: boolean;
+}): string {
+  if (args.participantView) return "Identity sealed";
+  if (args.juryOutcomeRevealed) return "Returned";
+  if (args.juryChamberOpened) return "In session";
+  return "Frozen at Start";
+}
+
+export function debateJuryRosterFooterCopy(args: {
+  participantView: boolean;
+  jury: Pick<DebateSessionV1["jury"], "phase" | "forVotes" | "againstVotes">;
+  juryOutcomeRevealed: boolean;
+  juryChamberOpened: boolean;
+}): string {
+  if (args.participantView) {
+    return "Five anonymous seats follow the public floor. Their chamber remains sealed until the aggregate verdict.";
+  }
+  if (args.juryOutcomeRevealed && args.jury.phase === "complete") {
+    return `The Jury has returned ${args.jury.forVotes}–${args.jury.againstVotes}.`;
+  }
+  if (args.juryChamberOpened) {
+    return "The Jury chamber is now in session.";
+  }
+  return "The frozen roster follows the public floor; hover an ellipsis to read a thought. PRISM enters the chamber automatically when deliberation begins.";
+}

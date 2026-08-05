@@ -55,6 +55,10 @@ const identSource = readFileSync(
   fileURLToPath(new URL("./debateIdentAudio.ts", import.meta.url)),
   "utf8",
 );
+const presentation = readFileSync(
+  fileURLToPath(new URL("./debatePresentation.ts", import.meta.url)),
+  "utf8",
+);
 
 describe("Debate experience", () => {
   it("maps frozen source provenance to stable physical evidence props", () => {
@@ -1421,7 +1425,7 @@ describe("Debate experience", () => {
     }
     assert.match(
       source,
-      /data-kind=\{spectatorAwaitingFirstWatch \? "ready" : "paused"\}/u,
+      /data-kind=\{readyToBeginOverlay \? "ready" : "paused"\}/u,
     );
     assert.match(source, /Debate paused/u);
     assert.match(source, /Resume Debate/u);
@@ -1435,6 +1439,9 @@ describe("Debate experience", () => {
       source,
       /The proceeding is held until you start, so a long prepare cannot begin while you are away/u,
     );
+    assert.match(source, /debateLivePhaseLabel\(session/u);
+    assert.match(source, /debateJuryRosterFooterCopy\(/u);
+    assert.match(source, /debateJuryOutcomeRevealed\(/u);
     assert.match(page, /const debateLastVoiceClipRef = useRef/u);
     assert.match(
       page,
@@ -1925,10 +1932,10 @@ describe("Debate experience", () => {
       /lastPresentableId !== null &&\s*fresh\.some\(\(event\) => event\.id === lastPresentableId\)/u,
     );
     assert.match(source, /nextMutationKey\("spectator-ready-hold"\)/u);
-    assert.match(source, /startSpectatorWatch \? "spectator-start"/u);
+    assert.match(source, /startSpectatorWatch\s*\?\s*"spectator-start"/u);
     assert.match(
       source,
-      /data-kind=\{spectatorAwaitingFirstWatch \? "ready" : "paused"\}/u,
+      /data-kind=\{readyToBeginOverlay \? "ready" : "paused"\}/u,
     );
     assert.match(source, /Start Debate/u);
     assert.match(source, /Gallery ready/u);
@@ -1946,7 +1953,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /const judgeResumedWithGavel =\s*lifecycleEvent !== undefined &&\s*lifecycleCutscene &&\s*result\.session\.playerRole === "judge"/u,
+      /const judgeResumedWithGavel =\s*lifecycleEvent !== undefined &&\s*lifecycleCutscene &&\s*!heldIsOpeningIntro &&\s*result\.session\.playerRole === "judge"/u,
     );
     assert.match(
       source,
@@ -2079,7 +2086,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /args\.kind === "hush"[\s\S]{0,400}DEBATE_AUDIENCE_REACTIONS\.laugh\.url[\s\S]{0,500}playDebateAudienceReaction\("order"/u,
+      /args\.kind === "hush"[\s\S]{0,2200}DEBATE_AUDIENCE_REACTIONS\.laugh\.url[\s\S]{0,1600}playDebateAudienceReaction\("order"/u,
     );
     assert.match(
       source,
@@ -2327,7 +2334,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /\$\{session\.jury\.finalBallots\.length\} of \$\{DEBATE_JURY_SIZE\} final ballots cast/u,
+      /\$\{visibleFinalBallots\.length\} of \$\{DEBATE_JURY_SIZE\} final ballots cast/u,
     );
     assert.match(
       source,
@@ -2511,8 +2518,9 @@ describe("Debate experience", () => {
       source,
       /pendingJuryComment\?\.content[\s\S]{0,500}styles\.juryThoughtPreview/u,
     );
+    assert.match(source, /debateJuryRosterFooterCopy\(/u);
     assert.match(
-      source,
+      presentation,
       /hover an ellipsis to read a thought\. PRISM enters the chamber automatically/u,
     );
     assert.match(
@@ -3343,7 +3351,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /const judgeGavelCameraForced = judgeGavelSmashCue !== null/u,
+      /const judgeGavelCameraForced =\s*judgeGavelSmashCue !== null \|\| gavelCameraSettling/u,
     );
     assert.match(
       source,

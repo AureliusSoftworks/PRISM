@@ -98,6 +98,7 @@ import {
   type PrismRefractMagicTarget,
 } from "./prismRefract";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import { isPrismBackendUnavailableError } from "./backendUnavailable.ts";
 import {
   ModelWarmupIntermission,
   type ModelWarmupIntermissionPhase,
@@ -200,7 +201,13 @@ import {
   debateEvidenceFromMarkdownHref,
   debateGalleryReactingIndices,
   debateGalleryReaction,
+  debateJuryChamberOpenedInPresentation,
+  debateJuryOutcomeRevealed,
+  debateJuryRosterFooterCopy,
+  debateJuryRosterStatusLabel,
+  debateLivePhaseLabel,
   debateRevealDurationMs,
+  debateSessionPhaseLabel,
   debateTranscriptIsAtLive,
   debateTurnClockState,
   debateTurnOwnerBotId,
@@ -1875,14 +1882,7 @@ function debateExitPresentationEventId(
 }
 
 function phaseLabel(session: DebateSessionV1): string {
-  if (session.formatState.format === "turnabout") {
-    const phase = session.formatState.phase;
-    return `${phase.charAt(0).toUpperCase()}${phase.slice(1)}`;
-  }
-  if (session.phase === "rebuttal") {
-    return `Rebuttal ${session.formatState.rebuttalRound} of ${session.formatState.rebuttalRoundTarget}`;
-  }
-  return `${session.phase.charAt(0).toUpperCase()}${session.phase.slice(1)}`;
+  return debateSessionPhaseLabel(session);
 }
 
 function debateJudgeGavelLockedForJury(
@@ -2362,6 +2362,18 @@ async function writeDebateClipboardText(text: string): Promise<void> {
   }
 }
 
+/** Flatten backend errors so the toast clipboard includes detail/path, not only the short title. */
+function debateErrorClipboardText(caught: unknown, fallback: string): string {
+  if (isPrismBackendUnavailableError(caught)) {
+    const lines = [caught.message];
+    if (caught.detail?.trim()) lines.push(caught.detail.trim());
+    if (caught.path?.trim()) lines.push(`Request: ${caught.path.trim()}`);
+    return lines.join("\n");
+  }
+  if (caught instanceof Error && caught.message.trim()) return caught.message;
+  return fallback;
+}
+
 function DebateErrorToast(props: { message: string }): React.JSX.Element {
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">(
     "idle",
@@ -2374,7 +2386,7 @@ function DebateErrorToast(props: { message: string }): React.JSX.Element {
       data-copy-state={copyState}
       onClick={() => {
         // #region agent log
-        fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc245c'},body:JSON.stringify({sessionId:'fc245c',runId:'pre-fix',hypothesisId:'D',location:'DebateExperience.tsx:DebateErrorToast',message:'debate error toast copy clicked',data:{message:props.message.slice(0,500),messageLength:props.message.length},timestamp:Date.now()})}).catch(()=>{});
+        fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc245c'},body:JSON.stringify({sessionId:'fc245c',runId:'post-fix',hypothesisId:'D',location:'DebateExperience.tsx:DebateErrorToast',message:'debate error toast copy clicked',data:{message:props.message.slice(0,500),messageLength:props.message.length},timestamp:Date.now()})}).catch(()=>{});
         // #endregion
         void writeDebateClipboardText(props.message)
           .then(() => setCopyState("copied"))
@@ -8200,12 +8212,10 @@ export function DebateExperience(
       await adoptSession(null, result.session, { playIntro: true });
     } catch (caught) {
       // #region agent log
-      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc245c'},body:JSON.stringify({sessionId:'fc245c',runId:'pre-fix',hypothesisId:'C',location:'DebateExperience.tsx:startDebate-catch',message:'startDebate failed',data:{message:caught instanceof Error?caught.message.slice(0,400):String(caught),name:caught instanceof Error?caught.name:typeof caught,detail:caught&&typeof caught==='object'&&'detail' in caught&&typeof (caught as {detail?:unknown}).detail==='string'?(caught as {detail:string}).detail.slice(0,400):null,path:caught&&typeof caught==='object'&&'path' in caught?String((caught as {path?:unknown}).path):null,status:caught&&typeof caught==='object'&&'status' in caught?(caught as {status?:unknown}).status:null,code:caught&&typeof caught==='object'&&'code' in caught?String((caught as {code?:unknown}).code):null},timestamp:Date.now()})}).catch(()=>{});
+      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc245c'},body:JSON.stringify({sessionId:'fc245c',runId:'post-fix',hypothesisId:'C',location:'DebateExperience.tsx:startDebate-catch',message:'startDebate failed',data:{message:caught instanceof Error?caught.message.slice(0,400):String(caught),name:caught instanceof Error?caught.name:typeof caught,detail:caught&&typeof caught==='object'&&'detail' in caught&&typeof (caught as {detail?:unknown}).detail==='string'?(caught as {detail:string}).detail.slice(0,400):null,path:caught&&typeof caught==='object'&&'path' in caught?String((caught as {path?:unknown}).path):null,status:caught&&typeof caught==='object'&&'status' in caught?(caught as {status?:unknown}).status:null,code:caught&&typeof caught==='object'&&'code' in caught?String((caught as {code?:unknown}).code):null},timestamp:Date.now()})}).catch(()=>{});
       // #endregion
       setError(
-        caught instanceof Error
-          ? caught.message
-          : "The Debate could not start.",
+        debateErrorClipboardText(caught, "The Debate could not start."),
       );
       if (playerRole === "spectator") {
         setView("dashboard");
@@ -13567,6 +13577,14 @@ export function DebateExperience(
   ): React.JSX.Element | null => {
     if (session.jury.enabled) {
       const participantView = session.playerRole === "participant";
+      const juryOutcomeRevealed = debateJuryOutcomeRevealed(
+        session,
+        transcriptVisibleThroughSequence,
+      );
+      const juryChamberOpened = debateJuryChamberOpenedInPresentation(
+        session,
+        transcriptVisibleThroughSequence,
+      );
       const activeJurorId =
         presentationEventId &&
         liveReveal?.eventId === presentationEventId &&
@@ -13578,7 +13596,13 @@ export function DebateExperience(
         <aside
           className={`${styles.audienceGallery} ${styles.juryRoster}`}
           aria-label="Frozen five-seat Jury"
-          data-phase={session.jury.phase}
+          data-phase={
+            juryOutcomeRevealed
+              ? "complete"
+              : juryChamberOpened
+                ? "deliberating"
+                : "waiting"
+          }
           data-tutorial-target="debate-jury-roster"
         >
           <header>
@@ -13587,7 +13611,11 @@ export function DebateExperience(
               <span>{DEBATE_JURY_SIZE} seats · binding majority</span>
             </div>
             <small>
-              {participantView ? "Identity sealed" : "Frozen at Start"}
+              {debateJuryRosterStatusLabel({
+                participantView,
+                juryOutcomeRevealed,
+                juryChamberOpened,
+              })}
             </small>
           </header>
           <div className={styles.juryRosterSeats}>
@@ -13654,13 +13682,12 @@ export function DebateExperience(
                 ))}
           </div>
           <p>
-            {participantView
-              ? "Five anonymous seats follow the public floor. Their chamber remains sealed until the aggregate verdict."
-              : session.jury.phase === "waiting"
-                ? "The frozen roster follows the public floor; hover an ellipsis to read a thought. PRISM enters the chamber automatically when deliberation begins."
-                : session.jury.phase === "complete"
-                  ? `The Jury has returned ${session.jury.forVotes}–${session.jury.againstVotes}.`
-                  : "The Jury chamber is now in session."}
+            {debateJuryRosterFooterCopy({
+              participantView,
+              jury: session.jury,
+              juryOutcomeRevealed,
+              juryChamberOpened,
+            })}
           </p>
         </aside>
       );
@@ -13713,23 +13740,61 @@ export function DebateExperience(
       juryDeliberationInFlightSessionId === session.id ||
       session.jury.phase === "initial_ballots" ||
       session.jury.phase === "deliberating";
-    const finalBallotsByJurorId = new Map(
-      session.jury.finalBallots.map((ballot) => [ballot.jurorBotId, ballot]),
+    const heardFinalBallotJurorIds = new Set(
+      session.playerRole === "spectator" &&
+        transcriptVisibleThroughSequence !== null
+        ? session.events
+            .filter(
+              (event) =>
+                event.sequence <= transcriptVisibleThroughSequence &&
+                event.kind === "ballot" &&
+                event.speakerKind === "juror" &&
+                event.stepKey.startsWith("jury_final"),
+            )
+            .map((event) => event.speakerBotId)
+            .filter((id): id is string => typeof id === "string")
+        : session.jury.finalBallots.map((ballot) => ballot.jurorBotId),
     );
-    const liveForVotes = session.jury.finalBallots.filter(
+    const visibleFinalBallots =
+      session.playerRole === "spectator"
+        ? session.jury.finalBallots.filter((ballot) =>
+            heardFinalBallotJurorIds.has(ballot.jurorBotId),
+          )
+        : session.jury.finalBallots;
+    const finalBallotsByJurorId = new Map(
+      visibleFinalBallots.map((ballot) => [ballot.jurorBotId, ballot]),
+    );
+    const liveForVotes = visibleFinalBallots.filter(
       (ballot) => ballot.sideId === "for",
     ).length;
-    const liveAgainstVotes = session.jury.finalBallots.filter(
+    const liveAgainstVotes = visibleFinalBallots.filter(
       (ballot) => ballot.sideId === "against",
     ).length;
     const finalBallotRoundVisible =
-      session.jury.phase === "final_ballots" ||
-      session.jury.phase === "complete" ||
-      session.jury.finalBallots.length > 0;
+      visibleFinalBallots.length > 0 &&
+      (session.playerRole !== "spectator" ||
+        debateJuryChamberOpenedInPresentation(
+          session,
+          transcriptVisibleThroughSequence,
+        ));
     return (
       <div
         className={styles.juryChamber}
-        data-phase={session.jury.phase}
+        data-phase={
+          debateJuryOutcomeRevealed(
+            session,
+            transcriptVisibleThroughSequence,
+          )
+            ? "complete"
+            : debateJuryChamberOpenedInPresentation(
+                  session,
+                  transcriptVisibleThroughSequence,
+                )
+              ? session.jury.phase === "waiting"
+                ? "deliberating"
+                : session.jury.phase
+              : "waiting"
+        }
         data-silent-deliberation={
           silentDeliberationPreparing ? "true" : undefined
         }
@@ -13902,7 +13967,7 @@ export function DebateExperience(
             className={styles.juryVoteBoard}
             role="status"
             aria-live="polite"
-            aria-label={`${session.jury.finalBallots.length} of ${DEBATE_JURY_SIZE} final ballots cast. ${session.motion.forSide.label}: ${liveForVotes}. ${session.motion.againstSide.label}: ${liveAgainstVotes}.`}
+            aria-label={`${visibleFinalBallots.length} of ${DEBATE_JURY_SIZE} final ballots cast. ${session.motion.forSide.label}: ${liveForVotes}. ${session.motion.againstSide.label}: ${liveAgainstVotes}.`}
           >
             <div className={styles.juryVoteSide} data-side="for">
               <span title={session.motion.forSide.label}>
@@ -13924,7 +13989,7 @@ export function DebateExperience(
                 );
               })}
               <small>
-                {session.jury.finalBallots.length} of {DEBATE_JURY_SIZE} cast
+                {visibleFinalBallots.length} of {DEBATE_JURY_SIZE} cast
               </small>
             </div>
             <div className={styles.juryVoteSide} data-side="against">
@@ -13947,11 +14012,11 @@ export function DebateExperience(
         <div
           className={styles.juryBallotPile}
           role="img"
-          aria-label={`${session.jury.finalBallots.length} final Jury ${
-            session.jury.finalBallots.length === 1 ? "ballot" : "ballots"
+          aria-label={`${visibleFinalBallots.length} final Jury ${
+            visibleFinalBallots.length === 1 ? "ballot" : "ballots"
           } collected`}
         >
-          {session.jury.finalBallots.map((ballot, ballotIndex) => (
+          {visibleFinalBallots.map((ballot, ballotIndex) => (
             <span
               className={styles.juryBallotSlip}
               data-side={ballot.sideId}
@@ -13972,13 +14037,32 @@ export function DebateExperience(
           <small>
             {session.jury.phase === "initial_ballots"
               ? "Private leanings"
-              : session.jury.phase === "final_ballots"
-                ? `${session.jury.finalBallots.length} / ${DEBATE_JURY_SIZE} ballots cast`
-                : session.jury.phase === "complete"
+              : session.jury.phase === "final_ballots" ||
+                  (session.playerRole === "spectator" &&
+                    visibleFinalBallots.length > 0 &&
+                    visibleFinalBallots.length < DEBATE_JURY_SIZE)
+                ? `${visibleFinalBallots.length} / ${DEBATE_JURY_SIZE} ballots cast`
+                : session.jury.phase === "complete" &&
+                    debateJuryOutcomeRevealed(
+                      session,
+                      transcriptVisibleThroughSequence,
+                    )
                   ? `${session.jury.forVotes}–${session.jury.againstVotes}`
-                  : session.jury.phase === "waiting"
+                  : session.jury.phase === "waiting" ||
+                      (session.playerRole === "spectator" &&
+                        !debateJuryChamberOpenedInPresentation(
+                          session,
+                          transcriptVisibleThroughSequence,
+                        ))
                     ? "Following the floor"
-                    : `${session.jury.discussionTurnCount} / ${session.jury.discussionTurnTarget}`}
+                    : session.playerRole === "spectator" &&
+                        visibleFinalBallots.length >= DEBATE_JURY_SIZE &&
+                        !debateJuryOutcomeRevealed(
+                          session,
+                          transcriptVisibleThroughSequence,
+                        )
+                      ? `${visibleFinalBallots.length} / ${DEBATE_JURY_SIZE} ballots cast`
+                      : `${session.jury.discussionTurnCount} / ${session.jury.discussionTurnTarget}`}
           </small>
         </div>
         <div
@@ -16225,7 +16309,12 @@ export function DebateExperience(
               <p className={styles.eyebrow}>
                 <span className={styles.liveStateBeacon} aria-hidden="true" />
                 {session.format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
-                {phaseLabel(session)} · {session.playerRole}
+                {debateLivePhaseLabel(session, {
+                  awaitingFirstWatch: spectatorAwaitingFirstWatch,
+                  activeEvent: presenting ? activeEvent : null,
+                  heardThroughSequence: transcriptVisibleThroughSequence,
+                })}{" "}
+                · {session.playerRole}
               </p>
               <h1 data-debate-motion-title="true" title={session.motion.motion}>
                 {debateTitleForMotion(session.motion, session.formality)}
@@ -16911,7 +17000,12 @@ export function DebateExperience(
                         ? "Ready"
                         : session.status === "paused"
                           ? "Paused"
-                          : phaseLabel(session)}
+                          : debateLivePhaseLabel(session, {
+                              awaitingFirstWatch: false,
+                              activeEvent: presenting ? activeEvent : null,
+                              heardThroughSequence:
+                                transcriptVisibleThroughSequence,
+                            })}
                     </span>
                   </header>
                   <div className={styles.proceedingControlActions}>
