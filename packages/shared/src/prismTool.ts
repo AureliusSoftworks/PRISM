@@ -186,6 +186,56 @@ export interface WebSearchPayload {
   results: WebSearchResult[];
 }
 
+/** Soft limits for personal notes (Prism `userNotes` tool). */
+export const USER_NOTE_TITLE_MAX = 120;
+export const USER_NOTE_BODY_MAX = 8_000;
+
+export type UserNotesAction = "save" | "list" | "get" | "delete";
+
+/**
+ * Model request stub for the personal notes tool (Chat + floating Ask Prism).
+ * Server executes and persists a privacy-safe `UserNotesPayload` receipt.
+ */
+export interface UserNotesRequestPayload {
+  v: 1;
+  name: "userNotes";
+  action: UserNotesAction;
+  id?: string;
+  title?: string;
+  body?: string;
+}
+
+/** Id + title only — never store note bodies on message tool_payload receipts. */
+export interface UserNotesReceiptItem {
+  id: string;
+  title: string;
+}
+
+export type UserNotesReceiptStatus =
+  | "saved"
+  | "updated"
+  | "deleted"
+  | "listed"
+  | "retrieved"
+  | "error";
+
+/**
+ * Persisted receipt for a completed `userNotes` action (shown as an in-chat card).
+ * Bodies are never included — only ids/titles/status.
+ */
+export interface UserNotesPayload {
+  v: 1;
+  name: "userNotes";
+  action: UserNotesAction;
+  status: UserNotesReceiptStatus;
+  at: string;
+  id?: string;
+  title?: string;
+  noteCount?: number;
+  notes?: UserNotesReceiptItem[];
+  error?: string;
+}
+
 export interface CoffeeAmbientActionPayload {
   v: 1;
   name: "coffeeAmbientAction";
@@ -491,6 +541,8 @@ export interface StoredAssistantToolEnvelope {
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** Persisted web results shown as an assistant-side source card. */
   webSearch?: WebSearchPayload;
+  /** Persisted chat-only personal note receipt (ids/titles only). */
+  userNotes?: UserNotesPayload;
   /** Coffee-only scripted ambient action shown as table UI, not transcript prose. */
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
   /** Coffee-only canonical stage action (Director / LLM / Power) for exact-once display. */
@@ -538,6 +590,8 @@ export interface ParsedAssistantTurn {
   sendGeneratedImage?: { prompt: string };
   /** Model asked Prism to fetch fresh web context before answering. */
   webSearch?: WebSearchRequestPayload;
+  /** Model asked Prism to save/list/get/delete a personal note. */
+  userNotes?: UserNotesRequestPayload;
 }
 
 export interface ParsedStoredAssistantToolPayload {
@@ -549,6 +603,7 @@ export interface ParsedStoredAssistantToolPayload {
   zenTurn?: StoredZenAssistantTurnPayload;
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
+  userNotes?: UserNotesPayload;
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
   coffeeStageAction?: CoffeeStageActionPayload;
   zenStageAction?: ZenStageActionPayload;
@@ -836,6 +891,169 @@ function normalizeStoredWebSearchPayload(value: unknown): WebSearchPayload | und
     fetchedAt,
     results,
   };
+}
+
+function truncateUserNoteText(text: string, maxLength: number): string {
+  const collapsed = text.replace(/\s+/g, " ").trim();
+  return collapsed.length > maxLength ? collapsed.slice(0, maxLength).trimEnd() : collapsed;
+}
+
+function normalizeUserNotesAction(value: unknown): UserNotesAction | undefined {
+  if (typeof value !== "string") return undefined;
+  const action = value.trim().toLowerCase();
+  if (action === "save" || action === "list" || action === "get" || action === "delete") {
+    return action;
+  }
+  return undefined;
+}
+
+/**
+ * Normalize a model-emitted `userNotes` request from a Prism tool JSON object.
+ */
+export function normalizeUserNotesRequestFromRecord(
+  row: Record<string, unknown>
+): UserNotesRequestPayload | undefined {
+  const rawName = typeof row.name === "string" ? row.name.trim().toLowerCase() : "";
+  const raw =
+    rawName === "usernotes"
+      ? row
+      : row.userNotes && typeof row.userNotes === "object"
+        ? (row.userNotes as Record<string, unknown>)
+        : undefined;
+  if (!raw) return undefined;
+  const action = normalizeUserNotesAction(raw.action);
+  if (!action) return undefined;
+  const idRaw = typeof raw.id === "string" ? raw.id.trim() : "";
+  const titleRaw =
+    typeof raw.title === "string" ? truncateUserNoteText(raw.title, USER_NOTE_TITLE_MAX) : "";
+  // Preserve newlines in body; only trim ends and hard-cap length.
+  const bodyRaw =
+    typeof raw.body === "string"
+      ? raw.body.trim().slice(0, USER_NOTE_BODY_MAX)
+      : "";
+  if (action === "save") {
+    if (idRaw) {
+      if (!titleRaw && !bodyRaw) return undefined;
+      return {
+        v: 1,
+        name: "userNotes",
+        action,
+        id: idRaw,
+        ...(titleRaw ? { title: titleRaw } : {}),
+        ...(bodyRaw ? { body: bodyRaw } : {}),
+      };
+    }
+    if (!titleRaw || !bodyRaw) return undefined;
+    return {
+      v: 1,
+      name: "userNotes",
+      action,
+      title: titleRaw,
+      body: bodyRaw,
+    };
+  }
+  if (action === "list") {
+    return { v: 1, name: "userNotes", action };
+  }
+  if (action === "get") {
+    if (!idRaw && !titleRaw) return undefined;
+    return {
+      v: 1,
+      name: "userNotes",
+      action,
+      ...(idRaw ? { id: idRaw } : {}),
+      ...(titleRaw ? { title: titleRaw } : {}),
+    };
+  }
+  // delete
+  if (!idRaw && !titleRaw) return undefined;
+  return {
+    v: 1,
+    name: "userNotes",
+    action,
+    ...(idRaw ? { id: idRaw } : {}),
+    ...(titleRaw ? { title: titleRaw } : {}),
+  };
+}
+
+/**
+ * Normalize a persisted `userNotes` receipt from `messages.tool_payload`.
+ */
+export function normalizeStoredUserNotesPayload(
+  value: unknown
+): UserNotesPayload | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const row = value as Record<string, unknown>;
+  const rawName = typeof row.name === "string" ? row.name.trim().toLowerCase() : "";
+  if (rawName && rawName !== "usernotes") return undefined;
+  const action = normalizeUserNotesAction(row.action);
+  const statusRaw = typeof row.status === "string" ? row.status.trim().toLowerCase() : "";
+  const status: UserNotesReceiptStatus | undefined =
+    statusRaw === "saved" ||
+    statusRaw === "updated" ||
+    statusRaw === "deleted" ||
+    statusRaw === "listed" ||
+    statusRaw === "retrieved" ||
+    statusRaw === "error"
+      ? statusRaw
+      : undefined;
+  const at = typeof row.at === "string" ? row.at.trim() : "";
+  if (!action || !status || !at) return undefined;
+  const id = typeof row.id === "string" ? row.id.trim() : "";
+  const title =
+    typeof row.title === "string" ? truncateUserNoteText(row.title, USER_NOTE_TITLE_MAX) : "";
+  const noteCount =
+    typeof row.noteCount === "number" && Number.isFinite(row.noteCount)
+      ? Math.max(0, Math.round(row.noteCount))
+      : undefined;
+  const notes = Array.isArray(row.notes)
+    ? row.notes
+        .map((item): UserNotesReceiptItem | null => {
+          if (!item || typeof item !== "object") return null;
+          const note = item as Record<string, unknown>;
+          const noteId = typeof note.id === "string" ? note.id.trim() : "";
+          const noteTitle =
+            typeof note.title === "string"
+              ? truncateUserNoteText(note.title, USER_NOTE_TITLE_MAX)
+              : "";
+          if (!noteId || !noteTitle) return null;
+          return { id: noteId, title: noteTitle };
+        })
+        .filter((item): item is UserNotesReceiptItem => Boolean(item))
+        .slice(0, 50)
+    : undefined;
+  const error =
+    typeof row.error === "string" ? truncateUserNoteText(row.error, 240) : "";
+  return {
+    v: 1,
+    name: "userNotes",
+    action,
+    status,
+    at,
+    ...(id ? { id } : {}),
+    ...(title ? { title } : {}),
+    ...(noteCount !== undefined ? { noteCount } : {}),
+    ...(notes && notes.length > 0 ? { notes } : {}),
+    ...(error ? { error } : {}),
+  };
+}
+
+function prismToolBlockHasContent(block: {
+  askQuestion?: AskQuestionPayload;
+  tellFictionalStory?: TellFictionalStoryPayload;
+  sendGeneratedImage?: { prompt: string };
+  webSearch?: WebSearchRequestPayload;
+  userNotes?: UserNotesRequestPayload;
+  zenDisplay?: ZenDisplayMetadata;
+}): boolean {
+  return Boolean(
+    block.askQuestion ||
+      block.tellFictionalStory ||
+      block.sendGeneratedImage ||
+      block.webSearch ||
+      block.userNotes ||
+      block.zenDisplay
+  );
 }
 
 function normalizeCoffeeAmbientActionPayload(
@@ -1690,17 +1908,20 @@ function normalizePrismToolBlockPayload(parsed: unknown): {
   tellFictionalStory?: TellFictionalStoryPayload;
   sendGeneratedImage?: { prompt: string };
   webSearch?: WebSearchRequestPayload;
+  userNotes?: UserNotesRequestPayload;
   zenDisplay?: ZenDisplayMetadata;
 } {
   const askFlat = normalizeAskQuestionEnvelope(parsed);
   const storyFlat = normalizeTellFictionalStoryEnvelope(parsed);
   let pairSend: { prompt: string } | undefined;
   let webSearch: WebSearchRequestPayload | undefined;
+  let userNotes: UserNotesRequestPayload | undefined;
   let zenDisplay: ZenDisplayMetadata | undefined;
   if (parsed && typeof parsed === "object") {
     const row = parsed as Record<string, unknown>;
     pairSend = normalizeSendGeneratedImageRequestFromRecord(row);
     webSearch = normalizeWebSearchRequestFromRecord(row);
+    userNotes = normalizeUserNotesRequestFromRecord(row);
     zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
   }
   if (askFlat || storyFlat) {
@@ -1709,6 +1930,7 @@ function normalizePrismToolBlockPayload(parsed: unknown): {
       ...(storyFlat ? { tellFictionalStory: storyFlat } : {}),
       ...(pairSend ? { sendGeneratedImage: pairSend } : {}),
       ...(webSearch ? { webSearch } : {}),
+      ...(userNotes ? { userNotes } : {}),
       ...(zenDisplay ? { zenDisplay } : {}),
     };
   }
@@ -1720,17 +1942,20 @@ function normalizePrismToolBlockPayload(parsed: unknown): {
   }
   const storyNested = normalizeTellFictionalStoryEnvelope(row.tellFictionalStory);
   pairSend = normalizeSendGeneratedImageRequestFromRecord(row);
+  userNotes = normalizeUserNotesRequestFromRecord(row);
   const out: {
     askQuestion?: AskQuestionPayload;
     tellFictionalStory?: TellFictionalStoryPayload;
     sendGeneratedImage?: { prompt: string };
     webSearch?: WebSearchRequestPayload;
+    userNotes?: UserNotesRequestPayload;
     zenDisplay?: ZenDisplayMetadata;
   } = {};
   if (askNested) out.askQuestion = askNested;
   if (storyNested) out.tellFictionalStory = storyNested;
   if (pairSend) out.sendGeneratedImage = pairSend;
   if (webSearch) out.webSearch = webSearch;
+  if (userNotes) out.userNotes = userNotes;
   if (zenDisplay) out.zenDisplay = zenDisplay;
   return out;
 }
@@ -1877,7 +2102,7 @@ function extractLastStandaloneFencedToolJson(raw: string): {
     try {
       const parsed = JSON.parse(jsonCandidate) as unknown;
       const block = normalizePrismToolBlockPayload(parsed);
-      if (!block.askQuestion && !block.sendGeneratedImage && !block.zenDisplay) {
+      if (!prismToolBlockHasContent(block)) {
         continue;
       }
       const prose = `${raw.slice(0, idx)}${raw.slice(idx + fenceLen)}`.trimEnd();
@@ -1954,7 +2179,7 @@ function extractLastAltSendGeneratedImageSpan(raw: string): { innerJson: string;
     try {
       const parsed = JSON.parse(tail) as unknown;
       const block = normalizePrismToolBlockPayload(parsed);
-      if (block.askQuestion || block.sendGeneratedImage || block.zenDisplay) {
+      if (prismToolBlockHasContent(block)) {
         const spanEnd = tokenStart + last[0].length + leadingWs + openIdx + tail.length;
         const prose = `${raw.slice(0, tokenStart)}${raw.slice(spanEnd)}`.trimEnd();
         return { innerJson: tail, prose };
@@ -1989,7 +2214,7 @@ function extractTrailingBareToolJson(raw: string): { innerJson: string; prose: s
     try {
       const parsed = JSON.parse(tail) as unknown;
       const block = normalizePrismToolBlockPayload(parsed);
-      if (!block.askQuestion && !block.sendGeneratedImage && !block.zenDisplay) continue;
+      if (!prismToolBlockHasContent(block)) continue;
       return {
         innerJson: tail,
         prose: s.slice(0, openIdx).trimEnd(),
@@ -2069,7 +2294,7 @@ export function parseAssistantPrismTools(rawAssistantText: string): ParsedAssist
   const jsonText = stripMarkdownFences(innerJson);
   try {
     const block = normalizePrismToolBlockPayload(JSON.parse(jsonText) as unknown);
-    if (!block.askQuestion && !block.tellFictionalStory && !block.sendGeneratedImage && !block.webSearch && !block.zenDisplay) {
+    if (!prismToolBlockHasContent(block)) {
       return { displayContent: cleanedProse };
     }
     return {
@@ -2078,6 +2303,7 @@ export function parseAssistantPrismTools(rawAssistantText: string): ParsedAssist
       ...(block.tellFictionalStory ? { tellFictionalStory: block.tellFictionalStory } : {}),
       ...(block.sendGeneratedImage ? { sendGeneratedImage: block.sendGeneratedImage } : {}),
       ...(block.webSearch ? { webSearch: block.webSearch } : {}),
+      ...(block.userNotes ? { userNotes: block.userNotes } : {}),
       ...(block.zenDisplay ? { zenDisplay: block.zenDisplay } : {}),
     };
   } catch {
@@ -2116,6 +2342,9 @@ export function parseStoredAssistantToolPayload(
         : undefined;
       const webSearch = root
         ? normalizeStoredWebSearchPayload(root.webSearch)
+        : undefined;
+      const userNotes = root
+        ? normalizeStoredUserNotesPayload(root.userNotes)
         : undefined;
       const coffeeAmbientAction = root
         ? normalizeCoffeeAmbientActionPayload(root.coffeeAmbientAction)
@@ -2163,6 +2392,7 @@ export function parseStoredAssistantToolPayload(
         ...(sent ? { sentGeneratedImage: sent } : {}),
         ...(story ? { tellFictionalStory: story } : {}),
         ...(webSearch ? { webSearch } : {}),
+        ...(userNotes ? { userNotes } : {}),
         ...(zenDisplay ? { zenDisplay } : {}),
         ...(zenTurn ? { zenTurn } : {}),
         ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
@@ -2185,6 +2415,7 @@ export function parseStoredAssistantToolPayload(
     const askQuestion = normalizeAskQuestionEnvelope(row.askQuestion);
     const sentOnly = normalizeStoredSentGeneratedImagePayload(row.sentGeneratedImage);
     const webSearch = normalizeStoredWebSearchPayload(row.webSearch);
+    const userNotes = normalizeStoredUserNotesPayload(row.userNotes);
     const story = normalizeTellFictionalStoryEnvelope(row.tellFictionalStory);
     const zenDisplay = normalizeZenDisplayMetadata(row.zenDisplay);
     const zenTurn = normalizeStoredZenAssistantTurnPayload(row.zenTurn);
@@ -2241,6 +2472,7 @@ export function parseStoredAssistantToolPayload(
       ...(zenTurn ? { zenTurn } : {}),
       ...(sentOnly ? { sentGeneratedImage: sentOnly } : {}),
       ...(webSearch ? { webSearch } : {}),
+      ...(userNotes ? { userNotes } : {}),
       ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
       ...(coffeeStageAction ? { coffeeStageAction } : {}),
       ...(zenStageAction ? { zenStageAction } : {}),
@@ -2272,6 +2504,7 @@ export function hydrateAssistantMessageParts(args: {
   zenDisplay?: ZenDisplayMetadata;
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
+  userNotes?: UserNotesPayload;
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
   coffeeStageAction?: CoffeeStageActionPayload;
   zenStageAction?: ZenStageActionPayload;
@@ -2302,6 +2535,7 @@ export function hydrateAssistantMessageParts(args: {
     ...(stored.zenDisplay ? { zenDisplay: stored.zenDisplay } : {}),
     ...(stored.sentGeneratedImage ? { sentGeneratedImage: stored.sentGeneratedImage } : {}),
     ...(stored.webSearch ? { webSearch: stored.webSearch } : {}),
+    ...(stored.userNotes ? { userNotes: stored.userNotes } : {}),
     ...(stored.coffeeAmbientAction
       ? { coffeeAmbientAction: stored.coffeeAmbientAction }
       : {}),
@@ -2347,6 +2581,7 @@ export function serializeAssistantToolPayload(args: {
   zenTurn?: StoredZenAssistantTurnPayload;
   sentGeneratedImage?: SentGeneratedImagePayload;
   webSearch?: WebSearchPayload;
+  userNotes?: UserNotesPayload;
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
   coffeeStageAction?: CoffeeStageActionPayload;
   zenStageAction?: ZenStageActionPayload;
@@ -2366,6 +2601,8 @@ export function serializeAssistantToolPayload(args: {
   const hasImage = args.sentGeneratedImage !== undefined;
   const webSearch = normalizeStoredWebSearchPayload(args.webSearch);
   const hasWebSearch = webSearch !== undefined;
+  const userNotes = normalizeStoredUserNotesPayload(args.userNotes);
+  const hasUserNotes = userNotes !== undefined;
   const zenDisplay = normalizeZenDisplayMetadata(args.zenDisplay);
   const hasZenDisplay = zenDisplay !== undefined;
   const zenTurn = normalizeStoredZenAssistantTurnPayload(args.zenTurn);
@@ -2409,6 +2646,7 @@ export function serializeAssistantToolPayload(args: {
     !hasMood &&
     !hasImage &&
     !hasWebSearch &&
+    !hasUserNotes &&
     !hasZenDisplay &&
     !hasZenTurn &&
     !hasCoffeeAmbientAction &&
@@ -2432,6 +2670,7 @@ export function serializeAssistantToolPayload(args: {
     !hasStory &&
     !hasMood &&
     !hasWebSearch &&
+    !hasUserNotes &&
     !hasZenDisplay &&
     !hasZenTurn &&
     !hasCoffeeAmbientAction &&
@@ -2456,6 +2695,7 @@ export function serializeAssistantToolPayload(args: {
     !hasMood &&
     !hasImage &&
     !hasWebSearch &&
+    !hasUserNotes &&
     !hasZenDisplay &&
     !hasZenTurn &&
     !hasCoffeeAmbientAction &&
@@ -2493,6 +2733,7 @@ export function serializeAssistantToolPayload(args: {
     ...(hasZenTurn ? { zenTurn } : {}),
     ...(hasImage ? { sentGeneratedImage: args.sentGeneratedImage! } : {}),
     ...(hasWebSearch ? { webSearch } : {}),
+    ...(hasUserNotes ? { userNotes } : {}),
     ...(hasCoffeeAmbientAction ? { coffeeAmbientAction } : {}),
     ...(hasCoffeeStageAction ? { coffeeStageAction } : {}),
     ...(hasZenStageAction ? { zenStageAction } : {}),

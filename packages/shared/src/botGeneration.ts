@@ -16,6 +16,7 @@ import {
   normalizeBotAudioVoiceProfileV1,
   type BotAudioVoiceProfileV2,
 } from "./audioVoice.ts";
+import { inferCorporalityFromPersona } from "./corporalityFoley.ts";
 import {
   parseStoredBotPrompt,
   serializeStoredBotPrompt,
@@ -321,6 +322,7 @@ function normalizeGeneratedAvatarDetails(value: unknown): BotAvatarDetailsV1 | n
 function normalizeGeneratedVoice(
   value: unknown,
   availableElevenLabsVoiceIds: readonly string[],
+  personaText = "",
 ): BotAudioVoiceProfileV2 {
   const record = isRecord(value) ? value : {};
   const available = new Set(
@@ -328,6 +330,10 @@ function normalizeGeneratedVoice(
   );
   const requestedVoiceId = compactText(record.elevenLabsVoiceId, 240);
   const elevenLabsVoiceId = available.has(requestedVoiceId) ? requestedVoiceId : null;
+  const corporality =
+    typeof record.corporality === "number" && Number.isFinite(record.corporality)
+      ? record.corporality
+      : inferCorporalityFromPersona(personaText);
   const normalized = normalizeBotAudioVoiceProfileV1({
     ...record,
     v: 2,
@@ -337,6 +343,7 @@ function normalizeGeneratedVoice(
     elevenLabsVoiceIdOverride: null,
     elevenLabsVoiceInitialized: available.size > 0,
     voiceEffectExplicit: true,
+    corporality,
     avatarSfx: null,
   });
   const {
@@ -409,6 +416,20 @@ export function normalizeBotGeneratedDraftV1(
         compiled: null,
       }
     : null;
+  const personaSeedText = [
+    name,
+    voicePreviewLine,
+    powerPrompt,
+    profile.purpose.statement,
+    profile.purpose.legacyNotes,
+    profile.core.traits,
+    profile.core.interests,
+    profile.core.quirks,
+    profile.identity.species,
+    profile.appearance.description,
+  ]
+    .filter((part): part is string => typeof part === "string" && part.trim().length > 0)
+    .join(" ");
   return {
     v: BOT_GENERATION_DRAFT_VERSION,
     name,
@@ -423,6 +444,7 @@ export function normalizeBotGeneratedDraftV1(
     audioVoiceProfile: normalizeGeneratedVoice(
       value.voice,
       options.availableElevenLabsVoiceIds ?? [],
+      personaSeedText,
     ),
     voicePreviewLine,
     powers: generatedPower ? [generatedPower] : [],

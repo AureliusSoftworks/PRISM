@@ -3008,3 +3008,43 @@ export function botcastReplayMessageIndexAt(
   }
   return activeIndex;
 }
+
+/**
+ * Read whether Signal froze Auto or a fixed model when the episode began.
+ * Empty string in the picker means Auto; Auto must never flip to the
+ * concrete model that ran in the background.
+ */
+export function botcastEpisodeModelSelectionKind(
+  episode: Pick<BotcastEpisode, "events">,
+): "auto" | "fixed" | null {
+  const event = episode.events.find((entry) => entry.kind === "routing");
+  if (!event || event.payload.v !== 1) return null;
+  const kind = event.payload.modelSelectionKind;
+  return kind === "auto" || kind === "fixed" ? kind : null;
+}
+
+/**
+ * Locked Signal model control value: keep showing Auto when Auto was chosen,
+ * even after the episode stores the concrete model Auto resolved to.
+ */
+export function signalEpisodeModelPickerValue(args: {
+  liveSessionActive: boolean;
+  episode: Pick<BotcastEpisode, "events" | "model"> | null;
+  draft: string;
+  availableModelIds: readonly string[];
+}): string {
+  if (!args.liveSessionActive || !args.episode) {
+    return args.draft;
+  }
+  const selectionKind = botcastEpisodeModelSelectionKind(args.episode);
+  if (selectionKind === "auto") {
+    return "";
+  }
+  if (
+    args.episode.model &&
+    args.availableModelIds.includes(args.episode.model)
+  ) {
+    return args.episode.model;
+  }
+  return args.draft;
+}

@@ -1,5 +1,9 @@
 import type { EphemeralChatResolvedProvider } from "./ephemeralChat.js";
 import type { PrismCompanionCardV1 } from "./prismOrchestration.js";
+import {
+  normalizeStoredUserNotesPayload,
+  type UserNotesPayload,
+} from "./prismTool.js";
 import type {
   DebateFormalityId,
   DebateFormatId,
@@ -70,6 +74,8 @@ export interface PrismCompanionMessage {
   role: "user" | "assistant";
   content: string;
   createdAt: string;
+  /** Privacy-safe personal-note receipt after a companion userNotes action. */
+  userNotes?: UserNotesPayload;
 }
 
 export const PRISM_COMPANION_TOOL_IDS = [
@@ -259,6 +265,7 @@ export function normalizePrismCompanionMessages(
       if (!content || content.length > PRISM_COMPANION_MESSAGE_MAX_LENGTH) {
         return [];
       }
+      const userNotes = normalizeStoredUserNotesPayload(message.userNotes);
       return [
         {
           id: boundedId(message.id) ?? `recovery-${crypto.randomUUID()}`,
@@ -268,6 +275,7 @@ export function normalizePrismCompanionMessages(
             typeof message.createdAt === "string" && message.createdAt.trim()
               ? message.createdAt
               : new Date(0).toISOString(),
+          ...(userNotes ? { userNotes } : {}),
         },
       ];
     })

@@ -282,6 +282,101 @@ describe("parseAssistantPrismTools", () => {
     });
   });
 
+  it("parses a userNotes save request from assistant tool JSON", () => {
+    const inner = JSON.stringify({
+      v: 1,
+      userNotes: { action: "save", title: "Groceries", body: "milk, eggs" },
+    });
+    const raw = `Saved.\n${PRISM_TOOL_START}\n${inner}\n${PRISM_TOOL_END}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.displayContent.trim(), "Saved.");
+    assert.deepEqual(out.userNotes, {
+      v: 1,
+      name: "userNotes",
+      action: "save",
+      title: "Groceries",
+      body: "milk, eggs",
+    });
+  });
+
+  it("parses userNotes list/get/delete requests", () => {
+    const listOut = parseAssistantPrismTools(
+      `Listing.\n${PRISM_TOOL_START}\n${JSON.stringify({
+        v: 1,
+        userNotes: { action: "list" },
+      })}\n${PRISM_TOOL_END}`
+    );
+    assert.deepEqual(listOut.userNotes, {
+      v: 1,
+      name: "userNotes",
+      action: "list",
+    });
+
+    const getOut = parseAssistantPrismTools(
+      `Opening.\n${PRISM_TOOL_START}\n${JSON.stringify({
+        v: 1,
+        userNotes: { action: "get", title: "Groceries" },
+      })}\n${PRISM_TOOL_END}`
+    );
+    assert.deepEqual(getOut.userNotes, {
+      v: 1,
+      name: "userNotes",
+      action: "get",
+      title: "Groceries",
+    });
+
+    const deleteOut = parseAssistantPrismTools(
+      `Removing.\n${PRISM_TOOL_START}\n${JSON.stringify({
+        v: 1,
+        userNotes: { action: "delete", id: "note-1" },
+      })}\n${PRISM_TOOL_END}`
+    );
+    assert.deepEqual(deleteOut.userNotes, {
+      v: 1,
+      name: "userNotes",
+      action: "delete",
+      id: "note-1",
+    });
+  });
+
+  it("rejects empty userNotes save create without title or body", () => {
+    const raw = `Nope.\n${PRISM_TOOL_START}\n${JSON.stringify({
+      v: 1,
+      userNotes: { action: "save", title: "  " },
+    })}\n${PRISM_TOOL_END}`;
+    const out = parseAssistantPrismTools(raw);
+    assert.equal(out.userNotes, undefined);
+    assert.equal(out.displayContent.trim(), "Nope.");
+  });
+
+  it("round-trips a userNotes receipt through serialize/hydrate", () => {
+    const serialized = serializeAssistantToolPayload({
+      userNotes: {
+        v: 1,
+        name: "userNotes",
+        action: "save",
+        status: "saved",
+        at: "2026-08-04T12:00:00.000Z",
+        id: "note-abc",
+        title: "Groceries",
+      },
+    });
+    assert.ok(serialized);
+    const hydrated = hydrateAssistantMessageParts({
+      content: "Got it.",
+      toolPayload: serialized,
+    });
+    assert.deepEqual(hydrated.userNotes, {
+      v: 1,
+      name: "userNotes",
+      action: "save",
+      status: "saved",
+      at: "2026-08-04T12:00:00.000Z",
+      id: "note-abc",
+      title: "Groceries",
+    });
+  });
+
   it("parses tellFictionalStory story action rail metadata", () => {
     const inner = JSON.stringify({
       v: 1,

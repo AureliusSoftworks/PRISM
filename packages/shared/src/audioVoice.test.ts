@@ -214,6 +214,7 @@ describe("audio voice normalization", () => {
       pace: 0.125,
       lilt: 0.2,
       bottishTone: 1,
+      corporality: 0.5,
       eqTilt: 0,
       gainDb: 0,
       volume: 1,

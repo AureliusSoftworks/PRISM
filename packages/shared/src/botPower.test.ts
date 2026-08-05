@@ -48,6 +48,8 @@ import {
   botPowerPairwiseSizeCueFromEffectsV1,
   botPowerIsMutedV1,
   botPowerMumblesSpeechV1,
+  botPowerIntendedSpeechLooksGibberishV1,
+  botPowerSpeechObfuscationAuthoringCueV1,
   botPowerIgnoresOtherPowersV1,
   botPowerIneptImagePromptV1,
   botPowerIneptitudeRoleCueV1,
@@ -530,6 +532,24 @@ test("mumbling is a normal-volume hard speech transform that preserves only phys
   assert.doesNotMatch(first, /Mira|explained|rational|plan|clearly|prism-bot/iu);
   assert.equal(botPowerVoiceGainMultiplierV1(powers), 1);
   assert.equal(botPowerTextScaleV1(powers), 1);
+  assert.equal(botPowerIntendedSpeechLooksGibberishV1(intended), false);
+  assert.equal(botPowerIntendedSpeechLooksGibberishV1(first), true);
+  assert.match(
+    botPowerSpeechObfuscationAuthoringCueV1(),
+    /author fully intelligible natural-language intent only/iu,
+  );
+  assert.equal(
+    botPowerIntendedSpeechLooksGibberishV1(
+      "Nuhff, nuhff, awright, lehmmeh try this—wuhff yuhb, guhff, wuhff yuhb doo when yuhb tryin",
+    ),
+    true,
+  );
+  assert.equal(
+    botPowerIntendedSpeechLooksGibberishV1(
+      "When someone misunderstands you, what exact step do you take first to clarify your meaning?",
+    ),
+    false,
+  );
 });
 
 test("voice presence does not override physical size or visibility presentation", () => {

@@ -260,6 +260,8 @@ export {
   botPowerIsMutedV1,
   botPowerMumblesSpeechFromEffectsV1,
   botPowerMumblesSpeechV1,
+  botPowerSpeechObfuscationAuthoringCueV1,
+  botPowerIntendedSpeechLooksGibberishV1,
   botPowerMirrorsIdentityV1,
   botPowerShapeshiftsIdentityV1,
   botPowerBelievesFalseNameV1,
@@ -852,6 +854,15 @@ export {
   type WebSearchPayload,
   type WebSearchRequestPayload,
   type WebSearchResult,
+  type UserNotesAction,
+  type UserNotesPayload,
+  type UserNotesReceiptItem,
+  type UserNotesReceiptStatus,
+  type UserNotesRequestPayload,
+  USER_NOTE_BODY_MAX,
+  USER_NOTE_TITLE_MAX,
+  normalizeStoredUserNotesPayload,
+  normalizeUserNotesRequestFromRecord,
   type StoredAssistantMoodPayload,
   type StoredAssistantToolPayload,
   type StoredMoodKey,
@@ -1201,6 +1212,7 @@ import type {
   CoffeeReplayEventPayload,
   CoffeeUserActionPayload,
   SentGeneratedImagePayload,
+  UserNotesPayload,
   ZenDisplayMetadata,
   ZenStageActionPayload,
 } from "./prismTool.js";
@@ -1379,6 +1391,8 @@ export interface ChatMessage {
   sentGeneratedImage?: SentGeneratedImagePayload;
   /** When this assistant turn included web search results shown as a source card. */
   webSearch?: WebSearchPayload;
+  /** When this assistant turn completed a chat-only personal note action (receipt). */
+  userNotes?: UserNotesPayload;
   /** Coffee-only scripted ambient action shown as table UI, not transcript prose. */
   coffeeAmbientAction?: CoffeeAmbientActionPayload;
   /** Coffee-only canonical stage action (Director / LLM / Power) for exact-once display. */
@@ -3188,6 +3202,9 @@ export interface CoffeePollPlayerVoteResponse {
   poll: CoffeePoll;
 }
 export * from "./botcast.js";
+export * from "./actionSfxPack.js";
+export * from "./corporalityFoley.js";
+export * from "./signalFancyAction.js";
 export * from "./signalPickles.js";
 export * from "./signalMusicProfile.js";
 export * from "./voiceSpokenText.js";

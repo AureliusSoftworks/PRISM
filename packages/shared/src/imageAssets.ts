@@ -67,6 +67,8 @@ export interface ImageAssetSet {
   usageCount: number;
   usage: ImageAssetUsage[];
   members: ImageAssetMember[];
+  magentaPassCount: number;
+  magentaUndoAvailable: boolean;
 }
 
 export interface ImageAssetUsage {
@@ -89,6 +91,7 @@ export interface ImageAssetStorageKindSummary {
 export interface ImageAssetStorageSummary {
   activeBytes: number;
   recoveryTrashBytes: number;
+  revisionBytes: number;
   generatedBytes: number;
   uploadedBytes: number;
   systemManagedBytes: number;

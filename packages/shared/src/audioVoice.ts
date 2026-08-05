@@ -403,6 +403,11 @@ export interface BotAudioVoiceProfileV2 {
   pace: number;
   lilt: number;
   bottishTone: number;
+  /**
+   * Bodily Foley material continuum for stock Action SFX fallbacks.
+   * 0 = Artificial, 0.5 = Organic, 1 = Ethereal.
+   */
+  corporality?: number;
   /** Signed low/high shelf tilt. Negative is low-forward; positive is bright. */
   eqTilt: number;
   /** Relative per-bot output trim in decibels; account Voice Volume stays master. */
@@ -562,6 +567,11 @@ export interface BotAudioVoiceProfileV3 {
   premium: BotPremiumVoiceProfileV1;
   delivery: BotVoiceDeliveryProfileV1;
   bottishTone: number;
+  /**
+   * Bodily Foley material continuum for stock Action SFX fallbacks.
+   * 0 = Artificial, 0.5 = Organic, 1 = Ethereal.
+   */
+  corporality?: number;
   avatarSfx?: BotAvatarSfxV1;
   avatarSfxMuted?: boolean;
 }
@@ -931,6 +941,7 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2: Readonly<BotAudioVoiceProfileV2
     pace: 0,
     lilt: 0,
     bottishTone: 0.45,
+    corporality: 0.5,
     eqTilt: 0,
     gainDb: 0,
     volume: 1,
@@ -970,6 +981,7 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3: Readonly<BotAudioVoiceProfileV3
       texture: BOT_VOICE_TEXTURE_RECIPES.clean,
     },
     bottishTone: 0.45,
+    corporality: 0.5,
   };
 export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 =
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2;
@@ -1371,6 +1383,7 @@ function flattenBotAudioVoiceProfileV3Record(
     pace: delivery.pace,
     lilt: delivery.lilt,
     bottishTone: value.bottishTone,
+    corporality: value.corporality,
     eqTilt: tone.brightness,
     gainDb: tone.gainDb,
     volume: delivery.volume,
@@ -1527,6 +1540,10 @@ export function normalizeBotAudioVoiceProfileV1(
     bottishTone: normalizeBotAudioVoiceControl(
       legacy ? record.signal : record.bottishTone,
       fallbackProfile.bottishTone,
+    ),
+    corporality: normalizeCorporality(
+      record.corporality,
+      fallbackProfile.corporality ?? 0.5,
     ),
     eqTilt: normalizeBotAudioVoiceControl(
       record.eqTilt,
@@ -1738,9 +1755,25 @@ export function normalizeBotAudioVoiceProfileV3(
       texture: normalizeBotVoiceTexture(profile.texture),
     },
     bottishTone: normalizeBotAudioVoiceControl(profile.bottishTone, 0.45),
+    corporality: normalizeCorporality(profile.corporality, 0.5),
     ...(avatarSfx ? { avatarSfx } : {}),
     ...(profile.avatarSfxMuted ? { avatarSfxMuted: true } : {}),
   };
+}
+
+/** Clamp Identity corporality slider to [0, 1]. */
+export function normalizeCorporality(
+  value: unknown,
+  fallback = 0.5,
+): number {
+  const parsed =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : NaN;
+  const safe = Number.isFinite(parsed) ? parsed : fallback;
+  return Number(Math.min(1, Math.max(0, safe)).toFixed(4));
 }
 
 export function normalizeBotVoiceVolume(value: unknown, fallback = 1): number {

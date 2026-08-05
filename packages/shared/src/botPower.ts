@@ -2066,6 +2066,60 @@ export function botPowerMumblesSpeechV1(value: unknown): boolean {
   return botPowerMumblesSpeechFromEffectsV1(activeBotPowerEffectsV1(value));
 }
 
+/**
+ * HARD authoring contract for speech_obfuscation holders.
+ * The model must draft clear natural language; runtime applies public gibberish.
+ */
+export function botPowerSpeechObfuscationAuthoringCueV1(): string {
+  return "HARD speech obfuscation: author fully intelligible natural-language intent only. Do not imitate mumbling, gibberish, slurring, phonetic spelling, or nonsense syllables in your draft. PRISM applies the public speech transformation after generation. You believe you spoke the clear intended meaning.";
+}
+
+const BOT_POWER_CLEAR_ENGLISH_STOPWORDS_V1 = new Set([
+  "a", "about", "after", "again", "all", "also", "an", "and", "any", "are", "as",
+  "at", "back", "be", "because", "been", "before", "being", "but", "by", "can",
+  "could", "did", "do", "does", "doing", "don't", "down", "each", "even", "ever",
+  "every", "first", "for", "from", "get", "give", "go", "good", "got", "had",
+  "has", "have", "he", "her", "here", "him", "his", "how", "i", "if", "in",
+  "into", "is", "it", "its", "just", "know", "like", "look", "make", "me",
+  "more", "most", "my", "need", "no", "not", "now", "of", "on", "one", "only",
+  "or", "other", "our", "out", "over", "own", "people", "really", "right",
+  "said", "same", "say", "see", "she", "should", "so", "some", "still", "such",
+  "take", "than", "that", "the", "their", "them", "then", "there", "these",
+  "they", "this", "those", "through", "to", "too", "try", "up", "us", "very",
+  "want", "was", "we", "well", "were", "what", "when", "where", "which", "who",
+  "why", "will", "with", "would", "you", "your", "you're",
+]);
+
+function botPowerWordLooksMumbledV1(word: string): boolean {
+  const lower = word.toLocaleLowerCase().replace(/[’']/gu, "'");
+  if (BOT_POWER_CLEAR_ENGLISH_STOPWORDS_V1.has(lower)) return false;
+  const stripped = lower.replace(/[^a-z]/gu, "");
+  if (stripped.length < 3) return false;
+  // Match the runtime mumble phoneme inventory (onset + nucleus + coda syllables).
+  return /^(?:(?:m|n|b|d|g|r|w|y|bl|br|gr|mm|ng)?(?:uh|ah|oo|eh|ih)(?:m|n|b|g|sh|rr|ff)?){1,4}m?$/u.test(
+    stripped,
+  );
+}
+
+/**
+ * True when a draft looks like public gibberish rather than clear intended speech.
+ * Used to reject speech_obfuscation holders who imitate mumbling in the private draft.
+ */
+export function botPowerIntendedSpeechLooksGibberishV1(value: unknown): boolean {
+  if (typeof value !== "string") return false;
+  const source = value.trim();
+  if (!source || botPowerResponseIsSilentV1(source)) return false;
+  const spoken = source
+    .replace(/\*[^*]{1,200}\*/gu, " ")
+    .replace(/\[\[[^\]]{1,80}\]\]/gu, " ")
+    .replace(/\[[^\]]{1,100}\]\([^)\s]{1,120}\)/gu, " ");
+  const words = spoken.match(/[\p{L}]+(?:['’\-][\p{L}]+)*/gu) ?? [];
+  if (words.length < 3) return false;
+  const mumbleLike = words.filter((word) => botPowerWordLooksMumbledV1(word))
+    .length;
+  return mumbleLike / words.length >= 0.4;
+}
+
 /** Resolves hard visibility first so contradictory Powers never reveal a hidden avatar. */
 export function botPowerAvatarVisibilityModeFromEffectsV1(
   value: unknown,
