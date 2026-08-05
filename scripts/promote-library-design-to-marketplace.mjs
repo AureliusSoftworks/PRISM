@@ -30,6 +30,7 @@ import { backup, DatabaseSync } from "node:sqlite";
 import {
   normalizeBotAudioVoiceProfileV1,
   parseStoredBotFaceThinkingFrames,
+  resolveBotAudioVoiceProfileV1,
   resolveBotFaceStyle,
 } from "@localai/shared";
 
@@ -290,17 +291,106 @@ function parseLibraryVoiceLayers(row) {
   return { authored, override };
 }
 
+function voiceCharacterIsBlank(profile) {
+  return [profile.openness, profile.weight, profile.brightness, profile.resonance].every(
+    (value) => !value,
+  );
+}
+
+function rawExpressesVoiceCharacter(raw) {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return false;
+  if (raw.v === 3 && raw.local && typeof raw.local === "object") {
+    const tone = raw.local.tone;
+    if (!tone || typeof tone !== "object") return false;
+    return ["openness", "weight", "brightness", "resonance"].some(
+      (key) => key in tone && Number(tone[key]) !== 0,
+    );
+  }
+  return ["openness", "weight", "brightness", "resonance"].some(
+    (key) => key in raw && Number(raw[key]) !== 0,
+  );
+}
+
+/** Prefer Library shaping only when it expresses a non-default choice. */
+function pickExpressedShaping(libraryValue, marketValue, blankValue = 0) {
+  if (libraryValue == null || libraryValue === blankValue) return marketValue;
+  return libraryValue;
+}
+
 function marketplaceVoiceProfile(row, marketAuthored) {
   const { authored, override } = parseLibraryVoiceLayers(row);
-  const source = override ?? authored;
-  const heard = normalizeBotAudioVoiceProfileV1(source);
+  const authoredNorm = normalizeBotAudioVoiceProfileV1(authored);
+  // Resolve the effective Library voice Jared hears (authored + override), not
+  // the override alone — Premium-only overrides often default local fields to
+  // inherit/zeros and would otherwise wipe Marketplace Voice+ craftsmanship.
+  const heard = resolveBotAudioVoiceProfileV1(authored, override);
   const marketNormalized = normalizeBotAudioVoiceProfileV1(marketAuthored);
   const strippedSfx = portableAvatarSfx(heard.avatarSfx);
-  // Promote portable PRISM/base shaping while retaining Marketplace-authored
-  // provider treatment. Account-bound ElevenLabs identities never cross into
-  // a Marketplace bundle.
+
+  const keepMarketEngine =
+    heard.localEnginePreference === "inherit" &&
+    marketNormalized.localEnginePreference !== "inherit";
+  // Only adopt Library Voice Character when authored/override JSON actually
+  // sets those fields. Normalized profiles can mirror eqTilt into brightness
+  // and falsely look "crafted."
+  const libraryExpressesVoiceCharacter =
+    rawExpressesVoiceCharacter(override) || rawExpressesVoiceCharacter(authored);
+  const keepMarketVoiceCharacter =
+    !libraryExpressesVoiceCharacter ||
+    (voiceCharacterIsBlank(heard) && !voiceCharacterIsBlank(marketNormalized));
+  // Prefer the Library-authored PRISM archetype for Marketplace shipping.
+  // Personal override archetypes often drift under Premium listening and break
+  // the curated gender/voice map without reflecting intentional base-voice work.
+  const baseVoiceId = authoredNorm.baseVoiceId || heard.baseVoiceId;
+  // Public Marketplace bundles must ship Voice+ (catalog quality gate). Never
+  // promote a Premium-era "inherit" engine into the authored Marketplace profile.
+  const localEnginePreference = keepMarketEngine
+    ? marketNormalized.localEnginePreference
+    : heard.localEnginePreference === "inherit"
+      ? marketNormalized.localEnginePreference !== "inherit"
+        ? marketNormalized.localEnginePreference
+        : "voice-plus"
+      : heard.localEnginePreference;
+
+  // Start from Marketplace so Voice+/portable delivery stays intact, then layer
+  // expressed Library portable shaping. Account-bound ElevenLabs identities
+  // never cross. Blank Library defaults do not erase Marketplace craftsmanship.
   const portable = normalizeBotAudioVoiceProfileV1({
-    ...heard,
+    ...marketNormalized,
+    baseVoiceId,
+    systemVoiceName: heard.systemVoiceName ?? marketNormalized.systemVoiceName,
+    pitch: pickExpressedShaping(heard.pitch, marketNormalized.pitch),
+    warmth: pickExpressedShaping(heard.warmth, marketNormalized.warmth),
+    pace: pickExpressedShaping(heard.pace, marketNormalized.pace),
+    lilt: pickExpressedShaping(heard.lilt, marketNormalized.lilt),
+    bottishTone: pickExpressedShaping(
+      heard.bottishTone,
+      marketNormalized.bottishTone,
+      0.45,
+    ),
+    eqTilt: pickExpressedShaping(heard.eqTilt, marketNormalized.eqTilt),
+    gainDb: pickExpressedShaping(heard.gainDb, marketNormalized.gainDb),
+    volume: pickExpressedShaping(heard.volume, marketNormalized.volume, 1),
+    texture:
+      heard.texture?.preset && heard.texture.preset !== "clean"
+        ? heard.texture
+        : marketNormalized.texture,
+    localEnginePreference,
+    localVoiceSource:
+      heard.localVoiceSource === "inherit" || !heard.localVoiceSource
+        ? marketNormalized.localVoiceSource || "portable"
+        : heard.localVoiceSource,
+    openness: keepMarketVoiceCharacter ? marketNormalized.openness : heard.openness,
+    weight: keepMarketVoiceCharacter ? marketNormalized.weight : heard.weight,
+    brightness: keepMarketVoiceCharacter
+      ? marketNormalized.brightness
+      : heard.brightness,
+    resonance: keepMarketVoiceCharacter
+      ? marketNormalized.resonance
+      : heard.resonance,
+    // Keep Marketplace portable speechprint policy (catalog quality gate).
+    accentMode: marketNormalized.accentMode,
+    speechprintInfluence: marketNormalized.speechprintInfluence,
     elevenLabsVoiceId: null,
     elevenLabsVoiceIdOverride: null,
     elevenLabsVoiceInitialized: false,
@@ -308,7 +398,7 @@ function marketplaceVoiceProfile(row, marketAuthored) {
     elevenLabsEffect: marketNormalized.elevenLabsEffect,
     voiceEffectExplicit: marketNormalized.voiceEffectExplicit,
     elevenLabsStability: marketNormalized.elevenLabsStability,
-    ...(strippedSfx ? { avatarSfx: strippedSfx } : { avatarSfx: undefined }),
+    ...(strippedSfx ? { avatarSfx: strippedSfx } : {}),
   });
   return {
     fromOverride: Boolean(override),

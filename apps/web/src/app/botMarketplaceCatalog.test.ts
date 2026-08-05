@@ -81,7 +81,7 @@ describe("bot marketplace static catalog", () => {
       ["the-buddha", "○"],
       ["rumi", "∞"],
       ["leonardo-da-vinci", "|"],
-      ["salvador-dali", "∿"],
+      ["salvador-dali", " "],
       ["vincent-van-gogh", "⊙"],
       ["georgia-okeeffe", "◉"],
       ["machiavelli", "."],
@@ -188,13 +188,17 @@ describe("bot marketplace static catalog", () => {
     assert.equal(carlJung.faceEyesFont, "playful");
     assert.equal(carlJung.faceEyeOffsetX, 0.02);
     assert.equal(carlJung.faceEyeOffsetY, -0.02);
-    assert.equal(carlJung.faceMouthOffsetY, 0.18);
+    assert.equal(carlJung.faceMouthFont, "neutral");
+    assert.equal(carlJung.faceMouthScale, 0.75);
+    assert.equal(carlJung.faceMouthOffsetX, -0.08);
+    assert.equal(carlJung.faceMouthOffsetY, 0.24);
+    assert.equal(carlJung.faceFontWeight, 300);
     assert.equal(carlJung.audioVoiceProfileOverride ?? null, null);
     assert.equal(
       createHash("sha256")
         .update(carlJung.avatarDetails?.screen.paintColorMapBase64 ?? "")
         .digest("hex"),
-      "a7360b41a12b75c0fb1d718ed144b83b791300dd776f760bc7390d0294822382"
+      "85fe430933f0c4da3bdd5d7b294678215e1c48ec03e79222f700fb3fefdd127d"
     );
   });
 
