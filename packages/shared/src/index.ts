@@ -1356,7 +1356,6 @@ export interface UsageTripMeter {
   frozen: boolean;
 }
 
-
 export interface UserProfile {
   id: string;
   email: string;
@@ -3253,4 +3252,5 @@ export * from "./livingShellProgress.js";
 export * from "./imageAssets.js";
 export * from "./slateHandoff.js";
 export * from "./debate.js";
+export * from "./coffeeGroupSetup.js";
 export * from "./debateAudiencePressure.js";

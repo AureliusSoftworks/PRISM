@@ -97,6 +97,8 @@ import type {
   CoffeeGroupAtmosphere,
   CoffeeGroup,
   CoffeeGroupModelChoice,
+  CoffeeGroupSetupSuggestionV1,
+  CoffeeGroupSetupSuggestionRosterBot,
   CoffeeGroupSynthesisItem,
   CoffeeGroupSynthesisItemState,
   CoffeeGroupSynthesisSource,
@@ -236,6 +238,11 @@ import {
   autoFallbackResolvedChain,
   isCoffeeExperienceMode,
   normalizeCoffeeSessionSettings,
+  normalizeCoffeeGroupSetupSuggestionV1,
+  COFFEE_GROUP_SETUP_SUGGESTION_BOT_MAX,
+  COFFEE_GROUP_SETUP_SUGGESTION_BOT_MIN,
+  COFFEE_GROUP_SETUP_SUGGESTION_TOPIC_MAX,
+  COFFEE_GROUP_SETUP_SUGGESTION_TOPIC_MIN,
   parseStoredAssistantToolPayload,
   parseStoredBotAvatarDetailsV1,
   parseStoredBotPrompt,
@@ -9717,6 +9724,124 @@ export async function inferCoffeeGroupName(args: {
   fallbackName: string;
 }): Promise<string> {
   return (await inferCoffeeGroupNameDetailed(args)).name;
+}
+
+const COFFEE_GROUP_SETUP_SUGGEST_ATTEMPTS = 3;
+const COFFEE_GROUP_SETUP_SUGGEST_TEMPERATURE = 0.72;
+const COFFEE_GROUP_SETUP_SUGGEST_MAX_TOKENS = 1_600;
+
+function parseCoffeeGroupSetupSuggestionPayload(
+  raw: string,
+  allowedBotIds: readonly string[],
+): CoffeeGroupSetupSuggestionV1 | null {
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  const candidates = [trimmed];
+  const objectMatch = trimmed.match(/\{[\s\S]*\}/u);
+  if (objectMatch && objectMatch[0] !== trimmed) candidates.push(objectMatch[0]);
+  for (const candidate of candidates) {
+    try {
+      const parsed = JSON.parse(candidate) as unknown;
+      const normalized = normalizeCoffeeGroupSetupSuggestionV1(
+        parsed,
+        allowedBotIds,
+      );
+      if (normalized) return normalized;
+    } catch {
+      // Try the next candidate.
+    }
+  }
+  return null;
+}
+
+/**
+ * Invent a complete Coffee Group draft for Wield Prism → New Coffee Group.
+ * Bot ids must come from the supplied Library roster (2–5 seats).
+ */
+export async function suggestCoffeeGroupSetup(args: {
+  direction?: unknown;
+  roster: readonly CoffeeGroupSetupSuggestionRosterBot[];
+  provider: LlmProvider;
+}): Promise<CoffeeGroupSetupSuggestionV1> {
+  const roster = args.roster
+    .map((bot) => ({
+      id: typeof bot.id === "string" ? bot.id.trim() : "",
+      name: (typeof bot.name === "string" ? bot.name.trim() : "") || "Bot",
+      personaSnippet:
+        typeof bot.personaSnippet === "string"
+          ? bot.personaSnippet.trim().replace(/\s+/gu, " ").slice(0, 280)
+          : "",
+    }))
+    .filter((bot) => bot.id);
+  if (roster.length < COFFEE_GROUP_SETUP_SUGGESTION_BOT_MIN) {
+    throw new Error(
+      `Add at least ${COFFEE_GROUP_SETUP_SUGGESTION_BOT_MIN} Library bots before Prism can invent a Coffee Group.`,
+    );
+  }
+  const direction =
+    typeof args.direction === "string"
+      ? args.direction.trim().replace(/\s+/gu, " ").slice(0, 500)
+      : "";
+  const allowedBotIds = roster.map((bot) => bot.id);
+  const rosterLines = roster
+    .slice(0, 40)
+    .map(
+      (bot) =>
+        `- ${bot.id} · ${bot.name}${bot.personaSnippet ? ` — ${bot.personaSnippet}` : ""}`,
+    )
+    .join("\n");
+  const messages: ProviderMessage[] = [
+    {
+      role: "system",
+      content: [
+        "You invent a complete PRISM Coffee Group draft for the player.",
+        "Pick 2-5 contrasting Library bots that would enjoy the same table.",
+        "Return JSON only. Never invent bot ids outside the roster.",
+        "Name and ethos should feel like a café circle, not software marketing.",
+      ].join("\n"),
+    },
+    {
+      role: "user",
+      content: [
+        direction
+          ? `Player direction: ${direction}`
+          : "Player direction: invent any lively café circle from this Library.",
+        "Library roster (choose groupBotIds from these ids only):",
+        rosterLines,
+        "Invent:",
+        "- name: short memorable Coffee Group title (no participant list)",
+        "- ethos: one warm sentence for why these exact personalities gather",
+        `- groupBotIds: ${COFFEE_GROUP_SETUP_SUGGESTION_BOT_MIN}-${COFFEE_GROUP_SETUP_SUGGESTION_BOT_MAX} roster ids (array; pad later is fine)`,
+        "- coffeeSettings: optional knobs among responseLength (brief|balanced|detailed|roomy), tableEnergy (still|relaxed|buzzy|theatre|afterparty), crossTalk (rare|normal|chatty|pileup), breathingRoom 0-100, humanPacing 0-100, experienceMode (join|serve)",
+        `- starterTopics: ${COFFEE_GROUP_SETUP_SUGGESTION_TOPIC_MIN}-${COFFEE_GROUP_SETUP_SUGGESTION_TOPIC_MAX} short conversation seeds for this cast`,
+        "- notes: optional short director note for the player",
+        'JSON shape: {"name","ethos","groupBotIds":["..."],"coffeeSettings":{...},"starterTopics":["..."],"notes"}',
+      ].join("\n"),
+    },
+  ];
+
+  for (
+    let attempt = 0;
+    attempt < COFFEE_GROUP_SETUP_SUGGEST_ATTEMPTS;
+    attempt += 1
+  ) {
+    try {
+      const raw = await args.provider.generateResponse(messages, {
+        temperature: COFFEE_GROUP_SETUP_SUGGEST_TEMPERATURE + attempt * 0.08,
+        maxTokens: COFFEE_GROUP_SETUP_SUGGEST_MAX_TOKENS,
+        jsonMode: true,
+        usagePurpose: "coffee_router",
+      });
+      const suggestion = parseCoffeeGroupSetupSuggestionPayload(
+        raw,
+        allowedBotIds,
+      );
+      if (suggestion) return suggestion;
+    } catch {
+      // Non-fatal retry.
+    }
+  }
+  throw new Error("Prism could not invent a Coffee Group from that direction.");
 }
 
 function parseCoffeeGroupEthosPayload(raw: string): string | null {

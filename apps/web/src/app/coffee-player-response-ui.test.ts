@@ -129,12 +129,6 @@ describe("Coffee player response UI wiring", () => {
       pageSource,
       /if \(coffeeActiveVoiceMessageIdRef\.current === message\.id\) \{\s*armVoiceRevealWatchdog\(\s*coffeeVoiceRevealStallWatchdogDelayMs\(\)/u,
     );
-    assert.match(pageSource, /const voiceStillOwningFloor =/u);
-    assert.match(
-      pageSource,
-      /else if \(voiceStillOwningFloor\) \{[\s\S]*?requestAnimationFrame\(step\)/,
-    );
-    assert.match(pageSource, /const liveDurationMs = Math\.max\(/u);
   });
 
   it("starts the speaking reveal only from real voice playback start", () => {

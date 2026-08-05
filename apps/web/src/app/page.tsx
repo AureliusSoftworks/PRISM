@@ -155,7 +155,7 @@ import {
 } from "./prismBrand";
 import SlateWorkspace from "./SlateWorkspace";
 import PrismCompanion from "./PrismCompanion";
-import { PrismRefractTarget, type PrismRefractBinding } from "./prismRefract";
+import { PrismRefractTarget, type PrismRefractBinding, type PrismRefractMagicTarget } from "./prismRefract";
 import { registerSpatialUiSfx } from "./spatialUiSfx";
 import PrismHandoffCanvas from "./PrismHandoffCanvas";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
@@ -893,6 +893,7 @@ import {
   parseComfyUiRemoteWorkflowPath,
   memoryQualifiesLongTerm,
   normalizeCoffeeSessionSettings,
+  isCoffeeExperienceMode,
   normalizeBotResponseCueProfileV1,
   botResponseCuesEnabledForSurfaceV1,
   selectBotResponseCueV1,
@@ -1020,6 +1021,7 @@ import {
   type CoffeeSessionDurationMinutes,
   type CoffeeSessionSettings,
   type CoffeeGroupAtmosphere,
+  type CoffeeGroupSetupSuggestionV1,
   type CoffeeGroupSynthesisItem,
   type CoffeeGroupSynthesisState,
   type ConversationHistoryEntry,
@@ -1284,6 +1286,7 @@ import {
 } from "./speechActivity";
 import {
   releaseRealtimeVoiceAudio,
+  type VoicePlaybackChannel,
   type VoicePlaybackCharacterAlignment,
   type VoicePlaybackLifecycle,
 } from "./voiceEffects";
@@ -59832,6 +59835,8 @@ function HomeContent(): React.JSX.Element {
   const pendingCoffeeDraftSyncTimerRef = useRef<number | null>(null);
   const coffeeMentionBotsRef = useRef<BotMentionPick[]>([]);
   const [coffeeBusy, setCoffeeBusy] = useState<boolean>(false);
+  const [coffeeNewGroupGenerateBusy, setCoffeeNewGroupGenerateBusy] =
+    useState(false);
   const [coffeeGroupCreationOperation, setCoffeeGroupCreationOperation] =
     useState<CoffeeGroupCreationOperation | null>(null);
   const [coffeeAutoBusy, setCoffeeAutoBusy] = useState<boolean>(false);
@@ -85560,6 +85565,24 @@ function HomeContent(): React.JSX.Element {
       };
     },
     [cancelBotContextLongPress, openBotContextMenu],
+  );
+
+  const openBotContextMenuById = useCallback(
+    (botId: string, x: number, y: number) => {
+      const bot = bots.find((candidate) => candidate.id === botId);
+      if (!bot) return;
+      openBotContextMenu(bot, x, y);
+    },
+    [bots, openBotContextMenu],
+  );
+
+  const startBotContextLongPressById = useCallback(
+    (event: React.PointerEvent<HTMLElement>, botId: string) => {
+      const bot = bots.find((candidate) => candidate.id === botId);
+      if (!bot) return;
+      startBotContextLongPress(event, bot);
+    },
+    [bots, startBotContextLongPress],
   );
 
   const handleBotContextPointerMove = useCallback(
@@ -120972,11 +120995,30 @@ function HomeContent(): React.JSX.Element {
             if (coffeeRevealTimerRef.current) {
               clearTimeout(coffeeRevealTimerRef.current);
             }
-            // Heartbeat: keep the table reveal timer behind live speech so a
-            // short initial estimate cannot stop still-playing audio.
-            coffeeRevealTimerRef.current = setTimeout(() => {
-              coffeeRevealCompleteFnRef.current?.();
-            }, coffeeVoiceRevealStallWatchdogDelayMs());
+            // Heartbeat must respect remaining reported duration, and must
+            // never seal while voice still owns the floor. English clause
+            // synthesis can pause longer than remaining+grace between chunks;
+            // sealing here cuts TTS and dumps the full table line early.
+            // Natural completion is owned by onEnd.
+            const remainingMs = Math.max(
+              0,
+              (Number.isFinite(durationMs) ? durationMs : 0) -
+                (Number.isFinite(elapsedMs) ? elapsedMs : 0),
+            );
+            const armVoiceRevealWatchdog = (delayMs: number) => {
+              coffeeRevealTimerRef.current = setTimeout(() => {
+                if (coffeeActiveVoiceMessageIdRef.current === message.id) {
+                  armVoiceRevealWatchdog(
+                    coffeeVoiceRevealStallWatchdogDelayMs(),
+                  );
+                  return;
+                }
+                coffeeRevealCompleteFnRef.current?.();
+              }, delayMs);
+            };
+            armVoiceRevealWatchdog(
+              coffeeVoiceRevealFallbackDelayMs(remainingMs, true),
+            );
           }
           if (
             coffeeVoiceRevealClockRef.current?.messageId === message.id &&
@@ -123827,6 +123869,118 @@ function HomeContent(): React.JSX.Element {
         setCoffeeBusy(false);
       }
     };
+  const generateCoffeeGroupFromPrism = async (
+    direction: string,
+  ): Promise<void> => {
+    if (bots.length < COFFEE_GROUP_MIN_SIZE_CLIENT) {
+      setCoffeeError(
+        `Create at least ${COFFEE_GROUP_MIN_SIZE_CLIENT} Library bots before Prism can invent a Coffee Group.`,
+      );
+      return;
+    }
+    if (coffeeBusy || coffeeNewGroupGenerateBusy) return;
+    setCoffeeBusy(true);
+    setCoffeeNewGroupGenerateBusy(true);
+    setCoffeeError(null);
+    setCoffeeGroupCreationOperation({
+      title: "Inventing your Coffee Group",
+      detail:
+        "Prism is casting a café circle from your Library. You can edit seats, ethos, and topics after it lands.",
+      stepLabel: "Listening for the table",
+      progress: null,
+    });
+    try {
+      const suggestionResult = await api<{
+        ok: true;
+        suggestion: CoffeeGroupSetupSuggestionV1;
+      }>("/api/coffee/groups/setup-suggestion", {
+        method: "POST",
+        body: JSON.stringify({
+          direction,
+          roster: bots.map((bot) => ({
+            id: bot.id,
+            name: bot.name,
+            personaSnippet: (bot.system_prompt ?? "").slice(0, 280),
+          })),
+          preferredProvider: coffeeSessionProvider,
+          modelOverride: coffeeSessionModelOverride,
+          responseMode: coffeeResponseModeForSend,
+        }),
+      });
+      const suggestion = suggestionResult.suggestion;
+      const duplicateGroup = findDuplicateCoffeeGroupByRoster(
+        coffeeGroups,
+        suggestion.groupBotIds,
+      );
+      if (duplicateGroup) {
+        setCoffeeError(
+          `Prism cast the same circle as “${duplicateGroup.name}.” Try a different direction, or open that group.`,
+        );
+        return;
+      }
+      setCoffeeGroupCreationOperation((current) =>
+        current
+          ? {
+              ...current,
+              stepLabel: `Saving ${suggestion.name}`,
+              progress: 0.72,
+            }
+          : current,
+      );
+      const response = await api<{ ok: true; group: CoffeeGroupState }>(
+        "/api/coffee/groups",
+        {
+          method: "POST",
+          body: JSON.stringify({
+            name: suggestion.name,
+            ethos: suggestion.ethos,
+            groupBotIds: suggestion.groupBotIds,
+            coffeeSettings: suggestion.coffeeSettings,
+            starterTopics: suggestion.starterTopics,
+            modelChoiceByProvider: normalizeCoffeeModelChoiceByProvider(
+              coffeeModelChoiceByProvider,
+            ),
+          }),
+        },
+      );
+      setCoffeeGroups((current) => [
+        response.group,
+        ...current.filter((group) => group.id !== response.group.id),
+      ]);
+      setCoffeeGroupCreationOperation((current) =>
+        current
+          ? {
+              ...current,
+              stepLabel: `Opening ${response.group.name}`,
+              progress: 0.92,
+            }
+          : current,
+      );
+      openCoffeeGroup(response.group);
+      void copyCoffeeGroupStarterTopicsToClipboard(response.group);
+      void refreshCoffeeGroups({ quiet: true });
+    } catch (err) {
+      setCoffeeError(
+        err instanceof Error
+          ? err.message
+          : "Prism could not invent a Coffee Group.",
+      );
+    } finally {
+      setCoffeeGroupCreationOperation(null);
+      setCoffeeNewGroupGenerateBusy(false);
+      setCoffeeBusy(false);
+    }
+  };
+  const newCoffeeGroupMagic: PrismRefractMagicTarget = {
+    id: "coffee:new-group-generate",
+    label: "Generate a Coffee Group",
+    kind: "magic",
+    disabled: () =>
+      bots.length < COFFEE_GROUP_MIN_SIZE_CLIENT ||
+      coffeeBusy ||
+      coffeeNewGroupGenerateBusy,
+    run: (direction) => void generateCoffeeGroupFromPrism(direction),
+  };
   const createCoffeeGroupFromCurrentSession =
     async (): Promise<CoffeeGroupState | null> => {
       if (!coffeeConversation || coffeeBusy) return null;
@@ -126889,7 +127043,22 @@ function HomeContent(): React.JSX.Element {
             "aria-label": offlineProtected
               ? `${bot.name} (offline-only, protected)`
               : bot.name,
-            onClick: () => toggleCoffeeBot(bot.id),
+            onPointerDown: (event) => startBotContextLongPress(event, bot),
+            onPointerUp: handleBotContextPointerEnd,
+            onPointerCancel: handleBotContextPointerEnd,
+            onPointerMove: handleBotContextPointerMove,
+            onContextMenu: (event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openBotContextMenu(bot, event.clientX, event.clientY);
+            },
+            onClick: () => {
+              if (botContextSuppressClickRef.current) {
+                botContextSuppressClickRef.current = false;
+                return;
+              }
+              toggleCoffeeBot(bot.id);
+            },
           }}
         />
       </li>
@@ -129443,6 +129612,13 @@ function HomeContent(): React.JSX.Element {
       coffeeAtmosphereImage?.imageId &&
       !coffeeAtmosphereImageFailedIds.has(coffeeAtmosphereImage.imageId),
     );
+    const coffeeLiveExperienceModeRaw =
+      coffeeConversation?.coffeeSettings?.experienceMode;
+    const coffeeLiveExperienceMode = isCoffeeExperienceMode(
+      coffeeLiveExperienceModeRaw,
+    )
+      ? coffeeLiveExperienceModeRaw
+      : null;
     return (
       <section
         ref={coffeeStageRef}
@@ -129474,6 +129650,7 @@ function HomeContent(): React.JSX.Element {
         data-coffee-perspective={
           coffeeFirstPersonPerspective ? "first-person" : "third-person"
         }
+        data-experience-mode={coffeeLiveExperienceMode ?? undefined}
         aria-label="Coffee table"
         onWheel={handleCoffeeReplayWheel}
       >
@@ -133412,14 +133589,22 @@ function HomeContent(): React.JSX.Element {
                 >
                   <IconTrash />
                 </button>
-                <button
-                  type="button"
-                  className={styles.coffeeNewSessionButton}
-                  onClick={resetCoffeeToPicker}
-                  aria-label="New Coffee Session"
-                >
-                  +
-                </button>
+                <PrismRefractTarget target={newCoffeeGroupMagic}>
+                  {(binding) => (
+                    <button
+                      {...binding}
+                      type="button"
+                      className={styles.coffeeNewSessionButton}
+                      onClick={resetCoffeeToPicker}
+                      disabled={coffeeBusy || coffeeNewGroupGenerateBusy}
+                      aria-label="New Coffee Session"
+                      title="New Coffee Session · Wield Prism to invent a Coffee Group"
+                      data-tutorial-target="coffee-new-group"
+                    >
+                      +
+                    </button>
+                  )}
+                </PrismRefractTarget>
               </div>
             </div>
             <ul className={styles.coffeeSessionList}>
@@ -135131,6 +135316,7 @@ function HomeContent(): React.JSX.Element {
         data-chat-sidebar-hidden="true"
         data-chrome-language="studio"
         data-debate-shell="true"
+        onContextMenu={handleAppContextMenu}
       >
         <section className={styles.debateMain}>
           {renderSharedAppletNavbar("Debate tools", {
@@ -135282,6 +135468,10 @@ function HomeContent(): React.JSX.Element {
                   className={options.className}
                 />
               )}
+              onBotContextMenu={openBotContextMenuById}
+              onBotContextLongPressStart={startBotContextLongPressById}
+              onBotContextLongPressMove={handleBotContextPointerMove}
+              onBotContextLongPressEnd={handleBotContextPointerEnd}
               renderBotAvatar={(botSnapshot, avatarState) => {
                 const staticAudiencePortrait = avatarState.role === "audience";
                 const playerJudgePrism =
@@ -135699,6 +135889,8 @@ function HomeContent(): React.JSX.Element {
         {renderViewSwitchOverlay()}
         {renderDesktopFirstRunChecklist()}
         {renderBackendUnavailableNotice("banner")}
+        {renderContextMenuPortal(renderBotContextMenu())}
+        {renderGlobalPrismCompanion()}
         <GlyphTooltipLayer />
       </main>
     );
@@ -135748,7 +135940,7 @@ function HomeContent(): React.JSX.Element {
       personaTemperament: signalPersonaTemperamentFor(bot.system_prompt),
     }));
     return (
-      <div className={themeClass}>
+      <div className={themeClass} onContextMenu={handleAppContextMenu}>
         <BotcastExperience
           key={`signal:${signalOrchestrationEpoch}`}
           bots={signalBots}
@@ -135775,6 +135967,10 @@ function HomeContent(): React.JSX.Element {
               className={options.className}
             />
           )}
+          onBotContextMenu={openBotContextMenuById}
+          onBotContextLongPressStart={startBotContextLongPressById}
+          onBotContextLongPressMove={handleBotContextPointerMove}
+          onBotContextLongPressEnd={handleBotContextPointerEnd}
           producerName={user?.displayName?.trim() || "You"}
           autoCorrectGuestAnswerEnabled={
             settings?.composerWritingAssist !== false
