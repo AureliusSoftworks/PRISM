@@ -14,17 +14,17 @@ export interface PreSpeechBreathPlan {
 
 export const PRE_SPEECH_BREATH_URLS = {
   micro: [
-    "/audio/voice-presence/breath-micro-01.mp3",
-    "/audio/voice-presence/breath-micro-02.mp3",
+    "/audio/voice-presence/breath-micro-01-v2.mp3",
+    "/audio/voice-presence/breath-micro-02-v2.mp3",
   ],
   natural: [
-    "/audio/voice-presence/breath-natural-01.mp3",
-    "/audio/voice-presence/breath-natural-02.mp3",
-    "/audio/voice-presence/breath-natural-03.mp3",
+    "/audio/voice-presence/breath-natural-01-v2.mp3",
+    "/audio/voice-presence/breath-natural-02-v2.mp3",
+    "/audio/voice-presence/breath-natural-03-v2.mp3",
   ],
   deliberate: [
-    "/audio/voice-presence/breath-deliberate-01.mp3",
-    "/audio/voice-presence/breath-deliberate-02.mp3",
+    "/audio/voice-presence/breath-deliberate-01-v2.mp3",
+    "/audio/voice-presence/breath-deliberate-02-v2.mp3",
   ],
 } as const satisfies Record<PreSpeechBreathIntensity, readonly string[]>;
 

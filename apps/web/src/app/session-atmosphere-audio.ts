@@ -139,8 +139,8 @@ const AMBIENT_BOT_VOCALIZATIONS = [
   },
   {
     kind: "soft-inhale",
-    url: "/audio/voice-presence/breath-deliberate-02.mp3",
-    durationMs: 914,
+    url: "/audio/voice-presence/breath-deliberate-02-v2.mp3",
+    durationMs: 920,
   },
 ] as const satisfies readonly Omit<
   SessionAmbientBotVocalizationCue,

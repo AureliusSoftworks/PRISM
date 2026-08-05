@@ -153,6 +153,9 @@ describe("pre-speech breath integration", () => {
     assert.match(effectsSource, /\.catch\(\(\) => null\)/u);
     assert.match(effectsSource, /activeVoiceChannels\.presence/u);
     assert.match(effectsSource, /voiceStartsAt/u);
+    assert.match(effectsSource, /attackSeconds/u);
+    assert.match(effectsSource, /highpass\.frequency\.value = 140/u);
+    assert.match(effectsSource, /lowpass\.frequency\.value = 7_000/u);
     assert.doesNotMatch(effectsSource, /postGapMs/u);
     assert.ok(
       englishSource.indexOf("await playPreSpeechBreath") <
