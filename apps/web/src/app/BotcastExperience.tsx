@@ -607,6 +607,14 @@ export interface BotcastExperienceProps {
   theme?: "light" | "dark";
   liveConversationPanelExpanded?: boolean;
   renderBotGlyph: BotPickerGlyphRenderer;
+  /** Library bot chip menu — same surface as Zen/Chat bot chips. */
+  onBotContextMenu?: (botId: string, x: number, y: number) => void;
+  onBotContextLongPressStart?: (
+    event: ReactPointerEvent<HTMLElement>,
+    botId: string,
+  ) => void;
+  onBotContextLongPressMove?: (event: ReactPointerEvent<HTMLElement>) => void;
+  onBotContextLongPressEnd?: (event: ReactPointerEvent<HTMLElement>) => void;
   renderAvatar?: (
     bot: BotcastBotSummary,
     state: {
@@ -1851,6 +1859,10 @@ export function BotcastExperience({
   theme = "dark",
   liveConversationPanelExpanded = false,
   renderBotGlyph,
+  onBotContextMenu,
+  onBotContextLongPressStart,
+  onBotContextLongPressMove,
+  onBotContextLongPressEnd,
   renderAvatar,
   renderMug,
   resolveCupRateMultiplier,
@@ -5301,6 +5313,7 @@ export function BotcastExperience({
     setStudioLayoutEditorOpen(false);
     stopIntroPreview();
     onPrepareUtterance?.();
+    setWatchBakeLabel(null);
     const { controller, runId } = beginEpisodeOperation();
     const selectedModelOption = episodeModelDraft
       ? (modelOptions.find((option) => option.id === episodeModelDraft) ?? null)
@@ -5350,68 +5363,94 @@ export function BotcastExperience({
       phase: "preparing",
       source: selectedShow.introAudio.source,
     };
-    preRollSkipRequestedRef.current = false;
-    setEpisodePreRoll(preRoll);
-    const provisionalCaptureId = `signal-pending:${selectedShow.id}:${Date.now()}`;
-    primeReplayAudioMasterCapture();
-    if (
-      await startReplayAudioMasterCapture(provisionalCaptureId, {
-        markIntro: true,
-        compactThinkingGaps: true,
-        voiceSelection: recordingVoiceSelection,
-      })
-    ) {
-      signalCaptureSourceIdRef.current = provisionalCaptureId;
-    }
-    const introPlayback = playSignalIntroAudio({
-      ...signalIntroIdentityForShow(selectedShow, hostBot),
-      introAudio: selectedShow.introAudio,
-      enabled: introAudioEnabled,
-      volume: introAudioVolume,
-      startDelayMs: SIGNAL_EPISODE_INTRO_LEAD_IN_MS,
-    });
-    const reducedMotion =
+    let provisionalCaptureId: string | null = null;
+    let introPlayback: { durationMs: number; finished: Promise<void> } = {
+      durationMs: 0,
+      finished: Promise.resolve(),
+    };
+    let visualMinimum = Promise.resolve();
+    let reducedMotion =
       window.matchMedia?.("(prefers-reduced-motion: reduce)").matches === true;
-    // Gate the opening card and first speech on the full extended ident, not a
-    // shorter visual minimum that can release dialogue early.
-    const introPresentationMs = Math.max(
-      SIGNAL_EPISODE_PRE_ROLL_MIN_MS,
-      SIGNAL_EPISODE_INTRO_LEAD_IN_MS + introPlayback.durationMs,
-    );
-    const visualMinimum = new Promise<void>((resolve) => {
-      let settled = false;
-      const timer = window.setTimeout(
-        finish,
-        reducedMotion
-          ? Math.min(1_100, introPresentationMs)
-          : introPresentationMs,
-      );
-      function finish(): void {
-        if (settled) return;
-        settled = true;
-        window.clearTimeout(timer);
-        if (preRollGateResolveRef.current === finish) {
-          preRollGateResolveRef.current = null;
-        }
-        resolve();
+
+    const beginEpisodeIntroBookend = async (
+      bookend: SignalEpisodePreRoll,
+      captureSourceId: string,
+    ): Promise<void> => {
+      preRollSkipRequestedRef.current = false;
+      setEpisodePreRoll(bookend);
+      provisionalCaptureId = captureSourceId;
+      primeReplayAudioMasterCapture();
+      if (
+        await startReplayAudioMasterCapture(captureSourceId, {
+          markIntro: true,
+          compactThinkingGaps: true,
+          voiceSelection: recordingVoiceSelection,
+        })
+      ) {
+        signalCaptureSourceIdRef.current = captureSourceId;
       }
-      preRollGateResolveRef.current = finish;
-    });
-    void visualMinimum.then(() => {
-      if (!episodeOperationIsCurrent(controller, runId)) return;
-      if (!preparationPending) return;
-      const current = signalModelWarmupRef.current;
-      if (!current || current.phase === "releasing") return;
-      signalModelWarmupVisibleRef.current = true;
-      assignSignalModelWarmup({
-        ...current,
-        phase: current.phase === "failed" ? "failed" : "held",
+      introPlayback = playSignalIntroAudio({
+        ...signalIntroIdentityForShow(selectedShow, hostBot),
+        introAudio: selectedShow.introAudio,
+        enabled: introAudioEnabled,
+        volume: introAudioVolume,
+        startDelayMs: SIGNAL_EPISODE_INTRO_LEAD_IN_MS,
       });
-      setEpisodePreRoll(null);
-      // Do not stop the ident here. Cutting it short resolves
-      // introPlayback.finished early and lets the opening line air before the
-      // extended intro has completed.
-    });
+      reducedMotion =
+        window.matchMedia?.("(prefers-reduced-motion: reduce)").matches ===
+        true;
+      // Gate the opening card and first speech on the full extended ident, not a
+      // shorter visual minimum that can release dialogue early.
+      const introPresentationMs = Math.max(
+        SIGNAL_EPISODE_PRE_ROLL_MIN_MS,
+        SIGNAL_EPISODE_INTRO_LEAD_IN_MS + introPlayback.durationMs,
+      );
+      visualMinimum = new Promise<void>((resolve) => {
+        let settled = false;
+        const timer = window.setTimeout(
+          finish,
+          reducedMotion
+            ? Math.min(1_100, introPresentationMs)
+            : introPresentationMs,
+        );
+        function finish(): void {
+          if (settled) return;
+          settled = true;
+          window.clearTimeout(timer);
+          if (preRollGateResolveRef.current === finish) {
+            preRollGateResolveRef.current = null;
+          }
+          resolve();
+        }
+        preRollGateResolveRef.current = finish;
+      });
+      void visualMinimum.then(() => {
+        if (!episodeOperationIsCurrent(controller, runId)) return;
+        if (!preparationPending) return;
+        const current = signalModelWarmupRef.current;
+        if (!current || current.phase === "releasing") return;
+        signalModelWarmupVisibleRef.current = true;
+        assignSignalModelWarmup({
+          ...current,
+          phase: current.phase === "failed" ? "failed" : "held",
+        });
+        setEpisodePreRoll(null);
+        // Do not stop the ident here. Cutting it short resolves
+        // introPlayback.finished early and lets the opening line air before the
+        // extended intro has completed.
+      });
+    };
+
+    // Watch bakes behind a fullscreen loader first. The branded intro card
+    // only opens once the synthesized episode is ready to present.
+    if (watchMode) {
+      setWatchBakeLabel(liveBakeSurfaceTitle("signal"));
+    } else {
+      await beginEpisodeIntroBookend(
+        preRoll,
+        `signal-pending:${selectedShow.id}:${Date.now()}`,
+      );
+    }
     setBusy(true);
     setError(null);
     let unstartedEpisodeId: string | null = null;
@@ -5453,6 +5492,7 @@ export function BotcastExperience({
       unstartedEpisodeId = response.episode.id;
       latestCaptureEpisode = response.episode;
       if (
+        provisionalCaptureId &&
         signalCaptureSourceIdRef.current === provisionalCaptureId &&
         adoptReplayAudioMasterCaptureSourceId(
           provisionalCaptureId,
@@ -5502,6 +5542,7 @@ export function BotcastExperience({
           initial: true,
           episodeId: response.episode.id,
         });
+        setWatchBakeLabel(null);
         setEpisodePreRoll(null);
         stopSignalIntroAudio();
         return;
@@ -5511,11 +5552,6 @@ export function BotcastExperience({
       }
       if (watchMode) {
         setWatchBakeLabel(liveBakeSurfaceTitle("signal"));
-        setEpisodePreRoll((current) =>
-          current
-            ? { ...current, phase: "preparing", topic: "Baking the broadcast" }
-            : current,
-        );
         const baked = await request<{
           episode: BotcastEpisode;
           liveBake: LiveBakeArtifactV1;
@@ -5540,10 +5576,21 @@ export function BotcastExperience({
         setEpisode(baked.episode);
         setAutoRun(false);
         await releaseSignalModelWarmup(baked.episode.id);
+        if (!episodeOperationIsCurrent(controller, runId)) return;
+        setWatchBakeLabel(null);
+        await beginEpisodeIntroBookend(
+          {
+            ...preRoll,
+            guestName:
+              baked.episode.guestName ?? guest?.name ?? preRoll.guestName,
+            topic: baked.episode.topic.trim() || preRoll.topic,
+            phase: "preparing",
+          },
+          baked.episode.id,
+        );
         await Promise.all([introPlayback.finished, visualMinimum]);
         if (!episodeOperationIsCurrent(controller, runId)) return;
         setEpisodePreRoll(null);
-        setWatchBakeLabel(null);
         for (const message of baked.episode.messages) {
           if (!episodeOperationIsCurrent(controller, runId)) return;
           prepareEpisodeMessage(message, baked.episode);
@@ -5618,6 +5665,7 @@ export function BotcastExperience({
         preRollGateResolveRef.current?.();
         preRollGateResolveRef.current = null;
         stopSignalIntroAudio();
+        setWatchBakeLabel(null);
         setEpisodePreRoll(null);
         setAutoRun(false);
         if (unstartedEpisodeId && signalModelWarmupRef.current) {
@@ -5648,6 +5696,7 @@ export function BotcastExperience({
       if (episodeOperationIsCurrent(controller, runId)) {
         preRollGateResolveRef.current = null;
         episodeOperationAbortRef.current = null;
+        setWatchBakeLabel(null);
         setBusy(false);
       }
     }
@@ -9063,7 +9112,7 @@ export function BotcastExperience({
               replayInterviewFootageElapsedMs,
             )
           : null;
-      const mouthShape =
+      const rawMouthShape =
         bakedReplayMouthShape ??
         (ephemeralSpeech
           ? crtSpeechMouthShapeAtAlignedElapsedMs({
@@ -9080,6 +9129,16 @@ export function BotcastExperience({
               alignment: speechReveal?.alignment,
             })
             : "closed");
+      // Literal "closed" and activity gaps stay idle lips — never remap to
+      // speech-closed while the utterance clock is still running.
+      const mouthShape =
+        rawMouthShape === "closed" ||
+        (!args.replay &&
+          !ephemeralSpeech &&
+          talking &&
+          botcastSpeechRevealIsVoicing(speechReveal) === false)
+          ? "closed"
+          : rawMouthShape;
       const mouthCapture = (
         <ReplayMouthPresentationCapture
           sourceId={args.replay ? null : signalCaptureSourceIdRef.current}
@@ -9674,6 +9733,16 @@ export function BotcastExperience({
                     "aria-checked": selected,
                     "aria-label": `${bot.name}${selected ? ", selected" : ""}`,
                     disabled,
+                    onPointerDown: (event) =>
+                      onBotContextLongPressStart?.(event, bot.id),
+                    onPointerUp: onBotContextLongPressEnd,
+                    onPointerCancel: onBotContextLongPressEnd,
+                    onPointerMove: onBotContextLongPressMove,
+                    onContextMenu: (event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      onBotContextMenu?.(bot.id, event.clientX, event.clientY);
+                    },
                     onClick: () => onSelect(bot.id),
                   }}
                 />
@@ -10848,65 +10917,71 @@ export function BotcastExperience({
                     busy || Boolean(bookingSuggestionBusy) ? true : undefined
                   }
                 >
-                  <button
-                    type="button"
-                    className={styles.producerGuestPickerOption}
-                    data-selected={producerGuestSelected ? "true" : undefined}
-                    aria-pressed={producerGuestSelected}
-                    disabled={busy || Boolean(bookingSuggestionBusy)}
-                    onClick={() => {
-                      setPlaybackModeDraft("live");
-                      setGuestDraftId(BOTCAST_PRODUCER_GUEST_ID);
-                    }}
+                  <div
+                    className={styles.producerGuestModeList}
+                    role="group"
+                    aria-label="Episode mode"
                   >
-                    <strong>Me</strong>
-                    <span>Get interviewed</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.producerGuestPickerOption}
-                    data-selected={
-                      !producerGuestSelected && playbackModeDraft === "live"
-                        ? "true"
-                        : undefined
-                    }
-                    aria-pressed={
-                      !producerGuestSelected && playbackModeDraft === "live"
-                    }
-                    disabled={busy || Boolean(bookingSuggestionBusy)}
-                    onClick={() => {
-                      setPlaybackModeDraft("live");
-                      if (guestDraftId === BOTCAST_PRODUCER_GUEST_ID) {
-                        setGuestDraftId(initialCast[1] ?? "");
+                    <button
+                      type="button"
+                      className={styles.producerGuestPickerOption}
+                      data-selected={producerGuestSelected ? "true" : undefined}
+                      aria-pressed={producerGuestSelected}
+                      disabled={busy || Boolean(bookingSuggestionBusy)}
+                      onClick={() => {
+                        setPlaybackModeDraft("live");
+                        setGuestDraftId(BOTCAST_PRODUCER_GUEST_ID);
+                      }}
+                    >
+                      <strong>Me</strong>
+                      <span>Get interviewed</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.producerGuestPickerOption}
+                      data-selected={
+                        !producerGuestSelected && playbackModeDraft === "live"
+                          ? "true"
+                          : undefined
                       }
-                    }}
-                  >
-                    <strong>Produce</strong>
-                    <span>Direct the show live</span>
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.producerGuestPickerOption}
-                    data-selected={
-                      !producerGuestSelected && playbackModeDraft === "watch"
-                        ? "true"
-                        : undefined
-                    }
-                    aria-pressed={
-                      !producerGuestSelected && playbackModeDraft === "watch"
-                    }
-                    disabled={busy || Boolean(bookingSuggestionBusy)}
-                    data-tutorial-target="botcast-watch-show"
-                    onClick={() => {
-                      setPlaybackModeDraft("watch");
-                      if (guestDraftId === BOTCAST_PRODUCER_GUEST_ID) {
-                        setGuestDraftId(initialCast[1] ?? "");
+                      aria-pressed={
+                        !producerGuestSelected && playbackModeDraft === "live"
                       }
-                    }}
-                  >
-                    <strong>Watch</strong>
-                    <span>Bake ahead, then sit back</span>
-                  </button>
+                      disabled={busy || Boolean(bookingSuggestionBusy)}
+                      onClick={() => {
+                        setPlaybackModeDraft("live");
+                        if (guestDraftId === BOTCAST_PRODUCER_GUEST_ID) {
+                          setGuestDraftId(initialCast[1] ?? "");
+                        }
+                      }}
+                    >
+                      <strong>Produce</strong>
+                      <span>Direct the show live</span>
+                    </button>
+                    <button
+                      type="button"
+                      className={styles.producerGuestPickerOption}
+                      data-selected={
+                        !producerGuestSelected && playbackModeDraft === "watch"
+                          ? "true"
+                          : undefined
+                      }
+                      aria-pressed={
+                        !producerGuestSelected && playbackModeDraft === "watch"
+                      }
+                      disabled={busy || Boolean(bookingSuggestionBusy)}
+                      data-tutorial-target="botcast-watch-show"
+                      onClick={() => {
+                        setPlaybackModeDraft("watch");
+                        if (guestDraftId === BOTCAST_PRODUCER_GUEST_ID) {
+                          setGuestDraftId(initialCast[1] ?? "");
+                        }
+                      }}
+                    >
+                      <strong>Watch</strong>
+                      <span>Bake ahead, then sit back</span>
+                    </button>
+                  </div>
                   {renderSignalBotPicker({
                     bots: guestOptions,
                     selectedId: guestDraftId,
@@ -14138,12 +14213,24 @@ export function BotcastExperience({
       ) : null}
     </main>
     <PrismBlockingLoader
-      open={blockingOperation !== null}
-      title={blockingOperation?.title ?? "PRISM is working"}
-      detail={blockingOperation?.detail ?? "Preparing your workspace."}
-      stepLabel={blockingOperation?.stepLabel ?? "Working"}
+      open={blockingOperation !== null || watchBakeLabel !== null}
+      title={
+        blockingOperation?.title ?? liveBakeSurfaceTitle("signal")
+      }
+      detail={
+        blockingOperation?.detail ??
+        "The episode is being prepared ahead of time so watching stays seamless."
+      }
+      stepLabel={
+        blockingOperation?.stepLabel ?? watchBakeLabel ?? "Working"
+      }
       progress={blockingOperation?.progress}
       theme={theme}
+      footer={
+        blockingOperation
+          ? "Keep this window open while the light takes shape."
+          : "Keep this window open while Prism bakes the broadcast."
+      }
         onCancel={
           blockingOperation?.cancellable ? cancelBlockingOperation : undefined
         }

@@ -95,6 +95,16 @@ describe("Signal experience shell", () => {
     assert.match(source, /ariaLabel: "Choose a Signal guest"/u);
     assert.doesNotMatch(source, /id="botcast-host-picker"/u);
     assert.match(source, /className=\{styles\.producerGuestPickerOption\}/u);
+    assert.match(source, /className=\{styles\.producerGuestModeList\}/u);
+    assert.match(source, /aria-label="Episode mode"/u);
+    assert.match(
+      css,
+      /\.producerGuestPickerOption\s*\{[^}]*grid-template-columns:\s*minmax\(0,\s*1fr\)/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.producerGuestPickerOption strong\s*\{[^}]*width:\s*34px/u,
+    );
     assert.match(source, /data-tutorial-target="botcast-create-show"/u);
   });
 
@@ -2239,7 +2249,22 @@ describe("Signal experience shell", () => {
     assert.match(source, /Handing missing artwork to the background renderer/u);
     assert.match(source, /progress: null/u);
     assert.match(source, /<PrismBlockingLoader/u);
-    assert.match(source, /open=\{blockingOperation !== null\}/u);
+    assert.match(
+      source,
+      /open=\{blockingOperation !== null \|\| watchBakeLabel !== null\}/u,
+    );
+    assert.match(
+      source,
+      /if \(watchMode\) \{\s*setWatchBakeLabel\(liveBakeSurfaceTitle\("signal"\)\);/u,
+    );
+    assert.match(
+      source,
+      /setWatchBakeLabel\(null\);[\s\S]{0,120}beginEpisodeIntroBookend\(/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /topic:\s*"Baking the broadcast"/u,
+    );
     assert.match(blockingLoaderSource, /data-prism-blocking-loader="true"/u);
     assert.match(source, /new AbortController\(\)/u);
     assert.match(source, /signal: controller\.signal/u);

@@ -586,10 +586,66 @@
 .signalBotPickerEmpty { margin: 0; border: 1px dashed var(--botcast-line); border-radius: 12px; padding: 18px 12px; color: var(--botcast-muted); font-size: .7rem; text-align: center; }
 .signalGuestPickerField { display: grid; grid-column: 1 / -1; min-width: 0; gap: 8px; }
 .signalGuestPickerLabel { color: var(--botcast-muted); font-size: .75rem; }
-.producerGuestPickerOption { width: 100%; display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; gap: 10px; border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 24%, var(--botcast-line)); border-radius: 12px; padding: 11px 13px; color: var(--botcast-ink); background: color-mix(in srgb, var(--botcast-host-accent) 7%, var(--botcast-soft-panel)); text-align: left; cursor: pointer; }
-.producerGuestPickerOption strong { display: grid; width: 34px; height: 34px; place-items: center; border-radius: 999px; color: #17131d; background: linear-gradient(135deg, var(--prism-p), var(--prism-s)); font-size: .72rem; }
-.producerGuestPickerOption span { color: var(--botcast-muted); font-size: .68rem; }
-.producerGuestPickerOption[data-selected="true"] { border-color: color-mix(in srgb, var(--botcast-host-accent) 66%, var(--botcast-line)); background: color-mix(in srgb, var(--botcast-host-accent) 16%, var(--botcast-soft-panel)); box-shadow: 0 0 0 2px color-mix(in srgb, var(--botcast-host-accent) 12%, transparent); }
+.producerGuestModeList { display: grid; gap: 7px; }
+.producerGuestPickerOption {
+  position: relative;
+  width: 100%;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  justify-items: start;
+  gap: 3px;
+  border: 1px solid color-mix(in srgb, var(--botcast-host-accent) 24%, var(--botcast-line));
+  border-radius: 12px;
+  padding: 10px 12px 10px 14px;
+  color: var(--botcast-ink);
+  background: color-mix(in srgb, var(--botcast-host-accent) 7%, var(--botcast-soft-panel));
+  text-align: left;
+  cursor: pointer;
+  transition: border-color 140ms ease, background 140ms ease, box-shadow 140ms ease;
+}
+.producerGuestPickerOption::before {
+  content: "";
+  position: absolute;
+  top: 9px;
+  bottom: 9px;
+  left: 0;
+  width: 3px;
+  border-radius: 0 999px 999px 0;
+  background: transparent;
+  transition: background 140ms ease;
+}
+.producerGuestPickerOption strong {
+  display: block;
+  min-width: 0;
+  color: var(--botcast-ink);
+  font-size: .78rem;
+  font-weight: 760;
+  letter-spacing: .01em;
+  line-height: 1.2;
+}
+.producerGuestPickerOption span {
+  display: block;
+  min-width: 0;
+  color: var(--botcast-muted);
+  font-size: .68rem;
+  line-height: 1.35;
+}
+.producerGuestPickerOption[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--botcast-host-accent) 66%, var(--botcast-line));
+  background: color-mix(in srgb, var(--botcast-host-accent) 16%, var(--botcast-soft-panel));
+  box-shadow: 0 0 0 2px color-mix(in srgb, var(--botcast-host-accent) 12%, transparent);
+}
+.producerGuestPickerOption[data-selected="true"]::before {
+  background: linear-gradient(180deg, var(--prism-p), var(--prism-s));
+}
+.producerGuestPickerOption[data-selected="true"] strong {
+  color: color-mix(in srgb, var(--botcast-ink) 88%, var(--botcast-host-accent));
+}
+.producerGuestPickerOption:hover:not(:disabled),
+.producerGuestPickerOption:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--botcast-host-accent) 48%, var(--botcast-line));
+}
 .producerGuestPickerOption:disabled { opacity: .42; cursor: not-allowed; }
 .producerBrief { grid-column: 1 / -1; }
 .producerBrief span { color: #74767c; }
