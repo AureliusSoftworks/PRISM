@@ -19,9 +19,16 @@ export const PRISM_BOT_THINKING_SFX_FALLBACK_URLS = [
   "/audio/avatar/prism-calculating-03.mp3",
   "/audio/avatar/prism-calculating-04.mp3",
 ] as const;
-export const BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS = 0.08;
-export const BOT_AVATAR_SFX_SHORT_LOOP_TRIM_RATIO = 0.1;
-export const BOT_AVATAR_SFX_LOOP_CROSSFADE_SECONDS = 0.06;
+/** Bake/normalize edge trim — keeps newly saved loops padded for the guard. */
+export const BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS = 0.24;
+export const BOT_AVATAR_SFX_SHORT_LOOP_TRIM_RATIO = 0.12;
+export const BOT_AVATAR_SFX_LOOP_CROSSFADE_SECONDS = 0.22;
+/**
+ * Playback-only restart trim. Existing clips keep their baked bytes; the
+ * live loop wraps earlier so drawn-out tails never reach the file end.
+ */
+export const BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS = 0.48;
+export const BOT_AVATAR_SFX_PLAYBACK_SHORT_LOOP_TRIM_RATIO = 0.2;
 export const BOT_AVATAR_SFX_ATTACK_MS = 120;
 export const BOT_AVATAR_SFX_RELEASE_MS = 240;
 
@@ -118,11 +125,21 @@ function clampBotAvatarSfxProgress(value: number): number {
 
 export function botAvatarSfxLoopBounds(
   durationSeconds: number,
+  options?: {
+    edgeTrimSeconds?: number;
+    shortLoopTrimRatio?: number;
+  },
 ): { startTime: number; endTime: number } | null {
   if (!Number.isFinite(durationSeconds) || durationSeconds <= 0) return null;
+  const maxEdgeTrim = Number.isFinite(options?.edgeTrimSeconds)
+    ? Math.max(0, options!.edgeTrimSeconds!)
+    : BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS;
+  const shortRatio = Number.isFinite(options?.shortLoopTrimRatio)
+    ? Math.max(0, options!.shortLoopTrimRatio!)
+    : BOT_AVATAR_SFX_SHORT_LOOP_TRIM_RATIO;
   const edgeTrim = Math.min(
-    BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
-    durationSeconds * BOT_AVATAR_SFX_SHORT_LOOP_TRIM_RATIO,
+    maxEdgeTrim,
+    durationSeconds * shortRatio,
   );
   return {
     startTime: edgeTrim,
@@ -130,11 +147,20 @@ export function botAvatarSfxLoopBounds(
   };
 }
 
+export function botAvatarSfxPlaybackLoopBounds(
+  durationSeconds: number,
+): { startTime: number; endTime: number } | null {
+  return botAvatarSfxLoopBounds(durationSeconds, {
+    edgeTrimSeconds: BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS,
+    shortLoopTrimRatio: BOT_AVATAR_SFX_PLAYBACK_SHORT_LOOP_TRIM_RATIO,
+  });
+}
+
 export function botAvatarSfxLoopRestartTime(
   currentTime: number,
   durationSeconds: number,
 ): number | null {
-  const bounds = botAvatarSfxLoopBounds(durationSeconds);
+  const bounds = botAvatarSfxPlaybackLoopBounds(durationSeconds);
   if (!bounds || !Number.isFinite(currentTime)) return null;
   return currentTime < bounds.startTime || currentTime >= bounds.endTime
     ? bounds.startTime
@@ -145,6 +171,8 @@ export function botAvatarSfxLoopRestartTime(
  * Bake the trimmed loop boundary into a decoded buffer. This is deliberately
  * independent of the ElevenLabs `loop` prompt flag: generated audio can still
  * arrive with a hard tail, so the provider output is treated as raw material.
+ * A longer crossfade + earlier restart keeps drawn-out tails from cutting off
+ * when the loop wraps.
  */
 export function createSeamlessBotAvatarSfxLoopBuffer(
   context: BaseAudioContext,
@@ -302,9 +330,9 @@ export async function normalizeBotAvatarSfxLoopBlob(blob: Blob): Promise<Blob> {
       (await blob.arrayBuffer()).slice(0),
     );
     const loopBuffer = createSeamlessBotAvatarSfxLoopBuffer(context, decoded);
-    // Keep the existing playback guard's 80ms edge trim meaningful: the
-    // baked loop lives between silent guard pads, so playback drops the pads
-    // and lands exactly on the crossfaded loop boundary.
+    // Keep the playback guard's edge trim meaningful: the baked loop lives
+    // between silent guard pads, so playback drops the pads and lands exactly
+    // on the crossfaded loop boundary.
     const paddedLoopBuffer = addBotAvatarSfxLoopGuardPadding(
       context,
       loopBuffer,
