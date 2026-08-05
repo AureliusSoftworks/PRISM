@@ -127,6 +127,7 @@ import {
   modelEffortValueForCapability,
   modelEffortWheelDirection,
 } from "./modelEffortControl";
+import { isPendingReplyVisible } from "./pendingReplyVisible";
 import { modelPickerStepValue } from "./modelPickerControl";
 import { KeyboardShortcutSettings } from "./KeyboardShortcutSettings";
 import {
@@ -55287,6 +55288,7 @@ function HomeContent(): React.JSX.Element {
         selectedProvider={modelProvider}
         loading={modelCatalogLoading}
         disabled={coffeeHeaderModelControlsLocked()}
+        generating={coffeeTurnRhythmState === "botThinking"}
         title={
           coffeeHeaderModelControlsLockReason() ??
           `Coffee model (${responseModeShortLabel(responseMode)} — concrete choices override contextual Auto)`
@@ -55545,7 +55547,7 @@ function HomeContent(): React.JSX.Element {
               selectedProvider={modelProvider}
               loading={modelCatalogLoading}
               disabled={!settings || pendingReplyVisible}
-              generating={pendingReplyVisible}
+              generating={pendingReplyVisible || sandboxSummaryBusy}
                 title={`Model for ${responseModeShortLabel(responseMode)} replies`}
                 ariaLabel={`Model for ${isLocal ? "local" : "online"} replies`}
               dismissPopoversSignal={composerPopoverDismissSignal}
@@ -56634,11 +56636,13 @@ function HomeContent(): React.JSX.Element {
 
   const showPrivateConversationEmptyState =
     privateChatActive && visibleConversations.length === 0;
-  const pendingReplyVisible =
-    pendingReply &&
-    ((pendingReplyConversationId !== null &&
-      detail?.id === pendingReplyConversationId) ||
-      (pendingReplyIsNewConversation && detail?.id === "pending"));
+  const pendingReplyVisible = isPendingReplyVisible({
+    pendingReply,
+    pendingReplyConversationId,
+    pendingReplyIsNewConversation,
+    detailId: detail?.id,
+    selectedId,
+  });
   const pendingMessageCleanupVisible = pendingMessageCleanupMessageIds.size > 0;
   const pendingReplyVisualVisible =
     pendingReplyVisible && !pendingMessageCleanupVisible;
@@ -79168,6 +79172,12 @@ function HomeContent(): React.JSX.Element {
               ? (bots.find((bot) => bot.id === event.botId) ?? null)
               : null;
             setSelectedId(event.conversationId);
+            // New conversations start with pendingReplyConversationId=null.
+            // Progressive delivery upgrades detail off "pending" mid-call —
+            // adopt the real id so the effort glyph keeps spinning.
+            setPendingReplyConversationId(
+              (current) => current ?? event.conversationId,
+            );
             setDetail((current) => {
               if (!current) return current;
               const existingIndex = current.messages.findIndex(

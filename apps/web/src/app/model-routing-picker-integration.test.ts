@@ -193,16 +193,27 @@ describe("shared routing model picker integration", () => {
       /data-generating=\{generating \? "true" : undefined\}/u,
     );
     assert.ok(
-      (pageSource.match(/generating=\{pendingReplyVisible\}/gu) ?? []).length >= 1,
+      (pageSource.match(
+        /generating=\{pendingReplyVisible \|\| sandboxSummaryBusy\}/gu,
+      ) ?? []).length >= 1,
+    );
+    assert.match(
+      pageSource,
+      /generating=\{coffeeTurnRhythmState === "botThinking"\}/u,
+    );
+    assert.match(pageSource, /isPendingReplyVisible\(/u);
+    assert.match(
+      pageSource,
+      /setPendingReplyConversationId\(\s*\(current\) => current \?\? event\.conversationId/u,
     );
     assert.match(
       cssSource,
-      /composeModelEffortTrigger\[data-generating="true"\][\s\S]{0,120}animation: modelEffortThinkingSpin 1\.2s linear infinite/u,
+      /composeModelEffortTrigger\[data-generating="true"\][\s\S]{0,200}animation: modelEffortThinkingSpin 1\.2s linear infinite/u,
     );
     assert.match(cssSource, /@keyframes modelEffortThinkingSpin/u);
     assert.match(
       cssSource,
-      /@keyframes modelEffortThinkingSpin[\s\S]{0,80}rotate: 1turn/u,
+      /@keyframes modelEffortThinkingSpin[\s\S]{0,120}transform: rotate\(360deg\)/u,
     );
     assert.match(
       cssSource,

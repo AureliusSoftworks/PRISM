@@ -34439,13 +34439,26 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .composeModelEffortTrigger[data-generating="true"] > .modelEffortIcon {
   animation: modelEffortThinkingSpin 1.2s linear infinite;
   transform-origin: center;
-  will-change: rotate;
+  will-change: transform;
+  /* Hover scale uses transform — suppress it while spinning so the
+     thinking rotation stays continuous and eye-catching. */
+  transition: filter 160ms ease;
 }
 
 @keyframes modelEffortThinkingSpin {
-  to {
-    rotate: 1turn;
+  from {
+    transform: rotate(0deg);
   }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.composeModelEffortTrigger[data-generating="true"]:hover:not(:disabled)
+  > .modelEffortIcon,
+.composeModelEffortTrigger[data-generating="true"]:focus-visible
+  > .modelEffortIcon {
+  transform: none;
 }
 
 @media (prefers-reduced-motion: reduce) {
