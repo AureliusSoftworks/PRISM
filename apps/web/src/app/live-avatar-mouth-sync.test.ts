@@ -42,6 +42,15 @@ describe("live avatar mouth synchronization", () => {
       /text: args\.activeMessage\.content,[\s\S]{0,180}alignment: speechReveal\?\.alignment/u,
     );
     assert.match(avatar, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
+    assert.match(
+      avatar,
+      /rawMouthShape === "closed"/u,
+      "Signal must idle lips on literal closed pause shapes",
+    );
+    assert.match(
+      avatar,
+      /botcastSpeechRevealIsVoicing\(speechReveal\) === false/u,
+    );
   });
 
   it("drives Debate visemes from the active utterance audio clock and provider alignment", () => {
@@ -55,7 +64,7 @@ describe("live avatar mouth synchronization", () => {
     );
     assert.match(
       debateSource,
-      /onProgress: \(elapsedMs, durationMs\)[\s\S]{0,900}speechTiming: \{[\s\S]{0,220}elapsedMs: Math\.min\(playbackDurationMs, elapsedMs\)[\s\S]{0,220}alignment: playbackAlignment/u,
+      /onProgress: \(elapsedMs, durationMs\)[\s\S]{0,2500}speechTiming: \{[\s\S]{0,220}elapsedMs: Math\.min\(playbackDurationMs, elapsedMs\)[\s\S]{0,220}alignment: playbackAlignment/u,
     );
     assert.match(
       debateSource,
@@ -77,7 +86,7 @@ describe("live avatar mouth synchronization", () => {
     );
     assert.match(
       debateAvatar,
-      /const debateMouthActive =\s+!avatarState\.thinking &&\s+\(avatarState\.talking \|\| debateMouthShape !== "closed"\)/u,
+      /const debateMouthActive =\s+!avatarState\.thinking &&\s+\(\(avatarState\.talking &&\s+debateMouthShape !== "closed"\) \|\|/u,
     );
     assert.match(
       debateAvatar,
@@ -108,7 +117,7 @@ describe("live avatar mouth synchronization", () => {
   it("uses the exact primary crosstalk playback message for Signal audio", () => {
     assert.match(
       signalSource,
-      /const playbackMessage = primarySpokenContent === message\.content[\s\S]{0,120}\{ \.\.\.message, content: primarySpokenContent \}/u,
+      /const playbackMessage =\s*primarySpokenContent === message\.content[\s\S]{0,120}\{\s*\.\.\.message,\s*content:\s*primarySpokenContent\s*\}/u,
     );
     assert.match(
       signalSource,
@@ -190,6 +199,15 @@ describe("live avatar mouth synchronization", () => {
       /voiceMode === "bottish"/u,
     );
     assert.match(seatMouth, /bottishMouthShapeAtAlignedElapsedMs\(\{/u);
+    assert.match(
+      seatMouth,
+      /liveSeatLipsVoicing/u,
+      "Coffee live seats must idle lips through closed pause shapes",
+    );
+    assert.match(
+      seatMouth,
+      /liveSeatAlignedMouthShape !== "closed"/u,
+    );
   });
 
   it("caches Coffee history folds across mouth/typewriter frames", () => {

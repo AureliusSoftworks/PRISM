@@ -2,8 +2,11 @@ import {
   DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
   DEBATE_PLAYER_JUDGE_BOT_ID,
   DEBATE_PLAYER_PARTICIPANT_BOT_ID,
+  DEBATE_SCHEMA_VERSION,
   DEBATE_SETUP_PRESETS,
+  normalizeDebateModeratorTitle,
   type DebateAdvocacyConsent,
+  type DebateEvidencePacketV1,
   type DebateEvidenceSourceV1,
   type DebateFormalityId,
   type DebateForumRoundMode,
@@ -11,7 +14,9 @@ import {
   type DebateMotionSlateV1,
   type DebatePlayerRole,
   type DebateSetupPresetId,
+  type DebateSetupSuggestionV1,
   type DebateSessionV1,
+  type DebateSideId,
   type DebateStatus,
 } from "@localai/shared";
 
@@ -357,5 +362,123 @@ export function applyDebateSetupPreset<
       preset.format === current.format && preset.formality === current.formality
         ? current.roleChecks
         : [],
+  };
+}
+
+export interface DebateSetupSuggestionAppliedState {
+  topic: string;
+  format: DebateFormatId;
+  formality: DebateFormalityId;
+  forumRoundMode: DebateForumRoundMode;
+  forumRoundCount: number;
+  juryEnabled: boolean;
+  selectedPresetId: DebateSetupPresetId;
+  motion: DebateMotionSlateV1;
+  cast: DebateCastSelection;
+  playerRole: DebatePlayerRole;
+  playerSideId: DebateSideId;
+  moderatorTitle: string;
+  evidence: DebateEvidencePacketV1;
+  researchQuery: string;
+  scholarQuery: string;
+  sourcesSkippedNotice: string | null;
+}
+
+/**
+ * Map a setup-suggestion payload into Debate Studio setters without auto-start.
+ * Preserves Prism's chosen seat (Judge / Spectate / Crossfire), Jury flag,
+ * and moderator when the player is not on the Bench.
+ */
+export function applyDebateSetupSuggestion(
+  suggestion: DebateSetupSuggestionV1,
+): DebateSetupSuggestionAppliedState {
+  const matchingPreset = suggestion.setupPresetId
+    ? DEBATE_SETUP_PRESETS.find(
+        (preset) =>
+          preset.id === suggestion.setupPresetId &&
+          preset.format === suggestion.format &&
+          preset.formality === suggestion.formality &&
+          preset.playerRole === suggestion.playerRole &&
+          preset.juryEnabled === suggestion.juryEnabled,
+      )
+    : undefined;
+  const fallbackPreset =
+    DEBATE_SETUP_PRESETS.find(
+      (preset) =>
+        preset.format === suggestion.format &&
+        preset.formality === suggestion.formality &&
+        preset.playerRole === suggestion.playerRole &&
+        preset.juryEnabled === suggestion.juryEnabled,
+    ) ??
+    DEBATE_SETUP_PRESETS.find((preset) => preset.id === "classic-duel") ??
+    DEBATE_SETUP_PRESETS[0]!;
+
+  let sourcesSkippedNotice: string | null = null;
+  switch (suggestion.researchMeta.sourcesSkippedReason) {
+    case "local":
+      sourcesSkippedNotice =
+        "LOCAL mode kept emoji exhibits only — public sources stay offline.";
+      break;
+    case "missing_brave_key":
+      sourcesSkippedNotice =
+        "Brave Search was unavailable; Crossref or exhibits may still be staged.";
+      break;
+    case "research_unavailable":
+      sourcesSkippedNotice =
+        "Public source search returned nothing useful; emoji exhibits remain.";
+      break;
+    case null:
+      sourcesSkippedNotice = null;
+      break;
+    default: {
+      const _exhaustive: never = suggestion.researchMeta.sourcesSkippedReason;
+      void _exhaustive;
+      sourcesSkippedNotice = null;
+      break;
+    }
+  }
+
+  const playerRole = suggestion.playerRole;
+  const playerSideId =
+    playerRole === "participant"
+      ? (suggestion.playerSideId ?? "for")
+      : "for";
+  const forAdvocate =
+    playerRole === "participant" && playerSideId === "for"
+      ? ""
+      : suggestion.forAdvocateBotId;
+  const againstAdvocate =
+    playerRole === "participant" && playerSideId === "against"
+      ? ""
+      : suggestion.againstAdvocateBotId;
+
+  return {
+    topic: suggestion.topic,
+    format: suggestion.format,
+    formality: suggestion.formality,
+    forumRoundMode: suggestion.forumRoundMode,
+    forumRoundCount: suggestion.forumRoundCount,
+    juryEnabled: suggestion.juryEnabled,
+    selectedPresetId: matchingPreset?.id ?? fallbackPreset.id,
+    motion: copyDebateMotionSlate(suggestion.motion),
+    cast: {
+      moderator:
+        playerRole === "judge" ? "" : (suggestion.moderatorBotId ?? ""),
+      forAdvocate,
+      againstAdvocate,
+    },
+    playerRole,
+    playerSideId,
+    moderatorTitle: normalizeDebateModeratorTitle(suggestion.moderatorTitle),
+    evidence: {
+      version: DEBATE_SCHEMA_VERSION,
+      notes: suggestion.notes,
+      sources: suggestion.sources,
+      exhibits: suggestion.exhibits,
+      frozenAt: null,
+    },
+    researchQuery: suggestion.researchMeta.webQuery,
+    scholarQuery: suggestion.researchMeta.scholarQuery,
+    sourcesSkippedNotice,
   };
 }

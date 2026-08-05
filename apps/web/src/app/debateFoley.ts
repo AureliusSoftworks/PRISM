@@ -276,6 +276,22 @@ export const DEBATE_GAVEL_VISUAL_IMPACT_MS = {
 
 export const DEBATE_GAVEL_ORDER_CAMERA_CUT_MS = 420;
 
+/**
+ * Settle Auto on the Moderator shot before the visual slam arms. Order needs a
+ * longer establish after recess Wide; attention (opening bookends) still needs
+ * a visible Moderator beat before the first strike.
+ */
+export const DEBATE_GAVEL_ORDER_CAMERA_SETTLE_MS = 780;
+export const DEBATE_GAVEL_ATTENTION_CAMERA_SETTLE_MS = 720;
+
+export function debateModeratorGavelCameraSettleMs(
+  kind: DebateModeratorGavelCueKind,
+): number {
+  return kind === "order"
+    ? DEBATE_GAVEL_ORDER_CAMERA_SETTLE_MS
+    : DEBATE_GAVEL_ATTENTION_CAMERA_SETTLE_MS;
+}
+
 export function debateModeratorGavelSpeechLeadMs(
   kind: DebateModeratorGavelCueKind,
 ): number {

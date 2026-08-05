@@ -1,4 +1,7 @@
-import type { DebateAudiencePressureBand } from "@localai/shared";
+import type {
+  DebateAudiencePressureBand,
+  DebateFormalityId,
+} from "@localai/shared";
 import type { SessionAtmosphereMix } from "./session-atmosphere-audio.ts";
 
 export {
@@ -16,12 +19,36 @@ export type {
 
 /** Beds share one chamber, so preserve headroom for gavel and reaction Foley. */
 export const DEBATE_AUDIENCE_MIX_BED_CEILING = 0.7;
-const DEBATE_AUDIENCE_PRESSURE_MIX = {
+
+/**
+ * How hard the gallery bed pushes for each frozen Rowdiness choice.
+ * Daytime Showdown locks free_for_all — the loudest, messiest end.
+ */
+export const DEBATE_AUDIENCE_FORMALITY_LOUDNESS = {
+  parliamentary: 0.52,
+  structured: 0.68,
+  plainspoken: 0.84,
+  heated: 1,
+  free_for_all: 1.28,
+} as const satisfies Record<DebateFormalityId, number>;
+
+/** Anchor mixes at band thresholds — interpolated by live pressure score. */
+const DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS = {
   settled: { background: 0.1, grain: 0, foley: 0.3 },
-  murmuring: { background: 0.24, grain: 0.1, foley: 0.3 },
-  restless: { background: 0.28, grain: 0.26, foley: 0.3 },
-  disruptive: { background: 0.3, grain: 0.4, foley: 0.3 },
+  murmuring: { background: 0.22, grain: 0.12, foley: 0.3 },
+  restless: { background: 0.3, grain: 0.3, foley: 0.3 },
+  disruptive: { background: 0.34, grain: 0.42, foley: 0.3 },
 } as const satisfies Record<DebateAudiencePressureBand, SessionAtmosphereMix>;
+
+/** @deprecated Prefer debateAudiencePressureMixForScore for a smooth curve. */
+const DEBATE_AUDIENCE_PRESSURE_MIX = DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS;
+
+const DEBATE_AUDIENCE_BAND_SCORE = {
+  settled: 0,
+  murmuring: 20,
+  restless: 45,
+  disruptive: 70,
+} as const satisfies Record<DebateAudiencePressureBand, number>;
 
 function stableHash(text: string): number {
   let hash = 2_166_136_261;
@@ -32,11 +59,146 @@ function stableHash(text: string): number {
   return hash >>> 0;
 }
 
+function clampUnit(value: number): number {
+  return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
+}
+
+function clampPressure(value: number): number {
+  return Math.max(0, Math.min(100, Number.isFinite(value) ? value : 0));
+}
+
+function lerp(from: number, to: number, t: number): number {
+  return from + (to - from) * clampUnit(t);
+}
+
+function scaleMixBed(
+  mix: SessionAtmosphereMix,
+  loudness: number,
+): SessionAtmosphereMix {
+  const background = mix.background * loudness;
+  const grain = mix.grain * loudness;
+  const bed = background + grain;
+  if (bed <= DEBATE_AUDIENCE_MIX_BED_CEILING || bed <= 0) {
+    return { background, grain, foley: mix.foley };
+  }
+  const shrink = DEBATE_AUDIENCE_MIX_BED_CEILING / bed;
+  return {
+    background: background * shrink,
+    grain: grain * shrink,
+    foley: mix.foley,
+  };
+}
+
+function interpolatePressureMix(
+  score: number,
+): SessionAtmosphereMix {
+  const pressure = clampPressure(score);
+  if (pressure <= DEBATE_AUDIENCE_BAND_SCORE.murmuring) {
+    const t =
+      pressure / Math.max(1, DEBATE_AUDIENCE_BAND_SCORE.murmuring);
+    const from = DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS.settled;
+    const to = DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS.murmuring;
+    return {
+      background: lerp(from.background, to.background, t),
+      grain: lerp(from.grain, to.grain, t),
+      foley: from.foley,
+    };
+  }
+  if (pressure <= DEBATE_AUDIENCE_BAND_SCORE.restless) {
+    const span =
+      DEBATE_AUDIENCE_BAND_SCORE.restless -
+      DEBATE_AUDIENCE_BAND_SCORE.murmuring;
+    const t =
+      (pressure - DEBATE_AUDIENCE_BAND_SCORE.murmuring) / Math.max(1, span);
+    const from = DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS.murmuring;
+    const to = DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS.restless;
+    return {
+      background: lerp(from.background, to.background, t),
+      grain: lerp(from.grain, to.grain, t),
+      foley: from.foley,
+    };
+  }
+  if (pressure <= DEBATE_AUDIENCE_BAND_SCORE.disruptive) {
+    const span =
+      DEBATE_AUDIENCE_BAND_SCORE.disruptive -
+      DEBATE_AUDIENCE_BAND_SCORE.restless;
+    const t =
+      (pressure - DEBATE_AUDIENCE_BAND_SCORE.restless) / Math.max(1, span);
+    const from = DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS.restless;
+    const to = DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS.disruptive;
+    return {
+      background: lerp(from.background, to.background, t),
+      grain: lerp(from.grain, to.grain, t),
+      foley: from.foley,
+    };
+  }
+  const overflow = (pressure - DEBATE_AUDIENCE_BAND_SCORE.disruptive) / 30;
+  const peak = DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS.disruptive;
+  return {
+    background: lerp(peak.background, peak.background + 0.06, overflow),
+    grain: lerp(peak.grain, peak.grain + 0.08, overflow),
+    foley: peak.foley,
+  };
+}
+
+export function debateAudienceFormalityLoudness(
+  formality: DebateFormalityId,
+): number {
+  return DEBATE_AUDIENCE_FORMALITY_LOUDNESS[formality];
+}
+
+/**
+ * Discrete band mix (legacy). Prefer {@link debateAudiencePressureMixForScore}
+ * so the room swells continuously instead of stair-stepping.
+ */
 export function debateAudiencePressureMix(
   band: DebateAudiencePressureBand,
+  formality: DebateFormalityId = "plainspoken",
 ): SessionAtmosphereMix {
-  return DEBATE_AUDIENCE_PRESSURE_MIX[band];
+  return scaleMixBed(
+    DEBATE_AUDIENCE_PRESSURE_MIX[band],
+    debateAudienceFormalityLoudness(formality),
+  );
 }
+
+/** Smooth gallery bed from live pressure + frozen Rowdiness. */
+export function debateAudiencePressureMixForScore(
+  score: number,
+  formality: DebateFormalityId,
+): SessionAtmosphereMix {
+  return scaleMixBed(
+    interpolatePressureMix(score),
+    debateAudienceFormalityLoudness(formality),
+  );
+}
+
+/**
+ * Peak bed while the moderator calls the gallery to order. Hotter Rowdiness
+ * stays louder under the gavel — never ducks to silence.
+ */
+export function debateAudienceOrderCallMix(
+  formality: DebateFormalityId,
+): SessionAtmosphereMix {
+  const loudness = debateAudienceFormalityLoudness(formality);
+  const peak = DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS.disruptive;
+  return scaleMixBed(
+    {
+      background: peak.background + 0.08,
+      grain: peak.grain + 0.1,
+      foley: peak.foley,
+    },
+    Math.max(1, loudness),
+  );
+}
+
+/** Hold the rowdy peak under the order call before easing room tone back. */
+export const DEBATE_AUDIENCE_ORDER_PEAK_HOLD_MS = 1_350;
+
+/** Ease from order-call peak back toward settled room tone. */
+export const DEBATE_AUDIENCE_ORDER_RETURN_MS = 2_800;
+
+/** Continuous pressure-band mix transitions (not the order-call special case). */
+export const DEBATE_AUDIENCE_PRESSURE_MIX_TRANSITION_MS = 1_400;
 
 export function debateAudienceTalkerIndices(args: {
   band: DebateAudiencePressureBand;

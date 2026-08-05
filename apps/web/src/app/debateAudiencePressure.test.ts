@@ -7,8 +7,10 @@ import {
 } from "@localai/shared";
 import {
   DEBATE_AUDIENCE_MIX_BED_CEILING,
+  debateAudienceOrderCallMix,
   debateAudiencePressureBand,
   debateAudiencePressureMix,
+  debateAudiencePressureMixForScore,
   debateAudiencePressureScore,
   debateAudienceTalkerIndices,
   debateAudienceVisualPressureBand,
@@ -46,22 +48,51 @@ describe("Debate audience pressure", () => {
     assert.equal(debateAudiencePressureBand(69), "restless");
     assert.equal(debateAudiencePressureBand(70), "disruptive");
     assert.equal(debateAudiencePressureBand(100), "disruptive");
-    assert.deepEqual(debateAudiencePressureMix("disruptive"), {
-      background: 0.3,
-      grain: 0.4,
-      foley: 0.3,
-    });
+    assert.ok(
+      Math.abs(
+        debateAudiencePressureMix("disruptive").background - 0.34 * 0.84,
+      ) < 1e-9,
+    );
+    assert.ok(
+      Math.abs(debateAudiencePressureMix("disruptive").grain - 0.42 * 0.84) <
+        1e-9,
+    );
+    assert.equal(debateAudiencePressureMix("disruptive").foley, 0.3);
+    assert.deepEqual(
+      debateAudiencePressureMix("disruptive", "free_for_all").background >
+        debateAudiencePressureMix("disruptive", "parliamentary").background,
+      true,
+    );
+    const mid = debateAudiencePressureMixForScore(57, "heated");
+    const low = debateAudiencePressureMixForScore(25, "heated");
+    const high = debateAudiencePressureMixForScore(88, "heated");
+    assert.ok(mid.background > low.background);
+    assert.ok(high.grain >= mid.grain);
+    const orderCall = debateAudienceOrderCallMix("free_for_all");
+    assert.ok(
+      orderCall.background + orderCall.grain >
+        debateAudiencePressureMix("disruptive", "plainspoken").background +
+          debateAudiencePressureMix("disruptive", "plainspoken").grain,
+    );
     for (const band of [
       "settled",
       "murmuring",
       "restless",
       "disruptive",
     ] as const) {
-      const mix = debateAudiencePressureMix(band);
-      assert.ok(
-        mix.background + mix.grain <= DEBATE_AUDIENCE_MIX_BED_CEILING,
-      );
-      assert.ok(mix.background + mix.grain + mix.foley <= 1);
+      for (const formality of [
+        "parliamentary",
+        "structured",
+        "plainspoken",
+        "heated",
+        "free_for_all",
+      ] as const) {
+        const mix = debateAudiencePressureMix(band, formality);
+        assert.ok(
+          mix.background + mix.grain <= DEBATE_AUDIENCE_MIX_BED_CEILING + 1e-9,
+        );
+        assert.ok(mix.background + mix.grain + mix.foley <= 1 + 1e-9);
+      }
     }
   });
 
@@ -88,7 +119,7 @@ describe("Debate audience pressure", () => {
     assert.ok(new Set(scores).size === scores.length);
   });
 
-  it("keeps the gallery quiet through most of a live monologue, then murmurs near the end", () => {
+  it("keeps a living murmur under a live monologue, then swells near the end", () => {
     const speech = event("ramping", 1);
     const prior = event("prior", 0, {
       content: "Earlier argument that already heated the room.",
@@ -101,13 +132,16 @@ describe("Debate audience pressure", () => {
         activeEventId: speech.id,
         visibleCharacterCount,
       });
-    // Prior heat is fully suppressed while the current bot is still talking.
-    assert.equal(scoreAt(0), 0);
-    assert.equal(scoreAt(Math.floor(speech.content.length * 0.5)), 0);
-    assert.equal(scoreAt(Math.floor(speech.content.length * 0.74)), 0);
+    // Prior heat is ducked, but stays at least murmuring so seats keep talking.
+    const early = scoreAt(0);
+    const mid = scoreAt(Math.floor(speech.content.length * 0.5));
+    assert.ok(early >= 28);
+    assert.equal(early, mid);
+    assert.equal(debateAudiencePressureBand(early), "murmuring");
+    // Heated rooms start the late swell after ~79% of the line.
     assert.ok(
-      scoreAt(Math.floor(speech.content.length * 0.85)) >
-        scoreAt(Math.floor(speech.content.length * 0.75)),
+      scoreAt(Math.floor(speech.content.length * 0.9)) >
+        scoreAt(Math.floor(speech.content.length * 0.7)),
     );
     assert.equal(
       scoreAt(speech.content.length),
@@ -117,6 +151,28 @@ describe("Debate audience pressure", () => {
         playerRole: "judge",
       }),
     );
+  });
+
+  it("lets Daytime Showdown / free-for-all swell earlier in a live line", () => {
+    const speech = event("daytime-ramp", 1, {
+      content:
+        "A longer daytime-showdown line so the gallery can start swelling before the handoff arrives on the floor.",
+    });
+    const scoreAt = (
+      formality: DebateFormalityId,
+      ratio: number,
+    ): number =>
+      debateAudiencePressureScore({
+        events: [speech],
+        formality,
+        playerRole: "spectator",
+        activeEventId: speech.id,
+        visibleCharacterCount: Math.floor(speech.content.length * ratio),
+      });
+    // Living floor keeps a murmur bed under every formality; hotter rooms swell more.
+    assert.ok(scoreAt("parliamentary", 0.55) > 0);
+    assert.ok(scoreAt("free_for_all", 0.55) > scoreAt("parliamentary", 0.55));
+    assert.ok(scoreAt("free_for_all", 0.55) > scoreAt("heated", 0.55));
   });
 
   it("uses the strongest event reaction bonus and resets on saved order", () => {

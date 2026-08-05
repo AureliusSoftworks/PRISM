@@ -1,6 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import type { DebateEventV1 } from "@localai/shared";
+import { DEBATE_SCHEMA_VERSION, type DebateEventV1 } from "@localai/shared";
 
 import {
   DEBATE_INTERRUPT_OVERLAP_PROGRESS,
@@ -15,11 +15,14 @@ function event(
     Pick<DebateEventV1, "id" | "kind" | "sequence">,
 ): DebateEventV1 {
   return {
+    version: DEBATE_SCHEMA_VERSION,
+    phase: "opening",
     stepKey: "opening_against",
     speakerKind: "advocate",
     speakerBotId: "bot-a",
     sideId: "for",
     content: "And that's why all fighters deserve better support.",
+    sourceIds: [],
     createdAt: "2026-08-05T00:00:00.000Z",
     ...partial,
   };
@@ -59,13 +62,14 @@ describe("debateInterruptOverlap", () => {
     });
     const order = event({
       id: "order-1",
-      kind: "system",
+      kind: "judge_gavel",
       sequence: 2,
       stepKey: "audience_order",
       speakerKind: "system",
       speakerBotId: null,
       sideId: null,
       content: "",
+      gavelReason: "audience_order",
     });
     const objection = event({
       id: "obj-1",

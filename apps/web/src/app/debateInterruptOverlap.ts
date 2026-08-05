@@ -32,7 +32,8 @@ function debateInterruptSkippableBetween(
   event: Pick<DebateEventV1, "kind" | "stepKey">,
 ): boolean {
   return (
-    event.kind === "system" ||
+    event.kind === "case_board" ||
+    event.kind === "silence" ||
     event.stepKey === "audience_order" ||
     event.stepKey.startsWith("persona_reaction_")
   );
@@ -52,11 +53,7 @@ export function debateInterruptOverlapPair(
   if (interruptedIndex < 0) return null;
   const interrupted = events[interruptedIndex]!;
   if (!interrupted.interrupted) return null;
-  if (
-    interrupted.kind !== "speech" &&
-    interrupted.kind !== "player_turn" &&
-    interrupted.kind !== "moderator_prompt"
-  ) {
+  if (interrupted.kind !== "speech" && interrupted.kind !== "player_turn") {
     return null;
   }
   for (let index = interruptedIndex + 1; index < events.length; index += 1) {

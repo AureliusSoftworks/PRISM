@@ -15,15 +15,21 @@ export type ZenLiveBotMouthShape =
   | "at"
   | "click";
 
-/** Keeps mood-specific resting mouths out of active speech's closed beats. */
+/**
+ * Speech visemes use `"speech-closed"` for consonant closures and `"closed"` for
+ * true silence / punctuation rests. Never remap `"closed"` → `"speech-closed"`
+ * while an utterance is still in progress — that made lips chatter through
+ * pauses. Callers that need mood idle should pass `null` / drop talking lips
+ * separately from the utterance/`isTalking` status label.
+ */
 export function zenLiveBotMouthShapeForTalkingState({
   mouthShape,
-  isTalking,
+  isTalking: _isTalking,
 }: {
   mouthShape: ZenLiveBotMouthShape;
   isTalking: boolean;
 }): ZenLiveBotMouthShape {
-  return isTalking && mouthShape === "closed" ? "speech-closed" : mouthShape;
+  return mouthShape;
 }
 
 type ZenLiveTalkingMouthShape = Exclude<ZenLiveBotMouthShape, "closed">;

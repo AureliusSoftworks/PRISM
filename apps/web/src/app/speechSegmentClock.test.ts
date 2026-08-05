@@ -102,6 +102,20 @@ describe("speech segment clock — English clause gaps", () => {
     assert.equal(speechActivityAtMs(windows, 2425), false);
   });
 
+  it("does not pull the next clause onset into a silence gap with attack", () => {
+    const segments = spongesSegments();
+    const windows = buildSpeechActivityWindowsFromHeardSegments(
+      segments,
+      3400,
+    );
+    assert.ok(windows);
+    // Second heard clause starts at 1100ms — attack must not open lips at 1055.
+    assert.equal(speechActivityAtMs(windows, 1099), false);
+    assert.equal(speechActivityAtMs(windows, 1100), true);
+    assert.equal(speechActivityAtMs(windows, 2499), false);
+    assert.equal(speechActivityAtMs(windows, 2500), true);
+  });
+
   it("keeps Signal reveal text and mouth frozen through a gap", () => {
     const [first, gap, second] = spongesSegments();
     let reveal = startBotcastSpeechReveal({

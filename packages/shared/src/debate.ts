@@ -38,6 +38,12 @@ export const DEBATE_EVIDENCE_ITEM_MAX_COUNT = 12;
 export const DEBATE_EVIDENCE_EXHIBIT_ADJECTIVE_MAX_LENGTH = 48;
 export const DEBATE_EVIDENCE_EXHIBIT_OBJECT_MAX_LENGTH = 96;
 export const DEBATE_EVIDENCE_EXHIBIT_OBSERVATION_MAX_LENGTH = 800;
+/** New Duel generate always stages a small prop pack. */
+export const DEBATE_SETUP_SUGGESTION_EXHIBIT_MIN = 2;
+export const DEBATE_SETUP_SUGGESTION_EXHIBIT_MAX = 4;
+/** Cap auto research so exhibits still fit under DEBATE_EVIDENCE_ITEM_MAX_COUNT. */
+export const DEBATE_SETUP_SUGGESTION_WEB_SOURCE_MAX = 2;
+export const DEBATE_SETUP_SUGGESTION_SCHOLAR_SOURCE_MAX = 2;
 export const DEBATE_PLAYER_TURN_MAX_LENGTH = 4_000;
 export const DEBATE_CASE_CARDS_PER_SIDE = 4;
 export const DEBATE_TURNABOUT_STATEMENTS_PER_SIDE = 2;
@@ -431,6 +437,46 @@ export interface DebateEvidencePacketV1 {
   /** Optional on legacy source-only sessions; normalization always supplies it. */
   exhibits?: DebateEvidenceExhibitV1[];
   frozenAt: string | null;
+}
+
+export type DebateSetupSuggestionSourcesSkippedReason =
+  | "local"
+  | "missing_brave_key"
+  | "research_unavailable"
+  | null;
+
+export interface DebateSetupSuggestionResearchMetaV1 {
+  webQuery: string;
+  scholarQuery: string;
+  sourcesSkippedReason: DebateSetupSuggestionSourcesSkippedReason;
+}
+
+/**
+ * Full Debate Studio draft from Wield Prism → New Duel.
+ * Room role, Jury, and moderator may vary with the chosen preset.
+ */
+export interface DebateSetupSuggestionV1 {
+  topic: string;
+  motion: DebateMotionSlateV1;
+  format: DebateFormatId;
+  formality: DebateFormalityId;
+  forumRoundMode: DebateForumRoundMode;
+  forumRoundCount: number;
+  juryEnabled: boolean;
+  setupPresetId: DebateSetupPresetId | null;
+  playerRole: DebatePlayerRole;
+  /** Required when playerRole is participant; otherwise null. */
+  playerSideId: DebateSideId | null;
+  /** Empty when the player occupies the Judge seat (Prism). */
+  moderatorBotId: string | null;
+  /** Evocative public title for the presiding voice; topic-flavored. */
+  moderatorTitle: string;
+  forAdvocateBotId: string;
+  againstAdvocateBotId: string;
+  notes: string;
+  exhibits: DebateEvidenceExhibitV1[];
+  sources: DebateEvidenceSourceV1[];
+  researchMeta: DebateSetupSuggestionResearchMetaV1;
 }
 
 export interface DebateAdvocacyConsent {
@@ -983,6 +1029,11 @@ export interface DebateSessionCreateRequest {
   modelOverride?: string | null;
   responseMode?: ResponseMode;
   theme?: BotPowerResolvedThemeV1;
+  /**
+   * Save for later: create a paused Archive Open proceeding without opening
+   * the chamber. Exhibit imageIds stay protected via session_json references.
+   */
+  deferStart?: boolean;
   idempotencyKey: string;
 }
 
@@ -1070,6 +1121,8 @@ export interface DebateSessionListItemV1 {
   /** Canonical presentation runtime; excludes recesses and generation waits. */
   activeDurationMs: number | null;
   synopsisText?: string | null;
+  /** True when Archive Open holds a Save Debate setup that has never started. */
+  awaitingDeferredStart?: boolean;
 }
 
 export interface DebateDebriefChatMessageV1 {
@@ -1425,6 +1478,249 @@ export function normalizeDebateEvidencePacketV1(
   };
 }
 
+function normalizeDebateSetupSuggestionSourcesSkippedReason(
+  value: unknown,
+): DebateSetupSuggestionSourcesSkippedReason {
+  if (
+    value === "local" ||
+    value === "missing_brave_key" ||
+    value === "research_unavailable"
+  ) {
+    return value;
+  }
+  return null;
+}
+
+function normalizeDebateForumRoundMode(value: unknown): DebateForumRoundMode {
+  return value === "fixed" ? "fixed" : "auto";
+}
+
+function normalizeDebateForumRoundCount(value: unknown): number {
+  const raw =
+    typeof value === "number"
+      ? value
+      : typeof value === "string"
+        ? Number(value)
+        : Number.NaN;
+  if (!Number.isFinite(raw)) return DEBATE_FORUM_MIN_REBUTTAL_ROUNDS;
+  return Math.max(
+    DEBATE_FORUM_MIN_REBUTTAL_ROUNDS,
+    Math.min(DEBATE_FORUM_MAX_REBUTTAL_ROUNDS, Math.trunc(raw)),
+  );
+}
+
+/**
+ * Strict New Duel draft normalizer. Rejects unknown bot ids and incomplete
+ * motions; forces emoji-only exhibits; caps Brave/Crossref sources so the
+ * shared evidence packet still has room for props.
+ */
+export function normalizeDebateSetupSuggestionV1(
+  value: unknown,
+  allowedBotIds: readonly string[],
+): DebateSetupSuggestionV1 | null {
+  const source =
+    value && typeof value === "object"
+      ? (value as Record<string, unknown>)
+      : {};
+  const allowed = new Set(
+    allowedBotIds
+      .map((id) => (typeof id === "string" ? id.trim() : ""))
+      .filter(Boolean),
+  );
+  const motion = normalizeDebateMotionSlateV1(source.motion, "setup-slate");
+  if (
+    !motion.motion ||
+    !motion.forSide.label ||
+    !motion.forSide.brief ||
+    !motion.againstSide.label ||
+    !motion.againstSide.brief
+  ) {
+    return null;
+  }
+  const forAdvocateBotId =
+    typeof source.forAdvocateBotId === "string"
+      ? source.forAdvocateBotId.trim()
+      : "";
+  const againstAdvocateBotId =
+    typeof source.againstAdvocateBotId === "string"
+      ? source.againstAdvocateBotId.trim()
+      : "";
+  if (
+    !forAdvocateBotId ||
+    !againstAdvocateBotId ||
+    forAdvocateBotId === againstAdvocateBotId ||
+    !allowed.has(forAdvocateBotId) ||
+    !allowed.has(againstAdvocateBotId)
+  ) {
+    return null;
+  }
+
+  const researchMetaSource =
+    source.researchMeta && typeof source.researchMeta === "object"
+      ? (source.researchMeta as Record<string, unknown>)
+      : {};
+  const researchMeta: DebateSetupSuggestionResearchMetaV1 = {
+    webQuery: normalizedText(researchMetaSource.webQuery ?? source.webQuery, 500),
+    scholarQuery: normalizedText(
+      researchMetaSource.scholarQuery ?? source.scholarQuery,
+      500,
+    ),
+    sourcesSkippedReason: normalizeDebateSetupSuggestionSourcesSkippedReason(
+      researchMetaSource.sourcesSkippedReason,
+    ),
+  };
+
+  const packet = normalizeDebateEvidencePacketV1({
+    notes: source.notes,
+    sources: Array.isArray(source.sources) ? source.sources : [],
+    exhibits: Array.isArray(source.exhibits)
+      ? source.exhibits.map((item, index) => {
+          const row =
+            item && typeof item === "object"
+              ? (item as Record<string, unknown>)
+              : {};
+          const adjective = normalizeDebateEvidenceExhibitAdjective(
+            row.adjective,
+          );
+          const object = normalizeDebateEvidenceExhibitObject(row.object);
+          return {
+            id: `exhibit-${index + 1}`,
+            adjective,
+            object,
+            title: debateEvidenceExhibitTitle({ adjective, object }),
+            observation: row.observation,
+            emoji: row.emoji,
+            visualKind: "emoji",
+            imageId: null,
+            createdBy: "prism",
+          };
+        })
+      : [],
+  });
+
+  const sources = packet.sources.slice(
+    0,
+    DEBATE_SETUP_SUGGESTION_WEB_SOURCE_MAX +
+      DEBATE_SETUP_SUGGESTION_SCHOLAR_SOURCE_MAX,
+  );
+  const exhibits = (packet.exhibits ?? [])
+    .filter((exhibit) => exhibit.adjective && exhibit.object && exhibit.title)
+    .slice(0, DEBATE_SETUP_SUGGESTION_EXHIBIT_MAX)
+    .map((exhibit, index) => ({
+      ...exhibit,
+      id: `exhibit-${index + 1}`,
+      visualKind: "emoji" as const,
+      imageId: null,
+      createdBy: "prism" as const,
+    }));
+  if (exhibits.length < DEBATE_SETUP_SUGGESTION_EXHIBIT_MIN) {
+    return null;
+  }
+
+  const remainingSlots = Math.max(
+    0,
+    DEBATE_EVIDENCE_ITEM_MAX_COUNT - exhibits.length,
+  );
+  const cappedSources = sources.slice(0, remainingSlots);
+
+  const setupPresetRaw = source.setupPresetId;
+  const setupPresetId = isDebateSetupPresetId(setupPresetRaw)
+    ? setupPresetRaw
+    : null;
+  const matchedPreset = setupPresetId
+    ? DEBATE_SETUP_PRESETS.find((preset) => preset.id === setupPresetId) ?? null
+    : null;
+
+  const requestedPlayerRole = isDebatePlayerRole(source.playerRole)
+    ? source.playerRole
+    : null;
+  const playerRole =
+    matchedPreset?.playerRole ?? requestedPlayerRole ?? "judge";
+  const juryEnabled = matchedPreset
+    ? matchedPreset.juryEnabled
+    : source.juryEnabled === true;
+  const format = matchedPreset
+    ? matchedPreset.format
+    : normalizeDebateFormatId(source.format);
+  const formality = matchedPreset
+    ? matchedPreset.formality
+    : normalizeDebateFormalityId(source.formality);
+
+  const playerSideId =
+    playerRole === "participant"
+      ? isDebateSideId(source.playerSideId)
+        ? source.playerSideId
+        : "for"
+      : null;
+
+  const moderatorBotIdRaw =
+    typeof source.moderatorBotId === "string"
+      ? source.moderatorBotId.trim()
+      : "";
+  const moderatorBotId =
+    playerRole === "judge"
+      ? null
+      : moderatorBotIdRaw &&
+          allowed.has(moderatorBotIdRaw) &&
+          moderatorBotIdRaw !== forAdvocateBotId &&
+          moderatorBotIdRaw !== againstAdvocateBotId
+        ? moderatorBotIdRaw
+        : null;
+  const moderatorTitle = normalizeDebateModeratorTitle(source.moderatorTitle);
+
+  return {
+    topic: normalizedText(source.topic, 1_000) || motion.motion.slice(0, 120),
+    motion,
+    format,
+    formality,
+    forumRoundMode: normalizeDebateForumRoundMode(source.forumRoundMode),
+    forumRoundCount: normalizeDebateForumRoundCount(source.forumRoundCount),
+    juryEnabled,
+    setupPresetId,
+    playerRole,
+    playerSideId,
+    moderatorBotId,
+    moderatorTitle,
+    forAdvocateBotId,
+    againstAdvocateBotId,
+    notes: packet.notes,
+    exhibits,
+    sources: cappedSources,
+    researchMeta,
+  };
+}
+
+/**
+ * Fill a missing moderator seat for Spectator/Crossfire drafts from unused roster bots.
+ */
+export function completeDebateSetupSuggestionCastV1(
+  suggestion: DebateSetupSuggestionV1,
+  allowedBotIds: readonly string[],
+  pickIndex: (exclusiveMax: number) => number = (max) =>
+    Math.floor(Math.random() * max),
+): DebateSetupSuggestionV1 {
+  if (suggestion.playerRole === "judge") {
+    return { ...suggestion, moderatorBotId: null };
+  }
+  if (suggestion.moderatorBotId) return suggestion;
+  const reserved = new Set([
+    suggestion.forAdvocateBotId,
+    suggestion.againstAdvocateBotId,
+  ]);
+  const candidates = allowedBotIds
+    .map((id) => id.trim())
+    .filter((id) => id && !reserved.has(id));
+  if (candidates.length === 0) return suggestion;
+  const index = Math.max(
+    0,
+    Math.min(candidates.length - 1, Math.floor(pickIndex(candidates.length))),
+  );
+  return {
+    ...suggestion,
+    moderatorBotId: candidates[index] ?? null,
+  };
+}
+
 export function debateEvidenceItems(
   evidence: DebateEvidencePacketV1,
 ): DebateEvidenceItemV1[] {
@@ -1612,6 +1908,25 @@ export function debateSpectatorAwaitingFirstWatch(
     session.status === "paused" &&
     !session.pausedPresentationEventId &&
     session.events.length > 0
+  );
+}
+
+/**
+ * Saved-for-later Studio setups: Archive Open, paused, never opened the floor.
+ * Resume/Start begins the intro (and Spectator bake) as a fresh launch.
+ */
+export function debateSessionAwaitingDeferredStart(
+  session: Pick<
+    DebateSessionV1,
+    "status" | "pausedPresentationEventId" | "events" | "completedAt" | "stepKey"
+  >,
+): boolean {
+  if (session.status !== "paused") return false;
+  if (session.completedAt != null) return false;
+  if (session.pausedPresentationEventId) return false;
+  if (session.events.length > 0) return false;
+  return (
+    session.stepKey === "intro" || session.stepKey === "turnabout_intro"
   );
 }
 

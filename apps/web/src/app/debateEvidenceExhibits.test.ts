@@ -5,11 +5,13 @@ import {
   DEBATE_EVIDENCE_EMOJI_CHOICES,
   applyDebateEvidenceExhibitAssetReuse,
   applyDebateEvidenceObjectNameEdit,
+  debateEvidenceObjectDraftFromExhibit,
   debateEvidenceObjectDraftFromPrismCandidate,
   debateEvidenceObjectFromPrismCandidate,
   debateEvidenceEmojiForObject,
   normalizeDebateEvidenceEmojiChoice,
   randomDebateEvidenceObject,
+  replaceDebateEvidenceExhibit,
   searchDebateEvidenceEmojis,
 } from "./debateEvidenceExhibits.ts";
 
@@ -244,5 +246,50 @@ describe("Debate evidence object generator", () => {
     assert.equal(normalizeDebateEvidenceEmojiChoice("🧑🏽‍🚀"), "🧑🏽‍🚀");
     assert.equal(normalizeDebateEvidenceEmojiChoice("📦🏳️‍🌈"), "🏳️‍🌈");
     assert.equal(normalizeDebateEvidenceEmojiChoice("", "🥄"), "🥄");
+  });
+
+  it("reopens a saved exhibit into the composer and replaces by id", () => {
+    const exhibit = {
+      id: "exhibit-1",
+      adjective: "Rusty",
+      object: "spoon",
+      title: "Rusty spoon",
+      observation: "The bowl is dented.",
+      emoji: "🥄",
+      visualKind: "emoji" as const,
+      imageId: null,
+      createdBy: "player" as const,
+    };
+    const draft = debateEvidenceObjectDraftFromExhibit(exhibit);
+    assert.equal(draft.adjective, "Rusty");
+    assert.equal(draft.emojiCustomized, true);
+    assert.equal(draft.createdBy, "player");
+
+    const packet = {
+      version: 1 as const,
+      notes: "",
+      sources: [],
+      exhibits: [
+        exhibit,
+        {
+          ...exhibit,
+          id: "exhibit-2",
+          adjective: "Folded",
+          object: "note",
+          title: "Folded note",
+          observation: "Ink bleeds at the crease.",
+          emoji: "📝",
+        },
+      ],
+      frozenAt: null,
+    };
+    const next = replaceDebateEvidenceExhibit(packet, "exhibit-1", {
+      ...exhibit,
+      observation: "The handle is warm.",
+      emoji: "🔧",
+    });
+    assert.equal(next.exhibits?.[0]?.id, "exhibit-1");
+    assert.equal(next.exhibits?.[0]?.observation, "The handle is warm.");
+    assert.equal(next.exhibits?.[1]?.id, "exhibit-2");
   });
 });

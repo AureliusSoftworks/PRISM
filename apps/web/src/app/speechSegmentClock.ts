@@ -1,7 +1,10 @@
 import {
   buildSpeechActivityWindows,
   buildSpeechActivityWindowsFromTextCadence,
+  speechActivityEnvelopeEndMs,
+  speechActivityEnvelopeStartMs,
   SPEECH_ACTIVITY_ATTACK_MS,
+  SPEECH_ACTIVITY_MERGE_GAP_MS,
   SPEECH_ACTIVITY_RELEASE_MS,
   type SpeechActivityWindow,
 } from "./speechActivity.ts";
@@ -83,8 +86,9 @@ export function buildCharacterAlignmentFromSegmentTimings(
 }
 
 /**
- * Voiced windows from heard speech segments only. Gaps stay idle after a
- * brief release so the mouth closes through clause pauses.
+ * Voiced windows from heard speech segments only. Gaps stay idle — attack
+ * never pulls the next clause into silence, and release is capped so short
+ * pauses still close the mouth.
  */
 export function buildSpeechActivityWindowsFromHeardSegments(
   segments: readonly SpeechSegmentTiming[],
@@ -97,21 +101,28 @@ export function buildSpeechActivityWindowsFromHeardSegments(
     Math.round(Number.isFinite(durationMs) ? durationMs : 0),
   );
   const windows: SpeechActivityWindow[] = [];
-  for (const segment of speech) {
-    const startMs = Math.max(
-      0,
-      windows.length === 0
-        ? segment.startMs
-        : segment.startMs - SPEECH_ACTIVITY_ATTACK_MS,
-    );
-    const endMs = Math.min(
-      normalizedDurationMs,
-      segment.endMs + SPEECH_ACTIVITY_RELEASE_MS,
-    );
+  for (let index = 0; index < speech.length; index += 1) {
+    const segment = speech[index]!;
+    const next = speech[index + 1] ?? null;
+    const previousSegment = speech[index - 1] ?? null;
+    const previous = windows.at(-1) ?? null;
+    const startMs = speechActivityEnvelopeStartMs({
+      rawStartMs: segment.startMs,
+      previousEndMs: previousSegment?.endMs ?? null,
+      attackMs: SPEECH_ACTIVITY_ATTACK_MS,
+    });
+    const endMs = speechActivityEnvelopeEndMs({
+      rawEndMs: segment.endMs,
+      nextRawStartMs: next?.startMs ?? null,
+      releaseMs: SPEECH_ACTIVITY_RELEASE_MS,
+      durationMs: normalizedDurationMs,
+    });
     if (endMs <= startMs) continue;
-    const previous = windows.at(-1);
     // Do not bridge deliberate clause pauses — only touch adjacent phoneme tails.
-    if (previous && startMs <= previous.endMs) {
+    if (
+      previous &&
+      startMs <= previous.endMs + SPEECH_ACTIVITY_MERGE_GAP_MS
+    ) {
       previous.endMs = Math.max(previous.endMs, endMs);
     } else {
       windows.push({ startMs, endMs });

@@ -13,8 +13,13 @@ import {
   DEBATE_PLAYER_JUDGE_BOT_ID,
   DEBATE_PLAYER_PARTICIPANT_BOT_ID,
   DEBATE_PLAYER_TURN_MAX_LENGTH,
+  DEBATE_MODERATOR_TITLE_MAX_LENGTH,
   DEBATE_SCHEMA_VERSION,
   DEBATE_SETUP_PRESETS,
+  DEBATE_SETUP_SUGGESTION_EXHIBIT_MAX,
+  DEBATE_SETUP_SUGGESTION_EXHIBIT_MIN,
+  DEBATE_SETUP_SUGGESTION_SCHOLAR_SOURCE_MAX,
+  DEBATE_SETUP_SUGGESTION_WEB_SOURCE_MAX,
   DEBATE_VOICE_PERFORMANCE_CUES,
   DEBATE_PERSONA_SURPRISE_STEP_PREFIX,
   DEBATE_TURNABOUT_STATEMENTS_PER_SIDE,
@@ -46,6 +51,7 @@ import {
   debateActivePresentationDurationMs,
   debateEstimatedSpeechDurationMs,
   debateSessionAwaitsPresentationSeal,
+  debateSessionAwaitingDeferredStart,
   botPowerPairwisePerceptionFromEffectsV1,
   debateSourceIdsFromText,
   debateSpokenText,
@@ -62,6 +68,8 @@ import {
   normalizeDebateJuryStateV1,
   normalizeDebateModeratorTitle,
   normalizeDebateMotionSlateV1,
+  normalizeDebateSetupSuggestionV1,
+  completeDebateSetupSuggestionCastV1,
   normalizeDebateVoicePerformanceCue,
   normalizeDebateTitle,
   normalizeDebateSetupPresetId,
@@ -92,6 +100,7 @@ import {
   type DebateEventKind,
   type DebateEventV1,
   type DebateEvidencePacketV1,
+  type DebateEvidenceSourceV1,
   type DebateFormalityId,
   type DebateForumFormatStateV1,
   type DebateFormatId,
@@ -119,6 +128,7 @@ import {
   type DebateSessionSynopsisV1,
   type DebateSessionV1,
   type DebateSetupPresetId,
+  type DebateSetupSuggestionV1,
   type DebateSideId,
   type DebateSpeakerKind,
   type DebateTurnaboutActionRequest,
@@ -1392,6 +1402,244 @@ export async function synthesizeDebateTitle(
   );
 }
 
+export interface DebateSetupSuggestionRosterBot {
+  id: string;
+  name: string;
+  personaSnippet: string;
+}
+
+export interface DebateSetupSuggestionResearchHooks {
+  allowOnlineResearch: boolean;
+  searchWeb: (query: string) => Promise<DebateEvidenceSourceV1[]>;
+  searchScholar: (query: string) => Promise<DebateEvidenceSourceV1[]>;
+}
+
+function mergeSetupSuggestionSources(
+  web: readonly DebateEvidenceSourceV1[],
+  scholar: readonly DebateEvidenceSourceV1[],
+): DebateEvidenceSourceV1[] {
+  const merged: DebateEvidenceSourceV1[] = [];
+  const seenUrls = new Set<string>();
+  const push = (
+    source: DebateEvidenceSourceV1,
+    prefix: "brave" | "scholar",
+  ): void => {
+    const url = source.url.trim();
+    if (!url || seenUrls.has(url)) return;
+    seenUrls.add(url);
+    merged.push({
+      ...source,
+      id: `${prefix}-${merged.filter((row) => row.id.startsWith(prefix)).length + 1}`,
+    });
+  };
+  for (const source of web.slice(0, DEBATE_SETUP_SUGGESTION_WEB_SOURCE_MAX)) {
+    push(source, "brave");
+  }
+  for (const source of scholar.slice(
+    0,
+    DEBATE_SETUP_SUGGESTION_SCHOLAR_SOURCE_MAX,
+  )) {
+    push(source, "scholar");
+  }
+  return merged;
+}
+
+/**
+ * Invent a complete editable Debate Studio draft for Wield Prism → New Duel.
+ * Research enrichment is best-effort and never fails the duel generation.
+ */
+export async function suggestDebateSetup(args: {
+  direction?: unknown;
+  roster: readonly DebateSetupSuggestionRosterBot[];
+  runtime: DebateAiRuntime;
+  research: DebateSetupSuggestionResearchHooks;
+}): Promise<DebateSetupSuggestionV1> {
+  const roster = args.roster
+    .map((bot) => ({
+      id: compactText(bot.id, 80),
+      name: compactText(bot.name, 80) || "Bot",
+      personaSnippet: compactText(bot.personaSnippet, 280),
+    }))
+    .filter((bot) => bot.id);
+  if (roster.length < 2) {
+    throw new HttpError(
+      400,
+      "Add at least two Library bots before Prism can cast a New Duel.",
+    );
+  }
+  // Shuffle so alphabetical / list-order celebrity bots are not over-picked.
+  const shuffledRoster = [...roster];
+  for (let index = shuffledRoster.length - 1; index > 0; index -= 1) {
+    const swapAt = randomInt(index + 1);
+    const current = shuffledRoster[index]!;
+    shuffledRoster[index] = shuffledRoster[swapAt]!;
+    shuffledRoster[swapAt] = current;
+  }
+  const direction = compactText(args.direction, 500);
+  const varietySeed = randomInt(1_000_000_000);
+  const rosterLines = shuffledRoster
+    .slice(0, 40)
+    .map(
+      (bot) =>
+        `- ${bot.id} · ${bot.name}${bot.personaSnippet ? ` — ${bot.personaSnippet}` : ""}`,
+    )
+    .join("\n");
+  const presetCatalog = DEBATE_SETUP_PRESETS.map(
+    (preset) =>
+      `- ${preset.id}: ${preset.name} · format ${preset.format} · ${preset.formality} · player ${preset.playerRole} · Jury ${preset.juryEnabled ? "on" : "off"}`,
+  ).join("\n");
+  const generation = await generateJson(
+    args.runtime.lanes ?? selectedLane(args.runtime),
+    [
+      {
+        role: "system",
+        content: [
+          "You invent a complete, fair Debate Studio draft for Prism.",
+          "Vary the room: the player may Judge, Spectate, or take one advocate seat (Crossfire).",
+          "Pick Library bots whose personas genuinely clash on THIS topic — not famous default debate celebrities.",
+          "Unless the direction or topic clearly needs a science/atheism/celebrity voice, prefer other contrasting Library bots.",
+          "Rotate setup presets across runs. Do not default to classic-duel or Bench Trial every time.",
+          "Invent a unique moderatorTitle each time — a short evocative public title for the neutral presiding voice that fits THIS topic and room flavor (usually 1-5 words).",
+          'Avoid generic repeats like "Moderator", "The Judge", or "Chair" unless the player direction demands them.',
+          "Return JSON only. Never invent URLs or claim real sources exist.",
+          "Emoji exhibits are playful physical props, not research citations.",
+        ].join("\n"),
+      },
+      {
+        role: "user",
+        content: [
+          direction
+            ? `Player direction: ${direction}`
+            : "Player direction: invent any lively, arguable territory.",
+          `Variety seed: ${varietySeed}`,
+          "Setup presets (choose one setupPresetId; playerRole and juryEnabled must match it):",
+          presetCatalog,
+          "Library roster (choose forAdvocateBotId, againstAdvocateBotId, and when needed moderatorBotId from these ids only):",
+          rosterLines,
+          "Invent:",
+          "- topic: short seed phrase",
+          "- motion: one slate with id, title, motion, forSide {label, brief}, againstSide {label, brief}",
+          "- setupPresetId: one of the listed presets",
+          "- format / formality / juryEnabled / playerRole: must match that preset",
+          "- playerSideId: for or against when playerRole is participant; otherwise null",
+          "- moderatorBotId: a third unused roster bot when playerRole is spectator or participant; null when playerRole is judge",
+          `- moderatorTitle: unique 1-${DEBATE_MODERATOR_TITLE_MAX_LENGTH}-char public title flavored by the topic (not a person name)`,
+          "- forAdvocateBotId and againstAdvocateBotId: two different roster bots (even if the player later occupies one seat)",
+          "- forumRoundMode: auto or fixed",
+          "- forumRoundCount: 1-3",
+          `- exhibits: ${DEBATE_SETUP_SUGGESTION_EXHIBIT_MIN}-${DEBATE_SETUP_SUGGESTION_EXHIBIT_MAX} objects with adjective, object, observation, emoji`,
+          "- notes: optional short evidence table note",
+          "- webQuery and scholarQuery: neutral search strings for later research (no URLs)",
+          'JSON shape: {"topic","motion","format","formality","forumRoundMode","forumRoundCount","juryEnabled","setupPresetId","playerRole","playerSideId","moderatorBotId","moderatorTitle","forAdvocateBotId","againstAdvocateBotId","notes","exhibits":[...],"webQuery","scholarQuery"}',
+        ].join("\n"),
+      },
+    ],
+    {
+      maxTokens: 2_400,
+      temperature: 0.84,
+      validate: (value) =>
+        Boolean(
+          normalizeDebateSetupSuggestionV1(
+            {
+              ...value,
+              researchMeta: {
+                webQuery: value.webQuery,
+                scholarQuery: value.scholarQuery,
+                sourcesSkippedReason: null,
+              },
+              sources: [],
+            },
+            shuffledRoster.map((bot) => bot.id),
+          ),
+        ),
+    },
+  );
+
+  const draft = generation.value;
+  const webQuery = compactText(draft.webQuery, 500);
+  const scholarQuery = compactText(draft.scholarQuery, 500);
+  let sources: DebateEvidenceSourceV1[] = [];
+  let sourcesSkippedReason:
+    | "local"
+    | "missing_brave_key"
+    | "research_unavailable"
+    | null = null;
+
+  if (!args.research.allowOnlineResearch) {
+    sourcesSkippedReason = "local";
+  } else {
+    type WebAttempt =
+      | { ok: true; sources: DebateEvidenceSourceV1[] }
+      | { ok: false; missingKey: boolean };
+    const webPromise: Promise<WebAttempt> = webQuery
+      ? args.research.searchWeb(webQuery).then(
+          (rows) => ({ ok: true, sources: rows }),
+          (error: unknown) => ({
+            ok: false,
+            missingKey:
+              error instanceof Error &&
+              /MISSING_BRAVE|BRAVE_SEARCH_API_KEY|Brave Search is not configured/iu.test(
+                error.message,
+              ),
+          }),
+        )
+      : Promise.resolve({ ok: true, sources: [] });
+    const scholarPromise = scholarQuery
+      ? args.research.searchScholar(scholarQuery).catch(() => [])
+      : Promise.resolve([] as DebateEvidenceSourceV1[]);
+    const [webResult, scholarSources] = await Promise.all([
+      webPromise,
+      scholarPromise,
+    ]);
+    const webSources = webResult.ok ? webResult.sources : [];
+    if (!webResult.ok && webResult.missingKey) {
+      sourcesSkippedReason = "missing_brave_key";
+    }
+    sources = mergeSetupSuggestionSources(webSources, scholarSources);
+    if (
+      sources.length === 0 &&
+      sourcesSkippedReason === null &&
+      (webQuery || scholarQuery)
+    ) {
+      sourcesSkippedReason = "research_unavailable";
+    }
+  }
+
+  const suggestion = normalizeDebateSetupSuggestionV1(
+    {
+      ...draft,
+      sources,
+      researchMeta: {
+        webQuery,
+        scholarQuery,
+        sourcesSkippedReason,
+      },
+    },
+    shuffledRoster.map((bot) => bot.id),
+  );
+  if (!suggestion) {
+    throw new HttpError(
+      502,
+      "Prism could not invent a complete New Duel draft.",
+    );
+  }
+  const completed = completeDebateSetupSuggestionCastV1(
+    suggestion,
+    shuffledRoster.map((bot) => bot.id),
+    (exclusiveMax) => randomInt(Math.max(1, exclusiveMax)),
+  );
+  // Stamp a stable public title if the model left one thin.
+  return {
+    ...completed,
+    motion: {
+      ...completed.motion,
+      title:
+        completed.motion.title ||
+        debateTitleForMotion(completed.motion, completed.formality),
+    },
+  };
+}
+
 async function roleCheck(
   bot: DebateBotRow,
   sideId: DebateSideId,
@@ -2173,6 +2421,7 @@ export function listDebateSessions(
     let juryEnabled = false;
     let synopsisText: string | null = null;
     let title = "";
+    let awaitingDeferredStart = false;
     try {
       const parsed = JSON.parse(row.session_json) as {
         format?: unknown;
@@ -2183,6 +2432,9 @@ export function listDebateSessions(
         playerRole?: unknown;
         jury?: unknown;
         synopsis?: unknown;
+        stepKey?: unknown;
+        events?: unknown;
+        pausedPresentationEventId?: unknown;
       };
       if (isDebateFormatId(parsed.format)) format = parsed.format;
       formality = normalizeDebateFormalityId(parsed.formality);
@@ -2209,6 +2461,23 @@ export function listDebateSessions(
             ? parsed.playerRole
             : row.player_role,
         juryEnabled,
+      });
+      awaitingDeferredStart = debateSessionAwaitingDeferredStart({
+        status: row.status as DebateSessionV1["status"],
+        pausedPresentationEventId:
+          typeof parsed.pausedPresentationEventId === "string"
+            ? parsed.pausedPresentationEventId
+            : parsed.pausedPresentationEventId === null
+              ? null
+              : null,
+        events: Array.isArray(parsed.events) ? parsed.events : [],
+        completedAt: row.completed_at,
+        stepKey:
+          typeof parsed.stepKey === "string" && parsed.stepKey.trim()
+            ? parsed.stepKey
+            : format === "turnabout"
+              ? "turnabout_intro"
+              : "intro",
       });
     } catch {
       format = "forum";
@@ -2243,6 +2512,7 @@ export function listDebateSessions(
       completedAt: row.completed_at,
       activeDurationMs: activeDurationMs > 0 ? activeDurationMs : null,
       synopsisText,
+      awaitingDeferredStart,
     };
   });
 }
@@ -2480,11 +2750,12 @@ export function createDebateSession(
           rebuttalRoundRationale: forumRoundPlan.rationale,
         } satisfies DebateForumFormatStateV1)
       : defaultDebateFormatStateV1(format);
+  const deferStart = request.deferStart === true;
   const session: DebateSessionV1 = {
     version: DEBATE_SCHEMA_VERSION,
     id: randomUUID(),
     revision: 1,
-    status: "live",
+    status: deferStart ? "paused" : "live",
     phase: "opening",
     stepKey: format === "turnabout" ? "turnabout_intro" : "intro",
     provider: lane.providerName,
@@ -2539,6 +2810,13 @@ export function createDebateSession(
     updatedAt: now,
     endedEarlyAt: null,
     completedAt: null,
+    ...(deferStart
+      ? {
+          pausedAt: now,
+          pausedPresentationEventId: null,
+          pausedDurationMs: 0,
+        }
+      : {}),
   };
   db.prepare(
     `INSERT INTO debate_sessions

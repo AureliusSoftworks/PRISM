@@ -52,6 +52,7 @@ import {
   swingDebateJudgeGavel,
   synthesizeDebateSlates,
   synthesizeDebateTitle,
+  suggestDebateSetup,
   type DebateAiRuntime,
 } from "../debate.ts";
 import type {
@@ -64,6 +65,10 @@ import { HttpError } from "../utils.http.ts";
 const NOW = "2026-07-27T12:00:00.000Z";
 const debateSource = readFileSync(
   fileURLToPath(new URL("../debate.ts", import.meta.url)),
+  "utf8",
+);
+const serverSource = readFileSync(
+  fileURLToPath(new URL("../server.ts", import.meta.url)),
   "utf8",
 );
 
@@ -1307,6 +1312,8 @@ async function createJudgeDebate(
   options: {
     forSystemPrompt?: string;
     formality?: "free_for_all" | "plainspoken";
+    deferStart?: boolean;
+    idempotencyKey?: string;
     consentFormality?: "free_for_all" | "plainspoken";
     moderatorTitle?: string;
     playerJudgeUsesPrism?: boolean;
@@ -1365,7 +1372,8 @@ async function createJudgeDebate(
       advocacyConsent: checks,
       preferredProvider: "local",
       theme: "dark",
-      idempotencyKey: "create:judge:0001",
+      ...(options.deferStart ? { deferStart: true } : {}),
+      idempotencyKey: options.idempotencyKey ?? "create:judge:0001",
     },
     debateRuntime,
   );
@@ -1614,6 +1622,27 @@ describe("Debate engine", () => {
       source,
       /chatWithDebateDebriefBot[\s\S]{0,2500}INSERT INTO (?:messages|memories|memory_summaries)/u,
     );
+  });
+
+  it("saves a deferred Debate into Archive Open without opening the floor", async () => {
+    const db = createTestDb();
+    try {
+      const session = await createJudgeDebate(db, runtime(), {
+        deferStart: true,
+        idempotencyKey: "create:judge:defer-start",
+      });
+      assert.equal(session.status, "paused");
+      assert.equal(session.events.length, 0);
+      assert.equal(session.stepKey, "intro");
+      assert.ok(session.pausedAt);
+      assert.equal(session.pausedPresentationEventId, null);
+      const listed = listDebateSessions(db, "user-1");
+      assert.equal(listed.length, 1);
+      assert.equal(listed[0]?.awaitingDeferredStart, true);
+      assert.equal(listed[0]?.status, "paused");
+    } finally {
+      db.close();
+    }
   });
 
   it("freezes Auto candidates but records the fresh route on generated events", async () => {
@@ -5391,6 +5420,213 @@ describe("Debate engine", () => {
       runtimeWith(provider),
     );
     assert.equal(title, "Parking Wars");
+  });
+
+  it("exposes setup-suggestion over the Debate navbar AI runtime", () => {
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/debates\/setup-suggestion"/u,
+    );
+    assert.match(
+      serverSource,
+      /setup-suggestion[\s\S]{0,1200}debateAiRuntimeForUser/u,
+    );
+    assert.match(
+      serverSource,
+      /setup-suggestion[\s\S]{0,2200}allowOnlineResearch/u,
+    );
+    assert.match(debateSource, /export async function suggestDebateSetup/u);
+  });
+
+  it("suggests a full New Duel draft and skips research in LOCAL", async () => {
+    let webCalls = 0;
+    let scholarCalls = 0;
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        return JSON.stringify({
+          topic: "City wildlife",
+          motion: {
+            id: "setup-1",
+            title: "Wild Lots",
+            motion: "Cities should rewild vacant lots.",
+            forSide: {
+              label: "Rewild",
+              brief: "Habitat restores local ecology and cools streets.",
+            },
+            againstSide: {
+              label: "Develop",
+              brief: "Housing and jobs need the land more urgently.",
+            },
+          },
+          format: "forum",
+          formality: "plainspoken",
+          forumRoundMode: "auto",
+          forumRoundCount: 1,
+          juryEnabled: false,
+          setupPresetId: "classic-duel",
+          moderatorTitle: "Keeper of the Lots",
+          forAdvocateBotId: "bot-a",
+          againstAdvocateBotId: "bot-b",
+          notes: "Keep props playful.",
+          exhibits: [
+            {
+              adjective: "Mossy",
+              object: "brick",
+              observation: "Moss covers one face of the brick.",
+              emoji: "🧱",
+            },
+            {
+              adjective: "Folded",
+              object: "permit",
+              observation: "The permit is stamped but unsigned.",
+              emoji: "📄",
+            },
+          ],
+          webQuery: "urban rewilding",
+          scholarQuery: "vacant lot ecology",
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const suggestion = await suggestDebateSetup({
+      direction: "",
+      roster: [
+        { id: "bot-a", name: "Ada", personaSnippet: "careful ecologist" },
+        { id: "bot-b", name: "Bea", personaSnippet: "housing advocate" },
+      ],
+      runtime: runtimeWith(provider),
+      research: {
+        allowOnlineResearch: false,
+        searchWeb: async () => {
+          webCalls += 1;
+          return [];
+        },
+        searchScholar: async () => {
+          scholarCalls += 1;
+          return [];
+        },
+      },
+    });
+    assert.equal(suggestion.forAdvocateBotId, "bot-a");
+    assert.equal(suggestion.exhibits.length, 2);
+    assert.equal(suggestion.sources.length, 0);
+    assert.equal(suggestion.researchMeta.sourcesSkippedReason, "local");
+    assert.equal(suggestion.playerRole, "judge");
+    assert.equal(suggestion.moderatorBotId, null);
+    assert.equal(suggestion.moderatorTitle, "Keeper of the Lots");
+    assert.equal(webCalls, 0);
+    assert.equal(scholarCalls, 0);
+  });
+
+  it("pins New Duel variety prompts so celebrity defaults do not dominate", () => {
+    assert.match(debateSource, /Variety seed:/u);
+    assert.match(debateSource, /famous default debate celebrities/u);
+    assert.match(debateSource, /Rotate setup presets across runs/u);
+    assert.match(debateSource, /unique moderatorTitle each time/u);
+    assert.match(debateSource, /completeDebateSetupSuggestionCastV1/u);
+    assert.match(
+      debateSource,
+      /shuffledRoster[\s\S]{0,200}randomInt\(index \+ 1\)/u,
+    );
+  });
+
+  it("attaches Brave and Crossref sources when online research is allowed", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        return JSON.stringify({
+          topic: "City wildlife",
+          motion: {
+            id: "setup-1",
+            title: "Wild Lots",
+            motion: "Cities should rewild vacant lots.",
+            forSide: {
+              label: "Rewild",
+              brief: "Habitat restores local ecology and cools streets.",
+            },
+            againstSide: {
+              label: "Develop",
+              brief: "Housing and jobs need the land more urgently.",
+            },
+          },
+          format: "forum",
+          formality: "plainspoken",
+          forumRoundMode: "auto",
+          forumRoundCount: 1,
+          juryEnabled: false,
+          forAdvocateBotId: "bot-a",
+          againstAdvocateBotId: "bot-b",
+          exhibits: [
+            {
+              adjective: "Mossy",
+              object: "brick",
+              observation: "Moss covers one face of the brick.",
+              emoji: "🧱",
+            },
+            {
+              adjective: "Folded",
+              object: "permit",
+              observation: "The permit is stamped but unsigned.",
+              emoji: "📄",
+            },
+            {
+              adjective: "Rusty",
+              object: "gate",
+              observation: "The gate squeaks but still latches.",
+              emoji: "🚪",
+            },
+          ],
+          webQuery: "urban rewilding",
+          scholarQuery: "vacant lot ecology",
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const suggestion = await suggestDebateSetup({
+      roster: [
+        { id: "bot-a", name: "Ada", personaSnippet: "careful ecologist" },
+        { id: "bot-b", name: "Bea", personaSnippet: "housing advocate" },
+      ],
+      runtime: runtimeWith(provider),
+      research: {
+        allowOnlineResearch: true,
+        searchWeb: async () => [
+          {
+            id: "brave-1",
+            title: "Lot study",
+            url: "https://example.com/lots",
+            snippet: "Vacant lots store carbon.",
+            publishedAt: null,
+          },
+          {
+            id: "brave-2",
+            title: "City brief",
+            url: "https://example.com/brief",
+            snippet: "Pilot rewilding blocks heat islands.",
+            publishedAt: null,
+          },
+        ],
+        searchScholar: async () => [
+          {
+            id: "scholar-1",
+            title: "Ecology paper",
+            url: "https://doi.org/10.1000/lot",
+            snippet: "Peer-reviewed vacant-lot ecology.",
+            publishedAt: "2024",
+          },
+        ],
+      },
+    });
+    assert.equal(suggestion.sources.length, 3);
+    assert.equal(suggestion.sources[0]?.id, "brave-1");
+    assert.equal(suggestion.sources[2]?.id, "scholar-1");
+    assert.equal(suggestion.researchMeta.sourcesSkippedReason, null);
+    assert.equal(suggestion.exhibits.length, 3);
   });
 
   it("makes Free-for-all Turnabout a feisty confrontation without forcing Court-of-Record language", async () => {

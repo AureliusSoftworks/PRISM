@@ -12,6 +12,9 @@ import {
   DEBATE_GAVEL_FOLEY_TRIM,
   DEBATE_GAVEL_FOLEY_URLS,
   DEBATE_GAVEL_ORDER_CAMERA_CUT_MS,
+  DEBATE_GAVEL_ATTENTION_CAMERA_SETTLE_MS,
+  DEBATE_GAVEL_ORDER_CAMERA_SETTLE_MS,
+  debateModeratorGavelCameraSettleMs,
   DEBATE_GAVEL_VISUAL_IMPACT_MS,
   debateAudienceBeatForEvent,
   debateDirectedAudiencePlayback,
@@ -759,5 +762,13 @@ describe("Debate moderator gavel", () => {
       DEBATE_GAVEL_ORDER_CAMERA_CUT_MS > DEBATE_GAVEL_VISUAL_IMPACT_MS.order,
     );
     assert.ok(DEBATE_GAVEL_ORDER_CAMERA_CUT_MS < orderSecondPeakMs);
+    assert.ok(
+      DEBATE_GAVEL_ORDER_CAMERA_SETTLE_MS > DEBATE_GAVEL_ORDER_CAMERA_CUT_MS,
+    );
+    assert.equal(debateModeratorGavelCameraSettleMs("order"), DEBATE_GAVEL_ORDER_CAMERA_SETTLE_MS);
+    assert.equal(
+      debateModeratorGavelCameraSettleMs("attention"),
+      DEBATE_GAVEL_ATTENTION_CAMERA_SETTLE_MS,
+    );
   });
 });

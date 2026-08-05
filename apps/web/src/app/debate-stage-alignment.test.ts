@@ -17,6 +17,7 @@ import {
   debateStageAlignmentStyle,
   debateStageAlignmentTarget,
   debateStageEvidenceViewForCamera,
+  defaultDebateStageEvidenceShadow,
   formatDebateStageAlignmentClipboard,
   formatDebateStageEvidenceTableClipboard,
   formatDebateStageGavelClipboard,
@@ -29,6 +30,21 @@ import {
   updateDebateStageLightMaskOpacity,
   writeDebateStageAlignment,
 } from "./debateStageAlignment.ts";
+
+function evidencePlacement(
+  x: number,
+  y: number,
+  size: number,
+  view: "wide" | "left" | "moderator" | "right",
+  kind: "exhibit" | "source" = "exhibit",
+) {
+  return {
+    x,
+    y,
+    size,
+    shadow: defaultDebateStageEvidenceShadow(view, kind),
+  };
+}
 
 describe("Debate stage alignment", () => {
   it("keeps independent evidence geometry for every public-floor camera", () => {
@@ -43,9 +59,9 @@ describe("Debate stage alignment", () => {
     assert.equal(DEBATE_STAGE_GAVEL_POSITION_MAX, 300);
   });
 
-  it("uses the approved version-ten stage composition as its canonical default", () => {
+  it("uses the approved version-eleven stage composition as its canonical default", () => {
     const expected = {
-      version: 10,
+      version: 11,
       wide: {
         for: {
           bot: { x: 0.01, y: -2 },
@@ -74,16 +90,16 @@ describe("Debate stage alignment", () => {
       },
       evidenceTable: {
         exhibit: {
-          wide: { x: 0, y: 111.5, size: 100 },
-          left: { x: 0, y: 111.5, size: 100 },
-          moderator: { x: 0, y: 174, size: 220 },
-          right: { x: 0, y: 111.5, size: 100 },
+          wide: evidencePlacement(0, 111.5, 100, "wide", "exhibit"),
+          left: evidencePlacement(0, 111.5, 100, "left", "exhibit"),
+          moderator: evidencePlacement(0, 174, 220, "moderator", "exhibit"),
+          right: evidencePlacement(0, 111.5, 100, "right", "exhibit"),
         },
         source: {
-          wide: { x: 0, y: 111.5, size: 100 },
-          left: { x: 0, y: 174, size: 220 },
-          moderator: { x: 0, y: 174, size: 220 },
-          right: { x: 0, y: 174, size: 220 },
+          wide: evidencePlacement(0, 111.5, 100, "wide", "source"),
+          left: evidencePlacement(0, 174, 220, "left", "source"),
+          moderator: evidencePlacement(0, 174, 220, "moderator", "source"),
+          right: evidencePlacement(0, 174, 220, "right", "source"),
         },
       },
       lightBlendModes: {
@@ -141,7 +157,7 @@ describe("Debate stage alignment", () => {
         evidenceTable: { x: -999, y: 999, size: 12 },
       }),
       {
-        version: 10,
+        version: 11,
         wide: {
           for: {
             bot: { x: -12, y: 2.13 },
@@ -180,48 +196,64 @@ describe("Debate stage alignment", () => {
         },
         evidenceTable: {
           exhibit: {
-            wide: {
-              x: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
-              y: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
-              size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
-            },
-            left: {
-              x: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
-              y: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
-              size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
-            },
-            moderator: {
-              x: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
-              y: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
-              size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
-            },
-            right: {
-              x: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
-              y: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
-              size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
-            },
+            wide: evidencePlacement(
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+              DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+              "wide",
+              "exhibit",
+            ),
+            left: evidencePlacement(
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+              DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+              "left",
+              "exhibit",
+            ),
+            moderator: evidencePlacement(
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+              DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+              "moderator",
+              "exhibit",
+            ),
+            right: evidencePlacement(
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+              DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+              "right",
+              "exhibit",
+            ),
           },
           source: {
-            wide: {
-              x: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
-              y: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
-              size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
-            },
-            left: {
-              x: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
-              y: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
-              size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
-            },
-            moderator: {
-              x: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
-              y: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
-              size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
-            },
-            right: {
-              x: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
-              y: DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
-              size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
-            },
+            wide: evidencePlacement(
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+              DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+              "wide",
+              "source",
+            ),
+            left: evidencePlacement(
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+              DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+              "left",
+              "source",
+            ),
+            moderator: evidencePlacement(
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+              DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+              "moderator",
+              "source",
+            ),
+            right: evidencePlacement(
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MIN,
+              DEBATE_STAGE_EVIDENCE_TABLE_POSITION_MAX,
+              DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+              "right",
+              "source",
+            ),
           },
         },
         lightBlendModes: {
@@ -246,7 +278,7 @@ describe("Debate stage alignment", () => {
     };
     assert.equal(
       debateStageAlignmentStorageKey("user-1"),
-      "prism_debate_stage_alignment_v10:user-1",
+      "prism_debate_stage_alignment_v11:user-1",
     );
     assert.deepEqual(
       readDebateStageAlignment(storage, "user-1"),
@@ -373,19 +405,20 @@ describe("Debate stage alignment", () => {
       readDebateStageAlignment(storage, "user-1").evidenceTable,
       {
         exhibit: {
-          wide: { x: 8, y: -12, size: 115 },
-          left: { x: 8, y: -12, size: 115 },
-          moderator: { x: 8, y: -12, size: 115 },
-          right: { x: 8, y: -12, size: 115 },
+          wide: evidencePlacement(8, -12, 115, "wide", "exhibit"),
+          left: evidencePlacement(8, -12, 115, "left", "exhibit"),
+          moderator: evidencePlacement(8, -12, 115, "moderator", "exhibit"),
+          right: evidencePlacement(8, -12, 115, "right", "exhibit"),
         },
         source: {
-          wide: { x: 8, y: -12, size: 115 },
-          left: { x: 8, y: -12, size: 115 },
-          moderator: { x: 8, y: -12, size: 115 },
-          right: { x: 8, y: -12, size: 115 },
+          wide: evidencePlacement(8, -12, 115, "wide", "source"),
+          left: evidencePlacement(8, -12, 115, "left", "source"),
+          moderator: evidencePlacement(8, -12, 115, "moderator", "source"),
+          right: evidencePlacement(8, -12, 115, "right", "source"),
         },
       },
     );
+    values.delete("prism_debate_stage_alignment_v11:user-1");
     values.delete("prism_debate_stage_alignment_v10:user-1");
     values.set(
       "prism_debate_stage_alignment_v9:user-1",
@@ -405,16 +438,16 @@ describe("Debate stage alignment", () => {
     );
     const migratedV9 = readDebateStageAlignment(storage, "user-1");
     assert.deepEqual(migratedV9.evidenceTable.exhibit, {
-      wide: { x: 12, y: -14, size: 110 },
-      left: { x: 12, y: -14, size: 110 },
-      moderator: { x: -20, y: 16, size: 180 },
-      right: { x: 12, y: -14, size: 110 },
+      wide: evidencePlacement(12, -14, 110, "wide", "exhibit"),
+      left: evidencePlacement(12, -14, 110, "left", "exhibit"),
+      moderator: evidencePlacement(-20, 16, 180, "moderator", "exhibit"),
+      right: evidencePlacement(12, -14, 110, "right", "exhibit"),
     });
     assert.deepEqual(migratedV9.evidenceTable.source, {
-      wide: { x: 9, y: -11, size: 115 },
-      left: { x: -24, y: 19, size: 190 },
-      moderator: { x: -24, y: 19, size: 190 },
-      right: { x: -24, y: 19, size: 190 },
+      wide: evidencePlacement(9, -11, 115, "wide", "source"),
+      left: evidencePlacement(-24, 19, 190, "left", "source"),
+      moderator: evidencePlacement(-24, 19, 190, "moderator", "source"),
+      right: evidencePlacement(-24, 19, 190, "right", "source"),
     });
     values.delete("prism_debate_stage_alignment_v9:user-1");
     values.set(
@@ -429,16 +462,16 @@ describe("Debate stage alignment", () => {
     );
     const migratedV8 = readDebateStageAlignment(storage, "user-1");
     assert.deepEqual(migratedV8.evidenceTable.exhibit, {
-      wide: { x: 11, y: -13, size: 105 },
-      left: { x: 11, y: -13, size: 105 },
-      moderator: { x: -22, y: 17, size: 175 },
-      right: { x: 11, y: -13, size: 105 },
+      wide: evidencePlacement(11, -13, 105, "wide", "exhibit"),
+      left: evidencePlacement(11, -13, 105, "left", "exhibit"),
+      moderator: evidencePlacement(-22, 17, 175, "moderator", "exhibit"),
+      right: evidencePlacement(11, -13, 105, "right", "exhibit"),
     });
     assert.deepEqual(migratedV8.evidenceTable.source, {
-      wide: { x: 11, y: -13, size: 105 },
-      left: { x: -22, y: 17, size: 175 },
-      moderator: { x: -22, y: 17, size: 175 },
-      right: { x: -22, y: 17, size: 175 },
+      wide: evidencePlacement(11, -13, 105, "wide", "source"),
+      left: evidencePlacement(-22, 17, 175, "left", "source"),
+      moderator: evidencePlacement(-22, 17, 175, "moderator", "source"),
+      right: evidencePlacement(-22, 17, 175, "right", "source"),
     });
   });
 
@@ -513,6 +546,16 @@ describe("Debate stage alignment", () => {
     assert.equal(style["--debate-right-source-evidence-offset-x"], "7.5%");
     assert.equal(style["--debate-right-source-evidence-offset-y"], "-9%");
     assert.equal(style["--debate-right-source-evidence-scale"], "1.2");
+    assert.equal(style["--debate-evidence-shadow-cast-x"], "1px");
+    assert.equal(style["--debate-evidence-shadow-cast-y"], "13px");
+    assert.equal(style["--debate-evidence-shadow-blur"], "11px");
+    assert.equal(style["--debate-evidence-shadow-opacity"], "0.88");
+    assert.equal(style["--debate-evidence-shadow-floor-x"], "0px");
+    assert.equal(style["--debate-evidence-shadow-floor-scale-x"], "1");
+    assert.equal(style["--debate-left-evidence-shadow-cast-x"], "7px");
+    assert.equal(style["--debate-right-evidence-shadow-cast-x"], "-7px");
+    assert.equal(style["--debate-moderator-evidence-shadow-cast-y"], "15px");
+    assert.equal(style["--debate-source-evidence-shadow-floor-scale-x"], "0.86");
     assert.equal(style["--debate-light-blend-mode-dark"], "overlay");
     assert.equal(style["--debate-light-blend-mode-light"], "screen");
     assert.equal(style["--debate-light-mask-opacity-dark"], "65%");
@@ -705,6 +748,7 @@ describe("Debate stage alignment", () => {
       x: 18.5,
       y: -22,
       size: DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
+      shadow: defaultDebateStageEvidenceShadow("wide", "exhibit"),
     });
     assert.deepEqual(
       tunedWide.evidenceTable.exhibit.moderator,
@@ -720,7 +764,43 @@ describe("Debate stage alignment", () => {
       x: -40,
       y: 12,
       size: 150,
+      shadow: defaultDebateStageEvidenceShadow("left", "source"),
     });
+    const shadowed = updateDebateStageEvidenceTable(
+      tunedLeft,
+      "exhibit",
+      "wide",
+      {
+        shadow: {
+          castX: -12,
+          castY: 22,
+          blur: 18,
+          opacity: 70,
+          floorX: -4,
+          floorWidth: 120,
+        },
+      },
+    );
+    assert.deepEqual(shadowed.evidenceTable.exhibit.wide.shadow, {
+      castX: -12,
+      castY: 22,
+      blur: 18,
+      opacity: 70,
+      floorX: -4,
+      floorWidth: 120,
+    });
+    assert.equal(
+      (
+        debateStageAlignmentStyle(shadowed) as Record<string, string>
+      )["--debate-evidence-shadow-cast-x"],
+      "-12px",
+    );
+    assert.equal(
+      (
+        debateStageAlignmentStyle(shadowed) as Record<string, string>
+      )["--debate-evidence-shadow-floor-scale-x"],
+      "1.2",
+    );
     assert.deepEqual(
       tunedLeft.evidenceTable.source.right,
       DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable.source.right,

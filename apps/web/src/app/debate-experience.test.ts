@@ -340,12 +340,21 @@ describe("Debate experience", () => {
   it("grounds table-placed evidence with contact and cast shadows", () => {
     assert.match(
       css,
-      /\.evidencePedestal \.evidencePedestalSprite\s*\{[^}]*filter:\s*drop-shadow\(0 3px 2px rgba\(0, 0, 0, 0\.72\)\)\s*drop-shadow\(1px 13px 11px rgba\(0, 0, 0, 0\.48\)\)/u,
+      /\.evidencePedestalFloorShadow\s*\{[^}]*radial-gradient/u,
     );
     assert.match(
       css,
-      /\.evidencePedestalDocument\s*\{[^}]*box-shadow:\s*0 3px 3px rgba\(0, 0, 0, 0\.58\),\s*1px 13px 18px rgba\(0, 0, 0, 0\.44\)/u,
+      /\.evidencePedestal \.evidencePedestalSprite\s*\{[^}]*--debate-active-evidence-shadow-cast-x/u,
     );
+    assert.match(
+      css,
+      /\.evidencePedestalDocument\s*\{[^}]*--debate-active-evidence-shadow-cast-x/u,
+    );
+    assert.match(source, /data-debate-evidence-floor-shadow="true"/u);
+    assert.match(source, /data-debate-evidence-shadow-tuner="true"/u);
+    assert.match(source, /Drop shadow/u);
+    assert.match(source, /Shadow drift/u);
+    assert.match(source, /Floor width/u);
   });
 
   it("uses one progressive setup path with optional room, motion, and seat tuning", () => {
@@ -383,6 +392,10 @@ describe("Debate experience", () => {
     assert.match(source, /Continue without evidence/u);
     assert.match(source, /setEvidenceDecisionMade\(true\)/u);
     assert.match(source, /Start Debate/u);
+    assert.match(source, /Save Debate/u);
+    assert.match(source, /deferStart:\s*true/u);
+    assert.match(source, /data-tutorial-target="debate-save"/u);
+    assert.match(source, /debateSessionAwaitingDeferredStart/u);
     assert.match(source, /data-tutorial-target="debate-rowdiness"/u);
     assert.match(source, /aria-label="Debate atmosphere"/u);
     assert.match(source, /data-tutorial-target="debate-rounds"/u);
@@ -577,6 +590,9 @@ describe("Debate experience", () => {
       /import \{ PrismBlockingLoader \} from "\.\/PrismBlockingLoader"/u,
     );
     assert.match(source, /open=\{evidenceObjectVisualBusy === "synthesize"\}/u);
+    assert.match(source, /open=\{newDuelGenerateBusy\}/u);
+    assert.match(source, /Inventing a New Duel/u);
+    assert.match(source, /setNewDuelGenerateBusy\(true\)/u);
     assert.match(source, /Generating and cutting out the exhibit/u);
     assert.match(
       source,
@@ -601,9 +617,29 @@ describe("Debate experience", () => {
       source.slice(draftStart, draftEnd),
       /debates\/exhibits\/synthesize|setEvidenceObjectVisualBusy/u,
     );
-    assert.match(source, /The text record is evidence/u);
+    assert.match(source, /The text record is evidence|Tap the picture to pick an emoji/u);
     assert.doesNotMatch(source, /openDesktopEmojiPicker\(\)/u);
     assert.match(source, /Choose exhibit emoji\. Current emoji:/u);
+    assert.match(source, /evidenceObjectPreviewPicture/u);
+    assert.doesNotMatch(source, /evidenceEmojiPickerHelp/u);
+    assert.doesNotMatch(source, /Search for an emoji/u);
+    assert.match(source, /debate:new-duel-generate/u);
+    assert.match(source, /generateNewDuelFromPrism/u);
+    assert.match(source, /\/api\/debates\/setup-suggestion/u);
+    assert.match(
+      source,
+      /setPlayerRole\(applied\.playerRole\)[\s\S]{0,200}setJuryEnabled\(applied\.juryEnabled\)[\s\S]{0,200}setPlayerSideId\(applied\.playerSideId\)[\s\S]{0,120}setModeratorTitle\(applied\.moderatorTitle\)/u,
+    );
+    assert.match(
+      source,
+      /playerRole:\s*applied\.playerRole[\s\S]{0,220}playerSideId:[\s\S]{0,120}applied\.playerRole === "participant"/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /\/api\/debates\/role-checks[\s\S]{0,400}playerRole:\s*"judge"/u,
+    );
+    assert.match(source, /beginEditingExhibit/u);
+    assert.match(source, /Save changes/u);
     assert.match(source, /searchDebateEvidenceEmojis/u);
     assert.match(source, /Three most relevant emojis/u);
     assert.match(source, /Find the right symbol/u);
@@ -618,11 +654,11 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.evidenceObjectPreview > \.evidenceExhibitVisual\s*\{[^}]*font-size:\s*52px/u,
+      /\.evidenceObjectPreviewPicture\s*>\s*\.evidenceExhibitVisual\s*\{[^}]*font-size:\s*52px|\.evidenceObjectPreview(?:Picture)?\s*>\s*\.evidenceExhibitVisual\s*\{[^}]*font-size:\s*52px/u,
     );
     assert.match(
       css,
-      /\.evidenceObjectPreview > \.evidenceExhibitVisual > span\s*\{[^}]*max-width:\s*88%/u,
+      /\.evidenceObjectPreview(?:Picture)?\s*>\s*\.evidenceExhibitVisual\s*>\s*span\s*\{[^}]*max-width:\s*88%/u,
     );
     assert.match(
       css,
@@ -1184,6 +1220,7 @@ describe("Debate experience", () => {
       "debate-consent",
       "debate-evidence",
       "debate-readiness",
+      "debate-save",
       "debate-start",
       "debate-case-board",
       "debate-camera",
@@ -1839,6 +1876,26 @@ describe("Debate experience", () => {
     assert.match(source, /\$\{lifecyclePath\}\/announce/u);
     assert.match(source, /resume \? "resume" : "pause"/u);
     assert.match(source, /debateSessionWithRecessResumeFiller/u);
+    assert.match(
+      source,
+      /held && debateEventIsModeratorIntro\(held\)[\s\S]{0,80}return session/u,
+    );
+    assert.match(
+      source,
+      /resumeOpeningIntro[\s\S]{0,200}silentLifecycle/u,
+    );
+    assert.match(
+      source,
+      /lifecycleEvent && !heldIsOpeningIntro/u,
+    );
+    assert.match(
+      source,
+      /introCameraSpeechSnapshot\.eventId === event\.id[\s\S]{0,120}visibleContent\.length/u,
+    );
+    assert.match(
+      source,
+      /Speech ticks often skip React liveReveal/u,
+    );
     assert.match(source, /debateRecessResumeFiller/u);
     assert.match(source, /debateExitPresentationEventId/u);
     assert.match(source, /debateSessionNeedsReturnPause\(result\.session\)/u);
@@ -1851,6 +1908,15 @@ describe("Debate experience", () => {
     assert.match(source, /debateSpectatorAwaitingFirstWatch/u);
     assert.match(source, /\/seal-presentation/u);
     assert.match(source, /nextMutationKey\("seal-presentation"\)/u);
+    assert.match(source, /spectatorWatchPresentationCompleteRef/u);
+    assert.match(
+      source,
+      /!spectatorWatchPresentationCompleteRef\.current/u,
+    );
+    assert.match(
+      source,
+      /lastPresentableId !== null &&\s*fresh\.some\(\(event\) => event\.id === lastPresentableId\)/u,
+    );
     assert.match(source, /nextMutationKey\("spectator-ready-hold"\)/u);
     assert.match(source, /startSpectatorWatch \? "spectator-start"/u);
     assert.match(
@@ -1999,6 +2065,19 @@ describe("Debate experience", () => {
     );
     assert.match(source, /data-audience-order-response=/u);
     assert.match(source, /returningRoomTone:\s*true/u);
+    assert.match(source, /DEBATE_AUDIENCE_ORDER_PEAK_HOLD_MS/u);
+    assert.match(
+      source,
+      /debate-audience-laugh-into-order:/u,
+    );
+    assert.match(
+      source,
+      /args\.kind === "hush"[\s\S]{0,400}DEBATE_AUDIENCE_REACTIONS\.laugh\.url[\s\S]{0,500}playDebateAudienceReaction\("order"/u,
+    );
+    assert.match(
+      source,
+      /audienceRoomToneReturnTimerRef[\s\S]{0,200}setAudiencePressureReset\(/u,
+    );
   });
 
   it("performs a missed Judge gavel cue as a silent camera beat", () => {
@@ -2502,9 +2581,10 @@ describe("Debate experience", () => {
     assert.match(source, /className=\{styles\.sourceDrawerClose\}/u);
     assert.match(css, /\.sourceDrawerBackdrop\s*\{[^}]*z-index:\s*960/u);
     assert.match(css, /\.sourceDrawer\s*\{[^}]*z-index:\s*961/u);
+    assert.match(source, /beginEditingExhibit\(exhibit\)/u);
     assert.match(
       source,
-      /current === exhibit\.id \? null : exhibit\.id/u,
+      /current === source\.id \? null : source\.id/u,
     );
   });
 
@@ -2815,15 +2895,23 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /const DEBATE_AUDIENCE_DUCKED_MIX = \{[\s\S]{0,100}background:\s*0\.1/u,
+      /const DEBATE_AUDIENCE_DUCKED_MIX = \{[\s\S]{0,100}background:\s*0\.24/u,
     );
     assert.match(
       source,
-      /audiencePressureBandTrue === null[\s\S]{0,60}\? 320[\s\S]{0,180}\? 4_000[\s\S]{0,80}: 90[\s\S]{0,40}: 900/u,
+      /audiencePressureBandTrue === null[\s\S]{0,80}activeAudienceOrderResponse === null[\s\S]{0,40}\? 320[\s\S]{0,220}DEBATE_AUDIENCE_ORDER_RETURN_MS[\s\S]{0,80}: 480[\s\S]{0,80}DEBATE_AUDIENCE_PRESSURE_MIX_TRANSITION_MS/u,
     );
     assert.match(
       source,
-      /debateAudiencePressureMix\(audiencePressureBandTrue\)/u,
+      /debateAudienceOrderCallMix\(session\.formality\)/u,
+    );
+    assert.match(
+      source,
+      /debateAudiencePressureMixForScore\(\s*currentAudiencePressureScore,\s*session\.formality,/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /activeAudienceOrderResponse &&[\s\S]{0,120}!activeAudienceOrderResponse\.returningRoomTone[\s\S]{0,80}\? DEBATE_FOLEY_MIX/u,
     );
     assert.match(source, /DEBATE_AUDIENCE_AGITATION_URL/u);
     assert.doesNotMatch(source, /debateAudienceEventIsShocking/u);
@@ -3079,7 +3167,7 @@ describe("Debate experience", () => {
     assert.doesNotMatch(identSource, /RoomAcoustics|roomAcoustics/u);
     assert.match(
       source,
-      /deferBotVocalization=\{\s*debateIdentPlaying !== null \|\|\s*presenting \|\|\s*audienceReactingSeatIndices\.size > 0 \|\|\s*\(busy && !presenting\)\s*\}/u,
+      /deferBotVocalization=\{\s*debateIdentPlaying !== null \|\|\s*\(presenting &&\s*\(audiencePressureBand === null \|\|\s*audiencePressureBand === "settled"\)\) \|\|\s*audienceReactingSeatIndices\.size > 0 \|\|\s*\(busy && !presenting\)\s*\}/u,
     );
   });
 
@@ -3456,7 +3544,16 @@ describe("Debate experience", () => {
     assert.match(source, /debateModeratorGavelSpeechLeadMs\(gavelCue\.kind\)/u);
     assert.match(
       source,
-      /setLiveGavelCue\([^)]+gavelCue\)[\s\S]{0,260}DEBATE_GAVEL_ORDER_CAMERA_CUT_MS[\s\S]{0,420}let presentationArmedForHandoff = false[\s\S]{0,600}setPresentationEventId\(event\.id\)/u,
+      /setGavelCameraSettling\(true\)[\s\S]{0,500}setLiveGavelCue\(resumedJudgeGavelAlreadyStruck \? null : gavelCue\)/u,
+    );
+    assert.match(source, /debateModeratorGavelCameraSettleMs/u);
+    assert.match(
+      source,
+      /judgeGavelSmashCue !== null \|\| gavelCameraSettling/u,
+    );
+    assert.match(
+      source,
+      /setLiveGavelCue\([^)]+gavelCue\)[\s\S]{0,900}DEBATE_GAVEL_ORDER_CAMERA_CUT_MS[\s\S]{0,1800}let presentationArmedForHandoff = false[\s\S]{0,800}setPresentationEventId\(event\.id\)/u,
     );
     assert.match(
       source,
@@ -3470,15 +3567,23 @@ describe("Debate experience", () => {
     assert.match(source, /session\.status === "paused" && !presenting/u);
     assert.match(
       source,
-      /recessSettledWide[\s\S]{0,120}session\.status === "paused" && !presenting && !busy/u,
+      /recessSettledWide[\s\S]{0,120}session\.status === "paused" && !presenting;/u,
     );
     assert.match(
       source,
-      /recessLifecycleModerator[\s\S]{0,120}session\.status === "paused" && \(busy \|\| presenting\)/u,
+      /recessLifecycleModerator[\s\S]{0,120}session\.status === "paused" && presenting;/u,
     );
     assert.match(
       source,
       /recessSettledWide\s*\?\s*"wide"\s*:\s*recessLifecycleModerator\s*\?\s*"moderator"/u,
+    );
+    assert.match(
+      source,
+      /resume && \(!silentLifecycle \|\| resumeOpeningIntro\)[\s\S]{0,180}status: "paused"/u,
+    );
+    assert.match(
+      source,
+      /Ceremonial resume \(and opening-intro restarts\) keep the recess UI/u,
     );
     assert.match(
       source,
@@ -3513,7 +3618,7 @@ describe("Debate experience", () => {
     assert.match(source, /ambientBotVocalizations=\{ambientAudioActive\}/u);
     assert.match(
       source,
-      /judgeGavelSmashCue !== null \|\|\s*activeGavelCue\?\.kind !== "order" \|\|\s*presentationEventId === activeGavelCue\.eventId/u,
+      /judgeGavelSmashCue !== null \|\|\s*gavelCameraSettling \|\|\s*activeGavelCue == null \|\|\s*activeGavelCue\.kind === "order" \|\|\s*activeGavelCue\.kind === "attention"/u,
     );
     assert.match(
       source,

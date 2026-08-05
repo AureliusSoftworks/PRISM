@@ -52,6 +52,7 @@ import {
   debateRecessResumeFiller,
   debateRecessResumePresentationContent,
   debateSessionAwaitsPresentationSeal,
+  debateSessionAwaitingDeferredStart,
   debateSpectatorAwaitingFirstWatch,
   normalizeBotAudioVoiceControl,
   normalizeBotAudioVoiceProfileV1,
@@ -72,6 +73,7 @@ import {
   type DebateSetupPresetId,
   type DebateSessionListItemV1,
   type DebateSessionV1,
+  type DebateSetupSuggestionV1,
   type DebateSideId,
   type DebateTurnaboutFormatStateV1,
   type DebateTurnaboutStatementV1,
@@ -102,6 +104,7 @@ import type { DebateForumRole } from "./DebateForumScene";
 import {
   copyDebateMotionSlate,
   applyDebateSetupPreset,
+  applyDebateSetupSuggestion,
   debateAlignmentPreviewCast,
   debateEvidenceSourcePropKind,
   debateMotionRevealState,
@@ -126,8 +129,12 @@ import {
   debateSpectatorPrismAudienceSeat,
 } from "./debateAudience";
 import {
+  DEBATE_AUDIENCE_ORDER_PEAK_HOLD_MS,
+  DEBATE_AUDIENCE_ORDER_RETURN_MS,
+  DEBATE_AUDIENCE_PRESSURE_MIX_TRANSITION_MS,
+  debateAudienceOrderCallMix,
   debateAudiencePressureBand,
-  debateAudiencePressureMix,
+  debateAudiencePressureMixForScore,
   debateAudiencePressureScore,
   debateAudienceTalkerIndices,
   debateAudienceVisualPressureBand,
@@ -156,8 +163,10 @@ import {
 import {
   DEBATE_EVIDENCE_EMOJI_CHOICES,
   applyDebateEvidenceObjectNameEdit,
+  debateEvidenceObjectDraftFromExhibit,
   debateEvidenceObjectDraftFromPrismCandidate,
   nextDebateEvidenceExhibitId,
+  replaceDebateEvidenceExhibit,
   searchDebateEvidenceEmojis,
   type DebateEvidenceObjectDraft,
 } from "./debateEvidenceExhibits";
@@ -198,6 +207,7 @@ import {
 import {
   DEBATE_INTRO_WIDE_HOLD_MS,
   DEBATE_MODERATOR_BREATH_WIDE_MS,
+  debateEventIsModeratorIntro,
   debateEventIsModeratorMonologue,
   resolveDebateModeratorCameraView,
   type DebateModeratorCameraFocus,
@@ -246,6 +256,21 @@ import {
   DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MAX,
   DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN,
   DEBATE_STAGE_EVIDENCE_TABLE_SIZE_STEP,
+  DEBATE_STAGE_EVIDENCE_SHADOW_BLUR_MAX,
+  DEBATE_STAGE_EVIDENCE_SHADOW_BLUR_MIN,
+  DEBATE_STAGE_EVIDENCE_SHADOW_BLUR_STEP,
+  DEBATE_STAGE_EVIDENCE_SHADOW_CAST_MAX,
+  DEBATE_STAGE_EVIDENCE_SHADOW_CAST_MIN,
+  DEBATE_STAGE_EVIDENCE_SHADOW_CAST_STEP,
+  DEBATE_STAGE_EVIDENCE_SHADOW_FLOOR_WIDTH_MAX,
+  DEBATE_STAGE_EVIDENCE_SHADOW_FLOOR_WIDTH_MIN,
+  DEBATE_STAGE_EVIDENCE_SHADOW_FLOOR_WIDTH_STEP,
+  DEBATE_STAGE_EVIDENCE_SHADOW_LENGTH_MAX,
+  DEBATE_STAGE_EVIDENCE_SHADOW_LENGTH_MIN,
+  DEBATE_STAGE_EVIDENCE_SHADOW_LENGTH_STEP,
+  DEBATE_STAGE_EVIDENCE_SHADOW_OPACITY_MAX,
+  DEBATE_STAGE_EVIDENCE_SHADOW_OPACITY_MIN,
+  DEBATE_STAGE_EVIDENCE_SHADOW_OPACITY_STEP,
   DEBATE_STAGE_LIGHT_BLEND_MODES,
   DEBATE_STAGE_LIGHT_MASK_OPACITY_MAX,
   DEBATE_STAGE_LIGHT_MASK_OPACITY_MIN,
@@ -272,6 +297,7 @@ import {
   type DebateStageAlignmentTarget,
   type DebateStageAlignmentV6,
   type DebateStageEvidenceKind,
+  type DebateStageEvidenceShadowV1,
   type DebateStageEvidenceView,
   type DebateStageLightBlendMode,
   type DebateStageOffsetV1,
@@ -310,6 +336,7 @@ import {
   DEBATE_GAVEL_ORDER_CAMERA_CUT_MS,
   debateAudienceBeatForEvent,
   debateDirectedAudiencePlayback,
+  debateModeratorGavelCameraSettleMs,
   debateModeratorGavelCue,
   debateModeratorGavelSpeechLeadMs,
   debateVocalFoleyTargetId,
@@ -369,7 +396,11 @@ import {
   logDebateClientPerf,
 } from "./debatePerfTiming";
 import { reuseDebateSessionEventPrefix } from "./debateSessionAdopt";
-import { usePrismPresentationSuspended } from "./prismPresentationSuspend";
+import {
+  usePrismPresentationSuspended,
+  usePrismAppAwayFromUser,
+  waitWhilePrismPresentationSuspended,
+} from "./prismPresentationSuspend";
 import type { PrismSceneQuality } from "./prismSceneRuntime";
 
 export interface DebateBotSummary {
@@ -449,6 +480,17 @@ export interface DebateExperienceProps {
   objectionRulingTimeoutMs?: number;
   request: <T>(path: string, options?: RequestInit) => Promise<T>;
   renderBotGlyph: BotPickerGlyphRenderer;
+  /**
+   * Library-chip / cast-bot right-click (and long-press) menu — same actions as
+   * Zen/Chat bot chips. `botId` is a Library bot id.
+   */
+  onBotContextMenu?: (botId: string, x: number, y: number) => void;
+  onBotContextLongPressStart?: (
+    event: ReactPointerEvent<HTMLElement>,
+    botId: string,
+  ) => void;
+  onBotContextLongPressMove?: (event: ReactPointerEvent<HTMLElement>) => void;
+  onBotContextLongPressEnd?: (event: ReactPointerEvent<HTMLElement>) => void;
   renderBotAvatar?: (
     bot: DebateBotSnapshotV1,
     state: DebateBotAvatarState,
@@ -1010,7 +1052,7 @@ const DEBATE_AUDIENCE_IDLE_MIX = {
 } as const satisfies SessionAtmosphereMix;
 const DEBATE_AUDIENCE_DUCKED_MIX = {
   ...DEBATE_FOLEY_MIX,
-  background: 0.1,
+  background: 0.24,
 } as const satisfies SessionAtmosphereMix;
 const DEBATE_JURY_CHAMBER_MIX = {
   background: 0.12,
@@ -1754,6 +1796,7 @@ function sessionStatusLabel(session: DebateSessionListItemV1): string {
       : "Completed";
   }
   if (session.status === "waiting_for_player") return "Your turn";
+  if (session.awaitingDeferredStart) return "Saved · ready to start";
   if (session.status === "paused") return "Paused";
   if (session.status === "failed") return "Needs attention";
   return `${session.phase.charAt(0).toUpperCase()}${session.phase.slice(1)}`;
@@ -1765,12 +1808,17 @@ function debateSessionNeedsReturnPause(session: DebateSessionV1): boolean {
 
 /**
  * Presentation-only copy of a held line with a recess lead-in. Saved Proceedings
- * keep the original event text.
+ * keep the original event text. Opening intros replay from the start without a
+ * filler — the chamber never got far enough for "as I was saying…" to make sense.
  */
 function debateSessionWithRecessResumeFiller(
   session: DebateSessionV1,
   eventId: string,
 ): DebateSessionV1 {
+  const held = session.events.find((event) => event.id === eventId);
+  if (held && debateEventIsModeratorIntro(held)) {
+    return session;
+  }
   const filler = debateRecessResumeFiller({
     formality: session.formality,
     sessionId: session.id,
@@ -2693,6 +2741,11 @@ function DebateEvidencePedestal({
         title={title}
         aria-label={`Open evidence: ${title}`}
       >
+        <span
+          className={styles.evidencePedestalFloorShadow}
+          aria-hidden="true"
+          data-debate-evidence-floor-shadow="true"
+        />
         <span className={styles.evidencePedestalGlow} aria-hidden="true" />
         {exhibit ? (
           <DebateEvidenceExhibitVisual
@@ -3053,6 +3106,7 @@ export function DebateExperience(
       3,
   });
   const presentationSuspended = usePrismPresentationSuspended();
+  const appAwayFromUser = usePrismAppAwayFromUser();
   const [topic, setTopic] = useState("");
   const [format, setFormat] = useState<DebateFormatId>("forum");
   const [formality, setFormality] = useState<DebateFormalityId>("plainspoken");
@@ -3086,6 +3140,7 @@ export function DebateExperience(
   const [evidenceObjectSeed, setEvidenceObjectSeed] = useState("");
   const [evidenceObjectDraft, setEvidenceObjectDraft] =
     useState<DebateEvidenceObjectDraft | null>(null);
+  const [editingExhibitId, setEditingExhibitId] = useState<string | null>(null);
   const [evidenceEmojiSearchOpen, setEvidenceEmojiSearchOpen] = useState(false);
   const [evidenceEmojiSearchQuery, setEvidenceEmojiSearchQuery] = useState("");
   const evidenceEmojiTriggerRef = useRef<HTMLButtonElement | null>(null);
@@ -3141,9 +3196,11 @@ export function DebateExperience(
   );
   const presentationStore = useMemo(createDebatePresentationStore, []);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id ?? null);
+  const activeSessionRef = useRef(activeSession);
   useEffect(() => {
     activeSessionIdRef.current = activeSession?.id ?? null;
-  }, [activeSession?.id]);
+    activeSessionRef.current = activeSession;
+  }, [activeSession, activeSession?.id]);
   // Consent is lane-bound: LOCAL↔ONLINE must re-check so a weaker lane cannot
   // rubber-stamp a stronger floor.
   const advocacyConsentPrivacyLaneRef = useRef(props.responseMode);
@@ -3288,6 +3345,7 @@ export function DebateExperience(
     useState<string | null>(null);
   const [liveGavelCue, setLiveGavelCue] =
     useState<DebateModeratorGavelCue | null>(null);
+  const [gavelCameraSettling, setGavelCameraSettling] = useState(false);
   const [debateIdentPlaying, setDebateIdentPlaying] =
     useState<DebateIdentKind | null>(null);
   const [judgeGavelSmashCue, setJudgeGavelSmashCue] =
@@ -3301,9 +3359,13 @@ export function DebateExperience(
   const [audienceOrderSaving, setAudienceOrderSaving] = useState(false);
   const [pauseCooldownUntilMs, setPauseCooldownUntilMs] = useState(0);
   const [pauseCooldownTick, setPauseCooldownTick] = useState(0);
-  const pauseOrResumeRef = useRef<(() => Promise<void>) | null>(null);
+  const pauseOrResumeRef = useRef<
+    ((options?: { bypassCooldown?: boolean }) => Promise<void>) | null
+  >(null);
   const pauseInFlightRef = useRef(false);
   const spectatorPresentationSealInFlightRef = useRef<string | null>(null);
+  /** True only after Spectator watch finishes the full presentation loop. */
+  const spectatorWatchPresentationCompleteRef = useRef(false);
   const [judgeGavelCeremony, setJudgeGavelCeremony] =
     useState<DebateJudgeGavelCeremony | null>(null);
   const [judgeGavelMissedCameraView, setJudgeGavelMissedCameraView] = useState<
@@ -3376,6 +3438,7 @@ export function DebateExperience(
     setAudiencePressurePresentationEventId,
   ] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const [newDuelGenerateBusy, setNewDuelGenerateBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [setupRestoreLoadingId, setSetupRestoreLoadingId] = useState<
     string | null
@@ -4192,6 +4255,13 @@ export function DebateExperience(
   const [introCameraView, setIntroCameraView] =
     useState<DebateModeratorCameraView | null>(null);
   const [introCameraTick, setIntroCameraTick] = useState(0);
+  // Speech ticks often skip React liveReveal (store-only updates). Intro camera
+  // must follow the presentation store or it stays locked on Moderator.
+  const introCameraSpeechSnapshot = useSyncExternalStore(
+    presentationStore.subscribe,
+    presentationStore.getSnapshot,
+    presentationStore.getSnapshot,
+  );
   useEffect(() => {
     const session = activeSession;
     const event = cameraPresentationEvent;
@@ -4219,7 +4289,9 @@ export function DebateExperience(
       };
     }
     const visibleLength =
-      liveReveal?.eventId === event.id ? liveReveal.visibleContent.length : 0;
+      introCameraSpeechSnapshot.eventId === event.id
+        ? introCameraSpeechSnapshot.visibleContent.length
+        : 0;
     const resolved = resolveDebateModeratorCameraView({
       content: event.content,
       visibleLength,
@@ -4256,8 +4328,8 @@ export function DebateExperience(
     activeSession,
     cameraPresentationEvent,
     effectiveCameraMode,
+    introCameraSpeechSnapshot,
     introCameraTick,
-    liveReveal,
     presenting,
     view,
   ]);
@@ -4798,11 +4870,13 @@ export function DebateExperience(
     setScholarQuery("");
     setEvidenceObjectSeed("");
     setEvidenceObjectDraft(null);
+    setEditingExhibitId(null);
     setPlayerDraft("");
     setTurnaboutObjecting(false);
     setTurnaboutEvidenceSourceId("");
     setSetupRestoreLoadingId(null);
     setSetupRestoreNotice(null);
+    setNewDuelGenerateBusy(false);
     setError(null);
   };
 
@@ -5399,6 +5473,148 @@ export function DebateExperience(
     [busy, synthesize, topic],
   );
 
+  const generateNewDuelFromPrism = useCallback(
+    async (direction: string): Promise<void> => {
+      if (props.bots.length < 2) {
+        setError("Create at least two Library bots to start a Debate.");
+        return;
+      }
+      startNewDebate();
+      setBusy(true);
+      setNewDuelGenerateBusy(true);
+      setSetupRestoreNotice(null);
+      setError(null);
+      try {
+        const result = await props.request<{
+          suggestion: DebateSetupSuggestionV1;
+        }>(
+          "/api/debates/setup-suggestion",
+          requestBody({
+            direction,
+            roster: props.bots.map((bot) => ({
+              id: bot.id,
+              name: bot.name,
+              personaSnippet: (bot.systemPrompt ?? "").slice(0, 280),
+            })),
+            preferredProvider:
+              props.modelOverride?.provider ?? props.preferredProvider,
+            modelOverride: props.modelOverride?.model,
+            responseMode: props.responseMode,
+          }),
+        );
+        const applied = applyDebateSetupSuggestion(result.suggestion);
+        setTopic(applied.topic);
+        setFormat(applied.format);
+        setForumRoundMode(applied.forumRoundMode);
+        setForumRoundCount(applied.forumRoundCount);
+        setFormality(applied.formality);
+        setSelectedPresetId(applied.selectedPresetId);
+        setSlates([]);
+        setMotion(applied.motion);
+        setCast(applied.cast);
+        setPlayerRole(applied.playerRole);
+        setJuryEnabled(applied.juryEnabled);
+        setPlayerSideId(applied.playerSideId);
+        setModeratorTitle(applied.moderatorTitle);
+        setActiveCastSlot(
+          applied.playerRole === "judge"
+            ? "forAdvocate"
+            : applied.playerRole === "participant"
+              ? applied.playerSideId === "against"
+                ? "forAdvocate"
+                : "againstAdvocate"
+              : "moderator",
+        );
+        setEvidence(applied.evidence);
+        setResearchQuery(applied.researchQuery);
+        setScholarQuery(applied.scholarQuery);
+        setEvidenceDecisionMade(true);
+        setStudioPanel("motion");
+        setCastTuningOpen(
+          applied.playerRole !== "judge" || applied.juryEnabled,
+        );
+        if (applied.sourcesSkippedNotice) {
+          setSetupRestoreNotice(applied.sourcesSkippedNotice);
+        }
+        const roleChecksReady =
+          applied.playerRole === "participant"
+            ? Boolean(
+                applied.cast.moderator &&
+                  (applied.playerSideId === "for"
+                    ? applied.cast.againstAdvocate
+                    : applied.cast.forAdvocate),
+              )
+            : Boolean(
+                applied.cast.forAdvocate &&
+                  applied.cast.againstAdvocate &&
+                  (applied.playerRole === "judge" || applied.cast.moderator),
+              );
+        if (!roleChecksReady) {
+          setRoleChecks([]);
+          return;
+        }
+        const roleResult = await props.request<{
+          checks: DebateAdvocacyConsent[];
+        }>(
+          "/api/debates/role-checks",
+          requestBody({
+            format: applied.format,
+            formality: applied.formality,
+            motion: applied.motion,
+            playerRole: applied.playerRole,
+            playerSideId:
+              applied.playerRole === "participant"
+                ? applied.playerSideId
+                : null,
+            forAdvocateBotId:
+              applied.playerRole === "participant" &&
+              applied.playerSideId === "for"
+                ? undefined
+                : applied.cast.forAdvocate,
+            againstAdvocateBotId:
+              applied.playerRole === "participant" &&
+              applied.playerSideId === "against"
+                ? undefined
+                : applied.cast.againstAdvocate,
+            preferredProvider:
+              props.modelOverride?.provider ?? props.preferredProvider,
+            modelOverride: props.modelOverride?.model,
+            responseMode: props.responseMode,
+          }),
+        );
+        setRoleChecks(roleResult.checks);
+      } catch (caught) {
+        setError(
+          caught instanceof Error
+            ? caught.message
+            : "Prism could not invent a New Duel.",
+        );
+      } finally {
+        setBusy(false);
+        setNewDuelGenerateBusy(false);
+      }
+    },
+    [
+      props.bots,
+      props.modelOverride?.model,
+      props.modelOverride?.provider,
+      props.preferredProvider,
+      props.request,
+      props.responseMode,
+    ],
+  );
+
+  const newDuelMagic = useMemo<PrismRefractMagicTarget>(
+    () => ({
+      id: "debate:new-duel-generate",
+      label: "Generate a full New Duel",
+      kind: "magic",
+      disabled: () => props.bots.length < 2 || busy || newDuelGenerateBusy,
+      run: (direction) => void generateNewDuelFromPrism(direction),
+    }),
+    [busy, generateNewDuelFromPrism, newDuelGenerateBusy, props.bots.length],
+  );
+
   const selectSlate = (slate: DebateMotionSlateV1): void => {
     setMotion(copyDebateMotionSlate(slate));
     setRoleChecks([]);
@@ -5639,6 +5855,7 @@ export function DebateExperience(
           throw new Error("Prism returned an incomplete exhibit.");
         }
         setEvidenceObjectDraft(contextualDraft);
+        setEditingExhibitId(null);
         setEvidenceObjectSeed("");
       } catch (caught) {
         setError(
@@ -5789,31 +6006,43 @@ export function DebateExperience(
     }
   };
 
+  const beginEditingExhibit = (exhibit: DebateEvidenceExhibitV1): void => {
+    setEvidenceObjectDraft(debateEvidenceObjectDraftFromExhibit(exhibit));
+    setEditingExhibitId(exhibit.id);
+    setEvidenceObjectSeed("");
+    setEvidenceEmojiSearchOpen(false);
+    setSourceDrawerId(null);
+    setError(null);
+  };
+
   const addEvidenceObject = (): void => {
-    if (!evidenceObjectDraft || evidenceItemLimitReached) return;
+    if (!evidenceObjectDraft) return;
+    if (!editingExhibitId && evidenceItemLimitReached) return;
     const title = debateEvidenceExhibitTitle(evidenceObjectDraft);
     if (!title) {
       setError("Use one adjective and one object, such as Rusty spoon.");
       return;
     }
     const draft = evidenceObjectDraft;
-    setEvidence((current) => ({
-      ...current,
-      exhibits: [
-        ...(current.exhibits ?? []),
-        {
-          id: nextDebateEvidenceExhibitId(current),
-          adjective: draft.adjective,
-          object: draft.object,
-          title,
-          observation: draft.observation.trim() || `${title}.`,
-          emoji: draft.emoji,
-          visualKind: draft.imageId ? draft.visualKind : "emoji",
-          imageId: draft.imageId,
-          createdBy: draft.createdBy,
-        },
-      ],
-    }));
+    const nextExhibit: DebateEvidenceExhibitV1 = {
+      id: editingExhibitId ?? nextDebateEvidenceExhibitId(evidence),
+      adjective: draft.adjective,
+      object: draft.object,
+      title,
+      observation: draft.observation.trim() || `${title}.`,
+      emoji: draft.emoji,
+      visualKind: draft.imageId ? draft.visualKind : "emoji",
+      imageId: draft.imageId,
+      createdBy: draft.createdBy,
+    };
+    setEvidence((current) =>
+      editingExhibitId
+        ? replaceDebateEvidenceExhibit(current, editingExhibitId, nextExhibit)
+        : {
+            ...current,
+            exhibits: [...(current.exhibits ?? []), nextExhibit],
+          },
+    );
     void playDebateExhibitImpactSfx({
       exhibit: {
         adjective: draft.adjective,
@@ -5827,6 +6056,7 @@ export function DebateExperience(
     setEvidenceEmojiSearchOpen(false);
     setEvidenceObjectSeed("");
     setEvidenceObjectDraft(null);
+    setEditingExhibitId(null);
     setError(null);
   };
 
@@ -6159,6 +6389,10 @@ export function DebateExperience(
       }
       for (const [eventIndex, event] of fresh.entries()) {
         if (presentationRunRef.current !== runId) return;
+        await waitWhilePrismPresentationSuspended(
+          () => presentationRunRef.current !== runId,
+        );
+        if (presentationRunRef.current !== runId) return;
         if (consumedOverlapEventIds.has(event.id)) {
           scheduleProceedingsReveal(next.id, event.sequence);
           continue;
@@ -6322,6 +6556,22 @@ export function DebateExperience(
           if (presentationRunRef.current !== runId) return;
           gavelCue = null;
         }
+        const gavelCameraSettleMs = gavelCue
+          ? debateModeratorGavelCameraSettleMs(gavelCue.kind)
+          : 0;
+        // Cut to Moderator and hold before the visual slam arms — especially
+        // important after recess Wide / opening restart.
+        if (gavelCameraSettleMs > 0) {
+          setGavelCameraSettling(true);
+          await new Promise((resolve) =>
+            window.setTimeout(resolve, gavelCameraSettleMs),
+          );
+          if (presentationRunRef.current !== runId) {
+            setGavelCameraSettling(false);
+            return;
+          }
+          setGavelCameraSettling(false);
+        }
         setLiveGavelCue(resumedJudgeGavelAlreadyStruck ? null : gavelCue);
         const orderCameraCutMs =
           gavelCue?.kind === "order" ? DEBATE_GAVEL_ORDER_CAMERA_CUT_MS : 0;
@@ -6426,6 +6676,57 @@ export function DebateExperience(
             0,
             debateModeratorGavelSpeechLeadMs(gavelCue.kind) - orderCameraCutMs,
           );
+          // #region agent log
+          if (
+            event.gavelReason === "audience_order" ||
+            event.stepKey === "audience_order" ||
+            (event.kind === "moderator_ruling" && gavelCue.kind === "order")
+          ) {
+            const pressureNow = debateAudiencePressureScore({
+              events: next.events,
+              formality: next.formality,
+              playerRole: next.playerRole,
+              visibleThroughSequence: event.sequence,
+            });
+            const pressureBefore = debateAudiencePressureScore({
+              events: next.events,
+              formality: next.formality,
+              playerRole: next.playerRole,
+              visibleThroughSequence: event.sequence - 1,
+            });
+            fetch(
+              "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Debug-Session-Id": "408330",
+                },
+                body: JSON.stringify({
+                  sessionId: "408330",
+                  runId: "gallery-rowdy",
+                  hypothesisId: "B-moderator-order-score-zero",
+                  location: "DebateExperience.tsx:gavelCue.preSpeech",
+                  message: "order-capable event before speech lead",
+                  data: {
+                    eventKind: event.kind,
+                    stepKey: event.stepKey ?? null,
+                    gavelReason: event.gavelReason ?? null,
+                    formality: next.formality,
+                    gavelCueKind: gavelCue.kind,
+                    audienceReaction: gavelCue.audienceReaction ?? null,
+                    pressureNow,
+                    pressureBefore,
+                    triggersJudgeOrderPath:
+                      event.kind === "judge_gavel" &&
+                      event.gavelReason === "audience_order",
+                  },
+                  timestamp: Date.now(),
+                }),
+              },
+            ).catch(() => {});
+          }
+          // #endregion
           await new Promise((resolve) =>
             window.setTimeout(resolve, remainingSpeechLeadMs),
           );
@@ -6466,6 +6767,30 @@ export function DebateExperience(
                 ),
               })?.listenerReaction ?? null,
           });
+          // #region agent log
+          fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+            method: "POST",
+            headers: {
+              "Content-Type": "application/json",
+              "X-Debug-Session-Id": "408330",
+            },
+            body: JSON.stringify({
+              sessionId: "408330",
+              runId: "gallery-rowdy",
+              hypothesisId: "A-judge-gavel-order",
+              location: "DebateExperience.tsx:judge_gavel.audience_order",
+              message: "judge gavel audience order response",
+              data: {
+                formality: next.formality,
+                pressureBeforeOrder,
+                kind: pressureBeforeOrder >= 45 ? "hush" : "awkward",
+                eventKind: event.kind,
+                gavelReason: event.gavelReason ?? null,
+              },
+              timestamp: Date.now(),
+            }),
+          }).catch(() => {});
+          // #endregion
           triggerAudienceOrderResponseRef.current?.({
             eventId: event.id,
             kind: pressureBeforeOrder >= 45 ? "hush" : "awkward",
@@ -7054,11 +7379,28 @@ export function DebateExperience(
       if (presentationRunRef.current !== runId) return;
       presentationPlaybackEventIdRef.current = null;
       setLiveGavelCue(null);
+      setGavelCameraSettling(false);
       setSpeakerHandoff(null);
       setInterruptCameraView(null);
       setOverlapSpeakingBotIds(new Set());
       replaceLiveReveal(null);
       setVoicePreparationSpeakerBotId(null);
+      if (next.playerRole === "spectator") {
+        const allPresentable = debatePresentationEvents(
+          null,
+          next,
+          debateJuryCameraIsActive(
+            debateCameraModeForSession(cameraModeRef.current, next),
+            next,
+          ),
+        );
+        const lastPresentableId = allPresentable.at(-1)?.id ?? null;
+        // Only seal after the final presentable beat — not after a partial
+        // recess resume batch or a suspend abort.
+        spectatorWatchPresentationCompleteRef.current =
+          lastPresentableId !== null &&
+          fresh.some((event) => event.id === lastPresentableId);
+      }
     },
     [
       debateMaterialQuality,
@@ -7233,6 +7575,9 @@ export function DebateExperience(
       presentationRunRef.current = runId;
       presentationPlaybackEventIdRef.current = null;
       activeSessionIdRef.current = next.id;
+      if (next.playerRole === "spectator") {
+        spectatorWatchPresentationCompleteRef.current = false;
+      }
       presentationStore.clear();
       setVoicePreparationSpeakerBotId(null);
       setSpeakerHandoff(null);
@@ -7293,6 +7638,7 @@ export function DebateExperience(
         );
         setPresentationEventId(null);
         setLiveGavelCue(null);
+        setGavelCameraSettling(false);
         replaceLiveReveal(null);
       }
       setPresenting(fresh.length > 0 || options.playIntro === true);
@@ -7472,6 +7818,7 @@ export function DebateExperience(
       setUrlEvidenceDraft(null);
       setUrlEvidenceError(null);
       setEvidenceObjectDraft(null);
+      setEditingExhibitId(null);
       setEvidenceEmojiSearchOpen(false);
       setEvidenceEmojiSearchQuery("");
       setSourceDrawerId(null);
@@ -7495,76 +7842,124 @@ export function DebateExperience(
     }
   };
 
+  const buildDebateCreateBody = (
+    titledMotion: typeof motion,
+    options: { deferStart?: boolean; idempotencyLabel: string },
+  ): Record<string, unknown> => ({
+    presetId: effectivePresetId,
+    format,
+    formality,
+    motion: titledMotion,
+    evidence,
+    moderatorTitle: normalizeDebateModeratorTitle(moderatorTitle),
+    moderatorBotId: effectiveModeratorBotId,
+    playerJudgeUsesPrism: playerRole === "judge",
+    forAdvocateBotId:
+      playerRole === "participant" && playerSideId === "for"
+        ? undefined
+        : cast.forAdvocate,
+    againstAdvocateBotId:
+      playerRole === "participant" && playerSideId === "against"
+        ? undefined
+        : cast.againstAdvocate,
+    playerRole,
+    playerSideId: playerRole === "participant" ? playerSideId : null,
+    jury: {
+      enabled: juryEnabled,
+      cadence: "natural-five",
+    },
+    forumRounds:
+      format === "forum"
+        ? {
+            mode: forumRoundMode,
+            count: forumRoundMode === "fixed" ? forumRoundCount : undefined,
+          }
+        : undefined,
+    advocacyConsent: roleChecks,
+    preferredProvider:
+      props.modelOverride?.provider ?? props.preferredProvider,
+    modelOverride: props.modelOverride?.model,
+    responseMode: props.responseMode,
+    theme: props.theme,
+    ...(options.deferStart ? { deferStart: true } : {}),
+    idempotencyKey: nextMutationKey(options.idempotencyLabel),
+  });
+
+  const ensureDebateMotionTitle = async (): Promise<typeof motion> => {
+    let titledMotion = motion;
+    if (!motion.title?.trim()) {
+      try {
+        const titleResult = await props.request<{ title: string }>(
+          "/api/debates/title",
+          requestBody({
+            motion,
+            formality,
+            preferredProvider:
+              props.modelOverride?.provider ?? props.preferredProvider,
+            modelOverride: props.modelOverride?.model,
+            responseMode: props.responseMode,
+          }),
+        );
+        titledMotion = { ...motion, title: titleResult.title };
+      } catch {
+        titledMotion = {
+          ...motion,
+          title: debateTitleForMotion(motion, formality),
+        };
+      }
+      setMotion(titledMotion);
+    }
+    return titledMotion;
+  };
+
+  const saveDebate = async (): Promise<void> => {
+    if (!debateCanStart) return;
+    setBusy(true);
+    setSetupRestoreNotice(null);
+    setError(null);
+    try {
+      const titledMotion = await ensureDebateMotionTitle();
+      await props.request<{ session: DebateSessionV1 }>(
+        "/api/debates",
+        requestBody(
+          buildDebateCreateBody(titledMotion, {
+            deferStart: true,
+            idempotencyLabel: "save",
+          }),
+        ),
+      );
+      if (!mountedRef.current) return;
+      startNewDebate();
+      setSetupRestoreNotice(
+        "Saved to Archive · Open. Exhibit images stay protected while this proceeding remains archived.",
+      );
+      setStudioPanel("archive");
+      await loadSessions();
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The Debate could not be saved.",
+      );
+    } finally {
+      setBusy(false);
+    }
+  };
+
   const startDebate = async (): Promise<void> => {
     if (!debateCanStart) return;
     setBusy(true);
     setSetupRestoreNotice(null);
     setError(null);
     try {
-      let titledMotion = motion;
-      if (!motion.title?.trim()) {
-        try {
-          const titleResult = await props.request<{ title: string }>(
-            "/api/debates/title",
-            requestBody({
-              motion,
-              formality,
-              preferredProvider:
-                props.modelOverride?.provider ?? props.preferredProvider,
-              modelOverride: props.modelOverride?.model,
-              responseMode: props.responseMode,
-            }),
-          );
-          titledMotion = { ...motion, title: titleResult.title };
-        } catch {
-          titledMotion = {
-            ...motion,
-            title: debateTitleForMotion(motion, formality),
-          };
-        }
-        setMotion(titledMotion);
-      }
+      const titledMotion = await ensureDebateMotionTitle();
       const result = await props.request<{ session: DebateSessionV1 }>(
         "/api/debates",
-        requestBody({
-          presetId: effectivePresetId,
-          format,
-          formality,
-          motion: titledMotion,
-          evidence,
-          moderatorTitle: normalizeDebateModeratorTitle(moderatorTitle),
-          moderatorBotId: effectiveModeratorBotId,
-          playerJudgeUsesPrism: playerRole === "judge",
-          forAdvocateBotId:
-            playerRole === "participant" && playerSideId === "for"
-              ? undefined
-              : cast.forAdvocate,
-          againstAdvocateBotId:
-            playerRole === "participant" && playerSideId === "against"
-              ? undefined
-              : cast.againstAdvocate,
-          playerRole,
-          playerSideId: playerRole === "participant" ? playerSideId : null,
-          jury: {
-            enabled: juryEnabled,
-            cadence: "natural-five",
-          },
-          forumRounds:
-            format === "forum"
-              ? {
-                  mode: forumRoundMode,
-                  count:
-                    forumRoundMode === "fixed" ? forumRoundCount : undefined,
-                }
-              : undefined,
-          advocacyConsent: roleChecks,
-          preferredProvider:
-            props.modelOverride?.provider ?? props.preferredProvider,
-          modelOverride: props.modelOverride?.model,
-          responseMode: props.responseMode,
-          theme: props.theme,
-          idempotencyKey: nextMutationKey("create"),
-        }),
+        requestBody(
+          buildDebateCreateBody(titledMotion, {
+            idempotencyLabel: "create",
+          }),
+        ),
       );
       if (playerRole === "spectator") {
         setSpectatorBake(result.session.liveBake ?? null);
@@ -7835,7 +8230,8 @@ export function DebateExperience(
       audienceOrderSaving ||
       presenting ||
       earlyEndOpen ||
-      presentationSuspended
+      presentationSuspended ||
+      appAwayFromUser
     ) {
       return;
     }
@@ -7847,6 +8243,7 @@ export function DebateExperience(
   }, [
     activeSession,
     advance,
+    appAwayFromUser,
     audienceOrderSaving,
     busy,
     earlyEndOpen,
@@ -7866,6 +8263,8 @@ export function DebateExperience(
       presenting ||
       earlyEndOpen ||
       presentationSuspended ||
+      appAwayFromUser ||
+      !spectatorWatchPresentationCompleteRef.current ||
       debateFloorMutationInFlightRef.current ||
       pauseInFlightRef.current
     ) {
@@ -7918,6 +8317,7 @@ export function DebateExperience(
     // cancel the seal when that local busy flag flips.
   }, [
     activeSession,
+    appAwayFromUser,
     earlyEndOpen,
     loadSessions,
     nextMutationKey,
@@ -8296,6 +8696,7 @@ export function DebateExperience(
 
   const cancelCurrentPresentation = (): void => {
     presentationRunRef.current += 1;
+    spectatorWatchPresentationCompleteRef.current = false;
     cancelJudgeGavelCeremonyRef.current?.();
     props.onStopUtterance?.();
     void stopDebateIdentAudio();
@@ -8309,6 +8710,7 @@ export function DebateExperience(
       speechRevealRunRef.current = null;
     }
     setLiveGavelCue(null);
+    setGavelCameraSettling(false);
     setSpeakerHandoff(null);
     setAudiencePressurePresentationEventId(null);
     setInterruptCameraView(null);
@@ -8325,6 +8727,7 @@ export function DebateExperience(
     eventId: string | null,
   ): void => {
     presentationRunRef.current += 1;
+    spectatorWatchPresentationCompleteRef.current = false;
     cancelJudgeGavelCeremonyRef.current?.();
     props.onStopUtterance?.();
     void stopDebateIdentAudio();
@@ -8338,6 +8741,7 @@ export function DebateExperience(
       speechRevealRunRef.current = null;
     }
     setLiveGavelCue(null);
+    setGavelCameraSettling(false);
     setSpeakerHandoff(null);
     setAudiencePressurePresentationEventId(null);
     setInterruptCameraView(null);
@@ -8425,32 +8829,117 @@ export function DebateExperience(
     if (args.performGavel !== false) {
       triggerJudgeGavelSmash("order");
     }
-    setAudiencePressureReset({
-      resetAfterSequence: args.resetAfterSequence,
-      sessionId: args.sessionId,
-    });
+    // Keep scored pressure hot under the call — reset only when room tone returns.
     setAudienceOrderResponse(response);
-    playDebateAudienceReaction("order", args.eventId);
+    // #region agent log
+    const laughPath =
+      args.kind === "hush" &&
+      props.audioEnabled &&
+      props.audioVolume > 0 &&
+      !juryCameraActive;
+    const controllerReady = Boolean(debateAtmosphereControllerRef.current);
+    let laughPlayed: boolean | null = null;
+    let swellPlayed: boolean | null = null;
+    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "408330",
+      },
+      body: JSON.stringify({
+        sessionId: "408330",
+        runId: "gallery-rowdy",
+        hypothesisId: "C-D-laugh-path",
+        location: "DebateExperience.tsx:triggerAudienceOrderResponse",
+        message: "audience order response armed",
+        data: {
+          kind: args.kind,
+          laughPath,
+          controllerReady,
+          audioEnabled: props.audioEnabled,
+          audioVolume: props.audioVolume,
+          juryCameraActive,
+          formality: activeSession?.formality ?? null,
+          livePressureScore: currentAudiencePressureScore,
+          livePressureBand: currentAudiencePressureBand,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     if (audienceOrderResponseClearTimerRef.current !== null) {
       window.clearTimeout(audienceOrderResponseClearTimerRef.current);
     }
     if (audienceRoomToneReturnTimerRef.current !== null) {
       window.clearTimeout(audienceRoomToneReturnTimerRef.current);
     }
+    // Rowdy calls get a light laugh + agitation swell before the hush; quiet
+    // awkward beats go straight to the order bed.
+    if (laughPath) {
+      laughPlayed =
+        debateAtmosphereControllerRef.current?.playFoley(
+          DEBATE_AUDIENCE_REACTIONS.laugh.url,
+          {
+            trim: DEBATE_AUDIENCE_REACTIONS.laugh.trim * 0.42,
+            lowCutHz: 140,
+            highCutHz: 6_400,
+            stereoPan: -0.06,
+            tag: `debate-audience-laugh-into-order:${args.eventId}`,
+          },
+        ) ?? false;
+      swellPlayed =
+        debateAtmosphereControllerRef.current?.playFoley(
+          DEBATE_AUDIENCE_AGITATION_URL,
+          {
+            trim: 0.62,
+            lowCutHz: 90,
+            highCutHz: 8_200,
+            stereoPan: 0.05,
+            tag: `debate-audience-order-swell:${args.eventId}`,
+          },
+        ) ?? false;
+      // #region agent log
+      fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "408330",
+        },
+        body: JSON.stringify({
+          sessionId: "408330",
+          runId: "gallery-rowdy",
+          hypothesisId: "C-foley-play",
+          location: "DebateExperience.tsx:triggerAudienceOrderResponse.foley",
+          message: "laugh/swell playFoley results",
+          data: { laughPlayed, swellPlayed, controllerReady },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      window.setTimeout(() => {
+        playDebateAudienceReaction("order", args.eventId);
+      }, 280);
+    } else {
+      playDebateAudienceReaction("order", args.eventId);
+    }
     audienceRoomToneReturnTimerRef.current = window.setTimeout(() => {
+      setAudiencePressureReset({
+        resetAfterSequence: args.resetAfterSequence,
+        sessionId: args.sessionId,
+      });
       setAudienceOrderResponse((current) =>
         current?.id === response.id
           ? { ...current, returningRoomTone: true }
           : current,
       );
       audienceRoomToneReturnTimerRef.current = null;
-    }, 100);
+    }, DEBATE_AUDIENCE_ORDER_PEAK_HOLD_MS);
     audienceOrderResponseClearTimerRef.current = window.setTimeout(() => {
       setAudienceOrderResponse((current) =>
         current?.id === response.id ? null : current,
       );
       audienceOrderResponseClearTimerRef.current = null;
-    }, 4_100);
+    }, DEBATE_AUDIENCE_ORDER_PEAK_HOLD_MS + DEBATE_AUDIENCE_ORDER_RETURN_MS);
   };
   triggerAudienceOrderResponseRef.current = triggerAudienceOrderResponse;
 
@@ -8778,7 +9267,9 @@ export function DebateExperience(
     }
   };
 
-  const pauseOrResume = async (): Promise<void> => {
+  const pauseOrResume = async (
+    options: { bypassCooldown?: boolean } = {},
+  ): Promise<void> => {
     const previous = activeSession;
     if (
       !previous ||
@@ -8794,6 +9285,7 @@ export function DebateExperience(
     const resume = previous.status === "paused";
     if (
       !resume &&
+      !options.bypassCooldown &&
       pauseCooldownUntilMs > Date.now()
     ) {
       return;
@@ -8803,8 +9295,25 @@ export function DebateExperience(
     debateFloorMutationInFlightRef.current = true;
     const startSpectatorWatch =
       resume && debateSpectatorAwaitingFirstWatch(previous);
+    const startDeferredSetup =
+      resume && debateSessionAwaitingDeferredStart(previous);
+    const heldBeforeResume = resume
+      ? previous.pausedPresentationEventId
+        ? (previous.events.find(
+            (event) => event.id === previous.pausedPresentationEventId,
+          ) ?? null)
+        : null
+      : null;
+    const resumeOpeningIntro =
+      heldBeforeResume != null &&
+      debateEventIsModeratorIntro(heldBeforeResume);
     const lifecycleCutscene = !juryCameraActive;
-    const silentLifecycle = !lifecycleCutscene || startSpectatorWatch;
+    // Opening-intro holds restart from the bookend — no recess announce/filler.
+    const silentLifecycle =
+      !lifecycleCutscene ||
+      startSpectatorWatch ||
+      startDeferredSetup ||
+      resumeOpeningIntro;
     const previousEventIds = new Set(previous.events.map((event) => event.id));
     let replayEventId = resume
       ? (previous.pausedPresentationEventId ?? null)
@@ -8820,7 +9329,13 @@ export function DebateExperience(
         resume ? "resume" : "pause"
       }`;
       const lifecycleIdempotencyKey = nextMutationKey(
-        startSpectatorWatch ? "spectator-start" : resume ? "resume" : "pause",
+        startSpectatorWatch
+          ? "spectator-start"
+          : startDeferredSetup
+            ? "deferred-start"
+            : resume
+              ? "resume"
+              : "pause",
       );
       const requestQuietLifecycle = (session: DebateSessionV1) =>
         props.request<{ session: DebateSessionV1 }>(
@@ -8830,7 +9345,9 @@ export function DebateExperience(
             idempotencyKey: `${lifecycleIdempotencyKey}:quiet`,
             juryVisible: !lifecycleCutscene,
             quietSave: true,
-            ...(startSpectatorWatch ? { exitRecovery: true } : {}),
+            ...(startSpectatorWatch || startDeferredSetup
+              ? { exitRecovery: true }
+              : {}),
             ...(!resume ? { presentationEventId: replayEventId } : {}),
           }),
         );
@@ -8876,9 +9393,15 @@ export function DebateExperience(
         }
       }
       // Quiet bookmark is authoritative before any ceremony speech starts.
+      // Ceremonial resume (and opening-intro restarts) keep the recess UI until
+      // adopt presents — otherwise Auto never settles on Moderator before slam.
       if (mountedRef.current) {
-        setActiveSession(quiet.session);
-        if (resume || silentLifecycle) setBusy(false);
+        if (resume && (!silentLifecycle || resumeOpeningIntro)) {
+          setActiveSession({ ...quiet.session, status: "paused" });
+        } else {
+          setActiveSession(quiet.session);
+          if (resume || silentLifecycle) setBusy(false);
+        }
       }
       let result = quiet;
       if (!silentLifecycle) {
@@ -8905,8 +9428,34 @@ export function DebateExperience(
           event.stepKey === (resume ? "resume" : "pause"),
       );
       if (resume) {
-        if (mountedRef.current) setBusy(false);
         if (startSpectatorWatch) {
+          if (mountedRef.current) setBusy(false);
+          await adoptSession(null, result.session, { playIntro: true });
+          void loadSessions();
+          return;
+        }
+        if (startDeferredSetup) {
+          if (result.session.playerRole === "spectator") {
+            setSpectatorBake(result.session.liveBake ?? null);
+            setView("baking");
+            setBusy(true);
+            const baked = await props.request<{
+              session: DebateSessionV1;
+              liveBake: LiveBakeArtifactV1;
+            }>(
+              `/api/debates/${encodeURIComponent(result.session.id)}/bake`,
+              requestBody({}),
+            );
+            if (!mountedRef.current) return;
+            setSpectatorBake(null);
+            if (mountedRef.current) setBusy(false);
+            // Deferred Spectator Start already chose to begin — bake then play,
+            // without a second hold-for-Start gate.
+            await adoptSession(null, baked.session, { playIntro: true });
+            void loadSessions();
+            return;
+          }
+          if (mountedRef.current) setBusy(false);
           await adoptSession(null, result.session, { playIntro: true });
           void loadSessions();
           return;
@@ -8916,9 +9465,13 @@ export function DebateExperience(
         const pausedPresentationEvent = heldEventId
           ? result.session.events.find((event) => event.id === heldEventId)
           : undefined;
+        const heldIsOpeningIntro =
+          pausedPresentationEvent != null &&
+          debateEventIsModeratorIntro(pausedPresentationEvent);
         const judgeResumedWithGavel =
           lifecycleEvent !== undefined &&
           lifecycleCutscene &&
+          !heldIsOpeningIntro &&
           result.session.playerRole === "judge";
         if (judgeResumedWithGavel && lifecycleEvent) {
           triggerJudgeGavelSmash("order", lifecycleEvent.id);
@@ -8930,7 +9483,7 @@ export function DebateExperience(
             sessionId: result.session.id,
           });
         }
-        if (lifecycleEvent) {
+        if (lifecycleEvent && !heldIsOpeningIntro) {
           await adoptSession(previous, result.session, {
             resumedJudgeGavelPresentationEventId: judgeResumedWithGavel
               ? lifecycleEvent.id
@@ -9006,6 +9559,26 @@ export function DebateExperience(
     }
   };
   pauseOrResumeRef.current = pauseOrResume;
+
+  useEffect(() => {
+    if (!appAwayFromUser) return;
+    if (view !== "live" || earlyEndOpen) return;
+    let cancelled = false;
+    const attemptRecess = (): void => {
+      if (cancelled || pauseInFlightRef.current) return;
+      const session = activeSessionRef.current;
+      if (!session || !debateSessionNeedsReturnPause(session)) return;
+      // Leaving the app must recess even during the short Pause cooldown —
+      // otherwise background timers can silent-skip the remaining floor.
+      void pauseOrResumeRef.current?.({ bypassCooldown: true });
+    };
+    attemptRecess();
+    const timer = window.setInterval(attemptRecess, 1_500);
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [appAwayFromUser, earlyEndOpen, view]);
 
   useEffect(() => {
     if (pauseCooldownUntilMs <= Date.now()) return;
@@ -9618,16 +10191,21 @@ export function DebateExperience(
           </span>
         </div>
         <div className={styles.lobbyActions}>
-          <button
-            type="button"
-            className={styles.primaryButton}
-            onClick={startNewDebate}
-            disabled={props.bots.length < 2}
-            data-tutorial-target="debate-new"
-          >
-            <span aria-hidden="true">＋</span>
-            New Duel
-          </button>
+          <PrismRefractTarget target={newDuelMagic}>
+            {(binding) => (
+              <button
+                {...binding}
+                type="button"
+                className={styles.primaryButton}
+                onClick={startNewDebate}
+                disabled={props.bots.length < 2 || busy || newDuelGenerateBusy}
+                data-tutorial-target="debate-new"
+              >
+                <span aria-hidden="true">＋</span>
+                New Duel
+              </button>
+            )}
+          </PrismRefractTarget>
           {props.onResetTutorial ? (
             <button
               type="button"
@@ -10555,6 +11133,7 @@ export function DebateExperience(
                   className={styles.castSlotSelect}
                   aria-pressed={effectiveActiveCastSlot === key}
                   disabled={fixedSeat}
+                  data-bot-id={bot && !fixedSeat ? bot.id : undefined}
                   onClick={() => setActiveCastSlot(key)}
                 >
                   <span className={styles.castSlotGlyph} aria-hidden="true">
@@ -10646,13 +11225,31 @@ export function DebateExperience(
                   buttonProps={{
                     role: "radio",
                     "aria-checked": selected,
+                    "aria-disabled": disabledReason ? true : undefined,
                     "aria-label": disabledReason
                       ? `${bot.name}, ${disabledReason}`
                       : `${bot.name}${selected ? ", selected" : ""}`,
-                    disabled: Boolean(disabledReason),
+                    // Keep pointer events so right-click / long-press still open
+                    // the Library bot menu on already-cast chips.
                     title: disabledReason ?? undefined,
-                    onClick: () =>
-                      assignBotToCastSlot(effectiveActiveCastSlot, bot.id),
+                    onPointerDown: (event) =>
+                      props.onBotContextLongPressStart?.(event, bot.id),
+                    onPointerUp: props.onBotContextLongPressEnd,
+                    onPointerCancel: props.onBotContextLongPressEnd,
+                    onPointerMove: props.onBotContextLongPressMove,
+                    onContextMenu: (event) => {
+                      event.preventDefault();
+                      event.stopPropagation();
+                      props.onBotContextMenu?.(
+                        bot.id,
+                        event.clientX,
+                        event.clientY,
+                      );
+                    },
+                    onClick: () => {
+                      if (disabledReason) return;
+                      assignBotToCastSlot(effectiveActiveCastSlot, bot.id);
+                    },
                   }}
                 />
               );
@@ -11302,15 +11899,33 @@ export function DebateExperience(
         {evidenceObjectDraft && objectPreview ? (
           <section
             className={styles.evidenceObjectEditor}
-            aria-label="Create an object exhibit"
+            aria-label={
+              editingExhibitId
+                ? "Edit an object exhibit"
+                : "Create an object exhibit"
+            }
           >
             <div className={styles.evidenceObjectPreview}>
-              <DebateEvidenceExhibitVisual exhibit={objectPreview} />
+              <button
+                ref={evidenceEmojiTriggerRef}
+                type="button"
+                className={styles.evidenceObjectPreviewPicture}
+                aria-label={`Choose exhibit emoji. Current emoji: ${evidenceObjectDraft.emoji}`}
+                aria-haspopup="dialog"
+                aria-expanded={evidenceEmojiSearchOpen}
+                onClick={openEvidenceEmojiSearch}
+                disabled={evidenceObjectVisualBusy !== null}
+              >
+                <DebateEvidenceExhibitVisual exhibit={objectPreview} />
+              </button>
               <div>
-                <span>Object exhibit</span>
+                <span>
+                  {editingExhibitId ? "Editing exhibit" : "Object exhibit"}
+                </span>
                 <strong>{objectTitle || "{ADJECTIVE} {OBJECT}"}</strong>
                 <small>
-                  The text record is evidence. Its visual is presentation only.
+                  Tap the picture to pick an emoji. Upload, reuse, or synthesize
+                  overwrites that picture; the text remains the evidence.
                 </small>
               </div>
             </div>
@@ -11438,30 +12053,6 @@ export function DebateExperience(
                 )}
               </PrismRefractTarget>
             </label>
-            <fieldset className={styles.evidenceEmojiPicker}>
-              <legend>Exhibit emoji</legend>
-              <div>
-                <button
-                  ref={evidenceEmojiTriggerRef}
-                  type="button"
-                  className={styles.evidenceEmojiTrigger}
-                  aria-label={`Choose exhibit emoji. Current emoji: ${evidenceObjectDraft.emoji}`}
-                  aria-haspopup="dialog"
-                  aria-expanded={evidenceEmojiSearchOpen}
-                  onClick={openEvidenceEmojiSearch}
-                  disabled={evidenceObjectVisualBusy !== null}
-                >
-                  <span aria-hidden="true">{evidenceObjectDraft.emoji}</span>
-                </button>
-                <div className={styles.evidenceEmojiPickerHelp}>
-                  <strong>Search for an emoji</strong>
-                  <small id="debate-evidence-emoji-help">
-                    Click the emoji, then describe the object or idea you want
-                    to represent.
-                  </small>
-                </div>
-              </div>
-            </fieldset>
             {evidenceEmojiSearchOpen ? (
               <div
                 className={styles.evidenceEmojiSearchBackdrop}
@@ -11589,6 +12180,7 @@ export function DebateExperience(
                 onClick={() => {
                   setEvidenceEmojiSearchOpen(false);
                   setEvidenceObjectDraft(null);
+                  setEditingExhibitId(null);
                 }}
                 disabled={evidenceObjectVisualBusy !== null}
               >
@@ -11600,11 +12192,11 @@ export function DebateExperience(
                 onClick={addEvidenceObject}
                 disabled={
                   !objectTitle ||
-                  evidenceItemLimitReached ||
+                  (!editingExhibitId && evidenceItemLimitReached) ||
                   evidenceObjectVisualBusy !== null
                 }
               >
-                Add to evidence
+                {editingExhibitId ? "Save changes" : "Add to evidence"}
               </button>
             </div>
           </section>
@@ -11662,10 +12254,10 @@ export function DebateExperience(
                 <li key={exhibit.id}>
                   <button
                     type="button"
-                    onClick={() =>
-                      setSourceDrawerId((current) =>
-                        current === exhibit.id ? null : exhibit.id,
-                      )
+                    onClick={() => beginEditingExhibit(exhibit)}
+                    aria-label={`Edit ${exhibit.title}`}
+                    data-editing={
+                      editingExhibitId === exhibit.id ? "true" : undefined
                     }
                   >
                     <DebateEvidenceExhibitVisual exhibit={exhibit} />
@@ -11676,14 +12268,19 @@ export function DebateExperience(
                   <button
                     type="button"
                     aria-label={`Remove ${exhibit.title}`}
-                    onClick={() =>
+                    onClick={() => {
                       setEvidence((current) => ({
                         ...current,
                         exhibits: (current.exhibits ?? []).filter(
                           (candidate) => candidate.id !== exhibit.id,
                         ),
-                      }))
-                    }
+                      }));
+                      if (editingExhibitId === exhibit.id) {
+                        setEvidenceObjectDraft(null);
+                        setEditingExhibitId(null);
+                        setEvidenceEmojiSearchOpen(false);
+                      }
+                    }}
                   >
                     Remove
                   </button>
@@ -11827,6 +12424,15 @@ export function DebateExperience(
                   ? "Secure advocacy consent."
                   : "Choose evidence or continue without it."}
         </span>
+        <button
+          type="button"
+          className={styles.secondaryButton}
+          disabled={busy || !debateCanStart}
+          onClick={() => void saveDebate()}
+          data-tutorial-target="debate-save"
+        >
+          {busy ? "Saving…" : "Save Debate"}
+        </button>
         <button
           type="button"
           className={styles.primaryButton}
@@ -13321,24 +13927,16 @@ export function DebateExperience(
       stageAlignmentPreviewCamera,
     );
     const evidenceTableIsDefault =
-      stageAlignmentDraft.evidenceTable[stageAlignmentPreviewEvidenceKind][
-        evidenceAlignmentView
-      ].x ===
+      JSON.stringify(
+        stageAlignmentDraft.evidenceTable[stageAlignmentPreviewEvidenceKind][
+          evidenceAlignmentView
+        ],
+      ) ===
+      JSON.stringify(
         DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable[
           stageAlignmentPreviewEvidenceKind
-        ][evidenceAlignmentView].x &&
-      stageAlignmentDraft.evidenceTable[stageAlignmentPreviewEvidenceKind][
-        evidenceAlignmentView
-      ].y ===
-        DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable[
-          stageAlignmentPreviewEvidenceKind
-        ][evidenceAlignmentView].y &&
-      stageAlignmentDraft.evidenceTable[stageAlignmentPreviewEvidenceKind][
-        evidenceAlignmentView
-      ].size ===
-        DEFAULT_DEBATE_STAGE_ALIGNMENT.evidenceTable[
-          stageAlignmentPreviewEvidenceKind
-        ][evidenceAlignmentView].size;
+        ][evidenceAlignmentView],
+      );
     const activeGavelPose = stageAlignmentDraft.gavel[stageAlignmentGavelPose];
     const activeEvidenceTable =
       stageAlignmentDraft.evidenceTable[stageAlignmentPreviewEvidenceKind][
@@ -14205,6 +14803,123 @@ export function DebateExperience(
                         );
                       })}
                     </div>
+                    <div
+                      className={styles.alignmentGavelTunerRows}
+                      data-debate-evidence-shadow-tuner="true"
+                    >
+                      <strong className={styles.alignmentEvidenceShadowHeading}>
+                        Drop shadow
+                      </strong>
+                      {(
+                        [
+                          {
+                            key: "castX",
+                            label: "Shadow drift",
+                            min: DEBATE_STAGE_EVIDENCE_SHADOW_CAST_MIN,
+                            max: DEBATE_STAGE_EVIDENCE_SHADOW_CAST_MAX,
+                            step: DEBATE_STAGE_EVIDENCE_SHADOW_CAST_STEP,
+                            suffix: "px",
+                            decimals: 1,
+                          },
+                          {
+                            key: "castY",
+                            label: "Shadow length",
+                            min: DEBATE_STAGE_EVIDENCE_SHADOW_LENGTH_MIN,
+                            max: DEBATE_STAGE_EVIDENCE_SHADOW_LENGTH_MAX,
+                            step: DEBATE_STAGE_EVIDENCE_SHADOW_LENGTH_STEP,
+                            suffix: "px",
+                            decimals: 1,
+                          },
+                          {
+                            key: "blur",
+                            label: "Shadow soft",
+                            min: DEBATE_STAGE_EVIDENCE_SHADOW_BLUR_MIN,
+                            max: DEBATE_STAGE_EVIDENCE_SHADOW_BLUR_MAX,
+                            step: DEBATE_STAGE_EVIDENCE_SHADOW_BLUR_STEP,
+                            suffix: "px",
+                            decimals: 1,
+                          },
+                          {
+                            key: "opacity",
+                            label: "Shadow strength",
+                            min: DEBATE_STAGE_EVIDENCE_SHADOW_OPACITY_MIN,
+                            max: DEBATE_STAGE_EVIDENCE_SHADOW_OPACITY_MAX,
+                            step: DEBATE_STAGE_EVIDENCE_SHADOW_OPACITY_STEP,
+                            suffix: "%",
+                            decimals: 0,
+                          },
+                          {
+                            key: "floorX",
+                            label: "Floor drift",
+                            min: DEBATE_STAGE_EVIDENCE_SHADOW_CAST_MIN,
+                            max: DEBATE_STAGE_EVIDENCE_SHADOW_CAST_MAX,
+                            step: DEBATE_STAGE_EVIDENCE_SHADOW_CAST_STEP,
+                            suffix: "px",
+                            decimals: 1,
+                          },
+                          {
+                            key: "floorWidth",
+                            label: "Floor width",
+                            min: DEBATE_STAGE_EVIDENCE_SHADOW_FLOOR_WIDTH_MIN,
+                            max: DEBATE_STAGE_EVIDENCE_SHADOW_FLOOR_WIDTH_MAX,
+                            step: DEBATE_STAGE_EVIDENCE_SHADOW_FLOOR_WIDTH_STEP,
+                            suffix: "%",
+                            decimals: 0,
+                          },
+                        ] as const satisfies ReadonlyArray<{
+                          key: keyof DebateStageEvidenceShadowV1;
+                          label: string;
+                          min: number;
+                          max: number;
+                          step: number;
+                          suffix: string;
+                          decimals: number;
+                        }>
+                      ).map((control) => {
+                        const value = activeEvidenceTable.shadow[control.key];
+                        return (
+                          <label key={control.key}>
+                            <span>
+                              {control.label}
+                              <output>
+                                {control.key !== "opacity" &&
+                                control.key !== "floorWidth" &&
+                                value > 0
+                                  ? "+"
+                                  : ""}
+                                {value.toFixed(control.decimals)}
+                                {control.suffix}
+                              </output>
+                            </span>
+                            <input
+                              type="range"
+                              min={control.min}
+                              max={control.max}
+                              step={control.step}
+                              value={value}
+                              aria-label={`${stageAlignmentPreviewEvidenceKind === "source" ? "Source" : "Exhibit"} ${control.label.toLowerCase()}`}
+                              onChange={(event) => {
+                                const nextValue = Number(
+                                  event.currentTarget.value,
+                                );
+                                setStageAlignmentDraft((current) =>
+                                  updateDebateStageEvidenceTable(
+                                    current,
+                                    stageAlignmentPreviewEvidenceKind,
+                                    evidenceAlignmentView,
+                                    {
+                                      shadow: {
+                                        [control.key]: nextValue,
+                                      },
+                                    },
+                                  ),
+                                );
+                              }}
+                            />
+                          </label>
+                        );
+                      })}
+                    </div>
                   </div>
                   <div
                     className={styles.alignmentGavelPreviewActions}
@@ -14243,8 +14958,9 @@ export function DebateExperience(
                       ) : null}
                     </div>
                     <small>
-                      Exhibit and Source placement are saved independently for
-                      Wide, Left, Moderator, and Right cameras.
+                      Exhibit and Source placement and drop shadows are saved
+                      independently for Wide, Left, Moderator, and Right
+                      cameras.
                     </small>
                   </div>
                 </section>
@@ -14519,6 +15235,9 @@ export function DebateExperience(
     const session = activeSession;
     const spectatorAwaitingFirstWatch =
       debateSpectatorAwaitingFirstWatch(session);
+    const awaitingDeferredStart = debateSessionAwaitingDeferredStart(session);
+    const readyToBeginOverlay =
+      spectatorAwaitingFirstWatch || awaitingDeferredStart;
     const roomPresence = debateRoomPresence({
       status: session.status,
       presenting,
@@ -14620,26 +15339,30 @@ export function DebateExperience(
                 ?.color ?? null);
     const activeGavelCue =
       judgeGavelSmashCue ?? (presenting ? liveGavelCue : null);
+    // Order/attention gavels lock Moderator as soon as the settle or cue arms.
+    // Attention cues used to wait for presentationEventId, which left Auto on
+    // recess Wide while the opening slam fired immediately after Resume.
     const gavelCameraReady =
       judgeGavelSmashCue !== null ||
-      activeGavelCue?.kind !== "order" ||
+      gavelCameraSettling ||
+      activeGavelCue == null ||
+      activeGavelCue.kind === "order" ||
+      activeGavelCue.kind === "attention" ||
       presentationEventId === activeGavelCue.eventId;
     const forumPreparingNextTurn =
       busy && !presenting && judgeGavelSmashCue === null;
-    const judgeGavelCameraForced = judgeGavelSmashCue !== null;
-    // Settled recess overlay holds Wide. Resume/pause ceremony (busy or
-    // presenting while paused) cuts to Moderator for the gavel beat.
-    const recessSettledWide =
-      session.status === "paused" && !presenting && !busy;
+    const judgeGavelCameraForced =
+      judgeGavelSmashCue !== null || gavelCameraSettling;
+    // Settled recess overlay holds Wide through Resume network waits. Only the
+    // in-progress recess announcement (presenting while still paused) cuts to
+    // Moderator before the live floor returns.
+    const recessSettledWide = session.status === "paused" && !presenting;
     const recessLifecycleModerator =
-      session.status === "paused" && (busy || presenting);
+      session.status === "paused" && presenting;
     const lifecycleModeratorShot =
       presenting &&
       activeEvent != null &&
-      (activeEvent.stepKey === "pause" ||
-        activeEvent.stepKey === "resume" ||
-        activeEvent.gavelReason === "pause" ||
-        activeEvent.gavelReason === "resume");
+      (activeEvent.stepKey === "pause" || activeEvent.stepKey === "resume");
     const activeEvidenceItem = debateTableEvidenceItem(
       session.evidence,
       tableEvidenceStickyId,
@@ -15025,7 +15748,6 @@ export function DebateExperience(
     );
     const legacyAudienceChattering =
       debateIdentPlaying === null &&
-      !presenting &&
       !participantJurySealed &&
       (session.status === "live" || session.status === "waiting_for_player");
     const audienceChattering =
@@ -15036,6 +15758,33 @@ export function DebateExperience(
       audienceOrderResponse?.sessionId === session.id
         ? audienceOrderResponse
         : null;
+    const galleryMixBranch = juryChamberVisible
+      ? "jury"
+      : debateIdentPlaying !== null
+        ? "ident"
+        : activeAudienceOrderResponse &&
+            !activeAudienceOrderResponse.returningRoomTone
+          ? "order-peak"
+          : audiencePressureBandTrue
+            ? "pressure-score"
+            : presenting
+              ? "ducked"
+              : "idle";
+    const galleryMix =
+      galleryMixBranch === "jury"
+        ? DEBATE_JURY_CHAMBER_MIX
+        : galleryMixBranch === "ident"
+          ? DEBATE_FOLEY_MIX
+          : galleryMixBranch === "order-peak"
+            ? debateAudienceOrderCallMix(session.formality)
+            : galleryMixBranch === "pressure-score"
+              ? debateAudiencePressureMixForScore(
+                  currentAudiencePressureScore,
+                  session.formality,
+                )
+              : galleryMixBranch === "ducked"
+                ? DEBATE_AUDIENCE_DUCKED_MIX
+                : DEBATE_AUDIENCE_IDLE_MIX;
     const handleDebateAmbientBotVocalization = (
       cue: SessionAmbientBotVocalizationCue,
     ): boolean | "owned" => {
@@ -15044,7 +15793,9 @@ export function DebateExperience(
         props.audioVolume <= 0 ||
         (session.status !== "live" &&
           session.status !== "waiting_for_player") ||
-        presenting ||
+        (presenting &&
+          (audiencePressureBand === null ||
+            audiencePressureBand === "settled")) ||
         audienceReactingSeatIndices.size > 0 ||
         (busy && !presenting) ||
         participantJurySealed ||
@@ -15195,28 +15946,16 @@ export function DebateExperience(
               ? DEBATE_AUDIENCE_CROSSTALK_URL
               : null
           }
-          mix={
-            juryChamberVisible
-              ? DEBATE_JURY_CHAMBER_MIX
-              : debateIdentPlaying !== null
-                ? DEBATE_FOLEY_MIX
-                : activeAudienceOrderResponse &&
-                    !activeAudienceOrderResponse.returningRoomTone
-                  ? DEBATE_FOLEY_MIX
-                  : audiencePressureBandTrue
-                    ? debateAudiencePressureMix(audiencePressureBandTrue)
-                    : presenting
-                      ? DEBATE_AUDIENCE_DUCKED_MIX
-                      : DEBATE_AUDIENCE_IDLE_MIX
-          }
+          mix={galleryMix}
           mixTransitionMs={
-            audiencePressureBandTrue === null
+            audiencePressureBandTrue === null &&
+            activeAudienceOrderResponse === null
               ? 320
               : activeAudienceOrderResponse
                 ? activeAudienceOrderResponse.returningRoomTone
-                  ? 4_000
-                  : 90
-                : 900
+                  ? DEBATE_AUDIENCE_ORDER_RETURN_MS
+                  : 480
+                : DEBATE_AUDIENCE_PRESSURE_MIX_TRANSITION_MS
           }
           preloadFoleyUrls={DEBATE_LIVE_FOLEY_PRELOAD_URLS}
           foleyRoomAcoustics={
@@ -15234,7 +15973,9 @@ export function DebateExperience(
           deferFoley={debateIdentPlaying !== null || (busy && !presenting)}
           deferBotVocalization={
             debateIdentPlaying !== null ||
-            presenting ||
+            (presenting &&
+              (audiencePressureBand === null ||
+                audiencePressureBand === "settled")) ||
             audienceReactingSeatIndices.size > 0 ||
             (busy && !presenting)
           }
@@ -15679,30 +16420,34 @@ export function DebateExperience(
                 ) : session.status === "paused" && !presenting ? (
                   <div
                     className={styles.stageStateOverlay}
-                    data-kind={spectatorAwaitingFirstWatch ? "ready" : "paused"}
+                    data-kind={readyToBeginOverlay ? "ready" : "paused"}
                   >
                     <span aria-hidden="true">
-                      {spectatorAwaitingFirstWatch ? "▶" : "Ⅱ"}
+                      {readyToBeginOverlay ? "▶" : "Ⅱ"}
                     </span>
                     <strong>
                       {spectatorAwaitingFirstWatch
                         ? "Gallery ready"
-                        : "Debate paused"}
+                        : awaitingDeferredStart
+                          ? "Saved · ready to start"
+                          : "Debate paused"}
                     </strong>
                     <small>
                       {spectatorAwaitingFirstWatch
                         ? "The proceeding is held until you start, so a long prepare cannot begin while you are away."
-                        : "The interrupted line is preserved and will replay from its beginning."}
+                        : awaitingDeferredStart
+                          ? "This Archive setup is frozen. Start opens the chamber when you are ready."
+                          : "The interrupted line is preserved and will replay from its beginning."}
                     </small>
                     <button
                       type="button"
                       data-action={
-                        spectatorAwaitingFirstWatch ? "start" : "resume"
+                        readyToBeginOverlay ? "start" : "resume"
                       }
                       onClick={() => void pauseOrResume()}
                       disabled={busy || debateFloorMutationInFlightRef.current}
                     >
-                      {spectatorAwaitingFirstWatch
+                      {readyToBeginOverlay
                         ? "Start Debate"
                         : "Resume Debate"}
                     </button>
@@ -16602,6 +17347,15 @@ export function DebateExperience(
   return (
     <>
       {experience}
+      <PrismBlockingLoader
+        open={newDuelGenerateBusy}
+        title="Inventing a New Duel"
+        detail="Prism is casting the motion, advocates, room tone, and evidence packet for a fresh editable workbench."
+        stepLabel="Building the Debate Studio draft"
+        progress={null}
+        theme={props.theme}
+        footer="Start stays unpressed until you review the draft."
+      />
       <PrismBlockingLoader
         open={evidenceObjectVisualBusy === "synthesize"}
         title={

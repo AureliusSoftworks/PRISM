@@ -1,6 +1,6 @@
 import type { CSSProperties } from "react";
 
-export const DEBATE_STAGE_ALIGNMENT_VERSION = 10 as const;
+export const DEBATE_STAGE_ALIGNMENT_VERSION = 11 as const;
 export const DEBATE_STAGE_ALIGNMENT_MIN = -12;
 export const DEBATE_STAGE_ALIGNMENT_MAX = 12;
 export const DEBATE_STAGE_ALIGNMENT_STEP = 0.5;
@@ -19,6 +19,21 @@ export const DEBATE_STAGE_EVIDENCE_TABLE_POSITION_STEP = 0.5;
 export const DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MIN = 40;
 export const DEBATE_STAGE_EVIDENCE_TABLE_SIZE_MAX = 220;
 export const DEBATE_STAGE_EVIDENCE_TABLE_SIZE_STEP = 5;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_CAST_MIN = -40;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_CAST_MAX = 40;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_CAST_STEP = 0.5;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_LENGTH_MIN = 0;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_LENGTH_MAX = 40;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_LENGTH_STEP = 0.5;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_BLUR_MIN = 0;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_BLUR_MAX = 40;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_BLUR_STEP = 0.5;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_OPACITY_MIN = 0;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_OPACITY_MAX = 100;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_OPACITY_STEP = 1;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_FLOOR_WIDTH_MIN = 40;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_FLOOR_WIDTH_MAX = 160;
+export const DEBATE_STAGE_EVIDENCE_SHADOW_FLOOR_WIDTH_STEP = 1;
 export const DEBATE_STAGE_LIGHT_MASK_OPACITY_MIN = 0;
 export const DEBATE_STAGE_LIGHT_MASK_OPACITY_MAX = 100;
 export const DEBATE_STAGE_LIGHT_MASK_OPACITY_STEP = 5;
@@ -97,9 +112,26 @@ export interface DebateStageGavelV3 {
   raised: DebateStageGavelPoseV3;
 }
 
-/** Shared place/size for the exhibit table that uses the Jury coffee-table raster. */
+/** Room-lit contact/cast shadow under a table exhibit or source pamphlet. */
+export interface DebateStageEvidenceShadowV1 {
+  /** Horizontal cast drift in px (negative = left). */
+  castX: number;
+  /** How far the cast falls down the table in px. */
+  castY: number;
+  /** Softness of the cast edge in px. */
+  blur: number;
+  /** Floor-blob strength, 0–100. */
+  opacity: number;
+  /** Horizontal drift of the soft floor ellipse in px. */
+  floorX: number;
+  /** Floor ellipse width as a percent of the default footprint. */
+  floorWidth: number;
+}
+
+/** Shared place/size/shadow for the exhibit table that uses the Jury coffee-table raster. */
 export interface DebateStageEvidenceTableV1 extends DebateStageOffsetV1 {
   size: number;
+  shadow: DebateStageEvidenceShadowV1;
 }
 
 /** Per-camera evidence placement for every public Forum composition. */
@@ -116,7 +148,7 @@ export interface DebateStageEvidencePlacementsV10 {
   source: DebateStageEvidenceTablesV10;
 }
 
-export interface DebateStageAlignmentV10 {
+export interface DebateStageAlignmentV11 {
   version: typeof DEBATE_STAGE_ALIGNMENT_VERSION;
   wide: DebateStageAlignmentWideV4;
   moderator: DebateStageRolePlacementV4;
@@ -126,18 +158,77 @@ export interface DebateStageAlignmentV10 {
   lightMaskOpacities: DebateStageLightMaskOpacitiesV1;
 }
 
-/** @deprecated Prefer DebateStageAlignmentV10 — kept as stable import aliases. */
-export type DebateStageAlignmentV9 = DebateStageAlignmentV10;
-export type DebateStageAlignmentV8 = DebateStageAlignmentV10;
-export type DebateStageAlignmentV7 = DebateStageAlignmentV10;
-export type DebateStageAlignmentV6 = DebateStageAlignmentV10;
+/** @deprecated Prefer DebateStageAlignmentV11 — kept as stable import aliases. */
+export type DebateStageAlignmentV10 = DebateStageAlignmentV11;
+export type DebateStageAlignmentV9 = DebateStageAlignmentV11;
+export type DebateStageAlignmentV8 = DebateStageAlignmentV11;
+export type DebateStageAlignmentV7 = DebateStageAlignmentV11;
+export type DebateStageAlignmentV6 = DebateStageAlignmentV11;
 
 export const DEBATE_STAGE_ALIGNMENT_ROLES: readonly DebateStageAlignmentRole[] =
   ["for", "moderator", "against"];
 export const DEBATE_STAGE_ALIGNMENT_ITEMS: readonly DebateStageAlignmentItem[] =
   ["bot", "nameplate", "glyph"];
 
-export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV10 = {
+/** Sensible room-lit defaults per camera; sources keep a slightly narrower floor. */
+export function defaultDebateStageEvidenceShadow(
+  view: DebateStageEvidenceView,
+  kind: DebateStageEvidenceKind = "exhibit",
+): DebateStageEvidenceShadowV1 {
+  const byView: Record<DebateStageEvidenceView, DebateStageEvidenceShadowV1> = {
+    wide: {
+      castX: 1,
+      castY: 13,
+      blur: 11,
+      opacity: 88,
+      floorX: 0,
+      floorWidth: 100,
+    },
+    left: {
+      castX: 7,
+      castY: 13,
+      blur: 11,
+      opacity: 88,
+      floorX: 5,
+      floorWidth: 100,
+    },
+    moderator: {
+      castX: 2,
+      castY: 15,
+      blur: 11,
+      opacity: 88,
+      floorX: 1,
+      floorWidth: 100,
+    },
+    right: {
+      castX: -7,
+      castY: 13,
+      blur: 11,
+      opacity: 88,
+      floorX: -5,
+      floorWidth: 100,
+    },
+  };
+  const base = byView[view];
+  return kind === "source" ? { ...base, floorWidth: 86 } : { ...base };
+}
+
+function evidenceTablePlacement(
+  x: number,
+  y: number,
+  size: number,
+  view: DebateStageEvidenceView,
+  kind: DebateStageEvidenceKind,
+): DebateStageEvidenceTableV1 {
+  return {
+    x,
+    y,
+    size,
+    shadow: defaultDebateStageEvidenceShadow(view, kind),
+  };
+}
+
+export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV11 = {
   version: DEBATE_STAGE_ALIGNMENT_VERSION,
   wide: {
     for: {
@@ -167,16 +258,16 @@ export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV10 = {
   },
   evidenceTable: {
     exhibit: {
-      wide: { x: 0, y: 111.5, size: 100 },
-      left: { x: 0, y: 111.5, size: 100 },
-      moderator: { x: 0, y: 174, size: 220 },
-      right: { x: 0, y: 111.5, size: 100 },
+      wide: evidenceTablePlacement(0, 111.5, 100, "wide", "exhibit"),
+      left: evidenceTablePlacement(0, 111.5, 100, "left", "exhibit"),
+      moderator: evidenceTablePlacement(0, 174, 220, "moderator", "exhibit"),
+      right: evidenceTablePlacement(0, 111.5, 100, "right", "exhibit"),
     },
     source: {
-      wide: { x: 0, y: 111.5, size: 100 },
-      left: { x: 0, y: 174, size: 220 },
-      moderator: { x: 0, y: 174, size: 220 },
-      right: { x: 0, y: 174, size: 220 },
+      wide: evidenceTablePlacement(0, 111.5, 100, "wide", "source"),
+      left: evidenceTablePlacement(0, 174, 220, "left", "source"),
+      moderator: evidenceTablePlacement(0, 174, 220, "moderator", "source"),
+      right: evidenceTablePlacement(0, 174, 220, "right", "source"),
     },
   },
   lightBlendModes: {
@@ -257,6 +348,54 @@ function normalizedEvidenceTablePosition(
   );
 }
 
+function normalizeEvidenceShadow(
+  value: unknown,
+  fallback: DebateStageEvidenceShadowV1,
+): DebateStageEvidenceShadowV1 {
+  const candidate =
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    castX: normalizedNumber(
+      candidate.castX,
+      DEBATE_STAGE_EVIDENCE_SHADOW_CAST_MIN,
+      DEBATE_STAGE_EVIDENCE_SHADOW_CAST_MAX,
+      fallback.castX,
+    ),
+    castY: normalizedNumber(
+      candidate.castY,
+      DEBATE_STAGE_EVIDENCE_SHADOW_LENGTH_MIN,
+      DEBATE_STAGE_EVIDENCE_SHADOW_LENGTH_MAX,
+      fallback.castY,
+    ),
+    blur: normalizedNumber(
+      candidate.blur,
+      DEBATE_STAGE_EVIDENCE_SHADOW_BLUR_MIN,
+      DEBATE_STAGE_EVIDENCE_SHADOW_BLUR_MAX,
+      fallback.blur,
+    ),
+    opacity: normalizedNumber(
+      candidate.opacity,
+      DEBATE_STAGE_EVIDENCE_SHADOW_OPACITY_MIN,
+      DEBATE_STAGE_EVIDENCE_SHADOW_OPACITY_MAX,
+      fallback.opacity,
+    ),
+    floorX: normalizedNumber(
+      candidate.floorX,
+      DEBATE_STAGE_EVIDENCE_SHADOW_CAST_MIN,
+      DEBATE_STAGE_EVIDENCE_SHADOW_CAST_MAX,
+      fallback.floorX,
+    ),
+    floorWidth: normalizedNumber(
+      candidate.floorWidth,
+      DEBATE_STAGE_EVIDENCE_SHADOW_FLOOR_WIDTH_MIN,
+      DEBATE_STAGE_EVIDENCE_SHADOW_FLOOR_WIDTH_MAX,
+      fallback.floorWidth,
+    ),
+  };
+}
+
 function normalizedLightMaskOpacity(value: unknown): number {
   return normalizedNumber(
     value,
@@ -311,6 +450,7 @@ function normalizeEvidenceTable(
     x: normalizedEvidenceTablePosition(candidate.x, fallback.x),
     y: normalizedEvidenceTablePosition(candidate.y, fallback.y),
     size: normalizedEvidenceTableSize(candidate.size, fallback.size),
+    shadow: normalizeEvidenceShadow(candidate.shadow, fallback.shadow),
   };
 }
 
@@ -332,10 +472,10 @@ function normalizeEvidenceTables(
   if (isLegacyFlatEvidenceTable(value)) {
     const shared = normalizeEvidenceTable(value, fallback.wide);
     return {
-      wide: shared,
-      left: { ...shared },
-      moderator: { ...shared },
-      right: { ...shared },
+      wide: { ...shared, shadow: fallback.wide.shadow },
+      left: { ...shared, shadow: fallback.left.shadow },
+      moderator: { ...shared, shadow: fallback.moderator.shadow },
+      right: { ...shared, shadow: fallback.right.shadow },
     };
   }
   const candidate =
@@ -350,9 +490,19 @@ function normalizeEvidenceTables(
   const legacyCloseup = legacyCloseupView === "moderator" ? moderator : wide;
   return {
     wide,
-    left: normalizeEvidenceTable(candidate.left, legacyCloseup),
+    left: normalizeEvidenceTable(candidate.left, {
+      x: legacyCloseup.x,
+      y: legacyCloseup.y,
+      size: legacyCloseup.size,
+      shadow: fallback.left.shadow,
+    }),
     moderator,
-    right: normalizeEvidenceTable(candidate.right, legacyCloseup),
+    right: normalizeEvidenceTable(candidate.right, {
+      x: legacyCloseup.x,
+      y: legacyCloseup.y,
+      size: legacyCloseup.size,
+      shadow: fallback.right.shadow,
+    }),
   };
 }
 
@@ -677,9 +827,13 @@ export function updateDebateStageEvidenceTable(
   alignment: DebateStageAlignmentV6,
   evidenceKind: DebateStageEvidenceKind,
   view: DebateStageEvidenceView,
-  update: Partial<DebateStageEvidenceTableV1>,
+  update: Partial<Omit<DebateStageEvidenceTableV1, "shadow">> & {
+    shadow?: Partial<DebateStageEvidenceShadowV1>;
+  },
 ): DebateStageAlignmentV6 {
   const normalized = normalizeDebateStageAlignment(alignment);
+  const current = normalized.evidenceTable[evidenceKind][view];
+  const { shadow: shadowUpdate, ...rest } = update;
   return normalizeDebateStageAlignment({
     ...normalized,
     evidenceTable: {
@@ -687,8 +841,12 @@ export function updateDebateStageEvidenceTable(
       [evidenceKind]: {
         ...normalized.evidenceTable[evidenceKind],
         [view]: {
-          ...normalized.evidenceTable[evidenceKind][view],
-          ...update,
+          ...current,
+          ...rest,
+          shadow: {
+            ...current.shadow,
+            ...(shadowUpdate ?? {}),
+          },
         },
       },
     },
@@ -696,6 +854,10 @@ export function updateDebateStageEvidenceTable(
 }
 
 export function debateStageAlignmentStorageKey(scopeId: string): string {
+  return `prism_debate_stage_alignment_v11:${scopeId}`;
+}
+
+function v10DebateStageAlignmentStorageKey(scopeId: string): string {
   return `prism_debate_stage_alignment_v10:${scopeId}`;
 }
 
@@ -742,6 +904,7 @@ export function readDebateStageAlignment(
   try {
     const serialized =
       storage.getItem(debateStageAlignmentStorageKey(scopeId)) ??
+      storage.getItem(v10DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v9DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v8DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v7DebateStageAlignmentStorageKey(scopeId)) ??
@@ -774,6 +937,17 @@ export function debateStageAlignmentStyle(
   alignment: DebateStageAlignmentV6,
 ): CSSProperties {
   const normalized = normalizeDebateStageAlignment(alignment);
+  const evidenceShadowVars = (
+    prefix: string,
+    shadow: DebateStageEvidenceShadowV1,
+  ): Record<string, string> => ({
+    [`--debate-${prefix}evidence-shadow-cast-x`]: `${shadow.castX}px`,
+    [`--debate-${prefix}evidence-shadow-cast-y`]: `${shadow.castY}px`,
+    [`--debate-${prefix}evidence-shadow-blur`]: `${shadow.blur}px`,
+    [`--debate-${prefix}evidence-shadow-opacity`]: `${shadow.opacity / 100}`,
+    [`--debate-${prefix}evidence-shadow-floor-x`]: `${shadow.floorX}px`,
+    [`--debate-${prefix}evidence-shadow-floor-scale-x`]: `${shadow.floorWidth / 100}`,
+  });
   return {
     "--debate-for-offset-x": `${normalized.wide.for.bot.x}%`,
     "--debate-for-offset-y": `${normalized.wide.for.bot.y}%`,
@@ -831,6 +1005,35 @@ export function debateStageAlignmentStyle(
     "--debate-right-source-evidence-offset-x": `${normalized.evidenceTable.source.right.x}%`,
     "--debate-right-source-evidence-offset-y": `${normalized.evidenceTable.source.right.y}%`,
     "--debate-right-source-evidence-scale": `${normalized.evidenceTable.source.right.size / 100}`,
+    ...evidenceShadowVars("", normalized.evidenceTable.exhibit.wide.shadow),
+    ...evidenceShadowVars(
+      "left-",
+      normalized.evidenceTable.exhibit.left.shadow,
+    ),
+    ...evidenceShadowVars(
+      "moderator-",
+      normalized.evidenceTable.exhibit.moderator.shadow,
+    ),
+    ...evidenceShadowVars(
+      "right-",
+      normalized.evidenceTable.exhibit.right.shadow,
+    ),
+    ...evidenceShadowVars(
+      "source-",
+      normalized.evidenceTable.source.wide.shadow,
+    ),
+    ...evidenceShadowVars(
+      "left-source-",
+      normalized.evidenceTable.source.left.shadow,
+    ),
+    ...evidenceShadowVars(
+      "moderator-source-",
+      normalized.evidenceTable.source.moderator.shadow,
+    ),
+    ...evidenceShadowVars(
+      "right-source-",
+      normalized.evidenceTable.source.right.shadow,
+    ),
     "--debate-light-blend-mode-dark": normalized.lightBlendModes.dark,
     "--debate-light-blend-mode-light": normalized.lightBlendModes.light,
     "--debate-light-mask-opacity-dark": `${normalized.lightMaskOpacities.dark}%`,

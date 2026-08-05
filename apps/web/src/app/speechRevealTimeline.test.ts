@@ -69,9 +69,15 @@ describe("speech reveal timeline", () => {
       speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 200)),
       true,
     );
+    // First phrase ends ~250ms; release is capped to half the following silence
+    // (~175ms), so activity ends at ~425ms — idle through the rest of the gap.
+    assert.equal(
+      speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 350)),
+      true,
+    );
     assert.equal(
       speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 450)),
-      true,
+      false,
     );
     assert.equal(
       speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 525)),

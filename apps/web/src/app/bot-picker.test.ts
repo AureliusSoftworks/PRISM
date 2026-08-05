@@ -117,4 +117,31 @@ describe("shared bot picker", () => {
     assert.match(signalSource, /<BotPickerTile/u);
     assert.match(debateSource, /<BotPickerTile/u);
   });
+
+  it("opens the shared Library bot context menu from picker chips", () => {
+    assert.match(
+      pageSource,
+      /data-debate-shell="true"[\s\S]{0,220}onContextMenu=\{handleAppContextMenu\}/u,
+    );
+    assert.match(
+      pageSource,
+      /data-debate-shell="true"[\s\S]*?renderContextMenuPortal\(renderBotContextMenu\(\)\)/u,
+    );
+    assert.match(
+      debateSource,
+      /onBotContextMenu\?\.\([\s\S]{0,80}bot\.id/u,
+    );
+    assert.match(
+      signalSource,
+      /onBotContextMenu\?\.\([\s\S]{0,80}bot\.id/u,
+    );
+    assert.match(
+      pageSource,
+      /onBotContextMenu=\{openBotContextMenuById\}/u,
+    );
+    assert.match(
+      pageSource,
+      /openBotContextMenu\(bot, event\.clientX, event\.clientY\)/u,
+    );
+  });
 });

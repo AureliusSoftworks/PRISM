@@ -18,13 +18,13 @@ import {
   zenLiveBotMouthShapeFromVisibleTextProgress,
 } from "./zenLiveMouth.ts";
 
-test("talking closed beats bypass mood-specific idle mouths", () => {
+test("closed speech rests stay closed — never remap to speech-closed", () => {
   assert.equal(
     zenLiveBotMouthShapeForTalkingState({
       mouthShape: "closed",
       isTalking: true,
     }),
-    "speech-closed",
+    "closed",
   );
   assert.equal(
     zenLiveBotMouthShapeForTalkingState({
@@ -39,6 +39,13 @@ test("talking closed beats bypass mood-specific idle mouths", () => {
       isTalking: true,
     }),
     "open-wide",
+  );
+  assert.equal(
+    zenLiveBotMouthShapeForTalkingState({
+      mouthShape: "speech-closed",
+      isTalking: true,
+    }),
+    "speech-closed",
   );
 });
 

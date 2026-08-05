@@ -14,8 +14,8 @@ export type DebateModeratorCameraView =
 /** @deprecated Alias retained for call-site clarity during intro beats. */
 export type DebateIntroCameraView = DebateModeratorCameraView;
 
-/** Brief establish on Wide before a named advocate close-up. */
-export const DEBATE_INTRO_WIDE_HOLD_MS = 560;
+/** Establish on Wide before a named advocate close-up. */
+export const DEBATE_INTRO_WIDE_HOLD_MS = 980;
 
 /** Brief Wide accent during long moderator prose without a name cue. */
 export const DEBATE_MODERATOR_BREATH_WIDE_MS = 720;
@@ -24,16 +24,26 @@ export const DEBATE_MODERATOR_BREATH_WIDE_MS = 720;
 export const DEBATE_MODERATOR_MONOLOGUE_MIN_CHARS = 160;
 
 /**
- * Once this much of the audible monologue remains, Auto refocuses the
- * moderator so the handoff does not leave the camera on an advocate or Wide.
+ * Once this much of the audible monologue remains after the final introducee
+ * close-up has established, Auto latches back to the moderator for the handoff.
  */
-export const DEBATE_INTRO_RETURN_MODERATOR_REMAINING_RATIO = 0.2;
+export const DEBATE_INTRO_RETURN_MODERATOR_REMAINING_RATIO = 0.38;
+
+/** Minimum close-up time on the final introducee before an intentional cut home. */
+export const DEBATE_INTRO_FINAL_CLOSE_MS = 2_200;
+
+/**
+ * Docket bookend after the formal motion/cast listing. Profile talk about each
+ * advocate usually follows; camera cues prefer names after this point.
+ */
+const DEBATE_INTRO_PROFILE_BOOKEND =
+  /\b(?:the\s+proceeding\s+may\s+begin|we\s+(?:may|can)\s+begin|let\s+(?:us|the\s+proceeding)\s+begin)\b/iu;
 
 export type DebateIntroAdvocateCue = {
   kind: "advocate";
   side: "for" | "against";
   view: "left" | "right";
-  /** First character index of the advocate name in the monologue content. */
+  /** Character index where this advocate camera beat should arm. */
   offset: number;
 };
 
@@ -46,12 +56,44 @@ export type DebateModeratorCameraCue =
   | DebateIntroAdvocateCue
   | DebateModeratorBreathCue;
 
-function debateIntroNameOffset(content: string, name: string): number | null {
+function debateIntroNameOffsetFrom(
+  content: string,
+  name: string,
+  fromIndex: number,
+): number | null {
   const needle = name.trim();
   if (!needle) return null;
   const haystack = content.toLocaleLowerCase();
-  const index = haystack.indexOf(needle.toLocaleLowerCase());
+  const index = haystack.indexOf(
+    needle.toLocaleLowerCase(),
+    Math.max(0, fromIndex),
+  );
   return index >= 0 ? index : null;
+}
+
+/**
+ * Prefer a later name mention (post-docket profile talk) when present; otherwise
+ * the first mention. Second occurrences beat first-docket roll calls.
+ */
+export function debateIntroPreferredNameOffset(
+  content: string,
+  name: string,
+): number | null {
+  const first = debateIntroNameOffsetFrom(content, name, 0);
+  if (first === null) return null;
+
+  const bookend = DEBATE_INTRO_PROFILE_BOOKEND.exec(content);
+  if (bookend && bookend.index != null) {
+    const afterBookend = debateIntroNameOffsetFrom(
+      content,
+      name,
+      bookend.index + bookend[0].length,
+    );
+    if (afterBookend !== null) return afterBookend;
+  }
+
+  const second = debateIntroNameOffsetFrom(content, name, first + name.trim().length);
+  return second ?? first;
 }
 
 /**
@@ -64,8 +106,11 @@ export function debateIntroAdvocateCues(args: {
   againstName: string;
 }): DebateIntroAdvocateCue[] {
   const cues: DebateIntroAdvocateCue[] = [];
-  const forOffset = debateIntroNameOffset(args.content, args.forName);
-  const againstOffset = debateIntroNameOffset(args.content, args.againstName);
+  const forOffset = debateIntroPreferredNameOffset(args.content, args.forName);
+  const againstOffset = debateIntroPreferredNameOffset(
+    args.content,
+    args.againstName,
+  );
   if (forOffset !== null) {
     cues.push({ kind: "advocate", side: "for", view: "left", offset: forOffset });
   }
@@ -147,6 +192,8 @@ export type DebateModeratorCameraFocus =
   | "for"
   | "against"
   | `breath:${number}`
+  /** Latched after introducees — prevents Wide↔Moderator flicker. */
+  | "complete"
   | null;
 
 /**
@@ -194,12 +241,54 @@ export function resolveDebateModeratorCameraView(args: {
     DEBATE_INTRO_RETURN_MODERATOR_REMAINING_RATIO;
   const nameWideHoldMs = args.wideHoldMs ?? DEBATE_INTRO_WIDE_HOLD_MS;
   const breathWideMs = args.breathWideMs ?? DEBATE_MODERATOR_BREATH_WIDE_MS;
+  const finalCloseMs = DEBATE_INTRO_FINAL_CLOSE_MS;
 
-  if (visibleLength <= 0 || remainingRatio <= returnRatio) {
+  // Once the introducee sequence has cut home, stay home — clearing focus used
+  // to re-arm the last name cue and flicker Wide ↔ Moderator every hold cycle.
+  if (args.focusedSide === "complete") {
+    return {
+      view: "moderator",
+      wideHoldStartedAtMs: null,
+      focusedSide: "complete",
+    };
+  }
+
+  if (visibleLength <= 0) {
     return {
       view: "moderator",
       wideHoldStartedAtMs: null,
       focusedSide: null,
+    };
+  }
+
+  const lastAdvocateCue = [...cues]
+    .reverse()
+    .find((cue): cue is DebateIntroAdvocateCue => cue.kind === "advocate");
+  const lastIntroduceeHoldElapsedMs =
+    lastAdvocateCue &&
+    args.focusedSide === lastAdvocateCue.side &&
+    args.wideHoldStartedAtMs != null
+      ? args.nowMs - args.wideHoldStartedAtMs
+      : null;
+  const lastIntroduceeReadyToLeave =
+    lastIntroduceeHoldElapsedMs != null &&
+    lastIntroduceeHoldElapsedMs >= nameWideHoldMs &&
+    (lastIntroduceeHoldElapsedMs >= nameWideHoldMs + finalCloseMs ||
+      remainingRatio <= returnRatio);
+  // Past the final cue with nothing left to introduce: latch home even if focus
+  // was cleared (the flicker path from a previous early return).
+  const pastIntroducees =
+    lastAdvocateCue != null && visibleLength > lastAdvocateCue.offset;
+  if (
+    lastIntroduceeReadyToLeave ||
+    (pastIntroducees &&
+      remainingRatio <= returnRatio &&
+      args.focusedSide === null)
+  ) {
+    return {
+      view: "moderator",
+      wideHoldStartedAtMs: null,
+      focusedSide: "complete",
     };
   }
 

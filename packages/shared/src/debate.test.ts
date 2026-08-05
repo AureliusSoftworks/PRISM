@@ -32,6 +32,8 @@ import {
   normalizeDebateJuryStateV1,
   normalizeDebateModeratorTitle,
   normalizeDebateMotionSlateV1,
+  normalizeDebateSetupSuggestionV1,
+  completeDebateSetupSuggestionCastV1,
   normalizeDebateTitle,
   normalizeDebateVoicePerformanceCue,
   normalizeDebateSessionSynopsis,
@@ -43,6 +45,7 @@ import {
   debateSessionAwaitsPresentationSeal,
   debateSessionFloorIsSettled,
   debateSpectatorAwaitingFirstWatch,
+  debateSessionAwaitingDeferredStart,
   debateRecessResumeFiller,
   debateRecessResumePresentationContent,
   type DebateEventV1,
@@ -767,6 +770,36 @@ test("Spectator floor settlement awaits a presentation seal until watched", () =
     }),
     false,
   );
+  assert.equal(
+    debateSessionAwaitingDeferredStart({
+      status: "paused",
+      pausedPresentationEventId: null,
+      events: [],
+      completedAt: null,
+      stepKey: "intro",
+    }),
+    true,
+  );
+  assert.equal(
+    debateSessionAwaitingDeferredStart({
+      status: "paused",
+      pausedPresentationEventId: null,
+      events: [activeDurationEvent({})],
+      completedAt: null,
+      stepKey: "intro",
+    }),
+    false,
+  );
+  assert.equal(
+    debateSessionAwaitingDeferredStart({
+      status: "live",
+      pausedPresentationEventId: null,
+      events: [],
+      completedAt: null,
+      stepKey: "intro",
+    }),
+    false,
+  );
 });
 
 test("recess resume fillers stay formality-aware and stable", () => {
@@ -800,5 +833,210 @@ test("recess resume fillers stay formality-aware and stable", () => {
   assert.equal(
     debateRecessResumePresentationContent("", "As I was saying…"),
     "As I was saying…",
+  );
+});
+
+test("normalizeDebateSetupSuggestionV1 accepts a complete New Duel draft", () => {
+  const suggestion = normalizeDebateSetupSuggestionV1(
+    {
+      topic: "Urban wildlife",
+      motion: {
+        motion: "Cities should rewild vacant lots.",
+        forSide: { label: "Rewild", brief: "Habitat restores local ecology." },
+        againstSide: {
+          label: "Develop",
+          brief: "Housing needs the land more urgently.",
+        },
+      },
+      format: "forum",
+      formality: "plainspoken",
+      forumRoundMode: "auto",
+      forumRoundCount: 1,
+      juryEnabled: false,
+      setupPresetId: "classic-duel",
+      forAdvocateBotId: "bot-a",
+      againstAdvocateBotId: "bot-b",
+      notes: "Keep props playful.",
+      exhibits: [
+        {
+          adjective: "Mossy",
+          object: "brick",
+          observation: "Moss covers one face of the brick.",
+          emoji: "🧱",
+        },
+        {
+          adjective: "Folded",
+          object: "permit",
+          observation: "The permit is stamped but unsigned.",
+          emoji: "📄",
+        },
+      ],
+      sources: [
+        {
+          id: "web-1",
+          title: "Lot study",
+          url: "https://example.com/lots",
+          snippet: "Vacant lots store carbon.",
+        },
+      ],
+      researchMeta: {
+        webQuery: "urban rewilding vacant lots",
+        scholarQuery: "urban vacant lot ecology",
+        sourcesSkippedReason: null,
+      },
+    },
+    ["bot-a", "bot-b", "bot-c"],
+  );
+  assert.ok(suggestion);
+  assert.equal(suggestion?.forAdvocateBotId, "bot-a");
+  assert.equal(suggestion?.againstAdvocateBotId, "bot-b");
+  assert.equal(suggestion?.exhibits.length, 2);
+  assert.equal(suggestion?.exhibits[0]?.visualKind, "emoji");
+  assert.equal(suggestion?.exhibits[0]?.createdBy, "prism");
+  assert.equal(suggestion?.exhibits[0]?.id, "exhibit-1");
+  assert.equal(suggestion?.sources.length, 1);
+  assert.equal(suggestion?.setupPresetId, "classic-duel");
+  assert.equal(suggestion?.playerRole, "judge");
+  assert.equal(suggestion?.playerSideId, null);
+  assert.equal(suggestion?.moderatorBotId, null);
+  assert.equal(suggestion?.moderatorTitle, "Moderator");
+  assert.equal(suggestion?.juryEnabled, false);
+});
+
+test("normalizeDebateSetupSuggestionV1 syncs Spectator Jury presets and keeps moderator", () => {
+  const suggestion = normalizeDebateSetupSuggestionV1(
+    {
+      topic: "Urban wildlife",
+      motion: {
+        motion: "Cities should rewild vacant lots.",
+        forSide: { label: "Rewild", brief: "Habitat restores local ecology." },
+        againstSide: {
+          label: "Develop",
+          brief: "Housing needs the land more urgently.",
+        },
+      },
+      setupPresetId: "public-forum",
+      playerRole: "judge",
+      juryEnabled: false,
+      moderatorBotId: "bot-c",
+      moderatorTitle: "Town Hall Host",
+      forAdvocateBotId: "bot-a",
+      againstAdvocateBotId: "bot-b",
+      exhibits: [
+        {
+          adjective: "Mossy",
+          object: "brick",
+          observation: "Moss covers one face of the brick.",
+          emoji: "🧱",
+        },
+        {
+          adjective: "Folded",
+          object: "permit",
+          observation: "The permit is stamped but unsigned.",
+          emoji: "📄",
+        },
+      ],
+      researchMeta: {
+        webQuery: "",
+        scholarQuery: "",
+        sourcesSkippedReason: null,
+      },
+    },
+    ["bot-a", "bot-b", "bot-c"],
+  );
+  assert.ok(suggestion);
+  assert.equal(suggestion?.playerRole, "spectator");
+  assert.equal(suggestion?.juryEnabled, true);
+  assert.equal(suggestion?.formality, "plainspoken");
+  assert.equal(suggestion?.moderatorBotId, "bot-c");
+  assert.equal(suggestion?.moderatorTitle, "Town Hall Host");
+});
+
+test("completeDebateSetupSuggestionCastV1 fills a missing moderator seat", () => {
+  const base = normalizeDebateSetupSuggestionV1(
+    {
+      topic: "Urban wildlife",
+      motion: {
+        motion: "Cities should rewild vacant lots.",
+        forSide: { label: "Rewild", brief: "Habitat restores local ecology." },
+        againstSide: {
+          label: "Develop",
+          brief: "Housing needs the land more urgently.",
+        },
+      },
+      setupPresetId: "take-the-floor",
+      playerSideId: "for",
+      forAdvocateBotId: "bot-a",
+      againstAdvocateBotId: "bot-b",
+      exhibits: [
+        {
+          adjective: "Mossy",
+          object: "brick",
+          observation: "Moss covers one face of the brick.",
+          emoji: "🧱",
+        },
+        {
+          adjective: "Folded",
+          object: "permit",
+          observation: "The permit is stamped but unsigned.",
+          emoji: "📄",
+        },
+      ],
+      researchMeta: {
+        webQuery: "",
+        scholarQuery: "",
+        sourcesSkippedReason: null,
+      },
+    },
+    ["bot-a", "bot-b", "bot-c"],
+  );
+  assert.ok(base);
+  assert.equal(base?.playerRole, "participant");
+  assert.equal(base?.moderatorBotId, null);
+  const completed = completeDebateSetupSuggestionCastV1(
+    base!,
+    ["bot-a", "bot-b", "bot-c"],
+    () => 0,
+  );
+  assert.equal(completed.moderatorBotId, "bot-c");
+});
+
+test("normalizeDebateSetupSuggestionV1 rejects unknown bots and thin exhibit packs", () => {
+  assert.equal(
+    normalizeDebateSetupSuggestionV1(
+      {
+        motion: {
+          motion: "Should coffee be free?",
+          forSide: { label: "Yes", brief: "Hospitality builds community." },
+          againstSide: { label: "No", brief: "Scarcity needs pricing." },
+        },
+        forAdvocateBotId: "bot-a",
+        againstAdvocateBotId: "missing",
+        exhibits: [
+          { adjective: "Warm", object: "mug", observation: "Steam rises.", emoji: "☕" },
+          { adjective: "Torn", object: "receipt", observation: "Ink smudged.", emoji: "🧾" },
+        ],
+      },
+      ["bot-a", "bot-b"],
+    ),
+    null,
+  );
+  assert.equal(
+    normalizeDebateSetupSuggestionV1(
+      {
+        motion: {
+          motion: "Should coffee be free?",
+          forSide: { label: "Yes", brief: "Hospitality builds community." },
+          againstSide: { label: "No", brief: "Scarcity needs pricing." },
+        },
+        forAdvocateBotId: "bot-a",
+        againstAdvocateBotId: "bot-b",
+        exhibits: [
+          { adjective: "Warm", object: "mug", observation: "Steam rises.", emoji: "☕" },
+        ],
+      },
+      ["bot-a", "bot-b"],
+    ),
+    null,
   );
 });

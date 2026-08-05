@@ -38,9 +38,57 @@ const DEBATE_AUDIENCE_HEAT_EVENT_KINDS = new Set<DebateEventV1["kind"]>([
   "testimony",
 ]);
 
-/** Crowd stays quiet through the body of a live monologue. */
+/** Crowd stays quieter through the body of a live monologue. */
 export const DEBATE_AUDIENCE_MONOLOGUE_QUIET_UNTIL = 0.75;
 export const DEBATE_AUDIENCE_MONOLOGUE_FULL_BY = 0.92;
+
+/**
+ * Hotter Rowdiness lets the gallery start swelling earlier in a live line so
+ * Daytime Showdown / free-for-all never feel muted until the last beat.
+ */
+export const DEBATE_AUDIENCE_MONOLOGUE_QUIET_UNTIL_BY_FORMALITY = {
+  parliamentary: 0.82,
+  structured: 0.78,
+  plainspoken: 0.75,
+  heated: 0.62,
+  free_for_all: 0.48,
+} as const satisfies Record<DebateFormalityId, number>;
+
+export const DEBATE_AUDIENCE_MONOLOGUE_FULL_BY_FORMALITY = {
+  parliamentary: 0.94,
+  structured: 0.93,
+  plainspoken: 0.92,
+  heated: 0.88,
+  free_for_all: 0.82,
+} as const satisfies Record<DebateFormalityId, number>;
+
+/**
+ * Never fully mute the gallery under a live line. The late swell still lands,
+ * but murmur and seat chatter keep breathing so advocacy never feels alone.
+ */
+export const DEBATE_AUDIENCE_MONOLOGUE_FLOOR_BY_FORMALITY = {
+  parliamentary: 0.42,
+  structured: 0.48,
+  plainspoken: 0.55,
+  heated: 0.64,
+  free_for_all: 0.72,
+} as const satisfies Record<DebateFormalityId, number>;
+
+export const DEBATE_AUDIENCE_MONOLOGUE_FLOOR = 0.55;
+
+/**
+ * While a line is still being heard, keep scored pressure at least in the
+ * murmuring band so seat chatter and the murmur bed stay alive under advocacy.
+ */
+export const DEBATE_AUDIENCE_MONOLOGUE_MIN_PRESSURE_BY_FORMALITY = {
+  parliamentary: 20,
+  structured: 22,
+  plainspoken: 24,
+  heated: 28,
+  free_for_all: 32,
+} as const satisfies Record<DebateFormalityId, number>;
+
+export const DEBATE_AUDIENCE_MONOLOGUE_MIN_PRESSURE = 24;
 
 function stableHash(text: string): number {
   let hash = 2_166_136_261;
@@ -102,13 +150,27 @@ export function debateAudienceReactionForContent(
   return "attentive";
 }
 
-export function debateAudienceMonologueSilenceGate(progress: number): number {
-  const span =
-    DEBATE_AUDIENCE_MONOLOGUE_FULL_BY - DEBATE_AUDIENCE_MONOLOGUE_QUIET_UNTIL;
-  if (span <= 0) return progress >= DEBATE_AUDIENCE_MONOLOGUE_FULL_BY ? 1 : 0;
-  return clampUnit(
-    (clampUnit(progress) - DEBATE_AUDIENCE_MONOLOGUE_QUIET_UNTIL) / span,
-  );
+export function debateAudienceMonologueSilenceGate(
+  progress: number,
+  formality: DebateFormalityId = "plainspoken",
+): number {
+  const quietUntil =
+    DEBATE_AUDIENCE_MONOLOGUE_QUIET_UNTIL_BY_FORMALITY[formality] ??
+    DEBATE_AUDIENCE_MONOLOGUE_QUIET_UNTIL;
+  const fullBy =
+    DEBATE_AUDIENCE_MONOLOGUE_FULL_BY_FORMALITY[formality] ??
+    DEBATE_AUDIENCE_MONOLOGUE_FULL_BY;
+  const floor =
+    DEBATE_AUDIENCE_MONOLOGUE_FLOOR_BY_FORMALITY[formality] ??
+    DEBATE_AUDIENCE_MONOLOGUE_FLOOR;
+  const span = fullBy - quietUntil;
+  const raw =
+    span <= 0
+      ? clampUnit(progress) >= fullBy
+        ? 1
+        : 0
+      : clampUnit((clampUnit(progress) - quietUntil) / span);
+  return Math.max(floor, raw);
 }
 
 function eventReactionBonus(
@@ -155,11 +217,13 @@ function eventRevealHeatMultiplier(
   event: DebateEventV1,
   activeEventId: string | null,
   visibleCharacterCount: number | null,
+  formality: DebateFormalityId,
 ): number {
   if (event.id !== activeEventId || visibleCharacterCount === null) return 1;
   if (event.content.length === 0) return 0;
   return debateAudienceMonologueSilenceGate(
     visibleCharacterCount / event.content.length,
+    formality,
   );
 }
 
@@ -167,6 +231,7 @@ function liveMonologueAudienceSilenceFactor(args: {
   events: readonly DebateEventV1[];
   activeEventId: string | null;
   visibleCharacterCount: number | null;
+  formality: DebateFormalityId;
 }): number {
   if (!args.activeEventId || args.visibleCharacterCount === null) return 1;
   const activeEvent = args.events.find(
@@ -175,6 +240,7 @@ function liveMonologueAudienceSilenceFactor(args: {
   if (!activeEvent || activeEvent.content.length === 0) return 1;
   return debateAudienceMonologueSilenceGate(
     args.visibleCharacterCount / activeEvent.content.length,
+    args.formality,
   );
 }
 
@@ -247,16 +313,29 @@ export function debateAudiencePressureScore(args: {
         event,
         args.activeEventId ?? null,
         args.visibleCharacterCount ?? null,
+        args.formality,
       );
   }
-  return clampPressure(
-    score *
-      liveMonologueAudienceSilenceFactor({
-        events: args.events,
-        activeEventId: args.activeEventId ?? null,
-        visibleCharacterCount: args.visibleCharacterCount ?? null,
-      }),
-  );
+  const silence = liveMonologueAudienceSilenceFactor({
+    events: args.events,
+    activeEventId: args.activeEventId ?? null,
+    visibleCharacterCount: args.visibleCharacterCount ?? null,
+    formality: args.formality,
+  });
+  const gated = score * silence;
+  // Active monologue with a living duck: never drop into "settled" — that
+  // zeroes talker seats and ambient vocal Foley even when the murmur bed is on.
+  if (
+    args.activeEventId &&
+    args.visibleCharacterCount !== null &&
+    silence < 1
+  ) {
+    const minPressure =
+      DEBATE_AUDIENCE_MONOLOGUE_MIN_PRESSURE_BY_FORMALITY[args.formality] ??
+      DEBATE_AUDIENCE_MONOLOGUE_MIN_PRESSURE;
+    return clampPressure(Math.max(gated, minPressure));
+  }
+  return clampPressure(gated);
 }
 
 /**

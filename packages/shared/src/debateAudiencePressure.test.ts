@@ -4,6 +4,8 @@ import { DEBATE_SCHEMA_VERSION, type DebateEventV1 } from "./debate.ts";
 import {
   debateAudienceEventIsShocking,
   debateAudienceModeratorOrderPlan,
+  debateAudienceMonologueSilenceGate,
+  debateAudiencePressureBand,
   debateAudiencePressureScore,
 } from "./debateAudiencePressure.ts";
 
@@ -156,5 +158,31 @@ describe("Debate audience pressure", () => {
       })?.reason,
       "shock",
     );
+  });
+
+  it("keeps a living gallery bed under a live monologue instead of full mute", () => {
+    const prior = speech("prior", 1);
+    const live = {
+      ...speech("live", 2),
+      content: "A long enough contention that progress can be measured carefully.",
+    };
+    const midLine = debateAudiencePressureScore({
+      events: [prior, live],
+      formality: "plainspoken",
+      playerRole: "judge",
+      activeEventId: live.id,
+      visibleCharacterCount: Math.floor(live.content.length * 0.2),
+    });
+    const betweenBeats = debateAudiencePressureScore({
+      events: [prior, live],
+      formality: "plainspoken",
+      playerRole: "judge",
+    });
+    assert.ok(midLine > 0);
+    assert.ok(midLine < betweenBeats);
+    assert.equal(debateAudiencePressureBand(midLine), "murmuring");
+    assert.equal(debateAudienceMonologueSilenceGate(0, "plainspoken"), 0.55);
+    assert.equal(debateAudienceMonologueSilenceGate(0, "free_for_all"), 0.72);
+    assert.ok(debateAudienceMonologueSilenceGate(0.95, "plainspoken") > 0.55);
   });
 });

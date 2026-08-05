@@ -528,3 +528,31 @@ export function applyDebateEvidenceObjectNameEdit(
     imageId: hasLockedVisual ? current.imageId : null,
   };
 }
+
+/** Reopen a saved exhibit into the Evidence composer for in-place edits. */
+export function debateEvidenceObjectDraftFromExhibit(
+  exhibit: DebateEvidenceExhibitV1,
+): DebateEvidenceObjectDraft {
+  return {
+    adjective: exhibit.adjective,
+    object: exhibit.object,
+    observation: exhibit.observation,
+    emoji: exhibit.emoji,
+    emojiCustomized: true,
+    createdBy: exhibit.createdBy,
+    visualKind: exhibit.visualKind,
+    imageId: exhibit.imageId,
+  };
+}
+
+/** Replace one exhibit by id while preserving packet order and other items. */
+export function replaceDebateEvidenceExhibit(
+  evidence: DebateEvidencePacketV1,
+  exhibitId: string,
+  next: DebateEvidenceExhibitV1,
+): DebateEvidencePacketV1 {
+  const exhibits = (evidence.exhibits ?? []).map((exhibit) =>
+    exhibit.id === exhibitId ? { ...next, id: exhibitId } : exhibit,
+  );
+  return { ...evidence, exhibits };
+}

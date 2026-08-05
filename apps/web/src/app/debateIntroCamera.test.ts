@@ -7,19 +7,34 @@ import {
   debateEventIsModeratorIntro,
   debateEventIsModeratorMonologue,
   debateIntroAdvocateCues,
+  debateIntroPreferredNameOffset,
   debateModeratorBreathCues,
   resolveDebateModeratorCameraView,
 } from "./debateIntroCamera.ts";
 
 describe("Debate intro camera choreography", () => {
-  const content =
+  const docketOnly =
     "This Debate is called to order on: Free coffee for all. " +
     "Ava argues For; Blake argues Against. The proceeding may begin.";
 
-  it("orders advocate cues by first name mention", () => {
+  const withProfiles =
+    "This Debate is called to order on: Free coffee for all. " +
+    "Ava argues For; Blake argues Against. The proceeding may begin. " +
+    "Tonight Ava brings a sharp practical case, while Blake answers with " +
+    "tradition and craft. Keep the arguments sharp, stay with the frozen " +
+    "record, and do not invent evidence while the chamber settles into the " +
+    "first round.";
+
+  it("prefers post-docket profile name mentions over the first roll call", () => {
+    const forOffset = debateIntroPreferredNameOffset(withProfiles, "Ava");
+    const againstOffset = debateIntroPreferredNameOffset(withProfiles, "Blake");
+    assert.ok(forOffset != null && forOffset > withProfiles.indexOf("Ava"));
+    assert.ok(
+      againstOffset != null && againstOffset > withProfiles.indexOf("Blake"),
+    );
     assert.deepEqual(
       debateIntroAdvocateCues({
-        content,
+        content: withProfiles,
         forName: "Ava",
         againstName: "Blake",
       }),
@@ -28,13 +43,37 @@ describe("Debate intro camera choreography", () => {
           kind: "advocate",
           side: "for",
           view: "left",
-          offset: content.indexOf("Ava"),
+          offset: forOffset,
         },
         {
           kind: "advocate",
           side: "against",
           view: "right",
-          offset: content.indexOf("Blake"),
+          offset: againstOffset,
+        },
+      ],
+    );
+  });
+
+  it("falls back to the first name mention when no later profile beat exists", () => {
+    assert.deepEqual(
+      debateIntroAdvocateCues({
+        content: docketOnly,
+        forName: "Ava",
+        againstName: "Blake",
+      }),
+      [
+        {
+          kind: "advocate",
+          side: "for",
+          view: "left",
+          offset: docketOnly.indexOf("Ava"),
+        },
+        {
+          kind: "advocate",
+          side: "against",
+          view: "right",
+          offset: docketOnly.indexOf("Blake"),
         },
       ],
     );
@@ -69,13 +108,13 @@ describe("Debate intro camera choreography", () => {
     );
   });
 
-  it("starts on the moderator, then Wide → advocate as each name is heard", () => {
-    const forOffset = content.indexOf("Ava");
-    const againstOffset = content.indexOf("Blake");
+  it("starts on the moderator, then Wide → advocate as each profile name is heard", () => {
+    const forOffset = debateIntroPreferredNameOffset(withProfiles, "Ava")!;
+    const againstOffset = debateIntroPreferredNameOffset(withProfiles, "Blake")!;
 
     assert.equal(
       resolveDebateModeratorCameraView({
-        content,
+        content: withProfiles,
         visibleLength: 12,
         forName: "Ava",
         againstName: "Blake",
@@ -86,8 +125,22 @@ describe("Debate intro camera choreography", () => {
       "moderator",
     );
 
+    // Still on the docket listing — stay with the moderator.
+    assert.equal(
+      resolveDebateModeratorCameraView({
+        content: withProfiles,
+        visibleLength: docketOnly.indexOf("Ava") + 1,
+        forName: "Ava",
+        againstName: "Blake",
+        nowMs: 1_500,
+        wideHoldStartedAtMs: null,
+        focusedSide: null,
+      }).view,
+      "moderator",
+    );
+
     const firstWide = resolveDebateModeratorCameraView({
-      content,
+      content: withProfiles,
       visibleLength: forOffset + 1,
       forName: "Ava",
       againstName: "Blake",
@@ -99,7 +152,7 @@ describe("Debate intro camera choreography", () => {
     assert.equal(firstWide.focusedSide, "for");
 
     const forClose = resolveDebateModeratorCameraView({
-      content,
+      content: withProfiles,
       visibleLength: forOffset + 8,
       forName: "Ava",
       againstName: "Blake",
@@ -110,7 +163,7 @@ describe("Debate intro camera choreography", () => {
     assert.equal(forClose.view, "left");
 
     const secondWide = resolveDebateModeratorCameraView({
-      content,
+      content: withProfiles,
       visibleLength: againstOffset + 1,
       forName: "Ava",
       againstName: "Blake",
@@ -122,7 +175,7 @@ describe("Debate intro camera choreography", () => {
     assert.equal(secondWide.focusedSide, "against");
 
     const againstClose = resolveDebateModeratorCameraView({
-      content,
+      content: withProfiles,
       visibleLength: againstOffset + 10,
       forName: "Ava",
       againstName: "Blake",
@@ -134,19 +187,65 @@ describe("Debate intro camera choreography", () => {
   });
 
   it("returns to the moderator before the intro finishes", () => {
-    const late = Math.floor(content.length * 0.9);
-    assert.equal(
-      resolveDebateModeratorCameraView({
-        content,
-        visibleLength: late,
-        forName: "Ava",
-        againstName: "Blake",
-        nowMs: 9_000,
-        wideHoldStartedAtMs: 4_000,
-        focusedSide: "against",
-      }).view,
-      "moderator",
+    const againstOffset = debateIntroPreferredNameOffset(withProfiles, "Blake")!;
+    const late = Math.max(
+      againstOffset + 40,
+      Math.floor(withProfiles.length * 0.9),
     );
+    const home = resolveDebateModeratorCameraView({
+      content: withProfiles,
+      visibleLength: late,
+      forName: "Ava",
+      againstName: "Blake",
+      nowMs: 9_000 + DEBATE_INTRO_WIDE_HOLD_MS,
+      wideHoldStartedAtMs: 9_000,
+      focusedSide: "against",
+    });
+    assert.equal(home.view, "moderator");
+    assert.equal(home.focusedSide, "complete");
+  });
+
+  it("does not flicker Wide after cutting home from the final introducee", () => {
+    const againstOffset = debateIntroPreferredNameOffset(withProfiles, "Blake")!;
+    const late = Math.max(
+      againstOffset + 40,
+      Math.floor(withProfiles.length * 0.9),
+    );
+    const home = resolveDebateModeratorCameraView({
+      content: withProfiles,
+      visibleLength: late,
+      forName: "Ava",
+      againstName: "Blake",
+      nowMs: 9_000 + DEBATE_INTRO_WIDE_HOLD_MS,
+      wideHoldStartedAtMs: 9_000,
+      focusedSide: "against",
+    });
+    assert.equal(home.focusedSide, "complete");
+
+    // Cleared-focus path that previously re-armed Wide every hold cycle.
+    const afterClear = resolveDebateModeratorCameraView({
+      content: withProfiles,
+      visibleLength: late + 8,
+      forName: "Ava",
+      againstName: "Blake",
+      nowMs: 10_000,
+      wideHoldStartedAtMs: null,
+      focusedSide: null,
+    });
+    assert.equal(afterClear.view, "moderator");
+    assert.equal(afterClear.focusedSide, "complete");
+
+    const latched = resolveDebateModeratorCameraView({
+      content: withProfiles,
+      visibleLength: late + 20,
+      forName: "Ava",
+      againstName: "Blake",
+      nowMs: 11_000,
+      wideHoldStartedAtMs: null,
+      focusedSide: "complete",
+    });
+    assert.equal(latched.view, "moderator");
+    assert.equal(latched.focusedSide, "complete");
   });
 
   it("takes Wide breaths on long moderator prose without advocate names", () => {
@@ -185,7 +284,7 @@ describe("Debate intro camera choreography", () => {
   it("stays on the moderator when names are missing from a short line", () => {
     assert.equal(
       resolveDebateModeratorCameraView({
-        content: "The proceeding is called to order.",
+        content: "Welcome back. The floor is yours.",
         visibleLength: 20,
         forName: "Ava",
         againstName: "Blake",

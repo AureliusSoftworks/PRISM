@@ -104,6 +104,17 @@ test("audience materials throttle without removing semantic reactions", () => {
   assert.match(debateSource, /reuseDebateSessionEventPrefix/u);
   assert.match(debateSource, /presentationSuspended/u);
   assert.match(debateSource, /usePrismPresentationSuspended/u);
+  assert.match(debateSource, /usePrismAppAwayFromUser/u);
+  assert.match(debateSource, /waitWhilePrismPresentationSuspended/u);
+  assert.match(debateSource, /spectatorWatchPresentationCompleteRef/u);
+  assert.match(
+    debateSource,
+    /bypassCooldown:\s*true/u,
+  );
+  assert.match(
+    debateSource,
+    /Leaving the app must recess/u,
+  );
   assert.doesNotMatch(
     debateSource,
     /setInterval\(\(\) => \{\s*const now = Date\.now\(\);\s*setJudgeGavelNowMs/u,

@@ -265,3 +265,10 @@ export function resetPrismVisualLifecycleForTests(): void {
   systemPauseReasons.clear();
   listeners.clear();
 }
+
+/** Test-only: publish a lifecycle snapshot without attaching browser listeners. */
+export function seedPrismVisualLifecycleForTests(
+  snapshot: PrismVisualLifecycleSnapshot,
+): void {
+  emit(snapshot);
+}
