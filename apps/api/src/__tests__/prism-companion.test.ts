@@ -4,12 +4,14 @@ import { DatabaseSync } from "node:sqlite";
 import {
   buildPrismCompanionAuthoritativeContext,
   chatWithPrismCompanion,
+  parseCompanionUserNotesIntent,
   parsePrismCompanionModelOutput,
   prismCompanionDirectActionIntents,
   prismCompanionSystemPrompt,
   resolvePrismCompanionProvider,
 } from "../prism-companion.ts";
 import { defaultEphemeralChatProviderPreferences } from "@localai/shared";
+import { ensureUserNotesSchema, listUserNotes } from "../user-notes.ts";
 
 function fixture(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
@@ -22,6 +24,19 @@ function fixture(): DatabaseSync {
     CREATE TABLE slate_sections (id TEXT PRIMARY KEY, user_id TEXT, project_id TEXT, title TEXT, prose TEXT);
     CREATE TABLE story_sessions (id TEXT PRIMARY KEY, user_id TEXT, title TEXT, status TEXT);
     CREATE TABLE images (id TEXT PRIMARY KEY, user_id TEXT, prompt TEXT);
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      email TEXT,
+      display_name TEXT,
+      password_hash TEXT,
+      password_salt TEXT,
+      wrapped_user_key TEXT,
+      wrapped_user_key_iv TEXT,
+      wrapped_user_key_tag TEXT,
+      created_at TEXT,
+      last_active_at TEXT
+    );
+    INSERT INTO users VALUES ('u1', 'u1@example.test', 'Jared', 'h', 's', 'w', 'i', 't', 'now', 'now');
     INSERT INTO bots VALUES ('owned', 'u1', 'Lux', 'private');
     INSERT INTO bots VALUES ('public', 'u2', 'Umbra', 'public');
     INSERT INTO bots VALUES ('secret', 'u2', 'Secret', 'private');
@@ -31,6 +46,7 @@ function fixture(): DatabaseSync {
     INSERT INTO story_sessions VALUES ('story-1', 'u1', 'Glass Archive', 'playing');
     INSERT INTO images VALUES ('image-1', 'u1', 'A pinecone under theatrical light');
   `);
+  ensureUserNotesSchema(db);
   return db;
 }
 
@@ -235,6 +251,7 @@ test("authorizes export only for an owned bot and does not persist chat", async 
   const result = await chatWithPrismCompanion({
     db,
     userId: "u1",
+    userKey: Buffer.alloc(32, 1),
     displayName: "Jared",
     surface: { surfaceId: "home", botIds: ["owned", "public"] },
     recoveryMessages: [],
@@ -251,4 +268,101 @@ test("authorizes export only for an owned bot and does not persist chat", async 
     )
     .get() as { count: number };
   assert.equal(persistenceTables.count, 0);
+});
+
+test("parses clear Ask Prism note shorthand without waiting on the model", () => {
+  assert.deepEqual(parseCompanionUserNotesIntent("bug note: Slow startup performance"), {
+    v: 1,
+    name: "userNotes",
+    action: "save",
+    title: "Bug · Slow startup performance",
+    body: "Slow startup performance",
+  });
+  assert.deepEqual(parseCompanionUserNotesIntent("note: buy oat milk"), {
+    v: 1,
+    name: "userNotes",
+    action: "save",
+    title: "buy oat milk",
+    body: "buy oat milk",
+  });
+  assert.deepEqual(parseCompanionUserNotesIntent("list notes"), {
+    v: 1,
+    name: "userNotes",
+    action: "list",
+  });
+  assert.equal(parseCompanionUserNotesIntent("what is a note?"), null);
+});
+
+test("saves a bug note from Ask Prism without calling the model", async () => {
+  const db = fixture();
+  const userKey = Buffer.alloc(32, 3);
+  let called = 0;
+  const provider = {
+    name: "local" as const,
+    async generateResponse(): Promise<string> {
+      called += 1;
+      return "Should not run.";
+    },
+    async embedText(): Promise<number[]> {
+      return [];
+    },
+  };
+  const result = await chatWithPrismCompanion({
+    db,
+    userId: "u1",
+    userKey,
+    displayName: "Jared",
+    surface: { surfaceId: "home" },
+    recoveryMessages: [],
+    message: "bug note: Slow startup performance",
+    provider,
+    providerName: "local",
+    model: "local-model",
+  });
+  assert.equal(called, 0);
+  assert.equal(result.userNotes?.status, "saved");
+  assert.equal(result.userNotes?.title, "Bug · Slow startup performance");
+  assert.match(result.content, /Saved your note/u);
+  const notes = listUserNotes(db, "u1", userKey);
+  assert.equal(notes.length, 1);
+  assert.equal(notes[0]?.body, "Slow startup performance");
+});
+
+test("blocks Ask Prism notes on Private (incognito) surfaces", async () => {
+  const db = fixture();
+  const result = await chatWithPrismCompanion({
+    db,
+    userId: "u1",
+    userKey: Buffer.alloc(32, 3),
+    displayName: "Jared",
+    surface: { surfaceId: "zen", conversationId: "c1" },
+    recoveryMessages: [],
+    message: "bug note: secret thought",
+    provider: {
+      name: "local",
+      async generateResponse(): Promise<string> {
+        return "Should not run.";
+      },
+      async embedText(): Promise<number[]> {
+        return [];
+      },
+    },
+    providerName: "local",
+    model: "local-model",
+  });
+  assert.equal(result.userNotes?.status, "error");
+  assert.match(result.content, /Private/u);
+  assert.equal(listUserNotes(db, "u1", Buffer.alloc(32, 3)).length, 0);
+});
+
+test("teaches userNotes in the companion system prompt", () => {
+  const db = fixture();
+  const context = buildPrismCompanionAuthoritativeContext(db, "u1", "Jared", {
+    surfaceId: "home",
+  });
+  assert.match(prismCompanionSystemPrompt(context), /userNotes/u);
+  assert.match(
+    prismCompanionSystemPrompt(context),
+    /personal notes via the optional userNotes/u,
+  );
 });

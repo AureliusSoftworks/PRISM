@@ -168,6 +168,16 @@ function createChatTestDb(): DatabaseSync {
       source_message_ids TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL
     );
+    CREATE TABLE user_notes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
     CREATE TABLE memory_summaries (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -3836,6 +3846,106 @@ describe("processChatMessage AskQuestion tool", () => {
     assert.ok(webSearchStatuses.includes("detected"));
     assert.ok(webSearchStatuses.includes("blocked"));
     assert.equal(webSearchStatuses.includes("completed"), false);
+  });
+
+  it("blocks userNotes outside Chat companion mode", async () => {
+    const db = createChatTestDb();
+    const notesTool = {
+      v: 1,
+      userNotes: { action: "save", title: "Groceries", body: "milk" },
+    };
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          message: {
+            content: `Saving.\n<<<PRISM_TOOL>>>\n${JSON.stringify(notesTool)}\n<<<END_PRISM_TOOL>>>`,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Save a grocery note",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "sandbox",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages
+      .filter((m) => m.role === "assistant")
+      .pop();
+    assert.equal(lastAssistant?.userNotes?.status, "error");
+    assert.match(lastAssistant?.content ?? "", /only available in Chat/i);
+    const noteCount = (
+      db.prepare("SELECT COUNT(*) AS n FROM user_notes").get() as { n: number }
+    ).n;
+    assert.equal(noteCount, 0);
+    const statuses =
+      result.toolCalls
+        ?.filter((event) => event.name === "userNotes")
+        .map((event) => event.status) ?? [];
+    assert.ok(statuses.includes("detected"));
+    assert.ok(statuses.includes("blocked"));
+  });
+
+  it("saves a userNotes create in Chat mode and attaches a receipt", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, system_prompt) VALUES (?, ?, ?, ?)"
+    ).run("bot-1", "user-1", "Notes Bot", "You are helpful.");
+    const notesTool = {
+      v: 1,
+      userNotes: { action: "save", title: "Groceries", body: "milk, eggs" },
+    };
+    globalThis.fetch = (async () =>
+      new Response(
+        JSON.stringify({
+          message: {
+            content: `Got it.\n<<<PRISM_TOOL>>>\n${JSON.stringify(notesTool)}\n<<<END_PRISM_TOOL>>>`,
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      )) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Save milk and eggs as a groceries note",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        starterPrompt: false,
+        incognito: false,
+        mode: "chat",
+        botId: "bot-1",
+        botSystemPrompt: "You are helpful.",
+      }
+    );
+
+    const lastAssistant = result.conversation.messages
+      .filter((m) => m.role === "assistant")
+      .pop();
+    assert.equal(lastAssistant?.userNotes?.status, "saved");
+    assert.equal(lastAssistant?.userNotes?.title, "Groceries");
+    assert.ok(lastAssistant?.userNotes?.id);
+    const row = db
+      .prepare("SELECT title, user_id FROM user_notes WHERE user_id = ?")
+      .get("user-1") as { title: string; user_id: string } | undefined;
+    assert.equal(row?.title, "Groceries");
+    const statuses =
+      result.toolCalls
+        ?.filter((event) => event.name === "userNotes")
+        .map((event) => event.status) ?? [];
+    assert.ok(statuses.includes("detected"));
+    assert.ok(statuses.includes("completed"));
   });
 
   it("blocks manual WebSearch in LOCAL mode before any Brave request", async () => {
@@ -8217,6 +8327,26 @@ describe("buildAssistantToolCallEvents", () => {
       imageSlot: "none",
     });
     assert.deepEqual(events, []);
+  });
+
+  it("emits detected + completed for a successful userNotes action", () => {
+    const events = buildAssistantToolCallEvents({
+      rawReply:
+        '<<<PRISM_TOOL>>>\n{"v":1,"userNotes":{"action":"save","title":"Groceries","body":"milk"}}\n<<<END_PRISM_TOOL>>>',
+      parsedUserNotes: {
+        v: 1,
+        name: "userNotes",
+        action: "save",
+        title: "Groceries",
+        body: "milk",
+      },
+      userNotesStatus: "completed",
+      imageSlot: "none",
+    });
+    assert.equal(events.length, 2);
+    assert.equal(events[0]?.name, "userNotes");
+    assert.equal(events[0]?.status, "detected");
+    assert.equal(events[1]?.status, "completed");
   });
 
   it("emits detected + acquired for a parsed sendGeneratedImage that scheduled a job", () => {

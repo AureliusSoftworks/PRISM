@@ -24,6 +24,7 @@ import type {
   PrismCompanionMessage,
   PrismCompanionResponse,
   PrismCompanionSurfaceReference,
+  UserNotesPayload,
 } from "@localai/shared";
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import {
@@ -262,6 +263,35 @@ function actionLabel(action: PrismCompanionActionIntent): string {
   return action.direction === "zen-to-slate"
     ? "Send selection to Slate"
     : "Discuss selection in Zen";
+}
+
+function companionUserNotesHeadline(userNotes: UserNotesPayload): string {
+  const title = userNotes.title?.trim() || "";
+  const count =
+    typeof userNotes.noteCount === "number"
+      ? userNotes.noteCount
+      : userNotes.notes?.length;
+  switch (userNotes.status) {
+    case "saved":
+      return title ? `Saved note · ${title}` : "Saved note";
+    case "updated":
+      return title ? `Updated note · ${title}` : "Updated note";
+    case "deleted":
+      return title ? `Deleted note · ${title}` : "Deleted note";
+    case "listed":
+      return typeof count === "number"
+        ? `Notes on file · ${count}`
+        : "Notes on file";
+    case "retrieved":
+      return title ? `Opened note · ${title}` : "Opened note";
+    case "error":
+      return userNotes.error?.trim() || "Note action failed";
+    default: {
+      const _exhaustive: never = userNotes.status;
+      void _exhaustive;
+      return "Note";
+    }
+  }
 }
 
 export default function PrismCompanion({
@@ -1056,7 +1086,7 @@ export default function PrismCompanion({
         markRefractTarget(readySession, "ready");
         updateRefractSession(readySession);
         setRefractStatus(
-          `${choice.label} is ready. Click, Enter, or Tab keeps it. Space or ${modifierPresentation.modifierLabel}-click here rerolls; ${modifierPresentation.modifierLabel}-click another control keeps this and moves Prism there. Escape restores.`,
+          `${choice.label} is ready. Click away, Enter, or Tab keeps it. Space rerolls. Escape restores.`,
         );
         return;
       }
@@ -1099,7 +1129,7 @@ export default function PrismCompanion({
           markRefractTarget(readySession, "ready");
           updateRefractSession(readySession);
           setRefractStatus(
-            `${target.label} is ready. Click, Enter, or Tab keeps it. Space or ${modifierPresentation.modifierLabel}-click here rerolls; ${modifierPresentation.modifierLabel}-click another control keeps this and moves Prism there. Escape restores.`,
+            `${target.label} is ready. Click away, Enter, or Tab keeps it. Space rerolls. Escape restores.`,
           );
         })
         .catch((error) => {
@@ -1426,20 +1456,20 @@ export default function PrismCompanion({
           clickedTargetId: shiftedRegistration.target.id,
           canAccept:
             session.phase === "ready" && session.candidateValue !== null,
-          canReroll:
-            session.phase === "ready" || session.phase === "error",
         });
-        if (decision === "reroll") {
-          rerollPrismRefract();
-        } else if (decision === "wait") {
+        if (decision === "wait") {
           setRefractStatus("Prism is still refracting.");
         } else {
-          if (decision === "accept-and-begin") acceptPrismRefract();
-          requestPrismRefract(
-            shiftedRegistration.target.id,
-            "modifier-click",
-            { clientX: event.clientX, clientY: event.clientY },
-          );
+          if (decision === "accept" || decision === "accept-and-begin") {
+            acceptPrismRefract();
+          }
+          if (decision === "begin" || decision === "accept-and-begin") {
+            requestPrismRefract(
+              shiftedRegistration.target.id,
+              "modifier-click",
+              { clientX: event.clientX, clientY: event.clientY },
+            );
+          }
         }
         wieldSuppressedClickRef.current = shiftedRegistration.element;
         if (wieldSuppressedClickTimerRef.current !== null) {
@@ -1494,6 +1524,15 @@ export default function PrismCompanion({
         acceptPrismRefract();
         return;
       }
+      // Clicking off the captured field affirms a settled draft; Escape still restores.
+      if (
+        session.registration.target.kind !== "magic" &&
+        session.phase === "ready" &&
+        session.candidateValue !== null
+      ) {
+        acceptPrismRefract();
+        return;
+      }
       releasePrismRefract(true);
     };
     const preventCapturedFieldInput = (event: InputEvent): void => {
@@ -1540,7 +1579,6 @@ export default function PrismCompanion({
     acceptPrismRefract,
     refractSession,
     releasePrismRefract,
-    rerollPrismRefract,
   ]);
 
   useEffect(() => {
@@ -2433,8 +2471,8 @@ export default function PrismCompanion({
                 {refractTutorialStage === "summon"
                   ? `Wield Prism with ${modifierPresentation.modifierLabel} and click the highlighted field, focus it and use ${shortcutPresentation.spokenLabel}, or drag the orb onto it.`
                   : refractTutorialStage === "reroll"
-                    ? `Space or ${modifierPresentation.modifierLabel}-clicking the same control refracts another candidate. It never types into the captured field.`
-                    : `Enter, Tab, or ${modifierPresentation.modifierLabel}-clicking another registered control keeps the draft. Escape restores the original.`}
+                    ? "Space refracts another candidate. It never types into the captured field."
+                    : "Click away, Enter, or Tab keeps the draft. Escape restores the original."}
               </p>
               <div>
                 <button
@@ -2569,6 +2607,27 @@ export default function PrismCompanion({
                         {visibleContent}
                       </ReactMarkdown>
                     </div>
+                    {message.role === "assistant" && message.userNotes ? (
+                      <aside
+                        className={styles.userNotesCard}
+                        aria-label="Personal note receipt"
+                        data-status={message.userNotes.status}
+                      >
+                        <span className={styles.userNotesEyebrow}>Notes</span>
+                        <span className={styles.userNotesHeadline}>
+                          {companionUserNotesHeadline(message.userNotes)}
+                        </span>
+                        {message.userNotes.status === "listed" &&
+                        message.userNotes.notes &&
+                        message.userNotes.notes.length > 0 ? (
+                          <ul className={styles.userNotesList}>
+                            {message.userNotes.notes.slice(0, 8).map((note) => (
+                              <li key={note.id}>{note.title}</li>
+                            ))}
+                          </ul>
+                        ) : null}
+                      </aside>
+                    ) : null}
                     <div
                       className={styles.srOnly}
                       role="status"

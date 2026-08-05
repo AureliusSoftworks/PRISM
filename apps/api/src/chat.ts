@@ -69,6 +69,8 @@ import type {
   SessionOpinion,
   SentGeneratedImagePayload,
   TellFictionalStoryPayload,
+  UserNotesPayload,
+  UserNotesRequestPayload,
   WebSearchPayload,
   WebSearchRequestPayload,
   AutoFallbackChainV1,
@@ -195,6 +197,12 @@ import {
   formatWebSearchForModel,
   searchWebWithBrave,
 } from "./web-search.ts";
+import {
+  executeUserNotesRequest,
+  formatUserNoteTitlesHint,
+  formatUserNotesForModel,
+  listUserNoteTitles,
+} from "./user-notes.ts";
 import { attachUsageEventsToMessage, patchUsageSession } from "./usage.ts";
 import { withPrismRuntimeGrounding, composeBotSystemPrompt } from "./bots.ts";
 import {
@@ -243,6 +251,7 @@ export type ChatToolCallEventName =
   | "sendGeneratedImage"
   | "askQuestion"
   | "webSearch"
+  | "userNotes"
   | "unknown";
 
 export type ChatToolCallEventStatus =
@@ -3374,6 +3383,42 @@ function isZenMode(mode: ChatMode): boolean {
   return mode === "zen";
 }
 
+function isChatCompanionMode(mode: ChatMode): boolean {
+  return mode === "chat";
+}
+
+/** Personal notes are Chat-only and never touch Private (incognito) threads. */
+function userNotesGateReason(
+  mode: ChatMode,
+  incognito: boolean
+): "incognito" | "lane" | null {
+  if (incognito) return "incognito";
+  if (!isChatCompanionMode(mode)) return "lane";
+  return null;
+}
+
+function userNotesBlockedMessage(reason: "incognito" | "lane"): string {
+  return reason === "incognito"
+    ? "Personal notes are unavailable in Private chats. Leave Private mode to save or read notes."
+    : "Personal notes are only available in Chat. Switch to Chat to manage notes.";
+}
+
+function userNotesBlockedReceipt(
+  request: UserNotesRequestPayload,
+  reason: "incognito" | "lane"
+): UserNotesPayload {
+  return {
+    v: 1,
+    name: "userNotes",
+    action: request.action,
+    status: "error",
+    at: new Date().toISOString(),
+    ...(request.id ? { id: request.id } : {}),
+    ...(request.title ? { title: request.title } : {}),
+    error: userNotesBlockedMessage(reason),
+  };
+}
+
 function planZenStageActionForTurn(args: {
   conversationId: string;
   botId: string | null | undefined;
@@ -3770,8 +3815,10 @@ const TOOL_CALL_RAW_HINT_PATTERNS: ReadonlyArray<RegExp> = [
   /"\s*sendGeneratedImage\s*"\s*:/i,
   /"\s*askQuestion\s*"\s*:/i,
   /"\s*webSearch\s*"\s*:/i,
+  /"\s*userNotes\s*"\s*:/i,
   /"\s*name\s*"\s*:\s*"\s*AskQuestion\s*"/i,
   /"\s*name\s*"\s*:\s*"\s*WebSearch\s*"/i,
+  /"\s*name\s*"\s*:\s*"\s*userNotes\s*"/i,
   /<\|\s*send\s*_?\s*generated\s*_?\s*image\s*\|>/i,
   /<<<\s*PRISM\s*_?\s*TOOL\s*>>>/i,
 ];
@@ -3791,6 +3838,11 @@ const WEB_SEARCH_NAME_HINTS: ReadonlyArray<RegExp> = [
   /"\s*name\s*"\s*:\s*"\s*WebSearch\s*"/i,
 ];
 
+const USER_NOTES_NAME_HINTS: ReadonlyArray<RegExp> = [
+  /"\s*userNotes\s*"\s*:/i,
+  /"\s*name\s*"\s*:\s*"\s*userNotes\s*"/i,
+];
+
 function inferDroppedToolNameFromRaw(raw: string): ChatToolCallEventName {
   if (SEND_GENERATED_IMAGE_NAME_HINTS.some((rx) => rx.test(raw))) {
     return "sendGeneratedImage";
@@ -3800,6 +3852,9 @@ function inferDroppedToolNameFromRaw(raw: string): ChatToolCallEventName {
   }
   if (WEB_SEARCH_NAME_HINTS.some((rx) => rx.test(raw))) {
     return "webSearch";
+  }
+  if (USER_NOTES_NAME_HINTS.some((rx) => rx.test(raw))) {
+    return "userNotes";
   }
   return "unknown";
 }
@@ -3817,6 +3872,8 @@ interface BuildAssistantToolCallEventsArgs {
   parsedAskQuestion?: AskQuestionPayload;
   parsedWebSearch?: WebSearchRequestPayload;
   webSearchStatus?: "blocked" | "completed" | "none";
+  parsedUserNotes?: UserNotesRequestPayload;
+  userNotesStatus?: "blocked" | "completed" | "error" | "none";
   /**
    * What happened on the image-slot acquisition path for this turn:
    *  - "acquired" → we scheduled a background job (use `imageJobId`)
@@ -3869,6 +3926,40 @@ export function buildAssistantToolCallEvents(
     }
   }
 
+  if (args.parsedUserNotes) {
+    const promptPreview = truncateToolCallPreview(
+      `${args.parsedUserNotes.action}${
+        args.parsedUserNotes.title ? `:${args.parsedUserNotes.title}` : ""
+      }${args.parsedUserNotes.id ? `:${args.parsedUserNotes.id}` : ""}`
+    );
+    events.push({
+      name: "userNotes",
+      status: "detected",
+      prompt: promptPreview,
+    });
+    if (args.userNotesStatus === "blocked") {
+      events.push({
+        name: "userNotes",
+        status: "blocked",
+        prompt: promptPreview,
+        detail: "user notes are Chat-only and unavailable in Private chats",
+      });
+    } else if (args.userNotesStatus === "completed") {
+      events.push({
+        name: "userNotes",
+        status: "completed",
+        prompt: promptPreview,
+      });
+    } else if (args.userNotesStatus === "error") {
+      events.push({
+        name: "userNotes",
+        status: "dropped",
+        prompt: promptPreview,
+        detail: "user notes action failed",
+      });
+    }
+  }
+
   if (args.parsedSendGeneratedImage) {
     const promptPreview = truncateToolCallPreview(args.parsedSendGeneratedImage.prompt);
     events.push({
@@ -3892,6 +3983,9 @@ export function buildAssistantToolCallEvents(
       });
     }
   } else if (
+    !args.parsedAskQuestion &&
+    !args.parsedWebSearch &&
+    !args.parsedUserNotes &&
     typeof args.rawReply === "string" &&
     args.rawReply.length > 0 &&
     TOOL_CALL_RAW_HINT_PATTERNS.some((rx) => rx.test(args.rawReply))
@@ -3955,6 +4049,20 @@ const PRISM_ASSISTANT_TOOLS_APPENDIX = [
   "- Do not use WebSearch for stable facts, private/local knowledge, or when the user explicitly asks to stay offline.",
   "- WebSearch example: {\"v\":1,\"webSearch\":{\"query\":\"latest OpenAI API model documentation June 2026\"}}.",
   "- Never emit more than one WebSearch request in a turn.",
+  "",
+  "Optional — personal notes (Chat lane + floating Ask Prism; create/read/edit/delete only through this tool):",
+  "- Use `userNotes` when the user asks you to save, list, read, update, or delete a personal note.",
+  "- Notes are private to this account and are not the same as Memories or Slate Room Notes.",
+  "- One `userNotes` action per turn. Never invent note ids — use an id from a prior list/get, or omit id when creating.",
+  "- save (create): {\"v\":1,\"userNotes\":{\"action\":\"save\",\"title\":\"Groceries\",\"body\":\"milk, eggs\"}}",
+  "- save (update): {\"v\":1,\"userNotes\":{\"action\":\"save\",\"id\":\"…\",\"title\":\"Groceries\",\"body\":\"milk, eggs, bread\"}}",
+  "- list: {\"v\":1,\"userNotes\":{\"action\":\"list\"}}",
+  "- get by id or title: {\"v\":1,\"userNotes\":{\"action\":\"get\",\"id\":\"…\"}} or {\"v\":1,\"userNotes\":{\"action\":\"get\",\"title\":\"Groceries\"}}",
+  "- delete by id or title: {\"v\":1,\"userNotes\":{\"action\":\"delete\",\"id\":\"…\"}}",
+  "- Keep visible prose short on save/delete; Prism shows a small receipt card after the action.",
+  "- When a destructive delete target is ambiguous, prefer AskQuestion chips to confirm before emitting delete.",
+  "- Do not use userNotes in Zen, Coffee, Debate, or Slate conversation lanes — Chat or floating Ask Prism only.",
+  "- Never use userNotes in Private (incognito) chats.",
   "",
   "Optional — Zen display hint (hidden, visual-only, used only by Zen surfaces):",
   "- Use `zenDisplay` sparingly for very short, dramatic replies where placement matters; never use it for ordinary paragraphs, lists, or code.",
@@ -5653,6 +5761,7 @@ function hydrateMessages(
         ? { sentGeneratedImage: assembled.sentGeneratedImage }
         : {}),
       ...(assembled.webSearch ? { webSearch: assembled.webSearch } : {}),
+      ...(assembled.userNotes ? { userNotes: assembled.userNotes } : {}),
       ...(assembled.coffeeAmbientAction
         ? { coffeeAmbientAction: assembled.coffeeAmbientAction }
         : {}),
@@ -6416,6 +6525,8 @@ function buildPromptMessages(args: {
   interruptedContent?: string;
   /** Prism single-slot image job hint (busy / in-flight status). */
   imageSlotSystemHint?: string | null;
+  /** Titles-only personal notes hint (Chat companion; never includes bodies). */
+  userNotesTitlesHint?: string | null;
   /** Hard holder Power enforcement placed after the current user request. */
   finalTurnPowerCue?: string | null;
 }): ProviderMessage[] {
@@ -6538,6 +6649,10 @@ function buildPromptMessages(args: {
           .join("\n")}`,
       });
     }
+  }
+  const userNotesTitlesHint = args.userNotesTitlesHint?.trim();
+  if (userNotesTitlesHint) {
+    promptMessages.push({ role: "system", content: userNotesTitlesHint });
   }
   const resumeContextHint = buildSessionResumePromptContext(
     normalizeSessionResumeContext(args.sessionResumeContext),
@@ -7497,6 +7612,16 @@ export async function processChatMessage(
         parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
       }
     }
+    const requestedUserNotesForTurn = botPowerHardResponseTurn
+      ? undefined
+      : parsedAssistant.userNotes;
+    let userNotesForTurn: UserNotesPayload | undefined;
+    let userNotesStatus: "blocked" | "completed" | "error" | "none" = "none";
+    if (requestedUserNotesForTurn) {
+      // Incognito path never reads or writes durable personal notes.
+      userNotesForTurn = userNotesBlockedReceipt(requestedUserNotesForTurn, "incognito");
+      userNotesStatus = "blocked";
+    }
     const shouldBackfillAskQuestion =
         explicitAskQuestionRequest ||
         assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent);
@@ -7518,6 +7643,9 @@ export async function processChatMessage(
 	    );
 	    if (webSearchStatus === "blocked") {
 	      assistantDisplayRaw = webSearchUnavailableMessage;
+	    }
+	    if (userNotesStatus === "blocked" && userNotesForTurn?.error) {
+	      assistantDisplayRaw = userNotesForTurn.error;
 	    }
     const starterSendGeneratedImageRequested =
       !botPowerHardResponseTurn && isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
@@ -7742,6 +7870,9 @@ export async function processChatMessage(
       ...(assistantAskQuestionForTurn
         ? { parsedAskQuestion: assistantAskQuestionForTurn }
         : {}),
+      ...(requestedUserNotesForTurn
+        ? { parsedUserNotes: requestedUserNotesForTurn, userNotesStatus }
+        : {}),
       imageSlot: incognitoImageSlot,
       ...(incognitoImageJobId ? { imageJobId: incognitoImageJobId } : {}),
     });
@@ -7781,6 +7912,7 @@ export async function processChatMessage(
         : {}),
       ...(zenStageAction ? { zenStageAction } : {}),
       ...(webSearchForTurn ? { webSearch: webSearchForTurn } : {}),
+      ...(userNotesForTurn ? { userNotes: userNotesForTurn } : {}),
       ...(botPowerEchoEnforcedTurn
         ? { botPowerExactResponse: "speech_copy" as const }
         : botPowerMumblingTurn
@@ -8693,6 +8825,10 @@ export async function processChatMessage(
         : askQuestionMode,
     interruptedContent: settings.prismInterruption?.interruptedContent,
     imageSlotSystemHint: buildImageSlotSystemHint(userId, activeConversationId),
+    userNotesTitlesHint:
+      mode === "chat" && !botPowerEternalIntroductionTurn
+        ? formatUserNoteTitlesHint(listUserNoteTitles(db, userId)) || null
+        : null,
     finalTurnPowerCue: botPowerIneptitudeFinalTurnCueV1(settings.botPowers),
   });
   if (zenStageActionPlan) {
@@ -9004,6 +9140,91 @@ export async function processChatMessage(
       throwIfCancelledBeforeAssistantReply();
     }
   }
+  const requestedUserNotesForTurn =
+    botPowerHardResponseTurn ||
+    zenAutonomyTurn ||
+    zenAskQuestionPatienceTurn ||
+    zenLiveActionInterruptTurn
+      ? undefined
+      : parsedAssistant.userNotes;
+  let userNotesForTurn: UserNotesPayload | undefined;
+  let userNotesStatus: "blocked" | "completed" | "error" | "none" = "none";
+  if (requestedUserNotesForTurn) {
+    const gate = userNotesGateReason(mode, false);
+    if (gate) {
+      userNotesForTurn = userNotesBlockedReceipt(requestedUserNotesForTurn, gate);
+      userNotesStatus = "blocked";
+    } else {
+      pushBackendEvent(
+        "tool",
+        "Running userNotes",
+        `action=${requestedUserNotesForTurn.action}`
+      );
+      const executed = executeUserNotesRequest(
+        db,
+        userId,
+        userKey,
+        requestedUserNotesForTurn
+      );
+      userNotesForTurn = executed.receipt;
+      userNotesStatus =
+        executed.receipt.status === "error" ? "error" : "completed";
+      if (
+        (requestedUserNotesForTurn.action === "list" ||
+          requestedUserNotesForTurn.action === "get") &&
+        executed.notesForModel &&
+        executed.receipt.status !== "error"
+      ) {
+        try {
+          ({
+            assistantReplyRaw,
+            providerNameUsed,
+            modelUsed,
+            autoRecovery,
+            psychicThought: psychicThoughtForTurn,
+            psychicDebug: psychicDebugForTurn,
+          } = await generateChatResponse({
+            provider: primaryProvider,
+            promptMessages: [
+              ...promptMessages,
+              {
+                role: "assistant",
+                content:
+                  parsedAssistant.displayContent.trim() ||
+                  "I need the note contents before answering.",
+              },
+              {
+                role: "system",
+                content: formatUserNotesForModel(executed.notesForModel),
+              },
+              {
+                role: "user",
+                content:
+                  "Using the personal notes above, answer the user's latest message now. Do not request userNotes again for this same read.",
+              },
+            ],
+            botOverrides: primaryBotOverrides,
+            secondaryOllamaHost: settings.secondaryOllamaHost,
+            responseMode: isZenMode(mode) ? settings.responseMode : undefined,
+            autoFallbackChain: settings.autoFallbackChain,
+            resolveReasoningEffort: settings.resolveReasoningEffort,
+            providerFactory: settings.providerFactory,
+            openAiApiKey: settings.openAiApiKey,
+            anthropicApiKey: settings.anthropicApiKey,
+            experimentalAllModelEffortEnabled: settings.experimentalAllModelEffortEnabled,
+            psychicModeEnabled: psychicModeEnabledForTurn,
+            signal: settings.signal,
+            onPsychicProgress: settings.onPsychicProgress,
+          }));
+          parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
+        } catch (error) {
+          rollbackIfTurnFailedBeforeAssistantReply(error);
+          throw error;
+        }
+        throwIfCancelledBeforeAssistantReply();
+      }
+    }
+  }
   const shouldBackfillAskQuestion =
     progressiveSegmentCount === 0 &&
     !zenAutonomyTurn &&
@@ -9030,6 +9251,9 @@ export async function processChatMessage(
   );
   if (webSearchStatus === "blocked") {
 	    assistantDisplayRaw = webSearchUnavailableMessage;
+  }
+  if (userNotesStatus === "blocked" && userNotesForTurn?.error) {
+    assistantDisplayRaw = userNotesForTurn.error;
   }
   const starterSendGeneratedImageRequested =
     !botPowerHardResponseTurn && isStarterPrompt && Boolean(parsedAssistant.sendGeneratedImage?.prompt?.trim());
@@ -9292,9 +9516,12 @@ export async function processChatMessage(
               parsedSendGeneratedImage: { prompt: sendImgPromptPersistedRequested },
             }
           : {}),
-        ...(assistantAskQuestionForTurn
-          ? { parsedAskQuestion: assistantAskQuestionForTurn }
-          : {}),
+	        ...(assistantAskQuestionForTurn
+	          ? { parsedAskQuestion: assistantAskQuestionForTurn }
+	          : {}),
+	        ...(requestedUserNotesForTurn
+	          ? { parsedUserNotes: requestedUserNotesForTurn, userNotesStatus }
+	          : {}),
         imageSlot: persistedImageSlot,
         ...(persistedImageJobId ? { imageJobId: persistedImageJobId } : {}),
       });
@@ -9338,6 +9565,7 @@ export async function processChatMessage(
 	    zenStageAction,
 	    zenTurn: zenTurnMarker,
 	    webSearch: webSearchForTurn,
+	    userNotes: userNotesForTurn,
 	    autoRecovery,
 	    autoRoute: settings.autoRouteDecision,
 	    botPowerExactResponse: botPowerQuietIgnoredTurn

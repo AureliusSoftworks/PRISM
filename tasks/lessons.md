@@ -4,6 +4,11 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-08-04 · [UX]
+**Trigger**: Chat-only personal notes were wired only to the main Chat lane; the player tried `bug note: …` in floating Ask Prism and nothing saved.
+**Lesson**: “Talk to Prism” for meta tools means the floating Ask Prism companion (`/api/prism-companion`) as well as Chat. Clear shorthand (`note:`, `bug note:`) should save without relying on the model. Still block Private/incognito.
+**Applies to**: `prism-companion.ts`, `userNotes`, `/prism` command docs
+
 ### 2026-07-31 · [workflow]
 **Trigger**: `/update-bots marie antoinette` — she only lives on `library-dev-backup` (`branchLock: "dev"`), so the public-only promote loop skipped her.
 **Lesson**: `promote-library-design-to-marketplace.mjs` bare runs stay public-shelf only; explicit `--only` may include branch-locked backups. Marketplace bundles never ship account-bound ElevenLabs voice identities; preserve personal Library IDs locally and keep provider treatment separate from portable PRISM/base voice promotion.
