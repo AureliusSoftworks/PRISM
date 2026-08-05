@@ -1790,15 +1790,15 @@ describe("Coffee seat arrival CSS", () => {
   it("docks the Coffee pot directly above the composer", () => {
     assert.match(
       pageSource,
-      /const coffeePotVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"\) &&\s*!previewingSession &&\s*!coffeeReplayActive;/
+      /const coffeePotVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"\) &&\s*!previewingSession &&\s*!coffeeReplayActive &&\s*coffeeExperienceAllowsPot;/,
     );
     assert.match(
       pageSource,
-      /const coffeePotComposerDockVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"\) &&\s*!coffeeReplayActive;/
+      /const coffeePotComposerDockVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"\) &&\s*!coffeeReplayActive &&\s*coffeeExperienceAllowsPot;/,
     );
     assert.match(
       pageSource,
-      /topContent:\s*coffeePotComposerDockVisible\s*\|\|\s*coffeeShhVisible\s*\?\s*\(/
+      /topContent:\s*coffeePotComposerDockVisible\s*\|\|\s*coffeeShhVisible\s*\|\|\s*coffeeJoinSipControlVisible\s*\?\s*\(/,
     );
     assert.match(pageSource, /className=\{styles\.coffeePotComposerDock\}/);
     assert.match(pageSource, /const coffeePotAssetTheme: CoffeePotAssetTheme = resolvedTheme;/);

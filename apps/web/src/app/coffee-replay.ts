@@ -1,4 +1,4 @@
-import { extractStageDirections, tokenizeBotMentionSource } from "./botMention.ts";
+import { extractStageDirections, looksLikeSpokenProseMiswrappedAsAction, tokenizeBotMentionSource } from "./botMention.ts";
 import { normalizeCoffeeMessageDelivery } from "./coffee-voice-text.ts";
 import {
   coffeeCupSipMessageGapForDuration,
@@ -508,6 +508,8 @@ export function sanitizeCoffeeActionForBot(
   );
   if (!collapsed) return "";
   if (coffeeActionIsSip(collapsed)) return "";
+  // Dialogue that leaked into the action field belongs on the table line.
+  if (looksLikeSpokenProseMiswrappedAsAction(collapsed)) return "";
   if (!COFFEE_ACTION_FACIAL_HAIR_RE.test(collapsed)) return collapsed;
   if (!coffeeActionContextRejectsFacialHair(bot)) return collapsed;
 

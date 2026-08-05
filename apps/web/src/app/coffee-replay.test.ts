@@ -1164,6 +1164,13 @@ describe("coffee replay helpers", () => {
     assert.equal(sanitizeCoffeeActionForBot("sips coffee quietly"), "");
     assert.equal(sanitizeCoffeeActionForBot("raises the mug to his lips"), "");
     assert.equal(sanitizeCoffeeActionForBot("sets the cup down"), "sets the cup down");
+    assert.equal(
+      sanitizeCoffeeActionForBot(
+        "It lets us paint the world not just as it is, but as it should be",
+      ),
+      "",
+    );
+    assert.equal(sanitizeCoffeeActionForBot("Leans in a little"), "Leans in a little");
     assert.deepEqual(
       collectCoffeeReplayActionsForBot([message], "Nova").map((action) => action.action),
       ["nods"]

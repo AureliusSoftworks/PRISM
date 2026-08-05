@@ -244,6 +244,47 @@ function looksLikeStageDirectionAction(inner: string): boolean {
   );
 }
 
+/**
+ * Detects dialogue / spoken prose that models sometimes wrap in asterisks
+ * (or put in a stage-action field). Those belong on the table line, not in
+ * the seat action badge.
+ */
+export function looksLikeSpokenProseMiswrappedAsAction(inner: string): boolean {
+  const normalized = inner.replace(/\s+/g, " ").trim();
+  if (!normalized) return false;
+  if (/\?/u.test(normalized)) return true;
+  if (looksLikeStageDirectionAction(normalized)) return false;
+  const words = normalized.split(/\s+/).filter(Boolean);
+  const lower = normalized.toLowerCase();
+  // Conversational contractions are almost never physical stage cues.
+  if (
+    /\b(?:doesn't|don't|isn't|aren't|won't|can't|shouldn't|wouldn't|couldn't|let's|i'm|you're|we're|they're|it's)\b/iu.test(
+      lower,
+    )
+  ) {
+    return true;
+  }
+  // Sentence-shaped openers ("It lets us…", "I suppose…") that are too long
+  // to be a stage beat.
+  if (
+    words.length >= 6 &&
+    /^(?:it|i|we|you|they|he|she|this|that|there|what|why|how|when|where|who|exactly|sure|well|yes|no|maybe|perhaps|actually|honestly|surrealism)\b/iu.test(
+      lower,
+    )
+  ) {
+    return true;
+  }
+  // Long multi-clause prose without an action-verb opener.
+  if (
+    words.length >= 8 &&
+    (normalized.match(/,/g) ?? []).length >= 1 &&
+    !looksLikeStageDirectionAction(normalized)
+  ) {
+    return true;
+  }
+  return false;
+}
+
 function looksLikeInlineActionAtSentenceBoundary(before: string, after: string): boolean {
   const beforeTrimmed = before.trimEnd();
   const afterTrimmed = after.trimStart();
@@ -449,13 +490,14 @@ function parseStageDirectionsDetailed(
 
     if (isAsteriskToken) {
       if (
-        hasSpokenBefore &&
-        hasSpokenAfter &&
-        !looksLikeStageDirectionAction(trimmed) &&
-        !looksLikeInlineActionAtSentenceBoundary(before, after) &&
-        !isBotMentionAddressPrefix(before)
+        looksLikeSpokenProseMiswrappedAsAction(trimmed) ||
+        (hasSpokenBefore &&
+          hasSpokenAfter &&
+          !looksLikeStageDirectionAction(trimmed) &&
+          !looksLikeInlineActionAtSentenceBoundary(before, after) &&
+          !isBotMentionAddressPrefix(before))
       ) {
-        // Inline emphasis in ordinary prose.
+        // Spoken prose miswrapped as *action*, or inline emphasis in prose.
         spokenRaw += trimmed;
       } else {
         const revealAtDisplayLength = getBotMentionDisplayLength(

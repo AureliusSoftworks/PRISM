@@ -537,6 +537,17 @@ describe("extractStageDirections", () => {
     assert.deepEqual(double.actions, ["nods"]);
   });
 
+  it("keeps spoken prose miswrapped in asterisks on the table line", () => {
+    const out = extractStageDirections(
+      "*It lets us paint the world not just as it is, but as it should be*",
+    );
+    assert.equal(
+      out.mainText,
+      "It lets us paint the world not just as it is, but as it should be",
+    );
+    assert.deepEqual(out.actions, []);
+  });
+
   it("unwraps inline emphasis instead of deleting words from regular conversation", () => {
     const out = extractStageDirections("Ah, but a rock can't make a snack—it's the *thought* that counts.");
     assert.equal(out.mainText, "Ah, but a rock can't make a snack—it's the thought that counts.");

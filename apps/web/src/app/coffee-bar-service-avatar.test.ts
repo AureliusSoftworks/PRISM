@@ -49,7 +49,7 @@ describe("retired Coffee service", () => {
   it("gives every live off-camera player the pot without legacy ritual state", () => {
     assert.match(
       pageSource,
-      /const coffeePotComposerDockVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\|\s*coffeeSessionPhase === "live"\) &&\s*!coffeeReplayActive;/u,
+      /const coffeePotComposerDockVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\|\s*coffeeSessionPhase === "live"\) &&\s*!coffeeReplayActive &&\s*coffeeExperienceAllowsPot;/u,
     );
     assert.doesNotMatch(
       pageSource,
@@ -61,7 +61,7 @@ describe("retired Coffee service", () => {
     );
     assert.match(
       pageSource,
-      /const coffeePotVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"\) &&\s*!previewingSession &&\s*!coffeeReplayActive;/u,
+      /const coffeePotVisible =\s*conversationActive &&\s*\(coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live"\) &&\s*!previewingSession &&\s*!coffeeReplayActive &&\s*coffeeExperienceAllowsPot;/u,
     );
     assert.doesNotMatch(
       pageSource,
@@ -76,6 +76,8 @@ describe("retired Coffee service", () => {
     assert.match(coffeeTutorial, /You remain off camera during the live table/u);
     assert.match(coffeeTutorial, /Replay seats you as Default Prism/u);
     assert.match(coffeeTutorial, /Drag the pot/u);
+    assert.match(coffeeTutorial, /Join for Coffee/u);
+    assert.match(coffeeTutorial, /Serve Coffee/u);
     assert.match(coffeeTutorial, /faithful audio master/u);
     assert.doesNotMatch(coffeeTutorial, /Stop at the bar|Receive your drink/u);
     assert.doesNotMatch(coffeeTutorial, /Choose Video|video download/u);

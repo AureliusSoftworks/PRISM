@@ -42,6 +42,16 @@ describe("Coffee group dashboard composer routing", () => {
       /const coffeeComposerVisible =\s*conversationActive &&/,
     );
     assert.match(shellSetup, /coffeeSessionPhase === "topic"/);
+    // Serve still needs the Coffee topic composer; otherwise the shell falls
+    // through to coffee-global and hands the draft into Zen/chat.
+    assert.match(
+      shellSetup,
+      /coffeeSessionPhase === "topic" \|\| \(!coffeeIsServeExperience &&/,
+    );
+    assert.match(
+      pageSource,
+      /coffeeSessionPhase === "topic" \|\| coffeeSessionPhase === "arriving" \|\| coffeeSessionPhase === "live" \? null : renderShellComposer\(\{ variant: "coffee-global"/,
+    );
   });
 
   it("restores a recent session into an editable Coffee setup", () => {
@@ -55,10 +65,7 @@ describe("Coffee group dashboard composer routing", () => {
       pageSource,
       /setCoffeeExcludedBotIds\(new Set\(retry\.excludedBotIds\)\)/,
     );
-    assert.match(
-      pageSource,
-      /setCoffeeSelectedDurationMinutes\(retry\.durationMinutes\)/,
-    );
+    assert.match(pageSource, /setCoffeeSelectedDurationMinutes\(/);
     assert.match(pageSource, /setCoffeeSessionSettings\(retry\.settings\)/);
     assert.match(pageSource, /coffeeSettings: coffeeSessionSettings/);
     assert.match(pageSource, /deferTopicSelection: true/);

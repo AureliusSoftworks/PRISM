@@ -119,14 +119,22 @@ describe("Coffee player response UI wiring", () => {
       pageSource,
       /coffeeVoiceRevealFallbackDelayMs\(durationMs, voiced\)/,
     );
+    // Stall watchdog must re-arm while voice still owns the floor — never
+    // seal mid-monologue between English clause chunks.
     assert.match(
       pageSource,
-      /coffeeVoiceRevealStallWatchdogDelayMs\(\)/u,
+      /armVoiceRevealWatchdog\(\s*coffeeVoiceRevealFallbackDelayMs\(remainingMs, true\)/,
     );
     assert.match(
       pageSource,
-      /coffeeRevealTimerRef\.current = setTimeout\(\(\) => \{\s*coffeeRevealCompleteFnRef\.current\?\.\(\);/u,
+      /if \(coffeeActiveVoiceMessageIdRef\.current === message\.id\) \{\s*armVoiceRevealWatchdog\(\s*coffeeVoiceRevealStallWatchdogDelayMs\(\)/u,
     );
+    assert.match(pageSource, /const voiceStillOwningFloor =/u);
+    assert.match(
+      pageSource,
+      /else if \(voiceStillOwningFloor\) \{[\s\S]*?requestAnimationFrame\(step\)/,
+    );
+    assert.match(pageSource, /const liveDurationMs = Math\.max\(/u);
   });
 
   it("starts the speaking reveal only from real voice playback start", () => {
