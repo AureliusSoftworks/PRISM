@@ -68,4 +68,8 @@ test("left sidebar is treated as right-panel background", () => {
     /\.appLayout\[data-right-panel-open="true"\] > \.sidebar\.sidebarOpen/
   );
   assert.match(css, /z-index:\s*98;/);
+  assert.match(
+    css,
+    /\.appLayout\[data-right-panel-open="true"\]\s*\[data-shared-app-navbar="true"\]/
+  );
 });

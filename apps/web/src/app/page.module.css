@@ -37462,7 +37462,13 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 /* ── Panels (settings / bots / images) ── */
 .panelOverlay {
   position: fixed;
+  /* Leave the shared top navbar clear so LOCAL/ONLINE, model picker, and
+     panel switches stay usable. Blur/dim still covers the page body. */
   inset: 0;
+  top: var(
+    --app-shell-top-nav-height,
+    calc(60px + env(safe-area-inset-top, 0px))
+  );
   background: rgba(0, 0, 0, 0.22);
   backdrop-filter: blur(2px);
   z-index: 99;
@@ -37495,7 +37501,11 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .panel {
   --panel-width: min(479px, calc(max(100vw, 1280px) - 32px));
   position: fixed;
-  top: 0;
+  /* Sit under the shared navbar so its controls are never covered. */
+  top: var(
+    --app-shell-top-nav-height,
+    calc(60px + env(safe-area-inset-top, 0px))
+  );
   right: 0;
   bottom: 0;
   width: var(--panel-width);
@@ -39997,7 +40007,12 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   --image-tools-gap: 14px;
   --panel-width: min(479px, calc(max(100vw, 1280px) - 32px));
   position: fixed;
-  top: 20px;
+  top: calc(
+    var(
+        --app-shell-top-nav-height,
+        calc(60px + env(safe-area-inset-top, 0px))
+      ) + 20px
+  );
   right: calc(var(--panel-width) + var(--image-tools-gap));
   bottom: 20px;
   width: min(340px, calc(max(100vw, 1280px) - var(--panel-width) - 52px));
@@ -60922,6 +60937,15 @@ a.settingsCreditItem:focus-visible {
   z-index: 98;
 }
 
+/* Keep the shared top chrome above the dimmer (and Coffee's raised drawer)
+   so panel switches + routing controls stay clickable while a drawer is open. */
+.appLayout[data-right-panel-open="true"] [data-shared-app-navbar="true"],
+.appLayout[data-right-panel-open="true"] [data-app-shell-header="true"] {
+  position: relative;
+  z-index: 200;
+  pointer-events: auto;
+}
+
 /* Chat overflow (wrench) — visual sibling to ☰ on mobile (fixed top-right). */
 .chatGearGlyph {
   width: 15px;
@@ -62795,8 +62819,8 @@ a.settingsCreditItem:focus-visible {
       )
     );
     max-width: none;
-    padding: calc(env(safe-area-inset-top) + 16px)
-      max(12px, calc(env(safe-area-inset-right) + 12px))
+    /* Top edge already clears the shared navbar (incl. safe-area). */
+    padding: 16px max(12px, calc(env(safe-area-inset-right) + 12px))
       calc(env(safe-area-inset-bottom) + 22px) 12px;
     gap: 12px;
   }
@@ -64563,9 +64587,8 @@ a.settingsCreditItem:focus-visible {
   --coffee-stage-max-width: 1500px;
 }
 
-/* Coffee deliberately keeps its global toolbar above the backdrop while a
-   shared drawer is open. Keep the drawer itself one layer higher so its own
-   back / close header is never hidden behind that toolbar. */
+/* Coffee keeps its drawer above the shared backdrop. The drawer starts below
+   the measured top navbar, so chrome controls stay clickable while open. */
 .coffeeShell .panel {
   z-index: 181;
 }

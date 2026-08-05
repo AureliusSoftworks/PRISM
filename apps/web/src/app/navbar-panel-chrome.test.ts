@@ -1,0 +1,57 @@
+import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
+import { dirname, join } from "node:path";
+import { test } from "node:test";
+import { fileURLToPath } from "node:url";
+
+const appDir = dirname(fileURLToPath(import.meta.url));
+const pageSource = readFileSync(join(appDir, "page.tsx"), "utf8");
+const css = readFileSync(join(appDir, "page.module.css"), "utf8");
+
+test("right-panel inert pass exempts shared navbar chrome", () => {
+  assert.match(pageSource, /function collectRightPanelInertTargets\(/u);
+  assert.match(pageSource, /function rightPanelFocusableElements\(/u);
+  assert.match(
+    pageSource,
+    /\[data-shared-app-navbar="true"\], \[data-app-shell-header="true"\]/u,
+  );
+  assert.match(
+    pageSource,
+    /collectRightPanelInertTargets\(panelNode\)/u,
+  );
+  assert.match(
+    pageSource,
+    /rightPanelFocusableElements\(panelNode\)/u,
+  );
+  assert.match(pageSource, /isInsideRightPanelChrome\(activeElement\)/u);
+});
+
+test("right-panel overlay and drawer clear the shared top navbar", () => {
+  assert.match(
+    css,
+    /\.panelOverlay\s*\{[\s\S]*?top:\s*var\(\s*--app-shell-top-nav-height/u,
+  );
+  assert.match(
+    css,
+    /\.panel\s*\{[\s\S]*?top:\s*var\(\s*--app-shell-top-nav-height/u,
+  );
+  assert.match(
+    css,
+    /\.appLayout\[data-right-panel-open="true"\]\s*\[data-shared-app-navbar="true"\]/u,
+  );
+  assert.match(
+    css,
+    /\.appLayout\[data-right-panel-open="true"\][\s\S]*?z-index:\s*200;/u,
+  );
+});
+
+test("measured top-nav height is published for fixed panel layers", () => {
+  assert.match(
+    pageSource,
+    /document\.documentElement\.style\.setProperty\(\s*"--app-shell-top-nav-height"/u,
+  );
+  assert.match(
+    pageSource,
+    /document\.documentElement\.style\.removeProperty\(\s*"--app-shell-top-nav-height"/u,
+  );
+});

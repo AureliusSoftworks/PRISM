@@ -17557,6 +17557,70 @@ function panelFocusableElements(root: HTMLElement): HTMLElement[] {
   );
 }
 
+/** Shared top chrome that must stay usable while a right-hand drawer is open. */
+const RIGHT_PANEL_CHROME_SELECTOR =
+  '[data-shared-app-navbar="true"], [data-app-shell-header="true"]';
+
+function isRightPanelChromeElement(node: HTMLElement): boolean {
+  return (
+    node.dataset.sharedAppNavbar === "true" ||
+    node.dataset.appShellHeader === "true"
+  );
+}
+
+/**
+ * Mark background surfaces inert while a right panel is open, but keep the
+ * shared navbar interactive so LOCAL/ONLINE, model picker, and panel switches
+ * still work. `inert` cannot exempt a descendant, so shells that contain the
+ * navbar are never inerted wholesale — only their non-chrome children are.
+ */
+function collectRightPanelInertTargets(panelNode: HTMLElement): HTMLElement[] {
+  const parent = panelNode.parentElement;
+  if (!parent) return [];
+  const targets: HTMLElement[] = [];
+  for (const child of Array.from(parent.children)) {
+    if (!(child instanceof HTMLElement)) continue;
+    if (child === panelNode) continue;
+    if (child.dataset.prismPanelLayer === "true") continue;
+    if (isRightPanelChromeElement(child)) continue;
+
+    const chrome = child.querySelector<HTMLElement>(RIGHT_PANEL_CHROME_SELECTOR);
+    if (chrome) {
+      for (const grandchild of Array.from(child.children)) {
+        if (!(grandchild instanceof HTMLElement)) continue;
+        if (isRightPanelChromeElement(grandchild)) continue;
+        targets.push(grandchild);
+      }
+      continue;
+    }
+    targets.push(child);
+  }
+  return targets;
+}
+
+/** Focus cycle for an open right panel includes the shared top navbar. */
+function rightPanelFocusableElements(panelNode: HTMLElement): HTMLElement[] {
+  const chromeRoots = Array.from(
+    document.querySelectorAll<HTMLElement>(RIGHT_PANEL_CHROME_SELECTOR),
+  ).filter((node) => !panelNode.contains(node));
+  const seen = new Set<HTMLElement>();
+  const ordered: HTMLElement[] = [];
+  for (const root of [...chromeRoots, panelNode]) {
+    for (const element of panelFocusableElements(root)) {
+      if (seen.has(element)) continue;
+      seen.add(element);
+      ordered.push(element);
+    }
+  }
+  return ordered;
+}
+
+function isInsideRightPanelChrome(node: Node | null): boolean {
+  return node instanceof HTMLElement
+    ? node.closest(RIGHT_PANEL_CHROME_SELECTOR) !== null
+    : false;
+}
+
 interface PrismGroupDef {
   id: PrismGroupId;
   letter: string;
@@ -19687,9 +19751,6 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
         : String(err ?? "");
     if (looksLikeDisconnectedFetchFailure(err, path)) {
       const backendError = prismApiTransportHint(path, rawMsg || "network");
-      // #region agent log
-      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc245c'},body:JSON.stringify({sessionId:'fc245c',runId:'pre-fix',hypothesisId:'B',location:'page.tsx:api-fetch-catch',message:'client classified disconnected fetch as backend unavailable',data:{path,method:options?.method??'GET',rawMsg:rawMsg.slice(0,400),errName:err instanceof Error ? err.name : typeof err},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       if (isPrismBackendUnavailableError(backendError)) {
         dispatchBackendUnavailableEvent(backendError);
       }
@@ -19743,9 +19804,6 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
         path,
         status: res.status,
       });
-      // #region agent log
-      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc245c'},body:JSON.stringify({sessionId:'fc245c',runId:'pre-fix',hypothesisId:'A',location:'page.tsx:api-payload-503',message:'api() received backend_unavailable payload',data:{path,method:options?.method??'GET',status:res.status,error:payload?.error,detail:typeof (payload as {detail?:unknown}).detail==='string'?(payload as {detail:string}).detail.slice(0,400):null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
       dispatchBackendUnavailableEvent(backendError);
       throw apiErrorWithDiagnostic(backendError, path, options, res.status);
     }
@@ -50547,9 +50605,15 @@ function HomeContent(): React.JSX.Element {
       const header = chatHeaderRef.current;
       const shell = header?.parentElement;
       if (!header || !shell) return;
-      shell.style.setProperty(
+      const heightValue = appShellTopNavHeightCssValue(
+        header.getBoundingClientRect().height,
+      );
+      shell.style.setProperty("--app-shell-top-nav-height", heightValue);
+      // Right-panel overlay/drawer sit outside `.chatPane`, so publish the
+      // measured height on the documentElement for those fixed layers.
+      document.documentElement.style.setProperty(
         "--app-shell-top-nav-height",
-        appShellTopNavHeightCssValue(header.getBoundingClientRect().height),
+        heightValue,
       );
     };
     const scheduleMeasure = () => {
@@ -50607,6 +50671,9 @@ function HomeContent(): React.JSX.Element {
       observer?.disconnect();
       window.removeEventListener("resize", scheduleMeasure);
       shell?.style.removeProperty("--app-shell-top-nav-height");
+      document.documentElement.style.removeProperty(
+        "--app-shell-top-nav-height",
+      );
     };
   }, [chatHeaderToolsWrapped, sidebarOpen, view, viewportWidth]);
   useLayoutEffect(() => {
@@ -52466,24 +52533,18 @@ function HomeContent(): React.JSX.Element {
     const activeElement = document.activeElement;
     if (
       activeElement instanceof HTMLElement &&
-      !panelNode.contains(activeElement)
+      !panelNode.contains(activeElement) &&
+      !isInsideRightPanelChrome(activeElement)
     ) {
       panelFocusReturnRef.current = activeElement;
     }
-    const siblingStates = panelNode.parentElement
-      ? Array.from(panelNode.parentElement.children)
-          .filter(
-            (node): node is HTMLElement =>
-              node instanceof HTMLElement &&
-              node !== panelNode &&
-              node.dataset.prismPanelLayer !== "true",
-          )
-          .map((node) => ({
-            node,
-            ariaHidden: node.getAttribute("aria-hidden"),
-            inert: node.hasAttribute("inert"),
-          }))
-      : [];
+    const siblingStates = collectRightPanelInertTargets(panelNode).map(
+      (node) => ({
+        node,
+        ariaHidden: node.getAttribute("aria-hidden"),
+        inert: node.hasAttribute("inert"),
+      }),
+    );
     for (const { node } of siblingStates) {
       node.setAttribute("aria-hidden", "true");
       node.setAttribute("inert", "");
@@ -52492,7 +52553,8 @@ function HomeContent(): React.JSX.Element {
       const currentActiveElement = document.activeElement;
       if (
         currentActiveElement instanceof HTMLElement &&
-        panelNode.contains(currentActiveElement)
+        (panelNode.contains(currentActiveElement) ||
+          isInsideRightPanelChrome(currentActiveElement))
       ) {
         return;
       }
@@ -52516,7 +52578,7 @@ function HomeContent(): React.JSX.Element {
         return;
       }
       if (event.key !== "Tab") return;
-      const focusable = panelFocusableElements(panelNode);
+      const focusable = rightPanelFocusableElements(panelNode);
       if (focusable.length === 0) {
         event.preventDefault();
         panelNode.focus({ preventScroll: true });
@@ -52525,22 +52587,17 @@ function HomeContent(): React.JSX.Element {
       const first = focusable[0]!;
       const last = focusable[focusable.length - 1]!;
       const current = document.activeElement;
+      const currentInCycle =
+        current instanceof HTMLElement &&
+        (panelNode.contains(current) || isInsideRightPanelChrome(current));
       if (event.shiftKey) {
-        if (
-          current === first ||
-          !(current instanceof HTMLElement) ||
-          !panelNode.contains(current)
-        ) {
+        if (current === first || !currentInCycle) {
           event.preventDefault();
           last.focus({ preventScroll: true });
         }
         return;
       }
-      if (
-        current === last ||
-        !(current instanceof HTMLElement) ||
-        !panelNode.contains(current)
-      ) {
+      if (current === last || !currentInCycle) {
         event.preventDefault();
         first.focus({ preventScroll: true });
       }
@@ -136017,7 +136074,6 @@ function HomeContent(): React.JSX.Element {
         {debateLiveSessionActive || debateCompanionContext === null ? (
           <PrismCompanionPresenceBoundary reason="debate-live-session" />
         ) : null}
-        {renderGlobalPrismCompanion()}
         {renderSharedPanels()}
         {renderModeTutorialOverlay()}
         {renderViewSwitchOverlay()}

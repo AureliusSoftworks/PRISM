@@ -26,13 +26,20 @@ describe("Chat shell header layout", () => {
   it("publishes the live navigation height from the shared header observer", () => {
     assert.match(
       pageSource,
-      /appShellTopNavHeightCssValue\(header\.getBoundingClientRect\(\)\.height\)/,
+      /appShellTopNavHeightCssValue\(\s*header\.getBoundingClientRect\(\)\.height,?\s*\)/,
     );
     assert.match(
       pageSource,
       /shell\.style\.setProperty\(\s*"--app-shell-top-nav-height"/,
     );
-    assert.equal(pageSource.match(/data-app-shell-header="true"/g)?.length, 2);
+    assert.match(
+      pageSource,
+      /document\.documentElement\.style\.setProperty\(\s*"--app-shell-top-nav-height"/,
+    );
+    assert.equal(
+      pageSource.match(/\sdata-app-shell-header="true"/g)?.length,
+      2,
+    );
   });
 
   it("moves Home navigation onto the PRISM wordmarks", () => {
