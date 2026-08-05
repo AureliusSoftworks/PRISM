@@ -393,6 +393,15 @@ describe("Debate live presentation", () => {
       0,
     );
     assert.equal(
+      debateAdoptProceedingsCursor(null, {
+        ...resumedNext,
+        status: "live",
+        pausedPresentationEventId: null,
+        stepKey: "challenge_for_prompt",
+      }),
+      null,
+    );
+    assert.equal(
       debateAdoptProceedingsCursor(
         { id: "debate-resume", events: events.slice(0, 1) },
         {

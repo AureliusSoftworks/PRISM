@@ -1801,7 +1801,7 @@
   z-index: 1;
   display: block;
   width: 100%;
-  height: clamp(112px, 9.4vw, 150px);
+  height: clamp(118px, 10vw, 160px);
   box-sizing: border-box;
   flex: 0 0 auto;
   overflow: hidden;
@@ -2043,7 +2043,7 @@
 .debateAudienceLayer {
   position: absolute;
   right: 0;
-  bottom: -2%;
+  bottom: 6%;
   left: 0;
   z-index: 2;
   display: flex;
@@ -2059,7 +2059,7 @@
 }
 
 .debateAudienceLayer[data-depth-row="rear"] {
-  bottom: 16%;
+  bottom: 22%;
   z-index: 1;
   padding-inline: clamp(34px, 6vw, 126px);
   opacity: 0.5;
@@ -2117,13 +2117,13 @@
   --debate-audience-facing-scale: 1;
   --debate-audience-shade-opacity: 0.3;
   position: relative;
-  width: clamp(50px, 6.2vw, 92px);
+  width: clamp(56px, 6.9vw, 104px);
   min-width: 0;
   aspect-ratio: 0.9;
   overflow: hidden;
   border-radius: 46% 46% 12% 12%;
   opacity: 0.72;
-  transform: translateY(14%) scale(var(--debate-audience-depth));
+  transform: translateY(4%) scale(var(--debate-audience-depth));
   transform-origin: 50% 100%;
   contain: layout paint style;
   transition:
@@ -2134,7 +2134,7 @@
 .debateAudienceLayer[data-depth-row="rear"] .debateAudienceBotPortrait {
   --debate-audience-depth: 0.9;
   --debate-audience-shade-opacity: 0.38;
-  width: clamp(43px, 5.25vw, 78px);
+  width: clamp(48px, 5.85vw, 88px);
   opacity: 0.64;
 }
 
@@ -2319,15 +2319,15 @@
 
 @keyframes debate-audience-live-reaction {
   0% {
-    transform: translateY(14%) scale(var(--debate-audience-depth));
+    transform: translateY(4%) scale(var(--debate-audience-depth));
   }
 
   48% {
-    transform: translateY(7%) scale(var(--debate-audience-depth));
+    transform: translateY(-2%) scale(var(--debate-audience-depth));
   }
 
   100% {
-    transform: translateY(10%) scale(var(--debate-audience-depth));
+    transform: translateY(1%) scale(var(--debate-audience-depth));
   }
 }
 
@@ -11216,53 +11216,240 @@
   color: color-mix(in srgb, var(--debate-studio-accent) 55%, var(--debate-studio-muted));
 }
 
-.dashboard .archivePanel .archiveGroup[data-archive-group="completed"] .sessionOpen strong {
-  color: color-mix(in srgb, var(--debate-studio-ink) 82%, var(--debate-studio-muted));
+.dashboard .archivePanel .archiveGroup[data-archive-group="completed"] .archiveChipTitle {
+  color: color-mix(in srgb, #f8f8f8 86%, #a8a8b8);
 }
 
 .dashboard .archivePanel .sessionList {
-  gap: 0;
+  gap: 12px;
 }
 
-.dashboard .archivePanel .sessionList li {
+.dashboard .archivePanel .sessionList li,
+.dashboard .archivePanel .archiveChipRow {
   display: grid;
-  grid-template-columns: 36px minmax(0, 1fr) auto;
-  gap: 8px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: stretch;
   border: 0;
-  border-bottom: 1px solid var(--debate-studio-line);
+  border-bottom: 0;
   border-radius: 0;
-  padding: 8px 4px;
+  padding: 0;
   color: var(--debate-studio-ink);
   background: transparent;
 }
 
 .archiveIndex {
-  align-self: center;
-  color: var(--debate-studio-accent);
-  font-size: 9px;
+  color: color-mix(in srgb, #ffffff 72%, var(--debate-studio-accent));
+  font-size: 10px;
+  font-variant-numeric: tabular-nums;
+  letter-spacing: 0.08em;
+}
+
+.archiveChip {
+  --debate-archive-gradient: radial-gradient(
+    circle at 30% 30%,
+    rgba(123, 92, 255, 0.45),
+    transparent 58%
+  );
+  position: relative;
+  overflow: hidden;
+  display: grid;
+  gap: 7px;
+  width: 100%;
+  min-width: 0;
+  min-height: 108px;
+  box-sizing: border-box;
+  padding: 14px 16px;
+  text-align: left;
+  border-radius: 14px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  color: #f8f8f8;
+  background:
+    linear-gradient(135deg, rgba(0, 0, 0, 0.56), rgba(0, 0, 0, 0.78)),
+    var(--debate-archive-gradient);
+  cursor: pointer;
+}
+
+.archiveChip::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: var(--debate-archive-gradient);
+  opacity: 0.24;
+  pointer-events: none;
+}
+
+.archiveChip > * {
+  position: relative;
+  z-index: 1;
+}
+
+.archiveChip:hover:not(:disabled),
+.archiveChip:focus-visible:not(:disabled) {
+  border-color: rgba(255, 255, 255, 0.24);
+  outline: none;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.28);
+}
+
+.archiveChip:disabled {
+  opacity: 0.62;
+  cursor: not-allowed;
+}
+
+.archiveChipTop {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.archiveChipDots {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.archiveChipDot {
+  width: 9px;
+  height: 9px;
+  border-radius: 999px;
+  background: var(--debate-archive-dot, rgba(255, 255, 255, 0.55));
+  box-shadow: 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.archiveChipTitle {
+  margin: 0;
+  color: #ffffff;
+  font-size: 15px;
+  font-weight: 620;
+  letter-spacing: 0.01em;
+  line-height: 1.25;
+}
+
+.archiveChipMotion {
+  color: rgba(248, 248, 248, 0.72);
+  font-size: 12px;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.archiveChipMeta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 2px;
+}
+
+.archiveChipTag {
+  display: inline-flex;
+  align-items: center;
+  max-width: 100%;
+  padding: 3px 8px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(255, 255, 255, 0.08);
+  color: rgba(248, 248, 248, 0.88);
+  font-size: 10px;
+  font-weight: 560;
+  letter-spacing: 0.02em;
+  line-height: 1.2;
+  white-space: nowrap;
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.archiveChipRouting {
+  display: inline-flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 8px;
+  margin-top: 2px;
+}
+
+.archiveChipModel {
+  color: rgba(248, 248, 248, 0.9);
+  font-size: 11px;
+  font-weight: 600;
   font-variant-numeric: tabular-nums;
 }
 
-.dashboard .archivePanel .sessionOpen {
-  padding: 8px;
+.archiveChipEffort {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 2px 7px 2px 5px;
+  border-radius: 999px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  background: rgba(0, 0, 0, 0.28);
+  color: rgba(248, 248, 248, 0.86);
+  font-size: 10px;
+  font-weight: 560;
 }
 
-.dashboard .archivePanel .sessionOpen span {
-  color: var(--debate-studio-muted);
+.archiveEffortIcon {
+  --debate-archive-effort-icon: none;
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  background: rgba(248, 248, 248, 0.82);
+  -webkit-mask: var(--debate-archive-effort-icon) center / contain no-repeat;
+  mask: var(--debate-archive-effort-icon) center / contain no-repeat;
+}
+
+.archiveEffortIcon[data-effort-level="none"],
+.archiveEffortIcon[data-effort-level="minimal"] {
+  background: #c5ccd4;
+}
+
+.archiveEffortIcon[data-effort-level="low"] {
+  background: #9fd0ff;
+}
+
+.archiveEffortIcon[data-effort-level="medium"] {
+  background: #b7a6ff;
+}
+
+.archiveEffortIcon[data-effort-level="high"],
+.archiveEffortIcon[data-effort-level="xhigh"] {
+  background: #ff9fbf;
+}
+
+.archiveEffortAutoIcon {
+  display: block;
+  width: 14px;
+  height: 14px;
+  flex: 0 0 auto;
+  color: rgba(248, 248, 248, 0.78);
+}
+
+.dashboard .archivePanel .archiveSynopsis {
+  color: rgba(248, 248, 248, 0.64);
+  font-size: 11px;
+  line-height: 1.4;
+  font-style: normal;
 }
 
 .dashboard .archivePanel .archiveActions {
   display: flex;
-  align-items: center;
-  gap: 4px;
+  flex-direction: column;
+  align-items: stretch;
+  justify-content: center;
+  gap: 6px;
+  padding-block: 4px;
 }
 
 .dashboard .archivePanel .archiveReuseButton,
 .dashboard .archivePanel .deleteButton {
-  align-self: center;
+  align-self: stretch;
   border: 0;
-  border-radius: 6px;
+  border-radius: 8px;
   background: transparent;
+  padding: 8px 10px;
+  white-space: nowrap;
 }
 
 .dashboard .archivePanel .archiveReuseButton {
@@ -11279,6 +11466,14 @@
 
 .dashboard .archivePanel .deleteButton:hover {
   background: color-mix(in srgb, #d89aad 9%, transparent);
+}
+
+.dashboard .archivePanel .sessionOpen {
+  padding: 8px;
+}
+
+.dashboard .archivePanel .sessionOpen span {
+  color: var(--debate-studio-muted);
 }
 
 .alignmentModalBackdrop {
@@ -11303,6 +11498,7 @@
   flex-direction: column;
   height: 100%;
   min-height: 0;
+  overflow: hidden;
   color: #ece8f2;
   background:
     radial-gradient(
@@ -11834,6 +12030,7 @@
   gap: 0;
   margin: 0;
   padding: 0;
+  overflow: hidden;
 }
 
 .stageColumn {
@@ -11847,6 +12044,8 @@
 }
 
 .forum {
+  /* Width owns the cinematic 2:1 frame. Do not use flex-basis 0 — that lets
+     height collapse first and then shrinks width to keep the ratio (tiny stage). */
   flex: 0 0 auto;
   width: 100%;
   min-height: 0;
@@ -12409,7 +12608,8 @@
 
 .stageSupport {
   display: grid;
-  flex: 1 1 auto;
+  /* Absorb leftover height under the cinematic stage; shrink before the stage. */
+  flex: 1 1 0;
   min-height: 140px;
   grid-template-columns: minmax(0, 1.55fr) minmax(226px, 0.55fr);
   align-items: stretch;
@@ -12597,8 +12797,11 @@
 .debateRail {
   position: relative;
   top: auto;
-  display: block;
-  min-height: 100%;
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  height: 100%;
   overflow: hidden;
   background: color-mix(in srgb, #100d15 94%, transparent);
 }
@@ -12616,6 +12819,7 @@
 
 .proceedingControls {
   display: grid;
+  flex: 0 0 auto;
   gap: 8px;
   border-bottom: 1px solid
     color-mix(in srgb, var(--debate-moderator-color) 22%, transparent);
@@ -12740,15 +12944,20 @@
 }
 
 .debateRail[data-player-window-active="true"] {
-  display: block;
-  height: auto;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
   max-height: none;
+  min-height: 0;
 }
 
 .transcript,
 .debateRail[data-player-window-active="true"] .transcript {
-  min-height: 560px;
-  height: calc(100dvh - 214px);
+  /* Fill the rail under proceeding controls — never re-measure from 100dvh
+     (navbar + live header are already reserved by the shell grid). */
+  flex: 1 1 auto;
+  min-height: 0;
+  height: auto;
   max-height: none;
   border: 0;
   border-radius: 0;
@@ -12798,6 +13007,8 @@
 }
 
 .transcriptFeed {
+  flex: 1 1 auto;
+  min-height: 0;
   padding-inline: 14px 10px;
 }
 
@@ -12924,7 +13135,7 @@
 
 .debateRail[data-completed="true"] {
   display: grid;
-  height: calc(100dvh - 124px);
+  height: 100%;
   min-height: 0;
   grid-template-rows: minmax(220px, 46%) minmax(0, 1fr);
 }

@@ -75,6 +75,7 @@ import {
   normalizeDebateSetupPresetId,
   normalizeAutoRouteDecisionV1,
   normalizeAutoFallbackModelRef,
+  normalizeModelReasoningEffortPreference,
   resolveDebateForumRoundPlan,
   normalizeBotAudioVoiceProfileV1,
   parseStoredBotPrompt,
@@ -137,6 +138,7 @@ import {
   type DebateTurnaboutStatementV1,
   type DebateTurnTimingV1,
   type DebateVoicePerformanceCue,
+  type ModelReasoningEffortPreference,
   type DebateVerdictRequest,
   type DebateDebriefChatMessageV1,
   type DebateDebriefEligibleBotV1,
@@ -802,6 +804,38 @@ function selectedLane(runtime: DebateAiRuntime): DebateGenerationLane {
       ? runtime.online
       : runtime.local)
   );
+}
+
+function debateRuntimeReasoningEffort(
+  runtime: DebateAiRuntime,
+): ModelReasoningEffortPreference | null {
+  return (
+    normalizeModelReasoningEffortPreference(
+      runtime.autoRoute?.reasoningEffort,
+    ) ??
+    normalizeModelReasoningEffortPreference(
+      selectedLane(runtime).reasoningEffort,
+    )
+  );
+}
+
+function debateSessionListCastColors(parsed: {
+  moderator?: { color?: unknown };
+  forAdvocate?: { color?: unknown };
+  againstAdvocate?: { color?: unknown };
+}): string[] {
+  const colors: string[] = [];
+  for (const raw of [
+    parsed.moderator?.color,
+    parsed.forAdvocate?.color,
+    parsed.againstAdvocate?.color,
+  ]) {
+    if (typeof raw !== "string") continue;
+    const color = raw.trim();
+    if (!color || colors.includes(color)) continue;
+    colors.push(color);
+  }
+  return colors;
 }
 
 interface DebateJsonGeneration {
@@ -2167,6 +2201,19 @@ function parseSessionRow(
           )!,
         }
       : {}),
+    ...(normalizeModelReasoningEffortPreference(parsed.lastReasoningEffort)
+      ? {
+          lastReasoningEffort: normalizeModelReasoningEffortPreference(
+            parsed.lastReasoningEffort,
+          ),
+        }
+      : normalizeAutoRouteDecisionV1(parsed.latestAutoRoute)?.reasoningEffort
+        ? {
+            lastReasoningEffort: normalizeAutoRouteDecisionV1(
+              parsed.latestAutoRoute,
+            )!.reasoningEffort,
+          }
+        : {}),
     responseMode:
       parsed.responseMode ??
       ((parsed.provider ?? parsed.moderator.provider) === "local"
@@ -2430,6 +2477,11 @@ export function listDebateSessions(
     let synopsisText: string | null = null;
     let title = "";
     let awaitingDeferredStart = false;
+    let provider: DebateSessionListItemV1["provider"];
+    let model: string | undefined;
+    let modelSelectionKind: DebateSessionListItemV1["modelSelectionKind"];
+    let reasoningEffort: ModelReasoningEffortPreference | null = null;
+    let castColors: string[] = [];
     try {
       const parsed = JSON.parse(row.session_json) as {
         format?: unknown;
@@ -2443,6 +2495,14 @@ export function listDebateSessions(
         stepKey?: unknown;
         events?: unknown;
         pausedPresentationEventId?: unknown;
+        provider?: unknown;
+        model?: unknown;
+        modelSelectionKind?: unknown;
+        latestAutoRoute?: unknown;
+        lastReasoningEffort?: unknown;
+        moderator?: { color?: unknown };
+        forAdvocate?: { color?: unknown };
+        againstAdvocate?: { color?: unknown };
       };
       if (isDebateFormatId(parsed.format)) format = parsed.format;
       formality = normalizeDebateFormalityId(parsed.formality);
@@ -2487,6 +2547,36 @@ export function listDebateSessions(
               ? "turnabout_intro"
               : "intro",
       });
+      if (
+        parsed.provider === "local" ||
+        parsed.provider === "openai" ||
+        parsed.provider === "anthropic"
+      ) {
+        provider = parsed.provider;
+      }
+      if (typeof parsed.model === "string" && parsed.model.trim()) {
+        model = parsed.model.trim();
+      }
+      if (parsed.modelSelectionKind === "auto" || parsed.modelSelectionKind === "fixed") {
+        modelSelectionKind = parsed.modelSelectionKind;
+      }
+      const autoRoute = normalizeAutoRouteDecisionV1(parsed.latestAutoRoute);
+      reasoningEffort =
+        normalizeModelReasoningEffortPreference(autoRoute?.reasoningEffort) ??
+        normalizeModelReasoningEffortPreference(parsed.lastReasoningEffort);
+      if (autoRoute?.model && !model) {
+        model = autoRoute.model;
+      }
+      if (
+        autoRoute &&
+        (autoRoute.provider === "local" ||
+          autoRoute.provider === "openai" ||
+          autoRoute.provider === "anthropic") &&
+        !provider
+      ) {
+        provider = autoRoute.provider;
+      }
+      castColors = debateSessionListCastColors(parsed);
     } catch {
       format = "forum";
     }
@@ -2521,6 +2611,11 @@ export function listDebateSessions(
       activeDurationMs: activeDurationMs > 0 ? activeDurationMs : null,
       synopsisText,
       awaitingDeferredStart,
+      ...(provider ? { provider } : {}),
+      ...(model ? { model } : {}),
+      ...(modelSelectionKind ? { modelSelectionKind } : {}),
+      reasoningEffort,
+      castColors,
     };
   });
 }
@@ -2777,6 +2872,9 @@ export function createDebateSession(
           routingPolicyVersion: runtime.autoRoute.v,
           latestAutoRoute: runtime.autoRoute,
         }
+      : {}),
+    ...(debateRuntimeReasoningEffort(runtime)
+      ? { lastReasoningEffort: debateRuntimeReasoningEffort(runtime) }
       : {}),
     responseMode,
     generationChain,
@@ -9210,6 +9308,9 @@ export async function prepareDebateAdvance(
     status: "live" as const,
     error: null,
     ...(runtime.autoRoute ? { latestAutoRoute: runtime.autoRoute } : {}),
+    ...(debateRuntimeReasoningEffort(runtime)
+      ? { lastReasoningEffort: debateRuntimeReasoningEffort(runtime) }
+      : {}),
   };
   const stepSpan = startDebatePerfSpan("advance.step");
   const transitioned = isJudgeAftermathStep(session.stepKey)
@@ -9318,6 +9419,9 @@ export async function advanceDebateSession(
   let session = {
     ...checked.session,
     ...(runtime.autoRoute ? { latestAutoRoute: runtime.autoRoute } : {}),
+    ...(debateRuntimeReasoningEffort(runtime)
+      ? { lastReasoningEffort: debateRuntimeReasoningEffort(runtime) }
+      : {}),
   };
   if (session.status === "completed" || session.status === "cancelled") {
     throw new HttpError(409, "This Debate is already finished.");

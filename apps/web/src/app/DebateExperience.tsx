@@ -88,11 +88,21 @@ import {
   type BotPresenceBeatV1,
   type ResponseMode,
   type LiveBakeArtifactV1,
+  type ModelReasoningEffortPreference,
+  type ReasoningEffort,
 } from "@localai/shared";
 import {
   liveBakeStatusCopy,
   liveBakeSurfaceTitle,
 } from "./liveBakeLoading";
+import {
+  LIVE_BAKE_POLL_INTERVAL_MS,
+  liveBakeMayStartWatch,
+  liveBakeProgressRatio,
+  liveBakeShouldResumeOnOpen,
+} from "./liveBakeClient";
+import { buildDebateArchiveChipVisualStyle } from "./debateArchiveChipGradient";
+import { MODEL_EFFORT_ICON_PATHS } from "./modelEffortControl";
 import {
   PrismRefractTarget,
   type PrismRefractMagicTarget,
@@ -1818,6 +1828,91 @@ function sessionStatusLabel(session: DebateSessionListItemV1): string {
   return `${session.phase.charAt(0).toUpperCase()}${session.phase.slice(1)}`;
 }
 
+const DEBATE_ARCHIVE_EFFORT_LABELS: Record<
+  ModelReasoningEffortPreference | "auto",
+  string
+> = {
+  auto: "Auto",
+  none: "None",
+  minimal: "Minimal",
+  low: "Low",
+  medium: "Medium",
+  high: "High",
+  xhigh: "XHigh",
+};
+
+function DebateArchiveEffortIcon({
+  level,
+}: {
+  level: ReasoningEffort;
+}): React.JSX.Element {
+  if (level === "auto") {
+    return (
+      <svg
+        className={styles.archiveEffortAutoIcon}
+        width="16"
+        height="16"
+        viewBox="0 0 18 18"
+        fill="none"
+        stroke="currentColor"
+        strokeWidth="1.7"
+        strokeLinejoin="round"
+        aria-hidden="true"
+      >
+        <path d="M9 2.75 15.25 14H2.75L9 2.75Z" />
+      </svg>
+    );
+  }
+  return (
+    <span
+      className={styles.archiveEffortIcon}
+      data-effort-level={level}
+      style={
+        {
+          "--debate-archive-effort-icon": `url("${MODEL_EFFORT_ICON_PATHS[level]}")`,
+        } as CSSProperties
+      }
+      aria-hidden="true"
+    />
+  );
+}
+
+function debateArchiveModelLabel(session: DebateSessionListItemV1): string {
+  if (session.modelSelectionKind === "auto") {
+    return session.model?.trim() ? `Auto · ${session.model.trim()}` : "Auto";
+  }
+  return session.model?.trim() || "Model unset";
+}
+
+function debateArchiveEffortLevel(
+  session: DebateSessionListItemV1,
+): ReasoningEffort | null {
+  if (session.reasoningEffort) return session.reasoningEffort;
+  if (session.modelSelectionKind === "auto") return "auto";
+  return null;
+}
+
+function debateArchiveMetaChips(
+  session: DebateSessionListItemV1,
+): string[] {
+  const chips = [
+    session.format === "turnabout" ? "Turnabout" : "Forum",
+    debateProductionName(session.format, session.formality),
+    debateFormalityDescriptor(session.formality).title,
+    session.moderatorTitle,
+    sessionStatusLabel(session),
+    session.playerRole === "spectator"
+      ? "Spectator"
+      : session.playerRole === "judge"
+        ? "Judge"
+        : "Participant",
+  ];
+  if (session.activeDurationMs !== null) {
+    chips.push(debateActiveDurationLabel(session.activeDurationMs));
+  }
+  return chips;
+}
+
 function debateSessionNeedsReturnPause(session: DebateSessionV1): boolean {
   return session.status === "live" || session.status === "waiting_for_player";
 }
@@ -2385,9 +2480,6 @@ function DebateErrorToast(props: { message: string }): React.JSX.Element {
       role="alert"
       data-copy-state={copyState}
       onClick={() => {
-        // #region agent log
-        fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc245c'},body:JSON.stringify({sessionId:'fc245c',runId:'post-fix',hypothesisId:'D',location:'DebateExperience.tsx:DebateErrorToast',message:'debate error toast copy clicked',data:{message:props.message.slice(0,500),messageLength:props.message.length},timestamp:Date.now()})}).catch(()=>{});
-        // #endregion
         void writeDebateClipboardText(props.message)
           .then(() => setCopyState("copied"))
           .catch(() => setCopyState("failed"));
@@ -3058,6 +3150,13 @@ export function DebateExperience(
   const [spectatorBake, setSpectatorBake] = useState<LiveBakeArtifactV1 | null>(
     null,
   );
+  const [spectatorBakeStartedAt, setSpectatorBakeStartedAt] = useState<
+    string | null
+  >(null);
+  const [spectatorBakeLiveFallback, setSpectatorBakeLiveFallback] =
+    useState(false);
+  const spectatorBakeAbortRef = useRef<AbortController | null>(null);
+  const spectatorBakeSessionIdRef = useRef<string | null>(null);
   const [observerPerspective, setObserverPerspective] = useState<
     "live" | "replay"
   >("live");
@@ -3502,6 +3601,10 @@ export function DebateExperience(
     detail: string;
   } | null>(null);
   const inventWarmupAbortRef = useRef<AbortController | null>(null);
+  const inventRequestAbortRef = useRef<AbortController | null>(null);
+  const [inventLoaderStartedAt, setInventLoaderStartedAt] = useState<
+    string | null
+  >(null);
   const dismissRefractionNotice = useCallback(() => {
     setRefractionNotice(null);
   }, []);
@@ -4205,10 +4308,12 @@ export function DebateExperience(
     stageAlignmentSoundCheck?.status,
   ]);
 
+  // Keep the routing pickers locked for the whole sit — including recess/pause
+  // and progressive Spectator bake — so a mid-session manual swap cannot
+  // scramble an in-progress bakery or frozen floor. Auto still re-routes
+  // model/effort per generation when the picker stays on Auto.
   const liveSessionActive =
-    view === "live" &&
-    activeSession !== null &&
-    activeSession.status !== "paused";
+    view === "baking" || (view === "live" && activeSession !== null);
   useEffect(() => {
     onLiveSessionActiveChange?.(liveSessionActive);
   }, [liveSessionActive, onLiveSessionActiveChange]);
@@ -5536,16 +5641,23 @@ export function DebateExperience(
         }
         setInventWarmup(null);
         setMotionOptionsBusy(true);
+        setInventLoaderStartedAt(new Date().toISOString());
+        inventRequestAbortRef.current?.abort();
+        const requestController = new AbortController();
+        inventRequestAbortRef.current = requestController;
         const result = await request<{ slates: DebateMotionSlateV1[] }>(
           "/api/debates/synthesize",
-          requestBody({
-            topic: resolvedTopic,
-            formality,
-            preferredProvider: preferred,
-            modelOverride: props.modelOverride?.model,
-            responseMode: props.responseMode,
-            direction,
-          }),
+          {
+            ...requestBody({
+              topic: resolvedTopic,
+              formality,
+              preferredProvider: preferred,
+              modelOverride: props.modelOverride?.model,
+              responseMode: props.responseMode,
+              direction,
+            }),
+            signal: requestController.signal,
+          },
         );
         setSlates(result.slates);
         setMotion(result.slates[0] ?? EMPTY_SLATE);
@@ -5575,8 +5687,10 @@ export function DebateExperience(
         if (inventWarmupAbortRef.current === warmupController) {
           inventWarmupAbortRef.current = null;
         }
+        inventRequestAbortRef.current = null;
         setInventWarmup(null);
         setMotionOptionsBusy(false);
+        setInventLoaderStartedAt(null);
         setBusy(false);
       }
     },
@@ -5666,23 +5780,30 @@ export function DebateExperience(
         setInventWarmup(null);
         startNewDebate();
         setNewDuelGenerateBusy(true);
+        setInventLoaderStartedAt(new Date().toISOString());
+        inventRequestAbortRef.current?.abort();
+        const requestController = new AbortController();
+        inventRequestAbortRef.current = requestController;
         const result = await props.request<{
           suggestion: DebateSetupSuggestionV1;
           provider?: string;
           model?: string | null;
         }>(
           "/api/debates/setup-suggestion",
-          requestBody({
-            direction,
-            roster: props.bots.map((bot) => ({
-              id: bot.id,
-              name: bot.name,
-              personaSnippet: (bot.systemPrompt ?? "").slice(0, 280),
-            })),
-            preferredProvider,
-            modelOverride: props.modelOverride?.model,
-            responseMode: props.responseMode,
-          }),
+          {
+            ...requestBody({
+              direction,
+              roster: props.bots.map((bot) => ({
+                id: bot.id,
+                name: bot.name,
+                personaSnippet: (bot.systemPrompt ?? "").slice(0, 280),
+              })),
+              preferredProvider,
+              modelOverride: props.modelOverride?.model,
+              responseMode: props.responseMode,
+            }),
+            signal: requestController.signal,
+          },
         );
         const applied = applyDebateSetupSuggestion(result.suggestion);
         setTopic(applied.topic);
@@ -5789,8 +5910,10 @@ export function DebateExperience(
         if (inventWarmupAbortRef.current === warmupController) {
           inventWarmupAbortRef.current = null;
         }
+        inventRequestAbortRef.current = null;
         setBusy(false);
         setNewDuelGenerateBusy(false);
+        setInventLoaderStartedAt(null);
         setInventWarmup((current) =>
           current?.phase === "failed" ? current : null,
         );
@@ -7910,6 +8033,82 @@ export function DebateExperience(
     ],
   );
 
+  const runSpectatorProgressiveBake = async (
+    sessionId: string,
+  ): Promise<DebateSessionV1 | null> => {
+    spectatorBakeAbortRef.current?.abort();
+    const controller = new AbortController();
+    spectatorBakeAbortRef.current = controller;
+    spectatorBakeSessionIdRef.current = sessionId;
+    activeSessionIdRef.current = sessionId;
+    const started = await props.request<{
+      session: DebateSessionV1;
+      liveBake: LiveBakeArtifactV1;
+      baking?: boolean;
+    }>(`/api/debates/${encodeURIComponent(sessionId)}/bake`, {
+      ...requestBody({}),
+      signal: controller.signal,
+    });
+    if (!mountedRef.current) return null;
+    setSpectatorBake(started.liveBake);
+    let session = started.session;
+    let artifact = started.liveBake;
+    while (
+      mountedRef.current &&
+      !controller.signal.aborted &&
+      !liveBakeMayStartWatch(artifact, 0) &&
+      artifact.status !== "ready" &&
+      artifact.status !== "failed"
+    ) {
+      await new Promise((resolve) =>
+        window.setTimeout(resolve, LIVE_BAKE_POLL_INTERVAL_MS),
+      );
+      if (!mountedRef.current || controller.signal.aborted) break;
+      const polled = await props.request<{ session: DebateSessionV1 }>(
+        `/api/debates/${encodeURIComponent(sessionId)}`,
+        { method: "GET", signal: controller.signal },
+      );
+      session = polled.session;
+      artifact = polled.session.liveBake ?? artifact;
+      setSpectatorBake(artifact);
+      if (artifact.status === "cancelled") {
+        throw new DOMException("Bake cancelled", "AbortError");
+      }
+      if (artifact.status === "failed") {
+        throw new Error(artifact.error || "Debate bake failed.");
+      }
+    }
+    if (controller.signal.aborted) {
+      throw new DOMException("Bake cancelled", "AbortError");
+    }
+    return session;
+  };
+
+  const cancelSpectatorBake = async (): Promise<void> => {
+    const sessionId =
+      spectatorBakeSessionIdRef.current ||
+      activeSessionIdRef.current ||
+      spectatorBake?.sourceId ||
+      null;
+    spectatorBakeAbortRef.current?.abort();
+    if (sessionId) {
+      try {
+        await props.request(
+          `/api/debates/${encodeURIComponent(sessionId)}/bake/cancel`,
+          requestBody({}),
+        );
+      } catch {
+        // Best-effort cancel; local abort still stops polling.
+      }
+    }
+    setSpectatorBakeLiveFallback(false);
+    setSpectatorBake(null);
+    setSpectatorBakeStartedAt(null);
+    spectatorBakeSessionIdRef.current = null;
+    setView("dashboard");
+    setBusy(false);
+  };
+
   const openSession = async (
     archived: DebateSessionListItemV1,
   ): Promise<void> => {
@@ -7921,7 +8120,7 @@ export function DebateExperience(
       const result = await props.request<{ session: DebateSessionV1 }>(
         `/api/debates/${encodeURIComponent(archived.id)}?perspective=${perspective}`,
       );
-      const session = debateSessionNeedsReturnPause(result.session)
+      let session = debateSessionNeedsReturnPause(result.session)
         ? (
             await props.request<{ session: DebateSessionV1 }>(
               `/api/debates/${encodeURIComponent(result.session.id)}/pause`,
@@ -7941,23 +8140,64 @@ export function DebateExperience(
             )
           ).session
         : result.session;
+
+      // Unfinished Spectator galleries resume append-only bake; hard loader
+      // only while the unlock buffer is unmet. Fully ready opens review-from-start.
+      if (
+        session.playerRole === "spectator" &&
+        session.liveBake?.status !== "ready" &&
+        liveBakeShouldResumeOnOpen(session.liveBake)
+      ) {
+        setSpectatorBakeLiveFallback(false);
+        setSpectatorBake(session.liveBake ?? null);
+        setSpectatorBakeStartedAt(new Date().toISOString());
+        if (!liveBakeMayStartWatch(session.liveBake, 0)) {
+          setView("baking");
+          setBusy(true);
+          const unlocked = await runSpectatorProgressiveBake(session.id);
+          if (!mountedRef.current || !unlocked) return;
+          session = unlocked;
+        } else {
+          // Buffer already met — kick bake in background without fullscreen wait.
+          void props
+            .request(`/api/debates/${encodeURIComponent(session.id)}/bake`, {
+              ...requestBody({}),
+            })
+            .catch(() => undefined);
+        }
+        setSpectatorBake(null);
+        setSpectatorBakeStartedAt(null);
+      }
+
       clearDebateDebrief();
       selectDebateCameraMode("auto");
       setTurnaboutObjecting(false);
       setTurnaboutEvidenceSourceId("");
-      setObserverPerspective(perspective);
+      setObserverPerspective(
+        session.liveBake?.status === "ready" ? "replay" : perspective,
+      );
       presentationStore.clear();
       clearProceedingsRevealTimers();
       activeSessionIdRef.current = session.id;
       setTranscriptVisibleThroughSequence(
         debateInitialProceedingsCursor(
           session,
-          debateSpectatorAwaitingFirstWatch(session),
+          debateSpectatorAwaitingFirstWatch(session) ||
+            session.liveBake?.status === "ready",
         ),
       );
       setActiveSession(session);
       setView("live");
     } catch (caught) {
+      if (
+        caught instanceof Error &&
+        (caught.name === "AbortError" || /aborted|cancelled/i.test(caught.message))
+      ) {
+        setView("dashboard");
+        setSpectatorBake(null);
+        setSpectatorBakeStartedAt(null);
+        return;
+      }
       setError(caught instanceof Error ? caught.message : "Debate not found.");
     } finally {
       setBusy(false);
@@ -8169,24 +8409,20 @@ export function DebateExperience(
         ),
       );
       if (playerRole === "spectator") {
+        setSpectatorBakeLiveFallback(false);
         setSpectatorBake(result.session.liveBake ?? null);
+        setSpectatorBakeStartedAt(new Date().toISOString());
         setView("baking");
         setBusy(true);
-        const baked = await props.request<{
-          session: DebateSessionV1;
-          liveBake: LiveBakeArtifactV1;
-        }>(
-          `/api/debates/${encodeURIComponent(result.session.id)}/bake`,
-          requestBody({}),
-        );
-        if (!mountedRef.current) return;
-        setSpectatorBake(baked.liveBake);
-        // Hold the finished gallery paused until the player presses Start, so a
-        // long synthesize cannot begin while they are away from the keyboard.
+        const session = await runSpectatorProgressiveBake(result.session.id);
+        if (!mountedRef.current || !session) return;
+        // Hold the gallery paused until the player presses Start.
+        // presentationEventId stays null so progressive mid-bake holds still
+        // count as awaitingFirstWatch (Start-from-beginning, not Resume delta).
         const held = await props.request<{ session: DebateSessionV1 }>(
-          `/api/debates/${encodeURIComponent(baked.session.id)}/pause`,
+          `/api/debates/${encodeURIComponent(session.id)}/pause`,
           requestBody({
-            expectedRevision: baked.session.revision,
+            expectedRevision: session.revision,
             idempotencyKey: nextMutationKey("spectator-ready-hold"),
             exitRecovery: true,
             presentationEventId: null,
@@ -8202,6 +8438,7 @@ export function DebateExperience(
         activeSessionIdRef.current = held.session.id;
         setActiveSession(held.session);
         setSpectatorBake(null);
+        setSpectatorBakeStartedAt(null);
         setView("live");
         setBusy(false);
         return;
@@ -8211,15 +8448,22 @@ export function DebateExperience(
       setView("live");
       await adoptSession(null, result.session, { playIntro: true });
     } catch (caught) {
-      // #region agent log
-      fetch('http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2',{method:'POST',headers:{'Content-Type':'application/json','X-Debug-Session-Id':'fc245c'},body:JSON.stringify({sessionId:'fc245c',runId:'post-fix',hypothesisId:'C',location:'DebateExperience.tsx:startDebate-catch',message:'startDebate failed',data:{message:caught instanceof Error?caught.message.slice(0,400):String(caught),name:caught instanceof Error?caught.name:typeof caught,detail:caught&&typeof caught==='object'&&'detail' in caught&&typeof (caught as {detail?:unknown}).detail==='string'?(caught as {detail:string}).detail.slice(0,400):null,path:caught&&typeof caught==='object'&&'path' in caught?String((caught as {path?:unknown}).path):null,status:caught&&typeof caught==='object'&&'status' in caught?(caught as {status?:unknown}).status:null,code:caught&&typeof caught==='object'&&'code' in caught?String((caught as {code?:unknown}).code):null},timestamp:Date.now()})}).catch(()=>{});
-      // #endregion
+      if (
+        caught instanceof Error &&
+        (caught.name === "AbortError" || /aborted|cancelled/i.test(caught.message))
+      ) {
+        setView("dashboard");
+        setSpectatorBake(null);
+        setSpectatorBakeStartedAt(null);
+        return;
+      }
       setError(
         debateErrorClipboardText(caught, "The Debate could not start."),
       );
       if (playerRole === "spectator") {
         setView("dashboard");
         setSpectatorBake(null);
+        setSpectatorBakeStartedAt(null);
       }
     } finally {
       setBusy(false);
@@ -8443,6 +8687,15 @@ export function DebateExperience(
     ) {
       return;
     }
+    // While progressive bake is healthy, never ask the presenter to invent —
+    // wait for the baker. Mid-sit live fallback opts back into on-demand advance.
+    if (
+      activeSession.playerRole === "spectator" &&
+      activeSession.liveBake?.status === "baking" &&
+      !spectatorBakeLiveFallback
+    ) {
+      return;
+    }
     const timer = window.setTimeout(
       () => void advance(false),
       DEBATE_AUTO_ADVANCE_DELAY_MS,
@@ -8457,6 +8710,79 @@ export function DebateExperience(
     earlyEndOpen,
     presentationSuspended,
     presenting,
+    spectatorBakeLiveFallback,
+    view,
+  ]);
+
+  // Keep watching the baker while a Spectator sit is open and still baking.
+  useEffect(() => {
+    if (
+      view !== "live" ||
+      !activeSession ||
+      activeSession.playerRole !== "spectator" ||
+      activeSession.liveBake?.status !== "baking" ||
+      spectatorBakeLiveFallback
+    ) {
+      return;
+    }
+    const sessionId = activeSession.id;
+    let cancelled = false;
+    const tick = async (): Promise<void> => {
+      try {
+        const polled = await props.request<{ session: DebateSessionV1 }>(
+          `/api/debates/${encodeURIComponent(sessionId)}`,
+          { method: "GET" },
+        );
+        if (cancelled || !mountedRef.current) return;
+        if (activeSessionIdRef.current !== sessionId) return;
+        const previous = activeSession;
+        if (previous.id !== sessionId) return;
+        if (previous.revision === polled.session.revision) {
+          if (
+            JSON.stringify(previous.liveBake) !==
+            JSON.stringify(polled.session.liveBake)
+          ) {
+            setActiveSession({
+              ...previous,
+              liveBake: polled.session.liveBake,
+            });
+          }
+        } else if (
+          !busy &&
+          !presenting &&
+          !debateFloorMutationInFlightRef.current &&
+          !presentationSuspended
+        ) {
+          await adoptSession(previous, polled.session);
+        } else {
+          setActiveSession(polled.session);
+        }
+        if (
+          polled.session.liveBake?.status === "failed" ||
+          polled.session.liveBake?.status === "cancelled"
+        ) {
+          setSpectatorBakeLiveFallback(true);
+        }
+      } catch {
+        // Soft poll — next interval retries.
+      }
+    };
+    const timer = window.setInterval(() => {
+      void tick();
+    }, LIVE_BAKE_POLL_INTERVAL_MS);
+    void tick();
+    return () => {
+      cancelled = true;
+      window.clearInterval(timer);
+    };
+  }, [
+    activeSession,
+    adoptSession,
+    busy,
+    presentationSuspended,
+    presenting,
+    props.request,
+    spectatorBakeLiveFallback,
     view,
   ]);
 
@@ -9644,22 +9970,21 @@ export function DebateExperience(
         }
         if (startDeferredSetup) {
           if (result.session.playerRole === "spectator") {
+            setSpectatorBakeLiveFallback(false);
             setSpectatorBake(result.session.liveBake ?? null);
+            setSpectatorBakeStartedAt(new Date().toISOString());
             setView("baking");
             setBusy(true);
-            const baked = await props.request<{
-              session: DebateSessionV1;
-              liveBake: LiveBakeArtifactV1;
-            }>(
-              `/api/debates/${encodeURIComponent(result.session.id)}/bake`,
-              requestBody({}),
+            const bakedSession = await runSpectatorProgressiveBake(
+              result.session.id,
             );
-            if (!mountedRef.current) return;
+            if (!mountedRef.current || !bakedSession) return;
             setSpectatorBake(null);
+            setSpectatorBakeStartedAt(null);
             if (mountedRef.current) setBusy(false);
             // Deferred Spectator Start already chose to begin — bake then play,
             // without a second hold-for-Start gate.
-            await adoptSession(null, baked.session, { playIntro: true });
+            await adoptSession(null, bakedSession, { playIntro: true });
             void loadSessions();
             return;
           }
@@ -9813,6 +10138,21 @@ export function DebateExperience(
     presentationStore.clear();
     activeSessionIdRef.current = null;
     spectatorPresentationSealInFlightRef.current = null;
+    spectatorBakeAbortRef.current?.abort();
+    if (
+      previous?.playerRole === "spectator" &&
+      previous.liveBake?.status === "baking"
+    ) {
+      void props
+        .request(
+          `/api/debates/${encodeURIComponent(previous.id)}/bake/cancel`,
+          requestBody({}),
+        )
+        .catch(() => undefined);
+    }
+    setSpectatorBake(null);
+    setSpectatorBakeStartedAt(null);
+    setSpectatorBakeLiveFallback(false);
     setEarlyEndOpen(false);
     setView("dashboard");
     setActiveSession(null);
@@ -10161,59 +10501,102 @@ export function DebateExperience(
   const renderArchiveSessionRow = (
     session: DebateSessionListItemV1,
     index: number,
-  ): React.JSX.Element => (
-    <li key={session.id} data-status={session.status}>
-      <span className={styles.archiveIndex} aria-hidden="true">
-        {String(index + 1).padStart(2, "0")}
-      </span>
-      <button
-        type="button"
-        className={styles.sessionOpen}
-        onClick={() => void openSession(session)}
-        disabled={busy}
+  ): React.JSX.Element => {
+    const metaChips = debateArchiveMetaChips(session);
+    const modelLabel = debateArchiveModelLabel(session);
+    const effortLevel = debateArchiveEffortLevel(session);
+    const castColors = session.castColors ?? [];
+    return (
+      <li
+        key={session.id}
+        className={styles.archiveChipRow}
+        data-status={session.status}
+        data-archive-group-item={
+          session.status === "completed" ? "completed" : "open"
+        }
       >
-        <strong>{session.title}</strong>
-        <span>
-          {session.motion} ·{" "}
-          {session.format === "turnabout" ? "Turnabout" : "Forum"} ·{" "}
-          {debateProductionName(session.format, session.formality)} ·{" "}
-          {debateFormalityDescriptor(session.formality).title} ·{" "}
-          {session.moderatorTitle} · {sessionStatusLabel(session)} ·{" "}
-          {session.playerRole}
-          {session.activeDurationMs === null
-            ? ""
-            : ` · ${debateActiveDurationLabel(session.activeDurationMs)}`}
-        </span>
-        {session.synopsisText ? (
-          <em className={styles.archiveSynopsis}>
-            {session.synopsisText}
-          </em>
-        ) : null}
-      </button>
-      <div className={styles.archiveActions}>
         <button
           type="button"
-          className={styles.archiveReuseButton}
-          onClick={() => void reuseSessionSetup(session)}
-          disabled={busy}
-          aria-label={`Use setup from ${session.title}`}
-        >
-          {setupRestoreLoadingId === session.id
-            ? "Loading…"
-            : "Use setup"}
-        </button>
-        <button
-          type="button"
-          className={styles.deleteButton}
-          onClick={() => setPendingDeleteSession(session)}
-          aria-label={`Delete ${session.motion}`}
+          className={styles.archiveChip}
+          style={buildDebateArchiveChipVisualStyle(
+            session.id,
+            castColors,
+            props.theme,
+          )}
+          onClick={() => void openSession(session)}
           disabled={busy}
         >
-          Remove
+          <span className={styles.archiveChipTop}>
+            <span className={styles.archiveChipDots} aria-hidden="true">
+              {(castColors.length > 0
+                ? castColors
+                : ["#7b5cff", "#2fd3e3", "#ff4d6d"]
+              )
+                .slice(0, 5)
+                .map((color, colorIndex) => (
+                  <span
+                    key={`${session.id}:cast:${colorIndex}`}
+                    className={styles.archiveChipDot}
+                    style={
+                      {
+                        "--debate-archive-dot": color,
+                      } as CSSProperties
+                    }
+                  />
+                ))}
+            </span>
+            <span className={styles.archiveIndex} aria-hidden="true">
+              {String(index + 1).padStart(2, "0")}
+            </span>
+          </span>
+          <strong className={styles.archiveChipTitle}>{session.title}</strong>
+          <span className={styles.archiveChipMotion}>{session.motion}</span>
+          <span className={styles.archiveChipMeta} aria-label="Proceeding details">
+            {metaChips.map((chip) => (
+              <span key={`${session.id}:${chip}`} className={styles.archiveChipTag}>
+                {chip}
+              </span>
+            ))}
+          </span>
+          <span className={styles.archiveChipRouting}>
+            <span className={styles.archiveChipModel}>{modelLabel}</span>
+            {effortLevel ? (
+              <span
+                className={styles.archiveChipEffort}
+                title={`Effort: ${DEBATE_ARCHIVE_EFFORT_LABELS[effortLevel]}`}
+              >
+                <DebateArchiveEffortIcon level={effortLevel} />
+                <span>{DEBATE_ARCHIVE_EFFORT_LABELS[effortLevel]}</span>
+              </span>
+            ) : null}
+          </span>
+          {session.synopsisText ? (
+            <em className={styles.archiveSynopsis}>{session.synopsisText}</em>
+          ) : null}
         </button>
-      </div>
-    </li>
-  );
+        <div className={styles.archiveActions}>
+          <button
+            type="button"
+            className={styles.archiveReuseButton}
+            onClick={() => void reuseSessionSetup(session)}
+            disabled={busy}
+            aria-label={`Use setup from ${session.title}`}
+          >
+            {setupRestoreLoadingId === session.id ? "Loading…" : "Use setup"}
+          </button>
+          <button
+            type="button"
+            className={styles.deleteButton}
+            onClick={() => setPendingDeleteSession(session)}
+            aria-label={`Delete ${session.motion}`}
+            disabled={busy}
+          >
+            Remove
+          </button>
+        </div>
+      </li>
+    );
+  };
 
   const renderArchive = (): React.JSX.Element => {
     const openSessions = sessions.filter(
@@ -12376,6 +12759,9 @@ export function DebateExperience(
             <div className={styles.evidenceObjectAssetActions}>
               <button
                 type="button"
+                data-soft-busy={
+                  evidenceObjectVisualBusy === "synthesize" ? "true" : undefined
+                }
                 onClick={() => void synthesizeEvidenceObjectImage()}
                 disabled={!objectTitle || evidenceObjectVisualBusy !== null}
               >
@@ -12385,10 +12771,17 @@ export function DebateExperience(
                     ? "Synthesize another asset"
                     : "Synthesize asset"}
               </button>
-              <small>
-                Optional. Upload, reuse, or synthesize only changes the stage
-                sprite; the editable text and emoji remain the evidence.
-              </small>
+              {evidenceObjectVisualBusy === "synthesize" ? (
+                <span role="status" aria-live="polite">
+                  Soft prepare — emoji stays as the fallback until the sprite
+                  swaps in.
+                </span>
+              ) : (
+                <small>
+                  Optional. Upload, reuse, or synthesize only changes the stage
+                  sprite; the editable text and emoji remain the evidence.
+                </small>
+              )}
             </div>
             <div className={styles.evidenceObjectCommitActions}>
               <button
@@ -16747,6 +17140,25 @@ export function DebateExperience(
                         : "Resume Debate"}
                     </button>
                   </div>
+                ) : session.playerRole === "spectator" &&
+                  session.liveBake?.status === "baking" &&
+                  !spectatorBakeLiveFallback &&
+                  session.status === "live" &&
+                  !presenting &&
+                  !readyToBeginOverlay ? (
+                  <div
+                    className={styles.stageStateOverlay}
+                    data-kind="paused"
+                    role="status"
+                    aria-live="polite"
+                  >
+                    <span aria-hidden="true">◇</span>
+                    <strong>Still preparing the next beat…</strong>
+                    <small>
+                      {liveBakeStatusCopy(session.liveBake) ||
+                        "Prism is baking ahead so the gallery can continue without inventing live."}
+                    </small>
+                  </div>
                 ) : judgeGuidedStep && !presenting && !juryChamberVisible ? (
                   renderJudgeGuidedControls(session, judgeGuidedStep)
                 ) : session.status === "waiting_for_player" &&
@@ -17634,16 +18046,21 @@ export function DebateExperience(
               <PrismBlockingLoader
                 open
                 title={liveBakeSurfaceTitle("debate")}
-                detail="The gallery is being prepared ahead of time so watching stays seamless."
+                detail="Prism is preparing the opening stretch so watching can begin once enough of the gallery is ready. You can leave anytime — progress is saved."
                 stepLabel={liveBakeStatusCopy(spectatorBake)}
-                progress={null}
+                progress={liveBakeProgressRatio(spectatorBake)}
+                startedAt={spectatorBakeStartedAt}
+                cancelLabel="Stop preparing"
+                cancelConfirmTitle="Stop preparing this gallery?"
+                cancelConfirmDetail="Your progress stays saved. You can reopen later and Prism will continue from where it left off."
+                footer="Watching unlocks when the opening buffer is ready. Model thinking can stretch the wait."
+                onCancel={() => {
+                  void cancelSpectatorBake();
+                }}
               />
             </>
           )
         : renderLobby();
-  const synthesizingExhibitTitle = evidenceObjectDraft
-    ? debateEvidenceExhibitTitle(evidenceObjectDraft)
-    : "";
   return (
     <>
       {experience}
@@ -17660,10 +18077,13 @@ export function DebateExperience(
           onExit={() => {
             inventWarmupAbortRef.current?.abort();
             inventWarmupAbortRef.current = null;
+            inventRequestAbortRef.current?.abort();
+            inventRequestAbortRef.current = null;
             setInventWarmup(null);
             setBusy(false);
             setNewDuelGenerateBusy(false);
             setMotionOptionsBusy(false);
+            setInventLoaderStartedAt(null);
           }}
           onRetry={
             inventWarmup.phase === "failed"
@@ -17686,8 +18106,21 @@ export function DebateExperience(
         detail="Prism is casting the motion, advocates, room tone, and evidence packet for a fresh editable workbench."
         stepLabel="Building the Debate Studio draft"
         progress={null}
+        startedAt={inventLoaderStartedAt}
         theme={props.theme}
         footer="Start stays unpressed until you review the draft."
+        cancelLabel="Stop inventing"
+        cancelConfirmTitle="Stop inventing this duel?"
+        cancelConfirmDetail="This invent request will stop. Your studio stays as it was."
+        onCancel={() => {
+          inventRequestAbortRef.current?.abort();
+          inventRequestAbortRef.current = null;
+          inventWarmupAbortRef.current?.abort();
+          inventWarmupAbortRef.current = null;
+          setNewDuelGenerateBusy(false);
+          setInventLoaderStartedAt(null);
+          setBusy(false);
+        }}
       />
       <PrismBlockingLoader
         open={motionOptionsBusy}
@@ -17695,21 +18128,21 @@ export function DebateExperience(
         detail="Prism is refracting motion options for this topic into editable slates."
         stepLabel="Building motion options"
         progress={null}
+        startedAt={inventLoaderStartedAt}
         theme={props.theme}
         footer="Keep this window open while the light takes shape."
-      />
-      <PrismBlockingLoader
-        open={evidenceObjectVisualBusy === "synthesize"}
-        title={
-          synthesizingExhibitTitle
-            ? `Synthesizing ${synthesizingExhibitTitle}`
-            : "Synthesizing exhibit artwork"
-        }
-        detail="Prism is generating a Debate-only transparent stage sprite from your object description."
-        stepLabel="Generating and cutting out the exhibit"
-        progress={null}
-        theme={props.theme}
-        footer="The exhibit text and emoji fallback remain unchanged while the sprite takes shape."
+        cancelLabel="Stop synthesizing"
+        cancelConfirmTitle="Stop synthesizing options?"
+        cancelConfirmDetail="This invent request will stop. You can try again whenever you are ready."
+        onCancel={() => {
+          inventRequestAbortRef.current?.abort();
+          inventRequestAbortRef.current = null;
+          inventWarmupAbortRef.current?.abort();
+          inventWarmupAbortRef.current = null;
+          setMotionOptionsBusy(false);
+          setInventLoaderStartedAt(null);
+          setBusy(false);
+        }}
       />
     </>
   );

@@ -13,6 +13,7 @@ import type {
 import type { LlmProviderName } from "./index.js";
 import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type { LiveBakeArtifactV1 } from "./liveBake.js";
+import type { ModelReasoningEffortPreference } from "./reasoningEffort.js";
 
 export const DEBATE_SCHEMA_VERSION = 1 as const;
 export const DEBATE_FORMAT_SCHEMA_VERSION = 1 as const;
@@ -800,6 +801,12 @@ export interface DebateSessionV1 {
   routingPolicyVersion?: number;
   /** Most recent contextual route; generated events carry their own copy. */
   latestAutoRoute?: AutoRouteDecisionV1;
+  /**
+   * Last applied effort for archive chrome. Auto updates this alongside
+   * `latestAutoRoute`; fixed lanes freeze the preference used at create /
+   * generation time.
+   */
+  lastReasoningEffort?: ModelReasoningEffortPreference | null;
   /** Ordered primary + fallback lanes. One entry for LOCAL/ONLINE. */
   generationChain: AutoFallbackModelRef[];
   format: DebateFormatId;
@@ -1123,6 +1130,14 @@ export interface DebateSessionListItemV1 {
   synopsisText?: string | null;
   /** True when Archive Open holds a Save Debate setup that has never started. */
   awaitingDeferredStart?: boolean;
+  /** Frozen primary generation lane for archive chrome. */
+  provider?: LlmProviderName;
+  model?: string;
+  modelSelectionKind?: "auto" | "fixed";
+  /** Last applied effort (Auto route or frozen fixed preference). */
+  reasoningEffort?: ModelReasoningEffortPreference | null;
+  /** Moderator + advocate cast colors for Coffee-style archive chips. */
+  castColors?: string[];
 }
 
 export interface DebateDebriefChatMessageV1 {
@@ -1889,8 +1904,10 @@ export function debateSessionAwaitsPresentationSeal(
 }
 
 /**
- * Baked Spectator Debates hold paused with no interrupted line until the player
- * presses Start, so a long synthesize cannot begin while they are away.
+ * Spectator galleries hold paused with no interrupted line until the player
+ * presses Start — both after a full bake settles and after progressive unlock
+ * while the baker is still ahead. Resume would only present *new* deltas and
+ * skip the already-baked opening, so this gate forces Start-from-beginning.
  */
 export function debateSpectatorAwaitingFirstWatch(
   session: Pick<
@@ -1903,12 +1920,12 @@ export function debateSpectatorAwaitingFirstWatch(
     | "completedAt"
   >,
 ): boolean {
-  return (
-    debateSessionAwaitsPresentationSeal(session) &&
-    session.status === "paused" &&
-    !session.pausedPresentationEventId &&
-    session.events.length > 0
-  );
+  if (session.playerRole !== "spectator") return false;
+  if (session.status !== "paused") return false;
+  if (session.pausedPresentationEventId) return false;
+  if (session.events.length === 0) return false;
+  if (session.completedAt != null) return false;
+  return true;
 }
 
 /**

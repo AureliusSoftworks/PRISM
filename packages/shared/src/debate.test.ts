@@ -763,9 +763,31 @@ test("Spectator floor settlement awaits a presentation seal until watched", () =
     debateSpectatorAwaitingFirstWatch({
       playerRole: "spectator",
       status: "paused",
+      pausedPresentationEventId: null,
+      events: [activeDurationEvent({})],
+      stepKey: "opening_for",
+      completedAt: null,
+    }),
+    true,
+  );
+  assert.equal(
+    debateSpectatorAwaitingFirstWatch({
+      playerRole: "spectator",
+      status: "paused",
       pausedPresentationEventId: "event-1",
       events: [activeDurationEvent({})],
       stepKey: "completed",
+      completedAt: null,
+    }),
+    false,
+  );
+  assert.equal(
+    debateSpectatorAwaitingFirstWatch({
+      playerRole: "spectator",
+      status: "live",
+      pausedPresentationEventId: null,
+      events: [activeDurationEvent({})],
+      stepKey: "opening_for",
       completedAt: null,
     }),
     false,

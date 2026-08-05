@@ -1670,6 +1670,11 @@ describe("Debate engine", () => {
         session.autoCandidateAllowlist,
         debateRuntime.autoCandidateAllowlist,
       );
+      const listed = listDebateSessions(db, "user-1");
+      assert.equal(listed[0]?.modelSelectionKind, "auto");
+      assert.equal(listed[0]?.model, "debate-test");
+      assert.equal(listed[0]?.reasoningEffort, "low");
+      assert.ok((listed[0]?.castColors?.length ?? 0) > 0);
       for (let turn = 0; turn < 2; turn += 1) {
         session = await advanceDebateSession(
           db,

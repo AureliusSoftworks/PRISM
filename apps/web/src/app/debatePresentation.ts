@@ -174,6 +174,16 @@ export function debateAdoptProceedingsCursor(
     | "completedAt"
   >,
 ): number | null {
+  // Brand-new Spectator presentation runs (Start after progressive or full bake)
+  // must open an empty Proceedings rail — never inherit a stenographer cursor
+  // or only the post-hold delta from Resume.
+  if (
+    (!previous || previous.id !== next.id) &&
+    next.playerRole === "spectator"
+  ) {
+    return null;
+  }
+
   const safe = debateInitialProceedingsCursor(
     next,
     debateSpectatorAwaitingFirstWatch(next),

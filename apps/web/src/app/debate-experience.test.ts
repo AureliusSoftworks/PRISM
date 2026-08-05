@@ -436,8 +436,10 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /\{session\.moderatorTitle\} · \{sessionStatusLabel\(session\)\}/u,
+      /debateArchiveMetaChips\(session\)/u,
     );
+    assert.match(source, /session\.moderatorTitle/u);
+    assert.match(source, /sessionStatusLabel\(session\)/u);
     assert.match(css, /\.moderatorTitleField\s*\{/u);
   });
 
@@ -593,15 +595,28 @@ describe("Debate experience", () => {
       source,
       /import \{ PrismBlockingLoader \} from "\.\/PrismBlockingLoader"/u,
     );
-    assert.match(source, /open=\{evidenceObjectVisualBusy === "synthesize"\}/u);
+    assert.doesNotMatch(
+      source,
+      /open=\{evidenceObjectVisualBusy === "synthesize"\}/u,
+    );
     assert.match(source, /open=\{newDuelGenerateBusy\}/u);
     assert.match(source, /Inventing a New Duel/u);
     assert.match(source, /setNewDuelGenerateBusy\(true\)/u);
-    assert.match(source, /Generating and cutting out the exhibit/u);
+    assert.match(source, /data-soft-busy=/u);
     assert.match(
+      source,
+      /Soft prepare — emoji stays as the fallback until the sprite/u,
+    );
+    assert.doesNotMatch(source, /generating and cutting out the exhibit/u);
+    assert.doesNotMatch(
       source,
       /The exhibit text and emoji fallback remain unchanged while the sprite takes shape/u,
     );
+    assert.match(source, /liveBakeMayStartWatch/u);
+    assert.match(source, /runSpectatorProgressiveBake/u);
+    assert.match(source, /\/bake\/cancel/u);
+    assert.match(source, /Still preparing the next beat/u);
+    assert.match(source, /LIVE_BAKE_POLL_INTERVAL_MS/u);
     assert.match(
       source,
       /setEvidenceObjectVisualBusy\("synthesize"\)[\s\S]{0,800}\/api\/debates\/exhibits\/synthesize[\s\S]{0,1600}finally \{[\s\S]{0,120}setEvidenceObjectVisualBusy\(null\)/u,
@@ -788,11 +803,14 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /debateActiveDurationLabel\(session\.activeDurationMs\)/u,
+      /debateArchiveMetaChips\(session\)/u,
     );
-    assert.match(source, /session\.activeDurationMs === null/u);
+    assert.match(source, /debateActiveDurationLabel\(session\.activeDurationMs\)/u);
+    assert.match(source, /session\.activeDurationMs !== null/u);
     assert.match(source, /"The record"/u);
     assert.match(css, /\.formatPicker/u);
+    assert.match(css, /\.archiveChip\s*\{/u);
+    assert.match(css, /\.archiveChipTag\s*\{/u);
     assert.match(
       css,
       /\.formatPicker label\[data-availability="coming_soon"\]/u,
@@ -1253,7 +1271,7 @@ describe("Debate experience", () => {
     assert.match(css, /\.transcriptFeed\s*\{[^}]*overflow-y:\s*auto/u);
     assert.match(
       css,
-      /\.debateRail\[data-completed="true"\]\s*\{[^}]*display:\s*grid[^}]*height:\s*calc\(100dvh - 124px\)[^}]*grid-template-rows:\s*minmax\(220px,\s*46%\)\s+minmax\(0,\s*1fr\)/u,
+      /\.debateRail\[data-completed="true"\]\s*\{[^}]*display:\s*grid[^}]*height:\s*100%[^}]*grid-template-rows:\s*minmax\(220px,\s*46%\)\s+minmax\(0,\s*1fr\)/u,
     );
     assert.match(
       css,
@@ -3108,7 +3126,11 @@ describe("Debate experience", () => {
   it("scrolls only the Living Case Board cards while gallery and jury stay fixed", () => {
     assert.match(
       css,
-      /\.live\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*height:\s*100%/u,
+      /\.live\s*\{[^}]*display:\s*flex[^}]*flex-direction:\s*column[^}]*height:\s*100%[^}]*overflow:\s*hidden/u,
+    );
+    assert.match(
+      css,
+      /\.liveWorkspace\s*\{[^}]*overflow:\s*hidden/u,
     );
     assert.match(
       css,
@@ -3116,7 +3138,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.stageSupport\s*\{[^}]*flex:\s*1\s+1\s+auto[^}]*min-height:\s*140px[^}]*overflow:\s*hidden/u,
+      /\.stageSupport\s*\{[^}]*flex:\s*1\s+1\s+0[^}]*min-height:\s*140px[^}]*overflow:\s*hidden/u,
     );
     assert.match(
       css,
@@ -3130,7 +3152,7 @@ describe("Debate experience", () => {
       css,
       /\.caseColumns h2\s*\{[^}]*position:\s*sticky[^}]*top:\s*0/u,
     );
-    assert.match(css, /\.debateAudienceRow\s*\{[^}]*height:\s*clamp\(112px/u);
+    assert.match(css, /\.debateAudienceRow\s*\{[^}]*height:\s*clamp\(118px/u);
     assert.match(css, /\.debateAudienceRow\s*\{[^}]*flex:\s*0\s+0\s+auto/u);
     assert.doesNotMatch(
       css,
@@ -3143,6 +3165,22 @@ describe("Debate experience", () => {
     assert.match(
       css,
       /\.audienceGallery\.juryRoster\s*\{[^}]*flex:\s*0\s+0\s+auto[^}]*overflow:\s*visible/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /height:\s*calc\(100dvh\s*-\s*214px\)/u,
+    );
+    assert.doesNotMatch(
+      css,
+      /\.debateRail\[data-completed="true"\]\s*\{[^}]*height:\s*calc\(100dvh/u,
+    );
+    assert.match(
+      css,
+      /\.transcript,\s*\.debateRail\[data-player-window-active="true"\]\s*\.transcript\s*\{[^}]*flex:\s*1\s+1\s+auto[^}]*min-height:\s*0[^}]*height:\s*auto/u,
+    );
+    assert.match(
+      css,
+      /\.forum\s*\{[^}]*flex:\s*0\s+0\s+auto[^}]*width:\s*100%[^}]*aspect-ratio:\s*2\s*\/\s*1/u,
     );
   });
 
@@ -4095,7 +4133,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /const liveSessionActive =\s*view === "live" &&\s*activeSession !== null &&\s*activeSession\.status !== "paused"/u,
+      /const liveSessionActive =\s*view === "baking" \|\| \(view === "live" && activeSession !== null\)/u,
     );
     assert.match(source, /modelOverride:\s*props\.modelOverride\?\.model/u);
     assert.doesNotMatch(source, /className=\{styles\.privacyBadge\}/u);
