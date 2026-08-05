@@ -136582,7 +136582,7 @@ function HomeContent(): React.JSX.Element {
                 size="sm"
                 className={styles.hubHomeWordmark}
               />
-              <AppletHeaderLabel appletId="zen" />
+              <AppletHeaderLabel appletId="chat" />
             </span>
           </button>
 
@@ -136662,7 +136662,9 @@ function HomeContent(): React.JSX.Element {
             {relationshipDepthAnnouncement}
           </p>
           {renderSharedAppletNavbar("Chat tools", {
-            brandAppletId: "chat",
+            // Convo panel already carries the Chat wordmark — keep the navbar
+            // brand for immersive Zen only (sidebar closed).
+            brandAppletId: sidebarOpen ? undefined : "zen",
             headerRef: chatHeaderRef,
             controlRail: renderHeaderModelPicker(),
             zenDragExclusion: true,

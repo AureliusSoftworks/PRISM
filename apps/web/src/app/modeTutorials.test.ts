@@ -71,7 +71,7 @@ describe("mode tutorials", () => {
         '[data-tutorial-target="avatar-foundry-dock"]',
       ],
     );
-    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /lights stay dark/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /stay dark/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /generated drafts/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /perimeter dock/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /light online/u);

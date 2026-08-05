@@ -62,7 +62,7 @@ describe("Chat shell header layout", () => {
   it("keeps Chat and Zen routing controls in the navbar before and during a conversation", () => {
     assert.match(
       pageSource,
-      /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: "chat"/,
+      /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: sidebarOpen \? undefined : "zen"/,
     );
     assert.match(
       pageSource,

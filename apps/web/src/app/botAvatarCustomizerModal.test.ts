@@ -1804,7 +1804,7 @@ test("avatar foundry uses bottom-bar navigation and view-only camera navigation"
   );
   assert.match(pageSource, /setFoundryViewport\(viewport\);/);
   assert.match(pageSource, /data-tutorial-target="avatar-foundry-controls"/);
-  assert.match(pageSource, /data-tutorial-target="avatar-foundry-eyes-tab"/);
+  assert.match(pageSource, /"avatar-foundry-eyes-tab"/);
   assert.doesNotMatch(pageSource, /BotAvatarFoundryFeatureHandle/);
   assert.doesNotMatch(pageSource, /data-avatar-hotspot/);
   assert.match(

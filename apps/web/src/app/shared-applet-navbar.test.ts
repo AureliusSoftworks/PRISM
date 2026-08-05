@@ -67,9 +67,13 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
     /options\.brandAppletId[\s\S]*renderSharedAppletBrand\(options\.brandAppletId\)/u,
   );
 
-  for (const appletId of ["chat", "coffee", "debate", "botcast", "slate"]) {
+  for (const appletId of ["coffee", "debate", "botcast", "slate"]) {
     assert.match(pageSource, new RegExp(`brandAppletId:\\s*"${appletId}"`));
   }
+  assert.match(
+    pageSource,
+    /brandAppletId: sidebarOpen \? undefined : "zen"/,
+  );
   assert.match(
     pageSource,
     /navigationHeader=\{\(\{[\s\S]*liveSessionActive,[\s\S]*episodeModelControl,[\s\S]*\}\) => \{[\s\S]*renderSharedAppletNavbar\("Signal tools", \{[\s\S]*showVoiceSelector: true,[\s\S]*liveSessionActive,[\s\S]*modelControls:/u,
@@ -95,7 +99,7 @@ test("every active applet consumes the Debate PRISM navbar contract", () => {
   );
   assert.match(
     pageSource,
-    /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: "chat"[\s\S]*headerRef: chatHeaderRef[\s\S]*controlRail: renderHeaderModelPicker\(\)/u,
+    /renderSharedAppletNavbar\("Chat tools", \{[\s\S]*brandAppletId: sidebarOpen \? undefined : "zen"[\s\S]*headerRef: chatHeaderRef[\s\S]*controlRail: renderHeaderModelPicker\(\)/u,
   );
   assert.doesNotMatch(pageSource, /data-zen-header-hidden=/u);
   assert.match(
