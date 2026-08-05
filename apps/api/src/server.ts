@@ -149,6 +149,7 @@ import {
   inferCoffeeGroupEthos,
   inferCoffeeGroupNameDetailed,
   inferCoffeeGroupStarterTopicsDetailed,
+  suggestCoffeeGroupSetup,
   coffeePlayerDepartureEpilogueShouldStop,
   listCoffeeGroups,
   listCoffeePresets,
@@ -219,6 +220,7 @@ import {
   swingDebateJudgeGavel,
   synthesizeDebateSlates,
   synthesizeDebateTitle,
+  suggestDebateSetup,
   generateDebateSessionSynopsis,
   chatWithDebateDebriefBot,
   type DebateAiRuntime,
@@ -14055,6 +14057,76 @@ function buildRoutes(): RouteDefinition[] {
       );
       json(ctx.res, 200, { ok: true, slates });
     }),
+    route("POST", "/api/debates/setup-suggestion", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        body.preferredProvider,
+        body.modelOverride,
+        body.responseMode,
+      );
+      const requestedMode = normalizeResponseMode(
+        body.responseMode,
+        body.preferredProvider === "local" ? "local" : "online",
+      );
+      const allowOnlineResearch =
+        requestedMode !== "local" && !userBlocksOnlineCapabilities(user);
+      const rosterRaw = Array.isArray(body.roster) ? body.roster : [];
+      const roster = rosterRaw
+        .map((entry) => {
+          const row =
+            entry && typeof entry === "object"
+              ? (entry as Record<string, unknown>)
+              : {};
+          return {
+            id: typeof row.id === "string" ? row.id : "",
+            name: typeof row.name === "string" ? row.name : "",
+            personaSnippet:
+              typeof row.personaSnippet === "string"
+                ? row.personaSnippet
+                : typeof row.systemPrompt === "string"
+                  ? row.systemPrompt.slice(0, 280)
+                  : "",
+          };
+        })
+        .filter((bot) => bot.id.trim());
+      const suggestion = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          suggestDebateSetup({
+            direction: body.direction,
+            roster,
+            runtime,
+            research: {
+              allowOnlineResearch,
+              searchWeb: async (query) => {
+                const userKey = decryptUserKey(userId);
+                const apiKey =
+                  getBraveSearchApiKeyForUser(userId, userKey) ??
+                  config.braveSearchApiKey;
+                if (!apiKey?.trim()) {
+                  throw new Error("MISSING_BRAVE_KEY");
+                }
+                const payload = await searchWebWithBrave({
+                  query,
+                  apiKey,
+                });
+                return debateEvidenceSourcesFromWebResults(payload.results);
+              },
+              searchScholar: (query) => searchScholarWithCrossref({ query }),
+            },
+          }),
+      );
+      json(ctx.res, 200, { ok: true, suggestion });
+    }),
     route("POST", "/api/debates/title", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -17035,6 +17107,7 @@ function buildRoutes(): RouteDefinition[] {
             body.durationMinutes === null || body.durationMinutes === undefined
               ? null
               : Number(body.durationMinutes),
+          playbackMode: body.playbackMode === "watch" ? "watch" : "live",
         },
       });
       const run = await prismCapabilityRegistry.executeProposal({
@@ -17892,6 +17965,55 @@ function buildRoutes(): RouteDefinition[] {
         group,
       });
       queueInitialCoffeeGroupSynthesis(userId, group.id, pendingSynthesisItems);
+    }),
+    route("POST", "/api/coffee/groups/setup-suggestion", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        body.preferredProvider,
+        body.modelOverride,
+        body.responseMode,
+      );
+      const lane =
+        (Array.isArray(runtime.lanes) && runtime.lanes[0]) ||
+        runtime.online ||
+        runtime.local;
+      const rosterRaw = Array.isArray(body.roster) ? body.roster : [];
+      const roster = rosterRaw
+        .map((entry) => {
+          const row =
+            entry && typeof entry === "object"
+              ? (entry as Record<string, unknown>)
+              : {};
+          return {
+            id: typeof row.id === "string" ? row.id : "",
+            name: typeof row.name === "string" ? row.name : "",
+            personaSnippet:
+              typeof row.personaSnippet === "string"
+                ? row.personaSnippet
+                : typeof row.systemPrompt === "string"
+                  ? row.systemPrompt.slice(0, 280)
+                  : "",
+          };
+        })
+        .filter((bot) => bot.id.trim());
+      const suggestion = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "coffee",
+          surface: "coffee",
+        },
+        () =>
+          suggestCoffeeGroupSetup({
+            direction: body.direction,
+            roster,
+            provider: lane.provider,
+          }),
+      );
+      json(ctx.res, 200, { ok: true, suggestion });
     }),
     route("PATCH", "/api/coffee/groups/:id", async (ctx) => {
       const userId = requireAuth(ctx);

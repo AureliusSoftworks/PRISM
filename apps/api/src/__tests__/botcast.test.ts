@@ -1212,6 +1212,37 @@ describe("Botcast persistence and isolation", () => {
     assert.ok(episodeCreationIndex > bookingFailureIndex);
   });
 
+  it("forwards Watch playbackMode from Signal create into the episode capability", () => {
+    const serverSource = readFileSync(
+      new URL("../server.ts", import.meta.url),
+      "utf8",
+    );
+    const capabilitySource = readFileSync(
+      new URL("../prism-domain-capabilities.ts", import.meta.url),
+      "utf8",
+    );
+    const createBlockStart = capabilitySource.indexOf(
+      'id: "signal.episode.create"',
+    );
+    assert.ok(createBlockStart >= 0);
+    const createBlock = capabilitySource.slice(
+      createBlockStart,
+      createBlockStart + 8_000,
+    );
+    assert.match(
+      serverSource,
+      /capabilityId: "signal\.episode\.create"[\s\S]{0,1200}?playbackMode: body\.playbackMode === "watch" \? "watch" : "live"/u,
+    );
+    assert.match(
+      createBlock,
+      /playbackMode: input\.playbackMode === "watch" \? "watch" : "live"/u,
+    );
+    assert.match(
+      createBlock,
+      /createBotcastEpisode\([\s\S]{0,2000}?playbackMode: input\.playbackMode === "watch" \? "watch" : "live"/u,
+    );
+  });
+
   it("resolves topic and producer-brief wildcards before Signal episode create", () => {
     const serverSource = readFileSync(
       new URL("../server.ts", import.meta.url),

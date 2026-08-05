@@ -3974,6 +3974,7 @@ function signalEpisodeCreateCapability(): PrismCapabilityDefinition {
           typeof input.durationMinutes === "number"
             ? input.durationMinutes
             : null,
+        playbackMode: input.playbackMode === "watch" ? "watch" : "live",
       };
     },
     preview: (context, input) => {
@@ -3982,12 +3983,22 @@ function signalEpisodeCreateCapability(): PrismCapabilityDefinition {
         .prepare("SELECT name FROM botcast_shows WHERE id = ? AND user_id = ?")
         .get(showId, context.userId) as { name: string } | undefined;
       if (!show) throw new Error("Signal show not found.");
+      const watchMode = input.playbackMode === "watch";
       return {
-        ...simplePreview(`Begin a new episode of ${show.name}.`),
-        consequences: [
-          "Going live may consume paid voice credits.",
-          "Credits already consumed are not restored by Undo.",
-        ],
+        ...simplePreview(
+          watchMode
+            ? `Bake a Watch episode of ${show.name}.`
+            : `Begin a new episode of ${show.name}.`,
+        ),
+        consequences: watchMode
+          ? [
+              "Watch mode bakes the full episode before playback.",
+              "Credits already consumed are not restored by Undo.",
+            ]
+          : [
+              "Going live may consume paid voice credits.",
+              "Credits already consumed are not restored by Undo.",
+            ],
         provider:
           typeof input.preferredProvider === "string"
             ? input.preferredProvider
@@ -4032,6 +4043,7 @@ function signalEpisodeCreateCapability(): PrismCapabilityDefinition {
           typeof input.durationMinutes === "number"
             ? input.durationMinutes
             : null,
+        playbackMode: input.playbackMode === "watch" ? "watch" : "live",
       });
       return {
         result: {

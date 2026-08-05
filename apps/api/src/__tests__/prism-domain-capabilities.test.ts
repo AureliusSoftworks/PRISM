@@ -153,7 +153,55 @@ describe("Prism Signal domain capabilities", () => {
         2,
       );
       assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT playback_mode AS playbackMode FROM botcast_episodes WHERE topic = 'Sith Stand-Up'",
+            )
+            .get() as { playbackMode: string }
+        ).playbackMode,
+        "live",
+      );
+      assert.equal(
         registry.undo({ context: context(db), runId: created.id }).status,
+        "undone",
+      );
+
+      const watchProposal = registry.createProposal({
+        context: context(db),
+        capabilityId: "signal.episode.create",
+        input: {
+          showId: "show",
+          guestKind: "bot",
+          guestBotId: "guest",
+          topic: "Watch Bake Smoke",
+          producerBrief: "Sit back.",
+          preferredProvider: "local",
+          responseMode: "local",
+          modelOverride: "llama3.2",
+          durationMinutes: null,
+          playbackMode: "watch",
+        },
+      });
+      const watched = await registry.executeProposal({
+        context: context(db),
+        proposalId: watchProposal.id,
+        confirmation: true,
+        idempotencyKey: "create-signal-watch",
+      });
+      assert.equal(watched.status, "committed", watched.error ?? undefined);
+      assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT playback_mode AS playbackMode FROM botcast_episodes WHERE topic = 'Watch Bake Smoke'",
+            )
+            .get() as { playbackMode: string }
+        ).playbackMode,
+        "watch",
+      );
+      assert.equal(
+        registry.undo({ context: context(db), runId: watched.id }).status,
         "undone",
       );
     } finally {
