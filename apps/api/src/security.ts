@@ -8,6 +8,12 @@ export interface EncryptedBlob {
   ciphertext: string;
 }
 
+export interface EncryptedBinaryBlob {
+  iv: Buffer;
+  tag: Buffer;
+  ciphertext: Buffer;
+}
+
 export function randomId(bytes = 16): string {
   return randomBytes(bytes).toString("hex");
 }
@@ -55,6 +61,25 @@ export function decryptText(blob: EncryptedBlob, key: Buffer): string {
     decipher.final()
   ]);
   return plaintext.toString("utf8");
+}
+
+export function encryptBytes(
+  plaintext: Buffer,
+  key: Buffer,
+): EncryptedBinaryBlob {
+  const iv = randomBytes(12);
+  const cipher = createCipheriv(AES_ALGO, key, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext), cipher.final()]);
+  return { iv, tag: cipher.getAuthTag(), ciphertext };
+}
+
+export function decryptBytes(
+  blob: EncryptedBinaryBlob,
+  key: Buffer,
+): Buffer {
+  const decipher = createDecipheriv(AES_ALGO, key, blob.iv);
+  decipher.setAuthTag(blob.tag);
+  return Buffer.concat([decipher.update(blob.ciphertext), decipher.final()]);
 }
 
 export function encryptJson(

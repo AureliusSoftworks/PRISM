@@ -35,6 +35,7 @@ import {
   ensureImageAssetLibrarySchema,
   synchronizeImageAssetCatalog,
 } from "./image-asset-library.ts";
+import { ensureUserNotesSchema } from "./user-notes.ts";
 
 export const SQLITE_BUSY_TIMEOUT_MS = 5_000;
 
@@ -652,6 +653,17 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       certainty REAL,
       source_message_ids TEXT NOT NULL DEFAULT '[]',
       created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS user_notes (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL DEFAULT '',
+      ciphertext TEXT NOT NULL,
+      iv TEXT NOT NULL,
+      tag TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS images (
@@ -4244,6 +4256,25 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_usage_events_user_purpose_created ON usage_events (user_id, purpose, created_at DESC);",
   );
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS action_sfx_pack_clips (
+      user_id TEXT NOT NULL,
+      owner_kind TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      kind TEXT NOT NULL,
+      variant_index INTEGER NOT NULL,
+      content_type TEXT NOT NULL,
+      audio_bytes BLOB NOT NULL,
+      prompt_seed TEXT NOT NULL,
+      pack_generation_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, owner_kind, owner_id, kind, variant_index),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_action_sfx_pack_owner ON action_sfx_pack_clips (user_id, owner_kind, owner_id);",
+  );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_developer_transcript_events_conversation_created ON developer_transcript_events (user_id, conversation_id, created_at);",
   );
@@ -4439,7 +4470,11 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories (user_id, created_at DESC);",
   );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_user_notes_user_updated ON user_notes (user_id, updated_at DESC);",
+  );
 
+  ensureUserNotesSchema(db);
   ensureImageAssetLibrarySchema(db);
   for (const row of db.prepare("SELECT id FROM users").all() as Array<{
     id: string;
