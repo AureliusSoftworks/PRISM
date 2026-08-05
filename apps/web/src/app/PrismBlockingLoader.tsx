@@ -4,12 +4,16 @@ import {
   useEffect,
   useId,
   useRef,
+  useState,
   type CSSProperties,
 } from "react";
 import { createPortal } from "react-dom";
 import { PrismOrb } from "./PrismOrb";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import styles from "./prism-blocking-loader.module.css";
+import { formatBlockingLoaderElapsed } from "./prismBlockingLoaderFormat";
+
+export { formatBlockingLoaderElapsed } from "./prismBlockingLoaderFormat";
 
 export interface PrismBlockingLoaderProps {
   open: boolean;
@@ -17,9 +21,15 @@ export interface PrismBlockingLoaderProps {
   detail: string;
   stepLabel: string;
   progress?: number | null;
+  /** ISO timestamp or epoch ms when the operation began — drives the elapsed timer. */
+  startedAt?: string | number | null;
   theme?: "light" | "dark";
   onCancel?: () => void;
   cancelLabel?: string;
+  /** Confirm dialog title when stopping a hard wait. */
+  cancelConfirmTitle?: string;
+  /** Confirm dialog body when stopping a hard wait. */
+  cancelConfirmDetail?: string;
   footer?: string;
 }
 
@@ -34,20 +44,35 @@ export function PrismBlockingLoader({
   detail,
   stepLabel,
   progress = null,
+  startedAt = null,
   theme = "dark",
   onCancel,
   cancelLabel = "Cancel operation",
+  cancelConfirmTitle = "Stop preparing?",
+  cancelConfirmDetail = "Progress so far is kept. You can continue later from where you left off.",
   footer = "Keep this window open while the light takes shape.",
 }: PrismBlockingLoaderProps): React.JSX.Element | null {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
+  const keepWaitingRef = useRef<HTMLButtonElement | null>(null);
   const titleId = useId();
   const detailId = useId();
+  const confirmTitleId = useId();
+  const confirmDetailId = useId();
+  const [confirming, setConfirming] = useState(false);
+  const [nowMs, setNowMs] = useState(() => Date.now());
   const normalized = normalizedProgress(progress);
   const progressPercent = normalized === null ? null : Math.round(normalized * 100);
+  const elapsedLabel =
+    startedAt != null && startedAt !== ""
+      ? formatBlockingLoaderElapsed(startedAt, nowMs)
+      : null;
 
   useEffect(() => {
-    if (!open) return;
+    if (!open) {
+      setConfirming(false);
+      return;
+    }
     const overlay = rootRef.current;
     if (!overlay) return;
     const previouslyFocused =
@@ -74,11 +99,33 @@ export function PrismBlockingLoader({
     };
   }, [open]);
 
+  useEffect(() => {
+    if (!open || startedAt == null || startedAt === "") return;
+    setNowMs(Date.now());
+    const timer = window.setInterval(() => setNowMs(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [open, startedAt]);
+
+  useEffect(() => {
+    if (!confirming) return;
+    keepWaitingRef.current?.focus({ preventScroll: true });
+  }, [confirming]);
+
   if (!open || typeof document === "undefined") return null;
 
   const progressStyle = {
     "--prism-blocking-progress": `${progressPercent ?? 38}%`,
   } as CSSProperties;
+
+  const requestCancel = (): void => {
+    if (!onCancel) return;
+    setConfirming(true);
+  };
+
+  const confirmCancel = (): void => {
+    setConfirming(false);
+    onCancel?.();
+  };
 
   return (
     <>
@@ -89,6 +136,7 @@ export function PrismBlockingLoader({
           className={styles.backdrop}
           data-prism-blocking-loader="true"
           data-theme={theme}
+          data-confirming={confirming ? "true" : undefined}
           role="dialog"
           aria-modal="true"
           aria-busy="true"
@@ -98,8 +146,12 @@ export function PrismBlockingLoader({
           onKeyDown={(event) => {
             if (event.key === "Escape") {
               event.preventDefault();
-              onCancel?.();
-            } else if (event.key === "Tab") {
+              if (confirming) {
+                setConfirming(false);
+              } else if (onCancel) {
+                requestCancel();
+              }
+            } else if (event.key === "Tab" && !confirming) {
               event.preventDefault();
               (cancelButtonRef.current ?? rootRef.current)?.focus({
                 preventScroll: true,
@@ -113,7 +165,7 @@ export function PrismBlockingLoader({
                 ref={cancelButtonRef}
                 type="button"
                 className={styles.cancelButton}
-                onClick={onCancel}
+                onClick={requestCancel}
                 aria-label={cancelLabel}
                 title={cancelLabel}
               >
@@ -144,8 +196,43 @@ export function PrismBlockingLoader({
               >
                 <span className={styles.progressFill} />
               </div>
+              {elapsedLabel ? (
+                <div className={styles.elapsedRow} aria-live="polite">
+                  <span>Elapsed</span>
+                  <strong>{elapsedLabel}</strong>
+                </div>
+              ) : null}
             </div>
             <small>{footer}</small>
+            {confirming && onCancel ? (
+              <div
+                className={styles.confirmPanel}
+                role="alertdialog"
+                aria-modal="true"
+                aria-labelledby={confirmTitleId}
+                aria-describedby={confirmDetailId}
+              >
+                <strong id={confirmTitleId}>{cancelConfirmTitle}</strong>
+                <p id={confirmDetailId}>{cancelConfirmDetail}</p>
+                <div className={styles.confirmActions}>
+                  <button
+                    ref={keepWaitingRef}
+                    type="button"
+                    className={styles.confirmKeep}
+                    onClick={() => setConfirming(false)}
+                  >
+                    Keep waiting
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.confirmStop}
+                    onClick={confirmCancel}
+                  >
+                    Stop
+                  </button>
+                </div>
+              </div>
+            ) : null}
           </section>
         </div>,
         document.body,

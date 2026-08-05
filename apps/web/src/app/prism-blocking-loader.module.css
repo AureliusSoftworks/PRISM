@@ -149,6 +149,89 @@
   font-weight: 800;
 }
 
+.elapsedRow {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  color: var(--loader-muted);
+  font: 650 .7rem/1.3 system-ui, sans-serif;
+}
+
+.elapsedRow strong {
+  color: var(--loader-ink);
+  font-variant-numeric: tabular-nums;
+  font-weight: 800;
+}
+
+.confirmPanel {
+  position: absolute;
+  inset: 0;
+  z-index: 3;
+  display: grid;
+  align-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: 28px 24px;
+  text-align: center;
+  background: color-mix(in srgb, var(--loader-card) 92%, transparent);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+}
+
+.confirmPanel strong {
+  max-width: 18ch;
+  color: var(--loader-ink);
+  font: 800 1.15rem/1.2 system-ui, sans-serif;
+  text-wrap: balance;
+}
+
+.confirmPanel p {
+  max-width: 36ch;
+  margin: 0;
+  color: var(--loader-muted);
+  font: 500 .82rem/1.45 system-ui, sans-serif;
+}
+
+.confirmActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 8px;
+}
+
+.confirmKeep,
+.confirmStop {
+  min-height: 40px;
+  border-radius: 999px;
+  padding: 0 16px;
+  font: 700 .78rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.confirmKeep {
+  border: 1px solid var(--loader-line);
+  color: var(--loader-ink);
+  background: color-mix(in srgb, var(--loader-card) 88%, transparent);
+}
+
+.confirmStop {
+  border: 1px solid color-mix(in srgb, var(--prism-p) 55%, var(--loader-line));
+  color: #fff;
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, var(--prism-p) 88%, #000),
+    color-mix(in srgb, var(--prism-m) 72%, #000)
+  );
+}
+
+.confirmKeep:focus-visible,
+.confirmStop:focus-visible {
+  outline: 2px solid var(--prism-s);
+  outline-offset: 3px;
+}
+
 .progressTrack {
   position: relative;
   width: 100%;

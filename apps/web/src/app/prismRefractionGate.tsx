@@ -106,6 +106,8 @@ export function PrismRefractionGateProvider(props: {
   const request = props.request ?? defaultGateRequest;
   const [warmup, setWarmup] = useState<WarmupUiState | null>(null);
   const [loader, setLoader] = useState<PrismRefractionLoaderCopy | null>(null);
+  const [loaderStartedAt, setLoaderStartedAt] = useState<string | null>(null);
+  const loaderCancelRef = useRef<(() => void) | null>(null);
   const warmupAbortRef = useRef<AbortController | null>(null);
 
   const clearWarmup = useCallback((): void => {
@@ -208,10 +210,14 @@ export function PrismRefractionGateProvider(props: {
       onCancel?: () => void;
     }): Promise<T> => {
       setLoader(args.loader);
+      setLoaderStartedAt(new Date().toISOString());
+      loaderCancelRef.current = args.onCancel ?? null;
       try {
         return await args.work();
       } finally {
         setLoader(null);
+        setLoaderStartedAt(null);
+        loaderCancelRef.current = null;
       }
     },
     [],
@@ -284,9 +290,26 @@ export function PrismRefractionGateProvider(props: {
         detail={loader?.detail ?? "Prism is shaping a fresh reading."}
         stepLabel={loader?.stepLabel ?? "Working"}
         progress={null}
+        startedAt={loaderStartedAt}
         theme={loader?.theme ?? "dark"}
         footer={
           loader?.footer ?? "Keep this window open while the light takes shape."
+        }
+        cancelLabel="Cancel refraction"
+        cancelConfirmTitle="Stop refracting?"
+        cancelConfirmDetail="This invent request will stop. You can try again whenever you are ready."
+        onCancel={
+          loader
+            ? () => {
+                loaderCancelRef.current?.();
+                warmupAbortRef.current?.abort();
+                warmupAbortRef.current = null;
+                setLoader(null);
+                setLoaderStartedAt(null);
+                loaderCancelRef.current = null;
+                clearWarmup();
+              }
+            : undefined
         }
       />
     </PrismRefractionGateContext.Provider>
