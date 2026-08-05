@@ -12,6 +12,7 @@ import type {
 } from "./botPower.js";
 import type { LlmProviderName } from "./index.js";
 import type { AutoRouteDecisionV1 } from "./modelRouting.js";
+import type { LiveBakeArtifactV1 } from "./liveBake.js";
 
 export const DEBATE_SCHEMA_VERSION = 1 as const;
 export const DEBATE_FORMAT_SCHEMA_VERSION = 1 as const;
@@ -801,6 +802,11 @@ export interface DebateSessionV1 {
   completedAt: string | null;
   /** Coffee-style end-of-session overview; present once generated after completion. */
   synopsis?: DebateSessionSynopsisV1 | null;
+  /**
+   * Spectator full-bake artifact (liveBake). Present after gallery preload;
+   * play without further LLM advances while status === ready.
+   */
+  liveBake?: LiveBakeArtifactV1 | null;
 }
 
 export interface DebateSessionSynopsisV1 {
@@ -1564,6 +1570,137 @@ const DEBATE_ACTIVE_PRESENTATION_EVENT_KINDS = new Set<DebateEventKind>([
   "jury_verdict",
   "verdict",
 ]);
+
+/**
+ * Spectator Debates keep `status: "live"` (or paused) after the floor finishes
+ * until the player has fully watched the closing. Pause, leave, and return all
+ * stay on the live recess path until this seal lands.
+ */
+export function debateSessionAwaitsPresentationSeal(
+  session: Pick<
+    DebateSessionV1,
+    "playerRole" | "stepKey" | "status" | "completedAt"
+  >,
+): boolean {
+  return (
+    session.playerRole === "spectator" &&
+    session.stepKey === "completed" &&
+    session.completedAt === null &&
+    (session.status === "live" || session.status === "paused")
+  );
+}
+
+/**
+ * Baked Spectator Debates hold paused with no interrupted line until the player
+ * presses Start, so a long synthesize cannot begin while they are away.
+ */
+export function debateSpectatorAwaitingFirstWatch(
+  session: Pick<
+    DebateSessionV1,
+    | "playerRole"
+    | "status"
+    | "pausedPresentationEventId"
+    | "events"
+    | "stepKey"
+    | "completedAt"
+  >,
+): boolean {
+  return (
+    debateSessionAwaitsPresentationSeal(session) &&
+    session.status === "paused" &&
+    !session.pausedPresentationEventId &&
+    session.events.length > 0
+  );
+}
+
+/**
+ * True once the Debate floor has produced its closing beat (or already sealed).
+ * Spectator sessions may still be watchable after this becomes true.
+ */
+export function debateSessionFloorIsSettled(
+  session: Pick<DebateSessionV1, "stepKey" | "status">,
+): boolean {
+  return (
+    session.stepKey === "completed" ||
+    session.status === "completed" ||
+    session.status === "cancelled" ||
+    session.status === "failed"
+  );
+}
+
+const DEBATE_RECESS_RESUME_FILLERS = {
+  free_for_all: [
+    "As I was saying…",
+    "Before the break, I wanted to say…",
+    "Now that we are back from the recess…",
+    "Alright — picking that back up…",
+  ],
+  heated: [
+    "As I was saying…",
+    "Before we got interrupted, I was saying…",
+    "Now that we are back from the recess…",
+    "Back to it — as I was saying…",
+  ],
+  plainspoken: [
+    "As I was saying…",
+    "Before the intermission, I wanted to say…",
+    "Now that we are back from the recess…",
+    "To continue where I left off…",
+  ],
+  structured: [
+    "As I was saying…",
+    "Before the recess, I wished to say…",
+    "Now that we are back from the recess…",
+    "Returning to the held point…",
+  ],
+  parliamentary: [
+    "As I was saying…",
+    "Before the chamber stood in recess, I wished to say…",
+    "Now that we are back from the recess…",
+    "With the floor restored, as I was saying…",
+  ],
+} as const satisfies Record<DebateFormalityId, readonly string[]>;
+
+function debateRecessResumeFillerIndex(seed: string, length: number): number {
+  let hash = 0;
+  for (let index = 0; index < seed.length; index += 1) {
+    hash = (hash * 31 + seed.charCodeAt(index)) >>> 0;
+  }
+  return length === 0 ? 0 : hash % length;
+}
+
+/**
+ * Presentation-only lead-in when a held speaker resumes after recess.
+ * Does not rewrite the saved Proceedings line.
+ */
+export function debateRecessResumeFiller(args: {
+  formality: DebateFormalityId;
+  sessionId: string;
+  eventId: string;
+  revision?: number;
+}): string {
+  const formality = normalizeDebateFormalityId(args.formality);
+  const pool = DEBATE_RECESS_RESUME_FILLERS[formality];
+  const index = debateRecessResumeFillerIndex(
+    `${args.sessionId}:${args.eventId}:${args.revision ?? 0}:recess-filler-v1`,
+    pool.length,
+  );
+  return pool[index]!;
+}
+
+/**
+ * Prepend a recess filler to spoken/caption content for a single replay pass.
+ */
+export function debateRecessResumePresentationContent(
+  content: string,
+  filler: string,
+): string {
+  const body = content.trim();
+  const lead = filler.trim();
+  if (!lead) return body;
+  if (!body) return lead;
+  return `${lead} ${body}`;
+}
 
 /**
  * Deterministic active runtime for a saved Debate record. This mirrors the

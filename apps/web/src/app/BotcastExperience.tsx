@@ -127,6 +127,7 @@ import {
   type BotcastStudioLayout,
   type BotcastStudioLayoutItem,
   type BotcastVoiceLevelsByBotId,
+  type LiveBakeArtifactV1,
   type BotIdentityMirrorStateV1,
   type BotIdentityShapeshiftStateV1,
   type BotPowerAvatarScaleMode,
@@ -173,11 +174,16 @@ import {
   botcastSpeechRevealVisibleText,
   finishBotcastSpeechReveal,
   prepareBotcastSpeechReveal,
+  applyBotcastSpeechRevealSegmentTiming,
   startBotcastSpeechReveal,
   updateBotcastSpeechReveal,
   type BotcastSpeechRevealState,
 } from "./botcastSpeechReveal";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import {
+  liveBakeStatusCopy,
+  liveBakeSurfaceTitle,
+} from "./liveBakeLoading";
 import { AssetRail } from "./AssetLibrary";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import { PrismRefractTarget } from "./prismRefract";
@@ -1978,6 +1984,11 @@ export function BotcastExperience({
   const [episodeModelDraft, setEpisodeModelDraft] = useState("");
   const [episodeDurationDraft, setEpisodeDurationDraft] =
     useState<BotcastSessionDurationMinutes | null>(null);
+  /** live = Produce/Interview; watch = full-bake spectator show. */
+  const [playbackModeDraft, setPlaybackModeDraft] = useState<"live" | "watch">(
+    "live",
+  );
+  const [watchBakeLabel, setWatchBakeLabel] = useState<string | null>(null);
   const [episodeSetupLoadingId, setEpisodeSetupLoadingId] = useState<
     string | null
   >(null);
@@ -5266,6 +5277,7 @@ export function BotcastExperience({
 
   const startEpisode = async (): Promise<void> => {
     const producerGuest = guestDraftId === BOTCAST_PRODUCER_GUEST_ID;
+    const watchMode = playbackModeDraft === "watch" && !producerGuest;
     const producerGuestWantsSurprise =
       producerGuest && !producerGuestContextDraft.trim();
     if (
@@ -5429,6 +5441,7 @@ export function BotcastExperience({
                   topic: topicDraft.trim(),
                   producerBrief: resolvedProducerBrief,
                 }),
+            ...(watchMode ? { playbackMode: "watch" } : {}),
             preferredProvider: episodeProvider,
             responseMode,
             modelOverride: selectedModelOption?.id ?? null,
@@ -5495,6 +5508,54 @@ export function BotcastExperience({
       }
       if (!signalModelWarmupVisibleRef.current) {
         assignSignalModelWarmup(null);
+      }
+      if (watchMode) {
+        setWatchBakeLabel(liveBakeSurfaceTitle("signal"));
+        setEpisodePreRoll((current) =>
+          current
+            ? { ...current, phase: "preparing", topic: "Baking the broadcast" }
+            : current,
+        );
+        const baked = await request<{
+          episode: BotcastEpisode;
+          liveBake: LiveBakeArtifactV1;
+        }>(
+          `/api/botcast/episodes/${encodeURIComponent(response.episode.id)}/bake`,
+          {
+            method: "POST",
+            signal: controller.signal,
+            body: JSON.stringify({ theme }),
+          },
+        );
+        if (!episodeOperationIsCurrent(controller, runId)) return;
+        setWatchBakeLabel(liveBakeStatusCopy(baked.liveBake));
+        latestCaptureEpisode = baked.episode;
+        openingMessageReceived = baked.episode.messages.length > 0;
+        setTopicDraft("");
+        setProducerBriefDraft("");
+        setProducerGuestContextDraft("");
+        setEpisodeModelDraft("");
+        setAskAboutDraft("");
+        void loadEpisodes(selectedShow.id).catch(() => undefined);
+        setEpisode(baked.episode);
+        setAutoRun(false);
+        await releaseSignalModelWarmup(baked.episode.id);
+        await Promise.all([introPlayback.finished, visualMinimum]);
+        if (!episodeOperationIsCurrent(controller, runId)) return;
+        setEpisodePreRoll(null);
+        setWatchBakeLabel(null);
+        for (const message of baked.episode.messages) {
+          if (!episodeOperationIsCurrent(controller, runId)) return;
+          prepareEpisodeMessage(message, baked.episode);
+          await playPreparedEpisodeMessage(
+            message,
+            baked.episode,
+            controller,
+            runId,
+            true,
+          );
+        }
+        return;
       }
       let opening: BotcastEpisodeAdvanceResponse | null = null;
       for (
@@ -6256,7 +6317,31 @@ export function BotcastExperience({
               text: message.content,
               durationMs: resolvedDurationMs,
               alignment,
+              // Chunked Kokoro has no clip alignment — hold for segment timings
+              // instead of inventing a full-line weight clock that races ahead.
+              segmentClock: !alignment,
+              segmentTimings: alignment ? null : [],
             }),
+          });
+        },
+        onSegmentTiming: (timing) => {
+          if (
+            !voiceAttemptActive ||
+            activeSpeechMessageIdRef.current !== message.id ||
+            !episodeOperationIsCurrent(controller, runId)
+          ) {
+            return;
+          }
+          setLiveSpeech((current) => {
+            if (!current || current.messageId !== message.id) return current;
+            return {
+              ...current,
+              reveal: applyBotcastSpeechRevealSegmentTiming(
+                current.reveal,
+                timing,
+                Math.max(current.reveal.durationMs, timing.endMs),
+              ),
+            };
           });
         },
         onProgress: (elapsedMs, durationMs) => {
@@ -6293,6 +6378,8 @@ export function BotcastExperience({
               ? startBotcastSpeechReveal({
                   text: message.content,
                   durationMs,
+                  segmentClock: true,
+                  segmentTimings: [],
                 })
               : current.reveal;
             return {
@@ -10767,10 +10854,58 @@ export function BotcastExperience({
                     data-selected={producerGuestSelected ? "true" : undefined}
                     aria-pressed={producerGuestSelected}
                     disabled={busy || Boolean(bookingSuggestionBusy)}
-                    onClick={() => setGuestDraftId(BOTCAST_PRODUCER_GUEST_ID)}
+                    onClick={() => {
+                      setPlaybackModeDraft("live");
+                      setGuestDraftId(BOTCAST_PRODUCER_GUEST_ID);
+                    }}
                   >
                     <strong>Me</strong>
-                    <span>Go on as the guest</span>
+                    <span>Get interviewed</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.producerGuestPickerOption}
+                    data-selected={
+                      !producerGuestSelected && playbackModeDraft === "live"
+                        ? "true"
+                        : undefined
+                    }
+                    aria-pressed={
+                      !producerGuestSelected && playbackModeDraft === "live"
+                    }
+                    disabled={busy || Boolean(bookingSuggestionBusy)}
+                    onClick={() => {
+                      setPlaybackModeDraft("live");
+                      if (guestDraftId === BOTCAST_PRODUCER_GUEST_ID) {
+                        setGuestDraftId(initialCast[1] ?? "");
+                      }
+                    }}
+                  >
+                    <strong>Produce</strong>
+                    <span>Direct the show live</span>
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.producerGuestPickerOption}
+                    data-selected={
+                      !producerGuestSelected && playbackModeDraft === "watch"
+                        ? "true"
+                        : undefined
+                    }
+                    aria-pressed={
+                      !producerGuestSelected && playbackModeDraft === "watch"
+                    }
+                    disabled={busy || Boolean(bookingSuggestionBusy)}
+                    data-tutorial-target="botcast-watch-show"
+                    onClick={() => {
+                      setPlaybackModeDraft("watch");
+                      if (guestDraftId === BOTCAST_PRODUCER_GUEST_ID) {
+                        setGuestDraftId(initialCast[1] ?? "");
+                      }
+                    }}
+                  >
+                    <strong>Watch</strong>
+                    <span>Bake ahead, then sit back</span>
                   </button>
                   {renderSignalBotPicker({
                     bots: guestOptions,
@@ -10779,7 +10914,12 @@ export function BotcastExperience({
                     onSearchChange: setGuestPickerSearch,
                     groupId: guestPickerGroupId,
                     onGroupChange: setGuestPickerGroupId,
-                    onSelect: setGuestDraftId,
+                    onSelect: (id) => {
+                      setGuestDraftId(id);
+                      if (id === BOTCAST_PRODUCER_GUEST_ID) {
+                        setPlaybackModeDraft("live");
+                      }
+                    },
                     ariaLabel: "Choose a Signal guest",
                     disabled: busy || Boolean(bookingSuggestionBusy),
                   })}
@@ -11032,7 +11172,9 @@ export function BotcastExperience({
               (!producerGuestSelected && !topicDraft.trim())
             }
           >
-            Begin episode
+            {playbackModeDraft === "watch" && !producerGuestSelected
+              ? "Watch show"
+              : "Begin episode"}
           </button>
         </div>
       </div>

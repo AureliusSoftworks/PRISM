@@ -75270,6 +75270,159 @@ a.settingsCreditItem:focus-visible {
   background: rgba(255, 255, 255, 0.035);
 }
 
+.coffeeExperienceModePicker {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 4px;
+  padding: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.coffeeExperienceModePicker button {
+  border: 0;
+  border-radius: 6px;
+  padding: 7px 9px;
+  color: rgba(255, 255, 255, 0.58);
+  background: transparent;
+  font-size: 0.7rem;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.coffeeExperienceModePicker button[data-active="true"] {
+  color: #fff;
+  background: rgba(255, 255, 255, 0.13);
+}
+
+.coffeeExperienceModeNote {
+  color: rgba(255, 255, 255, 0.56);
+  font-size: 0.68rem;
+  line-height: 1.3;
+}
+
+.coffeeServeThanksChip {
+  position: absolute;
+  top: -10px;
+  left: 50%;
+  z-index: 10;
+  width: max-content;
+  max-width: min(180px, calc(100vw - 24px));
+  padding: 5px 9px;
+  border: 1px solid color-mix(in srgb, var(--coffee-bot-color) 36%, var(--line));
+  border-radius: 999px;
+  background: color-mix(
+    in srgb,
+    var(--bg-elevated) 88%,
+    var(--coffee-bot-color) 10%
+  );
+  color: var(--fg);
+  font-size: clamp(0.68rem, 0.74vw, 0.78rem);
+  font-style: italic;
+  font-weight: 600;
+  line-height: 1.25;
+  text-align: center;
+  pointer-events: none;
+  transform: translate(-50%, -100%);
+}
+
+.coffeeJoinSipControl {
+  position: absolute;
+  left: clamp(18px, 2.2vw, 30px);
+  bottom: calc(100% + clamp(6px, 0.7vw, 10px));
+  z-index: 18;
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  pointer-events: auto;
+}
+
+.coffeeJoinSipButton {
+  min-height: 34px;
+  border: 1px solid rgba(255, 255, 255, 0.18);
+  border-radius: 999px;
+  padding: 0 14px;
+  color: rgba(255, 255, 255, 0.9);
+  background: rgba(8, 8, 8, 0.82);
+  font-size: 0.78rem;
+  font-weight: 720;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.coffeeJoinSipButton:hover:not(:disabled),
+.coffeeJoinSipButton:focus-visible:not(:disabled) {
+  background: rgba(36, 25, 25, 0.94);
+  border-color: rgba(255, 255, 255, 0.32);
+}
+
+.coffeeJoinSipButton:disabled {
+  opacity: 0.55;
+  cursor: default;
+}
+
+.coffeeJoinSipButton[data-sipping="true"] {
+  opacity: 0.82;
+}
+
+.coffeeServePotRail {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 12px;
+  width: min(100%, 320px);
+  margin: 0 auto;
+  padding: 0 18px calc(18px + env(safe-area-inset-bottom, 0px));
+  pointer-events: none;
+}
+
+.coffeeServePotRail .coffeePotComposerDock {
+  position: relative;
+  left: auto;
+  bottom: auto;
+  pointer-events: auto;
+}
+
+.coffeeServePotRail .coffeePotTray {
+  width: clamp(60px, 7.2vw, 92px);
+  height: clamp(52px, 6vw, 78px);
+}
+
+.coffeeServePotRailHint {
+  color: rgba(255, 255, 255, 0.62);
+  font-size: 0.78rem;
+  line-height: 1.35;
+  letter-spacing: 0.01em;
+  text-align: center;
+  max-width: 14rem;
+  pointer-events: none;
+}
+
+/* Serve mode: give mugs a little more breathing room off the seat glow. */
+.coffeeStage[data-experience-mode="serve"] .coffeeCup {
+  --coffee-cup-side-offset: clamp(-28px, -2.4vw, -18px);
+}
+
+.coffeeStage[data-experience-mode="serve"]
+  .coffeeSeat[data-seat-count="4"]:is(
+    [data-layout-seat="2"],
+    [data-layout-seat="3"]
+  )
+  .coffeeCup {
+  bottom: clamp(18px, 2.2vw, 28px);
+}
+
+.coffeeExperienceModePicker button:disabled,
+.coffeeDurationModePicker button:disabled {
+  opacity: 0.45;
+  cursor: default;
+}
+
 .coffeeDurationModePicker button {
   border: 0;
   border-radius: 6px;
@@ -78407,6 +78560,25 @@ a.settingsCreditItem:focus-visible {
 .themeLight.coffeeShell .coffeeDurationModePicker button[data-active="true"] {
   color: var(--fg);
   background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.themeLight.coffeeShell .coffeeExperienceModePicker {
+  border-color: var(--coffee-line);
+  background: color-mix(in srgb, var(--fg) 4%, transparent);
+}
+
+.themeLight.coffeeShell .coffeeExperienceModePicker button {
+  color: var(--fg-muted);
+}
+
+.themeLight.coffeeShell .coffeeExperienceModePicker button[data-active="true"] {
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 12%, transparent);
+}
+
+.themeLight.coffeeShell .coffeeExperienceModeNote,
+.themeLight.coffeeShell .coffeeServePotRailHint {
+  color: var(--fg-muted);
 }
 
 .themeLight.coffeeShell .coffeeDurationAutoNote {

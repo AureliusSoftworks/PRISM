@@ -170,6 +170,7 @@ import {
   saveSynthesizedCoffeeGroupName,
   shouldGenerateCoffeeGroupNameFromInput,
   topOffCoffeeCupForBot,
+  sipCoffeeJoinPlayerCup,
   undoLatestCoffeeDebugMessage,
   updateCoffeeGroup,
   updateCoffeePreset,
@@ -219,6 +220,10 @@ import {
   type DebateAiRuntime,
   type DebateAdvancePreparation,
 } from "./debate.ts";
+import {
+  bakeBotcastWatchEpisode,
+  bakeDebateSpectatorSession,
+} from "./live-bake.ts";
 import {
   TurnPreparationError,
   turnPreparationRegistry,
@@ -14642,6 +14647,52 @@ function buildRoutes(): RouteDefinition[] {
         session: debateSessionForPlayer(session),
       });
     }),
+    route("POST", "/api/debates/:id/bake", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "debate",
+        ctx.params.id,
+        "Spectator bake replaced the prepared turn.",
+      );
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      if (frozen.playerRole !== "spectator") {
+        throw new HttpError(
+          409,
+          "Full bake is only available for Spectator Debates.",
+        );
+      }
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
+      const result = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          bakeDebateSpectatorSession({
+            db,
+            userId,
+            sessionId: ctx.params.id,
+            runtime,
+          }),
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(result.session),
+        liveBake: result.artifact,
+      });
+    }),
     route("POST", "/api/debates/:id/interject", async (ctx) => {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "Player speech interrupted the prepared turn.");
@@ -17568,6 +17619,74 @@ function buildRoutes(): RouteDefinition[] {
         ...projectBotcastAdvanceResponseForAudienceV1(result),
       });
     }),
+    route("POST", "/api/botcast/episodes/:id/bake", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "signal",
+        ctx.params.id,
+        "Watch bake replaced the prepared turn.",
+      );
+      const user = getUserRow(userId);
+      const frozenEpisode = getBotcastEpisode(db, userId, ctx.params.id);
+      if (frozenEpisode.playbackMode !== "watch") {
+        throw new HttpError(
+          409,
+          "Full bake is only available for Watch a show episodes.",
+        );
+      }
+      const runtime = await contextualSignalRuntimeForEpisode({
+        userId,
+        user,
+        episode: frozenEpisode,
+      });
+      const bakeAbort = new AbortController();
+      const onBakeClientClose = () => {
+        if (!ctx.res.writableEnded) bakeAbort.abort();
+      };
+      ctx.req.once("close", onBakeClientClose);
+      ctx.req.once("aborted", onBakeClientClose);
+      ctx.res.once("close", onBakeClientClose);
+      try {
+        const result = await bakeBotcastWatchEpisode({
+          db,
+          userId,
+          episodeId: ctx.params.id,
+          generation: {
+            preferredProvider: runtime.provider,
+            responseMode: runtime.responseMode,
+            openAiApiKey: runtime.openAiApiKey,
+            anthropicApiKey: runtime.anthropicApiKey,
+            secondaryOllamaHost: user.secondary_ollama_host,
+            contextualModel: runtime.model,
+            contextualReasoningEffort: runtime.reasoningEffort,
+            autoRouteDecision: runtime.autoRoute,
+            autoFallbackChain: runtime.autoFallbackChain,
+            experimentalAllModelEffortEnabled:
+              user.experimental_all_model_effort_enabled === 1,
+            signal: bakeAbort.signal,
+            providerFactory: providerFactoryOverride,
+          },
+          signal: bakeAbort.signal,
+        });
+        if (bakeAbort.signal.aborted) return;
+        json(ctx.res, 200, {
+          ok: true,
+          episode: result.episode,
+          liveBake: result.artifact,
+        });
+      } catch (error) {
+        if (bakeAbort.signal.aborted) return;
+        if (error instanceof SignalOnlineTurnError) {
+          throw new HttpError(signalOnlineTurnHttpStatus(error), error.message);
+        }
+        throw error;
+      } finally {
+        ctx.req.off("close", onBakeClientClose);
+        ctx.req.off("aborted", onBakeClientClose);
+        ctx.res.off("close", onBakeClientClose);
+      }
+    }),
     // Coffee mode (timed live sessions for 3-5 reactive bots). Lives on its own
     // endpoint rather than inside /api/chat so the lighter coffee
     // pipeline (router LLM + per-bot reply, no cross-thread memory) can
@@ -17778,6 +17897,7 @@ function buildRoutes(): RouteDefinition[] {
               forceAttendance: body.forceAttendance,
               initialPoll,
               initialTeams,
+              experienceMode: body.experienceMode,
             },
             {
               prismDefaultLlmModel: user.prism_default_llm_model,
@@ -17830,9 +17950,11 @@ function buildRoutes(): RouteDefinition[] {
             {
               groupBotIds,
               coffeeSettings: body.coffeeSettings,
+              durationMinutes: body.durationMinutes,
               initialTopic: body.initialTopic,
               initialPoll,
               initialTeams,
+              experienceMode: body.experienceMode,
             },
             {
               prismDefaultLlmModel: user.prism_default_llm_model,
@@ -17900,6 +18022,14 @@ function buildRoutes(): RouteDefinition[] {
         410,
         "Coffee service is retired. Carry the pot to top off seated bots.",
       );
+    }),
+    route("POST", "/api/coffee/sessions/:id/join-cup/sip", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const conversation = sipCoffeeJoinPlayerCup(db, userId, ctx.params.id);
+      json(ctx.res, 200, {
+        ok: true,
+        conversation,
+      });
     }),
     route(
       "POST",

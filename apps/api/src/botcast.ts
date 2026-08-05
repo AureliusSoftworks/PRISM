@@ -738,6 +738,7 @@ type BotcastEpisodeRow = {
   runtime_ms: number | null;
   model_warmup_hold_duration_ms: number;
   model_warmup_hold_started_at: string | null;
+  playback_mode?: "live" | "watch" | null;
   persona_reviewer_bot_id: string | null;
   persona_reviewer_name: string | null;
   persona_rating: number | null;
@@ -2654,6 +2655,7 @@ function mapEpisodeSummary(row: BotcastEpisodeRow): BotcastEpisodeSummary {
     hostBotId: row.host_bot_id,
     guestBotId: row.guest_bot_id,
     guestKind: row.guest_kind === "producer" ? "producer" : "bot",
+    playbackMode: row.playback_mode === "watch" ? "watch" : "live",
     guestName:
       cleanText(row.guest_name, "", 120) ||
       (row.guest_kind === "producer" ? "Producer" : "Guest"),
@@ -7426,6 +7428,11 @@ export function createBotcastEpisode(
   const host = loadBotProfile(db, userId, show.hostBotId);
   const guestKind: BotcastGuestKind =
     input.guestKind === "producer" ? "producer" : "bot";
+  const playbackMode =
+    input.playbackMode === "watch" && guestKind === "bot" ? "watch" : "live";
+  if (input.playbackMode === "watch" && guestKind === "producer") {
+    throw new Error("Watch a show requires a bot guest.");
+  }
   const guestContext = cleanText(input.guestContext, "", BOTCAST_TEXT_MAX);
   const guest =
     guestKind === "producer"
@@ -7495,9 +7502,9 @@ export function createBotcastEpisode(
       `INSERT INTO botcast_episodes
         (id, user_id, show_id, host_bot_id, guest_bot_id, guest_kind, guest_name,
          guest_context, title, topic,
-         producer_brief, provider, model, response_mode, duration_minutes, status, segment,
+         producer_brief, provider, model, response_mode, duration_minutes, playback_mode, status, segment,
          started_at, created_at, updated_at)
-       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', 'opening', ?, ?, ?)`,
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 'live', 'opening', ?, ?, ?)`,
     ).run(
       id,
       userId,
@@ -7514,6 +7521,7 @@ export function createBotcastEpisode(
       model,
       responseMode,
       durationMinutes,
+      playbackMode,
       now,
       now,
       now,
@@ -11696,6 +11704,20 @@ export async function advanceBotcastEpisode(
     throw new Error(
       "Signal guest thinking time requires a Producer guest answer.",
     );
+  }
+  if (episode.playbackMode === "watch") {
+    if (
+      input.cue ||
+      input.cueDelivery ||
+      input.hostRedirect ||
+      input.guestInterruption ||
+      input.guestMessage !== undefined ||
+      input.producerGuestHostInterruption
+    ) {
+      throw new Error(
+        "Watch a show episodes play without producer direction.",
+      );
+    }
   }
   if (episode.guestKind === "producer") {
     if (input.cue || input.cueDelivery || input.hostRedirect || input.guestInterruption) {

@@ -440,6 +440,15 @@ describe("English voice post processing", () => {
     const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
     const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
     let playCount = 0;
+    const heardSpeechSegmentsAtPlaying: number[] = [];
+    const segmentTimings: Array<{
+      kind?: string;
+      startMs: number;
+      endMs: number;
+      heard: boolean;
+      sourceStart?: number;
+      sourceEnd?: number;
+    }> = [];
     class FakeAudio {
       duration = Number.NaN;
       currentTime = 0;
@@ -460,7 +469,16 @@ describe("English voice post processing", () => {
         playCount += 1;
         setTimeout(() => {
           this.listeners.get("playing")?.();
-          this.listeners.get("ended")?.();
+          heardSpeechSegmentsAtPlaying.push(
+            segmentTimings.filter(
+              (segment) => segment.kind === "speech" && segment.heard,
+            ).length,
+          );
+          // Keep the clip "playing" briefly so the test can prove segment
+          // timing published at start rather than only after ended.
+          setTimeout(() => {
+            this.listeners.get("ended")?.();
+          }, 15);
         }, 0);
         return Promise.resolve();
       }
@@ -471,19 +489,31 @@ describe("English voice post processing", () => {
     });
     Object.defineProperty(globalThis, "window", {
       configurable: true,
-      value: { clearInterval, clearTimeout, setInterval, setTimeout },
+      value: {
+        clearInterval,
+        clearTimeout,
+        setInterval,
+        setTimeout,
+        requestAnimationFrame: (callback: FrameRequestCallback) =>
+          setTimeout(() => callback(0), 0),
+        cancelAnimationFrame: (id: number) => clearTimeout(id),
+      },
     });
     const streamBody = [
       {
         index: 0,
         characterCount: 6,
         text: "Hello.",
+        sourceStart: 0,
+        sourceEnd: 6,
         audioBase64: Buffer.from([1, 2, 3]).toString("base64"),
       },
       {
         index: 1,
         characterCount: 7,
         text: "Again.",
+        sourceStart: 6,
+        sourceEnd: 13,
         audioBase64: Buffer.from([4, 5, 6]).toString("base64"),
       },
     ]
@@ -499,11 +529,6 @@ describe("English voice post processing", () => {
     });
     let startCount = 0;
     let endCount = 0;
-    const segmentTimings: Array<{
-      startMs: number;
-      endMs: number;
-      heard: boolean;
-    }> = [];
     try {
       await enqueueChunkedEnglishVoice(
         response,
@@ -529,13 +554,22 @@ describe("English voice post processing", () => {
       assert.equal(playCount, 2);
       assert.equal(startCount, 1);
       assert.equal(endCount, 1);
+      // Forced clause pauses are off — chunks abut with speech segments only.
       assert.equal(segmentTimings.length, 2);
-      assert.ok(segmentTimings.every((timing) => timing.heard));
-      // Strong punctuation after the first chunk inserts a clause pause before
-      // the next speech segment, even when decorative breaths are disabled.
+      assert.equal(segmentTimings[0]?.heard, true);
+      assert.equal(segmentTimings[1]?.heard, true);
+      assert.equal(segmentTimings[0]?.kind, "speech");
+      assert.equal(segmentTimings[1]?.kind, "speech");
       assert.ok(
-        (segmentTimings[1]?.startMs ?? 0) >=
-          (segmentTimings[0]?.endMs ?? 0) + 250,
+        (heardSpeechSegmentsAtPlaying[0] ?? 0) >= 1,
+        "first speech segment must publish when audio starts, not after it ends",
+      );
+      assert.ok(
+        (heardSpeechSegmentsAtPlaying[1] ?? 0) >= 2,
+        "second speech segment must publish when its audio starts",
+      );
+      assert.ok(
+        (segmentTimings[1]?.startMs ?? 0) >= (segmentTimings[0]?.endMs ?? 0),
       );
     } finally {
       stopEnglishVoice();

@@ -234,6 +234,7 @@ import {
   readDirectionalIrritationIntensity,
   socialSilenceMessageIsMarkedV1,
   autoFallbackResolvedChain,
+  isCoffeeExperienceMode,
   normalizeCoffeeSessionSettings,
   parseStoredAssistantToolPayload,
   parseStoredBotAvatarDetailsV1,
@@ -5656,6 +5657,7 @@ export interface CoffeeSessionCreateInput {
   initialPoll?: CoffeePollCreateInput;
   initialTeams?: CoffeeTeamCreateInput;
   starterTopics?: string[];
+  experienceMode?: unknown;
 }
 
 export interface CoffeeGroupCreateInput {
@@ -5693,6 +5695,7 @@ export interface CoffeeGroupSessionCreateInput {
   forceAttendance?: unknown;
   initialPoll?: CoffeePollCreateInput;
   initialTeams?: CoffeeTeamCreateInput;
+  experienceMode?: unknown;
 }
 
 export interface CoffeePollCreateInput {
@@ -15565,18 +15568,44 @@ export async function createCoffeeConversation(
     group,
     socialByBotId: relationshipSeededSocialByBotId,
   });
-  const reusableSessionSettings = coffeeReusableSessionSettings(
-    normalizeCoffeeSessionSettings(input.coffeeSettings),
-  );
+  const rawSessionSettings = normalizeCoffeeSessionSettings(input.coffeeSettings);
+  const experienceMode = isCoffeeExperienceMode(input.experienceMode)
+    ? input.experienceMode
+    : rawSessionSettings.experienceMode;
+  const reusableSessionSettings = coffeeReusableSessionSettings(rawSessionSettings);
   // Custom service is retired. Keep the legacy schema readable, but do not
   // activate it for new or restarted Coffee sessions.
-  const { barRitual: _retiredBarRitual, ...sessionSettings } =
+  const { barRitual: _retiredBarRitual, ...baseSessionSettings } =
     reusableSessionSettings;
-  const coffeeSettingsJson = JSON.stringify(sessionSettings);
-  const durationMinutes =
+  let durationMinutes =
     input.durationMinutes === undefined || input.durationMinutes === null
       ? null
       : normalizeCoffeeSessionDurationMinutes(input.durationMinutes);
+  let sessionSettings: CoffeeSessionSettings = { ...baseSessionSettings };
+  if (experienceMode === "join") {
+    // Join stays open-ended (Auto) so empty-cup group wrap can end the table.
+    durationMinutes = null;
+    sessionSettings = {
+      ...sessionSettings,
+      experienceMode: "join",
+      joinPlayerCup: {
+        fillId: randomId(8),
+        filledAt: now,
+        topOffCount: 0,
+        sipCount: 0,
+      },
+    };
+  } else if (experienceMode === "serve") {
+    // Serve is hospitality-only and always timed — never Auto.
+    if (durationMinutes === null) {
+      durationMinutes = DEFAULT_COFFEE_SESSION_DURATION_MINUTES;
+    }
+    sessionSettings = {
+      ...sessionSettings,
+      experienceMode: "serve",
+    };
+  }
+  const coffeeSettingsJson = JSON.stringify(sessionSettings);
   const coffeeAbsentBotIds = normalizeCoffeeExcludedBotIds(input.coffeeAbsentBotIds);
   const initialTopic = normalizeCoffeeConversationTopic(input.initialTopic);
   let presetLabel: string | null = null;
@@ -15986,7 +16015,11 @@ export async function createCoffeeConversationFromGroup(
     group.coffeeSeatBotIds,
     input.excludedBotIds
   );
-  const moodAttendance = input.forceAttendance === true
+  const experienceMode = isCoffeeExperienceMode(input.experienceMode)
+    ? input.experienceMode
+    : undefined;
+  const forceAttendance = input.forceAttendance === true || experienceMode === "serve";
+  const moodAttendance = forceAttendance
     ? {
         ...exclusionAttendance,
         moodAbsentBotIds: [],
@@ -16017,6 +16050,7 @@ export async function createCoffeeConversationFromGroup(
       initialPoll: input.initialPoll,
       initialTeams: input.initialTeams,
       starterTopics: canonicalStarterTopics,
+      experienceMode,
     },
     { ...llm, autoPickStarterTopic }
   );
@@ -16028,12 +16062,14 @@ export async function createCoffeeConversationFromGroup(
     "session_created",
     {
       conversationId: result.conversation.id,
-      durationMinutes,
+      durationMinutes:
+        result.conversation.coffeeSessionDurationMinutes ?? durationMinutes,
       presetId,
       coffeeTopic: result.conversation.coffeeTopic ?? null,
       attendingBotIds: result.conversation.botGroupIds ?? [],
       absentBotIds: moodAttendance.absentBotIds,
       moodAbsentBotIds: moodAttendance.moodAbsentBotIds,
+      experienceMode: experienceMode ?? null,
     },
     now
   );
@@ -19681,6 +19717,36 @@ export function respondCoffeeWaiterOffer(
   }, now);
 }
 
+const COFFEE_SERVE_THANKS_LINES = [
+  "Thanks for the top-off.",
+  "Appreciate the pour.",
+  "That hits the spot — thank you.",
+  "Much obliged.",
+] as const;
+
+/** Pick a short Serve-mode thanks line seeded by bot + pour time. */
+function coffeeServeThanksText(botId: string, at: string): string {
+  let hash = 2166136261;
+  const seed = `${botId}:${at}`;
+  for (let i = 0; i < seed.length; i += 1) {
+    hash ^= seed.charCodeAt(i);
+    hash = Math.imul(hash, 16777619);
+  }
+  return COFFEE_SERVE_THANKS_LINES[(hash >>> 0) % COFFEE_SERVE_THANKS_LINES.length]!;
+}
+
+function persistCoffeeSessionSettingsState(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  settings: CoffeeSessionSettings,
+  now: string,
+): void {
+  db.prepare(
+    `UPDATE conversations SET coffee_settings = ?, updated_at = ? WHERE id = ? AND user_id = ?`,
+  ).run(JSON.stringify(settings), now, conversationId, userId);
+}
+
 export function topOffCoffeeCupForBot(
   db: DatabaseSync,
   userId: string,
@@ -19695,6 +19761,10 @@ export function topOffCoffeeCupForBot(
   }
   if (!row.coffee_topic?.trim()) {
     throw new Error("Coffee session is not active yet.");
+  }
+  const sessionSettings = parseStoredCoffeeSessionSettings(row.coffee_settings);
+  if (sessionSettings.experienceMode === "join") {
+    throw new Error("Pouring is unavailable while joining for coffee.");
   }
   const coffeePowerPlan = resolveCoffeePowersForSession(db, userId, row.id);
   if (coffeePowerVesselMode(coffeePowerPlan, botId) === "none") {
@@ -19731,19 +19801,81 @@ export function topOffCoffeeCupForBot(
     },
   });
 
-  const socialByBotId = initializeCoffeeSocialState(
-    group,
-    loadCoffeeBotSocialState(db, userId, row.id, groupIds)
-  );
-  const currentSocial = socialByBotId[botId] ?? DEFAULT_COFFEE_SOCIAL;
-  const nextSocial = applyCoffeeTopOffSocialBoost(currentSocial);
-  upsertCoffeeBotSocialState(
-    db,
-    userId,
-    row.id,
-    { [botId]: nextSocial },
-    now
-  );
+  const isServeMode = sessionSettings.experienceMode === "serve";
+  if (isServeMode) {
+    // Serve pours refill cups without mood sunset boosts — thanks instead.
+    const nextSettings: CoffeeSessionSettings = {
+      ...sessionSettings,
+      lastServeThanks: {
+        botId,
+        text: coffeeServeThanksText(botId, now),
+        at: now,
+      },
+    };
+    persistCoffeeSessionSettingsState(db, userId, row.id, nextSettings, now);
+  } else {
+    const socialByBotId = initializeCoffeeSocialState(
+      group,
+      loadCoffeeBotSocialState(db, userId, row.id, groupIds)
+    );
+    const currentSocial = socialByBotId[botId] ?? DEFAULT_COFFEE_SOCIAL;
+    const nextSocial = applyCoffeeTopOffSocialBoost(currentSocial);
+    upsertCoffeeBotSocialState(
+      db,
+      userId,
+      row.id,
+      { [botId]: nextSocial },
+      now
+    );
+    appendCoffeeReplayEventMessage({
+      db,
+      userId,
+      conversationId: row.id,
+      event: {
+        v: 1,
+        name: "coffeeReplayEvent",
+        kind: "mood",
+        botId,
+        occurredAt: now,
+        social: nextSocial,
+      },
+    });
+    db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?").run(
+      now,
+      row.id,
+      userId
+    );
+  }
+  return buildCurrentCoffeeConversationResponse(db, userId, row.id);
+}
+
+/**
+ * Join-mode player sip: increments the seated join cup up to 6 sips.
+ */
+export function sipCoffeeJoinPlayerCup(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): Conversation {
+  const { row } = loadCoffeeConversationGroup(db, userId, conversationId);
+  const sessionSettings = parseStoredCoffeeSessionSettings(row.coffee_settings);
+  if (sessionSettings.experienceMode !== "join") {
+    throw new Error("Join cup sipping is only available while joining for coffee.");
+  }
+  const cup = sessionSettings.joinPlayerCup;
+  if (!cup) {
+    throw new Error("There is no join cup to sip.");
+  }
+  const now = new Date().toISOString();
+  const sipCount = Math.min(6, cup.sipCount + 1);
+  const nextSettings: CoffeeSessionSettings = {
+    ...sessionSettings,
+    joinPlayerCup: {
+      ...cup,
+      sipCount,
+    },
+  };
+  persistCoffeeSessionSettingsState(db, userId, row.id, nextSettings, now);
   appendCoffeeReplayEventMessage({
     db,
     userId,
@@ -19751,17 +19883,14 @@ export function topOffCoffeeCupForBot(
     event: {
       v: 1,
       name: "coffeeReplayEvent",
-      kind: "mood",
-      botId,
+      kind: "playerSip",
       occurredAt: now,
-      social: nextSocial,
+      fillId: cup.fillId,
+      sipCount,
+      drinkName: "House blend",
+      imageId: null,
     },
   });
-  db.prepare("UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?").run(
-    now,
-    row.id,
-    userId
-  );
   return buildCurrentCoffeeConversationResponse(db, userId, row.id);
 }
 

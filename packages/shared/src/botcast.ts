@@ -52,6 +52,11 @@ export type BotcastEpisodeProvider = "local" | "openai" | "anthropic";
 export type BotcastEpisodeResponseMode = "local" | "auto" | "online";
 export type BotcastSpeakerRole = "host" | "guest";
 export type BotcastGuestKind = "bot" | "producer";
+/**
+ * Live Produce/Interview vs Watch-a-show full bake.
+ * Watch still casts a bot guest; cues and producer involvement are disabled.
+ */
+export type BotcastPlaybackMode = "live" | "watch";
 export const BOTCAST_PRODUCER_GUEST_ID = "__signal_producer_guest__";
 export const BOTCAST_PRODUCER_GUEST_NAME = "the Producer";
 export const BOTCAST_PRODUCER_GUEST_THINKING_TIME_SCALE = 0.5;
@@ -2032,6 +2037,8 @@ export interface BotcastEpisodeSummary {
   guestBotId: string;
   /** Bot interview by default; producer means the signed-in person is on mic. */
   guestKind?: BotcastGuestKind;
+  /** Live produce/interview vs Watch-a-show full bake. Defaults to live. */
+  playbackMode?: BotcastPlaybackMode;
   /** Saved display label so Producer-guest replays remain intelligible. */
   guestName?: string;
   topic: string;
@@ -2135,6 +2142,8 @@ export interface BotcastShowPatchRequest {
 export interface BotcastEpisodeCreateRequest {
   guestBotId?: string;
   guestKind?: BotcastGuestKind;
+  /** Watch = full-bake spectator show; live = Produce or Get interviewed. */
+  playbackMode?: BotcastPlaybackMode;
   guestName?: string;
   guestContext?: string;
   topic?: string;

@@ -4110,6 +4110,11 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE botcast_episodes ADD COLUMN model_warmup_hold_started_at TEXT;",
     );
   }
+  if (!botcastEpisodeColumns.some((column) => column.name === "playback_mode")) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN playback_mode TEXT NOT NULL DEFAULT 'live' CHECK (playback_mode IN ('live', 'watch'));",
+    );
+  }
   const personaReviewColumns = [
     ["persona_reviewer_bot_id", "TEXT"],
     ["persona_reviewer_name", "TEXT"],

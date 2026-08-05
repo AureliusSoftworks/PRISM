@@ -1080,6 +1080,7 @@ import {
   type UsageRange,
   type UsageRecentEvent,
   type UsageResponse,
+  type UsageTripMeter,
   COFFEE_EMPTY_CUP_ATTEMPT_ANIMATION_MS,
   coffeeEmptyCupAttemptState,
   coffeeCupStatusForProgress,
@@ -1277,6 +1278,7 @@ import {
 } from "./offlineVoiceSelection";
 import {
   buildSpeechActivityWindows,
+  buildSpeechActivityWindowsFromTextCadence,
   speechActivityAtMs,
   type SpeechActivityWindow,
 } from "./speechActivity";
@@ -31081,17 +31083,25 @@ function ZenLiveBotPresencePlate({
   const [actionCopyAnchor, setActionCopyAnchor] =
     useState<ZenLiveBotActionCopyAnchor | null>(null);
   const transitioning = presencePhase !== "stable";
-  const faceTalking = isTalking;
-  const faceMouthShape = faceTalking
-    ? (mouthShape ?? (mouthOpen ? "open-wide" : "closed"))
-    : "closed";
-  const faceMouthOpen = faceTalking && faceMouthShape !== "closed";
+  // isTalking means the utterance is in flight (status "Replying"). Lip motion
+  // can idle through pauses without dropping that label.
+  const utteranceActive = isTalking;
+  const lipsVoicing =
+    utteranceActive &&
+    mouthShape != null &&
+    mouthShape !== "closed";
+  const faceMouthShape = lipsVoicing
+    ? mouthShape!
+    : mouthOpen && utteranceActive
+      ? "open-wide"
+      : "closed";
+  const faceMouthOpen = utteranceActive && faceMouthShape !== "closed";
   const actionText = transitioning
     ? "[LOADING]"
     : resolveZenLiveBotPresenceActionText({
         action: actionState?.action,
         replyAction: replyActionText,
-        isTalking: faceTalking,
+        isTalking: utteranceActive,
         userActionVisible,
         hasBot: Boolean(bot),
       });
@@ -31750,13 +31760,13 @@ function ZenLiveBotPresencePlate({
   const avatarCanvasSideRef = useRef(avatarCanvasSide);
   const avatarDraggingRef = useRef(avatarDragging);
   const transitioningRef = useRef(transitioning);
-  const faceTalkingRef = useRef(faceTalking);
+  const faceTalkingRef = useRef(utteranceActive);
   useLayoutEffect(() => {
     avatarCanvasSideRef.current = avatarCanvasSide;
     avatarDraggingRef.current = avatarDragging;
     transitioningRef.current = transitioning;
-    faceTalkingRef.current = faceTalking;
-  }, [avatarCanvasSide, avatarDragging, faceTalking, transitioning]);
+    faceTalkingRef.current = utteranceActive;
+  }, [avatarCanvasSide, avatarDragging, utteranceActive, transitioning]);
   const presencePlateMounted =
     Boolean(bot) ||
     Boolean(actionState) ||
@@ -31933,11 +31943,11 @@ function ZenLiveBotPresencePlate({
       data-prism-forming={
         defaultPrismPresence && defaultPrismPresenceForming ? "true" : undefined
       }
-      data-talking={faceTalking ? "true" : undefined}
+      data-talking={utteranceActive ? "true" : undefined}
       data-mouth-open={
-        faceTalking ? (faceMouthOpen ? "true" : "false") : undefined
+        utteranceActive ? (faceMouthOpen ? "true" : "false") : undefined
       }
-      data-mouth-shape={faceTalking ? faceMouthShape : undefined}
+      data-mouth-shape={utteranceActive ? faceMouthShape : undefined}
       data-presence-phase={transitioning ? presencePhase : undefined}
       data-transitioning={transitioning ? "true" : undefined}
       data-loading={transitioning ? "true" : undefined}
@@ -31973,9 +31983,9 @@ function ZenLiveBotPresencePlate({
     >
       <BotAmbientPresenceRig
         theme={resolvedTheme}
-        isTalking={faceTalking}
+        isTalking={utteranceActive}
         motionActive={
-          !faceTalking &&
+          !utteranceActive &&
           !faceSpinnerVisible &&
           !askQuestionActive &&
           !transitioning &&
@@ -31987,12 +31997,12 @@ function ZenLiveBotPresencePlate({
           faceStyle={faceStyle}
           faceScaleY={faceScaleY}
           voicePreset={voicePreset}
-          isTalking={faceTalking}
+          isTalking={lipsVoicing}
           avatarSfx={
             muteLiveAvatarSfx ? null : botAvatarSfxForBot(bot)
           }
           avatarSfxState={
-            faceTalking
+            utteranceActive
               ? "talking"
               : showThinkingSpinner || transitioning
                 ? "thinking"
@@ -42031,23 +42041,25 @@ function BotAvatarCustomizerModal({
         onPlaybackProgress: (elapsedMs, durationMs, alignment) => {
           if (forcedMode === "english") {
             if (previewSpeechActivityWindows === undefined) {
-              previewSpeechActivityWindows = buildSpeechActivityWindows(
-                alignment,
-                durationMs,
-              );
+              previewSpeechActivityWindows =
+                buildSpeechActivityWindows(alignment, durationMs) ??
+                buildSpeechActivityWindowsFromTextCadence(
+                  previewMouthText,
+                  durationMs,
+                );
             }
+            const mouthShape = crtSpeechMouthShapeAtAlignedElapsedMs({
+              text: previewMouthText,
+              elapsedMs,
+              durationMs,
+              alignment,
+            });
             setPreviewSpeechPaused(
-              speechActivityAtMs(previewSpeechActivityWindows, elapsedMs) ===
-                false,
+              mouthShape === "closed" ||
+                speechActivityAtMs(previewSpeechActivityWindows, elapsedMs) ===
+                  false,
             );
-            setPreviewSpeechMouthShape(
-              crtSpeechMouthShapeAtAlignedElapsedMs({
-                text: previewMouthText,
-                elapsedMs,
-                durationMs,
-                alignment,
-              }),
-            );
+            setPreviewSpeechMouthShape(mouthShape);
           } else if (forcedMode === "bottish") {
             const mouthShape = bottishMouthShapeAtAlignedElapsedMs({
               text: previewMouthText,
@@ -42105,23 +42117,22 @@ function BotAvatarCustomizerModal({
         },
         onPlaybackProgress: (elapsedMs, durationMs, alignment) => {
           if (previewSpeechActivityWindows === undefined) {
-            previewSpeechActivityWindows = buildSpeechActivityWindows(
-              alignment,
-              durationMs,
-            );
+            previewSpeechActivityWindows =
+              buildSpeechActivityWindows(alignment, durationMs) ??
+              buildSpeechActivityWindowsFromTextCadence(previewText, durationMs);
           }
+          const mouthShape = crtSpeechMouthShapeAtAlignedElapsedMs({
+            text: previewText,
+            elapsedMs,
+            durationMs,
+            alignment,
+          });
           setPreviewSpeechPaused(
-            speechActivityAtMs(previewSpeechActivityWindows, elapsedMs) ===
-              false,
+            mouthShape === "closed" ||
+              speechActivityAtMs(previewSpeechActivityWindows, elapsedMs) ===
+                false,
           );
-          setPreviewSpeechMouthShape(
-            crtSpeechMouthShapeAtAlignedElapsedMs({
-              text: previewText,
-              elapsedMs,
-              durationMs,
-              alignment,
-            }),
-          );
+          setPreviewSpeechMouthShape(mouthShape);
         },
       });
     } finally {
@@ -46891,6 +46902,36 @@ function HomeContent(): React.JSX.Element {
       }
     },
     [selectedId, usageRange, usageScope],
+  );
+  const [usageTripBusy, setUsageTripBusy] = useState(false);
+  const setUsageTripEnabled = useCallback(
+    async (enabled: boolean): Promise<void> => {
+      setUsageTripBusy(true);
+      setPanelError(null);
+      try {
+        const response = await api<{ ok: true; trip: UsageTripMeter }>(
+          "/api/usage/trip",
+          {
+            method: "POST",
+            body: JSON.stringify({ enabled }),
+          },
+        );
+        startTransition(() => {
+          setUsageReport((current) =>
+            current ? { ...current, trip: response.trip } : current,
+          );
+        });
+      } catch (err) {
+        setPanelError(
+          err instanceof Error
+            ? err.message
+            : "Failed to update the usage trip meter.",
+        );
+      } finally {
+        setUsageTripBusy(false);
+      }
+    },
+    [],
   );
   useEffect(() => {
     if (panel !== "usage") return;
@@ -57834,19 +57875,24 @@ function HomeContent(): React.JSX.Element {
         getBotMentionDisplayText(displayContent),
       );
       if (speechTimeline?.phase === "playing") {
-        return settings?.voiceMode === "bottish"
-          ? bottishMouthShapeAtAlignedElapsedMs({
-              text: speechContent,
-              elapsedMs: speechTimeline.elapsedMs,
-              durationMs: speechTimeline.durationMs,
-              alignment: speechTimeline.alignment,
-            })
-          : crtSpeechMouthShapeAtAlignedElapsedMs({
-              text: speechContent,
-              elapsedMs: speechTimeline.elapsedMs,
-              durationMs: speechTimeline.durationMs,
-              alignment: speechTimeline.alignment,
-            });
+        const playingMouthShape =
+          settings?.voiceMode === "bottish"
+            ? bottishMouthShapeAtAlignedElapsedMs({
+                text: speechContent,
+                elapsedMs: speechTimeline.elapsedMs,
+                durationMs: speechTimeline.durationMs,
+                alignment: speechTimeline.alignment,
+              })
+            : crtSpeechMouthShapeAtAlignedElapsedMs({
+                text: speechContent,
+                elapsedMs: speechTimeline.elapsedMs,
+                durationMs: speechTimeline.durationMs,
+                alignment: speechTimeline.alignment,
+              });
+        // True silence / punctuation rest / mid-phrase gap: idle the face.
+        // Leaving "closed" through would remap to speech-closed while talking.
+        if (playingMouthShape === "closed") return null;
+        return playingMouthShape;
       }
       const revealTokens = tokenizeMessageReveal(speechContent);
       const delayMultiplier =
@@ -57888,12 +57934,38 @@ function HomeContent(): React.JSX.Element {
       resolveZenAssistantRevealDelayMultiplier,
       settings?.voiceMode,
     ]);
-  const zenLiveBotTalking =
-    chatLikeSurface &&
-    zenLiveBotRevealMouthShape !== null &&
-    (latestAssistantMessage?.botId ?? null) === zenPersonaPresence.visibleBotId;
+  const zenLiveBotUtteranceActive = (() => {
+    if (!chatLikeSurface || !chatAssistantRevealInProgress) return false;
+    if (!detail?.id || !latestAssistantMessageId || !latestAssistantMessage) {
+      return false;
+    }
+    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
+    if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey)) return false;
+    if (
+      (latestAssistantMessage.botId ?? null) !== zenPersonaPresence.visibleBotId
+    ) {
+      return false;
+    }
+    const visibleBot = resolveMessageBotIdentity(
+      latestAssistantMessage,
+      bots,
+      detail.lastBotId ?? detail.botId,
+    );
+    if (
+      botPowerIsMutedV1(visibleBot?.powers) ||
+      botPowerResponseIsSilentV1(
+        resolveVisibleMessageContent(latestAssistantMessage),
+      )
+    ) {
+      return false;
+    }
+    return true;
+  })();
+  const zenLiveBotTalking = zenLiveBotUtteranceActive;
   const zenLiveBotMouthOpen =
-    zenLiveBotTalking && zenLiveBotRevealMouthShape !== "closed";
+    zenLiveBotUtteranceActive &&
+    zenLiveBotRevealMouthShape !== null &&
+    zenLiveBotRevealMouthShape !== "closed";
   useEffect(() => {
     const voiceSelection = voicePlaybackSelectionRef.current;
     const revealKey = activeAssistantRevealKey;
@@ -65906,6 +65978,8 @@ function HomeContent(): React.JSX.Element {
   const stopBotcastUtterance = useCallback((): void => {
     signalVoiceAbortRef.current?.abort();
     signalVoiceAbortRef.current = null;
+    signalCrosstalkVoiceAbortRef.current?.abort();
+    signalCrosstalkVoiceAbortRef.current = null;
     listenerReactionVoiceAbortRef.current?.abort();
     listenerReactionVoiceAbortRef.current = null;
     stopReactionVoiceAudio();
@@ -65913,6 +65987,13 @@ function HomeContent(): React.JSX.Element {
       voicePlaybackSelectionRef.current.voiceMode,
     );
   }, []);
+  const releaseBotcastPrimaryUtterance = useCallback(
+    (fadeMs = 90): void => {
+      releaseRealtimeVoiceAudio("primary", fadeMs);
+      signalVoiceAbortRef.current?.abort();
+    },
+    [],
+  );
   useEffect(() => {
     if (!prismPresentationSuspended) return;
     stopBotcastUtterance();
@@ -66309,6 +66390,7 @@ function HomeContent(): React.JSX.Element {
       playbackSurface: "signal" | "debate" = "signal",
       debateFormat: DebateFormatId | null = null,
       offlineOnly = false,
+      voiceChannel: VoicePlaybackChannel = "primary",
     ): Promise<boolean> => {
       const voiceSelection = voicePlaybackSelectionRef.current;
       const playerVoice = botSummary.producerGuest === true;
@@ -66466,12 +66548,22 @@ function HomeContent(): React.JSX.Element {
               !botcastMessageIsEphemeralInterruptionBridge(message),
           });
       const controller = new AbortController();
-      signalVoiceAbortRef.current?.abort();
-      signalVoiceAbortRef.current = controller;
+      const overlapChannel = voiceChannel !== "primary";
+      if (overlapChannel) {
+        signalCrosstalkVoiceAbortRef.current?.abort();
+        signalCrosstalkVoiceAbortRef.current = controller;
+      } else {
+        signalVoiceAbortRef.current?.abort();
+        signalVoiceAbortRef.current = controller;
+      }
       const playbackIsCurrent = (): boolean =>
         !controller.signal.aborted &&
-        signalVoiceAbortRef.current === controller;
-      handoffVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
+        (overlapChannel
+          ? signalCrosstalkVoiceAbortRef.current === controller
+          : signalVoiceAbortRef.current === controller);
+      if (!overlapChannel) {
+        handoffVoicePlaybackPreservingPreparedMode(voiceSelection.voiceMode);
+      }
       let playbackStarted = false;
       let captureSpeechStarted = false;
       let heardPlaybackStartedAtMs: number | null = null;
@@ -66550,7 +66642,7 @@ function HomeContent(): React.JSX.Element {
                 gain: playbackVolume,
                 pan: stereoPan,
                 alignment: alignment ?? null,
-                channel: "primary",
+                channel: voiceChannel,
               },
             });
           }
@@ -66704,6 +66796,7 @@ function HomeContent(): React.JSX.Element {
           preSpeechBreath,
           stereoPan,
           playbackIsCurrent,
+          voiceChannel,
         );
         return playbackStarted && !controller.signal.aborted;
       } catch (voiceError) {
@@ -66718,6 +66811,9 @@ function HomeContent(): React.JSX.Element {
       } finally {
         if (signalVoiceAbortRef.current === controller) {
           signalVoiceAbortRef.current = null;
+        }
+        if (signalCrosstalkVoiceAbortRef.current === controller) {
+          signalCrosstalkVoiceAbortRef.current = null;
         }
       }
     },
@@ -84258,23 +84354,25 @@ function HomeContent(): React.JSX.Element {
           if (botHubVoicePreviewRunRef.current !== runId) return;
           if (englishChoice) {
             if (previewSpeechActivityWindows === undefined) {
-              previewSpeechActivityWindows = buildSpeechActivityWindows(
-                alignment,
-                durationMs,
-              );
+              previewSpeechActivityWindows =
+                buildSpeechActivityWindows(alignment, durationMs) ??
+                buildSpeechActivityWindowsFromTextCadence(
+                  previewText,
+                  durationMs,
+                );
             }
+            const mouthShape = crtSpeechMouthShapeAtAlignedElapsedMs({
+              text: previewText,
+              elapsedMs,
+              durationMs,
+              alignment,
+            });
             setBotHubPreviewVoicing(
-              speechActivityAtMs(previewSpeechActivityWindows, elapsedMs) !==
-                false,
+              mouthShape !== "closed" &&
+                speechActivityAtMs(previewSpeechActivityWindows, elapsedMs) !==
+                  false,
             );
-            setBotHubPreviewMouthShape(
-              crtSpeechMouthShapeAtAlignedElapsedMs({
-                text: previewText,
-                elapsedMs,
-                durationMs,
-                alignment,
-              }),
-            );
+            setBotHubPreviewMouthShape(mouthShape);
           } else if (mode === "bottish") {
             const mouthShape = bottishMouthShapeAtAlignedElapsedMs({
               text: previewText,
@@ -107471,6 +107569,54 @@ function HomeContent(): React.JSX.Element {
             </div>
           </section>
 
+          <section
+            className={styles.usageTripCard}
+            data-enabled={usageReport?.trip.enabled ? "true" : "false"}
+            data-frozen={
+              usageReport?.trip.frozen && !usageReport.trip.enabled
+                ? "true"
+                : undefined
+            }
+            aria-label="Online token trip meter"
+          >
+            <div className={styles.usageTripCardCopy}>
+              <span>Trip meter</span>
+              <strong>
+                {formatUsageNumber(usageReport?.trip.onlineTokens)}
+              </strong>
+              <small>
+                {usageReport?.trip.enabled
+                  ? `Counting online tokens since ${formatUsageDate(usageReport.trip.startedAt)}`
+                  : usageReport?.trip.frozen
+                    ? `Paused · last trip ${formatUsageCost(usageReport.trip.estimatedCostMicroUsd)}`
+                    : "Flip on to count online tokens from zero"}
+              </small>
+            </div>
+            <label className={styles.usageTripToggle}>
+              <input
+                type="checkbox"
+                role="switch"
+                checked={Boolean(usageReport?.trip.enabled)}
+                disabled={!usageReport || usageTripBusy || usageLoading}
+                onChange={(event) => {
+                  void setUsageTripEnabled(event.target.checked);
+                }}
+                aria-label={
+                  usageReport?.trip.enabled
+                    ? "Pause trip meter"
+                    : "Start trip meter from zero"
+                }
+              />
+              <span>
+                {usageReport?.trip.enabled
+                  ? "On"
+                  : usageReport?.trip.frozen
+                    ? "Paused"
+                    : "Off"}
+              </span>
+            </label>
+          </section>
+
           <div className={styles.usageControls} aria-label="Usage filters">
             <div
               className={styles.usageSegmentedControl}
@@ -120806,10 +120952,15 @@ function HomeContent(): React.JSX.Element {
             elapsedMs: 0,
             durationMs: resolvedDurationMs,
             alignment: resolvedAlignment,
-            speechActivityWindows: buildSpeechActivityWindows(
-              resolvedAlignment,
-              resolvedDurationMs,
-            ),
+            speechActivityWindows:
+              buildSpeechActivityWindows(
+                resolvedAlignment,
+                resolvedDurationMs,
+              ) ??
+              buildSpeechActivityWindowsFromTextCadence(
+                displayText,
+                resolvedDurationMs,
+              ),
           });
           settle(resolvedDurationMs);
         },
@@ -134969,6 +135120,7 @@ function HomeContent(): React.JSX.Element {
         "debate",
         utterance.format,
         debateResponseMode === "local",
+        utterance.voiceChannel ?? "primary",
       );
       if (!played) queuePlayerActionSfx(Number.POSITIVE_INFINITY);
       return played;

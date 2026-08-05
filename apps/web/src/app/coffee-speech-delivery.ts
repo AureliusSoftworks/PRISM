@@ -1,5 +1,6 @@
 import {
   buildSpeechActivityWindows,
+  buildSpeechActivityWindowsFromTextCadence,
   speechActivityAtMs,
   type SpeechActivityWindow,
 } from "./speechActivity.ts";
@@ -222,7 +223,10 @@ export function buildCoffeeDeliveryPlan({
     durationMs: Math.round(targetDuration),
     baseCharacterMs: baseCharacterMs * scale,
     emphasis: resolveEmphasis(text),
-    speechActivityWindows: null,
+    speechActivityWindows: buildSpeechActivityWindowsFromTextCadence(
+      text,
+      targetDuration,
+    ),
   };
 }
 

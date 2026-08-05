@@ -1,3 +1,5 @@
+import { englishCrtVisemeTimeline } from "./zenLiveMouth.ts";
+
 export interface SpeechActivityCharacterAlignment {
   characters: string[];
   characterStartTimesSeconds: number[];
@@ -12,12 +14,22 @@ export interface SpeechActivityWindow {
 /**
  * Give the face a small attack/release envelope so it does not chatter shut
  * between phonemes. Provider gaps longer than this envelope still read as a
- * deliberate phrase pause.
+ * deliberate phrase pause. Attack never pulls the *first* voiced onset early —
+ * that made lips move before the first audible phoneme.
  */
 export const SPEECH_ACTIVITY_ATTACK_MS = 45;
 /** Hold the last phoneme long enough for the audible vowel/consonant tail. */
 export const SPEECH_ACTIVITY_RELEASE_MS = 200;
 const SPEECH_ACTIVITY_MERGE_GAP_MS = 40;
+/** Text-cadence rests already encode pause length — keep envelope tiny. */
+const TEXT_CADENCE_ATTACK_MS = 12;
+const TEXT_CADENCE_RELEASE_MS = 24;
+/**
+ * Local Kokoro clips often open with a short silent lead-in and no character
+ * timing. Keep the mouth idle until that typical onset so lips do not beat the
+ * first phoneme.
+ */
+export const TEXT_CADENCE_LEAD_IN_MS = 110;
 
 function alignmentDurationSeconds(
   alignment: SpeechActivityCharacterAlignment,
@@ -71,10 +83,13 @@ export function buildSpeechActivityWindows(
   for (let index = 0; index < alignment.characters.length; index += 1) {
     const character = alignment.characters[index] ?? "";
     if (!/[\p{L}\p{N}]/u.test(character)) continue;
+    const rawStartMs =
+      (alignment.characterStartTimesSeconds[index] ?? 0) * 1000 * scale;
     const startMs = Math.max(
       0,
-      (alignment.characterStartTimesSeconds[index] ?? 0) * 1000 * scale -
-        SPEECH_ACTIVITY_ATTACK_MS,
+      windows.length === 0
+        ? rawStartMs
+        : rawStartMs - SPEECH_ACTIVITY_ATTACK_MS,
     );
     const endMs = Math.min(
       normalizedDurationMs,
@@ -93,6 +108,57 @@ export function buildSpeechActivityWindows(
     }
   }
   return windows;
+}
+
+/**
+ * When the voice engine ships no character timing (local English), derive
+ * voiced windows from the same punctuation-weighted CRT cadence the mouth
+ * uses so lips idle through commas, periods, and clause marks.
+ */
+export function buildSpeechActivityWindowsFromTextCadence(
+  text: string,
+  durationMs: number,
+): SpeechActivityWindow[] | null {
+  const beats = englishCrtVisemeTimeline(text);
+  if (beats.length === 0) return null;
+  const totalUnits = beats.reduce(
+    (sum, beat) => sum + beat.durationUnits,
+    0,
+  );
+  if (totalUnits <= 0) return null;
+  const normalizedDurationMs = Math.max(
+    1,
+    Math.round(Number.isFinite(durationMs) ? durationMs : 0),
+  );
+  const msPerUnit = normalizedDurationMs / totalUnits;
+  const windows: SpeechActivityWindow[] = [];
+  let cursorUnits = 0;
+  for (const beat of beats) {
+    const beatStartMs = cursorUnits * msPerUnit;
+    const beatEndMs = (cursorUnits + beat.durationUnits) * msPerUnit;
+    cursorUnits += beat.durationUnits;
+    if (beat.kind === "rest" || beat.shape === "closed") continue;
+    const rawStartMs =
+      windows.length === 0
+        ? Math.max(beatStartMs, TEXT_CADENCE_LEAD_IN_MS)
+        : beatStartMs - TEXT_CADENCE_ATTACK_MS;
+    const startMs = Math.max(0, rawStartMs);
+    const endMs = Math.min(
+      normalizedDurationMs,
+      beatEndMs + TEXT_CADENCE_RELEASE_MS,
+    );
+    if (endMs <= startMs) continue;
+    const previous = windows.at(-1);
+    if (
+      previous &&
+      startMs <= previous.endMs + SPEECH_ACTIVITY_MERGE_GAP_MS
+    ) {
+      previous.endMs = Math.max(previous.endMs, endMs);
+    } else {
+      windows.push({ startMs, endMs });
+    }
+  }
+  return windows.length > 0 ? windows : [];
 }
 
 /** Null means no reliable alignment was available, so callers should fallback. */

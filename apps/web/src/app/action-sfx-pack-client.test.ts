@@ -56,6 +56,10 @@ describe("action sfx pack playback wiring", () => {
       "utf8",
     );
     assert.match(page, /ActionSfxPackMagicButton/u);
+    assert.match(page, /EnglishPacingCalibrateMagicButton/u);
+    assert.match(page, /ENGLISH_FORCED_CLAUSE_PACING_ENABLED/u);
+    assert.match(page, /peekEnglishPacingProfile/u);
+    assert.match(page, /pacingOwnerId=\{actionSfxPackBotId\}/u);
     assert.match(page, /ownerKind="player"/u);
     assert.match(page, /ownerKind: "player"/u);
     assert.match(page, /packOwnerId=\{actionSfxPackBotId\}/u);
@@ -69,9 +73,11 @@ describe("action sfx pack playback wiring", () => {
     assert.match(magic, /actionSfxPackClipUrl/u);
     assert.match(magic, /Choose a vocal action pack clip to sample/u);
     assert.match(magic, /Generate vocal action pack/u);
+    assert.match(magic, /Confirm regenerate/u);
     assert.match(magic, /hasPremiumVoice/u);
     assert.match(magic, /ACTION_SFX_PACK_KIND_LABELS/u);
     assert.match(magic, /ACTION_SFX_PACK_CLIP_COUNT/u);
+    assert.doesNotMatch(magic, /window\.confirm/u);
     assert.doesNotMatch(magic, /\bfart\b/u);
 
     const cut = readFileSync(

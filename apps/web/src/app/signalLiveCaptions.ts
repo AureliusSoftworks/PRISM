@@ -8,7 +8,8 @@ import {
   type BotcastSpeechRevealState,
 } from "./botcastSpeechReveal.ts";
 
-export const SIGNAL_LIVE_CAPTION_DELAY_MS = 500;
+/** Kept named so call sites stay explicit; 0 means captions share the speech clock. */
+export const SIGNAL_LIVE_CAPTION_DELAY_MS = 0;
 const SIGNAL_SILENT_CAPTION_WORD_MS = 400;
 const SIGNAL_SILENT_CAPTION_MIN_MS = 2_000;
 const SIGNAL_SILENT_CAPTION_MAX_MS = 20_000;
@@ -59,9 +60,9 @@ export const debateVoiceCompletionFallbackDurationMs =
   signalVoiceCompletionFallbackDurationMs;
 
 /**
- * Mirrors only the fully spoken prefix of the active line after a small initial
- * delay. The empty result outside playback prevents captions from affecting or
- * surviving turn handoffs, interruptions, cuts, and completion.
+ * Mirrors only the fully spoken prefix of the active line on the speech clock
+ * (no added caption lag). The empty result outside playback prevents captions
+ * from affecting or surviving turn handoffs, interruptions, cuts, and completion.
  */
 export function signalLiveCaptionText(
   reveal: BotcastSpeechRevealState | null | undefined,

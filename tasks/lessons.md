@@ -5,6 +5,21 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 ---
 
 ### 2026-08-04 · [UX]
+**Trigger**: "*Replying*" under the Zen orb flickered on/off during speech pauses.
+**Lesson**: Keep presence `isTalking` / Replying tied to utterance-in-progress (`chatAssistantRevealInProgress`), not to momentary mouth shape. Idle lips through silence with `mouthShape === null`, but do not drop the status label when voicing windows close.
+**Applies to**: `ZenLiveBotPresencePlate`, `zenLiveBotUtteranceActive` in `page.tsx`
+
+### 2026-08-04 · [UX]
+**Trigger**: After pause-idle fix, mouth still started a beat before TTS audio.
+**Lesson**: Never apply speech-activity attack to the first voiced onset, and give text-cadence (no-alignment) windows a ~110ms lead-in idle. Oversized punctuation rest units compress spoken beats and race the mouth ahead of Kokoro — keep rests modest.
+**Applies to**: `speechActivity.ts`, `speechSegmentClock.ts`, `zenLiveMouth` rest weights
+
+### 2026-08-04 · [UX]
+**Trigger**: Mouth kept cycling through natural TTS pauses (local English has no character timing).
+**Lesson**: A literal `"closed"` mouth during speech must idle talking — never remap to `speech-closed` while `isTalking` stays true. When provider alignment is missing, build activity windows from the punctuation-weighted CRT cadence so commas/periods silence lips; do not leave `speechActivityWindows` null on local clips.
+**Applies to**: Zen/Chat mouth memo, `speechActivity.ts` text cadence, Avatar Studio / hub / Coffee voice previews
+
+### 2026-08-04 · [UX]
 **Trigger**: Chat-only personal notes were wired only to the main Chat lane; the player tried `bug note: …` in floating Ask Prism and nothing saved.
 **Lesson**: “Talk to Prism” for meta tools means the floating Ask Prism companion (`/api/prism-companion`) as well as Chat. Clear shorthand (`note:`, `bug note:`) should save without relying on the model. Still block Private/incognito.
 **Applies to**: `prism-companion.ts`, `userNotes`, `/prism` command docs

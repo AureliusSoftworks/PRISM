@@ -906,19 +906,28 @@ export async function playPreSpeechBreath(args: {
   const lowpass = context.createBiquadFilter();
   const gain = context.createGain();
   source.buffer = decoded;
+  // Keep presence airy and close-mic; cut rumble and harsh upper hiss.
   highpass.type = "highpass";
-  highpass.frequency.value = 90;
+  highpass.frequency.value = 140;
   lowpass.type = "lowpass";
-  lowpass.frequency.value = 12_000;
+  lowpass.frequency.value = 7_000;
   const breathGain = Math.min(1.25, profile.volume) * args.plan.gain;
   const startedAt = context.currentTime;
+  const attackSeconds = Math.min(0.07, decoded.duration * 0.18);
   const overlapSeconds = Math.min(
     decoded.duration * 0.35,
     Math.max(0, args.plan.voiceOverlapMs) / 1_000,
   );
   const voiceStartsAt = Math.max(startedAt, startedAt + decoded.duration - overlapSeconds);
-  gain.gain.setValueAtTime(breathGain, startedAt);
-  gain.gain.setValueAtTime(breathGain, voiceStartsAt);
+  gain.gain.setValueAtTime(0.0001, startedAt);
+  gain.gain.exponentialRampToValueAtTime(
+    Math.max(0.0001, breathGain),
+    startedAt + attackSeconds,
+  );
+  gain.gain.setValueAtTime(
+    Math.max(0.0001, breathGain),
+    Math.max(startedAt + attackSeconds, voiceStartsAt),
+  );
   gain.gain.exponentialRampToValueAtTime(0.0001, startedAt + decoded.duration);
   source.connect(highpass).connect(lowpass).connect(gain);
   active.roomConnection = connectRoomAcoustics({

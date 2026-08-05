@@ -16,6 +16,11 @@ export const REPLAY_VIDEO_WIDTH = 1920 as const;
 export const REPLAY_VIDEO_HEIGHT = 1080 as const;
 export const REPLAY_VIDEO_FPS = 30 as const;
 
+/**
+ * Faithful archive surfaces with audio masters today.
+ * Debate joins later (`FutureReplaySurfaceExtensionV1` in liveBake.ts) once
+ * capture + archive Watch ship — do not widen every switch prematurely.
+ */
 export type ReplaySurfaceV1 = "signal" | "coffee";
 export type ReplayAvailabilityV2 =
   | "saving"

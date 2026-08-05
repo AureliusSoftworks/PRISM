@@ -4,6 +4,12 @@ import {
   speechActivityAtMs,
   type SpeechActivityWindow,
 } from "./speechActivity.ts";
+import {
+  buildCharacterAlignmentFromSegmentTimings,
+  revealAtMsFromSegmentTimings,
+  speechActivityWindowsForSegmentClock,
+  type SpeechSegmentTiming,
+} from "./speechSegmentClock.ts";
 
 export type BotcastSpeechRevealPhase = "preparing" | "playing" | "ended";
 
@@ -24,6 +30,10 @@ export interface BotcastSpeechRevealState {
   /** Provider timing retained for the live avatar's aligned visemes. */
   alignment: SpeechCharacterAlignment | null;
   speechActivityWindows: SpeechActivityWindow[] | null;
+  /** Chunked English segment clock; when present, drives reveal through gaps. */
+  segmentTimings?: SpeechSegmentTiming[] | null;
+  /** Hold uncovered tokens until real chunk segments arrive. */
+  segmentClock?: boolean;
 }
 
 interface SourceToken {
@@ -149,6 +159,8 @@ export function prepareBotcastSpeechReveal(text: string): BotcastSpeechRevealSta
     phase: "preparing",
     alignment: null,
     speechActivityWindows: null,
+    segmentTimings: null,
+    segmentClock: false,
   };
 }
 
@@ -157,22 +169,53 @@ export function startBotcastSpeechReveal({
   text,
   durationMs,
   alignment,
+  segmentTimings,
+  segmentClock,
 }: {
   text: string;
   durationMs: number;
   alignment?: SpeechCharacterAlignment | null;
+  segmentTimings?: readonly SpeechSegmentTiming[] | null;
+  segmentClock?: boolean;
 }): BotcastSpeechRevealState {
   const normalizedDurationMs = Math.max(1, Math.round(
     Number.isFinite(durationMs) ? durationMs : 0
   ));
   const sourceTokens = tokenizePreservingWhitespace(text);
-  const mouthAlignment = alignmentTimingIsUsable(alignment) ? alignment : null;
-  const completionTimes = alignedCompletionTimes(
-    text,
-    sourceTokens,
-    normalizedDurationMs,
-    alignment,
-  ) ?? fallbackCompletionTimes(sourceTokens, normalizedDurationMs);
+  const useSegmentClock =
+    segmentClock === true || segmentTimings != null;
+  // When useSegmentClock is false, segmentTimings is already nullish
+  // (see the guard above), so there is no non-clock fallback array.
+  const segments = useSegmentClock ? [...(segmentTimings ?? [])] : null;
+  const segmentAlignment =
+    segments && segments.length > 0
+      ? buildCharacterAlignmentFromSegmentTimings(text, segments)
+      : null;
+  const mouthAlignment = alignmentTimingIsUsable(segmentAlignment)
+    ? segmentAlignment
+    : alignmentTimingIsUsable(alignment)
+      ? alignment
+      : null;
+  const segmentCompletionTimes = useSegmentClock
+    ? revealAtMsFromSegmentTimings(
+        sourceTokens.map((token) => token.text),
+        segments ?? [],
+      ) ?? sourceTokens.map(() => Number.POSITIVE_INFINITY)
+    : segments
+      ? revealAtMsFromSegmentTimings(
+          sourceTokens.map((token) => token.text),
+          segments,
+        )
+      : null;
+  const completionTimes =
+    segmentCompletionTimes ??
+    alignedCompletionTimes(
+      text,
+      sourceTokens,
+      normalizedDurationMs,
+      alignment,
+    ) ??
+    fallbackCompletionTimes(sourceTokens, normalizedDurationMs);
 
   return {
     text,
@@ -185,11 +228,42 @@ export function startBotcastSpeechReveal({
     progress: 0,
     phase: "playing",
     alignment: mouthAlignment,
-    speechActivityWindows: buildSpeechActivityWindows(
-      mouthAlignment,
-      normalizedDurationMs,
-    ),
+    speechActivityWindows: speechActivityWindowsForSegmentClock({
+      text,
+      segments: segments ?? [],
+      durationMs: normalizedDurationMs,
+      alignment: mouthAlignment,
+      segmentClock: useSegmentClock,
+    }) ??
+      buildSpeechActivityWindows(mouthAlignment, normalizedDurationMs),
+    segmentTimings: segments,
+    segmentClock: useSegmentClock,
   };
+}
+
+/**
+ * Fold a new chunked-English segment into a live reveal so text and mouth
+ * hold through silence and resume together when speech returns.
+ */
+export function applyBotcastSpeechRevealSegmentTiming(
+  state: BotcastSpeechRevealState,
+  timing: SpeechSegmentTiming,
+  durationMs?: number,
+): BotcastSpeechRevealState {
+  if (state.phase !== "playing") return state;
+  const segments = [...(state.segmentTimings ?? []), timing];
+  const rebuilt = startBotcastSpeechReveal({
+    text: state.text,
+    durationMs: Math.max(
+      state.durationMs,
+      Number.isFinite(durationMs) ? (durationMs as number) : 0,
+      timing.endMs,
+    ),
+    alignment: state.alignment,
+    segmentTimings: segments,
+    segmentClock: true,
+  });
+  return updateBotcastSpeechReveal(rebuilt, state.elapsedMs);
 }
 
 export function updateBotcastSpeechReveal(
@@ -228,7 +302,10 @@ export function botcastSpeechRevealVisibleTokenCount(
   let high = state.tokens.length;
   while (low < high) {
     const middle = Math.floor((low + high) / 2);
-    if ((state.tokens[middle]?.completionAtMs ?? Number.POSITIVE_INFINITY) <= state.elapsedMs) {
+    const completionAtMs =
+      state.tokens[middle]?.completionAtMs ?? Number.POSITIVE_INFINITY;
+    // Incomplete chunk tokens stay at +Infinity until their speech segment arrives.
+    if (Number.isFinite(completionAtMs) && completionAtMs <= state.elapsedMs) {
       low = middle + 1;
     } else {
       high = middle;

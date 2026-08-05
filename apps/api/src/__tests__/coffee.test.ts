@@ -152,6 +152,7 @@ import {
   saveSynthesizedCoffeeGroupEthos,
   saveSynthesizedCoffeeGroupName,
   sipCoffeePlayerCup,
+  sipCoffeeJoinPlayerCup,
   kickoffCoffeeMeetingSummaryRefresh,
   topOffCoffeeCupForBot,
   failCoffeeSpecialOrder,
@@ -181,6 +182,7 @@ import {
   createBotIdentityMirrorStateV1,
   derivePrismMoodKey,
   COFFEE_TOPIC_MAX_LENGTH,
+  DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
   DEFAULT_COFFEE_SESSION_SETTINGS,
   DIRECTIONAL_IRRITATION_CLEAN_TURN_DECAY,
   DIRECTIONAL_IRRITATION_REBUFF_DELTA,
@@ -13511,6 +13513,99 @@ describe("coffee social state helpers", () => {
     assert.throws(
       () => topOffCoffeeCupForBot(db, "user-2", created.conversation.id, ALICE.id, 0.62),
       /not found/i
+    );
+  });
+
+  it("Join mode refuses pouring and supports player sip", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      durationMinutes: 12,
+      experienceMode: "join",
+    });
+
+    assert.equal(created.conversation.coffeeSettings?.experienceMode, "join");
+    assert.equal(created.conversation.coffeeSessionDurationMinutes, undefined);
+    assert.ok(created.conversation.coffeeSettings?.joinPlayerCup?.fillId);
+    assert.equal(created.conversation.coffeeSettings?.joinPlayerCup?.sipCount, 0);
+    assert.equal(created.conversation.coffeeSettings?.joinPlayerCup?.topOffCount, 0);
+
+    await setCoffeeConversationTopic(db, userId, created.conversation.id, "Join table");
+    assert.throws(
+      () => topOffCoffeeCupForBot(db, userId, created.conversation.id, ALICE.id, 0.62),
+      /Pouring is unavailable while joining for coffee/i,
+    );
+
+    const sipped = sipCoffeeJoinPlayerCup(db, userId, created.conversation.id);
+    assert.equal(sipped.coffeeSettings?.joinPlayerCup?.sipCount, 1);
+    assert.ok(
+      sipped.messages.some((message) =>
+        message.coffeeReplayEvents?.some(
+          (event) => event.kind === "playerSip" && event.sipCount === 1,
+        ),
+      ),
+    );
+
+    let conversation = sipped;
+    for (let i = 0; i < 8; i += 1) {
+      conversation = sipCoffeeJoinPlayerCup(db, userId, created.conversation.id);
+    }
+    assert.equal(conversation.coffeeSettings?.joinPlayerCup?.sipCount, 6);
+  });
+
+  it("Serve mode forces a timed session and skips top-off mood boosts", async () => {
+    const db = createCoffeeTestDb();
+    const userId = "user-1";
+    seedCoffeeBot(db, userId, ALICE);
+    seedCoffeeBot(db, userId, BORIS);
+    const created = await createCoffeeConversation(db, userId, {
+      groupBotIds: [ALICE.id, BORIS.id],
+      durationMinutes: null,
+      experienceMode: "serve",
+    });
+
+    assert.equal(created.conversation.coffeeSettings?.experienceMode, "serve");
+    assert.equal(
+      created.conversation.coffeeSessionDurationMinutes,
+      DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
+    );
+    assert.equal(created.conversation.coffeeSettings?.joinPlayerCup, undefined);
+
+    await setCoffeeConversationTopic(db, userId, created.conversation.id, "Serve pour");
+    const socialBefore = created.conversation.coffeeBotSocialById?.[ALICE.id];
+    const conversation = topOffCoffeeCupForBot(
+      db,
+      userId,
+      created.conversation.id,
+      ALICE.id,
+      0.62,
+    );
+
+    assert.equal(conversation.coffeeCupTopOffsByBotId?.[ALICE.id]?.progressBefore, 0.62);
+    assert.deepEqual(conversation.coffeeBotSocialById?.[ALICE.id], socialBefore);
+    assert.equal(conversation.coffeeSettings?.lastServeThanks?.botId, ALICE.id);
+    assert.ok(conversation.coffeeSettings?.lastServeThanks?.text);
+    assert.ok(conversation.coffeeSettings?.lastServeThanks?.at);
+    assert.equal(
+      conversation.messages
+        .flatMap((message) => message.coffeeReplayEvents ?? [])
+        .some((event) => event.kind === "mood" && event.botId === ALICE.id),
+      false,
+    );
+    assert.ok(
+      conversation.messages.some((message) =>
+        message.coffeeReplayEvents?.some(
+          (event) => event.kind === "topOff" && event.botId === ALICE.id,
+        ),
+      ),
+    );
+
+    assert.throws(
+      () => sipCoffeeJoinPlayerCup(db, userId, created.conversation.id),
+      /only available while joining/i,
     );
   });
 

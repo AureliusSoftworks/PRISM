@@ -13,6 +13,7 @@ import {
   recordTextUsage,
   repairMisnormalizedUsagePurposes,
   runWithUsageSession,
+  setUsageTripEnabled,
 } from "../usage.ts";
 
 function restoreEnv(name: string, previous: string | undefined): void {
@@ -548,6 +549,124 @@ describe("usage accounting", () => {
       assert.ok(report.byPurpose.some((item) => item.label === "Signal Turn"));
       assert.ok(report.byPurpose.some((item) => item.label === "Bot Generation"));
       assert.ok(report.byPurpose.some((item) => item.label === "Debate Generation"));
+    });
+  });
+
+  it("tracks a resettable online-token trip meter without erasing history", () => {
+    withUsageTestDb((db) => {
+      runWithUsageSession(
+        {
+          db,
+          userId: "user-1",
+          privacyScope: "normal",
+          mode: "sandbox",
+          surface: "chat",
+          conversationId: "conv-1",
+          requestId: "pre-trip",
+        },
+        () => {
+          recordTextUsage({
+            provider: "openai",
+            model: "gpt-5",
+            purpose: "chat_reply",
+            inputTokens: 100,
+            outputTokens: 50,
+            totalTokens: 150,
+            tokenCountSource: "provider_reported",
+          });
+          recordTextUsage({
+            provider: "local",
+            model: "llama3.2",
+            purpose: "chat_reply",
+            inputTokens: 80,
+            outputTokens: 40,
+            totalTokens: 120,
+            tokenCountSource: "provider_reported",
+          });
+        },
+      );
+
+      db.prepare(
+        "UPDATE usage_events SET created_at = ? WHERE request_id = ?",
+      ).run("2026-08-04T21:00:00.000Z", "pre-trip");
+
+      const before = getUsageReport({ db, userId: "user-1", range: "all" });
+      assert.equal(before.trip.enabled, false);
+      assert.equal(before.trip.onlineTokens, 0);
+      assert.equal(before.totals.onlineTokens > 0, true);
+
+      const started = setUsageTripEnabled({
+        db,
+        userId: "user-1",
+        enabled: true,
+        now: new Date("2026-08-04T22:00:00.000Z"),
+      });
+      assert.equal(started.enabled, true);
+      assert.equal(started.onlineTokens, 0);
+      assert.equal(started.startedAt, "2026-08-04T22:00:00.000Z");
+
+      runWithUsageSession(
+        {
+          db,
+          userId: "user-1",
+          privacyScope: "normal",
+          mode: "sandbox",
+          surface: "chat",
+          conversationId: "conv-1",
+          requestId: "during-trip",
+        },
+        () => {
+          recordTextUsage({
+            provider: "openai",
+            model: "gpt-5",
+            purpose: "chat_reply",
+            inputTokens: 200,
+            outputTokens: 100,
+            totalTokens: 300,
+            tokenCountSource: "provider_reported",
+          });
+          recordTextUsage({
+            provider: "local",
+            model: "llama3.2",
+            purpose: "chat_reply",
+            inputTokens: 10,
+            outputTokens: 10,
+            totalTokens: 20,
+            tokenCountSource: "provider_reported",
+          });
+        },
+      );
+
+      // Keep the trip event after the trip start marker.
+      db.prepare(
+        "UPDATE usage_events SET created_at = ? WHERE request_id = ?",
+      ).run("2026-08-04T22:05:00.000Z", "during-trip");
+
+      const live = getUsageReport({ db, userId: "user-1", range: "all" });
+      assert.equal(live.trip.enabled, true);
+      assert.equal(live.trip.onlineTokens, 300);
+      assert.equal(live.trip.frozen, false);
+      assert.ok(live.totals.onlineTokens >= 450);
+
+      const paused = setUsageTripEnabled({
+        db,
+        userId: "user-1",
+        enabled: false,
+      });
+      assert.equal(paused.enabled, false);
+      assert.equal(paused.frozen, true);
+      assert.equal(paused.onlineTokens, 300);
+
+      const restarted = setUsageTripEnabled({
+        db,
+        userId: "user-1",
+        enabled: true,
+        now: new Date("2026-08-04T23:00:00.000Z"),
+      });
+      assert.equal(restarted.enabled, true);
+      assert.equal(restarted.onlineTokens, 0);
+      assert.equal(restarted.frozen, false);
+      assert.equal(restarted.startedAt, "2026-08-04T23:00:00.000Z");
     });
   });
 });

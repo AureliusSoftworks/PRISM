@@ -12,6 +12,7 @@ import type {
   UsageResponse,
   UsageTokenCountSource,
   UsageTotals,
+  UsageTripMeter,
 } from "@localai/shared";
 
 type UsageMode = "zen" | "sandbox" | "coffee" | "story" | "system" | string | null;
@@ -1190,6 +1191,126 @@ function recentFromRow(row: UsageRecentRow): UsageRecentEvent {
   };
 }
 
+function aggregateOnlineTripSince(args: {
+  db: DatabaseSync;
+  userId: string;
+  startedAt: string;
+}): { onlineTokens: number; estimatedCostMicroUsd: number } {
+  const row = args.db
+    .prepare(
+      `SELECT
+         COALESCE(SUM(CASE WHEN provider IN ('openai', 'anthropic') THEN COALESCE(total_tokens, 0) ELSE 0 END), 0) AS online_tokens,
+         COALESCE(SUM(CASE WHEN provider IN ('openai', 'anthropic') THEN COALESCE(cost_micro_usd, 0) ELSE 0 END), 0) AS estimated_cost_micro_usd
+       FROM usage_events
+       WHERE user_id = ?
+         AND created_at >= ?`,
+    )
+    .get(args.userId, args.startedAt) as
+    | { online_tokens: number; estimated_cost_micro_usd: number }
+    | undefined;
+  return {
+    onlineTokens: Number(row?.online_tokens ?? 0),
+    estimatedCostMicroUsd: Number(row?.estimated_cost_micro_usd ?? 0),
+  };
+}
+
+interface UsageTripUserRow {
+  usage_trip_enabled: number | null;
+  usage_trip_started_at: string | null;
+  usage_trip_frozen_online_tokens: number | null;
+  usage_trip_frozen_cost_micro_usd: number | null;
+}
+
+function readUsageTripUserRow(
+  db: DatabaseSync,
+  userId: string,
+): UsageTripUserRow | undefined {
+  return db
+    .prepare(
+      `SELECT usage_trip_enabled, usage_trip_started_at,
+              usage_trip_frozen_online_tokens, usage_trip_frozen_cost_micro_usd
+       FROM users WHERE id = ?`,
+    )
+    .get(userId) as UsageTripUserRow | undefined;
+}
+
+/** Account-wide online-token trip meter for the Usage panel. */
+export function getUsageTripMeter(args: {
+  db: DatabaseSync;
+  userId: string;
+}): UsageTripMeter {
+  const row = readUsageTripUserRow(args.db, args.userId);
+  const enabled = Number(row?.usage_trip_enabled ?? 0) === 1;
+  const startedAt = row?.usage_trip_started_at ?? null;
+  if (enabled && startedAt) {
+    const live = aggregateOnlineTripSince({
+      db: args.db,
+      userId: args.userId,
+      startedAt,
+    });
+    return {
+      enabled: true,
+      startedAt,
+      onlineTokens: live.onlineTokens,
+      estimatedCostMicroUsd: live.estimatedCostMicroUsd,
+      frozen: false,
+    };
+  }
+  const frozenTokens = Math.max(
+    0,
+    Number(row?.usage_trip_frozen_online_tokens ?? 0),
+  );
+  const frozenCost = Math.max(
+    0,
+    Number(row?.usage_trip_frozen_cost_micro_usd ?? 0),
+  );
+  return {
+    enabled: false,
+    startedAt,
+    onlineTokens: frozenTokens,
+    estimatedCostMicroUsd: frozenCost,
+    frozen: Boolean(startedAt) || frozenTokens > 0 || frozenCost > 0,
+  };
+}
+
+/**
+ * Start a fresh trip (reset to 0) or freeze the current trip total.
+ * Lifetime usage history is never deleted.
+ */
+export function setUsageTripEnabled(args: {
+  db: DatabaseSync;
+  userId: string;
+  enabled: boolean;
+  now?: Date;
+}): UsageTripMeter {
+  const nowIso = (args.now ?? new Date()).toISOString();
+  if (args.enabled) {
+    args.db
+      .prepare(
+        `UPDATE users
+         SET usage_trip_enabled = 1,
+             usage_trip_started_at = ?,
+             usage_trip_frozen_online_tokens = 0,
+             usage_trip_frozen_cost_micro_usd = 0
+         WHERE id = ?`,
+      )
+      .run(nowIso, args.userId);
+    return getUsageTripMeter({ db: args.db, userId: args.userId });
+  }
+
+  const current = getUsageTripMeter({ db: args.db, userId: args.userId });
+  args.db
+    .prepare(
+      `UPDATE users
+       SET usage_trip_enabled = 0,
+           usage_trip_frozen_online_tokens = ?,
+           usage_trip_frozen_cost_micro_usd = ?
+       WHERE id = ?`,
+    )
+    .run(current.onlineTokens, current.estimatedCostMicroUsd, args.userId);
+  return getUsageTripMeter({ db: args.db, userId: args.userId });
+}
+
 export function getUsageReport(args: {
   db: DatabaseSync;
   userId: string;
@@ -1301,6 +1422,7 @@ export function getUsageReport(args: {
     trackingStartedAt,
     hasUntrackedHistory: Boolean(historyRow?.found),
     conversationScoped: Boolean(conversationId),
+    trip: getUsageTripMeter({ db: args.db, userId: args.userId }),
   };
 }
 

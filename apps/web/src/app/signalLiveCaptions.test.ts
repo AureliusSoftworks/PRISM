@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  botcastSpeechRevealVisibleText,
   finishBotcastSpeechReveal,
   prepareBotcastSpeechReveal,
   startBotcastSpeechReveal,
@@ -15,7 +16,11 @@ import {
   signalVoiceCompletionFallbackDurationMs,
 } from "./signalLiveCaptions.ts";
 
-describe("Signal delayed live captions", () => {
+describe("Signal live captions", () => {
+  it("keeps the named delay at zero so captions share the speech clock", () => {
+    assert.equal(SIGNAL_LIVE_CAPTION_DELAY_MS, 0);
+  });
+
   it("paces an Abe-sized silent fallback like readable speech", () => {
     const text =
       "That is my plain answer: equal citizenship is not a reward for obedience, but a right belonging to persons under the law. I arrived at it late, yet I mean it without qualification.";
@@ -45,7 +50,7 @@ describe("Signal delayed live captions", () => {
     );
   });
 
-  it("starts with only the words spoken by the end of the initial delay", () => {
+  it("shows spoken words as soon as playback is on the speech clock", () => {
     const text = "One two.";
     const reveal = startBotcastSpeechReveal({
       text,
@@ -57,23 +62,21 @@ describe("Signal delayed live captions", () => {
       },
     });
 
+    for (const elapsedMs of [0, 300, 900]) {
+      const state = updateBotcastSpeechReveal(reveal, elapsedMs);
+      assert.equal(
+        signalLiveCaptionText(state),
+        botcastSpeechRevealVisibleText(state).trim(),
+        `captions must match speech clock at ${elapsedMs}ms`,
+      );
+    }
     assert.equal(
-      signalLiveCaptionText(
-        updateBotcastSpeechReveal(
-          reveal,
-          SIGNAL_LIVE_CAPTION_DELAY_MS - 1,
-        ),
-      ),
-      "",
-    );
-    assert.equal(
-      signalLiveCaptionText(
-        updateBotcastSpeechReveal(
-          reveal,
-          SIGNAL_LIVE_CAPTION_DELAY_MS,
-        ),
-      ),
+      signalLiveCaptionText(updateBotcastSpeechReveal(reveal, 300)),
       "One",
+    );
+    assert.match(
+      signalLiveCaptionText(updateBotcastSpeechReveal(reveal, 900)),
+      /^One two/,
     );
   });
 
@@ -113,7 +116,7 @@ describe("Signal delayed live captions", () => {
   it("shows provenance-marked social silence but hides Power silence", () => {
     const reveal = updateBotcastSpeechReveal(
       startBotcastSpeechReveal({ text: "...", durationMs: 900 }),
-      SIGNAL_LIVE_CAPTION_DELAY_MS,
+      0,
     );
     assert.equal(
       signalLiveCaptionText(reveal, {

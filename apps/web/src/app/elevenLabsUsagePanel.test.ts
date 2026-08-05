@@ -45,6 +45,12 @@ test("ElevenLabs balance leads the Usage panel and exposes key management", () =
   );
   assert.match(usagePanel, /Account key connected/);
   assert.match(usagePanel, /Connect key/);
+  const tripIndex = usagePanel.indexOf("Trip meter");
+  assert.ok(tripIndex > prismUsageIndex, "Trip meter follows PRISM usage totals");
+  assert.match(usagePanel, /usageTripCard/);
+  assert.match(usagePanel, /Counting online tokens since/);
+  assert.match(pageSource, /\/api\/usage\/trip/);
+  assert.match(pageSource, /setUsageTripEnabled/);
 });
 
 test("ElevenLabs balance is no longer duplicated in Connections", () => {

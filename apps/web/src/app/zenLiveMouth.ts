@@ -420,11 +420,14 @@ function englishCrtVisemeStep(
 }
 
 function englishCrtRestDurationUnits(character: string): number {
-  if (/\s/u.test(character)) return 0.34;
-  if (/[.!?…]/u.test(character)) return 1.45;
-  if (/[,;:]/u.test(character)) return 0.92;
-  if (/[—–]/u.test(character)) return 0.78;
-  if (character === "-") return 0.22;
+  // Mildly weighted toward natural TTS clause silence when provider
+  // character timing is unavailable. Keep rests modest so spoken beats are
+  // not compressed ahead of the audio clock.
+  if (/\s/u.test(character)) return 0.38;
+  if (/[.!?…]/u.test(character)) return 1.9;
+  if (/[,;:]/u.test(character)) return 1.2;
+  if (/[—–]/u.test(character)) return 1.05;
+  if (character === "-") return 0.25;
   return 0.5;
 }
 

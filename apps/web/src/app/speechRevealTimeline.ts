@@ -1,5 +1,6 @@
 import {
   buildSpeechActivityWindows,
+  buildSpeechActivityWindowsFromTextCadence,
   speechActivityAtMs,
   type SpeechActivityWindow,
 } from "./speechActivity.ts";
@@ -138,10 +139,12 @@ function buildSpeechRevealTimeline(args: {
       visiblePrefixTokenCount,
       totalTokenCount,
       finalSegment: args.finalSegment ?? true,
-      speechActivityWindows: buildSpeechActivityWindows(
-        args.alignment,
-        normalizedDurationMs,
-      ),
+      speechActivityWindows:
+        buildSpeechActivityWindows(args.alignment, normalizedDurationMs) ??
+        buildSpeechActivityWindowsFromTextCadence(
+          args.tokenSignature,
+          normalizedDurationMs,
+        ),
       alignment: args.alignment ?? null,
     };
   }
@@ -172,10 +175,12 @@ function buildSpeechRevealTimeline(args: {
     visiblePrefixTokenCount,
     totalTokenCount,
     finalSegment: args.finalSegment ?? true,
-    speechActivityWindows: buildSpeechActivityWindows(
-      args.alignment,
-      normalizedDurationMs,
-    ),
+    speechActivityWindows:
+      buildSpeechActivityWindows(args.alignment, normalizedDurationMs) ??
+      buildSpeechActivityWindowsFromTextCadence(
+        args.tokenSignature,
+        normalizedDurationMs,
+      ),
     alignment: args.alignment ?? null,
   };
 }

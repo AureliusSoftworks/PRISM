@@ -113,6 +113,22 @@ export interface CoffeeBarRitualState {
   farewellFusesByBotId: Record<string, CoffeeFarewellFuseState>;
 }
 
+/** How the player enters a Coffee session. */
+export type CoffeeExperienceMode = "join" | "serve";
+
+export function isCoffeeExperienceMode(
+  value: unknown,
+): value is CoffeeExperienceMode {
+  return value === "join" || value === "serve";
+}
+
+/** Transient Serve-mode thanks line after a successful pour. */
+export interface CoffeeServeThanks {
+  botId: string;
+  text: string;
+  at: string;
+}
+
 export interface CoffeeSessionSettings {
   responseLength: CoffeeResponseLengthPreset;
   /** 0 = slower pauses, 50 = neutral, 100 = snappier (matches UI slider). */
@@ -128,6 +144,15 @@ export interface CoffeeSessionSettings {
   memoryCallbacks: CoffeeMemoryCallbacks;
   /** Session-only. Groups and presets omit this ritual snapshot. */
   barRitual?: CoffeeBarRitualState;
+  /**
+   * Join = chat + player sip, no pot; Serve = pour-only hospitality.
+   * Omitted on legacy sessions (treat as full interactive coffee).
+   */
+  experienceMode?: CoffeeExperienceMode;
+  /** Join-only seated player cup (sip ritual without the retired bar role). */
+  joinPlayerCup?: CoffeePlayerCupState | null;
+  /** Serve-only: last bot thanks line after a pour (session-local). */
+  lastServeThanks?: CoffeeServeThanks | null;
 }
 
 /** Defaults are the lively middle-ground Coffee table, with chaos still opt-in. */
@@ -398,7 +423,13 @@ export function coffeeFarewellReplyDelay(seed: string): 2 | 3 {
 export function coffeeReusableSessionSettings(
   settings: CoffeeSessionSettings,
 ): CoffeeSessionSettings {
-  const { barRitual: _barRitual, ...reusable } = settings;
+  const {
+    barRitual: _barRitual,
+    experienceMode: _experienceMode,
+    joinPlayerCup: _joinPlayerCup,
+    lastServeThanks: _lastServeThanks,
+    ...reusable
+  } = settings;
   return reusable;
 }
 
@@ -455,6 +486,50 @@ export function normalizeCoffeeSessionSettings(raw: unknown): CoffeeSessionSetti
     memoryCallbacks = o.memoryCallbacks as CoffeeMemoryCallbacks;
   }
 
+  const experienceMode = isCoffeeExperienceMode(o.experienceMode)
+    ? o.experienceMode
+    : undefined;
+  const joinPlayerCupRaw =
+    o.joinPlayerCup && typeof o.joinPlayerCup === "object" && !Array.isArray(o.joinPlayerCup)
+      ? (o.joinPlayerCup as Record<string, unknown>)
+      : null;
+  const joinPlayerCup =
+    joinPlayerCupRaw &&
+    compactText(joinPlayerCupRaw.fillId, 180) &&
+    isoString(joinPlayerCupRaw.filledAt)
+      ? {
+          fillId: compactText(joinPlayerCupRaw.fillId, 180),
+          filledAt: isoString(joinPlayerCupRaw.filledAt)!,
+          topOffCount: Math.max(
+            0,
+            Math.min(100, Math.floor(Number(joinPlayerCupRaw.topOffCount) || 0)),
+          ),
+          sipCount: Math.max(
+            0,
+            Math.min(6, Math.floor(Number(joinPlayerCupRaw.sipCount) || 0)),
+          ),
+        }
+      : o.joinPlayerCup === null
+        ? null
+        : undefined;
+  const thanksRaw =
+    o.lastServeThanks && typeof o.lastServeThanks === "object" && !Array.isArray(o.lastServeThanks)
+      ? (o.lastServeThanks as Record<string, unknown>)
+      : null;
+  const lastServeThanks =
+    thanksRaw &&
+    compactText(thanksRaw.botId, 180) &&
+    compactText(thanksRaw.text, 160) &&
+    isoString(thanksRaw.at)
+      ? {
+          botId: compactText(thanksRaw.botId, 180),
+          text: compactText(thanksRaw.text, 160),
+          at: isoString(thanksRaw.at)!,
+        }
+      : o.lastServeThanks === null
+        ? null
+        : undefined;
+
   return {
     responseLength,
     responseDelayBias,
@@ -468,6 +543,9 @@ export function normalizeCoffeeSessionSettings(raw: unknown): CoffeeSessionSetti
     ...(normalizeCoffeeBarRitual(o.barRitual)
       ? { barRitual: normalizeCoffeeBarRitual(o.barRitual) }
       : {}),
+    ...(experienceMode ? { experienceMode } : {}),
+    ...(joinPlayerCup !== undefined ? { joinPlayerCup } : {}),
+    ...(lastServeThanks !== undefined ? { lastServeThanks } : {}),
   };
 }
 

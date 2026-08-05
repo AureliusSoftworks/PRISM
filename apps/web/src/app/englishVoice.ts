@@ -11,6 +11,7 @@ import {
   VOICE_VOCAL_ACTIONS,
   VOICE_VOCAL_ACTION_MODIFIERS,
   type BotAudioVoiceProfileV1,
+  type EnglishPacingProfileV1,
   type ResolvedLocalVoicePronunciationV1,
   type ResolvedLocalVoiceSpeechprintV1,
   type VoicePerformanceVocalActionSegmentV1,
@@ -26,6 +27,7 @@ import {
   releaseRealtimeVoiceAudio,
   stopRealtimeVoiceAudio,
   voiceReleaseGainAt,
+  type VoicePlaybackChannel,
   type VoicePlaybackLifecycle,
 } from "./voiceEffects.ts";
 import type { PreSpeechBreathPlan } from "./preSpeechBreath.ts";
@@ -953,6 +955,7 @@ async function playAudio(
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan?: number,
   isPlaybackStillValid?: () => boolean,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   const playbackStillValid = (): boolean =>
     expectedGeneration === generation && (isPlaybackStillValid?.() ?? true);
@@ -985,6 +988,7 @@ async function playAudio(
       voiceEffect: voiceEffectForPlayback(profile),
       roomAcoustics,
       stereoPan,
+      channel,
       lifecycle,
       compensateLifecycleForOutputLatency: true,
       isCurrent: playbackStillValid,
@@ -1045,6 +1049,7 @@ async function playEnglishClauseGap(args: {
   authoredPerformanceText?: string | null;
   roomAcoustics?: RoomAcousticsSend;
   stereoPan?: number;
+  pacingProfile?: EnglishPacingProfileV1 | null;
 }): Promise<number> {
   if (args.expectedGeneration !== generation) return 0;
   const gap = resolveEnglishClauseGap({
@@ -1054,6 +1059,7 @@ async function playEnglishClauseGap(args: {
     fullText: args.fullText,
     authoredPerformanceText: args.authoredPerformanceText,
     enabled: args.effectsEnabled,
+    pacingProfile: args.pacingProfile,
   });
   if (gap.breath) {
     const startedAt = Date.now();
@@ -1098,6 +1104,7 @@ async function playChunkedEnglishResponse(
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan = 0,
   authoredPerformanceText?: string | null,
+  pacingProfile?: EnglishPacingProfileV1 | null,
 ): Promise<void> {
   const totalCharacters = Math.max(
     1,
@@ -1111,6 +1118,7 @@ async function playChunkedEnglishResponse(
   let previousSpeechChunk: {
     text: string;
     index: number;
+    sourceEnd: number;
   } | null = null;
 
   const remainingEstimateAfterCharacters = (charactersHeard: number): number =>
@@ -1163,11 +1171,11 @@ async function playChunkedEnglishResponse(
         {
           onStart: (durationMs) => {
             actualActionDurationMs = durationMs;
+            const actionFloor = Math.max(1, durationMs ?? 1);
             const reported = reportedChunkedVoiceDurationMs({
               estimatedDurationMs: safeEstimatedDurationMs,
               audibleElapsedMs: audibleSegmentCursorMs,
-              remainingEstimateMs:
-                Math.max(1, durationMs ?? 1) + remainingAfterAction,
+              remainingEstimateMs: actionFloor + remainingAfterAction,
             });
             if (!playbackStarted) {
               playbackStarted = true;
@@ -1175,6 +1183,17 @@ async function playChunkedEnglishResponse(
             } else {
               lifecycle?.onProgress?.(audibleSegmentCursorMs, reported);
             }
+            // Publish the segment as audio begins so mouth/text never race on
+            // the full-utterance estimate while this clip is still playing.
+            lifecycle?.onSegmentTiming?.({
+              kind: "vocal-action",
+              sourceStart: chunk.sourceStart ?? 0,
+              sourceEnd: chunk.sourceEnd ?? chunk.sourceStart ?? 0,
+              startMs: audibleSegmentCursorMs,
+              endMs: audibleSegmentCursorMs + actionFloor,
+              heard: true,
+              action: chunk.action,
+            });
           },
           onProgress: (elapsedMs) => {
             actualActionElapsedMs = Math.max(actualActionElapsedMs, elapsedMs);
@@ -1194,15 +1213,6 @@ async function playChunkedEnglishResponse(
         actualActionElapsedMs,
         expectedGeneration === generation ? (actualActionDurationMs ?? 1) : 0,
       );
-      lifecycle?.onSegmentTiming?.({
-        kind: "vocal-action",
-        sourceStart: chunk.sourceStart ?? 0,
-        sourceEnd: chunk.sourceEnd ?? chunk.sourceStart ?? 0,
-        startMs: audibleSegmentCursorMs,
-        endMs: audibleSegmentCursorMs + actionHeardMs,
-        heard: actionHeardMs > 0,
-        action: chunk.action,
-      });
       audibleSegmentCursorMs += actionHeardMs;
       if (expectedGeneration !== generation) return;
       reportLifecycleProgress(
@@ -1224,9 +1234,20 @@ async function playChunkedEnglishResponse(
         authoredPerformanceText,
         roomAcoustics,
         stereoPan,
+        pacingProfile,
       });
       if (expectedGeneration !== generation) return;
       if (gapHeardMs > 0) {
+        // Silence is part of the audible clock: emit a non-heard segment so
+        // on-screen text and mouth hold through the clause pause.
+        lifecycle?.onSegmentTiming?.({
+          kind: "speech",
+          sourceStart: previousSpeechChunk.sourceEnd,
+          sourceEnd: previousSpeechChunk.sourceEnd,
+          startMs: audibleSegmentCursorMs,
+          endMs: audibleSegmentCursorMs + gapHeardMs,
+          heard: false,
+        });
         audibleSegmentCursorMs += gapHeardMs;
         reportLifecycleProgress(
           audibleSegmentCursorMs,
@@ -1247,6 +1268,23 @@ async function playChunkedEnglishResponse(
     );
     let actualChunkDurationMs: number | null = null;
     let actualChunkElapsedMs = 0;
+    const sourceStart =
+      typeof chunk.sourceStart === "number" &&
+      typeof chunk.sourceEnd === "number" &&
+      chunk.sourceEnd > chunk.sourceStart
+        ? chunk.sourceStart
+        : consumedCharacters;
+    const sourceEnd =
+      typeof chunk.sourceStart === "number" &&
+      typeof chunk.sourceEnd === "number" &&
+      chunk.sourceEnd > chunk.sourceStart
+        ? chunk.sourceEnd
+        : sourceStart +
+          Math.max(
+            1,
+            chunk.text?.length ??
+              Math.max(0, chunk.characterCount - (chunk.index > 0 ? 1 : 0)),
+          );
     await playAudio(
       chunk.bytes,
       profile,
@@ -1255,57 +1293,61 @@ async function playChunkedEnglishResponse(
       effectsEnabled,
       engineUsed,
       {
-        onStart: (durationMs) => {
-          actualChunkDurationMs = durationMs;
-          const chunkFloor = Math.max(1, durationMs ?? segmentDurationMs);
-          const reported = reportedChunkedVoiceDurationMs({
-            estimatedDurationMs: safeEstimatedDurationMs,
-            audibleElapsedMs: audibleSegmentCursorMs,
-            remainingEstimateMs: chunkFloor + remainingAfterChunk,
-          });
-          if (!playbackStarted) {
-            playbackStarted = true;
-            lifecycle?.onStart?.(reported);
-          } else {
-            lifecycle?.onProgress?.(audibleSegmentCursorMs, reported);
-          }
+          onStart: (durationMs) => {
+            actualChunkDurationMs = durationMs;
+            const chunkFloor = Math.max(1, durationMs ?? segmentDurationMs);
+            const reported = reportedChunkedVoiceDurationMs({
+              estimatedDurationMs: safeEstimatedDurationMs,
+              audibleElapsedMs: audibleSegmentCursorMs,
+              remainingEstimateMs: chunkFloor + remainingAfterChunk,
+            });
+            if (!playbackStarted) {
+              playbackStarted = true;
+              lifecycle?.onStart?.(reported);
+            } else {
+              lifecycle?.onProgress?.(audibleSegmentCursorMs, reported);
+            }
+            // Lock reveal/mouth to this clause immediately. Waiting until the
+            // chunk ends left a weight-based full-line clock racing ahead of
+            // the audio (mouth + stream finishing early inside each phrase).
+            lifecycle?.onSegmentTiming?.({
+              kind: "speech",
+              sourceStart,
+              sourceEnd,
+              startMs: audibleSegmentCursorMs,
+              endMs: audibleSegmentCursorMs + chunkFloor,
+              heard: true,
+            });
+          },
+          onProgress: (elapsedMs) => {
+            actualChunkElapsedMs = Math.max(actualChunkElapsedMs, elapsedMs);
+            reportLifecycleProgress(
+              audibleSegmentCursorMs + elapsedMs,
+              Math.max(
+                0,
+                (actualChunkDurationMs ?? segmentDurationMs) - elapsedMs,
+              ) + remainingAfterChunk,
+            );
+          },
+          // The outer stream owns the single lifecycle end event.
+          onEnd: () => undefined,
         },
-        onProgress: (elapsedMs) => {
-          actualChunkElapsedMs = Math.max(actualChunkElapsedMs, elapsedMs);
-          reportLifecycleProgress(
-            audibleSegmentCursorMs + elapsedMs,
-            Math.max(
-              0,
-              (actualChunkDurationMs ?? segmentDurationMs) - elapsedMs,
-            ) + remainingAfterChunk,
-          );
-        },
-        // The outer stream owns the single lifecycle end event.
-        onEnd: () => undefined,
-      },
-      roomAcoustics,
-      playedChunks === 0 ? preSpeechBreath : null,
-      stereoPan,
-    );
+        roomAcoustics,
+        playedChunks === 0 ? preSpeechBreath : null,
+        stereoPan,
+      );
     const speechHeardMs = Math.max(
       actualChunkElapsedMs,
       expectedGeneration === generation
         ? (actualChunkDurationMs ?? segmentDurationMs)
         : 0,
     );
-    lifecycle?.onSegmentTiming?.({
-      kind: "speech",
-      sourceStart: chunk.sourceStart ?? 0,
-      sourceEnd: chunk.sourceEnd ?? chunk.sourceStart ?? 0,
-      startMs: audibleSegmentCursorMs,
-      endMs: audibleSegmentCursorMs + speechHeardMs,
-      heard: speechHeardMs > 0,
-    });
     audibleSegmentCursorMs += speechHeardMs;
     if (expectedGeneration !== generation) return;
     previousSpeechChunk = {
       text: chunk.text?.trim() || "",
       index: chunk.index,
+      sourceEnd: chunk.sourceEnd ?? chunk.sourceStart ?? 0,
     };
     playedChunks += 1;
     consumedCharacters += chunk.characterCount;
@@ -1344,29 +1386,34 @@ export function enqueueEnglishVoice(
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan = 0,
   isPlaybackStillValid?: () => boolean,
+  channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
     ...applyVoiceDeliveryMoodToProfile(profile, deliveryMood),
     volume: normalizeBotVoiceVolume(globalVolume),
   };
-  queue = queue
-    .catch(() => undefined)
-    .then(() =>
-      playAudio(
-        bytes,
-        playbackProfile,
-        expectedGeneration,
-        seed,
-        effectsEnabled,
-        engineUsed,
-        lifecycle,
-        roomAcoustics,
-        preSpeechBreath,
-        stereoPan,
-        isPlaybackStillValid,
-      ),
+  const run = () =>
+    playAudio(
+      bytes,
+      playbackProfile,
+      expectedGeneration,
+      seed,
+      effectsEnabled,
+      engineUsed,
+      lifecycle,
+      roomAcoustics,
+      preSpeechBreath,
+      stereoPan,
+      isPlaybackStillValid,
+      channel,
     );
+  // Crosstalk / reaction must not wait behind the primary English queue or the
+  // interrupt shout cannot overlap the cut-off line.
+  if (channel !== "primary") {
+    return run();
+  }
+  queue = queue.catch(() => undefined).then(run);
   return queue;
 }
 
@@ -1426,6 +1473,7 @@ export function enqueueChunkedEnglishVoice(
   roomAcoustics?: RoomAcousticsSend,
   preSpeechBreath?: PreSpeechBreathPlan | null,
   stereoPan = 0,
+  pacingProfile?: EnglishPacingProfileV1 | null,
 ): Promise<void> {
   const expectedGeneration = generation;
   const playbackProfile = {
@@ -1447,6 +1495,8 @@ export function enqueueChunkedEnglishVoice(
         roomAcoustics,
         preSpeechBreath,
         stereoPan,
+        null,
+        pacingProfile,
       ),
     );
   return queue;

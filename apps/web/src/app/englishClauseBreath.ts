@@ -4,6 +4,10 @@ import {
   type PreSpeechBreathIntensity,
   type PreSpeechBreathPlan,
 } from "./preSpeechBreath.ts";
+import {
+  englishPacingPauseMsForKind,
+  type EnglishPacingProfileV1,
+} from "@localai/shared";
 
 export type EnglishClausePunctuationKind =
   | "comma"
@@ -17,6 +21,13 @@ export interface EnglishClauseGapPlan {
   breath: PreSpeechBreathPlan | null;
 }
 
+/**
+ * Forced mid-stream pauses between Kokoro chunks. Off by default: they fight
+ * the engine's natural delivery. Player English already plays as one clip and
+ * sounds right; bot chunked streams should match that continuity.
+ */
+export const ENGLISH_FORCED_CLAUSE_PACING_ENABLED = false;
+
 const PAUSE_MS = {
   comma: 140,
   clause: 200,
@@ -24,11 +35,12 @@ const PAUSE_MS = {
   glue: 60,
 } as const satisfies Record<EnglishClausePunctuationKind, number>;
 
-/** Soft breath odds by trailing punctuation. */
+/** Soft breath odds by trailing punctuation. Kept at zero — intermittent
+ * mid-clause breaths sounded fake/disjointed; quiet pauses alone carry pacing. */
 const BREATH_CHANCE = {
-  comma: 0.2,
-  clause: 0.28,
-  strong: 0.4,
+  comma: 0,
+  clause: 0,
+  strong: 0,
   glue: 0,
 } as const satisfies Record<EnglishClausePunctuationKind, number>;
 
@@ -117,7 +129,8 @@ function resolveClauseBreathPlan(args: {
 
 /**
  * Plans the silence (and optional soft breath) after an English stream chunk.
- * Pauses always apply; decorative breaths stay sparse and shared.
+ * When forced clause pacing is disabled, chunks play back-to-back with no
+ * injected pause so Kokoro keeps its natural delivery.
  */
 export function resolveEnglishClauseGap(args: {
   seed: string;
@@ -126,9 +139,14 @@ export function resolveEnglishClauseGap(args: {
   fullText?: string | null;
   authoredPerformanceText?: string | null;
   enabled?: boolean;
+  pacingProfile?: EnglishPacingProfileV1 | null;
 }): EnglishClauseGapPlan {
   const kind = classifyEnglishClausePunctuation(args.trailingText);
-  const pauseMs = PAUSE_MS[kind];
+  if (!ENGLISH_FORCED_CLAUSE_PACING_ENABLED) {
+    return { pauseMs: 0, kind, breath: null };
+  }
+  const profilePauseMs = englishPacingPauseMsForKind(args.pacingProfile, kind);
+  const pauseMs = profilePauseMs ?? PAUSE_MS[kind];
   if (args.enabled === false) {
     return { pauseMs, kind, breath: null };
   }

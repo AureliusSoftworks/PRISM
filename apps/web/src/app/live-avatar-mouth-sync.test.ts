@@ -119,13 +119,32 @@ describe("live avatar mouth synchronization", () => {
   it("drives Zen visemes from its audio timeline instead of canvas reveal", () => {
     const zenMouth = pageSource.slice(
       pageSource.indexOf("const zenLiveBotRevealMouthShape ="),
-      pageSource.indexOf("const zenLiveBotTalking ="),
+      pageSource.indexOf("const zenLiveBotUtteranceActive"),
     );
     assert.match(zenMouth, /speechTimeline\?\.phase === "playing"/u);
     assert.match(zenMouth, /elapsedMs: speechTimeline\.elapsedMs/u);
     assert.match(zenMouth, /alignment: speechTimeline\.alignment/u);
     assert.match(zenMouth, /settings\?\.voiceMode === "bottish"/u);
     assert.match(zenMouth, /bottishMouthShapeAtAlignedElapsedMs\(\{/u);
+    assert.match(
+      zenMouth,
+      /playingMouthShape === "closed"[\s\S]{0,40}return null/u,
+      "Zen must idle the face on true closed pause shapes",
+    );
+    const zenTalking = pageSource.slice(
+      pageSource.indexOf("const zenLiveBotUtteranceActive"),
+      pageSource.indexOf("const zenLiveBotMouthOpen"),
+    );
+    assert.match(
+      zenTalking,
+      /chatAssistantRevealInProgress/u,
+      "Replying status must follow the whole utterance, not mouth open/close",
+    );
+    assert.doesNotMatch(
+      zenTalking,
+      /zenLiveBotRevealMouthShape !== null/u,
+      "Utterance-active must not flicker off when lips idle through pauses",
+    );
   });
 
   it("throttles Bottish in Avatar Studio while retaining its phrase gaps", () => {
@@ -154,11 +173,22 @@ describe("live avatar mouth synchronization", () => {
       /coffeeLiveAvatarSpeechProgressShouldCommit\(\{/u,
       "Coffee mouth progress must not setState on every animation frame",
     );
-    assert.match(playback, /speechActivityWindows: buildSpeechActivityWindows/u);
+    assert.match(
+      playback,
+      /speechActivityWindows:\s*\n?\s*buildSpeechActivityWindows\(/u,
+    );
+    assert.match(
+      playback,
+      /buildSpeechActivityWindowsFromTextCadence/u,
+      "Coffee must fall back to text-cadence silence when alignment is missing",
+    );
     assert.match(seatMouth, /crtSpeechMouthShapeAtAlignedElapsedMs\(\{/u);
     assert.match(seatMouth, /elapsedMs: liveSeatSpeech\.elapsedMs/u);
     assert.match(seatMouth, /alignment: liveSeatSpeech\.alignment/u);
-    assert.match(seatMouth, /settings\?\.voiceMode === "bottish"/u);
+    assert.match(
+      seatMouth,
+      /voiceMode === "bottish"/u,
+    );
     assert.match(seatMouth, /bottishMouthShapeAtAlignedElapsedMs\(\{/u);
   });
 

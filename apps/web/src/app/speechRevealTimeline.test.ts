@@ -79,6 +79,36 @@ describe("speech reveal timeline", () => {
     );
   });
 
+  it("idles the mouth through punctuation when provider alignment is missing", () => {
+    const timeline = startAlignedSpeechRevealTimeline(
+      ["Hello. ", "There."],
+      "Hello. There.",
+      2_000,
+      null,
+    );
+    assert.ok((timeline.speechActivityWindows?.length ?? 0) >= 2);
+    const firstEnd = timeline.speechActivityWindows![0]!.endMs;
+    const secondStart = timeline.speechActivityWindows![1]!.startMs;
+    const pauseMs = Math.round((firstEnd + secondStart) / 2);
+    assert.equal(
+      speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, pauseMs)),
+      false,
+    );
+    assert.equal(
+      speechRevealTimelineIsVoicing(updateSpeechRevealTimeline(timeline, 40)),
+      false,
+    );
+    assert.equal(
+      speechRevealTimelineIsVoicing(
+        updateSpeechRevealTimeline(
+          timeline,
+          timeline.speechActivityWindows![0]!.startMs + 20,
+        ),
+      ),
+      true,
+    );
+  });
+
   it("builds short phrase buffers without changing the utterance", () => {
     const tokens = ["One ", "two ", "three, ", "four ", "five ", "six ", "seven ", "eight ", "nine."];
     const phrases = buildSpeechRevealPhrases(tokens, { minWords: 3, maxWords: 5 });

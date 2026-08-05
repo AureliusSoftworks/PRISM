@@ -1222,7 +1222,10 @@ import type {
   PromptWildcardRunMetadata,
   PsychicThoughtPayload,
 } from "./promptShortcut.js";
-import type { CoffeeSessionSettings } from "./coffeeSettings.js";
+import type {
+  CoffeeExperienceMode,
+  CoffeeSessionSettings,
+} from "./coffeeSettings.js";
 import type {
   PrismMoodInterruptionInput,
   PrismMoodKey,
@@ -2381,6 +2384,7 @@ export {
   coffeeReplyLengthCaps,
   coffeeRouterTailMessageCount,
   coffeeRouterTemperature,
+  isCoffeeExperienceMode,
   normalizeCoffeeSessionSettings,
   type CoffeeCrossTalkLevel,
   type CoffeeBarDeliveryStatus,
@@ -2395,9 +2399,11 @@ export {
   type CoffeeBarSpecialImageStatus,
   type CoffeeFarewellFuseKind,
   type CoffeeFarewellFuseState,
+  type CoffeeExperienceMode,
   type CoffeeMemoryCallbacks,
   type CoffeeResponseLengthPreset,
   type CoffeeSessionSettings,
+  type CoffeeServeThanks,
   type CoffeePlayerCupState,
   type CoffeeWaiterOfferState,
   type CoffeeBotWaiterVisitState,
@@ -3004,6 +3010,8 @@ export interface CoffeeSessionCreateRequest {
   initialPoll?: CoffeePollCreateRequest;
   /** Optional opening teams mode that seeds left/right social dynamics. */
   initialTeams?: CoffeeTeamSessionConfig;
+  /** Join (chat+sip) or Serve (pour-only). Omitted = legacy full interactive. */
+  experienceMode?: CoffeeExperienceMode;
 }
 
 /** Request body for `POST /api/coffee/groups/:id/sessions`. */
@@ -3024,6 +3032,8 @@ export interface CoffeeGroupSessionCreateRequest {
   initialPoll?: CoffeePollCreateRequest;
   /** Optional opening teams mode that seeds left/right social dynamics. */
   initialTeams?: CoffeeTeamSessionConfig;
+  /** Join (chat+sip) or Serve (pour-only). Omitted = legacy full interactive. */
+  experienceMode?: CoffeeExperienceMode;
 }
 
 /** Response body for `POST /api/coffee/sessions`. */
@@ -3222,6 +3232,7 @@ export * from "./graphicsQuality.js";
 export * from "./review.js";
 export * from "./ephemeralChat.js";
 export * from "./replay.js";
+export * from "./liveBake.js";
 export * from "./livingShell.js";
 export * from "./livingShellProgress.js";
 export * from "./imageAssets.js";

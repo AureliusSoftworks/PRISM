@@ -6,53 +6,60 @@ import {
 } from "../local-voice-stream.ts";
 
 describe("local voice streaming chunks", () => {
-  it("preserves the complete utterance while yielding a short first phrase", () => {
+  it("cuts at every comma and period so Kokoro cannot invent mid-clause pauses", () => {
+    const text =
+      "The sponges, they are red and blue. Not green and white.";
+    assert.deepEqual(splitLocalVoiceStreamText(text), [
+      "The sponges,",
+      "they are red and blue.",
+      "Not green and white.",
+    ]);
+  });
+
+  it("preserves the complete utterance while yielding punctuated clauses", () => {
     const text =
       "Oh! Oh, okay, good—sorry, I was watching you for a second there and I could not tell if you were laughing with me or at me. It is usually at me, so that is an occupational hazard.";
     const chunks = splitLocalVoiceStreamText(text);
 
     assert.equal(chunks.join(" "), text);
-    assert.ok(chunks.length >= 2);
-    assert.equal(chunks[0], "Oh! Oh, okay,");
-    assert.ok(chunks[0]!.split(/\s+/u).length <= 12);
+    assert.ok(chunks.length >= 4);
+    assert.equal(chunks[0], "Oh!");
+    assert.equal(chunks[1], "Oh,");
+    assert.equal(chunks[2], "okay,");
     assert.ok(
-      chunks.slice(1).every((chunk) => chunk.split(/\s+/u).length <= 80),
+      chunks.every((chunk) => chunk.split(/\s+/u).length <= 80),
     );
   });
 
   it("handles empty, short, and punctuation-light speech", () => {
     assert.deepEqual(splitLocalVoiceStreamText("  "), []);
     assert.deepEqual(splitLocalVoiceStreamText("Hello there."), ["Hello there."]);
-    const long = splitLocalVoiceStreamText("word ".repeat(80));
+    const long = splitLocalVoiceStreamText("word ".repeat(160));
     assert.ok(long.length > 1);
-    assert.equal(long.join(" "), "word ".repeat(80).trim());
-    assert.ok(long.slice(1, -1).every((chunk) => chunk.split(/\s+/u).length >= 20));
+    assert.equal(long.join(" "), "word ".repeat(160).trim());
+    assert.ok(long.every((chunk) => chunk.split(/\s+/u).length <= 80));
   });
 
-  it("keeps complete sentences together after the latency-first phrase", () => {
+  it("keeps complete sentences as their own synthesis clauses", () => {
     const sentence = (index: number) =>
       `Sentence ${index} carries enough context to preserve a natural speaking cadence across the local synthesis pipeline.`;
     const text = Array.from({ length: 9 }, (_, index) => sentence(index + 1)).join(" ");
     const chunks = splitLocalVoiceStreamText(text);
     assert.equal(chunks.join(" "), text);
-    assert.ok(chunks.length >= 3);
-    assert.ok(chunks.slice(1).every((chunk) => chunk.split(/\s+/u).length <= 80));
+    assert.equal(chunks.length, 9);
+    assert.ok(chunks.every((chunk) => /\.$/u.test(chunk)));
   });
 
-  it("lets mid-utterance commas become chunk boundaries a little earlier", () => {
+  it("treats mid-utterance commas as hard synthesis boundaries", () => {
     const text =
       "After the opening settles into place, the next spoken clause keeps enough steady words to finally cross the clause threshold, then another clause continues with still more spoken detail for the local voice stream to carry forward.";
     const chunks = splitLocalVoiceStreamText(text);
     assert.equal(chunks.join(" "), text);
-    assert.ok(chunks.length >= 3, `chunks=${JSON.stringify(chunks)}`);
-    assert.ok(chunks.some((chunk) => /,$/u.test(chunk)));
-    assert.ok(
-      chunks.slice(1).some((chunk) => {
-        const tokens = chunk.split(/\s+/u).length;
-        return tokens >= 14 && tokens < 20 && /,$/u.test(chunk);
-      }),
-      `chunks=${JSON.stringify(chunks)}`,
-    );
+    assert.deepEqual(chunks, [
+      "After the opening settles into place,",
+      "the next spoken clause keeps enough steady words to finally cross the clause threshold,",
+      "then another clause continues with still more spoken detail for the local voice stream to carry forward.",
+    ]);
   });
 
   it("keeps exact canonical source ranges for interruption and replay", () => {
@@ -65,5 +72,7 @@ describe("local voice streaming chunks", () => {
       ).replace(/\s+/gu, " ")),
       segments.map((segment) => segment.text),
     );
+    assert.equal(segments.length, 2);
+    assert.equal(segments[0]?.text, "First phrase,");
   });
 });

@@ -124,6 +124,10 @@ import {
   restoreActionSfxPackClipsFromBackup,
 } from "./action-sfx-pack.ts";
 import {
+  listEnglishPacingProfilesForBackup,
+  restoreEnglishPacingProfilesFromBackup,
+} from "./english-pacing-profile.ts";
+import {
   listLibraryGroups,
   replaceLibraryGroups,
   type LibraryGroupV1,
@@ -574,6 +578,20 @@ export interface BackupSnapshot {
     promptSeed: string;
     packGenerationId: string;
     createdAt: string;
+  }>;
+  /**
+   * Local English pacing profiles (bot + player). Not part of bot Marketplace
+   * export. Optional in older v1 snapshots.
+   */
+  englishPacingProfiles?: Array<{
+    v: 1;
+    ownerKind: "bot" | "player";
+    ownerId: string;
+    commaMs: number;
+    clauseMs: number;
+    strongMs: number;
+    calibratedAt: string;
+    source: "elevenlabs-timestamps";
   }>;
 }
 
@@ -2785,6 +2803,7 @@ export function exportUserSnapshot(
       })),
     },
     actionSfxPacks: listActionSfxPackClipsForBackup(db, userId),
+    englishPacingProfiles: listEnglishPacingProfilesForBackup(db, userId),
     memories: memories.map((memory) => ({
       id: memory.id,
       conversationId: memory.conversation_id ?? undefined,
@@ -4266,6 +4285,17 @@ function importUserSnapshotWithinTransaction(
       userId,
     );
     restoreActionSfxPackClipsFromBackup(db, userId, snapshot.actionSfxPacks);
+  }
+
+  if (Array.isArray(snapshot.englishPacingProfiles)) {
+    db.prepare("DELETE FROM english_pacing_profiles WHERE user_id = ?").run(
+      userId,
+    );
+    restoreEnglishPacingProfilesFromBackup(
+      db,
+      userId,
+      snapshot.englishPacingProfiles,
+    );
   }
 
   for (const memory of snapshot.memories) {

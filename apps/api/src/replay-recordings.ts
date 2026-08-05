@@ -899,6 +899,9 @@ export async function startReplayPremiumProduction(args: {
   const manifest = parseJson<ReplayManifest>(row?.manifest_json ?? null);
   if (
     !row ||
+    // Premium production is Signal-only today. Coffee and Debate masters should
+    // reuse this path later (see LIVE_BAKE_PREMIUM_UPGRADE_SEAM); skip takes
+    // already marked Premium when that generalization lands.
     row.surface !== "signal" ||
     !manifest ||
     (!replayManifestV1IsValid(manifest) && !replayManifestV2IsValid(manifest))
