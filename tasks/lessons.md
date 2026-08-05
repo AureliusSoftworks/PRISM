@@ -1,8 +1,30 @@
-# Project Lessons Learned
+### 2026-08-05 · UX
+**Trigger**: Viewport-fit fix set `.forum { flex: 1 1 0 }` and the live stage collapsed to a tiny letterboxed strip.
+**Lesson**: Keep the Debate stage at `flex: 0 0 auto` + `width: 100%` + `aspect-ratio: 2 / 1` so height comes from width. Never give the stage `flex-basis: 0` — height collapses first and aspect-ratio then shrinks width. Let `.stageSupport` be `flex: 1 1 0` to absorb leftover / shrink. Keep the no-`100dvh` transcript rail fix.
+**Applies to**: `DebateExperience.module.css` `.forum`, `.stageSupport`, live viewport fit
 
-LocalAI-specific patterns and corrections. Updated when project-specific behavior needs to be remembered.
 
----
+**Lesson**: Never size nested Debate rail/transcript with `calc(100dvh - Npx)` — the shell grid already reserved the navbar + live header. Use `height: 100%` / `flex: 1 1 auto` + `min-height: 0` + `overflow: hidden` on `.live` / `.liveWorkspace` / `.debateRail`, and let `.transcriptFeed` scroll inside.
+**Applies to**: `DebateExperience.module.css` live layout, proceeding console transcript
+
+
+**Lesson**: Archive list items need cast colors + model + effort projected from `session_json` (`listDebateSessions`). Render Coffee-like gradient chips (`buildDebateArchiveChipVisualStyle`) with meta tags, model label, and effort glyph. Freeze `lastReasoningEffort` on create/advance so fixed lanes still show an effort chip; Auto prefers `latestAutoRoute.reasoningEffort`.
+**Applies to**: `DebateExperience.tsx` archive rows, `debateArchiveChipGradient.ts`, `DebateSessionListItemV1`, `listDebateSessions`
+
+### 2026-08-05 · UX
+**Trigger**: Right-hand drawers (Settings, Usage, etc.) locked the whole shell — navbar LOCAL/ONLINE, model picker, and other panel buttons were unreachable.
+**Lesson**: While a right panel is open, keep the shared top navbar interactive. Do not `inert` the chat pane wholesale (`inert` cannot exempt descendants). Inert only non-chrome children; start overlay + drawer below `--app-shell-top-nav-height`; raise navbar stacking above the dimmer. Publish the measured nav height on `document.documentElement` for fixed panel layers outside `.chatPane`. Background blur stays on content.
+**Applies to**: `page.tsx` right-panel focus trap, `page.module.css` `.panelOverlay` / `.panel`, `navbar-panel-chrome.test.ts`
+
+### 2026-08-05 · UX
+**Trigger**: Debate Archive showed two floating Ask Prism orbs.
+**Lesson**: Each applet shell must call `renderGlobalPrismCompanion()` exactly once. A second mount paints a duplicate orb; pin with a source test on the Debate companion tail.
+**Applies to**: `page.tsx` Debate view, `prism-companion-presence.test.ts`
+
+### 2026-08-05 · UX
+**Trigger**: Full-circle Spectator/Watch bake waits were too long; cosmetics shared the same hard loader.
+**Lesson**: Hard waits are head-start bake + invent/refraction only (sanctum loader, elapsed timer, confirm-X). Progressive bake unlocks when **both** ~2.5 min estimated buffer and min steps are met; enter held at Start; frontier soft-pauses while baking; cancel/leave checkpoints and resumes append-only from the tip; fully `ready` is always reviewable from the beginning. Soft waits (Debate exhibit synthesize, Signal artwork chips) keep emoji/activity feedback without fullscreen block.
+**Applies to**: `liveBake.ts`, `live-bake-jobs.ts`, `DebateExperience.tsx`, `BotcastExperience.tsx`, `PrismBlockingLoader.tsx`, `modeTutorials.ts`
 
 ### 2026-08-05 · [UX]
 **Trigger**: Spectator Gallery ready showed Forum · Verdict and “Jury has returned 5–0” after bake.
@@ -41,7 +63,7 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ### 2026-08-05 · [UX]
 **Trigger**: Signal Watch baking showed the show intro card during synthesis, so the active bake job was easy to miss.
-**Lesson**: For Watch full-bake, show the fullscreen `PrismBlockingLoader` first and only open the branded intro card after bake completes. Do not put bake status on the intro card topic line.
+**Lesson**: For Watch progressive bake, show the fullscreen `PrismBlockingLoader` only while the unlock buffer is unmet, then open the branded intro / held Start. Do not put bake status on the intro card topic line.
 **Applies to**: `BotcastExperience.tsx` Watch start path, `PrismBlockingLoader`
 
 ### 2026-08-05 · [UX]

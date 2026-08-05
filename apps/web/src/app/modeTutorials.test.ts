@@ -427,6 +427,14 @@ describe("mode tutorials", () => {
       /Start and Save stay locked until the motion, cast, consent, and explicit evidence choice are complete/u,
     );
     assert.match(copy, /Start then freezes that ordered chain/u);
+    assert.match(
+      copy,
+      /LOCAL\/ONLINE, model, and Effort stay locked for the whole sit/u,
+    );
+    assert.match(
+      copy,
+      /Auto still chooses model and Effort for each Debate generation when selected, including during Spectator bake/u,
+    );
     assert.match(copy, /instead of in the app chrome/u);
     assert.match(copy, /traditional three-bot majority/u);
     assert.match(
@@ -960,11 +968,15 @@ describe("mode tutorials", () => {
       routing?.body ?? "",
       /freezes the selected speaking type and engine/u,
     );
-    assert.match(routing?.body ?? "", /locks routing, model, Voice/u);
+    assert.match(routing?.body ?? "", /locks routing, model, Effort, Voice/u);
+    assert.match(
+      routing?.body ?? "",
+      /Auto still chooses model and Effort for each table turn/u,
+    );
     assert.match(routing?.body ?? "", /Recorded replay/u);
     assert.match(
       routing?.body ?? "",
-      /entire utility strip until you choose End session/,
+      /entire utility strip for the whole table[^.]*until you choose End session/u,
     );
     assert.doesNotMatch(routing?.body ?? "", /remain available/u);
   });
@@ -1546,7 +1558,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /locks that routing/u,
+      /locks LOCAL\/ONLINE, model, and Effort/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /Auto still chooses model and Effort/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
@@ -1680,7 +1696,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /close-up pans center/u,
+      /Watch prepares ahead with a progressive bake/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
