@@ -137,6 +137,8 @@ describe("mode tutorials", () => {
     const copy = tutorial.steps.map((step) => step.body).join(" ");
     assert.match(copy, /Studio follows one clear path/u);
     assert.match(copy, /opens as a Plainspoken Forum with Auto rounds/u);
+    assert.match(copy, /Plain New Duel clears the active workbench/u);
+    assert.match(copy, /Wield Prism onto New Duel invents a full editable duel/u);
     assert.match(copy, /Tune the room keeps the proceeding preset/u);
     assert.match(copy, /leave it closed and trust the defaults/u);
     assert.match(copy, /University Union to Daytime Showdown/u);
@@ -169,7 +171,8 @@ describe("mode tutorials", () => {
     assert.match(copy, /private LLM check/u);
     assert.match(copy, /Evidence is optional/u);
     assert.match(copy, /Continue without evidence confirms that choice/u);
-    assert.match(copy, /There is one Start Debate control/u);
+    assert.match(copy, /Save Debate parks a ready setup in Archive Open/u);
+    assert.match(copy, /Start Debate launches now/u);
     assert.doesNotMatch(copy, /Basic|Advanced/u);
     assert.match(
       copy,
@@ -189,9 +192,11 @@ describe("mode tutorials", () => {
       /describe the physical object.*Wield Prism into that description field for a contextual exhibit name.*Draft exhibit derives an editable adjective, object name, observable description, and emoji/u,
     );
     assert.match(copy, /It does not generate artwork/u);
-    assert.match(copy, /Click the exhibit emoji to search/u);
+    assert.match(copy, /tap it on the Evidence page to reopen/u);
+    assert.match(copy, /Tap the large exhibit picture to search/u);
     assert.match(copy, /three best live matches/u);
-    assert.match(copy, /close the search without changing/u);
+    assert.match(copy, /Tap the large exhibit picture to search/u);
+    assert.match(copy, /upload, reuse, or synthesize overwrites that same picture/u);
     assert.match(copy, /upload a PNG, JPEG, or WebP/u);
     assert.match(copy, /Synthesize asset creates a new sprite/u);
     assert.match(copy, /Reduce magenta pass/u);
@@ -415,10 +420,11 @@ describe("mode tutorials", () => {
     assert.match(copy, /currently selected model and routing remain in place/u);
     assert.match(copy, /whole chain fails/u);
     assert.match(copy, /LOCAL remains a hard offline guarantee/u);
-    assert.match(copy, /There is one Start Debate control/u);
+    assert.match(copy, /Save Debate parks a ready setup in Archive Open/u);
+    assert.match(copy, /Start Debate launches now/u);
     assert.match(
       copy,
-      /Start stays locked until the motion, cast, consent, and explicit evidence choice are complete/u,
+      /Start and Save stay locked until the motion, cast, consent, and explicit evidence choice are complete/u,
     );
     assert.match(copy, /Start then freezes that ordered chain/u);
     assert.match(copy, /instead of in the app chrome/u);
@@ -504,10 +510,17 @@ describe("mode tutorials", () => {
       copy,
       /During long moderator monologues—openings, recess and resume calls/u,
     );
-    assert.match(copy, /brief Wide breaths when the prose runs long without names/u);
     assert.match(
       copy,
-      /returning to the moderator before the floor is handed off/u,
+      /paced reveal beats: after the formal docket listing/u,
+    );
+    assert.match(
+      copy,
+      /without lingering on the final introducee/u,
+    );
+    assert.match(
+      copy,
+      /returns to the moderator before the floor is handed off/u,
     );
     assert.match(
       copy,

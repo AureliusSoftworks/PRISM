@@ -4,6 +4,26 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ---
 
+### 2026-08-05 · [UX]
+**Trigger**: Debate Studio Forum Cast bot chips had no right-click menu, unlike Zen/Chat library chips.
+**Lesson**: Any `BotPickerTile` grid (Debate cast, Signal host/guest pickers, Coffee canvas cast, Chat/Zen) must open the shared Library bot context menu. Prefer `data-bot-id` + shell `handleAppContextMenu` / `openBotContextMenuById`, and never use the native `disabled` attribute on “already cast” chips if that would block contextmenu — use `aria-disabled` and ignore the click instead. Mount `renderBotContextMenu()` in that shell.
+**Applies to**: Debate/Signal/Coffee bot pickers, `BotPickerTile`, `page.tsx` context menu portal
+
+### 2026-08-05 · [UX]
+**Trigger**: English TTS mouth was closer, but lips still reopened before a pause finished — consonants/vowels must stay 1:1 with audio in every speaking mode.
+**Lesson**: Never apply speech-activity attack across a real pause (only inside continuous phoneme runs ≤ merge gap). Cap release to half of the following silence. After CRT rests, add a post-rest lead-in. Never remap literal `"closed"` → `"speech-closed"` while an utterance is still in progress — Zen returns null; Coffee/Signal/Debate must idle lips the same way while keeping Replying/talking status on the utterance clock.
+**Applies to**: `speechActivity.ts`, `speechSegmentClock.ts`, `zenLiveBotMouthShapeForTalkingState`, Coffee/Signal/Debate mouth gates, Avatar Studio / hub previews
+
+### 2026-08-05 · [UX]
+**Trigger**: Signal Watch baking showed the show intro card during synthesis, so the active bake job was easy to miss.
+**Lesson**: For Watch full-bake, show the fullscreen `PrismBlockingLoader` first and only open the branded intro card after bake completes. Do not put bake status on the intro card topic line.
+**Applies to**: `BotcastExperience.tsx` Watch start path, `PrismBlockingLoader`
+
+### 2026-08-05 · [UX]
+**Trigger**: Debate audience murmur and seat chatter only returned between beats, not while a debater was speaking.
+**Lesson**: Do not zero gallery pressure for the body of a live monologue. Keep a formality floor on the silence gate, and while a line is still being heard force scored pressure into at least the murmuring band so talker seats, ambient vocal Foley, and the murmur bed stay alive under advocacy. Full mute reads as an empty room.
+**Applies to**: `packages/shared/src/debateAudiencePressure.ts`, Debate gallery mix / `audienceChattering` in `DebateExperience.tsx`
+
 ### 2026-08-04 · [UX]
 **Trigger**: "*Replying*" under the Zen orb flickered on/off during speech pauses.
 **Lesson**: Keep presence `isTalking` / Replying tied to utterance-in-progress (`chatAssistantRevealInProgress`), not to momentary mouth shape. Idle lips through silence with `mouthShape === null`, but do not drop the status label when voicing windows close.
@@ -131,8 +151,13 @@ LocalAI-specific patterns and corrections. Updated when project-specific behavio
 
 ### 2026-07-24 · [perf]
 **Trigger**: Coffee group session starts waited on personalized starter-topic LLM generation, and unfocused windows suspended visuals on blur.
-**Lesson**: Open Coffee from saved/deterministic topics immediately and refresh personalized group topics in the background with roster/settings/ethos re-checks before persist. Keep `prismVisualLifecycle` foreground on ordinary blur (`focused: false` is still tracked); suspend only for hidden/pagehide/system pause. Bound Coffee reveal voice with a validity token so the 1.8s silent fallback cannot let late queued audio become audible.
-**Applies to**: `apps/api/src/coffee.ts` `ensureCanonicalCoffeeGroupStarterTopics`, `apps/web/src/app/prismVisualLifecycle.ts`, `apps/web/src/app/englishVoice.ts`, Coffee reveal voice in `page.tsx`.
+**Lesson**: Open Coffee from saved/deterministic topics immediately and refresh personalized group topics in the background with roster/settings/ethos re-checks before persist. Keep `prismVisualLifecycle` foreground on ordinary blur (`focused: false` is still tracked); suspend only for hidden/pagehide/system pause. Bound Coffee reveal voice with a validity token so the 1.8s silent fallback cannot let late queued audio become audible. Debate is different: leaving focus/visibility must enter recess and must not silent-skip remaining events (`waitWhilePrismPresentationSuspended` + `usePrismAppAwayFromUser`).
+**Applies to**: `apps/api/src/coffee.ts` `ensureCanonicalCoffeeGroupStarterTopics`, `apps/web/src/app/prismVisualLifecycle.ts`, `apps/web/src/app/englishVoice.ts`, Coffee reveal voice in `page.tsx`, `DebateExperience.tsx`, `prismPresentationSuspend.ts`.
+
+### 2026-08-05 · [architecture]
+**Trigger**: Switching away from Prism during a live Debate raced the floor to the end because suspended voice returned false and silent-revealed every remaining event.
+**Lesson**: Never treat presentation-suspend as “skip this line.” Hold with `waitWhilePrismPresentationSuspended`, and for Debate enter a durable recess when the player leaves (`usePrismAppAwayFromUser`, including ordinary blur). Coffee clocks may keep running on blur; Debate must not. Spectator seal must also require `spectatorWatchPresentationCompleteRef` after the final presentable beat — `!presenting` alone after a suspend abort must never call `/seal-presentation`.
+**Applies to**: `prismPresentationSuspend.ts`, `DebateExperience.tsx` consume/auto-advance/away-recess/seal, `page.tsx` `playDebateUtterance`.
 
 ### 2026-07-24 · [architecture]
 **Trigger**: Coffee/Signal/Zen needed frequent `*actions*` without a second model wait, while still allowing occasional persona/prop beats.
