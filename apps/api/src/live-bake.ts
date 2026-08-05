@@ -1,17 +1,19 @@
 /**
  * Full-bake orchestration for Debate spectator and Signal Watch.
- * Builds a LiveBakeArtifactV1 by advancing the session to completion server-side
- * so the client can present without mid-show LLM stalls.
+ * Progressive append-only advances with persisted checkpoints so clients can
+ * unlock early and resume after cancel/leave without regenerating past beats.
  */
 import { randomBytes } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   createEmptyLiveBakeArtifact,
+  estimateSpokenDurationMs,
   LIVE_BAKE_MAX_STEPS_DEBATE,
   LIVE_BAKE_MAX_STEPS_SIGNAL,
   debateSessionFloorIsSettled,
   type DebateSessionV1,
   type LiveBakeArtifactV1,
+  type LiveBakeStatusV1,
   type LiveBakeUtteranceV1,
 } from "@localai/shared";
 import {
@@ -53,23 +55,125 @@ function debateEventToUtterance(
     voiceEngine: "unknown",
     isPremium: false,
     audioUrl: null,
-    durationMs: null,
+    durationMs: estimateSpokenDurationMs(text),
   };
 }
 
+function utterancesFromDebateSession(session: DebateSessionV1): LiveBakeUtteranceV1[] {
+  return session.events
+    .map((event, index) => debateEventToUtterance(event, index))
+    .filter((row): row is LiveBakeUtteranceV1 => row !== null);
+}
+
+function eventsFromDebateSession(session: DebateSessionV1): LiveBakeArtifactV1["events"] {
+  return session.events.map((event, index) => ({
+    id: event.id ?? `event-${index}`,
+    kind: event.kind ?? "speech",
+    atMs: null,
+    sourceEventId: event.id ?? null,
+    payload: event as unknown as Record<string, unknown>,
+  }));
+}
+
+function mergeDebateArtifact(
+  previous: LiveBakeArtifactV1 | null | undefined,
+  session: DebateSessionV1,
+  status: LiveBakeStatusV1,
+  phaseLabel: string,
+  error: string | null = null,
+): LiveBakeArtifactV1 {
+  const base =
+    previous && previous.sourceId === session.id
+      ? previous
+      : createEmptyLiveBakeArtifact({
+          surface: "debate",
+          sourceId: session.id,
+          title: session.motion?.title ?? session.motion?.motion ?? "Debate",
+          privacyMode: session.responseMode === "local" ? "local" : "online",
+          createdAt: previous?.createdAt,
+        });
+  const utterances = utterancesFromDebateSession(session);
+  const ready = status === "ready";
+  return {
+    ...base,
+    title: session.motion?.title ?? session.motion?.motion ?? base.title,
+    status,
+    progress: {
+      completedSteps: utterances.length,
+      totalStepsEstimate: ready ? utterances.length : null,
+      phaseLabel,
+      heartbeatAt: status === "baking" ? new Date().toISOString() : base.progress.heartbeatAt ?? null,
+    },
+    completedAt: ready || status === "cancelled" || status === "failed"
+      ? new Date().toISOString()
+      : null,
+    error,
+    utterances,
+    events: eventsFromDebateSession(session),
+    sessionSnapshot: ready
+      ? (session as unknown as Record<string, unknown>)
+      : base.sessionSnapshot,
+  };
+}
+
+export function persistDebateLiveBake(
+  db: DatabaseSync,
+  userId: string,
+  session: DebateSessionV1,
+): void {
+  db.prepare(
+    `UPDATE debate_sessions
+        SET session_json = ?, updated_at = ?
+      WHERE id = ? AND user_id = ?`,
+  ).run(
+    JSON.stringify(session),
+    session.updatedAt ?? new Date().toISOString(),
+    session.id,
+    userId,
+  );
+}
+
+/** Sync artifact forward from session events (append-only over existing history). */
+export function syncDebateLiveBakeFromSession(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  status: LiveBakeStatusV1 = "baking",
+  phaseLabel = "Preparing the gallery",
+): LiveBakeArtifactV1 {
+  const session = getDebateSession(db, userId, sessionId);
+  const artifact = mergeDebateArtifact(
+    session.liveBake,
+    session,
+    status,
+    phaseLabel,
+    status === "failed" ? session.liveBake?.error ?? null : null,
+  );
+  persistDebateLiveBake(db, userId, {
+    ...session,
+    liveBake: artifact,
+    updatedAt: new Date().toISOString(),
+  });
+  return artifact;
+}
+
 /**
- * Advance a spectator Debate to completion and attach a playable liveBake artifact.
+ * Advance a spectator Debate append-only from the true tip and persist checkpoints.
  */
 export async function bakeDebateSpectatorSession(args: {
   db: DatabaseSync;
   userId: string;
   sessionId: string;
-  runtime: DebateAiRuntime;
+  /**
+   * Resolved before every bake advance so Auto can re-route model/effort from
+   * the latest transcript context. Fixed picks stay pinned via the same helper.
+   */
+  resolveRuntime: () => Promise<DebateAiRuntime>;
   signal?: AbortSignal;
   maxSteps?: number;
   onProgress?: (artifact: LiveBakeArtifactV1) => void;
 }): Promise<{ session: DebateSessionV1; artifact: LiveBakeArtifactV1 }> {
-  const { db, userId, sessionId, runtime } = args;
+  const { db, userId, sessionId } = args;
   const maxSteps = args.maxSteps ?? LIVE_BAKE_MAX_STEPS_DEBATE;
   let session = getDebateSession(db, userId, sessionId);
   if (session.playerRole !== "spectator") {
@@ -79,32 +183,34 @@ export async function bakeDebateSpectatorSession(args: {
     return { session, artifact: session.liveBake };
   }
 
-  let artifact = createEmptyLiveBakeArtifact({
-    surface: "debate",
-    sourceId: session.id,
-    title: session.motion?.title ?? session.motion?.motion ?? "Debate",
-    privacyMode: session.responseMode === "local" ? "local" : "online",
+  let artifact = mergeDebateArtifact(
+    session.liveBake,
+    session,
+    "baking",
+    session.stepKey || "Preparing the gallery",
+  );
+  persistDebateLiveBake(db, userId, {
+    ...session,
+    liveBake: artifact,
+    updatedAt: new Date().toISOString(),
   });
-  artifact.status = "baking";
-  artifact.progress = {
-    completedSteps: 0,
-    totalStepsEstimate: null,
-    phaseLabel: "Preparing the gallery",
-  };
   args.onProgress?.(artifact);
 
   try {
     for (let step = 0; step < maxSteps; step += 1) {
       if (args.signal?.aborted) {
-        artifact = {
-          ...artifact,
-          status: "cancelled",
-          error: "Bake cancelled.",
-          completedAt: new Date().toISOString(),
-        };
+        session = getDebateSession(db, userId, sessionId);
+        artifact = mergeDebateArtifact(
+          session.liveBake,
+          session,
+          "cancelled",
+          "Bake cancelled",
+          "Bake cancelled.",
+        );
         persistDebateLiveBake(db, userId, {
-          ...getDebateSession(db, userId, sessionId),
+          ...session,
           liveBake: artifact,
+          updatedAt: new Date().toISOString(),
         });
         return {
           session: getDebateSession(db, userId, sessionId),
@@ -121,15 +227,9 @@ export async function bakeDebateSpectatorSession(args: {
           `Cannot bake while Debate status is ${session.status}.`,
         );
       }
-      artifact = {
-        ...artifact,
-        progress: {
-          completedSteps: step + 1,
-          totalStepsEstimate: null,
-          phaseLabel: session.stepKey || "Preparing",
-        },
-      };
-      args.onProgress?.(artifact);
+      // Append-only: only advance when the floor still needs baker steps.
+      // Re-resolve each step so Auto can switch as the proceeding grows.
+      const runtime = await args.resolveRuntime();
       session = await advanceDebateSession(
         db,
         userId,
@@ -140,6 +240,18 @@ export async function bakeDebateSpectatorSession(args: {
         },
         runtime,
       );
+      artifact = mergeDebateArtifact(
+        session.liveBake,
+        session,
+        "baking",
+        session.stepKey || "Preparing",
+      );
+      persistDebateLiveBake(db, userId, {
+        ...session,
+        liveBake: artifact,
+        updatedAt: new Date().toISOString(),
+      });
+      args.onProgress?.(artifact);
     }
 
     session = getDebateSession(db, userId, sessionId);
@@ -150,31 +262,7 @@ export async function bakeDebateSpectatorSession(args: {
       );
     }
 
-    const utterances = session.events
-      .map((event, index) => debateEventToUtterance(event, index))
-      .filter((row): row is LiveBakeUtteranceV1 => row !== null);
-
-    artifact = {
-      ...artifact,
-      status: "ready",
-      progress: {
-        completedSteps: utterances.length,
-        totalStepsEstimate: utterances.length,
-        phaseLabel: "Ready",
-      },
-      completedAt: new Date().toISOString(),
-      error: null,
-      utterances,
-      events: session.events.map((event, index) => ({
-        id: event.id ?? `event-${index}`,
-        kind: event.kind ?? "speech",
-        atMs: null,
-        sourceEventId: event.id ?? null,
-        payload: event as unknown as Record<string, unknown>,
-      })),
-      sessionSnapshot: session as unknown as Record<string, unknown>,
-    };
-
+    artifact = mergeDebateArtifact(session.liveBake, session, "ready", "Ready");
     persistDebateLiveBake(db, userId, {
       ...session,
       liveBake: artifact,
@@ -182,17 +270,38 @@ export async function bakeDebateSpectatorSession(args: {
     });
     return { session: getDebateSession(db, userId, sessionId), artifact };
   } catch (error) {
+    if (args.signal?.aborted) {
+      session = getDebateSession(db, userId, sessionId);
+      artifact = mergeDebateArtifact(
+        session.liveBake,
+        session,
+        "cancelled",
+        "Bake cancelled",
+        "Bake cancelled.",
+      );
+      persistDebateLiveBake(db, userId, {
+        ...session,
+        liveBake: artifact,
+        updatedAt: new Date().toISOString(),
+      });
+      return { session: getDebateSession(db, userId, sessionId), artifact };
+    }
     const message =
       error instanceof Error ? error.message : "Debate bake failed.";
-    artifact = {
-      ...artifact,
-      status: "failed",
-      error: message,
-      completedAt: new Date().toISOString(),
-    };
     try {
       const current = getDebateSession(db, userId, sessionId);
-      persistDebateLiveBake(db, userId, { ...current, liveBake: artifact });
+      artifact = mergeDebateArtifact(
+        current.liveBake,
+        current,
+        "failed",
+        "Bake failed",
+        message,
+      );
+      persistDebateLiveBake(db, userId, {
+        ...current,
+        liveBake: artifact,
+        updatedAt: new Date().toISOString(),
+      });
     } catch {
       // Best-effort persistence of failure state.
     }
@@ -200,26 +309,98 @@ export async function bakeDebateSpectatorSession(args: {
   }
 }
 
-function persistDebateLiveBake(
-  db: DatabaseSync,
-  userId: string,
-  session: DebateSessionV1,
-): void {
-  db.prepare(
-    `UPDATE debate_sessions
-        SET session_json = ?, updated_at = ?
-      WHERE id = ? AND user_id = ?`,
-  ).run(JSON.stringify(session), session.updatedAt, session.id, userId);
+export function buildSignalLiveBakeArtifactFromEpisode(
+  episode: ReturnType<typeof getBotcastEpisode>,
+  options: {
+    status?: LiveBakeStatusV1;
+    baking?: boolean;
+    error?: string | null;
+  } = {},
+): LiveBakeArtifactV1 {
+  const utterances: LiveBakeUtteranceV1[] = episode.messages
+    .filter(
+      (message) =>
+        typeof message.content === "string" && message.content.trim(),
+    )
+    .map((message, index) => {
+      const text = message.content.trim();
+      return {
+        id: `signal-bake-${message.id || index}`,
+        sourceEventId: message.id ?? null,
+        speakerId: message.botId ?? "unknown",
+        speakerRole: message.speakerRole ?? "speaker",
+        text,
+        spokenText: text,
+        voiceEngine: "unknown",
+        isPremium: false,
+        audioUrl: null,
+        durationMs: estimateSpokenDurationMs(text),
+      };
+    });
+
+  const status: LiveBakeStatusV1 =
+    options.status ??
+    (episode.status === "completed"
+      ? "ready"
+      : options.baking
+        ? "baking"
+        : "cancelled");
+
+  const artifact = createEmptyLiveBakeArtifact({
+    surface: "signal",
+    sourceId: episode.id,
+    title: episode.title || episode.topic,
+    privacyMode: episode.responseMode === "local" ? "local" : "online",
+  });
+  return {
+    ...artifact,
+    status,
+    progress: {
+      completedSteps: utterances.length,
+      totalStepsEstimate: status === "ready" ? utterances.length : null,
+      phaseLabel:
+        status === "ready"
+          ? "Ready"
+          : status === "cancelled"
+            ? "Bake cancelled"
+            : status === "failed"
+              ? "Bake failed"
+              : episode.segment || "Preparing the broadcast",
+      heartbeatAt: status === "baking" ? new Date().toISOString() : null,
+    },
+    completedAt:
+      status === "ready" || status === "cancelled" || status === "failed"
+        ? new Date().toISOString()
+        : null,
+    error: options.error ?? null,
+    utterances,
+    events: episode.events.map((event, index) => ({
+      id: event.id ?? `event-${index}`,
+      kind: event.kind ?? "speech",
+      atMs: null,
+      sourceEventId: event.id ?? null,
+      payload: event.payload ?? {},
+    })),
+    sessionSnapshot:
+      status === "ready"
+        ? (episode as unknown as Record<string, unknown>)
+        : undefined,
+  };
 }
 
 /**
- * Advance a Watch-mode Signal episode to completion and return a liveBake artifact.
+ * Advance a Watch-mode Signal episode append-only from the true tip.
+ * Episode messages are the durable checkpoint; artifact is derived on read.
  */
 export async function bakeBotcastWatchEpisode(args: {
   db: DatabaseSync;
   userId: string;
   episodeId: string;
-  generation: BotcastGenerationOptions;
+  /**
+   * Resolved before every bake advance so Auto can re-route model/effort from
+   * the latest episode context. Fixed picks stay pinned via the same helper.
+   */
+  resolveGeneration: () => Promise<BotcastGenerationOptions>;
   signal?: AbortSignal;
   maxSteps?: number;
   onProgress?: (artifact: LiveBakeArtifactV1) => void;
@@ -227,7 +408,7 @@ export async function bakeBotcastWatchEpisode(args: {
   episode: ReturnType<typeof getBotcastEpisode>;
   artifact: LiveBakeArtifactV1;
 }> {
-  const { db, userId, episodeId, generation } = args;
+  const { db, userId, episodeId } = args;
   const maxSteps = args.maxSteps ?? LIVE_BAKE_MAX_STEPS_SIGNAL;
   let episode = getBotcastEpisode(db, userId, episodeId);
   if (episode.playbackMode !== "watch") {
@@ -236,39 +417,43 @@ export async function bakeBotcastWatchEpisode(args: {
   if (episode.guestKind === "producer") {
     throw new HttpError(409, "Watch a show requires a bot guest.");
   }
+  if (episode.status === "completed") {
+    const artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
+      status: "ready",
+    });
+    return { episode, artifact };
+  }
 
-  let artifact = createEmptyLiveBakeArtifact({
-    surface: "signal",
-    sourceId: episode.id,
-    title: episode.title || episode.topic,
-    privacyMode: episode.responseMode === "local" ? "local" : "online",
+  let artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
+    status: "baking",
+    baking: true,
   });
-  artifact.status = "baking";
   args.onProgress?.(artifact);
 
   try {
     for (let step = 0; step < maxSteps; step += 1) {
       if (args.signal?.aborted) {
-        artifact = {
-          ...artifact,
+        episode = getBotcastEpisode(db, userId, episodeId);
+        artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
           status: "cancelled",
           error: "Bake cancelled.",
-          completedAt: new Date().toISOString(),
-        };
-        return { episode: getBotcastEpisode(db, userId, episodeId), artifact };
+        });
+        return { episode, artifact };
       }
       episode = getBotcastEpisode(db, userId, episodeId);
       if (episode.status === "completed") break;
-      artifact = {
-        ...artifact,
-        progress: {
-          completedSteps: step + 1,
-          totalStepsEstimate: null,
-          phaseLabel: episode.segment,
-        },
+      // Re-resolve each step so Auto can switch as the episode grows.
+      const generation = {
+        ...(await args.resolveGeneration()),
+        signal: args.signal,
       };
-      args.onProgress?.(artifact);
       await advanceBotcastEpisode(db, userId, episodeId, {}, generation);
+      episode = getBotcastEpisode(db, userId, episodeId);
+      artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
+        status: "baking",
+        baking: true,
+      });
+      args.onProgress?.(artifact);
     }
 
     episode = getBotcastEpisode(db, userId, episodeId);
@@ -279,52 +464,24 @@ export async function bakeBotcastWatchEpisode(args: {
       );
     }
 
-    const utterances: LiveBakeUtteranceV1[] = episode.messages
-      .filter(
-        (message) =>
-          typeof message.content === "string" && message.content.trim(),
-      )
-      .map((message, index) => ({
-        id: `signal-bake-${message.id || index}`,
-        sourceEventId: message.id ?? null,
-        speakerId: message.botId ?? "unknown",
-        speakerRole: message.speakerRole ?? "speaker",
-        text: message.content,
-        spokenText: message.content,
-        voiceEngine: "unknown",
-        isPremium: false,
-        audioUrl: null,
-        durationMs: null,
-      }));
-
-    artifact = {
-      ...artifact,
+    artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
       status: "ready",
-      progress: {
-        completedSteps: utterances.length,
-        totalStepsEstimate: utterances.length,
-        phaseLabel: "Ready",
-      },
-      completedAt: new Date().toISOString(),
-      error: null,
-      utterances,
-      events: episode.events.map((event, index) => ({
-        id: event.id ?? `event-${index}`,
-        kind: event.kind ?? "speech",
-        atMs: null,
-        sourceEventId: event.id ?? null,
-        payload: event.payload ?? {},
-      })),
-      sessionSnapshot: episode as unknown as Record<string, unknown>,
-    };
+    });
     return { episode, artifact };
   } catch (error) {
-    artifact = {
-      ...artifact,
+    if (args.signal?.aborted) {
+      episode = getBotcastEpisode(db, userId, episodeId);
+      artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
+        status: "cancelled",
+        error: "Bake cancelled.",
+      });
+      return { episode, artifact };
+    }
+    episode = getBotcastEpisode(db, userId, episodeId);
+    artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
       status: "failed",
       error: error instanceof Error ? error.message : "Signal bake failed.",
-      completedAt: new Date().toISOString(),
-    };
+    });
     throw error;
   }
 }

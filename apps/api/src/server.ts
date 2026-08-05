@@ -227,9 +227,9 @@ import {
   type DebateAdvancePreparation,
 } from "./debate.ts";
 import {
-  bakeBotcastWatchEpisode,
-  bakeDebateSpectatorSession,
+  buildSignalLiveBakeArtifactFromEpisode,
 } from "./live-bake.ts";
+import { liveBakeJobs } from "./live-bake-jobs.ts";
 import {
   TurnPreparationError,
   turnPreparationRegistry,
@@ -14749,15 +14749,6 @@ function buildRoutes(): RouteDefinition[] {
           "Full bake is only available for Spectator Debates.",
         );
       }
-      const runtime = await debateAiRuntimeForUser(
-        userId,
-        frozen.provider,
-        frozenDebateModelOverride(frozen),
-        frozen.responseMode,
-        frozen.generationChain,
-        frozen.autoCandidateAllowlist,
-        debateAutoRoutingContext(frozen),
-      );
       const result = await runWithUsageSession(
         {
           db,
@@ -14767,17 +14758,49 @@ function buildRoutes(): RouteDefinition[] {
           surface: "debate",
         },
         () =>
-          bakeDebateSpectatorSession({
+          liveBakeJobs.startDebateBake({
             db,
             userId,
             sessionId: ctx.params.id,
-            runtime,
+            // Re-resolve each bake step so Auto can switch from latest context;
+            // fixed model/effort stays pinned via frozenDebateModelOverride.
+            resolveRuntime: async () => {
+              const current = getDebateSession(db, userId, ctx.params.id);
+              return debateAiRuntimeForUser(
+                userId,
+                current.provider,
+                frozenDebateModelOverride(current),
+                current.responseMode,
+                current.generationChain,
+                current.autoCandidateAllowlist,
+                debateAutoRoutingContext(current),
+              );
+            },
           }),
       );
       json(ctx.res, 200, {
         ok: true,
         session: debateSessionForPlayer(result.session),
-        liveBake: result.artifact,
+        liveBake: result.liveBake,
+        baking: liveBakeJobs.isDebateRunning(userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/:id/bake/cancel", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      if (frozen.playerRole !== "spectator") {
+        throw new HttpError(
+          409,
+          "Full bake is only available for Spectator Debates.",
+        );
+      }
+      liveBakeJobs.cancelDebateBake(userId, ctx.params.id);
+      const session = getDebateSession(db, userId, ctx.params.id);
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+        liveBake: session.liveBake ?? null,
+        baking: liveBakeJobs.isDebateRunning(userId, ctx.params.id),
       });
     }),
     route("POST", "/api/debates/:id/interject", async (ctx) => {
@@ -17821,57 +17844,75 @@ function buildRoutes(): RouteDefinition[] {
           "Full bake is only available for Watch a show episodes.",
         );
       }
-      const runtime = await contextualSignalRuntimeForEpisode({
-        userId,
-        user,
-        episode: frozenEpisode,
-      });
-      const bakeAbort = new AbortController();
-      const onBakeClientClose = () => {
-        if (!ctx.res.writableEnded) bakeAbort.abort();
-      };
-      ctx.req.once("close", onBakeClientClose);
-      ctx.req.once("aborted", onBakeClientClose);
-      ctx.res.once("close", onBakeClientClose);
       try {
-        const result = await bakeBotcastWatchEpisode({
+        const result = await liveBakeJobs.startSignalBake({
           db,
           userId,
           episodeId: ctx.params.id,
-          generation: {
-            preferredProvider: runtime.provider,
-            responseMode: runtime.responseMode,
-            openAiApiKey: runtime.openAiApiKey,
-            anthropicApiKey: runtime.anthropicApiKey,
-            secondaryOllamaHost: user.secondary_ollama_host,
-            contextualModel: runtime.model,
-            contextualReasoningEffort: runtime.reasoningEffort,
-            autoRouteDecision: runtime.autoRoute,
-            autoFallbackChain: runtime.autoFallbackChain,
-            experimentalAllModelEffortEnabled:
-              user.experimental_all_model_effort_enabled === 1,
-            signal: bakeAbort.signal,
-            providerFactory: providerFactoryOverride,
+          // Re-resolve each bake step so Auto can switch from latest context;
+          // fixed model stays pinned via contextualSignalRuntimeForEpisode.
+          resolveGeneration: async () => {
+            const episode = getBotcastEpisode(db, userId, ctx.params.id);
+            const runtime = await contextualSignalRuntimeForEpisode({
+              userId,
+              user,
+              episode,
+            });
+            return {
+              preferredProvider: runtime.provider,
+              responseMode: runtime.responseMode,
+              openAiApiKey: runtime.openAiApiKey,
+              anthropicApiKey: runtime.anthropicApiKey,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              contextualModel: runtime.model,
+              contextualReasoningEffort: runtime.reasoningEffort,
+              autoRouteDecision: runtime.autoRoute,
+              autoFallbackChain: runtime.autoFallbackChain,
+              experimentalAllModelEffortEnabled:
+                user.experimental_all_model_effort_enabled === 1,
+              providerFactory: providerFactoryOverride,
+            };
           },
-          signal: bakeAbort.signal,
         });
-        if (bakeAbort.signal.aborted) return;
         json(ctx.res, 200, {
           ok: true,
           episode: result.episode,
-          liveBake: result.artifact,
+          liveBake: result.liveBake,
+          baking: liveBakeJobs.isSignalRunning(userId, ctx.params.id),
         });
       } catch (error) {
-        if (bakeAbort.signal.aborted) return;
         if (error instanceof SignalOnlineTurnError) {
           throw new HttpError(signalOnlineTurnHttpStatus(error), error.message);
         }
         throw error;
-      } finally {
-        ctx.req.off("close", onBakeClientClose);
-        ctx.req.off("aborted", onBakeClientClose);
-        ctx.res.off("close", onBakeClientClose);
       }
+    }),
+    route("POST", "/api/botcast/episodes/:id/bake/cancel", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const episode = getBotcastEpisode(db, userId, ctx.params.id);
+      if (episode.playbackMode !== "watch") {
+        throw new HttpError(
+          409,
+          "Full bake is only available for Watch a show episodes.",
+        );
+      }
+      liveBakeJobs.cancelSignalBake(userId, ctx.params.id);
+      const latest = getBotcastEpisode(db, userId, ctx.params.id);
+      json(ctx.res, 200, {
+        ok: true,
+        episode: latest,
+        liveBake: buildSignalLiveBakeArtifactFromEpisode(latest, {
+          status:
+            latest.status === "completed"
+              ? "ready"
+              : liveBakeJobs.isSignalRunning(userId, ctx.params.id)
+                ? "baking"
+                : "cancelled",
+          error:
+            latest.status === "completed" ? null : "Bake cancelled.",
+        }),
+        baking: liveBakeJobs.isSignalRunning(userId, ctx.params.id),
+      });
     }),
     // Coffee mode (timed live sessions for 3-5 reactive bots). Lives on its own
     // endpoint rather than inside /api/chat so the lighter coffee

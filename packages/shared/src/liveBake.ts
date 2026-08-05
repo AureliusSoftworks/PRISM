@@ -46,6 +46,8 @@ export interface LiveBakeProgressV1 {
   /** Null when total is unknown until the bake finishes. */
   totalStepsEstimate: number | null;
   phaseLabel: string;
+  /** ISO timestamp updated while the bake job is alive (stale-job resume). */
+  heartbeatAt?: string | null;
 }
 
 export interface LiveBakeUtteranceV1 {
@@ -96,6 +98,16 @@ export interface LiveBakeArtifactV1 {
 export const LIVE_BAKE_MAX_STEPS_DEBATE = 240;
 export const LIVE_BAKE_MAX_STEPS_SIGNAL = 120;
 export const LIVE_BAKE_DEFAULT_TIMEOUT_MS = 12 * 60_000;
+/** Estimated playback runway required before early Spectator/Watch entry. */
+export const LIVE_BAKE_UNLOCK_BUFFER_MS = 150_000;
+export const LIVE_BAKE_UNLOCK_MIN_STEPS_DEBATE = 6;
+export const LIVE_BAKE_UNLOCK_MIN_STEPS_SIGNAL = 4;
+/** Treat in-flight bake heartbeats older than this as stale and resumable. */
+export const LIVE_BAKE_STALE_HEARTBEAT_MS = 45_000;
+/** ~150 wpm speaking rate for duration estimates when audio length is unknown. */
+export const LIVE_BAKE_ESTIMATED_MS_PER_WORD = 400;
+export const LIVE_BAKE_ESTIMATED_DURATION_MIN_MS = 1_200;
+export const LIVE_BAKE_ESTIMATED_DURATION_MAX_MS = 45_000;
 
 export function isLiveBakeSurfaceV1(value: unknown): value is LiveBakeSurfaceV1 {
   return value === "debate" || value === "signal";
@@ -153,13 +165,104 @@ export function createEmptyLiveBakeArtifact(args: {
 export function liveBakeArtifactIsPlayable(
   artifact: LiveBakeArtifactV1 | null | undefined,
 ): boolean {
-  return (
-    !!artifact &&
-    artifact.v === LIVE_BAKE_ARTIFACT_VERSION &&
-    artifact.kind === "liveBake" &&
-    artifact.status === "ready" &&
-    artifact.utterances.length > 0
+  if (
+    !artifact ||
+    artifact.v !== LIVE_BAKE_ARTIFACT_VERSION ||
+    artifact.kind !== "liveBake" ||
+    artifact.utterances.length === 0
+  ) {
+    return false;
+  }
+  if (artifact.status === "ready") return true;
+  if (artifact.status === "baking") {
+    return liveBakeMayStartWatch(artifact, 0);
+  }
+  return false;
+}
+
+/** Estimate spoken duration from text when bake utterances lack `durationMs`. */
+export function estimateSpokenDurationMs(text: string | null | undefined): number {
+  const normalized = typeof text === "string" ? text.trim() : "";
+  if (!normalized) return LIVE_BAKE_ESTIMATED_DURATION_MIN_MS;
+  const words = normalized.split(/\s+/u).filter(Boolean).length;
+  const punctuationBonus = (normalized.match(/[,.;:!?—–-]/gu) ?? []).length * 180;
+  const estimated =
+    Math.max(1, words) * LIVE_BAKE_ESTIMATED_MS_PER_WORD + punctuationBonus;
+  return Math.min(
+    LIVE_BAKE_ESTIMATED_DURATION_MAX_MS,
+    Math.max(LIVE_BAKE_ESTIMATED_DURATION_MIN_MS, Math.round(estimated)),
   );
+}
+
+export function liveBakeUtteranceDurationMs(
+  utterance: Pick<LiveBakeUtteranceV1, "durationMs" | "spokenText" | "text">,
+): number {
+  if (
+    typeof utterance.durationMs === "number" &&
+    Number.isFinite(utterance.durationMs) &&
+    utterance.durationMs > 0
+  ) {
+    return Math.round(utterance.durationMs);
+  }
+  return estimateSpokenDurationMs(utterance.spokenText || utterance.text);
+}
+
+/** Total estimated playback length of baked utterances. */
+export function liveBakeBufferedPlaybackMs(
+  artifact: LiveBakeArtifactV1 | null | undefined,
+): number {
+  if (!artifact?.utterances.length) return 0;
+  return artifact.utterances.reduce(
+    (sum, utterance) => sum + liveBakeUtteranceDurationMs(utterance),
+    0,
+  );
+}
+
+export function liveBakeUnlockMinSteps(
+  surface: LiveBakeSurfaceV1 | null | undefined,
+): number {
+  return surface === "signal"
+    ? LIVE_BAKE_UNLOCK_MIN_STEPS_SIGNAL
+    : LIVE_BAKE_UNLOCK_MIN_STEPS_DEBATE;
+}
+
+/**
+ * Early-entry gate: require both a time buffer ahead of the viewer and a
+ * minimum number of settled baker steps (avoids unlocking on tiny steps alone).
+ */
+export function liveBakeMayStartWatch(
+  artifact: LiveBakeArtifactV1 | null | undefined,
+  viewerPositionMs = 0,
+): boolean {
+  if (!artifact || artifact.utterances.length === 0) return false;
+  if (artifact.status === "ready") return true;
+  if (artifact.status !== "baking" && artifact.status !== "cancelled") {
+    return false;
+  }
+  const bufferedMs = liveBakeBufferedPlaybackMs(artifact);
+  const aheadMs = bufferedMs - Math.max(0, viewerPositionMs);
+  const minSteps = liveBakeUnlockMinSteps(artifact.surface);
+  const steps = artifact.progress?.completedSteps ?? artifact.utterances.length;
+  return aheadMs >= LIVE_BAKE_UNLOCK_BUFFER_MS && steps >= minSteps;
+}
+
+/** Whether restore/open should auto-start or resume the bake job. */
+export function liveBakeShouldResumeOnOpen(
+  artifact: LiveBakeArtifactV1 | null | undefined,
+  nowMs: number = Date.now(),
+): boolean {
+  if (!artifact) return true;
+  if (artifact.status === "ready") return false;
+  if (artifact.status === "pending" || artifact.status === "cancelled") {
+    return true;
+  }
+  if (artifact.status === "failed") return true;
+  if (artifact.status !== "baking") return false;
+  const heartbeat = artifact.progress?.heartbeatAt;
+  if (!heartbeat) return true;
+  const heartbeatMs = new Date(heartbeat).getTime();
+  if (!Number.isFinite(heartbeatMs)) return true;
+  return nowMs - heartbeatMs >= LIVE_BAKE_STALE_HEARTBEAT_MS;
 }
 
 /**

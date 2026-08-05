@@ -1,5 +1,6 @@
 /**
- * Shared loading / progress helpers for Debate spectator and Signal Watch full bake.
+ * Shared loading / progress helpers for Debate Spectator and Signal Watch
+ * progressive bake unlock.
  */
 import type { LiveBakeArtifactV1, LiveBakeProgressV1 } from "@localai/shared";
 
