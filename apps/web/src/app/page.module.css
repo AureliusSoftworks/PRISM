@@ -37679,6 +37679,116 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   background: color-mix(in srgb, #2fd3e3 12%, transparent);
 }
 
+.usageTripCard {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 12px;
+  align-items: center;
+  padding: 14px 16px;
+  border: 1px solid var(--line);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--bg-elevated) 82%, var(--bg-surface));
+}
+
+.usageTripCard[data-enabled="true"] {
+  border-color: color-mix(in srgb, #2fd3e3 42%, var(--line));
+  background: color-mix(in srgb, #2fd3e3 10%, var(--bg-elevated));
+}
+
+.usageTripCardCopy {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.usageTripCardCopy span {
+  color: var(--fg-muted);
+  font:
+    760 11px/1.2 var(--font-ui-sans),
+    system-ui,
+    sans-serif;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.usageTripCardCopy strong {
+  color: var(--fg);
+  font:
+    760 24px/1.05 var(--font-ui-sans),
+    system-ui,
+    sans-serif;
+  font-variant-numeric: tabular-nums;
+}
+
+.usageTripCardCopy small {
+  color: var(--fg-muted);
+  font:
+    500 12px/1.35 var(--font-ui-sans),
+    system-ui,
+    sans-serif;
+}
+
+.usageTripToggle {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  min-height: 34px;
+  padding: 0 4px 0 0;
+  color: var(--fg-muted);
+  font:
+    760 12px/1 var(--font-ui-sans),
+    system-ui,
+    sans-serif;
+  cursor: pointer;
+  user-select: none;
+}
+
+.usageTripToggle input {
+  appearance: none;
+  width: 42px;
+  height: 24px;
+  margin: 0;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 10%, var(--bg-surface));
+  position: relative;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.usageTripToggle input::after {
+  content: "";
+  position: absolute;
+  top: 2px;
+  left: 2px;
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  background: var(--bg-elevated);
+  box-shadow: 0 1px 2px color-mix(in srgb, #000 22%, transparent);
+  transition: transform 140ms ease;
+}
+
+.usageTripToggle input:checked {
+  border-color: color-mix(in srgb, #2fd3e3 55%, var(--line));
+  background: color-mix(in srgb, #2fd3e3 72%, var(--bg-surface));
+}
+
+.usageTripToggle input:checked::after {
+  transform: translateX(18px);
+}
+
+.usageTripToggle input:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+}
+
+.usageTripToggle:has(input:checked) {
+  color: var(--fg);
+}
+
 .usageControls {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;

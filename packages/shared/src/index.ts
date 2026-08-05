@@ -1341,7 +1341,21 @@ export interface UsageResponse {
   trackingStartedAt: string | null;
   hasUntrackedHistory: boolean;
   conversationScoped: boolean;
+  /** Account-wide online-token trip meter (independent of range/scope filters). */
+  trip: UsageTripMeter;
 }
+
+/** Resettable online-token trip odometer for the Usage panel. */
+export interface UsageTripMeter {
+  enabled: boolean;
+  /** When the current/last trip began. Null if a trip has never been started. */
+  startedAt: string | null;
+  onlineTokens: number;
+  estimatedCostMicroUsd: number;
+  /** True when the meter is off and showing the frozen last-trip total. */
+  frozen: boolean;
+}
+
 
 export interface UserProfile {
   id: string;
@@ -3213,6 +3227,7 @@ export interface CoffeePollPlayerVoteResponse {
 }
 export * from "./botcast.js";
 export * from "./actionSfxPack.js";
+export * from "./englishPacingProfile.js";
 export * from "./corporalityFoley.js";
 export * from "./signalFancyAction.js";
 export * from "./signalPickles.js";

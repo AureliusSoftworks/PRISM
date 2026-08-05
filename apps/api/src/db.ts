@@ -2724,6 +2724,36 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE users ADD COLUMN psychic_mode_enabled INTEGER NOT NULL DEFAULT 0;",
     );
   }
+  const hasUsageTripEnabled = userColumns.some(
+    (column) => column.name === "usage_trip_enabled",
+  );
+  if (!hasUsageTripEnabled) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN usage_trip_enabled INTEGER NOT NULL DEFAULT 0;",
+    );
+  }
+  const hasUsageTripStartedAt = userColumns.some(
+    (column) => column.name === "usage_trip_started_at",
+  );
+  if (!hasUsageTripStartedAt) {
+    db.exec("ALTER TABLE users ADD COLUMN usage_trip_started_at TEXT;");
+  }
+  const hasUsageTripFrozenOnlineTokens = userColumns.some(
+    (column) => column.name === "usage_trip_frozen_online_tokens",
+  );
+  if (!hasUsageTripFrozenOnlineTokens) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN usage_trip_frozen_online_tokens INTEGER NOT NULL DEFAULT 0;",
+    );
+  }
+  const hasUsageTripFrozenCostMicroUsd = userColumns.some(
+    (column) => column.name === "usage_trip_frozen_cost_micro_usd",
+  );
+  if (!hasUsageTripFrozenCostMicroUsd) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN usage_trip_frozen_cost_micro_usd INTEGER NOT NULL DEFAULT 0;",
+    );
+  }
   const hasDevMemoriesEnabled = userColumns.some(
     (column) => column.name === "dev_memories_enabled",
   );
@@ -4279,6 +4309,23 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   `);
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_action_sfx_pack_owner ON action_sfx_pack_clips (user_id, owner_kind, owner_id);",
+  );
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS english_pacing_profiles (
+      user_id TEXT NOT NULL,
+      owner_kind TEXT NOT NULL,
+      owner_id TEXT NOT NULL,
+      comma_ms INTEGER NOT NULL,
+      clause_ms INTEGER NOT NULL,
+      strong_ms INTEGER NOT NULL,
+      calibrated_at TEXT NOT NULL,
+      source TEXT NOT NULL,
+      PRIMARY KEY (user_id, owner_kind, owner_id),
+      FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+  `);
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_english_pacing_owner ON english_pacing_profiles (user_id, owner_kind, owner_id);",
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_developer_transcript_events_conversation_created ON developer_transcript_events (user_id, conversation_id, created_at);",

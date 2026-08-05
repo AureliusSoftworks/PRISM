@@ -51,6 +51,7 @@ import {
   patchUsageSession,
   recordImageUsage,
   runWithUsageSession,
+  setUsageTripEnabled,
 } from "./usage.ts";
 import { requireValidSession, resolveSessionToken } from "./auth.ts";
 import {
@@ -322,6 +323,11 @@ import {
   getActionSfxPackClip,
   getActionSfxPackSummary,
 } from "./action-sfx-pack.ts";
+import {
+  ENGLISH_PACING_MISSING_VOICE_MESSAGE,
+  calibrateEnglishPacingProfile,
+  getEnglishPacingProfile,
+} from "./english-pacing-profile.ts";
 import {
   extractSignalStudioMicrophoneTint,
   normalizeSignalAssetUpload,
@@ -2210,9 +2216,10 @@ async function sendLocalVoiceWaveStream(args: {
         ...(hasVocalActions ? { kind: "speech" } : {}),
         characterCount: item.text.length + (index > 0 ? 1 : 0),
         text: item.text,
-        ...(hasVocalActions
-          ? { sourceStart: item.sourceStart, sourceEnd: item.sourceEnd }
-          : {}),
+        // Always include source spans so the client can lock mouth/text to each
+        // Kokoro clause instead of inventing a full-utterance weight clock.
+        sourceStart: item.sourceStart,
+        sourceEnd: item.sourceEnd,
         audioBase64: wave.toString("base64"),
       })}\n`,
     );
@@ -20613,6 +20620,151 @@ function buildRoutes(): RouteDefinition[] {
         ctx.req.off("close", onClose);
       }
     }),
+    route("GET", "/api/english-pacing-profile", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const url = new URL(ctx.req.url ?? "/", "http://localhost");
+      const ownerKind = normalizeActionSfxPackOwnerKind(
+        url.searchParams.get("ownerKind"),
+      );
+      if (!ownerKind) {
+        throw new HttpError(400, "Choose a bot or player pacing profile owner.");
+      }
+      let ownerId: string;
+      try {
+        ownerId = actionSfxPackOwnerIdFor(
+          ownerKind,
+          url.searchParams.get("ownerId"),
+        );
+      } catch {
+        throw new HttpError(
+          400,
+          "A bot id is required for a bot English pacing profile.",
+        );
+      }
+      if (ownerKind === "bot") {
+        const bot = db
+          .prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?")
+          .get(ownerId, userId);
+        if (!bot) throw new HttpError(404, "Bot not found.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        profile: getEnglishPacingProfile(db, userId, ownerKind, ownerId),
+      });
+    }),
+    route("POST", "/api/english-pacing-profile/calibrate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      if (userBlocksOnlineCapabilities(user)) {
+        throw new HttpError(
+          409,
+          "Switch to AUTO or ONLINE before calibrating English pacing.",
+        );
+      }
+      const raw = ctx.body as Record<string, unknown>;
+      const ownerKind = normalizeActionSfxPackOwnerKind(raw.ownerKind);
+      if (!ownerKind) {
+        throw new HttpError(400, "Choose a bot or player pacing profile owner.");
+      }
+      const botId =
+        typeof raw.ownerId === "string" ? raw.ownerId.trim() : null;
+      let ownerId: string;
+      try {
+        ownerId = actionSfxPackOwnerIdFor(ownerKind, botId);
+      } catch {
+        throw new HttpError(
+          400,
+          "A bot id is required for a bot English pacing profile.",
+        );
+      }
+
+      let voiceProfile = normalizeBotAudioVoiceProfileV1(undefined);
+      if (ownerKind === "bot") {
+        const bot = db
+          .prepare(
+            `SELECT authored_audio_voice_profile, audio_voice_profile_override
+               FROM bots
+              WHERE id = ? AND user_id = ?`,
+          )
+          .get(ownerId, userId) as
+          | {
+              authored_audio_voice_profile: string | null;
+              audio_voice_profile_override: string | null;
+            }
+          | undefined;
+        if (!bot) throw new HttpError(404, "Bot not found.");
+        voiceProfile = resolveBotAudioVoiceProfileV1(
+          bot.authored_audio_voice_profile,
+          bot.audio_voice_profile_override,
+        );
+        if (!resolveElevenLabsVoiceId(voiceProfile)) {
+          const authoredOnly =
+            parseStoredBotAudioVoiceProfileV1(
+              bot.authored_audio_voice_profile,
+            ) ?? normalizeBotAudioVoiceProfileV1(undefined);
+          if (resolveElevenLabsVoiceId(authoredOnly)) {
+            voiceProfile = authoredOnly;
+          }
+        }
+      } else {
+        voiceProfile =
+          parseStoredBotAudioVoiceProfileV1(user.player_audio_voice_profile) ??
+          normalizeBotAudioVoiceProfileV1(undefined);
+      }
+
+      const voiceId = resolveElevenLabsVoiceId(voiceProfile);
+      if (!voiceId) {
+        throw new HttpError(400, ENGLISH_PACING_MISSING_VOICE_MESSAGE);
+      }
+
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(
+          409,
+          "Add an ElevenLabs API key in Settings first.",
+        );
+      }
+
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      try {
+        const profile = await calibrateEnglishPacingProfile({
+          db,
+          userId,
+          ownerKind,
+          botId: ownerKind === "bot" ? ownerId : null,
+          apiKey,
+          voiceId,
+          voiceProfile,
+          voiceModel: normalizeElevenLabsTtsModel(user.elevenlabs_voice_model),
+          signal: controller.signal,
+        });
+        if (controller.signal.aborted) return;
+        json(ctx.res, 200, { ok: true, profile });
+        void checkPrismCreditMonitorForUser(userId, true);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof ElevenLabsVoiceError) {
+          const status =
+            error.status === 401 || error.status === 403
+              ? 401
+              : error.status === 429
+                ? 429
+                : error.status === 400
+                  ? 400
+                  : error.status === 499
+                    ? 499
+                    : 502;
+          throw new HttpError(status, error.message);
+        }
+        throw error;
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
     route("POST", "/api/coffee/action-sfx", async (ctx) => {
       const userId = requireAuth(ctx);
       const raw = ctx.body as Record<string, unknown>;
@@ -22931,6 +23083,19 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ...getUsageReport({ db, userId, range, conversationId }),
       });
+    }),
+    route("POST", "/api/usage/trip", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      if (typeof body.enabled !== "boolean") {
+        throw new Error("enabled must be a boolean.");
+      }
+      const trip = setUsageTripEnabled({
+        db,
+        userId,
+        enabled: body.enabled,
+      });
+      json(ctx.res, 200, { ok: true, trip });
     }),
     route("GET", "/api/settings/secondary-ollama-status", async (ctx) => {
       const userId = requireAuth(ctx);
