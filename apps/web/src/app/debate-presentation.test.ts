@@ -10,6 +10,10 @@ import {
   debateEventSpokenLineDurationMs,
   debateGavelAudioEnabled,
   debateLiveElapsedDurationMs,
+  debateInitialProceedingsCursor,
+  debateAdoptProceedingsCursor,
+  debateInterruptedSpeechCaption,
+  debateWatchElapsedMs,
   debateMarkdownSource,
   debateGalleryReactingIndices,
   debateGalleryReaction,
@@ -124,6 +128,18 @@ describe("Debate live presentation", () => {
     );
   });
 
+  it("freezes a mid-speech Pause cutoff with an em dash", () => {
+    assert.equal(
+      debateInterruptedSpeechCaption("And that is why I like to do the ch"),
+      "And that is why I like to do the ch—",
+    );
+    assert.equal(
+      debateInterruptedSpeechCaption("Hold that thought—"),
+      "Hold that thought—",
+    );
+    assert.equal(debateInterruptedSpeechCaption("   "), "—");
+  });
+
   it("keeps a setting-independent duration for every spoken line", () => {
     const event = {
       version: 1 as const,
@@ -231,6 +247,160 @@ describe("Debate live presentation", () => {
         nowMs,
       ),
       30_000,
+    );
+  });
+
+  it("keeps Debate time count-up and Proceedings cursors spoiler-safe", () => {
+    assert.equal(
+      debateWatchElapsedMs({
+        accumulatedMs: 12_000,
+        runningSinceMs: 1_000,
+        nowMs: 4_000,
+      }),
+      15_000,
+    );
+    assert.equal(
+      debateWatchElapsedMs({
+        accumulatedMs: 12_000,
+        runningSinceMs: null,
+        nowMs: 99_000,
+      }),
+      12_000,
+    );
+    assert.equal(
+      debateInitialProceedingsCursor(
+        {
+          id: "debate-1",
+          status: "paused",
+          events: [
+            {
+              version: 1,
+              id: "a",
+              sequence: 0,
+              phase: "opening",
+              stepKey: "intro",
+              kind: "intro",
+              speakerKind: "moderator",
+              speakerBotId: "mod",
+              sideId: null,
+              content: "Welcome.",
+              sourceIds: [],
+              createdAt: "2026-08-01T00:00:00.000Z",
+            },
+            {
+              version: 1,
+              id: "b",
+              sequence: 1,
+              phase: "opening",
+              stepKey: "opening_for",
+              kind: "speech",
+              speakerKind: "advocate",
+              speakerBotId: "for",
+              sideId: "for",
+              content: "Held line.",
+              sourceIds: [],
+              createdAt: "2026-08-01T00:00:01.000Z",
+            },
+          ],
+          pausedPresentationEventId: "b",
+          playerRole: "spectator",
+          stepKey: "opening_for",
+          completedAt: null,
+        },
+        false,
+      ),
+      0,
+    );
+    assert.equal(
+      debateInitialProceedingsCursor(
+        {
+          id: "debate-2",
+          status: "paused",
+          events: [
+            {
+              version: 1,
+              id: "a",
+              sequence: 0,
+              phase: "opening",
+              stepKey: "intro",
+              kind: "intro",
+              speakerKind: "moderator",
+              speakerBotId: "mod",
+              sideId: null,
+              content: "Welcome.",
+              sourceIds: [],
+              createdAt: "2026-08-01T00:00:00.000Z",
+            },
+          ],
+          pausedPresentationEventId: null,
+          playerRole: "spectator",
+          stepKey: "completed",
+          completedAt: null,
+        },
+        true,
+      ),
+      null,
+    );
+  });
+
+  it("keeps Resume from dumping a baked Spectator Proceedings tail", () => {
+    const events = [0, 1, 2, 3, 4].map((sequence) => ({
+      version: 1 as const,
+      id: `e${sequence}`,
+      sequence,
+      phase: "opening" as const,
+      stepKey: sequence === 0 ? "intro" : "opening_for",
+      kind: sequence === 0 ? ("intro" as const) : ("speech" as const),
+      speakerKind:
+        sequence === 0 ? ("moderator" as const) : ("advocate" as const),
+      speakerBotId: sequence === 0 ? "mod" : "for",
+      sideId: sequence === 0 ? null : ("for" as const),
+      content: `Line ${sequence}.`,
+      sourceIds: [] as string[],
+      createdAt: "2026-08-01T00:00:00.000Z",
+    }));
+    const held = events[1]!;
+    const fullPrevious = {
+      id: "debate-resume",
+      events,
+    };
+    const resumedNext = {
+      id: "debate-resume",
+      status: "live" as const,
+      events: [
+        ...events,
+        {
+          ...events[0]!,
+          id: "resume-announce",
+          sequence: 5,
+          stepKey: "resume",
+          kind: "speech" as const,
+          speakerKind: "moderator" as const,
+          speakerBotId: "mod",
+          sideId: null,
+          content: "Welcome back.",
+          sourceIds: [] as string[],
+          createdAt: "2026-08-01T00:01:00.000Z",
+        },
+      ],
+      pausedPresentationEventId: held.id,
+      playerRole: "spectator" as const,
+      stepKey: "opening_for",
+      completedAt: null,
+    };
+    assert.equal(
+      debateAdoptProceedingsCursor(fullPrevious, resumedNext),
+      0,
+    );
+    assert.equal(
+      debateAdoptProceedingsCursor(
+        { id: "debate-resume", events: events.slice(0, 1) },
+        {
+          ...resumedNext,
+          events: events.slice(0, 2),
+        },
+      ),
+      0,
     );
   });
 

@@ -45,6 +45,7 @@ import {
   debateTitleForMotion,
   debateActivePresentationDurationMs,
   debateEstimatedSpeechDurationMs,
+  debateSessionAwaitsPresentationSeal,
   botPowerPairwisePerceptionFromEffectsV1,
   debateSourceIdsFromText,
   debateSpokenText,
@@ -2255,18 +2256,26 @@ function validateConsents(
   }[],
   format: DebateFormatId,
   formality: DebateFormalityId,
+  responseMode: ResponseMode,
 ): DebateAdvocacyConsent[] {
   const expectedHash = debateMotionHash(motion);
   return advocates.map(({ bot, sideId }) => {
     const consent = consents.find(
       (candidate) => candidate.botId === bot.id && candidate.sideId === sideId,
     );
+    const consentLane =
+      consent?.provider === "local"
+        ? "local"
+        : consent?.provider === "openai" || consent?.provider === "anthropic"
+          ? "online"
+          : null;
     if (
       !consent ||
       consent.motionHash !== expectedHash ||
       consent.botRevision !== botRevision(bot) ||
       (consent.format ?? "forum") !== format ||
-      normalizeDebateFormalityId(consent.formality) !== formality
+      normalizeDebateFormalityId(consent.formality) !== formality ||
+      consentLane !== responseMode
     ) {
       throw new HttpError(
         409,
@@ -2384,15 +2393,19 @@ export function createDebateSession(
     ...(forRow ? [{ bot: forRow, sideId: "for" as const }] : []),
     ...(againstRow ? [{ bot: againstRow, sideId: "against" as const }] : []),
   ];
+  const lane = selectedLane(runtime);
+  const responseMode: ResponseMode =
+    runtime.responseMode ??
+    (lane.providerName === "local" ? "local" : "online");
   const advocacyConsent = validateConsents(
     request.advocacyConsent,
     motion,
     consentAdvocates,
     format,
     formality,
+    responseMode,
   );
   const now = new Date().toISOString();
-  const lane = selectedLane(runtime);
   const juryEnabled = request.jury?.enabled === true;
   const ignoredParticipantSideBotId =
     playerSideId === "for"
@@ -2486,7 +2499,7 @@ export function createDebateSession(
           latestAutoRoute: runtime.autoRoute,
         }
       : {}),
-    responseMode: lane.providerName === "local" ? "local" : "online",
+    responseMode,
     generationChain,
     format,
     formatVersion: DEBATE_FORMAT_SCHEMA_VERSION,
@@ -3436,7 +3449,9 @@ function debateEvidenceCoverageItemsForSpeech(
     return [];
   }
   const unused = debateUnusedEvidenceItems(session);
-  return session.stepKey.startsWith("closing_") ? unused : unused.slice(0, 2);
+  // One primary chamber-table piece per turn — never assign a second item that
+  // would need a mid-speech table swap to stay display-honest.
+  return unused.slice(0, 1);
 }
 
 function debateEvidenceCoveragePrompt(
@@ -3444,9 +3459,10 @@ function debateEvidenceCoveragePrompt(
 ): string {
   if (items.length === 0) return "";
   return [
-    "Evidence participation assignment: meaningfully refer to every item below in this turn.",
-    "Use each item where it genuinely helps—as support, limitation, counterexample, analogy, or a physical exhibit in the room. Do not pretend it proves more than its frozen record.",
-    "Place the references early enough to survive an interruption and preserve each exact marker:",
+    "Evidence participation assignment: meaningfully discuss the item below in this turn.",
+    "Include its exact marker so the chamber can place that piece on the table before you speak. Do not mention, paraphrase, or rely on any other frozen packet item unless you also include its marker and discuss it.",
+    "Use it where it genuinely helps—as support, limitation, counterexample, analogy, or a physical exhibit in the room. Do not pretend it proves more than its frozen record.",
+    "Place the marker early enough to survive an interruption:",
     ...items.map(
       (item) =>
         `- ${debateEvidenceMarker(item)} ${debateEvidenceItemRecord(item)}`,
@@ -4223,6 +4239,7 @@ async function generateSpeech(
           `Against brief: ${session.motion.againstSide.brief}`,
           "Use only the frozen prep packet below. Never claim live research.",
           "Cite a frozen web source only as [[source:id]] and a frozen object exhibit only as [[exhibit:id]]. Never invent an evidence ID or infer visual details beyond an exhibit's approved text record.",
+          "Chamber table discipline: include a marker only for a piece you will meaningfully discuss or refer back to in this turn. Prefer one primary piece. Do not name, paraphrase, or rely on any other frozen packet item unless you also include its marker before you discuss it. Never cite a piece you will not actually talk about.",
           "Stay in your assigned role, but perform it only as well as this persona naturally could.",
           personaVoicePrompt(snapshot),
           personaCapabilityPrompt(snapshot),
@@ -4934,23 +4951,15 @@ function interruptedStatementPrefix(
   const markerStart = prefix.lastIndexOf("[[source:");
   const markerEnd = prefix.lastIndexOf("]]");
   if (markerStart > markerEnd) prefix = prefix.slice(0, markerStart);
-  const boundary = Math.max(
-    prefix.lastIndexOf(" "),
-    prefix.lastIndexOf("\n"),
-    prefix.lastIndexOf("."),
-    prefix.lastIndexOf(","),
-    prefix.lastIndexOf(";"),
-    prefix.lastIndexOf(":"),
-    prefix.lastIndexOf("!"),
-    prefix.lastIndexOf("?"),
-  );
-  if (boundary >= Math.max(0, prefix.length - 28)) {
-    prefix = prefix.slice(0, boundary + 1);
-  }
   prefix = prefix
     .trimEnd()
     .replace(/[,:;–—-]+$/gu, "")
     .trimEnd();
+  // Keep a hard mid-word cut with an em dash so Spectator playback can audibly
+  // choke on the last syllable when another advocate interrupts.
+  if (prefix.length > 0 && count < content.length) {
+    return `${prefix}—`;
+  }
   return prefix ? `${prefix}…` : "";
 }
 
@@ -5225,6 +5234,34 @@ function queueCaseBoardRefinement(
 
 function statusForStep(stepKey: string): DebateSessionV1["status"] {
   return PLAYER_STEPS.has(stepKey) ? "waiting_for_player" : "live";
+}
+
+/**
+ * Apply floor-settled fields. Spectator Debates stay open (`live`) until the
+ * client seals after the player finishes watching the closing.
+ */
+function withDebateFloorSettled(
+  session: DebateSessionV1,
+  patch: Partial<DebateSessionV1> & {
+    winnerSideId?: DebateSessionV1["winnerSideId"];
+  } = {},
+): DebateSessionV1 {
+  if (session.playerRole === "spectator") {
+    return {
+      ...session,
+      ...patch,
+      stepKey: "completed",
+      status: "live",
+      completedAt: null,
+    };
+  }
+  return {
+    ...session,
+    ...patch,
+    stepKey: "completed",
+    status: "completed",
+    completedAt: new Date().toISOString(),
+  };
 }
 
 function forumOpeningStep(
@@ -7099,12 +7136,7 @@ async function participantModeratorClosingTransition(
     runtime,
   );
   return {
-    session: {
-      ...session,
-      stepKey: "completed",
-      status: "completed",
-      completedAt: new Date().toISOString(),
-    },
+    session: withDebateFloorSettled(session),
     events: [event],
   };
 }
@@ -7144,14 +7176,9 @@ async function juryModeratorClosingTransition(
     ),
     session.jury.majoritySideId,
   );
-  const completedAt = new Date().toISOString();
-  let next: DebateSessionV1 = {
-    ...session,
-    stepKey: "completed",
-    status: "completed",
+  let next = withDebateFloorSettled(session, {
     winnerSideId: session.jury.majoritySideId,
-    completedAt,
-  };
+  });
   if (next.format === "turnabout") {
     next = withTurnaboutState(next, {
       ...turnaboutState(next),
@@ -7270,14 +7297,9 @@ async function judgeModeratorClosingTransition(
     ),
     session.playerVerdict,
   );
-  const completedAt = new Date().toISOString();
-  let next: DebateSessionV1 = {
-    ...session,
-    stepKey: "completed",
-    status: "completed",
+  let next = withDebateFloorSettled(session, {
     winnerSideId: session.playerVerdict,
-    completedAt,
-  };
+  });
   if (next.format === "turnabout") {
     next = withTurnaboutState(next, {
       ...turnaboutState(next),
@@ -8212,14 +8234,10 @@ async function advanceTurnaboutStep(
       );
       return {
         session: withTurnaboutState(
-          {
-            ...session,
+          withDebateFloorSettled(session, {
             ballots,
             winnerSideId,
-            status: "completed",
-            completedAt: new Date().toISOString(),
-            stepKey: "completed",
-          },
+          }),
           {
             ...state,
             phase: "resolution",
@@ -8271,15 +8289,16 @@ function skippedTurnaboutTransition(session: DebateSessionV1): DebateSessionV1 {
   if (session.stepKey === "turnabout_ballot_against") {
     const winnerSideId =
       session.playerRole === "judge" ? session.playerVerdict : null;
-    return {
-      ...session,
-      status: winnerSideId ? "completed" : "failed",
-      winnerSideId,
-      completedAt: winnerSideId ? new Date().toISOString() : null,
-      error: winnerSideId
-        ? null
-        : "The Turnabout ended without enough public-record ballots.",
-    };
+    if (!winnerSideId) {
+      return {
+        ...session,
+        status: "failed",
+        winnerSideId: null,
+        completedAt: null,
+        error: "The Turnabout ended without enough public-record ballots.",
+      };
+    }
+    return withDebateFloorSettled(session, { winnerSideId });
   }
   throw new HttpError(409, "This Turnabout step cannot be skipped.");
 }
@@ -8325,15 +8344,16 @@ function skippedTransition(session: DebateSessionV1): DebateSessionV1 {
     return { ...session, stepKey: "participant_closing_moderator" };
   }
   if (step === "participant_closing_moderator") {
-    return {
-      ...session,
-      status: session.winnerSideId ? "completed" : "failed",
-      stepKey: session.winnerSideId ? "completed" : step,
-      completedAt: session.winnerSideId ? new Date().toISOString() : null,
-      error: session.winnerSideId
-        ? null
-        : "The Moderator's decision is missing.",
-    };
+    if (!session.winnerSideId) {
+      return {
+        ...session,
+        status: "failed",
+        stepKey: step,
+        completedAt: null,
+        error: "The Moderator's decision is missing.",
+      };
+    }
+    return withDebateFloorSettled(session);
   }
   if (step === "ballot_moderator") {
     if (playerParticipantProxy(session)) {
@@ -8353,13 +8373,16 @@ function skippedTransition(session: DebateSessionV1): DebateSessionV1 {
         : session.ballots.length >= 3
           ? majorityWinner(session.ballots)
           : null;
-    return {
-      ...session,
-      status: winnerSideId ? "completed" : "failed",
-      winnerSideId,
-      completedAt: winnerSideId ? new Date().toISOString() : null,
-      error: winnerSideId ? null : "The debate ended without enough ballots.",
-    };
+    if (!winnerSideId) {
+      return {
+        ...session,
+        status: "failed",
+        winnerSideId: null,
+        completedAt: null,
+        error: "The debate ended without enough ballots.",
+      };
+    }
+    return withDebateFloorSettled(session, { winnerSideId });
   }
   throw new HttpError(409, "This Debate step cannot be skipped.");
 }
@@ -8807,14 +8830,10 @@ async function advanceStep(
         runtime,
       );
       return {
-        session: {
-          ...session,
+        session: withDebateFloorSettled(session, {
           ballots,
           winnerSideId,
-          status: "completed",
-          completedAt: new Date().toISOString(),
-          stepKey: "completed",
-        },
+        }),
         events: [event, verdictEvent, closingEvent],
       };
     }
@@ -8882,6 +8901,7 @@ export function debateSessionCanPrepareAdvance(
 ): boolean {
   return (
     session.status === "live" &&
+    session.stepKey !== "completed" &&
     session.judgeGavel?.status !== "awaiting_message" &&
     session.objectionRuling?.status !== "awaiting_ruling" &&
     session.participantObjection?.status !== "awaiting_reason"
@@ -9015,6 +9035,12 @@ export async function advanceDebateSession(
   };
   if (session.status === "completed" || session.status === "cancelled") {
     throw new HttpError(409, "This Debate is already finished.");
+  }
+  if (session.stepKey === "completed") {
+    throw new HttpError(
+      409,
+      "This Debate has finished its floor. Finish watching to seal the record.",
+    );
   }
   if (session.judgeGavel?.status === "awaiting_message") {
     throw new HttpError(
@@ -11165,6 +11191,11 @@ type DebateLifecycleRequest = {
   idempotencyKey: string;
   /** Recovery pauses preserve unresolved floor state when the player left. */
   exitRecovery?: boolean;
+  /**
+   * Immediate bookmark-only pause/resume. Ceremony is appended afterward so
+   * leaving mid-announcement still returns to a held floor.
+   */
+  quietSave?: boolean;
   /** A visible Jury chamber keeps pause/resume instantaneous and off-camera. */
   juryVisible?: boolean;
   /** Exact saved public line to replay from its beginning after resume. */
@@ -11248,6 +11279,17 @@ function debateLifecycleIsInstant(
   request: DebateLifecycleRequest,
 ): boolean {
   return request.juryVisible === true && session.jury.enabled;
+}
+
+function debateLifecycleIsQuiet(
+  session: DebateSessionV1,
+  request: DebateLifecycleRequest,
+): boolean {
+  return (
+    request.exitRecovery === true ||
+    request.quietSave === true ||
+    debateLifecycleIsInstant(session, request)
+  );
 }
 
 async function generateDebateLifecycleSpeech(
@@ -11424,8 +11466,7 @@ export function pauseDebateSession(
     session,
     request.presentationEventId,
   );
-  const lifecycleEvents =
-    request.exitRecovery || debateLifecycleIsInstant(session, request)
+  const lifecycleEvents = debateLifecycleIsQuiet(session, request)
       ? []
       : [debatePauseAnnouncementEvent(session, speech)];
   return commitMutation(
@@ -11444,6 +11485,51 @@ export function pauseDebateSession(
   );
 }
 
+/**
+ * Seal a Spectator Debate after the player finishes watching the closing.
+ * Floor settlement alone does not mark the archive Completed.
+ */
+export function sealDebateSessionPresentation(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: { expectedRevision: number; idempotencyKey: string },
+): DebateSessionV1 {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  const session = checked.session;
+  if (session.status === "completed") {
+    throw new HttpError(409, "This Debate is already finished.");
+  }
+  if (!debateSessionAwaitsPresentationSeal(session)) {
+    throw new HttpError(
+      409,
+      "This Debate cannot be sealed until its closing has finished.",
+    );
+  }
+  if (session.status === "paused") {
+    throw new HttpError(
+      409,
+      "Resume this Debate before sealing the finished presentation.",
+    );
+  }
+  return commitMutation(
+    db,
+    userId,
+    session,
+    {
+      ...session,
+      status: "completed",
+      completedAt: new Date().toISOString(),
+      pausedPresentationEventId: null,
+      pausedAt: null,
+      error: null,
+    },
+    checked.idempotencyKey,
+    [],
+  );
+}
+
 export async function pauseDebateSessionWithPersona(
   db: DatabaseSync,
   userId: string,
@@ -11451,20 +11537,59 @@ export async function pauseDebateSessionWithPersona(
   request: DebateLifecycleRequest,
   runtime: DebateAiRuntime,
 ): Promise<DebateSessionV1> {
-  const checked = assertMutation(db, userId, sessionId, request);
-  if (checked.replay) return checked.replay;
-  if (
-    request.exitRecovery ||
-    debateLifecycleIsInstant(checked.session, request)
-  ) {
+  const session = getDebateSession(db, userId, sessionId);
+  if (debateLifecycleIsQuiet(session, request)) {
     return pauseDebateSession(db, userId, sessionId, request);
   }
-  const speech = await generateDebateLifecycleSpeech(
-    checked.session,
-    "pause",
+  const quietKey = `${request.idempotencyKey}:quiet`;
+  const announceKey = `${request.idempotencyKey}:announce`;
+  const announcedReplay = mutationReplay(db, userId, sessionId, announceKey);
+  if (announcedReplay) return announcedReplay;
+  const quietReplay = mutationReplay(db, userId, sessionId, quietKey);
+  const quiet =
+    quietReplay ??
+    pauseDebateSession(db, userId, sessionId, {
+      ...request,
+      quietSave: true,
+      idempotencyKey: quietKey,
+    });
+  return announceDebatePauseCeremony(
+    db,
+    userId,
+    sessionId,
+    {
+      expectedRevision: quiet.revision,
+      idempotencyKey: announceKey,
+    },
     runtime,
   );
-  return pauseDebateSession(db, userId, sessionId, request, speech);
+}
+
+/**
+ * Append the moderator recess call after a quiet pause bookmark is already saved.
+ */
+export async function announceDebatePauseCeremony(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: { expectedRevision: number; idempotencyKey: string },
+  runtime: DebateAiRuntime,
+): Promise<DebateSessionV1> {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  const session = checked.session;
+  if (session.status !== "paused") {
+    throw new HttpError(409, "Announce recess only while the Debate is paused.");
+  }
+  const speech = await generateDebateLifecycleSpeech(session, "pause", runtime);
+  return commitMutation(
+    db,
+    userId,
+    session,
+    session,
+    checked.idempotencyKey,
+    [debatePauseAnnouncementEvent(session, speech)],
+  );
 }
 
 export function endDebateSessionEarly(
@@ -11620,9 +11745,9 @@ export function resumeDebateSession(
     session.participantObjection?.status === "awaiting_reason"
       ? "waiting_for_player"
       : statusForStep(session.stepKey);
-  const lifecycleEvents = debateLifecycleIsInstant(session, request)
-    ? []
-    : [debateResumeGavelEvent(session, speech)];
+  const lifecycleEvents = debateLifecycleIsQuiet(session, request)
+      ? []
+      : [debateResumeGavelEvent(session, speech)];
   return commitMutation(
     db,
     userId,
@@ -11645,20 +11770,72 @@ export async function resumeDebateSessionWithPersona(
   request: DebateLifecycleRequest,
   runtime: DebateAiRuntime,
 ): Promise<DebateSessionV1> {
-  const checked = assertMutation(db, userId, sessionId, request);
-  if (checked.replay) return checked.replay;
-  if (checked.session.status !== "paused") {
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.status !== "paused") {
     throw new HttpError(409, "This Debate is not paused.");
   }
-  if (debateLifecycleIsInstant(checked.session, request)) {
+  if (debateLifecycleIsQuiet(session, request)) {
     return resumeDebateSession(db, userId, sessionId, request);
   }
+  const quietKey = `${request.idempotencyKey}:quiet`;
+  const announceKey = `${request.idempotencyKey}:announce`;
+  const announcedReplay = mutationReplay(db, userId, sessionId, announceKey);
+  if (announcedReplay) return announcedReplay;
+  const quietReplay = mutationReplay(db, userId, sessionId, quietKey);
+  const quiet =
+    quietReplay ??
+    resumeDebateSession(db, userId, sessionId, {
+      ...request,
+      quietSave: true,
+      idempotencyKey: quietKey,
+    });
+  return announceDebateResumeCeremony(
+    db,
+    userId,
+    sessionId,
+    {
+      expectedRevision: quiet.revision,
+      idempotencyKey: announceKey,
+    },
+    runtime,
+  );
+}
+
+/**
+ * Append the return-to-order beat after a quiet resume has already gone live.
+ */
+export async function announceDebateResumeCeremony(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  request: { expectedRevision: number; idempotencyKey: string },
+  runtime: DebateAiRuntime,
+): Promise<DebateSessionV1> {
+  const checked = assertMutation(db, userId, sessionId, request);
+  if (checked.replay) return checked.replay;
+  const session = checked.session;
+  if (session.status === "paused") {
+    throw new HttpError(
+      409,
+      "Resume the Debate quietly before announcing the return to order.",
+    );
+  }
+  if (session.status === "completed" || session.status === "cancelled") {
+    throw new HttpError(409, "This Debate is already finished.");
+  }
   const speech = await generateDebateLifecycleSpeech(
-    checked.session,
+    session,
     "resume",
     runtime,
   );
-  return resumeDebateSession(db, userId, sessionId, request, speech);
+  return commitMutation(
+    db,
+    userId,
+    session,
+    session,
+    checked.idempotencyKey,
+    [debateResumeGavelEvent(session, speech)],
+  );
 }
 
 export function deleteDebateSession(

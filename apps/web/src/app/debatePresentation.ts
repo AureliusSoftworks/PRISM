@@ -6,7 +6,10 @@ import type {
   DebateSessionV1,
   DebateTurnTimingV1,
 } from "@localai/shared";
-import { debateEstimatedSpeechDurationMs } from "@localai/shared";
+import {
+  debateEstimatedSpeechDurationMs,
+  debateSpectatorAwaitingFirstWatch,
+} from "@localai/shared";
 
 import type { SpeechCharacterAlignment } from "./speechRevealTimeline";
 
@@ -23,6 +26,188 @@ export function debateRevealDurationMs(spokenText: string): number {
 export function debateActiveDurationLabel(activeDurationMs: number): string {
   const minutes = Math.max(1, Math.round(activeDurationMs / 60_000));
   return `~${minutes} min active`;
+}
+
+/** Delay before a finished floor line lands in Proceedings (court stenographer feel). */
+export const DEBATE_PROCEEDINGS_STENOGRAPHER_DELAY_MS = 850;
+
+/**
+ * Caption freeze when graceful Pause cuts a live line mid-speech. Keeps the
+ * heard fragment and ends with an em dash — Proceedings stay the full saved line.
+ */
+export function debateInterruptedSpeechCaption(visibleContent: string): string {
+  const text = visibleContent.replace(/\s+$/u, "");
+  if (!text) return "—";
+  if (/[—–…]$/u.test(text)) return text;
+  if (/[-]$/u.test(text)) return `${text.slice(0, -1)}—`;
+  return `${text}—`;
+}
+
+export function debateProceedingsCursorStorageKey(sessionId: string): string {
+  return `prism.debate.proceedingsCursor.v1:${sessionId}`;
+}
+
+export function debateWatchElapsedStorageKey(sessionId: string): string {
+  return `prism.debate.watchElapsed.v1:${sessionId}`;
+}
+
+export function readDebateProceedingsCursor(sessionId: string): number | null {
+  try {
+    const raw = sessionStorage.getItem(
+      debateProceedingsCursorStorageKey(sessionId),
+    );
+    if (raw === null || raw === "") return null;
+    const value = Number(raw);
+    return Number.isFinite(value) ? value : null;
+  } catch {
+    return null;
+  }
+}
+
+export function writeDebateProceedingsCursor(
+  sessionId: string,
+  sequence: number | null,
+): void {
+  try {
+    const key = debateProceedingsCursorStorageKey(sessionId);
+    if (sequence === null) sessionStorage.removeItem(key);
+    else sessionStorage.setItem(key, String(sequence));
+  } catch {
+    // Private mode or blocked storage should not break the chamber.
+  }
+}
+
+export function readDebateWatchElapsedMs(sessionId: string): number {
+  try {
+    const raw = sessionStorage.getItem(debateWatchElapsedStorageKey(sessionId));
+    if (raw === null || raw === "") return 0;
+    const value = Number(raw);
+    return Number.isFinite(value) && value > 0 ? value : 0;
+  } catch {
+    return 0;
+  }
+}
+
+export function writeDebateWatchElapsedMs(
+  sessionId: string,
+  elapsedMs: number,
+): void {
+  try {
+    sessionStorage.setItem(
+      debateWatchElapsedStorageKey(sessionId),
+      String(Math.max(0, Math.floor(elapsedMs))),
+    );
+  } catch {
+    // Private mode or blocked storage should not break the chamber.
+  }
+}
+
+/**
+ * Count-up Debate time while the chamber is live. Freezes during recess and
+ * before Spectator Start so bake/wait time never inflates the readout.
+ */
+export function debateWatchElapsedMs(args: {
+  accumulatedMs: number;
+  runningSinceMs: number | null;
+  nowMs: number;
+}): number {
+  const runningMs =
+    args.runningSinceMs === null
+      ? 0
+      : Math.max(0, args.nowMs - args.runningSinceMs);
+  return Math.max(0, args.accumulatedMs + runningMs);
+}
+
+/**
+ * Proceedings open only through already-heard lines. `null` means the rail is
+ * still empty (Spectator hold, fresh Start, or mid-line recess before commit).
+ */
+export function debateInitialProceedingsCursor(
+  session: Pick<
+    DebateSessionV1,
+    | "id"
+    | "status"
+    | "events"
+    | "pausedPresentationEventId"
+    | "playerRole"
+    | "stepKey"
+    | "completedAt"
+  >,
+  awaitingFirstWatch: boolean,
+): number | null {
+  if (
+    session.status === "completed" ||
+    session.status === "cancelled" ||
+    session.status === "failed"
+  ) {
+    return session.events.at(-1)?.sequence ?? null;
+  }
+  if (awaitingFirstWatch) return null;
+  const heldId = session.pausedPresentationEventId;
+  if (heldId) {
+    const held = session.events.find((event) => event.id === heldId);
+    if (held) {
+      const prior = [...session.events]
+        .reverse()
+        .find((event) => event.sequence < held.sequence);
+      return prior?.sequence ?? null;
+    }
+  }
+  return readDebateProceedingsCursor(session.id);
+}
+
+/**
+ * Proceedings cursor when adopting a new session snapshot for presentation.
+ * Never inherits a full baked Spectator tail during Resume/lifecycle adopts —
+ * only a true one-step presentation prefix may advance the rail.
+ */
+export function debateAdoptProceedingsCursor(
+  previous: Pick<DebateSessionV1, "id" | "events"> | null,
+  next: Pick<
+    DebateSessionV1,
+    | "id"
+    | "status"
+    | "events"
+    | "pausedPresentationEventId"
+    | "playerRole"
+    | "stepKey"
+    | "completedAt"
+  >,
+): number | null {
+  const safe = debateInitialProceedingsCursor(
+    next,
+    debateSpectatorAwaitingFirstWatch(next),
+  );
+  if (!previous || previous.id !== next.id) return safe;
+
+  const heldId = next.pausedPresentationEventId;
+  if (heldId) {
+    const held = next.events.find((event) => event.id === heldId);
+    if (
+      held &&
+      previous.events.some((event) => event.sequence > held.sequence)
+    ) {
+      return safe;
+    }
+  }
+
+  // A full baked session still carries many unheard lines past the safe
+  // stenographer cursor — clamping prevents Resume from dumping the gallery.
+  if (safe !== null) {
+    const pastSafe = previous.events.filter(
+      (event) => event.sequence > safe,
+    ).length;
+    if (pastSafe > 1) return safe;
+  }
+
+  const previousIsPrefix =
+    previous.events.length > 0 &&
+    previous.events.length <= next.events.length &&
+    previous.events.every(
+      (event, index) => next.events[index]?.id === event.id,
+    );
+  if (!previousIsPrefix) return safe;
+  return previous.events.at(-1)?.sequence ?? safe;
 }
 
 /** Canonical final-text duration used when no live voice clock is available. */

@@ -15,7 +15,9 @@ describe("mode tutorials", () => {
       step?.body ?? "",
       /Transcript Chat keeps that same single visual stream but runs it much faster because Chat is muted/u,
     );
-    assert.match(step?.body ?? "", /thinking veil waits until your line finishes/u);
+    assert.match(step?.body ?? "", /sparse listening reaction/u);
+    assert.match(step?.body ?? "", /Action SFX/u);
+    assert.match(step?.body ?? "", /veil still waits until your line finishes/u);
     assert.match(step?.body ?? "", /user-readable planning pass/u);
     assert.match(step?.body ?? "", /assistant bubble/u);
     assert.match(step?.body ?? "", /stays collapsed until you click/u);
@@ -286,7 +288,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /never reads or writes relationship memory/u);
     assert.match(
       copy,
-      /Changing the motion, cast, format, or formality clears/u,
+      /Changing the motion, cast, format, formality, or LOCAL\/ONLINE privacy lane clears/u,
     );
     assert.match(copy, /idea dice remains available/u);
     assert.match(
@@ -318,10 +320,19 @@ describe("mode tutorials", () => {
     assert.match(copy, /Call time during overtime/u);
     assert.match(copy, /Space invokes that same context-aware control/u);
     assert.match(copy, /Participant and Spectator sessions use the same/u);
-    assert.match(copy, /Pause takes effect immediately/u);
+    assert.match(copy, /Pause always cuts the live floor immediately/u);
+    assert.match(copy, /settled recess screen holds the Wide chamber shot/u);
+    assert.match(copy, /hard-stops every voice/u);
+    assert.match(copy, /audibly chokes mid-phrase/u);
+    assert.match(copy, /Objection overlaps from the opposite side/u);
+    assert.match(copy, /even mid-speech, freezing the heard fragment with a cut/u);
     assert.match(
       copy,
-      /moderator uses a short Persona-shaped recess line/u,
+      /plays the moderator’s Persona-shaped recess call if you stay/u,
+    );
+    assert.match(
+      copy,
+      /Leaving mid-ceremony or returning to the Debate menu still hard-stops every voice/u,
     );
     assert.match(copy, /Jury chamber is visible, Pause stays instantaneous/u);
     assert.match(copy, /Leaving an unfinished Debate by any route/u);
@@ -330,13 +341,19 @@ describe("mode tutorials", () => {
     assert.match(copy, /without asking for a second slam/u);
     assert.match(copy, /Bot-moderated roles receive that moderator call/u);
     assert.match(copy, /Resume stays instantaneous without a cutscene/u);
-    assert.match(copy, /replays that exact saved line from its beginning/u);
+    assert.match(
+      copy,
+      /replays that saved line from its beginning with a short lead-in/u,
+    );
+    assert.match(copy, /As I was saying/u);
+    assert.match(copy, /without rewriting the archived Proceedings text/u);
     assert.match(copy, /exact next Jury preparation, ballot/u);
     assert.match(
       copy,
       /neither housekeeping beat enters the readable proceedings/u,
     );
-    assert.match(copy, /neither has a cooldown/u);
+    assert.match(copy, /brief Pause cooldown/u);
+    assert.match(copy, /shorter than Judge intervention cooling/u);
     assert.match(
       copy,
       /cooldown governs semantic interventions within that gavel control, not audience order/u,
@@ -485,7 +502,16 @@ describe("mode tutorials", () => {
     assert.match(copy, /cuts instantly/u);
     assert.match(
       copy,
-      /Sticky evidence can stay on the table without forcing Wide/u,
+      /During long moderator monologues—openings, recess and resume calls/u,
+    );
+    assert.match(copy, /brief Wide breaths when the prose runs long without names/u);
+    assert.match(
+      copy,
+      /returning to the moderator before the floor is handed off/u,
+    );
+    assert.match(
+      copy,
+      /Evidence placed for the active turn can stay on the table without forcing Wide/u,
     );
     assert.match(
       copy,
@@ -494,9 +520,16 @@ describe("mode tutorials", () => {
     assert.match(copy, /Choose a manual view to hold the shot/u);
     assert.match(copy, /only the heard fragment remains public/iu);
     assert.match(copy, /safe Markdown/u);
-    assert.match(copy, /Debate time clock.*overall elapsed time/u);
-    assert.match(copy, /including generation and player-wait time/u);
-    assert.match(copy, /freezing during explicit recesses/u);
+    assert.match(
+      copy,
+      /Debate time clock in the room counts up from when the chamber is live/u,
+    );
+    assert.match(copy, /never counts down a total runtime/u);
+    assert.match(
+      copy,
+      /only reveals lines after they have been heard[\s\S]{0,80}stenographer delay/u,
+    );
+    assert.match(copy, /freezes during recess and before Spectator Start/u);
     assert.match(copy, /setting-independent per-line spoken durations/u);
     assert.match(copy, /Copy verbose transcript/u);
   });
@@ -968,6 +1001,10 @@ describe("mode tutorials", () => {
     );
     assert.match(automaticThinkingSfx?.body ?? "", /Computer calculating/);
     assert.match(automaticThinkingSfx?.body ?? "", /vocal Action pack/);
+    assert.doesNotMatch(
+      automaticThinkingSfx?.body ?? "",
+      /Calibrate English pacing/,
+    );
     assert.match(automaticThinkingSfx?.body ?? "", /Premium ElevenLabs voice/);
     assert.match(automaticThinkingSfx?.body ?? "", /Corporality/);
     assert.match(automaticThinkingSfx?.body ?? "", /while thinking/);
@@ -1096,13 +1133,13 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.zen.steps[3]?.body ?? "", /mic-ready breath/u);
     assert.match(
       MODE_TUTORIALS.zen.steps[3]?.body ?? "",
-      /punctuation pauses/u,
+      /punctuation pauses stay quiet/u,
     );
     assert.match(
       MODE_TUTORIALS.coffee.steps
         .map((step) => step.body)
         .join(" "),
-      /soft breath in punctuation pauses/u,
+      /punctuation pauses stay quiet/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[4]?.body ?? "",
@@ -1894,7 +1931,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /active line appears as a live caption after a brief half-second delay and clears as soon as that line ends/u,
+      /active line appears as a live caption in step with the voice and clears as soon as that line ends/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",

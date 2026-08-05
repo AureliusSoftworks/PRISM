@@ -202,11 +202,14 @@ import {
   orderDebateAudience,
   pauseDebateSession,
   pauseDebateSessionWithPersona,
+  announceDebatePauseCeremony,
+  announceDebateResumeCeremony,
   prepareDebateAdvance,
   raiseDebateParticipantObjection,
   resolveDebateParticipantObjection,
   resumeDebateSession,
   resumeDebateSessionWithPersona,
+  sealDebateSessionPresentation,
   submitDebateInterjection,
   submitDebateJudgeGavelMessage,
   submitDebateObjectionRuling,
@@ -14966,6 +14969,16 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates/:id/pause", async (ctx) => {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Debate was paused.");
+      const body = ctx.body as Parameters<typeof pauseDebateSession>[3];
+      // Quiet bookmark first when the client will announce recess separately.
+      if (body?.quietSave === true || body?.exitRecovery === true) {
+        const session = pauseDebateSession(db, userId, ctx.params.id, body);
+        json(ctx.res, 200, {
+          ok: true,
+          session: debateSessionForPlayer(session),
+        });
+        return;
+      }
       const frozen = getDebateSession(db, userId, ctx.params.id);
       const runtime = await debateAiRuntimeForUser(
         userId,
@@ -14980,7 +14993,37 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         ctx.params.id,
-        ctx.body as Parameters<typeof pauseDebateSession>[3],
+        body,
+        runtime,
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
+    route("POST", "/api/debates/:id/pause/announce", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "debate",
+        ctx.params.id,
+        "The Debate recess was announced.",
+      );
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
+      const session = await announceDebatePauseCeremony(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof announceDebatePauseCeremony>[3],
         runtime,
       );
       json(ctx.res, 200, {
@@ -15002,9 +15045,37 @@ function buildRoutes(): RouteDefinition[] {
         session: debateSessionForPlayer(session),
       });
     }),
+    route("POST", "/api/debates/:id/seal-presentation", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "debate",
+        ctx.params.id,
+        "The Debate presentation was sealed.",
+      );
+      const session = sealDebateSessionPresentation(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof sealDebateSessionPresentation>[3],
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
     route("POST", "/api/debates/:id/resume", async (ctx) => {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Debate resumed from a new floor state.");
+      const body = ctx.body as Parameters<typeof resumeDebateSession>[3];
+      if (body?.quietSave === true || body?.exitRecovery === true) {
+        const session = resumeDebateSession(db, userId, ctx.params.id, body);
+        json(ctx.res, 200, {
+          ok: true,
+          session: debateSessionForPlayer(session),
+        });
+        return;
+      }
       const frozen = getDebateSession(db, userId, ctx.params.id);
       const runtime = await debateAiRuntimeForUser(
         userId,
@@ -15019,7 +15090,37 @@ function buildRoutes(): RouteDefinition[] {
         db,
         userId,
         ctx.params.id,
-        ctx.body as Parameters<typeof resumeDebateSession>[3],
+        body,
+        runtime,
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
+    route("POST", "/api/debates/:id/resume/announce", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "debate",
+        ctx.params.id,
+        "The Debate return to order was announced.",
+      );
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
+      const session = await announceDebateResumeCeremony(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof announceDebateResumeCeremony>[3],
         runtime,
       );
       json(ctx.res, 200, {
@@ -20517,6 +20618,18 @@ function buildRoutes(): RouteDefinition[] {
           bot.authored_audio_voice_profile,
           bot.audio_voice_profile_override,
         );
+        // Packs need the Premium identity even when the live override is
+        // local-only / initialized-without-id (resolveBotAudioVoiceProfileV1
+        // can hide the authored voice in that case).
+        if (!resolveElevenLabsVoiceId(voiceProfile)) {
+          const authoredOnly =
+            parseStoredBotAudioVoiceProfileV1(
+              bot.authored_audio_voice_profile,
+            ) ?? normalizeBotAudioVoiceProfileV1(undefined);
+          if (resolveElevenLabsVoiceId(authoredOnly)) {
+            voiceProfile = authoredOnly;
+          }
+        }
       } else {
         if (!ownerLabel) ownerLabel = "the player";
         voiceProfile =
@@ -25340,6 +25453,77 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const user = getUserRow(userId);
       const body = ctx.body as Record<string, unknown>;
+      // Avatar Studio may send an explicit lane/model. Archive import and other
+      // callers that omit routing keep the paired auxiliary (local helper) path.
+      const hasClientRouting =
+        body.responseMode != null ||
+        body.preferredProvider != null ||
+        body.modelOverride != null;
+      let compileProvider;
+      if (hasClientRouting) {
+        const requestedResponseMode = normalizeResponseMode(
+          body.responseMode,
+          user.preferred_provider === "local" ? "local" : "online",
+        );
+        const responseMode =
+          requestedResponseMode === "auto"
+            ? user.preferred_provider === "local"
+              ? "local"
+              : "online"
+            : requestedResponseMode;
+        const requestedProvider = readProvider(body.preferredProvider);
+        const requestedModelOverride = readModelOverride(body.modelOverride);
+        const explicitModelOverride =
+          requestedModelOverride?.toLowerCase() === "auto"
+            ? null
+            : requestedModelOverride;
+        const primaryProvider: ProviderName =
+          responseMode === "local"
+            ? "local"
+            : requestedProvider && requestedProvider !== "local"
+              ? requestedProvider
+              : user.preferred_provider === "anthropic"
+                ? "anthropic"
+                : "openai";
+        const userKey = decryptUserKey(userId);
+        const onlineAllowed = responseMode !== "local";
+        const openAiApiKey = onlineAllowed
+          ? (getOpenAiApiKeyForUser(userId, userKey) ?? config.openAiApiKey)
+          : undefined;
+        const anthropicApiKey = onlineAllowed
+          ? (getAnthropicApiKeyForUser(userId, userKey) ?? config.anthropicApiKey)
+          : undefined;
+        const catalog = await buildModelCatalog(
+          openAiApiKey,
+          user.secondary_ollama_host,
+          anthropicApiKey,
+        );
+        const resolved = resolveAutoModel({
+          provider: primaryProvider,
+          lane: responseMode,
+          explicitModelOverride,
+          hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
+          catalog,
+          routingContext: {
+            surface: "bot-powers",
+            inputText: JSON.stringify(body.powers ?? []),
+            structuredOutput: true,
+            outputTokens: 2_000,
+            highStakes: true,
+          },
+        });
+        compileProvider = providerFactoryOverride(
+          resolved.provider,
+          openAiApiKey,
+          user.secondary_ollama_host,
+          anthropicApiKey,
+        );
+      } else {
+        compileProvider = auxiliaryProviderFactoryOverride(
+          user.prism_default_llm_model ?? undefined,
+          dualOllamaWorkloadOptions(user),
+        );
+      }
       const result = await runWithUsageSession(
         {
           db,
@@ -25350,10 +25534,7 @@ function buildRoutes(): RouteDefinition[] {
         },
         () =>
           compileBotPowers({
-            provider: auxiliaryProviderFactoryOverride(
-              user.prism_default_llm_model ?? undefined,
-              dualOllamaWorkloadOptions(user),
-            ),
+            provider: compileProvider,
             botName: typeof body.botName === "string" ? body.botName : "",
             systemPrompt:
               typeof body.systemPrompt === "string" ? body.systemPrompt : "",
@@ -25406,10 +25587,15 @@ function buildRoutes(): RouteDefinition[] {
         user.secondary_ollama_host,
         anthropicApiKey,
       );
+      const requestedModelOverride = readModelOverride(body.modelOverride);
+      const explicitModelOverride =
+        requestedModelOverride?.toLowerCase() === "auto"
+          ? null
+          : requestedModelOverride;
       const resolved = resolveAutoModel({
         provider: primaryProvider,
         lane: responseMode,
-        explicitModelOverride: null,
+        explicitModelOverride,
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
         routingContext: {

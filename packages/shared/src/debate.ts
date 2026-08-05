@@ -20,6 +20,8 @@ export const DEBATE_PLAYER_JUDGE_BOT_ID = "prism:player-judge" as const;
 export const DEBATE_PLAYER_PARTICIPANT_BOT_ID =
   "prism:player-participant" as const;
 export const DEBATE_JUDGE_GAVEL_COOLDOWN_MS = 8_000;
+/** Graceful Pause re-arm after Resume — shorter than Judge intervention cooldown. */
+export const DEBATE_PAUSE_COOLDOWN_MS = 2_500;
 export const DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH = 600;
 export const DEBATE_OBJECTION_RULING_TIMEOUT_MS = 8_000;
 export const DEBATE_MODERATOR_TITLE_MAX_LENGTH = 72;

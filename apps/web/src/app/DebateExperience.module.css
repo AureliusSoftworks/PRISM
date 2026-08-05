@@ -11651,6 +11651,11 @@
   gap: 8px;
 }
 
+.stageStateOverlay[data-kind="ready"] {
+  --debate-active-color: var(--debate-moderator-color);
+  gap: 8px;
+}
+
 .stageStateOverlay[data-kind="gavel-cue"] {
   --debate-active-color: var(--debate-moderator-color);
   gap: 8px;
@@ -11680,7 +11685,8 @@
 }
 
 .stageStateOverlay[data-kind="gavel-cue"] > button,
-.stageStateOverlay[data-kind="paused"] > button {
+.stageStateOverlay[data-kind="paused"] > button,
+.stageStateOverlay[data-kind="ready"] > button {
   display: inline-flex;
   align-items: center;
   gap: 8px;
@@ -11702,7 +11708,9 @@
 .stageStateOverlay[data-kind="gavel-cue"] > button:hover,
 .stageStateOverlay[data-kind="gavel-cue"] > button:focus-visible,
 .stageStateOverlay[data-kind="paused"] > button:hover,
-.stageStateOverlay[data-kind="paused"] > button:focus-visible {
+.stageStateOverlay[data-kind="paused"] > button:focus-visible,
+.stageStateOverlay[data-kind="ready"] > button:hover,
+.stageStateOverlay[data-kind="ready"] > button:focus-visible {
   transform: translateY(-1px);
 }
 
@@ -11778,7 +11786,8 @@
 }
 
 .live[data-theme="light"] .stageStateOverlay[data-kind="gavel-cue"] > button,
-.live[data-theme="light"] .stageStateOverlay[data-kind="paused"] > button {
+.live[data-theme="light"] .stageStateOverlay[data-kind="paused"] > button,
+.live[data-theme="light"] .stageStateOverlay[data-kind="ready"] > button {
   border-color: color-mix(in srgb, var(--debate-moderator-color) 46%, #c8c0ce);
   color: #2e2635;
   background: color-mix(in srgb, var(--debate-moderator-color) 16%, white);

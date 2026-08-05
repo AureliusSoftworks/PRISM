@@ -20,7 +20,7 @@ export function debateEventEvidenceIds(event: DebateEventV1): string[] {
   return ids;
 }
 
-/** Evidence markers that have actually reached the audience in a live reveal. */
+/** Evidence markers that appear in public content (spoken / Proceedings text). */
 export function debateVisibleEvidenceIds(content: string): string[] {
   const ids: string[] = [];
   for (const match of content.matchAll(
@@ -64,44 +64,50 @@ export function debateTableEvidenceItem(
 }
 
 /**
- * Keep presented evidence on the table until another piece replaces it, or
- * until an advocate/participant discussion turn begins that no longer cites it.
- * Moderator, Judge gavel, Jury, and between-turn gaps keep the sticky piece.
+ * The single chamber-table piece for a turn: the first marker the speaker
+ * actually includes in their public line. Metadata-only sourceIds that never
+ * appear in the text do not earn a display.
+ */
+export function debateEventPrimaryTableEvidenceId(
+  event: DebateEventV1,
+  evidence: DebateEvidencePacketV1,
+): string | null {
+  for (const id of debateVisibleEvidenceIds(event.content)) {
+    if (debateTableEvidenceItem(evidence, id)) return id;
+  }
+  return null;
+}
+
+/**
+ * Place or swap table evidence when a speaker's turn arms — only if that turn
+ * will discuss the piece. Keep it through moderator/gavel gaps; clear when the
+ * next advocate discussion moves on without a citation. Do not mid-line swap
+ * as later markers become audible.
  */
 export function resolveDebateTableEvidenceStickyId(args: {
   previousStickyId: string | null;
   activeEvent: DebateEventV1 | null;
   presenting: boolean;
   evidence: DebateEvidencePacketV1;
-  /** Growing public content; later heard markers replace earlier exhibits. */
+  /** Retained for call-site compatibility; mid-line audible progress is ignored. */
   visibleContent?: string;
 }): string | null {
-  const {
-    previousStickyId,
-    activeEvent,
-    presenting,
-    evidence,
-    visibleContent,
-  } = args;
+  const { previousStickyId, activeEvent, presenting, evidence } = args;
   if (!activeEvent) return previousStickyId;
 
-  const heardIds =
-    visibleContent === undefined
-      ? []
-      : debateVisibleEvidenceIds(visibleContent).filter((id) =>
-          debateEventEvidenceIds(activeEvent).includes(id),
-        );
-  for (const id of [...heardIds].reverse()) {
-    if (debateTableEvidenceItem(evidence, id)) return id;
-  }
-
-  for (const id of debateEventEvidenceIds(activeEvent)) {
-    if (debateTableEvidenceItem(evidence, id)) return id;
+  if (presenting) {
+    const primary = debateEventPrimaryTableEvidenceId(activeEvent, evidence);
+    if (primary) return primary;
+    if (!debateEventIsAdvocateDiscussion(activeEvent)) {
+      return previousStickyId &&
+        debateTableEvidenceItem(evidence, previousStickyId)
+        ? previousStickyId
+        : null;
+    }
+    return null;
   }
 
   if (!previousStickyId) return null;
   if (!debateTableEvidenceItem(evidence, previousStickyId)) return null;
-  if (!presenting) return previousStickyId;
-  if (!debateEventIsAdvocateDiscussion(activeEvent)) return previousStickyId;
-  return null;
+  return previousStickyId;
 }

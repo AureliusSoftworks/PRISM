@@ -40,6 +40,11 @@ import {
   debateDebriefEligibleBots,
   sanitizeDebateDebaterText,
   sanitizeDebateStatementSources,
+  debateSessionAwaitsPresentationSeal,
+  debateSessionFloorIsSettled,
+  debateSpectatorAwaitingFirstWatch,
+  debateRecessResumeFiller,
+  debateRecessResumePresentationContent,
   type DebateEventV1,
 } from "./debate.ts";
 
@@ -692,5 +697,108 @@ test("normalizes Debate session synopsis and seals Participant Jury from debrief
       ...session,
       playerRole: "spectator",
     }).some((entry) => entry.id === "juror-1"),
+  );
+});
+
+test("Spectator floor settlement awaits a presentation seal until watched", () => {
+  assert.equal(
+    debateSessionAwaitsPresentationSeal({
+      playerRole: "spectator",
+      stepKey: "completed",
+      status: "live",
+      completedAt: null,
+    }),
+    true,
+  );
+  assert.equal(
+    debateSessionAwaitsPresentationSeal({
+      playerRole: "spectator",
+      stepKey: "completed",
+      status: "paused",
+      completedAt: null,
+    }),
+    true,
+  );
+  assert.equal(
+    debateSessionAwaitsPresentationSeal({
+      playerRole: "spectator",
+      stepKey: "completed",
+      status: "completed",
+      completedAt: "2026-08-04T00:00:00.000Z",
+    }),
+    false,
+  );
+  assert.equal(
+    debateSessionAwaitsPresentationSeal({
+      playerRole: "judge",
+      stepKey: "completed",
+      status: "completed",
+      completedAt: "2026-08-04T00:00:00.000Z",
+    }),
+    false,
+  );
+  assert.equal(
+    debateSessionFloorIsSettled({ stepKey: "completed", status: "live" }),
+    true,
+  );
+  assert.equal(
+    debateSessionFloorIsSettled({ stepKey: "ballot_for", status: "live" }),
+    false,
+  );
+  assert.equal(
+    debateSpectatorAwaitingFirstWatch({
+      playerRole: "spectator",
+      status: "paused",
+      pausedPresentationEventId: null,
+      events: [activeDurationEvent({})],
+      stepKey: "completed",
+      completedAt: null,
+    }),
+    true,
+  );
+  assert.equal(
+    debateSpectatorAwaitingFirstWatch({
+      playerRole: "spectator",
+      status: "paused",
+      pausedPresentationEventId: "event-1",
+      events: [activeDurationEvent({})],
+      stepKey: "completed",
+      completedAt: null,
+    }),
+    false,
+  );
+});
+
+test("recess resume fillers stay formality-aware and stable", () => {
+  const first = debateRecessResumeFiller({
+    formality: "parliamentary",
+    sessionId: "debate-a",
+    eventId: "speech-1",
+    revision: 4,
+  });
+  const again = debateRecessResumeFiller({
+    formality: "parliamentary",
+    sessionId: "debate-a",
+    eventId: "speech-1",
+    revision: 4,
+  });
+  assert.equal(first, again);
+  assert.match(first, /…$/u);
+  assert.match(
+    debateRecessResumeFiller({
+      formality: "free_for_all",
+      sessionId: "debate-b",
+      eventId: "speech-2",
+      revision: 1,
+    }),
+    /As I was saying|Before the break|Now that we are back|Alright/u,
+  );
+  assert.equal(
+    debateRecessResumePresentationContent("The floor is mine.", first),
+    `${first} The floor is mine.`,
+  );
+  assert.equal(
+    debateRecessResumePresentationContent("", "As I was saying…"),
+    "As I was saying…",
   );
 });

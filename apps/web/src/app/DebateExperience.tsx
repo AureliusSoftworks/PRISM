@@ -26,6 +26,7 @@ import {
   DEBATE_JUDGE_GAVEL_MESSAGE_MAX_LENGTH,
   DEBATE_MODERATOR_TITLE_MAX_LENGTH,
   DEBATE_OBJECTION_RULING_TIMEOUT_MS,
+  DEBATE_PAUSE_COOLDOWN_MS,
   DEBATE_PLAYER_JUDGE_BOT_ID,
   DEBATE_PLAYER_PARTICIPANT_BOT_ID,
   DEBATE_PLAYER_TURN_MAX_LENGTH,
@@ -169,10 +170,14 @@ import {
 } from "./debateJudgeQuickChoices";
 import { randomDebateTerritory } from "./debateTerritoryRandomizer";
 import {
+  DEBATE_PROCEEDINGS_STENOGRAPHER_DELAY_MS,
   debateActiveDurationLabel,
   debateEventSpokenLineDurationMs,
   debateGavelAudioEnabled,
-  debateLiveElapsedDurationMs,
+  debateInitialProceedingsCursor,
+  debateAdoptProceedingsCursor,
+  debateInterruptedSpeechCaption,
+  debateWatchElapsedMs,
   debateMarkdownSource,
   debateEvidenceFromMarkdownHref,
   debateGalleryReactingIndices,
@@ -186,10 +191,21 @@ import {
   debateVisibleContentAtSpeechTime,
   formatDebateElapsedDuration,
   formatDebateSpokenDuration,
+  readDebateWatchElapsedMs,
+  writeDebateProceedingsCursor,
+  writeDebateWatchElapsedMs,
 } from "./debatePresentation";
+import {
+  DEBATE_INTRO_WIDE_HOLD_MS,
+  DEBATE_MODERATOR_BREATH_WIDE_MS,
+  debateEventIsModeratorMonologue,
+  resolveDebateModeratorCameraView,
+  type DebateModeratorCameraFocus,
+  type DebateModeratorCameraView,
+} from "./debateIntroCamera";
 import { debateVoiceCompletionFallbackDurationMs } from "./signalLiveCaptions";
 import {
-  debateEventEvidenceIds,
+  debateEventPrimaryTableEvidenceId,
   resolveDebateTableEvidenceStickyId,
   debateTableEvidenceItem,
 } from "./debateTableEvidence";
@@ -199,6 +215,16 @@ import {
   debateSpeakerHandoffPlan,
   type DebateSpeakerHandoffPhase,
 } from "./debateSpeakerHandoff";
+import {
+  DEBATE_INTERRUPT_CAMERA_HOLD_MS,
+  DEBATE_INTERRUPT_OVERLAP_PROGRESS,
+  DEBATE_INTERRUPT_PRIMARY_RELEASE_MS,
+  DEBATE_INTERRUPT_TRAIL_OFF_LEAD_MS,
+  debateInterruptCutCaption,
+  debateInterruptOverlapPair,
+  debateInterruptShouldFire,
+  debateInterruptTrailOffLine,
+} from "./debateInterruptOverlap";
 import {
   DEBATE_STAGE_ALIGNMENT_MAX,
   DEBATE_STAGE_ALIGNMENT_MIN,
@@ -370,6 +396,8 @@ export interface DebateUtterance {
   spokenText: string;
   voicePerformanceText?: string | null;
   voiceSourceBotId: string | null;
+  /** Independent channel so an Objection can overlap a cut-off advocate. */
+  voiceChannel?: "primary" | "crosstalk";
   lifecycle?: {
     onStart?: (
       durationMs: number | null,
@@ -442,6 +470,8 @@ export interface DebateExperienceProps {
   presenceBeats?: readonly BotPresenceBeatV1[];
   onUtterance?: (utterance: DebateUtterance) => Promise<boolean>;
   onStopUtterance?: () => void;
+  /** Soft-cut the primary Debate voice without killing an overlapping shout. */
+  onReleaseUtterance?: (fadeMs?: number) => void;
   onLiveSessionActiveChange?: (active: boolean) => void;
   onCompanionContextChange?: (context: DebateCompanionContext | null) => void;
   renderJudgeComposer?: (composer: DebateJudgeComposerRenderProps) => ReactNode;
@@ -1077,10 +1107,12 @@ function debateCameraTransition(
   cameraMode: DebateCameraMode,
   event: DebateEventV1 | null,
 ): DebateCameraTransition {
+  // Interruptions always animate the pan — never an instant Auto cut.
+  if (event?.kind === "objection" || event?.kind === "interjection") {
+    return "objection-pan";
+  }
   if (cameraMode !== "auto") return "move";
-  return event?.kind === "objection" || event?.kind === "interjection"
-    ? "objection-pan"
-    : "cut";
+  return "cut";
 }
 
 const DEBATE_STAGE_ALIGNMENT_LABELS: Record<DebateStageAlignmentRole, string> =
@@ -1104,7 +1136,7 @@ const DEBATE_LIVE_FOLEY_PRELOAD_URLS = [
   DEBATE_AUDIENCE_AGITATION_URL,
   ...Object.values(DEBATE_AUDIENCE_REACTIONS).map((reaction) => reaction.url),
   "/audio/session-atmosphere/throat-clear.mp3",
-  "/audio/voice-presence/breath-deliberate-02.mp3",
+  "/audio/voice-presence/breath-deliberate-02-v2.mp3",
 ];
 
 function DebateForumLightMasks(props: {
@@ -1235,26 +1267,31 @@ function DebateTurnClock(props: {
 }
 
 function DebateElapsedTimer(props: {
-  session: DebateSessionV1;
+  accumulatedMs: number;
+  runningSinceMs: number | null;
+  status: DebateSessionV1["status"];
 }): React.JSX.Element {
   const [nowMs, setNowMs] = useState(() => Date.now());
-  const running =
-    props.session.status === "live" ||
-    props.session.status === "waiting_for_player";
+  const running = props.runningSinceMs !== null;
 
   useEffect(() => {
     if (!running) return;
     const interval = window.setInterval(() => setNowMs(Date.now()), 250);
     return () => window.clearInterval(interval);
-  }, [props.session.id, running]);
+  }, [running, props.runningSinceMs]);
 
   const elapsedLabel = formatDebateElapsedDuration(
-    debateLiveElapsedDurationMs(props.session, nowMs),
+    debateWatchElapsedMs({
+      accumulatedMs: props.accumulatedMs,
+      runningSinceMs: props.runningSinceMs,
+      nowMs,
+    }),
   );
   return (
     <div
       className={styles.debateElapsedTimer}
-      data-status={props.session.status}
+      data-status={props.status}
+      data-running={running ? "true" : "false"}
       role="timer"
       aria-live="off"
       aria-label={`Debate elapsed time ${elapsedLabel}`}
@@ -1501,7 +1538,8 @@ function debateCaseBoardAtSequence(
   session: DebateSessionV1,
   visibleThroughSequence: number | null,
 ): DebateCaseCardV1[] {
-  if (visibleThroughSequence === null) return session.caseBoard;
+  // null = Proceedings still closed; do not spoil the frozen board.
+  if (visibleThroughSequence === null) return [];
   const latestBoardEvent = [...session.events]
     .reverse()
     .find(
@@ -1723,6 +1761,60 @@ function sessionStatusLabel(session: DebateSessionListItemV1): string {
 
 function debateSessionNeedsReturnPause(session: DebateSessionV1): boolean {
   return session.status === "live" || session.status === "waiting_for_player";
+}
+
+/**
+ * Presentation-only copy of a held line with a recess lead-in. Saved Proceedings
+ * keep the original event text.
+ */
+function debateSessionWithRecessResumeFiller(
+  session: DebateSessionV1,
+  eventId: string,
+): DebateSessionV1 {
+  const filler = debateRecessResumeFiller({
+    formality: session.formality,
+    sessionId: session.id,
+    eventId,
+    revision: session.revision,
+  });
+  return {
+    ...session,
+    events: session.events.map((event) =>
+      event.id === eventId
+        ? {
+            ...event,
+            content: debateRecessResumePresentationContent(
+              event.content,
+              filler,
+            ),
+          }
+        : event,
+    ),
+  };
+}
+
+/**
+ * Prefer the recess bookmark when leaving during a pause/resume ceremony beat so
+ * the held speech survives, not the moderator announcement.
+ */
+function debateExitPresentationEventId(
+  session: DebateSessionV1,
+  interruptedEventId: string | null,
+): string | null {
+  if (!interruptedEventId) {
+    return session.pausedPresentationEventId ?? null;
+  }
+  const interrupted = session.events.find(
+    (event) => event.id === interruptedEventId,
+  );
+  if (
+    interrupted &&
+    (interrupted.stepKey === "pause" || interrupted.stepKey === "resume") &&
+    session.pausedPresentationEventId
+  ) {
+    return session.pausedPresentationEventId;
+  }
+  return interruptedEventId;
 }
 
 function phaseLabel(session: DebateSessionV1): string {
@@ -2852,6 +2944,7 @@ export function DebateExperience(
     onPrefetchPreparedUtterance,
     onResponseCueGeneration,
     onStopUtterance,
+    onReleaseUtterance,
     onUtterance,
     preferredProvider,
     renderPickAwareComposer,
@@ -3051,6 +3144,14 @@ export function DebateExperience(
   useEffect(() => {
     activeSessionIdRef.current = activeSession?.id ?? null;
   }, [activeSession?.id]);
+  // Consent is lane-bound: LOCAL↔ONLINE must re-check so a weaker lane cannot
+  // rubber-stamp a stronger floor.
+  const advocacyConsentPrivacyLaneRef = useRef(props.responseMode);
+  useEffect(() => {
+    if (advocacyConsentPrivacyLaneRef.current === props.responseMode) return;
+    advocacyConsentPrivacyLaneRef.current = props.responseMode;
+    setRoleChecks([]);
+  }, [props.responseMode]);
   const [liveReveal, setLiveRevealState] = useState<DebateLiveReveal | null>(
     null,
   );
@@ -3092,6 +3193,34 @@ export function DebateExperience(
     transcriptVisibleThroughSequence,
     setTranscriptVisibleThroughSequence,
   ] = useState<number | null>(null);
+  const proceedingsRevealTimersRef = useRef<number[]>([]);
+  const clearProceedingsRevealTimers = useCallback((): void => {
+    for (const timer of proceedingsRevealTimersRef.current) {
+      window.clearTimeout(timer);
+    }
+    proceedingsRevealTimersRef.current = [];
+  }, []);
+  const scheduleProceedingsReveal = useCallback(
+    (sessionId: string, sequence: number): void => {
+      const timer = window.setTimeout(() => {
+        proceedingsRevealTimersRef.current =
+          proceedingsRevealTimersRef.current.filter((id) => id !== timer);
+        setTranscriptVisibleThroughSequence((current) => {
+          const next =
+            current === null || sequence > current ? sequence : current;
+          writeDebateProceedingsCursor(sessionId, next);
+          return next;
+        });
+      }, DEBATE_PROCEEDINGS_STENOGRAPHER_DELAY_MS);
+      proceedingsRevealTimersRef.current.push(timer);
+    },
+    [],
+  );
+  const [watchElapsedAccumulatedMs, setWatchElapsedAccumulatedMs] = useState(0);
+  const [watchElapsedRunningSinceMs, setWatchElapsedRunningSinceMs] = useState<
+    number | null
+  >(null);
+  const watchElapsedSessionIdRef = useRef<string | null>(null);
   const visibleCaseBoard = useMemo(
     () =>
       activeSession
@@ -3781,20 +3910,32 @@ export function DebateExperience(
   const mountedRef = useRef(true);
 
   useEffect(() => {
-    if (
+    // Allow speech only on the live floor, or during a paused pause/resume
+    // ceremony. Settled recess and the Debate menu must be fully silent.
+    const allowSpeechAudio =
       view === "live" &&
       (activeSession?.status === "live" ||
-        activeSession?.status === "waiting_for_player") &&
-      props.audioEnabled &&
-      props.audioVolume > 0
-    ) {
+        activeSession?.status === "waiting_for_player" ||
+        (activeSession?.status === "paused" && presenting));
+    if (allowSpeechAudio && props.audioEnabled && props.audioVolume > 0) {
+      debateAtmosphereControllerRef.current?.setPresentationSuspended(
+        false,
+        80,
+      );
       return;
     }
     stopDebateAmbientBotVocalization();
+    if (!allowSpeechAudio) {
+      props.onStopUtterance?.();
+      void stopDebateIdentAudio();
+      debateAtmosphereControllerRef.current?.setPresentationSuspended(true, 60);
+    }
   }, [
     activeSession?.status,
+    presenting,
     props.audioEnabled,
     props.audioVolume,
+    props.onStopUtterance,
     stopDebateAmbientBotVocalization,
     view,
   ]);
@@ -4039,6 +4180,87 @@ export function DebateExperience(
         preparingSpeakerBotId: voicePreparationSpeakerBotId,
       })
     : false;
+  const introCameraStateRef = useRef<{
+    eventId: string | null;
+    wideHoldStartedAtMs: number | null;
+    focusedSide: DebateModeratorCameraFocus;
+  }>({
+    eventId: null,
+    wideHoldStartedAtMs: null,
+    focusedSide: null,
+  });
+  const [introCameraView, setIntroCameraView] =
+    useState<DebateModeratorCameraView | null>(null);
+  const [introCameraTick, setIntroCameraTick] = useState(0);
+  useEffect(() => {
+    const session = activeSession;
+    const event = cameraPresentationEvent;
+    if (
+      !session ||
+      view !== "live" ||
+      !presenting ||
+      !event ||
+      !debateEventIsModeratorMonologue(event) ||
+      (effectiveCameraMode !== "auto" && effectiveCameraMode !== "jury")
+    ) {
+      introCameraStateRef.current = {
+        eventId: null,
+        wideHoldStartedAtMs: null,
+        focusedSide: null,
+      };
+      setIntroCameraView(null);
+      return;
+    }
+    if (introCameraStateRef.current.eventId !== event.id) {
+      introCameraStateRef.current = {
+        eventId: event.id,
+        wideHoldStartedAtMs: null,
+        focusedSide: null,
+      };
+    }
+    const visibleLength =
+      liveReveal?.eventId === event.id ? liveReveal.visibleContent.length : 0;
+    const resolved = resolveDebateModeratorCameraView({
+      content: event.content,
+      visibleLength,
+      forName: session.forAdvocate.name,
+      againstName: session.againstAdvocate.name,
+      nowMs: Date.now(),
+      wideHoldStartedAtMs: introCameraStateRef.current.wideHoldStartedAtMs,
+      focusedSide: introCameraStateRef.current.focusedSide,
+    });
+    introCameraStateRef.current = {
+      eventId: event.id,
+      wideHoldStartedAtMs: resolved.wideHoldStartedAtMs,
+      focusedSide: resolved.focusedSide,
+    };
+    setIntroCameraView(resolved.view);
+    if (
+      resolved.view === "wide" &&
+      resolved.wideHoldStartedAtMs !== null
+    ) {
+      const holdMs =
+        typeof resolved.focusedSide === "string" &&
+        resolved.focusedSide.startsWith("breath:")
+          ? DEBATE_MODERATOR_BREATH_WIDE_MS
+          : DEBATE_INTRO_WIDE_HOLD_MS;
+      const remainingMs = holdMs - (Date.now() - resolved.wideHoldStartedAtMs);
+      const timer = window.setTimeout(
+        () => setIntroCameraTick((tick) => tick + 1),
+        Math.max(16, remainingMs),
+      );
+      return () => window.clearTimeout(timer);
+    }
+    return undefined;
+  }, [
+    activeSession,
+    cameraPresentationEvent,
+    effectiveCameraMode,
+    introCameraTick,
+    liveReveal,
+    presenting,
+    view,
+  ]);
   useEffect(() => {
     const empty = new Set<string>();
     playedJuryCommentIdsRef.current = empty;
@@ -5924,6 +6146,7 @@ export function DebateExperience(
             event.gavelHeardCharacterCount !== undefined
           ),
       );
+      const consumedOverlapEventIds = new Set<string>();
       const recovery = [...fresh]
         .reverse()
         .find((event) => event.autoRecovery)?.autoRecovery;
@@ -5936,17 +6159,23 @@ export function DebateExperience(
       }
       for (const [eventIndex, event] of fresh.entries()) {
         if (presentationRunRef.current !== runId) return;
-        const replayableEvent =
-          event.speakerKind !== "system" && event.kind !== "error"
-            ? event
-            : fresh
-                .slice(eventIndex + 1)
-                .find(
-                  (candidate) =>
-                    candidate.speakerKind !== "system" &&
-                    candidate.kind !== "error",
-                );
-        presentationPlaybackEventIdRef.current = replayableEvent?.id ?? null;
+        if (consumedOverlapEventIds.has(event.id)) {
+          scheduleProceedingsReveal(next.id, event.sequence);
+          continue;
+        }
+        let includeInProceedings = false;
+        try {
+          const replayableEvent =
+            event.speakerKind !== "system" && event.kind !== "error"
+              ? event
+              : fresh
+                  .slice(eventIndex + 1)
+                  .find(
+                    (candidate) =>
+                      candidate.speakerKind !== "system" &&
+                      candidate.kind !== "error",
+                  );
+          presentationPlaybackEventIdRef.current = replayableEvent?.id ?? null;
         setAudiencePressurePresentationEventId(event.id);
         if (debateEventIsJurySidebarComment(event)) {
           markJuryCommentPlayed(event.id);
@@ -6022,10 +6251,8 @@ export function DebateExperience(
             next,
           ),
           gavelLed: gavelCue !== null,
-          hasEvidence: debateEventEvidenceIds(event).some(
-            (sourceId) =>
-              debateTableEvidenceItem(next.evidence, sourceId) !== null,
-          ),
+          hasEvidence:
+            debateEventPrimaryTableEvidenceId(event, next.evidence) !== null,
           speakerCanFoley:
             event.speakerKind === "advocate" &&
             Boolean(event.speakerBotId) &&
@@ -6119,7 +6346,6 @@ export function DebateExperience(
           // table place cited evidence without exposing any Proceedings prose.
           setSpeakerHandoff({ eventId: event.id, phase: "evidence" });
           setPresentationEventId(event.id);
-          setTranscriptVisibleThroughSequence(event.sequence);
           replaceLiveReveal({
             eventId: event.id,
             visibleContent: "",
@@ -6185,11 +6411,10 @@ export function DebateExperience(
         if (presentationRunRef.current !== runId) return;
         setVoicePreparationSpeakerBotId(null);
         setSpeakerHandoff(null);
-        // Open Proceedings only once the floor/streaming shell can arm — never
-        // while voice prep still leaves presentationEventId null (full-text flash).
+        // Open the stage shell only once the floor/streaming path can arm —
+        // Proceedings wait for a stenographer delay after the line finishes.
         if (!presentationArmedForHandoff) {
           setPresentationEventId(event.id);
-          setTranscriptVisibleThroughSequence(event.sequence);
           replaceLiveReveal({
             eventId: event.id,
             visibleContent: "",
@@ -6215,6 +6440,7 @@ export function DebateExperience(
             visibleContent: event.content,
           });
           await new Promise((resolve) => window.setTimeout(resolve, 900));
+          includeInProceedings = true;
           continue;
         }
         if (
@@ -6253,6 +6479,7 @@ export function DebateExperience(
             speechTiming: null,
           });
           await new Promise((resolve) => window.setTimeout(resolve, 260));
+          includeInProceedings = true;
           continue;
         }
         if (
@@ -6268,6 +6495,7 @@ export function DebateExperience(
           if (audienceReaction) {
             playDebateAudienceReaction(audienceReaction, event.id);
           }
+          includeInProceedings = true;
           continue;
         }
         if (event.speakerKind === "system") {
@@ -6277,6 +6505,7 @@ export function DebateExperience(
           if (audienceReaction) {
             playDebateAudienceReaction(audienceReaction, event.id);
           }
+          includeInProceedings = true;
           continue;
         }
         if (
@@ -6288,13 +6517,17 @@ export function DebateExperience(
         ) {
           replaceLiveReveal(null);
           await new Promise((resolve) => window.setTimeout(resolve, 900));
+          includeInProceedings = true;
           continue;
         }
         // Judge and Spectator projections expose final Jury reasons, so they
         // follow the same caption, mouth, and voice path as deliberation.
         // Participant projections omit these events, and hard-muted jurors
         // still resolve through canonical silence.
-        if (!utterance) continue;
+        if (!utterance) {
+          includeInProceedings = true;
+          continue;
+        }
         if (debateEventIsAtmosphericVocalFoley(event)) {
           const { spokenText, voicePerformanceText } =
             debateVocalFoleyVoicePerformance(event.content);
@@ -6387,9 +6620,274 @@ export function DebateExperience(
           if (audienceReaction) {
             playDebateAudienceReaction(audienceReaction, event.id);
           }
+          includeInProceedings = true;
           continue;
         }
         const { spokenText } = utterance;
+        const interruptPair = debateInterruptOverlapPair(next.events, event.id);
+        const interrupterUtterance = interruptPair
+          ? debateUtteranceForEvent(next, interruptPair.interrupter)
+          : null;
+        if (interruptPair && interrupterUtterance && onUtterance) {
+          consumedOverlapEventIds.add(interruptPair.interrupter.id);
+          replaceLiveReveal({ eventId: event.id, visibleContent: "" });
+          let playbackProgressSeen = false;
+          let playbackCancelled = false;
+          let overlapFired = false;
+          let overlapPromise: Promise<void> | null = null;
+          let lastOverlapElapsedMs = 0;
+          let playbackAlignment: VoicePlaybackCharacterAlignment | null = null;
+          let playbackDurationMs = Math.max(
+            1,
+            debateRevealDurationMs(spokenText || event.content),
+          );
+          let lastSpeechRenderAt = 0;
+          let lastSemanticKey = "";
+          const trailOffText = debateInterruptTrailOffLine(event.id);
+          const interrupterRole: DebateForumRole | null =
+            interruptPair.interrupter.sideId === "for"
+              ? "for"
+              : interruptPair.interrupter.sideId === "against"
+                ? "against"
+                : interruptPair.interrupter.speakerBotId === next.moderator.id
+                  ? "moderator"
+                  : null;
+          const fireOverlap = (): Promise<void> => {
+            if (overlapPromise) return overlapPromise;
+            overlapFired = true;
+            overlapPromise = (async () => {
+            const cutCaption = debateInterruptCutCaption(
+              debateVisibleContentAtSpeechTime({
+                content: event.content,
+                spokenText,
+                elapsedMs: lastOverlapElapsedMs ||
+                  playbackDurationMs * DEBATE_INTERRUPT_OVERLAP_PROGRESS,
+                durationMs: playbackDurationMs,
+                alignment: playbackAlignment,
+              }),
+            );
+            replaceLiveReveal({
+              eventId: event.id,
+              visibleContent: cutCaption,
+              speechTiming: null,
+            });
+            onReleaseUtterance?.(DEBATE_INTERRUPT_PRIMARY_RELEASE_MS);
+            if (interrupterRole) {
+              setInterruptCameraView(debateAutoCameraView(interrupterRole));
+            }
+            const interrupterIds = new Set<string>();
+            if (interruptPair.interrupter.speakerBotId) {
+              interrupterIds.add(interruptPair.interrupter.speakerBotId);
+            }
+            setOverlapSpeakingBotIds(interrupterIds);
+            setPresentationEventId(interruptPair.interrupter.id);
+            replaceLiveReveal({
+              eventId: interruptPair.interrupter.id,
+              visibleContent: "",
+              speechTiming: null,
+            });
+            const objectionPlay = onUtterance({
+              ...interrupterUtterance,
+              voiceChannel: "crosstalk",
+              lifecycle: {
+                onStart: (durationMs, alignment) => {
+                  if (presentationRunRef.current !== runId) return;
+                  updateLiveReveal((current) =>
+                    current?.eventId === interruptPair.interrupter.id
+                      ? {
+                          ...current,
+                          speechTiming: {
+                            text: interrupterUtterance.spokenText,
+                            elapsedMs: 0,
+                            durationMs: Math.max(1, durationMs ?? 1),
+                            alignment: alignment ?? null,
+                          },
+                        }
+                      : current,
+                  );
+                },
+                onProgress: (elapsedMs, durationMs) => {
+                  if (presentationRunRef.current !== runId) return;
+                  updateLiveReveal((current) =>
+                    current?.eventId === interruptPair.interrupter.id
+                      ? {
+                          ...current,
+                          visibleContent: debateVisibleContentAtSpeechTime({
+                            content: interruptPair.interrupter.content,
+                            spokenText: interrupterUtterance.spokenText,
+                            elapsedMs,
+                            durationMs: Math.max(1, durationMs),
+                            alignment: current.speechTiming?.alignment ?? null,
+                          }),
+                          speechTiming: {
+                            text: interrupterUtterance.spokenText,
+                            elapsedMs,
+                            durationMs: Math.max(1, durationMs),
+                            alignment: current.speechTiming?.alignment ?? null,
+                          },
+                        }
+                      : current,
+                  );
+                },
+                onEnd: () => {
+                  if (presentationRunRef.current !== runId) return;
+                  updateLiveReveal((current) =>
+                    current?.eventId === interruptPair.interrupter.id
+                      ? {
+                          ...current,
+                          visibleContent: interruptPair.interrupter.content,
+                          speechTiming: null,
+                        }
+                      : current,
+                  );
+                },
+              },
+            });
+            await new Promise((resolve) =>
+              window.setTimeout(resolve, DEBATE_INTERRUPT_TRAIL_OFF_LEAD_MS),
+            );
+            if (presentationRunRef.current !== runId) {
+              await objectionPlay;
+              return;
+            }
+            const trailBotId = event.speakerBotId;
+            if (trailBotId) {
+              setOverlapSpeakingBotIds(
+                new Set([...interrupterIds, trailBotId]),
+              );
+            }
+            const trailPlay = onUtterance({
+              ...utterance,
+              spokenText: trailOffText,
+              voicePerformanceText: trailOffText,
+              voiceCacheKey: `${event.id}:trail-off`,
+              voiceChannel: "primary",
+              lifecycle: {
+                onEnd: () => {
+                  if (presentationRunRef.current !== runId) return;
+                  if (trailBotId) {
+                    setOverlapSpeakingBotIds(new Set(interrupterIds));
+                  }
+                },
+                onCancel: () => {
+                  if (trailBotId) {
+                    setOverlapSpeakingBotIds(new Set(interrupterIds));
+                  }
+                },
+              },
+            });
+            await Promise.all([objectionPlay, trailPlay]);
+            if (presentationRunRef.current !== runId) return;
+            await new Promise((resolve) =>
+              window.setTimeout(resolve, DEBATE_INTERRUPT_CAMERA_HOLD_MS),
+            );
+            setOverlapSpeakingBotIds(new Set());
+            setInterruptCameraView(null);
+            })();
+            return overlapPromise;
+          };
+
+          const played = await onUtterance({
+            ...utterance,
+            lifecycle: {
+              onStart: (durationMs, alignment) => {
+                if (presentationRunRef.current !== runId) return;
+                playbackAlignment = alignment ?? null;
+                playbackDurationMs = Math.max(
+                  1,
+                  durationMs ??
+                    Math.max(
+                      playbackDurationMs,
+                      debateVoiceCompletionFallbackDurationMs(
+                        spokenText || event.content,
+                      ),
+                    ),
+                );
+                lastSpeechRenderAt = performance.now();
+                updateLiveReveal((current) =>
+                  current?.eventId === event.id
+                    ? {
+                        ...current,
+                        speechTiming: {
+                          text: spokenText,
+                          elapsedMs: 0,
+                          durationMs: playbackDurationMs,
+                          alignment: playbackAlignment,
+                        },
+                      }
+                    : current,
+                );
+              },
+              onProgress: (elapsedMs, durationMs) => {
+                if (presentationRunRef.current !== runId) return;
+                playbackProgressSeen = true;
+                playbackDurationMs = Math.max(1, durationMs);
+                lastOverlapElapsedMs = elapsedMs;
+                if (
+                  !overlapFired &&
+                  debateInterruptShouldFire(elapsedMs, playbackDurationMs)
+                ) {
+                  void fireOverlap();
+                }
+                const now = performance.now();
+                if (
+                  elapsedMs < playbackDurationMs &&
+                  now - lastSpeechRenderAt <
+                    DEBATE_LIVE_SPEECH_RENDER_INTERVAL_MS
+                ) {
+                  return;
+                }
+                lastSpeechRenderAt = now;
+                if (overlapFired) return;
+                const visibleContent = debateVisibleContentAtSpeechTime({
+                  content: event.content,
+                  spokenText,
+                  elapsedMs,
+                  durationMs: playbackDurationMs,
+                  alignment: playbackAlignment,
+                });
+                const floorReady = visibleContent.length >= 24;
+                const semanticKey = floorReady
+                  ? "floor-ready"
+                  : "floor-warming";
+                replaceLiveReveal(
+                  {
+                    eventId: event.id,
+                    visibleContent,
+                    speechTiming: {
+                      text: spokenText,
+                      elapsedMs: Math.min(playbackDurationMs, elapsedMs),
+                      durationMs: playbackDurationMs,
+                      alignment: playbackAlignment,
+                    },
+                  },
+                  semanticKey !== lastSemanticKey,
+                );
+                lastSemanticKey = semanticKey;
+              },
+              onEnd: () => {
+                if (presentationRunRef.current !== runId) return;
+                if (!overlapFired) {
+                  void fireOverlap();
+                }
+              },
+              onCancel: () => {
+                if (presentationRunRef.current !== runId) return;
+                playbackCancelled = true;
+                if (!overlapFired) {
+                  void fireOverlap();
+                }
+              },
+            },
+          });
+          if (presentationRunRef.current !== runId) return;
+          await fireOverlap();
+          if (presentationRunRef.current !== runId) return;
+          if (!played && !playbackProgressSeen && !overlapFired) {
+            await revealEventSilently(event, spokenText, () => undefined);
+          }
+          includeInProceedings = true;
+        } else {
         replaceLiveReveal({ eventId: event.id, visibleContent: "" });
         let playbackProgressSeen = false;
         let playbackCancelled = false;
@@ -6542,13 +7040,24 @@ export function DebateExperience(
         } else if (audienceReaction) {
           playDebateAudienceReaction(audienceReaction, event.id);
         }
+          includeInProceedings = true;
+        }
+        } finally {
+          if (
+            includeInProceedings &&
+            presentationRunRef.current === runId
+          ) {
+            scheduleProceedingsReveal(next.id, event.sequence);
+          }
+        }
       }
       if (presentationRunRef.current !== runId) return;
       presentationPlaybackEventIdRef.current = null;
       setLiveGavelCue(null);
       setSpeakerHandoff(null);
+      setInterruptCameraView(null);
+      setOverlapSpeakingBotIds(new Set());
       replaceLiveReveal(null);
-      setTranscriptVisibleThroughSequence(null);
       setVoicePreparationSpeakerBotId(null);
     },
     [
@@ -6556,6 +7065,7 @@ export function DebateExperience(
       debateUtteranceForEvent,
       markJuryCommentPlayed,
       onPrepareUtterance,
+      onReleaseUtterance,
       onUtterance,
       playDebateAudienceReaction,
       props.audioEnabled,
@@ -6563,6 +7073,7 @@ export function DebateExperience(
       props.graphicsQuality,
       replaceLiveReveal,
       revealEventSilently,
+      scheduleProceedingsReveal,
       startDebateAmbientBotVocalization,
       stopDebateAmbientBotVocalization,
       updateLiveReveal,
@@ -6650,6 +7161,7 @@ export function DebateExperience(
     (session: DebateSessionV1): void => {
       if (
         session.status !== "live" ||
+        session.stepKey === "completed" ||
         session.judgeGavel?.status === "awaiting_message" ||
         session.objectionRuling?.status === "awaiting_ruling" ||
         session.participantObjection?.status === "awaiting_reason"
@@ -6759,12 +7271,11 @@ export function DebateExperience(
           !onPrepareUtterance &&
           !firstWaitsForJudgeGavel &&
           firstGavelCue?.kind !== "order";
-        // Keep Proceedings closed through voice prep / gavel waits so the next
-        // speech cannot render as a completed article before playback starts.
+        // Keep Proceedings closed through voice prep / gavel waits, and never
+        // open the next line until stenographer delay after it finishes.
+        // Resume/lifecycle adopts must not inherit a full baked Spectator tail.
         setTranscriptVisibleThroughSequence(
-          presentsImmediately
-            ? first.sequence
-            : (previous?.events.at(-1)?.sequence ?? 0),
+          debateAdoptProceedingsCursor(previous, next),
         );
         if (presentsImmediately) {
           setPresentationEventId(first.id);
@@ -6842,6 +7353,7 @@ export function DebateExperience(
       prepareNextAutomaticTurn,
       presentationStore,
       replaceLiveReveal,
+      clearProceedingsRevealTimers,
     ],
   );
 
@@ -7233,6 +7745,11 @@ export function DebateExperience(
           );
         }
         if (mountedRef.current) setBusy(false);
+        if (pauseInFlightRef.current) {
+          // Graceful Pause owns the floor; discard this advance presentation.
+          debateFloorMutationInFlightRef.current = false;
+          return;
+        }
         const adoption = adoptSession(previous, result.session);
         debateFloorMutationInFlightRef.current = false;
         await adoption;
@@ -7313,6 +7830,7 @@ export function DebateExperience(
       view !== "live" ||
       !activeSession ||
       activeSession.status !== "live" ||
+      activeSession.stepKey === "completed" ||
       busy ||
       audienceOrderSaving ||
       presenting ||
@@ -7780,6 +8298,9 @@ export function DebateExperience(
     presentationRunRef.current += 1;
     cancelJudgeGavelCeremonyRef.current?.();
     props.onStopUtterance?.();
+    void stopDebateIdentAudio();
+    stopDebateAmbientBotVocalization();
+    debateAtmosphereControllerRef.current?.setPresentationSuspended(true, 60);
     if (speechRevealRunRef.current) {
       if (speechRevealRunRef.current.frameId !== null) {
         window.cancelAnimationFrame(speechRevealRunRef.current.frameId);
@@ -7790,7 +8311,51 @@ export function DebateExperience(
     setLiveGavelCue(null);
     setSpeakerHandoff(null);
     setAudiencePressurePresentationEventId(null);
+    setInterruptCameraView(null);
+    setOverlapSpeakingBotIds(new Set());
     replaceLiveReveal(null);
+    setPresenting(false);
+  };
+
+  /**
+   * Cut a live line for graceful Pause: freeze the heard caption with an em
+   * dash, stop voice, and abort the presentation run without clearing the cut.
+   */
+  const interruptPresentationForRecess = (
+    eventId: string | null,
+  ): void => {
+    presentationRunRef.current += 1;
+    cancelJudgeGavelCeremonyRef.current?.();
+    props.onStopUtterance?.();
+    void stopDebateIdentAudio();
+    stopDebateAmbientBotVocalization();
+    debateAtmosphereControllerRef.current?.setPresentationSuspended(true, 60);
+    if (speechRevealRunRef.current) {
+      if (speechRevealRunRef.current.frameId !== null) {
+        window.cancelAnimationFrame(speechRevealRunRef.current.frameId);
+      }
+      speechRevealRunRef.current.cancel();
+      speechRevealRunRef.current = null;
+    }
+    setLiveGavelCue(null);
+    setSpeakerHandoff(null);
+    setAudiencePressurePresentationEventId(null);
+    setInterruptCameraView(null);
+    setOverlapSpeakingBotIds(new Set());
+    const snapshot = presentationStore.getSnapshot();
+    if (
+      eventId &&
+      snapshot.eventId === eventId &&
+      snapshot.visibleContent.length > 0
+    ) {
+      replaceLiveReveal({
+        eventId,
+        visibleContent: debateInterruptedSpeechCaption(snapshot.visibleContent),
+        speechTiming: null,
+      });
+    } else {
+      replaceLiveReveal(null);
+    }
     setPresenting(false);
   };
 
@@ -8255,30 +8820,40 @@ export function DebateExperience(
         resume ? "resume" : "pause"
       }`;
       const lifecycleIdempotencyKey = nextMutationKey(
-        resume ? "resume" : "pause",
+        startSpectatorWatch ? "spectator-start" : resume ? "resume" : "pause",
       );
-      const requestLifecycle = (session: DebateSessionV1) =>
+      const requestQuietLifecycle = (session: DebateSessionV1) =>
         props.request<{ session: DebateSessionV1 }>(
           lifecyclePath,
           requestBody({
             expectedRevision: session.revision,
-            idempotencyKey: lifecycleIdempotencyKey,
+            idempotencyKey: `${lifecycleIdempotencyKey}:quiet`,
             juryVisible: !lifecycleCutscene,
+            quietSave: true,
+            ...(startSpectatorWatch ? { exitRecovery: true } : {}),
             ...(!resume ? { presentationEventId: replayEventId } : {}),
           }),
         );
-      let result: { session: DebateSessionV1 };
+      const requestAnnounceLifecycle = (session: DebateSessionV1) =>
+        props.request<{ session: DebateSessionV1 }>(
+          `${lifecyclePath}/announce`,
+          requestBody({
+            expectedRevision: session.revision,
+            idempotencyKey: `${lifecycleIdempotencyKey}:announce`,
+          }),
+        );
+      let quiet: { session: DebateSessionV1 };
       try {
-        result = await requestLifecycle(previous);
+        quiet = await requestQuietLifecycle(previous);
       } catch (caught) {
         if (!debateRequestIsRevisionConflict(caught)) throw caught;
         const refreshed = await props.request<{ session: DebateSessionV1 }>(
           `/api/debates/${encodeURIComponent(previous.id)}?perspective=live`,
         );
         if (!resume && refreshed.session.status === "paused") {
-          result = refreshed;
+          quiet = refreshed;
         } else if (resume && refreshed.session.status !== "paused") {
-          result = refreshed;
+          quiet = refreshed;
         } else {
           if (!resume && !replayEventId) {
             replayEventId =
@@ -8297,8 +8872,32 @@ export function DebateExperience(
                   event.speakerKind !== "system" && event.kind !== "error",
               )?.id ?? null;
           }
-          result = await requestLifecycle(refreshed.session);
+          quiet = await requestQuietLifecycle(refreshed.session);
         }
+      }
+      // Quiet bookmark is authoritative before any ceremony speech starts.
+      if (mountedRef.current) {
+        setActiveSession(quiet.session);
+        if (resume || silentLifecycle) setBusy(false);
+      }
+      let result = quiet;
+      if (!silentLifecycle) {
+        try {
+          result = await requestAnnounceLifecycle(quiet.session);
+        } catch (caught) {
+          if (!debateRequestIsRevisionConflict(caught)) throw caught;
+          const refreshed = await props.request<{ session: DebateSessionV1 }>(
+            `/api/debates/${encodeURIComponent(previous.id)}?perspective=live`,
+          );
+          if (
+            (!resume && refreshed.session.status !== "paused") ||
+            (resume && refreshed.session.status === "paused")
+          ) {
+            throw caught;
+          }
+          result = await requestAnnounceLifecycle(refreshed.session);
+        }
+        if (mountedRef.current) setActiveSession(result.session);
       }
       const lifecycleEvent = result.session.events.find(
         (event) =>
@@ -8307,21 +8906,27 @@ export function DebateExperience(
       );
       if (resume) {
         if (mountedRef.current) setBusy(false);
-        const pausedPresentationEvent = result.session.events.find(
-          (event) => event.id === result.session.pausedPresentationEventId,
-        );
+        if (startSpectatorWatch) {
+          await adoptSession(null, result.session, { playIntro: true });
+          void loadSessions();
+          return;
+        }
+        const heldEventId =
+          result.session.pausedPresentationEventId ?? replayEventId;
+        const pausedPresentationEvent = heldEventId
+          ? result.session.events.find((event) => event.id === heldEventId)
+          : undefined;
         const judgeResumedWithGavel =
           lifecycleEvent !== undefined &&
           lifecycleCutscene &&
           result.session.playerRole === "judge";
-        if (judgeResumedWithGavel) {
+        if (judgeResumedWithGavel && lifecycleEvent) {
           triggerJudgeGavelSmash("order", lifecycleEvent.id);
           triggerAudienceOrderResponse({
             eventId: lifecycleEvent.id,
             kind: "hush",
             performGavel: false,
-            resetAfterSequence:
-              lifecycleEvent.sequence,
+            resetAfterSequence: lifecycleEvent.sequence,
             sessionId: result.session.id,
           });
         }
@@ -8333,31 +8938,53 @@ export function DebateExperience(
           });
         }
         if (pausedPresentationEvent) {
+          const filledSession = debateSessionWithRecessResumeFiller(
+            result.session,
+            pausedPresentationEvent.id,
+          );
           await adoptSession(
             {
-              ...result.session,
-              events: result.session.events.filter(
+              ...filledSession,
+              events: filledSession.events.filter(
                 (event) => event.sequence < pausedPresentationEvent.sequence,
               ),
             },
             {
-              ...result.session,
-              events: result.session.events.filter(
+              ...filledSession,
+              events: filledSession.events.filter(
                 (event) => event.sequence <= pausedPresentationEvent.sequence,
               ),
             },
             { automaticJudgeGavel: true },
           );
+          const hasRemainingEvents = result.session.events.some(
+            (event) => event.sequence > pausedPresentationEvent.sequence,
+          );
+          if (hasRemainingEvents) {
+            await adoptSession(
+              {
+                ...result.session,
+                events: result.session.events.filter(
+                  (event) =>
+                    event.sequence <= pausedPresentationEvent.sequence,
+                ),
+              },
+              result.session,
+            );
+            setPauseCooldownUntilMs(Date.now() + DEBATE_PAUSE_COOLDOWN_MS);
+            void loadSessions();
+            return;
+          }
         }
         setActiveSession(result.session);
+        setPauseCooldownUntilMs(Date.now() + DEBATE_PAUSE_COOLDOWN_MS);
       } else {
         if (lifecycleEvent) {
           if (mountedRef.current) setBusy(false);
-          await adoptSession(
-            previous,
-            { ...result.session, status: previous.status },
-            { automaticJudgeGavel: true },
-          );
+          // Stay recessed while the moderator calls recess; overlay hides while presenting.
+          await adoptSession(previous, result.session, {
+            automaticJudgeGavel: true,
+          });
         }
         setActiveSession(result.session);
       }
@@ -8373,6 +9000,7 @@ export function DebateExperience(
         replaceLiveReveal(null);
       }
     } finally {
+      pauseInFlightRef.current = false;
       debateFloorMutationInFlightRef.current = false;
       setBusy(false);
     }
@@ -8380,16 +9008,15 @@ export function DebateExperience(
   pauseOrResumeRef.current = pauseOrResume;
 
   useEffect(() => {
-    if (
-      !pauseQueued ||
-      busy ||
-      !activeSession ||
-      activeSession.status === "paused"
-    ) {
-      return;
-    }
-    void pauseOrResumeRef.current?.();
-  }, [activeSession, busy, pauseQueued]);
+    if (pauseCooldownUntilMs <= Date.now()) return;
+    const timer = window.setInterval(() => {
+      setPauseCooldownTick((tick) => tick + 1);
+      if (pauseCooldownUntilMs <= Date.now()) {
+        window.clearInterval(timer);
+      }
+    }, 250);
+    return () => window.clearInterval(timer);
+  }, [pauseCooldownUntilMs]);
 
   const exitLiveSessionToStudio = async (): Promise<void> => {
     const previous = activeSession;
@@ -8453,7 +9080,10 @@ export function DebateExperience(
                     event.speakerKind !== "system" && event.kind !== "error",
                 )?.id ?? null;
             }
-            await pauseForExit(refreshed.session);
+            await pauseForExit(
+              refreshed.session,
+              debateExitPresentationEventId(refreshed.session, replayEventId),
+            );
           }
         }
       } catch {
@@ -11990,8 +12620,8 @@ export function DebateExperience(
                   !debateEventIsTranscriptHousekeeping(event) &&
                   !debateEventIsAtmosphericVocalFoley(event) &&
                   !debateEventIsJuryComment(event) &&
-                  (transcriptVisibleThroughSequence === null ||
-                    event.sequence <= transcriptVisibleThroughSequence),
+                  transcriptVisibleThroughSequence !== null &&
+                  event.sequence <= transcriptVisibleThroughSequence,
               )
               .map((event) => {
                 const streaming =
@@ -13997,30 +14627,59 @@ export function DebateExperience(
     const forumPreparingNextTurn =
       busy && !presenting && judgeGavelSmashCue === null;
     const judgeGavelCameraForced = judgeGavelSmashCue !== null;
+    // Settled recess overlay holds Wide. Resume/pause ceremony (busy or
+    // presenting while paused) cuts to Moderator for the gavel beat.
+    const recessSettledWide =
+      session.status === "paused" && !presenting && !busy;
+    const recessLifecycleModerator =
+      session.status === "paused" && (busy || presenting);
+    const lifecycleModeratorShot =
+      presenting &&
+      activeEvent != null &&
+      (activeEvent.stepKey === "pause" ||
+        activeEvent.stepKey === "resume" ||
+        activeEvent.gavelReason === "pause" ||
+        activeEvent.gavelReason === "resume");
     const activeEvidenceItem = debateTableEvidenceItem(
       session.evidence,
       tableEvidenceStickyId,
     );
-    const cameraTransition = speakerHandoff
-      ? "handoff"
-      : debateCameraTransition(effectiveCameraMode, activeEvent);
+    const cameraTransition = interruptCameraView
+      ? "objection-pan"
+      : speakerHandoff
+        ? "handoff"
+        : debateCameraTransition(effectiveCameraMode, activeEvent);
     const speakerHandoffKeepsWide =
       speakerHandoff?.phase === "wide" || speakerHandoff?.phase === "evidence";
     const cameraView = judgeGavelCameraForced
       ? "moderator"
-      : judgeGavelCeremony?.status === "missed" && judgeGavelMissedCameraView
-        ? judgeGavelMissedCameraView
-        : juryCameraActive
-          ? "jury"
-          : speakerHandoffKeepsWide && effectiveCameraMode === "auto"
-            ? "wide"
-            : effectiveCameraMode === "auto" || effectiveCameraMode === "jury"
-              ? forumPreparingNextTurn
+      : interruptCameraView
+        ? interruptCameraView
+        : recessSettledWide
+        ? "wide"
+        : recessLifecycleModerator
+          ? "moderator"
+          : judgeGavelCeremony?.status === "missed" &&
+              judgeGavelMissedCameraView
+            ? judgeGavelMissedCameraView
+            : juryCameraActive
+              ? "jury"
+              : speakerHandoffKeepsWide && effectiveCameraMode === "auto"
                 ? "wide"
-                : activeGavelCue && gavelCameraReady
-                  ? "moderator"
-                  : debateAutoCameraView(activeRole)
-              : effectiveCameraMode;
+                : introCameraView &&
+                    (effectiveCameraMode === "auto" ||
+                      effectiveCameraMode === "jury") &&
+                    !speakerHandoff
+                  ? introCameraView
+                  : effectiveCameraMode === "auto" ||
+                      effectiveCameraMode === "jury"
+                    ? forumPreparingNextTurn
+                      ? "wide"
+                      : (activeGavelCue && gavelCameraReady) ||
+                          lifecycleModeratorShot
+                        ? "moderator"
+                        : debateAutoCameraView(activeRole)
+                    : effectiveCameraMode;
     const evidenceView = debateStageEvidenceViewForCamera(cameraView);
     const participantFloorRailVisible =
       participantOpponentSpeechActive && !judgeGavelKeyboardBlocked;
@@ -14053,6 +14712,9 @@ export function DebateExperience(
     );
     const judgeCanCallTime = judgeCanCallTimeNow;
     const judgeGavelOnCooldown = judgeGavelInterventionOnCooldownNow;
+    void pauseCooldownTick;
+    const pauseOnCooldown =
+      session.status !== "paused" && pauseCooldownUntilMs > Date.now();
     const judgeGavelCooldownLabel =
       judgeGavelOnCooldown && Number.isFinite(judgeGavelCooldownUntilMs) ? (
         <DebateDeadlineCountdown
@@ -14509,10 +15171,12 @@ export function DebateExperience(
         session.status === "live" ||
         session.status === "waiting_for_player"),
     );
+    // Keep the gavel bus alive only while a cue is armed — settled recess must
+    // not keep the atmosphere layer (and ambient vocalizations) running.
     const gavelAudioActive = Boolean(
       debateGavelAudioEnabled(props.audioVolume) &&
       moderatorPresentation.visibility !== "hidden" &&
-      (session.status === "paused" || activeGavelCue !== null),
+      activeGavelCue !== null,
     );
     return (
       <>
@@ -14627,7 +15291,12 @@ export function DebateExperience(
                 {session.motion.motion}
               </p>
             </div>
-            <DebateElapsedTimer key={session.id} session={session} />
+            <DebateElapsedTimer
+              key={session.id}
+              accumulatedMs={watchElapsedAccumulatedMs}
+              runningSinceMs={watchElapsedRunningSinceMs}
+              status={session.status}
+            />
           </header>
           <div className={styles.liveWorkspace}>
             <div className={styles.stageColumn}>
@@ -14661,6 +15330,7 @@ export function DebateExperience(
                             ) ?? bot);
                         const talking =
                           responseCueSpeakerBotId === bot.id ||
+                          overlapSpeakingBotIds.has(bot.id) ||
                           (presenting &&
                             speakerHandoff === null &&
                             activeSpeakerId === bot.id &&
@@ -15362,7 +16032,8 @@ export function DebateExperience(
                       onClick={() => void pauseOrResume()}
                       disabled={
                         (busy && session.status === "paused") ||
-                        pauseQueued ||
+                        pauseInFlightRef.current ||
+                        pauseOnCooldown ||
                         participantObjectionAwaitingReason ||
                         (session.status !== "paused" &&
                           session.judgeGavel?.status === "awaiting_message")

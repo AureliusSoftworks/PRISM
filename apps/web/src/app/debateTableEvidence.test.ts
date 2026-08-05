@@ -8,6 +8,7 @@ import {
 import {
   debateEventEvidenceIds,
   debateEventIsAdvocateDiscussion,
+  debateEventPrimaryTableEvidenceId,
   debateVisibleEvidenceIds,
   resolveDebateTableEvidenceStickyId,
 } from "./debateTableEvidence.ts";
@@ -101,41 +102,61 @@ describe("Debate table evidence sticky placement", () => {
     );
   });
 
-  it("places evidence when cited and keeps it between turns", () => {
-    const placed = resolveDebateTableEvidenceStickyId({
-      previousStickyId: null,
-      activeEvent: event({
-        id: "place",
-        sequence: 1,
-        evidenceSourceId: "exhibit-1",
-      }),
-      presenting: true,
-      evidence,
+  it("places the first content marker at turn arm, not metadata-only ids", () => {
+    const cited = event({
+      id: "place",
+      sequence: 1,
+      content: "The hinge [[exhibit:exhibit-1]] proves the door was forced.",
+      evidenceSourceId: "exhibit-1",
+      sourceIds: ["exhibit-1"],
     });
-    assert.equal(placed, "exhibit-1");
+    assert.equal(
+      debateEventPrimaryTableEvidenceId(cited, evidence),
+      "exhibit-1",
+    );
     assert.equal(
       resolveDebateTableEvidenceStickyId({
-        previousStickyId: placed,
-        activeEvent: event({
-          id: "place",
-          sequence: 1,
-          evidenceSourceId: "exhibit-1",
-        }),
+        previousStickyId: null,
+        activeEvent: cited,
+        presenting: true,
+        evidence,
+      }),
+      "exhibit-1",
+    );
+    assert.equal(
+      resolveDebateTableEvidenceStickyId({
+        previousStickyId: "exhibit-1",
+        activeEvent: cited,
         presenting: false,
         evidence,
       }),
       "exhibit-1",
     );
+    assert.equal(
+      debateEventPrimaryTableEvidenceId(
+        event({
+          id: "meta-only",
+          sequence: 2,
+          evidenceSourceId: "exhibit-1",
+          sourceIds: ["exhibit-1"],
+          content: "I object to that claim.",
+        }),
+        evidence,
+      ),
+      null,
+    );
   });
 
-  it("replaces sticky evidence when a later event cites a different piece", () => {
+  it("replaces sticky evidence when a later turn cites a different piece", () => {
     assert.equal(
       resolveDebateTableEvidenceStickyId({
         previousStickyId: "exhibit-1",
         activeEvent: event({
           id: "replace",
           sequence: 2,
+          content: "The inspectors [[source:source-1]] disagree.",
           evidenceSourceId: "source-1",
+          sourceIds: ["source-1"],
         }),
         presenting: true,
         evidence,
@@ -144,7 +165,7 @@ describe("Debate table evidence sticky placement", () => {
     );
   });
 
-  it("replaces an earlier exhibit when a later marker becomes audible in the same line", () => {
+  it("keeps the first cited piece for the whole turn — no mid-line table swap", () => {
     const cited = event({
       id: "two-exhibits",
       sequence: 3,
@@ -157,6 +178,10 @@ describe("Debate table evidence sticky placement", () => {
         "First the hinge [[exhibit:exhibit-1]], then the key [[exhibit:exhibit-2]].",
       ),
       ["exhibit-1", "exhibit-2"],
+    );
+    assert.equal(
+      debateEventPrimaryTableEvidenceId(cited, evidence),
+      "exhibit-1",
     );
     assert.equal(
       resolveDebateTableEvidenceStickyId({
@@ -176,7 +201,7 @@ describe("Debate table evidence sticky placement", () => {
         evidence,
         visibleContent: cited.content,
       }),
-      "exhibit-2",
+      "exhibit-1",
     );
   });
 
