@@ -83,6 +83,10 @@ describe("Prism Refract integration", () => {
     );
     assert.match(
       debateSource,
+      /id: "debate-setup-exhibit-seed"[\s\S]*"debate\.setup\.exhibitPair"/u,
+    );
+    assert.match(
+      debateSource,
       /id: "debate-setup-exhibit-adjective"[\s\S]*"debate\.setup\.exhibitObservation"/u,
     );
     assert.match(
@@ -136,11 +140,11 @@ describe("Prism Refract integration", () => {
     );
     assert.match(
       companionSource,
-      /nextEditableControl[\s\S]*session\.phase === "ready"[\s\S]*session\.candidateValue !== null[\s\S]*acceptPrismRefract\(\);[\s\S]*return;[\s\S]*releasePrismRefract\(true\)/u,
+      /nextEditableControl[\s\S]*session\.phase === "ready"[\s\S]*session\.candidateValue !== null[\s\S]*acceptPrismRefract\(\);[\s\S]*return;[\s\S]*Clicking off the captured field affirms[\s\S]*acceptPrismRefract\(\);[\s\S]*return;[\s\S]*releasePrismRefract\(true\)/u,
     );
     const nextInputAcceptance =
       companionSource.match(
-        /const nextEditableControl =[\s\S]*?releasePrismRefract\(true\);/u,
+        /const nextEditableControl =[\s\S]*?Clicking off the captured field affirms[\s\S]*?releasePrismRefract\(true\);/u,
       )?.[0] ?? "";
     assert.doesNotMatch(
       nextInputAcceptance,
@@ -200,10 +204,22 @@ describe("Prism Refract integration", () => {
     assert.doesNotMatch(refractSource, /shift-click|shiftKey|onClickCapture/u);
   });
 
-  it("rerolls same-target modifier-clicks and accepts before chaining to another target", () => {
+  it("rerolls only with Space; modifier-clicks accept before chaining to another target", () => {
+    assert.match(
+      refractSource,
+      /Same-target modifier clicks never reroll/u,
+    );
+    assert.doesNotMatch(
+      companionSource,
+      /decision === "reroll"[\s\S]*rerollPrismRefract\(\)/u,
+    );
     assert.match(
       companionSource,
-      /isPrismCompanionModifierHeld\(event, platform\)[\s\S]*prismRefractModifierClickDecision[\s\S]*decision === "reroll"[\s\S]*rerollPrismRefract\(\)[\s\S]*decision === "accept-and-begin"[\s\S]*acceptPrismRefract\(\)[\s\S]*"modifier-click"/u,
+      /decision === "accept" \|\| decision === "accept-and-begin"[\s\S]*acceptPrismRefract\(\)/u,
+    );
+    assert.match(
+      companionSource,
+      /decision === "begin" \|\| decision === "accept-and-begin"[\s\S]*"modifier-click"/u,
     );
     assert.match(
       companionSource,
@@ -336,7 +352,7 @@ describe("Prism Refract integration", () => {
     assert.match(tutorialSource, /skippable Wield Prism teaching beat/u);
     assert.match(
       tutorialSource,
-      /Space rerolls[\s\S]*Option-clicking the same control[\s\S]*Control-clicking the same control[\s\S]*Enter, Tab, or clicking another input keeps the current draft[\s\S]*Option-clicking a different registered control[\s\S]*Control-clicking a different registered control[\s\S]*Escape[\s\S]*non-input outside click restores/u,
+      /Space rerolls[\s\S]*Clicking away, Enter, Tab, or clicking another input keeps the current draft[\s\S]*Option-clicking a different registered control[\s\S]*Control-clicking a different registered control[\s\S]*Escape restores the original/u,
     );
     assert.match(pageSource, /tutorialProgress\.prismWield/u);
     assert.match(pageSource, /tutorialProgress\.signalRefract/u);

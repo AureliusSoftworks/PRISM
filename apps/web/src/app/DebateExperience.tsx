@@ -2648,43 +2648,62 @@ function DebateEvidenceDrawer({
   const source = item.kind === "source" ? item.value : null;
   const exhibit = item.kind === "exhibit" ? item.value : null;
   return (
-    <aside
-      className={styles.sourceDrawer}
-      data-kind={item.kind}
-      role="dialog"
-      aria-modal="true"
-      aria-labelledby="debate-evidence-title"
+    <div
+      className={styles.sourceDrawerBackdrop}
+      data-debate-evidence-drawer-backdrop="true"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
     >
-      <button ref={closeButtonRef} type="button" onClick={onClose}>
-        Close
-      </button>
-      <span>
-        {item.kind === "source" ? "Public source" : "Object exhibit"} ·{" "}
-        {item.value.id}
-      </span>
-      {exhibit ? (
-        <DebateEvidenceExhibitVisual
-          exhibit={exhibit}
-          className={styles.evidenceDrawerVisual}
-        />
-      ) : null}
-      <h2 id="debate-evidence-title">{item.value.title}</h2>
-      <p>{source ? source.snippet : exhibit?.observation}</p>
-      {source?.publishedAt ? <small>{source.publishedAt}</small> : null}
-      {exhibit ? (
-        <small>
-          {exhibit.createdBy === "prism"
-            ? "PRISM suggested the object; you approved its record."
-            : "Player-authored exhibit record."}{" "}
-          The visual is presentation only.
-        </small>
-      ) : null}
-      {source ? (
-        <a href={source.url} target="_blank" rel="noreferrer">
-          Open original source
-        </a>
-      ) : null}
-    </aside>
+      <aside
+        className={styles.sourceDrawer}
+        data-kind={item.kind}
+        data-debate-evidence-drawer="true"
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="debate-evidence-title"
+      >
+        <header className={styles.sourceDrawerHeader}>
+          <span>
+            {item.kind === "source" ? "Public source" : "Object exhibit"} ·{" "}
+            {item.value.id}
+          </span>
+          <button
+            ref={closeButtonRef}
+            type="button"
+            className={styles.sourceDrawerClose}
+            onClick={onClose}
+            aria-label={
+              item.kind === "source" ? "Close source" : "Close exhibit"
+            }
+          >
+            Close
+          </button>
+        </header>
+        {exhibit ? (
+          <DebateEvidenceExhibitVisual
+            exhibit={exhibit}
+            className={styles.evidenceDrawerVisual}
+          />
+        ) : null}
+        <h2 id="debate-evidence-title">{item.value.title}</h2>
+        <p>{source ? source.snippet : exhibit?.observation}</p>
+        {source?.publishedAt ? <small>{source.publishedAt}</small> : null}
+        {exhibit ? (
+          <small>
+            {exhibit.createdBy === "prism"
+              ? "PRISM suggested the object; you approved its record."
+              : "Player-authored exhibit record."}{" "}
+            The visual is presentation only.
+          </small>
+        ) : null}
+        {source ? (
+          <a href={source.url} target="_blank" rel="noreferrer">
+            Open original source
+          </a>
+        ) : null}
+      </aside>
+    </div>
   );
 }
 
@@ -10220,28 +10239,58 @@ export function DebateExperience(
           >
             <label className={styles.field}>
               <span>Describe a physical exhibit</span>
-              <input
-                value={evidenceObjectSeed}
-                onChange={(event) =>
-                  setEvidenceObjectSeed(event.currentTarget.value)
-                }
-                onKeyDown={(event) => {
-                  if (
-                    event.key !== "Enter" ||
-                    event.nativeEvent.isComposing ||
-                    !evidenceObjectSeed.trim()
-                  ) {
-                    return;
-                  }
-                  event.preventDefault();
-                  void draftEvidenceObject();
+              <PrismRefractTarget
+                target={{
+                  id: "debate-setup-exhibit-seed",
+                  kind: "field",
+                  label: "physical exhibit description",
+                  read: () => evidenceObjectSeed,
+                  preview: setEvidenceObjectSeed,
+                  accept: setEvidenceObjectSeed,
+                  disabled: () =>
+                    evidenceItemLimitReached ||
+                    evidenceObjectSuggestionBusy ||
+                    evidenceObjectVisualBusy !== null ||
+                    busy,
+                  generate: ({ currentValue, rejectedValues, signal }) =>
+                    generateDebateRefractField(
+                      "debate.setup.exhibitPair",
+                      currentValue,
+                      rejectedValues.length > 0
+                        ? rejectedValues
+                        : (evidence.exhibits ?? []).map(
+                            (exhibit) => exhibit.title,
+                          ),
+                      signal,
+                    ),
                 }}
-                maxLength={600}
-                placeholder="A torn glove with one finger stained blue"
-                disabled={
-                  evidenceItemLimitReached || evidenceObjectSuggestionBusy
-                }
-              />
+              >
+                {(binding) => (
+                  <input
+                    {...binding}
+                    value={evidenceObjectSeed}
+                    onChange={(event) =>
+                      setEvidenceObjectSeed(event.currentTarget.value)
+                    }
+                    onKeyDown={(event) => {
+                      if (
+                        event.key !== "Enter" ||
+                        event.nativeEvent.isComposing ||
+                        !evidenceObjectSeed.trim()
+                      ) {
+                        return;
+                      }
+                      event.preventDefault();
+                      void draftEvidenceObject();
+                    }}
+                    maxLength={600}
+                    placeholder="A torn glove with one finger stained blue"
+                    disabled={
+                      evidenceItemLimitReached || evidenceObjectSuggestionBusy
+                    }
+                  />
+                )}
+              </PrismRefractTarget>
             </label>
             <div className={styles.evidenceObjectActions}>
               <button
@@ -10729,7 +10778,11 @@ export function DebateExperience(
                 <li key={source.id}>
                   <button
                     type="button"
-                    onClick={() => setSourceDrawerId(source.id)}
+                    onClick={() =>
+                      setSourceDrawerId((current) =>
+                        current === source.id ? null : source.id,
+                      )
+                    }
                   >
                     <span>{source.id}</span>
                     <strong>{source.title}</strong>
@@ -10767,7 +10820,11 @@ export function DebateExperience(
                 <li key={exhibit.id}>
                   <button
                     type="button"
-                    onClick={() => setSourceDrawerId(exhibit.id)}
+                    onClick={() =>
+                      setSourceDrawerId((current) =>
+                        current === exhibit.id ? null : exhibit.id,
+                      )
+                    }
                   >
                     <DebateEvidenceExhibitVisual exhibit={exhibit} />
                     <span>{exhibit.id}</span>

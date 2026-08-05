@@ -553,6 +553,10 @@ describe("Debate experience", () => {
     assert.match(source, /Draft exhibit/u);
     assert.match(
       source,
+      /id: "debate-setup-exhibit-seed"[\s\S]*"debate\.setup\.exhibitPair"/u,
+    );
+    assert.match(
+      source,
       /"debate\.setup\.exhibitDraft"[\s\S]*seed,[\s\S]*rejectedTitles[\s\S]*debateEvidenceObjectDraftFromPrismCandidate/u,
     );
     assert.doesNotMatch(source, /debate:refract-evidence-object/u);
@@ -2437,6 +2441,18 @@ describe("Debate experience", () => {
     assert.match(
       css,
       /\.live\[data-theme="light"\] \.proceedingControlActions button:disabled\s*\{[^}]*color:\s*#706676[^}]*opacity:\s*0\.72/u,
+    );
+  });
+
+  it("keeps the evidence drawer close control above app chrome", () => {
+    assert.match(source, /data-debate-evidence-drawer-backdrop="true"/u);
+    assert.match(source, /aria-label=\{\s*item\.kind === "source" \? "Close source" : "Close exhibit"\s*\}/u);
+    assert.match(source, /className=\{styles\.sourceDrawerClose\}/u);
+    assert.match(css, /\.sourceDrawerBackdrop\s*\{[^}]*z-index:\s*960/u);
+    assert.match(css, /\.sourceDrawer\s*\{[^}]*z-index:\s*961/u);
+    assert.match(
+      source,
+      /current === exhibit\.id \? null : exhibit\.id/u,
     );
   });
 

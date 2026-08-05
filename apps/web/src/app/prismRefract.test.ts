@@ -38,19 +38,18 @@ describe("Prism Refract helpers", () => {
     );
   });
 
-  it("uses modifier-click to reroll in place or accept and continue", () => {
+  it("uses modifier-click to accept in place or accept and continue", () => {
     const active = {
       activeTargetId: "topic",
       activeTargetKind: "field" as const,
       canAccept: true,
-      canReroll: true,
     };
     assert.equal(
       prismRefractModifierClickDecision({
         ...active,
         clickedTargetId: "topic",
       }),
-      "reroll",
+      "accept",
     );
     assert.equal(
       prismRefractModifierClickDecision({
@@ -61,6 +60,18 @@ describe("Prism Refract helpers", () => {
     );
   });
 
+  it("never rerolls from modifier-click — Spacebar owns reroll", () => {
+    assert.equal(
+      prismRefractModifierClickDecision({
+        activeTargetId: "topic",
+        activeTargetKind: "field",
+        clickedTargetId: "topic",
+        canAccept: false,
+      }),
+      "wait",
+    );
+  });
+
   it("waits for an unsettled draft before modifier-click chaining", () => {
     assert.equal(
       prismRefractModifierClickDecision({
@@ -68,7 +79,6 @@ describe("Prism Refract helpers", () => {
         activeTargetKind: "field",
         clickedTargetId: "private-comments",
         canAccept: false,
-        canReroll: false,
       }),
       "wait",
     );
@@ -78,7 +88,6 @@ describe("Prism Refract helpers", () => {
         activeTargetKind: null,
         clickedTargetId: "topic",
         canAccept: false,
-        canReroll: false,
       }),
       "begin",
     );

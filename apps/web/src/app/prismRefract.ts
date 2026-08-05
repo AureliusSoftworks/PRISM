@@ -71,7 +71,7 @@ export type PrismRefractTarget =
 
 export type PrismRefractModifierClickDecision =
   | "begin"
-  | "reroll"
+  | "accept"
   | "accept-and-begin"
   | "wait";
 
@@ -80,13 +80,13 @@ export function prismRefractModifierClickDecision(input: {
   activeTargetKind: PrismRefractTarget["kind"] | null;
   clickedTargetId: string;
   canAccept: boolean;
-  canReroll: boolean;
 }): PrismRefractModifierClickDecision {
   if (!input.activeTargetId || input.activeTargetKind === "magic") {
     return "begin";
   }
+  // Same-target modifier clicks never reroll — Spacebar is the only reroll path.
   if (input.activeTargetId === input.clickedTargetId) {
-    return input.canReroll ? "reroll" : "wait";
+    return input.canAccept ? "accept" : "wait";
   }
   return input.canAccept ? "accept-and-begin" : "wait";
 }
