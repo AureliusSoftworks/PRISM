@@ -31,6 +31,9 @@ test("new bot creation starts with a bounded, privacy-labelled prompt", () => {
   assert.doesNotMatch(openCreator, /setBotAvatarCustomizerOpen\(true\)/u);
   assert.match(pageSource, /maxLength=\{BOT_GENERATION_PROMPT_MAX_LENGTH\}/u);
   assert.match(pageSource, /data-tutorial-target="bot-generator-prompt"/u);
+  assert.match(pageSource, /data-tutorial-target="bot-generator-model"/u);
+  assert.match(pageSource, /ariaLabel="Model for this bot draft"/u);
+  assert.match(pageSource, /This choice applies only to this draft\./u);
   assert.match(pageSource, /Nothing is saved until you choose Create bot\./u);
   assert.match(pageSource, /data-mode=/u);
   assert.match(pageSource, /\? "AUTO"/u);
@@ -87,6 +90,8 @@ test("generation produces only a reviewable draft and keeps manual creation", ()
   const manualDraft = functionSource("openManualBotDraft", "applyGeneratedBotDraft");
 
   assert.match(generateDraft, /"\/api\/bots\/generate-draft"/u);
+  assert.match(generateDraft, /\.\.\.\(modelOverride \? \{ modelOverride \} : \{\}\)/u);
+  assert.match(generateDraft, /preferredProvider,/u);
   assert.match(generateDraft, /generateBotThinkingSfxProfile\(/u);
   assert.match(generateDraft, /audioVoiceProfile: await/u);
   assert.match(generateDraft, /setBotAvatarCustomizerOpen\(true\)/u);

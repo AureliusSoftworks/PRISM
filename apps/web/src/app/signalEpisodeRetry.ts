@@ -3,6 +3,7 @@ import type {
   BotcastEpisodeResponseMode,
   BotcastSessionDurationMinutes,
 } from "@localai/shared";
+import { botcastEpisodeModelSelectionKind } from "@localai/shared";
 
 export type SignalEpisodeRetryDraft = {
   guestId: string;
@@ -24,7 +25,8 @@ export function signalEpisodeRetryDraft(args: {
     | "model"
     | "responseMode"
     | "durationMinutes"
-  >;
+  > &
+    Partial<Pick<BotcastEpisode, "events">>;
   availableGuestIds: readonly string[];
   availableModelIds: readonly string[];
   currentResponseMode: BotcastEpisodeResponseMode;
@@ -35,8 +37,15 @@ export function signalEpisodeRetryDraft(args: {
   const modelAvailable =
     args.episode.model === null ||
     args.availableModelIds.includes(args.episode.model);
+  const selectionKind = args.episode.events
+    ? botcastEpisodeModelSelectionKind({ events: args.episode.events })
+    : null;
+  // Legacy responseMode "auto" plus the frozen routing snapshot both mean
+  // the picker should stay on Auto — never restore the concrete background model.
+  const autoSelected =
+    selectionKind === "auto" || args.currentResponseMode === "auto";
   const restoreModel =
-    args.currentResponseMode !== "auto" &&
+    !autoSelected &&
     args.episode.model !== null &&
     modelAvailable;
 
@@ -48,7 +57,7 @@ export function signalEpisodeRetryDraft(args: {
     durationMinutes: args.episode.durationMinutes,
     guestAvailable,
     modelUnavailable:
-      args.currentResponseMode !== "auto" &&
+      !autoSelected &&
       args.episode.model !== null &&
       !modelAvailable,
     modeChanged: args.episode.responseMode !== args.currentResponseMode,

@@ -86,7 +86,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.7",
+    version: "0.8",
     status: "preview",
   },
   polling: {
@@ -104,7 +104,7 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.55",
+    version: "1.56",
     status: "active",
   },
   feed: {

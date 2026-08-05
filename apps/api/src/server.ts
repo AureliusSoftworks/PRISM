@@ -312,6 +312,11 @@ import {
   requestSignalElevenLabsAtmosphere,
 } from "./elevenlabs-sound.ts";
 import {
+  generateActionSfxPack,
+  getActionSfxPackClip,
+  getActionSfxPackSummary,
+} from "./action-sfx-pack.ts";
+import {
   extractSignalStudioMicrophoneTint,
   normalizeSignalAssetUpload,
   normalizeSignalLogoImage,
@@ -932,6 +937,10 @@ import {
   type PrismRefractSignalTextTarget,
   type AutoFallbackModelRef,
   type AutoRoutingContextV1,
+  ACTION_SFX_PACK_VARIANT_COUNT,
+  actionSfxPackOwnerIdFor,
+  isActionSfxPackKind,
+  normalizeActionSfxPackOwnerKind,
 } from "@localai/shared";
 import { editImage, generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
@@ -975,6 +984,11 @@ import {
   updateImageAssetPlayerTags,
 } from "./image-asset-library.ts";
 import {
+  applyImageAssetMagentaPass,
+  ImageMagentaPassError,
+  undoImageAssetMagentaPass,
+} from "./image-magenta-pass.ts";
+import {
   DEBATE_EXHIBIT_IMAGE_PURPOSE,
   IMAGE_BOT_MEMBERSHIP_SQL,
   SIGNAL_DAY_STUDIO_IMAGE_PURPOSE,
@@ -1006,10 +1020,7 @@ import {
   removeAssetCleanupTrashDirectoryForUser,
   tryUnlinkGeneratedImageFile,
   writeGeneratedImageBytes,
-  resolveAbsoluteUnderDataRoot,
 } from "./image-storage.ts";
-import { prismLocalFileRevealEnabled } from "./prism-branch.ts";
-import { revealLocalFileInFolder } from "./reveal-local-file.ts";
 import {
   readOrCreateThumbBytes,
   tryGenerateThumbAfterPngWrite,
@@ -20233,6 +20244,217 @@ function buildRoutes(): RouteDefinition[] {
         ctx.req.off("close", onClose);
       }
     }),
+    route("GET", "/api/action-sfx-pack", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const url = new URL(ctx.req.url ?? "/", "http://localhost");
+      const ownerKind = normalizeActionSfxPackOwnerKind(
+        url.searchParams.get("ownerKind"),
+      );
+      if (!ownerKind) {
+        throw new HttpError(400, "Choose a bot or player action pack owner.");
+      }
+      let ownerId: string;
+      try {
+        ownerId = actionSfxPackOwnerIdFor(
+          ownerKind,
+          url.searchParams.get("ownerId"),
+        );
+      } catch {
+        throw new HttpError(400, "A bot id is required for a bot action pack.");
+      }
+      if (ownerKind === "bot") {
+        const bot = db
+          .prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?")
+          .get(ownerId, userId);
+        if (!bot) throw new HttpError(404, "Bot not found.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        pack: getActionSfxPackSummary(db, userId, ownerKind, ownerId),
+      });
+    }),
+    route("GET", "/api/action-sfx-pack/clip", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const url = new URL(ctx.req.url ?? "/", "http://localhost");
+      const ownerKind = normalizeActionSfxPackOwnerKind(
+        url.searchParams.get("ownerKind"),
+      );
+      const kind = url.searchParams.get("kind");
+      const variantRaw = Number(url.searchParams.get("variantIndex"));
+      if (!ownerKind || !isActionSfxPackKind(kind)) {
+        throw new HttpError(400, "Unsupported action pack clip request.");
+      }
+      if (
+        !Number.isInteger(variantRaw) ||
+        variantRaw < 0 ||
+        variantRaw >= ACTION_SFX_PACK_VARIANT_COUNT
+      ) {
+        throw new HttpError(400, "Action pack variant must be 0, 1, or 2.");
+      }
+      let ownerId: string;
+      try {
+        ownerId = actionSfxPackOwnerIdFor(
+          ownerKind,
+          url.searchParams.get("ownerId"),
+        );
+      } catch {
+        throw new HttpError(400, "A bot id is required for a bot action pack.");
+      }
+      const clip = getActionSfxPackClip(
+        db,
+        userId,
+        ownerKind,
+        ownerId,
+        kind,
+        variantRaw,
+      );
+      if (!clip) throw new HttpError(404, "Action pack clip not found.");
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", clip.contentType);
+      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.setHeader("x-prism-action-sfx-pack-kind", clip.kind);
+      ctx.res.setHeader(
+        "x-prism-action-sfx-pack-variant",
+        String(clip.variantIndex),
+      );
+      ctx.res.end(clip.audioBytes);
+    }),
+    route("POST", "/api/action-sfx-pack/generate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      if (userBlocksOnlineCapabilities(user)) {
+        throw new HttpError(
+          409,
+          "Switch to AUTO or ONLINE before generating an action SFX pack.",
+        );
+      }
+      const raw = ctx.body as Record<string, unknown>;
+      const ownerKind = normalizeActionSfxPackOwnerKind(raw.ownerKind);
+      if (!ownerKind) {
+        throw new HttpError(400, "Choose a bot or player action pack owner.");
+      }
+      const botId =
+        typeof raw.ownerId === "string" ? raw.ownerId.trim() : null;
+      let ownerId: string;
+      try {
+        ownerId = actionSfxPackOwnerIdFor(ownerKind, botId);
+      } catch {
+        throw new HttpError(400, "A bot id is required for a bot action pack.");
+      }
+
+      let ownerLabel =
+        typeof raw.ownerLabel === "string"
+          ? raw.ownerLabel.replace(/\s+/gu, " ").trim()
+          : "";
+      let personaSnippet =
+        typeof raw.personaSnippet === "string"
+          ? raw.personaSnippet.replace(/\s+/gu, " ").trim().slice(0, 160)
+          : "";
+
+      if (ownerKind === "bot") {
+        const bot = db
+          .prepare(
+            `SELECT name, system_prompt FROM bots
+              WHERE id = ? AND user_id = ?`,
+          )
+          .get(ownerId, userId) as
+          | { name: string; system_prompt: string | null }
+          | undefined;
+        if (!bot) throw new HttpError(404, "Bot not found.");
+        if (!ownerLabel) ownerLabel = bot.name.trim() || "this bot";
+        if (!personaSnippet && typeof bot.system_prompt === "string") {
+          personaSnippet = bot.system_prompt.replace(/\s+/gu, " ").trim().slice(0, 160);
+        }
+      } else if (!ownerLabel) {
+        ownerLabel = "the player";
+      }
+
+      const userKey = decryptUserKey(userId);
+      const apiKey =
+        getElevenLabsApiKeyForUser(userId, userKey) ?? config.elevenLabsApiKey;
+      if (!apiKey) {
+        throw new HttpError(
+          409,
+          "Add an ElevenLabs API key in Settings first.",
+        );
+      }
+
+      const controller = new AbortController();
+      const onClose = () => controller.abort();
+      ctx.req.once("close", onClose);
+      let streamStarted = false;
+      const writeEvent = (event: Record<string, unknown>): void => {
+        if (ctx.res.destroyed || ctx.res.writableEnded) return;
+        if (!streamStarted) {
+          streamStarted = true;
+          ctx.res.statusCode = 200;
+          ctx.res.setHeader(
+            "content-type",
+            "application/x-ndjson; charset=utf-8",
+          );
+          ctx.res.setHeader("cache-control", "no-store");
+          ctx.res.setHeader("x-accel-buffering", "no");
+          ctx.res.setHeader("x-prism-action-sfx-pack-progress", "ndjson-v1");
+          ctx.res.flushHeaders();
+        }
+        ctx.res.write(`${JSON.stringify(event)}\n`);
+      };
+      try {
+        writeEvent({ type: "start", total: 21 });
+        const summary = await generateActionSfxPack({
+          db,
+          userId,
+          ownerKind,
+          botId: ownerKind === "bot" ? ownerId : null,
+          ownerLabel,
+          personaSnippet: personaSnippet || null,
+          apiKey,
+          signal: controller.signal,
+          onProgress: (done, total, kind) => {
+            writeEvent({ type: "progress", done, total, kind });
+          },
+        });
+        if (controller.signal.aborted) return;
+        writeEvent({ type: "done", ok: true, pack: summary });
+        ctx.res.end();
+        void checkPrismCreditMonitorForUser(userId, true);
+      } catch (error) {
+        if (controller.signal.aborted) return;
+        if (error instanceof ElevenLabsSoundError) {
+          const status =
+            error.status === 401 || error.status === 403
+              ? 401
+              : error.status === 429
+                ? 429
+                : error.status === 499
+                  ? 499
+                  : 502;
+          if (!streamStarted) {
+            throw new HttpError(status, error.message);
+          }
+          writeEvent({
+            type: "error",
+            ok: false,
+            error: error.message,
+            status,
+          });
+          ctx.res.end();
+          return;
+        }
+        if (!streamStarted) throw error;
+        writeEvent({
+          type: "error",
+          ok: false,
+          error:
+            error instanceof Error
+              ? error.message
+              : "Action SFX pack generation failed.",
+        });
+        ctx.res.end();
+      } finally {
+        ctx.req.off("close", onClose);
+      }
+    }),
     route("POST", "/api/coffee/action-sfx", async (ctx) => {
       const userId = requireAuth(ctx);
       const raw = ctx.body as Record<string, unknown>;
@@ -21912,6 +22134,7 @@ function buildRoutes(): RouteDefinition[] {
             chatWithPrismCompanion({
               db,
               userId,
+              userKey: decryptUserKey(userId),
               displayName: user.display_name,
               surface: request.surface,
               recoveryMessages: request.recoveryMessages,
@@ -21929,6 +22152,7 @@ function buildRoutes(): RouteDefinition[] {
             role: "assistant",
             content: result.content,
             createdAt: new Date().toISOString(),
+            ...(result.userNotes ? { userNotes: result.userNotes } : {}),
           },
           actions: result.actions,
           cards: [],
@@ -24302,6 +24526,70 @@ function buildRoutes(): RouteDefinition[] {
         throw error;
       }
     }),
+    route("POST", "/api/assets/:id/magenta-pass", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (peekActiveImageJobForUser(userId)) {
+        throw new HttpError(
+          409,
+          "Image generation is still finishing. Wait before changing assets.",
+        );
+      }
+      try {
+        const result = await applyImageAssetMagentaPass({
+          db,
+          userId,
+          setId: ctx.params.id,
+          userKey: decryptUserKey(userId),
+        });
+        const asset = getImageAssetSet(db, userId, ctx.params.id);
+        if (!asset) throw new HttpError(404, "That asset is unavailable.");
+        json(ctx.res, 200, { ok: true, result, asset });
+      } catch (error) {
+        if (error instanceof ImageMagentaPassError) {
+          throw new HttpError(
+            error.code === "not_found"
+              ? 404
+              : error.code === "unavailable"
+                ? 409
+                : 400,
+            error.message,
+          );
+        }
+        throw error;
+      }
+    }),
+    route("POST", "/api/assets/:id/magenta-pass/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (peekActiveImageJobForUser(userId)) {
+        throw new HttpError(
+          409,
+          "Image generation is still finishing. Wait before changing assets.",
+        );
+      }
+      try {
+        const result = await undoImageAssetMagentaPass({
+          db,
+          userId,
+          setId: ctx.params.id,
+          userKey: decryptUserKey(userId),
+        });
+        const asset = getImageAssetSet(db, userId, ctx.params.id);
+        if (!asset) throw new HttpError(404, "That asset is unavailable.");
+        json(ctx.res, 200, { ok: true, result, asset });
+      } catch (error) {
+        if (error instanceof ImageMagentaPassError) {
+          throw new HttpError(
+            error.code === "not_found"
+              ? 404
+              : error.code === "unavailable"
+                ? 409
+                : 400,
+            error.message,
+          );
+        }
+        throw error;
+      }
+    }),
     route("DELETE", "/api/assets/:id", async (ctx) => {
       const userId = requireAuth(ctx);
       if (peekActiveImageJobForUser(userId)) {
@@ -24553,52 +24841,6 @@ function buildRoutes(): RouteDefinition[] {
       ctx.res.setHeader("content-type", "image/png");
       ctx.res.setHeader("cache-control", "private, max-age=3600");
       ctx.res.end(bytes);
-    }),
-    route("POST", "/api/images/:id/reveal-in-finder", async (ctx) => {
-      // Native desktop and exact-dev builds only; never expose absolute paths.
-      if (!prismLocalFileRevealEnabled()) {
-        throw new HttpError(404, "Not found.");
-      }
-      const userId = requireAuth(ctx);
-      const imageId = ctx.params.id;
-      const row = db
-        .prepare(
-          "SELECT user_id, local_rel_path, provider FROM images WHERE id = ?",
-        )
-        .get(imageId) as
-        | {
-            user_id: string;
-            local_rel_path: string | null;
-            provider: string | null;
-          }
-        | undefined;
-      if (!row || row.user_id !== userId) {
-        throw new HttpError(404, "Image not found.");
-      }
-      if ((row.provider ?? "").trim().toLowerCase() === "upload") {
-        throw new HttpError(400, "Only synthesized assets can be revealed.");
-      }
-      const rel = row.local_rel_path?.trim();
-      if (!rel) {
-        throw new HttpError(404, "Image file not available.");
-      }
-      let absolutePath: string;
-      try {
-        absolutePath = resolveAbsoluteUnderDataRoot(rel);
-      } catch {
-        throw new HttpError(404, "Image file not found.");
-      }
-      const result = revealLocalFileInFolder(absolutePath);
-      if (!result.ok) {
-        if (result.reason === "missing") {
-          throw new HttpError(404, "Image file not found.");
-        }
-        throw new HttpError(
-          500,
-          "Could not open the asset in your file manager.",
-        );
-      }
-      json(ctx.res, 200, { ok: true });
     }),
     route("DELETE", "/api/images", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -24929,6 +25171,11 @@ function buildRoutes(): RouteDefinition[] {
             : "online"
           : requestedResponseMode;
       const requestedProvider = readProvider(body.preferredProvider);
+      const requestedModelOverride = readModelOverride(body.modelOverride);
+      const explicitModelOverride =
+        requestedModelOverride?.toLowerCase() === "auto"
+          ? null
+          : requestedModelOverride;
       const primaryProvider: ProviderName =
         responseMode === "local"
           ? "local"
@@ -24956,7 +25203,7 @@ function buildRoutes(): RouteDefinition[] {
       const resolved = resolveAutoModel({
         provider: primaryProvider,
         lane: responseMode,
-        explicitModelOverride: null,
+        explicitModelOverride,
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
         routingContext: {

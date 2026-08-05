@@ -66,17 +66,19 @@ describe("mode tutorials", () => {
     assert.deepEqual(
       MODE_TUTORIALS.avatar.steps.map((step) => step.targetSelector),
       [
-        '[data-tutorial-target="avatar-foundry-upgrade-node"]',
+        '[data-tutorial-target="avatar-foundry-eyes-tab"]',
         '[data-tutorial-target="avatar-foundry-controls"]',
         '[data-tutorial-target="avatar-foundry-dock"]',
       ],
     );
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /lights stay dark/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /generated drafts/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /perimeter dock/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /light online/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /Wield Prism/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /randomizer buttons/u);
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Save or Create bot/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Core for name/u);
   });
 
   it("explains the full-width Accent map in plain language", () => {
@@ -84,7 +86,8 @@ describe("mode tutorials", () => {
       (candidate) => candidate.heading === "Shape an offline voice",
     );
     assert.ok(step);
-    assert.match(step.body, /full-width Accent map/u);
+    assert.match(step.body, /Accent, Feel, and Voice stages/u);
+    assert.match(step.body, /full-width map/u);
     assert.match(step.body, /anywhere in the world/u);
     assert.match(step.body, /pin stays exactly where you leave it/u);
     assert.match(step.body, /nearest broadly regional pronunciation/u);
@@ -181,7 +184,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /duplicate URLs are rejected/u);
     assert.match(
       copy,
-      /describe the physical object.*Draft exhibit remains unavailable until.*editable adjective, object name, observable description, and emoji/u,
+      /describe the physical object.*Wield Prism into that description field for a contextual exhibit name.*Draft exhibit derives an editable adjective, object name, observable description, and emoji/u,
     );
     assert.match(copy, /It does not generate artwork/u);
     assert.match(copy, /Click the exhibit emoji to search/u);
@@ -189,6 +192,8 @@ describe("mode tutorials", () => {
     assert.match(copy, /close the search without changing/u);
     assert.match(copy, /upload a PNG, JPEG, or WebP/u);
     assert.match(copy, /Synthesize asset creates a new sprite/u);
+    assert.match(copy, /Reduce magenta pass/u);
+    assert.match(copy, /Undo last pass/u);
     assert.match(copy, /visual adds no facts/u);
     assert.match(copy, /later searches add distinct sources/u);
     assert.match(copy, /up to 12/u);
@@ -299,7 +304,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /Wield Prism into a glowing setup field/u);
     assert.match(
       copy,
-      /Space rerolls; Enter, Tab, or clicking another input accepts; Escape or a non-input outside click restores/u,
+      /Space rerolls; clicking away, Enter, Tab, or clicking another input accepts; Escape restores/u,
     );
     assert.match(copy, /adjective, object, or observable-fact fields/u);
     assert.match(
@@ -962,6 +967,8 @@ describe("mode tutorials", () => {
       /one of four built-in PRISM/,
     );
     assert.match(automaticThinkingSfx?.body ?? "", /Computer calculating/);
+    assert.match(automaticThinkingSfx?.body ?? "", /local Action SFX pack/);
+    assert.match(automaticThinkingSfx?.body ?? "", /Corporality/);
     assert.match(automaticThinkingSfx?.body ?? "", /while thinking/);
     assert.match(
       automaticThinkingSfx?.body ?? "",
@@ -1087,6 +1094,16 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.zen.steps[3]?.body ?? "", /Voice Effects on/u);
     assert.match(MODE_TUTORIALS.zen.steps[3]?.body ?? "", /mic-ready breath/u);
     assert.match(
+      MODE_TUTORIALS.zen.steps[3]?.body ?? "",
+      /punctuation pauses/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.coffee.steps
+        .map((step) => step.body)
+        .join(" "),
+      /soft breath in punctuation pauses/u,
+    );
+    assert.match(
       MODE_TUTORIALS.botcast.steps[4]?.body ?? "",
       /saved episodes choose them deterministically on replay/u,
     );
@@ -1204,6 +1221,18 @@ describe("mode tutorials", () => {
     assert.match(
       producerGuestCopy,
       /Sip coffee animates your stage mug and face with room Foley without sending a transcript turn/u,
+    );
+    assert.match(
+      producerGuestCopy,
+      /Action-only send still cuts the camera to you/u,
+    );
+    assert.match(
+      producerGuestCopy,
+      /Loud bodily bits like those can earn a brief in-character host aside/u,
+    );
+    assert.match(
+      producerGuestCopy,
+      /quieter gestures such as nods or leans stay visual only/u,
     );
     assert.match(
       producerGuestCopy,
@@ -1499,7 +1528,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /hold Option.*Control.*Wield Prism.*Option Space.*Control Space.*Space rerolls.*Escape.*restores/u,
+      /hold Option.*Control.*Wield Prism.*Control Space.*Space rerolls.*Clicking away.*Escape restores/u,
     );
     assert.doesNotMatch(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",

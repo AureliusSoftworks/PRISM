@@ -51,6 +51,39 @@ describe("Signal episode retry setup", () => {
     assert.equal(retry.modeChanged, true);
   });
 
+  it("keeps Auto in the picker when the frozen routing snapshot used Auto", () => {
+    const retry = signalEpisodeRetryDraft({
+      episode: {
+        ...episode,
+        responseMode: "online",
+        events: [
+          {
+            id: "routing-1",
+            episodeId: "ep-1",
+            sequence: 1,
+            kind: "routing",
+            payload: {
+              v: 1,
+              lane: "online",
+              modelSelectionKind: "auto",
+              candidateAllowlist: [],
+              fallbackChain: [],
+              policyVersion: 1,
+            },
+            occurredAt: "2026-08-04T00:00:00.000Z",
+          },
+        ],
+      },
+      availableGuestIds: ["guest-1"],
+      availableModelIds: ["model-1"],
+      currentResponseMode: "online",
+    });
+
+    assert.equal(retry.modelId, "");
+    assert.equal(retry.modelUnavailable, false);
+    assert.equal(retry.modeChanged, false);
+  });
+
   it("clears unavailable identities instead of silently retrying with different ones", () => {
     const retry = signalEpisodeRetryDraft({
       episode,
