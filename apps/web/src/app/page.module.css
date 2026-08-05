@@ -49098,6 +49098,28 @@ a.settingsCreditItem:focus-visible {
   gap: 8px;
 }
 
+.botAvatarStudioRoutingControls {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  margin-right: 2px;
+}
+
+.botProfileBuilderHeader .botAvatarStudioRoutingControls button {
+  width: auto;
+  height: auto;
+  min-height: 32px;
+  padding: 0 10px;
+  border-radius: 999px;
+}
+
+.botProfileBuilderHeader
+  .botAvatarStudioRoutingControls
+  .composeModelControl
+  button {
+  min-height: 36px;
+}
+
 .botAvatarSaveStatus {
   min-height: 28px;
   display: inline-flex;

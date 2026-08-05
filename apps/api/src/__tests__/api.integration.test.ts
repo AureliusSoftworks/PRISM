@@ -1671,6 +1671,47 @@ describe("API request integration", () => {
     ]);
   });
 
+  it("routes Avatar Studio power compilation through the requested online model", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "studio-power-compiler@example.com",
+        password: "studio-power-compiler-password",
+      })
+    );
+    assert.equal(register.status, 201);
+
+    const auxiliaryStart = auxiliaryProviderFactoryCalls.length;
+    const providerStart = providerFactoryCalls.length;
+    const response = await client.request(
+      "/api/bot-powers/compile",
+      jsonInit({
+        botName: "William Shakespeare",
+        systemPrompt: "A theatrical poet.",
+        preferredProvider: "openai",
+        responseMode: "online",
+        modelOverride: "gpt-4o-mini",
+        powers: [
+          {
+            version: 1,
+            id: "shakespearean-speech",
+            authoringMode: "prompt",
+            name: "",
+            intent: "Speaks only in Shakespearean.",
+            enabled: true,
+            compileStatus: "draft",
+            compiled: null,
+          },
+        ],
+      })
+    );
+    assert.equal(response.status, 200);
+    assert.equal((await json(response)).ok, true);
+    assert.deepEqual(auxiliaryProviderFactoryCalls.slice(auxiliaryStart), []);
+    assert.deepEqual(providerFactoryCalls.slice(providerStart), ["openai"]);
+  });
+
   it("persists Zen player voice while ignoring retired account-wide defaults", async () => {
     const client = createClient();
     const register = await client.request(

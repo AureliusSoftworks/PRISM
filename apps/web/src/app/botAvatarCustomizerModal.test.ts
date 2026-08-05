@@ -1282,6 +1282,20 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.doesNotMatch(pageSource, /BOT_POWER_SIGIL_GLYPHS/u);
   assert.match(pageSource, /Pop Power\?/u);
   assert.match(pageSource, /\/api\/bot-powers\/compile/);
+  assert.match(
+    pageSource,
+    /data-tutorial-target="avatar-studio-synthesis-routing"/,
+  );
+  assert.match(
+    pageSource,
+    /ariaLabel="Model for Avatar Studio synthesis"/,
+  );
+  assert.match(
+    pageSource,
+    /preferredProvider,[\s\S]*?responseMode,[\s\S]*?\.\.\.\(modelOverride \? \{ modelOverride \} : \{\}\)/,
+  );
+  assert.match(cssSource, /\.botAvatarStudioRoutingControls\s*\{/);
+  assert.match(pageSource, /seedBotStudioSynthesisModelChoice\(\)/);
   assert.match(cssSource, /\.botPowersPanel/);
   assert.match(
     cssSource,

@@ -1786,47 +1786,55 @@ function compilerDiagnosticContext(provider: LlmProvider): string {
   return `Provider: ${provider.name}; model: ${safeDiagnosticModel(provider)}`;
 }
 
+function powerCompileFailurePrefix(provider: LlmProvider): string {
+  return provider.name === "local"
+    ? "Local power compilation failed"
+    : "Power compilation failed";
+}
+
 function providerFailureMessage(provider: LlmProvider, error: unknown): string {
+  const prefix = powerCompileFailurePrefix(provider);
   const context = compilerDiagnosticContext(provider);
   if (error instanceof LocalModelRequestError) {
     switch (error.kind) {
       case "service_unavailable":
-        return `Local power compilation failed: service unavailable. ${context}; start the local service, then retry.`;
+        return `${prefix}: service unavailable. ${context}; start the local service, then retry.`;
       case "endpoint_not_found":
-        return `Local power compilation failed: chat endpoint not found. ${context}; update the local service, then retry.`;
+        return `${prefix}: chat endpoint not found. ${context}; update the local service, then retry.`;
       case "model_unavailable":
-        return `Local power compilation failed: configured model unavailable. ${context}; install or select that model, then retry.`;
+        return `${prefix}: configured model unavailable. ${context}; install or select that model, then retry.`;
       case "authentication_or_configuration":
-        return `Local power compilation failed: authentication or configuration failure. ${context}; check local settings, then retry.`;
+        return `${prefix}: authentication or configuration failure. ${context}; check local settings, then retry.`;
       case "request_failed":
         break;
     }
   }
-  return `Local power compilation failed: request failed. ${context}; check local settings, then retry.`;
+  return `${prefix}: request failed. ${context}; check settings, then retry.`;
 }
 
 function compileFailureMessage(power: BotPowerV1, provider: LlmProvider): string {
+  const prefix = powerCompileFailurePrefix(provider);
   if (deterministicAvatarScalePower(power, "")) {
-    return `Local power compilation failed: invalid compiler output; required avatar-size rule missing. ${compilerDiagnosticContext(provider)}; describe the physical size clearly, then retry.`;
+    return `${prefix}: invalid compiler output; required avatar-size rule missing. ${compilerDiagnosticContext(provider)}; describe the physical size clearly, then retry.`;
   }
   if (deterministicAvatarColorCyclePower(power, "")) {
-    return `Local power compilation failed: invalid compiler output; required avatar color-cycle rule missing. ${compilerDiagnosticContext(provider)}; describe the cycling colors clearly, then retry.`;
+    return `${prefix}: invalid compiler output; required avatar color-cycle rule missing. ${compilerDiagnosticContext(provider)}; describe the cycling colors clearly, then retry.`;
   }
   if (deterministicGhostPower(power, "")) {
-    return `Local power compilation failed: invalid compiler output; required speaking-only avatar rule missing. ${compilerDiagnosticContext(provider)}; describe the ghost's idle invisibility and speaking reveal, then retry.`;
+    return `${prefix}: invalid compiler output; required speaking-only avatar rule missing. ${compilerDiagnosticContext(provider)}; describe the ghost's idle invisibility and speaking reveal, then retry.`;
   }
   if (deterministicInvisiblePower(power, "")) {
-    return `Local power compilation failed: invalid compiler output; required translucent-avatar rule missing. ${compilerDiagnosticContext(provider)}; describe the continuous invisibility clearly, then retry.`;
+    return `${prefix}: invalid compiler output; required translucent-avatar rule missing. ${compilerDiagnosticContext(provider)}; describe the continuous invisibility clearly, then retry.`;
   }
   const required = requiredHardAudienceEffect(power.intent);
   const context = compilerDiagnosticContext(provider);
   if (required === "awareness") {
-    return `Local power compilation failed: invalid compiler output; required visibility rule missing. ${context}; name who sees it; retry.`;
+    return `${prefix}: invalid compiler output; required visibility rule missing. ${context}; name who sees it; retry.`;
   }
   if (required === "speech_audience") {
-    return `Local power compilation failed: invalid compiler output; required speech rule missing. ${context}; name who hears it; retry.`;
+    return `${prefix}: invalid compiler output; required speech rule missing. ${context}; name who hears it; retry.`;
   }
-  return `Local power compilation failed: invalid compiler output. ${context}; try one short description with one effect.`;
+  return `${prefix}: invalid compiler output. ${context}; try one short description with one effect.`;
 }
 
 function promptPowerDisplayName(

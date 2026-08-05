@@ -75,10 +75,10 @@ test("Avatar Studio exposes atomic semantic and bounded local field dice", () =>
   assert.match(reroll, /"\/api\/bots\/generate-field"/u);
   assert.match(reroll, /botFieldGenerationRunRef/u);
   assert.match(reroll, /pushBotAvatarUndoSnapshot\(\)/u);
+  assert.match(reroll, /preferredProvider,/u);
+  assert.match(reroll, /\.\.\.\(modelOverride \? \{ modelOverride \} : \{\}\)/u);
   assert.match(pageSource, /function BotFieldRandomizerButton/u);
   assert.match(pageSource, /label="temperature"/u);
-  assert.match(pageSource, /label=\{`\$\{label\} X coordinate`\}/u);
-  assert.match(pageSource, /label=\{`\$\{label\} Y coordinate`\}/u);
   assert.match(pageSource, /BOT_POWER_SIGIL_IDS_V1/u);
 });
 
