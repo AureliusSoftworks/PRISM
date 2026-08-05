@@ -321,12 +321,16 @@ describe("voice settings preview", () => {
   });
 
   it("keeps Pace local and exposes only ElevenLabs performance stability", () => {
+    const performanceSource = pageSource.slice(
+      pageSource.indexOf("function BotVoicePerformanceControls("),
+      pageSource.indexOf("function BotVoiceFeelStage("),
+    );
     const editorSource = pageSource.slice(
       pageSource.indexOf("function BotVoiceEditor("),
       pageSource.indexOf("type BotEditOriginalSnapshot"),
     );
-    assert.match(editorSource, /\["pace", "Pace"\]/);
-    assert.doesNotMatch(editorSource, /Pace is the only duration control\./);
+    assert.match(performanceSource, /\["pace", "Pace"\]/);
+    assert.doesNotMatch(performanceSource, /Pace is the only duration control\./);
     assert.match(editorSource, /aria-label="ElevenLabs performance stability"/);
     assert.match(editorSource, /elevenLabsStability:/);
     assert.match(editorSource, /Eleven v3 uses this setting alone\./);
@@ -378,7 +382,9 @@ describe("voice settings preview", () => {
 
   it("loads the configured ElevenLabs catalog from Avatar Studio in any response mode", () => {
     const catalogEffectSource = pageSource.slice(
-      pageSource.indexOf("if (!botAvatarCustomizerOpen)"),
+      pageSource.indexOf(
+        "if (!botAvatarCustomizerOpen && !playerVoiceSettingsOpen)",
+      ),
       pageSource.indexOf("const [botAvatarSavePromptOpen"),
     );
     assert.match(
@@ -402,7 +408,9 @@ describe("voice settings preview", () => {
 
   it("lets Voice Settings pick an authenticated ElevenLabs collection", () => {
     const catalogEffectSource = pageSource.slice(
-      pageSource.indexOf("if (!botAvatarCustomizerOpen)"),
+      pageSource.indexOf(
+        "if (!botAvatarCustomizerOpen && !playerVoiceSettingsOpen)",
+      ),
       pageSource.indexOf("const [botAvatarSavePromptOpen"),
     );
     assert.match(pageSource, /data-elevenlabs-collection-picker/);
@@ -426,20 +434,13 @@ describe("voice settings preview", () => {
   });
 
   it("shows per-profile effects for every voice engine", () => {
-    const editorSource = pageSource.slice(
-      pageSource.indexOf("function BotVoiceEditor("),
-      pageSource.indexOf("type BotEditOriginalSnapshot"),
-    );
-    const performanceSource = editorSource.slice(
-      editorSource.indexOf('id="bot-voice-performance-title"'),
-      editorSource.indexOf(
-        "<footer",
-        editorSource.indexOf('id="bot-voice-performance-title"'),
-      ),
+    const performanceSource = pageSource.slice(
+      pageSource.indexOf("function BotVoicePerformanceControls("),
+      pageSource.indexOf("function BotVoiceFeelStage("),
     );
     assert.match(
       performanceSource,
-      /<label htmlFor="bot-voice-effect">\s*Voice effect[\s\S]*?label="voice effect"[\s\S]*?<\/label>/,
+      /<label htmlFor=\{effectSelectId\}>\s*Voice effect[\s\S]*?label="voice effect"[\s\S]*?<\/label>/,
     );
     assert.match(performanceSource, /aria-label="Voice effect"/);
     assert.match(performanceSource, /VOICE_EFFECTS\.map/);
@@ -447,7 +448,7 @@ describe("voice settings preview", () => {
     assert.doesNotMatch(performanceSource, /Applied locally to PRISM/);
     assert.match(pageSource, /enqueueEnglishVoice\([\s\S]*?clip\.engineUsed/);
     assert.match(
-      editorSource,
+      performanceSource,
       /elevenLabsEffect:[\s\S]*?saveImmediately: true/,
     );
     assert.match(pageSource, /async function flushBotVoiceAutosaveQueue/);
@@ -483,20 +484,24 @@ describe("voice settings preview", () => {
   });
 
   it("keeps only audible performance controls and removes custom textures", () => {
+    const performanceSource = pageSource.slice(
+      pageSource.indexOf("function BotVoicePerformanceControls("),
+      pageSource.indexOf("function BotVoiceFeelStage("),
+    );
     const editorSource = pageSource.slice(
       pageSource.indexOf("function BotVoiceEditor("),
       pageSource.indexOf("type BotEditOriginalSnapshot"),
     );
-    assert.match(editorSource, /\["pitch", "Pitch"\]/);
-    assert.match(editorSource, /\["lilt", "Lilt"\]/);
-    assert.doesNotMatch(editorSource, /<span>Tone<\/span>/);
-    assert.doesNotMatch(editorSource, /Pace is the only duration control\./);
-    assert.match(editorSource, /\["pace", "Pace"\]/);
-    assert.doesNotMatch(editorSource, /\["warmth", "Warmth"\]/);
-    assert.doesNotMatch(editorSource, /<span>Volume<\/span>/);
-    assert.doesNotMatch(editorSource, />Texture</);
-    assert.doesNotMatch(editorSource, /Voice texture/);
-    assert.doesNotMatch(editorSource, /Texture amount/);
+    assert.match(performanceSource, /\["pitch", "Pitch"\]/);
+    assert.match(performanceSource, /\["lilt", "Lilt"\]/);
+    assert.doesNotMatch(performanceSource, /<span>Tone<\/span>/);
+    assert.doesNotMatch(performanceSource, /Pace is the only duration control\./);
+    assert.match(performanceSource, /\["pace", "Pace"\]/);
+    assert.doesNotMatch(performanceSource, /\["warmth", "Warmth"\]/);
+    assert.doesNotMatch(performanceSource, /<span>Volume<\/span>/);
+    assert.doesNotMatch(performanceSource, />Texture</);
+    assert.doesNotMatch(performanceSource, /Voice texture/);
+    assert.doesNotMatch(performanceSource, /Texture amount/);
     assert.match(
       editorSource,
       /texture: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1\.texture/,
@@ -509,24 +514,24 @@ describe("voice settings preview", () => {
   });
 
   it("commits pitch, pace, and lilt through the selected bot profile instead of global settings", () => {
-    const editorSource = pageSource.slice(
-      pageSource.indexOf("function BotVoiceEditor("),
-      pageSource.indexOf("type BotEditOriginalSnapshot"),
+    const performanceSource = pageSource.slice(
+      pageSource.indexOf("function BotVoicePerformanceControls("),
+      pageSource.indexOf("function BotVoiceFeelStage("),
     );
     const autosaveSource = pageSource.slice(
       pageSource.indexOf("async function flushBotVoiceAutosaveQueue"),
       pageSource.indexOf("// Single submit handler for the top form"),
     );
 
-    assert.match(editorSource, /\["pitch", "Pitch"\]/);
-    assert.match(editorSource, /\["lilt", "Lilt"\]/);
-    assert.match(editorSource, /\["pace", "Pace"\]/);
+    assert.match(performanceSource, /\["pitch", "Pitch"\]/);
+    assert.match(performanceSource, /\["lilt", "Lilt"\]/);
+    assert.match(performanceSource, /\["pace", "Pace"\]/);
     assert.match(
-      editorSource,
+      performanceSource,
       /onPointerUp=\{\(event\) =>[\s\S]*?saveImmediately: true/,
     );
     assert.match(
-      editorSource,
+      performanceSource,
       /onKeyUp=\{\(event\) =>[\s\S]*?saveImmediately: true/,
     );
     assert.match(autosaveSource, /targetId: editingBotId/);

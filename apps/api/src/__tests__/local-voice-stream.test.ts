@@ -39,6 +39,22 @@ describe("local voice streaming chunks", () => {
     assert.ok(chunks.slice(1).every((chunk) => chunk.split(/\s+/u).length <= 80));
   });
 
+  it("lets mid-utterance commas become chunk boundaries a little earlier", () => {
+    const text =
+      "After the opening settles into place, the next spoken clause keeps enough steady words to finally cross the clause threshold, then another clause continues with still more spoken detail for the local voice stream to carry forward.";
+    const chunks = splitLocalVoiceStreamText(text);
+    assert.equal(chunks.join(" "), text);
+    assert.ok(chunks.length >= 3, `chunks=${JSON.stringify(chunks)}`);
+    assert.ok(chunks.some((chunk) => /,$/u.test(chunk)));
+    assert.ok(
+      chunks.slice(1).some((chunk) => {
+        const tokens = chunk.split(/\s+/u).length;
+        return tokens >= 14 && tokens < 20 && /,$/u.test(chunk);
+      }),
+      `chunks=${JSON.stringify(chunks)}`,
+    );
+  });
+
   it("keeps exact canonical source ranges for interruption and replay", () => {
     const text = "  First phrase,   then the second phrase keeps going.";
     const segments = splitLocalVoiceStreamSegments(text, 40);

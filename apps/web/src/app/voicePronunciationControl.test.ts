@@ -20,9 +20,17 @@ const atlasMap = new URL(
 describe("cross-accent local voice pronunciation controls", () => {
   it("uses the Foundry adjustment console for bots and Default PRISM", () => {
     assert.match(pageSource, /value: "pronunciation", label: "Accent"/u);
+    assert.match(pageSource, /value: "feel", label: "Feel"/u);
+    assert.match(pageSource, /value: "voice", label: "Voice"/u);
+    assert.match(pageSource, /data-bot-voice-feel-stage="true"/u);
+    assert.match(pageSource, /data-bot-voice-identity-stage=/u);
     assert.match(pageSource, /<PronunciationAtlas/u);
     assert.match(pageSource, /data-adjustment-target=/u);
     assert.match(atlasSource, /label = "Accent map"/u);
+    assert.doesNotMatch(
+      pageSource,
+      /activeAdjustmentTarget === "pronunciation" \? null : activeAdjustmentOptions/,
+    );
   });
 
   it("offers the same control for the Zen player voice", () => {

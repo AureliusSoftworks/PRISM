@@ -1599,3 +1599,173 @@ export async function playRealtimeVoiceBytes(args: {
   });
   return true;
 }
+
+let activeBodilyFoleyStop: (() => void) | null = null;
+
+/** Stop any in-flight bodily Foley routed through the vocal FX bus. */
+export function stopBodilyFoleyThroughVoiceBus(): void {
+  activeBodilyFoleyStop?.();
+  activeBodilyFoleyStop = null;
+}
+
+/**
+ * Play short bodily Foley (fart/burp/cough) through the same vocal FX coloring
+ * as speech when effects are on; otherwise dry through Prism master out so
+ * faithful replay still captures it.
+ */
+export async function playBodilyFoleyThroughVoiceBus(args: {
+  urls: readonly string[];
+  gains: readonly number[];
+  profile: BotAudioVoiceProfileV1;
+  effectsEnabled: boolean;
+  voiceVolume: number;
+  playbackRate?: number;
+}): Promise<boolean> {
+  if (args.urls.length === 0 || args.urls.length !== args.gains.length) {
+    return false;
+  }
+  const context = contextForPlayback();
+  if (!context || !(await prepareRealtimeVoiceAudio())) return false;
+  const profile = normalizeBotAudioVoiceProfileV1(args.profile);
+  const volume = Math.min(
+    1.25,
+    Math.max(0, args.voiceVolume) * Math.min(1.25, profile.volume),
+  );
+  if (volume <= 0) return true;
+
+  const buffers: AudioBuffer[] = [];
+  for (const url of args.urls) {
+    try {
+      const response = await fetch(url, {
+        credentials: "include",
+        cache: "force-cache",
+      });
+      if (!response.ok) return false;
+      const bytes = await response.arrayBuffer();
+      buffers.push(await context.decodeAudioData(bytes.slice(0)));
+    } catch {
+      return false;
+    }
+  }
+
+  stopBodilyFoleyThroughVoiceBus();
+
+  const voiceEffect = resolveVoiceEffectPlan(
+    args.effectsEnabled
+      ? normalizeVoiceEffect(profile.elevenLabsEffect)
+      : "clean",
+  );
+  const now = context.currentTime;
+  const playbackRate = Math.max(0.5, Math.min(2, args.playbackRate ?? 1));
+  const mixGain = context.createGain();
+  mixGain.gain.value = 1;
+  const sources: AudioBufferSourceNode[] = [];
+  let longestSeconds = 0;
+  for (let index = 0; index < buffers.length; index += 1) {
+    const buffer = buffers[index]!;
+    const gainValue = Math.max(0, args.gains[index] ?? 0);
+    const source = context.createBufferSource();
+    source.buffer = buffer;
+    source.playbackRate.value = playbackRate;
+    const clipGain = context.createGain();
+    clipGain.gain.value = gainValue;
+    source.connect(clipGain).connect(mixGain);
+    sources.push(source);
+    longestSeconds = Math.max(longestSeconds, buffer.duration / playbackRate);
+  }
+
+  const highpass = context.createBiquadFilter();
+  const lowpass = context.createBiquadFilter();
+  const shaper = context.createWaveShaper();
+  const speechGain = context.createGain();
+  const outputGain = context.createGain();
+  const limiter = context.createDynamicsCompressor();
+  highpass.type = "highpass";
+  highpass.frequency.value = Math.max(voiceEffect.highpassHz, 40);
+  lowpass.type = "lowpass";
+  lowpass.frequency.value = Math.min(voiceEffect.lowpassHz, 20_000);
+  shaper.curve = distortionCurve(voiceEffect.drive, voiceEffect.bitDepth);
+  shaper.oversample = "2x";
+  speechGain.gain.value = voiceEffect.modulationBaseGain;
+  outputGain.gain.value =
+    Math.min(0.48, volume * 0.42) * voiceEffect.outputTrim * voiceEffect.dryGain;
+  limiter.threshold.value = -4;
+  limiter.knee.value = 8;
+  limiter.ratio.value = 12;
+  limiter.attack.value = 0.003;
+  limiter.release.value = 0.12;
+
+  const applyColoredPath =
+    args.effectsEnabled && profile.elevenLabsEffect !== "clean";
+  if (applyColoredPath) {
+    mixGain
+      .connect(highpass)
+      .connect(lowpass)
+      .connect(shaper)
+      .connect(speechGain);
+  } else {
+    mixGain.connect(speechGain);
+  }
+  speechGain.connect(outputGain).connect(limiter);
+
+  if (applyColoredPath) {
+    for (const voice of voiceEffect.parallelVoices) {
+      const delay = context.createDelay();
+      const parallelGain = context.createGain();
+      delay.delayTime.value = voice.delaySeconds;
+      parallelGain.gain.value = voice.gain;
+      mixGain.connect(delay).connect(parallelGain).connect(highpass);
+    }
+  }
+
+  const roomConnection = connectRoomAcoustics({
+    context,
+    input: limiter,
+    destination: prismAudioOutputNode(context),
+  });
+
+  let cleaned = false;
+  const cleanup = (): void => {
+    if (cleaned) return;
+    cleaned = true;
+    for (const source of sources) {
+      try {
+        source.stop();
+      } catch {
+        // already stopped
+      }
+      try {
+        source.disconnect();
+      } catch {
+        // already disconnected
+      }
+    }
+    roomConnection.disconnect();
+    if (activeBodilyFoleyStop === cleanup) activeBodilyFoleyStop = null;
+  };
+  activeBodilyFoleyStop = cleanup;
+
+  await new Promise<void>((resolve) => {
+    let remaining = sources.length;
+    const onEnded = (): void => {
+      remaining -= 1;
+      if (remaining <= 0) {
+        cleanup();
+        resolve();
+      }
+    };
+    for (const source of sources) {
+      source.addEventListener("ended", onEnded, { once: true });
+      source.start(now);
+      source.stop(now + longestSeconds + 0.05);
+    }
+    window.setTimeout(
+      () => {
+        cleanup();
+        resolve();
+      },
+      Math.ceil((longestSeconds + 0.2) * 1000),
+    );
+  });
+  return true;
+}

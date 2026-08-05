@@ -29,6 +29,18 @@ describe("English voice post processing", () => {
     const source = readFileSync(new URL("./englishVoice.ts", import.meta.url), "utf8");
     assert.match(
       source,
+      /resolveEnglishClauseGap/u,
+    );
+    assert.match(
+      source,
+      /playEnglishClauseGap/u,
+    );
+    assert.match(
+      source,
+      /previousSpeechChunk/u,
+    );
+    assert.match(
+      source,
       /export async function prepareEnglishVoice\(\)[\s\S]*?if \(preparedMedia\)[\s\S]*?return;[\s\S]*?beginMediaUnlock\(\);/
     );
     assert.match(
@@ -491,7 +503,12 @@ describe("English voice post processing", () => {
       assert.equal(endCount, 1);
       assert.equal(segmentTimings.length, 2);
       assert.ok(segmentTimings.every((timing) => timing.heard));
-      assert.equal(segmentTimings[1]?.startMs, segmentTimings[0]?.endMs);
+      // Strong punctuation after the first chunk inserts a clause pause before
+      // the next speech segment, even when decorative breaths are disabled.
+      assert.ok(
+        (segmentTimings[1]?.startMs ?? 0) >=
+          (segmentTimings[0]?.endMs ?? 0) + 250,
+      );
     } finally {
       stopEnglishVoice();
       if (originalAudio) {
