@@ -39,6 +39,10 @@ const serverSource = readFileSync(
   new URL("../../../api/src/server.ts", import.meta.url),
   "utf8",
 );
+const magentaPassSource = readFileSync(
+  new URL("../../../api/src/image-magenta-pass.ts", import.meta.url),
+  "utf8",
+);
 
 describe("typed local asset library", () => {
   it("keeps the recent rail exact-type, context-ranked, and capped at five", () => {
@@ -82,13 +86,12 @@ describe("typed local asset library", () => {
     assert.match(assetSource, /assetDisplayTitle\(asset\)/u);
     assert.match(assetSource, /Close asset details/u);
     assert.match(assetSource, /detailRef\.current\?\.scrollTo\(\{ top: 0 \}\)/u);
-    assert.match(assetSource, /Reveal in Finder/u);
-    assert.match(assetSource, /Shown in Finder/u);
-    assert.match(assetSource, /revealSynthesizedAssetInFinder\(member\.imageId\)/u);
-    assert.match(
-      assetSource,
-      /detail\.source === "generated"[\s\S]*REVEAL_SYNTHESIZED_ASSET_IN_FINDER_ENABLED/u,
-    );
+    assert.doesNotMatch(assetSource, /Finder|Photoshop|onRevealImage/u);
+    assert.match(assetSource, /Magenta cleanup/u);
+    assert.match(assetSource, /Reduce magenta/u);
+    assert.match(assetSource, /Undo last pass/u);
+    assert.match(assetSource, /Apply one pass to this entire asset set/u);
+    assert.match(assetSource, /each pass remains undoable/u);
     assert.match(assetSource, /Open Signal to retry synthesis/u);
     assert.match(assetSource, /Confirm deleting unused asset/u);
     assert.match(assetSource, /deleteConfirmationId === detail\.id/u);
@@ -107,7 +110,7 @@ describe("typed local asset library", () => {
       /data-asset-preview-kind="debate_exhibit"[\s\S]*object-fit: contain/u,
     );
     assert.match(assetStyles, /\.detailActions[\s\S]*position: sticky/u);
-    assert.match(assetStyles, /\.revealButton[\s\S]*inline-flex/u);
+    assert.match(assetStyles, /\.magentaPass[\s\S]*display: grid/u);
   });
 
   it("reuses PRISM surface, form, gallery, and state primitives", () => {
@@ -139,7 +142,7 @@ describe("typed local asset library", () => {
     assert.doesNotMatch(assetStyles, /\.modalHeader > button\s*\{/u);
   });
 
-  it("allows safe deletion from rail-launched modals without Debate Finder chrome", () => {
+  it("allows safe deletion from rail-launched modals without external-file chrome", () => {
     assert.match(
       assetSource,
       /<AssetLibraryModal[\s\S]*currentImageIds=\{\[\.\.\.currentIds\]\}[\s\S]*allowDelete/u,
@@ -151,6 +154,8 @@ describe("typed local asset library", () => {
       debateSource.indexOf("Uploaded and synthesized images are cut"),
     );
     assert.doesNotMatch(debateRail, /onRevealImage|onContextMenu|Finder/u);
+    assert.doesNotMatch(pageSource, /revealSynthesizedAssetContextMenu/u);
+    assert.doesNotMatch(signalSource, /revealSynthesizedAssetContextMenu/u);
   });
 
   it("migrates every requested image surface to its declared asset kind", () => {
@@ -185,6 +190,11 @@ describe("typed local asset library", () => {
     assert.match(serverSource, /route\("GET", "\/api\/assets\/storage"/u);
     assert.match(serverSource, /route\("POST", "\/api\/assets\/storage\/visible"/u);
     assert.match(serverSource, /route\("PATCH", "\/api\/assets\/:id"/u);
+    assert.match(serverSource, /route\("POST", "\/api\/assets\/:id\/magenta-pass"/u);
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/assets\/:id\/magenta-pass\/undo"/u,
+    );
     assert.match(serverSource, /route\("DELETE", "\/api\/assets\/:id"/u);
     assert.match(assetSource, /\/api\/assets\/storage\/visible/u);
     assert.match(assetSource, /\{assets\.length\} shown ·/u);
@@ -204,6 +214,11 @@ describe("typed local asset library", () => {
     assert.match(assetSource, /Confirm clearing unused assets/u);
     assert.match(assetSource, /Move to recovery trash/u);
     assert.match(assetSource, /setCleanupConfirmation/u);
+    assert.match(magentaPassSource, /reduceMagentaInPng/u);
+    assert.match(magentaPassSource, /encryptBytes\(replacement\.before, args\.userKey\)/u);
+    assert.match(magentaPassSource, /generateSignalStudioLightingMap/u);
+    assert.match(magentaPassSource, /MAGENTA_REVISION_RETENTION = 8/u);
+    assert.doesNotMatch(serverSource, /reveal-in-finder|revealLocalFileInFolder/u);
   });
 
   it("passes bounded Refract direction to providers without making it canonical", () => {

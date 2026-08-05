@@ -10,7 +10,6 @@ import {
 } from "react";
 import { createPortal } from "react-dom";
 import Link from "next/link";
-import { FolderOpen } from "lucide-react";
 import {
   IMAGE_ASSET_KIND_LABELS,
   type ImageAssetCatalogPage,
@@ -22,10 +21,6 @@ import {
   requestPrismRefract,
   type PrismRefractMagicTarget,
 } from "./prismRefract";
-import {
-  REVEAL_SYNTHESIZED_ASSET_IN_FINDER_ENABLED,
-  revealSynthesizedAssetInFinder,
-} from "./revealSynthesizedAssetInFinder";
 import sharedStyles from "./page.module.css";
 import styles from "./AssetLibrary.module.css";
 
@@ -49,6 +44,17 @@ interface CleanupConfirmation {
   storageBytes: number;
 }
 
+interface MagentaPassResponse {
+  ok: boolean;
+  asset: ImageAssetSet;
+  result: {
+    assetSetId: string;
+    changedPixels: number;
+    passCount: number;
+    undoAvailable: boolean;
+  };
+}
+
 export interface AssetRailProps {
   kind: ImageAssetKind;
   label?: string;
@@ -60,7 +66,6 @@ export interface AssetRailProps {
   onUpload?: () => void;
   onSynthesize: (direction: string) => void | Promise<void>;
   onSelect: (asset: ImageAssetSet) => void | Promise<void>;
-  onRevealImage?: (imageId: string, event: React.MouseEvent) => void;
 }
 
 function primaryMember(asset: ImageAssetSet) {
@@ -176,7 +181,6 @@ export function AssetRail({
   onUpload,
   onSynthesize,
   onSelect,
-  onRevealImage,
 }: AssetRailProps) {
   const reactId = useId().replaceAll(":", "");
   const targetId = `asset-add:${kind}:${reactId}`;
@@ -347,14 +351,6 @@ export function AssetRail({
                 aria-pressed={selected}
                 title={asset.title}
                 onClick={() => void onSelect(asset)}
-                onContextMenu={
-                  onRevealImage
-                    ? (event) => {
-                        const member = primaryMember(asset);
-                        if (member) onRevealImage(member.imageId, event);
-                      }
-                    : undefined
-                }
                 disabled={disabled || selected}
               >
                 <AssetPreview asset={asset} />
@@ -475,9 +471,10 @@ export function AssetLibraryModal({
     string | null
   >(null);
   const [deletingAssetId, setDeletingAssetId] = useState<string | null>(null);
-  const [revealState, setRevealState] = useState<
-    "idle" | "revealing" | "shown"
-  >("idle");
+  const [magentaConfirmation, setMagentaConfirmation] = useState(false);
+  const [magentaBusy, setMagentaBusy] = useState<"apply" | "undo" | null>(
+    null,
+  );
   const currentIds = useMemo(() => new Set(currentImageIds), [currentImageIds]);
   const detailIsCurrent =
     detail?.members.some((member) => currentIds.has(member.imageId)) ?? false;
@@ -618,35 +615,79 @@ export function AssetLibraryModal({
   const openDetail = (asset: ImageAssetSet): void => {
     setDetail(asset);
     setTagDraft(asset.playerTags.join(", "));
-    setRevealState("idle");
+    setMagentaConfirmation(false);
     setDeleteConfirmationId(null);
     window.requestAnimationFrame(() => {
       detailRef.current?.scrollTo({ top: 0 });
     });
   };
 
-  const revealDetailInFinder = async (): Promise<void> => {
-    const member = detail ? primaryMember(detail) : null;
-    if (
-      !detail ||
-      detail.source !== "generated" ||
-      !REVEAL_SYNTHESIZED_ASSET_IN_FINDER_ENABLED ||
-      !member
-    ) {
-      return;
-    }
-    setRevealState("revealing");
+  const replaceAsset = (asset: ImageAssetSet): void => {
+    setDetail(asset);
+    setAssets((current) =>
+      current.map((candidate) => (candidate.id === asset.id ? asset : candidate)),
+    );
+  };
+
+  const applyMagentaPass = async (): Promise<void> => {
+    if (!detail || !magentaConfirmation || magentaBusy) return;
+    const target = detail;
+    setMagentaBusy("apply");
     setError(null);
+    setNotice(null);
     try {
-      await revealSynthesizedAssetInFinder(member.imageId);
-      setRevealState("shown");
+      const response = await readJson<MagentaPassResponse>(
+        await fetch(
+          `/api/assets/${encodeURIComponent(target.id)}/magenta-pass`,
+          { method: "POST", credentials: "include", body: "{}" },
+        ),
+      );
+      replaceAsset(response.asset);
+      setMagentaConfirmation(false);
+      setNotice(
+        response.result.changedPixels > 0
+          ? `Magenta reduced. Pass ${response.result.passCount} can be undone or compounded with another pass.`
+          : "No strong magenta remained to reduce.",
+      );
     } catch (caught) {
-      setRevealState("idle");
       setError(
         caught instanceof Error
           ? caught.message
-          : "Could not reveal the asset in Finder.",
+          : "The magenta pass could not be applied.",
       );
+    } finally {
+      setMagentaBusy(null);
+    }
+  };
+
+  const undoMagentaPass = async (): Promise<void> => {
+    if (!detail?.magentaUndoAvailable || magentaBusy) return;
+    const target = detail;
+    setMagentaBusy("undo");
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await readJson<MagentaPassResponse>(
+        await fetch(
+          `/api/assets/${encodeURIComponent(target.id)}/magenta-pass/undo`,
+          { method: "POST", credentials: "include", body: "{}" },
+        ),
+      );
+      replaceAsset(response.asset);
+      setMagentaConfirmation(false);
+      setNotice(
+        response.result.undoAvailable
+          ? `Last magenta pass undone. ${response.result.passCount} earlier pass${response.result.passCount === 1 ? " remains" : "es remain"} undoable.`
+          : "Last magenta pass undone.",
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The magenta pass could not be undone.",
+      );
+    } finally {
+      setMagentaBusy(null);
     }
   };
 
@@ -917,24 +958,65 @@ export function AssetLibraryModal({
               </header>
               <AssetPreview asset={detail} />
               <p>{detail.source === "legacy" ? "Protected legacy asset" : assetSourceLabel(detail)} · {new Date(detail.createdAt).toLocaleString()}</p>
-              {detail.source === "generated" &&
-              REVEAL_SYNTHESIZED_ASSET_IN_FINDER_ENABLED &&
-              primaryMember(detail) ? (
-                <button
-                  type="button"
-                  className={`${styles.revealButton} ${sharedStyles.accountLogoutButton}`}
-                  onClick={() => void revealDetailInFinder()}
-                  disabled={revealState === "revealing"}
+              {detail.status === "ready" && primaryMember(detail) ? (
+                <section
+                  className={styles.magentaPass}
+                  aria-label="Magenta cleanup"
                 >
-                  <FolderOpen aria-hidden="true" />
-                  <span aria-live="polite">
-                    {revealState === "revealing"
-                      ? "Revealing…"
-                      : revealState === "shown"
-                        ? "Shown in Finder"
-                        : "Reveal in Finder"}
-                  </span>
-                </button>
+                  <div>
+                    <strong>Magenta cleanup</strong>
+                    <small>
+                      Local and cumulative. Strong pinks or purples may also
+                      soften, so each pass remains undoable.
+                    </small>
+                  </div>
+                  {magentaConfirmation ? (
+                    <div role="group" aria-label="Confirm magenta pass">
+                      <span>
+                        Apply one pass to this entire asset set?
+                      </span>
+                      <button
+                        type="button"
+                        className={sharedStyles.linkButton}
+                        onClick={() => setMagentaConfirmation(false)}
+                        disabled={magentaBusy !== null}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className={sharedStyles.btnPrimary}
+                        onClick={() => void applyMagentaPass()}
+                        disabled={magentaBusy !== null}
+                      >
+                        {magentaBusy === "apply" ? "Applying…" : "Apply pass"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <button
+                        type="button"
+                        className={sharedStyles.accountLogoutButton}
+                        onClick={() => setMagentaConfirmation(true)}
+                        disabled={magentaBusy !== null}
+                      >
+                        Reduce magenta
+                      </button>
+                      {detail.magentaUndoAvailable ? (
+                        <button
+                          type="button"
+                          className={sharedStyles.linkButton}
+                          onClick={() => void undoMagentaPass()}
+                          disabled={magentaBusy !== null}
+                        >
+                          {magentaBusy === "undo"
+                            ? "Undoing…"
+                            : `Undo last pass (${detail.magentaPassCount})`}
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+                </section>
               ) : null}
               {detail.usage.length > 0 ? (
                 <div><strong>Used by</strong><ul>{detail.usage.map((item) => <li key={item.label}>{item.href ? <a href={item.href}>{item.label}</a> : item.label}</li>)}</ul></div>

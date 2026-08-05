@@ -68,13 +68,14 @@ export function StorageSettings({
         <button type="button" onClick={() => void refresh()}>Refresh</button>
       </header>
       <p>
-        Originals and thumbnail sidecars stay on this device. Shared files are
-        counted once, and active project references remain protected.
+        Originals, thumbnails, and encrypted magenta-pass Undo history stay on
+        this device. Shared files are counted once, and active project
+        references remain protected.
       </p>
       {error ? <p className={styles.error} role="alert">{error}</p> : null}
       <div className={styles.totals}>
         <article>
-          <small>Active assets</small>
+          <small>Library total</small>
           <strong>{summary ? formatBytes(summary.activeBytes) : "—"}</strong>
           <span>{summary?.totalAssetCount ?? 0} reusable sets</span>
         </article>
@@ -90,6 +91,11 @@ export function StorageSettings({
           <small>Recovery trash</small>
           <strong>{summary ? formatBytes(summary.recoveryTrashBytes) : "—"}</strong>
           <span>Available to Undo until purged</span>
+        </article>
+        <article>
+          <small>Magenta Undo history</small>
+          <strong>{summary ? formatBytes(summary.revisionBytes) : "—"}</strong>
+          <span>Removed as each pass is undone</span>
         </article>
       </div>
       <div className={styles.kindList}>

@@ -204,6 +204,32 @@ export function ensureImageAssetLibrarySchema(db: DatabaseSync): void {
       ON image_asset_sets(user_id, kind, status, updated_at DESC, id DESC);
     CREATE INDEX IF NOT EXISTS idx_image_asset_set_items_set_ordinal
       ON image_asset_set_items(set_id, ordinal, image_id);
+    CREATE TABLE IF NOT EXISTS image_asset_magenta_revisions (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      set_id TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'committed'
+        CHECK (status IN ('committed', 'undone')),
+      created_at TEXT NOT NULL,
+      undone_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(set_id) REFERENCES image_asset_sets(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS image_asset_magenta_revision_items (
+      revision_id TEXT NOT NULL,
+      image_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      ciphertext BLOB NOT NULL,
+      iv BLOB NOT NULL,
+      tag BLOB NOT NULL,
+      PRIMARY KEY(revision_id, image_id),
+      FOREIGN KEY(revision_id)
+        REFERENCES image_asset_magenta_revisions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_image_asset_magenta_revisions_latest
+      ON image_asset_magenta_revisions(
+        user_id, set_id, status, created_at DESC, id DESC
+      );
     CREATE VIRTUAL TABLE IF NOT EXISTS image_asset_search USING fts5(
       set_id UNINDEXED,
       user_id UNINDEXED,
@@ -247,7 +273,11 @@ function upsertSet(
        END,
        source_context_json = excluded.source_context_json,
        automatic_tags_json = excluded.automatic_tags_json,
-       updated_at = excluded.updated_at`,
+       updated_at = CASE
+         WHEN image_asset_sets.updated_at > excluded.updated_at
+           THEN image_asset_sets.updated_at
+         ELSE excluded.updated_at
+       END`,
   ).run(
     set.id,
     set.userId,
@@ -811,8 +841,10 @@ function membersForSets(
     .prepare(
       `SELECT items.set_id, items.role, images.id, images.prompt,
               images.revised_prompt, images.url, images.provider, images.model,
-              images.size, images.local_rel_path, images.created_at
+              images.size, images.local_rel_path, images.created_at,
+              sets.updated_at AS set_updated_at
          FROM image_asset_set_items items
+         JOIN image_asset_sets sets ON sets.id = items.set_id
          JOIN images ON images.id = items.image_id
         WHERE items.set_id IN (${setIds.map(() => "?").join(",")})
         ORDER BY items.set_id, items.ordinal, images.id`,
@@ -829,17 +861,19 @@ function membersForSets(
     size: string;
     local_rel_path: string | null;
     created_at: string;
+    set_updated_at: string;
   }>;
   const result = new Map<string, ImageAssetMember[]>();
   for (const row of rows) {
+    const version = encodeURIComponent(row.set_updated_at);
     const member: ImageAssetMember = {
       imageId: row.id,
       role: row.role,
       url: row.local_rel_path
-        ? `/api/images/${encodeURIComponent(row.id)}/file`
+        ? `/api/images/${encodeURIComponent(row.id)}/file?v=${version}`
         : row.url,
       thumbnailUrl: row.local_rel_path
-        ? `/api/images/${encodeURIComponent(row.id)}/thumb`
+        ? `/api/images/${encodeURIComponent(row.id)}/thumb?v=${version}`
         : row.url,
       prompt: row.prompt,
       revisedPrompt: row.revised_prompt,
@@ -851,6 +885,30 @@ function membersForSets(
     result.set(row.set_id, [...(result.get(row.set_id) ?? []), member]);
   }
   return result;
+}
+
+function magentaRevisionStateForSets(
+  db: DatabaseSync,
+  userId: string,
+  setIds: readonly string[],
+): Map<string, number> {
+  if (setIds.length === 0) return new Map();
+  const rows = db
+    .prepare(
+      `SELECT set_id, COUNT(*) AS pass_count
+         FROM image_asset_magenta_revisions
+        WHERE user_id = ?
+          AND status = 'committed'
+          AND set_id IN (${setIds.map(() => "?").join(",")})
+        GROUP BY set_id`,
+    )
+    .all(userId, ...setIds) as Array<{
+    set_id: string;
+    pass_count: number | bigint;
+  }>;
+  return new Map(
+    rows.map((row) => [row.set_id, Number(row.pass_count)] as const),
+  );
 }
 
 function usageHrefForKind(kind: ImageAssetKind): string | null {
@@ -886,6 +944,7 @@ function mapAssetSetRows(
   const ids = rows.map((row) => row.id);
   const members = membersForSets(db, ids);
   const usage = usageForSets(db, userId, ids);
+  const magentaRevisionState = magentaRevisionStateForSets(db, userId, ids);
   return rows.map((row) => {
     const kind = row.kind as ImageAssetKind;
     const setUsage = navigableUsage(usage.get(row.id) ?? [], kind);
@@ -903,6 +962,8 @@ function mapAssetSetRows(
       usageCount: setUsage.length,
       usage: setUsage,
       members: members.get(row.id) ?? [],
+      magentaPassCount: magentaRevisionState.get(row.id) ?? 0,
+      magentaUndoAvailable: (magentaRevisionState.get(row.id) ?? 0) > 0,
     };
   });
 }
@@ -1084,12 +1145,29 @@ export function imageAssetStorageSummary(
       }>
     ).map((row) => [row.kind, Number(row.count)] as const),
   );
+  const revisionBytes = Number(
+    (
+      db
+        .prepare(
+          `SELECT COALESCE(
+                    SUM(length(items.ciphertext) + length(items.iv) + length(items.tag)),
+                    0
+                  ) AS bytes
+             FROM image_asset_magenta_revision_items items
+             JOIN image_asset_magenta_revisions revisions
+               ON revisions.id = items.revision_id
+            WHERE revisions.user_id = ? AND revisions.status = 'committed'`,
+        )
+        .get(userId) as { bytes: number | bigint }
+    ).bytes,
+  );
   return {
-    activeBytes,
+    activeBytes: activeBytes + revisionBytes,
     recoveryTrashBytes: listGeneratedImageRecoveryBatchesForUser(userId).reduce(
       (total, batch) => total + batch.sizeBytes,
       0,
     ),
+    revisionBytes,
     generatedBytes,
     uploadedBytes,
     systemManagedBytes,

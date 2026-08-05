@@ -101,6 +101,40 @@ export function writeGeneratedImageBytes(localRelPath: string, bytes: Buffer): v
   writeFileSync(absolute, bytes);
 }
 
+/** Replaces one generated image without exposing a partially written file. */
+export function replaceGeneratedImageBytesAtomically(
+  localRelPath: string,
+  bytes: Buffer,
+): void {
+  const absolute = resolveAbsoluteUnderDataRoot(localRelPath);
+  mkdirSync(dirname(absolute), { recursive: true });
+  const temporaryPath = `${absolute}.${randomBytes(8).toString("hex")}.tmp`;
+  let descriptor: number | null = null;
+  try {
+    descriptor = openSync(temporaryPath, "wx", 0o600);
+    writeFileSync(descriptor, bytes);
+    fsyncSync(descriptor);
+    closeSync(descriptor);
+    descriptor = null;
+    renameSync(temporaryPath, absolute);
+  } finally {
+    if (descriptor !== null) closeSync(descriptor);
+    if (existsSync(temporaryPath)) unlinkSync(temporaryPath);
+  }
+}
+
+/** Removes a rebuildable thumbnail after its canonical PNG changes. */
+export function invalidateGeneratedImageThumbnail(localRelPath: string): void {
+  try {
+    const absolute = resolveAbsoluteUnderDataRoot(
+      thumbWebpRelativePathFromPngRelativePath(localRelPath),
+    );
+    if (existsSync(absolute)) unlinkSync(absolute);
+  } catch {
+    // A later GET /thumb can retry once the primary path is valid again.
+  }
+}
+
 /** Restore/import writes must never replace an existing file on an id collision. */
 export function writeGeneratedImageBytesExclusive(
   localRelPath: string,
