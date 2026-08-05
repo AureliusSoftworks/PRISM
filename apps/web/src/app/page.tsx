@@ -39554,6 +39554,10 @@ function BotAvatarSfxEditor({
           ownerId={packOwnerId}
           ownerLabel={packOwnerLabel?.trim() || "this bot"}
           personaSnippet={packPersonaSnippet}
+          hasPremiumVoice={Boolean(
+            normalizedProfile.elevenLabsVoiceIdOverride ||
+              normalizedProfile.elevenLabsVoiceId,
+          )}
         />
       </div>
 
@@ -114421,6 +114425,9 @@ function HomeContent(): React.JSX.Element {
                                 <ActionSfxPackMagicButton
                                   ownerKind="player"
                                   ownerLabel="the player"
+                                  hasPremiumVoice={Boolean(
+                                    selectedPlayerPremiumVoiceId,
+                                  )}
                                 />
                               </div>
                               <div className={styles.botVoiceIdentityField}>

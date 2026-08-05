@@ -67,14 +67,19 @@ describe("action sfx pack playback wiring", () => {
     );
     assert.match(magic, /data-action-sfx-pack-sample="true"/u);
     assert.match(magic, /actionSfxPackClipUrl/u);
-    assert.match(magic, /Choose an action pack clip to sample/u);
+    assert.match(magic, /Choose a vocal action pack clip to sample/u);
+    assert.match(magic, /Generate vocal action pack/u);
+    assert.match(magic, /hasPremiumVoice/u);
     assert.match(magic, /ACTION_SFX_PACK_KIND_LABELS/u);
+    assert.match(magic, /ACTION_SFX_PACK_CLIP_COUNT/u);
+    assert.doesNotMatch(magic, /\bfart\b/u);
 
     const cut = readFileSync(
       fileURLToPath(new URL("./signalStudioCutAudio.ts", import.meta.url)),
       "utf8",
     );
     assert.match(cut, /resolveActionSfxPackPlayback/u);
+    assert.match(cut, /isActionSfxPackKind\(actionKind\)/u);
     assert.match(cut, /resolveBodilyActionSfxPlayback/u);
     assert.match(cut, /throat_clear/u);
 
@@ -82,7 +87,9 @@ describe("action sfx pack playback wiring", () => {
       fileURLToPath(new URL("./modeTutorials.ts", import.meta.url)),
       "utf8",
     );
-    assert.match(tutorial, /local Action SFX pack/u);
+    assert.match(tutorial, /vocal Action pack/u);
+    assert.match(tutorial, /Premium ElevenLabs voice/u);
+    assert.match(tutorial, /bodily Foley/u);
     assert.match(tutorial, /Corporality/u);
   });
 });

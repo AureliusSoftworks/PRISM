@@ -2,51 +2,85 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  ACTION_SFX_BODILY_KINDS,
   ACTION_SFX_PACK_CLIP_COUNT,
   ACTION_SFX_PACK_KINDS,
   ACTION_SFX_PACK_VARIANT_COUNT,
+  ACTION_SFX_PACK_VERSION,
   actionSfxPackOwnerIdFor,
-  buildActionSfxPackPrompt,
+  actionSfxPackTtsSeed,
+  buildActionSfxPackTtsText,
+  isActionSfxBodilyKind,
+  isActionSfxPackBodilyKind,
   isActionSfxPackKind,
   pickActionSfxPackVariantIndex,
 } from "./actionSfxPack.ts";
 
 describe("actionSfxPack", () => {
-  it("covers seven kinds and twenty-one clips", () => {
-    assert.equal(ACTION_SFX_PACK_KINDS.length, 7);
+  it("covers four vocal kinds and twelve clips at pack v2", () => {
+    assert.equal(ACTION_SFX_PACK_VERSION, 2);
+    assert.equal(ACTION_SFX_PACK_KINDS.length, 4);
     assert.equal(ACTION_SFX_PACK_VARIANT_COUNT, 3);
-    assert.equal(ACTION_SFX_PACK_CLIP_COUNT, 21);
+    assert.equal(ACTION_SFX_PACK_CLIP_COUNT, 12);
     assert.equal(isActionSfxPackKind("laugh"), true);
+    assert.equal(isActionSfxPackKind("fart"), false);
     assert.equal(isActionSfxPackKind("yawn"), false);
+    assert.deepEqual([...ACTION_SFX_BODILY_KINDS], ["fart", "burp", "cough"]);
+    assert.equal(isActionSfxBodilyKind("cough"), true);
+    assert.equal(isActionSfxPackBodilyKind("laugh"), false);
   });
 
-  it("flavors vocal prompts more strongly than bodily ones", () => {
-    const laugh = buildActionSfxPackPrompt({
-      kind: "laugh",
+  it("builds short ElevenLabs audio-tag TTS text per vocal take", () => {
+    assert.equal(
+      buildActionSfxPackTtsText({ kind: "laugh", variantIndex: 0 }),
+      "[laughs]",
+    );
+    assert.equal(
+      buildActionSfxPackTtsText({ kind: "laugh", variantIndex: 1 }),
+      "[laughs softly]",
+    );
+    assert.equal(
+      buildActionSfxPackTtsText({ kind: "throat_clear", variantIndex: 0 }),
+      "[clears throat]",
+    );
+    assert.match(
+      buildActionSfxPackTtsText({ kind: "gasp", variantIndex: 2 }),
+      /^\[.+\]$/u,
+    );
+  });
+
+  it("derives a stable non-negative TTS seed", () => {
+    const a = actionSfxPackTtsSeed({
+      ownerId: "bot-1",
+      kind: "sigh",
       variantIndex: 1,
-      ownerLabel: "Mara",
-      personaSnippet: "dry, wry, mid-register",
+      packGenerationId: "abc",
     });
-    const fart = buildActionSfxPackPrompt({
-      kind: "fart",
-      variantIndex: 0,
-      ownerLabel: "Mara",
+    const b = actionSfxPackTtsSeed({
+      ownerId: "bot-1",
+      kind: "sigh",
+      variantIndex: 1,
+      packGenerationId: "abc",
     });
-    assert.match(laugh, /Mara/u);
-    assert.match(laugh, /dry, wry/u);
-    assert.match(laugh, /never speak words/u);
-    assert.match(fart, /Unique take 1 for Mara/u);
-    assert.doesNotMatch(fart, /never speak words/u);
+    const c = actionSfxPackTtsSeed({
+      ownerId: "bot-1",
+      kind: "sigh",
+      variantIndex: 2,
+      packGenerationId: "abc",
+    });
+    assert.equal(a, b);
+    assert.notEqual(a, c);
+    assert.ok(a >= 0);
   });
 
   it("avoids repeating the last variant when possible", () => {
     const first = pickActionSfxPackVariantIndex({
-      kind: "cough",
+      kind: "laugh",
       state: { lastVariantByKind: {} },
       random: () => 0,
     });
     const second = pickActionSfxPackVariantIndex({
-      kind: "cough",
+      kind: "laugh",
       state: first.state,
       random: () => 0,
     });

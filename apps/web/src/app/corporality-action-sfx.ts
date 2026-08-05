@@ -1,13 +1,13 @@
 /**
- * Bodily Action SFX resolution: pack → corporality-bin stock (crossfade) → legacy.
+ * Bodily Action SFX resolution: corporality-bin stock (crossfade) → legacy.
+ * Vocal packs never supply fart/burp/cough — those stay corporality-only.
  */
 
 import {
   corporalityStockClipPathsForMix,
-  isActionSfxPackBodilyKind,
+  isActionSfxBodilyKind,
   isCorporalityStockKind,
   normalizeCorporality,
-  type ActionSfxPackKind,
   type CorporalityBinMix,
   type CorporalityStockKind,
 } from "@localai/shared";
@@ -15,13 +15,6 @@ import {
 export type BodilyActionSfxKind = CorporalityStockKind;
 
 export type ResolvedBodilyActionSfx =
-  | {
-      source: "pack";
-      urls: [string];
-      gains: [number];
-      playbackRate: number;
-      variantIndex: number;
-    }
   | {
       source: "corporality";
       urls: [string] | [string, string];
@@ -73,25 +66,20 @@ function bodilyPlaybackRate(
   return 1 + (boundedRandom(random) * 2 - 1) * pitchDepth;
 }
 
-/** Prefer pack clip when present; otherwise adjacent-bin corporality stock. */
+/**
+ * Corporality stock only — pack sources are ignored for bodily kinds.
+ */
 export function resolveBodilyActionSfxPlayback(args: {
-  kind: ActionSfxPackKind | BodilyActionSfxKind;
+  kind: BodilyActionSfxKind | string;
   corporality?: number | null;
+  /** @deprecated Ignored — bodily Foley never uses Action SFX packs. */
   packSource?: string | null;
+  /** @deprecated Ignored with packSource. */
   packVariantIndex?: number | null;
   random?: () => number;
 }): ResolvedBodilyActionSfx | null {
   const random = args.random ?? Math.random;
-  if (args.packSource) {
-    return {
-      source: "pack",
-      urls: [args.packSource],
-      gains: [1],
-      playbackRate: 1,
-      variantIndex: Math.max(0, Math.floor(args.packVariantIndex ?? 0)),
-    };
-  }
-  if (!isCorporalityStockKind(args.kind) && !isActionSfxPackBodilyKind(args.kind as ActionSfxPackKind)) {
+  if (!isCorporalityStockKind(args.kind) && !isActionSfxBodilyKind(args.kind)) {
     return null;
   }
   const kind = args.kind as BodilyActionSfxKind;

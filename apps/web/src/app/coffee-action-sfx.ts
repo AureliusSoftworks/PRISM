@@ -13,7 +13,6 @@ import {
 import {
   resolveBodilyActionSfxPlayback,
   resolveLegacyBodilyActionSfxPlayback,
-  type BodilyActionSfxKind,
 } from "./corporality-action-sfx.ts";
 import {
   playBodilyFoleyThroughVoiceBus,
@@ -41,7 +40,10 @@ export type BundledCoffeeActionSfxKind = "fart" | "burp" | "cough";
 /** Pack-only vocal Foley — silent until a local action pack exists. */
 export type VocalActionSfxKind = "laugh" | "sigh" | "gasp" | "throat_clear";
 
-export type PackPlayableActionSfxKind = ActionSfxPackKind;
+/** Fancy action kinds that may play pack (vocal) or corporality (bodily). */
+export type PackPlayableActionSfxKind =
+  | ActionSfxPackKind
+  | BundledCoffeeActionSfxKind;
 
 export type CoffeeActionReactionKind =
   | "nod"
@@ -324,7 +326,7 @@ export function isVocalActionSfxKind(
 export function isPackPlayableActionSfxKind(
   kind: CoffeeActionSfxKind,
 ): kind is PackPlayableActionSfxKind {
-  return isActionSfxPackKind(kind);
+  return isActionSfxPackKind(kind) || isBundledCoffeeActionSfxKind(kind);
 }
 
 export function coffeeActionSfxKindForAction(
@@ -491,6 +493,7 @@ export function prefetchCoffeeActionSfx(args: {
   if (
     typeof window === "undefined" ||
     isBundledCoffeeActionSfxKind(args.kind) ||
+    isVocalActionSfxKind(args.kind) ||
     preparedClips.has(args.kind) ||
     pendingClips.has(args.kind)
   ) {
@@ -569,9 +572,10 @@ export async function playPreparedCoffeeActionSfx(args: {
   voiceEffectsEnabled?: boolean;
 }): Promise<boolean> {
   let packPlayback: { source: string; variantIndex: number } | null = null;
+  // Vocal packs only — bodily gags never query Action SFX packs.
   if (
     typeof window !== "undefined" &&
-    isPackPlayableActionSfxKind(args.kind) &&
+    isVocalActionSfxKind(args.kind) &&
     args.ownerKind
   ) {
     try {
@@ -600,8 +604,6 @@ export async function playPreparedCoffeeActionSfx(args: {
       resolveBodilyActionSfxPlayback({
         kind: bodilyKind,
         corporality,
-        packSource: packPlayback?.source ?? null,
-        packVariantIndex: packPlayback?.variantIndex ?? null,
         random: args.seed
           ? (() => {
               let index = 0;
@@ -643,6 +645,10 @@ export async function playPreparedCoffeeActionSfx(args: {
         ? bundledCoffeeActionSfxPlaybackForSeed(bodilyKind, args.seed)
         : resolveBundledCoffeeActionSfxPlayback(bodilyKind)
       : null;
+  // Vocal Foley is pack-only — never fall through to prepared / sound-gen clips.
+  if (isVocalActionSfxKind(args.kind) && !packPlayback) {
+    return false;
+  }
   const clip =
     !packPlayback && !bundledPlayback ? preparedClips.get(args.kind) : null;
   if (

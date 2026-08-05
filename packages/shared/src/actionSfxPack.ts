@@ -1,16 +1,16 @@
 /**
- * Local Action SFX packs — per-bot / per-player Foley that stays off bot export.
- * 7 kinds × 3 variants, generated via ElevenLabs text-to-sound.
+ * Local Action SFX packs — per-bot / per-player *vocal* Foley that stays off
+ * bot export. Generated through the owner's real ElevenLabs Premium voice.
+ *
+ * Bodily gags (fart / burp / cough) are corporality stock only — never packed.
  */
 
-export const ACTION_SFX_PACK_VERSION = 1 as const;
+export const ACTION_SFX_PACK_VERSION = 2 as const;
 export const ACTION_SFX_PACK_VARIANT_COUNT = 3 as const;
 export const ACTION_SFX_PACK_PLAYER_OWNER_ID = "player" as const;
 
+/** Vocal reaction kinds stored in an Action SFX pack. */
 export const ACTION_SFX_PACK_KINDS = [
-  "fart",
-  "burp",
-  "cough",
   "laugh",
   "sigh",
   "gasp",
@@ -19,10 +19,10 @@ export const ACTION_SFX_PACK_KINDS = [
 
 export type ActionSfxPackKind = (typeof ACTION_SFX_PACK_KINDS)[number];
 
+/** @deprecated Alias — packs are vocal-only; prefer ACTION_SFX_PACK_KINDS. */
+export const ACTION_SFX_PACK_VOCAL_KINDS = ACTION_SFX_PACK_KINDS;
+
 export const ACTION_SFX_PACK_KIND_LABELS: Record<ActionSfxPackKind, string> = {
-  fart: "Fart",
-  burp: "Burp",
-  cough: "Cough",
   laugh: "Laugh",
   sigh: "Sigh",
   gasp: "Gasp",
@@ -34,7 +34,9 @@ export type ActionSfxPackOwnerKind = "bot" | "player";
 export const ACTION_SFX_PACK_CLIP_COUNT =
   ACTION_SFX_PACK_KINDS.length * ACTION_SFX_PACK_VARIANT_COUNT;
 
-const BODILY_KINDS = new Set<ActionSfxPackKind>(["fart", "burp", "cough"]);
+/** Bodily Foley kinds — corporality stock only; never Action SFX pack kinds. */
+export const ACTION_SFX_BODILY_KINDS = ["fart", "burp", "cough"] as const;
+export type ActionSfxBodilyKind = (typeof ACTION_SFX_BODILY_KINDS)[number];
 
 export function isActionSfxPackKind(value: unknown): value is ActionSfxPackKind {
   return (
@@ -43,8 +45,18 @@ export function isActionSfxPackKind(value: unknown): value is ActionSfxPackKind 
   );
 }
 
-export function isActionSfxPackBodilyKind(kind: ActionSfxPackKind): boolean {
-  return BODILY_KINDS.has(kind);
+export function isActionSfxBodilyKind(
+  value: unknown,
+): value is ActionSfxBodilyKind {
+  return (
+    typeof value === "string" &&
+    (ACTION_SFX_BODILY_KINDS as readonly string[]).includes(value)
+  );
+}
+
+/** @deprecated Bodily kinds are not pack kinds; always false for pack kinds. */
+export function isActionSfxPackBodilyKind(_kind: ActionSfxPackKind): boolean {
+  return false;
 }
 
 export function actionSfxPackOwnerIdFor(
@@ -57,61 +69,62 @@ export function actionSfxPackOwnerIdFor(
   return id;
 }
 
-/** Soft audio length targets for ElevenLabs sound-generation. */
-export function actionSfxPackDurationSeconds(kind: ActionSfxPackKind): number {
-  switch (kind) {
-    case "fart":
-      return 0.9;
-    case "burp":
-      return 0.85;
-    case "cough":
-      return 0.8;
-    case "laugh":
-      return 1.2;
-    case "sigh":
-      return 1.1;
-    case "gasp":
-      return 0.7;
-    case "throat_clear":
-      return 0.75;
-    default: {
-      const _exhaustive: never = kind;
-      return _exhaustive;
-    }
-  }
-}
-
-const KIND_BASE_PROMPTS: Record<ActionSfxPackKind, string> = {
-  fart: "A short comic bodily fart, dry close mic, brief natural decay, no words, no music.",
-  burp: "A short comic burp, dry close mic, brief natural decay, no words, no music.",
-  cough: "A short single cough, dry close mic, brief natural decay, no words, no music.",
-  laugh: "A short human laugh, dry close mic, brief natural decay, no words, no music.",
-  sigh: "A short human sigh, dry close mic, brief natural decay, no words, no music.",
-  gasp: "A short startled human gasp, dry close mic, brief natural decay, no words, no music.",
-  throat_clear:
-    "A short polite throat clear, dry close mic, brief natural decay, no words, no music.",
+const VOCAL_TTS_TAGS: Record<ActionSfxPackKind, readonly [string, string, string]> = {
+  laugh: ["[laughs]", "[laughs softly]", "[chuckles]"],
+  sigh: ["[sighs]", "[sighs softly]", "[exhales]"],
+  gasp: ["[gasps]", "[gasps softly]", "[gasps briefly]"],
+  throat_clear: [
+    "[clears throat]",
+    "[clears throat softly]",
+    "[clears throat briefly]",
+  ],
 };
 
 /**
- * Builds an ElevenLabs sound prompt flavored by owner identity and variant salt.
+ * Speakable ElevenLabs v3 audio-tag text for a vocal pack take.
+ * The owner's Premium voice identity carries the persona; tags stay short.
  */
-export function buildActionSfxPackPrompt(args: {
+export function buildActionSfxPackTtsText(args: {
   kind: ActionSfxPackKind;
   variantIndex: number;
-  ownerLabel: string;
-  personaSnippet?: string | null;
 }): string {
   const variant = Math.max(
     0,
     Math.min(ACTION_SFX_PACK_VARIANT_COUNT - 1, Math.floor(args.variantIndex)),
   );
-  const owner = args.ownerLabel.replace(/\s+/gu, " ").trim() || "this character";
-  const persona = args.personaSnippet?.replace(/\s+/gu, " ").trim() ?? "";
-  const base = KIND_BASE_PROMPTS[args.kind];
-  const vocalFlavor = isActionSfxPackBodilyKind(args.kind)
-    ? `Unique take ${variant + 1} for ${owner}; keep it recognizable as the same gag with a slightly different timing and pitch.`
-    : `Sound as if performed by ${owner}${persona ? ` (${persona.slice(0, 120)})` : ""}; unique take ${variant + 1} with matching age, energy, and timbre; never speak words.`;
-  return `${base} ${vocalFlavor}`.slice(0, 450);
+  return VOCAL_TTS_TAGS[args.kind][variant] ?? VOCAL_TTS_TAGS[args.kind][0]!;
+}
+
+/**
+ * Stable ElevenLabs seed so regenerating the same owner/kind/take stays close.
+ */
+export function actionSfxPackTtsSeed(args: {
+  ownerId: string;
+  kind: ActionSfxPackKind;
+  variantIndex: number;
+  packGenerationId: string;
+}): number {
+  const raw = `${args.ownerId}:${args.kind}:${args.variantIndex}:${args.packGenerationId}`;
+  let hash = 2166136261;
+  for (let offset = 0; offset < raw.length; offset += 1) {
+    hash ^= raw.charCodeAt(offset);
+    hash = Math.imul(hash, 16777619);
+  }
+  // ElevenLabs seeds are non-negative 32-bit integers.
+  return hash >>> 0;
+}
+
+/**
+ * @deprecated Sound-gen prompts are retired; use buildActionSfxPackTtsText.
+ * Kept as a thin wrapper so older call sites compile during the migration.
+ */
+export function buildActionSfxPackPrompt(args: {
+  kind: ActionSfxPackKind;
+  variantIndex: number;
+  ownerLabel?: string;
+  personaSnippet?: string | null;
+}): string {
+  return buildActionSfxPackTtsText(args);
 }
 
 export interface ActionSfxPackVariantPickState {

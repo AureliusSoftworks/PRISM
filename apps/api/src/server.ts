@@ -312,6 +312,7 @@ import {
   requestSignalElevenLabsAtmosphere,
 } from "./elevenlabs-sound.ts";
 import {
+  ACTION_SFX_PACK_MISSING_VOICE_MESSAGE,
   generateActionSfxPack,
   getActionSfxPackClip,
   getActionSfxPackSummary,
@@ -937,10 +938,12 @@ import {
   type PrismRefractSignalTextTarget,
   type AutoFallbackModelRef,
   type AutoRoutingContextV1,
+  ACTION_SFX_PACK_CLIP_COUNT,
   ACTION_SFX_PACK_VARIANT_COUNT,
   actionSfxPackOwnerIdFor,
   isActionSfxPackKind,
   normalizeActionSfxPackOwnerKind,
+  resolveBotAudioVoiceProfileV1,
 } from "@localai/shared";
 import { editImage, generateImage } from "./image-provider.ts";
 import { generateLocalImageBytesByModelId } from "./image-local-by-model.ts";
@@ -20325,7 +20328,7 @@ function buildRoutes(): RouteDefinition[] {
       if (userBlocksOnlineCapabilities(user)) {
         throw new HttpError(
           409,
-          "Switch to AUTO or ONLINE before generating an action SFX pack.",
+          "Switch to AUTO or ONLINE before generating a vocal action pack.",
         );
       }
       const raw = ctx.body as Record<string, unknown>;
@@ -20351,22 +20354,42 @@ function buildRoutes(): RouteDefinition[] {
           ? raw.personaSnippet.replace(/\s+/gu, " ").trim().slice(0, 160)
           : "";
 
+      let voiceProfile = normalizeBotAudioVoiceProfileV1(undefined);
       if (ownerKind === "bot") {
         const bot = db
           .prepare(
-            `SELECT name, system_prompt FROM bots
+            `SELECT name, system_prompt, authored_audio_voice_profile,
+                    audio_voice_profile_override
+               FROM bots
               WHERE id = ? AND user_id = ?`,
           )
           .get(ownerId, userId) as
-          | { name: string; system_prompt: string | null }
+          | {
+              name: string;
+              system_prompt: string | null;
+              authored_audio_voice_profile: string | null;
+              audio_voice_profile_override: string | null;
+            }
           | undefined;
         if (!bot) throw new HttpError(404, "Bot not found.");
         if (!ownerLabel) ownerLabel = bot.name.trim() || "this bot";
         if (!personaSnippet && typeof bot.system_prompt === "string") {
           personaSnippet = bot.system_prompt.replace(/\s+/gu, " ").trim().slice(0, 160);
         }
-      } else if (!ownerLabel) {
-        ownerLabel = "the player";
+        voiceProfile = resolveBotAudioVoiceProfileV1(
+          bot.authored_audio_voice_profile,
+          bot.audio_voice_profile_override,
+        );
+      } else {
+        if (!ownerLabel) ownerLabel = "the player";
+        voiceProfile =
+          parseStoredBotAudioVoiceProfileV1(user.player_audio_voice_profile) ??
+          normalizeBotAudioVoiceProfileV1(undefined);
+      }
+
+      const voiceId = resolveElevenLabsVoiceId(voiceProfile);
+      if (!voiceId) {
+        throw new HttpError(400, ACTION_SFX_PACK_MISSING_VOICE_MESSAGE);
       }
 
       const userKey = decryptUserKey(userId);
@@ -20400,7 +20423,7 @@ function buildRoutes(): RouteDefinition[] {
         ctx.res.write(`${JSON.stringify(event)}\n`);
       };
       try {
-        writeEvent({ type: "start", total: 21 });
+        writeEvent({ type: "start", total: ACTION_SFX_PACK_CLIP_COUNT });
         const summary = await generateActionSfxPack({
           db,
           userId,
@@ -20409,6 +20432,9 @@ function buildRoutes(): RouteDefinition[] {
           ownerLabel,
           personaSnippet: personaSnippet || null,
           apiKey,
+          voiceId,
+          voiceProfile,
+          voiceModel: normalizeElevenLabsTtsModel(user.elevenlabs_voice_model),
           signal: controller.signal,
           onProgress: (done, total, kind) => {
             writeEvent({ type: "progress", done, total, kind });
@@ -20420,15 +20446,17 @@ function buildRoutes(): RouteDefinition[] {
         void checkPrismCreditMonitorForUser(userId, true);
       } catch (error) {
         if (controller.signal.aborted) return;
-        if (error instanceof ElevenLabsSoundError) {
+        if (error instanceof ElevenLabsVoiceError) {
           const status =
             error.status === 401 || error.status === 403
               ? 401
               : error.status === 429
                 ? 429
-                : error.status === 499
-                  ? 499
-                  : 502;
+                : error.status === 400
+                  ? 400
+                  : error.status === 499
+                    ? 499
+                    : 502;
           if (!streamStarted) {
             throw new HttpError(status, error.message);
           }
@@ -20448,7 +20476,7 @@ function buildRoutes(): RouteDefinition[] {
           error:
             error instanceof Error
               ? error.message
-              : "Action SFX pack generation failed.",
+              : "Vocal action pack generation failed.",
         });
         ctx.res.end();
       } finally {

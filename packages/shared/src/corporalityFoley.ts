@@ -3,8 +3,7 @@
  * with adjacent-bin crossfade for mixed corporality on the Identity slider.
  */
 
-import type { ActionSfxPackKind } from "./actionSfxPack.ts";
-import { isActionSfxPackBodilyKind } from "./actionSfxPack.ts";
+import { isActionSfxBodilyKind } from "./actionSfxPack.ts";
 import { normalizeCorporality } from "./audioVoice.ts";
 
 export { normalizeCorporality } from "./audioVoice.ts";
@@ -114,14 +113,11 @@ export function corporalityStockClipPath(
 }
 
 export function corporalityStockClipPathsForMix(args: {
-  kind: CorporalityStockKind | ActionSfxPackKind;
+  kind: CorporalityStockKind | string;
   corporality: number;
   variantIndex: number;
 }): { left: string; right: string; mix: CorporalityBinMix } | null {
-  if (
-    !isCorporalityStockKind(args.kind) &&
-    !isActionSfxPackBodilyKind(args.kind)
-  ) {
+  if (!isCorporalityStockKind(args.kind) && !isActionSfxBodilyKind(args.kind)) {
     return null;
   }
   const kind = args.kind as CorporalityStockKind;

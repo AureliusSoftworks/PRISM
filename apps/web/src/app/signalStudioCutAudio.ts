@@ -9,6 +9,7 @@ import type {
   BotcastSoundboardCueKind,
 } from "@localai/shared";
 import {
+  isActionSfxPackKind,
   normalizeBotcastStudioAtmosphereMix,
   normalizeCorporality,
 } from "@localai/shared";
@@ -342,7 +343,7 @@ export async function prepareSignalStudioCut(
           ? event.payload.packOwnerId
           : null;
       const packUrl =
-        typeof window !== "undefined"
+        typeof window !== "undefined" && isActionSfxPackKind(actionKind)
           ? (
               await resolveActionSfxPackPlayback({
                 origin: window.location.origin,

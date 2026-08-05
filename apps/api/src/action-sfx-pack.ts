@@ -1,6 +1,9 @@
 /**
- * Local action SFX pack persistence and ElevenLabs generation.
- * Packs stay off bot Marketplace export; account backup includes them.
+ * Local vocal Action SFX packs — generated through the owner's real
+ * ElevenLabs Premium voice (TTS audio tags). Packs stay off bot Marketplace
+ * export; account backup includes them.
+ *
+ * Bodily gags (fart / burp / cough) are never stored here.
  */
 
 import { randomBytes } from "node:crypto";
@@ -10,20 +13,25 @@ import {
   ACTION_SFX_PACK_KINDS,
   ACTION_SFX_PACK_VARIANT_COUNT,
   ACTION_SFX_PACK_VERSION,
-  actionSfxPackDurationSeconds,
   actionSfxPackOwnerIdFor,
-  buildActionSfxPackPrompt,
+  actionSfxPackTtsSeed,
+  buildActionSfxPackTtsText,
   isActionSfxPackKind,
+  normalizeBotAudioVoiceProfileV1,
   type ActionSfxPackKind,
   type ActionSfxPackOwnerKind,
   type ActionSfxPackSummaryV1,
+  type BotAudioVoiceProfileV1,
 } from "@localai/shared";
 import {
-  ElevenLabsSoundError,
-  requestActionSfxPackClip,
-} from "./elevenlabs-sound.ts";
+  ElevenLabsVoiceError,
+  requestElevenLabsSpeech,
+} from "./voices.ts";
 
 export const ACTION_SFX_PACK_CLIP_MAX_BYTES = 512 * 1024;
+
+export const ACTION_SFX_PACK_MISSING_VOICE_MESSAGE =
+  "Assign a Premium voice before generating a vocal action pack.";
 
 export interface ActionSfxPackClipRow {
   kind: ActionSfxPackKind;
@@ -60,6 +68,11 @@ function randomId(bytes = 12): string {
   return randomBytes(bytes).toString("hex");
 }
 
+/** v2 TTS takes store short audio-tag seeds; reject legacy sound-gen prompts. */
+function looksLikeVocalTtsPromptSeed(seed: string): boolean {
+  return /^\[[^\]]{2,48}\]$/u.test(seed.trim());
+}
+
 export function getActionSfxPackSummary(
   db: DatabaseSync,
   userId: string,
@@ -68,28 +81,36 @@ export function getActionSfxPackSummary(
 ): ActionSfxPackSummaryV1 | null {
   const rows = db
     .prepare(
-      `SELECT kind, pack_generation_id, created_at
+      `SELECT kind, prompt_seed, pack_generation_id, created_at
          FROM action_sfx_pack_clips
         WHERE user_id = ? AND owner_kind = ? AND owner_id = ?
         ORDER BY created_at DESC`,
     )
     .all(userId, ownerKind, ownerId) as Array<{
     kind: string;
+    prompt_seed: string;
     pack_generation_id: string;
     created_at: string;
   }>;
   if (rows.length === 0) return null;
-  const kinds = ACTION_SFX_PACK_KINDS.filter((kind) =>
-    rows.some((row) => row.kind === kind),
+  // Ignore legacy bodily rows and pre-v2 sound-gen takes.
+  const vocalRows = rows.filter(
+    (row) =>
+      isActionSfxPackKind(row.kind) &&
+      looksLikeVocalTtsPromptSeed(row.prompt_seed),
   );
-  const latest = rows[0]!;
+  if (vocalRows.length === 0) return null;
+  const kinds = ACTION_SFX_PACK_KINDS.filter((kind) =>
+    vocalRows.some((row) => row.kind === kind),
+  );
+  const latest = vocalRows[0]!;
   return {
     v: ACTION_SFX_PACK_VERSION,
     ownerKind,
     ownerId,
     packGenerationId: latest.pack_generation_id,
     createdAt: latest.created_at,
-    clipCount: rows.length,
+    clipCount: vocalRows.length,
     kinds,
   };
 }
@@ -275,13 +296,21 @@ export async function generateActionSfxPack(args: {
   ownerLabel: string;
   personaSnippet?: string | null;
   apiKey: string;
+  voiceId: string;
+  voiceProfile: BotAudioVoiceProfileV1;
+  voiceModel?: unknown;
   signal?: AbortSignal;
   onProgress?: (done: number, total: number, kind: ActionSfxPackKind) => void;
   fetchImpl?: typeof fetch;
 }): Promise<ActionSfxPackSummaryV1> {
+  const voiceId = args.voiceId.trim();
+  if (!voiceId) {
+    throw new ElevenLabsVoiceError(400, ACTION_SFX_PACK_MISSING_VOICE_MESSAGE);
+  }
   const ownerId = actionSfxPackOwnerIdFor(args.ownerKind, args.botId);
   const packGenerationId = randomId(8);
   const createdAt = new Date().toISOString();
+  const profile = normalizeBotAudioVoiceProfileV1(args.voiceProfile);
   const clips: Array<{
     kind: ActionSfxPackKind;
     variantIndex: number;
@@ -297,26 +326,48 @@ export async function generateActionSfxPack(args: {
       variantIndex += 1
     ) {
       if (args.signal?.aborted) {
-        throw new ElevenLabsSoundError(499, "Action SFX pack generation aborted.");
+        throw new ElevenLabsVoiceError(
+          499,
+          "Vocal action pack generation aborted.",
+        );
       }
-      const promptSeed = buildActionSfxPackPrompt({
+      const promptSeed = buildActionSfxPackTtsText({ kind, variantIndex });
+      const seed = actionSfxPackTtsSeed({
+        ownerId,
         kind,
         variantIndex,
-        ownerLabel: args.ownerLabel,
-        personaSnippet: args.personaSnippet,
+        packGenerationId,
       });
-      const sound = await requestActionSfxPackClip({
+      const response = await requestElevenLabsSpeech({
         apiKey: args.apiKey,
-        prompt: promptSeed,
-        durationSeconds: actionSfxPackDurationSeconds(kind),
+        voiceId,
+        model: args.voiceModel ?? "eleven_v3",
+        text: promptSeed,
+        profile,
+        seed,
         signal: args.signal,
         fetchImpl: args.fetchImpl,
       });
+      const audioBytes = Buffer.from(await response.arrayBuffer());
+      if (
+        audioBytes.length === 0 ||
+        audioBytes.length > ACTION_SFX_PACK_CLIP_MAX_BYTES
+      ) {
+        throw new ElevenLabsVoiceError(
+          502,
+          `ElevenLabs returned an unusable ${kind} take.`,
+        );
+      }
+      const contentType =
+        response.headers.get("content-type")?.split(";")[0]?.trim() ||
+        "audio/mpeg";
       clips.push({
         kind,
         variantIndex,
-        contentType: sound.contentType,
-        audioBytes: sound.audioBytes,
+        contentType: contentType.startsWith("audio/")
+          ? contentType
+          : "audio/mpeg",
+        audioBytes,
         promptSeed,
       });
       done += 1;

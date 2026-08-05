@@ -967,7 +967,8 @@ describe("mode tutorials", () => {
       /one of four built-in PRISM/,
     );
     assert.match(automaticThinkingSfx?.body ?? "", /Computer calculating/);
-    assert.match(automaticThinkingSfx?.body ?? "", /local Action SFX pack/);
+    assert.match(automaticThinkingSfx?.body ?? "", /vocal Action pack/);
+    assert.match(automaticThinkingSfx?.body ?? "", /Premium ElevenLabs voice/);
     assert.match(automaticThinkingSfx?.body ?? "", /Corporality/);
     assert.match(automaticThinkingSfx?.body ?? "", /while thinking/);
     assert.match(

@@ -3,8 +3,10 @@
  */
 
 import {
+  isActionSfxBodilyKind,
   isActionSfxPackKind,
   signalFancyActionCueText,
+  type ActionSfxBodilyKind,
   type ActionSfxPackKind,
   type ActionSfxPackOwnerKind,
   type ReplayDirectionEventV2,
@@ -15,9 +17,11 @@ import { buildBundledActionSfxPlan } from "./coffee-action-sfx.ts";
 
 export const SIGNAL_ACTION_SFX_DIRECTION_KIND = "action_sfx" as const;
 
+export type SignalActionSfxKind = ActionSfxPackKind | ActionSfxBodilyKind;
+
 export interface SignalActionSfxDirectionPayload {
   kind: typeof SIGNAL_ACTION_SFX_DIRECTION_KIND;
-  actionKind: ActionSfxPackKind;
+  actionKind: SignalActionSfxKind;
   seed: string;
   packOwnerKind: ActionSfxPackOwnerKind;
   packOwnerId?: string | null;
@@ -28,7 +32,12 @@ export function isSignalActionSfxDirectionPayload(
   payload: Record<string, unknown> | null | undefined,
 ): payload is Record<string, unknown> & SignalActionSfxDirectionPayload {
   if (!payload || payload.kind !== SIGNAL_ACTION_SFX_DIRECTION_KIND) return false;
-  if (!isActionSfxPackKind(payload.actionKind)) return false;
+  if (
+    !isActionSfxPackKind(payload.actionKind) &&
+    !isActionSfxBodilyKind(payload.actionKind)
+  ) {
+    return false;
+  }
   return (
     payload.packOwnerKind === undefined ||
     payload.packOwnerKind === "bot" ||
@@ -51,7 +60,7 @@ export function signalActionSfxCueTextForUtterance(
 }
 
 export function buildSignalActionSfxDirectionPayload(args: {
-  actionKind: ActionSfxPackKind;
+  actionKind: SignalActionSfxKind;
   sourceMessageId: string;
   packOwnerKind?: ActionSfxPackOwnerKind;
   packOwnerId?: string | null;

@@ -52,12 +52,15 @@ export function ActionSfxPackMagicButton({
   ownerId,
   ownerLabel,
   personaSnippet,
+  hasPremiumVoice = true,
   className,
 }: {
   ownerKind: ActionSfxPackOwnerKind;
   ownerId?: string | null;
   ownerLabel: string;
   personaSnippet?: string | null;
+  /** When false, generation is disabled until a Premium ElevenLabs voice is set. */
+  hasPremiumVoice?: boolean;
   className?: string;
 }): React.JSX.Element {
   const sampleSelectId = useId();
@@ -106,13 +109,17 @@ export function ActionSfxPackMagicButton({
   const generate = async (): Promise<void> => {
     if (busy || typeof window === "undefined") return;
     if (ownerKind === "bot" && !ownerId?.trim()) {
-      setStatus("Save this bot before generating an action pack.");
+      setStatus("Save this bot before generating a vocal action pack.");
+      return;
+    }
+    if (!hasPremiumVoice) {
+      setStatus("Assign a Premium voice before generating a vocal action pack.");
       return;
     }
     if (
       pack &&
       !window.confirm(
-        "Regenerate replaces all 21 local action sounds for this owner. Continue?",
+        `Regenerate replaces all ${ACTION_SFX_PACK_CLIP_COUNT} local vocal reaction takes for this owner. Continue?`,
       )
     ) {
       return;
@@ -142,12 +149,12 @@ export function ActionSfxPackMagicButton({
         ownerKind === "player" ? "player" : (ownerId ?? ""),
         true,
       );
-      setStatus("Action pack ready on this machine.");
+      setStatus("Vocal action pack ready on this machine.");
     } catch (error) {
       setStatus(
         error instanceof Error
           ? error.message
-          : "Could not generate the action pack.",
+          : "Could not generate the vocal action pack.",
       );
     } finally {
       setBusy(false);
@@ -194,6 +201,8 @@ export function ActionSfxPackMagicButton({
   const readyLabel = pack
     ? `Ready · ${new Date(pack.createdAt).toLocaleDateString()}`
     : null;
+  const canGenerate =
+    hasPremiumVoice && !(ownerKind === "bot" && !ownerId?.trim());
 
   return (
     <div
@@ -201,27 +210,32 @@ export function ActionSfxPackMagicButton({
       data-action-sfx-pack-magic="true"
       data-owner-kind={ownerKind}
       data-pack-ready={pack ? "true" : undefined}
+      data-has-premium-voice={hasPremiumVoice ? "true" : "false"}
     >
       <div className={styles.actionSfxPackMagicRow}>
         <button
           type="button"
           className={styles.actionSfxPackMagicButton}
-          disabled={busy || (ownerKind === "bot" && !ownerId?.trim())}
+          disabled={busy || !canGenerate}
           onClick={() => void generate()}
           aria-label={
             pack
-              ? "Regenerate local action SFX pack"
-              : "Generate local action SFX pack"
+              ? "Regenerate local vocal action pack"
+              : "Generate local vocal action pack"
           }
-          title="Optional local Action SFX pack — laughs, sighs, bodily bits. Stays on this machine; not exported with the bot."
+          title={
+            hasPremiumVoice
+              ? "Generate laughs, sighs, gasps, and throat clears in this Premium voice. Stays on this machine; not exported with the bot."
+              : "Assign a Premium ElevenLabs voice before generating a vocal action pack."
+          }
         >
           <Sparkles size={13} strokeWidth={2.3} aria-hidden="true" />
           <span>
             {busy
               ? (progressLabel ?? "Generating…")
               : pack
-                ? "Regenerate action pack"
-                : "Generate action pack"}
+                ? "Regenerate vocal action pack"
+                : "Generate vocal action pack"}
           </span>
         </button>
         {pack ? (
@@ -240,7 +254,7 @@ export function ActionSfxPackMagicButton({
               className={styles.actionSfxPackSampleSelect}
               value={sampleClip}
               disabled={busy}
-              aria-label="Choose an action pack clip to sample"
+              aria-label="Choose a vocal action pack clip to sample"
               onChange={(event) => setSampleClip(event.currentTarget.value)}
             >
               {SAMPLE_CLIP_OPTIONS.map((option) => (
@@ -255,8 +269,8 @@ export function ActionSfxPackMagicButton({
               disabled={busy}
               aria-label={
                 samplePlaying
-                  ? "Playing selected action pack clip"
-                  : "Play selected action pack clip"
+                  ? "Playing selected vocal action pack clip"
+                  : "Play selected vocal action pack clip"
               }
               onClick={() => void playSample()}
             >
@@ -270,7 +284,9 @@ export function ActionSfxPackMagicButton({
         <small className={styles.actionSfxPackMagicReady}>{readyLabel}</small>
       ) : (
         <small className={styles.actionSfxPackMagicHint}>
-          Optional · local Foley for Fancy Actions &amp; Coffee
+          {hasPremiumVoice
+            ? "Optional · laughs, sighs, gasps & throat clears in this voice"
+            : "Assign a Premium voice to unlock vocal action packs"}
         </small>
       )}
       {status ? (
