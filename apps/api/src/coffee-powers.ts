@@ -9,6 +9,8 @@ import {
   botPowerAddressedFandomCueFromEffectsV1,
   botPowerCandorResponseRuleV1,
   botPowerCandorTriggerV1,
+  botPowerCredulitySelfRuleV1,
+  botPowerAntiTruthSelfRuleV1,
   botPowerEternallyIntroducesFromEffectsV1,
   botPowerForgetfulPriorMessagesV1,
   botPowerObserverCueLinesV1,
@@ -1096,6 +1098,14 @@ export function coffeePowersPromptForSpeaker(
           ? `${responseBudget.enforcement === "hard" ? "Hard" : "Soft"} response budget: use no more than two concise table sentences.`
           : "Response tendency: offer a fuller answer only when there is real substance; never pad the turn.",
     );
+  }
+  const credulity = own?.effects.find((effect) => effect.type === "credulity");
+  if (credulity?.type === "credulity") {
+    lines.push(botPowerCredulitySelfRuleV1(credulity.strength));
+  }
+  const antiTruth = own?.effects.find((effect) => effect.type === "anti_truth");
+  if (antiTruth?.type === "anti_truth") {
+    lines.push(botPowerAntiTruthSelfRuleV1(antiTruth.strength));
   }
   const candorRule = coffeePowerCandorPromptForTurn({
     plan,

@@ -41304,6 +41304,10 @@ function BotPowerBadge({
     }
     if (effect.type === "candor")
       return `${effect.strength} one-response candor pressure on ${targetNames(effect.targets)}`;
+    if (effect.type === "credulity")
+      return `${effect.strength} gullible belief of every claim`;
+    if (effect.type === "anti_truth")
+      return `${effect.strength} anti-truth (soft lies; hard invert on questions)`;
     if (effect.type === "mood_resistance")
       return `${effect.strength} ${effect.polarity} mood resistance`;
     if (effect.type === "cup_rate")

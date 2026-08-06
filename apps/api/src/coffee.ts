@@ -51,6 +51,7 @@ import {
   type ProviderMessage,
   type ProviderName,
 } from "./providers.ts";
+import { rewriteBotPowerAntiTruthAnswerV1 } from "./bot-powers.ts";
 import {
   ABOUT_YOU_MEMORY_SOURCE,
   extractBotPreferredAddressMemoryCandidates,
@@ -249,6 +250,7 @@ import {
   resolveFinalStageActionV1,
   resolveBotAudioVoiceProfileV1,
   rewriteBotFalseNameResponseV1,
+  botPowerIsAddressedQuestionV1,
   stageActionPersonaInvitePromptV1,
   stageActionSpeechOnlyPromptV1,
   pickCoffeeInterruptionReaction,
@@ -18014,6 +18016,21 @@ async function generateCoffeeBotReply(args: {
       speakerHardResponseBudget,
       speakerHardResponseBudget?.mode === "minimal" && !requiredBeat ? 1 : 2,
     );
+  }
+  if (
+    !speakerUsesHardResponse &&
+    !socialSilenceMarker &&
+    !speakerIsMutedForTurn &&
+    coffeePowerPlan?.bots[speaker.id]?.effects.some(
+      (effect) => effect.type === "anti_truth",
+    ) &&
+    botPowerIsAddressedQuestionV1(speakerTableFocus)
+  ) {
+    replyText = await rewriteBotPowerAntiTruthAnswerV1({
+      provider: coffeeAuxiliaryProvider(settings),
+      question: speakerTableFocus,
+      draftAnswer: replyText,
+    });
   }
   // Promote any plain `@Name` / bare-name peer references into prism-bot mention
   // markdown so the client renders the chip + lights the notified glyph on the

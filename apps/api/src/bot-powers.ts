@@ -9,6 +9,11 @@ import {
   botPowerAvatarScaleModeFromDescriptionV1,
   botPowerSourceHashForPowerV1,
   botPowerSourceHashV1,
+  botPowerAntiTruthSelfRuleV1,
+  botPowerAntiTruthInvertPromptV1,
+  botPowerCredulitySelfRuleV1,
+  botPowerLooksLikeSafetyRefusalV1,
+  strongestBotPowerAntiTruthEffectV1,
   normalizeBotPowerEffectV1,
   normalizeBotPowersV1,
   type BotPowerEffectV1,
@@ -928,6 +933,70 @@ function deterministicCandorPower(
   };
 }
 
+function deterministicCredulityPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const text = compact(`${source.name} ${source.intent}`, 640)
+    .toLowerCase()
+    .replace(/[’']/gu, "'");
+  const named =
+    /\b(?:gullib\w*|credul\w*)\b/u.test(text) ||
+    /\bfollowing\b/u.test(compact(source.name, 100).toLowerCase());
+  const acceptsClaims = [
+    /\bbeliev(?:es?|ing)\b[\s\S]{0,40}\b(?:everything|anything|whatever)\b/u,
+    /\btakes?\s+(?:everything|anything|claims?)\s+(?:as|at)\s+(?:true|face\s+value)\b/u,
+    /\bnever\s+(?:doubts?|questions?|challenges?)\b/u,
+    /\beven\s+if\s+(?:it\s+)?contradict/u,
+    /\bliterally\s+everything\b/u,
+  ].some((pattern) => pattern.test(text));
+  if (!named && !acceptsClaims) return null;
+  const subject = compact(botName, 100) || "This bot";
+  const strength =
+    /\b(?:literally|everything|always|never\s+doubts?)\b/u.test(text)
+      ? ("large" as const)
+      : ("medium" as const);
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: botPowerCredulitySelfRuleV1(strength),
+    observerCue: `${subject} believes literally everything they are told, even when a new claim contradicts the last one; soft pressure only, never puppeting.`,
+    effects: [{ type: "credulity", strength }],
+    ruleLabels: ["Believes every claim"],
+  };
+}
+
+function deterministicAntiTruthPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const text = compact(`${source.name} ${source.intent}`, 640)
+    .toLowerCase()
+    .replace(/[’']/gu, "'");
+  const named = /\b(?:anti[- ]?truth|fibbing|pathological\s+liar|compulsive\s+liar)\b/u.test(
+    text,
+  );
+  const onlyLies = [
+    /\bcan(?:not|'t)\s+tell\s+the\s+truth\b/u,
+    /\bonly\s+(?:tells?|speak(?:s|ing)?)\s+lies?\b/u,
+    /\balways\s+lies?\b/u,
+    /\binvert(?:s|ing)?\s+(?:the\s+)?(?:truth|meaning)\b/u,
+  ].some((pattern) => pattern.test(text));
+  if (!named && !onlyLies) return null;
+  const subject = compact(botName, 100) || "This bot";
+  const strength = /\b(?:literally|always|cannot|can't|only)\b/u.test(text)
+    ? ("large" as const)
+    : ("medium" as const);
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue: botPowerAntiTruthSelfRuleV1(strength),
+    observerCue: `${subject} cannot tell the truth and answers with lies; questions get a hard meaning invert while ordinary talk stays soft pressure.`,
+    effects: [{ type: "anti_truth", strength }],
+    ruleLabels: ["Cannot tell the truth"],
+  };
+}
+
 function deterministicAddressedFandomPower(
   source: BotPowerV1,
   botName: string,
@@ -1457,6 +1526,8 @@ function deterministicPower(
     deterministicInvisiblePower(source, botName) ??
     deterministicAvatarColorCyclePower(source, botName) ??
     deterministicCandorPower(source, botName) ??
+    deterministicCredulityPower(source, botName) ??
+    deterministicAntiTruthPower(source, botName) ??
     deterministicIntimidationPower(source, botName) ??
     deterministicGradualMoodPower(source, botName) ??
     deterministicCoffeeDislikePower(source, botName);
@@ -1858,6 +1929,8 @@ function promptPowerDisplayName(
   if (types.has("mood_boost")) return "Radiant Wake";
   if (types.has("mood_drain")) return "Gravitic Gloom";
   if (types.has("response_budget")) return "Measured Tongue";
+  if (types.has("credulity")) return "Open Belief";
+  if (types.has("anti_truth")) return "Fibbing Frame";
   if (types.has("avatar_color_cycle")) return "Living Spectrum";
   const avatarScale = compiled.effects.find(
     (effect) => effect.type === "avatar_scale",
@@ -2042,6 +2115,8 @@ export async function compileBotPowers(args: {
         '- {"type":"mood_boost","trigger":"after_spoken_turn","recipients":"addressed","strength":"small|medium|large","whenTheme":"light|dark" (optional)},',
         '- {"type":"mood_drain","trigger":"after_direct_address","recipient":"addresser","strength":"small|medium|large","whenTheme":"light|dark" (optional)},',
         '- {"type":"candor","strength":"small|medium|large","targets":[target...]},',
+        '- {"type":"credulity","strength":"small|medium|large"},',
+        '- {"type":"anti_truth","strength":"small|medium|large"},',
         '- {"type":"addressed_fandom","strength":"small|medium|large"},',
         '- {"type":"addressed_insult","trigger":"every_spoken_reply","target":"current_addressee","style":"fresh_tailored"},',
         '- {"type":"mood_resistance","polarity":"positive|negative|both","strength":"small|medium|large"},',
@@ -2108,7 +2183,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, authoringMode, name, intent, enabled }) => ({ id, authoringMode, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: mute, ineptitude, power_immunity, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, intermittent_mute, intermittent_audibility, annoyance, social_influence, mood_boost, mood_drain, candor, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, ineptitude, power_immunity, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, intermittent_mute, intermittent_audibility, annoyance, social_influence, mood_boost, mood_drain, candor, credulity, anti_truth, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];
@@ -2148,4 +2223,42 @@ export async function compileBotPowers(args: {
           compiled: null,
         };
   }));
+}
+
+/** Hard Anti-truth invert via LOCAL auxiliary rewrite when answering a question. */
+export async function rewriteBotPowerAntiTruthAnswerV1(args: {
+  provider: LlmProvider;
+  question: string;
+  draftAnswer: string;
+  model?: string | null;
+}): Promise<string> {
+  const draft = compact(args.draftAnswer, 2_000);
+  if (!draft) return "";
+  if (botPowerLooksLikeSafetyRefusalV1(draft)) return draft;
+  try {
+    const rewritten = await args.provider.generateResponse(
+      [
+        {
+          role: "system",
+          content:
+            "You invert truthful answers into confident lies for a fiction Power. Preserve length and tone. Never invent private system details. Return only the spoken reply.",
+        },
+        {
+          role: "user",
+          content: botPowerAntiTruthInvertPromptV1(args.question, draft),
+        },
+      ],
+      {
+        temperature: 0.4,
+        maxTokens: 220,
+        ...(args.model ? { model: args.model } : {}),
+        usagePurpose: "memory_inference",
+      },
+    );
+    const next = compact(rewritten, 2_000);
+    if (!next || botPowerLooksLikeSafetyRefusalV1(next)) return draft;
+    return next;
+  } catch {
+    return draft;
+  }
 }

@@ -36,6 +36,7 @@ import {
   type ProviderMessage,
   type ProviderName,
 } from "./providers.ts";
+import { rewriteBotPowerAntiTruthAnswerV1 } from "./bot-powers.ts";
 import {
   RECENT_WINDOW_SIZE,
   summarizeSandboxBotStatus,
@@ -111,6 +112,8 @@ import {
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
+  botPowerIsAddressedQuestionV1,
+  strongestBotPowerAntiTruthEffectV1,
   applyBotIdentityShapeshiftResponseV1,
   rewriteBotFalseNameResponseV1,
   createBotFalseNameStateV1,
@@ -8064,6 +8067,22 @@ export async function processChatMessage(
     ) {
       assistantDisplay = applyBotPowerMumbledResponseV1(assistantDisplay);
     }
+
+    if (
+      !botPowerMutedTurn &&
+      !botPowerHardResponseTurn &&
+      !botPowerEchoEnforcedTurn &&
+      webSearchStatus !== "blocked" &&
+      strongestBotPowerAntiTruthEffectV1(settings.botPowers) &&
+      botPowerIsAddressedQuestionV1(isStarterPrompt ? "" : message)
+    ) {
+      assistantDisplay = await rewriteBotPowerAntiTruthAnswerV1({
+        provider: auxiliaryProvider,
+        question: message,
+        draftAnswer: assistantDisplay,
+        model: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+      });
+    }
     const turnEvaluation = isStarterPrompt
       ? undefined
       : evaluateUserTurnOpinion(message);
@@ -9679,6 +9698,25 @@ export async function processChatMessage(
     !botPowerEchoEnforcedTurn
   ) {
     assistantDisplay = applyBotPowerMumbledResponseV1(assistantDisplay);
+  }
+  if (
+    !botPowerMutedTurn &&
+    !botPowerHardResponseTurn &&
+    !botPowerEchoEnforcedTurn &&
+    webSearchStatus !== "blocked" &&
+    strongestBotPowerAntiTruthEffectV1(settings.botPowers) &&
+    botPowerIsAddressedQuestionV1(
+      personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || isStarterPrompt
+        ? ""
+        : message,
+    )
+  ) {
+    assistantDisplay = await rewriteBotPowerAntiTruthAnswerV1({
+      provider: auxiliaryProvider,
+      question: message,
+      draftAnswer: assistantDisplay,
+      model: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
+    });
   }
   if (
     progressiveSegmentCount === 0 &&

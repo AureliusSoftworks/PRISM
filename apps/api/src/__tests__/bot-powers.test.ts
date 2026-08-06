@@ -3083,3 +3083,55 @@ test("hidden speakers cannot alter unaware bots through post-speech powers", () 
   assert.ok(Math.abs((next.light?.disposition ?? 0) - 0.34) < 1e-9);
   assert.equal(next.harry?.disposition, 0.5);
 });
+
+test("compiler recovers Gullible / Following as hard-named soft credulity", async () => {
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() { throw new Error("provider should not be needed"); },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Following Jackson",
+    powers: [{
+      version: 1,
+      id: "gullible",
+      name: "Gullible",
+      intent: "Believes literally everything he is told, even when it contradicts the last statement.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "credulity",
+    strength: "large",
+  }]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Credulity/u);
+});
+
+test("compiler recovers Anti-truth / Fibbing as soft anti_truth", async () => {
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() { throw new Error("provider should not be needed"); },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Fibbing Phil",
+    powers: [{
+      version: 1,
+      id: "anti-truth",
+      name: "Anti-Truth",
+      intent: "Literally cannot tell the truth; can only tell lies. If a truthful answer appears, invert the meaning.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "anti_truth",
+    strength: "large",
+  }]);
+  assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Anti-truth/u);
+});

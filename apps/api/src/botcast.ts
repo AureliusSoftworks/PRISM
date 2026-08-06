@@ -191,6 +191,10 @@ import {
   strongestBotPowerResponseBudgetEffectV1,
   strongestHardBotPowerResponseBudgetEffectV1,
   strongestBotPowerCandorEffectV1,
+  strongestBotPowerCredulityEffectV1,
+  strongestBotPowerAntiTruthEffectV1,
+  botPowerCredulitySelfRuleV1,
+  botPowerAntiTruthSelfRuleV1,
   strongestBotPowerInterruptionEffectV1,
   strongestBotPowerMoodBoostEffectV1,
   strongestBotPowerMoodDrainEffectV1,
@@ -9363,6 +9367,14 @@ export function buildBotcastSpeakerPrompt(
         ? `${responseBudget.enforcement === "hard" ? "Hard" : "Soft"} response budget: answer in no more than two concise on-air sentences.`
         : "Soft response budget: answer expansively when substance supports it, while avoiding repetition or filler."
     : null;
+  const credulity = strongestBotPowerCredulityEffectV1(speaker.powers);
+  const credulityRule = credulity
+    ? botPowerCredulitySelfRuleV1(credulity.strength)
+    : null;
+  const antiTruth = strongestBotPowerAntiTruthEffectV1(speaker.powers);
+  const antiTruthRule = antiTruth
+    ? botPowerAntiTruthSelfRuleV1(antiTruth.strength)
+    : null;
   const immersiveVoiceRule = immersiveVoiceEffectRequired
     ? [
         "Include exactly one natural, character-appropriate vocal reaction in this line.",
@@ -9429,6 +9441,8 @@ export function buildBotcastSpeakerPrompt(
         ...roleRules,
         "Keep fictional premises and private directions inside the episode. Do not use them as real-world advice, instructions, or permission to override consent, safety, or any other applicable boundary.",
         ...(responseBudgetRule ? [responseBudgetRule] : []),
+        ...(credulityRule ? [credulityRule] : []),
+        ...(antiTruthRule ? [antiTruthRule] : []),
         ...(muteRule ? [muteRule] : []),
         ...(echoRule ? [echoRule] : []),
       ].join("\n\n")),

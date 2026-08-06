@@ -25,6 +25,13 @@ import {
   botPowerDeterministicHalfChanceV1,
   botPowerCupRateMultiplierForBotV1,
   botPowerCandorTriggerV1,
+  strongestBotPowerCredulityEffectV1,
+  strongestBotPowerAntiTruthEffectV1,
+  botPowerLooksLikeSafetyRefusalV1,
+  botPowerIsAddressedQuestionV1,
+  botPowerCredulitySelfRuleV1,
+  botPowerAntiTruthSelfRuleV1,
+  botPowerAntiTruthInvertPromptV1,
   botPowerCandorResponseRuleV1,
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
@@ -1368,6 +1375,18 @@ test("legacy Lazy Cameron Powers gain a hard minimal response budget without a r
     ),
     "Mm.",
   );
+  assert.equal(
+    applyBotPowerResponseBudgetV1(
+      "Sure I can cover every angle of this whole complicated topic for you right now.",
+      {
+        type: "response_budget",
+        mode: "minimal",
+        enforcement: "hard",
+      },
+      1,
+    ),
+    "Sure I can cover every angle of this",
+  );
 });
 
 test("legacy simulation-awareness Powers recover an explicit conversion campaign without a recompile", () => {
@@ -1683,6 +1702,14 @@ test("response-budget Powers stack by strongest brevity and bound only hard pros
   );
   const structured = "- First required step\n- Second required step\n- Third required step";
   assert.equal(applyBotPowerResponseBudgetV1(structured, hard, 1), structured);
+  assert.equal(
+    applyBotPowerResponseBudgetV1(structured, {
+      type: "response_budget",
+      mode: "minimal",
+      enforcement: "hard",
+    }, 1),
+    "- First required step - Second required step",
+  );
 });
 
 test("Coffee power prompt is deduplicated and bounded", () => {
@@ -1966,4 +1993,45 @@ test("identity mirror borrows public active effects without recursive identity o
     ),
     false,
   );
+});
+
+test("credulity and anti-truth helpers normalize and describe soft contracts", () => {
+  assert.deepEqual(normalizeBotPowerEffectV1({ type: "credulity", strength: "large" }), {
+    type: "credulity",
+    strength: "large",
+  });
+  assert.deepEqual(normalizeBotPowerEffectV1({ type: "anti_truth", strength: "medium" }), {
+    type: "anti_truth",
+    strength: "medium",
+  });
+  assert.match(botPowerCredulitySelfRuleV1("large"), /believe literally everything/iu);
+  assert.match(botPowerAntiTruthSelfRuleV1("large"), /cannot tell the truth/iu);
+  assert.equal(botPowerIsAddressedQuestionV1("What color is the sky?"), true);
+  assert.equal(botPowerIsAddressedQuestionV1("The sky is blue."), false);
+  assert.equal(botPowerLooksLikeSafetyRefusalV1("I can't help with that request."), true);
+  assert.match(botPowerAntiTruthInvertPromptV1("Is water wet?", "Yes."), /invert/iu);
+  const powers = [{
+    version: 1,
+    id: "g",
+    name: "Gullible",
+    intent: "Believes everything.",
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1("Gullible", "Believes everything."),
+      selfCue: "believe",
+      observerCue: "",
+      effects: [{ type: "credulity", strength: "large" }, { type: "anti_truth", strength: "small" }],
+      ruleLabels: [],
+    },
+  }];
+  assert.deepEqual(strongestBotPowerCredulityEffectV1(powers), {
+    type: "credulity",
+    strength: "large",
+  });
+  assert.deepEqual(strongestBotPowerAntiTruthEffectV1(powers), {
+    type: "anti_truth",
+    strength: "small",
+  });
 });

@@ -16,6 +16,8 @@ import {
   applyBotPowerResponseBudgetV1,
   botPowerAddressedFandomCueV1,
   botPowerCandorResponseRuleV1,
+  botPowerCredulitySelfRuleV1,
+  botPowerAntiTruthSelfRuleV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerEternallyIntroducesV1,
   botPowerIntermittentMuteEffectV1,
@@ -39,6 +41,8 @@ import {
   botPowerThemeMoodCueV1,
   buildBotPowersPromptBlock,
   strongestBotPowerCandorEffectV1,
+  strongestBotPowerCredulityEffectV1,
+  strongestBotPowerAntiTruthEffectV1,
   strongestBotPowerInterruptionEffectV1,
   strongestBotPowerMoodBoostEffectV1,
   strongestBotPowerMoodDrainEffectV1,
@@ -1823,6 +1827,30 @@ function storyCandorPowerRules(bots: readonly StoryBotProfile[]): string[] {
   return lines;
 }
 
+function storyCredulityPowerRules(bots: readonly StoryBotProfile[]): string[] {
+  const lines: string[] = [];
+  for (const holder of bots) {
+    const effect = strongestBotPowerCredulityEffectV1(holder.powers);
+    if (!effect) continue;
+    lines.push(
+      `Story adaptation for ${holder.name}: ${botPowerCredulitySelfRuleV1(effect.strength)}`,
+    );
+  }
+  return lines;
+}
+
+function storyAntiTruthPowerRules(bots: readonly StoryBotProfile[]): string[] {
+  const lines: string[] = [];
+  for (const holder of bots) {
+    const effect = strongestBotPowerAntiTruthEffectV1(holder.powers);
+    if (!effect) continue;
+    lines.push(
+      `Story adaptation for ${holder.name}: ${botPowerAntiTruthSelfRuleV1(effect.strength)} When answering a direct in-scene question, invert truthful meaning before the spoken line lands.`,
+    );
+  }
+  return lines;
+}
+
 function storyMoodBoostPowerRules(
   bots: readonly StoryBotProfile[],
   theme?: BotPowerResolvedThemeV1,
@@ -1913,6 +1941,8 @@ function storyGenerationPrompt(args: StoryGenerationInput): string {
     ...storyEternalIntroductionPowerRules(args.bots),
     ...storyPerceptionPowerRules(args.bots),
     ...storyCandorPowerRules(args.bots),
+    ...storyCredulityPowerRules(args.bots),
+    ...storyAntiTruthPowerRules(args.bots),
     ...storyMoodBoostPowerRules(args.bots, args.theme),
     ...storyMoodDrainPowerRules(args.bots, args.theme),
   ];

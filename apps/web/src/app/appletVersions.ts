@@ -45,6 +45,8 @@ export type BotPowerAvatarVisibilityModePolicy = BotPowerGhostModePolicy;
 export type BotPowerVoicePresenceModePolicy = BotPowerGhostModePolicy;
 export type BotPowerSpeechObfuscationModePolicy = BotPowerGhostModePolicy;
 export type BotPowerAddressedFandomModePolicy = BotPowerGhostModePolicy;
+export type BotPowerCredulityModePolicy = BotPowerGhostModePolicy;
+export type BotPowerAntiTruthModePolicy = BotPowerGhostModePolicy;
 export type BotPowerIntermittentMuteModePolicy =
   BotPowerHearingRepeatModePolicy;
 export type BotPowerIntermittentAudibilityModePolicy = BotPowerGhostModePolicy;
@@ -349,6 +351,41 @@ export const BOT_POWER_MUTE_MODE_POLICY: Record<PrismAppletId, BotPowerMuteModeP
   slate: "not_applicable",
   pseudo: "required_before_activation",
   surf: "required_before_activation",
+};
+
+
+/** Exhaustive gullibility policy: holder believes claims; soft cue in 1:1, direct in social modes. */
+export const BOT_POWER_CREDULITY_MODE_POLICY: Record<PrismAppletId, BotPowerCredulityModePolicy> = {
+  chat: "cue",
+  zen: "cue",
+  debate: "direct",
+  polling: "deferred",
+  coffee: "direct",
+  botcast: "direct",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
+};
+
+/** Exhaustive anti-truth policy: soft lies always; hard invert on addressed questions in live modes. */
+export const BOT_POWER_ANTI_TRUTH_MODE_POLICY: Record<PrismAppletId, BotPowerAntiTruthModePolicy> = {
+  chat: "direct",
+  zen: "direct",
+  debate: "adapted",
+  polling: "deferred",
+  coffee: "adapted",
+  botcast: "adapted",
+  feed: "deferred",
+  games: "deferred",
+  story: "adapted",
+  gym: "deferred",
+  slate: "irrelevant",
+  pseudo: "deferred",
+  surf: "deferred",
 };
 
 /** Exhaustive candor policy: future applets cannot inherit social pressure silently. */

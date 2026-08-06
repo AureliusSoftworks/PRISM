@@ -1858,7 +1858,9 @@ function debatePowerPolicy(
     type === "identity_mirror" ||
     type === "identity_shapeshift" ||
     type === "false_name" ||
-    type === "candor"
+    type === "candor" ||
+    type === "credulity" ||
+    type === "anti_truth"
   ) {
     return "direct";
   }
@@ -10347,11 +10349,14 @@ function participantObjectionModeratorDelivery(
   let content = `${
     decision.ruling === "sustained" ? "Sustained" : "Overruled"
   }. ${decision.reason || fallback}`;
-  content = applyBotPowerResponseBudgetV1(
-    content,
-    strongestBotPowerResponseBudgetEffectV1(effects),
-    strongestBotPowerResponseBudgetEffectV1(effects)?.mode === "minimal" ? 1 : 2,
-  );
+  {
+    const responseBudget = strongestBotPowerResponseBudgetEffectV1(effects);
+    content = applyBotPowerResponseBudgetV1(
+      content,
+      responseBudget,
+      responseBudget?.mode === "minimal" ? 1 : 2,
+    );
+  }
   if (effects.some((effect) => effect.type === "speech_obfuscation")) {
     content = applyBotPowerMumbledResponseV1(content);
   }
