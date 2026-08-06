@@ -607,6 +607,21 @@ describe("Debate experience", () => {
       source,
       /Soft prepare — emoji stays as the fallback until the sprite/u,
     );
+    assert.match(source, /Save anytime; the side refract card keeps working/u);
+    assert.match(source, /placement="docked"/u);
+    assert.match(source, /softExhibitJobList/u);
+    assert.match(source, /cancelSoftExhibitSynthesizeJob/u);
+    assert.match(source, /Soft jobs run in parallel after Save/u);
+    assert.match(
+      source,
+      /softExhibitSynthesizeJobs\.length > 0 &&\s*!newDuelGenerateBusy &&\s*!motionOptionsBusy/u,
+    );
+    assert.match(source, /applyDebateEvidenceExhibitSynthesizedImage/u);
+    assert.match(source, /evidenceObjectUploadBusy/u);
+    assert.match(
+      source,
+      /disabled=\{\s*!objectTitle \|\|[\s\S]{0,120}evidenceObjectUploadBusy\s*\}/u,
+    );
     assert.doesNotMatch(source, /generating and cutting out the exhibit/u);
     assert.doesNotMatch(
       source,
@@ -619,7 +634,7 @@ describe("Debate experience", () => {
     assert.match(source, /LIVE_BAKE_POLL_INTERVAL_MS/u);
     assert.match(
       source,
-      /setEvidenceObjectVisualBusy\("synthesize"\)[\s\S]{0,800}\/api\/debates\/exhibits\/synthesize[\s\S]{0,1600}finally \{[\s\S]{0,120}setEvidenceObjectVisualBusy\(null\)/u,
+      /setEvidenceObjectVisualBusy\("synthesize"\)[\s\S]{0,1200}\/api\/debates\/exhibits\/synthesize[\s\S]{0,2200}finally \{[\s\S]{0,220}setEvidenceObjectVisualBusy/u,
     );
     assert.match(source, /<AssetRail[\s\S]{0,180}kind="debate_exhibit"/u);
     assert.match(source, /onSynthesize=\{synthesizeEvidenceObjectImage\}/u);
@@ -1441,22 +1456,32 @@ describe("Debate experience", () => {
     for (const kind of ["player", "verdict", "failed"]) {
       assert.match(source, new RegExp(`data-kind="${kind}"`, "u"));
     }
+    // Spectator ready/pause holds use the full-screen intro title so Proceedings
+    // cannot spoil a hard-synthesized gallery before Start/Resume.
     assert.match(
       source,
-      /data-kind=\{readyToBeginOverlay \? "ready" : "paused"\}/u,
+      /readyToBeginOverlay \|\| session\.playerRole === "spectator"/u,
+    );
+    assert.match(source, /data-hold=\{hold \? "true" : undefined\}/u);
+    assert.match(source, /data-action="start"/u);
+    assert.match(source, /Gallery ready/u);
+    assert.match(source, /Start Debate/u);
+    assert.match(
+      source,
+      /session\.playerRole !== "spectator"[\s\S]{0,220}data-kind="paused"/u,
     );
     assert.match(source, /Debate paused/u);
     assert.match(source, /Resume Debate/u);
-    assert.match(source, /Gallery ready/u);
-    assert.match(source, /Start Debate/u);
     assert.match(
       source,
       /The interrupted line is preserved and will replay from\s+its\s+beginning/u,
     );
     assert.match(
       source,
-      /The proceeding is held until you start, so a long prepare cannot begin while you are away/u,
+      /The proceeding stays covered until you start/u,
     );
+    assert.match(css, /\.identOverlay\[data-hold="true"\]/u);
+    assert.match(css, /\.identHoldAction/u);
     assert.match(source, /debateLivePhaseLabel\(session/u);
     assert.match(source, /debateJuryRosterFooterCopy\(/u);
     assert.match(source, /debateJuryOutcomeRevealed\(/u);
@@ -1473,7 +1498,8 @@ describe("Debate experience", () => {
     assert.match(source, /The proceeding is sealed/u);
     assert.match(source, /No prevailing side/u);
     assert.match(css, /\.stageStateOverlay\s*\{[^}]*position:\s*absolute/u);
-    assert.match(css, /\.stageStateOverlay\[data-kind="ready"\]/u);
+    assert.match(css, /\.identOverlay\[data-hold="true"\]/u);
+    assert.match(css, /\.identHoldAction/u);
   });
 
   it("copies Debate error toasts when clicked", () => {
@@ -1953,8 +1979,9 @@ describe("Debate experience", () => {
     assert.match(source, /startSpectatorWatch\s*\?\s*"spectator-start"/u);
     assert.match(
       source,
-      /data-kind=\{readyToBeginOverlay \? "ready" : "paused"\}/u,
+      /readyToBeginOverlay \|\| session\.playerRole === "spectator"/u,
     );
+    assert.match(source, /data-hold=\{hold \? "true" : undefined\}/u);
     assert.match(source, /Start Debate/u);
     assert.match(source, /Gallery ready/u);
     assert.match(source, /activeSession\.stepKey === "completed"/u);
@@ -4123,7 +4150,7 @@ describe("Debate experience", () => {
     assert.match(source, /All configured Auto models failed|Recovered with/u);
     assert.match(
       page,
-      /PRISM chooses the best in-lane model and effort for each Debate generation\./u,
+      /Picks model & effort/u,
     );
     assert.doesNotMatch(page, /Account default|Uses the account model/u);
     assert.doesNotMatch(page, /Cast models/u);

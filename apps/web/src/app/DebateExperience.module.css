@@ -10732,6 +10732,55 @@
   background: linear-gradient(135deg, #fbf9ff, #b9a8ff);
 }
 
+/* Soft exhibit queue rows inside the shared docked refract card. */
+.softExhibitJobList {
+  display: grid;
+  gap: 7px;
+  margin: 10px 0 4px;
+  padding: 0;
+  list-style: none;
+}
+
+.softExhibitJobList li {
+  display: grid;
+  grid-template-columns: 8px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  font-size: 0.75rem;
+}
+
+.softExhibitJobList li > span {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: #44d6d9;
+  box-shadow: 0 0 12px rgba(68, 214, 217, 0.85);
+}
+
+.softExhibitJobList b {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 700;
+}
+
+.softExhibitJobList button {
+  flex: none;
+  min-height: 28px;
+  border: 1px solid color-mix(in srgb, #9a6cff 34%, rgba(255, 255, 255, 0.16));
+  border-radius: 999px;
+  padding: 0 10px;
+  color: inherit;
+  background: color-mix(in srgb, #9a6cff 14%, transparent);
+  font: 750 0.68rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.softExhibitJobList button:hover {
+  background: color-mix(in srgb, #9a6cff 24%, transparent);
+}
+
 .visuallyHidden {
   position: absolute !important;
   width: 1px !important;
@@ -11549,6 +11598,92 @@
 
 .identOverlay[data-kind="outro"] {
   animation: debate-ident-outro-curtain var(--debate-ident-duration) linear both;
+}
+
+/* Spoiler-safe Spectator hold: keep the cinematic title up until Start/Resume
+   so Proceedings and stage chrome cannot peek through a stage-only card. */
+.identOverlay[data-hold="true"] {
+  animation: none;
+  opacity: 1;
+}
+
+.identOverlay[data-hold="true"] .identComposition {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
+
+.identOverlay[data-hold="true"] .identSpectralField,
+.identOverlay[data-hold="true"] .identSpectralField i,
+.identOverlay[data-hold="true"] .identPrismMark,
+.identOverlay[data-hold="true"] .identPrismMark i,
+.identOverlay[data-hold="true"]::before,
+.identOverlay[data-hold="true"]::after {
+  animation: none;
+}
+
+.identHoldActions {
+  display: grid;
+  justify-items: center;
+  gap: 8px;
+  margin-top: clamp(10px, 1.6vw, 18px);
+  max-width: min(420px, 86vw);
+}
+
+.identHoldTitle {
+  margin: 0;
+  color: #f4f0f7;
+  font-family: var(--font-title, var(--font-ui-sans, ui-sans-serif));
+  font-size: clamp(18px, 2.2vw, 28px);
+  font-weight: 330;
+  letter-spacing: -0.03em;
+}
+
+.identHoldDetail {
+  margin: 0;
+  color: #bdb5ca;
+  font-size: clamp(11px, 1.1vw, 13px);
+  line-height: 1.45;
+  letter-spacing: 0.02em;
+}
+
+.identHoldAction {
+  -webkit-appearance: none;
+  appearance: none;
+  margin-top: 4px;
+  border: 1px solid color-mix(in srgb, #d8d2e3 42%, transparent);
+  border-radius: 999px;
+  padding: 11px 22px;
+  color: #050407;
+  background: linear-gradient(
+    135deg,
+    #f7f4ff 0%,
+    color-mix(in srgb, var(--debate-ident-for-color) 34%, #ffffff) 48%,
+    color-mix(in srgb, var(--debate-ident-against-color) 30%, #ffffff) 100%
+  );
+  font: inherit;
+  font-size: 12px;
+  font-weight: 720;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  cursor: pointer;
+  box-shadow:
+    0 0 24px color-mix(in srgb, #a995ff 28%, transparent),
+    0 10px 28px rgba(0, 0, 0, 0.35);
+  transition:
+    transform 120ms ease,
+    filter 120ms ease,
+    opacity 120ms ease;
+}
+
+.identHoldAction:hover:not(:disabled) {
+  transform: translateY(-1px);
+  filter: brightness(1.04);
+}
+
+.identHoldAction:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
 }
 
 .identOverlay::before,

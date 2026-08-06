@@ -11,6 +11,7 @@ import {
   debateEvidenceEmojiForObject,
   normalizeDebateEvidenceEmojiChoice,
   randomDebateEvidenceObject,
+  applyDebateEvidenceExhibitSynthesizedImage,
   replaceDebateEvidenceExhibit,
   searchDebateEvidenceEmojis,
 } from "./debateEvidenceExhibits.ts";
@@ -291,5 +292,35 @@ describe("Debate evidence object generator", () => {
     assert.equal(next.exhibits?.[0]?.id, "exhibit-1");
     assert.equal(next.exhibits?.[0]?.observation, "The handle is warm.");
     assert.equal(next.exhibits?.[1]?.id, "exhibit-2");
+  });
+
+  it("soft-applies a synthesized sprite onto a saved exhibit", () => {
+    const exhibit = {
+      id: "exhibit-1",
+      adjective: "Mud-speckled",
+      object: "walking boot",
+      title: "Mud-speckled walking boot",
+      observation: "A dog can transform a reluctant owner into someone who goes outside every day.",
+      emoji: "🥾",
+      visualKind: "emoji" as const,
+      imageId: null,
+      createdBy: "player" as const,
+    };
+    const packet = {
+      version: 1 as const,
+      notes: "",
+      sources: [],
+      exhibits: [exhibit],
+      frozenAt: null,
+    };
+    const next = applyDebateEvidenceExhibitSynthesizedImage(
+      packet,
+      "exhibit-1",
+      "img-soft-1",
+    );
+    assert.equal(next.exhibits?.[0]?.visualKind, "synthesized");
+    assert.equal(next.exhibits?.[0]?.imageId, "img-soft-1");
+    assert.equal(next.exhibits?.[0]?.observation, exhibit.observation);
+    assert.equal(next.exhibits?.[0]?.emoji, exhibit.emoji);
   });
 });

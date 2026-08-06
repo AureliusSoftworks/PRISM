@@ -182,6 +182,7 @@ import {
 } from "./debateUrlEvidence";
 import {
   DEBATE_EVIDENCE_EMOJI_CHOICES,
+  applyDebateEvidenceExhibitSynthesizedImage,
   applyDebateEvidenceObjectNameEdit,
   debateEvidenceObjectDraftFromExhibit,
   debateEvidenceObjectDraftFromPrismCandidate,
@@ -2079,9 +2080,23 @@ function verdictLabel(session: DebateSessionV1): string {
 function DebateIdentOverlay({
   kind,
   session,
+  hold = false,
+  holdTitle,
+  holdDetail,
+  holdAction,
 }: {
   kind: DebateIdentKind;
   session: DebateSessionV1;
+  /** Static title card — covers the chamber until Start (no timed curtain). */
+  hold?: boolean;
+  holdTitle?: string;
+  holdDetail?: string;
+  holdAction?: {
+    label: string;
+    disabled?: boolean;
+    action?: "start" | "resume";
+    onClick: () => void;
+  };
 }): React.JSX.Element {
   const intro = kind === "intro";
   const outcome = verdictLabel(session);
@@ -2089,6 +2104,7 @@ function DebateIdentOverlay({
     <section
       className={styles.identOverlay}
       data-kind={kind}
+      data-hold={hold ? "true" : undefined}
       data-debate-ident-overlay="true"
       style={
         {
@@ -2101,9 +2117,11 @@ function DebateIdentOverlay({
       role="status"
       aria-live="polite"
       aria-label={
-        intro
-          ? `The Prismatic Forum. ${session.motion.motion}`
-          : `The Forum is adjourned. ${outcome}.`
+        hold && holdTitle
+          ? `${holdTitle}. ${session.motion.motion}`
+          : intro
+            ? `The Prismatic Forum. ${session.motion.motion}`
+            : `The Forum is adjourned. ${outcome}.`
       }
     >
       <div className={styles.identSpectralField} aria-hidden="true">
@@ -2138,6 +2156,26 @@ function DebateIdentOverlay({
               ? "Prevailing side"
               : "No side prevailed"}
         </small>
+        {hold && holdAction ? (
+          <div className={styles.identHoldActions}>
+            {holdTitle ? (
+              <strong className={styles.identHoldTitle}>{holdTitle}</strong>
+            ) : null}
+            {holdDetail ? (
+              <p className={styles.identHoldDetail}>{holdDetail}</p>
+            ) : null}
+            <button
+              type="button"
+              className={styles.identHoldAction}
+              data-action={holdAction.action ?? "start"}
+              data-tutorial-target="debate-start-from-ident"
+              onClick={holdAction.onClick}
+              disabled={holdAction.disabled}
+            >
+              {holdAction.label}
+            </button>
+          </div>
+        ) : null}
       </div>
     </section>
   );
@@ -3302,7 +3340,33 @@ export function DebateExperience(
   const [evidenceObjectVisualBusy, setEvidenceObjectVisualBusy] = useState<
     "upload" | "synthesize" | null
   >(null);
+  /** Soft exhibit sprite jobs keep a docked refract card after Save/Cancel. */
+  const [softExhibitSynthesizeJobs, setSoftExhibitSynthesizeJobs] = useState<
+    Array<{
+      requestId: string;
+      title: string;
+      startedAt: string;
+    }>
+  >([]);
   const evidenceExhibitUploadRef = useRef<HTMLInputElement | null>(null);
+  const evidenceObjectDraftInstanceIdRef = useRef<string | null>(null);
+  const editingExhibitIdRef = useRef<string | null>(null);
+  const pendingExhibitSynthesizeRef = useRef(
+    new Map<
+      string,
+      {
+        draftInstanceId: string;
+        exhibitId: string | null;
+        discarded: boolean;
+        abort: AbortController;
+      }
+    >(),
+  );
+  const activeExhibitVisualRequestIdRef = useRef<string | null>(null);
+  const evidenceObjectUploadBusy = evidenceObjectVisualBusy === "upload";
+  const evidenceObjectSoftSynthesizing =
+    evidenceObjectVisualBusy === "synthesize";
+  const evidenceObjectAssetLocked = evidenceObjectVisualBusy !== null;
   const evidenceItemTotal = debateEvidenceItemCount(evidence);
   const evidenceItemLimitReached =
     evidenceItemTotal >= DEBATE_EVIDENCE_ITEM_MAX_COUNT;
@@ -6184,6 +6248,8 @@ export function DebateExperience(
         if (!contextualDraft) {
           throw new Error("Prism returned an incomplete exhibit.");
         }
+        evidenceObjectDraftInstanceIdRef.current = `draft:${Date.now().toString(16)}`;
+        editingExhibitIdRef.current = null;
         setEvidenceObjectDraft(contextualDraft);
         setEditingExhibitId(null);
         setEvidenceObjectSeed("");
@@ -6228,11 +6294,58 @@ export function DebateExperience(
   };
 
   const openEvidenceEmojiSearch = (): void => {
-    if (!evidenceObjectDraft || evidenceObjectVisualBusy) return;
+    if (!evidenceObjectDraft || evidenceObjectUploadBusy) return;
     setEvidenceEmojiSearchQuery(
       `${evidenceObjectDraft.adjective} ${evidenceObjectDraft.object}`.trim(),
     );
     setEvidenceEmojiSearchOpen(true);
+  };
+
+  const clearSoftExhibitSynthesizeJob = (requestId: string): void => {
+    setSoftExhibitSynthesizeJobs((current) =>
+      current.filter((job) => job.requestId !== requestId),
+    );
+  };
+
+  const discardActiveExhibitSynthesize = (): void => {
+    const requestId = activeExhibitVisualRequestIdRef.current;
+    if (!requestId) return;
+    const pending = pendingExhibitSynthesizeRef.current.get(requestId);
+    if (pending) {
+      pending.discarded = true;
+      pending.abort.abort();
+    }
+    activeExhibitVisualRequestIdRef.current = null;
+    setEvidenceObjectVisualBusy(null);
+  };
+
+  const cancelSoftExhibitSynthesizeJob = (requestId: string): void => {
+    const pending = pendingExhibitSynthesizeRef.current.get(requestId);
+    if (pending) {
+      pending.discarded = true;
+      pending.abort.abort();
+      pendingExhibitSynthesizeRef.current.delete(requestId);
+    }
+    if (activeExhibitVisualRequestIdRef.current === requestId) {
+      activeExhibitVisualRequestIdRef.current = null;
+      setEvidenceObjectVisualBusy((current) =>
+        current === "synthesize" ? null : current,
+      );
+    }
+    clearSoftExhibitSynthesizeJob(requestId);
+  };
+
+  const cancelSoftExhibitSynthesizeJobs = (): void => {
+    for (const [requestId, pending] of pendingExhibitSynthesizeRef.current) {
+      pending.discarded = true;
+      pending.abort.abort();
+      pendingExhibitSynthesizeRef.current.delete(requestId);
+    }
+    activeExhibitVisualRequestIdRef.current = null;
+    setEvidenceObjectVisualBusy((current) =>
+      current === "synthesize" ? null : current,
+    );
+    setSoftExhibitSynthesizeJobs([]);
   };
 
   const chooseEvidenceObjectEmoji = (emoji: string): void => {
@@ -6301,6 +6414,26 @@ export function DebateExperience(
       if (!title) setError("Name the evidence object before synthesizing it.");
       return;
     }
+    const draftInstanceId =
+      evidenceObjectDraftInstanceIdRef.current ??
+      `draft:${Date.now().toString(16)}`;
+    evidenceObjectDraftInstanceIdRef.current = draftInstanceId;
+    const requestId = `exhibit-synth:${Date.now().toString(16)}:${Math.random()
+      .toString(16)
+      .slice(2)}`;
+    const abort = new AbortController();
+    pendingExhibitSynthesizeRef.current.set(requestId, {
+      draftInstanceId,
+      exhibitId: editingExhibitIdRef.current,
+      discarded: false,
+      abort,
+    });
+    activeExhibitVisualRequestIdRef.current = requestId;
+    const startedAt = new Date().toISOString();
+    setSoftExhibitSynthesizeJobs((current) => [
+      ...current.filter((job) => job.requestId !== requestId),
+      { requestId, title, startedAt },
+    ]);
     setEvidenceObjectVisualBusy("synthesize");
     setError(null);
     try {
@@ -6308,35 +6441,67 @@ export function DebateExperience(
         image: { id: string; displayUrl: string };
       }>(
         "/api/debates/exhibits/synthesize",
-        requestBody({
-          adjective: draft.adjective,
-          object: draft.object,
-          preferredProvider: props.preferredImageProvider,
-          responseMode: props.responseMode,
-          direction,
-        }),
+        {
+          ...requestBody({
+            adjective: draft.adjective,
+            object: draft.object,
+            preferredProvider: props.preferredImageProvider,
+            responseMode: props.responseMode,
+            direction,
+          }),
+          signal: abort.signal,
+        },
       );
-      setEvidenceObjectDraft((current) =>
-        current
-          ? {
-              ...current,
-              visualKind: "synthesized",
-              imageId: result.image.id,
-            }
-          : current,
-      );
+      const pending = pendingExhibitSynthesizeRef.current.get(requestId);
+      pendingExhibitSynthesizeRef.current.delete(requestId);
+      if (!pending || pending.discarded) return;
+      const imageId = result.image.id;
+      setEvidenceObjectDraft((current) => {
+        if (!current) return current;
+        const sameDraftInstance =
+          evidenceObjectDraftInstanceIdRef.current === pending.draftInstanceId;
+        const sameReopenedExhibit =
+          pending.exhibitId != null &&
+          editingExhibitIdRef.current === pending.exhibitId;
+        if (!sameDraftInstance && !sameReopenedExhibit) return current;
+        return {
+          ...current,
+          visualKind: "synthesized",
+          imageId,
+        };
+      });
+      if (pending.exhibitId) {
+        setEvidence((current) =>
+          applyDebateEvidenceExhibitSynthesizedImage(
+            current,
+            pending.exhibitId!,
+            imageId,
+          ),
+        );
+      }
     } catch (caught) {
+      const pending = pendingExhibitSynthesizeRef.current.get(requestId);
+      pendingExhibitSynthesizeRef.current.delete(requestId);
+      if (pending?.discarded || abort.signal.aborted) return;
       setError(
         caught instanceof Error
           ? caught.message
           : "The evidence object could not be synthesized.",
       );
     } finally {
-      setEvidenceObjectVisualBusy(null);
+      clearSoftExhibitSynthesizeJob(requestId);
+      if (activeExhibitVisualRequestIdRef.current === requestId) {
+        activeExhibitVisualRequestIdRef.current = null;
+        setEvidenceObjectVisualBusy((current) =>
+          current === "synthesize" ? null : current,
+        );
+      }
     }
   };
 
   const beginEditingExhibit = (exhibit: DebateEvidenceExhibitV1): void => {
+    evidenceObjectDraftInstanceIdRef.current = `edit:${exhibit.id}:${Date.now().toString(16)}`;
+    editingExhibitIdRef.current = exhibit.id;
     setEvidenceObjectDraft(debateEvidenceObjectDraftFromExhibit(exhibit));
     setEditingExhibitId(exhibit.id);
     setEvidenceObjectSeed("");
@@ -6347,6 +6512,7 @@ export function DebateExperience(
 
   const addEvidenceObject = (): void => {
     if (!evidenceObjectDraft) return;
+    if (evidenceObjectUploadBusy) return;
     if (!editingExhibitId && evidenceItemLimitReached) return;
     const title = debateEvidenceExhibitTitle(evidenceObjectDraft);
     if (!title) {
@@ -6354,8 +6520,9 @@ export function DebateExperience(
       return;
     }
     const draft = evidenceObjectDraft;
+    const nextId = editingExhibitId ?? nextDebateEvidenceExhibitId(evidence);
     const nextExhibit: DebateEvidenceExhibitV1 = {
-      id: editingExhibitId ?? nextDebateEvidenceExhibitId(evidence),
+      id: nextId,
       adjective: draft.adjective,
       object: draft.object,
       title,
@@ -6365,6 +6532,17 @@ export function DebateExperience(
       imageId: draft.imageId,
       createdBy: draft.createdBy,
     };
+    const activeRequestId = activeExhibitVisualRequestIdRef.current;
+    if (activeRequestId && evidenceObjectSoftSynthesizing) {
+      const pending = pendingExhibitSynthesizeRef.current.get(activeRequestId);
+      if (pending) {
+        pending.exhibitId = nextId;
+        pending.discarded = false;
+      }
+      // Soft wait continues in the docked refract card — free the composer.
+      activeExhibitVisualRequestIdRef.current = null;
+      setEvidenceObjectVisualBusy(null);
+    }
     setEvidence((current) =>
       editingExhibitId
         ? replaceDebateEvidenceExhibit(current, editingExhibitId, nextExhibit)
@@ -6387,6 +6565,8 @@ export function DebateExperience(
     setEvidenceObjectSeed("");
     setEvidenceObjectDraft(null);
     setEditingExhibitId(null);
+    editingExhibitIdRef.current = null;
+    evidenceObjectDraftInstanceIdRef.current = null;
     setError(null);
   };
 
@@ -12288,7 +12468,8 @@ export function DebateExperience(
                   disabled: () =>
                     evidenceItemLimitReached ||
                     evidenceObjectSuggestionBusy ||
-                    evidenceObjectVisualBusy !== null ||
+                    evidenceObjectUploadBusy ||
+                    evidenceObjectSoftSynthesizing ||
                     busy,
                   generate: ({ currentValue, rejectedValues, signal }) =>
                     generateDebateRefractField(
@@ -12343,7 +12524,7 @@ export function DebateExperience(
                   !evidenceObjectSeed.trim() ||
                   evidenceItemLimitReached ||
                   evidenceObjectSuggestionBusy ||
-                  evidenceObjectVisualBusy !== null
+                  evidenceObjectUploadBusy
                 }
               >
                 <span aria-hidden="true">
@@ -12513,7 +12694,7 @@ export function DebateExperience(
                 aria-haspopup="dialog"
                 aria-expanded={evidenceEmojiSearchOpen}
                 onClick={openEvidenceEmojiSearch}
-                disabled={evidenceObjectVisualBusy !== null}
+                disabled={evidenceObjectUploadBusy}
               >
                 <DebateEvidenceExhibitVisual exhibit={objectPreview} />
               </button>
@@ -12543,7 +12724,7 @@ export function DebateExperience(
                       ),
                     accept: (value) =>
                       updateEvidenceObjectName("adjective", value),
-                    disabled: () => evidenceObjectVisualBusy !== null || busy,
+                    disabled: () => evidenceObjectUploadBusy || busy,
                     generate: ({ currentValue, rejectedValues, signal }) =>
                       generateDebateRefractField(
                         "debate.setup.exhibitAdjective",
@@ -12564,7 +12745,7 @@ export function DebateExperience(
                         )
                       }
                       placeholder="Rusty"
-                      disabled={evidenceObjectVisualBusy !== null}
+                      disabled={evidenceObjectUploadBusy}
                     />
                   )}
                 </PrismRefractTarget>
@@ -12583,7 +12764,7 @@ export function DebateExperience(
                       ),
                     accept: (value) =>
                       updateEvidenceObjectName("object", value),
-                    disabled: () => evidenceObjectVisualBusy !== null || busy,
+                    disabled: () => evidenceObjectUploadBusy || busy,
                     generate: ({ currentValue, rejectedValues, signal }) =>
                       generateDebateRefractField(
                         "debate.setup.exhibitObject",
@@ -12604,7 +12785,7 @@ export function DebateExperience(
                         )
                       }
                       placeholder="spoon"
-                      disabled={evidenceObjectVisualBusy !== null}
+                      disabled={evidenceObjectUploadBusy}
                     />
                   )}
                 </PrismRefractTarget>
@@ -12626,7 +12807,7 @@ export function DebateExperience(
                     setEvidenceObjectDraft((current) =>
                       current ? { ...current, observation: value } : current,
                     ),
-                  disabled: () => evidenceObjectVisualBusy !== null || busy,
+                  disabled: () => evidenceObjectUploadBusy || busy,
                   generate: ({ currentValue, rejectedValues, signal }) =>
                     generateDebateRefractField(
                       "debate.setup.exhibitObservation",
@@ -12729,13 +12910,13 @@ export function DebateExperience(
                 if (file) void uploadEvidenceObjectImage(file);
               }}
             />
-            <AssetRail
+              <AssetRail
               kind="debate_exhibit"
               label="Exhibit sprites"
               context={objectTitle}
               currentImageIds={[evidenceObjectDraft.imageId]}
               refreshKey={evidenceObjectDraft.imageId}
-              disabled={!objectTitle || evidenceObjectVisualBusy !== null}
+              disabled={!objectTitle || evidenceObjectAssetLocked}
               onUpload={() => evidenceExhibitUploadRef.current?.click()}
               onSynthesize={synthesizeEvidenceObjectImage}
               onSelect={(asset) => {
@@ -12760,21 +12941,21 @@ export function DebateExperience(
               <button
                 type="button"
                 data-soft-busy={
-                  evidenceObjectVisualBusy === "synthesize" ? "true" : undefined
+                  evidenceObjectSoftSynthesizing ? "true" : undefined
                 }
                 onClick={() => void synthesizeEvidenceObjectImage()}
-                disabled={!objectTitle || evidenceObjectVisualBusy !== null}
+                disabled={!objectTitle || evidenceObjectAssetLocked}
               >
-                {evidenceObjectVisualBusy === "synthesize"
+                {evidenceObjectSoftSynthesizing
                   ? "Synthesizing…"
                   : evidenceObjectDraft.imageId
                     ? "Synthesize another asset"
                     : "Synthesize asset"}
               </button>
-              {evidenceObjectVisualBusy === "synthesize" ? (
+              {evidenceObjectSoftSynthesizing ? (
                 <span role="status" aria-live="polite">
                   Soft prepare — emoji stays as the fallback until the sprite
-                  swaps in.
+                  swaps in. Save anytime; the side refract card keeps working.
                 </span>
               ) : (
                 <small>
@@ -12787,11 +12968,16 @@ export function DebateExperience(
               <button
                 type="button"
                 onClick={() => {
+                  if (evidenceObjectSoftSynthesizing) {
+                    discardActiveExhibitSynthesize();
+                  }
                   setEvidenceEmojiSearchOpen(false);
                   setEvidenceObjectDraft(null);
                   setEditingExhibitId(null);
+                  editingExhibitIdRef.current = null;
+                  evidenceObjectDraftInstanceIdRef.current = null;
                 }}
-                disabled={evidenceObjectVisualBusy !== null}
+                disabled={evidenceObjectUploadBusy}
               >
                 Cancel
               </button>
@@ -12802,7 +12988,7 @@ export function DebateExperience(
                 disabled={
                   !objectTitle ||
                   (!editingExhibitId && evidenceItemLimitReached) ||
-                  evidenceObjectVisualBusy !== null
+                  evidenceObjectUploadBusy
                 }
               >
                 {editingExhibitId ? "Save changes" : "Add to evidence"}
@@ -16689,6 +16875,34 @@ export function DebateExperience(
         >
           {debateIdentPlaying ? (
             <DebateIdentOverlay kind={debateIdentPlaying} session={session} />
+          ) : session.status === "paused" &&
+            !presenting &&
+            (readyToBeginOverlay || session.playerRole === "spectator") ? (
+            <DebateIdentOverlay
+              kind="intro"
+              session={session}
+              hold
+              holdTitle={
+                spectatorAwaitingFirstWatch
+                  ? "Gallery ready"
+                  : awaitingDeferredStart
+                    ? "Saved · ready to start"
+                    : "Debate paused"
+              }
+              holdDetail={
+                spectatorAwaitingFirstWatch
+                  ? "The proceeding stays covered until you start — no spoilers from the prepared floor."
+                  : awaitingDeferredStart
+                    ? "This Archive setup is frozen. Start opens the chamber when you are ready."
+                    : "The interrupted line is preserved and will replay from its beginning."
+              }
+              holdAction={{
+                label: readyToBeginOverlay ? "Start Debate" : "Resume Debate",
+                disabled: busy || debateFloorMutationInFlightRef.current,
+                onClick: () => void pauseOrResume(),
+                action: readyToBeginOverlay ? "start" : "resume",
+              }}
+            />
           ) : null}
           <header className={styles.liveHeader}>
             <button
@@ -17105,39 +17319,27 @@ export function DebateExperience(
                       enters your record.
                     </small>
                   </div>
-                ) : session.status === "paused" && !presenting ? (
+                ) : session.status === "paused" &&
+                  !presenting &&
+                  !readyToBeginOverlay &&
+                  session.playerRole !== "spectator" ? (
                   <div
                     className={styles.stageStateOverlay}
-                    data-kind={readyToBeginOverlay ? "ready" : "paused"}
+                    data-kind="paused"
                   >
-                    <span aria-hidden="true">
-                      {readyToBeginOverlay ? "▶" : "Ⅱ"}
-                    </span>
-                    <strong>
-                      {spectatorAwaitingFirstWatch
-                        ? "Gallery ready"
-                        : awaitingDeferredStart
-                          ? "Saved · ready to start"
-                          : "Debate paused"}
-                    </strong>
+                    <span aria-hidden="true">Ⅱ</span>
+                    <strong>Debate paused</strong>
                     <small>
-                      {spectatorAwaitingFirstWatch
-                        ? "The proceeding is held until you start, so a long prepare cannot begin while you are away."
-                        : awaitingDeferredStart
-                          ? "This Archive setup is frozen. Start opens the chamber when you are ready."
-                          : "The interrupted line is preserved and will replay from its beginning."}
+                      The interrupted line is preserved and will replay from its
+                      beginning.
                     </small>
                     <button
                       type="button"
-                      data-action={
-                        readyToBeginOverlay ? "start" : "resume"
-                      }
+                      data-action="resume"
                       onClick={() => void pauseOrResume()}
                       disabled={busy || debateFloorMutationInFlightRef.current}
                     >
-                      {readyToBeginOverlay
-                        ? "Start Debate"
-                        : "Resume Debate"}
+                      Resume Debate
                     </button>
                   </div>
                 ) : session.playerRole === "spectator" &&
@@ -18144,6 +18346,53 @@ export function DebateExperience(
           setBusy(false);
         }}
       />
+      <PrismBlockingLoader
+        open={
+          softExhibitSynthesizeJobs.length > 0 &&
+          !newDuelGenerateBusy &&
+          !motionOptionsBusy
+        }
+        placement="docked"
+        theme={props.theme}
+        eyebrow="Debate · Exhibit"
+        title={
+          softExhibitSynthesizeJobs.length > 1
+            ? `Synthesizing ${softExhibitSynthesizeJobs.length} exhibit sprites`
+            : "Synthesizing exhibit sprite"
+        }
+        detail="Soft jobs run in parallel after Save. Emoji stays as the fallback until each sprite swaps in."
+        stepLabel={
+          softExhibitSynthesizeJobs.length > 1
+            ? `${softExhibitSynthesizeJobs.length} in flight`
+            : (softExhibitSynthesizeJobs[0]?.title ?? "Exhibit sprite")
+        }
+        progress={null}
+        startedAt={softExhibitSynthesizeJobs[0]?.startedAt ?? null}
+        footer="Soft prepare — Save anytime. The × stops every in-flight sprite."
+        cancelLabel="Stop all exhibit synthesis"
+        cancelConfirmTitle="Stop all exhibit sprites?"
+        cancelConfirmDetail="Every in-flight sprite will stop. Saved exhibit text and emoji stay as they are."
+        onCancel={cancelSoftExhibitSynthesizeJobs}
+      >
+        <ul
+          className={styles.softExhibitJobList}
+          aria-label="Exhibit sprites preparing"
+        >
+          {softExhibitSynthesizeJobs.map((job) => (
+            <li key={job.requestId} data-status="generating">
+              <span aria-hidden="true" />
+              <b>{job.title}</b>
+              <button
+                type="button"
+                onClick={() => cancelSoftExhibitSynthesizeJob(job.requestId)}
+                aria-label={`Stop synthesizing ${job.title}`}
+              >
+                Stop
+              </button>
+            </li>
+          ))}
+        </ul>
+      </PrismBlockingLoader>
     </>
   );
 }

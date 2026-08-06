@@ -556,3 +556,24 @@ export function replaceDebateEvidenceExhibit(
   );
   return { ...evidence, exhibits };
 }
+
+/**
+ * Soft-synthesize completion: swap the stage sprite onto a saved exhibit while
+ * leaving its text and emoji evidence untouched.
+ */
+export function applyDebateEvidenceExhibitSynthesizedImage(
+  evidence: DebateEvidencePacketV1,
+  exhibitId: string,
+  imageId: string,
+): DebateEvidencePacketV1 {
+  const exhibits = (evidence.exhibits ?? []).map((exhibit) =>
+    exhibit.id === exhibitId
+      ? {
+          ...exhibit,
+          visualKind: "synthesized" as const,
+          imageId,
+        }
+      : exhibit,
+  );
+  return { ...evidence, exhibits };
+}
