@@ -1,11 +1,15 @@
 import {
   modelSupportsNativeReasoningEffort,
   reasoningGenerationBudgetMs,
+  normalizeSimulatedEffortLadderProfile,
+  simulatedEffortLadderPasses,
   simulatedEffortUsesThriftyPrompting,
   simulatedSurfacePreparationMaxTokens,
   simulatedSurfacePreparationNoteMaxChars,
   type NativeReasoningEffortProvider,
   type ReasoningEffort,
+  type SimulatedEffortLadderProfile,
+  type SimulatedEffortPassName,
 } from "@localai/shared";
 import type {
   GenerateOptions,
@@ -69,20 +73,9 @@ export async function runWithReasoningGenerationBudget<T>(args: {
   }
 }
 
-const SIMULATED_EFFORT_STEPS: Record<
-  Exclude<ReasoningEffort, "auto" | "none">,
-  readonly ("plan" | "draft" | "audit" | "revision")[]
-> = {
-  minimal: ["plan"],
-  low: ["plan"],
-  medium: ["plan", "audit"],
-  high: ["plan", "draft", "audit"],
-  xhigh: ["plan", "draft", "audit", "revision"],
-};
-
 function simulatedStepInstruction(args: {
   surface: SimulatedEffortSurface;
-  step: "plan" | "draft" | "audit" | "revision";
+  step: SimulatedEffortPassName;
   priorNotes: string;
   effort: Exclude<ReasoningEffort, "auto" | "none">;
   outputContract?: string;
@@ -96,19 +89,57 @@ function simulatedStepInstruction(args: {
       ? "Keep this under ~60 words. Prefer short bullets over paragraphs."
       : mediumLean
         ? "Keep this under ~100 words. Prefer short bullets over paragraphs."
-        : "Keep notes actionable and compact; avoid long chain-of-thought.";
-  const task =
-    args.step === "plan"
-      ? lean
+        : args.effort === "xhigh"
+          ? "Keep notes actionable; XHigh may use denser bullets but still avoid long chain-of-thought."
+          : "Keep notes actionable and compact; avoid long chain-of-thought.";
+  let task: string;
+  switch (args.step) {
+    case "plan":
+      task = lean
         ? "List the key intent and 1-2 persona or constraint checks."
-        : "Make a concise response plan with the key intent, factual or procedural checks, and persona choices."
-      : args.step === "draft"
-        ? "Sketch a concise candidate response that follows the plan."
-        : args.step === "audit"
-          ? lean || mediumLean
-            ? "Audit for missed instructions, schema risks, and character drift. Return corrections only."
-            : "Audit the preparation for missed instructions, contradictions, weak reasoning, schema risks, and character drift. Return corrections only."
-          : "Produce a concise final response blueprint incorporating the useful corrections.";
+        : "Make a concise response plan with the key intent, factual or procedural checks, and persona choices.";
+      break;
+    case "alternatives":
+      task =
+        args.effort === "xhigh"
+          ? "Sketch 3 reply approaches (A/B/C), then choose one with a one-line why."
+          : "Sketch 2 reply approaches (A/B), then choose one with a one-line why.";
+      break;
+    case "draft":
+      task = "Sketch a concise candidate response that follows the plan and chosen approach.";
+      break;
+    case "audit":
+      task =
+        lean || mediumLean
+          ? "Audit for missed instructions, schema risks, and character drift. Return corrections only."
+          : "Audit the preparation for missed instructions, contradictions, weak reasoning, schema risks, and character drift. Return corrections only.";
+      break;
+    case "red_team":
+      task =
+        "Adversarially list how this reply could fail constraints or annoy the user, then name guards. Use '- Attack:' / '- Guard:' bullets.";
+      break;
+    case "constraint_lock":
+      task =
+        "Extract a tiny must-keep checklist ('- Must:' bullets) for labels, limits, forbidden words, and format shape.";
+      break;
+    case "revise_draft":
+      task =
+        "Rewrite the candidate response under the critiques and constraint lock. Keep it private and concise.";
+      break;
+    case "compliance_sweep":
+      task =
+        "Hostile compliance sweep against the must-keep checklist. Use '- Fail:' / '- Pass:' then '- Enforce:' bullets.";
+      break;
+    case "synthesis":
+    case "revision":
+      task =
+        "Produce a concise final response blueprint incorporating the useful corrections and must-keeps.";
+      break;
+    default: {
+      const _exhaustive: never = args.step;
+      task = `Continue private preparation for step ${String(_exhaustive)}.`;
+    }
+  }
   return [
     `Private PRISM ${args.surface} preparation pass: ${args.step}.`,
     task,
@@ -148,11 +179,16 @@ export async function prepareMessagesWithSimulatedEffort(args: {
   effort: ReasoningEffort | null | undefined;
   surface: SimulatedEffortSurface;
   outputContract?: string;
+  /** Defaults to standard (product). Pass deep for experimental heavy spine. */
+  ladderProfile?: SimulatedEffortLadderProfile;
 }): Promise<ProviderMessage[]> {
   if (!args.effort || args.effort === "auto" || args.effort === "none") {
     return args.messages;
   }
-  const steps = SIMULATED_EFFORT_STEPS[args.effort];
+  const ladderProfile = normalizeSimulatedEffortLadderProfile(
+    args.ladderProfile,
+  );
+  const steps = simulatedEffortLadderPasses(args.effort, ladderProfile);
   let priorNotes = "";
   for (const step of steps) {
     if (args.options.signal?.aborted) throw args.options.signal.reason;
@@ -174,7 +210,8 @@ export async function prepareMessagesWithSimulatedEffort(args: {
         ],
         {
           model: args.options.model,
-          temperature: step === "draft" ? 0.35 : 0,
+          temperature:
+            step === "draft" || step === "revise_draft" ? 0.35 : 0,
           maxTokens: simulatedSurfacePreparationMaxTokens(args.effort),
           topP: args.options.topP,
           topK: args.options.topK,

@@ -5590,7 +5590,7 @@ export interface CoffeeTurnSettings {
   reasoningEffort?: ReasoningEffort;
   /** Contextual Auto decision frozen for this individual generation. */
   autoRouteDecision?: AutoRouteDecisionV1;
-  /** Account experiment that permits private multi-call effort for non-native models. */
+  /** Experimental deep simulated-effort ladder (simulation itself is always on for thoughtless models). */
   experimentalAllModelEffortEnabled?: boolean;
   /** Cancels router, private deliberation, and final speaker generation. */
   signal?: AbortSignal;
@@ -17007,12 +17007,11 @@ async function generateCoffeeBotReply(args: {
     userId,
     provider: effectiveProvider,
     modelId: concreteSpeakerModel,
-    simulatedEffortEnabled:
-      settings.experimentalAllModelEffortEnabled === true,
+    simulatedEffortEnabled: true,
   });
   const effectiveReasoningEffort = coffeeEffectiveReasoningEffort({
     requested: storedReasoningEffort ?? settings.reasoningEffort,
-    experimentEnabled: settings.experimentalAllModelEffortEnabled === true,
+    experimentEnabled: true,
     effectiveProvider,
     modelId: concreteSpeakerModel,
   });
@@ -17423,8 +17422,7 @@ async function generateCoffeeBotReply(args: {
       userId,
       provider,
       modelId: model,
-      simulatedEffortEnabled:
-        settings.experimentalAllModelEffortEnabled === true,
+      simulatedEffortEnabled: true,
     }) ?? (provider === effectiveProvider && model === concreteSpeakerModel
       ? effectiveReasoningEffort
       : undefined);
@@ -17439,7 +17437,6 @@ async function generateCoffeeBotReply(args: {
       speakerUsesHardResponse ||
       cannedInterruptionReaction ||
       socialSilenceMarker ||
-      settings.experimentalAllModelEffortEnabled !== true ||
       !args.effort ||
       !shouldPrepareMessagesWithSimulatedEffort({
         provider: args.providerName,
@@ -17455,6 +17452,10 @@ async function generateCoffeeBotReply(args: {
       options: args.options,
       effort: args.effort,
       surface: "coffee",
+      ladderProfile:
+        settings.experimentalAllModelEffortEnabled === true
+          ? "deep"
+          : "standard",
       outputContract:
         "Write one short in-character Coffee contribution; preserve Powers, floor ownership, and any poll or team constraints.",
     });

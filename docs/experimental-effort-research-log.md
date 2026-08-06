@@ -224,3 +224,161 @@ node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/eff
 
 - Keep thrifty as the product default for simulated Effort; reserve `--budget-profile legacy` for eval A/B only.
 - ONLINE Fast (`service_tier`) remains a separate future control.
+
+## 2026-08-05 - Standard lean ladder vs Deep experimental (`llama3.2`)
+
+### Scope
+
+- Model: `llama3.2` (local Ollama)
+- Suite: effort ladder `--quick --repeats 2` (rollout-table constraint trap)
+- Budgets: thrifty (product default)
+- Arms: `--ladder-profile standard` (product default) vs `--ladder-profile deep` (Settings experimental)
+- Commands:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --ladder-profile standard --budget-profile thrifty
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --ladder-profile deep --budget-profile thrifty
+```
+
+- Artifacts:
+  - standard: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T06-24-00-070Z.md`
+  - deep: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T06-25-49-590Z.md`
+- Harness note: `--ladder-profile` maps to `experimentalAllModelEffortEnabled` (`deep` = on).
+
+### Integrity QA
+
+- Standard passes: `none=0`, `minimal/low=1`, `medium=2`, `high=3`, `xhigh=4` (`plan`→`draft`→`audit`→`synthesis`)
+- Deep passes: `none=0`, `minimal=3`, `low=5`, `medium=7`, `high=8`, `xhigh=9` (full workshop incl. Compliance Sweep on xhigh)
+- Zero planning warnings; no role-token collapses; no CoT/scratchpad leak heuristics
+- LOCAL-only for every private + visible pass
+
+### Aggregate results
+
+| Effort | Standard score | Deep score | Standard median ms | Deep median ms | Std passes | Deep passes |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| none | 8.0 | 8.5 | 5485 | 3407 | 0 | 0 |
+| minimal | 9.5 | 8.5 | 7606 | 9722 | 1 | 3 |
+| low | 9.5 | 9.0 | 6259 | 14006 | 1 | 5 |
+| medium | 9.5 | 9.5 | 11430 | 19312 | 2 | 7 |
+| high | 10.0 | 10.0 | 11001 | 20477 | 3 | 8 |
+| xhigh | 9.0 | 10.0 | 10749 | 20111 | 4 | 9 |
+
+### Interpretation
+
+- **Standard default earns its keep**: beats `none` at every nonzero tier; `high` is the quality peak (10/10 both repeats) at ~11s median.
+- **Deep is a latency tax with mixed low-tier payoff**: ~+2–9s median vs standard; `minimal`/`low` scored *worse* than standard on this n=2 smoke despite 3–5 private passes.
+- **Deep helps Extra High on this prompt**: xhigh 10/10 vs standard 9/10, with Compliance Sweep present — still ~2× the wait of standard high.
+- **Do not promote Deep to default** from this run. Keep lean standard as product default; keep Deep behind Settings experimental for players who want maximum private workshop at High/XHigh.
+
+### Product Notes
+
+- Eval harness now defaults `--ladder-profile standard` so ladder smokes match product, not the experimental deep spine.
+- Cafe-constraint head-to-head still open for Deep vs Standard quality claims beyond the rollout-table trap.
+
+## 2026-08-06 - Thrifty vs legacy hard suite (`gemma3:4b`)
+
+### Scope
+
+- Model: `gemma3:4b` (local Ollama, 4.3B)
+- Suite: hard effort ladder (3 prompts × 2 repeats × 6 efforts = 36 runs/profile)
+- Profiles: `thrifty` vs `legacy`; ladder profile `standard`
+- Commands:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model gemma3:4b --repeats 2 --budget-profile thrifty
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model gemma3:4b --repeats 2 --budget-profile legacy
+```
+
+- Artifacts:
+  - thrifty: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T11-12-05-175Z.md`
+  - legacy: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T11-28-28-654Z.md`
+- Note: first thrifty attempt stalled on cold/swapped Ollama (medium/high hit wall-clock budgets). After `ollama stop` + warm gemma generate, both suites completed with zero timeouts.
+
+### Integrity QA
+
+- Pass ladder for healthy runs: `none=0`, `low=1`, `medium=2`, `high=3`, `xhigh=4`
+- Thrifty **minimal** is broken on this model: `avgPasses=0`, **6/6** `invalid_json` planning warnings, scratchpad 0
+- Legacy minimal healthier but still flaky (`avgPasses=0.67`, 2 warnings)
+- No `assistant` role-token collapses; all runs `status=ok` after warm load
+- LOCAL-only throughout
+
+### Aggregate results
+
+| Effort | Thrifty score | Legacy score | Thrifty median ms | Legacy median ms | Thrifty passes | Legacy passes | Thrifty warn | Legacy warn |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| none | 5.67 | 6.17 | 14305 | 14676 | 0 | 0 | 0 | 0 |
+| minimal | 5.00 | 7.67 | 19147 | 21844 | 0 | 0.67 | 6 | 2 |
+| low | **9.33** | 8.50 | 22501 | 23843 | 1 | 1 | 0 | 0 |
+| medium | 7.83 | **8.83** | 27204 | 31373 | 2 | 2 | 0 | 0 |
+| high | 8.50 | 8.50 | 33984 | 34320 | 3 | 3 | 0 | 0 |
+| xhigh | 8.67 | 8.67 | 42194 | 39684 | 4 | 4 | 0 | 0 |
+
+### Interpretation
+
+- **Thrifty Low is the gemma sweet spot**: best score in the whole A/B (9.33), beats legacy Low, and slightly faster — lean plan+guidance helps this 4B model.
+- **Thrifty Minimal is too lean**: 200-token planning budget + ultra-short prompt → `invalid_json` every time on gemma. Treat as a product bug for thrifty Minimal, not “gemma can’t simulate Effort.”
+- **Thrifty Medium underperformed legacy Medium** (7.83 vs 8.83) despite healthy 2-pass ladder — lean medium budgets/prompts may strip useful audit room on gemma.
+- **High/XHigh identical** across profiles (same top-tier budgets); Extra High still not clearly better than High on score.
+- Warm Ollama matters: cold model-swap made medium/high look like hard timeouts earlier.
+
+### Next
+
+1. Raise thrifty Minimal planning budget (and/or relax Minimal thrifty prompt) so gemma can emit valid plan JSON — target: nonzero `passCount` and 0 `invalid_json` on a quick gemma recheck.
+2. Consider a small Medium thrifty bump for weak local models if Medium keeps losing to legacy on more models.
+3. Optional: same hard A/B on `mistral` / `smollm:1.7b` once Minimal is fixed.
+
+## 2026-08-06 - Fix: thrifty Minimal planning room (`gemma3:4b` recheck)
+
+### Change
+
+- Thrifty `simulatedPsychicPlanningMaxTokens("minimal")`: `200` → `300`; `low` → `340` to keep ordering
+- Softened Minimal thrifty plan prompt to demand complete valid JSON fields
+- Rebuilt `@localai/shared` dist (runtime imports dist; source-only edits do not apply)
+
+### Recheck (standard ladder, thrifty, `gemma3:4b`, Minimal × 2)
+
+- `simulated: true`, `passCount: 1` (`plan` only), `warnings: []` both repeats
+- Scratchpad ~323 chars (was 0 / `invalid_json` before)
+
+### Note
+
+Eval/scripts that import `@localai/shared` must rebuild `packages/shared` after budget helper edits.
+
+## 2026-08-06 - Hard thrifty ladder (`mistral`)
+
+### Scope
+
+- Model: `mistral` (local Ollama)
+- Suite: hard effort ladder, thrifty + standard, `--repeats 2`
+- Command:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model mistral --repeats 2 --budget-profile thrifty --ladder-profile standard
+```
+
+- Artifact: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T17-54-19-932Z.md`
+
+### Aggregate results
+
+| Effort | Avg score | Median ms | Avg passes | Warnings | Avg scratchpad |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| none | 5.67 | 7832 | 0 | 0 | 0 |
+| minimal | 3.83 | 32175 | 0.33 | 4 | 137 |
+| low | 5.50 | 28637 | 1 | 0 | 175 |
+| medium | 3.83 | 40896 | 1.33 | 2 | 1003 |
+| high | 5.00 | 52577 | 2 | 2 | 1896 |
+| xhigh | 6.00 | 70077 | 2.67 | 2 | 520 |
+
+### Interpretation
+
+- Suite completed with **0 hard errors** (no wall-clock timeouts).
+- **Low is the only reliably healthy sim tier** on mistral here: `avgPasses=1`, 0 warnings.
+- **Minimal still flaky** after the 300-token bump: 4/6 `invalid_json` (works on rollout-table, fails on incident-handoff + qa-gate). Gemma-fixed Minimal is not universal.
+- Medium/High/XHigh also drop plan JSON on some prompts (incident-handoff especially weak overall, scores ~1–3).
+- Simulated Effort does **not** clearly beat `none` on average for this model/suite; XHigh edges `none` (6.0 vs 5.67) but latency ~9×.
+- Next diagnosis: capture mistral Minimal raw plan payloads on failing prompts; consider JSON repair / slightly higher Minimal budget / model-specific plan prompt — do not raise Medium yet until Minimal is stable across small locals.
+
+### Product Notes
+
+- Keep thrifty Low as the practical “lean sim works” tier for weaker Ollama chat models.
+- Treat mistral Minimal JSON failures as a follow-up bug, not a reason to revert the gemma Minimal fix.

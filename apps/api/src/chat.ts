@@ -137,7 +137,11 @@ import {
   simulatedPsychicPrivateArtifactMaxChars,
   simulatedPsychicPrivatePassMaxTokens,
   simulatedPsychicScratchpadMaxChars,
+  simulatedEffortTextPasses,
   simulatedEffortUsesThriftyPrompting,
+  type SimulatedEffortLadderProfile,
+  type SimulatedEffortPassName,
+  type SimulatedEffortTextPassName,
   normalizePrismMoodSensitivity,
   prismMoodDeclineReason,
   prismMoodIgnoreForgivenessChance,
@@ -310,7 +314,7 @@ export interface PsychicDebugPayload {
   simulated: boolean;
   passCount?: number;
   passes?: Array<{
-    name: "plan" | "draft" | "audit" | "revision";
+    name: SimulatedEffortPassName;
     chars: number;
     summary?: string;
     warning?: string;
@@ -320,7 +324,7 @@ export interface PsychicDebugPayload {
 
 /** Live-only PRISM-owned planning progress streamed before the final Chat reply. */
 export interface PsychicProgressPayload {
-  stage: "plan" | "draft" | "audit" | "revision";
+  stage: SimulatedEffortPassName;
   summary: string;
   scratchpad: string;
   effort: ReasoningEffort;
@@ -1035,7 +1039,7 @@ interface PsychicPlanningTrace {
   shouldGuideFinalAnswer: boolean;
 }
 
-type PsychicPrivatePassName = "plan" | "draft" | "audit" | "revision";
+type PsychicPrivatePassName = SimulatedEffortPassName;
 
 interface PsychicPrivatePassDiagnostic {
   name: PsychicPrivatePassName;
@@ -1045,7 +1049,7 @@ interface PsychicPrivatePassDiagnostic {
 }
 
 interface PsychicPrivateTextPassResult {
-  name: Exclude<PsychicPrivatePassName, "plan">;
+  name: SimulatedEffortTextPassName;
   content: string;
   publicSummary: string;
   diagnostic: PsychicPrivatePassDiagnostic;
@@ -1119,7 +1123,13 @@ function psychicPlanPromptForEffort(effort: ReasoningEffort): string {
       "Keep it concise, but do not leave the final answer to rediscover the constraints.",
     ].join("\n");
   }
-  if (effort === "minimal" || effort === "low") {
+  if (effort === "minimal") {
+    return [
+      PSYCHIC_PLANNING_SYSTEM_PROMPT,
+      "Keep fields compact but complete. Always return valid JSON with non-empty summary, scratchpad, and answerGuidance. Prefer short notes over long reasoning.",
+    ].join("\n");
+  }
+  if (effort === "low") {
     return [
       PSYCHIC_PLANNING_SYSTEM_PROMPT,
       "Keep every field short. Prefer 2 short scratchpad notes and 2 concrete guidance bullets. Do not write long reasoning.",
@@ -1149,28 +1159,9 @@ function psychicPlanningTokenBudget(effort: ReasoningEffort): number {
 
 function psychicPrivateTextPassTokenBudget(
   effort: ReasoningEffort,
-  passName: Exclude<PsychicPrivatePassName, "plan">
+  passName: SimulatedEffortTextPassName,
 ): number {
   return simulatedPsychicPrivatePassMaxTokens(effort, passName);
-}
-
-function simulatedEffortTextPasses(
-  effort: ReasoningEffort
-): Array<Exclude<PsychicPrivatePassName, "plan">> {
-  switch (effort) {
-    case "medium":
-      return ["audit"];
-    case "high":
-      return ["draft", "audit"];
-    case "xhigh":
-      return ["draft", "audit", "revision"];
-    case "minimal":
-    case "low":
-    case "none":
-    case "auto":
-    default:
-      return [];
-  }
 }
 
 function providerModelSupportsNativeReasoningEffort(
@@ -1184,12 +1175,10 @@ function providerModelSupportsNativeReasoningEffort(
 }
 
 function simulatedEffortNoticeDetail(args: {
-  experimentalAllModelEffortEnabled?: boolean;
   provider: LlmProvider;
   botOverrides: GenerateOptions | undefined;
   effort: ReasoningEffort;
 }): string | null {
-  if (args.experimentalAllModelEffortEnabled !== true) return null;
   if (args.effort === "auto" || args.effort === "none") return null;
   if (args.provider.name === "local") return null;
   const model = describeRequestedModel(args.provider, args.botOverrides);
@@ -1200,17 +1189,23 @@ function simulatedEffortNoticeDetail(args: {
 }
 
 function shouldSimulateReasoningEffort(args: {
-  experimentalAllModelEffortEnabled?: boolean;
   provider: LlmProvider;
   botOverrides: GenerateOptions | undefined;
   effort: ReasoningEffort;
 }): boolean {
-  if (args.experimentalAllModelEffortEnabled !== true) return false;
+  // Product default: thoughtless models always get Prism's simulated Effort.
   if (args.effort === "auto" || args.effort === "none") return false;
   return !providerModelSupportsNativeReasoningEffort(
     args.provider,
     args.botOverrides,
   );
+}
+
+function simulatedEffortLadderProfileForSettings(args: {
+  experimentalAllModelEffortEnabled?: boolean;
+}): SimulatedEffortLadderProfile {
+  // Settings flag now means "deep experimental ladder", not "enable simulation".
+  return args.experimentalAllModelEffortEnabled === true ? "deep" : "standard";
 }
 
 function parsePsychicPlanningResponse(
@@ -1240,15 +1235,32 @@ function parsePsychicPlanningResponse(
   }
 }
 
-function buildPsychicDraftPrompt(plan: {
-  summary: string;
-  scratchpad: string;
-  answerGuidance: string;
+function buildPsychicAlternativesPrompt(args: {
+  plan: { summary: string; scratchpad: string; answerGuidance: string };
+  effort: ReasoningEffort;
+}): string {
+  const optionCount = args.effort === "xhigh" ? 3 : 2;
+  return [
+    "You are Prism's private alternatives pass for the next assistant reply.",
+    "Return only one JSON object with string fields artifact and summary.",
+    `artifact: sketch ${optionCount} distinct reply approaches (A/B${optionCount === 3 ? "/C" : ""}), then choose exactly one. Format as short bullets: '- Option A: …', '- Option B: …'${optionCount === 3 ? ", '- Option C: …'" : ""}, '- Chosen: <letter> because …'. Max 140 words.`,
+    "summary: write 1-2 short first-person sentences naming which approach you chose and why, without giving away the final answer.",
+    "Do not write the final answer. Do not reveal chain-of-thought.",
+    "",
+    `Planning summary: ${args.plan.summary}`,
+    `Planning notes: ${args.plan.scratchpad}`,
+    `Answer guidance: ${args.plan.answerGuidance}`,
+  ].join("\n");
+}
+
+function buildPsychicDraftPrompt(args: {
+  plan: { summary: string; scratchpad: string; answerGuidance: string };
+  alternatives?: string;
 }): string {
   return [
     "You are Prism's private draft pass for the next assistant reply.",
     "Return only one JSON object with string fields artifact and summary.",
-    "artifact: write a private draft answer that follows the plan. This draft is never shown to the user.",
+    "artifact: write a private draft answer that follows the plan and chosen approach. This draft is never shown to the user.",
     "summary: write 1-2 short first-person sentences for the user explaining the concrete response shape or choices this draft established. Do not reveal hidden chain-of-thought, quote the artifact, or give away the final answer.",
     "Obey the user's requested format, labels, word limits, and forbidden-word rules exactly. If the user asks for S1-S6 labels, use S1, S2, S3, S4, S5, and S6 exactly.",
     "Preserve required key terms from the user's constraints, and return only the requested answer shape without extra notes or summaries.",
@@ -1256,16 +1268,22 @@ function buildPsychicDraftPrompt(plan: {
     "If Psychic mode needs a visible indicator, name a toast, badge, subtle line, or label, not a toggle.",
     "Do not reveal chain-of-thought. Do not mention that this is a draft.",
     "",
-    `Planning summary: ${plan.summary}`,
-    `Planning notes: ${plan.scratchpad}`,
-    `Answer guidance: ${plan.answerGuidance}`,
-  ].join("\n");
+    `Planning summary: ${args.plan.summary}`,
+    `Planning notes: ${args.plan.scratchpad}`,
+    `Answer guidance: ${args.plan.answerGuidance}`,
+    args.alternatives
+      ? `Chosen approach notes:\n${clampPsychicPlanningText(args.alternatives, 1200)}`
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
 function buildPsychicAuditPrompt(args: {
   plan: { summary: string; scratchpad: string; answerGuidance: string };
   userRequest: string;
   draft?: string;
+  alternatives?: string;
 }): string {
   return [
     "You are Prism's private audit pass for the next assistant reply.",
@@ -1288,39 +1306,185 @@ function buildPsychicAuditPrompt(args: {
     `Planning summary: ${args.plan.summary}`,
     `Answer guidance: ${args.plan.answerGuidance}`,
     `Planning notes to audit: ${args.plan.scratchpad}`,
+    args.alternatives
+      ? `Chosen approach:\n${clampPsychicPlanningText(args.alternatives, 800)}`
+      : "",
     args.draft
       ? "A private draft was produced. Audit it against the user request and plan, but do not quote or copy it."
       : "",
-  ].join("\n");
+  ]
+    .filter(Boolean)
+    .join("\n");
 }
 
-function buildPsychicRevisionPrompt(args: {
+function buildPsychicRedTeamPrompt(args: {
   plan: { summary: string; scratchpad: string; answerGuidance: string };
   userRequest: string;
   draft?: string;
   audit?: string;
+  effort: ReasoningEffort;
 }): string {
+  const depth =
+    args.effort === "xhigh"
+      ? "List 5-7 hostile failure modes."
+      : "List 3-5 hostile failure modes.";
   return [
-    "You are Prism's private revision-guidance pass for the next assistant reply.",
+    "You are Prism's private adversarial red-team pass for the next assistant reply.",
     "Return only one JSON object with string fields artifact and summary.",
-    "artifact: write 3-5 short bullet lines of final-answer guidance, no more than 120 words total. Each bullet must start with '- Final:'.",
-    "summary: write 1-2 short first-person sentences for the user explaining what the final refinement changed or locked in. Do not reveal hidden chain-of-thought, quote the private artifact, or give away the final answer.",
-    "Do not put a Markdown table in artifact. Do not write the final answer. Do not copy draft wording.",
-    "Focus on satisfying constraints, preserving privacy, avoiding overlong output, obeying forbidden-word rules, preserving exact requested labels such as S1-S6, and naming concrete UI indicators rather than toggles.",
-    "If the user says local-only, tell the final answer to use local machine, local device, local provider, or Ollama wording; never recommend infrastructure-only wording.",
-    "If the user says private planning pass, tell the final answer to use the exact phrase private planning pass.",
-    "Tell the final answer to preserve required key terms and to avoid extra notes outside the requested format.",
+    `artifact: ${depth} Each bullet must start with '- Attack:' and name how the reply could violate a constraint, invent facts, drift tone, or annoy the user. Then add 2 bullets starting with '- Guard:' that neutralize the worst attacks. Max 160 words.`,
+    "summary: write 1-2 short first-person sentences naming the sharpest risk you pressure-tested.",
+    "Do not write the final answer. Do not quote the private draft. Do not include raw chain-of-thought.",
     "",
-    "User request to revise against:",
+    "User request:",
     "---",
     clampPsychicPlanningText(args.userRequest, 2600),
     "---",
+    `Planning summary: ${args.plan.summary}`,
+    `Answer guidance: ${args.plan.answerGuidance}`,
+    args.audit ? `Audit notes:\n${clampPsychicPlanningText(args.audit, 1200)}` : "",
+    args.draft
+      ? "A private draft exists. Attack that approach without quoting it."
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildPsychicConstraintLockPrompt(args: {
+  plan: { summary: string; scratchpad: string; answerGuidance: string };
+  userRequest: string;
+  audit?: string;
+  redTeam?: string;
+}): string {
+  return [
+    "You are Prism's private constraint-lock pass for the next assistant reply.",
+    "Return only one JSON object with string fields artifact and summary.",
+    "artifact: extract a tiny must-keep checklist the final reply must obey. 4-8 bullets, each starting with '- Must:'. Include exact labels, word limits, forbidden words, required key phrases, and format shape. Max 120 words. No prose outside bullets.",
+    "summary: write 1-2 short first-person sentences saying you froze the non-negotiable constraints.",
+    "Do not write the final answer. Do not invent constraints the user did not imply.",
     "",
+    "User request:",
+    "---",
+    clampPsychicPlanningText(args.userRequest, 2600),
+    "---",
+    `Planning summary: ${args.plan.summary}`,
+    `Answer guidance: ${args.plan.answerGuidance}`,
+    args.audit ? `Audit:\n${clampPsychicPlanningText(args.audit, 900)}` : "",
+    args.redTeam ? `Red-team:\n${clampPsychicPlanningText(args.redTeam, 900)}` : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildPsychicReviseDraftPrompt(args: {
+  plan: { summary: string; scratchpad: string; answerGuidance: string };
+  userRequest: string;
+  draft: string;
+  alternatives?: string;
+  audit?: string;
+  redTeam?: string;
+  constraintLock?: string;
+}): string {
+  return [
+    "You are Prism's private revise-draft pass for the next assistant reply.",
+    "Return only one JSON object with string fields artifact and summary.",
+    "artifact: rewrite the private draft answer so it satisfies the audit, red-team guards, and constraint lock. This revised draft is never shown to the user.",
+    "summary: write 1-2 short first-person sentences explaining what the rewrite tightened or corrected, without giving away the final answer.",
+    "Obey exact formats, labels, word limits, and forbidden-word rules. Do not mention private planning.",
+    "",
+    "User request:",
+    "---",
+    clampPsychicPlanningText(args.userRequest, 2600),
+    "---",
+    `Planning summary: ${args.plan.summary}`,
+    `Answer guidance: ${args.plan.answerGuidance}`,
+    args.alternatives
+      ? `Chosen approach:\n${clampPsychicPlanningText(args.alternatives, 800)}`
+      : "",
+    args.audit ? `Audit:\n${clampPsychicPlanningText(args.audit, 900)}` : "",
+    args.redTeam ? `Red-team:\n${clampPsychicPlanningText(args.redTeam, 900)}` : "",
+    args.constraintLock
+      ? `Constraint lock:\n${clampPsychicPlanningText(args.constraintLock, 900)}`
+      : "",
+    "Prior private draft to improve (rewrite; do not merely patch):",
+    "---",
+    clampPsychicPlanningText(args.draft, 3200),
+    "---",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildPsychicComplianceSweepPrompt(args: {
+  plan: { summary: string; scratchpad: string; answerGuidance: string };
+  userRequest: string;
+  constraintLock?: string;
+  revisedDraft?: string;
+  effort: ReasoningEffort;
+}): string {
+  return [
+    "You are Prism's private XHigh compliance-sweep pass for the next assistant reply.",
+    "Return only one JSON object with string fields artifact and summary.",
+    "artifact: hostile compliance check of the revised draft against the constraint lock and user request. 4-8 bullets starting with '- Fail:' or '- Pass:'. Then 2-4 bullets starting with '- Enforce:' that the final reply must obey. Max 160 words.",
+    "summary: write 1-2 short first-person sentences naming whether the revised draft cleared the lock or still needed enforcement.",
+    "Do not write the final answer. Do not quote long draft passages.",
+    args.effort === "xhigh"
+      ? "Be stricter than a normal audit: treat any missing label, soft constraint, or format drift as a Fail."
+      : "",
+    "",
+    "User request:",
+    "---",
+    clampPsychicPlanningText(args.userRequest, 2600),
+    "---",
+    `Planning summary: ${args.plan.summary}`,
+    args.constraintLock
+      ? `Constraint lock:\n${clampPsychicPlanningText(args.constraintLock, 1200)}`
+      : "",
+    args.revisedDraft
+      ? "A revised private draft exists. Sweep it without quoting it at length."
+      : "",
+  ]
+    .filter(Boolean)
+    .join("\n");
+}
+
+function buildPsychicSynthesisPrompt(args: {
+  plan: { summary: string; scratchpad: string; answerGuidance: string };
+  userRequest: string;
+  alternatives?: string;
+  audit?: string;
+  redTeam?: string;
+  constraintLock?: string;
+  complianceSweep?: string;
+  hasDraft: boolean;
+}): string {
+  return [
+    "You are Prism's private synthesis pass for the next assistant reply.",
+    "Return only one JSON object with string fields artifact and summary.",
+    "artifact: write 4-7 short bullet lines of final-answer guidance, no more than 140 words total. Each bullet must start with '- Final:'. Merge the plan, critiques, constraint lock, and compliance notes into one clean brief the visible reply will follow.",
+    "summary: write 1-2 short first-person sentences explaining what the final brief locked in.",
+    "Do not put a Markdown table in artifact. Do not write the final answer. Do not copy draft wording.",
+    "Focus on satisfying constraints, preserving privacy, avoiding overlong output, obeying forbidden-word rules, preserving exact requested labels such as S1-S6, and naming concrete UI indicators rather than toggles.",
+    "",
+    "User request:",
+    "---",
+    clampPsychicPlanningText(args.userRequest, 2600),
+    "---",
     `Planning summary: ${args.plan.summary}`,
     `Initial guidance: ${args.plan.answerGuidance}`,
-    args.audit ? `Audit guidance: ${clampPsychicPlanningText(args.audit, 1800)}` : "",
-    args.draft
-      ? "A private draft was produced. Use the audit to improve final-answer instructions, but do not quote or copy the draft."
+    args.alternatives
+      ? `Chosen approach:\n${clampPsychicPlanningText(args.alternatives, 700)}`
+      : "",
+    args.audit ? `Audit:\n${clampPsychicPlanningText(args.audit, 700)}` : "",
+    args.redTeam ? `Red-team:\n${clampPsychicPlanningText(args.redTeam, 700)}` : "",
+    args.constraintLock
+      ? `Constraint lock:\n${clampPsychicPlanningText(args.constraintLock, 900)}`
+      : "",
+    args.complianceSweep
+      ? `Compliance sweep:\n${clampPsychicPlanningText(args.complianceSweep, 900)}`
+      : "",
+    args.hasDraft
+      ? "A private draft/revision exists. Use critiques to improve final-answer instructions, but do not quote or copy the draft."
       : "",
   ]
     .filter(Boolean)
@@ -1329,33 +1493,54 @@ function buildPsychicRevisionPrompt(args: {
 
 function appendPsychicPrivateArtifactsToScratchpad(args: {
   planScratchpad: string;
+  alternatives?: string;
   draft?: string;
   audit?: string;
-  revision?: string;
+  redTeam?: string;
+  constraintLock?: string;
+  reviseDraft?: string;
+  complianceSweep?: string;
+  synthesis?: string;
 }): string {
   const parts = [
     `Plan scratchpad:\n${args.planScratchpad}`,
+    args.alternatives ? `Alternatives:\n${args.alternatives}` : "",
     args.draft ? `Private draft:\n${args.draft}` : "",
     args.audit ? `Private audit:\n${args.audit}` : "",
-    args.revision ? `Private revision guidance:\n${args.revision}` : "",
+    args.redTeam ? `Red-team:\n${args.redTeam}` : "",
+    args.constraintLock ? `Constraint lock:\n${args.constraintLock}` : "",
+    args.reviseDraft ? `Revised draft:\n${args.reviseDraft}` : "",
+    args.complianceSweep ? `Compliance sweep:\n${args.complianceSweep}` : "",
+    args.synthesis ? `Synthesis:\n${args.synthesis}` : "",
   ].filter(Boolean);
-  return clampPsychicPlanningText(parts.join("\n\n"), 8000);
+  return clampPsychicPlanningText(parts.join("\n\n"), 10_000);
 }
 
 function composePsychicFinalGuidance(args: {
   planGuidance: string;
+  alternatives?: string;
   audit?: string;
-  revision?: string;
+  redTeam?: string;
+  constraintLock?: string;
+  complianceSweep?: string;
+  synthesis?: string;
 }): string {
-  const latestGuidance = args.revision || args.audit;
+  const latestGuidance =
+    args.synthesis || args.complianceSweep || args.redTeam || args.audit;
   const parts = [
     "Non-negotiable final-answer rules: follow the user's exact requested format, labels, word limits, and forbidden-word rules; preserve required key terms; if the prompt says local-only, include the word local; if it says private planning pass, use that exact phrase; if it says scratchpads are not persisted, use that exact phrase; if labels like S1-S6 are requested, use those exact labels and do not convert them to 1-6; include every named item; never add a Note or summary after an exact table/list request; do not mention private planning; if Psychic mode needs an indicator, use toast, badge, line, or label.",
-    `Core plan: ${clampPsychicPlanningText(args.planGuidance, 520)}`,
+    `Core plan: ${clampPsychicPlanningText(args.planGuidance, 480)}`,
+    args.alternatives
+      ? `Chosen approach: ${clampPsychicPlanningText(args.alternatives, 280)}`
+      : "",
+    args.constraintLock
+      ? `Constraint lock: ${clampPsychicPlanningText(args.constraintLock, 420)}`
+      : "",
     latestGuidance
       ? `Latest checklist: ${clampPsychicPlanningText(latestGuidance, 520)}`
       : "",
   ].filter(Boolean);
-  return clampPsychicPlanningText(parts.join("\n"), 1100);
+  return clampPsychicPlanningText(parts.join("\n"), 1_400);
 }
 
 function latestUserPromptContent(promptMessages: readonly ProviderMessage[]): string {
@@ -1367,21 +1552,35 @@ function latestUserPromptContent(promptMessages: readonly ProviderMessage[]): st
 }
 
 function psychicPrivatePassFallbackSummary(
-  passName: Exclude<PsychicPrivatePassName, "plan">,
+  passName: SimulatedEffortTextPassName,
 ): string {
   switch (passName) {
+    case "alternatives":
+      return "I compared reply approaches and locked the strongest path before drafting.";
     case "draft":
       return "I translated the plan into a candidate response while preserving the requested shape and constraints.";
     case "audit":
       return "I checked the candidate against the request for missed constraints, privacy issues, and likely user-facing mistakes.";
-    case "revision":
-      return "I folded the audit into the final response guidance and locked in the clearest compliant approach.";
+    case "red_team":
+      return "I adversarially pressure-tested the approach for constraint breaks and user-facing failure modes.";
+    case "constraint_lock":
+      return "I froze the non-negotiable must-keep constraints for the final reply.";
+    case "revise_draft":
+      return "I rewrote the private draft under the critiques and constraint lock.";
+    case "compliance_sweep":
+      return "I ran a final hostile compliance sweep against the constraint lock.";
+    case "synthesis":
+      return "I synthesized the critiques into one final brief for the visible reply.";
+    default: {
+      const _exhaustive: never = passName;
+      return _exhaustive;
+    }
   }
 }
 
 function parsePsychicPrivateTextPassResponse(
   raw: string,
-  passName: Exclude<PsychicPrivatePassName, "plan">,
+  passName: SimulatedEffortTextPassName,
   effort: ReasoningEffort,
 ): { content: string; publicSummary: string } | null {
   const artifactMax = simulatedPsychicPrivateArtifactMaxChars(effort);
@@ -1442,7 +1641,7 @@ async function runPsychicPrivateTextPass(args: {
   promptMessages: ProviderMessage[];
   botOverrides: GenerateOptions | undefined;
   effort: ReasoningEffort;
-  passName: Exclude<PsychicPrivatePassName, "plan">;
+  passName: SimulatedEffortTextPassName;
   systemPrompt: string;
   includeOriginalPromptAsUser?: boolean;
   signal?: AbortSignal;
@@ -1573,13 +1772,17 @@ async function runPsychicPlanningPass(args: {
   effort: ReasoningEffort;
   simulated: boolean;
   psychicModeEnabled?: boolean;
+  ladderProfile?: SimulatedEffortLadderProfile;
   signal?: AbortSignal;
   onPlanningWarning?: (detail: string) => void;
   onProgress?: (progress: PsychicProgressPayload) => void;
 }): Promise<PsychicPlanningTrace | null> {
+  // Effort None means no thinking / no simulated thinking — skip Psychic entirely.
+  if (args.effort === "none") return null;
   const requestedModel = describeRequestedModel(args.provider, args.botOverrides);
   const shouldPlan = args.simulated || args.psychicModeEnabled === true;
   if (!shouldPlan) return null;
+  const ladderProfile = args.ladderProfile ?? "standard";
   const planningMode: NonNullable<PsychicThoughtPayload["planningMode"]> =
     args.simulated
       ? "simulated"
@@ -1629,20 +1832,31 @@ async function runPsychicPlanningPass(args: {
   const passSummaries: PsychicThoughtPass[] = [
     { stage: "plan", summary: parsed.summary },
   ];
+  let alternatives = "";
   let draft = "";
   let audit = "";
-  let revision = "";
-  const emitProgress = (stage: PsychicPrivatePassName): void => {
-    const scratchpad = appendPsychicPrivateArtifactsToScratchpad({
+  let redTeam = "";
+  let constraintLock = "";
+  let reviseDraft = "";
+  let complianceSweep = "";
+  let synthesis = "";
+  const scratchpadSnapshot = () =>
+    appendPsychicPrivateArtifactsToScratchpad({
       planScratchpad: parsed.scratchpad,
+      alternatives,
       draft,
       audit,
-      revision,
+      redTeam,
+      constraintLock,
+      reviseDraft,
+      complianceSweep,
+      synthesis,
     });
+  const emitProgress = (stage: PsychicPrivatePassName): void => {
     args.onProgress?.({
       stage,
       summary: passSummaries.at(-1)?.summary ?? parsed.summary,
-      scratchpad,
+      scratchpad: scratchpadSnapshot(),
       effort: args.effort,
       provider: args.provider.name,
       model: requestedModel,
@@ -1656,18 +1870,93 @@ async function runPsychicPlanningPass(args: {
   };
   emitProgress("plan");
   if (args.simulated) {
-    for (const passName of simulatedEffortTextPasses(args.effort)) {
-      const systemPrompt =
-        passName === "draft"
-          ? buildPsychicDraftPrompt(parsed)
-        : passName === "audit"
-          ? buildPsychicAuditPrompt({ plan: parsed, userRequest: latestUserRequest, draft })
-          : buildPsychicRevisionPrompt({
-              plan: parsed,
-              userRequest: latestUserRequest,
-              draft,
-              audit,
-            });
+    for (const passName of simulatedEffortTextPasses(
+      args.effort,
+      ladderProfile,
+    )) {
+      const activeDraft = reviseDraft || draft;
+      if (
+        (passName === "revise_draft" || passName === "compliance_sweep") &&
+        !activeDraft
+      ) {
+        const warning = `${passName}_skipped_no_draft`;
+        args.onPlanningWarning?.(warning);
+        passDiagnostics.push({ name: passName, chars: 0, warning });
+        continue;
+      }
+      let systemPrompt = "";
+      switch (passName) {
+        case "alternatives":
+          systemPrompt = buildPsychicAlternativesPrompt({
+            plan: parsed,
+            effort: args.effort,
+          });
+          break;
+        case "draft":
+          systemPrompt = buildPsychicDraftPrompt({ plan: parsed, alternatives });
+          break;
+        case "audit":
+          systemPrompt = buildPsychicAuditPrompt({
+            plan: parsed,
+            userRequest: latestUserRequest,
+            draft,
+            alternatives,
+          });
+          break;
+        case "red_team":
+          systemPrompt = buildPsychicRedTeamPrompt({
+            plan: parsed,
+            userRequest: latestUserRequest,
+            draft: activeDraft,
+            audit,
+            effort: args.effort,
+          });
+          break;
+        case "constraint_lock":
+          systemPrompt = buildPsychicConstraintLockPrompt({
+            plan: parsed,
+            userRequest: latestUserRequest,
+            audit,
+            redTeam,
+          });
+          break;
+        case "revise_draft":
+          systemPrompt = buildPsychicReviseDraftPrompt({
+            plan: parsed,
+            userRequest: latestUserRequest,
+            draft: activeDraft,
+            alternatives,
+            audit,
+            redTeam,
+            constraintLock,
+          });
+          break;
+        case "compliance_sweep":
+          systemPrompt = buildPsychicComplianceSweepPrompt({
+            plan: parsed,
+            userRequest: latestUserRequest,
+            constraintLock,
+            revisedDraft: activeDraft,
+            effort: args.effort,
+          });
+          break;
+        case "synthesis":
+          systemPrompt = buildPsychicSynthesisPrompt({
+            plan: parsed,
+            userRequest: latestUserRequest,
+            alternatives,
+            audit,
+            redTeam,
+            constraintLock,
+            complianceSweep,
+            hasDraft: Boolean(activeDraft),
+          });
+          break;
+        default: {
+          const _exhaustive: never = passName;
+          throw new Error(`Unhandled Psychic pass: ${String(_exhaustive)}`);
+        }
+      }
       const result = await runPsychicPrivateTextPass({
         provider: args.provider,
         promptMessages: args.promptMessages,
@@ -1675,30 +1964,57 @@ async function runPsychicPlanningPass(args: {
         effort: args.effort,
         passName,
         systemPrompt,
-        includeOriginalPromptAsUser: passName === "draft",
+        includeOriginalPromptAsUser:
+          passName === "draft" || passName === "revise_draft",
         signal: args.signal,
         onPlanningWarning: args.onPlanningWarning,
       });
       passDiagnostics.push(result.diagnostic);
       if (!result.content) continue;
-      if (passName === "draft") draft = result.content;
-      if (passName === "audit") audit = result.content;
-      if (passName === "revision") revision = result.content;
+      switch (passName) {
+        case "alternatives":
+          alternatives = result.content;
+          break;
+        case "draft":
+          draft = result.content;
+          break;
+        case "audit":
+          audit = result.content;
+          break;
+        case "red_team":
+          redTeam = result.content;
+          break;
+        case "constraint_lock":
+          constraintLock = result.content;
+          break;
+        case "revise_draft":
+          reviseDraft = result.content;
+          break;
+        case "compliance_sweep":
+          complianceSweep = result.content;
+          break;
+        case "synthesis":
+          synthesis = result.content;
+          break;
+        default: {
+          const _exhaustive: never = passName;
+          throw new Error(`Unhandled Psychic pass: ${String(_exhaustive)}`);
+        }
+      }
       passSummaries.push({ stage: passName, summary: result.publicSummary });
       emitProgress(passName);
     }
   }
   const answerGuidance = composePsychicFinalGuidance({
     planGuidance: parsed.answerGuidance,
+    alternatives,
     audit,
-    revision,
+    redTeam,
+    constraintLock,
+    complianceSweep,
+    synthesis,
   });
-  const liveScratchpad = appendPsychicPrivateArtifactsToScratchpad({
-    planScratchpad: parsed.scratchpad,
-    draft,
-    audit,
-    revision,
-  });
+  const liveScratchpad = scratchpadSnapshot();
   const completedPassCount = passDiagnostics.filter(
     (pass) => pass.chars > 0,
   ).length;
@@ -1796,15 +2112,11 @@ async function generateChatResponse(args: {
           ...(effort === "auto" ? {} : { reasoningEffort: effort }),
         };
     const simulatedEffort = shouldSimulateReasoningEffort({
-      experimentalAllModelEffortEnabled:
-        args.experimentalAllModelEffortEnabled,
       provider,
       botOverrides: overrides,
       effort,
     });
     const simulatedEffortNotice = simulatedEffortNoticeDetail({
-      experimentalAllModelEffortEnabled:
-        args.experimentalAllModelEffortEnabled,
       provider,
       botOverrides: overrides,
       effort,
@@ -1819,6 +2131,10 @@ async function generateChatResponse(args: {
       effort,
       simulated: simulatedEffort,
       psychicModeEnabled: args.psychicModeEnabled,
+      ladderProfile: simulatedEffortLadderProfileForSettings({
+        experimentalAllModelEffortEnabled:
+          args.experimentalAllModelEffortEnabled,
+      }),
       signal,
       onPlanningWarning: args.onPlanningWarning,
       onProgress: args.onPsychicProgress,

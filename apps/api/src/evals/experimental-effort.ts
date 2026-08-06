@@ -59,7 +59,17 @@ interface EvalRunResult {
     simulated: boolean;
     passCount?: number;
     passes?: Array<{
-      name: "plan" | "draft" | "audit" | "revision";
+      name:
+        | "plan"
+        | "alternatives"
+        | "draft"
+        | "audit"
+        | "red_team"
+        | "constraint_lock"
+        | "revise_draft"
+        | "compliance_sweep"
+        | "synthesis"
+        | "revision";
       chars: number;
       warning?: string;
     }>;
@@ -251,7 +261,8 @@ function evalRuns(options: CliOptions): EvalRunConfig[] {
       provider: "local",
       model: options.localModel,
       reasoningEffort: options.effort,
-      experimentalAllModelEffortEnabled: true,
+      // Product-default lean ladder (deep ladder is Settings experimental).
+      experimentalAllModelEffortEnabled: false,
       psychicModeEnabled: true,
       requiresApiKey: null,
     },

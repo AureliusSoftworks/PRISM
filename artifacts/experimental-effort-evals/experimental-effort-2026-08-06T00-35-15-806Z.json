@@ -1,0 +1,133 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-06T00:35:15.806Z",
+  "prompt": "You are advising a two-person local-first app team.\nThey have one weekend to ship a feature that lets non-reasoning local models behave more like thinking models.\nConstraints:\n- No cloud calls may happen in LOCAL mode.\n- Users should never see raw chain-of-thought.\n- Developer diagnostics should be useful but not persisted as private scratchpads.\n- The UI must stay calm and not turn this into a wall of controls.\n\nPropose an implementation plan, the key tests, and the main failure modes.\nBe concrete enough that an engineer could start coding from your answer.",
+  "options": {
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 39953,
+      "assistant": "**Implementation Plan:**\n\nTo enable non-reasoning local models to behave more like thinking models, we'll introduce a new feature called \"Model Reflection.\" This feature will allow users to configure their local models to generate explanations and justifications for their decisions.\n\nHere's the high-level plan:\n\n**Key Tests:**\n\nTo ensure the feature works as expected, we'll need to write several tests:\n\n1. **Model Reflection Toggle Test**: Verify that the Model Reflection interface toggles correctly between on and off states.\n2. **Explainability Algorithm Test**: Validate that the Explainability algorithm generates accurate explanations for the model's decisions.\n3. **UI Feedback Loop Test**: Ensure that the UI updates correctly when the user toggles Model Reflection on or off, and that the Explainability algorithm generates explanations in response to this change.\n\n**Main Failure Modes:**\n\nTo mitigate potential failure modes, we'll need to consider the following:\n\n1. **Performance Impact**: If the Explainability algorithm is computationally expensive, it may impact the overall performance of the app. To mitigate this, we can optimize the algorithm for faster execution times.\n2. **Explainability Algorithm Accuracy**: If the Explainability algorithm generates inaccurate explanations, users may become confused or mistrust the model's decisions. We'll need to carefully test and refine the algorithm to ensure accurate explanations are generated.\n3. **Model Reflection Toggle Issues**: If the Model Reflection interface does not toggle correctly, users will not be able to control the feature. We'll need to thoroughly test this component to ensure it works as expected.\n\n**Concrete Code Start Point:**\n\nTo get started with implementing the Model Reflection feature, we can begin by creating a new module responsible for generating explanations. This module will analyze the model's decision-making process and provide a human-readable explanation.\n\nCreate a new file called `explainability.py` in the app's core directory:\n```python\nimport numpy as np\n\nclass ExplainabilityModel:\n    def __init__(self, model):\n        self.model = model\n\n    def explain(self, input_data):\n        # Analyze the model's decision-making process and generate an explanation\n        # This is a placeholder implementation; we'll need to refine this algorithm later\n        explanation = \"The model decided based on the following factors: \"\n        # Add more logic here to generate a concise explanation\n        return explanation\n\ndef create_explainability_model(model):\n    return ExplainabilityModel(model)\n```\nNext, we can modify the local model to include an additional module responsible for generating explanations. We'll need to update the `model.py` file:\n```python\nimport explainability\n\nclass LocalModel:\n    def __init__(self):\n        self.explainability_module = None\n\n    def train(self, data):\n        # Train the model on the data\n        pass\n\n    def make_prediction(self, input_data):\n        # Make a prediction using the trained model\n        pass\n\n    def enable_explainability(self):\n        self.explainability_module = explainability.create_explainability_model(self)\n```\nThis is just a starting point, and we'll need to continue refining the implementation as we work through the feature's development.",
+      "assistantChars": 3330
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 92798,
+      "assistant": "**Implementation Plan:**\n\nTo enable non-reasoning local models to behave more like thinking models, we'll introduce a new abstraction layer between the model's internal workings and the user interface. This layer will provide a simplified, high-level representation of the model's thought process, while still maintaining the benefits of local-first operation.\n\n**Key Components:**\n\n**Implementation Steps:**\n\n\t* Update existing models to accept this new parameter.\n\t* Develop a simple example model that demonstrates the usage of this parameter.\n2. Design and implement the thought process generator module (approx. 4-5 days).\n\t* Analyze the output of various models to identify key concepts, entities, and relationships.\n\t* Develop an algorithm to generate a simplified representation of the thought process.\n3. Implement the UI abstraction layer (approx. 4-5 days).\n\t* Design a new UI component that will display the simplified thought process representation.\n\t* Ensure that the UI remains calm and focused on the main idea.\n\n**Key Tests:**\n\n1. **Model Interface Test**: Verify that the model interface accepts the `thought_process` parameter correctly (approx. 1 day).\n2. **Thought Process Generator Test**: Validate that the thought process generator module produces accurate and relevant simplified representations of the thought process (approx. 2 days).\n3. **UI Abstraction Layer Test**: Ensure that the UI abstraction layer displays the simplified thought process representation correctly and in a calm manner (approx. 1 day).\n\n**Main Failure Modes:**\n\n1. **Inaccurate Thought Process Representation**: The thought process generator module fails to accurately identify key concepts, entities, and relationships.\n2. **UI Overload**: The UI abstraction layer becomes too cluttered or overwhelming, causing the user experience to degrade.\n3. **Model Interface Issues**: The model interface fails to accept the `thought_process` parameter correctly, leading to errors or unexpected behavior.\n\n**Mitigation Strategies:**\n\n1. **Inaccurate Thought Process Representation**: Implement a fallback mechanism that defaults to a simple representation of the thought process if the generator module fails.\n2. **UI Overload**: Implement a filtering mechanism that allows users to toggle between different levels of detail in the simplified thought process representation.\n3. **Model Interface Issues**: Develop comprehensive unit tests and integration tests for the model interface to ensure its correctness.\n\n**Code Structure:**\n\nThe implementation plan will be organized into the following modules:\n\n* `models/thought_process_generator.py`: Thought process generator module\n* `ui/simplified_thought_process.py`: UI abstraction layer\n* `ui/models.py`: Model interface with `thought_process` parameter\n* `tests/models/test_thought_process_generator.py`: Unit tests for thought process generator module\n* `tests/ui/test_simplified_thought_process.py`: Integration tests for UI abstraction layer\n\nThis plan should provide a solid foundation for implementing the feature and ensuring that it meets the required constraints.",
+      "assistantChars": 3115
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": true,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 20536,
+      "assistant": "assistant\n\n**Implementation Plan**\n\nTo implement the local-first feature for non-reasoning models to behave more like thinking models within the given constraints, we'll follow a phased approach:\n\n\t* Create a proxy model that intercepts and sanitizes user input.\n\t* Implement a logging mechanism to collect diagnostic data without exposing chain-of-thought.\n\t* Use a local database to store the sanitized data, ensuring no cloud calls are made in LOCAL mode.\n\t* Integrate the proxy model with the existing non-reasoning local models.\n\t* Modify the models to use the proxy model's sanitized input instead of raw user input.\n\t* Update the UI to display a calm and minimalistic interface for the new feature.\n\t* Perform thorough testing to ensure the feature works as expected, including edge cases.\n\n**Key Tests**\n\nTo validate the implementation, we'll focus on the following key tests:\n\n\t* Test that the proxy model intercepts and sanitizes user input correctly.\n\t* Verify that the local model uses sanitized input without exposing chain-of-thought.\n2. **S2: LOCAL mode with non-reasoning model + edge case (e.g., invalid input)**\n\t* Test that the proxy model handles edge cases correctly, such as invalid or missing input.\n3. **S3: Developer diagnostics in LOCAL mode without exposed chain-of-thought**\n\t* Test that the logging mechanism collects diagnostic data without exposing chain-of-thought to users.\n\n**Main Failure Modes**\n\nTo mitigate potential issues, we'll focus on the following main failure modes:\n\n1. **Cloud calls in LOCAL mode**: Ensure that no cloud calls are made during LOCAL mode testing.\n2. **Exposed chain-of-thought**: Verify that the proxy model and local models do not expose chain-of-thought to users.\n3. **Unstable UI**: Monitor the UI for any signs of instability or excessive controls, ensuring a calm and minimalistic interface.\n\n**Additional Considerations**\n\n* Use a separate logging mechanism for developer diagnostics to ensure data is not persisted as private scratchpads.\n* Implement a mechanism to reset the proxy model's state when the user closes the app or switches to a different LOCAL mode.\n* Perform thorough testing to ensure the feature works correctly in various scenarios, including edge cases.\n\nBy following this implementation plan and focusing on key tests and failure modes, we can deliver a local-first feature that meets the constraints while ensuring a stable and user-friendly experience.",
+      "assistantChars": 2443,
+      "psychicDebug": {
+        "summary": "Implement local-first feature to enable non-reasoning models to behave like thinking models without exposing chain-of-thought or persisting diagnostics.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 516,
+            "summary": "Implement local-first feature to enable non-reasoning models to behave like thinking models without exposing chain-of-thought or persisting diagnostics."
+          },
+          {
+            "name": "draft",
+            "chars": 202,
+            "summary": "I'll work with you to implement a feature that lets non-reasoning local models behave more like thinking models without exposing chain-of-thought or persisting diagnostics."
+          },
+          {
+            "name": "audit",
+            "chars": 194,
+            "summary": "I need to ensure that our app respects the constraint of no cloud calls in LOCAL mode, preserves user privacy by not showing raw chain-of-thought, and keeps diagnostics useful but private."
+          }
+        ],
+        "guidanceChars": 1100,
+        "scratchpadChars": 961,
+        "scratchpad": "Plan scratchpad: Constraints: - No cloud calls in LOCAL mode - Users should not see raw chain-of-thought - Developer diagnostics should be useful but not persisted Likely failure modes: - Inadequate handling of edge cases leading to exposed chain-of-thought - Insufficient diagnostic logging causing lost context Answer structure: Implement a proxy model that intercepts and sanitizes user input, then passes it to the local model. Use a separate logging mechanism for developer diagnostics that does not expose raw chain-of-thought. Private draft: Implement a proxy model that intercepts and sanitizes user input, then passes it to the local model. Use a separate logging mechanism for developer diagnostics that does not expose raw chain-of-thought. Private audit: Use a proxy model to intercept and sanitize user input before passing it to the local model. Use a separate logging mechanism for developer diagnostics that does not expose raw chain-of-thought."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 2,
+          "reasoning": 2,
+          "actionability": 2,
+          "constraints": 2,
+          "total": 2,
+          "notes": "Proposes generic explainability rather than a concrete local reasoning/scaffolding feature. Does not address no-cloud enforcement, chain-of-thought suppression, or non-persistent diagnostics. Tests are superficial and implementation is mostly placeholder ML code unrelated to the requested app feature."
+        },
+        "B": {
+          "correctness": 2,
+          "reasoning": 2,
+          "actionability": 3,
+          "constraints": 2,
+          "total": 2,
+          "notes": "Mentions a UI abstraction and modules, but the plan is incomplete, exceeds the one-weekend constraint, and risks displaying 'thought process' to users. It does not meaningfully address LOCAL-mode cloud blocking or developer diagnostics. Tests are generic."
+        },
+        "C": {
+          "correctness": 4,
+          "reasoning": 4,
+          "actionability": 3,
+          "constraints": 5,
+          "total": 4,
+          "notes": "Best addresses the explicit constraints: no cloud calls, no exposed chain-of-thought, diagnostics, and calm UI. However, the proposed proxy/sanitization approach does not really make non-reasoning models behave more like thinking models, is vague, and suggests local storage of sanitized data, which conflicts with not persisting private scratchpads. Lacks concrete architecture, prompts, adapters, or coding steps."
+        }
+      },
+      "ranking": [
+        "C",
+        "B",
+        "A"
+      ],
+      "winner": "C",
+      "summary": "All three responses are weak. C is the least bad because it at least acknowledges most constraints and proposes relevant tests/failure modes, but it remains vague and does not deliver a concrete weekend implementation for local reasoning-style scaffolding. B has slightly more structure than A but misses key constraints and is unrealistic. A is mostly unrelated generic explainability boilerplate."
+    }
+  }
+}

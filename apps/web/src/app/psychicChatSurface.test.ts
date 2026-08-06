@@ -20,10 +20,10 @@ describe("Psychic Chat surface wiring", () => {
     );
   });
 
-  it("treats product Chat (view=chat) as a Psychic presentation surface", () => {
+  it("shows settled Psychic only in transcript Chat, never immersive Zen", () => {
     assert.match(
       pageSource,
-      /function isPsychicPresentationSurfaceView\(view: View\): boolean \{\s*return isZenSurfaceView\(view\) \|\| isChatSurfaceView\(view\);\s*\}/u,
+      /function isPsychicPresentationSurfaceView\(\s*view: View,\s*presentation: ChatPresentation \| null,\s*\): boolean \{\s*if \(isChatSurfaceView\(view\)\) return true;\s*return isZenSurfaceView\(view\) && presentation === "chat";\s*\}/u,
     );
   });
 
@@ -35,7 +35,7 @@ describe("Psychic Chat surface wiring", () => {
     assert.ok(renderSource);
     assert.match(
       renderSource,
-      /!isPsychicPresentationSurfaceView\(view\)\s*\|\|\s*msg\.role !== "assistant"/u,
+      /!isPsychicPresentationSurfaceView\(view, chatPresentation\)\s*\|\|\s*msg\.role !== "assistant"/u,
     );
     assert.match(renderSource, /expandedPsychicAssistantMessageId === msg\.id/u);
     assert.match(renderSource, /data-expanded=\{expanded/u);
@@ -95,7 +95,7 @@ describe("Psychic Chat surface wiring", () => {
     assert.doesNotMatch(zenSource, /Psychic/u);
   });
 
-  it("reveals model and effort glyph metadata while Chat context is focused", () => {
+  it("reveals model and effort glyph metadata only in transcript Chat while focused", () => {
     const metadataSource = pageSource.match(
       /function renderMessageGenerationMetadata[\s\S]*?\n  }/,
     )?.[0];
@@ -103,7 +103,7 @@ describe("Psychic Chat surface wiring", () => {
     assert.ok(metadataSource);
     assert.match(
       metadataSource,
-      /!isPsychicPresentationSurfaceView\(view\)/u,
+      /!isPsychicPresentationSurfaceView\(view, chatPresentation\)/u,
     );
     assert.match(metadataSource, /contextFocusedMessageId !== msg\.id/u);
     assert.match(metadataSource, /assistantGenerationMetadata/u);
@@ -111,10 +111,10 @@ describe("Psychic Chat surface wiring", () => {
     assert.match(metadataSource, /REASONING_EFFORT_LABELS\[metadata\.effort\]/u);
   });
 
-  it("resolves Psychic source messages on Psychic presentation surfaces", () => {
+  it("resolves Psychic source messages only on transcript Chat presentation", () => {
     assert.match(
       pageSource,
-      /const psychicSourceMessage = isPsychicPresentationSurfaceView\(\s*view,\s*\)\s*\?\s*psychicSourceForAssistantMessage/u,
+      /const psychicSourceMessage = isPsychicPresentationSurfaceView\(\s*view,\s*chatPresentation,\s*\)\s*\?\s*psychicSourceForAssistantMessage/u,
     );
     assert.doesNotMatch(
       pageSource,

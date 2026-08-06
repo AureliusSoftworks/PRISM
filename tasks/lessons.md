@@ -1,3 +1,28 @@
+### 2026-08-06 · UX
+**Trigger**: Ask Prism idle fade should eventually leave the scene entirely.
+**Lesson**: Idle presence is two equal stages: dim after `PRISM_COMPANION_IDLE_DIM_MS`, then hide after the same span (`PRISM_COMPANION_IDLE_VANISH_MS`). Keep the companion mounted so Option+Space and Option wield can revive it via `clearIdleDim` (including at wield arm start).
+**Applies to**: `PrismCompanion.tsx`, `prismCompanion.module.css`
+
+### 2026-08-06 · architecture
+**Trigger**: Soft Debate exhibit synth returned 503 “Another image is generating” while a docked soft job was already in flight.
+**Lesson**: Soft exhibit sprites must use `waitForImageSlot` (FIFO queue), not `tryAcquireImageSlot`. Client may start another soft synth while one is busy; only uploads hard-lock the asset controls. Docked soft-job UI already supports multiple in-flight titles.
+**Applies to**: `/api/debates/exhibits/synthesize`, `synthesizeEvidenceObjectImage`, `softExhibitSynthesizeJobs`
+
+### 2026-08-06 · UX
+**Trigger**: Debate Brave/Scholar inputs looked clickable in LOCAL but HTML `disabled` swallowed focus with no feedback.
+**Lesson**: LOCAL must still block public search (privacy), but keep the query fields focusable/typable. Search buttons should explain “switch to ONLINE” instead of silently no-op’ing. Drafting a query (including Wield Prism) is local-safe; only `/api/debates/research` is ONLINE-gated.
+**Applies to**: Debate evidence Brave/Scholar inputs, `publicResearchBlockedReason`, research action buttons
+
+### 2026-08-05 · architecture
+**Trigger**: Effort None still showed a hollow Public Plan Psychic card; player wanted maximum simulated-effort milking, then wanted simulation as product default.
+**Lesson**: Effort `none` must skip Psychic entirely. Simulated Effort is product-default for thoughtless models (lean standard ladder). The heavy spine (Alternatives→…→Compliance Sweep) is Settings → Experimental “Deep simulated thinking”, stored on the old `experimental_all_model_effort_enabled` flag. Educate with a one-shot toast when Effort changes on a simulated model.
+**Applies to**: `simulatedEffortLadderPasses(profile)`, `runPsychicPlanningPass`, capability resolve default-on, surface prep, modeTutorials
+
+### 2026-08-06 · architecture
+**Trigger**: Thrifty Minimal on gemma3:4b failed plan JSON 6/6 (`invalid_json`, passCount 0).
+**Lesson**: Thrifty Minimal planning maxTokens must stay high enough for small locals to emit complete `summary`/`scratchpad`/`answerGuidance` JSON (≈300, not 200). Soften Minimal thrifty prompt to demand complete valid JSON rather than ultra-short fields that truncate mid-object.
+**Applies to**: `simulatedPsychicPlanningMaxTokens`, `psychicPlanPromptForEffort` in `chat.ts`
+
 ### 2026-08-05 · architecture
 **Trigger**: Wanted LOCAL simulated thinking to feel Fast-lean without a Fast toggle.
 **Lesson**: Bake thrifty budgets into the simulated-effort ladder itself — lean maxTokens/note caps at minimal/low/medium, richer at high/xhigh — across Chat Psychic and Coffee/Signal/Debate/Story preparation. Keep Effort as the depth dial; defer real ONLINE Fast (`service_tier` / provider speed) to a later toggle.
@@ -9,9 +34,14 @@
 **Applies to**: `renderChatComposerWithPrismRefract`, `/api/composer/random-prompt`, modeTutorials composer steps
 
 ### 2026-08-05 · UX
+**Trigger**: Psychic disclosure and model/effort chrome showed on immersive Zen bubbles; Zen should stay quiet.
+**Lesson**: Settled Psychic + message model/effort metadata are transcript-Chat only (`chatPresentation === "chat"` / Conversations open). Immersive Zen (`presentation === "zen"`) never paints them; private simulated passes may still run underneath. Legacy sandbox keeps disclosure.
+**Applies to**: `isPsychicPresentationSurfaceView(view, chatPresentation)`, `renderAssistantPsychicDisclosure`, `renderMessageGenerationMetadata`
+
+### 2026-08-05 · UX
 **Trigger**: Psychic “seeing thinking” appeared to do nothing — no Psychic label/text on product Chat.
-**Lesson**: Product Chat is `view=chat` (`isZenSurfaceView`), not legacy sandbox (`isChatSurfaceView`). Gate settled Psychic disclosure / scratchpad presentation with `isPsychicPresentationSurfaceView` (both), never sandbox-only.
-**Applies to**: `renderAssistantPsychicDisclosure`, `psychicSourceMessage`, `productChatSurface` for psychicTextEnabled
+**Lesson**: Product Home is `view=chat`. Transcript Chat vs Zen is `chatPresentation` from the Conversations sidebar, not sandbox-only gating.
+**Applies to**: `chatPresentationForSurface`, Psychic disclosure surfaces
 
 ### 2026-08-05 · UX
 **Trigger**: Model picker still showed a DEFAULT pill on GPT 4o Mini after Auto became the player-facing default.
@@ -30,7 +60,7 @@
 
 ### 2026-08-06 · UX
 **Trigger**: Debate alignment needed Signal-like per-voice and gallery levels for mic checks, plus a way to A/B gallery heat.
-**Lesson**: Persist For/Moderator/Against voice levels + Gallery volume on stage alignment (v12 localStorage). Apply voice levels on soundcheck and live `DebateUtterance.voiceLevel`; scale gallery murmur beds with `scaleDebateAudienceMixByGalleryVolume` (leave Foley untouched). Keep Quiet↔Rowdy as an alignment-session-only toggle — do not save it with alignment.
+**Lesson**: Persist For/Moderator/Against voice levels + Gallery volume on stage alignment (v12 localStorage). Put a **Test** control on each mixer lane (not only the lower position tuner) so mic checks are obvious. Apply voice levels on soundcheck and live `DebateUtterance.voiceLevel`; scale gallery murmur beds with `scaleDebateAudienceMixByGalleryVolume` (leave Foley untouched). Gallery heat is an alignment-session-only cycle: Off → Murmuring → Restless → Disruptive → Off — do not save it with alignment. Murmuring stays murmur-only; Restless+ introduce crosstalk. When the shared bed hits its ceiling, prefer keeping grain so free_for_all Disruptive does not collapse into Restless.
 **Applies to**: `debateStageAlignment.ts`, `DebateExperience` alignment mixer, `debateAudiencePressure.ts`, `page.tsx` `playDebateUtterance`
 
 ### 2026-08-05 · UX

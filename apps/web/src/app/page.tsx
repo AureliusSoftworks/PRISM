@@ -1346,6 +1346,7 @@ import {
   chatPresentationForcesVoiceMute,
   effectiveVoiceModeForPresentation,
   zenPresentationIsVoiceMuted,
+  type ChatPresentation,
 } from "./chatVoicePolicy";
 import {
   PRISM_APPLETS,
@@ -6657,12 +6658,17 @@ function isChatSurfaceView(view: View): boolean {
 }
 
 /**
- * Settled Psychic disclosure / scratchpad presentation.
- * Product Chat owns `view=chat` (server mode zen); sandbox remains a
- * compatibility branch that also requests Psychic on chat-mode turns.
+ * Settled Psychic disclosure / model-effort metadata on message bubbles.
+ * Immersive Zen stays quiet. Transcript Chat (Conversations open) and the
+ * legacy sandbox branch may show Psychic; private planning can still run
+ * underneath Zen without painting it on the canvas.
  */
-function isPsychicPresentationSurfaceView(view: View): boolean {
-  return isZenSurfaceView(view) || isChatSurfaceView(view);
+function isPsychicPresentationSurfaceView(
+  view: View,
+  presentation: ChatPresentation | null,
+): boolean {
+  if (isChatSurfaceView(view)) return true;
+  return isZenSurfaceView(view) && presentation === "chat";
 }
 
 function chatRequestModeForView(view: View): "zen" | "chat" | "sandbox" {
@@ -10662,7 +10668,17 @@ interface ChatPostEnvelope {
     simulated: boolean;
     passCount?: number;
     passes?: Array<{
-      name: "plan" | "draft" | "audit" | "revision";
+      name:
+        | "plan"
+        | "alternatives"
+        | "draft"
+        | "audit"
+        | "red_team"
+        | "constraint_lock"
+        | "revise_draft"
+        | "compliance_sweep"
+        | "synthesis"
+        | "revision";
       chars: number;
       warning?: string;
     }>;
@@ -23590,6 +23606,8 @@ interface ComposerModelPickerEffortControl {
   rowValueForModel: (model: ModelCatalogEntry) => ReasoningEffort | undefined;
   onChange: (nextValue: ReasoningEffort) => void;
   onActivate?: () => void;
+  /** Fired when Effort changes on a thoughtless (simulated) model. */
+  onSimulatedEffortEducate?: () => void;
   disabled?: boolean;
   disabledReason?: string;
 }
@@ -23834,6 +23852,9 @@ function ComposerModelPicker({
       if (!effortControl || effortInteractionDisabled) return;
       effortControl.onActivate?.();
       if (nextValue !== effortControl.value) {
+        if (effortControl.capability.mode === "simulated") {
+          effortControl.onSimulatedEffortEducate?.();
+        }
         effortControl.onChange(nextValue);
       }
     },
@@ -46043,6 +46064,20 @@ function HomeContent(): React.JSX.Element {
         console.warn("[effort] reset failed", error);
       });
   }, []);
+  const notifySimulatedEffortEducation = useCallback(() => {
+    if (typeof window === "undefined") return;
+    const storageKey = "prism:simulated-effort-toast:v1";
+    try {
+      if (window.sessionStorage.getItem(storageKey) === "1") return;
+      window.sessionStorage.setItem(storageKey, "1");
+    } catch {
+      // Still show once this session even if storage is blocked.
+    }
+    showLocalCommandToast(
+      "Simulated thinking",
+      "This model has no built-in Effort dial. Prism runs private planning passes before the reply — higher Effort means more passes and a longer wait.",
+    );
+  }, []);
   const effortControlForTarget = useCallback(
     (
       target: ActiveModelEffortTarget | null,
@@ -46065,8 +46100,7 @@ function HomeContent(): React.JSX.Element {
           const capability = resolveModelReasoningEffortCapability({
             provider: model.provider,
             modelId: model.id,
-            simulatedEffortEnabled:
-              settings?.experimentalAllModelEffortEnabled === true,
+            simulatedEffortEnabled: true,
           });
           if (capability.mode === "unavailable") return undefined;
           return savedModelReasoningEffort(
@@ -46083,9 +46117,10 @@ function HomeContent(): React.JSX.Element {
         },
         onChange: (nextValue) =>
           persistModelEffortPreference(target, nextValue),
+        onSimulatedEffortEducate: notifySimulatedEffortEducation,
       };
     },
-    [persistModelEffortPreference, settings],
+    [notifySimulatedEffortEducation, persistModelEffortPreference, settings],
   );
   const startupPreferenceAppliedForUserRef = useRef<string | null>(null);
   useEffect(() => {
@@ -46307,8 +46342,7 @@ function HomeContent(): React.JSX.Element {
         provider,
         modelId,
         options: modelOptionsForResponseMode(modelCatalog, settings, "auto"),
-        simulatedEffortEnabled:
-          settings.experimentalAllModelEffortEnabled === true,
+        simulatedEffortEnabled: true,
       });
     };
     const handler = (event: KeyboardEvent): void => {
@@ -55177,8 +55211,7 @@ function HomeContent(): React.JSX.Element {
       provider: primary?.provider ?? modelProvider,
       modelId: primary?.model ?? modelChoice,
       options: modelOptions,
-      simulatedEffortEnabled:
-        settings.experimentalAllModelEffortEnabled === true,
+      simulatedEffortEnabled: true,
     });
     return (
       <>
@@ -55480,8 +55513,7 @@ function HomeContent(): React.JSX.Element {
       provider: primaryForAuto?.provider ?? modelProvider,
       modelId: primaryForAuto?.model ?? visibleModelChoice,
       options: modelOptions,
-      simulatedEffortEnabled:
-        settings.experimentalAllModelEffortEnabled === true,
+      simulatedEffortEnabled: true,
     });
     const pickerStatusMessage: ComposerModelPickerStatusMessage | undefined =
       modelCatalogStatus === "checking" ||
@@ -55733,8 +55765,7 @@ function HomeContent(): React.JSX.Element {
       provider: primaryForAuto?.provider ?? modelProvider,
       modelId: primaryForAuto?.model ?? visibleModelChoice,
       options: modelOptions,
-      simulatedEffortEnabled:
-        settings?.experimentalAllModelEffortEnabled === true,
+      simulatedEffortEnabled: true,
     });
     const activeSideChat =
       view === "chat" && detail?.hubRole === "side" && detail.mode === "chat";
@@ -58913,7 +58944,7 @@ function HomeContent(): React.JSX.Element {
             ),
             undefined,
             psychicTextEnabledForConversation(result.conversation, {
-              productChatSurface: isPsychicPresentationSurfaceView(view),
+              productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
             }),
           )
         : undefined;
@@ -65002,8 +65033,7 @@ function HomeContent(): React.JSX.Element {
       storyModelOverride ??
       storyEffectiveModelChoice,
     options: storyModelOptions,
-    simulatedEffortEnabled:
-      settings?.experimentalAllModelEffortEnabled === true,
+    simulatedEffortEnabled: true,
   });
   useEffect(() => {
     if (storyAnyOfflineProtected && storyProvider !== "local") {
@@ -74019,7 +74049,7 @@ function HomeContent(): React.JSX.Element {
     if (
       envelope.psychicDebug &&
       psychicTextEnabledForConversation(envelope.conversation, {
-        productChatSurface: isPsychicPresentationSurfaceView(view),
+        productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
       })
     ) {
       const debug = envelope.psychicDebug;
@@ -75751,7 +75781,7 @@ function HomeContent(): React.JSX.Element {
           ),
           d.psychicDebug,
           psychicTextEnabledForConversation(d.conversation, {
-            productChatSurface: isPsychicPresentationSurfaceView(view),
+            productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
           }),
         );
         markLatestAssistantRevealEligible(patchedConversation);
@@ -75804,7 +75834,7 @@ function HomeContent(): React.JSX.Element {
           ),
           d.psychicDebug,
           psychicTextEnabledForConversation(d.conversation, {
-            productChatSurface: isPsychicPresentationSurfaceView(view),
+            productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
           }),
         );
         markLatestAssistantRevealEligible(patchedConversation);
@@ -76644,7 +76674,7 @@ function HomeContent(): React.JSX.Element {
         ),
         undefined,
         psychicTextEnabledForConversation(result.conversation, {
-          productChatSurface: isPsychicPresentationSurfaceView(view),
+          productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
         }),
       );
       setDetail(patchedConversation);
@@ -77852,7 +77882,7 @@ function HomeContent(): React.JSX.Element {
       ),
       envelope.psychicDebug,
       psychicTextEnabledForConversation(envelope.conversation, {
-        productChatSurface: isPsychicPresentationSurfaceView(view),
+        productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
       }),
     );
     if (options.consumeCache) {
@@ -79836,7 +79866,7 @@ function HomeContent(): React.JSX.Element {
           ),
           d.psychicDebug,
           psychicTextEnabledForConversation(d.conversation, {
-            productChatSurface: isPsychicPresentationSurfaceView(view),
+            productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
           }),
         );
         if (isInitialZenStarterPrompt) {
@@ -80938,7 +80968,7 @@ function HomeContent(): React.JSX.Element {
     psychicSource: Message | null,
   ): React.ReactNode {
     if (
-      !isPsychicPresentationSurfaceView(view) ||
+      !isPsychicPresentationSurfaceView(view, chatPresentation) ||
       msg.role !== "assistant" ||
       !psychicSource
     ) {
@@ -81035,7 +81065,7 @@ function HomeContent(): React.JSX.Element {
     psychicSource: Message | null,
   ): React.ReactNode {
     if (
-      !isPsychicPresentationSurfaceView(view) ||
+      !isPsychicPresentationSurfaceView(view, chatPresentation) ||
       msg.role !== "assistant" ||
       contextFocusedMessageId !== msg.id
     ) {
@@ -114613,14 +114643,16 @@ function HomeContent(): React.JSX.Element {
                                       )
                                     }
                                   />
-                                  Give unsupported models simulated effort
+                                  Deep simulated thinking (experimental)
                                 </label>
                                 <small className={styles.settingsHostHint}>
-                                  Models without native effort can use
-                                  Prism&apos;s private multi-call simulation
-                                  across conversational modes. Online models
-                                  make multiple provider calls and may increase
-                                  usage or cost; native effort remains native.
+                                  Simulated Effort is already on for models
+                                  without a built-in thinking dial. Turn this on
+                                  for the heavier private workshop
+                                  (Alternatives, Red-team, Constraint Lock,
+                                  Revise Draft, and on Extra High a Compliance
+                                  Sweep). Expect longer waits and more model
+                                  calls.
                                 </small>
                                 <button
                                   type="button"
@@ -115996,14 +116028,14 @@ function HomeContent(): React.JSX.Element {
                                 )
                               }
                             />
-                            Give unsupported models simulated effort
+                            Deep simulated thinking (experimental)
                           </label>
                           <small className={styles.settingsHostHint}>
-                            Models without native effort can use Prism&apos;s
-                            private multi-call simulation across conversational
-                            modes. Online models make multiple provider calls
-                            and may increase usage or cost; native effort
-                            remains native.
+                            Simulated Effort is already on for models without a
+                            built-in thinking dial. Turn this on for the heavier
+                            private workshop (Alternatives, Red-team, Constraint
+                            Lock, Revise Draft, and on Extra High a Compliance
+                            Sweep). Expect longer waits and more model calls.
                           </small>
                           <button
                             type="button"
@@ -135585,8 +135617,7 @@ function HomeContent(): React.JSX.Element {
       provider: debatePrimaryForAuto?.provider ?? debateModelProvider,
       modelId: debatePrimaryForAuto?.model ?? debateModelChoice,
       options: debateModelOptions,
-      simulatedEffortEnabled:
-        settings?.experimentalAllModelEffortEnabled === true,
+      simulatedEffortEnabled: true,
     });
     const debateLiveChromePolicy = debateLiveSessionActive
       ? liveSessionChromePolicy("Debate")
@@ -136938,8 +136969,7 @@ function HomeContent(): React.JSX.Element {
                 episodePrimaryForAuto?.provider ?? episodeSelectedModelProvider,
               modelId: episodePrimaryForAuto?.model ?? episodeModelChoice,
               options: signalNavbarModelOptions,
-              simulatedEffortEnabled:
-                settings?.experimentalAllModelEffortEnabled === true,
+              simulatedEffortEnabled: true,
             });
             return renderSharedAppletNavbar("Signal tools", {
               brandAppletId: "botcast",
@@ -138243,6 +138273,7 @@ function HomeContent(): React.JSX.Element {
                   (msg.role === "assistant" ? "not recorded" : "");
                 const psychicSourceMessage = isPsychicPresentationSurfaceView(
                   view,
+                  chatPresentation,
                 )
                   ? psychicSourceForAssistantMessage(
                       visibleDetailMessages,
@@ -138294,7 +138325,7 @@ function HomeContent(): React.JSX.Element {
                 const assistantMessageHasBotIdentity =
                   msg.role === "assistant" &&
                   messageHasCustomBotIdentity(msg, assistantDisplayBot);
-                // Chat mode stays minimal: no role/model header row above bubbles.
+                // Immersive Zen stays headerless; transcript Chat keeps role/model chrome.
                 const showMessageRoleLabel = !chatLikeSurface;
                 const showProviderTag = !chatLikeSurface && Boolean(status);
                 const showMessageHeader = !chatLikeSurface;
@@ -140369,6 +140400,7 @@ function HomeContent(): React.JSX.Element {
                 modelLabel || (msg.role === "assistant" ? "not recorded" : "");
               const psychicSourceMessage = isPsychicPresentationSurfaceView(
                 view,
+                chatPresentation,
               )
                 ? psychicSourceForAssistantMessage(
                     visibleDetailMessages,
@@ -140416,7 +140448,7 @@ function HomeContent(): React.JSX.Element {
               const assistantMessageHasBotIdentity =
                 msg.role === "assistant" &&
                 messageHasCustomBotIdentity(msg, assistantDisplayBot);
-              // Chat mode stays minimal: no role/model header row above bubbles.
+              // Immersive Zen stays headerless; transcript Chat keeps role/model chrome.
               const showMessageRoleLabel = !chatLikeSurface;
               const showProviderTag = !chatLikeSurface && Boolean(status);
               const showMessageHeader = !chatLikeSurface;

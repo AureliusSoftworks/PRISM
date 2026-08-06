@@ -1389,8 +1389,7 @@ async function startPrismStorySession(
       surface: "story",
       inputText: premise ?? "",
       outputTokens: 2_048,
-      simulatedEffortEnabled:
-        user.experimental_all_model_effort_enabled === 1,
+      simulatedEffortEnabled: true,
     },
   });
   effectiveProvider = resolvedAuto.provider;
@@ -5537,6 +5536,8 @@ async function debateAiRuntimeForUser(
       ? resolvedPrimary.model
       : routingCatalog.local[0]?.id ??
         defaultModelIdForProvider("local");
+  const deepSimulatedEffort =
+    user.experimental_all_model_effort_enabled === 1;
   const local: DebateAiRuntime["local"] = {
     provider: providerFactoryOverride(
       "local",
@@ -5546,6 +5547,7 @@ async function debateAiRuntimeForUser(
     ),
     providerName: "local",
     model: localModel,
+    deepSimulatedEffort,
     reasoningEffort:
       resolvedPrimary.provider === "local"
         ? primaryEffort
@@ -5575,6 +5577,7 @@ async function debateAiRuntimeForUser(
       ),
       providerName,
       model,
+      deepSimulatedEffort,
       reasoningEffort:
         reasoningEffort ??
         resolveUserModelReasoningEffort(db, {
@@ -5913,8 +5916,7 @@ async function contextualTextRuntimeForUser(args: {
     ),
     routingContext: {
       ...args.routingContext,
-      simulatedEffortEnabled:
-        args.user.experimental_all_model_effort_enabled === 1,
+      simulatedEffortEnabled: true,
     },
   });
   const reasoningEffort =
@@ -5923,8 +5925,7 @@ async function contextualTextRuntimeForUser(args: {
       userId: args.userId,
       provider: resolved.provider,
       modelId: resolved.model,
-      simulatedEffortEnabled:
-        args.user.experimental_all_model_effort_enabled === 1,
+      simulatedEffortEnabled: true,
     });
   const candidateAllowlist = (
     responseMode === "local" ? routingCatalog.local : routingCatalog.online
@@ -13581,8 +13582,7 @@ function buildRoutes(): RouteDefinition[] {
               inputText: message,
               outputTokens: generationOverrides.maxTokens,
               toolUse: Boolean(manualTool),
-              simulatedEffortEnabled:
-                user.experimental_all_model_effort_enabled === 1,
+              simulatedEffortEnabled: true,
             },
           });
       effectiveProvider = resolvedAuto.provider;
@@ -14306,33 +14306,30 @@ function buildRoutes(): RouteDefinition[] {
       const imageAbort = new AbortController();
       const onClose = (): void => imageAbort.abort();
       ctx.req.once("close", onClose);
-      const acquired = await tryAcquireImageSlot({
-        userId,
-        conversationId: null,
-        botId: null,
-        mode: "sandbox",
-        incognito: false,
-        captionPrompt: descriptor.title,
-        userMessage: `[Debate exhibit] ${descriptor.title}`,
-        source: "debate_exhibit",
-        requestedSize: "1024x1024",
-        abortController: imageAbort,
-      });
-      if (!acquired.ok) {
-        ctx.req.off("close", onClose);
-        throw new HttpError(
-          503,
-          "Another image is generating right now. The evidence object is unchanged.",
-        );
-      }
+      // Soft exhibit sprites queue behind other image work instead of 503'ing.
+      let ownedImageSlotJobId: string | null = null;
       try {
+        const acquired = await waitForImageSlot({
+          userId,
+          conversationId: null,
+          botId: null,
+          mode: "sandbox",
+          incognito: false,
+          captionPrompt: descriptor.title,
+          userMessage: `[Debate exhibit] ${descriptor.title}`,
+          source: "debate_exhibit",
+          requestedSize: "1024x1024",
+          abortController: imageAbort,
+          signal: imageAbort.signal,
+        });
+        ownedImageSlotJobId = acquired.id;
         const asset = await generateAndPersistStandaloneImageAsset({
           userId,
           prompt,
           ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
           preferredProvider: requestedImageProvider,
           offlineOnly,
-          signal: acquired.job.abortController.signal,
+          signal: acquired.abortController.signal,
           size: "1024x1024",
           origin: "debate",
           purpose: DEBATE_EXHIBIT_IMAGE_PURPOSE,
@@ -14351,7 +14348,9 @@ function buildRoutes(): RouteDefinition[] {
         });
       } finally {
         ctx.req.off("close", onClose);
-        await releaseImageSlotIfOwned(userId, acquired.job.id);
+        if (ownedImageSlotJobId) {
+          await releaseImageSlotIfOwned(userId, ownedImageSlotJobId);
+        }
       }
     }),
     route("POST", "/api/debates/role-checks", async (ctx) => {
@@ -23204,8 +23203,7 @@ function buildRoutes(): RouteDefinition[] {
         const capability = resolveModelReasoningEffortCapability({
           provider,
           modelId,
-          simulatedEffortEnabled:
-            user.experimental_all_model_effort_enabled === 1,
+          simulatedEffortEnabled: true,
         });
         if (!capability.levels.includes(effort)) {
           throw new HttpError(

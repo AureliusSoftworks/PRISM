@@ -12649,8 +12649,7 @@ export async function advanceBotcastEpisode(
       userId,
       provider: selected.providerName,
       modelId: selectedModelId,
-      simulatedEffortEnabled:
-        generation.experimentalAllModelEffortEnabled === true,
+      simulatedEffortEnabled: true,
     });
   const generationOptions = {
     temperature: Math.min(1.15, Math.max(0.2, speaker.temperature)),
@@ -12750,8 +12749,7 @@ export async function advanceBotcastEpisode(
                     userId,
                     provider: attempt.provider,
                     modelId: attempt.model,
-                    simulatedEffortEnabled:
-                      generation.experimentalAllModelEffortEnabled === true,
+                    simulatedEffortEnabled: true,
                   }),
             );
             const attemptOptions: GenerateOptions = {
@@ -12779,6 +12777,10 @@ export async function advanceBotcastEpisode(
                     options: attemptOptions,
                     effort: attemptReasoningEffort,
                     surface: "signal",
+                    ladderProfile:
+                      generation.experimentalAllModelEffortEnabled === true
+                        ? "deep"
+                        : "standard",
                     outputContract:
                       "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
                   })
@@ -12796,8 +12798,7 @@ export async function advanceBotcastEpisode(
                     userId,
                     provider: attempt.provider,
                     modelId: attempt.model,
-                    simulatedEffortEnabled:
-                      generation.experimentalAllModelEffortEnabled === true,
+                    simulatedEffortEnabled: true,
                   }),
             ),
             { provider: attempt.provider, modelId: attempt.model },
@@ -12871,6 +12872,10 @@ export async function advanceBotcastEpisode(
                   options: onlineTurnOptions,
                   effort: primaryReasoningEffort,
                   surface: "signal",
+                  ladderProfile:
+                    generation.experimentalAllModelEffortEnabled === true
+                      ? "deep"
+                      : "standard",
                   outputContract:
                     "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
                 })
@@ -12992,6 +12997,10 @@ export async function advanceBotcastEpisode(
                   options: localTurnOptions,
                   effort: primaryReasoningEffort,
                   surface: "signal",
+                  ladderProfile:
+                    generation.experimentalAllModelEffortEnabled === true
+                      ? "deep"
+                      : "standard",
                   outputContract:
                     "Write only the next on-air Signal utterance in the assigned role; preserve cue, interruption, Power, and closing rules.",
                 })

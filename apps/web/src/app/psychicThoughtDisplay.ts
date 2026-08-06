@@ -9,7 +9,7 @@ export const PSYCHIC_PENDING_SUMMARY =
 export interface PsychicCanvasScratchpadPayload {
   v: 1;
   scratchpad: string;
-  stage?: "plan" | "draft" | "audit" | "revision";
+  stage?: PsychicThoughtPass["stage"];
   effort: PsychicThoughtPayload["effort"];
   provider: PsychicThoughtPayload["provider"];
   model?: string;
@@ -37,8 +37,14 @@ export interface PsychicThoughtDisplayLine {
 
 const PSYCHIC_PASS_LABELS: Record<PsychicThoughtPass["stage"], string> = {
   plan: "Plan",
+  alternatives: "Alternatives",
   draft: "Draft",
   audit: "Audit",
+  red_team: "Red-team",
+  constraint_lock: "Constraint lock",
+  revise_draft: "Revise draft",
+  compliance_sweep: "Compliance sweep",
+  synthesis: "Synthesis",
   revision: "Refine",
 };
 
@@ -123,7 +129,7 @@ export function psychicThoughtDisplayLineForMessage(
           : `Psychic summary: ${summary}`,
       ...(visiblePasses ? { passes: visiblePasses } : {}),
       ...(scratchpad ? { scratchpad } : {}),
-      ...(scratchpad && scratchpadMeta ? { scratchpadMeta } : {}),
+      ...(scratchpadMeta ? { scratchpadMeta } : {}),
     };
   }
   if (!options.pendingThinking || !options.pendingDelayElapsed) return null;

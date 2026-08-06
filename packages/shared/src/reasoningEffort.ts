@@ -33,8 +33,137 @@ export type ModelReasoningEffortPreference =
  * Eval harnesses may temporarily select `legacy` to A/B against the pre-thrifty
  * budgets. Product runtime always uses `thrifty` unless an eval sets otherwise.
  */
-export type SimulatedEffortPassName = "plan" | "draft" | "audit" | "revision";
+/**
+ * Full heavy simulated-effort Psychic spine (plan first, then text passes).
+ * Legacy `revision` remains readable for older stored thoughts; new runs emit
+ * `synthesis` instead.
+ */
+export const SIMULATED_EFFORT_PASS_NAMES = [
+  "plan",
+  "alternatives",
+  "draft",
+  "audit",
+  "red_team",
+  "constraint_lock",
+  "revise_draft",
+  "compliance_sweep",
+  "synthesis",
+  "revision",
+] as const;
+
+export type SimulatedEffortPassName = (typeof SIMULATED_EFFORT_PASS_NAMES)[number];
+
+/** Private text passes after the initial Plan JSON (excludes plan + legacy revision). */
+export type SimulatedEffortTextPassName = Exclude<
+  SimulatedEffortPassName,
+  "plan" | "revision"
+>;
+
 export type SimulatedEffortBudgetProfile = "thrifty" | "legacy";
+
+/**
+ * `standard` — product default for thoughtless models (proven lean ladder).
+ * `deep` — experimental heavy spine (Alternatives → … → Compliance Sweep).
+ */
+export type SimulatedEffortLadderProfile = "standard" | "deep";
+
+/** Lean product-default simulated ladder. */
+function standardSimulatedEffortLadderPasses(
+  effort: ReasoningEffort,
+): readonly SimulatedEffortPassName[] {
+  switch (effort) {
+    case "minimal":
+    case "low":
+      return ["plan"];
+    case "medium":
+      return ["plan", "audit"];
+    case "high":
+      return ["plan", "draft", "audit"];
+    case "xhigh":
+      return ["plan", "draft", "audit", "synthesis"];
+    case "none":
+    case "auto":
+    default:
+      return [];
+  }
+}
+
+/**
+ * Experimental deep ladder: heavy-from-Minimal. XHigh adds Compliance Sweep
+ * before Synthesis.
+ */
+function deepSimulatedEffortLadderPasses(
+  effort: ReasoningEffort,
+): readonly SimulatedEffortPassName[] {
+  switch (effort) {
+    case "minimal":
+      return ["plan", "alternatives", "draft"];
+    case "low":
+      return ["plan", "alternatives", "draft", "audit", "red_team"];
+    case "medium":
+      return [
+        "plan",
+        "alternatives",
+        "draft",
+        "audit",
+        "red_team",
+        "constraint_lock",
+        "synthesis",
+      ];
+    case "high":
+      return [
+        "plan",
+        "alternatives",
+        "draft",
+        "audit",
+        "red_team",
+        "constraint_lock",
+        "revise_draft",
+        "synthesis",
+      ];
+    case "xhigh":
+      return [
+        "plan",
+        "alternatives",
+        "draft",
+        "audit",
+        "red_team",
+        "constraint_lock",
+        "revise_draft",
+        "compliance_sweep",
+        "synthesis",
+      ];
+    case "none":
+    case "auto":
+    default:
+      return [];
+  }
+}
+
+export function normalizeSimulatedEffortLadderProfile(
+  value: unknown,
+): SimulatedEffortLadderProfile {
+  return value === "deep" ? "deep" : "standard";
+}
+
+export function simulatedEffortLadderPasses(
+  effort: ReasoningEffort,
+  profile: SimulatedEffortLadderProfile = "standard",
+): readonly SimulatedEffortPassName[] {
+  return profile === "deep"
+    ? deepSimulatedEffortLadderPasses(effort)
+    : standardSimulatedEffortLadderPasses(effort);
+}
+
+/** Text passes after Plan for Chat Psychic simulation. */
+export function simulatedEffortTextPasses(
+  effort: ReasoningEffort,
+  profile: SimulatedEffortLadderProfile = "standard",
+): SimulatedEffortTextPassName[] {
+  return simulatedEffortLadderPasses(effort, profile).filter(
+    (pass): pass is SimulatedEffortTextPassName => pass !== "plan",
+  );
+}
 
 let simulatedEffortBudgetProfile: SimulatedEffortBudgetProfile = "thrifty";
 
@@ -132,9 +261,10 @@ export function simulatedPsychicPlanningMaxTokens(value: unknown): number {
   }
   switch (effort) {
     case "minimal":
-      return 200;
+      // Room for valid plan JSON on small locals (gemma3:4b failed at 200).
+      return 300;
     case "low":
-      return 280;
+      return 340;
     case "medium":
       return 400;
     case "high":
@@ -146,7 +276,7 @@ export function simulatedPsychicPlanningMaxTokens(value: unknown): number {
   }
 }
 
-/** Max tokens for a Chat Psychic private draft/audit/revision pass. */
+/** Max tokens for a Chat Psychic private text pass (after Plan). */
 export function simulatedPsychicPrivatePassMaxTokens(
   value: unknown,
   passName: Exclude<SimulatedEffortPassName, "plan">,
@@ -155,22 +285,39 @@ export function simulatedPsychicPrivatePassMaxTokens(
   if (simulatedEffortBudgetProfile === "legacy") {
     switch (passName) {
       case "draft":
+      case "revise_draft":
         return effort === "xhigh" ? 1_100 : 900;
       case "audit":
+      case "red_team":
+      case "compliance_sweep":
         return effort === "medium" ? 420 : effort === "xhigh" ? 760 : 620;
+      case "alternatives":
+      case "constraint_lock":
+      case "synthesis":
       case "revision":
         return 760;
     }
   }
   switch (passName) {
     case "draft":
-      return effort === "xhigh" ? 1_000 : 640;
+      return effort === "xhigh" ? 1_200 : effort === "high" ? 800 : 640;
+    case "revise_draft":
+      return effort === "xhigh" ? 1_400 : 900;
     case "audit":
-      if (effort === "medium") return 260;
-      if (effort === "xhigh") return 700;
-      return 420;
+    case "red_team":
+      if (effort === "xhigh") return 800;
+      if (effort === "high") return 520;
+      if (effort === "medium") return 320;
+      return 280;
+    case "compliance_sweep":
+      return effort === "xhigh" ? 900 : 520;
+    case "alternatives":
+      return effort === "xhigh" ? 700 : effort === "high" ? 520 : 360;
+    case "constraint_lock":
+      return effort === "xhigh" ? 480 : 320;
+    case "synthesis":
     case "revision":
-      return effort === "xhigh" ? 640 : 520;
+      return effort === "xhigh" ? 800 : 520;
   }
 }
 
@@ -179,17 +326,17 @@ export function simulatedPsychicScratchpadMaxChars(value: unknown): number {
   if (simulatedEffortBudgetProfile === "legacy") return 4_000;
   switch (resolveSimulatedEffortTier(value)) {
     case "minimal":
-      return 800;
+      return 1_600;
     case "low":
-      return 1_200;
+      return 2_400;
     case "medium":
-      return 1_800;
+      return 3_600;
     case "high":
-      return 2_800;
+      return 5_200;
     case "xhigh":
-      return 4_000;
+      return 8_000;
     default:
-      return 1_200;
+      return 2_400;
   }
 }
 
@@ -217,16 +364,17 @@ export function simulatedPsychicPrivateArtifactMaxChars(value: unknown): number 
   if (simulatedEffortBudgetProfile === "legacy") return 3_200;
   switch (resolveSimulatedEffortTier(value)) {
     case "medium":
-      return 1_200;
+      return 1_600;
     case "high":
-      return 2_000;
+      return 2_400;
     case "xhigh":
-      return 3_200;
+      return 4_000;
     case "minimal":
-    case "low":
-      return 900;
-    default:
       return 1_200;
+    case "low":
+      return 1_400;
+    default:
+      return 1_400;
   }
 }
 
@@ -245,9 +393,12 @@ export function reasoningGenerationBudgetMs(
   },
 ): number {
   const effort = normalizeReasoningEffort(value);
-  if (effort === "xhigh") return 300_000;
-  if (effort === "high") return 180_000;
-  if (effort === "medium") return 120_000;
+  // Heavy-from-Minimal ladder: more private passes need longer wall clocks.
+  if (effort === "xhigh") return 480_000;
+  if (effort === "high") return 360_000;
+  if (effort === "medium") return 240_000;
+  if (effort === "low") return 180_000;
+  if (effort === "minimal") return 120_000;
   if (effort === "auto") {
     const usesNativeReasoning = model
       ? model.provider === "openai"
@@ -256,7 +407,7 @@ export function reasoningGenerationBudgetMs(
           ? anthropicModelSupportsReasoningEffort(model.modelId)
           : false
       : true;
-    return usesNativeReasoning ? 180_000 : 60_000;
+    return usesNativeReasoning ? 180_000 : 120_000;
   }
   return 60_000;
 }
@@ -463,10 +614,15 @@ export function modelSupportsNativeReasoningEffort(
 export function resolveModelReasoningEffortCapability(args: {
   provider: NativeReasoningEffortProvider;
   modelId: string;
+  /**
+   * Simulated Effort is product-default for thoughtless models.
+   * Pass `false` only to force unavailable (tests / explicit opt-out).
+   */
   simulatedEffortEnabled?: boolean;
 }): ModelReasoningEffortCapabilityV1 {
+  const simulatedEnabled = args.simulatedEffortEnabled !== false;
   if (args.provider === "local") {
-    if (args.simulatedEffortEnabled === true) {
+    if (simulatedEnabled) {
       return {
         mode: "simulated",
         levels: LOCAL_SIMULATED_REASONING_LEVELS,
@@ -477,8 +633,7 @@ export function resolveModelReasoningEffortCapability(args: {
       mode: "unavailable",
       levels: [],
       supportsNone: false,
-      disabledReason:
-        "Enable experimental simulated effort in Settings.",
+      disabledReason: "Simulated Effort is disabled for this model.",
     };
   }
   if (args.provider === "openai") {
@@ -489,8 +644,7 @@ export function resolveModelReasoningEffortCapability(args: {
           levels,
           supportsNone: levels.includes("none"),
         }
-      : args.simulatedEffortEnabled === true &&
-          !openAiModelIsFixedHigh(args.modelId)
+      : simulatedEnabled && !openAiModelIsFixedHigh(args.modelId)
         ? {
             mode: "simulated",
             levels: LOCAL_SIMULATED_REASONING_LEVELS,
@@ -502,7 +656,7 @@ export function resolveModelReasoningEffortCapability(args: {
             supportsNone: false,
             disabledReason: openAiModelIsFixedHigh(args.modelId)
               ? "This model uses a fixed reasoning effort."
-              : "Enable experimental simulated effort in Settings.",
+              : "Simulated Effort is disabled for this model.",
           };
   }
   if (anthropicModelSupportsReasoningEffort(args.modelId)) {
@@ -515,7 +669,7 @@ export function resolveModelReasoningEffortCapability(args: {
       supportsNone: false,
     };
   }
-  if (args.simulatedEffortEnabled === true) {
+  if (simulatedEnabled) {
     return {
       mode: "simulated",
       levels: LOCAL_SIMULATED_REASONING_LEVELS,
@@ -526,7 +680,7 @@ export function resolveModelReasoningEffortCapability(args: {
     mode: "unavailable",
     levels: [],
     supportsNone: false,
-    disabledReason: "Enable experimental simulated effort in Settings.",
+    disabledReason: "Simulated Effort is disabled for this model.",
   };
 }
 

@@ -1129,7 +1129,7 @@ describe("processChatMessage Psychic planning", () => {
         autoMemory: false,
         incognito: false,
         mode: "chat",
-        experimentalAllModelEffortEnabled: true,
+        experimentalAllModelEffortEnabled: false,
         psychicModeEnabled: false,
         botId: "bot-1",
         botSystemPrompt: "You are the selected Chat bot.",
@@ -1207,16 +1207,46 @@ describe("processChatMessage Psychic planning", () => {
   });
 
   it("scales simulated effort provider passes by effort", async () => {
+    type PassName =
+      | "plan"
+      | "alternatives"
+      | "draft"
+      | "audit"
+      | "red_team"
+      | "constraint_lock"
+      | "revise_draft"
+      | "compliance_sweep"
+      | "synthesis";
     const cases: Array<{
       effort: ReasoningEffort;
-      passes: Array<"plan" | "draft" | "audit" | "revision">;
+      deep: boolean;
+      passes: PassName[];
     }> = [
-      { effort: "none", passes: [] },
-      { effort: "minimal", passes: ["plan"] },
-      { effort: "low", passes: ["plan"] },
-      { effort: "medium", passes: ["plan", "audit"] },
-      { effort: "high", passes: ["plan", "draft", "audit"] },
-      { effort: "xhigh", passes: ["plan", "draft", "audit", "revision"] },
+      { effort: "none", deep: false, passes: [] },
+      { effort: "minimal", deep: false, passes: ["plan"] },
+      { effort: "low", deep: false, passes: ["plan"] },
+      { effort: "medium", deep: false, passes: ["plan", "audit"] },
+      { effort: "high", deep: false, passes: ["plan", "draft", "audit"] },
+      {
+        effort: "xhigh",
+        deep: false,
+        passes: ["plan", "draft", "audit", "synthesis"],
+      },
+      { effort: "minimal", deep: true, passes: ["plan", "alternatives", "draft"] },
+      {
+        effort: "high",
+        deep: true,
+        passes: [
+          "plan",
+          "alternatives",
+          "draft",
+          "audit",
+          "red_team",
+          "constraint_lock",
+          "revise_draft",
+          "synthesis",
+        ],
+      },
     ];
 
     for (const testCase of cases) {
@@ -1249,44 +1279,66 @@ describe("processChatMessage Psychic planning", () => {
             { status: 200, headers: { "content-type": "application/json" } }
           );
         }
-        if (content.includes("Prism's private draft pass")) {
-          return new Response(
-            JSON.stringify({
-              message: {
-                content: JSON.stringify({
-                  artifact: "private draft secret",
-                  summary: "I shaped the plan into a candidate response.",
-                }),
-              },
-            }),
-            { status: 200, headers: { "content-type": "application/json" } }
-          );
-        }
-        if (content.includes("Prism's private audit pass")) {
-          return new Response(
-            JSON.stringify({
-              message: {
-                content: JSON.stringify({
-                  artifact: "private audit guidance",
-                  summary: "I checked the candidate against the request.",
-                }),
-              },
-            }),
-            { status: 200, headers: { "content-type": "application/json" } }
-          );
-        }
-        if (content.includes("Prism's private revision-guidance pass")) {
-          return new Response(
-            JSON.stringify({
-              message: {
-                content: JSON.stringify({
-                  artifact: "private revision guidance",
-                  summary: "I refined the final response guidance.",
-                }),
-              },
-            }),
-            { status: 200, headers: { "content-type": "application/json" } }
-          );
+        const privatePassMatchers: Array<{
+          needle: string;
+          artifact: string;
+          summary: string;
+        }> = [
+          {
+            needle: "Prism's private alternatives pass",
+            artifact: "- Option A: direct\n- Option B: soft\n- Chosen: A because clearer",
+            summary: "I chose the clearer of two reply approaches.",
+          },
+          {
+            needle: "Prism's private draft pass",
+            artifact: "private draft secret",
+            summary: "I shaped the plan into a candidate response.",
+          },
+          {
+            needle: "Prism's private audit pass",
+            artifact: "private audit guidance",
+            summary: "I checked the candidate against the request.",
+          },
+          {
+            needle: "Prism's private adversarial red-team pass",
+            artifact: "- Attack: miss a label\n- Guard: keep every label",
+            summary: "I pressure-tested the approach for constraint breaks.",
+          },
+          {
+            needle: "Prism's private constraint-lock pass",
+            artifact: "- Must: keep exact labels",
+            summary: "I froze the non-negotiable constraints.",
+          },
+          {
+            needle: "Prism's private revise-draft pass",
+            artifact: "private revised draft secret",
+            summary: "I rewrote the private draft under the critiques.",
+          },
+          {
+            needle: "Prism's private XHigh compliance-sweep pass",
+            artifact: "- Pass: labels\n- Enforce: keep labels exact",
+            summary: "I ran a final hostile compliance sweep.",
+          },
+          {
+            needle: "Prism's private synthesis pass",
+            artifact: "- Final: keep the mapped constraints",
+            summary: "I synthesized the critiques into one final brief.",
+          },
+        ];
+        for (const matcher of privatePassMatchers) {
+          if (content.includes(matcher.needle)) {
+            return new Response(
+              JSON.stringify({
+                message: {
+                  content: JSON.stringify({
+                    artifact: matcher.artifact,
+                    summary: matcher.summary,
+                  }),
+                },
+              }),
+              { status: 200, headers: { "content-type": "application/json" } },
+            );
+          }
         }
         return new Response(
           JSON.stringify({ message: { content: "Final answer." } }),
@@ -1296,7 +1348,7 @@ describe("processChatMessage Psychic planning", () => {
 
       const result = await processChatMessage(
         db,
-        `user-${testCase.effort}`,
+        `user-${testCase.effort}-${testCase.deep ? "deep" : "standard"}`,
         "Help me plan this.",
         CHAT_TEST_USER_KEY,
         {
@@ -1304,7 +1356,7 @@ describe("processChatMessage Psychic planning", () => {
           autoMemory: false,
           incognito: true,
           mode: "sandbox",
-          experimentalAllModelEffortEnabled: true,
+          experimentalAllModelEffortEnabled: testCase.deep,
           botOverrides: { model: "llama3.2", reasoningEffort: testCase.effort },
           onPsychicProgress: (event) => progress.push(event),
         }
@@ -1384,6 +1436,19 @@ describe("processChatMessage Psychic planning", () => {
           { status: 200, headers: { "content-type": "application/json" } }
         );
       }
+      if (content.includes("Prism's private alternatives pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: "- Chosen: A",
+                summary: "I chose an approach.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
       if (content.includes("Prism's private draft pass")) {
         return new Response(
           JSON.stringify({ message: { content: "private draft secret" } }),
@@ -1395,6 +1460,19 @@ describe("processChatMessage Psychic planning", () => {
           status: 200,
           headers: { "content-type": "application/json" },
         });
+      }
+      if (content.includes("Prism's private")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: "private follow-on guidance",
+                summary: "I continued with prior guidance.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
       }
       return new Response(
         JSON.stringify({ message: { content: "Final answer." } }),
@@ -1412,7 +1490,7 @@ describe("processChatMessage Psychic planning", () => {
         autoMemory: false,
         incognito: false,
         mode: "sandbox",
-        experimentalAllModelEffortEnabled: true,
+        experimentalAllModelEffortEnabled: false,
         botOverrides: { model: "llama3.2", reasoningEffort: "high" },
       }
     );
@@ -1531,7 +1609,7 @@ describe("processChatMessage Psychic planning", () => {
         autoMemory: false,
         incognito: false,
         mode: "sandbox",
-        experimentalAllModelEffortEnabled: true,
+        experimentalAllModelEffortEnabled: false,
         botOverrides: { model: "llama3.2", reasoningEffort: "high" },
       }
     );
@@ -1568,7 +1646,7 @@ describe("processChatMessage Psychic planning", () => {
         autoMemory: false,
         incognito: false,
         mode: "sandbox",
-        experimentalAllModelEffortEnabled: true,
+        experimentalAllModelEffortEnabled: false,
         botOverrides: { model: "llama3.2", reasoningEffort: "medium" },
       }
     );
@@ -1625,7 +1703,7 @@ describe("processChatMessage Psychic planning", () => {
         autoMemory: false,
         incognito: true,
         mode: "zen",
-        experimentalAllModelEffortEnabled: true,
+        experimentalAllModelEffortEnabled: false,
         botOverrides: { model: "gpt-4o", reasoningEffort: "high" },
       }
     );
@@ -1684,7 +1762,7 @@ describe("processChatMessage Psychic planning", () => {
         autoMemory: false,
         incognito: true,
         mode: "zen",
-        experimentalAllModelEffortEnabled: true,
+        experimentalAllModelEffortEnabled: false,
         botOverrides: { model: "gpt-5.5", reasoningEffort: "high" },
       }
     );
@@ -1739,7 +1817,7 @@ describe("processChatMessage Psychic planning", () => {
         autoMemory: false,
         incognito: true,
         mode: "chat",
-        experimentalAllModelEffortEnabled: true,
+        experimentalAllModelEffortEnabled: false,
         psychicModeEnabled: false,
         botId: "bot-1",
         botSystemPrompt: "You are the selected Chat bot.",
@@ -1769,6 +1847,67 @@ describe("processChatMessage Psychic planning", () => {
       3,
     );
     assert.doesNotMatch(JSON.stringify(userMessage), /private online Chat plan/u);
+  });
+
+  it("uses the deep simulated ladder when the experimental setting is on", async () => {
+    const db = createChatTestDb();
+    const requests: Array<{ body: Record<string, unknown> }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = input instanceof Request ? input.url : String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      requests.push({ body });
+      assert.equal(url, "https://api.openai.com/v1/chat/completions");
+      const serialized = JSON.stringify(body);
+      const content = serialized.includes("Prism's user-readable Psychic planning pass")
+        ? JSON.stringify({
+            summary: "I mapped the deep-ladder request.",
+            scratchpad: "private deep plan",
+            answerGuidance: "Answer from the deep mapped constraints.",
+          })
+        : serialized.includes("Prism's private")
+          ? "private deep refinement"
+          : "Deep ladder answer.";
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content }, finish_reason: "stop" }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Help with deep simulation.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        incognito: true,
+        mode: "chat",
+        experimentalAllModelEffortEnabled: true,
+        psychicModeEnabled: false,
+        botId: "bot-1",
+        botSystemPrompt: "You are the selected Chat bot.",
+        botOverrides: { model: "gpt-4o", reasoningEffort: "minimal" },
+      },
+    );
+
+    assert.equal(result.psychicDebug?.simulated, true);
+    assert.equal(result.psychicDebug?.passCount, 3);
+    assert.deepEqual(
+      result.psychicDebug?.passes?.map((pass) => pass.name),
+      ["plan", "alternatives", "draft"],
+    );
+    assert.equal(requests.length, 4);
+    const userMessage = result.conversation.messages.find(
+      (message) => message.role === "user",
+    );
+    assert.deepEqual(
+      userMessage?.psychicThought?.passes?.map((pass) => pass.stage),
+      ["plan", "alternatives", "draft"],
+    );
   });
 
   it("attaches Psychic text to product Chat turns that use the Zen pipeline", async () => {
@@ -1807,7 +1946,7 @@ describe("processChatMessage Psychic planning", () => {
         autoMemory: false,
         incognito: true,
         mode: "zen",
-        experimentalAllModelEffortEnabled: true,
+        experimentalAllModelEffortEnabled: false,
         psychicModeEnabled: true,
         botOverrides: { model: "gpt-5.5", reasoningEffort: "high" },
       }
@@ -1865,7 +2004,7 @@ describe("processChatMessage Psychic planning", () => {
         autoMemory: false,
         incognito: true,
         mode: "zen",
-        experimentalAllModelEffortEnabled: true,
+        experimentalAllModelEffortEnabled: false,
         psychicModeEnabled: false,
         botOverrides: { model: "gpt-5.5", reasoningEffort: "high" },
       }
@@ -1908,7 +2047,7 @@ describe("processChatMessage Psychic planning", () => {
         autoMemory: false,
         incognito: true,
         mode: "zen",
-        experimentalAllModelEffortEnabled: true,
+        experimentalAllModelEffortEnabled: false,
         psychicModeEnabled: false,
         botOverrides: { model: "claude-opus-4-8", reasoningEffort: "xhigh" },
       }
@@ -3699,10 +3838,30 @@ describe("processChatMessage Auto response mode", () => {
       mode: "zen",
     });
 
-    assert.deepEqual(calls.slice(0, 2), [
-      { provider: "local", model: "primary-model", effort: "minimal" },
-      { provider: "local", model: "fallback-one", effort: "none" },
-    ]);
+    assert.ok(
+      calls.length >= 2,
+      "primary simulated pass and/or answer should run before fallback",
+    );
+    assert.deepEqual(calls[0], {
+      provider: "local",
+      model: "primary-model",
+      effort: "minimal",
+    });
+    assert.ok(
+      calls.every(
+        (call) =>
+          call.model === "primary-model"
+            ? call.effort === "minimal"
+            : true,
+      ),
+      "primary attempts keep the request Effort while simulation runs",
+    );
+    const fallbackCall = calls.find((call) => call.model === "fallback-one");
+    assert.deepEqual(fallbackCall, {
+      provider: "local",
+      model: "fallback-one",
+      effort: "none",
+    });
   });
 
   it("walks all five ordered same-lane fallbacks when earlier Zen attempts fail", async () => {

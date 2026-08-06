@@ -8,6 +8,7 @@ import {
   type ChatMessage,
   type ReasoningEffort,
   type SimulatedEffortBudgetProfile,
+  type SimulatedEffortLadderProfile,
 } from "@localai/shared";
 
 const LADDER_EFFORTS = [
@@ -36,6 +37,8 @@ interface CliOptions {
   includeScratchpad: boolean;
   keepDb: boolean;
   budgetProfile: SimulatedEffortBudgetProfile;
+  /** Product-default lean ladder vs Settings experimental deep workshop. */
+  ladderProfile: SimulatedEffortLadderProfile;
 }
 
 interface ConstraintScore {
@@ -46,7 +49,17 @@ interface ConstraintScore {
 }
 
 interface PassDiagnostic {
-  name: "plan" | "draft" | "audit" | "revision";
+  name:
+    | "plan"
+    | "alternatives"
+    | "draft"
+    | "audit"
+    | "red_team"
+    | "constraint_lock"
+    | "revise_draft"
+    | "compliance_sweep"
+    | "synthesis"
+    | "revision";
   chars: number;
   warning?: string;
 }
@@ -173,6 +186,7 @@ const DEFAULT_OPTIONS: CliOptions = {
   includeScratchpad: false,
   keepDb: false,
   budgetProfile: "thrifty",
+  ladderProfile: "standard",
 };
 
 function printHelp(): void {
@@ -196,6 +210,7 @@ Options:
   --temperature <number>   Final-answer temperature. Default: ${DEFAULT_OPTIONS.temperature}
   --max-tokens <number>    Max final-answer tokens. Default: ${DEFAULT_OPTIONS.maxTokens}
   --budget-profile <id>    thrifty (default product budgets) or legacy (pre-thrifty A/B).
+  --ladder-profile <id>    standard (product-default lean passes) or deep (experimental workshop).
   --out-dir <path>         Where JSON/Markdown reports are written.
   --include-scratchpad     Include live-only simulated scratchpad in the JSON artifact.
   --keep-db                Keep the temporary SQLite DB for inspection.
@@ -249,6 +264,14 @@ function readCliOptions(argv: string[]): CliOptions | null {
           throw new Error("--budget-profile must be thrifty or legacy.");
         }
         options.budgetProfile = profile;
+        break;
+      }
+      case "--ladder-profile": {
+        const profile = next().trim().toLowerCase();
+        if (profile !== "standard" && profile !== "deep") {
+          throw new Error("--ladder-profile must be standard or deep.");
+        }
+        options.ladderProfile = profile;
         break;
       }
       case "--include-scratchpad":
@@ -459,6 +482,7 @@ function redactedOptions(options: CliOptions): LadderReport["options"] {
     repeats: options.repeats,
     quick: options.quick,
     budgetProfile: options.budgetProfile,
+    ladderProfile: options.ladderProfile,
     promptOverride: Boolean(options.prompt?.trim()),
     includeScratchpad: options.includeScratchpad,
   };
@@ -474,6 +498,7 @@ function markdownReport(report: LadderReport): string {
     "",
     `Created: ${report.createdAt}`,
     `Budget profile: ${report.options.budgetProfile}`,
+    `Ladder profile: ${report.options.ladderProfile}`,
     "",
     "## Prompts",
     "",
@@ -623,7 +648,9 @@ async function main(): Promise<void> {
                 autoMemory: false,
                 incognito: true,
                 mode: "sandbox",
-                experimentalAllModelEffortEnabled: true,
+                // Deep experimental ladder reuses this settings flag.
+                experimentalAllModelEffortEnabled:
+                  options.ladderProfile === "deep",
                 psychicModeEnabled: false,
                 botOverrides: {
                   model: options.model,
@@ -692,7 +719,7 @@ async function main(): Promise<void> {
             const latest = runs[runs.length - 1];
             if (latest) {
               console.log(
-                `[${latest.promptId} r${latest.repeat} ${latest.effort}/${options.budgetProfile}] ${latest.status} in ${latest.durationMs}ms; score=${
+                `[${latest.promptId} r${latest.repeat} ${latest.effort}/${options.budgetProfile}/${options.ladderProfile}] ${latest.status} in ${latest.durationMs}ms; score=${
                   latest.score ? `${latest.score.total}/${latest.score.max}` : "n/a"
                 }; passes=${latest.passCount ?? 0}; warnings=${
                   latest.planningWarnings?.length ?? 0
@@ -720,6 +747,7 @@ async function main(): Promise<void> {
 
       console.log("Effort ladder eval complete.");
       console.log(`Budget profile: ${options.budgetProfile}`);
+      console.log(`Ladder profile: ${options.ladderProfile}`);
       console.log(`JSON: ${jsonPath}`);
       console.log(`Report: ${markdownPath}`);
       for (const summary of report.summary) {

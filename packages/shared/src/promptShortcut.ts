@@ -870,7 +870,30 @@ export interface PromptWildcardRunMetadata {
   wildcardReplacements?: PromptShortcutWildcardReplacement[];
 }
 
-export type PsychicThoughtPassStage = "plan" | "draft" | "audit" | "revision";
+export const PSYCHIC_THOUGHT_PASS_STAGES = [
+  "plan",
+  "alternatives",
+  "draft",
+  "audit",
+  "red_team",
+  "constraint_lock",
+  "revise_draft",
+  "compliance_sweep",
+  "synthesis",
+  /** Legacy stored stage; new runs emit `synthesis`. */
+  "revision",
+] as const;
+
+export type PsychicThoughtPassStage = (typeof PSYCHIC_THOUGHT_PASS_STAGES)[number];
+
+export function isPsychicThoughtPassStage(
+  value: unknown,
+): value is PsychicThoughtPassStage {
+  return (
+    typeof value === "string" &&
+    (PSYCHIC_THOUGHT_PASS_STAGES as readonly string[]).includes(value)
+  );
+}
 
 export interface PsychicThoughtPass {
   stage: PsychicThoughtPassStage;
@@ -929,12 +952,9 @@ function readPromptShortcutRange(value: unknown): number | undefined {
   return normalized >= 0 && normalized <= 20000 ? normalized : undefined;
 }
 
-const PSYCHIC_THOUGHT_PASS_STAGES = new Set<PsychicThoughtPassStage>([
-  "plan",
-  "draft",
-  "audit",
-  "revision",
-]);
+const PSYCHIC_THOUGHT_PASS_STAGE_SET = new Set<PsychicThoughtPassStage>(
+  PSYCHIC_THOUGHT_PASS_STAGES,
+);
 
 function normalizePsychicThoughtPasses(value: unknown): PsychicThoughtPass[] {
   if (!Array.isArray(value)) return [];
@@ -945,7 +965,7 @@ function normalizePsychicThoughtPasses(value: unknown): PsychicThoughtPass[] {
     const row = entry as Record<string, unknown>;
     if (
       typeof row.stage !== "string" ||
-      !PSYCHIC_THOUGHT_PASS_STAGES.has(row.stage as PsychicThoughtPassStage)
+      !PSYCHIC_THOUGHT_PASS_STAGE_SET.has(row.stage as PsychicThoughtPassStage)
     ) {
       continue;
     }
@@ -954,7 +974,7 @@ function normalizePsychicThoughtPasses(value: unknown): PsychicThoughtPass[] {
     if (!summary || seen.has(stage)) continue;
     seen.add(stage);
     passes.push({ stage, summary });
-    if (passes.length >= 4) break;
+    if (passes.length >= 12) break;
   }
   return passes;
 }

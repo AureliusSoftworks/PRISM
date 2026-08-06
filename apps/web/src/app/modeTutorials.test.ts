@@ -18,14 +18,18 @@ describe("mode tutorials", () => {
     assert.match(step?.body ?? "", /sparse listening reaction/u);
     assert.match(step?.body ?? "", /Action SFX/u);
     assert.match(step?.body ?? "", /veil still waits until your line finishes/u);
-    assert.match(step?.body ?? "", /user-readable planning pass/u);
+    assert.match(step?.body ?? "", /transcript Chat \(Conversations open\)/u);
+    assert.match(step?.body ?? "", /user-readable planning disclosure/u);
+    assert.match(step?.body ?? "", /Immersive Zen never paints Psychic/u);
     assert.match(step?.body ?? "", /assistant bubble/u);
-    assert.match(step?.body ?? "", /stays collapsed until you click/u);
+    assert.match(step?.body ?? "", /collapsed until you click/u);
     assert.match(step?.body ?? "", /model and effort glyph/u);
-    assert.match(step?.body ?? "", /visible passes guide the final reply/u);
+    assert.match(step?.body ?? "", /Those passes guide the final reply/u);
     assert.match(step?.body ?? "", /each one is an additional provider request/u);
-    assert.match(step?.body ?? "", /Plan, Draft, Audit, and Refine/u);
-    assert.match(step?.body ?? "", /distinct readable summaries/u);
+    assert.match(
+      step?.body ?? "",
+      /Plan, Draft, Audit, and more on higher Effort or Deep experimental/u,
+    );
     assert.match(step?.body ?? "", /scratchpad is never saved/u);
     assert.match(step?.body ?? "", /hidden chain-of-thought is never exposed/u);
   });

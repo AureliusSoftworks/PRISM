@@ -1,3 +1,8 @@
+import {
+  isPsychicThoughtPassStage,
+  type PsychicThoughtPass,
+} from "@localai/shared";
+
 export interface ZenProgressiveSegmentEvent {
   type: "segment";
   conversationId: string;
@@ -23,7 +28,7 @@ export interface ZenProgressiveEndEvent {
 
 export interface PsychicProgressEvent {
   type: "psychic";
-  stage: "plan" | "draft" | "audit" | "revision";
+  stage: PsychicThoughtPass["stage"];
   summary: string;
   scratchpad: string;
   effort: "auto" | "none" | "minimal" | "low" | "medium" | "high" | "xhigh";
@@ -66,19 +71,12 @@ function parsePsychicProgressPasses(
     for (const entry of value) {
       if (!entry || typeof entry !== "object") continue;
       const row = entry as Record<string, unknown>;
-      if (
-        row.stage !== "plan" &&
-        row.stage !== "draft" &&
-        row.stage !== "audit" &&
-        row.stage !== "revision"
-      ) {
-        continue;
-      }
+      if (!isPsychicThoughtPassStage(row.stage)) continue;
       const summary = typeof row.summary === "string" ? row.summary.trim() : "";
       if (!summary || seen.has(row.stage)) continue;
       seen.add(row.stage);
       passes.push({ stage: row.stage, summary: summary.slice(0, 1200) });
-      if (passes.length >= 4) break;
+      if (passes.length >= 12) break;
     }
   }
   if (passes.length > 0) return passes;
@@ -114,10 +112,7 @@ export function parseZenProgressiveChatEvent<T>(
   }
   if (
     record.type === "psychic" &&
-    (record.stage === "plan" ||
-      record.stage === "draft" ||
-      record.stage === "audit" ||
-      record.stage === "revision") &&
+    isPsychicThoughtPassStage(record.stage) &&
     typeof record.summary === "string" &&
     typeof record.scratchpad === "string" &&
     (record.effort === "auto" ||
@@ -257,4 +252,3 @@ export async function readZenProgressiveChatStream<T>(args: {
   }
   return envelope;
 }
-import type { PsychicThoughtPass } from "@localai/shared";

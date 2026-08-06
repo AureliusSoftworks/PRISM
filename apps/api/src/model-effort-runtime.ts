@@ -11,7 +11,16 @@ import {
   listModelReasoningEffortPreferences,
 } from "./model-effort-preferences.ts";
 
+/** Simulated Effort is product-default for thoughtless models. */
 function userAllowsSimulatedEffort(
+  _db: DatabaseSync,
+  _userId: string,
+): boolean {
+  return true;
+}
+
+/** Experimental deep ladder (not the enable-gate for simulation). */
+export function userUsesDeepSimulatedEffortLadder(
   db: DatabaseSync,
   userId: string,
 ): boolean {

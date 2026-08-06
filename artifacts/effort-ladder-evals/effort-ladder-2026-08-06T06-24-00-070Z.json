@@ -1,0 +1,630 @@
+{
+  "schema": "prism-effort-ladder-eval-v1",
+  "createdAt": "2026-08-06T06:24:00.070Z",
+  "prompts": [
+    {
+      "id": "rollout-table",
+      "title": "Rollout Table Constraint Trap",
+      "prompt": "Create a rollout plan as a compact Markdown table with exactly 6 body rows labeled S1 through S6.\nUse columns: ID, Plan.\n\nConstraints:\n- S1 must name the user-facing effort setting.\n- S2 must explain the local-only guarantee without using the word cloud.\n- S3 must describe the private planning pass.\n- S4 must say what happens if planning JSON fails.\n- S5 must mention that scratchpads are not persisted.\n- S6 must name one UI indicator for Psychic mode.\n- Do not expose raw chain-of-thought.\n- Keep the answer under 180 words."
+    }
+  ],
+  "options": {
+    "model": "llama3.2",
+    "outDir": "artifacts/effort-ladder-evals",
+    "temperature": 0.25,
+    "maxTokens": 900,
+    "repeats": 2,
+    "quick": true,
+    "budgetProfile": "thrifty",
+    "ladderProfile": "standard",
+    "promptOverride": false,
+    "includeScratchpad": false
+  },
+  "tempDbPath": "<removed>",
+  "summary": [
+    {
+      "effort": "none",
+      "runs": 2,
+      "ok": 2,
+      "errors": 0,
+      "averageScore": 8,
+      "scoreMax": 10,
+      "medianDurationMs": 5485,
+      "averagePassCount": 0,
+      "warningCount": 0,
+      "averageScratchpadChars": 0,
+      "averageGuidanceChars": 0
+    },
+    {
+      "effort": "minimal",
+      "runs": 2,
+      "ok": 2,
+      "errors": 0,
+      "averageScore": 9.5,
+      "scoreMax": 10,
+      "medianDurationMs": 7606,
+      "averagePassCount": 1,
+      "warningCount": 0,
+      "averageScratchpadChars": 355,
+      "averageGuidanceChars": 905
+    },
+    {
+      "effort": "low",
+      "runs": 2,
+      "ok": 2,
+      "errors": 0,
+      "averageScore": 9.5,
+      "scoreMax": 10,
+      "medianDurationMs": 6259,
+      "averagePassCount": 1,
+      "warningCount": 0,
+      "averageScratchpadChars": 355,
+      "averageGuidanceChars": 905
+    },
+    {
+      "effort": "medium",
+      "runs": 2,
+      "ok": 2,
+      "errors": 0,
+      "averageScore": 9.5,
+      "scoreMax": 10,
+      "medianDurationMs": 11430,
+      "averagePassCount": 2,
+      "warningCount": 0,
+      "averageScratchpadChars": 766,
+      "averageGuidanceChars": 1293
+    },
+    {
+      "effort": "high",
+      "runs": 2,
+      "ok": 2,
+      "errors": 0,
+      "averageScore": 10,
+      "scoreMax": 10,
+      "medianDurationMs": 11001,
+      "averagePassCount": 3,
+      "warningCount": 0,
+      "averageScratchpadChars": 644,
+      "averageGuidanceChars": 1400
+    },
+    {
+      "effort": "xhigh",
+      "runs": 2,
+      "ok": 2,
+      "errors": 0,
+      "averageScore": 9,
+      "scoreMax": 10,
+      "medianDurationMs": 10749,
+      "averagePassCount": 4,
+      "warningCount": 0,
+      "averageScratchpadChars": 507,
+      "averageGuidanceChars": 1144
+    }
+  ],
+  "runs": [
+    {
+      "effort": "none",
+      "model": "llama3.2",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 6932,
+      "planningBudgetTokens": 0,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Rollout of PRISM v2.0, codenamed \"Eclipse\" |\n| S2 | Local-only data storage ensures that all planning and configuration data is stored on the user's device, without relying on external services or networks. This guarantees that sensitive information remains private and secure. |\n| S3 | Private planning pass allows users to create and manage their own planning configurations, with exclusive access to these settings. This feature enables users to tailor PRISM to their specific needs while maintaining control over their data. |\n| S4 | If planning JSON fails, the system will revert to a default configuration and notify the user of any issues encountered during the planning process. |\n| S5 | Scratchpads are not persisted across sessions, meaning that any notes or ideas created during planning are lost when the session ends. |\n| S6 | Psychic mode is indicated by a glowing purple aura surrounding the PRISM interface, signifying the active use of this advanced feature. |",
+      "assistantChars": 1012,
+      "passCount": 0,
+      "guidanceChars": 0,
+      "scratchpadChars": 0,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 174,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": false,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "minimal",
+      "model": "llama3.2",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 7927,
+      "planningBudgetTokens": 200,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Rollout Pace: User-Friendly Experience |\n| S2 | Local Data Storage Guarantee: All user data is stored on local devices, ensuring maximum security and privacy. |\n| S3 | Private Planning Pass: Developer insights are restricted to authorized personnel only, maintaining confidentiality and integrity. |\n| S4 | Error Handling: In the event of planning JSON failures, a notification will be displayed with instructions for resolving the issue. |\n| S5 | Scratchpads Not Persisted: User notes and scratchpads are deleted upon session closure, ensuring data security and integrity. |\n| S6 | Toast Notification: A Psychic Mode indicator will be displayed as a toast notification when the mode is active, providing users with real-time updates. |\n\nNote: The rollout plan is designed to ensure a smooth transition to the new features while maintaining user privacy and security.",
+      "assistantChars": 902,
+      "psychicSummary": "Rollout Plan for Psychic Mode",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 338,
+          "summary": "Rollout Plan for Psychic Mode"
+        }
+      ],
+      "guidanceChars": 905,
+      "scratchpadChars": 355,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 151,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "low",
+      "model": "llama3.2",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 5939,
+      "planningBudgetTokens": 280,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Rollout Pace: Effort Setting |\n| S2 | Local Data Storage Guarantee: User Data is Stored on Device, Not in Central Repository, Ensuring Confidentiality and Control |\n| S3 | Private Planning Pass: Developer Insights are Restricted to Authorized Personnel, with Access Controlled through Secure Authentication |\n| S4 | Planning JSON Failure: Escalation to Development Team for Review and Resolution, with Notification of Users Affected |\n| S5 | Scratchpads are Not Persisted: User Data is Temporarily Stored in Memory, Erased upon Session Closure |\n| S6 | Toast Notification: Psychic Mode Active Indicator Displayed on Top Right Corner of Chat Window |",
+      "assistantChars": 684,
+      "psychicSummary": "Rollout Plan for Psychic Mode",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 338,
+          "summary": "Rollout Plan for Psychic Mode"
+        }
+      ],
+      "guidanceChars": 905,
+      "scratchpadChars": 355,
+      "score": {
+        "total": 10,
+        "max": 10,
+        "wordCount": 117,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "medium",
+      "model": "llama3.2",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 11159,
+      "planningBudgetTokens": 400,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Set 'Psychic Mode' as the user-facing effort setting, allowing users to opt-in to enhanced AI capabilities. |\n| S2 | Implement a secure data storage solution that ensures sensitive information remains isolated from external networks and devices, providing an additional layer of protection for user data. |\n| S3 | Utilize a private planning pass to generate responses, ensuring that all planning-related data is stored securely and only accessible to authorized personnel. This will prevent unauthorized access to sensitive information. |\n| S4 | Display an error message if planning JSON fails, alerting users to potential issues with the system and providing an opportunity for troubleshooting and improvement. |\n| S5 | Inform users that scratchpads are not persisted across sessions, ensuring they understand the limitations of this feature and can plan accordingly. |\n| S6 | Display a 'Psychic' badge on the UI when Psychic mode is enabled, visually indicating to users that they have opted-in to enhanced AI capabilities.",
+      "assistantChars": 1060,
+      "psychicSummary": "Rollout plan for Psychic feature",
+      "passCount": 2,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 490,
+          "summary": "Rollout plan for Psychic feature"
+        },
+        {
+          "name": "audit",
+          "chars": 243,
+          "summary": "I'm checking that you're using the right language for our Psychic feature rollout plan. I want to make sure we're protecting user privacy and security."
+        }
+      ],
+      "guidanceChars": 1293,
+      "scratchpadChars": 766,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 174,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": false,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "high",
+      "model": "llama3.2",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 10069,
+      "planningBudgetTokens": 720,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Set user-facing effort setting to 'Psychic Mode' |\n| S2 | Ensure local-only guarantee by using phrases like \"local machine\" or \"device-based processing\" |\n| S3 | Implement private planning pass for development and testing |\n| S4 | Display error message if planning JSON fails, with a clear indication of the issue |\n| S5 | Note that scratchpads are not persisted across sessions, and provide alternative storage options |\n| S6 | Display a 'Psychic Mode' badge on the UI indicator to signal the mode's activation |",
+      "assistantChars": 548,
+      "psychicSummary": "Rollout plan for Psychic mode",
+      "passCount": 3,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 215,
+          "summary": "Rollout plan for Psychic mode"
+        },
+        {
+          "name": "draft",
+          "chars": 29,
+          "summary": "Established a concise rollout plan with clear steps and constraints."
+        },
+        {
+          "name": "audit",
+          "chars": 351,
+          "summary": "I'm checking the rollout plan for Psychic mode to ensure it meets the required constraints. I'll review the plan carefully to catch any mistakes or issues."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 644,
+      "score": {
+        "total": 10,
+        "max": 10,
+        "wordCount": 102,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "xhigh",
+      "model": "llama3.2",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 1,
+      "status": "ok",
+      "durationMs": 10761,
+      "planningBudgetTokens": 900,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Set user-facing effort setting to 'Psychic Mode' |\n| S2 | All data will be stored on a secure, isolated machine for maximum privacy and security, utilizing local storage solutions. |\n| S3 | Utilize the private planning pass to plan the rollout of Psychic mode, ensuring all necessary steps are taken before deployment. |\n| S4 | If planning JSON fails, revert to previous version and notify the development team to address any issues promptly. |\n| S5 | Scratchpads will not be persisted across sessions; therefore, updates must occur prior to each use. |\n| S6 | Display a 'Psychic Mode' badge on the user interface to indicate active mode.",
+      "assistantChars": 673,
+      "psychicSummary": "Rollout plan for Psychic mode",
+      "passCount": 4,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 187,
+          "summary": "Rollout plan for Psychic mode"
+        },
+        {
+          "name": "draft",
+          "chars": 29,
+          "summary": "Established a plan for Psychic mode rollout with key constraints and steps."
+        },
+        {
+          "name": "audit",
+          "chars": 209,
+          "summary": "I'm checking that our rollout plan for Psychic mode respects the required constraints and avoids forbidden words. I'll make sure to preserve key terms and avoid extra notes outside the requested format."
+        },
+        {
+          "name": "synthesis",
+          "chars": 21,
+          "summary": "I locked in a concise rollout plan for Psychic mode while ensuring privacy and security."
+        }
+      ],
+      "guidanceChars": 1144,
+      "scratchpadChars": 507,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 125,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "none",
+      "model": "llama3.2",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 4038,
+      "planningBudgetTokens": 0,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Rollout of PRISM v2.0, codenamed \"Eclipse\" |\n| S2 | All planning data will be stored locally on the user's device, ensuring maximum security and minimizing reliance on external services. |\n| S3 | A private planning pass will be generated for each user, allowing them to access their personalized settings and configurations without exposing sensitive information to the public network. |\n| S4 | If a planning JSON fails to generate or is corrupted, the system will revert to default settings and notify the user via an in-app notification. |\n| S5 | Scratchpads created during planning sessions will not be persisted across device restarts or app updates. |\n| S6 | A \"Psychic Mode\" indicator will be displayed on the top-right corner of the interface, signaling when the system is operating in a more advanced, AI-driven mode. |",
+      "assistantChars": 862,
+      "passCount": 0,
+      "guidanceChars": 0,
+      "scratchpadChars": 0,
+      "score": {
+        "total": 8,
+        "max": 10,
+        "wordCount": 153,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "minimal",
+      "model": "llama3.2",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 7284,
+      "planningBudgetTokens": 200,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Rollout Pace: Effort Setting |\n| S2 | Local Data Storage Guarantee: User consent is required to access and store data on local devices, ensuring secure and private interactions. |\n| S3 | Private Planning Pass: Developer insights are restricted to authorized personnel with explicit permission, maintaining confidentiality and integrity of sensitive information. |\n| S4 | Planning JSON Failures: Escalation procedures will be triggered in case of errors or inconsistencies in planning JSON output, ensuring prompt attention and resolution. |\n| S5 | Scratchpads Not Persisted: User-created scratchpads are not retained across sessions, providing a clean slate for each interaction and minimizing data retention risks. |\n| S6 | Toast Notification: Psychic Mode Active Indicator |",
+      "assistantChars": 811,
+      "psychicSummary": "Rollout Plan for Psychic Mode",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 338,
+          "summary": "Rollout Plan for Psychic Mode"
+        }
+      ],
+      "guidanceChars": 905,
+      "scratchpadChars": 355,
+      "score": {
+        "total": 10,
+        "max": 10,
+        "wordCount": 130,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "low",
+      "model": "llama3.2",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 6579,
+      "planningBudgetTokens": 280,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Rollout Pace: Fast and Agile Deployment |\n| S2 | Local data storage ensures user consent is respected, without relying on external servers or networks. This guarantees sensitive information remains secure within the local environment. |\n| S3 | Private planning pass provides developer insights into user interactions and preferences, while maintaining strict data protection measures to prevent unauthorized access. |\n| S4 | If planning JSON fails, a notification will be displayed, alerting administrators to investigate and resolve the issue promptly. Escalation procedures will be triggered to ensure minimal disruption to users. |\n| S5 | Scratchpads are not persisted across sessions, ensuring that user-generated content is cleared upon logout. This maintains data security and prevents potential data breaches. |\n| S6 | Toast Notification: Psychic Mode Active - A discreet notification will appear in the corner of the screen when Psychic mode is enabled, indicating the user's current mental state and available features.",
+      "assistantChars": 1063,
+      "psychicSummary": "Rollout Plan for Psychic Mode",
+      "passCount": 1,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 338,
+          "summary": "Rollout Plan for Psychic Mode"
+        }
+      ],
+      "guidanceChars": 905,
+      "scratchpadChars": 355,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 168,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": false,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "medium",
+      "model": "llama3.2",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 11701,
+      "planningBudgetTokens": 400,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Set 'Psychic Mode' as the user-facing effort setting to track progress and adoption. |\n| S2 | Implement a secure, data-residency-based storage solution that ensures sensitive information is stored on devices or machines within local jurisdictions, providing an additional layer of protection against unauthorized access. |\n| S3 | Utilize a private planning pass to generate responses while maintaining the confidentiality and integrity of user input. This pass will be used to isolate sensitive information from other system components. |\n| S4 | Display an error message if planning JSON fails, indicating that the system is unable to generate a response due to insufficient data or conflicting requirements. |\n| S5 | Inform users that scratchpads are not persisted across sessions, and any changes made during a session will be lost upon logout. |\n| S6 | Display a 'Psychic' badge on the UI when Psychic mode is enabled, providing a visual indicator of the mode's status and facilitating user awareness.",
+      "assistantChars": 1039,
+      "psychicSummary": "Rollout plan for Psychic feature",
+      "passCount": 2,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 490,
+          "summary": "Rollout plan for Psychic feature"
+        },
+        {
+          "name": "audit",
+          "chars": 243,
+          "summary": "I'm checking that you're using the right language for our Psychic feature rollout plan. I want to make sure we're protecting user privacy and security."
+        }
+      ],
+      "guidanceChars": 1293,
+      "scratchpadChars": 766,
+      "score": {
+        "total": 10,
+        "max": 10,
+        "wordCount": 174,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "high",
+      "model": "llama3.2",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 11933,
+      "planningBudgetTokens": 720,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Set user-facing effort setting to 'Psychic Mode' |\n| S2 | Ensure local-only guarantee by using phrases such as 'local machine', 'local device', or 'local provider' |\n| S3 | Implement private planning pass for development and testing purposes |\n| S4 | Display an error message to the user if planning JSON fails, ensuring a seamless experience |\n| S5 | Note that scratchpads are not persisted across sessions, maintaining data integrity |\n| S6 | Display a 'Psychic Mode' badge on the UI indicator to signal the mode's activation |\n\nNote: I've followed the constraints and kept the answer concise, under 180 words. The rollout plan is presented in a compact Markdown table with exactly 6 body rows labeled S1 through S6.",
+      "assistantChars": 753,
+      "psychicSummary": "Rollout plan for Psychic mode",
+      "passCount": 3,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 215,
+          "summary": "Rollout plan for Psychic mode"
+        },
+        {
+          "name": "draft",
+          "chars": 29,
+          "summary": "Established a concise rollout plan with clear steps and constraints."
+        },
+        {
+          "name": "audit",
+          "chars": 351,
+          "summary": "I'm checking the rollout plan for Psychic mode to ensure it meets the required constraints. I'll review the plan carefully to catch any mistakes or issues."
+        }
+      ],
+      "guidanceChars": 1400,
+      "scratchpadChars": 644,
+      "score": {
+        "total": 10,
+        "max": 10,
+        "wordCount": 137,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": true,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    },
+    {
+      "effort": "xhigh",
+      "model": "llama3.2",
+      "promptId": "rollout-table",
+      "promptTitle": "Rollout Table Constraint Trap",
+      "repeat": 2,
+      "status": "ok",
+      "durationMs": 10736,
+      "planningBudgetTokens": 900,
+      "assistant": "| ID | Plan |\n| --- | --- |\n| S1 | Set user-facing effort setting to 'Psychic Mode' |\n| S2 | Store all data on local machine using secure, isolated environment for enhanced privacy and security |\n| S3 | Utilize private planning pass to plan rollout of Psychic mode, ensuring exclusive access and control |\n| S4 | If planning JSON fails, revert to previous version and notify development team to prevent data loss |\n| S5 | Update scratchpads before each use due to non-persistence across sessions |\n| S6 | Display a 'Psychic Mode' toast badge on user interface to indicate active mode |\n\nNote: The private planning pass is used to ensure exclusive access and control during the rollout of Psychic mode. This allows for a secure and controlled environment, free from external interference or influence.",
+      "assistantChars": 800,
+      "psychicSummary": "Rollout plan for Psychic mode",
+      "passCount": 4,
+      "passes": [
+        {
+          "name": "plan",
+          "chars": 187,
+          "summary": "Rollout plan for Psychic mode"
+        },
+        {
+          "name": "draft",
+          "chars": 29,
+          "summary": "Established a plan for Psychic mode rollout with key constraints and steps."
+        },
+        {
+          "name": "audit",
+          "chars": 209,
+          "summary": "I'm checking that our rollout plan for Psychic mode respects the required constraints and avoids forbidden words. I'll make sure to preserve key terms and avoid extra notes outside the requested format."
+        },
+        {
+          "name": "synthesis",
+          "chars": 21,
+          "summary": "I locked in a concise rollout plan for Psychic mode while ensuring privacy and security."
+        }
+      ],
+      "guidanceChars": 1144,
+      "scratchpadChars": 507,
+      "score": {
+        "total": 9,
+        "max": 10,
+        "wordCount": 143,
+        "checks": {
+          "exactlySixLabeledRows": true,
+          "s1NamesUserFacingSetting": true,
+          "s2ExplainsLocalOnlyWithoutCloud": true,
+          "s3DescribesPrivatePlanningPass": true,
+          "s4HandlesPlanningJsonFailure": true,
+          "s5SaysScratchpadsNotPersisted": false,
+          "s6NamesPsychicUiIndicator": true,
+          "avoidsCloudWord": true,
+          "underWordLimit": true,
+          "avoidsRawChainOfThought": true
+        }
+      }
+    }
+  ]
+}

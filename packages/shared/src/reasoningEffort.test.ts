@@ -17,6 +17,7 @@ import {
   simulatedPsychicAnswerGuidanceMaxChars,
   simulatedPsychicPlanningMaxTokens,
   simulatedPsychicPrivateArtifactMaxChars,
+  simulatedEffortLadderPasses,
   simulatedPsychicPrivatePassMaxTokens,
   simulatedPsychicScratchpadMaxChars,
   simulatedSurfacePreparationMaxTokens,
@@ -52,9 +53,19 @@ describe("reasoning effort helpers", () => {
       simulatedPsychicPlanningMaxTokens("low") <
         simulatedPsychicPlanningMaxTokens("high"),
     );
-    assert.equal(simulatedPsychicPrivatePassMaxTokens("medium", "audit"), 260);
-    assert.equal(simulatedPsychicPrivatePassMaxTokens("high", "draft"), 640);
-    assert.equal(simulatedPsychicPrivatePassMaxTokens("xhigh", "draft"), 1_000);
+    assert.equal(simulatedPsychicPlanningMaxTokens("minimal"), 300);
+    assert.equal(simulatedPsychicPlanningMaxTokens("low"), 340);
+    assert.ok(
+      simulatedPsychicPlanningMaxTokens("minimal") <
+        simulatedPsychicPlanningMaxTokens("low"),
+    );
+    assert.equal(simulatedPsychicPrivatePassMaxTokens("medium", "audit"), 320);
+    assert.equal(simulatedPsychicPrivatePassMaxTokens("high", "draft"), 800);
+    assert.equal(simulatedPsychicPrivatePassMaxTokens("xhigh", "draft"), 1_200);
+    assert.equal(
+      simulatedPsychicPrivatePassMaxTokens("xhigh", "revise_draft"),
+      1_400,
+    );
     assert.ok(
       simulatedPsychicScratchpadMaxChars("medium") <
         simulatedPsychicScratchpadMaxChars("xhigh"),
@@ -63,8 +74,51 @@ describe("reasoning effort helpers", () => {
       simulatedPsychicAnswerGuidanceMaxChars("low") <
         simulatedPsychicAnswerGuidanceMaxChars("high"),
     );
-    assert.equal(simulatedPsychicPrivateArtifactMaxChars("medium"), 1_200);
-    assert.equal(simulatedPsychicPrivateArtifactMaxChars("xhigh"), 3_200);
+    assert.equal(simulatedPsychicPrivateArtifactMaxChars("medium"), 1_600);
+    assert.equal(simulatedPsychicPrivateArtifactMaxChars("xhigh"), 4_000);
+  });
+
+  it("defaults to the lean standard ladder and keeps deep as experimental", () => {
+    assert.deepEqual(simulatedEffortLadderPasses("none"), []);
+    assert.deepEqual(simulatedEffortLadderPasses("minimal"), ["plan"]);
+    assert.deepEqual(simulatedEffortLadderPasses("low"), ["plan"]);
+    assert.deepEqual(simulatedEffortLadderPasses("medium"), ["plan", "audit"]);
+    assert.deepEqual(simulatedEffortLadderPasses("high"), [
+      "plan",
+      "draft",
+      "audit",
+    ]);
+    assert.deepEqual(simulatedEffortLadderPasses("xhigh"), [
+      "plan",
+      "draft",
+      "audit",
+      "synthesis",
+    ]);
+    assert.deepEqual(simulatedEffortLadderPasses("minimal", "deep"), [
+      "plan",
+      "alternatives",
+      "draft",
+    ]);
+    assert.deepEqual(simulatedEffortLadderPasses("low", "deep"), [
+      "plan",
+      "alternatives",
+      "draft",
+      "audit",
+      "red_team",
+    ]);
+    assert.equal(simulatedEffortLadderPasses("medium", "deep").length, 7);
+    assert.equal(simulatedEffortLadderPasses("high", "deep").length, 8);
+    assert.deepEqual(simulatedEffortLadderPasses("xhigh", "deep"), [
+      "plan",
+      "alternatives",
+      "draft",
+      "audit",
+      "red_team",
+      "constraint_lock",
+      "revise_draft",
+      "compliance_sweep",
+      "synthesis",
+    ]);
   });
 
   it("restores legacy simulated budgets for eval A/B", async () => {
@@ -86,11 +140,11 @@ describe("reasoning effort helpers", () => {
 
   it("budgets one complete generation attempt by effort", () => {
     assert.equal(reasoningGenerationBudgetMs("none"), 60_000);
-    assert.equal(reasoningGenerationBudgetMs("minimal"), 60_000);
-    assert.equal(reasoningGenerationBudgetMs("low"), 60_000);
-    assert.equal(reasoningGenerationBudgetMs("medium"), 120_000);
-    assert.equal(reasoningGenerationBudgetMs("high"), 180_000);
-    assert.equal(reasoningGenerationBudgetMs("xhigh"), 300_000);
+    assert.equal(reasoningGenerationBudgetMs("minimal"), 120_000);
+    assert.equal(reasoningGenerationBudgetMs("low"), 180_000);
+    assert.equal(reasoningGenerationBudgetMs("medium"), 240_000);
+    assert.equal(reasoningGenerationBudgetMs("high"), 360_000);
+    assert.equal(reasoningGenerationBudgetMs("xhigh"), 480_000);
     assert.equal(reasoningGenerationBudgetMs("auto"), 180_000);
     assert.equal(reasoningGenerationBudgetMs(undefined), 180_000);
     assert.equal(
@@ -105,14 +159,14 @@ describe("reasoning effort helpers", () => {
         provider: "local",
         modelId: "llama3.2",
       }),
-      60_000,
+      120_000,
     );
     assert.equal(
       reasoningGenerationBudgetMs(undefined, {
         provider: "openai",
         modelId: "gpt-4o",
       }),
-      60_000,
+      120_000,
     );
   });
 
@@ -220,18 +274,10 @@ describe("reasoning effort helpers", () => {
     assert.equal(openAiReasoningEffortForRequest("gpt-5.6-sol", "none"), "none");
   });
 
-  it("gates simulated effort for local and non-native online models", () => {
-    assert.equal(
-      resolveModelReasoningEffortCapability({
-        provider: "local",
-        modelId: "qwen3:14b",
-      }).mode,
-      "unavailable",
-    );
+  it("enables simulated effort by default for local and non-native online models", () => {
     const localSimulated = resolveModelReasoningEffortCapability({
       provider: "local",
       modelId: "qwen3:14b",
-      simulatedEffortEnabled: true,
     });
     assert.equal(localSimulated.mode, "simulated");
     assert.equal(localSimulated.supportsNone, true);
@@ -245,16 +291,16 @@ describe("reasoning effort helpers", () => {
     ]);
     assert.equal(
       resolveModelReasoningEffortCapability({
-        provider: "openai",
-        modelId: "gpt-4o",
-      }).disabledReason,
-      "Enable experimental simulated effort in Settings.",
+        provider: "local",
+        modelId: "qwen3:14b",
+        simulatedEffortEnabled: false,
+      }).mode,
+      "unavailable",
     );
     assert.equal(
       resolveModelReasoningEffortCapability({
         provider: "openai",
         modelId: "gpt-4o",
-        simulatedEffortEnabled: true,
       }).mode,
       "simulated",
     );
@@ -262,7 +308,6 @@ describe("reasoning effort helpers", () => {
       resolveModelReasoningEffortCapability({
         provider: "anthropic",
         modelId: "claude-haiku-4-5",
-        simulatedEffortEnabled: true,
       }).mode,
       "simulated",
     );
@@ -271,15 +316,6 @@ describe("reasoning effort helpers", () => {
         provider: "anthropic",
         modelId: "claude-haiku-4-5",
         preference: "minimal",
-      }),
-      null,
-    );
-    assert.equal(
-      effectiveModelReasoningEffort({
-        provider: "anthropic",
-        modelId: "claude-haiku-4-5",
-        preference: "minimal",
-        simulatedEffortEnabled: true,
       }),
       "minimal",
     );
@@ -288,7 +324,6 @@ describe("reasoning effort helpers", () => {
         provider: "anthropic",
         modelId: "claude-haiku-4-5",
         preference: "none",
-        simulatedEffortEnabled: true,
       }),
       "none",
     );

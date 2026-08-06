@@ -125,7 +125,7 @@ describe("Chat voice policy", () => {
     assert.equal(
       [
         ...pageSource.matchAll(
-          /:\s*!zenVoiceMuted &&\s*chatAssistantTypingMechanicsActive &&/gu,
+          /!zenVoiceMuted &&\s*chatAssistantTypingMechanicsActive &&/gu,
         ),
       ].length,
       2,

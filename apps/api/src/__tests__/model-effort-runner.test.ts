@@ -129,6 +129,17 @@ describe("simulated model effort runner", () => {
     assert.ok(calls.every((call) => call.options?.maxTokens === 220));
     const note = preparedHigh.at(-1)?.content ?? "";
     assert.ok(note.length <= 1_400 + 160);
+
+    calls.length = 0;
+    await prepareMessagesWithSimulatedEffort({
+      provider,
+      messages: [{ role: "user", content: "Argue it." }],
+      options: { model: "qwen3:9b" },
+      effort: "high",
+      surface: "coffee",
+      ladderProfile: "deep",
+    });
+    assert.equal(calls.length, 8);
   });
 
   it("uses the saved ladder without mutating canonical messages", async () => {

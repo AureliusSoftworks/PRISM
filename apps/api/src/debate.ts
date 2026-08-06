@@ -233,6 +233,8 @@ export interface DebateGenerationLane {
   model: string;
   reasoningEffort?: ReasoningEffort;
   available?: boolean;
+  /** Experimental deep simulated-effort ladder for this lane. */
+  deepSimulatedEffort?: boolean;
 }
 
 export interface DebateAiRuntime {
@@ -880,6 +882,7 @@ async function generateJsonOnLane(
       },
       effort: options.reasoningEffort ?? lane.reasoningEffort,
       surface: "debate",
+      ladderProfile: lane.deepSimulatedEffort === true ? "deep" : "standard",
       outputContract:
         "Return exactly the requested Debate JSON while preserving procedure, evidence visibility, Powers, and speaker role.",
     });
@@ -4718,7 +4721,11 @@ async function generateSpeech(
     }
   }
   const responseBudget = strongestBotPowerResponseBudgetEffectV1(effects);
-  intended = applyBotPowerResponseBudgetV1(intended, responseBudget, 3);
+  intended = applyBotPowerResponseBudgetV1(
+    intended,
+    responseBudget,
+    responseBudget?.mode === "minimal" ? 1 : 2,
+  );
   if (session.stepKey === "intro" || session.stepKey === "turnabout_intro") {
     const devils = session.advocacyConsent
       .filter((consent) => consent.status === "devils_advocate")
@@ -7149,7 +7156,11 @@ async function generateJuryBallot(
       session.powerPlan.bots[juror.id]?.effects.map((entry) => entry.effect) ??
       [];
     const responseBudget = strongestBotPowerResponseBudgetEffectV1(effects);
-    reason = applyBotPowerResponseBudgetV1(reason, responseBudget, 3);
+    reason = applyBotPowerResponseBudgetV1(
+      reason,
+      responseBudget,
+      responseBudget?.mode === "minimal" ? 1 : 2,
+    );
   }
   const publicDelivery =
     stage === "final"
@@ -10339,7 +10350,7 @@ function participantObjectionModeratorDelivery(
   content = applyBotPowerResponseBudgetV1(
     content,
     strongestBotPowerResponseBudgetEffectV1(effects),
-    3,
+    strongestBotPowerResponseBudgetEffectV1(effects)?.mode === "minimal" ? 1 : 2,
   );
   if (effects.some((effect) => effect.type === "speech_obfuscation")) {
     content = applyBotPowerMumbledResponseV1(content);

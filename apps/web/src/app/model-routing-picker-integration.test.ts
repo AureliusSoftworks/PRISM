@@ -164,19 +164,20 @@ describe("shared routing model picker integration", () => {
     );
   });
 
-  it("explains disabled effort and discloses online multi-call simulation", () => {
+  it("explains simulated Effort education and deep experimental ladder", () => {
     assert.match(pageSource, /data-glyph-tooltip=\{effortDisabledReason\}/u);
     assert.match(
       reasoningEffortSource,
-      /Enable experimental simulated effort in Settings/u,
+      /Simulated Effort is product-default for thoughtless models/u,
     );
     assert.ok(
-      (pageSource.match(/Give unsupported models simulated effort/gu) ?? [])
+      (pageSource.match(/Deep simulated thinking \(experimental\)/gu) ?? [])
         .length >= 2,
-      "expected both Settings presentations to use provider-neutral copy",
+      "expected both Settings presentations to describe deep simulated thinking",
     );
-    assert.match(pageSource, /multiple provider calls/u);
-    assert.match(pageSource, /increase[\s\S]{0,30}usage or cost/u);
+    assert.match(pageSource, /heavier private workshop/u);
+    assert.match(pageSource, /onSimulatedEffortEducate/u);
+    assert.match(pageSource, /Simulated thinking/u);
   });
 
   it("uses None instead of Default for simulated non-thinking models", () => {
@@ -190,7 +191,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       tutorialSource,
-      /Models without native reasoning begin at None and show only None through Extra High/u,
+      /Models without a built-in thinking dial always get Prism/u,
     );
   });
 
@@ -400,8 +401,12 @@ describe("shared routing model picker integration", () => {
     assert.match(tutorialSource, /vertical slider/u);
     assert.match(tutorialSource, /selected effort glyph rotates in place/u);
     assert.match(tutorialSource, /one through five PRISM colors/u);
-    assert.match(tutorialSource, /Hover a disabled glyph/u);
-    assert.match(tutorialSource, /online simulation may add provider usage or cost/u);
+    assert.match(tutorialSource, /Deep simulated thinking/u);
+    assert.match(tutorialSource, /short toast/u);
+    assert.match(
+      tutorialSource,
+      /[Oo]nline simulation may add provider usage or cost/u,
+    );
     assert.match(tutorialSource, /Cmd\/Ctrl\+Shift\+E/u);
     assert.match(tutorialSource, /Shift\+Tab opens Model/u);
     assert.match(tutorialSource, /tap Tab again to commit it and move directly into Effort/u);

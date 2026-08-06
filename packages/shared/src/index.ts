@@ -910,6 +910,8 @@ export {
   type PromptShortcutRunMetadata,
   type PromptShortcutWildcardReplacement,
   type PromptWildcardRunMetadata,
+  PSYCHIC_THOUGHT_PASS_STAGES,
+  isPsychicThoughtPassStage,
   type PsychicThoughtPass,
   type PsychicThoughtPassStage,
   type PsychicThoughtPayload,
@@ -1010,6 +1012,10 @@ export {
   simulatedPsychicAnswerGuidanceMaxChars,
   simulatedPsychicPlanningMaxTokens,
   simulatedPsychicPrivateArtifactMaxChars,
+  SIMULATED_EFFORT_PASS_NAMES,
+  normalizeSimulatedEffortLadderProfile,
+  simulatedEffortLadderPasses,
+  simulatedEffortTextPasses,
   simulatedPsychicPrivatePassMaxTokens,
   simulatedPsychicScratchpadMaxChars,
   simulatedSurfacePreparationMaxTokens,
@@ -1026,7 +1032,9 @@ export {
   type ReasoningEffort,
   type RequestReasoningEffort,
   type SimulatedEffortBudgetProfile,
+  type SimulatedEffortLadderProfile,
   type SimulatedEffortPassName,
+  type SimulatedEffortTextPassName,
 } from "./reasoningEffort.js";
 
 export {

@@ -15,13 +15,13 @@ For iterative diagnosis of a run (collapse, leakage, native-vs-simulated mismatc
 
 ## Product Boundary
 
-Simulated effort is an opt-in quality booster for models without adjustable native effort. It is not a claim that those models become true reasoning models.
+Simulated effort is the product-default quality booster for models without adjustable native effort (lean standard ladder + thrifty budgets). It is not a claim that those models become true reasoning models. The heavier Deep workshop remains Settings → Experimental.
 
-- Prism simulated planning/draft/audit/revision passes run on the selected provider/model, whether local or online.
-- OpenAI and Anthropic models without adjustable native effort receive the same private multi-call ladder when the experiment is enabled.
+- Prism simulated planning/draft/audit/(synthesis) passes run on the selected provider/model, whether local or online.
+- OpenAI and Anthropic models without adjustable native effort receive the same private multi-call ladder by default; Deep experimental adds Alternatives / Red-team / Constraint Lock / Revise Draft / Compliance Sweep.
 - Models with native effort keep provider-native effort; fixed-effort models remain fixed.
 - Online simulation makes multiple paid/provider calls and may increase usage, cost, and latency. Settings must say so plainly.
-- Psychic mode may show concise summaries/diagnostics, but private plans, drafts, audits, and revisions remain ephemeral.
+- Psychic disclosure is transcript-Chat only; private plans, drafts, audits, and revisions remain ephemeral.
 - LOCAL mode always uses the selected local provider for every private and visible pass; it must never call an online provider.
 
 ## Prerequisites
@@ -127,7 +127,15 @@ node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/eff
 node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --budget-profile legacy
 ```
 
+To A/B the product-default lean ladder against Deep simulated thinking (experimental):
+
+```powershell
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --ladder-profile standard
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --ladder-profile deep
+```
+
 `--budget-profile` is eval-only. Product runtime always uses thrifty unless an eval selects legacy.
+`--ladder-profile standard` is the product default; `deep` maps to Settings → Deep simulated thinking (`experimental_all_model_effort_enabled`).
 
 Artifacts are written to:
 
