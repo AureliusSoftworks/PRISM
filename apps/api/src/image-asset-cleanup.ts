@@ -473,13 +473,19 @@ function buildImageAssetCleanupGraph(
       usageLabel("Slate cover", row.title, row.id),
     );
   }
+  // Archive Remove soft-cancels proceedings (status = cancelled) while keeping
+  // session_json for quarantine restore. Those rows must not keep exhibit
+  // sprites protected after they disappear from the Archive list.
   for (const row of readRows<{
     id: string;
     motion: string;
     session_json: string;
   }>(
     db,
-    "SELECT id, motion, session_json FROM debate_sessions WHERE user_id = ?",
+    `SELECT id, motion, session_json
+       FROM debate_sessions
+      WHERE user_id = ?
+        AND status != 'cancelled'`,
     userId,
   )) {
     collectImageReferencesFromText(

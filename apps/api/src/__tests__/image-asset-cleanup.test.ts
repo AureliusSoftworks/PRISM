@@ -8,6 +8,7 @@ import { describe, it } from "node:test";
 import {
   cleanupUnreferencedImageAssets,
   ImageAssetCleanupError,
+  imageAssetUsageLabels,
   listImageAssetCleanupRecoveries,
   permanentlyDeleteImageAssetCleanupRecovery,
   previewUnreferencedImageAssets,
@@ -85,7 +86,8 @@ function fixture(): DatabaseSync {
       id TEXT NOT NULL,
       user_id TEXT NOT NULL,
       motion TEXT NOT NULL,
-      session_json TEXT NOT NULL
+      session_json TEXT NOT NULL,
+      status TEXT NOT NULL DEFAULT 'completed'
     );
     CREATE TABLE image_asset_sets (
       id TEXT PRIMARY KEY,
@@ -235,7 +237,9 @@ describe("image asset cleanup preview", () => {
         null,
         "[]",
       );
-      db.prepare("INSERT INTO debate_sessions VALUES (?, ?, ?, ?)").run(
+      db.prepare(
+        "INSERT INTO debate_sessions (id, user_id, motion, session_json, status) VALUES (?, ?, ?, ?, ?)",
+      ).run(
         "debate-1",
         "user-1",
         "A motion",
@@ -244,6 +248,7 @@ describe("image asset cleanup preview", () => {
             exhibits: [{ id: "exhibit-1", imageId: "debate-exhibit" }],
           },
         }),
+        "completed",
       );
 
       const before = (
@@ -302,6 +307,55 @@ describe("image asset cleanup preview", () => {
       const preview = previewUnreferencedImageAssets(db, "user-1");
       assert.equal(preview.candidates.length, 0);
       assert.equal(preview.protectedByReferenceCount, 1);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("stops protecting Debate exhibit sprites after Archive Remove soft-cancels the proceeding", () => {
+    const db = fixture();
+    try {
+      seedImage(db, "live-exhibit", {
+        origin: "debate",
+        purpose: "debate_exhibit",
+      });
+      seedImage(db, "removed-exhibit", {
+        origin: "debate",
+        purpose: "debate_exhibit",
+      });
+      const evidence = (imageId: string) =>
+        JSON.stringify({
+          evidence: {
+            exhibits: [{ id: `exhibit-${imageId}`, imageId }],
+          },
+        });
+      db.prepare(
+        "INSERT INTO debate_sessions (id, user_id, motion, session_json, status) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        "debate-live",
+        "user-1",
+        "Live motion",
+        evidence("live-exhibit"),
+        "paused",
+      );
+      db.prepare(
+        "INSERT INTO debate_sessions (id, user_id, motion, session_json, status) VALUES (?, ?, ?, ?, ?)",
+      ).run(
+        "debate-removed",
+        "user-1",
+        "Removed motion",
+        evidence("removed-exhibit"),
+        "cancelled",
+      );
+
+      const usage = imageAssetUsageLabels(db, "user-1", [
+        "live-exhibit",
+        "removed-exhibit",
+      ]);
+      assert.deepEqual(usage.get("live-exhibit"), [
+        "Debate evidence exhibit · Live motion",
+      ]);
+      assert.deepEqual(usage.get("removed-exhibit"), []);
     } finally {
       db.close();
     }
