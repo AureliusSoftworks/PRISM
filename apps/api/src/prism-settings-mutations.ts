@@ -39,6 +39,7 @@ export const PRISM_JOURNALED_SETTING_KEYS = new Set([
   "coffeeExperimentalTableAngleEnabled",
   "psychicModeEnabled",
   "autoFallbackChain",
+  "onlineAutoProviderBias",
   "hiddenBotModelIds",
   "hiddenComfyUiWorkflowIds",
   "lenientLocalImageFallbackModel",
