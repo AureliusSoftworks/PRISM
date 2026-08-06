@@ -37,10 +37,10 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
-  it("requests the bot response immediately after the player line settles", () => {
+  it("requests the bot response after the player line settles, deferring past an in-flight thinking bot", () => {
     assert.match(
       pageSource,
-      /await userRevealSettlePromise;[\s\S]*?setCoffeeTurnRhythmState\("botThinking"\);[\s\S]*?const presentBotIds =[\s\S]*?runCoffeeTurnJob\(/,
+      /await userRevealSettlePromise;[\s\S]*?setCoffeeTurnRhythmState\("botThinking"\);[\s\S]*?const turnJob = await turnJobPromise;/,
     );
     assert.doesNotMatch(pageSource, /coffeePlayerResponseBeatMs/);
     assert.match(
@@ -50,6 +50,10 @@ describe("Coffee player response UI wiring", () => {
     assert.match(
       pageSource,
       /const revealArgs: CoffeePendingRevealQueueArgs = \{[\s\S]*?includeCooldown: false,/,
+    );
+    assert.match(
+      pageSource,
+      /const turnJobPromise = \(async \(\) => \{\s*if \(sendParallelDuringThinkingBot\) \{[\s\S]*?runCoffeeTurnJob\(/,
     );
   });
 
@@ -69,24 +73,28 @@ describe("Coffee player response UI wiring", () => {
     );
   });
 
-  it("never lets typing pause the table and queues sends behind a thinking bot", () => {
+  it("never lets typing pause the table and keeps thinking bots intact while the player speaks", () => {
     // No typing-grace deferral machinery remains anywhere in the Coffee flow.
     assert.doesNotMatch(pageSource, /coffeeTableTalkAutoplayDeferralMs/);
     assert.doesNotMatch(pageSource, /coffeeGeneratedReplyRevealDeferralMs/);
     assert.doesNotMatch(pageSource, /COFFEE_TABLE_TALK_TYPING_GRACE_MS/);
     assert.doesNotMatch(pageSource, /paused while you type/);
-    // Sending while a bot thinks waits for its line instead of aborting it.
+    // Sending while a bot thinks prints/speaks immediately without aborting synthesis.
     assert.match(
       pageSource,
-      /const sendShouldWaitForThinkingBot =\s*!draftIsActionOnly &&\s*coffeeTurnRhythmState === "botThinking" &&\s*\(coffeeAutoBusy \|\|\s*coffeeContinueAbortRef\.current !== null \|\|\s*coffeePendingSpeakerBotId !== null\);/,
+      /const sendParallelDuringThinkingBot =\s*!draftIsActionOnly &&\s*coffeeTurnRhythmState === "botThinking" &&\s*\(coffeeAutoBusy \|\|\s*coffeeContinueAbortRef\.current !== null \|\|\s*coffeePendingSpeakerBotId !== null\);/,
     );
     assert.match(
       pageSource,
-      /if \(!actionShouldWaitForBotReveal && !sendShouldWaitForThinkingBot\) \{\s*clearCoffeeLoopTimer\(\);\s*coffeeContinueAbortRef\.current\?\.abort\(\);/,
+      /if \(!actionShouldWaitForBotReveal && !sendParallelDuringThinkingBot\) \{\s*clearCoffeeLoopTimer\(\);\s*coffeeContinueAbortRef\.current\?\.abort\(\);/,
     );
     assert.match(
       pageSource,
-      /if \(actionShouldWaitForBotReveal \|\| sendShouldWaitForThinkingBot\) \{[\s\S]{0,220}?await waitForCoffeeRevealToSettle\(\);/,
+      /const turnJobPromise = \(async \(\) => \{\s*if \(sendParallelDuringThinkingBot\) \{[\s\S]*?await waitForCoffeeRevealToSettle\(\);/,
+    );
+    assert.match(
+      pageSource,
+      /if \(actionShouldWaitForBotReveal\) \{[\s\S]{0,220}?await waitForCoffeeRevealToSettle\(\);/,
     );
     // A visible reveal (tableTyping) is still a real player interruption.
     assert.match(

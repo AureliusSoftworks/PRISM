@@ -1,3 +1,63 @@
+### 2026-08-05 · architecture
+**Trigger**: Wanted LOCAL simulated thinking to feel Fast-lean without a Fast toggle.
+**Lesson**: Bake thrifty budgets into the simulated-effort ladder itself — lean maxTokens/note caps at minimal/low/medium, richer at high/xhigh — across Chat Psychic and Coffee/Signal/Debate/Story preparation. Keep Effort as the depth dial; defer real ONLINE Fast (`service_tier` / provider speed) to a later toggle.
+**Applies to**: `packages/shared/src/reasoningEffort.ts` simulated budget helpers, `model-effort-runner.ts`, `chat.ts` Psychic planning clamps
+
+### 2026-08-05 · UX
+**Trigger**: Composer empty-state dice in Zen/Chat duplicated a one-shot send while Debate/Signal already use Wield Prism field refract.
+**Lesson**: Sunset composer dice submit. Register the message box as a Prism `field` refract target (`chat-composer-prompt`) so Wield → click drafts an editable prompt with Space reroll; keep Send for typed text only.
+**Applies to**: `renderChatComposerWithPrismRefract`, `/api/composer/random-prompt`, modeTutorials composer steps
+
+### 2026-08-05 · UX
+**Trigger**: Psychic “seeing thinking” appeared to do nothing — no Psychic label/text on product Chat.
+**Lesson**: Product Chat is `view=chat` (`isZenSurfaceView`), not legacy sandbox (`isChatSurfaceView`). Gate settled Psychic disclosure / scratchpad presentation with `isPsychicPresentationSurfaceView` (both), never sandbox-only.
+**Applies to**: `renderAssistantPsychicDisclosure`, `psychicSourceMessage`, `productChatSurface` for psychicTextEnabled
+
+### 2026-08-05 · UX
+**Trigger**: Model picker still showed a DEFAULT pill on GPT 4o Mini after Auto became the player-facing default.
+**Lesson**: Do not badge catalog `isDefault` models as “Default” in the picker. Auto owns the “Prism chooses” role; `isDefault` may remain internal for fallback/catalog ordering only.
+**Applies to**: `ComposerModelPicker` in `page.tsx`, `composeModelDefaultBadge` (removed)
+
+### 2026-08-05 · UX
+**Trigger**: Settings → Models ONLINE fallback chain: after Fallback 1 was set, picking any model in Fallback 2+ closed the dropdown without changing the selection.
+**Lesson**: Portaled `ComposerModelPicker` menus in multi-slot Settings rows must (1) treat `[data-compose-model-menu]` via `closest()` in the window-capture outside handler (refs can be stale with multiple pickers), (2) commit the choice on `pointerdown` before dismiss can win, and (3) use stable `key={lane:index}` — never include the selected value in the key or the row remounts mid-gesture.
+**Applies to**: `ComposerModelPicker` outside dismiss, Auto recovery fallback rows in `page.tsx`
+
+### 2026-08-05 · architecture
+**Trigger**: Simulated Effort on llama3.2 produced visible finals that were only `assistant` or started with `assistant\n\n…` while private plan/draft/audit passes looked healthy.
+**Lesson**: Never append Psychic/simulated-Effort guidance as a trailing `system` message after the last `user` turn. Ollama chat templates (llama3.2 confirmed) then emit a literal role token as content. Insert guidance immediately before the last user message, and strip a leading `assistant|user|system` role marker from local replies as a safety net.
+**Applies to**: `appendPsychicAnswerGuidance` in `chat.ts`, `stripLeadingChatRoleMarker` in `providers.ts`, `/effort-review`
+
+### 2026-08-05 · UX
+**Trigger**: Spectator hard-bake exit/return showed a stage-only pause card; Proceedings (and chamber chrome) could spoil the prepared floor before Start.
+**Lesson**: For Spectator pause/ready holds, render a static full-screen `DebateIdentOverlay` (`data-hold="true"`) with Start/Resume — not `.stageStateOverlay`. Keep mid-watch stage pause only for non-spectator roles. Hold skips the timed curtain so the title stays until the player continues.
+**Applies to**: `DebateExperience.tsx` `DebateIdentOverlay`, spectator pause branch, `DebateExperience.module.css` `.identOverlay[data-hold]`
+
+### 2026-08-05 · UX
+**Trigger**: Auto picker subtitle truncated (“PRISM CHOOSES THE BEST MODEL…”).
+**Lesson**: Keep Auto meta to a short line that fits beside the triangle glyph — default `"Picks model & effort"` (uppercased in the menu). Avoid long “chooses the best… for each request/generation” copy in narrow navbar pickers.
+**Applies to**: `AUTO_MODEL_SETTINGS_SUBTEXT`, Coffee/Debate/Signal Auto meta overrides
+
+### 2026-08-05 · UX
+**Trigger**: Auto model-picker row looked plain next to provider-tinted lanes; user wanted premium rainbow + triangle.
+**Lesson**: Style Auto as `composeModelOptionAuto` / `data-model-choice="auto"` with a spectrum rail + multi-provider wash, readable meta tint, and `AutoModelChoiceGlyph` (hollow triangle with spectrum stroke) in the effort column. Keep single-provider rows on their lane accents so Auto is the enticing default.
+**Applies to**: `ComposerModelPicker` Auto option, `page.module.css` `.composeModelOptionAuto`
+
+### 2026-08-05 · UX
+**Trigger**: Portaled model picker looked flat — missing OpenAI cyan / Anthropic terracotta / local green lane rails.
+**Lesson**: `COMPOSE_MENU_PORTAL_THEME_VARS` must include `--provider-accent-*`. Those tokens live on `.themeDark`/`.themeLight`, not `document.body`; without copying them onto the portal style, `composeModelOption[data-model-provider]` washes and inset rails resolve empty.
+**Applies to**: `page.tsx` `COMPOSE_MENU_PORTAL_THEME_VARS`, `composerMentionPortal.ts`, model picker portals
+
+### 2026-08-05 · UX
+**Trigger**: Model/effort/bot pickers stayed open on outside click while applet/voice (PrismMenu) closed reliably.
+**Lesson**: Portaled compose pickers must dismiss on `window` `pointerdown` capture (same as PrismMenu), not bubble `mousedown`/`document` only — Zen canvas and companion handlers can stop lower propagation and strand menus.
+**Applies to**: `ComposerModelPicker`, `ComposerBotPicker`, `PrismMenu.tsx`
+
+### 2026-08-05 · UX
+**Trigger**: Zen navbar auto-hid while a portaled dropdown (model/effort/bot/voice/app switcher) was still open — pointer left the bar into `document.body` portals.
+**Lesson**: Hold navbar visibility with `holdAppNavbarForDropdown()` (ref-counted) whenever a navbar/compose portal menu is open. Do not rely on `onPointerLeave` alone; menus escape the navbar DOM. Overflow gear uses the same hold (replacing `pinAppNavbar` for that case).
+**Applies to**: `appNavbarChrome.ts`, `page.tsx` ComposerModelPicker / ComposerBotPicker / voice / app switcher / chat overflow
+
 ### 2026-08-05 · UX
 **Trigger**: Viewport-fit fix set `.forum { flex: 1 1 0 }` and the live stage collapsed to a tiny letterboxed strip.
 **Lesson**: Keep the Debate stage at `flex: 0 0 auto` + `width: 100%` + `aspect-ratio: 2 / 1` so height comes from width. Never give the stage `flex-basis: 0` — height collapses first and aspect-ratio then shrinks width. Let `.stageSupport` be `flex: 1 1 0` to absorb leftover / shrink. Keep the no-`100dvh` transcript rail fix.
@@ -17,14 +77,19 @@
 **Applies to**: `page.tsx` right-panel focus trap, `page.module.css` `.panelOverlay` / `.panel`, `navbar-panel-chrome.test.ts`
 
 ### 2026-08-05 · UX
+**Trigger**: Debate exhibit sprites stayed Used/protected after Archive was empty.
+**Lesson**: Archive Remove soft-cancels proceedings (`status: cancelled`) for quarantine restore but hides them from the Archive list. Image usage scans must exclude `status = 'cancelled'` Debate sessions so Clear unused can reclaim exhibit sprites; restoring a proceeding re-protects its images.
+**Applies to**: `image-asset-cleanup.ts`, Debate Archive Remove, Asset Library Clear unused
+
+### 2026-08-05 · UX
 **Trigger**: Debate Archive showed two floating Ask Prism orbs.
 **Lesson**: Each applet shell must call `renderGlobalPrismCompanion()` exactly once. A second mount paints a duplicate orb; pin with a source test on the Debate companion tail.
 **Applies to**: `page.tsx` Debate view, `prism-companion-presence.test.ts`
 
 ### 2026-08-05 · UX
 **Trigger**: Full-circle Spectator/Watch bake waits were too long; cosmetics shared the same hard loader.
-**Lesson**: Hard waits are head-start bake + invent/refraction only (sanctum loader, elapsed timer, confirm-X). Progressive bake unlocks when **both** ~2.5 min estimated buffer and min steps are met; enter held at Start; frontier soft-pauses while baking; cancel/leave checkpoints and resumes append-only from the tip; fully `ready` is always reviewable from the beginning. Soft waits (Debate exhibit synthesize, Signal artwork chips) keep emoji/activity feedback without fullscreen block.
-**Applies to**: `liveBake.ts`, `live-bake-jobs.ts`, `DebateExperience.tsx`, `BotcastExperience.tsx`, `PrismBlockingLoader.tsx`, `modeTutorials.ts`
+**Lesson**: Hard waits are head-start bake + invent/refraction only (fullscreen `PrismBlockingLoader`, elapsed timer, confirm-X). Progressive bake unlocks when **both** ~2.5 min estimated buffer and min steps are met; enter held at Start; frontier soft-pauses while baking; cancel/leave checkpoints and resumes append-only from the tip; fully `ready` is always reviewable from the beginning. Soft waits use the same refract loader with `placement="docked"` (bottom-right, no inert, companion stays): Debate exhibit synthesize and Signal artwork keep working while Save/edit continue; emoji/assets remain fallback until sprites land. Exhibit soft jobs may run in parallel after Save (same open draft stays one-at-a-time); the docked card lists each job with per-job Stop, × stops all, and the card hides under a hard invent/motion loader without cancelling the soft jobs.
+**Applies to**: `PrismBlockingLoader.tsx`, `DebateExperience.tsx`, `SignalArtworkJobActivity.tsx`, `liveBake.ts`, `modeTutorials.ts`
 
 ### 2026-08-05 · [UX]
 **Trigger**: Spectator Gallery ready showed Forum · Verdict and “Jury has returned 5–0” after bake.

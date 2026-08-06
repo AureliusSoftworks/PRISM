@@ -24,15 +24,18 @@ export function autoFallbackPrimaryForSelection(args: {
   modelChoice: string | null | undefined;
   hiddenModelIds: readonly string[];
   catalog: CatalogShapeForAuto | null | undefined;
+  onlineAutoProviderBias?: number | null;
 }): AutoFallbackModelRef | null {
   const storedChoice = args.modelChoice?.trim() ?? "";
   const modelChoice = isDisabledModelChoice(storedChoice) ? AUTO_MODEL_CHOICE : storedChoice;
   const resolved = resolveAutoModel({
     provider: args.provider,
+    lane: args.provider === "local" ? "local" : "online",
     explicitModelOverride:
       modelChoice && modelChoice !== AUTO_MODEL_CHOICE ? modelChoice : null,
     hiddenModelIds: [...args.hiddenModelIds],
     catalog: args.catalog ?? { local: [], online: [] },
+    onlineAutoProviderBias: args.onlineAutoProviderBias,
   });
   return { provider: resolved.provider, model: resolved.model };
 }

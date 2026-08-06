@@ -12,7 +12,7 @@ describe("Coffee model controls", () => {
     assert.equal(COFFEE_AUTO_MODEL_LABEL, "Auto");
     assert.equal(
       COFFEE_AUTO_MODEL_META,
-      "Prism chooses the model and Effort contextually",
+      "Picks model & effort",
     );
     assert.equal(
       coffeeModelPickerAriaLabel("online"),

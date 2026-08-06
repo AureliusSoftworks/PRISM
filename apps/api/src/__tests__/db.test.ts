@@ -361,6 +361,15 @@ describe("createDatabase bot export hash migration", () => {
       );
       assert.ok(userColumns.some((column) => column.name === "hidden_comfyui_workflow_ids"));
       assert.ok(userColumns.some((column) => column.name === "preferred_image_provider"));
+      assert.ok(
+        userColumns.some((column) => column.name === "online_auto_provider_bias"),
+      );
+      assert.equal(
+        userColumns.find(
+          (column) => column.name === "online_auto_provider_bias",
+        )?.dflt_value,
+        "0",
+      );
       assert.equal(
         (
           reopened

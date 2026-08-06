@@ -51,7 +51,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
           `
           SELECT
             email, display_name, theme, graphics_quality, hub_atmosphere_enabled, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked,
-            auto_memory, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids,
+            auto_memory, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids,
             hidden_comfyui_workflow_ids, model_visibility_defaults_version,
             preferred_local_model, preferred_online_model,
             lenient_local_fallback_model, lenient_local_image_fallback_model,
@@ -116,6 +116,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.auto_memory, 1);
       assert.equal(user.auto_switch_model, 0);
       assert.equal(user.auto_fallback_chain, null);
+      assert.equal(user.online_auto_provider_bias, 0);
       assert.equal(user.hidden_bot_model_ids, "[]");
       assert.equal(user.hidden_comfyui_workflow_ids, "[]");
       assert.equal(user.model_visibility_defaults_version, 0);
@@ -247,6 +248,7 @@ function seedResetFixture(db: DatabaseSync): void {
       auto_memory = 0,
       auto_switch_model = 1,
       auto_fallback_chain = '{"v":1,"fallbacks":[{"provider":"local","model":"fallback-a"},{"provider":"openai","model":"fallback-b"}]}',
+      online_auto_provider_bias = 0.75,
       hidden_bot_model_ids = '["model-a"]',
       hidden_comfyui_workflow_ids = '["workflow-a"]',
       model_visibility_defaults_version = 99,

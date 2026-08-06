@@ -196,6 +196,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       auto_memory INTEGER NOT NULL DEFAULT 1,
       auto_switch_model INTEGER NOT NULL DEFAULT 0,
       auto_fallback_chain TEXT,
+      online_auto_provider_bias REAL NOT NULL DEFAULT 0,
       hidden_bot_model_ids TEXT NOT NULL DEFAULT '[]',
       hidden_comfyui_workflow_ids TEXT NOT NULL DEFAULT '[]',
       model_visibility_defaults_version INTEGER NOT NULL DEFAULT 0,
@@ -2810,6 +2811,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasAutoFallbackChain) {
     db.exec("ALTER TABLE users ADD COLUMN auto_fallback_chain TEXT;");
+  }
+  const hasOnlineAutoProviderBias = userColumns.some(
+    (column) => column.name === "online_auto_provider_bias",
+  );
+  if (!hasOnlineAutoProviderBias) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN online_auto_provider_bias REAL NOT NULL DEFAULT 0;",
+    );
   }
   const hasComposerWritingAssist = userColumns.some(
     (column) => column.name === "composer_writing_assist",

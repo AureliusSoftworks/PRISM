@@ -172,6 +172,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /Evidence is optional/u);
     assert.match(copy, /Continue without evidence confirms that choice/u);
     assert.match(copy, /Save Debate parks a ready setup in Archive Open/u);
+    assert.match(copy, /Remove soft-cancels it and releases those sprites/u);
     assert.match(copy, /Start Debate launches now/u);
     assert.doesNotMatch(copy, /Basic|Advanced/u);
     assert.match(
@@ -198,7 +199,8 @@ describe("mode tutorials", () => {
     assert.match(copy, /Tap the large exhibit picture to search/u);
     assert.match(copy, /upload, reuse, or synthesize overwrites that same picture/u);
     assert.match(copy, /upload a PNG, JPEG, or WebP/u);
-    assert.match(copy, /Synthesize asset creates a new sprite/u);
+    assert.match(copy, /Synthesize asset soft-prepares a new sprite/u);
+    assert.match(copy, /queue more soft sprites in parallel/u);
     assert.match(copy, /Reduce magenta pass/u);
     assert.match(copy, /Undo last pass/u);
     assert.match(copy, /visual adds no facts/u);
@@ -408,6 +410,10 @@ describe("mode tutorials", () => {
     assert.match(copy, /only that lane’s saved fallback chain/u);
     assert.match(copy, /LOCAL evaluates only local Ollama models/u);
     assert.match(copy, /ONLINE evaluates only configured OpenAI and Anthropic models/u);
+    assert.match(
+      copy,
+      /ONLINE Auto provider lean slider: middle is Balanced \(pure cost and speed\)/u,
+    );
     assert.match(copy, /hollow triangle is an accessible, noninteractive Effort state/u);
     assert.match(copy, /every generated statement and ballot records/u);
     assert.match(copy, /short title synthesized in the selected Rowdiness/u);
@@ -421,6 +427,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /whole chain fails/u);
     assert.match(copy, /LOCAL remains a hard offline guarantee/u);
     assert.match(copy, /Save Debate parks a ready setup in Archive Open/u);
+    assert.match(copy, /Remove soft-cancels it and releases those sprites/u);
     assert.match(copy, /Start Debate launches now/u);
     assert.match(
       copy,
@@ -876,10 +883,14 @@ describe("mode tutorials", () => {
     );
     assert.deepEqual(continueHome, {
       heading: "Continue this Home",
-      body: "Opening a persona Home from All Bots, the header picker, or its grouped conversation heading continues that Home's latest saved chat. Expand the group to choose an exact older chat; use its + or New chat only when you deliberately want a separate conversation. Only the selected conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. Opening the Conversations panel enters transcript Chat and temporarily forces Voice to Mute without changing your saved choice. Close the panel to return to immersive Zen, where English, Premium, Babble, or Bottish resumes automatically; an explicitly saved Mute remains muted. In Zen, Mute also lets the live avatar step out and reveals each completed reply in a near-instant sweep. When Shh appears, it stops the current reply without replacing the draft you are writing.",
+      body: "Opening a persona Home from All Bots, the header picker, or its grouped conversation heading continues that Home's latest saved chat. Expand the group to choose an exact older chat; use its + or New chat only when you deliberately want a separate conversation. Only the selected conversation's transcript enters its active context. Put physical stage direction in the separate Action field using letters and spaces only; typing exactly ** in the speech field jumps there. Action drafts stay private until Send. If you send an Action without speech, it and the bot's action response appear on the canvas as an ephemeral exchange and never enter history or memory. For a surprise opening or next line, Wield Prism onto the message box—hold Option on macOS or Control on Windows and Linux, then click the glowing composer—or focus it and press your Summon / Wield Prism shortcut. Space rerolls after a draft settles; clicking away, Enter, or Tab keeps it; Escape restores what you had. Opening the Conversations panel enters transcript Chat and temporarily forces Voice to Mute without changing your saved choice. Close the panel to return to immersive Zen, where English, Premium, Babble, or Bottish resumes automatically; an explicitly saved Mute remains muted. In Zen, Mute also lets the live avatar step out and reveals each completed reply in a near-instant sweep. When Shh appears, it stops the current reply without replacing the draft you are writing.",
       clickLabel: "the message box at the bottom",
       targetSelector: '[data-tutorial-target="composer"]',
     });
+    assert.match(
+      continueHome?.body ?? "",
+      /Wield Prism onto the message box/u,
+    );
     assert.equal(
       groupRoom?.targetSelector,
       '[data-tutorial-target="chat-group-atmosphere"]',
@@ -1455,7 +1466,7 @@ describe("mode tutorials", () => {
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
       /keep using PRISM/u,
     );
-    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /activity card/u);
+    assert.match(MODE_TUTORIALS.botcast.steps[1]?.body ?? "", /side refract card/u);
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
       /Light\/Dark studio set/u,

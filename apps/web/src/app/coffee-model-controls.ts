@@ -1,7 +1,6 @@
 export const COFFEE_AUTO_MODEL_LABEL = "Auto";
 
-export const COFFEE_AUTO_MODEL_META =
-  "Prism chooses the model and Effort contextually";
+export const COFFEE_AUTO_MODEL_META = "Picks model & effort";
 
 export function coffeeModelPickerAriaLabel(
   provider: "local" | "online" | "auto",

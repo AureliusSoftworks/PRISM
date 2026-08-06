@@ -69,6 +69,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     psychicModeEnabled: 0,
     autoSwitchModel: 0,
     autoFallbackChain: null,
+    onlineAutoProviderBias: 0,
     hiddenBotModelIds: "[]",
     hiddenComfyUiWorkflowIds: "[]",
     preferredLocalModel: null,
@@ -789,6 +790,39 @@ describe("resolveNextSettings — Auto model chain", () => {
     );
     assert.equal(next.autoSwitchModel, 0);
     assert.equal(next.autoFallbackChain, null);
+  });
+});
+
+describe("resolveNextSettings — onlineAutoProviderBias", () => {
+  it("persists a clamped OpenAI↔Anthropic lean", () => {
+    assert.equal(
+      resolveNextSettings({ onlineAutoProviderBias: -0.4 }, baseline())
+        .onlineAutoProviderBias,
+      -0.4,
+    );
+    assert.equal(
+      resolveNextSettings({ onlineAutoProviderBias: 2 }, baseline())
+        .onlineAutoProviderBias,
+      1,
+    );
+    assert.equal(
+      resolveNextSettings({ onlineAutoProviderBias: -3 }, baseline())
+        .onlineAutoProviderBias,
+      -1,
+    );
+  });
+
+  it("keeps the stored lean when the field is missing or invalid", () => {
+    const current = baseline({ onlineAutoProviderBias: 0.25 });
+    assert.equal(
+      resolveNextSettings({}, current).onlineAutoProviderBias,
+      0.25,
+    );
+    assert.equal(
+      resolveNextSettings({ onlineAutoProviderBias: "nope" }, current)
+        .onlineAutoProviderBias,
+      0,
+    );
   });
 });
 

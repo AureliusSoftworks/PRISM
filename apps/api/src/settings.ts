@@ -20,6 +20,7 @@ import {
   parseStoredBotAudioVoiceProfileV1,
   normalizeAutoFallbackChain,
   serializeAutoFallbackChain,
+  clampOnlineAutoProviderBias,
   type GraphicsQuality,
   type HubAtmosphereStyle,
   type ImageProviderName,
@@ -186,6 +187,8 @@ export interface CurrentSettings {
   autoSwitchModel: number;
   /** Versioned JSON stored in `users.auto_fallback_chain`. */
   autoFallbackChain: string | null;
+  /** Soft ONLINE Auto lean: -1 OpenAI … 0 balanced … +1 Anthropic. */
+  onlineAutoProviderBias: number;
   hiddenBotModelIds: string;
   hiddenComfyUiWorkflowIds: string;
   /** @deprecated Import/backup compatibility only; runtime routing ignores it. */
@@ -258,6 +261,7 @@ export interface NextSettings {
   psychicModeEnabled: number;
   autoSwitchModel: number;
   autoFallbackChain: string | null;
+  onlineAutoProviderBias: number;
   hiddenBotModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
   preferredLocalModel: string | null;
@@ -952,6 +956,10 @@ export function resolveNextSettings(
       : currentAutoFallbackChain
         ? serializeAutoFallbackChain(currentAutoFallbackChain)
         : null;
+  const onlineAutoProviderBias =
+    body.onlineAutoProviderBias === undefined
+      ? clampOnlineAutoProviderBias(current.onlineAutoProviderBias)
+      : clampOnlineAutoProviderBias(body.onlineAutoProviderBias);
   const autoSwitchModel = current.autoSwitchModel;
   const hiddenBotModelIds = readHiddenBotModelIds(
     body.hiddenBotModelIds,
@@ -1297,6 +1305,7 @@ export function resolveNextSettings(
     psychicModeEnabled,
     autoSwitchModel,
     autoFallbackChain,
+    onlineAutoProviderBias,
     hiddenBotModelIds,
     hiddenComfyUiWorkflowIds,
     preferredLocalModel,

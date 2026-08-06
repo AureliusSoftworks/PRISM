@@ -26,6 +26,20 @@ test("right-panel inert pass exempts shared navbar chrome", () => {
   assert.match(pageSource, /isInsideRightPanelChrome\(activeElement\)/u);
 });
 
+test("model picker outside-dismiss keeps portaled fallback menus selectable", () => {
+  assert.match(pageSource, /data-compose-model-menu="true"/u);
+  assert.match(pageSource, /data-compose-model-effort-menu="true"/u);
+  assert.match(
+    pageSource,
+    /target\.closest\(\s*[\s\S]*?data-compose-model-menu="true"[\s\S]*?data-compose-model-effort-menu="true"/u,
+  );
+  assert.ok(
+    pageSource.includes("key={`${lane}:${index}`}"),
+    "fallback picker rows should use a stable lane:index key",
+  );
+  assert.match(pageSource, /available:\s*autoFallbackRefs/u);
+});
+
 test("right-panel overlay and drawer clear the shared top navbar", () => {
   assert.match(
     css,

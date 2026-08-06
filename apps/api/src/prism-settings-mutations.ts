@@ -104,6 +104,7 @@ const PERSISTED_SETTING_COLUMNS = [
   "psychic_mode_enabled",
   "auto_switch_model",
   "auto_fallback_chain",
+  "online_auto_provider_bias",
   "preferred_local_model",
   "preferred_online_model",
   "lenient_local_image_fallback_model",
@@ -217,6 +218,10 @@ function currentSettings(
     psychicModeEnabled: Number(row.psychic_mode_enabled),
     autoSwitchModel: Number(row.auto_switch_model),
     autoFallbackChain: nullableString(row.auto_fallback_chain),
+    onlineAutoProviderBias:
+      typeof row.online_auto_provider_bias === "number"
+        ? row.online_auto_provider_bias
+        : 0,
     hiddenBotModelIds: String(row.hidden_bot_model_ids ?? "[]"),
     hiddenComfyUiWorkflowIds: String(
       row.hidden_comfyui_workflow_ids ?? "[]",
@@ -362,6 +367,7 @@ function persistedValues(
     psychic_mode_enabled: next.psychicModeEnabled,
     auto_switch_model: next.autoSwitchModel,
     auto_fallback_chain: next.autoFallbackChain,
+    online_auto_provider_bias: next.onlineAutoProviderBias,
     preferred_local_model: next.preferredLocalModel,
     preferred_online_model: next.preferredOnlineModel,
     lenient_local_image_fallback_model:

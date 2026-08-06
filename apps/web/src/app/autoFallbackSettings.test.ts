@@ -59,6 +59,29 @@ describe("Auto fallback settings", () => {
     assert.match(pageSource, /Effort chosen automatically/u);
   });
 
+  it("changes a later ONLINE fallback without treating it as a duplicate no-op", () => {
+    const available = [openai, anthropic, { provider: "openai" as const, model: "gpt-5.6-terra" }];
+    const chain = autoFallbackChainWithAddedEntry({
+      chain: autoFallbackChainWithEntry({
+        chain: null,
+        index: 0,
+        next: openai,
+        available,
+      }),
+      available,
+    });
+    assert.deepEqual(chain?.fallbacks, [openai, anthropic]);
+    assert.deepEqual(
+      autoFallbackChainWithEntry({
+        chain,
+        index: 1,
+        next: available[2]!,
+        available,
+      }),
+      { v: 1, fallbacks: [openai, available[2]!] },
+    );
+  });
+
   it("builds, extends, and trims a customizable fallback chain", () => {
     const first = autoFallbackChainWithEntry({
       chain: null,

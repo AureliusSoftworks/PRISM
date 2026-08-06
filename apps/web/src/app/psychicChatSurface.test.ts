@@ -20,7 +20,14 @@ describe("Psychic Chat surface wiring", () => {
     );
   });
 
-  it("renders settled Psychic only as a collapsed assistant disclosure in Chat", () => {
+  it("treats product Chat (view=chat) as a Psychic presentation surface", () => {
+    assert.match(
+      pageSource,
+      /function isPsychicPresentationSurfaceView\(view: View\): boolean \{\s*return isZenSurfaceView\(view\) \|\| isChatSurfaceView\(view\);\s*\}/u,
+    );
+  });
+
+  it("renders settled Psychic only as a collapsed assistant disclosure on Psychic surfaces", () => {
     const renderSource = pageSource.match(
       /function renderAssistantPsychicDisclosure[\s\S]*?\n  }/,
     )?.[0];
@@ -28,7 +35,7 @@ describe("Psychic Chat surface wiring", () => {
     assert.ok(renderSource);
     assert.match(
       renderSource,
-      /!isChatSurfaceView\(view\)\s*\|\|\s*msg\.role !== "assistant"/u,
+      /!isPsychicPresentationSurfaceView\(view\)\s*\|\|\s*msg\.role !== "assistant"/u,
     );
     assert.match(renderSource, /expandedPsychicAssistantMessageId === msg\.id/u);
     assert.match(renderSource, /data-expanded=\{expanded/u);
@@ -94,9 +101,24 @@ describe("Psychic Chat surface wiring", () => {
     )?.[0];
 
     assert.ok(metadataSource);
+    assert.match(
+      metadataSource,
+      /!isPsychicPresentationSurfaceView\(view\)/u,
+    );
     assert.match(metadataSource, /contextFocusedMessageId !== msg\.id/u);
     assert.match(metadataSource, /assistantGenerationMetadata/u);
     assert.match(metadataSource, /<ModelEffortIcon/u);
     assert.match(metadataSource, /REASONING_EFFORT_LABELS\[metadata\.effort\]/u);
+  });
+
+  it("resolves Psychic source messages on Psychic presentation surfaces", () => {
+    assert.match(
+      pageSource,
+      /const psychicSourceMessage = isPsychicPresentationSurfaceView\(\s*view,\s*\)\s*\?\s*psychicSourceForAssistantMessage/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /const psychicSourceMessage = isChatSurfaceView\(view\)/u,
+    );
   });
 });

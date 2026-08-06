@@ -92,6 +92,7 @@ import {
   type PrismStartupPreference,
   type PrismCapabilityRevelations,
   parseStoredAutoFallbackChain,
+  clampOnlineAutoProviderBias,
   normalizeEphemeralChatProviderPreferences,
   resolveImageProviderName,
   serializeAutoFallbackChain,
@@ -158,6 +159,8 @@ export interface BackupUserSettings {
   psychicModeEnabled?: boolean;
   autoModeEnabled?: boolean;
   autoFallbackChain?: AutoFallbackChainV1 | null;
+  /** Soft ONLINE Auto lean: -1 OpenAI … 0 balanced … +1 Anthropic. */
+  onlineAutoProviderBias?: number;
   /** Legacy import only. New backups no longer export this display preference. */
   fallbackModelMessageStripe?: boolean;
   hiddenBotModelIds: string[];
@@ -1653,6 +1656,7 @@ export function exportUserSnapshot(
          psychic_mode_enabled,
          auto_switch_model,
          auto_fallback_chain,
+         online_auto_provider_bias,
          fallback_model_message_stripe,
          hidden_bot_model_ids,
          hidden_comfyui_workflow_ids,
@@ -1720,6 +1724,7 @@ export function exportUserSnapshot(
         psychic_mode_enabled: number;
         auto_switch_model: number;
         auto_fallback_chain: string | null;
+        online_auto_provider_bias: number;
         fallback_model_message_stripe: number;
         hidden_bot_model_ids: string | null;
         hidden_comfyui_workflow_ids: string | null;
@@ -1805,6 +1810,9 @@ export function exportUserSnapshot(
         autoModeEnabled: user.auto_switch_model === 1,
         autoFallbackChain: parseStoredAutoFallbackChain(
           user.auto_fallback_chain,
+        ),
+        onlineAutoProviderBias: clampOnlineAutoProviderBias(
+          user.online_auto_provider_bias,
         ),
         hiddenBotModelIds: safeParseStringArray(user.hidden_bot_model_ids),
         hiddenComfyUiWorkflowIds: safeParseStringArray(
@@ -3211,6 +3219,7 @@ function importUserSnapshotWithinTransaction(
         psychic_mode_enabled = ?,
         auto_switch_model = ?,
         auto_fallback_chain = ?,
+        online_auto_provider_bias = ?,
         fallback_model_message_stripe = ?,
         hidden_bot_model_ids = ?,
         hidden_comfyui_workflow_ids = ?,
@@ -3295,6 +3304,7 @@ function importUserSnapshotWithinTransaction(
       settings.psychicModeEnabled === true ? 1 : 0,
       settings.autoModeEnabled === true && storedAutoFallbackChain ? 1 : 0,
       storedAutoFallbackChain,
+      clampOnlineAutoProviderBias(settings.onlineAutoProviderBias),
       settings.fallbackModelMessageStripe === false ? 0 : 1,
       JSON.stringify(
         Array.isArray(settings.hiddenBotModelIds)

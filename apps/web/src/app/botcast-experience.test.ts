@@ -2290,12 +2290,13 @@ describe("Signal experience shell", () => {
     );
     assert.match(artworkActivitySource, /setInterval/u);
     assert.match(artworkActivitySource, /completedCount/u);
-    assert.match(artworkActivitySource, /Elapsed \{elapsed\}/u);
+    assert.match(artworkActivitySource, /placement="docked"/u);
+    assert.match(artworkActivitySource, /PrismBlockingLoader/u);
     assert.match(artworkActivitySource, /Waiting for Dark studio/u);
     assert.match(artworkJobSource, /Relighting the completed Dark studio/u);
     assert.match(artworkJobSource, /job\.totalCount === 1/u);
     assert.match(artworkActivitySource, /\/cancel/u);
-    assert.match(artworkActivityCss, /signal-artwork-scan/u);
+    assert.match(artworkActivityCss, /\.assets\s*\{/u);
     assert.doesNotMatch(studioRefreshSource, /setBlockingOperation/u);
     assert.doesNotMatch(logoRefreshSource, /setBlockingOperation/u);
     assert.match(

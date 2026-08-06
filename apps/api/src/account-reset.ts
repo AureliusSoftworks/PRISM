@@ -120,6 +120,7 @@ export function restoreFactoryDefaultsInDatabase(
           auto_memory = 1,
           auto_switch_model = 0,
           auto_fallback_chain = NULL,
+          online_auto_provider_bias = 0,
           hidden_bot_model_ids = '[]',
           hidden_comfyui_workflow_ids = '[]',
           model_visibility_defaults_version = 0,

@@ -72,3 +72,50 @@ test("portaled picker layers stay above the shared navbar", () => {
     /\.menu\s*\{[\s\S]*position:\s*fixed;[\s\S]*z-index:\s*2147483000;/u,
   );
 });
+
+test("navbar and compose pickers hold Zen auto-hide while menus are open", () => {
+  assert.match(pageSource, /holdAppNavbarForDropdown/u);
+  assert.match(
+    pageSource,
+    /if \(!appSwitcherOpen\) return;[\s\S]{0,120}return holdAppNavbarForDropdown\(\);/u,
+  );
+  assert.match(
+    pageSource,
+    /if \(!voiceModeSelectorOpen\) return;[\s\S]{0,120}return holdAppNavbarForDropdown\(\);/u,
+  );
+  assert.match(
+    pageSource,
+    /if \(!chatOverflowMenuOpen\) return;[\s\S]{0,120}return holdAppNavbarForDropdown\(\);/u,
+  );
+  const modelPicker = sourceBetween(
+    "function ComposerModelPicker",
+    "// ── Hue lens",
+  );
+  assert.match(
+    modelPicker,
+    /if \(!menuOpen && !effortMenuOpen\) return;[\s\S]{0,120}return holdAppNavbarForDropdown\(\);/u,
+  );
+  const botPicker = sourceBetween(
+    "function ComposerBotPicker",
+    "function ComposerModelPicker",
+  );
+  assert.match(
+    botPicker,
+    /if \(!menuOpen\) return;[\s\S]{0,120}return holdAppNavbarForDropdown\(\);/u,
+  );
+});
+
+test("model effort and bot pickers dismiss on outside pointer like PrismMenu", () => {
+  assert.match(
+    pageSource,
+    /effortMenuRef\.current\?\.contains\(target\)[\s\S]{0,900}window\.addEventListener\("pointerdown", handler, true\)/u,
+  );
+  assert.match(
+    pageSource,
+    /function ComposerBotPicker[\s\S]{0,4500}?menuRef\.current\?\.contains\(target\)[\s\S]{0,200}window\.addEventListener\("pointerdown", handler, true\)/u,
+  );
+  assert.match(
+    pageSource,
+    /function ComposerModelPicker[\s\S]{0,24000}?window\.addEventListener\("pointerdown", handler, true\)[\s\S]{0,400}window\.removeEventListener\("pointerdown", handler, true\)/u,
+  );
+});

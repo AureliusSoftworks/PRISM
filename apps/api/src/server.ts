@@ -894,6 +894,7 @@ import {
   parseBuiltInPromptWildcardReference,
   parseStoredManualAskQuestionPayload,
   parseStoredAutoFallbackChain,
+  clampOnlineAutoProviderBias,
   autoFallbackResolvedChain,
   normalizeAutoFallbackModelRef,
   normalizeResponseMode,
@@ -1381,6 +1382,9 @@ async function startPrismStorySession(
     explicitModelOverride: storyModelOverride,
     hiddenModelIds,
     catalog,
+    onlineAutoProviderBias: clampOnlineAutoProviderBias(
+      user.online_auto_provider_bias,
+    ),
     routingContext: {
       surface: "story",
       inputText: premise ?? "",
@@ -2473,6 +2477,7 @@ interface UserDbRow {
   composer_writing_assist: number;
   auto_switch_model: number;
   auto_fallback_chain: string | null;
+  online_auto_provider_bias: number;
   hidden_bot_model_ids: string;
   hidden_comfyui_workflow_ids: string;
   model_visibility_defaults_version: number;
@@ -2901,7 +2906,7 @@ function userBlocksOnlineCapabilities(
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -5509,6 +5514,9 @@ async function debateAiRuntimeForUser(
     explicitModelOverride: modelOverride,
     hiddenModelIds,
     catalog: routingCatalog,
+    onlineAutoProviderBias: clampOnlineAutoProviderBias(
+      user.online_auto_provider_bias,
+    ),
     routingContext: {
       surface: "debate",
       structuredOutput: true,
@@ -5900,6 +5908,9 @@ async function contextualTextRuntimeForUser(args: {
     explicitModelOverride: readCoffeeSessionSpeakerModel(args.modelOverride),
     hiddenModelIds,
     catalog: routingCatalog,
+    onlineAutoProviderBias: clampOnlineAutoProviderBias(
+      args.user.online_auto_provider_bias,
+    ),
     routingContext: {
       ...args.routingContext,
       simulatedEffortEnabled:
@@ -13047,6 +13058,20 @@ function buildRoutes(): RouteDefinition[] {
               : "Recent conversation: none yet.",
             `Generation mode: ${randomPromptMode}.`,
             ...randomPromptTask,
+            (() => {
+              const rejectedValues = Array.isArray(body.rejectedValues)
+                ? body.rejectedValues
+                    .filter((value): value is string => typeof value === "string")
+                    .map((value) => value.trim())
+                    .filter((value) => value.length > 0)
+                    .slice(0, 8)
+                : [];
+              return rejectedValues.length > 0
+                ? `Do not repeat these rejected drafts:\n${rejectedValues
+                    .map((value) => `- ${clampComposerContextText(value, 180)}`)
+                    .join("\n")}`
+                : "Rejected drafts: none.";
+            })(),
             "Keep it short: one conversational message, roughly 5-28 words.",
             "Avoid generic prompts like 'Tell me something interesting.'",
             "Do not include labels, explanations, quotation marks, or multiple options.",
@@ -13547,6 +13572,9 @@ function buildRoutes(): RouteDefinition[] {
               responseLane === "online" ? openAiApiKey : undefined,
               user.secondary_ollama_host,
               responseLane === "online" ? anthropicApiKey : undefined,
+            ),
+            onlineAutoProviderBias: clampOnlineAutoProviderBias(
+              user.online_auto_provider_bias,
             ),
             routingContext: {
               surface: mode,
@@ -23018,6 +23046,9 @@ function buildRoutes(): RouteDefinition[] {
           autoFallbackChain: parseStoredAutoFallbackChain(
             user.auto_fallback_chain,
           ),
+          onlineAutoProviderBias: clampOnlineAutoProviderBias(
+            user.online_auto_provider_bias,
+          ),
           hiddenBotModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           hiddenComfyUiWorkflowIds: parseHiddenComfyUiWorkflowIds(
             user.hidden_comfyui_workflow_ids,
@@ -23628,6 +23659,7 @@ function buildRoutes(): RouteDefinition[] {
         psychicModeEnabled: user.psychic_mode_enabled,
         autoSwitchModel: user.auto_switch_model,
         autoFallbackChain: user.auto_fallback_chain,
+        onlineAutoProviderBias: user.online_auto_provider_bias,
         hiddenBotModelIds: user.hidden_bot_model_ids,
         hiddenComfyUiWorkflowIds: user.hidden_comfyui_workflow_ids,
         preferredLocalModel: user.preferred_local_model,
@@ -23869,6 +23901,7 @@ function buildRoutes(): RouteDefinition[] {
           autoFallbackChain: parseStoredAutoFallbackChain(
             next.autoFallbackChain,
           ),
+          onlineAutoProviderBias: next.onlineAutoProviderBias,
           zenPersonaTransitionChoice: next.zenPersonaTransitionChoice,
           voiceMode: next.voiceMode,
           voiceEffectsEnabled: next.voiceEffectsEnabled,
@@ -25682,6 +25715,9 @@ function buildRoutes(): RouteDefinition[] {
           explicitModelOverride,
           hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
           catalog,
+          onlineAutoProviderBias: clampOnlineAutoProviderBias(
+            user.online_auto_provider_bias,
+          ),
           routingContext: {
             surface: "bot-powers",
             inputText: JSON.stringify(body.powers ?? []),
@@ -25776,6 +25812,9 @@ function buildRoutes(): RouteDefinition[] {
         explicitModelOverride,
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
+        onlineAutoProviderBias: clampOnlineAutoProviderBias(
+          user.online_auto_provider_bias,
+        ),
         routingContext: {
           surface: "bot-field",
           inputText: JSON.stringify(body.context ?? {}),
@@ -25893,6 +25932,9 @@ function buildRoutes(): RouteDefinition[] {
         explicitModelOverride,
         hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
         catalog,
+        onlineAutoProviderBias: clampOnlineAutoProviderBias(
+          user.online_auto_provider_bias,
+        ),
         routingContext: {
           surface: "bot-generation",
           inputText: prompt,

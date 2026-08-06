@@ -79,7 +79,7 @@ test("keeps Model wheel scrolling native while Effort owns wheel selection", () 
   assert.match(pageSource, /moveModelHighlight\(/u);
   assert.match(
     pageSource,
-    /if \(!menuOpen && !effortMenuOpen\) return;[\s\S]{0,700}document\.addEventListener\("pointerdown", handler, true\)/u,
+    /if \(!menuOpen && !effortMenuOpen\) return;[\s\S]{0,700}window\.addEventListener\("pointerdown", handler, true\)/u,
   );
   assert.match(
     pageSource,

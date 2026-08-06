@@ -159,7 +159,7 @@ import PrismCompanion from "./PrismCompanion";
 import {
   armAppNavbarAutoHide,
   hideAppNavbarForImmersion,
-  pinAppNavbar,
+  holdAppNavbarForDropdown,
   revealAppNavbarForFreshSurface,
   revealAppNavbarFromPointerClientY,
   scheduleAppNavbarAutoHide,
@@ -1148,6 +1148,8 @@ import {
   HUB_ATMOSPHERE_IMAGE_PURPOSE,
   HUB_ATMOSPHERE_STYLES,
   normalizeAutoFallbackChain,
+  clampOnlineAutoProviderBias,
+  formatOnlineAutoProviderBiasLabel,
   normalizeHubAtmosphereStyle,
   PRISM_ONBOARDING_VERSION,
   createCompletedPrismOnboardingState,
@@ -6654,6 +6656,15 @@ function isChatSurfaceView(view: View): boolean {
   return view === "sandbox";
 }
 
+/**
+ * Settled Psychic disclosure / scratchpad presentation.
+ * Product Chat owns `view=chat` (server mode zen); sandbox remains a
+ * compatibility branch that also requests Psychic on chat-mode turns.
+ */
+function isPsychicPresentationSurfaceView(view: View): boolean {
+  return isZenSurfaceView(view) || isChatSurfaceView(view);
+}
+
 function chatRequestModeForView(view: View): "zen" | "chat" | "sandbox" {
   if (isZenSurfaceView(view)) return "zen";
   if (isChatSurfaceView(view)) return "chat";
@@ -10874,6 +10885,8 @@ interface UserSettings {
   modelEffortPreferences: ModelReasoningEffortPreferenceV1[];
   psychicModeEnabled: boolean;
   autoFallbackChain: AutoFallbackChainV1 | null;
+  /** Soft ONLINE Auto lean: -1 OpenAI … 0 balanced … +1 Anthropic. */
+  onlineAutoProviderBias: number;
   legacyAutoFallbackModelSuggestion?: string;
   hiddenBotModelIds: string[];
   hiddenComfyUiWorkflowIds: string[];
@@ -14895,8 +14908,46 @@ function HollowTriangleEffortIcon(): React.JSX.Element {
     </svg>
   );
 }
-const AUTO_MODEL_SETTINGS_SUBTEXT =
-  "Prism chooses the best model and effort for each request";
+
+/** Spectrum triangle for the Auto model-choice row — invites the prismatic pick. */
+function AutoModelChoiceGlyph(): React.JSX.Element {
+  const rawId = useId();
+  const gradientId = `auto-model-spectrum-${rawId.replace(/[^a-zA-Z0-9_-]/g, "")}`;
+  return (
+    <svg
+      className={styles.composeModelOptionAutoGlyph}
+      width="16"
+      height="16"
+      viewBox="0 0 18 18"
+      fill="none"
+      strokeWidth="1.7"
+      strokeLinejoin="round"
+      aria-hidden="true"
+    >
+      <defs>
+        <linearGradient
+          id={gradientId}
+          x1="2.5"
+          y1="15"
+          x2="15.5"
+          y2="2.5"
+          gradientUnits="userSpaceOnUse"
+        >
+          <stop offset="0%" stopColor="var(--provider-accent-local)" />
+          <stop offset="28%" stopColor="var(--provider-accent-openai)" />
+          <stop offset="55%" stopColor="#8b7dff" />
+          <stop offset="78%" stopColor="var(--provider-accent-anthropic)" />
+          <stop offset="100%" stopColor="#ff4fd8" />
+        </linearGradient>
+      </defs>
+      <path
+        d="M9 2.75 15.25 14H2.75L9 2.75Z"
+        stroke={`url(#${gradientId})`}
+      />
+    </svg>
+  );
+}
+const AUTO_MODEL_SETTINGS_SUBTEXT = "Picks model & effort";
 const ELEVENLABS_IMAGE_MENU_DISABLED_REASON =
   "ElevenLabs Image & Video - integration pending";
 const SETTINGS_OPENAI_KEY_FIELD = "openAiApiKey";
@@ -16513,6 +16564,7 @@ function resolvedAutoPrimaryForComposer(
     modelChoice,
     hiddenModelIds: settings.hiddenBotModelIds,
     catalog,
+    onlineAutoProviderBias: settings.onlineAutoProviderBias,
   });
 }
 
@@ -22176,6 +22228,13 @@ const COMPOSE_MENU_PORTAL_THEME_VARS = [
   "--accent-soft",
   "--accent-glow",
   "--shadow-sm",
+  // Provider lane colors live on `.themeDark` / `.themeLight`, not on
+  // `document.body`. Copy them so portaled model rows keep their tinted
+  // rails and wash (OpenAI cyan / Anthropic terracotta / local green).
+  "--provider-accent-openai",
+  "--provider-accent-anthropic",
+  "--provider-accent-local",
+  "--provider-accent-elevenlabs",
 ] as const;
 
 /**
@@ -22943,6 +23002,12 @@ function ComposerBotPicker({
     placement,
   );
 
+  // Portaled menus leave the navbar DOM; keep Zen auto-hide from tucking the bar.
+  useEffect(() => {
+    if (!menuOpen) return;
+    return holdAppNavbarForDropdown();
+  }, [menuOpen]);
+
   const closeMenu = useCallback((): void => {
     setOpen(false);
     setHueSortEngaged(false);
@@ -22967,19 +23032,20 @@ function ComposerBotPicker({
     [onHueChange],
   );
 
-  // Outside-click closes. Using mousedown (not click) so a click that
-  // lands on a menu option isn't intercepted by this handler.
+  // Outside-click closes. Mirror PrismMenu / applet+voice pickers: listen on
+  // window in the capture phase so canvas/companion handlers that stop
+  // bubbling cannot strand an open portaled menu.
   useEffect(() => {
     if (!menuOpen) return;
-    const handler = (event: MouseEvent) => {
+    const handler = (event: PointerEvent) => {
       if (!isPrimaryPointerDismissal(event)) return;
       const target = event.target as Node;
       if (triggerRef.current?.contains(target)) return;
       if (menuRef.current?.contains(target)) return;
       closeMenu();
     };
-    document.addEventListener("mousedown", handler);
-    return () => document.removeEventListener("mousedown", handler);
+    window.addEventListener("pointerdown", handler, true);
+    return () => window.removeEventListener("pointerdown", handler, true);
   }, [closeMenu, menuOpen]);
 
   // Escape closes and returns focus to the trigger so keyboard users
@@ -23711,6 +23777,14 @@ function ComposerModelPicker({
     portalZIndex,
     placement,
   );
+
+  // Portaled model/effort menus leave the navbar DOM; keep Zen auto-hide from
+  // tucking the bar while choosing.
+  useEffect(() => {
+    if (!menuOpen && !effortMenuOpen) return;
+    return holdAppNavbarForDropdown();
+  }, [effortMenuOpen, menuOpen]);
+
   const effortLabel = autoSelected
     ? "Chosen automatically"
     : !effortControl || effortControl.capability.mode === "unavailable"
@@ -23965,15 +24039,28 @@ function ComposerModelPicker({
     if (!menuOpen && !effortMenuOpen) return;
     const handler = (event: PointerEvent) => {
       if (!isPrimaryPointerDismissal(event)) return;
-      const target = event.target as Node;
+      const target = event.target;
+      if (!(target instanceof Node)) return;
       if (triggerRef.current?.contains(target)) return;
       if (effortTriggerRef.current?.contains(target)) return;
       if (menuRef.current?.contains(target)) return;
       if (effortMenuRef.current?.contains(target)) return;
+      // Portaled menus can briefly detach refs while multiple Settings pickers
+      // remount; treat any compose model/effort menu node as inside.
+      if (
+        target instanceof Element &&
+        target.closest(
+          '[data-compose-model-menu="true"], [data-compose-model-effort-menu="true"]',
+        )
+      ) {
+        return;
+      }
       setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
     };
-    document.addEventListener("pointerdown", handler, true);
-    return () => document.removeEventListener("pointerdown", handler, true);
+    // Match PrismMenu / applet+voice: window capture so stopPropagation on
+    // lower nodes cannot leave model/effort menus open after an outside click.
+    window.addEventListener("pointerdown", handler, true);
+    return () => window.removeEventListener("pointerdown", handler, true);
   }, [effortMenuOpen, menuOpen]);
 
   useEffect(() => {
@@ -24258,7 +24345,13 @@ function ComposerModelPicker({
               menuClassName ? ` ${menuClassName}` : ""
             }`}
             style={menuPortalStyle}
+            data-compose-model-menu="true"
             onKeyDown={handleModelKeyDown}
+            onPointerDown={(event) => {
+              // Keep window-capture outside handlers from treating option
+              // presses as dismissals when the portal remounts mid-gesture.
+              event.stopPropagation();
+            }}
           >
             {statusMessage ? (
               <div className={styles.composeModelStatusRow} role="status">
@@ -24297,8 +24390,9 @@ function ComposerModelPicker({
                 <button
                   key={autoOptionValue}
                   type="button"
-                  className={`${styles.composeBotOption} ${styles.composeModelOption}`}
+                  className={`${styles.composeBotOption} ${styles.composeModelOption} ${styles.composeModelOptionAuto}`}
                   role="option"
+                  data-model-choice="auto"
                   data-model-value={autoOptionValue}
                   data-highlighted={
                     pickerOpenState.interactionMode === "keyboard" &&
@@ -24307,7 +24401,15 @@ function ComposerModelPicker({
                       : undefined
                   }
                   aria-selected={normalizedValue === autoOptionValue}
-                  onClick={() => pick(autoOptionValue)}
+                  onPointerDown={(event) => {
+                    if (event.button !== 0) return;
+                    event.preventDefault();
+                    pick(autoOptionValue);
+                  }}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    pick(autoOptionValue);
+                  }}
                 >
                   <span className={styles.composeModelOptionMain}>
                     <span className={styles.composeModelOptionName}>
@@ -24317,13 +24419,22 @@ function ComposerModelPicker({
                       {autoMetaShown}
                     </span>
                   </span>
+                  <span className={styles.composeModelOptionStatus}>
+                    <span
+                      className={styles.composeModelRowEffort}
+                      role="img"
+                      aria-label="Auto · Prism chooses model and effort"
+                      title="Auto · Prism chooses model and effort"
+                    >
+                      <AutoModelChoiceGlyph />
+                    </span>
+                  </span>
                 </button>
               )}
               {options.map((model) => {
                 const isSelected = normalizedValue === model.id;
                 const isUnavailable = Boolean(model.disabledReason);
                 const rowEffort = effortControl?.rowValueForModel(model);
-                const showCatalogDefaultBadge = Boolean(model.isDefault);
                 return (
                   <button
                     key={`${model.provider}:${model.id}`}
@@ -24344,8 +24455,17 @@ function ComposerModelPicker({
                     aria-disabled={isUnavailable ? "true" : undefined}
                     disabled={isUnavailable}
                     title={model.disabledReason}
-                    onClick={() => {
-                      if (!isUnavailable) pick(model.id);
+                    onPointerDown={(event) => {
+                      if (isUnavailable || event.button !== 0) return;
+                      // Commit on pointerdown so a capture-phase outside
+                      // dismiss cannot close the menu before click fires.
+                      event.preventDefault();
+                      pick(model.id);
+                    }}
+                    onClick={(event) => {
+                      if (isUnavailable) return;
+                      event.preventDefault();
+                      pick(model.id);
                     }}
                   >
                     <span className={styles.composeModelOptionMain}>
@@ -24359,11 +24479,6 @@ function ComposerModelPicker({
                       )}
                     </span>
                     <span className={styles.composeModelOptionStatus}>
-                      {!isUnavailable && showCatalogDefaultBadge && (
-                          <span className={styles.composeModelDefaultBadge}>
-                            Default
-                          </span>
-                        )}
                       {rowEffort ? (
                         <span
                           className={styles.composeModelRowEffort}
@@ -24398,6 +24513,7 @@ function ComposerModelPicker({
             ref={effortMenuRef}
             className={`${styles.composeBotMenu} ${styles.composeModelEffortMenu}`}
             style={effortMenuPortalStyle}
+            data-compose-model-effort-menu="true"
             role="dialog"
             aria-label="Model effort"
             onKeyDown={handleEffortKeyDown}
@@ -45300,6 +45416,10 @@ function HomeContent(): React.JSX.Element {
   const view: View = prismSurfaceViewForRouteParam(viewParam);
   const debateVoiceSurfaceActiveRef = useRef(view === "debate");
   const [appSwitcherOpen, setAppSwitcherOpen] = useState(false);
+  useEffect(() => {
+    if (!appSwitcherOpen) return;
+    return holdAppNavbarForDropdown();
+  }, [appSwitcherOpen]);
   const appSwitcherRef = useRef<HTMLDivElement | null>(null);
   const [pendingSlateHandoff, setPendingSlateHandoff] =
     useState<SlateHandoffPreview | null>(null);
@@ -45700,7 +45820,6 @@ function HomeContent(): React.JSX.Element {
   const draftLiveRef = useRef("");
   const pendingCoffeeGlobalComposerSubmitRef = useRef<{
     draft: string;
-    randomNudge: boolean;
     starterPrompt: boolean;
   } | null>(null);
   const pendingDraftSyncValueRef = useRef<string | null>(null);
@@ -46021,6 +46140,10 @@ function HomeContent(): React.JSX.Element {
   const voiceModeSelectionBusyRef = useRef(false);
   const voiceModeSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const [voiceModeSelectorOpen, setVoiceModeSelectorOpen] = useState(false);
+  useEffect(() => {
+    if (!voiceModeSelectorOpen) return;
+    return holdAppNavbarForDropdown();
+  }, [voiceModeSelectorOpen]);
   const [voicePlaybackNotice, setVoicePlaybackNotice] = useState<string | null>(
     null,
   );
@@ -47156,8 +47279,8 @@ function HomeContent(): React.JSX.Element {
   /** Memories / Edit bot / Export / Delete overflow — mirrors ☰ toggle styling on mobile. */
   const [chatOverflowMenuOpen, setChatOverflowMenuOpen] = useState(false);
   useEffect(() => {
-    pinAppNavbar(chatOverflowMenuOpen);
-    return () => pinAppNavbar(false);
+    if (!chatOverflowMenuOpen) return;
+    return holdAppNavbarForDropdown();
   }, [chatOverflowMenuOpen]);
   const chatOverflowMenuRef = useRef<HTMLDivElement>(null);
   const chatHeaderRef = useRef<HTMLElement | null>(null);
@@ -54547,6 +54670,67 @@ function HomeContent(): React.JSX.Element {
           </div>
           </div>
 
+        <label
+          className={`${styles.settingsRangeField} ${styles.settingsOnlineAutoProviderBiasField}`}
+          data-tutorial-target="online-auto-provider-bias"
+        >
+          <span className={styles.settingsRangeHeader}>
+            <span className={styles.controlLabelWithInfo}>
+              <span>ONLINE Auto provider lean</span>
+              <PanelSectionInfo
+                id={`${variant}-control-info-online-auto-provider-bias`}
+                label="About ONLINE Auto provider lean"
+                variant="control"
+              >
+                Softly steers ONLINE Auto between OpenAI and Anthropic when both
+                can handle the request. Middle is Balanced (pure cost and
+                speed). Extremes lean hard but still allow the other provider
+                when it is clearly better. LOCAL Auto is unaffected.
+              </PanelSectionInfo>
+            </span>
+            <span className={styles.settingsRangeValue}>
+              {formatOnlineAutoProviderBiasLabel(
+                settings.onlineAutoProviderBias,
+              )}
+            </span>
+          </span>
+          <input
+            type="range"
+            className={styles.settingsOnlineAutoProviderBiasRange}
+            min={-100}
+            max={100}
+            step={1}
+            value={Math.round(
+              clampOnlineAutoProviderBias(settings.onlineAutoProviderBias) *
+                100,
+            )}
+            aria-label="ONLINE Auto provider lean"
+            onChange={(event) => {
+              const next = clampOnlineAutoProviderBias(
+                Number(event.target.value) / 100,
+              );
+              setSettings((previous) =>
+                previous
+                  ? { ...previous, onlineAutoProviderBias: next }
+                  : previous,
+              );
+            }}
+          />
+          <span
+            className={styles.settingsOnlineAutoProviderBiasLabels}
+            aria-hidden="true"
+          >
+            <span>OpenAI</span>
+            <span>Balanced</span>
+            <span>Anthropic</span>
+          </span>
+          <small className={styles.settingsOnlineAutoProviderBiasHint}>
+            {settings.hasOpenAiApiKey && settings.hasAnthropicApiKey
+              ? "Applies when ONLINE Auto can choose from both providers."
+              : "Saves now. Takes effect for ONLINE Auto once both OpenAI and Anthropic keys (and visible models) are available."}
+          </small>
+        </label>
+
         <details
           className={styles.settingsModelDropdown}
           data-tutorial-target="auto-model-chain"
@@ -54618,7 +54802,7 @@ function HomeContent(): React.JSX.Element {
               );
               return (
                 <div
-                          key={`${lane}:${index}:${selectedValue}`}
+                          key={`${lane}:${index}`}
                   className={styles.settingsFallbackEntry}
                 >
                   <div className={styles.settingsModelField}>
@@ -54649,7 +54833,9 @@ function HomeContent(): React.JSX.Element {
                                     suggestedChain,
                                   index,
                                   next: ref,
-                                            available: laneCandidates,
+                                            // Allow any runnable catalog model;
+                                            // lane filtering already shapes the picker.
+                                            available: autoFallbackRefs,
                                 }),
                               }
                             : previous,
@@ -55024,7 +55210,7 @@ function HomeContent(): React.JSX.Element {
           ariaLabel={`${surfaceLabel} model`}
           placement="down"
           minMenuWidthPx={180}
-          autoOptionMetaOverride="PRISM chooses the best in-lane model and effort for each request."
+          autoOptionMetaOverride="Picks model & effort"
           effortControl={effortControlForTarget(effortTarget)}
           dismissPopoversSignal={composerPopoverDismissSignal}
         />
@@ -58727,7 +58913,7 @@ function HomeContent(): React.JSX.Element {
             ),
             undefined,
             psychicTextEnabledForConversation(result.conversation, {
-              productChatSurface: isChatSurfaceView(view),
+              productChatSurface: isPsychicPresentationSurfaceView(view),
             }),
           )
         : undefined;
@@ -60886,6 +61072,13 @@ function HomeContent(): React.JSX.Element {
   const [coffeeUserRevealText, setCoffeeUserRevealText] = useState("");
   const coffeePendingRevealAfterUserRef =
     useRef<CoffeePendingRevealQueueArgs | null>(null);
+  /**
+   * Player sent while a bot was still synthesizing: defer that bot's
+   * `queueCoffeeReveal` until the player center line finishes.
+   */
+  const coffeeDeferBotRevealForPlayerLineRef = useRef(false);
+  /** True when a deferred thinking-bot line is expected to reveal before the user turn job. */
+  const coffeeParallelThinkingExpectBotRevealRef = useRef(false);
   const coffeeUserRevealSettledWaitersRef = useRef<Array<() => void>>([]);
   /** True after the player center typewriter finishes the current submitted line. */
   const coffeeUserTableTypingSettledRef = useRef(false);
@@ -73139,6 +73332,9 @@ function HomeContent(): React.JSX.Element {
       autoFallbackChain: normalizeAutoFallbackChain(
         d.settings.autoFallbackChain,
       ),
+      onlineAutoProviderBias: clampOnlineAutoProviderBias(
+        d.settings.onlineAutoProviderBias,
+      ),
       ephemeralChatProviderPreferences:
         normalizeEphemeralChatProviderPreferences(
           d.settings.ephemeralChatProviderPreferences,
@@ -73823,7 +74019,7 @@ function HomeContent(): React.JSX.Element {
     if (
       envelope.psychicDebug &&
       psychicTextEnabledForConversation(envelope.conversation, {
-        productChatSurface: isChatSurfaceView(view),
+        productChatSurface: isPsychicPresentationSurfaceView(view),
       })
     ) {
       const debug = envelope.psychicDebug;
@@ -75555,7 +75751,7 @@ function HomeContent(): React.JSX.Element {
           ),
           d.psychicDebug,
           psychicTextEnabledForConversation(d.conversation, {
-            productChatSurface: isChatSurfaceView(view),
+            productChatSurface: isPsychicPresentationSurfaceView(view),
           }),
         );
         markLatestAssistantRevealEligible(patchedConversation);
@@ -75608,7 +75804,7 @@ function HomeContent(): React.JSX.Element {
           ),
           d.psychicDebug,
           psychicTextEnabledForConversation(d.conversation, {
-            productChatSurface: isChatSurfaceView(view),
+            productChatSurface: isPsychicPresentationSurfaceView(view),
           }),
         );
         markLatestAssistantRevealEligible(patchedConversation);
@@ -76448,7 +76644,7 @@ function HomeContent(): React.JSX.Element {
         ),
         undefined,
         psychicTextEnabledForConversation(result.conversation, {
-          productChatSurface: isChatSurfaceView(view),
+          productChatSurface: isPsychicPresentationSurfaceView(view),
         }),
       );
       setDetail(patchedConversation);
@@ -77656,7 +77852,7 @@ function HomeContent(): React.JSX.Element {
       ),
       envelope.psychicDebug,
       psychicTextEnabledForConversation(envelope.conversation, {
-        productChatSurface: isChatSurfaceView(view),
+        productChatSurface: isPsychicPresentationSurfaceView(view),
       }),
     );
     if (options.consumeCache) {
@@ -79640,7 +79836,7 @@ function HomeContent(): React.JSX.Element {
           ),
           d.psychicDebug,
           psychicTextEnabledForConversation(d.conversation, {
-            productChatSurface: isChatSurfaceView(view),
+            productChatSurface: isPsychicPresentationSurfaceView(view),
           }),
         );
         if (isInitialZenStarterPrompt) {
@@ -80505,14 +80701,22 @@ function HomeContent(): React.JSX.Element {
 
   async function synthesizeRandomConversationNudge(
     fallbackPrompt: string,
+    options: {
+      signal?: AbortSignal;
+      rejectedValues?: readonly string[];
+    } = {},
   ): Promise<string> {
     try {
       const activePromptBotId =
         composeBotAccentId ?? (view === "sandbox" ? selectedBotId : null);
+      const rejectedValues = (options.rejectedValues ?? [])
+        .map((value) => value.trim())
+        .filter((value) => value.length > 0);
       const requestBody = {
         ...buildChatRequestBody("", {}),
         ...(activePromptBotId !== null ? { botId: activePromptBotId } : {}),
         recentMessages: buildComposerRandomPromptRecentMessages(),
+        ...(rejectedValues.length > 0 ? { rejectedValues } : {}),
       };
       const response = await api<{
         prompt?: string;
@@ -80521,10 +80725,12 @@ function HomeContent(): React.JSX.Element {
       }>("/api/composer/random-prompt", {
         method: "POST",
         body: JSON.stringify(requestBody),
+        ...(options.signal ? { signal: options.signal } : {}),
       });
       const prompt = response.prompt?.trim();
       return prompt && prompt.length > 0 ? prompt : fallbackPrompt;
-    } catch {
+    } catch (error) {
+      if (options.signal?.aborted) throw error;
       return fallbackPrompt;
     }
   }
@@ -80732,7 +80938,7 @@ function HomeContent(): React.JSX.Element {
     psychicSource: Message | null,
   ): React.ReactNode {
     if (
-      !isChatSurfaceView(view) ||
+      !isPsychicPresentationSurfaceView(view) ||
       msg.role !== "assistant" ||
       !psychicSource
     ) {
@@ -80829,7 +81035,7 @@ function HomeContent(): React.JSX.Element {
     psychicSource: Message | null,
   ): React.ReactNode {
     if (
-      !isChatSurfaceView(view) ||
+      !isPsychicPresentationSurfaceView(view) ||
       msg.role !== "assistant" ||
       contextFocusedMessageId !== msg.id
     ) {
@@ -81203,53 +81409,12 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  async function sendRandomConversationNudge(): Promise<void> {
-    if (modelCatalogLoading) {
-      showLocalCommandToast(
-        "Models are still loading",
-        "You can use commands in the meantime, but messages cannot be sent yet.",
-      );
-      return;
-    }
-    if (pendingReply && !canSendTextWhileReplyPending() && view !== "chat")
-      return;
-    if (composerRandomPromptBusy) return;
-    const rail =
-      detail?.id && detail.id !== "pending" ? getComposerChipRail() : null;
-    const starterPromptChoices =
-      rail && detail?.id === rail.conversationId
-        ? rail.chips
-            .filter((chip) => chip.action === "send")
-            .map((chip) => chip.sendValue ?? chip.label)
-        : [];
-    const chosenPrompt =
-      starterPromptChoices.length > 0
-        ? randomArrayItem(starterPromptChoices)
-        : randomChatNudgeFromContext();
-    setComposerRandomPromptBusy(true);
-    const synthesizedPrompt =
-      await synthesizeRandomConversationNudge(chosenPrompt);
-    setComposerRandomPromptBusy(false);
-    const syntheticSubmit = {
-      preventDefault: () => {
-        /* no-op — used so sendMessage can share the submit pathway */
-      },
-    } as React.FormEvent<HTMLFormElement>;
-    void sendMessage(syntheticSubmit, {
-      draftOverride: synthesizedPrompt,
-      skipComposerHistory: true,
-    });
-  }
-
   useEffect(() => {
     if (view !== "chat") return;
     const pendingCoffeeSubmit = pendingCoffeeGlobalComposerSubmitRef.current;
     if (!pendingCoffeeSubmit) return;
     pendingCoffeeGlobalComposerSubmitRef.current = null;
-    if (pendingCoffeeSubmit.randomNudge) {
-      void sendRandomConversationNudge();
-      return;
-    }
+    if (!pendingCoffeeSubmit.draft.trim()) return;
     const syntheticSubmit = {
       preventDefault: () => {
         /* no-op - Coffee global composer hands off to the Zen send pipeline */
@@ -82897,9 +83062,88 @@ function HomeContent(): React.JSX.Element {
   const composerReplyInterruptActive =
     chatLikeSurface && chatAssistantRevealInProgress;
 
-  function composerSubmitUsesRandomNudge(value: string): boolean {
-    if (botGroupWaitingRoomRenderActive) return false;
-    return editingMessageId === null && value.trim().length === 0;
+  const CHAT_COMPOSER_REFRACT_ID = "chat-composer-prompt";
+
+  function applyComposerRefractPreview(value: string): void {
+    draftComposerRef.current?.setValue(value);
+    updateComposerDraft(value);
+  }
+
+  async function generateComposerRefractPrompt(input: {
+    rejectedValues: readonly string[];
+    signal: AbortSignal;
+  }): Promise<string> {
+    const rail =
+      detail?.id && detail.id !== "pending" ? getComposerChipRail() : null;
+    const starterPromptChoices =
+      rail && detail?.id === rail.conversationId
+        ? rail.chips
+            .filter((chip) => chip.action === "send")
+            .map((chip) => chip.sendValue ?? chip.label)
+        : [];
+    const fallbackPrompt =
+      starterPromptChoices.length > 0
+        ? randomArrayItem(starterPromptChoices)
+        : randomChatNudgeFromContext();
+    setComposerRandomPromptBusy(true);
+    try {
+      let lastPrompt = fallbackPrompt;
+      for (let attempt = 0; attempt < 3; attempt += 1) {
+        if (input.signal.aborted) {
+          throw new DOMException("Aborted", "AbortError");
+        }
+        lastPrompt = await synthesizeRandomConversationNudge(fallbackPrompt, {
+          signal: input.signal,
+          rejectedValues: input.rejectedValues,
+        });
+        const normalized = lastPrompt.trim().toLocaleLowerCase();
+        if (
+          normalized.length > 0 &&
+          !input.rejectedValues.some(
+            (rejected) => rejected.trim().toLocaleLowerCase() === normalized,
+          )
+        ) {
+          return lastPrompt.trim();
+        }
+      }
+      const trimmed = lastPrompt.trim();
+      if (!trimmed) {
+        throw new Error("Prism could not shape a composer prompt.");
+      }
+      return trimmed;
+    } finally {
+      setComposerRandomPromptBusy(false);
+    }
+  }
+
+  function renderChatComposerWithPrismRefract(
+    composer: React.JSX.Element,
+  ): React.JSX.Element {
+    return (
+      <PrismRefractTarget
+        target={{
+          id: CHAT_COMPOSER_REFRACT_ID,
+          kind: "field",
+          label: "composer",
+          read: () =>
+            draftComposerRef.current?.getValue() ?? draftLiveRef.current,
+          preview: applyComposerRefractPreview,
+          accept: applyComposerRefractPreview,
+          disabled: () =>
+            botGroupCoffeeStaging !== null ||
+            prismHomeOrchestrationBusy ||
+            editingMessageId !== null ||
+            botGroupWaitingRoomRenderActive,
+          generate: generateComposerRefractPrompt,
+        }}
+      >
+        {(binding) => (
+          <div {...binding} className={styles.chatComposerRefractHost}>
+            {composer}
+          </div>
+        )}
+      </PrismRefractTarget>
+    );
   }
 
   function composerSubmitLabel(value: string): React.ReactNode {
@@ -82909,9 +83153,6 @@ function HomeContent(): React.JSX.Element {
         : value.trim().length > 0
           ? "Listen up"
           : "";
-    }
-    if (composerSubmitUsesRandomNudge(value)) {
-      return <BotGlyph name="dice" size={30} strokeWidth={1.45} />;
     }
     if (editingMessageId) return "Save edit";
     if (
@@ -82925,7 +83166,7 @@ function HomeContent(): React.JSX.Element {
         ? `Queue (${queuedCountAfterClick})`
         : "Queue";
     }
-    return value.trim().length > 0 ? "Send" : "";
+    return "Send";
   }
 
   function composerSubmitAriaLabel(value: string): string {
@@ -82933,11 +83174,6 @@ function HomeContent(): React.JSX.Element {
       return botGroupCoffeeStaging
         ? "Room prompt staged for Coffee"
         : "Stage room prompt for Coffee";
-    }
-    if (composerSubmitUsesRandomNudge(value)) {
-      return composerRandomPromptBusy
-        ? "Generating suggested prompt"
-        : "Send random suggested prompt";
     }
     if (editingMessageId) return "Save edited message";
     if (
@@ -82956,12 +83192,6 @@ function HomeContent(): React.JSX.Element {
 
   function composerSubmitDisabled(value: string): boolean {
     if (botGroupCoffeeStaging || prismHomeOrchestrationBusy) return true;
-    if (composerSubmitUsesRandomNudge(value)) {
-      return (
-        composerRandomPromptBusy ||
-        (pendingReply && !canSendTextWhileReplyPending() && view !== "chat")
-      );
-    }
     return (
       value.trim().length === 0 ||
       (editingMessageId !== null && value.trim() === editingOriginalText.trim())
@@ -82977,11 +83207,6 @@ function HomeContent(): React.JSX.Element {
       }
       return;
     }
-    if (composerSubmitUsesRandomNudge(liveDraft)) {
-      e.preventDefault();
-      void sendRandomConversationNudge();
-      return;
-    }
     void sendMessage(e, {
       starterPrompt: isStarterPromptReady(liveDraft),
       draftOverride: liveDraft,
@@ -82991,7 +83216,6 @@ function HomeContent(): React.JSX.Element {
   function queueCoffeeGlobalComposerSubmit(liveDraft: string): void {
     pendingCoffeeGlobalComposerSubmitRef.current = {
       draft: liveDraft,
-      randomNudge: composerSubmitUsesRandomNudge(liveDraft),
       starterPrompt: isStarterPromptReady(liveDraft),
     };
     navigateToView("chat");
@@ -83227,6 +83451,10 @@ function HomeContent(): React.JSX.Element {
         onInterrupt={onInterrupt}
       />
     );
+    const composerControl =
+      variant === "chat"
+        ? renderChatComposerWithPrismRefract(input)
+        : input;
 
     return (
       <form
@@ -83306,11 +83534,11 @@ function HomeContent(): React.JSX.Element {
                 className={styles.chatComposerRow}
                 data-zen-live-bot-composer-boundary="true"
               >
-                {input}
+                {composerControl}
               </div>
             </div>
           ) : (
-            input
+            composerControl
           )
         ) : null}
       </form>
@@ -125557,7 +125785,7 @@ function HomeContent(): React.JSX.Element {
       // NOTE: don't setCoffeeConversation here — queueCoffeeReveal's applyReveal
       // updates it at the right moment. Setting it now causes the new bot reply
       // to flash in the center card before the typewriter starts.
-      queueCoffeeReveal({
+      const revealArgs: CoffeePendingRevealQueueArgs = {
         conversation: response.conversation,
         speakerBotId: responseSpeakerBotId,
         includeCooldown: false,
@@ -125574,7 +125802,22 @@ function HomeContent(): React.JSX.Element {
           // the whole table indefinitely.
           scheduleCoffeeAutonomousTurn(response.conversation.id, undefined, 1);
         },
-      });
+      };
+      const playerLineStillTyping =
+        coffeeShouldQueueAssistantRevealAfterUserTyping(
+          coffeeTurnRhythmStateRef.current,
+        );
+      if (playerLineStillTyping) {
+        coffeePendingRevealAfterUserRef.current = revealArgs;
+        coffeeParallelThinkingExpectBotRevealRef.current = true;
+      } else if (coffeeDeferBotRevealForPlayerLineRef.current) {
+        // Player line already finished; deliver the planned bot prose now.
+        coffeeDeferBotRevealForPlayerLineRef.current = false;
+        coffeeParallelThinkingExpectBotRevealRef.current = true;
+        queueCoffeeReveal(revealArgs);
+      } else {
+        queueCoffeeReveal(revealArgs);
+      }
     } catch (err) {
       if (err instanceof DOMException && err.name === "AbortError") {
         await releaseCoffeeModelWarmup();
@@ -125920,16 +126163,21 @@ function HomeContent(): React.JSX.Element {
       draftIsActionOnly &&
       coffeeTurnRhythmState === "tableTyping" &&
       pendingRevealLatestMessage?.role === "assistant";
-    // Sending while a bot is still thinking is not an interruption: the bot
-    // keeps its turn, the player's line queues in behind it (Signal-style).
+    // Sending while a bot is still thinking is not an interruption: print and
+    // speak the player line immediately, but do not abort or steer the in-flight
+    // synthesis. The bot delivers its planned line after the player settles,
+    // then a follow-up turn may address the new message.
     // Only a send during a visible reveal (tableTyping) cuts a speaker off.
-    const sendShouldWaitForThinkingBot =
+    const sendParallelDuringThinkingBot =
       !draftIsActionOnly &&
       coffeeTurnRhythmState === "botThinking" &&
       (coffeeAutoBusy ||
         coffeeContinueAbortRef.current !== null ||
         coffeePendingSpeakerBotId !== null);
-    if (!actionShouldWaitForBotReveal && !sendShouldWaitForThinkingBot) {
+    if (sendParallelDuringThinkingBot) {
+      coffeeDeferBotRevealForPlayerLineRef.current = true;
+    }
+    if (!actionShouldWaitForBotReveal && !sendParallelDuringThinkingBot) {
       clearCoffeeLoopTimer();
       coffeeContinueAbortRef.current?.abort();
       coffeeContinueAbortRef.current = null;
@@ -125985,7 +126233,7 @@ function HomeContent(): React.JSX.Element {
       setCoffeePendingRevealConversation(null);
       setCoffeeTurnRhythmState("playerComposing");
     }
-    if (actionShouldWaitForBotReveal || sendShouldWaitForThinkingBot) {
+    if (actionShouldWaitForBotReveal) {
       setCoffeeBusy(true);
       coffeeDraftRef.current = "";
       setCoffeeDraft("");
@@ -126043,7 +126291,10 @@ function HomeContent(): React.JSX.Element {
     coffeeDraftRef.current = "";
     setCoffeeDraft("");
     setCoffeeError(null);
-    setCoffeePendingSpeakerBotId(null);
+    // Keep the thinking bot's seat cue while a parallel player line is on deck.
+    if (!sendParallelDuringThinkingBot) {
+      setCoffeePendingSpeakerBotId(null);
+    }
     const playerActionPlan = buildBundledActionSfxPlan(trimmed);
     coffeeLivePlayerActionMessageRef.current = playerActionPlan
       ? {
@@ -126061,7 +126312,9 @@ function HomeContent(): React.JSX.Element {
     // Stream the player line to the table immediately. Voice preparation runs
     // in parallel; settle still waits for delivery (+ audible start) before
     // bot processing, so orchestration timing stays the same.
-    coffeePendingRevealAfterUserRef.current = null;
+    if (!sendParallelDuringThinkingBot) {
+      coffeePendingRevealAfterUserRef.current = null;
+    }
     clearCoffeeRhythmTimers();
     coffeeRevealTypingDurationMsRef.current = randomCoffeeRevealDelayMs(
       trimmed,
@@ -126094,6 +126347,47 @@ function HomeContent(): React.JSX.Element {
       void sendCoffeeTurn(trimmed);
     };
     const turnJobPromise = (async () => {
+      if (sendParallelDuringThinkingBot) {
+        // Let the in-flight bot finish synthesizing before the user turn job
+        // persists this line (a user job would supersede and cancel synthesis).
+        const waitStartedAt = Date.now();
+        const maxWaitMs =
+          COFFEE_BOT_REVEAL_DELAY_MAX_MS + COFFEE_SEND_COOLDOWN_MS * 2;
+        while (
+          coffeeContinueAbortRef.current !== null &&
+          Date.now() - waitStartedAt < maxWaitMs
+        ) {
+          if (abortController.signal.aborted) return null;
+          await new Promise<void>((resolve) => {
+            window.setTimeout(resolve, 48);
+          });
+        }
+        if (abortController.signal.aborted) return null;
+        if (coffeeTurnRhythmStateRef.current === "userTableTyping") {
+          await waitForCoffeeUserRevealToSettle();
+          if (abortController.signal.aborted) return null;
+        }
+        if (coffeePendingRevealAfterUserRef.current) {
+          const queued = coffeePendingRevealAfterUserRef.current;
+          coffeePendingRevealAfterUserRef.current = null;
+          coffeeDeferBotRevealForPlayerLineRef.current = false;
+          coffeeParallelThinkingExpectBotRevealRef.current = true;
+          queueCoffeeRevealFnRef.current(queued);
+        }
+        if (
+          coffeeParallelThinkingExpectBotRevealRef.current ||
+          coffeeTurnRhythmStateRef.current === "tableTyping"
+        ) {
+          await waitForCoffeeRevealToSettle();
+          if (abortController.signal.aborted) return null;
+        }
+        clearCoffeeLoopTimer();
+        coffeeContinueAbortRef.current?.abort();
+        coffeeContinueAbortRef.current = null;
+        setCoffeeAutoBusy(false);
+        coffeeDeferBotRevealForPlayerLineRef.current = false;
+        coffeeParallelThinkingExpectBotRevealRef.current = false;
+      }
       if (!(await ensureCoffeeModelReady(initialWarmup))) return null;
       const presentBotIds = currentCoffeePresentBotIdsForRequest(
         activeConversation.id,
@@ -126263,6 +126557,8 @@ function HomeContent(): React.JSX.Element {
       if (coffeeTurnAbortRef.current === abortController) {
         coffeeTurnAbortRef.current = null;
       }
+      coffeeDeferBotRevealForPlayerLineRef.current = false;
+      coffeeParallelThinkingExpectBotRevealRef.current = false;
       setCoffeeBusy(false);
     }
   };
@@ -134288,7 +134584,7 @@ function HomeContent(): React.JSX.Element {
                       submitDisabled: composerSubmitDisabled(draft),
                       submitLabel: composerSubmitLabel(draft),
                       submitAriaLabel: composerSubmitAriaLabel(draft),
-                      submitIconOnly: composerSubmitUsesRandomNudge(draft),
+                      submitIconOnly: false,
                       hideSubmitButton: composerReplyInterruptActive
                         ? false
                         : hideMobileEmptySend,
@@ -135605,7 +135901,7 @@ function HomeContent(): React.JSX.Element {
                   ariaLabel="Debate model"
                   placement="down"
                   minMenuWidthPx={180}
-                  autoOptionMetaOverride="PRISM chooses the best in-lane model and effort for each Debate generation."
+                  autoOptionMetaOverride="Picks model & effort"
                   effortControl={effortControlForTarget(debateEffortTarget)}
                   dismissPopoversSignal={composerPopoverDismissSignal}
                 />
@@ -136680,7 +136976,7 @@ function HomeContent(): React.JSX.Element {
                     ariaLabel="Signal episode model"
                     placement="down"
                     minMenuWidthPx={180}
-                    autoOptionMetaOverride="PRISM chooses the best in-lane model and effort for each Signal generation."
+                    autoOptionMetaOverride="Picks model & effort"
                     effortControl={effortControlForTarget(episodeEffortTarget)}
                     dismissPopoversSignal={composerPopoverDismissSignal}
                   />
@@ -137945,7 +138241,9 @@ function HomeContent(): React.JSX.Element {
                 const modelRevealLabel =
                   modelLabel ||
                   (msg.role === "assistant" ? "not recorded" : "");
-                const psychicSourceMessage = isChatSurfaceView(view)
+                const psychicSourceMessage = isPsychicPresentationSurfaceView(
+                  view,
+                )
                   ? psychicSourceForAssistantMessage(
                       visibleDetailMessages,
                       renderedDetailMessageStartIndex + messageIndex,
@@ -138783,86 +139081,90 @@ function HomeContent(): React.JSX.Element {
                     className={styles.chatComposerRow}
                     data-zen-live-bot-composer-boundary="true"
                   >
-                    <ComposerInput
-                      ref={draftComposerRef}
-                      enabled={composerMarkdownEditorEnabled}
-                      value={draft}
-                      placeholder={
-                        botGroupWaitingRoomRenderActive
-                          ? botGroupCoffeeStaging
-                            ? "Room prompt staged for Coffee"
-                            : "Write a Listen up prompt for the room..."
-                          : "Say something..."
-                      }
-                      disabled={botGroupCoffeeStaging !== null}
-                      writingAssistEnabled={
-                        settings?.composerWritingAssist !== false
-                      }
-                      generatingRandomPrompt={composerRandomPromptBusy}
-                      submitDisabled={composerSubmitDisabled(draft)}
-                      submitLabel={composerSubmitLabel(draft)}
-                      submitAriaLabel={composerSubmitAriaLabel(draft)}
-                      submitIconOnly={composerSubmitUsesRandomNudge(draft)}
-                      hideSubmitButton={
-                        botGroupCoffeeStaging
-                          ? true
-                          : composerReplyInterruptActive
-                            ? false
-                            : hideMobileEmptySend
-                      }
-                      onChange={handleComposerChange}
-                      onValueChange={updateComposerDraft}
-                      onInputActivity={markComposerTypingActivity}
-                      onFocus={handleComposerFocus}
-                      resolvedTheme={resolvedTheme}
-                      mentionBots={
-                        chatMentionsEnabled && !activeSideChatSurface
-                          ? composeMentionBotPicks
-                          : []
-                      }
-                      commandPicks={composerCommandPicks}
-                      toolPicks={COMPOSER_TOOL_PICKS}
-                      promptPicks={commandCenterPromptPicks}
-                      wildcardPicks={composerWildcardDeckPicks}
-                      dismissPopoversSignal={composerPopoverDismissSignal}
-                      interruptActive={composerReplyInterruptActive}
-                      onInterrupt={handleTypingIndicatorPress}
-                    />
+                    {renderChatComposerWithPrismRefract(
+                      <ComposerInput
+                        ref={draftComposerRef}
+                        enabled={composerMarkdownEditorEnabled}
+                        value={draft}
+                        placeholder={
+                          botGroupWaitingRoomRenderActive
+                            ? botGroupCoffeeStaging
+                              ? "Room prompt staged for Coffee"
+                              : "Write a Listen up prompt for the room..."
+                            : "Say something..."
+                        }
+                        disabled={botGroupCoffeeStaging !== null}
+                        writingAssistEnabled={
+                          settings?.composerWritingAssist !== false
+                        }
+                        generatingRandomPrompt={composerRandomPromptBusy}
+                        submitDisabled={composerSubmitDisabled(draft)}
+                        submitLabel={composerSubmitLabel(draft)}
+                        submitAriaLabel={composerSubmitAriaLabel(draft)}
+                        submitIconOnly={false}
+                        hideSubmitButton={
+                          botGroupCoffeeStaging
+                            ? true
+                            : composerReplyInterruptActive
+                              ? false
+                              : hideMobileEmptySend
+                        }
+                        onChange={handleComposerChange}
+                        onValueChange={updateComposerDraft}
+                        onInputActivity={markComposerTypingActivity}
+                        onFocus={handleComposerFocus}
+                        resolvedTheme={resolvedTheme}
+                        mentionBots={
+                          chatMentionsEnabled && !activeSideChatSurface
+                            ? composeMentionBotPicks
+                            : []
+                        }
+                        commandPicks={composerCommandPicks}
+                        toolPicks={COMPOSER_TOOL_PICKS}
+                        promptPicks={commandCenterPromptPicks}
+                        wildcardPicks={composerWildcardDeckPicks}
+                        dismissPopoversSignal={composerPopoverDismissSignal}
+                        interruptActive={composerReplyInterruptActive}
+                        onInterrupt={handleTypingIndicatorPress}
+                      />,
+                    )}
                   </div>
                 </div>
               ) : (
-                <ComposerInput
-                  ref={draftComposerRef}
-                  enabled={composerMarkdownEditorEnabled}
-                  value={draft}
-                  placeholder="Ask anything..."
-                  writingAssistEnabled={
-                    settings?.composerWritingAssist !== false
-                  }
-                  generatingRandomPrompt={composerRandomPromptBusy}
-                  submitDisabled={composerSubmitDisabled(draft)}
-                  submitLabel={composerSubmitLabel(draft)}
-                  submitAriaLabel={composerSubmitAriaLabel(draft)}
-                  submitIconOnly={composerSubmitUsesRandomNudge(draft)}
-                  hideSubmitButton={
-                    composerReplyInterruptActive ? false : hideMobileEmptySend
-                  }
-                  onChange={handleComposerChange}
-                  onValueChange={updateComposerDraft}
-                  onInputActivity={markComposerTypingActivity}
-                  onFocus={handleComposerFocus}
-                  resolvedTheme={resolvedTheme}
-                  mentionBots={
-                    chatMentionsEnabled ? composeMentionBotPicks : []
-                  }
-                  commandPicks={composerCommandPicks}
-                  toolPicks={COMPOSER_TOOL_PICKS}
-                  promptPicks={commandCenterPromptPicks}
-                  wildcardPicks={composerWildcardDeckPicks}
-                  dismissPopoversSignal={composerPopoverDismissSignal}
-                  interruptActive={composerReplyInterruptActive}
-                  onInterrupt={handleTypingIndicatorPress}
-                />
+                renderChatComposerWithPrismRefract(
+                  <ComposerInput
+                    ref={draftComposerRef}
+                    enabled={composerMarkdownEditorEnabled}
+                    value={draft}
+                    placeholder="Ask anything..."
+                    writingAssistEnabled={
+                      settings?.composerWritingAssist !== false
+                    }
+                    generatingRandomPrompt={composerRandomPromptBusy}
+                    submitDisabled={composerSubmitDisabled(draft)}
+                    submitLabel={composerSubmitLabel(draft)}
+                    submitAriaLabel={composerSubmitAriaLabel(draft)}
+                    submitIconOnly={false}
+                    hideSubmitButton={
+                      composerReplyInterruptActive ? false : hideMobileEmptySend
+                    }
+                    onChange={handleComposerChange}
+                    onValueChange={updateComposerDraft}
+                    onInputActivity={markComposerTypingActivity}
+                    onFocus={handleComposerFocus}
+                    resolvedTheme={resolvedTheme}
+                    mentionBots={
+                      chatMentionsEnabled ? composeMentionBotPicks : []
+                    }
+                    commandPicks={composerCommandPicks}
+                    toolPicks={COMPOSER_TOOL_PICKS}
+                    promptPicks={commandCenterPromptPicks}
+                    wildcardPicks={composerWildcardDeckPicks}
+                    dismissPopoversSignal={composerPopoverDismissSignal}
+                    interruptActive={composerReplyInterruptActive}
+                    onInterrupt={handleTypingIndicatorPress}
+                  />,
+                )
               )
             ) : null}
           </form>
@@ -140065,7 +140367,9 @@ function HomeContent(): React.JSX.Element {
                   : "";
               const modelRevealLabel =
                 modelLabel || (msg.role === "assistant" ? "not recorded" : "");
-              const psychicSourceMessage = isChatSurfaceView(view)
+              const psychicSourceMessage = isPsychicPresentationSurfaceView(
+                view,
+              )
                 ? psychicSourceForAssistantMessage(
                     visibleDetailMessages,
                     renderedDetailMessageStartIndex + messageIndex,
@@ -140738,7 +141042,7 @@ function HomeContent(): React.JSX.Element {
           submitDisabled: composerSubmitDisabled(draft),
           submitLabel: composerSubmitLabel(draft),
           submitAriaLabel: composerSubmitAriaLabel(draft),
-          submitIconOnly: composerSubmitUsesRandomNudge(draft),
+          submitIconOnly: false,
           hideSubmitButton: composerReplyInterruptActive
             ? false
             : hideMobileEmptySend,

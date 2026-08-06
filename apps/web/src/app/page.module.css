@@ -40,6 +40,13 @@
      See page.tsx shellStyle / ensureContrast(). */
   --accent-ink: var(--accent);
 
+  /* Stable API-provider accents (not bot --accent). OpenAI is the
+     hue-inverse of Anthropic terracotta; ElevenLabs is Prism-invented. */
+  --provider-accent-openai: #57b9d9;
+  --provider-accent-anthropic: #d97757;
+  --provider-accent-local: #68e6a6;
+  --provider-accent-elevenlabs: #b8b2aa;
+
   /* User bubble rides whatever accent is active (gray by default,
      bot color when a bot is selected). Darkens toward one end for
      the slight gradient we already had visually. */
@@ -3445,6 +3452,13 @@
   --accent-glow: color-mix(in srgb, var(--accent) 11%, transparent);
   --accent-text: #ffffff;
   --accent-ink: var(--accent);
+
+  /* Stable API-provider accents (not bot --accent). OpenAI is the
+     hue-inverse of Anthropic terracotta; ElevenLabs is Prism-invented. */
+  --provider-accent-openai: #57b9d9;
+  --provider-accent-anthropic: #d97757;
+  --provider-accent-local: #68e6a6;
+  --provider-accent-elevenlabs: #777169;
 
   --user-bubble: linear-gradient(
     135deg,
@@ -6872,6 +6886,116 @@
   font-size: 12px;
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
+}
+
+.settingsOnlineAutoProviderBiasField {
+  margin: 10px 0 14px;
+}
+
+/* Beat `.form input[type="range"] { background: transparent }` so the brand
+   gradient actually paints on WebKit + Firefox tracks. */
+.form .settingsOnlineAutoProviderBiasRange,
+.settingsOnlineAutoProviderBiasRange {
+  width: 100%;
+  height: 22px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  appearance: none;
+  -webkit-appearance: none;
+  background: transparent;
+  accent-color: transparent;
+  outline: none;
+  cursor: pointer;
+}
+
+.form .settingsOnlineAutoProviderBiasRange::-webkit-slider-runnable-track,
+.settingsOnlineAutoProviderBiasRange::-webkit-slider-runnable-track {
+  height: 10px;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--provider-accent-openai) 0%,
+    color-mix(
+      in srgb,
+      var(--provider-accent-openai) 42%,
+      var(--provider-accent-anthropic) 58%
+    ) 50%,
+    var(--provider-accent-anthropic) 100%
+  );
+}
+
+.form .settingsOnlineAutoProviderBiasRange::-moz-range-track,
+.settingsOnlineAutoProviderBiasRange::-moz-range-track {
+  height: 10px;
+  border: 0;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    var(--provider-accent-openai) 0%,
+    color-mix(
+      in srgb,
+      var(--provider-accent-openai) 42%,
+      var(--provider-accent-anthropic) 58%
+    ) 50%,
+    var(--provider-accent-anthropic) 100%
+  );
+}
+
+.form .settingsOnlineAutoProviderBiasRange::-moz-range-progress,
+.settingsOnlineAutoProviderBiasRange::-moz-range-progress {
+  height: 10px;
+  border-radius: 999px;
+  background: transparent;
+}
+
+.form .settingsOnlineAutoProviderBiasRange::-webkit-slider-thumb,
+.settingsOnlineAutoProviderBiasRange::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 18px;
+  height: 18px;
+  margin-top: -4px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--fg, #f4f6f8) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-surface, #1c1f26) 40%, #f4f6f8 60%);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+
+.form .settingsOnlineAutoProviderBiasRange::-moz-range-thumb,
+.settingsOnlineAutoProviderBiasRange::-moz-range-thumb {
+  width: 18px;
+  height: 18px;
+  border-radius: 50%;
+  border: 2px solid color-mix(in srgb, var(--fg, #f4f6f8) 78%, transparent);
+  background: color-mix(in srgb, var(--bg-surface, #1c1f26) 40%, #f4f6f8 60%);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.4);
+  cursor: pointer;
+}
+
+.settingsOnlineAutoProviderBiasLabels {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-size: 0.68rem;
+  color: var(--fg-muted);
+}
+
+.settingsOnlineAutoProviderBiasLabels span:first-child {
+  color: var(--provider-accent-openai);
+  font-weight: 650;
+}
+
+.settingsOnlineAutoProviderBiasLabels span:last-child {
+  color: var(--provider-accent-anthropic);
+  font-weight: 650;
+}
+
+.settingsOnlineAutoProviderBiasHint {
+  color: var(--fg-muted);
+  font-size: 0.72rem;
+  line-height: 1.35;
 }
 
 .settingsTextField {
@@ -27960,6 +28084,41 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   gap: 10px;
 }
 
+.chatComposerRefractHost {
+  width: 100%;
+  min-width: 0;
+  border-radius: 18px;
+  transition:
+    outline-color 160ms ease,
+    filter 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.chatComposerRefractHost[data-prism-refract-state="traveling"],
+.chatComposerRefractHost[data-prism-refract-state="generating"] {
+  outline: 1px solid color-mix(in srgb, var(--prism-i, #6fe3ff) 62%, white);
+  outline-offset: 3px;
+  filter:
+    drop-shadow(0 0 5px color-mix(in srgb, var(--prism-i, #6fe3ff) 50%, transparent))
+    drop-shadow(0 0 14px color-mix(in srgb, var(--prism-s, #9d8cff) 28%, transparent));
+}
+
+.chatComposerRefractHost[data-prism-refract-state="ready"] {
+  outline: 1px solid color-mix(in srgb, var(--prism-p, #ff8ad8) 58%, white);
+  outline-offset: 3px;
+}
+
+.chatComposerRefractHost[data-prism-refract-state="error"] {
+  outline: 1px solid color-mix(in srgb, #ff7b7b 70%, white);
+  outline-offset: 3px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .chatComposerRefractHost {
+    transition-duration: 1ms;
+  }
+}
+
 .chatComposerStack {
   position: relative;
   width: 100%;
@@ -34197,19 +34356,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .composeModelControl[data-provider="local"] {
-  background: color-mix(in srgb, var(--bg-deep) 88%, #68e6a6 12%);
+  background: color-mix(in srgb, var(--bg-deep) 88%, var(--provider-accent-local) 12%);
 }
 
 .composeModelControl[data-provider="openai"] {
-  background: color-mix(in srgb, var(--bg-deep) 88%, #7db7ff 12%);
+  background: color-mix(in srgb, var(--bg-deep) 88%, var(--provider-accent-openai) 12%);
 }
 
 .composeModelControl[data-provider="anthropic"] {
-  background: color-mix(in srgb, var(--bg-deep) 88%, #d97757 12%);
+  background: color-mix(in srgb, var(--bg-deep) 88%, var(--provider-accent-anthropic) 12%);
 }
 
 .composeModelControl[data-provider="online"] {
-  background: color-mix(in srgb, var(--bg-deep) 88%, #8fb8ff 12%);
+  background: color-mix(in srgb, var(--bg-deep) 88%, var(--provider-accent-openai) 12%);
 }
 
 .compose[data-compose-bot-selected="true"]
@@ -34594,15 +34753,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .composeModelOption[data-model-provider="local"] {
-  --compose-model-provider-accent: #68e6a6;
+  --compose-model-provider-accent: var(--provider-accent-local);
 }
 
 .composeModelOption[data-model-provider="openai"] {
-  --compose-model-provider-accent: #7db7ff;
+  --compose-model-provider-accent: var(--provider-accent-openai);
 }
 
 .composeModelOption[data-model-provider="anthropic"] {
-  --compose-model-provider-accent: #d97757;
+  --compose-model-provider-accent: var(--provider-accent-anthropic);
 }
 
 .composeModelOption[data-model-provider][aria-selected="true"],
@@ -34619,7 +34778,110 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
 }
 
-.composeModelOption[data-highlighted="true"]:not(:disabled) {
+/* Auto is the prismatic premium pick — spectrum rail + wash so it outshines
+   single-provider lanes and invites the default choice. */
+.composeModelOptionAuto,
+.composeModelOption[data-model-choice="auto"] {
+  --compose-model-auto-spectrum: linear-gradient(
+    180deg,
+    var(--provider-accent-local) 0%,
+    var(--provider-accent-openai) 28%,
+    #8b7dff 52%,
+    var(--provider-accent-anthropic) 76%,
+    #ff4fd8 100%
+  );
+  position: relative;
+  isolation: isolate;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--provider-accent-local) 16%, transparent) 0%,
+    color-mix(in srgb, var(--provider-accent-openai) 14%, transparent) 28%,
+    color-mix(in srgb, #8b7dff 12%, transparent) 52%,
+    color-mix(in srgb, var(--provider-accent-anthropic) 14%, transparent) 76%,
+    transparent 100%
+  );
+  box-shadow: none;
+}
+
+.composeModelOptionAuto::before,
+.composeModelOption[data-model-choice="auto"]::before {
+  content: "";
+  position: absolute;
+  left: 0;
+  top: 5px;
+  bottom: 5px;
+  width: 3px;
+  border-radius: 999px;
+  background: var(--compose-model-auto-spectrum);
+  box-shadow: 0 0 10px
+    color-mix(in srgb, var(--provider-accent-openai) 34%, transparent);
+  pointer-events: none;
+  z-index: 1;
+}
+
+.composeModelOptionAuto .composeModelOptionName,
+.composeModelOption[data-model-choice="auto"] .composeModelOptionName {
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.composeModelOptionAuto .composeModelOptionMeta,
+.composeModelOption[data-model-choice="auto"] .composeModelOptionMeta {
+  color: color-mix(
+    in srgb,
+    var(--fg-muted) 72%,
+    var(--provider-accent-openai) 28%
+  );
+}
+
+.composeModelOptionAuto[aria-selected="true"],
+.composeModelOptionAuto[data-highlighted="true"],
+.composeModelOptionAuto:hover:not(:disabled),
+.composeModelOption[data-model-choice="auto"][aria-selected="true"],
+.composeModelOption[data-model-choice="auto"][data-highlighted="true"],
+.composeModelOption[data-model-choice="auto"]:hover:not(:disabled) {
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--provider-accent-local) 24%, var(--bg-hover)) 0%,
+    color-mix(in srgb, var(--provider-accent-openai) 22%, var(--bg-hover)) 30%,
+    color-mix(in srgb, #8b7dff 20%, var(--bg-hover)) 55%,
+    color-mix(in srgb, var(--provider-accent-anthropic) 22%, var(--bg-hover))
+      78%,
+    var(--bg-hover) 100%
+  );
+}
+
+.composeModelOptionAuto[data-highlighted="true"]:not(:disabled),
+.composeModelOption[data-model-choice="auto"][data-highlighted="true"]:not(
+    :disabled
+  ) {
+  outline: 1px solid
+    color-mix(in srgb, var(--provider-accent-openai) 48%, #8b7dff 52%);
+  outline-offset: -2px;
+}
+
+.composeModelOptionAutoGlyph {
+  display: block;
+  width: 16px;
+  height: 16px;
+  flex: 0 0 auto;
+  filter: drop-shadow(
+    0 0 5px color-mix(in srgb, #8b7dff 42%, transparent)
+  );
+}
+
+.themeLight .composeModelOptionAuto .composeModelOptionMeta,
+.themeLight .composeModelOption[data-model-choice="auto"] .composeModelOptionMeta {
+  color: color-mix(
+    in srgb,
+    var(--fg-muted) 68%,
+    var(--provider-accent-anthropic) 32%
+  );
+}
+
+.composeModelOption[data-highlighted="true"]:not(:disabled):not(
+  [data-model-choice="auto"]
+) {
   outline: 1px solid
     color-mix(
       in srgb,
@@ -34690,20 +34952,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   font-size: 10px;
   letter-spacing: 0.04em;
   color: var(--fg-subtle);
-  text-transform: uppercase;
-}
-
-.composeModelDefaultBadge {
-  flex-shrink: 0;
-  border: 1px solid var(--line);
-  border-radius: 999px;
-  padding: 2px 7px;
-  font-family:
-    var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9px;
-  font-weight: 700;
-  letter-spacing: 0.06em;
-  color: var(--fg-muted);
   text-transform: uppercase;
 }
 
@@ -35032,15 +35280,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .modelEffortHud[data-provider="local"] {
-  --model-effort-hud-accent: #68e6a6;
+  --model-effort-hud-accent: var(--provider-accent-local);
 }
 
 .modelEffortHud[data-provider="openai"] {
-  --model-effort-hud-accent: #7db7ff;
+  --model-effort-hud-accent: var(--provider-accent-openai);
 }
 
 .modelEffortHud[data-provider="anthropic"] {
-  --model-effort-hud-accent: #d97757;
+  --model-effort-hud-accent: var(--provider-accent-anthropic);
 }
 
 .modelEffortHudIdentity {
@@ -44019,15 +44267,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .settingsEffortProfileRow[data-provider="local"] {
-  --settings-effort-provider: #68e6a6;
+  --settings-effort-provider: var(--provider-accent-local);
 }
 
 .settingsEffortProfileRow[data-provider="openai"] {
-  --settings-effort-provider: #7db7ff;
+  --settings-effort-provider: var(--provider-accent-openai);
 }
 
 .settingsEffortProfileRow[data-provider="anthropic"] {
-  --settings-effort-provider: #d97757;
+  --settings-effort-provider: var(--provider-accent-anthropic);
 }
 
 .settingsEffortProfileRow strong {
@@ -44120,15 +44368,15 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .settingsModelProviderDropdown[data-model-provider="openai"] {
-  --settings-model-provider-accent: #10a37f;
+  --settings-model-provider-accent: var(--provider-accent-openai);
 }
 
 .settingsModelProviderDropdown[data-model-provider="anthropic"] {
-  --settings-model-provider-accent: #d97757;
+  --settings-model-provider-accent: var(--provider-accent-anthropic);
 }
 
 .settingsModelProviderDropdown[data-model-provider="elevenlabs"] {
-  --settings-model-provider-accent: #777169;
+  --settings-model-provider-accent: var(--provider-accent-elevenlabs);
 }
 
 .settingsModelProviderDropdown[data-model-pending="true"] {
@@ -44136,7 +44384,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .themeDark .settingsModelProviderDropdown[data-model-provider="elevenlabs"] {
-  --settings-model-provider-accent: #b8b2aa;
+  --settings-model-provider-accent: var(--provider-accent-elevenlabs);
 }
 
 .settingsModelProviderDropdown summary {

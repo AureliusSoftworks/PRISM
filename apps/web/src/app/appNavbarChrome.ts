@@ -11,6 +11,7 @@ export type AppNavbarChromeSnapshot = {
   companionOpen: boolean;
   wielding: boolean;
   pinned: boolean;
+  dropdownHeld: boolean;
   autoHideEnabled: boolean;
 };
 
@@ -20,6 +21,7 @@ let visible = true;
 let autoHideArmed = false;
 let autoHideEnabled = true;
 let pinned = false;
+let dropdownHoldCount = 0;
 let companionOpen = false;
 let wielding = false;
 let autoHideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -36,11 +38,20 @@ function clearAutoHideTimer(): void {
   }
 }
 
+function isDropdownHeld(): boolean {
+  return dropdownHoldCount > 0;
+}
+
+/** True when idle tuck should wait (menus, overflow, companion pin). */
+function blocksIdleHide(): boolean {
+  return companionOpen || pinned || isDropdownHeld();
+}
+
 function computeHidden(): boolean {
   if (companionOpen) return false;
   // Wield tuck is Zen-only; other modes keep the bar even while Wielding.
   if (wielding && autoHideEnabled) return true;
-  if (pinned) return false;
+  if (pinned || isDropdownHeld()) return false;
   return !visible;
 }
 
@@ -51,6 +62,11 @@ function syncDocumentAttributes(): void {
   else root.removeAttribute("data-prism-companion-open");
   if (wielding) root.setAttribute("data-prism-wielding", "true");
   else root.removeAttribute("data-prism-wielding");
+  if (isDropdownHeld()) {
+    root.setAttribute("data-app-navbar-dropdown-held", "true");
+  } else {
+    root.removeAttribute("data-app-navbar-dropdown-held");
+  }
   if (computeHidden()) root.setAttribute("data-app-navbar-hidden", "true");
   else root.removeAttribute("data-app-navbar-hidden");
 }
@@ -60,12 +76,24 @@ function commit(): void {
   emit();
 }
 
+function maybeScheduleAfterRelease(): void {
+  if (
+    autoHideEnabled &&
+    autoHideArmed &&
+    !wielding &&
+    !blocksIdleHide()
+  ) {
+    scheduleAppNavbarAutoHide();
+  }
+}
+
 export function getAppNavbarChromeSnapshot(): AppNavbarChromeSnapshot {
   return {
     hidden: computeHidden(),
     companionOpen,
     wielding,
     pinned,
+    dropdownHeld: isDropdownHeld(),
     autoHideEnabled,
   };
 }
@@ -76,8 +104,18 @@ export function getAppNavbarChromeServerSnapshot(): AppNavbarChromeSnapshot {
     companionOpen: false,
     wielding: false,
     pinned: false,
+    dropdownHeld: false,
     autoHideEnabled: true,
   };
+}
+
+/** Drain leftover dropdown holds between unit tests. */
+export function clearAppNavbarDropdownHoldsForTests(): void {
+  if (dropdownHoldCount === 0) return;
+  dropdownHoldCount = 0;
+  clearAutoHideTimer();
+  visible = true;
+  commit();
 }
 
 export function subscribeAppNavbarChrome(listener: Listener): () => void {
@@ -106,15 +144,29 @@ export function pinAppNavbar(next: boolean): void {
   if (pinned) {
     clearAutoHideTimer();
     visible = true;
-  } else if (
-    autoHideEnabled &&
-    autoHideArmed &&
-    !companionOpen &&
-    !wielding
-  ) {
-    scheduleAppNavbarAutoHide();
+  } else {
+    maybeScheduleAfterRelease();
   }
   commit();
+}
+
+/**
+ * Keep the navbar visible while a portaled navbar dropdown is open.
+ * Callers should invoke from a useEffect and return the release function.
+ * Ref-counted so model + voice + app switcher can overlap safely.
+ */
+export function holdAppNavbarForDropdown(): () => void {
+  dropdownHoldCount += 1;
+  clearAutoHideTimer();
+  visible = true;
+  commit();
+  return () => {
+    dropdownHoldCount = Math.max(0, dropdownHoldCount - 1);
+    if (dropdownHoldCount === 0) {
+      maybeScheduleAfterRelease();
+    }
+    commit();
+  };
 }
 
 export function setAppNavbarCompanionOpen(open: boolean): void {
@@ -123,13 +175,8 @@ export function setAppNavbarCompanionOpen(open: boolean): void {
   if (open) {
     clearAutoHideTimer();
     visible = true;
-  } else if (
-    autoHideEnabled &&
-    autoHideArmed &&
-    !wielding &&
-    !pinned
-  ) {
-    scheduleAppNavbarAutoHide();
+  } else {
+    maybeScheduleAfterRelease();
   }
   commit();
 }
@@ -145,12 +192,7 @@ export function setAppNavbarWielding(next: boolean): void {
     }
   } else {
     visible = true;
-    if (
-      autoHideEnabled &&
-      autoHideArmed &&
-      !companionOpen &&
-      !pinned
-    ) {
+    if (autoHideEnabled && autoHideArmed && !blocksIdleHide()) {
       scheduleAppNavbarAutoHide();
     } else if (!autoHideEnabled) {
       autoHideArmed = false;
@@ -167,9 +209,8 @@ export function revealAppNavbarTemporarily(): void {
   if (
     autoHideEnabled &&
     autoHideArmed &&
-    !companionOpen &&
     !wielding &&
-    !pinned
+    !blocksIdleHide()
   ) {
     scheduleAppNavbarAutoHide();
   }
@@ -191,7 +232,7 @@ export function showAppNavbarWhileInteracting(): void {
 
 export function hideAppNavbarForImmersion(): void {
   if (!autoHideEnabled) return;
-  if (companionOpen || pinned) {
+  if (blocksIdleHide()) {
     autoHideArmed = true;
     return;
   }
@@ -205,7 +246,7 @@ export function hideAppNavbarForImmersion(): void {
 export function armAppNavbarAutoHide(): void {
   if (!autoHideEnabled) return;
   autoHideArmed = true;
-  if (!companionOpen && !wielding && !pinned) {
+  if (!wielding && !blocksIdleHide()) {
     scheduleAppNavbarAutoHide();
   }
 }
@@ -214,16 +255,15 @@ export function scheduleAppNavbarAutoHide(): void {
   if (
     !autoHideEnabled ||
     !autoHideArmed ||
-    companionOpen ||
     wielding ||
-    pinned
+    blocksIdleHide()
   ) {
     return;
   }
   clearAutoHideTimer();
   autoHideTimer = setTimeout(() => {
     autoHideTimer = null;
-    if (!autoHideEnabled || companionOpen || wielding || pinned) return;
+    if (!autoHideEnabled || wielding || blocksIdleHide()) return;
     visible = false;
     commit();
   }, APP_NAVBAR_REVEAL_HOLD_MS);

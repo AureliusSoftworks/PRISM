@@ -114,16 +114,44 @@ describe("shared routing model picker integration", () => {
     assert.match(pageSource, /data-model-provider=\{model\.provider\}/u);
     assert.match(
       cssSource,
-      /composeModelOption\[data-model-provider="local"\][\s\S]{0,120}#68e6a6/u,
+      /composeModelOption\[data-model-provider="local"\][\s\S]{0,120}var\(--provider-accent-local\)/u,
     );
     assert.match(
       cssSource,
-      /composeModelOption\[data-model-provider="openai"\][\s\S]{0,120}#7db7ff/u,
+      /composeModelOption\[data-model-provider="openai"\][\s\S]{0,120}var\(--provider-accent-openai\)/u,
     );
     assert.match(
       cssSource,
-      /composeModelOption\[data-model-provider="anthropic"\][\s\S]{0,120}#d97757/u,
+      /composeModelOption\[data-model-provider="anthropic"\][\s\S]{0,120}var\(--provider-accent-anthropic\)/u,
     );
+    assert.match(cssSource, /--provider-accent-openai:\s*#57b9d9/u);
+    assert.match(cssSource, /--provider-accent-anthropic:\s*#d97757/u);
+    // Portaled menus sit on document.body — copy provider accents from the
+    // themed trigger or the tinted rails wash out.
+    assert.match(
+      pageSource,
+      /COMPOSE_MENU_PORTAL_THEME_VARS = \[[\s\S]*?"--provider-accent-openai"[\s\S]*?"--provider-accent-anthropic"[\s\S]*?"--provider-accent-local"/u,
+    );
+  });
+
+  it("presents Auto as a premium spectrum choice with a triangle glyph", () => {
+    assert.match(pageSource, /function AutoModelChoiceGlyph/u);
+    assert.match(pageSource, /data-model-choice="auto"/u);
+    assert.match(pageSource, /composeModelOptionAuto/u);
+    assert.match(pageSource, /<AutoModelChoiceGlyph \/>/u);
+    assert.match(
+      pageSource,
+      /AUTO_MODEL_SETTINGS_SUBTEXT = "Picks model & effort"/u,
+    );
+    assert.match(
+      cssSource,
+      /\.composeModelOptionAuto[\s\S]{0,500}--compose-model-auto-spectrum/u,
+    );
+    assert.match(
+      cssSource,
+      /compose-model-auto-spectrum:[\s\S]{0,220}provider-accent-local[\s\S]{0,120}provider-accent-openai[\s\S]{0,120}provider-accent-anthropic/u,
+    );
+    assert.match(cssSource, /\.composeModelOptionAutoGlyph/u);
   });
 
   it("persists effort per concrete model and exposes the split control everywhere", () => {
@@ -331,8 +359,10 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       pageSource,
-      /composeModelOptionMain[\s\S]{0,700}composeModelOptionStatus[\s\S]{0,500}composeModelDefaultBadge[\s\S]{0,500}composeModelRowEffort/u,
+      /composeModelOptionMain[\s\S]{0,700}composeModelOptionStatus[\s\S]{0,500}composeModelRowEffort/u,
     );
+    assert.doesNotMatch(pageSource, /composeModelDefaultBadge/u);
+    assert.doesNotMatch(cssSource, /\.composeModelDefaultBadge\b/u);
     assert.match(
       cssSource,
       /\.composeModelOptionStatus\s*\{[^}]*display:\s*inline-flex;[^}]*flex:\s*0 0 auto;[^}]*align-items:\s*center/u,
