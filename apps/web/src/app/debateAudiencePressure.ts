@@ -32,12 +32,16 @@ export const DEBATE_AUDIENCE_FORMALITY_LOUDNESS = {
   free_for_all: 1.28,
 } as const satisfies Record<DebateFormalityId, number>;
 
-/** Anchor mixes at band thresholds — interpolated by live pressure score. */
+/**
+ * Anchor mixes at band thresholds — interpolated by live pressure score.
+ * Disruptive leans hard into crosstalk (grain) so it stays audible past Restless
+ * even after the shared bed ceiling clamps total murmur+crosstalk.
+ */
 const DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS = {
   settled: { background: 0.1, grain: 0, foley: 0.3 },
-  murmuring: { background: 0.22, grain: 0.12, foley: 0.3 },
-  restless: { background: 0.3, grain: 0.3, foley: 0.3 },
-  disruptive: { background: 0.34, grain: 0.42, foley: 0.3 },
+  murmuring: { background: 0.22, grain: 0.08, foley: 0.3 },
+  restless: { background: 0.28, grain: 0.22, foley: 0.3 },
+  disruptive: { background: 0.3, grain: 0.5, foley: 0.3 },
 } as const satisfies Record<DebateAudiencePressureBand, SessionAtmosphereMix>;
 
 /** @deprecated Prefer debateAudiencePressureMixForScore for a smooth curve. */
@@ -81,10 +85,14 @@ function scaleMixBed(
   if (bed <= DEBATE_AUDIENCE_MIX_BED_CEILING || bed <= 0) {
     return { background, grain, foley: mix.foley };
   }
-  const shrink = DEBATE_AUDIENCE_MIX_BED_CEILING / bed;
+  // Prefer keeping crosstalk (grain) when the shared bed hits the ceiling.
+  // Equal shrink used to collapse free_for_all Disruptive into Restless.
+  const excess = bed - DEBATE_AUDIENCE_MIX_BED_CEILING;
+  const backgroundCut = Math.min(background * 0.72, excess);
+  const grainCut = Math.max(0, excess - backgroundCut);
   return {
-    background: background * shrink,
-    grain: grain * shrink,
+    background: Math.max(0, background - backgroundCut),
+    grain: Math.max(0, grain - grainCut),
     foley: mix.foley,
   };
 }

@@ -51,24 +51,36 @@ describe("Debate audience pressure", () => {
     assert.equal(debateAudiencePressureBand(100), "disruptive");
     assert.ok(
       Math.abs(
-        debateAudiencePressureMix("disruptive").background - 0.34 * 0.84,
+        debateAudiencePressureMix("disruptive").background - 0.3 * 0.84,
       ) < 1e-9,
     );
     assert.ok(
-      Math.abs(debateAudiencePressureMix("disruptive").grain - 0.42 * 0.84) <
+      Math.abs(debateAudiencePressureMix("disruptive").grain - 0.5 * 0.84) <
         1e-9,
     );
     assert.equal(debateAudiencePressureMix("disruptive").foley, 0.3);
     assert.deepEqual(
       debateAudiencePressureMix("disruptive", "free_for_all").background >
-        debateAudiencePressureMix("disruptive", "parliamentary").background,
+        debateAudiencePressureMix("disruptive", "parliamentary").background ||
+        debateAudiencePressureMix("disruptive", "free_for_all").grain >
+          debateAudiencePressureMix("disruptive", "parliamentary").grain,
       true,
     );
     const mid = debateAudiencePressureMixForScore(57, "heated");
     const low = debateAudiencePressureMixForScore(25, "heated");
     const high = debateAudiencePressureMixForScore(88, "heated");
-    assert.ok(mid.background > low.background);
+    assert.ok(mid.background > low.background || mid.grain > low.grain);
     assert.ok(high.grain >= mid.grain);
+    const restlessHeated = debateAudiencePressureMix("restless", "heated");
+    const disruptiveFree = debateAudiencePressureMix(
+      "disruptive",
+      "free_for_all",
+    );
+    // Ceiling may clamp total bed, but Disruptive must stay clearly crosstalk-heavier.
+    assert.ok(
+      disruptiveFree.grain - restlessHeated.grain >= 0.12,
+      `expected disruptive grain gap, got ${disruptiveFree.grain} vs ${restlessHeated.grain}`,
+    );
     const orderCall = debateAudienceOrderCallMix("free_for_all");
     assert.ok(
       orderCall.background + orderCall.grain >
