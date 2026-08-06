@@ -193,6 +193,7 @@ import {
   serializeStoredBotPrompt,
   normalizeCoffeeSessionSettings,
   planSocialSilenceV1,
+  type BotVoicePreset,
   type ChatMessage,
   type CoffeePowerPlanV1,
   type CoffeePoll,
@@ -15070,7 +15071,7 @@ describe("autoTagPeerMentionsInCoffeeReply", () => {
 
 function coffeeTestPromptWithProfile(
   overrides: Partial<{
-    communicationStyle: "neutral" | "warm" | "concise" | "playful" | "formal";
+    communicationStyle: BotVoicePreset;
     birthEra: "ad" | "bc";
     deceased: boolean;
     basedOnRealPersonOrCharacter: boolean;

@@ -219,6 +219,8 @@ export {
   botPowerIsAddressedQuestionV1,
   botPowerCredulitySelfRuleV1,
   botPowerAntiTruthSelfRuleV1,
+  botPowerAntiTruthSpokenNameV1,
+  applyBotPowerAntiTruthTrueNameLeakV1,
   botPowerAntiTruthInvertPromptV1,
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,

@@ -10,7 +10,15 @@ import {
 
 describe("Coffee interruption reactions", () => {
   it("provides more than eighty reviewed style/tone/outcome combinations", () => {
-    const styles: CoffeeReactionStyle[] = ["neutral", "warm", "concise", "playful", "formal"];
+    const styles: CoffeeReactionStyle[] = [
+      "neutral",
+      "warm",
+      "concise",
+      "playful",
+      "formal",
+      "reflective",
+      "direct",
+    ];
     const tones: CoffeeReactionTone[] = ["surprised", "annoyed", "firm", "wounded"];
     const outcomes = ["react", "yield", "resume"] as const;
     const lines = new Set(

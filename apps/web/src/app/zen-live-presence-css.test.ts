@@ -275,11 +275,11 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(pageSource, /data-bot-identity-color/);
     assert.match(
       pageSource,
-      /\.\.\.\(bot \? botAvatarIdentityMaterialStyle\(privateModeActive\) : \{\}\)/,
+      /botAvatarIdentityMaterialStyle\(\{\s*privateMode:\s*privateModeActive,\s*voicePreset,\s*metalAlloyEnabled:\s*!defaultPrismPresence,\s*\}\)/,
     );
     assert.match(
       pageSource,
-      /function botAvatarPreviewIdentityStyle[\s\S]*\.\.\.botAvatarIdentityMaterialStyle\(\)/,
+      /function botAvatarPreviewIdentityStyle[\s\S]*botAvatarIdentityMaterialStyle\(\{\s*voicePreset,\s*metalAlloyEnabled:\s*true,\s*\}\)/,
     );
 
     const childRule = ruleForExactSelector(".zenLiveBotPresencePlate *");
@@ -1049,7 +1049,10 @@ describe("Zen live presence CSS", () => {
     );
     assert.doesNotMatch(lightFaceRule, /--bot-face-frame-glow-filter/);
     assert.match(lightFaceRule, /--bot-face-ambient-glow-opacity:\s*0\.32\s*;/);
-    assert.match(lightFaceRule, /--bot-face-metal-light-base-color:\s*var\(--coffee-bot-color\)\s*;/);
+    assert.match(
+      lightFaceRule,
+      /--bot-face-metal-light-base-color:\s*color-mix\(\s*in srgb,\s*var\(--bot-face-metal-alloy-color,\s*#b8c0c8\)\s*40%,\s*var\(--coffee-bot-color\)\s*\)\s*;/,
+    );
     assert.match(
       lightFaceRule,
       /--bot-face-metal-light-background:\s*[\s\S]*var\(--bot-face-metal-light-base-color\)/
@@ -1078,7 +1081,7 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       coffeeLightZenRule,
-      /--bot-face-metal-light-base-color:\s*var\(--coffee-bot-color\)\s*;/
+      /--bot-face-metal-light-base-color:\s*color-mix\(\s*in srgb,\s*var\(--bot-face-metal-alloy-color,\s*#b8c0c8\)\s*40%,\s*var\(--coffee-bot-color\)\s*\)\s*;/
     );
     assert.match(
       coffeeLightZenRule,
@@ -1458,6 +1461,10 @@ describe("Zen live presence CSS", () => {
     assert.match(css, /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.botFaceScreenGlass[\s\S]*transition:\s*none\s*;/);
 
     const frameTintRule = ruleForExactSelector(".botFaceFrameTint");
+    assert.match(
+      frameTintRule,
+      /--bot-face-frame-resolved-color:\s*color-mix\(\s*in srgb,\s*var\(--bot-face-metal-alloy-color,\s*#b8c0c8\)\s*var\(--bot-face-metal-alloy-mix,\s*0%\),\s*var\(/,
+    );
     assert.match(
       frameTintRule,
       /opacity:\s*var\(--bot-face-frame-tint-opacity,\s*var\(--coffee-seat-mood-frame-raster-opacity,\s*1\)\)\s*;/

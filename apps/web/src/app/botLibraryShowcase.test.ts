@@ -136,7 +136,11 @@ describe("selected bot library showcase", () => {
     assert.match(previewHandlerSource, /await resolveBotHubVoicePreviewText\(bot\)/);
     assert.match(
       previewHandlerSource,
-      /const previewText = `My name is \$\{showcaseName\}\./
+      /const spokenShowcaseName = antiTruth/,
+    );
+    assert.match(
+      previewHandlerSource,
+      /My name is \$\{spokenShowcaseName\}\./,
     );
     assert.equal(previewHandlerSource.match(/await previewSelectedVoice\(/g)?.length, 1);
     assert.doesNotMatch(previewHandlerSource, /generateOnly/);

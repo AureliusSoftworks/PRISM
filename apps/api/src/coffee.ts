@@ -251,6 +251,7 @@ import {
   resolveBotAudioVoiceProfileV1,
   rewriteBotFalseNameResponseV1,
   botPowerIsAddressedQuestionV1,
+  applyBotPowerAntiTruthTrueNameLeakV1,
   stageActionPersonaInvitePromptV1,
   stageActionSpeechOnlyPromptV1,
   pickCoffeeInterruptionReaction,
@@ -4759,13 +4760,16 @@ export function coffeeCrosstalkFloorOutcomeV1(args: {
   if (args.canReclaim === false) return "yield";
   const styleAdjustment =
     args.communicationStyle === "concise" ||
-      args.communicationStyle === "formal"
+      args.communicationStyle === "formal" ||
+      args.communicationStyle === "direct"
       ? 0.05
       : args.communicationStyle === "playful"
         ? 0.03
         : args.communicationStyle === "warm"
           ? -0.04
-          : 0;
+          : args.communicationStyle === "reflective"
+            ? -0.02
+            : 0;
   const rawChance =
     COFFEE_CROSSTALK_RECLAIM_BASE_CHANCE +
     args.social.engagement * 0.34 +
@@ -10996,15 +11000,7 @@ function coffeeCannedInterruptionReaction(args: {
       : stableUnitValue(`${seed}:yield`) < 0.45
         ? "yield"
         : "react";
-  const style = profile.communicationStyle === "formal"
-    ? "formal"
-    : profile.communicationStyle === "playful"
-      ? "playful"
-      : profile.communicationStyle === "warm"
-        ? "warm"
-        : profile.communicationStyle === "concise"
-          ? "concise"
-          : "neutral";
+  const style = profile.communicationStyle;
   const reactionHistoryKey = `${args.conversationId}:${args.speaker.id}`;
   const recentReactions = coffeeRecentInterruptionReactions.get(reactionHistoryKey) ?? [];
   const text = pickCoffeeInterruptionReaction({
@@ -11043,8 +11039,17 @@ function buildCoffeeTransitionalBeatPromptLine(
       return `${frequency} use one soft hesitation or self-correction when it makes the response feel considered. Use at most one.`;
     case "concise":
       return `${frequency} use one very short hesitation or restart, but only when it earns its place in your concise voice.`;
-    default:
+    case "direct":
+      return `${frequency} use one brief hesitation only if it sharpens a frank point. Prefer clean delivery.`;
+    case "reflective":
+      return `${frequency} pause, restart, or self-correct when it shows careful thought. Use at most one imperfect beat.`;
+    case "formal":
+    case "neutral":
       return `${frequency} use one natural hesitation, restart, or self-correction. Never force filler, repeat a recent tic, or break character.`;
+    default: {
+      const _exhaustive: never = profile.communicationStyle;
+      return _exhaustive;
+    }
   }
 }
 
@@ -18031,6 +18036,23 @@ async function generateCoffeeBotReply(args: {
       question: speakerTableFocus,
       draftAnswer: replyText,
     });
+  }
+  {
+    const antiTruthEffect = coffeePowerPlan?.bots[speaker.id]?.effects.find(
+      (effect) => effect.type === "anti_truth",
+    );
+    if (
+      antiTruthEffect?.type === "anti_truth" &&
+      !speakerIsMutedForTurn &&
+      !socialSilenceMarker
+    ) {
+      replyText = applyBotPowerAntiTruthTrueNameLeakV1(
+        replyText,
+        speaker.name,
+        antiTruthEffect,
+        speaker.id,
+      );
+    }
   }
   // Promote any plain `@Name` / bare-name peer references into prism-bot mention
   // markdown so the client renders the chip + lights the notified glyph on the

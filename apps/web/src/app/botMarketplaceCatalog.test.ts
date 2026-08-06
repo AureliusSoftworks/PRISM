@@ -7,6 +7,7 @@ import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 
 import {
+  BOT_VOICE_PRESET_LABELS,
   DEFAULT_BOT_FACE_BLINK_BAR,
   botPowerSourceHashV1,
   normalizeBotFaceBlinkBar,
@@ -24,7 +25,8 @@ import {
   normalizeBotFaceThinkingFrames,
   normalizeOptionalBotAudioVoiceProfileV1,
   normalizeBotPowersV1,
-  PRISM_BUILTIN_ENGLISH_VOICES
+  PRISM_BUILTIN_ENGLISH_VOICES,
+  type BotVoicePreset,
 } from "@localai/shared";
 import {
   marketplaceEntriesForTheme,
@@ -653,6 +655,25 @@ describe("bot marketplace static catalog", () => {
           );
         }
       }
+    }
+  });
+
+  it("uses only official communication styles in every bundle", () => {
+    const manifest = normalizeBotMarketplaceManifest(
+      readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
+    );
+    const official = new Set(Object.keys(BOT_VOICE_PRESET_LABELS));
+    for (const entry of publicMarketplaceBots(manifest)) {
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
+      const style = bundle.botJson.profile?.core.communicationStyle as
+        | BotVoicePreset
+        | undefined;
+      assert.ok(style, `${entry.name} must declare communicationStyle`);
+      assert.equal(
+        official.has(style),
+        true,
+        `${entry.name} communicationStyle "${style}" must be official`
+      );
     }
   });
 

@@ -43,7 +43,9 @@ export type BotVoicePreset =
   | "warm"
   | "concise"
   | "playful"
-  | "formal";
+  | "formal"
+  | "reflective"
+  | "direct";
 
 export type BotProfileScaleValue = -2 | -1 | 0 | 1 | 2;
 
@@ -174,6 +176,8 @@ const VOICE_ORDER: readonly BotVoicePreset[] = [
   "concise",
   "playful",
   "formal",
+  "reflective",
+  "direct",
 ] as const;
 
 export const BOT_VOICE_PRESET_LABELS: Record<BotVoicePreset, string> = {
@@ -182,6 +186,8 @@ export const BOT_VOICE_PRESET_LABELS: Record<BotVoicePreset, string> = {
   concise: "Concise - short answers, lean into clarity",
   playful: "Playful - light wit when it fits",
   formal: "Formal - structured and precise",
+  reflective: "Reflective - thoughtful and probing",
+  direct: "Direct - frank and to the point",
 };
 
 const SCALE_VALUES: readonly BotProfileScaleValue[] = [-2, -1, 0, 1, 2] as const;
@@ -277,8 +283,14 @@ function describeVoiceForModel(voice: BotVoicePreset): string {
       return "You may use gentle humor when it helps the user; stay respectful.";
     case "formal":
       return "Use precise, structured language suitable for professional contexts.";
-    default:
-      return "";
+    case "reflective":
+      return "Think aloud carefully; ask probing questions and leave room for nuance.";
+    case "direct":
+      return "Be frank and to the point; say the hard thing cleanly without cruelty.";
+    default: {
+      const _exhaustive: never = voice;
+      return _exhaustive;
+    }
   }
 }
 

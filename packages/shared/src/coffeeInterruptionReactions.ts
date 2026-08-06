@@ -1,7 +1,14 @@
 import type { CoffeeInterruptionEvent } from "./index.js";
 import type { CrosstalkFloorOutcome } from "./listenerReaction.js";
 
-export type CoffeeReactionStyle = "neutral" | "warm" | "concise" | "playful" | "formal";
+export type CoffeeReactionStyle =
+  | "neutral"
+  | "warm"
+  | "concise"
+  | "playful"
+  | "formal"
+  | "reflective"
+  | "direct";
 export type CoffeeReactionTone = "surprised" | "annoyed" | "firm" | "wounded";
 export type CoffeeReactionOutcome = "react" | "yield" | "resume";
 
@@ -105,6 +112,18 @@ const OPENERS: Record<CoffeeReactionStyle, Record<CoffeeReactionTone, readonly s
     firm: ["Permit me to finish.", "I must insist on completing the point."],
     wounded: ["Very well.", "I understand that my contribution is not wanted."],
   },
+  reflective: {
+    surprised: ["Interesting timing.", "Hmm—okay."],
+    annoyed: ["I was still turning that over.", "That cut the thought short."],
+    firm: ["Let me finish the thread.", "Hold—I'm not done thinking aloud."],
+    wounded: ["All right. I'll leave it there.", "I see. The floor moved."],
+  },
+  direct: {
+    surprised: ["Okay.", "Noted."],
+    annoyed: ["I wasn't finished.", "Don't cut me off."],
+    firm: ["Let me finish.", "I'm still talking."],
+    wounded: ["Fine.", "Say what you mean, then."],
+  },
 };
 
 const CLOSERS: Record<CoffeeReactionOutcome, readonly string[]> = {
@@ -140,7 +159,7 @@ function stableIndex(seed: string, length: number): number {
   return length > 0 ? (hash >>> 0) % length : 0;
 }
 
-/** Compositional bank: 5 styles × 4 tones × 2 openers × 3 outcomes × 5 closers. */
+/** Compositional bank: 7 styles × 4 tones × 2 openers × 3 outcomes × 5 closers. */
 export function coffeeInterruptionReactionCandidates(
   style: CoffeeReactionStyle,
   tone: CoffeeReactionTone,

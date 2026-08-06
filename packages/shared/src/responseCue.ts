@@ -146,6 +146,16 @@ const RESPONSE_CUE_BANKS: Record<BotVoicePreset, CueBanks> = {
     redirect: ["Certainly.", "Very well.", "Understood.", "Proceeding."],
     waiting: ["One moment, please.", "Let me consider that.", "Very well…", "Let's see…"],
   },
+  reflective: {
+    interruption: ["Hmm—okay.", "Fair enough.", "All right, then.", "I hear you."],
+    redirect: ["Let's sit with that.", "Okay—new angle.", "I'm with you.", "All right."],
+    waiting: ["Hmm…", "Let me think…", "One moment.", "Give me a beat…"],
+  },
+  direct: {
+    interruption: ["Okay.", "Got it.", "Fine.", "Right."],
+    redirect: ["On it.", "Done.", "Right.", "Okay."],
+    waiting: ["One sec.", "Thinking.", "Hold on.", "Right…"],
+  },
 };
 
 function stableHashV1(value: string): number {

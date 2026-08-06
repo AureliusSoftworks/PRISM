@@ -258,7 +258,7 @@ function generatedBotJsonSchema(voiceIds: readonly string[]): Record<string, unk
       traits: stringField(500),
       communicationStyle: {
         type: "string",
-        enum: ["neutral", "warm", "concise", "playful", "formal"],
+        enum: ["neutral", "warm", "concise", "playful", "formal", "reflective", "direct"],
       },
       openness: nullableScaleSchema,
       conscientiousness: nullableScaleSchema,

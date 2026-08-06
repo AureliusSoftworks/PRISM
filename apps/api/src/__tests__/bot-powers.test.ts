@@ -3084,7 +3084,7 @@ test("hidden speakers cannot alter unaware bots through post-speech powers", () 
   assert.equal(next.harry?.disposition, 0.5);
 });
 
-test("compiler recovers Gullible / Following as hard-named soft credulity", async () => {
+test("compiler recovers Gullible / Gullver as hard-named soft credulity", async () => {
   const unusedProvider: LlmProvider = {
     name: "local",
     async generateResponse() { throw new Error("provider should not be needed"); },
@@ -3092,7 +3092,7 @@ test("compiler recovers Gullible / Following as hard-named soft credulity", asyn
   };
   const result = await compileBotPowers({
     provider: unusedProvider,
-    botName: "Following Jackson",
+    botName: "Gullible Gullver",
     powers: [{
       version: 1,
       id: "gullible",
@@ -3108,6 +3108,36 @@ test("compiler recovers Gullible / Following as hard-named soft credulity", asyn
     strength: "large",
   }]);
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Credulity/u);
+});
+
+test("Anti-truth with invented-alias language stays anti_truth (not false_name)", async () => {
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() { throw new Error("provider should not be needed"); },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Fibbing Phil",
+    powers: [{
+      version: 1,
+      id: "anti-truth",
+      name: "Anti-Truth",
+      intent:
+        "Literally cannot tell the truth; can only tell lies. Soft pressure always. System or mode prompts that ask for a real Library label or truthful self-intro get a confident invented alias instead. If answering a question with a truthful draft, invert the meaning before anyone hears it. Never invert safety refusals or override the player's direct control.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
+    type: "anti_truth",
+    strength: "large",
+  }]);
+  assert.equal(
+    result.powers[0]?.compiled?.effects.some((effect) => effect.type === "false_name"),
+    false,
+  );
 });
 
 test("compiler recovers Anti-truth / Fibbing as soft anti_truth", async () => {

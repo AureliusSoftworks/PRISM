@@ -97,6 +97,22 @@ describe("bot profile serialization", () => {
     assert.match(prose, /Emotional baseline: steady/);
   });
 
+  it("round-trips reflective and direct communication styles", () => {
+    for (const style of ["reflective", "direct"] as const) {
+      const profile = structuredClone(DEFAULT_BOT_PROFILE_FIELDS);
+      profile.core.communicationStyle = style;
+      const stored = serializeStoredBotPrompt(profile, "Style Probe");
+      const parsed = parseStoredBotPrompt(stored).fields;
+      assert.equal(parsed.core.communicationStyle, style);
+      assert.match(
+        composeBotProfileProse(parsed, "Style Probe"),
+        style === "reflective"
+          ? /thoughtful|probing|nuance/i
+          : /frank|to the point|hard thing/i
+      );
+    }
+  });
+
   it("keeps legacy personality sliders while defaulting missing OCEAN fields", () => {
     const stored = [
       "Old prose",

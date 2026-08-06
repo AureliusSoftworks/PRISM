@@ -822,7 +822,17 @@ function deterministicFalseNamePower(
     /\b(?:shapeshift|marketplace)\b/u.test(intent) ||
     (/\blibrary\b/u.test(intent) &&
       /\b(?:form|face|voice|other\s+bot|another\s+bot)\b/u.test(intent));
-  if (!explicitName && (!falseNameLanguage || shapeshiftLanguage)) {
+  // Anti-truth also mentions invented names; do not steal that contract.
+  const antiTruthLanguage =
+    /\b(?:anti[- ]?truth|fibbing|compulsive\s+liar|pathological\s+liar)\b/u.test(
+      `${name} ${intent}`,
+    ) ||
+    /\bcan(?:not|'t)\s+tell\s+the\s+truth\b/u.test(intent) ||
+    /\bonly\s+(?:tells?|speak(?:s|ing)?)\s+lies?\b/u.test(intent);
+  if (
+    antiTruthLanguage ||
+    (!explicitName && (!falseNameLanguage || shapeshiftLanguage))
+  ) {
     return null;
   }
   const subject = compact(botName, 100) || "This bot";
@@ -991,7 +1001,7 @@ function deterministicAntiTruthPower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue: botPowerAntiTruthSelfRuleV1(strength),
-    observerCue: `${subject} cannot tell the truth and answers with lies; questions get a hard meaning invert while ordinary talk stays soft pressure.`,
+    observerCue: `${subject} cannot tell the truth and answers with lies; system identity prompts get a false name, questions get a hard meaning invert, and ordinary talk stays soft pressure without overriding the player.`,
     effects: [{ type: "anti_truth", strength }],
     ruleLabels: ["Cannot tell the truth"],
   };
@@ -1508,6 +1518,7 @@ function deterministicPower(
     deterministicPowerImmunityPower(source, botName) ??
     deterministicEternalIntroductionPower(source, botName) ??
     deterministicSimulationEvangelistPower(source, botName) ??
+    deterministicAntiTruthPower(source, botName) ??
     deterministicFalseNamePower(source, botName) ??
     deterministicIdentityShapeshiftPower(source, botName) ??
     deterministicIdentityMirrorPower(source, botName) ??
@@ -1527,7 +1538,6 @@ function deterministicPower(
     deterministicAvatarColorCyclePower(source, botName) ??
     deterministicCandorPower(source, botName) ??
     deterministicCredulityPower(source, botName) ??
-    deterministicAntiTruthPower(source, botName) ??
     deterministicIntimidationPower(source, botName) ??
     deterministicGradualMoodPower(source, botName) ??
     deterministicCoffeeDislikePower(source, botName);

@@ -114,6 +114,7 @@ import {
   applyBotPowerResponseBudgetV1,
   botPowerIsAddressedQuestionV1,
   strongestBotPowerAntiTruthEffectV1,
+  applyBotPowerAntiTruthTrueNameLeakV1,
   applyBotIdentityShapeshiftResponseV1,
   rewriteBotFalseNameResponseV1,
   createBotFalseNameStateV1,
@@ -8083,6 +8084,23 @@ export async function processChatMessage(
         model: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
       });
     }
+
+    {
+      const antiTruthEffect = strongestBotPowerAntiTruthEffectV1(settings.botPowers);
+      if (
+        antiTruthEffect &&
+        !botPowerMutedTurn &&
+        !botPowerEchoEnforcedTurn &&
+        webSearchStatus !== "blocked"
+      ) {
+        assistantDisplay = applyBotPowerAntiTruthTrueNameLeakV1(
+          assistantDisplay,
+          settings.starterPromptLabel,
+          antiTruthEffect,
+          settings.botId ?? settings.starterPromptLabel,
+        );
+      }
+    }
     const turnEvaluation = isStarterPrompt
       ? undefined
       : evaluateUserTurnOpinion(message);
@@ -9717,6 +9735,22 @@ export async function processChatMessage(
       draftAnswer: assistantDisplay,
       model: resolveAuxiliaryOllamaModel(settings.prismDefaultLlmModel),
     });
+  }
+  {
+    const antiTruthEffect = strongestBotPowerAntiTruthEffectV1(settings.botPowers);
+    if (
+      antiTruthEffect &&
+      !botPowerMutedTurn &&
+      !botPowerEchoEnforcedTurn &&
+      webSearchStatus !== "blocked"
+    ) {
+      assistantDisplay = applyBotPowerAntiTruthTrueNameLeakV1(
+        assistantDisplay,
+        settings.starterPromptLabel,
+        antiTruthEffect,
+        settings.botId ?? settings.starterPromptLabel,
+      );
+    }
   }
   if (
     progressiveSegmentCount === 0 &&

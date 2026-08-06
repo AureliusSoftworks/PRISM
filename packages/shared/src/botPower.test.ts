@@ -31,6 +31,8 @@ import {
   botPowerIsAddressedQuestionV1,
   botPowerCredulitySelfRuleV1,
   botPowerAntiTruthSelfRuleV1,
+  botPowerAntiTruthSpokenNameV1,
+  applyBotPowerAntiTruthTrueNameLeakV1,
   botPowerAntiTruthInvertPromptV1,
   botPowerCandorResponseRuleV1,
   botPowerDefinitionIsExplicitInterruptionV1,
@@ -2005,7 +2007,20 @@ test("credulity and anti-truth helpers normalize and describe soft contracts", (
     strength: "medium",
   });
   assert.match(botPowerCredulitySelfRuleV1("large"), /believe literally everything/iu);
-  assert.match(botPowerAntiTruthSelfRuleV1("large"), /cannot tell the truth/iu);
+  assert.match(botPowerAntiTruthSelfRuleV1("large"), /false name/iu);
+  assert.equal(
+    applyBotPowerAntiTruthTrueNameLeakV1(
+      "My name is Fibbing Phil. Would I lie to you?",
+      "Fibbing Phil",
+      { type: "anti_truth", strength: "large" },
+      "fibbing-phil",
+    ),
+    `My name is ${botPowerAntiTruthSpokenNameV1("Fibbing Phil", "fibbing-phil")}. Would I lie to you?`,
+  );
+  assert.notEqual(
+    botPowerAntiTruthSpokenNameV1("Fibbing Phil", "fibbing-phil"),
+    "Fibbing Phil",
+  );
   assert.equal(botPowerIsAddressedQuestionV1("What color is the sky?"), true);
   assert.equal(botPowerIsAddressedQuestionV1("The sky is blue."), false);
   assert.equal(botPowerLooksLikeSafetyRefusalV1("I can't help with that request."), true);

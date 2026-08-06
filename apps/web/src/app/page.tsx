@@ -43,6 +43,7 @@ import {
   botFrameFinishMirroredForSeed,
 } from "./botFrameFinish";
 import { botAvatarIdentityMaterialStyle } from "./botAvatarIdentityMaterial";
+import { botFrameMetalAlloyStyle } from "./botFrameMetalAlloy";
 import {
   BACKEND_AVAILABLE_EVENT,
   BACKEND_UNAVAILABLE_CODE,
@@ -962,6 +963,9 @@ import {
   resolveBotIdentityShapeshiftVoiceV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerIsMutedV1,
+  botPowerAntiTruthSpokenNameV1,
+  strongestBotPowerAntiTruthEffectV1,
+  applyBotPowerAntiTruthTrueNameLeakV1,
   botPowerResponseIsSilentV1,
   botPowerVoiceGainMultiplierFromEffectsV1,
   botPowerVoiceGainMultiplierV1,
@@ -15226,6 +15230,8 @@ const BOT_VOICE_PRESET_DESCRIPTIONS: Record<BotVoicePreset, string> = {
   concise: "Short and direct.",
   playful: "Light humor when useful.",
   formal: "Structured and precise.",
+  reflective: "Thoughtful and probing.",
+  direct: "Frank and to the point.",
 };
 
 const VOICE_PREVIEW_TEXT =
@@ -32101,7 +32107,13 @@ function ZenLiveBotPresencePlate({
   );
   const avatarStyle = {
     ...botAccent,
-    ...(bot ? botAvatarIdentityMaterialStyle(privateModeActive) : {}),
+    ...(bot
+      ? botAvatarIdentityMaterialStyle({
+          privateMode: privateModeActive,
+          voicePreset,
+          metalAlloyEnabled: !defaultPrismPresence,
+        })
+      : {}),
     "--zen-live-bot-copy-offset-x": `${avatarCopyOffsetX}px`,
     "--coffee-plate-emoji-face-scale-y": faceScaleY,
     "--avatar-details-facing-scale-x": botAvatarDetailsFacingScaleX(faceScaleY),
@@ -37566,12 +37578,16 @@ function botAvatarThinkingFramesLabel(frames: readonly string[]): string {
 function botAvatarPreviewIdentityStyle(
   rawHex: string,
   prismPersona = false,
+  voicePreset: BotVoicePreset | null | undefined = "neutral",
 ): CSSProperties {
   if (prismPersona) return {};
   const accentStyle = botAccentStyle(rawHex, "dark") ?? {};
   return {
     ...accentStyle,
-    ...botAvatarIdentityMaterialStyle(),
+    ...botAvatarIdentityMaterialStyle({
+      voicePreset,
+      metalAlloyEnabled: true,
+    }),
   } as CSSProperties;
 }
 
@@ -38045,12 +38061,13 @@ function botAvatarFoundryPreviewStyle(
   color: string,
   isDefaultPrismBot: boolean,
   previewTheme: "light" | "dark",
+  voicePreset: BotVoicePreset | null | undefined = "neutral",
 ): CSSProperties {
   const bodySize = BOT_AVATAR_CUSTOMIZER_BODY_SIZE_PX;
   const bodyPlacement = BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT;
   const facePlacement = ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT;
   return {
-    ...botAvatarPreviewIdentityStyle(color, isDefaultPrismBot),
+    ...botAvatarPreviewIdentityStyle(color, isDefaultPrismBot, voicePreset),
     "--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
     "--avatar-details-scale-x": "1",
     "--avatar-details-facing-scale-x": "1",
@@ -42068,6 +42085,7 @@ function BotAvatarCustomizerModal({
     color,
     isDefaultPrismBot,
     previewTheme,
+    profile.core.communicationStyle,
   );
   const faceStyle = resolveBotFaceStyle(
     {
@@ -84705,7 +84723,19 @@ function HomeContent(): React.JSX.Element {
         : (DEFAULT_PRISM_VOICE_PREVIEW_LINES[profile.baseVoiceId] ??
           VOICE_PREVIEW_TEXT);
       if (botHubVoicePreviewRunRef.current !== runId) return;
-      const previewText = `My name is ${showcaseName}. ${cachedPreviewLine}`;
+      // Powers override conflicting system prompts (true-name intros); never player control.
+      const antiTruth = bot
+        ? strongestBotPowerAntiTruthEffectV1(bot.powers)
+        : null;
+      const spokenShowcaseName = antiTruth
+        ? botPowerAntiTruthSpokenNameV1(showcaseName, bot?.id ?? showcaseName)
+        : showcaseName;
+      const previewText = applyBotPowerAntiTruthTrueNameLeakV1(
+        `My name is ${spokenShowcaseName}. ${cachedPreviewLine}`,
+        showcaseName,
+        antiTruth,
+        bot?.id ?? showcaseName,
+      );
       let previewSpeechActivityWindows:
         SpeechActivityWindow[] | null | undefined;
       const audioCacheKey = englishChoice
@@ -108258,6 +108288,7 @@ function HomeContent(): React.JSX.Element {
       ...botAvatarPreviewIdentityStyle(
         bot?.color ?? DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR,
         isDefaultPrism,
+        bot ? coffeeSeatVoicePreset(bot) : "neutral",
       ),
       "--coffee-plate-emoji-face-scale-y":
         zenLiveBotFaceScaleYForCanvasSide("left"),
@@ -119422,6 +119453,9 @@ function HomeContent(): React.JSX.Element {
                               newBotColor,
                               false,
                               "dark",
+                              resolveBotVoicePreset({
+                                system_prompt: newBotSystemPrompt,
+                              }),
                             )}
                             faceStyle={resolveBotFaceStyle(
                               {
@@ -123042,6 +123076,7 @@ function HomeContent(): React.JSX.Element {
     const moodVisual = coffeeSeatMoodVisualMetrics(mood, social);
     return {
       ...coffeeBotVisualStyle(bot),
+      ...botFrameMetalAlloyStyle(coffeeSeatVoicePreset(bot)),
       ["--coffee-seat-mood-saturation" as string]: moodVisual.saturation,
       ["--coffee-seat-mood-grayscale" as string]: moodVisual.grayscale,
       ["--coffee-seat-mood-contrast" as string]: moodVisual.contrast,

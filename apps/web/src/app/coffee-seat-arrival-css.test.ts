@@ -1349,7 +1349,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       lightLiveFaceRule,
-      /--bot-face-metal-light-base-color:\s*var\(--coffee-bot-color\)\s*;/
+      /--bot-face-metal-light-base-color:\s*color-mix\(\s*in srgb,\s*var\(--bot-face-metal-alloy-color,\s*#b8c0c8\)\s*40%,\s*var\(--coffee-bot-color\)\s*\)\s*;/
     );
     assert.match(lightLiveFaceRule, /--bot-face-ambient-glow-opacity:\s*0\.32\s*;/);
     assert.match(lightLiveFaceRule, /--bot-face-screen-glass-opacity:\s*0\.3\s*;/);
@@ -1357,6 +1357,10 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(lightLiveFaceRule, /--bot-face-screen-specular-opacity:\s*0\.38\s*;/);
 
     const frameTintRule = ruleForExactSelector(".botFaceFrameTint");
+    assert.match(
+      frameTintRule,
+      /--bot-face-frame-resolved-color:\s*color-mix\(\s*in srgb,\s*var\(--bot-face-metal-alloy-color,\s*#b8c0c8\)\s*var\(--bot-face-metal-alloy-mix,\s*0%\),\s*var\(/,
+    );
     assert.match(
       frameTintRule,
       /opacity:\s*var\(--bot-face-frame-tint-opacity,\s*var\(--coffee-seat-mood-frame-raster-opacity,\s*1\)\)\s*;/

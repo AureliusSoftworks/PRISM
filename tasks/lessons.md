@@ -1,4 +1,14 @@
 ### 2026-08-06 · UX
+**Trigger**: Marketplace bots used Reflective/Direct styles that silently fell back to Balanced; wanted chassis metal variety by Communication Style.
+**Lesson**: Keep Communication Style as an official `BotVoicePreset` dial (including reflective/direct). Soft metal alloys live as a separate CSS wash (`--bot-face-metal-alloy-*`) mixed into frame tint — LEDs/phosphor stay on identity color; Prism rainbow chassis disables the mix.
+**Applies to**: `botProfile.ts`, `botFrameMetalAlloy.ts`, `botAvatarIdentityMaterial.ts`, `page.module.css` `.botFaceFrameTint`
+
+### 2026-08-06 · UX
+**Trigger**: Lime felt missing from everyday chrome; Dev Tools teal read like player product accents.
+**Lesson**: Brand letter I is lime `#b7e63a` — companion/orb/focus must not remap I to cyan. Settings Behavior may use lime as a standalone rail. Developer chrome uses bronze `#b8895a` (`--prism-dev-accent`) for Dev Tools, Coffee `$dev` overlays, and Settings → Experimental — never spectrum cyan/lime.
+**Applies to**: `prismCompanion.module.css`, `prism-orb.module.css`, `globals.css`, `page.module.css` (settings + `.devTools*` + `.coffeeDev*`)
+
+### 2026-08-06 · UX
 **Trigger**: Ask Prism idle fade should eventually leave the scene entirely.
 **Lesson**: Idle presence is two equal stages: dim after `PRISM_COMPANION_IDLE_DIM_MS`, then hide after the same span (`PRISM_COMPANION_IDLE_VANISH_MS`). Keep the companion mounted so Option+Space and Option wield can revive it via `clearIdleDim` (including at wield arm start).
 **Applies to**: `PrismCompanion.tsx`, `prismCompanion.module.css`
@@ -895,3 +905,8 @@
 **Trigger**: Forgetful/amnesia Power over-coached "fresh first contact" and rewrote organic replies.
 **Lesson**: Short-term amnesia should be a pure per-turn context wipe. Do not inject hard performance cues or rewrite replies that admit forgetting; let dangling referents land naturally.
 **Applies to**: botPower eternal_introduction, Coffee/Signal/Chat/Zen/Story adapters, Forgetful Freddie showcase
+
+### 2026-08-06 · [architecture]
+**Trigger**: Fibbing Phil hub preview announced "My name is Fibbing Phil" despite Anti-truth.
+**Lesson**: Powers must override conflicting *system* prompts (forced name intros, mode scaffolding) but never beat *player* control (authored names, direct instructions). Hub voice preview should speak Power-aliased names; compiler order must not let false_name steal Anti-truth intents that mention invented aliases.
+**Applies to**: bot powers, hub voice preview, compileBotPowers coalesce order

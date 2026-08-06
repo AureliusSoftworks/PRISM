@@ -1620,7 +1620,10 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   assert.match(pageSource, /const BOT_AVATAR_CUSTOMIZER_AVATAR_SIZE_PX = 330;/);
   assert.match(pageSource, /const BOT_AVATAR_CUSTOMIZER_BODY_SIZE_PX = 300;/);
   assert.doesNotMatch(pageSource, /BOT_AVATAR_CUSTOMIZER_FACE_GLYPH_SIZE_REM/);
-  assert.match(pageSource, /\.\.\.botAvatarIdentityMaterialStyle\(\)/);
+  assert.match(
+    pageSource,
+    /botAvatarIdentityMaterialStyle\(\{\s*voicePreset/,
+  );
   assert.match(
     pageSource,
     /\.\.\.botAvatarPreviewIdentityStyle\(color, isDefaultPrismBot\)/,
