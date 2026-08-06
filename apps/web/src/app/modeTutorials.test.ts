@@ -442,6 +442,18 @@ describe("mode tutorials", () => {
       copy,
       /Auto still chooses model and Effort for each Debate generation when selected, including during Spectator bake/u,
     );
+    assert.match(
+      copy,
+      /Spectator Start seats you in the gallery first, lets the rest of the house walk in/u,
+    );
+    assert.match(
+      copy,
+      /gallery murmur starts quiet and swells with each arrival/u,
+    );
+    assert.match(
+      copy,
+      /moderator.?s opening gavel hushes the gallery before the floor opens/u,
+    );
     assert.match(copy, /instead of in the app chrome/u);
     assert.match(copy, /traditional three-bot majority/u);
     assert.match(

@@ -92,17 +92,22 @@ export interface DebateCastSelection {
   againstAdvocate: string;
 }
 
-export type DebateRoomPresence = "occupied" | "departing" | "empty";
+export type DebateRoomPresence =
+  | "arriving"
+  | "occupied"
+  | "departing"
+  | "empty";
 
 /**
  * Keep every final spoken beat visible, then dismiss the live room once. A
  * completed replay opens directly on the already-empty sealed stage.
+ * Spectator pre-bake "arriving" is driven by DebateExperience, not this helper.
  */
 export function debateRoomPresence(args: {
   status: DebateStatus;
   presenting: boolean;
   observerPerspective: "live" | "replay";
-}): DebateRoomPresence {
+}): Exclude<DebateRoomPresence, "arriving"> {
   if (args.status !== "completed" || args.presenting) return "occupied";
   return args.observerPerspective === "replay" ? "empty" : "departing";
 }

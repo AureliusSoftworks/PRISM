@@ -6346,24 +6346,35 @@
 
 .alignmentVoiceMixerSliders {
   display: grid;
-  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  grid-template-columns: repeat(2, minmax(160px, 1fr));
   gap: 10px 14px;
 }
 
-.alignmentVoiceMixerSliders label {
+.alignmentVoiceMixerLane {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: end;
+  gap: 8px;
+}
+
+.alignmentVoiceMixerLane label,
+.alignmentVoiceMixerGallery {
   min-width: 0;
   display: grid;
   gap: 6px;
 }
 
-.alignmentVoiceMixerSliders label > span {
+.alignmentVoiceMixerLane label > span,
+.alignmentVoiceMixerGallery > span {
   display: flex;
   align-items: center;
   justify-content: space-between;
   gap: 8px;
 }
 
-.alignmentVoiceMixerSliders label > span > span {
+.alignmentVoiceMixerLane label > span > span,
+.alignmentVoiceMixerGallery > span > span {
   min-width: 0;
   display: flex;
   align-items: baseline;
@@ -6394,6 +6405,32 @@
   accent-color: #a995ff;
 }
 
+.alignmentVoiceMixerTest {
+  flex: 0 0 auto;
+  min-width: 58px;
+  border: 1px solid var(--alignment-border);
+  border-radius: 999px;
+  padding: 7px 10px;
+  color: var(--alignment-ink);
+  background: color-mix(in srgb, #a995ff 14%, var(--alignment-panel-raised));
+  font: 760 9px/1 system-ui;
+  cursor: pointer;
+}
+
+.alignmentVoiceMixerTest[data-sound-check-state="playing"] {
+  border-color: color-mix(in srgb, #a995ff 56%, var(--alignment-border));
+  box-shadow: 0 0 0 1px color-mix(in srgb, #a995ff 18%, transparent);
+}
+
+.alignmentVoiceMixerTest:disabled {
+  opacity: 0.42;
+  cursor: default;
+}
+
+.alignmentVoiceMixerGallery {
+  grid-column: 1 / -1;
+}
+
 .alignmentGalleryRowdiness {
   grid-column: 1 / -1;
   display: flex;
@@ -6412,7 +6449,17 @@
   cursor: pointer;
 }
 
-.alignmentGalleryRowdyToggle[data-rowdy="true"] {
+.alignmentGalleryRowdyToggle[data-gallery-heat="murmuring"] {
+  border-color: color-mix(in srgb, #9ecbff 46%, var(--alignment-border));
+  background: color-mix(in srgb, #9ecbff 14%, var(--alignment-panel-raised));
+}
+
+.alignmentGalleryRowdyToggle[data-gallery-heat="restless"] {
+  border-color: color-mix(in srgb, #ffc27a 46%, var(--alignment-border));
+  background: color-mix(in srgb, #ffc27a 16%, var(--alignment-panel-raised));
+}
+
+.alignmentGalleryRowdyToggle[data-gallery-heat="disruptive"] {
   border-color: color-mix(in srgb, #ff7a9a 46%, var(--alignment-border));
   background: color-mix(in srgb, #ff7a9a 16%, var(--alignment-panel-raised));
 }
@@ -10016,6 +10063,10 @@
   white-space: nowrap;
 }
 
+.dashboard .researchActions > button[data-public-research-blocked="true"] {
+  opacity: 0.55;
+}
+
 .evidenceObjectComposer {
   grid-column: 1 / -1;
   display: grid;
@@ -11662,6 +11713,7 @@
 /* Live Forum: one dominant scene with tonal utilities. */
 
 .live {
+  position: relative;
   display: flex;
   flex-direction: column;
   height: 100%;
@@ -11747,7 +11799,7 @@
 .identHoldAction {
   -webkit-appearance: none;
   appearance: none;
-  margin-top: 4px;
+  margin-top: 0;
   border: 1px solid color-mix(in srgb, #d8d2e3 42%, transparent);
   border-radius: 999px;
   padding: 11px 22px;
@@ -11912,6 +11964,14 @@
 .identOverlay[data-hold="true"][data-kind="outro"] {
   animation: none;
   opacity: 1;
+}
+
+/* Stage-scoped hold: curtain stays above the pit so filled seats remain visible. */
+.live .identOverlay[data-hold="true"][data-hold-scope="stage"] {
+  position: absolute;
+  inset: 0;
+  z-index: 140;
+  padding-bottom: calc(clamp(118px, 10vw, 160px) + 36px);
 }
 
 .identOverlay[data-hold="true"] .identComposition,
@@ -12739,6 +12799,225 @@
   animation: debate-gallery-status-depart 300ms ease 260ms both;
 }
 
+/* Pre-bake trickle-in: seats wait off-aisle until revealed, then walk in. */
+.live[data-debate-room-presence="arriving"]
+  .debateAudienceBotPortrait[data-gallery-arrived="false"] {
+  visibility: hidden;
+  opacity: 0;
+  transform: translate(
+      var(--debate-gallery-enter-x, var(--debate-gallery-exit-x, 220%)),
+      18%
+    )
+    scale(var(--debate-audience-depth, 1));
+  animation: none !important;
+  pointer-events: none;
+}
+
+.live[data-debate-room-presence="arriving"]
+  .debateAudienceBotPortrait[data-gallery-arrived="true"]:not(
+    [data-audience-source="player"]
+  ) {
+  animation: debate-gallery-seat-arrive 680ms cubic-bezier(0.33, 0.8, 0.28, 1)
+    both;
+}
+
+.live[data-debate-room-presence="arriving"]
+  .debateAudienceBotPortrait[data-audience-source="player"] {
+  animation: none;
+}
+
+.debateAudienceArrivalChrome {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px 12px;
+  pointer-events: auto;
+}
+
+.debateAudienceArrivalCopy {
+  display: grid;
+  min-width: min(220px, 42vw);
+  flex: 1 1 160px;
+  gap: 5px;
+}
+
+.debateAudienceArrivalCopy > strong {
+  color: rgba(255, 253, 255, 0.9);
+  font:
+    650 0.66rem/1.2 ui-sans-serif,
+    system-ui,
+    sans-serif;
+  letter-spacing: 0.02em;
+}
+
+.debateAudienceArrivalTrack {
+  display: block;
+  height: 3px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.1);
+}
+
+.debateAudienceArrivalTrack > i {
+  display: block;
+  height: 100%;
+  width: calc(var(--debate-gallery-arrival-progress, 0) * 100%);
+  border-radius: inherit;
+  background: color-mix(in srgb, var(--debate-active-color, #9c8cff) 72%, white);
+  transition: width 280ms ease;
+}
+
+.debateAudienceArrivalCancel {
+  margin-left: auto;
+  min-height: 28px;
+  padding: 5px 11px;
+  border: 1px solid color-mix(in srgb, currentColor 18%, transparent);
+  border-radius: 999px;
+  color: rgba(255, 253, 255, 0.88);
+  background: rgba(12, 10, 15, 0.94);
+  cursor: pointer;
+  font:
+    650 0.64rem/1 ui-sans-serif,
+    system-ui,
+    sans-serif;
+}
+
+.debateAudienceArrivalCancel:hover,
+.debateAudienceArrivalCancel:focus-visible {
+  border-color: color-mix(
+    in srgb,
+    var(--debate-moderator-color) 48%,
+    transparent
+  );
+}
+
+/* Stage-only curtain: gallery pit stays readable underneath. */
+.galleryArrivalStageMask {
+  position: absolute;
+  inset: 0;
+  z-index: 140;
+  display: grid;
+  place-content: center;
+  justify-items: center;
+  gap: 10px;
+  padding: clamp(24px, 4vw, 64px);
+  padding-bottom: calc(clamp(118px, 10vw, 160px) + 28px);
+  color: #f4f0f7;
+  text-align: center;
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in srgb, var(--debate-active-color, #9c8cff) 14%, transparent),
+      transparent 28%
+    ),
+    rgba(7, 6, 9, 0.88);
+  pointer-events: all;
+}
+
+.galleryArrivalKicker {
+  margin: 0;
+  color: color-mix(in srgb, var(--debate-active-color, #9c8cff) 72%, white);
+  font-size: 11px;
+  font-weight: 720;
+  letter-spacing: 0.18em;
+  text-transform: uppercase;
+}
+
+.galleryArrivalStageMask > strong {
+  margin: 0;
+  font-family: var(--font-title, var(--font-ui-sans, ui-sans-serif));
+  font-size: clamp(22px, 3vw, 40px);
+  font-weight: 330;
+  letter-spacing: -0.035em;
+}
+
+.galleryArrivalStageMask > p {
+  margin: 0;
+  max-width: min(380px, 84vw);
+  color: #bdb5ca;
+  font-size: clamp(12px, 1.15vw, 14px);
+  line-height: 1.45;
+}
+
+/* Keep the public gallery above arriving stage masks only.
+   Gallery-ready uses a full intro card that covers the pit. */
+.live[data-debate-room-presence="arriving"] .debateAudienceRow {
+  position: relative;
+  z-index: 150;
+}
+
+.live[data-debate-room-presence="arriving"] .stageSupport,
+.live[data-debate-room-presence="arriving"] .floorStatus,
+.live[data-debate-room-presence="arriving"] .liveCaption {
+  visibility: hidden;
+  pointer-events: none;
+}
+
+.identHoldActionRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  margin-top: 4px;
+}
+
+.identHoldBackAction {
+  -webkit-appearance: none;
+  appearance: none;
+  min-height: 42px;
+  border: 1px solid color-mix(in srgb, #d8d2e3 28%, transparent);
+  border-radius: 999px;
+  padding: 11px 18px;
+  color: #d8d2e3;
+  background: rgba(12, 10, 16, 0.55);
+  font: inherit;
+  font-size: 12px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  cursor: pointer;
+}
+
+.identHoldBackAction:hover:not(:disabled),
+.identHoldBackAction:focus-visible {
+  border-color: color-mix(in srgb, #f4f0f7 42%, transparent);
+  color: #f4f0f7;
+}
+
+.identHoldBackAction:disabled {
+  opacity: 0.48;
+  cursor: default;
+}
+
+.debateOpeningFade {
+  position: absolute;
+  inset: 0;
+  z-index: 140;
+  pointer-events: none;
+  background: #000;
+  animation: debate-opening-chamber-fade
+    var(--debate-opening-fade-ms, 5000ms) linear both;
+}
+
+@keyframes debate-opening-chamber-fade {
+  from {
+    opacity: 1;
+  }
+
+  to {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .debateOpeningFade {
+    animation-duration: 320ms;
+  }
+}
+
 .live[data-debate-room-presence="departing"] .juryChamberSeat {
   animation: debate-jury-seat-depart 720ms cubic-bezier(0.4, 0, 0.82, 0.4)
     var(--debate-room-exit-delay, 0ms) both;
@@ -12826,6 +13105,29 @@
   }
 }
 
+@keyframes debate-gallery-seat-arrive {
+  0% {
+    visibility: visible;
+    opacity: 0;
+    transform: translate(
+        var(--debate-gallery-enter-x, var(--debate-gallery-exit-x, 220%)),
+        18%
+      )
+      scale(var(--debate-audience-depth, 1));
+  }
+
+  28% {
+    opacity: 0.55;
+    transform: translate(0, 8%) scale(var(--debate-audience-depth, 1));
+  }
+
+  100% {
+    visibility: visible;
+    opacity: 0.72;
+    transform: translate(0, 4%) scale(var(--debate-audience-depth, 1));
+  }
+}
+
 @keyframes debate-gallery-status-depart {
   from {
     visibility: visible;
@@ -12864,6 +13166,25 @@
     visibility: hidden;
     opacity: 0;
     animation: none !important;
+  }
+
+  .live[data-debate-room-presence="arriving"]
+    .debateAudienceBotPortrait[data-gallery-arrived="true"]:not(
+      [data-audience-source="player"]
+    ) {
+    animation: none !important;
+    opacity: 0.72;
+    transform: translateY(4%) scale(var(--debate-audience-depth, 1));
+  }
+
+  .live[data-debate-room-presence="arriving"]
+    .debateAudienceBotPortrait[data-gallery-arrived="false"] {
+    visibility: hidden;
+    opacity: 0;
+  }
+
+  .debateAudienceArrivalTrack > i {
+    transition: none;
   }
 }
 

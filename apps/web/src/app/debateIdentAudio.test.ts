@@ -25,6 +25,13 @@ describe("Debate Living Chamber ident", () => {
     assert.equal(DEBATE_IDENT_AUDIO.outro.durationMs, 4_545);
   });
 
+  it("holds a five-second chamber fade before the first spoken beat", async () => {
+    const { DEBATE_OPENING_CHAMBER_FADE_MS } = await import(
+      "./debateIdentAudio.ts"
+    );
+    assert.equal(DEBATE_OPENING_CHAMBER_FADE_MS, 5_000);
+  });
+
   it("leaves a short verdict breath and releases interruptions smoothly", () => {
     assert.equal(DEBATE_IDENT_OUTRO_LEAD_MS, 420);
     assert.equal(DEBATE_IDENT_STOP_FADE_MS, 320);

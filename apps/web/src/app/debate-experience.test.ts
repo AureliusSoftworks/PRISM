@@ -268,19 +268,46 @@ describe("Debate experience", () => {
     assert.match(source, /data-debate-room-presence=\{roomPresence\}/u);
     assert.match(css, /debate-stage-bot-depart/u);
     assert.match(css, /debate-gallery-seat-depart/u);
+    assert.match(css, /debate-gallery-seat-arrive/u);
     assert.match(source, /debateAudienceDepartureXPercent/u);
+    assert.match(source, /data-gallery-arrived=/u);
+    assert.match(source, /debateGalleryArrivalRevealOrder/u);
+    assert.match(source, /data-debate-arrival-mask/u);
+    assert.match(source, /data-hold-scope=/u);
+    assert.match(source, /holdScope="full"/u);
+    assert.match(source, /holdBackAction=/u);
+    assert.match(source, /← Studio/u);
+    assert.match(source, /DEBATE_OPENING_CHAMBER_FADE_MS/u);
+    assert.match(source, /DEBATE_OPENING_GAVEL_SETTLE_MS/u);
+    assert.match(source, /debateOpeningGalleryHushed/u);
+    assert.match(source, /debateGalleryArrivalMurmurGain/u);
+    assert.match(source, /prestart-murmur/u);
+    assert.match(source, /opening-hush/u);
+    assert.match(source, /judgeGavelSmashRef\.current\?\.\("order"\)/u);
+    assert.match(source, /data-debate-opening-fade/u);
+    assert.match(css, /debate-opening-chamber-fade/u);
+    assert.match(source, /data-gallery-ready-hold=/u);
     assert.match(
       css,
       /translate\(var\(--debate-gallery-exit-x, 220%\), 18%\)/u,
     );
     assert.match(
       css,
+      /--debate-gallery-enter-x/u,
+    );
+    assert.match(
+      css,
       /\.debateAudienceRow\s*\{[\s\S]{0,260}overflow:\s*hidden/u,
     );
     assert.match(css, /data-debate-room-presence="empty"/u);
+    assert.match(css, /data-debate-room-presence="arriving"/u);
     assert.match(
       css,
       /prefers-reduced-motion: reduce[\s\S]*data-debate-room-presence="departing"/u,
+    );
+    assert.match(
+      css,
+      /prefers-reduced-motion: reduce[\s\S]*data-debate-room-presence="arriving"/u,
     );
     assert.doesNotMatch(page, /data-debate-moderator-avatar=/u);
     assert.match(
@@ -291,6 +318,22 @@ describe("Debate experience", () => {
       avatarDetailsCss,
       /translateY\(var\(--avatar-details-offset-y,\s*0px\)\)/u,
     );
+  });
+
+  it("mounts the live chamber during Spectator pre-bake instead of a fullscreen loader", () => {
+    assert.match(
+      source,
+      /view === "live" \|\| \(view === "baking" && activeSession\)/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /view === "baking"[\s\S]{0,400}PrismBlockingLoader[\s\S]{0,200}liveBakeSurfaceTitle\("debate"\)/u,
+    );
+    assert.match(source, /galleryArriving/u);
+    assert.match(source, /debateAudienceArrivalChrome/u);
+    assert.match(source, /galleryArrivalKicker/u);
+    assert.match(source, /!galleryArriving/u);
+    assert.match(css, /data-debate-room-presence="arriving"[\s\S]*\.stageSupport/u);
   });
 
   it("randomly casts three unique Library bots and fails safely with fewer", () => {
@@ -725,6 +768,19 @@ describe("Debate experience", () => {
     assert.doesNotMatch(source, /Emoji always remains as the fallback/u);
     assert.doesNotMatch(css, /\.evidenceObjectPreview span,/u);
     assert.match(source, /props\.responseMode === "local"/u);
+    assert.match(source, /publicResearchBlockedReason/u);
+    assert.match(source, /Switch the privacy lane to ONLINE/u);
+    assert.match(source, /data-public-research-blocked/u);
+    assert.match(source, /aria-describedby="debate-public-research-note"/u);
+    // Inputs stay focusable in LOCAL; only the live search call stays gated.
+    assert.doesNotMatch(
+      source,
+      /placeholder="Search for frozen public evidence"\s*disabled=\{props\.responseMode === "local"\}/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /placeholder="Search scholarly works via Crossref"\s*disabled=\{props\.responseMode === "local"\}/u,
+    );
     assert.doesNotMatch(source, /synthetic-[a-z]/u);
   });
 
@@ -3253,7 +3309,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /setActiveSession\(reuseDebateSessionEventPrefix\(previous, next\)\)[\s\S]{0,220}options\.playIntro[\s\S]{0,140}await playDebateIdent\("intro"\)[\s\S]{0,180}await consumeNewEvents/u,
+      /setActiveSession\(reuseDebateSessionEventPrefix\(previous, next\)\)[\s\S]{0,260}options\.playIntro[\s\S]{0,280}judgeGavelSmashRef\.current\?\.\("order"\)[\s\S]{0,120}setDebateOpeningGalleryHushed\(true\)[\s\S]{0,420}await playDebateIdent\("intro"\)[\s\S]{0,420}DEBATE_OPENING_CHAMBER_FADE_MS[\s\S]{0,360}setDebateOpeningGalleryHushed\(false\)[\s\S]{0,120}await consumeNewEvents/u,
     );
     assert.match(
       source,
@@ -3728,8 +3784,14 @@ describe("Debate experience", () => {
       source,
       /backgroundUrl=\{\s*ambientAudioActive\s*\? DEBATE_AUDIENCE_MURMUR_URL : null/u,
     );
-    assert.match(source, /ambientFoley=\{ambientAudioActive\}/u);
-    assert.match(source, /ambientBotVocalizations=\{ambientAudioActive\}/u);
+    assert.match(
+      source,
+      /ambientFoley=\{\s*ambientAudioActive &&\s*!galleryPrestartMurmur &&\s*!debateOpeningGalleryHushed\s*\}/u,
+    );
+    assert.match(
+      source,
+      /ambientBotVocalizations=\{\s*ambientAudioActive &&\s*!galleryPrestartMurmur &&\s*!debateOpeningGalleryHushed\s*\}/u,
+    );
     assert.match(
       source,
       /judgeGavelSmashCue !== null \|\|\s*gavelCameraSettling \|\|\s*activeGavelCue == null \|\|\s*activeGavelCue\.kind === "order" \|\|\s*activeGavelCue\.kind === "attention"/u,
@@ -3863,14 +3925,21 @@ describe("Debate experience", () => {
     assert.match(source, /Save alignment/u);
     assert.match(source, /data-debate-alignment-voice-mixer="true"/u);
     assert.match(source, /Voice levels/u);
-    assert.match(source, /Gallery · Quiet/u);
-    assert.match(source, /Gallery · Rowdy/u);
+    assert.match(source, /data-debate-alignment-mixer-test=/u);
+    assert.match(source, /Gallery · Off/u);
+    assert.match(source, /murmuring: "Murmuring"/u);
+    assert.match(source, /restless: "Restless"/u);
+    assert.match(source, /disruptive: "Disruptive"/u);
+    assert.match(source, /nextDebateAlignmentGalleryHeat/u);
+    assert.match(source, /DEBATE_ALIGNMENT_GALLERY_HEAT_CYCLE/u);
     assert.match(source, /updateDebateStageVoiceLevel/u);
     assert.match(source, /updateDebateStageGalleryVolume/u);
     assert.match(source, /scaleDebateAudienceMixByGalleryVolume/u);
     assert.match(source, /voiceLevel: debateStageVoiceLevelForRole/u);
     assert.match(css, /\.alignmentVoiceMixer/u);
+    assert.match(css, /\.alignmentVoiceMixerTest/u);
     assert.match(css, /\.alignmentGalleryRowdyToggle/u);
+    assert.match(css, /data-gallery-heat/u);
     assert.match(source, /Reset positions/u);
     assert.match(source, /Drag an item or use arrow keys to nudge by 0\.5%/u);
     assert.match(source, /\(\["light", "dark"\] as const\)/u);

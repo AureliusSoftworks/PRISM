@@ -149,11 +149,18 @@ import {
   debateSpectatorPrismAudienceSeat,
 } from "./debateAudience";
 import {
+  debateGalleryArrivalRevealOrder,
+  debateGalleryArrivalRevealedCount,
+  debateGalleryArrivalMurmurGain,
+  debateGallerySeatHasArrived,
+} from "./debateGalleryArrival";
+import {
   DEBATE_AUDIENCE_ORDER_PEAK_HOLD_MS,
   DEBATE_AUDIENCE_ORDER_RETURN_MS,
   DEBATE_AUDIENCE_PRESSURE_MIX_TRANSITION_MS,
   debateAudienceOrderCallMix,
   debateAudiencePressureBand,
+  debateAudiencePressureMix,
   debateAudiencePressureMixForScore,
   debateAudiencePressureScore,
   debateAudienceTalkerIndices,
@@ -391,6 +398,7 @@ import { debateEvidencePropRotationDeg } from "./debateEvidenceProp";
 import {
   DEBATE_IDENT_AUDIO,
   DEBATE_IDENT_OUTRO_LEAD_MS,
+  DEBATE_OPENING_CHAMBER_FADE_MS,
   playDebateIdentAudio,
   setDebateIdentAudioVolume,
   stopDebateIdentAudio,
@@ -713,6 +721,7 @@ interface DebateAudiencePortraitProps {
   allowFaceOpen: boolean;
   allowTransformBounce: boolean;
   departureXPercent: number;
+  galleryArrived: boolean;
   renderBotGlyph: BotPickerGlyphRenderer;
   renderBotAvatar?: DebateExperienceProps["renderBotAvatar"];
 }
@@ -728,6 +737,7 @@ const DebateAudiencePortrait = memo(function DebateAudiencePortrait({
   allowFaceOpen,
   allowTransformBounce,
   departureXPercent,
+  galleryArrived,
   renderBotGlyph,
   renderBotAvatar,
 }: DebateAudiencePortraitProps): React.JSX.Element {
@@ -758,6 +768,7 @@ const DebateAudiencePortrait = memo(function DebateAudiencePortrait({
       }
       data-listening-reaction={listenerReaction ?? undefined}
       data-conversation-facing={conversationFacing}
+      data-gallery-arrived={galleryArrived ? "true" : "false"}
       data-audience-source={
         debateAudienceBotIsPlayerSpectator(bot)
           ? "player"
@@ -769,6 +780,7 @@ const DebateAudiencePortrait = memo(function DebateAudiencePortrait({
         {
           "--debate-audience-index": index,
           "--debate-gallery-exit-x": `${departureXPercent}%`,
+          "--debate-gallery-enter-x": `${departureXPercent}%`,
         } as CSSProperties
       }
       title={
@@ -885,6 +897,18 @@ const DebateLiveAudienceGallery = memo(
     audiencePressureAttr: DebateAudiencePressureBand | null;
     audiencePressureScore: number;
     activeAudienceOrderKind: "awkward" | "hush" | undefined;
+    /** When set, seats trickle in during Spectator pre-bake. */
+    galleryArrival: {
+      revealOrder: ReadonlyArray<number>;
+      revealedCount: number;
+      progressRatio: number | null;
+      stepLabel: string;
+      title: string;
+      detail: string;
+      onCancel: () => void;
+    } | null;
+    /** Soften gallery chrome while Start Debate wait is up. */
+    galleryReadyHold?: boolean;
     judgeControl: {
       action: "call-time" | "cue" | "intervene" | "order";
       available: boolean;
@@ -953,6 +977,11 @@ const DebateLiveAudienceGallery = memo(
         : props.activeAudienceOrderKind === "awkward"
           ? "Gallery caught off guard"
           : null;
+    const galleryStatusLabel = props.galleryArrival
+      ? "Gathering"
+      : props.galleryReadyHold
+        ? "Ready"
+        : (orderResponseLabel ?? pressureLabel);
     const gavelEnergized =
       pressureBand === "restless" || pressureBand === "disruptive";
 
@@ -968,62 +997,106 @@ const DebateLiveAudienceGallery = memo(
         aria-label={`${props.audienceSeats.length} spectators in the Debate audience`}
       >
         <div className={styles.debateAudienceStatus}>
-          <div
-            className={styles.debateAudienceIdentity}
-            aria-live="polite"
-            aria-atomic="true"
-          >
-            <span>Public gallery</span>
-            <strong>{orderResponseLabel ?? pressureLabel}</strong>
-          </div>
-          <span
-            className={styles.debateAudienceMeter}
-            role="meter"
-            aria-label="Audience rowdiness"
-            aria-valuemin={0}
-            aria-valuemax={100}
-            aria-valuenow={Math.round(props.audiencePressureScore)}
-            aria-valuetext={pressureLabel}
-          >
-            {[0, 1, 2, 3].map((level) => (
-              <i
-                key={level}
-                data-active={level <= pressureRank ? "true" : undefined}
-                aria-hidden="true"
-              />
-            ))}
-          </span>
-          {props.judgeControl?.available ? (
-            <button
-              type="button"
-              className={styles.debateAudienceGavelButton}
-              data-action={props.judgeControl.action}
-              data-cue={
-                props.judgeControl.action === "cue" ? "true" : undefined
+          {props.galleryArrival ? (
+            <div
+              className={styles.debateAudienceArrivalChrome}
+              data-debate-gallery-arrival="true"
+              style={
+                {
+                  "--debate-gallery-arrival-progress":
+                    props.galleryArrival.progressRatio ?? 0.08,
+                } as CSSProperties
               }
-              data-energized={
-                gavelEnergized ||
-                props.judgeControl.action === "intervene" ||
-                props.judgeControl.action === "call-time"
-                  ? "true"
-                  : undefined
-              }
-              data-overtime={
-                props.judgeControl.action === "call-time" ? "true" : undefined
-              }
-              data-tutorial-target="debate-judge-gavel"
-              disabled={props.judgeControl.busy}
-              aria-label={props.judgeControl.ariaLabel}
-              onClick={(event) => {
-                event.currentTarget.blur();
-                props.judgeControl?.onActivate();
-              }}
-              title={props.judgeControl.title}
             >
-              {props.judgeControl.label}
-              <kbd aria-hidden="true">Space</kbd>
-            </button>
-          ) : null}
+              <div className={styles.debateAudienceIdentity}>
+                <span>Public gallery</span>
+                <strong>{galleryStatusLabel}</strong>
+              </div>
+              <div className={styles.debateAudienceArrivalCopy}>
+                <strong>{props.galleryArrival.stepLabel}</strong>
+                <span
+                  className={styles.debateAudienceArrivalTrack}
+                  role="progressbar"
+                  aria-valuemin={0}
+                  aria-valuemax={100}
+                  aria-valuenow={Math.round(
+                    (props.galleryArrival.progressRatio ?? 0.08) * 100,
+                  )}
+                  aria-label="Gallery preparation progress"
+                >
+                  <i aria-hidden="true" />
+                </span>
+              </div>
+              <button
+                type="button"
+                className={styles.debateAudienceArrivalCancel}
+                onClick={props.galleryArrival.onCancel}
+              >
+                Stop preparing
+              </button>
+            </div>
+          ) : (
+            <>
+              <div
+                className={styles.debateAudienceIdentity}
+                aria-live="polite"
+                aria-atomic="true"
+              >
+                <span>Public gallery</span>
+                <strong>{galleryStatusLabel}</strong>
+              </div>
+              <span
+                className={styles.debateAudienceMeter}
+                role="meter"
+                aria-label="Audience rowdiness"
+                aria-valuemin={0}
+                aria-valuemax={100}
+                aria-valuenow={Math.round(props.audiencePressureScore)}
+                aria-valuetext={pressureLabel}
+              >
+                {[0, 1, 2, 3].map((level) => (
+                  <i
+                    key={level}
+                    data-active={level <= pressureRank ? "true" : undefined}
+                    aria-hidden="true"
+                  />
+                ))}
+              </span>
+              {props.judgeControl?.available ? (
+                <button
+                  type="button"
+                  className={styles.debateAudienceGavelButton}
+                  data-action={props.judgeControl.action}
+                  data-cue={
+                    props.judgeControl.action === "cue" ? "true" : undefined
+                  }
+                  data-energized={
+                    gavelEnergized ||
+                    props.judgeControl.action === "intervene" ||
+                    props.judgeControl.action === "call-time"
+                      ? "true"
+                      : undefined
+                  }
+                  data-overtime={
+                    props.judgeControl.action === "call-time"
+                      ? "true"
+                      : undefined
+                  }
+                  data-tutorial-target="debate-judge-gavel"
+                  disabled={props.judgeControl.busy}
+                  aria-label={props.judgeControl.ariaLabel}
+                  onClick={(event) => {
+                    event.currentTarget.blur();
+                    props.judgeControl?.onActivate();
+                  }}
+                  title={props.judgeControl.title}
+                >
+                  {props.judgeControl.label}
+                  <kbd aria-hidden="true">Space</kbd>
+                </button>
+              ) : null}
+            </>
+          )}
         </div>
         {(["rear", "front"] as const).map((depthRow) => (
           <span
@@ -1063,6 +1136,17 @@ const DebateLiveAudienceGallery = memo(
                     departureXPercent={debateAudienceDepartureXPercent(
                       `${props.sessionId}:${audienceBot.id}:gallery-departure`,
                     )}
+                    galleryArrived={
+                      props.galleryArrival
+                        ? debateGallerySeatHasArrived({
+                            seatIndex: index,
+                            isPlayer:
+                              debateAudienceBotIsPlayerSpectator(audienceBot),
+                            revealOrder: props.galleryArrival.revealOrder,
+                            revealedCount: props.galleryArrival.revealedCount,
+                          })
+                        : true
+                    }
                     renderBotAvatar={props.renderBotAvatar}
                     renderBotGlyph={props.renderBotGlyph}
                   />
@@ -1085,6 +1169,14 @@ const DEBATE_AUDIENCE_IDLE_MIX = {
   ...DEBATE_FOLEY_MIX,
   background: 0.42,
 } as const satisfies SessionAtmosphereMix;
+/** Opening call to order — murmur bed drops out after the gavel. */
+const DEBATE_AUDIENCE_OPENING_HUSH_MIX = {
+  background: 0,
+  grain: 0,
+  foley: 0.34,
+} as const satisfies SessionAtmosphereMix;
+/** Brief settle after the opening gavel before the Living Chamber intro. */
+const DEBATE_OPENING_GAVEL_SETTLE_MS = 900;
 const DEBATE_AUDIENCE_DUCKED_MIX = {
   ...DEBATE_FOLEY_MIX,
   background: 0.24,
@@ -1198,6 +1290,45 @@ const DEBATE_STAGE_ALIGNMENT_LABELS: Record<DebateStageAlignmentRole, string> =
     moderator: "Moderator",
     against: "Against advocate",
   };
+
+/** Alignment-only gallery heat ladder (Off → murmur → restless → disruptive). */
+const DEBATE_ALIGNMENT_GALLERY_HEAT_CYCLE = [
+  null,
+  "murmuring",
+  "restless",
+  "disruptive",
+] as const satisfies ReadonlyArray<DebateAudiencePressureBand | null>;
+
+type DebateAlignmentGalleryHeat =
+  (typeof DEBATE_ALIGNMENT_GALLERY_HEAT_CYCLE)[number];
+
+const DEBATE_ALIGNMENT_GALLERY_HEAT_LABEL: Record<
+  Exclude<DebateAlignmentGalleryHeat, null>,
+  string
+> = {
+  murmuring: "Murmuring",
+  restless: "Restless",
+  disruptive: "Disruptive",
+};
+
+function nextDebateAlignmentGalleryHeat(
+  current: DebateAlignmentGalleryHeat,
+): DebateAlignmentGalleryHeat {
+  const index = DEBATE_ALIGNMENT_GALLERY_HEAT_CYCLE.findIndex(
+    (step) => step === current,
+  );
+  const nextIndex =
+    (Math.max(0, index) + 1) % DEBATE_ALIGNMENT_GALLERY_HEAT_CYCLE.length;
+  return DEBATE_ALIGNMENT_GALLERY_HEAT_CYCLE[nextIndex] ?? null;
+}
+
+function debateAlignmentGalleryHeatLabel(
+  heat: DebateAlignmentGalleryHeat,
+): string {
+  return heat === null
+    ? "Gallery · Off"
+    : `Gallery · ${DEBATE_ALIGNMENT_GALLERY_HEAT_LABEL[heat]}`;
+}
 
 /** Map a live Forum event onto the alignment voice mixer lanes. */
 function debateStageVoiceRoleForEvent(
@@ -2105,20 +2236,29 @@ function DebateIdentOverlay({
   kind,
   session,
   hold = false,
+  holdScope,
   holdTitle,
   holdDetail,
   holdAction,
+  holdBackAction,
 }: {
   kind: DebateIdentKind;
   session: DebateSessionV1;
   /** Static title card — covers the chamber until Start (no timed curtain). */
   hold?: boolean;
+  /** Stage-scoped hold leaves the gallery pit visible above the curtain. */
+  holdScope?: "full" | "stage";
   holdTitle?: string;
   holdDetail?: string;
   holdAction?: {
     label: string;
     disabled?: boolean;
     action?: "start" | "resume";
+    onClick: () => void;
+  };
+  holdBackAction?: {
+    label: string;
+    disabled?: boolean;
     onClick: () => void;
   };
 }): React.JSX.Element {
@@ -2129,6 +2269,7 @@ function DebateIdentOverlay({
       className={styles.identOverlay}
       data-kind={kind}
       data-hold={hold ? "true" : undefined}
+      data-hold-scope={hold ? (holdScope ?? "full") : undefined}
       data-debate-ident-overlay="true"
       style={
         {
@@ -2188,16 +2329,29 @@ function DebateIdentOverlay({
             {holdDetail ? (
               <p className={styles.identHoldDetail}>{holdDetail}</p>
             ) : null}
-            <button
-              type="button"
-              className={styles.identHoldAction}
-              data-action={holdAction.action ?? "start"}
-              data-tutorial-target="debate-start-from-ident"
-              onClick={holdAction.onClick}
-              disabled={holdAction.disabled}
-            >
-              {holdAction.label}
-            </button>
+            <div className={styles.identHoldActionRow}>
+              {holdBackAction ? (
+                <button
+                  type="button"
+                  className={styles.identHoldBackAction}
+                  data-action="back"
+                  onClick={holdBackAction.onClick}
+                  disabled={holdBackAction.disabled}
+                >
+                  {holdBackAction.label}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={styles.identHoldAction}
+                data-action={holdAction.action ?? "start"}
+                data-tutorial-target="debate-start-from-ident"
+                onClick={holdAction.onClick}
+                disabled={holdAction.disabled}
+              >
+                {holdAction.label}
+              </button>
+            </div>
           </div>
         ) : null}
       </div>
@@ -3219,6 +3373,15 @@ export function DebateExperience(
     useState(false);
   const spectatorBakeAbortRef = useRef<AbortController | null>(null);
   const spectatorBakeSessionIdRef = useRef<string | null>(null);
+  const spectatorBakeArtifactRef = useRef<LiveBakeArtifactV1 | null>(null);
+  /** Opening buffer ready — remaining seats hurry in. */
+  const [spectatorGalleryBakeUnlocked, setSpectatorGalleryBakeUnlocked] =
+    useState(false);
+  const [spectatorGalleryArrivalUnlockedAt, setSpectatorGalleryArrivalUnlockedAt] =
+    useState<number | null>(null);
+  const [spectatorGalleryArrivalNowMs, setSpectatorGalleryArrivalNowMs] =
+    useState(() => Date.now());
+  const spectatorGalleryArrivalCompleteRef = useRef(false);
   const [observerPerspective, setObserverPerspective] = useState<
     "live" | "replay"
   >("live");
@@ -3248,6 +3411,16 @@ export function DebateExperience(
       .catch(() => undefined);
     return () => controller.abort();
   }, [activeSession?.id, request]);
+
+  useEffect(() => {
+    if (view !== "baking") return;
+    setSpectatorGalleryArrivalNowMs(Date.now());
+    const timer = window.setInterval(() => {
+      setSpectatorGalleryArrivalNowMs(Date.now());
+    }, 100);
+    return () => window.clearInterval(timer);
+  }, [view]);
+
   const visiblePresenceBeats = useMemo(() => {
     const byResponseId = new Map<string, BotPresenceBeatV1>();
     for (const beat of [
@@ -3585,6 +3758,10 @@ export function DebateExperience(
   const [gavelCameraSettling, setGavelCameraSettling] = useState(false);
   const [debateIdentPlaying, setDebateIdentPlaying] =
     useState<DebateIdentKind | null>(null);
+  const [debateOpeningFade, setDebateOpeningFade] = useState(false);
+  /** After the opening gavel, keep the gallery bed silent until speech begins. */
+  const [debateOpeningGalleryHushed, setDebateOpeningGalleryHushed] =
+    useState(false);
   const [judgeGavelSmashCue, setJudgeGavelSmashCue] =
     useState<DebateModeratorGavelCue | null>(null);
   const [audienceOrderResponse, setAudienceOrderResponse] =
@@ -3636,9 +3813,9 @@ export function DebateExperience(
     useState<DebateCastSelection | null>(null);
   const [stageAlignmentSoundCheck, setStageAlignmentSoundCheck] =
     useState<DebateStageSoundCheckState>(null);
-  /** Alignment-only A/B: quiet gallery bed vs rowdy pressure while mic testing. */
-  const [stageAlignmentGalleryRowdy, setStageAlignmentGalleryRowdy] =
-    useState(false);
+  /** Alignment-only gallery heat ladder while mic testing (not saved). */
+  const [stageAlignmentGalleryHeat, setStageAlignmentGalleryHeat] =
+    useState<DebateAlignmentGalleryHeat>(null);
   const [stageAlignmentCopyState, setStageAlignmentCopyState] =
     useState<DebateClipboardState>("idle");
   const [stageAlignmentPreviewCamera, setStageAlignmentPreviewCamera] =
@@ -4380,7 +4557,7 @@ export function DebateExperience(
       setStageAlignmentDraggingTarget(null);
       setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
       setStageAlignmentGavelCue(null);
-      setStageAlignmentGalleryRowdy(false);
+      setStageAlignmentGalleryHeat(null);
       stageAlignmentSoundCheckRunRef.current += 1;
       if (stageAlignmentSoundCheck?.status === "playing") {
         onStopUtterance?.();
@@ -5282,7 +5459,7 @@ export function DebateExperience(
     setStageAlignmentGavelPose("lowered");
     setStageAlignmentGavelPosesLinked(false);
     setStageAlignmentSoundCheck(null);
-    setStageAlignmentGalleryRowdy(false);
+    setStageAlignmentGalleryHeat(null);
     setStageAlignmentCopyState("idle");
     setStageAlignmentSelectedItems({
       for: "bot",
@@ -5300,7 +5477,7 @@ export function DebateExperience(
     setStageAlignmentGavelCue(null);
     setStageAlignmentGavelPose("lowered");
     setStageAlignmentGavelPosesLinked(false);
-    setStageAlignmentGalleryRowdy(false);
+    setStageAlignmentGalleryHeat(null);
     setStageAlignmentCopyState("idle");
     setStageAlignmentDraggingTarget(null);
     stageAlignmentDragRef.current = null;
@@ -5321,7 +5498,7 @@ export function DebateExperience(
       setStageAlignmentGavelCue(null);
       setStageAlignmentGavelPose("lowered");
       setStageAlignmentGavelPosesLinked(false);
-      setStageAlignmentGalleryRowdy(false);
+      setStageAlignmentGalleryHeat(null);
       setStageAlignmentOpen(false);
     } catch {
       setError("Debate stage alignment could not be saved on this device.");
@@ -6137,11 +6314,21 @@ export function DebateExperience(
     setActiveCastSlot(cast.moderator ? nextOpponentSlot : "moderator");
   };
 
+  const publicResearchBlockedReason =
+    "Switch the privacy lane to ONLINE to search Brave or Scholar. LOCAL keeps public search off.";
+  const publicResearchBlocked = props.responseMode === "local";
+  const explainPublicResearchBlocked = (): void => {
+    setError(publicResearchBlockedReason);
+  };
   const research = async (sourceType: "web" | "scholar"): Promise<void> => {
     const query = (
       sourceType === "scholar" ? scholarQuery : researchQuery
     ).trim();
-    if (!query || props.responseMode === "local" || evidenceItemLimitReached) {
+    if (publicResearchBlocked) {
+      explainPublicResearchBlocked();
+      return;
+    }
+    if (!query || evidenceItemLimitReached) {
       return;
     }
     setBusy(true);
@@ -8203,9 +8390,24 @@ export function DebateExperience(
       audienceReactionFoleyStartsRef.current = 0;
       try {
         if (options.playIntro) {
+          // Keep the pre-start murmur bed through the opening gavel, then hush
+          // the gallery before the Living Chamber intro and first spoken beat.
+          judgeGavelSmashRef.current?.("order");
+          if (mountedRef.current) setDebateOpeningGalleryHushed(true);
+          await new Promise<void>((resolve) =>
+            window.setTimeout(resolve, DEBATE_OPENING_GAVEL_SETTLE_MS),
+          );
+          if (presentationRunRef.current !== runId) return;
           await playDebateIdent("intro");
           if (presentationRunRef.current !== runId) return;
+          if (mountedRef.current) setDebateOpeningFade(true);
+          await new Promise<void>((resolve) =>
+            window.setTimeout(resolve, DEBATE_OPENING_CHAMBER_FADE_MS),
+          );
+          if (mountedRef.current) setDebateOpeningFade(false);
+          if (presentationRunRef.current !== runId) return;
         }
+        if (mountedRef.current) setDebateOpeningGalleryHushed(false);
         await consumeNewEvents(previous, next, runId, {
           automaticJudgeGavel: options.automaticJudgeGavel,
           resumedJudgeGavelPresentationEventId:
@@ -8225,6 +8427,8 @@ export function DebateExperience(
         }
       } finally {
         if (presentationRunRef.current === runId) {
+          setDebateOpeningFade(false);
+          setDebateOpeningGalleryHushed(false);
           setVoicePreparationSpeakerBotId(null);
           setSpeakerHandoff(null);
           setAudiencePressurePresentationEventId(null);
@@ -8273,8 +8477,10 @@ export function DebateExperience(
     });
     if (!mountedRef.current) return null;
     setSpectatorBake(started.liveBake);
+    spectatorBakeArtifactRef.current = started.liveBake;
     let session = started.session;
     let artifact = started.liveBake;
+    setActiveSession(session);
     while (
       mountedRef.current &&
       !controller.signal.aborted &&
@@ -8293,6 +8499,8 @@ export function DebateExperience(
       session = polled.session;
       artifact = polled.session.liveBake ?? artifact;
       setSpectatorBake(artifact);
+      spectatorBakeArtifactRef.current = artifact;
+      setActiveSession(session);
       if (artifact.status === "cancelled") {
         throw new DOMException("Bake cancelled", "AbortError");
       }
@@ -8325,8 +8533,13 @@ export function DebateExperience(
     }
     setSpectatorBakeLiveFallback(false);
     setSpectatorBake(null);
+    spectatorBakeArtifactRef.current = null;
     setSpectatorBakeStartedAt(null);
+    setSpectatorGalleryBakeUnlocked(false);
+    setSpectatorGalleryArrivalUnlockedAt(null);
+    spectatorGalleryArrivalCompleteRef.current = false;
     spectatorBakeSessionIdRef.current = null;
+    setActiveSession(null);
     setView("dashboard");
     setBusy(false);
   };
@@ -8372,23 +8585,77 @@ export function DebateExperience(
       ) {
         setSpectatorBakeLiveFallback(false);
         setSpectatorBake(session.liveBake ?? null);
-        setSpectatorBakeStartedAt(new Date().toISOString());
+        spectatorBakeArtifactRef.current = session.liveBake ?? null;
+        const bakeStartedIso = new Date().toISOString();
+        setSpectatorBakeStartedAt(bakeStartedIso);
+        setSpectatorGalleryBakeUnlocked(false);
+        setSpectatorGalleryArrivalUnlockedAt(null);
+        spectatorGalleryArrivalCompleteRef.current = false;
+        activeSessionIdRef.current = session.id;
+        setActiveSession(session);
+        setObserverPerspective("live");
         if (!liveBakeMayStartWatch(session.liveBake, 0)) {
           setView("baking");
           setBusy(true);
           const unlocked = await runSpectatorProgressiveBake(session.id);
           if (!mountedRef.current || !unlocked) return;
           session = unlocked;
+          const audienceCount = debateAudienceBotCount(props.graphicsQuality);
+          const nonPlayerCount = Math.max(0, audienceCount - 1);
+          const bakeStartedMs = Date.parse(bakeStartedIso) || Date.now();
+          setSpectatorGalleryBakeUnlocked(true);
+          const unlockAt = Date.now();
+          setSpectatorGalleryArrivalUnlockedAt(unlockAt);
+          while (mountedRef.current) {
+            const now = Date.now();
+            setSpectatorGalleryArrivalNowMs(now);
+            const arrival = debateGalleryArrivalRevealedCount({
+              nonPlayerCount,
+              progressRatio: liveBakeProgressRatio(
+                spectatorBakeArtifactRef.current,
+              ),
+              bakeUnlocked: true,
+              elapsedMs: now - bakeStartedMs,
+              unlockElapsedMs: now - unlockAt,
+            });
+            if (arrival.arrivalComplete) break;
+            await new Promise((resolve) => window.setTimeout(resolve, 50));
+          }
+          if (!mountedRef.current) return;
         } else {
-          // Buffer already met — kick bake in background without fullscreen wait.
+          // Buffer already met — kick bake in background; hurry seats then ready.
           void props
             .request(`/api/debates/${encodeURIComponent(session.id)}/bake`, {
               ...requestBody({}),
             })
             .catch(() => undefined);
+          setView("baking");
+          setSpectatorGalleryBakeUnlocked(true);
+          const unlockAt = Date.now();
+          setSpectatorGalleryArrivalUnlockedAt(unlockAt);
+          const audienceCount = debateAudienceBotCount(props.graphicsQuality);
+          const nonPlayerCount = Math.max(0, audienceCount - 1);
+          const bakeStartedMs = Date.parse(bakeStartedIso) || Date.now();
+          while (mountedRef.current) {
+            const now = Date.now();
+            setSpectatorGalleryArrivalNowMs(now);
+            const arrival = debateGalleryArrivalRevealedCount({
+              nonPlayerCount,
+              progressRatio: 1,
+              bakeUnlocked: true,
+              elapsedMs: now - bakeStartedMs,
+              unlockElapsedMs: now - unlockAt,
+            });
+            if (arrival.arrivalComplete) break;
+            await new Promise((resolve) => window.setTimeout(resolve, 50));
+          }
+          if (!mountedRef.current) return;
         }
         setSpectatorBake(null);
+        spectatorBakeArtifactRef.current = null;
         setSpectatorBakeStartedAt(null);
+        setSpectatorGalleryBakeUnlocked(false);
+        setSpectatorGalleryArrivalUnlockedAt(null);
       }
 
       clearDebateDebrief();
@@ -8417,7 +8684,10 @@ export function DebateExperience(
       ) {
         setView("dashboard");
         setSpectatorBake(null);
+        spectatorBakeArtifactRef.current = null;
         setSpectatorBakeStartedAt(null);
+        setSpectatorGalleryBakeUnlocked(false);
+        setSpectatorGalleryArrivalUnlockedAt(null);
         return;
       }
       setError(caught instanceof Error ? caught.message : "Debate not found.");
@@ -8633,11 +8903,46 @@ export function DebateExperience(
       if (playerRole === "spectator") {
         setSpectatorBakeLiveFallback(false);
         setSpectatorBake(result.session.liveBake ?? null);
-        setSpectatorBakeStartedAt(new Date().toISOString());
+        spectatorBakeArtifactRef.current = result.session.liveBake ?? null;
+        const bakeStartedIso = new Date().toISOString();
+        setSpectatorBakeStartedAt(bakeStartedIso);
+        setSpectatorGalleryBakeUnlocked(false);
+        setSpectatorGalleryArrivalUnlockedAt(null);
+        spectatorGalleryArrivalCompleteRef.current = false;
+        clearDebateDebrief();
+        selectDebateCameraMode("auto");
+        setTurnaboutObjecting(false);
+        setTurnaboutEvidenceSourceId("");
+        setObserverPerspective("live");
+        presentationStore.clear();
+        activeSessionIdRef.current = result.session.id;
+        setActiveSession(result.session);
         setView("baking");
         setBusy(true);
         const session = await runSpectatorProgressiveBake(result.session.id);
         if (!mountedRef.current || !session) return;
+        const audienceCount = debateAudienceBotCount(props.graphicsQuality);
+        const nonPlayerCount = Math.max(0, audienceCount - 1);
+        const bakeStartedMs = Date.parse(bakeStartedIso) || Date.now();
+        setSpectatorGalleryBakeUnlocked(true);
+        const unlockAt = Date.now();
+        setSpectatorGalleryArrivalUnlockedAt(unlockAt);
+        while (mountedRef.current) {
+          const now = Date.now();
+          setSpectatorGalleryArrivalNowMs(now);
+          const arrival = debateGalleryArrivalRevealedCount({
+            nonPlayerCount,
+            progressRatio: liveBakeProgressRatio(
+              spectatorBakeArtifactRef.current,
+            ),
+            bakeUnlocked: true,
+            elapsedMs: now - bakeStartedMs,
+            unlockElapsedMs: now - unlockAt,
+          });
+          if (arrival.arrivalComplete) break;
+          await new Promise((resolve) => window.setTimeout(resolve, 50));
+        }
+        if (!mountedRef.current) return;
         // Hold the gallery paused until the player presses Start.
         // presentationEventId stays null so progressive mid-bake holds still
         // count as awaitingFirstWatch (Start-from-beginning, not Resume delta).
@@ -8660,7 +8965,10 @@ export function DebateExperience(
         activeSessionIdRef.current = held.session.id;
         setActiveSession(held.session);
         setSpectatorBake(null);
+        spectatorBakeArtifactRef.current = null;
         setSpectatorBakeStartedAt(null);
+        setSpectatorGalleryBakeUnlocked(false);
+        setSpectatorGalleryArrivalUnlockedAt(null);
         setView("live");
         setBusy(false);
         return;
@@ -8676,7 +8984,10 @@ export function DebateExperience(
       ) {
         setView("dashboard");
         setSpectatorBake(null);
+        spectatorBakeArtifactRef.current = null;
         setSpectatorBakeStartedAt(null);
+        setSpectatorGalleryBakeUnlocked(false);
+        setSpectatorGalleryArrivalUnlockedAt(null);
         return;
       }
       setError(
@@ -8685,7 +8996,10 @@ export function DebateExperience(
       if (playerRole === "spectator") {
         setView("dashboard");
         setSpectatorBake(null);
+        spectatorBakeArtifactRef.current = null;
         setSpectatorBakeStartedAt(null);
+        setSpectatorGalleryBakeUnlocked(false);
+        setSpectatorGalleryArrivalUnlockedAt(null);
       }
     } finally {
       setBusy(false);
@@ -10375,6 +10689,8 @@ export function DebateExperience(
     setSpectatorBake(null);
     setSpectatorBakeStartedAt(null);
     setSpectatorBakeLiveFallback(false);
+    setDebateOpeningFade(false);
+    setDebateOpeningGalleryHushed(false);
     setEarlyEndOpen(false);
     setView("dashboard");
     setActiveSession(null);
@@ -12387,7 +12703,7 @@ export function DebateExperience(
                 read: () => researchQuery,
                 preview: setResearchQuery,
                 accept: setResearchQuery,
-                disabled: () => props.responseMode === "local" || busy,
+                disabled: () => busy,
                 generate: ({ currentValue, rejectedValues, signal }) =>
                   generateDebateRefractField(
                     "debate.setup.researchQuery",
@@ -12405,7 +12721,7 @@ export function DebateExperience(
                     setResearchQuery(event.currentTarget.value)
                   }
                   placeholder="Search for frozen public evidence"
-                  disabled={props.responseMode === "local"}
+                  aria-describedby="debate-public-research-note"
                 />
               )}
             </PrismRefractTarget>
@@ -12413,17 +12729,27 @@ export function DebateExperience(
           <div className={styles.researchActions}>
             <button
               type="button"
-              onClick={() => void research("web")}
+              onClick={() => {
+                if (publicResearchBlocked) {
+                  explainPublicResearchBlocked();
+                  return;
+                }
+                void research("web");
+              }}
               disabled={
-                props.responseMode === "local" ||
-                !researchQuery.trim() ||
                 evidenceItemLimitReached ||
-                busy
+                busy ||
+                (!publicResearchBlocked && !researchQuery.trim())
+              }
+              data-public-research-blocked={
+                publicResearchBlocked ? "true" : undefined
               }
               title={
-                evidenceItemLimitReached
-                  ? "Remove an evidence item to search again"
-                  : undefined
+                publicResearchBlocked
+                  ? publicResearchBlockedReason
+                  : evidenceItemLimitReached
+                    ? "Remove an evidence item to search again"
+                    : undefined
               }
             >
               Search &amp; add
@@ -12451,7 +12777,7 @@ export function DebateExperience(
                 read: () => scholarQuery,
                 preview: setScholarQuery,
                 accept: setScholarQuery,
-                disabled: () => props.responseMode === "local" || busy,
+                disabled: () => busy,
                 generate: ({ currentValue, rejectedValues, signal }) =>
                   generateDebateRefractField(
                     "debate.setup.scholarQuery",
@@ -12469,7 +12795,7 @@ export function DebateExperience(
                     setScholarQuery(event.currentTarget.value)
                   }
                   placeholder="Search scholarly works via Crossref"
-                  disabled={props.responseMode === "local"}
+                  aria-describedby="debate-public-research-note"
                 />
               )}
             </PrismRefractTarget>
@@ -12477,17 +12803,27 @@ export function DebateExperience(
           <div className={styles.researchActions}>
             <button
               type="button"
-              onClick={() => void research("scholar")}
+              onClick={() => {
+                if (publicResearchBlocked) {
+                  explainPublicResearchBlocked();
+                  return;
+                }
+                void research("scholar");
+              }}
               disabled={
-                props.responseMode === "local" ||
-                !scholarQuery.trim() ||
                 evidenceItemLimitReached ||
-                busy
+                busy ||
+                (!publicResearchBlocked && !scholarQuery.trim())
+              }
+              data-public-research-blocked={
+                publicResearchBlocked ? "true" : undefined
               }
               title={
-                evidenceItemLimitReached
-                  ? "Remove an evidence item to search again"
-                  : "Scholarly metadata and DOI links from Crossref"
+                publicResearchBlocked
+                  ? publicResearchBlockedReason
+                  : evidenceItemLimitReached
+                    ? "Remove an evidence item to search again"
+                    : "Scholarly metadata and DOI links from Crossref"
               }
             >
               Search papers &amp; add
@@ -12587,9 +12923,12 @@ export function DebateExperience(
               </button>
             </div>
           </div>
-          <p className={styles.evidenceToolNote}>
-            {props.responseMode === "local"
-              ? "LOCAL keeps public search and page reading off. You can still add a URL with your own title and summary; PRISM will not access it."
+          <p
+            id="debate-public-research-note"
+            className={styles.evidenceToolNote}
+          >
+            {publicResearchBlocked
+              ? "LOCAL keeps public search and page reading off. Type a query anytime, then switch the privacy lane to ONLINE to Search—or add a URL with your own title and summary (PRISM will not access it)."
               : "Brave and Scholar each add up to three results per search. Everything added here is shared with both sides and frozen when the Debate begins."}
           </p>
         </div>
@@ -14888,13 +15227,23 @@ export function DebateExperience(
       stageAlignmentDraft.galleryVolume ===
       DEFAULT_DEBATE_STAGE_ALIGNMENT.galleryVolume;
     const mixerIsDefault = voiceLevelsAreDefault && galleryVolumeIsDefault;
+    const alignmentGalleryFormality =
+      stageAlignmentGalleryHeat === "disruptive"
+        ? "free_for_all"
+        : stageAlignmentGalleryHeat === "restless"
+          ? "heated"
+          : stageAlignmentGalleryHeat === "murmuring"
+            ? "plainspoken"
+            : (session?.formality ?? "parliamentary");
+    // Discrete band mixes (not mid-score blends) so Off → Murmuring → Restless →
+    // Disruptive stays clearly audible while mic-checking.
     const alignmentGalleryBed = scaleDebateAudienceMixByGalleryVolume(
-      debateAudiencePressureMixForScore(
-        stageAlignmentGalleryRowdy ? 82 : 0,
-        stageAlignmentGalleryRowdy
-          ? "free_for_all"
-          : (session?.formality ?? "parliamentary"),
-      ),
+      stageAlignmentGalleryHeat === null
+        ? { background: 0.08, grain: 0, foley: DEBATE_FOLEY_MIX.foley }
+        : debateAudiencePressureMix(
+            stageAlignmentGalleryHeat,
+            alignmentGalleryFormality,
+          ),
       stageAlignmentDraft.galleryVolume,
     );
     const alignmentAtmosphereMix = {
@@ -14916,7 +15265,9 @@ export function DebateExperience(
               : null
           }
           grainUrl={
-            stageAlignmentGalleryRowdy && stageAlignmentDraft.galleryVolume > 0
+            (stageAlignmentGalleryHeat === "restless" ||
+              stageAlignmentGalleryHeat === "disruptive") &&
+            stageAlignmentDraft.galleryVolume > 0
               ? DEBATE_AUDIENCE_CROSSTALK_URL
               : null
           }
@@ -15423,50 +15774,104 @@ export function DebateExperience(
                     </button>
                   </header>
                   <div className={styles.alignmentVoiceMixerSliders}>
-                    {alignmentCast.map(({ role, bot }) => {
+                    {alignmentCast.map(({ role, bot, sourceBot }) => {
                       const level = debateStageVoiceLevelForRole(
                         stageAlignmentDraft.voiceLevels,
                         role,
                       );
+                      const soundCheckState =
+                        stageAlignmentSoundCheck?.role === role
+                          ? stageAlignmentSoundCheck.status
+                          : null;
+                      const anotherSoundCheckIsPlaying =
+                        stageAlignmentSoundCheck?.status === "playing" &&
+                        stageAlignmentSoundCheck.role !== role;
+                      const soundCheckDisabled =
+                        !onUtterance ||
+                        !props.audioEnabled ||
+                        props.audioVolume <= 0 ||
+                        sourceBot.hardMuted ||
+                        anotherSoundCheckIsPlaying;
                       return (
-                        <label key={`alignment-voice:${role}`}>
-                          <span>
+                        <div
+                          className={styles.alignmentVoiceMixerLane}
+                          key={`alignment-voice:${role}`}
+                          data-role={role}
+                        >
+                          <label>
                             <span>
-                              <strong>
-                                {DEBATE_STAGE_ALIGNMENT_LABELS[role]}
-                              </strong>
-                              <small>{bot.name}</small>
+                              <span>
+                                <strong>
+                                  {DEBATE_STAGE_ALIGNMENT_LABELS[role]}
+                                </strong>
+                                <small>{bot.name}</small>
+                              </span>
+                              <output>{Math.round(level * 100)}%</output>
                             </span>
-                            <output>{Math.round(level * 100)}%</output>
-                          </span>
-                          <input
-                            type="range"
-                            min={0}
-                            max={DEBATE_STAGE_VOICE_LEVEL_MAX}
-                            step={DEBATE_STAGE_VOICE_LEVEL_STEP}
-                            value={level}
-                            aria-label={`${DEBATE_STAGE_ALIGNMENT_LABELS[role]} ${bot.name} voice level`}
-                            onChange={(event) => {
-                              const next = Number(event.currentTarget.value);
-                              if (!Number.isFinite(next)) return;
-                              if (
-                                stageAlignmentSoundCheck?.status === "playing"
-                              ) {
-                                stopStageAlignmentSoundCheck();
-                              }
-                              setStageAlignmentDraft((current) =>
-                                updateDebateStageVoiceLevel(
-                                  current,
-                                  role,
-                                  next,
-                                ),
-                              );
-                            }}
-                          />
-                        </label>
+                            <input
+                              type="range"
+                              min={0}
+                              max={DEBATE_STAGE_VOICE_LEVEL_MAX}
+                              step={DEBATE_STAGE_VOICE_LEVEL_STEP}
+                              value={level}
+                              aria-label={`${DEBATE_STAGE_ALIGNMENT_LABELS[role]} ${bot.name} voice level`}
+                              onChange={(event) => {
+                                const next = Number(event.currentTarget.value);
+                                if (!Number.isFinite(next)) return;
+                                if (
+                                  stageAlignmentSoundCheck?.status === "playing"
+                                ) {
+                                  stopStageAlignmentSoundCheck();
+                                }
+                                setStageAlignmentDraft((current) =>
+                                  updateDebateStageVoiceLevel(
+                                    current,
+                                    role,
+                                    next,
+                                  ),
+                                );
+                              }}
+                            />
+                          </label>
+                          <button
+                            type="button"
+                            className={styles.alignmentVoiceMixerTest}
+                            data-debate-alignment-mixer-test={role}
+                            data-sound-check-state={
+                              soundCheckState ?? undefined
+                            }
+                            disabled={soundCheckDisabled}
+                            aria-label={`Test ${sourceBot.name} as ${DEBATE_STAGE_ALIGNMENT_LABELS[role]}`}
+                            aria-pressed={soundCheckState === "playing"}
+                            title={
+                              sourceBot.hardMuted
+                                ? `${sourceBot.name} is fully muted.`
+                                : !onUtterance ||
+                                    !props.audioEnabled ||
+                                    props.audioVolume <= 0
+                                  ? "Enable voice and volume to audition this lane."
+                                  : `Play a sound check for ${sourceBot.name} at this lane level.`
+                            }
+                            onClick={() =>
+                              void previewStageAlignmentVoice(
+                                role,
+                                sourceBot,
+                                session?.format ?? format,
+                              )
+                            }
+                          >
+                            {sourceBot.hardMuted
+                              ? "Muted"
+                              : soundCheckState === "playing"
+                                ? "Stop"
+                                : soundCheckState === "unavailable"
+                                  ? "Unavailable"
+                                  : "Test"}
+                          </button>
+                        </div>
                       );
                     })}
-                    <label>
+                    <label className={styles.alignmentVoiceMixerGallery}>
                       <span>
                         <span>
                           <strong>Gallery</strong>
@@ -15497,20 +15902,23 @@ export function DebateExperience(
                     <button
                       type="button"
                       className={styles.alignmentGalleryRowdyToggle}
-                      data-rowdy={
-                        stageAlignmentGalleryRowdy ? "true" : "false"
+                      data-gallery-heat={
+                        stageAlignmentGalleryHeat ?? "off"
                       }
-                      aria-pressed={stageAlignmentGalleryRowdy}
+                      aria-label="Cycle gallery heat while testing mics"
                       onClick={() =>
-                        setStageAlignmentGalleryRowdy((current) => !current)
+                        setStageAlignmentGalleryHeat((current) =>
+                          nextDebateAlignmentGalleryHeat(current),
+                        )
                       }
                     >
-                      {stageAlignmentGalleryRowdy
-                        ? "Gallery · Rowdy"
-                        : "Gallery · Quiet"}
+                      {debateAlignmentGalleryHeatLabel(
+                        stageAlignmentGalleryHeat,
+                      )}
                     </button>
                     <small>
-                      Toggle gallery heat while testing mics — not saved.
+                      Tap to step Off → Murmuring → Restless → Disruptive.
+                      Audition only — not saved.
                     </small>
                   </div>
                   {!props.audioEnabled || props.audioVolume <= 0 ? (
@@ -16315,11 +16723,14 @@ export function DebateExperience(
     const awaitingDeferredStart = debateSessionAwaitingDeferredStart(session);
     const readyToBeginOverlay =
       spectatorAwaitingFirstWatch || awaitingDeferredStart;
-    const roomPresence = debateRoomPresence({
-      status: session.status,
-      presenting,
-      observerPerspective,
-    });
+    const galleryArriving = view === "baking";
+    const roomPresence = galleryArriving
+      ? ("arriving" as const)
+      : debateRoomPresence({
+          status: session.status,
+          presenting,
+          observerPerspective,
+        });
     const judgeGuidedStep = debateJudgeGuidedStepKind({
       playerRole: session.playerRole,
       status: session.status,
@@ -16786,6 +17197,53 @@ export function DebateExperience(
       index,
       layout: debateAudienceSeatLayout(index, audienceBots.length),
     }));
+    const galleryArrivalRevealOrder = galleryArriving
+      ? debateGalleryArrivalRevealOrder(
+          audienceSeats.map(({ bot, index }) => ({
+            index,
+            walkXPercent: debateAudienceDepartureXPercent(
+              `${session.id}:${bot.id}:gallery-departure`,
+            ),
+            isPlayer: debateAudienceBotIsPlayerSpectator(bot),
+          })),
+        )
+      : [];
+    const galleryArrivalStartedMs = spectatorBakeStartedAt
+      ? Date.parse(spectatorBakeStartedAt) || spectatorGalleryArrivalNowMs
+      : spectatorGalleryArrivalNowMs;
+    const galleryArrivalReveal = galleryArriving
+      ? debateGalleryArrivalRevealedCount({
+          nonPlayerCount: galleryArrivalRevealOrder.length,
+          progressRatio: liveBakeProgressRatio(spectatorBake),
+          bakeUnlocked: spectatorGalleryBakeUnlocked,
+          elapsedMs: Math.max(
+            0,
+            spectatorGalleryArrivalNowMs - galleryArrivalStartedMs,
+          ),
+          unlockElapsedMs:
+            spectatorGalleryArrivalUnlockedAt == null
+              ? 0
+              : Math.max(
+                  0,
+                  spectatorGalleryArrivalNowMs -
+                    spectatorGalleryArrivalUnlockedAt,
+                ),
+        })
+      : null;
+    const galleryArrivalChrome = galleryArriving
+      ? {
+          revealOrder: galleryArrivalRevealOrder,
+          revealedCount: galleryArrivalReveal?.revealedCount ?? 0,
+          progressRatio: liveBakeProgressRatio(spectatorBake),
+          stepLabel: liveBakeStatusCopy(spectatorBake),
+          title: liveBakeSurfaceTitle("debate"),
+          detail:
+            "Prism is preparing the opening stretch. You can leave anytime — progress is saved.",
+          onCancel: () => {
+            void cancelSpectatorBake();
+          },
+        }
+      : null;
     const audienceBeat = presenting
       ? debateAudienceBeatForEvent({
           event: activeEvent,
@@ -16827,47 +17285,72 @@ export function DebateExperience(
       debateIdentPlaying === null &&
       !participantJurySealed &&
       (session.status === "live" || session.status === "waiting_for_player");
+    const galleryArrivalMurmurGain = galleryArriving
+      ? debateGalleryArrivalMurmurGain({
+          revealedCount: galleryArrivalReveal?.revealedCount ?? 0,
+          nonPlayerCount: galleryArrivalRevealOrder.length,
+        })
+      : spectatorAwaitingFirstWatch
+        ? 1
+        : null;
+    const galleryPrestartMurmur =
+      galleryArrivalMurmurGain !== null && !debateOpeningGalleryHushed;
     const audienceChattering =
-      audiencePressureBand !== null
+      !galleryArriving &&
+      !debateOpeningGalleryHushed &&
+      (audiencePressureBand !== null
         ? audiencePressureBand !== "settled"
-        : legacyAudienceChattering;
+        : legacyAudienceChattering);
     const activeAudienceOrderResponse =
       audienceOrderResponse?.sessionId === session.id
         ? audienceOrderResponse
         : null;
     const galleryMixBranch = juryChamberVisible
       ? "jury"
-      : debateIdentPlaying !== null
-        ? "ident"
-        : activeAudienceOrderResponse &&
-            !activeAudienceOrderResponse.returningRoomTone
-          ? "order-peak"
-          : audiencePressureBandTrue
-            ? "pressure-score"
-            : presenting
-              ? "ducked"
-              : "idle";
+      : debateOpeningGalleryHushed
+        ? "opening-hush"
+        : galleryPrestartMurmur
+          ? "prestart-murmur"
+          : debateIdentPlaying !== null
+            ? "ident"
+            : activeAudienceOrderResponse &&
+                !activeAudienceOrderResponse.returningRoomTone
+              ? "order-peak"
+              : audiencePressureBandTrue
+                ? "pressure-score"
+                : presenting
+                  ? "ducked"
+                  : "idle";
     const galleryMix =
       galleryMixBranch === "jury"
         ? DEBATE_JURY_CHAMBER_MIX
-        : galleryMixBranch === "ident"
-          ? DEBATE_FOLEY_MIX
-          : galleryMixBranch === "order-peak"
-            ? debateAudienceOrderCallMix(session.formality)
-            : galleryMixBranch === "pressure-score"
-              ? debateAudiencePressureMixForScore(
-                  currentAudiencePressureScore,
-                  session.formality,
-                )
-              : galleryMixBranch === "ducked"
-                ? DEBATE_AUDIENCE_DUCKED_MIX
-                : DEBATE_AUDIENCE_IDLE_MIX;
+        : galleryMixBranch === "opening-hush"
+          ? DEBATE_AUDIENCE_OPENING_HUSH_MIX
+          : galleryMixBranch === "prestart-murmur"
+            ? DEBATE_AUDIENCE_IDLE_MIX
+            : galleryMixBranch === "ident"
+              ? DEBATE_FOLEY_MIX
+              : galleryMixBranch === "order-peak"
+                ? debateAudienceOrderCallMix(session.formality)
+                : galleryMixBranch === "pressure-score"
+                  ? debateAudiencePressureMixForScore(
+                      currentAudiencePressureScore,
+                      session.formality,
+                    )
+                  : galleryMixBranch === "ducked"
+                    ? DEBATE_AUDIENCE_DUCKED_MIX
+                    : DEBATE_AUDIENCE_IDLE_MIX;
     const galleryMixWithVolume =
-      galleryMixBranch === "jury" || galleryMixBranch === "ident"
+      galleryMixBranch === "jury" ||
+      galleryMixBranch === "ident" ||
+      galleryMixBranch === "opening-hush"
         ? galleryMix
         : scaleDebateAudienceMixByGalleryVolume(
             galleryMix,
-            stageAlignment.galleryVolume,
+            stageAlignment.galleryVolume *
+              (galleryMixBranch === "prestart-murmur"
+                ? (galleryArrivalMurmurGain ?? 1)
+                : 1),
           );
     const handleDebateAmbientBotVocalization = (
       cue: SessionAmbientBotVocalizationCue,
@@ -17002,7 +17485,9 @@ export function DebateExperience(
     const ambientAudioActive = Boolean(
       props.audioEnabled &&
       props.audioVolume > 0 &&
-      (presenting ||
+      (galleryPrestartMurmur ||
+        debateOpeningGalleryHushed ||
+        presenting ||
         session.status === "live" ||
         session.status === "waiting_for_player"),
     );
@@ -17047,7 +17532,11 @@ export function DebateExperience(
               ? DEBATE_TURNABOUT_FOLEY_ROOM_SEND
               : DEBATE_FORUM_FOLEY_ROOM_SEND
           }
-          ambientFoley={ambientAudioActive}
+          ambientFoley={
+            ambientAudioActive &&
+            !galleryPrestartMurmur &&
+            !debateOpeningGalleryHushed
+          }
           ambientFoleyProfile={
             juryChamberVisible
               ? DEBATE_JURY_AMBIENT_FOLEY_PROFILE
@@ -17063,7 +17552,11 @@ export function DebateExperience(
             audienceReactingSeatIndices.size > 0 ||
             (busy && !presenting)
           }
-          ambientBotVocalizations={ambientAudioActive}
+          ambientBotVocalizations={
+            ambientAudioActive &&
+            !galleryPrestartMurmur &&
+            !debateOpeningGalleryHushed
+          }
           ambientBotVocalizationProfile={DEBATE_VOCAL_FOLEY_PROFILE}
           onAmbientBotVocalization={handleDebateAmbientBotVocalization}
           controllerHandleRef={debateAtmosphereControllerRef}
@@ -17076,6 +17569,12 @@ export function DebateExperience(
           data-session-status={session.status}
           data-session-phase={session.phase}
           data-debate-room-presence={roomPresence}
+          data-gallery-ready-hold={
+            spectatorAwaitingFirstWatch && !galleryArriving
+              ? "true"
+              : undefined
+          }
+          data-debate-opening-fade={debateOpeningFade ? "true" : undefined}
           data-debate-material-quality={debateMaterialQuality}
           data-jury-chamber={juryChamberVisible ? "true" : undefined}
           style={
@@ -17085,11 +17584,32 @@ export function DebateExperience(
               "--debate-against-color":
                 session.againstAdvocate.color ?? "#ff5f8f",
               "--debate-moderator-color": session.moderator.color ?? "#d9d2ff",
+              "--debate-opening-fade-ms": `${DEBATE_OPENING_CHAMBER_FADE_MS}ms`,
             } as CSSProperties
           }
         >
-          {debateIdentPlaying ? (
+          {galleryArriving ? (
+            <div
+              className={styles.galleryArrivalStageMask}
+              data-debate-arrival-mask="true"
+              role="status"
+              aria-live="polite"
+            >
+              <p className={styles.galleryArrivalKicker}>Spectator</p>
+              <strong>Preparing the gallery</strong>
+              <p>
+                The floor stays covered while seats fill. Progress is saved if
+                you leave.
+              </p>
+            </div>
+          ) : debateIdentPlaying ? (
             <DebateIdentOverlay kind={debateIdentPlaying} session={session} />
+          ) : debateOpeningFade ? (
+            <div
+              className={styles.debateOpeningFade}
+              data-debate-opening-fade="true"
+              aria-hidden="true"
+            />
           ) : session.status === "paused" &&
             !presenting &&
             (readyToBeginOverlay || session.playerRole === "spectator") ? (
@@ -17097,6 +17617,7 @@ export function DebateExperience(
               kind="intro"
               session={session}
               hold
+              holdScope="full"
               holdTitle={
                 spectatorAwaitingFirstWatch
                   ? "Gallery ready"
@@ -17110,6 +17631,15 @@ export function DebateExperience(
                   : awaitingDeferredStart
                     ? "This Archive setup is frozen. Start opens the chamber when you are ready."
                     : "The interrupted line is preserved and will replay from its beginning."
+              }
+              holdBackAction={
+                readyToBeginOverlay
+                  ? {
+                      label: "← Studio",
+                      disabled: busy,
+                      onClick: () => void exitLiveSessionToStudio(),
+                    }
+                  : undefined
               }
               holdAction={{
                 label: readyToBeginOverlay ? "Start Debate" : "Resume Debate",
@@ -17558,6 +18088,7 @@ export function DebateExperience(
                     </button>
                   </div>
                 ) : session.playerRole === "spectator" &&
+                  !galleryArriving &&
                   session.liveBake?.status === "baking" &&
                   !spectatorBakeLiveFallback &&
                   session.status === "live" &&
@@ -17754,6 +18285,10 @@ export function DebateExperience(
                 audiencePressureAttr={audiencePressureBandTrue}
                 audiencePressureScore={currentAudiencePressureScore}
                 activeAudienceOrderKind={activeAudienceOrderResponse?.kind}
+                galleryArrival={galleryArrivalChrome}
+                galleryReadyHold={
+                  spectatorAwaitingFirstWatch && !galleryArriving
+                }
                 judgeControl={
                   session.playerRole === "judge" &&
                   (judgeGavelAvailable || judgeGavelCeremonyReady)
@@ -18454,29 +18989,10 @@ export function DebateExperience(
   };
 
   const experience =
-    view === "live"
+    view === "live" || (view === "baking" && activeSession)
       ? renderLive()
       : view === "baking"
-        ? (
-            <>
-              {renderLobby()}
-              <PrismBlockingLoader
-                open
-                title={liveBakeSurfaceTitle("debate")}
-                detail="Prism is preparing the opening stretch so watching can begin once enough of the gallery is ready. You can leave anytime — progress is saved."
-                stepLabel={liveBakeStatusCopy(spectatorBake)}
-                progress={liveBakeProgressRatio(spectatorBake)}
-                startedAt={spectatorBakeStartedAt}
-                cancelLabel="Stop preparing"
-                cancelConfirmTitle="Stop preparing this gallery?"
-                cancelConfirmDetail="Your progress stays saved. You can reopen later and Prism will continue from where it left off."
-                footer="Watching unlocks when the opening buffer is ready. Model thinking can stretch the wait."
-                onCancel={() => {
-                  void cancelSpectatorBake();
-                }}
-              />
-            </>
-          )
+        ? renderLobby()
         : renderLobby();
   return (
     <>
