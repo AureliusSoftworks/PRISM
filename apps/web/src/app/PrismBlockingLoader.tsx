@@ -6,6 +6,7 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { PrismOrb } from "./PrismOrb";
@@ -14,6 +15,8 @@ import styles from "./prism-blocking-loader.module.css";
 import { formatBlockingLoaderElapsed } from "./prismBlockingLoaderFormat";
 
 export { formatBlockingLoaderElapsed } from "./prismBlockingLoaderFormat";
+
+export type PrismBlockingLoaderPlacement = "fullscreen" | "docked";
 
 export interface PrismBlockingLoaderProps {
   open: boolean;
@@ -24,6 +27,13 @@ export interface PrismBlockingLoaderProps {
   /** ISO timestamp or epoch ms when the operation began — drives the elapsed timer. */
   startedAt?: string | number | null;
   theme?: "light" | "dark";
+  /**
+   * `fullscreen` hard-blocks the app (invent / head-start bake).
+   * `docked` is the soft-wait shell — side card, no inert, companion stays available.
+   */
+  placement?: PrismBlockingLoaderPlacement;
+  /** Overrides the default “PRISM is working” eyebrow. */
+  eyebrow?: string;
   onCancel?: () => void;
   cancelLabel?: string;
   /** Confirm dialog title when stopping a hard wait. */
@@ -31,6 +41,10 @@ export interface PrismBlockingLoaderProps {
   /** Confirm dialog body when stopping a hard wait. */
   cancelConfirmDetail?: string;
   footer?: string;
+  /** Optional body content under the progress block (e.g. Signal asset rows). */
+  children?: ReactNode;
+  /** Optional footer actions under the shared footer copy (docked soft waits). */
+  footerActions?: ReactNode;
 }
 
 function normalizedProgress(progress: number | null | undefined): number | null {
@@ -46,11 +60,15 @@ export function PrismBlockingLoader({
   progress = null,
   startedAt = null,
   theme = "dark",
+  placement = "fullscreen",
+  eyebrow = "PRISM is working",
   onCancel,
   cancelLabel = "Cancel operation",
   cancelConfirmTitle = "Stop preparing?",
   cancelConfirmDetail = "Progress so far is kept. You can continue later from where you left off.",
   footer = "Keep this window open while the light takes shape.",
+  children,
+  footerActions,
 }: PrismBlockingLoaderProps): React.JSX.Element | null {
   const rootRef = useRef<HTMLDivElement | null>(null);
   const cancelButtonRef = useRef<HTMLButtonElement | null>(null);
@@ -67,12 +85,14 @@ export function PrismBlockingLoader({
     startedAt != null && startedAt !== ""
       ? formatBlockingLoaderElapsed(startedAt, nowMs)
       : null;
+  const docked = placement === "docked";
 
   useEffect(() => {
     if (!open) {
       setConfirming(false);
       return;
     }
+    if (docked) return;
     const overlay = rootRef.current;
     if (!overlay) return;
     const previouslyFocused =
@@ -97,7 +117,7 @@ export function PrismBlockingLoader({
       document.body.style.overflow = previousOverflow;
       if (previouslyFocused?.isConnected) previouslyFocused.focus({ preventScroll: true });
     };
-  }, [open]);
+  }, [docked, open]);
 
   useEffect(() => {
     if (!open || startedAt == null || startedAt === "") return;
@@ -127,114 +147,151 @@ export function PrismBlockingLoader({
     onCancel?.();
   };
 
+  const card = (
+    <section
+      className={styles.card}
+      role="status"
+      aria-live="polite"
+      aria-labelledby={titleId}
+      aria-describedby={detailId}
+    >
+      {onCancel ? (
+        <button
+          ref={cancelButtonRef}
+          type="button"
+          className={styles.cancelButton}
+          onClick={requestCancel}
+          aria-label={cancelLabel}
+          title={cancelLabel}
+        >
+          <span aria-hidden="true">×</span>
+        </button>
+      ) : null}
+      <PrismOrb className={styles.prismOrb} />
+      <span className={styles.eyebrow}>{eyebrow}</span>
+      <h2 id={titleId}>{title}</h2>
+      <p id={detailId}>{detail}</p>
+      <div className={styles.progressBlock} style={progressStyle}>
+        <div className={styles.progressMeta}>
+          <span>{stepLabel}</span>
+          <strong>
+            {progressPercent === null ? "Working" : `${progressPercent}%`}
+          </strong>
+        </div>
+        <div
+          className={styles.progressTrack}
+          data-indeterminate={progressPercent === null ? "true" : undefined}
+          role="progressbar"
+          aria-label={stepLabel}
+          aria-valuemin={progressPercent === null ? undefined : 0}
+          aria-valuemax={progressPercent === null ? undefined : 100}
+          aria-valuenow={progressPercent ?? undefined}
+        >
+          <span className={styles.progressFill} />
+        </div>
+        {elapsedLabel ? (
+          <div className={styles.elapsedRow} aria-live="polite">
+            <span>Elapsed</span>
+            <strong>{elapsedLabel}</strong>
+          </div>
+        ) : null}
+      </div>
+      {children}
+      <small>{footer}</small>
+      {footerActions ? (
+        <div className={styles.footerActions}>{footerActions}</div>
+      ) : null}
+      {confirming && onCancel ? (
+        <div
+          className={styles.confirmPanel}
+          role="alertdialog"
+          aria-modal="true"
+          aria-labelledby={confirmTitleId}
+          aria-describedby={confirmDetailId}
+        >
+          <strong id={confirmTitleId}>{cancelConfirmTitle}</strong>
+          <p id={confirmDetailId}>{cancelConfirmDetail}</p>
+          <div className={styles.confirmActions}>
+            <button
+              ref={keepWaitingRef}
+              type="button"
+              className={styles.confirmKeep}
+              onClick={() => setConfirming(false)}
+            >
+              Keep waiting
+            </button>
+            <button
+              type="button"
+              className={styles.confirmStop}
+              onClick={confirmCancel}
+            >
+              Stop
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </section>
+  );
+
   return (
     <>
-      <PrismCompanionPresenceBoundary reason="blocking-loader" />
+      {docked ? null : (
+        <PrismCompanionPresenceBoundary reason="blocking-loader" />
+      )}
       {createPortal(
-        <div
-          ref={rootRef}
-          className={styles.backdrop}
-          data-prism-blocking-loader="true"
-          data-theme={theme}
-          data-confirming={confirming ? "true" : undefined}
-          role="dialog"
-          aria-modal="true"
-          aria-busy="true"
-          aria-labelledby={titleId}
-          aria-describedby={detailId}
-          tabIndex={-1}
-          onKeyDown={(event) => {
-            if (event.key === "Escape") {
-              event.preventDefault();
-              if (confirming) {
-                setConfirming(false);
-              } else if (onCancel) {
-                requestCancel();
+        docked ? (
+          <aside
+            ref={rootRef}
+            className={styles.docked}
+            data-prism-blocking-loader="true"
+            data-prism-blocking-placement="docked"
+            data-theme={theme}
+            data-confirming={confirming ? "true" : undefined}
+            data-dev-panel-safe-area="bottom"
+            aria-busy="true"
+            onKeyDown={(event) => {
+              if (event.key === "Escape" && onCancel) {
+                event.preventDefault();
+                if (confirming) setConfirming(false);
+                else requestCancel();
               }
-            } else if (event.key === "Tab" && !confirming) {
-              event.preventDefault();
-              (cancelButtonRef.current ?? rootRef.current)?.focus({
-                preventScroll: true,
-              });
-            }
-          }}
-        >
-          <section className={styles.card} role="status" aria-live="polite">
-            {onCancel ? (
-              <button
-                ref={cancelButtonRef}
-                type="button"
-                className={styles.cancelButton}
-                onClick={requestCancel}
-                aria-label={cancelLabel}
-                title={cancelLabel}
-              >
-                <span aria-hidden="true">×</span>
-              </button>
-            ) : null}
-            <PrismOrb className={styles.prismOrb} />
-            <span className={styles.eyebrow}>PRISM is working</span>
-            <h2 id={titleId}>{title}</h2>
-            <p id={detailId}>{detail}</p>
-            <div className={styles.progressBlock} style={progressStyle}>
-              <div className={styles.progressMeta}>
-                <span>{stepLabel}</span>
-                <strong>
-                  {progressPercent === null ? "Working" : `${progressPercent}%`}
-                </strong>
-              </div>
-              <div
-                className={styles.progressTrack}
-                data-indeterminate={
-                  progressPercent === null ? "true" : undefined
+            }}
+          >
+            {card}
+          </aside>
+        ) : (
+          <div
+            ref={rootRef}
+            className={styles.backdrop}
+            data-prism-blocking-loader="true"
+            data-prism-blocking-placement="fullscreen"
+            data-theme={theme}
+            data-confirming={confirming ? "true" : undefined}
+            role="dialog"
+            aria-modal="true"
+            aria-busy="true"
+            aria-labelledby={titleId}
+            aria-describedby={detailId}
+            tabIndex={-1}
+            onKeyDown={(event) => {
+              if (event.key === "Escape") {
+                event.preventDefault();
+                if (confirming) {
+                  setConfirming(false);
+                } else if (onCancel) {
+                  requestCancel();
                 }
-                role="progressbar"
-                aria-label={stepLabel}
-                aria-valuemin={progressPercent === null ? undefined : 0}
-                aria-valuemax={progressPercent === null ? undefined : 100}
-                aria-valuenow={progressPercent ?? undefined}
-              >
-                <span className={styles.progressFill} />
-              </div>
-              {elapsedLabel ? (
-                <div className={styles.elapsedRow} aria-live="polite">
-                  <span>Elapsed</span>
-                  <strong>{elapsedLabel}</strong>
-                </div>
-              ) : null}
-            </div>
-            <small>{footer}</small>
-            {confirming && onCancel ? (
-              <div
-                className={styles.confirmPanel}
-                role="alertdialog"
-                aria-modal="true"
-                aria-labelledby={confirmTitleId}
-                aria-describedby={confirmDetailId}
-              >
-                <strong id={confirmTitleId}>{cancelConfirmTitle}</strong>
-                <p id={confirmDetailId}>{cancelConfirmDetail}</p>
-                <div className={styles.confirmActions}>
-                  <button
-                    ref={keepWaitingRef}
-                    type="button"
-                    className={styles.confirmKeep}
-                    onClick={() => setConfirming(false)}
-                  >
-                    Keep waiting
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.confirmStop}
-                    onClick={confirmCancel}
-                  >
-                    Stop
-                  </button>
-                </div>
-              </div>
-            ) : null}
-          </section>
-        </div>,
+              } else if (event.key === "Tab" && !confirming) {
+                event.preventDefault();
+                (cancelButtonRef.current ?? rootRef.current)?.focus({
+                  preventScroll: true,
+                });
+              }
+            }}
+          >
+            {card}
+          </div>
+        ),
         document.body,
       )}
     </>

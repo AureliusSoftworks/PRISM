@@ -1,4 +1,5 @@
-.backdrop {
+.backdrop,
+.docked {
   --loader-bg: rgba(7, 8, 15, .82);
   --loader-card: rgba(18, 19, 31, .92);
   --loader-ink: #f8f7ff;
@@ -10,6 +11,10 @@
   --prism-i: #b8f34a;
   --prism-s: #2fd3e3;
   --prism-m: #9a6cff;
+  color: var(--loader-ink);
+}
+
+.backdrop {
   position: fixed;
   inset: 0;
   z-index: 5000;
@@ -17,7 +22,6 @@
   place-items: center;
   padding: max(20px, env(safe-area-inset-top)) max(20px, env(safe-area-inset-right)) max(20px, env(safe-area-inset-bottom)) max(20px, env(safe-area-inset-left));
   overflow: hidden;
-  color: var(--loader-ink);
   background:
     radial-gradient(circle at 18% 15%, color-mix(in srgb, var(--prism-p) 18%, transparent), transparent 38%),
     radial-gradient(circle at 83% 80%, color-mix(in srgb, var(--prism-s) 16%, transparent), transparent 40%),
@@ -27,7 +31,82 @@
   cursor: wait;
 }
 
-.backdrop[data-theme="light"] {
+/* Soft waits: same refract card, Signal-style bottom-right dock. */
+.docked {
+  position: fixed;
+  z-index: 760;
+  right: 22px;
+  bottom: 22px;
+  width: min(390px, calc(100vw - 28px));
+  pointer-events: none;
+}
+
+.docked > .card {
+  pointer-events: auto;
+  width: 100%;
+  justify-items: stretch;
+  gap: 8px;
+  border-radius: 18px;
+  padding: 18px;
+  text-align: left;
+}
+
+.docked .prismOrb {
+  --prism-orb-size: 52px;
+  justify-self: center;
+  margin-bottom: 0;
+}
+
+.docked .eyebrow {
+  justify-self: start;
+}
+
+.docked .card h2 {
+  max-width: none;
+  margin: 0;
+  font-size: 1.05rem;
+  line-height: 1.25;
+}
+
+.docked .card p {
+  max-width: none;
+  font-size: 0.8rem;
+}
+
+.docked .progressBlock {
+  margin-top: 6px;
+}
+
+.docked .progressTrack {
+  height: 8px;
+}
+
+.footerActions {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.footerActions > button {
+  min-height: 34px;
+  border: 1px solid var(--loader-line);
+  border-radius: 999px;
+  padding: 0 12px;
+  color: var(--loader-ink);
+  background: color-mix(in srgb, var(--prism-m) 14%, var(--loader-card));
+  font: 750 0.72rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.footerActions > button:disabled {
+  cursor: wait;
+  opacity: 0.55;
+}
+
+.backdrop[data-theme="light"],
+.docked[data-theme="light"] {
   --loader-bg: rgba(246, 246, 252, .82);
   --loader-card: rgba(255, 255, 255, .88);
   --loader-ink: #181725;
@@ -273,6 +352,15 @@
 @media (max-width: 620px) {
   .card { border-radius: 22px; padding: 28px 20px; }
   .prismOrb { --prism-orb-size: 64px; margin-block: -4px; }
+  .docked {
+    right: 14px;
+    bottom: 14px;
+  }
+  .docked > .card {
+    border-radius: 16px;
+    padding: 16px;
+  }
+  .docked .prismOrb { --prism-orb-size: 46px; margin-block: 0; }
 }
 
 @media (prefers-reduced-motion: reduce) {

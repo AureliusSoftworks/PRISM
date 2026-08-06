@@ -40,4 +40,26 @@ describe("PrismBlockingLoader confirm-before-cancel contract", () => {
     assert.match(source, /formatBlockingLoaderElapsed\(startedAt, nowMs\)/u);
     assert.match(source, /elapsedLabel/u);
   });
+
+  it("supports a docked soft-wait placement without inert or companion suppression", () => {
+    assert.match(source, /placement\?: PrismBlockingLoaderPlacement/u);
+    assert.match(source, /placement === "docked"/u);
+    assert.match(source, /data-prism-blocking-placement="docked"/u);
+    assert.match(source, /docked \? null : \(\s*<PrismCompanionPresenceBoundary/u);
+    assert.match(source, /if \(docked\) return;/u);
+  });
+});
+
+describe("PrismBlockingLoader docked styles", () => {
+  const css = readFileSync(
+    new URL("./prism-blocking-loader.module.css", import.meta.url),
+    "utf8",
+  );
+
+  it("docks the soft refract card like Signal’s bottom-right activity shell", () => {
+    assert.match(css, /\.docked\s*\{/u);
+    assert.match(css, /right:\s*22px/u);
+    assert.match(css, /bottom:\s*22px/u);
+    assert.match(css, /z-index:\s*760/u);
+  });
 });
