@@ -58,7 +58,169 @@ Each answer is scored out of 10 objective checks:
 ### Product Notes
 
 - Simulated effort should be described as a local-model quality booster, not as converting weak models into true reasoning models.
-- Online OpenAI/Anthropic models should not receive Prism simulated-effort private-pass chains.
-- Online native reasoning should remain provider-native.
-- Online non-reasoning effort customization should no-op clearly instead of silently multiplying paid API calls.
-- Psychic mode can still report concise summaries/diagnostics, but private artifacts remain live-only and must not be persisted into docs or transcript rows.
+- Keep Extra High available manually; Auto should stay capped at High unless a later policy explicitly opts in.
+
+## 2026-08-05 - Cafe constraint head-to-head (`llama3.2` vs `gpt-5.6-sol`)
+
+### Scope
+
+- Prompt: default cafe staffing constraint task (schedule table + `R1`–`R3` + feasibility sentence)
+- Local model: `llama3.2`
+- Strong reference: `gpt-5.6-sol` / High native effort
+- Effort for simulated local: `high`
+- Artifacts:
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T00-41-32-802Z.md`
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T00-41-32-802Z.json`
+- Prior meta-prompt run (superseded as method, kept for contrast):
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T00-35-15-806Z.md`
+
+### Why the prompt changed
+
+The previous default brief asked models to design simulated Effort itself. Blind judging became noisy (all answers weak/meta). The cafe task is checkable and domain-neutral.
+
+### Results
+
+| Run | Duration | Blind judge total | Notes |
+| --- | ---: | ---: | --- |
+| local baseline (`llama3.2`, no simulation) | 8.6s | 4 | Produced the format, but invalid schedule (2-hour close; Bob closes) |
+| thinking reference (`gpt-5.6-sol`, High) | 7.9s | 9 | Valid feasible schedule; clear winner |
+| local simulated (`llama3.2`, High simulation) | 60.2s | 1 | Private passes ran (plan/draft/audit), but final visible answer collapsed to the literal token `assistant` |
+
+Judge ranking: Sol ≫ baseline ≫ simulated collapse.
+
+### Interpretation
+
+- Constraint prompt restored a sane ranking: strong native reference beat local baseline.
+- Simulated Effort **machinery** was healthy (`simulated: true`, 3 passes, scratchpad/guidance present, no `invalid_json`).
+- Simulated Effort **final answer** failed this run: 9 chars (`assistant`). Do not treat this as “simulation hurts quality”; treat as a collapse/flake to rerun before the next local model.
+- Baseline still failed hard constraints, so there is room for simulation to help if the final pass stays intact.
+
+### Next
+
+1. Optional: one `llama3.2` simulated rerun to see if the collapse reproduces.
+2. Then move to `qwen3.6` with the same cafe prompt.
+
+## 2026-08-05 - Cafe constraint retry (`llama3.2` collapse check)
+
+### Scope
+
+- Same cafe prompt / High simulated Effort / `gpt-5.6-sol` reference as the prior head-to-head
+- Command:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts --local-model llama3.2 --thinking-provider openai --thinking-model gpt-5.6-sol --effort high --include-scratchpad
+```
+
+- Artifacts:
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T00-55-20-389Z.md`
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T00-55-20-389Z.json`
+
+### Results
+
+| Run | Duration | Blind judge total | Notes |
+| --- | ---: | ---: | --- |
+| local baseline (`llama3.2`, no simulation) | 8.1s | 4 | Same failure class as prior: 2-hour close; Bob closes; falsely claims feasible |
+| thinking reference (`gpt-5.6-sol`, High) | 6.2s | 10 | Valid overlapping 4-hour coverage; clear winner |
+| local simulated (`llama3.2`, High simulation) | 16.3s | 2 | Private passes healthy (3 passes, scratchpad/guidance present); final answer **starts with literal `assistant`**, then an invalid schedule (Bob closes; extends past 6pm; only two risk notes) |
+
+Judge ranking: Sol ≫ baseline ≫ simulated.
+
+### Interpretation
+
+- The total “final = only `assistant`” collapse did **not** fully repeat; a softer form did: role-token prefix leak + still-invalid schedule.
+- Simulation machinery remains healthy; final-generation / assembly is the suspect layer for the `assistant` prefix.
+- Simulated answer still lost to baseline on the blind judge (2 vs 4), so this is not yet evidence the ladder helps `llama3.2` on this prompt.
+- Treat the `assistant` prefix as a reproducible red flag for `/effort-review`, not as a one-off flake.
+
+### Root cause (confirmed live)
+
+Trailing Psychic guidance was appended as `system` **after** the last `user` turn. A direct Ollama probe on `llama3.2`:
+
+- `[system, user]` → `"Hello"`
+- `[system, user, system(guidance)]` → `"assistant\n\nhello"`
+- merged leading system → `"hello"`
+
+Fix tracked as `PRISM-n7ijv`: insert guidance before the last user message; strip leading role markers from local replies.
+
+### Next
+
+1. Verify with cafe head-to-head after the message-order fix.
+2. Then continue the local-model series (`qwen3.6` → `gemma4` → `gpt-oss`).
+
+## 2026-08-05 - Cafe constraint verify after role-token fix (`llama3.2`)
+
+### Scope
+
+- Same cafe prompt / High simulated Effort / `gpt-5.6-sol` reference
+- Code: Psychic guidance inserted before last user; local `stripLeadingChatRoleMarker`
+- Bead: `PRISM-n7ijv`
+- Artifacts:
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T01-15-29-068Z.md`
+  - `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T01-15-29-068Z.json`
+
+### Results
+
+| Run | Duration | Blind judge total | Notes |
+| --- | ---: | ---: | --- |
+| local baseline | 7.1s | 3 | Still invalid (Bob closes; 2-hour shift) |
+| thinking reference (`gpt-5.6-sol`) | 8.0s | 9 | Valid winner |
+| local simulated High | 17.6s | 2 | **No `assistant` prefix.** Schedule still invalid (Bob closes; past 6pm; only two risk notes) |
+
+Judge ranking: Sol ≫ baseline ≫ simulated.
+
+### Interpretation
+
+- Role-token leak is fixed on this prompt/model.
+- Simulated Effort still does not beat baseline for `llama3.2` on the cafe task — next `/effort-review` iteration is quality of guidance → final answer, not presentation collapse.
+
+### Next
+
+1. Continue model series (`qwen3.6` …) and/or tighten final-answer constraint transfer for weak local models.
+
+## 2026-08-05 - Thrifty vs legacy simulated budgets (`llama3.2` ladder QA)
+
+### Scope
+
+- Model: `llama3.2` (local Ollama)
+- Suite: effort ladder `--quick --repeats 2` (rollout-table constraint trap)
+- Profiles: `thrifty` (product default) vs `legacy` (pre-thrifty A/B via `--budget-profile`)
+- Commands:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --budget-profile thrifty
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --budget-profile legacy
+```
+
+- Artifacts:
+  - thrifty: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T01-58-04-794Z.md`
+  - legacy: `artifacts/effort-ladder-evals/effort-ladder-2026-08-06T02-00-05-762Z.md`
+
+### Integrity QA
+
+- Pass ladder identical for both: `none=0`, `minimal/low=1`, `medium=2`, `high=3`, `xhigh=4`
+- Planning token budgets differ at low/med as designed (`200/280/400` thrifty vs `300/420/560` legacy); `high`/`xhigh` stay `720`/`900`
+- Zero planning warnings; no `assistant` role-token collapses
+- LOCAL-only (Ollama) for every private + visible pass
+
+### Aggregate results
+
+| Effort | Thrifty score | Legacy score | Thrifty median ms | Legacy median ms | Passes |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| none | 7.0 | 7.5 | 7648 | 3222 | 0 |
+| minimal | 9.0 | 9.5 | 8869 | 7048 | 1 |
+| low | 8.5 | 10.0 | 7545 | 6967 | 1 |
+| medium | 9.0 | 7.5 | 11665 | 9113 | 2 |
+| high | 10.0 | 9.0 | 12050 | 7710 | 3 |
+| xhigh | 8.0 | 8.5 | 10103 | 8178 | 4 |
+
+### Interpretation
+
+- **Logic works**: profile switch + thrifty clamps are live (recorded budgets match helpers; guidance at thrifty `minimal`/`low` capped ~905 vs legacy ~952–1041).
+- **Quality**: thrifty `high` was the best arm (10/10 both repeats) and beat thrifty `none`; thrifty `medium` held 9 while legacy `medium` dipped to 7.5. Thrifty `low` was slightly weaker than legacy `low` on this n=2 smoke.
+- **Latency**: thrifty was not faster in this sequential smoke (machine variance + thrifty `high` filled a richer scratchpad ~1055 chars vs legacy ~267). Do not claim a wall-clock win from this run; re-run interleaved or warm-cached if latency is the claim.
+- **xhigh**: still not automatically better than `high` (matches prior calibration).
+
+### Product Notes
+
+- Keep thrifty as the product default for simulated Effort; reserve `--budget-profile legacy` for eval A/B only.
+- ONLINE Fast (`service_tier`) remains a separate future control.

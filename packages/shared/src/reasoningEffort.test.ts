@@ -14,6 +14,16 @@ import {
   reasoningGenerationBudgetMs,
   reasoningEffortForRequest,
   resolveModelReasoningEffortCapability,
+  simulatedPsychicAnswerGuidanceMaxChars,
+  simulatedPsychicPlanningMaxTokens,
+  simulatedPsychicPrivateArtifactMaxChars,
+  simulatedPsychicPrivatePassMaxTokens,
+  simulatedPsychicScratchpadMaxChars,
+  simulatedSurfacePreparationMaxTokens,
+  simulatedSurfacePreparationNoteMaxChars,
+  getSimulatedEffortBudgetProfile,
+  simulatedEffortUsesThriftyPrompting,
+  withSimulatedEffortBudgetProfile,
 } from "./reasoningEffort.ts";
 
 describe("reasoning effort helpers", () => {
@@ -25,6 +35,53 @@ describe("reasoning effort helpers", () => {
     assert.equal(reasoningEffortForRequest("auto"), null);
     assert.equal(reasoningEffortForRequest("none"), "none");
     assert.equal(reasoningEffortForRequest("minimal"), "minimal");
+  });
+
+  it("keeps simulated-effort token budgets thrifty at low tiers and richer at high", () => {
+    assert.equal(getSimulatedEffortBudgetProfile(), "thrifty");
+    assert.equal(simulatedSurfacePreparationMaxTokens("minimal"), 72);
+    assert.equal(simulatedSurfacePreparationMaxTokens("low"), 96);
+    assert.equal(simulatedSurfacePreparationMaxTokens("medium"), 140);
+    assert.equal(simulatedSurfacePreparationMaxTokens("high"), 220);
+    assert.equal(simulatedSurfacePreparationMaxTokens("xhigh"), 320);
+    assert.ok(
+      simulatedSurfacePreparationNoteMaxChars("medium") <
+        simulatedSurfacePreparationNoteMaxChars("high"),
+    );
+    assert.ok(
+      simulatedPsychicPlanningMaxTokens("low") <
+        simulatedPsychicPlanningMaxTokens("high"),
+    );
+    assert.equal(simulatedPsychicPrivatePassMaxTokens("medium", "audit"), 260);
+    assert.equal(simulatedPsychicPrivatePassMaxTokens("high", "draft"), 640);
+    assert.equal(simulatedPsychicPrivatePassMaxTokens("xhigh", "draft"), 1_000);
+    assert.ok(
+      simulatedPsychicScratchpadMaxChars("medium") <
+        simulatedPsychicScratchpadMaxChars("xhigh"),
+    );
+    assert.ok(
+      simulatedPsychicAnswerGuidanceMaxChars("low") <
+        simulatedPsychicAnswerGuidanceMaxChars("high"),
+    );
+    assert.equal(simulatedPsychicPrivateArtifactMaxChars("medium"), 1_200);
+    assert.equal(simulatedPsychicPrivateArtifactMaxChars("xhigh"), 3_200);
+  });
+
+  it("restores legacy simulated budgets for eval A/B", async () => {
+    await withSimulatedEffortBudgetProfile("legacy", async () => {
+      assert.equal(getSimulatedEffortBudgetProfile(), "legacy");
+      assert.equal(simulatedEffortUsesThriftyPrompting(), false);
+      assert.equal(simulatedSurfacePreparationMaxTokens("minimal"), 120);
+      assert.equal(simulatedSurfacePreparationMaxTokens("high"), 220);
+      assert.equal(simulatedSurfacePreparationNoteMaxChars("low"), 1_800);
+      assert.equal(simulatedPsychicPlanningMaxTokens("medium"), 560);
+      assert.equal(simulatedPsychicPrivatePassMaxTokens("high", "draft"), 900);
+      assert.equal(simulatedPsychicScratchpadMaxChars("minimal"), 4_000);
+      assert.equal(simulatedPsychicAnswerGuidanceMaxChars("low"), 1_400);
+      assert.equal(simulatedPsychicPrivateArtifactMaxChars("medium"), 3_200);
+    });
+    assert.equal(getSimulatedEffortBudgetProfile(), "thrifty");
+    assert.equal(simulatedEffortUsesThriftyPrompting(), true);
   });
 
   it("budgets one complete generation attempt by effort", () => {

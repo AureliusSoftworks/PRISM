@@ -25,6 +25,216 @@ export const MODEL_REASONING_EFFORT_PREFERENCE_VALUES = [
 export type ModelReasoningEffortPreference =
   (typeof MODEL_REASONING_EFFORT_PREFERENCE_VALUES)[number];
 
+/**
+ * Simulated-effort token and note budgets bake a thrifty “local Fast”
+ * default into the ladder: lean at minimal/low/medium, richer at high/xhigh.
+ * Native provider Fast (ONLINE service tier) remains a separate future control.
+ *
+ * Eval harnesses may temporarily select `legacy` to A/B against the pre-thrifty
+ * budgets. Product runtime always uses `thrifty` unless an eval sets otherwise.
+ */
+export type SimulatedEffortPassName = "plan" | "draft" | "audit" | "revision";
+export type SimulatedEffortBudgetProfile = "thrifty" | "legacy";
+
+let simulatedEffortBudgetProfile: SimulatedEffortBudgetProfile = "thrifty";
+
+export function getSimulatedEffortBudgetProfile(): SimulatedEffortBudgetProfile {
+  return simulatedEffortBudgetProfile;
+}
+
+/** Eval-only switch. Prefer `withSimulatedEffortBudgetProfile` for scoped runs. */
+export function setSimulatedEffortBudgetProfile(
+  profile: SimulatedEffortBudgetProfile,
+): void {
+  simulatedEffortBudgetProfile = profile;
+}
+
+export async function withSimulatedEffortBudgetProfile<T>(
+  profile: SimulatedEffortBudgetProfile,
+  run: () => Promise<T>,
+): Promise<T> {
+  const previous = simulatedEffortBudgetProfile;
+  simulatedEffortBudgetProfile = profile;
+  try {
+    return await run();
+  } finally {
+    simulatedEffortBudgetProfile = previous;
+  }
+}
+
+function resolveSimulatedEffortTier(
+  value: unknown,
+): Exclude<ReasoningEffort, "auto" | "none"> | null {
+  const effort = normalizeReasoningEffort(value);
+  if (effort === "auto" || effort === "none") return null;
+  return effort;
+}
+
+/** Max tokens for one Coffee/Signal/Debate/Story private preparation pass. */
+export function simulatedSurfacePreparationMaxTokens(value: unknown): number {
+  const effort = resolveSimulatedEffortTier(value);
+  if (simulatedEffortBudgetProfile === "legacy") {
+    return effort === "minimal" ? 120 : 220;
+  }
+  switch (effort) {
+    case "minimal":
+      return 72;
+    case "low":
+      return 96;
+    case "medium":
+      return 140;
+    case "high":
+      return 220;
+    case "xhigh":
+      return 320;
+    default:
+      return 96;
+  }
+}
+
+/** Cap retained private notes injected before the visible generation. */
+export function simulatedSurfacePreparationNoteMaxChars(value: unknown): number {
+  if (simulatedEffortBudgetProfile === "legacy") return 1_800;
+  switch (resolveSimulatedEffortTier(value)) {
+    case "minimal":
+      return 480;
+    case "low":
+      return 640;
+    case "medium":
+      return 900;
+    case "high":
+      return 1_400;
+    case "xhigh":
+      return 1_800;
+    default:
+      return 640;
+  }
+}
+
+/** Max tokens for Chat Psychic plan JSON (summary + scratchpad + guidance). */
+export function simulatedPsychicPlanningMaxTokens(value: unknown): number {
+  const effort = resolveSimulatedEffortTier(value);
+  if (simulatedEffortBudgetProfile === "legacy") {
+    switch (effort) {
+      case "xhigh":
+        return 900;
+      case "high":
+        return 720;
+      case "medium":
+        return 560;
+      case "low":
+        return 420;
+      case "minimal":
+        return 300;
+      default:
+        return 260;
+    }
+  }
+  switch (effort) {
+    case "minimal":
+      return 200;
+    case "low":
+      return 280;
+    case "medium":
+      return 400;
+    case "high":
+      return 720;
+    case "xhigh":
+      return 900;
+    default:
+      return 260;
+  }
+}
+
+/** Max tokens for a Chat Psychic private draft/audit/revision pass. */
+export function simulatedPsychicPrivatePassMaxTokens(
+  value: unknown,
+  passName: Exclude<SimulatedEffortPassName, "plan">,
+): number {
+  const effort = resolveSimulatedEffortTier(value);
+  if (simulatedEffortBudgetProfile === "legacy") {
+    switch (passName) {
+      case "draft":
+        return effort === "xhigh" ? 1_100 : 900;
+      case "audit":
+        return effort === "medium" ? 420 : effort === "xhigh" ? 760 : 620;
+      case "revision":
+        return 760;
+    }
+  }
+  switch (passName) {
+    case "draft":
+      return effort === "xhigh" ? 1_000 : 640;
+    case "audit":
+      if (effort === "medium") return 260;
+      if (effort === "xhigh") return 700;
+      return 420;
+    case "revision":
+      return effort === "xhigh" ? 640 : 520;
+  }
+}
+
+/** Soft cap on persisted/parsed Chat Psychic scratchpad text by effort. */
+export function simulatedPsychicScratchpadMaxChars(value: unknown): number {
+  if (simulatedEffortBudgetProfile === "legacy") return 4_000;
+  switch (resolveSimulatedEffortTier(value)) {
+    case "minimal":
+      return 800;
+    case "low":
+      return 1_200;
+    case "medium":
+      return 1_800;
+    case "high":
+      return 2_800;
+    case "xhigh":
+      return 4_000;
+    default:
+      return 1_200;
+  }
+}
+
+/** Soft cap on Chat Psychic answerGuidance text by effort. */
+export function simulatedPsychicAnswerGuidanceMaxChars(value: unknown): number {
+  if (simulatedEffortBudgetProfile === "legacy") return 1_400;
+  switch (resolveSimulatedEffortTier(value)) {
+    case "minimal":
+      return 500;
+    case "low":
+      return 700;
+    case "medium":
+      return 900;
+    case "high":
+      return 1_200;
+    case "xhigh":
+      return 1_400;
+    default:
+      return 700;
+  }
+}
+
+/** Soft cap on Chat Psychic private draft/audit/revision artifacts. */
+export function simulatedPsychicPrivateArtifactMaxChars(value: unknown): number {
+  if (simulatedEffortBudgetProfile === "legacy") return 3_200;
+  switch (resolveSimulatedEffortTier(value)) {
+    case "medium":
+      return 1_200;
+    case "high":
+      return 2_000;
+    case "xhigh":
+      return 3_200;
+    case "minimal":
+    case "low":
+      return 900;
+    default:
+      return 1_200;
+  }
+}
+
+/** Whether prompt wording should ask for thrifty short private notes. */
+export function simulatedEffortUsesThriftyPrompting(): boolean {
+  return simulatedEffortBudgetProfile === "thrifty";
+}
+
 /** Maximum wall time for one complete response attempt, including any
  * simulated preparation passes and the final visible generation. */
 export function reasoningGenerationBudgetMs(

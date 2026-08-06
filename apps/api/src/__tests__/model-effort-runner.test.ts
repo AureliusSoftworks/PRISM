@@ -95,6 +95,42 @@ describe("simulated model effort runner", () => {
     );
   });
 
+  it("scales thrifty simulated preparation budgets by effort", async () => {
+    const calls: Array<{
+      messages: ProviderMessage[];
+      options?: GenerateOptions;
+    }> = [];
+    const provider: LlmProvider = {
+      async generateResponse(messages, options) {
+        calls.push({ messages, options });
+        return `private note ${calls.length} `.repeat(80);
+      },
+    };
+    await prepareMessagesWithSimulatedEffort({
+      provider,
+      messages: [{ role: "user", content: "Argue it." }],
+      options: { model: "qwen3:9b" },
+      effort: "low",
+      surface: "coffee",
+    });
+    assert.equal(calls.length, 1);
+    assert.equal(calls[0]?.options?.maxTokens, 96);
+    assert.match(calls[0]?.messages.at(-1)?.content ?? "", /under ~60 words/u);
+
+    calls.length = 0;
+    const preparedHigh = await prepareMessagesWithSimulatedEffort({
+      provider,
+      messages: [{ role: "user", content: "Argue it." }],
+      options: { model: "qwen3:9b" },
+      effort: "high",
+      surface: "coffee",
+    });
+    assert.equal(calls.length, 3);
+    assert.ok(calls.every((call) => call.options?.maxTokens === 220));
+    const note = preparedHigh.at(-1)?.content ?? "";
+    assert.ok(note.length <= 1_400 + 160);
+  });
+
   it("uses the saved ladder without mutating canonical messages", async () => {
     const calls: Array<{
       messages: ProviderMessage[];

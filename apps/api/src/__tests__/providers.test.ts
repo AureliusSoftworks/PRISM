@@ -20,6 +20,7 @@ import {
   resetModelCatalogCacheForTests,
   SECONDARY_OLLAMA_MODEL_PREFIX,
   selectProvider,
+  stripLeadingChatRoleMarker,
 } from "../providers.ts";
 
 /**
@@ -29,6 +30,20 @@ import {
  * If this test ever needs to be weakened, think hard — it's the thing
  * keeping the "LOCAL" badge honest.
  */
+describe("stripLeadingChatRoleMarker", () => {
+  it("removes a leading chat-role line without touching later prose", () => {
+    assert.equal(
+      stripLeadingChatRoleMarker("assistant\n\nHello there."),
+      "Hello there."
+    );
+    assert.equal(stripLeadingChatRoleMarker("assistant"), "");
+    assert.equal(
+      stripLeadingChatRoleMarker("The assistant helped."),
+      "The assistant helped."
+    );
+  });
+});
+
 describe("selectProvider", () => {
   describe("LOCAL mode invariant", () => {
     it("returns LocalOllamaProvider when preferredProvider is 'local'", () => {

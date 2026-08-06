@@ -280,6 +280,165 @@ export const LIVE_BAKE_PREMIUM_UPGRADE_SEAM = {
   blockInHardLocal: true,
 } as const;
 
+/**
+ * Known Debate floor/step keys → loader copy. Unknown snake_case keys fall
+ * through {@link humanizeLiveBakePhaseLabel}'s generic title-casing.
+ */
+const LIVE_BAKE_DEBATE_STEP_LABELS: Readonly<Record<string, string>> = {
+  intro: "Opening the chamber",
+  turnabout_intro: "Opening the chamber",
+  opening_for: "For side opening",
+  opening_against: "Against side opening",
+  opening_for_player: "Your For opening",
+  opening_against_player: "Your Against opening",
+  challenge_for_prompt: "For challenge",
+  challenge_against_prompt: "Against challenge",
+  challenge_for: "For challenge",
+  challenge_against: "Against challenge",
+  challenge_judge_question: "Judge challenge question",
+  challenge_participant_prompt: "Your challenge",
+  challenge_participant_partner: "Partner challenge",
+  challenge_opponent_prompt: "Opponent challenge",
+  moderator_to_rebuttal: "Moving to rebuttal",
+  moderator_to_closing: "Moving to closing",
+  moderator_to_jury: "Turning to the Jury",
+  closing_for: "For closing",
+  closing_against: "Against closing",
+  closing_moderator: "Moderator closing",
+  participant_closing_moderator: "Moderator closing",
+  jury_closing_moderator: "Moderator closing",
+  judge_closing_moderator: "Moderator closing",
+  judge_aftermath_for: "For reacts to the ruling",
+  judge_aftermath_against: "Against reacts to the ruling",
+  jury_aftermath_for: "For reacts to the Jury",
+  jury_aftermath_against: "Against reacts to the Jury",
+  judge_objection_ruling: "Ruling on an objection",
+  participant_objection_reason: "Objection reason",
+  audience_order: "Calling the gallery to order",
+  pause: "Recess",
+  resume: "Returning from recess",
+  completed: "Finishing the gallery",
+  turnabout_testimony_for: "For testimony",
+  turnabout_testimony_against: "Against testimony",
+  turnabout_spectator_press: "Pressing the testimony",
+  turnabout_ballot_moderator: "Moderator ballot",
+  turnabout_ballot_for: "For ballot",
+  turnabout_ballot_against: "Against ballot",
+  ballot_for: "For ballot",
+  ballot_against: "Against ballot",
+};
+
+const LIVE_BAKE_PHASE_TOKEN_LABELS: Readonly<Record<string, string>> = {
+  for: "For",
+  against: "Against",
+  player: "your",
+  moderator: "Moderator",
+  jury: "Jury",
+  judge: "Judge",
+  participant: "Participant",
+  partner: "partner",
+  opponent: "opponent",
+  opening: "opening",
+  closing: "closing",
+  challenge: "challenge",
+  rebuttal: "rebuttal",
+  testimony: "testimony",
+  examination: "examination",
+  reversal: "reversal",
+  resolution: "resolution",
+  aftermath: "aftermath",
+  deliberation: "deliberation",
+  initial: "first thoughts",
+  final: "final ballot",
+  press: "press",
+  ruling: "ruling",
+  objection: "objection",
+  reason: "reason",
+  prompt: "prompt",
+  question: "question",
+  ballot: "ballot",
+  intro: "opening",
+  to: "to",
+  of: "of",
+  turnabout: "Turnabout",
+};
+
+function titleCaseLiveBakeWord(word: string): string {
+  if (!word) return word;
+  return `${word.charAt(0).toUpperCase()}${word.slice(1)}`;
+}
+
+function humanizeLiveBakeSnakeCase(label: string): string {
+  const tokens = label.split("_").filter(Boolean);
+  if (tokens.length === 0) return label;
+
+  const trailingNumber =
+    tokens.length > 1 && /^\d+$/u.test(tokens[tokens.length - 1]!)
+      ? Number(tokens[tokens.length - 1])
+      : null;
+  const bodyTokens =
+    trailingNumber === null ? tokens : tokens.slice(0, -1);
+
+  if (bodyTokens[0] === "rebuttal" && bodyTokens.length >= 2) {
+    const side = bodyTokens[1] === "against" ? "Against" : "For";
+    // Forum rebuttal step keys use 1-based round ids (rebuttal_for_1).
+    const roundLabel =
+      trailingNumber !== null ? ` · round ${Math.max(1, trailingNumber)}` : "";
+    return `${side} rebuttal${roundLabel}`;
+  }
+
+  if (bodyTokens[0] === "jury" && bodyTokens.length >= 2) {
+    const kind = bodyTokens[1];
+    const seat =
+      trailingNumber !== null ? ` · seat ${trailingNumber + 1}` : "";
+    if (kind === "initial") return `Jury first thoughts${seat}`;
+    if (kind === "deliberation") return `Jury deliberation${seat}`;
+    if (kind === "final") return `Jury final ballot${seat}`;
+    if (kind === "aftermath") {
+      const side = bodyTokens[2] === "against" ? "Against" : "For";
+      return `${side} reacts to the Jury`;
+    }
+  }
+
+  const words = bodyTokens.map((token, index) => {
+    const mapped = LIVE_BAKE_PHASE_TOKEN_LABELS[token];
+    if (mapped) {
+      if (index === 0) return titleCaseLiveBakeWord(mapped);
+      return mapped;
+    }
+    return titleCaseLiveBakeWord(token.replace(/-/gu, " "));
+  });
+
+  let phrase = words.join(" ").replace(/\s+/gu, " ").trim();
+  if (trailingNumber !== null && !phrase.includes("round") && !phrase.includes("seat")) {
+    phrase = `${phrase} · ${trailingNumber + 1}`;
+  }
+  return phrase || label;
+}
+
+/**
+ * Turn machine step keys (e.g. `opening_for`) into loader-friendly copy.
+ * Already-human labels (spaces, Ready, Preparing…) pass through unchanged.
+ */
+export function humanizeLiveBakePhaseLabel(
+  label: string | null | undefined,
+  fallback = "Preparing…",
+): string {
+  const trimmed = typeof label === "string" ? label.trim() : "";
+  if (!trimmed) return fallback;
+  if (LIVE_BAKE_DEBATE_STEP_LABELS[trimmed]) {
+    return LIVE_BAKE_DEBATE_STEP_LABELS[trimmed]!;
+  }
+  // Already prose, status copy, or Signal segment words like "interview".
+  if (/\s/u.test(trimmed) || !/_/u.test(trimmed)) {
+    if (trimmed === "interview") return "Interview";
+    if (trimmed === "opening") return "Opening";
+    if (trimmed === "closing") return "Closing";
+    return trimmed;
+  }
+  return humanizeLiveBakeSnakeCase(trimmed);
+}
+
 export function isLiveBakeArtifactV1(
   value: unknown,
 ): value is LiveBakeArtifactV1 {

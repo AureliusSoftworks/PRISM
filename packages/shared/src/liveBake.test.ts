@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   createEmptyLiveBakeArtifact,
   estimateSpokenDurationMs,
+  humanizeLiveBakePhaseLabel,
   isLiveBakeArtifactV1,
   LIVE_BAKE_PREMIUM_UPGRADE_SEAM,
   LIVE_BAKE_UNLOCK_BUFFER_MS,
@@ -126,5 +127,23 @@ describe("liveBake", () => {
       "coffee",
       "debate",
     ]);
+  });
+
+  it("humanizes Debate bake step keys for loader copy", () => {
+    assert.equal(humanizeLiveBakePhaseLabel("opening_for"), "For side opening");
+    assert.equal(
+      humanizeLiveBakePhaseLabel("opening_against"),
+      "Against side opening",
+    );
+    assert.equal(
+      humanizeLiveBakePhaseLabel("jury_initial_0"),
+      "Jury first thoughts · seat 1",
+    );
+    assert.equal(
+      humanizeLiveBakePhaseLabel("Preparing the gallery"),
+      "Preparing the gallery",
+    );
+    assert.equal(humanizeLiveBakePhaseLabel("interview"), "Interview");
+    assert.equal(humanizeLiveBakePhaseLabel(""), "Preparing…");
   });
 });

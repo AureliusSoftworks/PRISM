@@ -234,6 +234,16 @@ function modelCatalogCacheKey(
 export function resetModelCatalogCacheForTests(): void {
   modelCatalogCache.clear();
 }
+
+/**
+ * Some Ollama chat templates emit a literal role marker when the prompt ends on
+ * a trailing system message after the last user turn. Strip a leading
+ * assistant/user/system line so that template artifact never reaches players.
+ */
+export function stripLeadingChatRoleMarker(text: string): string {
+  return text.replace(/^\s*(?:assistant|user|system)(?:\s*\r?\n+|\s*$)/i, "");
+}
+
 export const SECONDARY_OLLAMA_MODEL_PREFIX = "ollama-secondary:";
 const DUAL_OLLAMA_WORKLOAD_STATUS_CACHE_MS = 30_000;
 
@@ -1441,9 +1451,13 @@ export class LocalOllamaProvider implements LlmProvider {
     };
     const msg = payload.message;
     const trimmedContent =
-      typeof msg?.content === "string" ? msg.content.trim() : "";
+      typeof msg?.content === "string"
+        ? stripLeadingChatRoleMarker(msg.content.trim())
+        : "";
     const trimmedThinking =
-      typeof msg?.thinking === "string" ? msg.thinking.trim() : "";
+      typeof msg?.thinking === "string"
+        ? stripLeadingChatRoleMarker(msg.thinking.trim())
+        : "";
     const toolCalls = msg?.tool_calls;
     const hasToolCalls = Array.isArray(toolCalls) && toolCalls.length > 0;
 

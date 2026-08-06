@@ -3,6 +3,8 @@ import { describe, it } from "node:test";
 
 import {
   REQUIRED_PRIMARY_LOCAL_MODEL_ID,
+  clampOnlineAutoProviderBias,
+  formatOnlineAutoProviderBiasLabel,
   defaultHiddenModelIdsForCatalog,
   isCommonOnlineChatModel,
   reconcileHiddenModelIdsForCatalog,
@@ -262,5 +264,147 @@ describe("resolveAutoModel", () => {
     assert.equal(resolved.provider, "openai");
     assert.equal(resolved.model, "gpt-4o-mini");
     assert.equal(resolved.autoRoute, undefined);
+  });
+
+  describe("onlineAutoProviderBias", () => {
+    const nearTieCatalog = {
+      local: [{ id: REQUIRED_PRIMARY_LOCAL_MODEL_ID }],
+      online: [
+        { id: "gpt-4o-mini", provider: "openai" as const },
+        { id: "claude-haiku-4-5", provider: "anthropic" as const },
+      ],
+    };
+    const equalPrice = () => ({
+      inputUsdPerMillion: 1,
+      outputUsdPerMillion: 1,
+    });
+    const lightContext = { surface: "chat", inputText: "Hello" };
+
+    it("matches unbiased ranking when bias is 0", () => {
+      const unbiased = resolveAutoModel({
+        provider: "openai",
+        lane: "online",
+        hiddenModelIds: [],
+        catalog: nearTieCatalog,
+        onlineAutoProviderBias: 0,
+        routingContext: lightContext,
+        priceForModel: equalPrice,
+      });
+      const omitted = resolveAutoModel({
+        provider: "openai",
+        lane: "online",
+        hiddenModelIds: [],
+        catalog: nearTieCatalog,
+        routingContext: lightContext,
+        priceForModel: equalPrice,
+      });
+      assert.deepEqual(unbiased, omitted);
+      // Equal cost/latency: alphabetical provider tie-break favors anthropic.
+      assert.equal(unbiased.provider, "anthropic");
+      assert.equal(unbiased.model, "claude-haiku-4-5");
+    });
+
+    it("leans OpenAI on near-ties when bias is negative", () => {
+      const resolved = resolveAutoModel({
+        provider: "openai",
+        lane: "online",
+        hiddenModelIds: [],
+        catalog: nearTieCatalog,
+        onlineAutoProviderBias: -1,
+        routingContext: lightContext,
+        priceForModel: equalPrice,
+      });
+      assert.equal(resolved.provider, "openai");
+      assert.equal(resolved.model, "gpt-4o-mini");
+    });
+
+    it("leans Anthropic on near-ties when bias is positive", () => {
+      const resolved = resolveAutoModel({
+        provider: "openai",
+        lane: "online",
+        hiddenModelIds: [],
+        catalog: nearTieCatalog,
+        onlineAutoProviderBias: 1,
+        routingContext: lightContext,
+        priceForModel: equalPrice,
+      });
+      assert.equal(resolved.provider, "anthropic");
+      assert.equal(resolved.model, "claude-haiku-4-5");
+    });
+
+    it("still yields to a clearly cheaper other provider at full lean", () => {
+      const catalog = {
+        local: [{ id: REQUIRED_PRIMARY_LOCAL_MODEL_ID }],
+        online: [
+          { id: "gpt-4o-mini", provider: "openai" as const },
+          { id: "claude-haiku-4-5", provider: "anthropic" as const },
+        ],
+      };
+      const resolved = resolveAutoModel({
+        provider: "openai",
+        lane: "online",
+        hiddenModelIds: [],
+        catalog,
+        // Max Anthropic lean — OpenAI remains vastly cheaper.
+        onlineAutoProviderBias: 1,
+        routingContext: lightContext,
+        priceForModel: (provider) =>
+          provider === "openai"
+            ? { inputUsdPerMillion: 0.1, outputUsdPerMillion: 0.1 }
+            : { inputUsdPerMillion: 50_000, outputUsdPerMillion: 50_000 },
+      });
+      assert.equal(resolved.provider, "openai");
+      assert.equal(resolved.model, "gpt-4o-mini");
+    });
+
+    it("ignores provider bias for LOCAL Auto", () => {
+      const localCatalog = {
+        local: [
+          { id: REQUIRED_PRIMARY_LOCAL_MODEL_ID },
+          { id: "mistral:latest" },
+        ],
+        online: [
+          { id: "gpt-4o-mini", provider: "openai" as const },
+          { id: "claude-haiku-4-5", provider: "anthropic" as const },
+        ],
+      };
+      const withBias = resolveAutoModel({
+        provider: "local",
+        lane: "local",
+        hiddenModelIds: [],
+        catalog: localCatalog,
+        onlineAutoProviderBias: 1,
+        routingContext: lightContext,
+      });
+      const withoutBias = resolveAutoModel({
+        provider: "local",
+        lane: "local",
+        hiddenModelIds: [],
+        catalog: localCatalog,
+        routingContext: lightContext,
+      });
+      assert.equal(withBias.provider, "local");
+      assert.deepEqual(withBias, withoutBias);
+    });
+  });
+});
+
+describe("clampOnlineAutoProviderBias", () => {
+  it("clamps and defaults invalid values", () => {
+    assert.equal(clampOnlineAutoProviderBias(0), 0);
+    assert.equal(clampOnlineAutoProviderBias(-1), -1);
+    assert.equal(clampOnlineAutoProviderBias(1), 1);
+    assert.equal(clampOnlineAutoProviderBias(-2), -1);
+    assert.equal(clampOnlineAutoProviderBias(2), 1);
+    assert.equal(clampOnlineAutoProviderBias(Number.NaN), 0);
+    assert.equal(clampOnlineAutoProviderBias("nope"), 0);
+    assert.equal(clampOnlineAutoProviderBias(null), 0);
+  });
+
+  it("formats lean labels for Settings", () => {
+    assert.equal(formatOnlineAutoProviderBiasLabel(0), "Balanced");
+    assert.equal(formatOnlineAutoProviderBiasLabel(0.02), "Balanced");
+    assert.equal(formatOnlineAutoProviderBiasLabel(-0.4), "Lean OpenAI 40%");
+    assert.equal(formatOnlineAutoProviderBiasLabel(1), "Lean Anthropic 100%");
   });
 });

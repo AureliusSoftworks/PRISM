@@ -121,6 +121,16 @@ export interface AutoModelPriceV1 {
 
 export const MODEL_VISIBILITY_DEFAULTS_VERSION = 5;
 
+/** ONLINE Auto: -1 max OpenAI lean, 0 balanced, +1 max Anthropic lean. */
+export const ONLINE_AUTO_PROVIDER_BIAS_MIN = -1;
+export const ONLINE_AUTO_PROVIDER_BIAS_MAX = 1;
+export const ONLINE_AUTO_PROVIDER_BIAS_DEFAULT = 0;
+/**
+ * Soft ranking nudge at full lean — on the order of one latency step so
+ * near-ties flip, but clearly cheaper/faster other-provider models still win.
+ */
+export const ONLINE_AUTO_PROVIDER_BIAS_WEIGHT = 10_000;
+
 /** Minimal catalog shape: only model ids are read. */
 export interface CatalogShapeForAuto {
   local: readonly { id: string }[];
@@ -135,11 +145,44 @@ export interface ResolveAutoModelInput {
   preferredModel?: string | null;
   hiddenModelIds: string[];
   catalog: CatalogShapeForAuto;
+  /**
+   * Soft ONLINE Auto lean between OpenAI (-1) and Anthropic (+1).
+   * Ignored for LOCAL. Clamped to [-1, 1]; default 0 = neutrality.
+   */
+  onlineAutoProviderBias?: number | null;
   routingContext?: AutoRoutingContextV1;
   priceForModel?: (
     provider: AutoModelProvider,
     modelId: string,
   ) => AutoModelPriceV1 | null;
+}
+
+export function clampOnlineAutoProviderBias(value: unknown): number {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
+    return ONLINE_AUTO_PROVIDER_BIAS_DEFAULT;
+  }
+  return Math.min(
+    ONLINE_AUTO_PROVIDER_BIAS_MAX,
+    Math.max(ONLINE_AUTO_PROVIDER_BIAS_MIN, value),
+  );
+}
+
+/** Human label for Settings / status chrome. */
+export function formatOnlineAutoProviderBiasLabel(value: unknown): string {
+  const bias = clampOnlineAutoProviderBias(value);
+  if (Math.abs(bias) < 0.05) return "Balanced";
+  const percent = Math.round(Math.abs(bias) * 100);
+  return bias < 0 ? `Lean OpenAI ${percent}%` : `Lean Anthropic ${percent}%`;
+}
+
+function providerBiasScoreDelta(
+  provider: AutoModelProvider,
+  bias: number,
+): number {
+  if (bias === 0 || provider === "local") return 0;
+  if (provider === "openai") return bias * ONLINE_AUTO_PROVIDER_BIAS_WEIGHT;
+  if (provider === "anthropic") return -bias * ONLINE_AUTO_PROVIDER_BIAS_WEIGHT;
+  return 0;
 }
 
 export interface ResolvedAutoModel {
@@ -485,6 +528,11 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
       );
   const inputTokens = estimatedInputTokens(input.routingContext);
   const outputTokens = Math.max(1, Math.round(input.routingContext?.outputTokens ?? 800));
+  // Soft OpenAI↔Anthropic lean applies only inside the ONLINE lane.
+  const providerBias =
+    lane === "online"
+      ? clampOnlineAutoProviderBias(input.onlineAutoProviderBias)
+      : ONLINE_AUTO_PROVIDER_BIAS_DEFAULT;
   const ranked = viable
     .map((candidate) => {
       const price = input.priceForModel?.(candidate.provider, candidate.id) ?? null;
@@ -499,7 +547,8 @@ function contextualAutoRoute(input: ResolveAutoModelInput): AutoRouteDecisionV1 
         score:
           estimatedCost +
           candidate.profile.latency * 10_000 +
-          (candidate.profile.known ? 0 : 1_000_000_000),
+          (candidate.profile.known ? 0 : 1_000_000_000) +
+          providerBiasScoreDelta(candidate.provider, providerBias),
       };
     })
     .sort((left, right) =>

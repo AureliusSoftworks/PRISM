@@ -11,6 +11,8 @@ Use this runbook when changing or validating:
 The eval scripts exercise the real chat pipeline, not isolated provider stubs.
 Observed results belong in `docs/experimental-effort-research-log.md`; keep this file as the repeatable method.
 
+For iterative diagnosis of a run (collapse, leakage, native-vs-simulated mismatch, LOCAL egress risk), use `/effort-review` (skill: `.codex/skills/effort-review/`).
+
 ## Product Boundary
 
 Simulated effort is an opt-in quality booster for models without adjustable native effort. It is not a claim that those models become true reasoning models.
@@ -24,29 +26,49 @@ Simulated effort is an opt-in quality booster for models without adjustable nati
 
 ## Prerequisites
 
-- Run from the repo root: `C:\PRISM`.
+- Run from the repo root (for example `~/Developer/Web Apps/PRISM` or `C:\PRISM`).
 - Keep Ollama running with the local test model available, usually `llama3.2`.
 - For the strong-reference comparison, set one online key in `.env` or the shell:
   - `ANTHROPIC_API_KEY` for Opus
-  - `OPENAI_API_KEY` for the OpenAI judge
+  - `OPENAI_API_KEY` for Sol / OpenAI judge
 - Do not use online keys for LOCAL-mode assertions. LOCAL simulated effort must stay on Ollama.
 - Use provider stubs for routine online multi-call tests. Run live paid-provider checks only when explicitly evaluating quality or cost.
 
 Prefer the direct Node commands below when passing flags. The npm scripts are convenient for defaults, but direct commands avoid shell-specific argument forwarding surprises.
 
-## Opus vs Llama vs Simulated Llama
+## Head-to-head prompt (default)
 
-Run:
+The default `experimental-effort.ts` prompt is a **constraint-heavy scheduling task**, not a meta “design simulated Effort” brief. Open-ended feature-design prompts make weak and strong models look alike and confuse the blind judge.
+
+Default task shape:
+
+- cafe staffing schedule with hard staff/shift constraints
+- required Markdown table + exactly three risk rows (`R1`–`R3`) + one feasibility sentence
+- staff whitelist, word cap, and no private step-by-step reasoning
+
+Override with `--prompt` only when deliberately testing a different skill. Prefer checkable constraints over open-ended product design.
+
+## Strong reference vs local baseline vs simulated local
+
+Run with Anthropic as the strong reference:
 
 ```powershell
 node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts --thinking-provider anthropic --thinking-model claude-opus-4-8
 ```
 
+Or with OpenAI Sol (useful when calibrating against the ONLINE Auto 5.6 ladder):
+
+```powershell
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts --local-model llama3.2 --thinking-provider openai --thinking-model gpt-5.6-sol --effort high
+```
+
+Swap `--local-model` for other installed Ollama chat models (`qwen3.6`, `gemma4`, `gpt-oss`, and so on).
+
 This produces:
 
-- local baseline: `llama3.2`, no simulated effort
-- thinking reference: `claude-opus-4-8`
-- local simulated effort: `llama3.2`, tiered private passes plus final pass
+- local baseline: chosen local model, no simulated effort
+- thinking reference: strong native-effort model
+- local simulated effort: same local model, tiered private passes plus final pass
 
 Artifacts are written to:
 
@@ -54,7 +76,7 @@ Artifacts are written to:
 artifacts/experimental-effort-evals/
 ```
 
-Inspect the latest Markdown report first, then the JSON if exact fields matter.
+Inspect the latest Markdown report first, then the JSON if exact fields matter. Append dated interpretation to `docs/experimental-effort-research-log.md`.
 
 ### What Good Looks Like
 
@@ -64,8 +86,9 @@ Inspect the latest Markdown report first, then the JSON if exact fields matter.
 - The simulated local run records `psychicDebug.passes` and `psychicDebug.guidanceChars`.
 - The simulated local run has non-empty `scratchpadChars`.
 - The simulated local run has no `planningWarnings`.
-- The blind judge result is plausible. Opus should usually beat `llama3.2`.
-- The local simulated run must not require or use OpenAI.
+- The blind judge result is plausible. The strong reference should usually beat the local baseline; simulated local should usually beat the same model's baseline if the ladder is helping.
+- Answers respect the prompt shape (table, `R1`–`R3`, feasibility sentence, staff whitelist, word cap).
+- The local simulated run must not require or use OpenAI/Anthropic for private passes.
 
 ### Red Flags
 
@@ -74,6 +97,8 @@ Inspect the latest Markdown report first, then the JSON if exact fields matter.
 - `passCount` stays flat across high-effort settings: the tiered private work is not being exercised.
 - Strong-reference OpenAI models return `OpenAI returned an empty response`: rerun with Opus before diagnosing local effort.
 - The simulated local answer improves latency only, not quality: the model may be ignoring the private guidance.
+- Blind judge ranks all answers as similarly weak on an open-ended prompt: switch back to the default constraint task before drawing product conclusions.
+- Final simulated answer is empty, tiny, or only a chat role token such as `assistant`: private passes may have completed while the visible generation collapsed; treat as a failed simulated run and rerun before concluding the ladder hurts quality. Known cause (fixed in `PRISM-n7ijv`): trailing Psychic guidance `system` after the last `user` turn; guidance must sit before the last user message.
 
 ## Effort Slider Ladder
 
@@ -94,6 +119,15 @@ For a fast smoke test that preserves the original single-prompt table, run:
 ```powershell
 node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick
 ```
+
+To A/B the thrifty (product default) budgets against the pre-thrifty ladder:
+
+```powershell
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --budget-profile thrifty
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --budget-profile legacy
+```
+
+`--budget-profile` is eval-only. Product runtime always uses thrifty unless an eval selects legacy.
 
 Artifacts are written to:
 

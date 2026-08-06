@@ -83,16 +83,19 @@ interface EvalReport {
 }
 
 const DEFAULT_PROMPT = [
-  "You are advising a two-person local-first app team.",
-  "They have one weekend to ship a feature that lets non-reasoning local models behave more like thinking models.",
-  "Constraints:",
-  "- No cloud calls may happen in LOCAL mode.",
-  "- Users should never see raw chain-of-thought.",
-  "- Developer diagnostics should be useful but not persisted as private scratchpads.",
-  "- The UI must stay calm and not turn this into a wall of controls.",
+  "A cafe has 3 baristas and must cover Sat 8am–6pm.",
+  "Shifts must be 4 hours. No barista works more than 8 hours.",
+  "Alice can't work before noon. Bob can't close. Cara can do any shift.",
+  "Produce:",
+  "1) a coverage schedule as a Markdown table with columns: Time, Barista",
+  "2) exactly 3 rows of uncovered risk notes labeled R1–R3",
+  "3) one sentence saying whether the schedule is feasible",
   "",
-  "Propose an implementation plan, the key tests, and the main failure modes.",
-  "Be concrete enough that an engineer could start coding from your answer.",
+  "Constraints:",
+  "- Use only Alice, Bob, Cara",
+  "- Do not invent extra staff",
+  "- Keep the whole answer under 220 words",
+  "- Do not show step-by-step private reasoning",
 ].join("\n");
 
 const DEFAULT_OPTIONS: CliOptions = {

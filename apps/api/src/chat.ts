@@ -132,6 +132,12 @@ import {
   normalizeReasoningEffort,
   reasoningGenerationBudgetMs,
   REASONING_GENERATION_AUTO_TOTAL_BUDGET_MS,
+  simulatedPsychicAnswerGuidanceMaxChars,
+  simulatedPsychicPlanningMaxTokens,
+  simulatedPsychicPrivateArtifactMaxChars,
+  simulatedPsychicPrivatePassMaxTokens,
+  simulatedPsychicScratchpadMaxChars,
+  simulatedEffortUsesThriftyPrompting,
   normalizePrismMoodSensitivity,
   prismMoodDeclineReason,
   prismMoodIgnoreForgivenessChance,
@@ -1103,8 +1109,27 @@ const PSYCHIC_PRIVATE_TEXT_PASS_JSON_SCHEMA = {
 } satisfies Record<string, unknown>;
 
 function psychicPlanPromptForEffort(effort: ReasoningEffort): string {
-  if (effort === "minimal") {
-    return PSYCHIC_PLANNING_SYSTEM_PROMPT;
+  if (!simulatedEffortUsesThriftyPrompting()) {
+    if (effort === "minimal") {
+      return PSYCHIC_PLANNING_SYSTEM_PROMPT;
+    }
+    return [
+      PSYCHIC_PLANNING_SYSTEM_PROMPT,
+      "For this effort level, make the scratchpad more useful: explicitly note required constraints, forbidden words, likely failure modes, and the answer structure.",
+      "Keep it concise, but do not leave the final answer to rediscover the constraints.",
+    ].join("\n");
+  }
+  if (effort === "minimal" || effort === "low") {
+    return [
+      PSYCHIC_PLANNING_SYSTEM_PROMPT,
+      "Keep every field short. Prefer 2 short scratchpad notes and 2 concrete guidance bullets. Do not write long reasoning.",
+    ].join("\n");
+  }
+  if (effort === "medium") {
+    return [
+      PSYCHIC_PLANNING_SYSTEM_PROMPT,
+      "Keep the scratchpad concise (about 3 short notes). Call out required constraints and answer shape without long reasoning.",
+    ].join("\n");
   }
   return [
     PSYCHIC_PLANNING_SYSTEM_PROMPT,
@@ -1119,36 +1144,14 @@ function clampPsychicPlanningText(value: unknown, maxLength: number): string {
 }
 
 function psychicPlanningTokenBudget(effort: ReasoningEffort): number {
-  switch (effort) {
-    case "xhigh":
-      return 900;
-    case "high":
-      return 720;
-    case "medium":
-      return 560;
-    case "low":
-      return 420;
-    case "minimal":
-      return 300;
-    case "none":
-    case "auto":
-    default:
-      return 260;
-  }
+  return simulatedPsychicPlanningMaxTokens(effort);
 }
 
 function psychicPrivateTextPassTokenBudget(
   effort: ReasoningEffort,
   passName: Exclude<PsychicPrivatePassName, "plan">
 ): number {
-  switch (passName) {
-    case "draft":
-      return effort === "xhigh" ? 1100 : 900;
-    case "audit":
-      return effort === "medium" ? 420 : effort === "xhigh" ? 760 : 620;
-    case "revision":
-      return 760;
-  }
+  return simulatedPsychicPrivatePassMaxTokens(effort, passName);
 }
 
 function simulatedEffortTextPasses(
@@ -1210,7 +1213,10 @@ function shouldSimulateReasoningEffort(args: {
   );
 }
 
-function parsePsychicPlanningResponse(raw: string): {
+function parsePsychicPlanningResponse(
+  raw: string,
+  effort: ReasoningEffort,
+): {
   summary: string;
   scratchpad: string;
   answerGuidance: string;
@@ -1219,8 +1225,14 @@ function parsePsychicPlanningResponse(raw: string): {
     const parsed = JSON.parse(extractJsonObjectPayload(raw)) as unknown;
     if (!isRecord(parsed)) return null;
     const summary = clampPsychicPlanningText(parsed.summary, 1200);
-    const scratchpad = clampPsychicPlanningText(parsed.scratchpad, 4000);
-    const answerGuidance = clampPsychicPlanningText(parsed.answerGuidance, 1400);
+    const scratchpad = clampPsychicPlanningText(
+      parsed.scratchpad,
+      simulatedPsychicScratchpadMaxChars(effort),
+    );
+    const answerGuidance = clampPsychicPlanningText(
+      parsed.answerGuidance,
+      simulatedPsychicAnswerGuidanceMaxChars(effort),
+    );
     if (!summary || !scratchpad || !answerGuidance) return null;
     return { summary, scratchpad, answerGuidance };
   } catch {
@@ -1370,11 +1382,13 @@ function psychicPrivatePassFallbackSummary(
 function parsePsychicPrivateTextPassResponse(
   raw: string,
   passName: Exclude<PsychicPrivatePassName, "plan">,
+  effort: ReasoningEffort,
 ): { content: string; publicSummary: string } | null {
+  const artifactMax = simulatedPsychicPrivateArtifactMaxChars(effort);
   try {
     const parsed = JSON.parse(extractJsonObjectPayload(raw)) as unknown;
     if (isRecord(parsed)) {
-      const content = clampPsychicPlanningText(parsed.artifact, 3200);
+      const content = clampPsychicPlanningText(parsed.artifact, artifactMax);
       const publicSummary = clampPsychicPlanningText(parsed.summary, 1200);
       if (content && publicSummary) return { content, publicSummary };
     }
@@ -1382,7 +1396,7 @@ function parsePsychicPrivateTextPassResponse(
     // Older/local providers may ignore JSON mode. Preserve their private
     // artifact and pair it with a safe deterministic public summary.
   }
-  const content = clampPsychicPlanningText(raw, 3200);
+  const content = clampPsychicPlanningText(raw, artifactMax);
   if (!content) return null;
   return {
     content,
@@ -1472,7 +1486,11 @@ async function runPsychicPrivateTextPass(args: {
     };
   }
 
-  const parsed = parsePsychicPrivateTextPassResponse(raw, args.passName);
+  const parsed = parsePsychicPrivateTextPassResponse(
+    raw,
+    args.passName,
+    args.effort,
+  );
   if (!parsed) {
     const warning = `${args.passName}_empty; provider=${args.provider.name}; model=${requestedModel}; rawChars=${raw.length}`;
     args.onPlanningWarning?.(warning);
@@ -1528,7 +1546,24 @@ function appendPsychicAnswerGuidance(
         ]
       : []),
   ].join("\n");
-  return [...promptMessages, { role: "system", content }];
+  const guidanceMessage: ProviderMessage = { role: "system", content };
+  // Insert before the last user turn. Appending system *after* user breaks some
+  // Ollama chat templates (e.g. llama3.2) into emitting a literal "assistant" role token.
+  let lastUserIndex = -1;
+  for (let index = promptMessages.length - 1; index >= 0; index -= 1) {
+    if (promptMessages[index]?.role === "user") {
+      lastUserIndex = index;
+      break;
+    }
+  }
+  if (lastUserIndex < 0) {
+    return [guidanceMessage, ...promptMessages];
+  }
+  return [
+    ...promptMessages.slice(0, lastUserIndex),
+    guidanceMessage,
+    ...promptMessages.slice(lastUserIndex),
+  ];
 }
 
 async function runPsychicPlanningPass(args: {
@@ -1579,7 +1614,7 @@ async function runPsychicPlanningPass(args: {
     return null;
   }
 
-  const parsed = parsePsychicPlanningResponse(raw);
+  const parsed = parsePsychicPlanningResponse(raw, args.effort);
   if (!parsed) {
     args.onPlanningWarning?.(
       `invalid_json; provider=${args.provider.name}; model=${requestedModel}; rawChars=${raw.length}`

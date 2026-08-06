@@ -1,6 +1,9 @@
 import {
   modelSupportsNativeReasoningEffort,
   reasoningGenerationBudgetMs,
+  simulatedEffortUsesThriftyPrompting,
+  simulatedSurfacePreparationMaxTokens,
+  simulatedSurfacePreparationNoteMaxChars,
   type NativeReasoningEffortProvider,
   type ReasoningEffort,
 } from "@localai/shared";
@@ -81,19 +84,35 @@ function simulatedStepInstruction(args: {
   surface: SimulatedEffortSurface;
   step: "plan" | "draft" | "audit" | "revision";
   priorNotes: string;
+  effort: Exclude<ReasoningEffort, "auto" | "none">;
   outputContract?: string;
 }): string {
+  const thrifty = simulatedEffortUsesThriftyPrompting();
+  const lean = thrifty && (args.effort === "minimal" || args.effort === "low");
+  const mediumLean = thrifty && args.effort === "medium";
+  const brevity = !thrifty
+    ? null
+    : lean
+      ? "Keep this under ~60 words. Prefer short bullets over paragraphs."
+      : mediumLean
+        ? "Keep this under ~100 words. Prefer short bullets over paragraphs."
+        : "Keep notes actionable and compact; avoid long chain-of-thought.";
   const task =
     args.step === "plan"
-      ? "Make a concise response plan with the key intent, factual or procedural checks, and persona choices."
+      ? lean
+        ? "List the key intent and 1-2 persona or constraint checks."
+        : "Make a concise response plan with the key intent, factual or procedural checks, and persona choices."
       : args.step === "draft"
         ? "Sketch a concise candidate response that follows the plan."
         : args.step === "audit"
-          ? "Audit the preparation for missed instructions, contradictions, weak reasoning, schema risks, and character drift. Return corrections only."
+          ? lean || mediumLean
+            ? "Audit for missed instructions, schema risks, and character drift. Return corrections only."
+            : "Audit the preparation for missed instructions, contradictions, weak reasoning, schema risks, and character drift. Return corrections only."
           : "Produce a concise final response blueprint incorporating the useful corrections.";
   return [
     `Private PRISM ${args.surface} preparation pass: ${args.step}.`,
     task,
+    ...(brevity ? [brevity] : []),
     args.outputContract
       ? `Visible-output contract: ${args.outputContract}`
       : "Preserve every visible-output constraint from the conversation.",
@@ -104,8 +123,11 @@ function simulatedStepInstruction(args: {
   ].join("\n");
 }
 
-function cleanPrivatePreparation(raw: string): string {
-  return raw.replace(/\s+/gu, " ").trim().slice(0, 1_800);
+function cleanPrivatePreparation(raw: string, effort: ReasoningEffort): string {
+  return raw
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, simulatedSurfacePreparationNoteMaxChars(effort));
 }
 
 export function shouldPrepareMessagesWithSimulatedEffort(args: {
@@ -145,6 +167,7 @@ export async function prepareMessagesWithSimulatedEffort(args: {
               surface: args.surface,
               step,
               priorNotes,
+              effort: args.effort,
               outputContract: args.outputContract,
             }),
           },
@@ -152,7 +175,7 @@ export async function prepareMessagesWithSimulatedEffort(args: {
         {
           model: args.options.model,
           temperature: step === "draft" ? 0.35 : 0,
-          maxTokens: args.effort === "minimal" ? 120 : 220,
+          maxTokens: simulatedSurfacePreparationMaxTokens(args.effort),
           topP: args.options.topP,
           topK: args.options.topK,
           repetitionPenalty: args.options.repetitionPenalty,
@@ -167,7 +190,7 @@ export async function prepareMessagesWithSimulatedEffort(args: {
       }
       break;
     }
-    const cleaned = cleanPrivatePreparation(raw);
+    const cleaned = cleanPrivatePreparation(raw, args.effort);
     if (cleaned) priorNotes = cleaned;
   }
   if (!priorNotes) return args.messages;

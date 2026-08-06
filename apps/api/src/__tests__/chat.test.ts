@@ -1361,10 +1361,12 @@ describe("processChatMessage Psychic planning", () => {
 
   it("continues with prior guidance when a later simulated pass fails", async () => {
     const db = createChatTestDb();
-    const requests: Array<{ messages?: Array<{ content: string }> }> = [];
+    const requests: Array<{
+      messages?: Array<{ role?: string; content: string }>;
+    }> = [];
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
       const body = JSON.parse(String(init?.body ?? "{}")) as {
-        messages?: Array<{ content: string }>;
+        messages?: Array<{ role?: string; content: string }>;
       };
       requests.push(body);
       const content = body.messages?.map((message) => message.content).join("\n") ?? "";
@@ -1442,9 +1444,102 @@ describe("processChatMessage Psychic planning", () => {
       )
     );
     assert.ok(finalRequest);
+    const finalMessages = finalRequest.messages ?? [];
+    const guidanceIndex = finalMessages.findIndex((message) =>
+      message.content.includes("Guidance derived from Prism's user-readable Psychic plan")
+    );
+    const lastUserIndex = finalMessages.reduce(
+      (lastIndex, message, index) =>
+        message.role === "user" ? index : lastIndex,
+      -1
+    );
+    assert.ok(guidanceIndex >= 0);
+    assert.ok(lastUserIndex >= 0);
+    assert.ok(
+      guidanceIndex < lastUserIndex,
+      "Psychic guidance must sit before the last user turn so local chat templates do not emit a literal assistant role token"
+    );
+    assert.equal(finalMessages.at(-1)?.role, "user");
     assert.doesNotMatch(JSON.stringify(finalRequest), /private draft secret/);
     assert.doesNotMatch(JSON.stringify(finalRequest), /private plan secret/);
     assert.match(JSON.stringify(finalRequest), /Use the mapped constraints/);
+    await flushBackgroundTitleJobs();
+  });
+
+  it("strips a leaked leading assistant role marker from the final local reply", async () => {
+    const db = createChatTestDb();
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ content: string }>;
+      };
+      const content = body.messages?.map((message) => message.content).join("\n") ?? "";
+      if (content.includes("Prism's user-readable Psychic planning pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                summary: "I mapped the constraints.",
+                scratchpad: "private plan secret",
+                answerGuidance: "Use the mapped constraints.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (content.includes("Prism's private draft pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: "private draft secret",
+                summary: "I drafted the shape.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (content.includes("Prism's private audit pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: "- Keep: mapped constraints",
+                summary: "I audited the candidate.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: { content: "assistant\n\nFinal answer without role leak." },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Help me plan this.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "sandbox",
+        experimentalAllModelEffortEnabled: true,
+        botOverrides: { model: "llama3.2", reasoningEffort: "high" },
+      }
+    );
+
+    assert.equal(
+      result.conversation.messages.find((message) => message.role === "assistant")?.content,
+      "Final answer without role leak."
+    );
     await flushBackgroundTitleJobs();
   });
 
