@@ -28,6 +28,11 @@
   --line: #25211e;
   --line-strong: #342f2a;
 
+  /* Workshop chrome outside the P/R/I/S/M spectrum. */
+  --prism-dev-accent: #b8895a;
+  --prism-dev-accent-strong: #d4a574;
+  --prism-dev-accent-soft: color-mix(in srgb, #b8895a 22%, transparent);
+
   /* Grayscale default; overridden inline when a bot is selected. */
   --accent: #cbd8e3;
   --accent-hover: color-mix(in srgb, var(--accent) 88%, #ffffff 12%);
@@ -3446,6 +3451,10 @@
   --line: #cfdce7;
   --line-strong: #b7c9d8;
 
+  --prism-dev-accent: #b8895a;
+  --prism-dev-accent-strong: #9a6f3f;
+  --prism-dev-accent-soft: color-mix(in srgb, #b8895a 18%, transparent);
+
   --accent: #172638;
   --accent-hover: color-mix(in srgb, var(--accent) 85%, #000000 15%);
   --accent-soft: color-mix(in srgb, var(--accent) 9%, var(--bg) 91%);
@@ -6342,7 +6351,7 @@
 }
 
 .settingsSection[data-settings-section="behavior"] {
-  --settings-section-color: #36d399;
+  --settings-section-color: #b7e63a;
 }
 
 .settingsSection[data-settings-section="appearance"] {
@@ -6496,7 +6505,7 @@
 }
 
 .settingsSection[data-settings-section="experimental"] {
-  --settings-section-color: #7abf7f;
+  --settings-section-color: var(--prism-dev-accent, #b8895a);
 }
 
 .settingsSection[data-settings-section="shortcuts"] {
@@ -11783,7 +11792,7 @@
   --dev-tools-panel-top: 76px;
   --dev-tools-panel-left: 14px;
   --dev-tools-panel-viewport-margin: 14px;
-  --dev-tools-accent: color-mix(in srgb, #48d6c8 62%, var(--accent) 38%);
+  --dev-tools-accent: color-mix(in srgb, var(--prism-dev-accent-strong, var(--prism-dev-accent)) 72%, var(--accent) 28%);
   position: fixed;
   top: 76px;
   left: 14px;
@@ -11848,11 +11857,11 @@
   gap: 8px;
   height: 42px;
   padding: 0 13px;
-  border: 1px solid color-mix(in srgb, #48d6c8 58%, var(--line-strong) 42%);
+  border: 1px solid color-mix(in srgb, var(--prism-dev-accent) 58%, var(--line-strong) 42%);
   border-radius: 999px;
   background: linear-gradient(
     135deg,
-    color-mix(in srgb, #48d6c8 20%, var(--bg-elevated) 80%),
+    color-mix(in srgb, var(--prism-dev-accent) 20%, var(--bg-elevated) 80%),
     var(--bg)
   );
   color: var(--fg);
@@ -11880,10 +11889,10 @@
 
 .devToolsBubble:hover,
 .devToolsBubble:focus-visible {
-  border-color: color-mix(in srgb, #48d6c8 82%, var(--line-strong) 18%);
+  border-color: color-mix(in srgb, var(--prism-dev-accent) 82%, var(--line-strong) 18%);
   background: linear-gradient(
     135deg,
-    color-mix(in srgb, #48d6c8 30%, var(--bg-elevated) 70%),
+    color-mix(in srgb, var(--prism-dev-accent) 30%, var(--bg-elevated) 70%),
     var(--bg-hover)
   );
   outline: none;
@@ -13343,7 +13352,7 @@
 }
 
 .zenToolLabDock {
-  --dev-tools-accent: color-mix(in srgb, #48d6c8 62%, var(--accent) 38%);
+  --dev-tools-accent: color-mix(in srgb, var(--prism-dev-accent-strong, var(--prism-dev-accent)) 72%, var(--accent) 28%);
   position: fixed;
   left: max(16px, calc(env(safe-area-inset-left, 0px) + 16px));
   top: max(16px, calc(env(safe-area-inset-top, 0px) + 16px));
@@ -28096,10 +28105,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .chatComposerRefractHost[data-prism-refract-state="traveling"],
 .chatComposerRefractHost[data-prism-refract-state="generating"] {
-  outline: 1px solid color-mix(in srgb, var(--prism-i, #6fe3ff) 62%, white);
+  outline: 1px solid color-mix(in srgb, var(--prism-i, #b7e63a) 62%, white);
   outline-offset: 3px;
   filter:
-    drop-shadow(0 0 5px color-mix(in srgb, var(--prism-i, #6fe3ff) 50%, transparent))
+    drop-shadow(0 0 5px color-mix(in srgb, var(--prism-i, #b7e63a) 50%, transparent))
     drop-shadow(0 0 14px color-mix(in srgb, var(--prism-s, #9d8cff) 28%, transparent));
 }
 
@@ -30093,7 +30102,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .themeLight.coffeeShell
   .coffeeSeatPlate[data-live-body-style="zen"]
   .zenLiveBotPresenceFace {
-  --bot-face-metal-light-base-color: var(--coffee-bot-color);
+  --bot-face-metal-light-base-color: color-mix(
+    in srgb,
+    var(--bot-face-metal-alloy-color, #b8c0c8) 40%,
+    var(--coffee-bot-color)
+  );
   --bot-face-ambient-glow-opacity: 0.32;
   --bot-face-ambient-glow-blur: clamp(20px, 13%, 40px);
   --bot-face-ambient-glow-spread: clamp(12px, 8%, 24px);
@@ -69685,11 +69698,16 @@ a.settingsCreditItem:focus-visible {
 }
 
 .botFaceFrameTint {
-  --bot-face-frame-resolved-color: var(
-    --bot-face-frame-color,
+  --bot-face-frame-resolved-color: color-mix(
+    in srgb,
+    var(--bot-face-metal-alloy-color, #b8c0c8)
+      var(--bot-face-metal-alloy-mix, 0%),
     var(
-      --coffee-seat-emotion-color,
-      var(--coffee-bot-color, var(--editor-bot-color, var(--accent)))
+      --bot-face-frame-color,
+      var(
+        --coffee-seat-emotion-color,
+        var(--coffee-bot-color, var(--editor-bot-color, var(--accent)))
+      )
     )
   );
   position: absolute;
@@ -73175,15 +73193,15 @@ a.settingsCreditItem:focus-visible {
   border: 1px solid
     color-mix(
       in srgb,
-      var(--coffee-bot-color, #ffffff) 48%,
-      rgba(255, 255, 255, 0.18)
+      var(--prism-dev-accent, #b8895a) 62%,
+      rgba(255, 255, 255, 0.16)
     );
   background: rgba(7, 7, 7, 0.9);
   color: rgba(255, 255, 255, 0.9);
   box-shadow:
     0 18px 46px rgba(0, 0, 0, 0.5),
     0 0 30px
-      color-mix(in srgb, var(--coffee-bot-color, #ffffff) 18%, transparent);
+      color-mix(in srgb, var(--prism-dev-accent, #b8895a) 24%, transparent);
   backdrop-filter: blur(16px);
 }
 

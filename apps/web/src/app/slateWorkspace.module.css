@@ -14,6 +14,7 @@
   background:
     radial-gradient(circle at 10% -8%, color-mix(in srgb, var(--slate-p) 9%, transparent), transparent 32%),
     radial-gradient(circle at 88% 2%, color-mix(in srgb, var(--slate-m) 11%, transparent), transparent 34%),
+    radial-gradient(circle at 72% 18%, color-mix(in srgb, var(--slate-i) 7%, transparent), transparent 36%),
     radial-gradient(circle at 48% 110%, color-mix(in srgb, var(--slate-s) 6%, transparent), transparent 40%),
     var(--bg, #0b0a09);
   font-family: var(--font-ui-sans), system-ui, sans-serif;
@@ -83,6 +84,7 @@
   background:
     radial-gradient(circle at 9% -8%, color-mix(in srgb, var(--slate-p) 8%, transparent), transparent 32%),
     radial-gradient(circle at 88% 1%, color-mix(in srgb, var(--slate-m) 8%, transparent), transparent 34%),
+    radial-gradient(circle at 72% 16%, color-mix(in srgb, var(--slate-i) 6%, transparent), transparent 36%),
     radial-gradient(circle at 48% 110%, color-mix(in srgb, var(--slate-s) 7%, transparent), transparent 42%),
     linear-gradient(180deg, var(--bg-surface, #ffffff), var(--bg, #edf5fc));
 }

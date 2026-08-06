@@ -22,6 +22,22 @@ const emblemSource = readFileSync(
   new URL("../../public/refraction-emblem.svg", import.meta.url),
   "utf8",
 );
+const companionCss = readFileSync(
+  new URL("./prismCompanion.module.css", import.meta.url),
+  "utf8",
+);
+const orbCss = readFileSync(
+  new URL("./prism-orb.module.css", import.meta.url),
+  "utf8",
+);
+const pageCss = readFileSync(
+  new URL("./page.module.css", import.meta.url),
+  "utf8",
+);
+const globalsCss = readFileSync(
+  new URL("./globals.css", import.meta.url),
+  "utf8",
+);
 const appEmblemSource = pageSource.slice(
   pageSource.indexOf("function PrismRefractionEmblem"),
   pageSource.indexOf("// ── Chat-mode picker geometry"),
@@ -105,5 +121,33 @@ describe("PRISM brand system", () => {
     assert.match(appEmblemSource, /strokeWidth=\{2\}[\s\S]*opacity="0\.55"/u);
     assert.match(emblemSource, /stroke-width="2"[\s\S]*opacity="0\.55"/u);
     assert.doesNotMatch(emblemSource, /keyline/u);
+  });
+
+  it("maps companion and focus I accents to brand lime, not cyan", () => {
+    assert.match(companionCss, /--companion-i:\s*#b7e63a/u);
+    assert.match(companionCss, /--companion-s:\s*#2fd3e3/u);
+    assert.match(companionCss, /--companion-m:\s*#7b5cff/u);
+    assert.doesNotMatch(companionCss, /--companion-i:\s*#6fe3ff/u);
+    assert.match(orbCss, /--prism-orb-i:\s*var\(--companion-i,\s*#b7e63a\)/u);
+    assert.match(globalsCss, /var\(--prism-i,\s*#b7e63a\)/u);
+    assert.match(
+      pageCss,
+      /settingsSection\[data-settings-section="behavior"\][\s\S]*?--settings-section-color:\s*#b7e63a/u,
+    );
+  });
+
+  it("skins developer chrome in bronze outside the brand spectrum", () => {
+    assert.match(pageCss, /--prism-dev-accent:\s*#b8895a/u);
+    assert.match(pageCss, /--prism-dev-accent-strong:\s*#d4a574/u);
+    assert.match(
+      pageCss,
+      /settingsSection\[data-settings-section="experimental"\][\s\S]*?--settings-section-color:\s*var\(--prism-dev-accent/u,
+    );
+    assert.match(pageCss, /\.devToolsFloatingPanel[\s\S]*?--dev-tools-accent:/u);
+    assert.doesNotMatch(pageCss, /#48d6c8/u);
+    assert.match(
+      pageCss,
+      /\.coffeeDevBotPanel,[\s\S]*?var\(--prism-dev-accent/u,
+    );
   });
 });

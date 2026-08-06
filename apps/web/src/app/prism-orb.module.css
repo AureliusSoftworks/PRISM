@@ -2,9 +2,9 @@
   --prism-orb-size: 58px;
   --prism-orb-p: var(--companion-p, #ff756c);
   --prism-orb-r: var(--companion-r, #ffba5c);
-  --prism-orb-i: var(--companion-i, #6fe3ff);
-  --prism-orb-s: var(--companion-s, #9d8cff);
-  --prism-orb-m: var(--companion-m, #e978d7);
+  --prism-orb-i: var(--companion-i, #b7e63a);
+  --prism-orb-s: var(--companion-s, #2fd3e3);
+  --prism-orb-m: var(--companion-m, #7b5cff);
   position: relative;
   z-index: 0;
   width: var(--prism-orb-size);

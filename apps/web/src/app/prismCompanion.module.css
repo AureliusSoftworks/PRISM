@@ -1,9 +1,10 @@
 .anchor {
   --companion-p: #ff756c;
   --companion-r: #ffba5c;
-  --companion-i: #6fe3ff;
-  --companion-s: #9d8cff;
-  --companion-m: #e978d7;
+  /* Brand P/R/I/S/M: rose, amber, lime, cyan, violet. */
+  --companion-i: #b7e63a;
+  --companion-s: #2fd3e3;
+  --companion-m: #7b5cff;
   position: fixed;
   /* Above ordinary drawers, below modal/tutorial safety layers. */
   z-index: 855;
@@ -333,8 +334,8 @@
   padding: 12px 15px 13px;
   border: 1px solid color-mix(in srgb, var(--companion-s) 25%, #ffffff16);
   color: var(--fg, #edf3f8);
-  background: radial-gradient(circle at 12% 0%, #6fe3ff12, transparent 48%), color-mix(in srgb, var(--bg-surface, #151311) 90%, transparent);
-  box-shadow: 0 18px 48px -24px #000d, 0 0 26px #6fe3ff14, inset 0 1px 0 #ffffff10;
+  background: radial-gradient(circle at 12% 0%, color-mix(in srgb, var(--companion-i) 7%, transparent), transparent 48%), color-mix(in srgb, var(--bg-surface, #151311) 90%, transparent);
+  box-shadow: 0 18px 48px -24px #000d, 0 0 26px color-mix(in srgb, var(--companion-i) 8%, transparent), inset 0 1px 0 #ffffff10;
   backdrop-filter: blur(18px) saturate(1.12);
   -webkit-backdrop-filter: blur(18px) saturate(1.12);
   pointer-events: auto;
@@ -347,7 +348,7 @@
 
 .bubble[data-copied="true"] {
   border-color: color-mix(in srgb, var(--companion-i) 62%, #ffffff32);
-  box-shadow: 0 18px 48px -24px #000d, 0 0 30px #6fe3ff30, inset 0 1px 0 #ffffff18;
+  box-shadow: 0 18px 48px -24px #000d, 0 0 30px color-mix(in srgb, var(--companion-i) 19%, transparent), inset 0 1px 0 #ffffff18;
 }
 
 .bubble[data-recent="true"] { animation: bubbleArrive 240ms ease-out both; }
@@ -386,7 +387,7 @@
 .bubble[data-copied="true"] .copyButton {
   border-color: #8bdfff70;
   color: #c6f3ff;
-  background: #6fe3ff12;
+  background: color-mix(in srgb, var(--companion-i) 7%, transparent);
 }
 .copyButton:focus-visible {
   outline: 2px solid white;
@@ -459,7 +460,7 @@
   border-radius: 999px;
   content: "";
   background: #9ceaff;
-  box-shadow: 0 0 8px #6fe3ffaa;
+  box-shadow: 0 0 8px color-mix(in srgb, var(--companion-i) 67%, transparent);
   animation: speechCursor 680ms ease-in-out infinite;
   vertical-align: -.08em;
 }
@@ -484,7 +485,7 @@
   border-radius: 16px;
   color: var(--fg, #edf3f8);
   background:
-    linear-gradient(120deg, #6fe3ff0d, #e978d70a),
+    linear-gradient(120deg, color-mix(in srgb, var(--companion-i) 5%, transparent), #e978d70a),
     color-mix(in srgb, var(--bg-surface, #151311) 94%, transparent);
   box-shadow: 0 14px 34px -24px #000d, inset 0 1px 0 #ffffff0d;
   backdrop-filter: blur(18px) saturate(1.08);
@@ -544,7 +545,7 @@
   border: 1px solid #8bdfff42;
   border-radius: 999px;
   color: #bcefff;
-  background: #6fe3ff0e;
+  background: color-mix(in srgb, var(--companion-i) 5%, transparent);
   font: 720 .56rem/1 system-ui, sans-serif;
   cursor: pointer;
 }
@@ -577,7 +578,7 @@
     color-mix(in srgb, var(--bg-surface, #151311) 94%, transparent);
   box-shadow:
     0 22px 58px -32px #000e,
-    0 0 30px #6fe3ff18,
+    0 0 30px color-mix(in srgb, var(--companion-i) 9%, transparent),
     inset 0 1px 0 #ffffff12;
   backdrop-filter: blur(20px) saturate(1.15);
   -webkit-backdrop-filter: blur(20px) saturate(1.15);
@@ -596,7 +597,7 @@
   background:
     radial-gradient(circle at 10% 0%, #e978d71a, transparent 50%),
     color-mix(in srgb, var(--bg-surface, #151311) 95%, transparent);
-  box-shadow: 0 20px 54px -30px #000e, 0 0 28px #6fe3ff14;
+  box-shadow: 0 20px 54px -30px #000e, 0 0 28px color-mix(in srgb, var(--companion-i) 8%, transparent);
   backdrop-filter: blur(20px) saturate(1.12);
   -webkit-backdrop-filter: blur(20px) saturate(1.12);
   pointer-events: auto;
@@ -625,7 +626,7 @@
   background: #070a11b8;
   font: .75rem/1.35 system-ui, sans-serif;
 }
-.refractPrompt input:focus { border-color: #9ceaff99; box-shadow: 0 0 0 2px #6fe3ff18; }
+.refractPrompt input:focus { border-color: color-mix(in srgb, var(--companion-s) 60%, white); box-shadow: 0 0 0 2px color-mix(in srgb, var(--companion-i) 9%, transparent); }
 .refractPrompt small { color: var(--fg-subtle, #77716d); font: .56rem/1.2 system-ui, sans-serif; }
 
 .srOnly {
@@ -671,7 +672,7 @@
 .composer .voiceToggle[data-enabled="true"] {
   border-color: #8bdfff42;
   color: #bcefff;
-  background: #6fe3ff10;
+  background: color-mix(in srgb, var(--companion-i) 6%, transparent);
 }
 .composer .voiceToggle:hover {
   border-color: #8bdfff72;

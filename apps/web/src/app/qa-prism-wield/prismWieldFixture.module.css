@@ -117,7 +117,7 @@
 
 .nativeControl[data-clicked="true"]::after {
   content: " · clicked";
-  color: #6fe3ff;
+  color: #b7e63a;
 }
 
 @media (prefers-reduced-motion: reduce) {

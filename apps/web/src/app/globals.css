@@ -280,9 +280,9 @@ html[data-relationship-depth-motion="pullback-swap"]::view-transition-new(relati
 }
 
 [data-prism-refract-wield-hover="true"] {
-  outline: 1px solid color-mix(in srgb, var(--prism-i, #6fe3ff) 68%, white);
+  outline: 1px solid color-mix(in srgb, var(--prism-i, #b7e63a) 68%, white);
   outline-offset: 3px;
   filter:
-    drop-shadow(0 0 5px color-mix(in srgb, var(--prism-i, #6fe3ff) 58%, transparent))
-    drop-shadow(0 0 13px color-mix(in srgb, var(--prism-s, #9d8cff) 30%, transparent));
+    drop-shadow(0 0 5px color-mix(in srgb, var(--prism-i, #b7e63a) 58%, transparent))
+    drop-shadow(0 0 13px color-mix(in srgb, var(--prism-s, #2fd3e3) 30%, transparent));
 }
