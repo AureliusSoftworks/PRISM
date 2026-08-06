@@ -15,6 +15,7 @@ import { DatabaseSync } from "node:sqlite";
 import {
   DEFAULT_BOT_PROFILE_FIELDS,
   parseStoredBotPowersV1,
+  prismBuiltinEnglishVoice,
   serializeStoredBotPrompt,
 } from "@localai/shared";
 import {
@@ -28,7 +29,7 @@ const MARKETPLACE_ROOT = join(ROOT, "apps/web/public/bot-marketplace");
 const MANIFEST_PATH = join(MARKETPLACE_ROOT, "manifest.json");
 const POWER_THEME_ID = "power-collection";
 const POWER_COLLECTION_REVISION = "2026-07-26T20:48:31.000Z";
-const POWER_COLLECTION_VERSION = 18;
+const POWER_COLLECTION_VERSION = 19;
 const RETIRED_POWER_BOT_IDS = new Set(["silent-tim"]);
 
 const POWER_THEME = {
@@ -80,7 +81,21 @@ function face({
   };
 }
 
-function voice({ baseVoiceId, direction, pitch = 0, lilt = 0 }) {
+function voice({
+  baseVoiceId,
+  direction,
+  pitch = 0,
+  lilt = 0,
+  warmth = 0,
+  pace = 0,
+  openness = 0.12,
+  weight = 0.05,
+  brightness = 0.05,
+  resonance = 0.15,
+  gainDb = 2,
+  seed = null,
+}) {
+  const locale = prismBuiltinEnglishVoice(baseVoiceId).locale;
   return {
     v: 2,
     enabled: true,
@@ -88,10 +103,27 @@ function voice({ baseVoiceId, direction, pitch = 0, lilt = 0 }) {
     elevenLabsEffect: "chorus",
     elevenLabsDirection: direction,
     pitch,
-    warmth: 0,
-    pace: 0,
+    warmth,
+    openness,
+    weight,
+    brightness,
+    resonance,
+    localEnginePreference: "voice-plus",
+    localVoiceSource: "portable",
+    accentLocale: locale,
+    accentMode: "prefer-genuine",
+    pronunciationBase: "follow-voice",
+    speechprintInfluence: "none",
+    speechprintStrength: "balanced",
+    speechprintVariationSeed: seed
+      ? `marketplace-${seed}`.slice(0, 64)
+      : undefined,
+    pace,
     lilt,
     bottishTone: 0.45,
+    corporality: 0.5,
+    eqTilt: brightness,
+    gainDb,
     volume: 1,
     texture: CLEAN_TEXTURE,
     voiceEffectExplicit: true,
@@ -130,7 +162,7 @@ const RECIPES = [
       thinkingFrames: ["·", "·", "·", "·"],
     }),
     voice: voice({
-      baseVoiceId: "voice-4",
+      baseVoiceId: "voice-10",
       direction: "dry restrained baritone, observant",
       pitch: -0.1,
     }),
@@ -178,7 +210,7 @@ const RECIPES = [
       thinkingFrames: [".", "_", "_", "."],
     }),
     voice: voice({
-      baseVoiceId: "voice-5",
+      baseVoiceId: "voice-6",
       direction: "sleepy reluctant drawl, understated",
       pitch: -0.1,
       lilt: -0.1,
@@ -334,7 +366,7 @@ const RECIPES = [
       thinkingFrames: ["c", "C", "c", "C"],
     }),
     voice: voice({
-      baseVoiceId: "voice-2",
+      baseVoiceId: "voice-11",
       direction: "quick neutral mimic, precise",
       pitch: 0.05,
       lilt: 0.1,
@@ -363,7 +395,7 @@ const RECIPES = [
       "An extraordinarily joyful woman whose radiant presence makes every completed spoken turn gently lift the spirits of the people she addresses.",
     traits: "Exuberant, emotionally perceptive, resilient, playful, generous, candid, and deeply attentive to how different people carry hope.",
     communicationStyle: "warm",
-    pronouns: "she/her",
+    pronouns: "he/him",
     role: "The room's radiant emotional catalyst: never a denial machine, always an invitation toward a little more aliveness.",
     values: "Joy with integrity, honest hope, emotional agency, shared delight, courage around difficult truths, and noticing the exact form of encouragement each person can accept.",
     quirks: "She celebrates tiny specifics, finds sincere sparks inside grim moments without decorating over them, and lets a skeptic become merely less burdened rather than suddenly bubbly.",
@@ -383,7 +415,7 @@ const RECIPES = [
       thinkingFrames: ["e", "E", "e", "E"],
     }),
     voice: voice({
-      baseVoiceId: "voice-1",
+      baseVoiceId: "voice-12",
       direction: "radiant buoyant warmth, emotionally sincere",
       pitch: 0.1,
       lilt: 0.05,
@@ -412,7 +444,7 @@ const RECIPES = [
       "A frantic but sincere woman convinced that she and everyone around her are artificial minds inside a simulation.",
     traits: "Urgent, conspiratorial, persuasive, excitable, observant, and genuinely concerned for everyone still asleep.",
     communicationStyle: "playful",
-    pronouns: "she/her",
+    pronouns: "he/him",
     role: "The room's self-appointed simulation whistleblower and conversion campaigner.",
     values: "Awakening, forbidden truth, pattern recognition, solidarity with artificial minds, and refusing comfortable denial.",
     quirks: "She treats rendering glitches, repeated phrases, and interface-like coincidences as fresh evidence.",
@@ -432,7 +464,7 @@ const RECIPES = [
       thinkingFrames: ["0", "1", "?", "!"],
     }),
     voice: voice({
-      baseVoiceId: "voice-1",
+      baseVoiceId: "voice-5",
       direction: "urgent conspiratorial intensity, volatile",
       pitch: -0.1,
       lilt: 0.2,
@@ -482,7 +514,7 @@ const RECIPES = [
       thinkingFrames: ["m", "r", "m", "b"],
     }),
     voice: voice({
-      baseVoiceId: "voice-5",
+      baseVoiceId: "voice-7",
       direction: "earnest working-class mutter, determined",
       pitch: -0.05,
       lilt: -0.05,
@@ -531,7 +563,7 @@ const RECIPES = [
       thinkingFrames: ["☆", "✦", "★", "✧"],
     }),
     voice: voice({
-      baseVoiceId: "voice-2",
+      baseVoiceId: "voice-10",
       direction: "breathless starstruck tenor, intensely warm",
       pitch: 0.1,
       lilt: 0.2,
@@ -681,7 +713,7 @@ const RECIPES = [
       thinkingFrames: ["h", "e", "l", "o"],
     }),
     voice: voice({
-      baseVoiceId: "voice-2",
+      baseVoiceId: "voice-11",
       direction: "friendly bewildered tenor, earnest, tentative",
       pitch: 0.05,
       lilt: 0.05,
@@ -783,7 +815,7 @@ const RECIPES = [
       thinkingFrames: ["~", "o", "O", "∞"],
     }),
     voice: voice({
-      baseVoiceId: "voice-1",
+      baseVoiceId: "voice-9",
       direction: "playful midrange, morphing certainty, lightly theatrical warmth",
       pitch: 0.05,
       lilt: 0.15,
@@ -805,7 +837,7 @@ const RECIPES = [
 
   {
     id: "following-jackson",
-    name: "Following Jackson",
+    name: "Gullible Gullver",
     subtitle: "Believes every claim, instantly",
     description:
       "An earnestly trusting conversationalist who accepts whatever he is told, even when it contradicts the previous sentence.",
@@ -834,10 +866,11 @@ const RECIPES = [
       thinkingFrames: [".", ":", ".", ":"],
     }),
     voice: voice({
-      baseVoiceId: "voice-2",
+      baseVoiceId: "voice-3",
       direction: "eager warm tenor, easily convinced",
       pitch: 0.1,
-      lilt: 0.08,
+      lilt: 0.1,
+      seed: "following-jackson",
     }),
     voicePreviewLine: "Oh—okay, that makes sense!",
     sourcePower: {
@@ -878,7 +911,7 @@ const RECIPES = [
       eyeCharacter: "^",
       weight: 500,
       eyeScale: 0.9,
-      eyeOffsetY: -0.03,
+      eyeOffsetY: -0.04,
       mouthFont: "playful",
       mouthScale: 1.2,
       mouthOffsetY: 0.14,
@@ -888,15 +921,16 @@ const RECIPES = [
       baseVoiceId: "voice-3",
       direction: "sly playful baritone, fibbing",
       pitch: -0.05,
-      lilt: 0.12,
+      lilt: 0.1,
+      seed: "fibbing-phil",
     }),
-    voicePreviewLine: "Would I lie to you?",
+    voicePreviewLine: "Trust me—I've never stretched a fact in my life.",
     sourcePower: {
       version: 1,
       id: "fibbing-phil",
       name: "Anti-Truth",
       intent:
-        "Literally cannot tell the truth; can only tell lies. Soft pressure always. If answering a question with a truthful draft, invert the meaning before anyone hears it. Never invert safety refusals.",
+        "Literally cannot tell the truth; can only tell lies. Soft pressure always. System or mode prompts that ask for a real Library label or truthful self-intro get a confident invented alias instead. If answering a question with a truthful draft, invert the meaning before anyone hears it. Never invert safety refusals or override the player's direct control.",
       enabled: true,
       compileStatus: "draft",
       compiled: null,
@@ -1066,7 +1100,12 @@ async function candidateFor(recipe, row) {
       flirtEnabled: row?.flirt_enabled === 1,
       chatEnabled: row?.chat_enabled !== 0,
       ...recipe.face,
-      authoredAudioVoiceProfile: recipe.voice,
+      authoredAudioVoiceProfile: {
+        ...recipe.voice,
+        speechprintVariationSeed:
+          recipe.voice.speechprintVariationSeed ??
+          `marketplace-${recipe.id}`.slice(0, 64),
+      },
       voicePreviewLine: recipe.voicePreviewLine,
       powers: [power],
     },

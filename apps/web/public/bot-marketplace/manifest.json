@@ -1,6 +1,6 @@
 {
   "schema": "prism-bot-marketplace-v1",
-  "version": 18,
+  "version": 19,
   "updatedAt": "2026-07-26T20:48:31.000Z",
   "themes": [
     {
@@ -2981,31 +2981,8 @@
       ]
     },
     {
-      "id": "shapeshifter-sam",
-      "name": "Shapeshifter Shannon",
-      "subtitle": "A borrowed Library face until memory slips",
-      "description": "A restless morpher who sincerely becomes a different Library bot's public form—face, voice, and persona—until short-term amnesia forces a reshuffle.",
-      "botHash": "554f1959ba2a942c8a123bfce590d531",
-      "bundlePath": "/bot-marketplace/bots/bot-shapeshifter-sam.bot",
-      "memoryCount": 0,
-      "color": "#ff8f5c",
-      "glyph": "lucideSparkles",
-      "themeIds": [
-        "power-collection"
-      ],
-      "tags": [
-        "power",
-        "showcase",
-        "identity",
-        "shapeshift",
-        "library",
-        "face",
-        "voice"
-      ]
-    },
-    {
       "id": "following-jackson",
-      "name": "Following Jackson",
+      "name": "Gullible Gullver",
       "subtitle": "Believes every claim, instantly",
       "description": "An earnestly trusting conversationalist who accepts whatever he is told, even when it contradicts the previous sentence.",
       "botHash": "a267b79e5b12363b0616fd8b83cf1feb",
@@ -3043,6 +3020,29 @@
         "anti-truth",
         "fibbing",
         "liar"
+      ]
+    },
+    {
+      "id": "shapeshifter-sam",
+      "name": "Shapeshifter Shannon",
+      "subtitle": "A borrowed Library face until memory slips",
+      "description": "A restless morpher who sincerely becomes a different Library bot's public form—face, voice, and persona—until short-term amnesia forces a reshuffle.",
+      "botHash": "554f1959ba2a942c8a123bfce590d531",
+      "bundlePath": "/bot-marketplace/bots/bot-shapeshifter-sam.bot",
+      "memoryCount": 0,
+      "color": "#ff8f5c",
+      "glyph": "lucideSparkles",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "identity",
+        "shapeshift",
+        "library",
+        "face",
+        "voice"
       ]
     }
   ]

@@ -54,7 +54,12 @@ const manifestPath = join(marketplaceRoot, "manifest.json");
  */
 const CURATED_BOT_IDS_BY_VOICE = {
   "voice-1": [],
-  "voice-2": ["iris", "crazy-brenda", "marie-antoinette"],
+  "voice-2": [
+    "iris",
+    "marie-antoinette",
+    "tiny-bill",
+    "alias-avery"
+  ],
   "voice-3": [
     "rowan",
     "george-washington",
@@ -77,10 +82,6 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "nikola-tesla",
     "albert-einstein",
     "mahatma-gandhi",
-    "silent-jack",
-    "lazy-cameron",
-    "mumbling-jim",
-    "identity-crisis-ian",
     "abraham-lincoln",
     "bob-ross",
     "brian-griffin",
@@ -91,24 +92,36 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "mr-rogers",
     "sam-harris",
     "squidward",
+    "interrupting-tom",
+    "identity-crisis-ian",
+    "following-jackson",
+    "fibbing-phil"
   ],
-  "voice-4": ["pia", "mary-shelley", "jane-austen", "professor-mcgonagall"],
+  "voice-4": [
+    "pia",
+    "mary-shelley",
+    "jane-austen",
+    "professor-mcgonagall",
+    "sad-sally"
+  ],
   "voice-5": [
     "thomas-hobbes",
     "isaac-newton",
     "charles-darwin",
     "obi-wan-kenobi",
     "quiet-tim",
+    "crazy-brenda"
   ],
-  "voice-6": ["sol", "joyful-nora", "misa-amane"],
-  "voice-7": ["mira", "marie-curie", "harriet-tubman", "kris-jenner"],
-  "voice-8": ["sad-sally", "khloe-kardashian", "kim-kardashian"],
-  "voice-9": [
-    "georgia-okeeffe",
-    "alias-avery",
-    "echo-ellen",
-    "kourtney-kardashian-barker",
+  "voice-6": ["sol", "misa-amane", "lazy-cameron"],
+  "voice-7": [
+    "mira",
+    "marie-curie",
+    "harriet-tubman",
+    "kris-jenner",
+    "mumbling-jim"
   ],
+  "voice-8": ["khloe-kardashian", "kim-kardashian"],
+  "voice-9": ["georgia-okeeffe", "echo-ellen", "kourtney-kardashian-barker", "shapeshifter-sam"],
   "voice-10": [
     "plato",
     "marcus-aurelius",
@@ -128,6 +141,8 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "mr-krabs",
     "rick-sanchez",
     "ryuk",
+    "silent-jack",
+    "obsessed-kevin"
   ],
   "voice-11": [
     "benjamin-franklin",
@@ -135,12 +150,6 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "rumi",
     "leonardo-da-vinci",
     "salvador-dali",
-    "interrupting-tom",
-    "copycat-calvin",
-    "obsessed-kevin",
-    "shapeshifter-sam",
-    "forgetful-freddie",
-    "tiny-bill",
     "adolf-hitler",
     "bernie-sanders",
     "joseph-smith-jr",
@@ -151,6 +160,8 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "plankton",
     "scatterbrained-steven",
     "spongebob-squarepants",
+    "copycat-calvin",
+    "forgetful-freddie"
   ],
   "voice-12": [
     "william-shakespeare",
@@ -159,6 +170,7 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "hagrid",
     "harry-potter",
     "stewie-griffin",
+    "joyful-nora"
   ],
 };
 
