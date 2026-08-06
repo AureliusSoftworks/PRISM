@@ -135783,7 +135783,7 @@ function HomeContent(): React.JSX.Element {
           frozenVoiceProfile?: BotAudioVoiceProfileV1 | null;
         },
         playerLifecycle,
-        1,
+        utterance.voiceLevel ?? 1,
         utterance.event.sideId === "for"
           ? -0.36
           : utterance.event.sideId === "against"

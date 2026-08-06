@@ -607,7 +607,23 @@ describe("Debate experience", () => {
       source,
       /Soft prepare — emoji stays as the fallback until the sprite/u,
     );
-    assert.match(source, /Save anytime; the side refract card keeps working/u);
+    assert.match(source, /Queue another asset/u);
+    assert.match(
+      source,
+      /queue more sprites while one waits/u,
+    );
+    assert.match(
+      source,
+      /Soft synth may queue behind other image work; only hard-block uploads/u,
+    );
+    assert.match(
+      source,
+      /if \(!draft \|\| !title \|\| evidenceObjectUploadBusy\)/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /synthesizeEvidenceObjectImage[\s\S]{0,220}evidenceObjectVisualBusy/u,
+    );
     assert.match(source, /placement="docked"/u);
     assert.match(source, /softExhibitJobList/u);
     assert.match(source, /cancelSoftExhibitSynthesizeJob/u);
@@ -1463,7 +1479,7 @@ describe("Debate experience", () => {
       /readyToBeginOverlay \|\| session\.playerRole === "spectator"/u,
     );
     assert.match(source, /data-hold=\{hold \? "true" : undefined\}/u);
-    assert.match(source, /data-action="start"/u);
+    assert.match(source, /data-action=\{holdAction\.action \?\? "start"\}/u);
     assert.match(source, /Gallery ready/u);
     assert.match(source, /Start Debate/u);
     assert.match(
@@ -1482,6 +1498,24 @@ describe("Debate experience", () => {
     );
     assert.match(css, /\.identOverlay\[data-hold="true"\]/u);
     assert.match(css, /\.identHoldAction/u);
+    // Hold composition overrides must follow timed intro composition so Start
+    // Debate cannot fade out with the cinematic curtain while data-hold is set.
+    const introCompositionIdx = css.indexOf(
+      '.identOverlay[data-kind="intro"] .identComposition',
+    );
+    const holdCompositionIdx = css.indexOf(
+      '.identOverlay[data-hold="true"] .identComposition',
+    );
+    assert.ok(introCompositionIdx >= 0, "intro composition animation missing");
+    assert.ok(holdCompositionIdx >= 0, "hold composition override missing");
+    assert.ok(
+      holdCompositionIdx > introCompositionIdx,
+      "hold composition must cascade after intro composition",
+    );
+    assert.match(
+      css,
+      /\.identOverlay\[data-hold="true"\]\[data-kind="intro"\] \.identComposition/u,
+    );
     assert.match(source, /debateLivePhaseLabel\(session/u);
     assert.match(source, /debateJuryRosterFooterCopy\(/u);
     assert.match(source, /debateJuryOutcomeRevealed\(/u);
@@ -3827,6 +3861,16 @@ describe("Debate experience", () => {
     assert.match(source, /className=\{styles\.cameraAdvanced\}/u);
     assert.match(source, /data-debate-stage-alignment-modal="true"/u);
     assert.match(source, /Save alignment/u);
+    assert.match(source, /data-debate-alignment-voice-mixer="true"/u);
+    assert.match(source, /Voice levels/u);
+    assert.match(source, /Gallery · Quiet/u);
+    assert.match(source, /Gallery · Rowdy/u);
+    assert.match(source, /updateDebateStageVoiceLevel/u);
+    assert.match(source, /updateDebateStageGalleryVolume/u);
+    assert.match(source, /scaleDebateAudienceMixByGalleryVolume/u);
+    assert.match(source, /voiceLevel: debateStageVoiceLevelForRole/u);
+    assert.match(css, /\.alignmentVoiceMixer/u);
+    assert.match(css, /\.alignmentGalleryRowdyToggle/u);
     assert.match(source, /Reset positions/u);
     assert.match(source, /Drag an item or use arrow keys to nudge by 0\.5%/u);
     assert.match(source, /\(\["light", "dark"\] as const\)/u);
@@ -4106,7 +4150,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.alignmentLightingTuner\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto/u,
+      /\.alignmentLightingTuner,\n\.alignmentVoiceMixer\s*\{[^}]*grid-template-columns:\s*auto minmax\(0,\s*1fr\) auto/u,
     );
     assert.match(
       css,

@@ -158,6 +158,7 @@ import {
   debateAudiencePressureScore,
   debateAudienceTalkerIndices,
   debateAudienceVisualPressureBand,
+  scaleDebateAudienceMixByGalleryVolume,
   type DebateAudiencePressureBand,
 } from "./debateAudiencePressure";
 import {
@@ -302,12 +303,15 @@ import {
   DEBATE_STAGE_LIGHT_MASK_OPACITY_MAX,
   DEBATE_STAGE_LIGHT_MASK_OPACITY_MIN,
   DEBATE_STAGE_LIGHT_MASK_OPACITY_STEP,
+  DEBATE_STAGE_VOICE_LEVEL_MAX,
+  DEBATE_STAGE_VOICE_LEVEL_STEP,
   DEFAULT_DEBATE_STAGE_ALIGNMENT,
   copyDebateStageAlignment,
   debateStageEvidenceViewForCamera,
   debateStageAlignmentOffset,
   debateStageAlignmentStyle,
   debateStageAlignmentTarget,
+  debateStageVoiceLevelForRole,
   formatDebateStageAlignmentClipboard,
   formatDebateStageEvidenceTableClipboard,
   formatDebateStageGavelClipboard,
@@ -315,9 +319,11 @@ import {
   readDebateStageAlignment,
   updateDebateStageAlignmentOffset,
   updateDebateStageEvidenceTable,
+  updateDebateStageGalleryVolume,
   updateDebateStageGavelPose,
   updateDebateStageLightBlendMode,
   updateDebateStageLightMaskOpacity,
+  updateDebateStageVoiceLevel,
   writeDebateStageAlignment,
   type DebateStageAlignmentItem,
   type DebateStageAlignmentRole,
@@ -454,6 +460,8 @@ export interface DebateUtterance {
   spokenText: string;
   voicePerformanceText?: string | null;
   voiceSourceBotId: string | null;
+  /** Stage-role voice fader from Debate alignment (0–1.25). Defaults to 1. */
+  voiceLevel?: number;
   /** Independent channel so an Objection can overlap a cut-off advocate. */
   voiceChannel?: "primary" | "crosstalk";
   lifecycle?: {
@@ -1190,6 +1198,22 @@ const DEBATE_STAGE_ALIGNMENT_LABELS: Record<DebateStageAlignmentRole, string> =
     moderator: "Moderator",
     against: "Against advocate",
   };
+
+/** Map a live Forum event onto the alignment voice mixer lanes. */
+function debateStageVoiceRoleForEvent(
+  event: DebateEventV1,
+): DebateStageAlignmentRole | null {
+  if (event.sideId === "for") return "for";
+  if (event.sideId === "against") return "against";
+  if (
+    event.speakerKind === "moderator" ||
+    (event.speakerKind === "player" && event.sideId == null)
+  ) {
+    return "moderator";
+  }
+  return null;
+}
+
 const DEBATE_STAGE_ALIGNMENT_ITEM_LABELS: Record<
   DebateStageAlignmentItem,
   string
@@ -3612,6 +3636,9 @@ export function DebateExperience(
     useState<DebateCastSelection | null>(null);
   const [stageAlignmentSoundCheck, setStageAlignmentSoundCheck] =
     useState<DebateStageSoundCheckState>(null);
+  /** Alignment-only A/B: quiet gallery bed vs rowdy pressure while mic testing. */
+  const [stageAlignmentGalleryRowdy, setStageAlignmentGalleryRowdy] =
+    useState(false);
   const [stageAlignmentCopyState, setStageAlignmentCopyState] =
     useState<DebateClipboardState>("idle");
   const [stageAlignmentPreviewCamera, setStageAlignmentPreviewCamera] =
@@ -4353,6 +4380,7 @@ export function DebateExperience(
       setStageAlignmentDraggingTarget(null);
       setStageAlignmentDraft(copyDebateStageAlignment(stageAlignment));
       setStageAlignmentGavelCue(null);
+      setStageAlignmentGalleryRowdy(false);
       stageAlignmentSoundCheckRunRef.current += 1;
       if (stageAlignmentSoundCheck?.status === "playing") {
         onStopUtterance?.();
@@ -5254,6 +5282,7 @@ export function DebateExperience(
     setStageAlignmentGavelPose("lowered");
     setStageAlignmentGavelPosesLinked(false);
     setStageAlignmentSoundCheck(null);
+    setStageAlignmentGalleryRowdy(false);
     setStageAlignmentCopyState("idle");
     setStageAlignmentSelectedItems({
       for: "bot",
@@ -5271,6 +5300,7 @@ export function DebateExperience(
     setStageAlignmentGavelCue(null);
     setStageAlignmentGavelPose("lowered");
     setStageAlignmentGavelPosesLinked(false);
+    setStageAlignmentGalleryRowdy(false);
     setStageAlignmentCopyState("idle");
     setStageAlignmentDraggingTarget(null);
     stageAlignmentDragRef.current = null;
@@ -5291,6 +5321,7 @@ export function DebateExperience(
       setStageAlignmentGavelCue(null);
       setStageAlignmentGavelPose("lowered");
       setStageAlignmentGavelPosesLinked(false);
+      setStageAlignmentGalleryRowdy(false);
       setStageAlignmentOpen(false);
     } catch {
       setError("Debate stage alignment could not be saved on this device.");
@@ -5450,6 +5481,10 @@ export function DebateExperience(
       playerVoice: false,
       spokenText,
       voiceSourceBotId: bot.id,
+      voiceLevel: debateStageVoiceLevelForRole(
+        stageAlignmentDraft.voiceLevels,
+        role,
+      ),
       lifecycle: {
         onStart: (durationMs, alignment) => {
           if (stageAlignmentSoundCheckRunRef.current !== runId) return;
@@ -6410,7 +6445,8 @@ export function DebateExperience(
   const synthesizeEvidenceObjectImage = async (direction = ""): Promise<void> => {
     const draft = evidenceObjectDraft;
     const title = draft ? debateEvidenceExhibitTitle(draft) : "";
-    if (!draft || !title || evidenceObjectVisualBusy) {
+    // Soft synth may queue behind other image work; only hard-block uploads.
+    if (!draft || !title || evidenceObjectUploadBusy) {
       if (!title) setError("Name the evidence object before synthesizing it.");
       return;
     }
@@ -6840,9 +6876,15 @@ export function DebateExperience(
             ? `[${hiddenPerformanceCue}] ${authoredPerformanceText ?? spokenText}`
             : authoredPerformanceText,
         voiceSourceBotId: presentation?.voiceSourceBotId ?? null,
+        voiceLevel: (() => {
+          const role = debateStageVoiceRoleForEvent(event);
+          return role
+            ? debateStageVoiceLevelForRole(stageAlignment.voiceLevels, role)
+            : 1;
+        })(),
       };
     },
-    [bots],
+    [bots, stageAlignment.voiceLevels],
   );
 
   const consumeNewEvents = useCallback(
@@ -12916,7 +12958,7 @@ export function DebateExperience(
               context={objectTitle}
               currentImageIds={[evidenceObjectDraft.imageId]}
               refreshKey={evidenceObjectDraft.imageId}
-              disabled={!objectTitle || evidenceObjectAssetLocked}
+              disabled={!objectTitle || evidenceObjectUploadBusy}
               onUpload={() => evidenceExhibitUploadRef.current?.click()}
               onSynthesize={synthesizeEvidenceObjectImage}
               onSelect={(asset) => {
@@ -12944,10 +12986,15 @@ export function DebateExperience(
                   evidenceObjectSoftSynthesizing ? "true" : undefined
                 }
                 onClick={() => void synthesizeEvidenceObjectImage()}
-                disabled={!objectTitle || evidenceObjectAssetLocked}
+                disabled={!objectTitle || evidenceObjectUploadBusy}
+                title={
+                  evidenceObjectSoftSynthesizing
+                    ? "Queue another soft sprite. It waits its turn if one is already generating."
+                    : undefined
+                }
               >
                 {evidenceObjectSoftSynthesizing
-                  ? "Synthesizing…"
+                  ? "Queue another asset"
                   : evidenceObjectDraft.imageId
                     ? "Synthesize another asset"
                     : "Synthesize asset"}
@@ -12955,7 +13002,7 @@ export function DebateExperience(
               {evidenceObjectSoftSynthesizing ? (
                 <span role="status" aria-live="polite">
                   Soft prepare — emoji stays as the fallback until the sprite
-                  swaps in. Save anytime; the side refract card keeps working.
+                  swaps in. Save anytime; queue more sprites while one waits.
                 </span>
               ) : (
                 <small>
@@ -14832,6 +14879,29 @@ export function DebateExperience(
     );
     const lightingIsDefault =
       lightBlendModesAreDefault && lightMaskOpacitiesAreDefault;
+    const voiceLevelsAreDefault = DEBATE_STAGE_ALIGNMENT_ROLES.every(
+      (role) =>
+        stageAlignmentDraft.voiceLevels[role] ===
+        DEFAULT_DEBATE_STAGE_ALIGNMENT.voiceLevels[role],
+    );
+    const galleryVolumeIsDefault =
+      stageAlignmentDraft.galleryVolume ===
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.galleryVolume;
+    const mixerIsDefault = voiceLevelsAreDefault && galleryVolumeIsDefault;
+    const alignmentGalleryBed = scaleDebateAudienceMixByGalleryVolume(
+      debateAudiencePressureMixForScore(
+        stageAlignmentGalleryRowdy ? 82 : 0,
+        stageAlignmentGalleryRowdy
+          ? "free_for_all"
+          : (session?.formality ?? "parliamentary"),
+      ),
+      stageAlignmentDraft.galleryVolume,
+    );
+    const alignmentAtmosphereMix = {
+      background: alignmentGalleryBed.background,
+      grain: alignmentGalleryBed.grain,
+      foley: DEBATE_FOLEY_MIX.foley,
+    };
     return (
       <>
         <SessionAtmosphereLayer
@@ -14840,7 +14910,18 @@ export function DebateExperience(
           )}
           sessionKey={`debate-alignment:${session?.id ?? props.storageScopeId}`}
           volume={props.audioVolume}
-          mix={DEBATE_FOLEY_MIX}
+          backgroundUrl={
+            stageAlignmentDraft.galleryVolume > 0
+              ? DEBATE_AUDIENCE_MURMUR_URL
+              : null
+          }
+          grainUrl={
+            stageAlignmentGalleryRowdy && stageAlignmentDraft.galleryVolume > 0
+              ? DEBATE_AUDIENCE_CROSSTALK_URL
+              : null
+          }
+          mix={alignmentAtmosphereMix}
+          mixTransitionMs={280}
           preloadFoleyUrls={DEBATE_GAVEL_FOLEY_PRELOAD_URLS}
           foleyRoomAcoustics={
             session?.format === "turnabout"
@@ -15309,6 +15390,133 @@ export function DebateExperience(
                     </div>
                   </div>
                 </div>
+                <section
+                  className={styles.alignmentVoiceMixer}
+                  aria-label="Debate stage voice mixer"
+                  data-debate-alignment-voice-mixer="true"
+                >
+                  <header>
+                    <div>
+                      <span className={styles.eyebrow}>Voice levels</span>
+                      <strong>Forum mix</strong>
+                    </div>
+                    <small>
+                      Master {Math.round(props.audioVolume * 100)}% · saved with
+                      alignment
+                    </small>
+                    <button
+                      type="button"
+                      disabled={mixerIsDefault}
+                      onClick={() =>
+                        setStageAlignmentDraft((current) =>
+                          normalizeDebateStageAlignment({
+                            ...current,
+                            voiceLevels:
+                              DEFAULT_DEBATE_STAGE_ALIGNMENT.voiceLevels,
+                            galleryVolume:
+                              DEFAULT_DEBATE_STAGE_ALIGNMENT.galleryVolume,
+                          }),
+                        )
+                      }
+                    >
+                      Reset
+                    </button>
+                  </header>
+                  <div className={styles.alignmentVoiceMixerSliders}>
+                    {alignmentCast.map(({ role, bot }) => {
+                      const level = debateStageVoiceLevelForRole(
+                        stageAlignmentDraft.voiceLevels,
+                        role,
+                      );
+                      return (
+                        <label key={`alignment-voice:${role}`}>
+                          <span>
+                            <span>
+                              <strong>
+                                {DEBATE_STAGE_ALIGNMENT_LABELS[role]}
+                              </strong>
+                              <small>{bot.name}</small>
+                            </span>
+                            <output>{Math.round(level * 100)}%</output>
+                          </span>
+                          <input
+                            type="range"
+                            min={0}
+                            max={DEBATE_STAGE_VOICE_LEVEL_MAX}
+                            step={DEBATE_STAGE_VOICE_LEVEL_STEP}
+                            value={level}
+                            aria-label={`${DEBATE_STAGE_ALIGNMENT_LABELS[role]} ${bot.name} voice level`}
+                            onChange={(event) => {
+                              const next = Number(event.currentTarget.value);
+                              if (!Number.isFinite(next)) return;
+                              if (
+                                stageAlignmentSoundCheck?.status === "playing"
+                              ) {
+                                stopStageAlignmentSoundCheck();
+                              }
+                              setStageAlignmentDraft((current) =>
+                                updateDebateStageVoiceLevel(
+                                  current,
+                                  role,
+                                  next,
+                                ),
+                              );
+                            }}
+                          />
+                        </label>
+                      );
+                    })}
+                    <label>
+                      <span>
+                        <span>
+                          <strong>Gallery</strong>
+                          <small>Murmur bed</small>
+                        </span>
+                        <output>
+                          {Math.round(stageAlignmentDraft.galleryVolume * 100)}%
+                        </output>
+                      </span>
+                      <input
+                        type="range"
+                        min={0}
+                        max={DEBATE_STAGE_VOICE_LEVEL_MAX}
+                        step={DEBATE_STAGE_VOICE_LEVEL_STEP}
+                        value={stageAlignmentDraft.galleryVolume}
+                        aria-label="Gallery murmur volume"
+                        onChange={(event) => {
+                          const next = Number(event.currentTarget.value);
+                          if (!Number.isFinite(next)) return;
+                          setStageAlignmentDraft((current) =>
+                            updateDebateStageGalleryVolume(current, next),
+                          );
+                        }}
+                      />
+                    </label>
+                  </div>
+                  <div className={styles.alignmentGalleryRowdiness}>
+                    <button
+                      type="button"
+                      className={styles.alignmentGalleryRowdyToggle}
+                      data-rowdy={
+                        stageAlignmentGalleryRowdy ? "true" : "false"
+                      }
+                      aria-pressed={stageAlignmentGalleryRowdy}
+                      onClick={() =>
+                        setStageAlignmentGalleryRowdy((current) => !current)
+                      }
+                    >
+                      {stageAlignmentGalleryRowdy
+                        ? "Gallery · Rowdy"
+                        : "Gallery · Quiet"}
+                    </button>
+                    <small>
+                      Toggle gallery heat while testing mics — not saved.
+                    </small>
+                  </div>
+                  {!props.audioEnabled || props.audioVolume <= 0 ? (
+                    <small>Turn voice audio on to audition this mix.</small>
+                  ) : null}
+                </section>
                 {stageAlignmentPreviewCamera === "moderator" ? (
                   <section
                     className={styles.alignmentGavelTuner}
@@ -16654,6 +16862,13 @@ export function DebateExperience(
               : galleryMixBranch === "ducked"
                 ? DEBATE_AUDIENCE_DUCKED_MIX
                 : DEBATE_AUDIENCE_IDLE_MIX;
+    const galleryMixWithVolume =
+      galleryMixBranch === "jury" || galleryMixBranch === "ident"
+        ? galleryMix
+        : scaleDebateAudienceMixByGalleryVolume(
+            galleryMix,
+            stageAlignment.galleryVolume,
+          );
     const handleDebateAmbientBotVocalization = (
       cue: SessionAmbientBotVocalizationCue,
     ): boolean | "owned" => {
@@ -16815,7 +17030,7 @@ export function DebateExperience(
               ? DEBATE_AUDIENCE_CROSSTALK_URL
               : null
           }
-          mix={galleryMix}
+          mix={galleryMixWithVolume}
           mixTransitionMs={
             audiencePressureBandTrue === null &&
             activeAudienceOrderResponse === null

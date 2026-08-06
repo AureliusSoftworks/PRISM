@@ -28,7 +28,12 @@ import {
   updateDebateStageGavelPose,
   updateDebateStageLightBlendMode,
   updateDebateStageLightMaskOpacity,
+  updateDebateStageGalleryVolume,
+  updateDebateStageVoiceLevel,
   writeDebateStageAlignment,
+  debateStageVoiceLevelForRole,
+  normalizeDebateStageGalleryVolume,
+  normalizeDebateStageVoiceLevel,
 } from "./debateStageAlignment.ts";
 
 function evidencePlacement(
@@ -59,9 +64,9 @@ describe("Debate stage alignment", () => {
     assert.equal(DEBATE_STAGE_GAVEL_POSITION_MAX, 300);
   });
 
-  it("uses the approved version-eleven stage composition as its canonical default", () => {
+  it("uses the approved version-twelve stage composition as its canonical default", () => {
     const expected = {
-      version: 11,
+      version: 12,
       wide: {
         for: {
           bot: { x: 0.01, y: -2 },
@@ -110,6 +115,12 @@ describe("Debate stage alignment", () => {
         dark: 100,
         light: 100,
       },
+      voiceLevels: {
+        for: 1,
+        moderator: 1,
+        against: 1,
+      },
+      galleryVolume: 1,
     };
 
     assert.deepEqual(DEFAULT_DEBATE_STAGE_ALIGNMENT, expected);
@@ -157,7 +168,7 @@ describe("Debate stage alignment", () => {
         evidenceTable: { x: -999, y: 999, size: 12 },
       }),
       {
-        version: 11,
+        version: 12,
         wide: {
           for: {
             bot: { x: -12, y: 2.13 },
@@ -264,6 +275,12 @@ describe("Debate stage alignment", () => {
           dark: 0,
           light: 72.5,
         },
+        voiceLevels: {
+          for: 1,
+          moderator: 1,
+          against: 1,
+        },
+        galleryVolume: 1,
       },
     );
   });
@@ -278,7 +295,7 @@ describe("Debate stage alignment", () => {
     };
     assert.equal(
       debateStageAlignmentStorageKey("user-1"),
-      "prism_debate_stage_alignment_v11:user-1",
+      "prism_debate_stage_alignment_v12:user-1",
     );
     assert.deepEqual(
       readDebateStageAlignment(storage, "user-1"),
@@ -418,6 +435,15 @@ describe("Debate stage alignment", () => {
         },
       },
     );
+    assert.deepEqual(
+      migrated.voiceLevels,
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.voiceLevels,
+    );
+    assert.equal(
+      migrated.galleryVolume,
+      DEFAULT_DEBATE_STAGE_ALIGNMENT.galleryVolume,
+    );
+    values.delete("prism_debate_stage_alignment_v12:user-1");
     values.delete("prism_debate_stage_alignment_v11:user-1");
     values.delete("prism_debate_stage_alignment_v10:user-1");
     values.set(
@@ -823,6 +849,42 @@ describe("Debate stage alignment", () => {
         formatDebateStageEvidenceTableClipboard(tunedLeft.evidenceTable),
       ),
       tunedLeft.evidenceTable,
+    );
+  });
+
+  it("normalizes and updates the alignment voice mixer without drifting placements", () => {
+    assert.equal(normalizeDebateStageVoiceLevel(9), 1.25);
+    assert.equal(normalizeDebateStageVoiceLevel(-1), 0);
+    assert.equal(normalizeDebateStageGalleryVolume(undefined), 1);
+    const tuned = updateDebateStageVoiceLevel(
+      DEFAULT_DEBATE_STAGE_ALIGNMENT,
+      "for",
+      0.7,
+    );
+    const withGallery = updateDebateStageGalleryVolume(tuned, 0.4);
+    assert.equal(debateStageVoiceLevelForRole(withGallery.voiceLevels, "for"), 0.7);
+    assert.equal(
+      debateStageVoiceLevelForRole(withGallery.voiceLevels, "against"),
+      1,
+    );
+    assert.equal(withGallery.galleryVolume, 0.4);
+    assert.deepEqual(withGallery.wide, DEFAULT_DEBATE_STAGE_ALIGNMENT.wide);
+    const values = new Map<string, string>();
+    const storage = {
+      getItem: (key: string) => values.get(key) ?? null,
+      setItem: (key: string, value: string) => {
+        values.set(key, value);
+      },
+    };
+    writeDebateStageAlignment(storage, "mixer-user", withGallery);
+    assert.ok(values.has("prism_debate_stage_alignment_v12:mixer-user"));
+    assert.deepEqual(
+      readDebateStageAlignment(storage, "mixer-user").voiceLevels,
+      withGallery.voiceLevels,
+    );
+    assert.equal(
+      readDebateStageAlignment(storage, "mixer-user").galleryVolume,
+      0.4,
     );
   });
 });

@@ -28,9 +28,14 @@
 **Lesson**: Never append Psychic/simulated-Effort guidance as a trailing `system` message after the last `user` turn. Ollama chat templates (llama3.2 confirmed) then emit a literal role token as content. Insert guidance immediately before the last user message, and strip a leading `assistant|user|system` role marker from local replies as a safety net.
 **Applies to**: `appendPsychicAnswerGuidance` in `chat.ts`, `stripLeadingChatRoleMarker` in `providers.ts`, `/effort-review`
 
+### 2026-08-06 · UX
+**Trigger**: Debate alignment needed Signal-like per-voice and gallery levels for mic checks, plus a way to A/B gallery heat.
+**Lesson**: Persist For/Moderator/Against voice levels + Gallery volume on stage alignment (v12 localStorage). Apply voice levels on soundcheck and live `DebateUtterance.voiceLevel`; scale gallery murmur beds with `scaleDebateAudienceMixByGalleryVolume` (leave Foley untouched). Keep Quiet↔Rowdy as an alignment-session-only toggle — do not save it with alignment.
+**Applies to**: `debateStageAlignment.ts`, `DebateExperience` alignment mixer, `debateAudiencePressure.ts`, `page.tsx` `playDebateUtterance`
+
 ### 2026-08-05 · UX
 **Trigger**: Spectator hard-bake exit/return showed a stage-only pause card; Proceedings (and chamber chrome) could spoil the prepared floor before Start.
-**Lesson**: For Spectator pause/ready holds, render a static full-screen `DebateIdentOverlay` (`data-hold="true"`) with Start/Resume — not `.stageStateOverlay`. Keep mid-watch stage pause only for non-spectator roles. Hold skips the timed curtain so the title stays until the player continues.
+**Lesson**: For Spectator pause/ready holds, render a static full-screen `DebateIdentOverlay` (`data-hold="true"`) with Start/Resume — not `.stageStateOverlay`. Keep mid-watch stage pause only for non-spectator roles. Hold skips the timed curtain so the title stays until the player continues. CSS hold overrides for `.identComposition` must be declared **after** `[data-kind=intro|outro] .identComposition` (or with higher specificity) — otherwise the timed fade wins and Start Debate disappears into a blank black chamber.
 **Applies to**: `DebateExperience.tsx` `DebateIdentOverlay`, spectator pause branch, `DebateExperience.module.css` `.identOverlay[data-hold]`
 
 ### 2026-08-05 · UX

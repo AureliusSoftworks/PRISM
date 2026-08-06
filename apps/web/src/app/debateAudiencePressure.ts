@@ -89,6 +89,19 @@ function scaleMixBed(
   };
 }
 
+/** Apply the alignment Gallery fader to murmur/crosstalk without touching Foley. */
+export function scaleDebateAudienceMixByGalleryVolume(
+  mix: SessionAtmosphereMix,
+  galleryVolume: number,
+): SessionAtmosphereMix {
+  const level = Number.isFinite(galleryVolume) ? Math.max(0, galleryVolume) : 1;
+  return {
+    background: mix.background * level,
+    grain: mix.grain * level,
+    foley: mix.foley,
+  };
+}
+
 function interpolatePressureMix(
   score: number,
 ): SessionAtmosphereMix {

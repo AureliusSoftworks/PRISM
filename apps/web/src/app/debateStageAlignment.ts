@@ -1,6 +1,11 @@
 import type { CSSProperties } from "react";
 
-export const DEBATE_STAGE_ALIGNMENT_VERSION = 11 as const;
+export const DEBATE_STAGE_ALIGNMENT_VERSION = 12 as const;
+/** Per-role voice gain on the alignment mixer (matches Signal's 0–125% range). */
+export const DEBATE_STAGE_VOICE_LEVEL_DEFAULT = 1;
+export const DEBATE_STAGE_VOICE_LEVEL_MAX = 1.25;
+export const DEBATE_STAGE_VOICE_LEVEL_STEP = 0.05;
+export const DEBATE_STAGE_GALLERY_VOLUME_DEFAULT = 1;
 export const DEBATE_STAGE_ALIGNMENT_MIN = -12;
 export const DEBATE_STAGE_ALIGNMENT_MAX = 12;
 export const DEBATE_STAGE_ALIGNMENT_STEP = 0.5;
@@ -148,7 +153,13 @@ export interface DebateStageEvidencePlacementsV10 {
   source: DebateStageEvidenceTablesV10;
 }
 
-export interface DebateStageAlignmentV11 {
+export interface DebateStageVoiceLevelsV1 {
+  for: number;
+  moderator: number;
+  against: number;
+}
+
+export interface DebateStageAlignmentV12 {
   version: typeof DEBATE_STAGE_ALIGNMENT_VERSION;
   wide: DebateStageAlignmentWideV4;
   moderator: DebateStageRolePlacementV4;
@@ -156,14 +167,19 @@ export interface DebateStageAlignmentV11 {
   evidenceTable: DebateStageEvidencePlacementsV10;
   lightBlendModes: DebateStageLightBlendModesV1;
   lightMaskOpacities: DebateStageLightMaskOpacitiesV1;
+  /** Alignment + live Forum voice gain by stage role (0–1.25). */
+  voiceLevels: DebateStageVoiceLevelsV1;
+  /** Gallery murmur/crosstalk bed multiplier (0–1.25). */
+  galleryVolume: number;
 }
 
-/** @deprecated Prefer DebateStageAlignmentV11 — kept as stable import aliases. */
-export type DebateStageAlignmentV10 = DebateStageAlignmentV11;
-export type DebateStageAlignmentV9 = DebateStageAlignmentV11;
-export type DebateStageAlignmentV8 = DebateStageAlignmentV11;
-export type DebateStageAlignmentV7 = DebateStageAlignmentV11;
-export type DebateStageAlignmentV6 = DebateStageAlignmentV11;
+/** @deprecated Prefer DebateStageAlignmentV12 — kept as stable import aliases. */
+export type DebateStageAlignmentV11 = DebateStageAlignmentV12;
+export type DebateStageAlignmentV10 = DebateStageAlignmentV12;
+export type DebateStageAlignmentV9 = DebateStageAlignmentV12;
+export type DebateStageAlignmentV8 = DebateStageAlignmentV12;
+export type DebateStageAlignmentV7 = DebateStageAlignmentV12;
+export type DebateStageAlignmentV6 = DebateStageAlignmentV12;
 
 export const DEBATE_STAGE_ALIGNMENT_ROLES: readonly DebateStageAlignmentRole[] =
   ["for", "moderator", "against"];
@@ -228,7 +244,13 @@ function evidenceTablePlacement(
   };
 }
 
-export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV11 = {
+export const DEFAULT_DEBATE_STAGE_VOICE_LEVELS: DebateStageVoiceLevelsV1 = {
+  for: DEBATE_STAGE_VOICE_LEVEL_DEFAULT,
+  moderator: DEBATE_STAGE_VOICE_LEVEL_DEFAULT,
+  against: DEBATE_STAGE_VOICE_LEVEL_DEFAULT,
+};
+
+export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV12 = {
   version: DEBATE_STAGE_ALIGNMENT_VERSION,
   wide: {
     for: {
@@ -278,6 +300,8 @@ export const DEFAULT_DEBATE_STAGE_ALIGNMENT: DebateStageAlignmentV11 = {
     dark: 100,
     light: 100,
   },
+  voiceLevels: { ...DEFAULT_DEBATE_STAGE_VOICE_LEVELS },
+  galleryVolume: DEBATE_STAGE_GALLERY_VOLUME_DEFAULT,
 };
 
 function normalizedNumber(
@@ -588,6 +612,57 @@ function normalizeLightBlendMode(
     : fallback;
 }
 
+export function normalizeDebateStageVoiceLevel(
+  value: unknown,
+  fallback = DEBATE_STAGE_VOICE_LEVEL_DEFAULT,
+): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  const safe = Number.isFinite(numeric) ? numeric : fallback;
+  return Number(
+    Math.max(0, Math.min(DEBATE_STAGE_VOICE_LEVEL_MAX, safe)).toFixed(2),
+  );
+}
+
+export function normalizeDebateStageVoiceLevels(
+  value: unknown,
+): DebateStageVoiceLevelsV1 {
+  const candidate =
+    typeof value === "object" && value !== null
+      ? (value as Record<string, unknown>)
+      : {};
+  return {
+    for: normalizeDebateStageVoiceLevel(
+      candidate.for,
+      DEFAULT_DEBATE_STAGE_VOICE_LEVELS.for,
+    ),
+    moderator: normalizeDebateStageVoiceLevel(
+      candidate.moderator,
+      DEFAULT_DEBATE_STAGE_VOICE_LEVELS.moderator,
+    ),
+    against: normalizeDebateStageVoiceLevel(
+      candidate.against,
+      DEFAULT_DEBATE_STAGE_VOICE_LEVELS.against,
+    ),
+  };
+}
+
+export function debateStageVoiceLevelForRole(
+  levels: DebateStageVoiceLevelsV1 | null | undefined,
+  role: DebateStageAlignmentRole,
+): number {
+  return normalizeDebateStageVoiceLevel(
+    levels?.[role],
+    DEFAULT_DEBATE_STAGE_VOICE_LEVELS[role],
+  );
+}
+
+export function normalizeDebateStageGalleryVolume(
+  value: unknown,
+  fallback = DEBATE_STAGE_GALLERY_VOLUME_DEFAULT,
+): number {
+  return normalizeDebateStageVoiceLevel(value, fallback);
+}
+
 export function normalizeDebateStageAlignment(
   value: unknown,
 ): DebateStageAlignmentV6 {
@@ -679,6 +754,8 @@ export function normalizeDebateStageAlignment(
       dark: normalizedLightMaskOpacity(lightMaskOpacities.dark),
       light: normalizedLightMaskOpacity(lightMaskOpacities.light),
     },
+    voiceLevels: normalizeDebateStageVoiceLevels(candidate.voiceLevels),
+    galleryVolume: normalizeDebateStageGalleryVolume(candidate.galleryVolume),
   };
 }
 
@@ -779,6 +856,30 @@ export function updateDebateStageLightMaskOpacity(
   });
 }
 
+export function updateDebateStageVoiceLevel(
+  alignment: DebateStageAlignmentV6,
+  role: DebateStageAlignmentRole,
+  level: number,
+): DebateStageAlignmentV6 {
+  return normalizeDebateStageAlignment({
+    ...alignment,
+    voiceLevels: {
+      ...alignment.voiceLevels,
+      [role]: level,
+    },
+  });
+}
+
+export function updateDebateStageGalleryVolume(
+  alignment: DebateStageAlignmentV6,
+  galleryVolume: number,
+): DebateStageAlignmentV6 {
+  return normalizeDebateStageAlignment({
+    ...alignment,
+    galleryVolume,
+  });
+}
+
 export function updateDebateStageGavelPose(
   alignment: DebateStageAlignmentV6,
   pose: "lowered" | "raised",
@@ -854,6 +955,10 @@ export function updateDebateStageEvidenceTable(
 }
 
 export function debateStageAlignmentStorageKey(scopeId: string): string {
+  return `prism_debate_stage_alignment_v12:${scopeId}`;
+}
+
+function v11DebateStageAlignmentStorageKey(scopeId: string): string {
   return `prism_debate_stage_alignment_v11:${scopeId}`;
 }
 
@@ -904,6 +1009,7 @@ export function readDebateStageAlignment(
   try {
     const serialized =
       storage.getItem(debateStageAlignmentStorageKey(scopeId)) ??
+      storage.getItem(v11DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v10DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v9DebateStageAlignmentStorageKey(scopeId)) ??
       storage.getItem(v8DebateStageAlignmentStorageKey(scopeId)) ??

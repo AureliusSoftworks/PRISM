@@ -14,6 +14,7 @@ import {
   debateAudiencePressureScore,
   debateAudienceTalkerIndices,
   debateAudienceVisualPressureBand,
+  scaleDebateAudienceMixByGalleryVolume,
 } from "./debateAudiencePressure.ts";
 
 function event(
@@ -273,5 +274,18 @@ describe("Debate audience pressure", () => {
       debateAudienceVisualPressureBand("settled", "minimal"),
       "settled",
     );
+  });
+
+  it("scales gallery murmur beds by the alignment Gallery fader without touching Foley", () => {
+    const base = debateAudiencePressureMixForScore(70, "free_for_all");
+    const half = scaleDebateAudienceMixByGalleryVolume(base, 0.5);
+    assert.ok(Math.abs(half.background - base.background * 0.5) < 1e-12);
+    assert.ok(Math.abs(half.grain - base.grain * 0.5) < 1e-12);
+    assert.equal(half.foley, base.foley);
+    assert.deepEqual(scaleDebateAudienceMixByGalleryVolume(base, 0), {
+      background: 0,
+      grain: 0,
+      foley: base.foley,
+    });
   });
 });

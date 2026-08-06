@@ -6196,6 +6196,7 @@
 .alignmentGavelTuner button,
 .alignmentEvidenceTuner button,
 .alignmentLightingTuner button,
+.alignmentVoiceMixer button,
 .alignmentTuner button {
   border: 1px solid var(--alignment-border);
   border-radius: 999px;
@@ -6213,6 +6214,7 @@
 .alignmentGavelTuner button:disabled,
 .alignmentEvidenceTuner button:disabled,
 .alignmentLightingTuner button:disabled,
+.alignmentVoiceMixer button:disabled,
 .alignmentTuner button:disabled {
   cursor: default;
   opacity: 0.4;
@@ -6293,7 +6295,8 @@
 
 .alignmentGavelTuner,
 .alignmentEvidenceTuner,
-.alignmentLightingTuner {
+.alignmentLightingTuner,
+.alignmentVoiceMixer {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr) auto;
   align-items: center;
@@ -6303,6 +6306,122 @@
   padding: 9px 11px;
   background: color-mix(in srgb, var(--alignment-panel) 84%, transparent);
   box-shadow: inset 3px 0 color-mix(in srgb, #a995ff 44%, transparent);
+}
+
+.alignmentVoiceMixer {
+  max-width: 1320px;
+  margin: 0 auto 12px;
+  grid-template-columns: minmax(160px, 0.42fr) minmax(0, 1fr);
+  align-items: start;
+}
+
+.alignmentVoiceMixer > header {
+  display: flex;
+  min-width: 0;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.alignmentVoiceMixer > header > div {
+  display: grid;
+  gap: 2px;
+}
+
+.alignmentVoiceMixer > header strong {
+  font-size: 11px;
+}
+
+.alignmentVoiceMixer > header small {
+  color: var(--alignment-muted);
+  font-size: 9px;
+  line-height: 1.3;
+}
+
+.alignmentVoiceMixer > header button {
+  padding: 5px 8px;
+  font-size: 9px;
+}
+
+.alignmentVoiceMixerSliders {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(140px, 1fr));
+  gap: 10px 14px;
+}
+
+.alignmentVoiceMixerSliders label {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+}
+
+.alignmentVoiceMixerSliders label > span {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.alignmentVoiceMixerSliders label > span > span {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 7px;
+}
+
+.alignmentVoiceMixerSliders strong {
+  font: 760 10px/1 system-ui;
+}
+
+.alignmentVoiceMixerSliders small {
+  overflow: hidden;
+  color: var(--alignment-muted);
+  font: 650 9px/1 system-ui;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.alignmentVoiceMixerSliders output {
+  flex: 0 0 auto;
+  font: 760 10px/1 system-ui;
+  font-variant-numeric: tabular-nums;
+}
+
+.alignmentVoiceMixerSliders input {
+  width: 100%;
+  margin: 0;
+  accent-color: #a995ff;
+}
+
+.alignmentGalleryRowdiness {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 10px;
+}
+
+.alignmentGalleryRowdyToggle {
+  border: 1px solid var(--alignment-border);
+  border-radius: 999px;
+  padding: 7px 12px;
+  color: var(--alignment-ink);
+  background: color-mix(in srgb, var(--alignment-panel-raised) 88%, transparent);
+  font: 760 10px/1 system-ui;
+  cursor: pointer;
+}
+
+.alignmentGalleryRowdyToggle[data-rowdy="true"] {
+  border-color: color-mix(in srgb, #ff7a9a 46%, var(--alignment-border));
+  background: color-mix(in srgb, #ff7a9a 16%, var(--alignment-panel-raised));
+}
+
+.alignmentGalleryRowdiness > small,
+.alignmentVoiceMixer > small {
+  color: var(--alignment-muted);
+  font-size: 9px;
+  line-height: 1.35;
 }
 
 .alignmentGavelTuner > header,
@@ -11600,28 +11719,6 @@
   animation: debate-ident-outro-curtain var(--debate-ident-duration) linear both;
 }
 
-/* Spoiler-safe Spectator hold: keep the cinematic title up until Start/Resume
-   so Proceedings and stage chrome cannot peek through a stage-only card. */
-.identOverlay[data-hold="true"] {
-  animation: none;
-  opacity: 1;
-}
-
-.identOverlay[data-hold="true"] .identComposition {
-  animation: none;
-  opacity: 1;
-  transform: none;
-}
-
-.identOverlay[data-hold="true"] .identSpectralField,
-.identOverlay[data-hold="true"] .identSpectralField i,
-.identOverlay[data-hold="true"] .identPrismMark,
-.identOverlay[data-hold="true"] .identPrismMark i,
-.identOverlay[data-hold="true"]::before,
-.identOverlay[data-hold="true"]::after {
-  animation: none;
-}
-
 .identHoldActions {
   display: grid;
   justify-items: center;
@@ -11803,6 +11900,35 @@
 .identOverlay[data-kind="outro"] .identComposition {
   animation: debate-ident-outro-composition var(--debate-ident-duration)
     cubic-bezier(0.2, 0.7, 0.2, 1) both;
+}
+
+/* Spoiler-safe Spectator hold: keep the cinematic title up until Start/Resume
+   so Proceedings and stage chrome cannot peek through a stage-only card.
+   These rules must beat `[data-kind=intro|outro]` curtain/composition
+   animations (declared above) — equal specificity would let the timed intro
+   fade erase Start Debate after the hold card mounts. */
+.identOverlay[data-hold="true"],
+.identOverlay[data-hold="true"][data-kind="intro"],
+.identOverlay[data-hold="true"][data-kind="outro"] {
+  animation: none;
+  opacity: 1;
+}
+
+.identOverlay[data-hold="true"] .identComposition,
+.identOverlay[data-hold="true"][data-kind="intro"] .identComposition,
+.identOverlay[data-hold="true"][data-kind="outro"] .identComposition {
+  animation: none;
+  opacity: 1;
+  transform: none;
+}
+
+.identOverlay[data-hold="true"] .identSpectralField,
+.identOverlay[data-hold="true"] .identSpectralField i,
+.identOverlay[data-hold="true"] .identPrismMark,
+.identOverlay[data-hold="true"] .identPrismMark i,
+.identOverlay[data-hold="true"]::before,
+.identOverlay[data-hold="true"]::after {
+  animation: none;
 }
 
 .identKicker,
