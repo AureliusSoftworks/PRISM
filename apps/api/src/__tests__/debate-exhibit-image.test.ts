@@ -115,6 +115,17 @@ describe("Debate exhibit image guardrails", () => {
       serverSource,
       /route\("POST", "\/api\/debates\/exhibits\/synthesize"[\s\S]*?normalizeResponseMode\([\s\S]*?=== "local" \|\| userBlocksOnlineCapabilities\(user\)/u,
     );
+    const synthesizeRoute = serverSource.slice(
+      serverSource.indexOf('route("POST", "/api/debates/exhibits/synthesize"'),
+      serverSource.indexOf('route("POST", "/api/debates/role-checks"'),
+    );
+    assert.match(synthesizeRoute, /waitForImageSlot\(\{/u);
+    assert.match(synthesizeRoute, /signal: imageAbort\.signal/u);
+    assert.doesNotMatch(synthesizeRoute, /tryAcquireImageSlot/u);
+    assert.doesNotMatch(
+      synthesizeRoute,
+      /Another image is generating right now\. The evidence object is unchanged/u,
+    );
     assert.match(
       serverSource,
       /source: "debate_exhibit"[\s\S]*?normalizeGeneratedDebateExhibitImage/u,
