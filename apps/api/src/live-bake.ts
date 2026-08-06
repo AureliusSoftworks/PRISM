@@ -8,6 +8,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   createEmptyLiveBakeArtifact,
   estimateSpokenDurationMs,
+  humanizeLiveBakePhaseLabel,
   LIVE_BAKE_MAX_STEPS_DEBATE,
   LIVE_BAKE_MAX_STEPS_SIGNAL,
   debateSessionFloorIsSettled,
@@ -187,7 +188,10 @@ export async function bakeDebateSpectatorSession(args: {
     session.liveBake,
     session,
     "baking",
-    session.stepKey || "Preparing the gallery",
+    humanizeLiveBakePhaseLabel(
+      session.stepKey,
+      "Preparing the gallery",
+    ),
   );
   persistDebateLiveBake(db, userId, {
     ...session,
@@ -244,7 +248,7 @@ export async function bakeDebateSpectatorSession(args: {
         session.liveBake,
         session,
         "baking",
-        session.stepKey || "Preparing",
+        humanizeLiveBakePhaseLabel(session.stepKey, "Preparing the gallery"),
       );
       persistDebateLiveBake(db, userId, {
         ...session,
@@ -365,7 +369,10 @@ export function buildSignalLiveBakeArtifactFromEpisode(
             ? "Bake cancelled"
             : status === "failed"
               ? "Bake failed"
-              : episode.segment || "Preparing the broadcast",
+              : humanizeLiveBakePhaseLabel(
+                  episode.segment,
+                  "Preparing the broadcast",
+                ),
       heartbeatAt: status === "baking" ? new Date().toISOString() : null,
     },
     completedAt:

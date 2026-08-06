@@ -21,9 +21,25 @@ describe("liveBakeLoading", () => {
       totalStepsEstimate: 10,
       phaseLabel: "opening_for",
     };
-    assert.equal(liveBakeProgressLabel(artifact.progress), "opening_for");
+    assert.equal(liveBakeProgressLabel(artifact.progress), "For side opening");
     assert.equal(liveBakeProgressPercent(artifact.progress), 20);
-    assert.equal(liveBakeStatusCopy(artifact), "opening_for");
+    assert.equal(liveBakeStatusCopy(artifact), "For side opening");
+    assert.equal(
+      liveBakeProgressLabel({
+        completedSteps: 3,
+        totalStepsEstimate: 10,
+        phaseLabel: "opening_against",
+      }),
+      "Against side opening",
+    );
+    assert.equal(
+      liveBakeProgressLabel({
+        completedSteps: 4,
+        totalStepsEstimate: 10,
+        phaseLabel: "rebuttal_for_1",
+      }),
+      "For rebuttal · round 1",
+    );
     assert.equal(liveBakeSurfaceTitle("signal"), "Preparing the broadcast");
   });
 });

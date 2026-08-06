@@ -2,15 +2,17 @@
  * Shared loading / progress helpers for Debate Spectator and Signal Watch
  * progressive bake unlock.
  */
-import type { LiveBakeArtifactV1, LiveBakeProgressV1 } from "@localai/shared";
+import {
+  humanizeLiveBakePhaseLabel,
+  type LiveBakeArtifactV1,
+  type LiveBakeProgressV1,
+} from "@localai/shared";
 
 export function liveBakeProgressLabel(
   progress: LiveBakeProgressV1 | null | undefined,
   fallback = "Preparing the show…",
 ): string {
-  const phase = progress?.phaseLabel?.trim();
-  if (phase) return phase;
-  return fallback;
+  return humanizeLiveBakePhaseLabel(progress?.phaseLabel, fallback);
 }
 
 export function liveBakeProgressPercent(
