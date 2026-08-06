@@ -6,10 +6,15 @@ import { parsePrismBotArchive } from "../apps/web/src/app/botArchive.ts";
 import { composeBotSystemPrompt } from "../apps/api/src/bots.ts";
 import {
   applyBotPowerAddressedInsultV1,
+  applyBotPowerResponseBudgetV1,
   botPowerIneptitudeFinalTurnCueV1,
   botPowerIneptUserPromptV1,
+  botPowerIsAddressedQuestionV1,
   botPowerRequiresAddressedInsultV1,
+  strongestBotPowerAntiTruthEffectV1,
+  strongestHardBotPowerResponseBudgetEffectV1,
 } from "@localai/shared";
+import { rewriteBotPowerAntiTruthAnswerV1 } from "../apps/api/src/bot-powers.ts";
 import {
   LocalOllamaProvider,
   OPENAI_DEFAULT_MODEL,
@@ -76,13 +81,33 @@ const rawResponse = await provider.generateResponse(
     maxTokens: 220,
   },
 );
-const response = botPowerRequiresAddressedInsultV1(bot.powers)
+let response = botPowerRequiresAddressedInsultV1(bot.powers)
   ? applyBotPowerAddressedInsultV1(
       rawResponse,
       "you",
       `live-validation:${bot.name}:${input}`,
     )
   : rawResponse;
+const responseBudget = strongestHardBotPowerResponseBudgetEffectV1(bot.powers);
+const budgetedResponse = applyBotPowerResponseBudgetV1(
+  response,
+  responseBudget,
+  responseBudget?.mode === "minimal" ? 1 : 2,
+);
+response = budgetedResponse;
+const antiTruth = strongestBotPowerAntiTruthEffectV1(bot.powers);
+let antiTruthInverted = false;
+if (antiTruth && botPowerIsAddressedQuestionV1(input)) {
+  const inverted = await rewriteBotPowerAntiTruthAnswerV1({
+    provider,
+    question: input,
+    draftAnswer: response,
+    model,
+  });
+  antiTruthInverted = inverted !== response;
+  response = inverted;
+}
+const runtimeAdjusted = response !== rawResponse;
 
 console.log(JSON.stringify({
   provider: provider.name,
@@ -92,7 +117,24 @@ console.log(JSON.stringify({
   ...(believedName ? { believedName } : {}),
   input,
   ...(modelInput !== input ? { modelInput } : {}),
-  runtimeAdjusted: response !== rawResponse,
-  ...(response !== rawResponse ? { rawResponse } : {}),
+  runtimeAdjusted,
+  ...(runtimeAdjusted ? { rawResponse } : {}),
+  ...(responseBudget
+    ? {
+        responseBudget: {
+          mode: responseBudget.mode,
+          enforcement: responseBudget.enforcement,
+        },
+      }
+    : {}),
+  ...(antiTruth
+    ? {
+        antiTruth: {
+          strength: antiTruth.strength,
+          inverted: antiTruthInverted,
+        },
+      }
+    : {}),
   response,
+  wordCount: response.trim() ? response.trim().split(/\s+/u).length : 0,
 }, null, 2));

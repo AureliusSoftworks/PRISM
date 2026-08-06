@@ -114,6 +114,8 @@ describe("bot marketplace static catalog", () => {
       ["forgetful-freddie", "?"],
       ["alias-avery", "o"],
       ["shapeshifter-sam", "∞"],
+      ["following-jackson", "·"],
+      ["fibbing-phil", "^"],
     ]);
     let customEyeCount = 0;
     let defaultEyeCount = 0;
@@ -308,6 +310,8 @@ describe("bot marketplace static catalog", () => {
           effects: ["identity_shapeshift"],
         },
       ],
+      ["following-jackson", { name: "Gullible", effects: ["credulity"] }],
+      ["fibbing-phil", { name: "Anti-Truth", effects: ["anti_truth"] }],
     ]);
 
     assert.ok(theme);
@@ -796,6 +800,8 @@ describe("bot marketplace static catalog", () => {
           "forgetful-freddie",
           "alias-avery",
           "shapeshifter-sam",
+          "following-jackson",
+          "fibbing-phil",
         ]
       ]
     ]);
