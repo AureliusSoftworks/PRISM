@@ -122,6 +122,8 @@ const PRISM_REFRACT_CURSOR_ATTRIBUTE = "data-prism-refract-cursor-hidden";
 const PRISM_WIELD_CURSOR_ATTRIBUTE = "data-prism-wielding";
 /** After settle, dim the idle orb so it stays out of the way. */
 export const PRISM_COMPANION_IDLE_DIM_MS = 3_000;
+/** After dimming, wait the same span again, then hide the orb completely. */
+export const PRISM_COMPANION_IDLE_VANISH_MS = PRISM_COMPANION_IDLE_DIM_MS;
 
 type PrismRefractPhase =
   | "traveling"
@@ -354,6 +356,7 @@ export default function PrismCompanion({
   const [dragging, setDragging] = useState(false);
   const [inertial, setInertial] = useState(false);
   const [idleDimmed, setIdleDimmed] = useState(false);
+  const [idleHidden, setIdleHidden] = useState(false);
   const [position, setPosition] = useState<PrismCompanionPosition>(() =>
     readPosition(accountKey),
   );
@@ -410,6 +413,7 @@ export default function PrismCompanion({
   const onWieldTutorialCompleteRef = useRef(onWieldTutorialComplete);
   const contextTokenIdsRef = useRef<string[]>([]);
   const refractTutorialTargetRef = useRef<HTMLElement | null>(null);
+  const refractTutorialVisibleRef = useRef(false);
   const refractTutorialStageRef = useRef<"summon" | "reroll" | "settle">(
     "summon",
   );
@@ -425,7 +429,9 @@ export default function PrismCompanion({
   const draggingRef = useRef(dragging);
   const inertialRef = useRef(inertial);
   const idleDimmedRef = useRef(false);
+  const idleHiddenRef = useRef(false);
   const idleDimTimerRef = useRef<number | null>(null);
+  const idleVanishTimerRef = useRef<number | null>(null);
   const wieldHoverTargetRef = useRef<HTMLElement | null>(null);
   const wieldReturnPositionRef = useRef<PrismCompanionPosition | null>(null);
   const wieldCaptureReturnPositionRef =
@@ -569,37 +575,74 @@ export default function PrismCompanion({
       window.clearTimeout(idleDimTimerRef.current);
       idleDimTimerRef.current = null;
     }
+    if (idleVanishTimerRef.current !== null) {
+      window.clearTimeout(idleVanishTimerRef.current);
+      idleVanishTimerRef.current = null;
+    }
     idleDimmedRef.current = false;
+    idleHiddenRef.current = false;
     setIdleDimmed(false);
+    setIdleHidden(false);
   }, []);
+
+  const isIdlePresenceBlocked = useCallback((): boolean => {
+    return (
+      openRef.current ||
+      draggingRef.current ||
+      inertialRef.current ||
+      wieldStateRef.current.phase !== "idle" ||
+      wieldTutorialVisibleRef.current ||
+      refractTutorialVisibleRef.current
+    );
+  }, []);
+
+  const scheduleIdleVanish = useCallback((): void => {
+    if (idleVanishTimerRef.current !== null) {
+      window.clearTimeout(idleVanishTimerRef.current);
+      idleVanishTimerRef.current = null;
+    }
+    if (isIdlePresenceBlocked() || idleHiddenRef.current) {
+      return;
+    }
+    idleVanishTimerRef.current = window.setTimeout(() => {
+      idleVanishTimerRef.current = null;
+      if (isIdlePresenceBlocked()) {
+        return;
+      }
+      idleHiddenRef.current = true;
+      setIdleHidden(true);
+    }, PRISM_COMPANION_IDLE_VANISH_MS);
+  }, [isIdlePresenceBlocked]);
 
   const scheduleIdleDim = useCallback((): void => {
     if (idleDimTimerRef.current !== null) {
       window.clearTimeout(idleDimTimerRef.current);
       idleDimTimerRef.current = null;
     }
-    if (
-      openRef.current ||
-      draggingRef.current ||
-      inertialRef.current ||
-      wieldStateRef.current.phase !== "idle"
-    ) {
+    if (idleVanishTimerRef.current !== null) {
+      window.clearTimeout(idleVanishTimerRef.current);
+      idleVanishTimerRef.current = null;
+    }
+    if (isIdlePresenceBlocked()) {
+      return;
+    }
+    if (idleHiddenRef.current) {
+      return;
+    }
+    if (idleDimmedRef.current) {
+      scheduleIdleVanish();
       return;
     }
     idleDimTimerRef.current = window.setTimeout(() => {
       idleDimTimerRef.current = null;
-      if (
-        openRef.current ||
-        draggingRef.current ||
-        inertialRef.current ||
-        wieldStateRef.current.phase !== "idle"
-      ) {
+      if (isIdlePresenceBlocked()) {
         return;
       }
       idleDimmedRef.current = true;
       setIdleDimmed(true);
+      scheduleIdleVanish();
     }, PRISM_COMPANION_IDLE_DIM_MS);
-  }, []);
+  }, [isIdlePresenceBlocked, scheduleIdleVanish]);
 
   useEffect(() => {
     openRef.current = open;
@@ -850,6 +893,8 @@ export default function PrismCompanion({
         pointer,
       });
       if (next === current) return;
+      // Revive a dimmed/hidden orb as soon as Option wield begins.
+      clearIdleDim();
       wieldStateRef.current = next;
       const epoch = next.epoch;
       wieldArmTimerRef.current = window.setTimeout(() => {
@@ -863,7 +908,7 @@ export default function PrismCompanion({
         presentPrismWield(armed);
       }, PRISM_WIELD_ARM_DELAY_MS);
     },
-    [presentPrismWield],
+    [clearIdleDim, presentPrismWield],
   );
 
   useLayoutEffect(() => {
@@ -874,6 +919,10 @@ export default function PrismCompanion({
       if (idleDimTimerRef.current !== null) {
         window.clearTimeout(idleDimTimerRef.current);
         idleDimTimerRef.current = null;
+      }
+      if (idleVanishTimerRef.current !== null) {
+        window.clearTimeout(idleVanishTimerRef.current);
+        idleVanishTimerRef.current = null;
       }
       stopPrismCompanionGlassTapAudio();
       speechRunRef.current += 1;
@@ -1072,6 +1121,7 @@ export default function PrismCompanion({
         refractTutorialStageRef.current === "settle"
       ) {
         refractTutorialRunRef.current = false;
+        refractTutorialVisibleRef.current = false;
         setRefractTutorialVisible(false);
         delete refractTutorialTargetRef.current?.dataset.prismRefractTutorial;
         refractTutorialTargetRef.current = null;
@@ -1110,6 +1160,7 @@ export default function PrismCompanion({
       if (!target) return false;
       wieldTutorialTargetRef.current = target;
       target.dataset.prismWieldTutorial = "true";
+      clearIdleDim();
       wieldTutorialVisibleRef.current = true;
       setWieldTutorialVisible(true);
       return true;
@@ -1131,12 +1182,13 @@ export default function PrismCompanion({
       delete wieldTutorialTargetRef.current?.dataset.prismWieldTutorial;
       wieldTutorialTargetRef.current = null;
     };
-  }, [updateWieldTutorialStage, wieldTutorialActive]);
+  }, [clearIdleDim, updateWieldTutorialStage, wieldTutorialActive]);
 
   useEffect(() => {
     delete refractTutorialTargetRef.current?.dataset.prismRefractTutorial;
     refractTutorialTargetRef.current = null;
     refractTutorialRunRef.current = false;
+    refractTutorialVisibleRef.current = false;
     setRefractTutorialVisible(false);
     updateRefractTutorialStage("summon");
     if (
@@ -1162,11 +1214,14 @@ export default function PrismCompanion({
       if (!target) return false;
       refractTutorialTargetRef.current = target;
       target.dataset.prismRefractTutorial = "true";
+      clearIdleDim();
+      refractTutorialVisibleRef.current = true;
       setRefractTutorialVisible(true);
       return true;
     };
     if (revealWhenReady()) {
       return () => {
+        refractTutorialVisibleRef.current = false;
         delete refractTutorialTargetRef.current?.dataset.prismRefractTutorial;
         refractTutorialTargetRef.current = null;
       };
@@ -1177,10 +1232,12 @@ export default function PrismCompanion({
     observer.observe(document.body, { childList: true, subtree: true });
     return () => {
       observer.disconnect();
+      refractTutorialVisibleRef.current = false;
       delete refractTutorialTargetRef.current?.dataset.prismRefractTutorial;
       refractTutorialTargetRef.current = null;
     };
   }, [
+    clearIdleDim,
     refractTutorialActive,
     surface.surfaceId,
     updateRefractTutorialStage,
@@ -1566,6 +1623,7 @@ export default function PrismCompanion({
     (resolution: "skip" | "remind"): void => {
       refractTutorialRunRef.current = false;
       releasePrismRefract(true);
+      refractTutorialVisibleRef.current = false;
       setRefractTutorialVisible(false);
       delete refractTutorialTargetRef.current?.dataset.prismRefractTutorial;
       refractTutorialTargetRef.current = null;
@@ -2633,6 +2691,7 @@ export default function PrismCompanion({
         data-dragging={dragging ? "true" : undefined}
         data-inertial={inertial ? "true" : undefined}
         data-idle-dimmed={idleDimmed ? "true" : undefined}
+        data-idle-hidden={idleHidden ? "true" : undefined}
         data-refracting={refractSession?.phase}
         data-dock={position.x < 0.5 ? "left" : "right"}
         data-vertical={position.y < 0.48 ? "below" : "above"}

@@ -202,6 +202,25 @@
   filter: none;
 }
 
+/* After a second idle span, leave the scene entirely until summon/wield. */
+.anchor[data-idle-hidden="true"]:not([data-wielding="true"]):not([data-open="true"]) {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+  transition:
+    opacity 220ms ease,
+    visibility 0s linear 220ms;
+}
+
+.anchor[data-idle-hidden="true"]:not([data-wielding="true"]):not([data-open="true"]) .avatar,
+.anchor[data-idle-hidden="true"]:not([data-wielding="true"]):not([data-open="true"]) .orb,
+.anchor[data-idle-hidden="true"]:not([data-wielding="true"]):not([data-open="true"]) .light,
+.anchor[data-idle-hidden="true"]:not([data-wielding="true"]):not([data-open="true"]) .shortcut,
+.anchor[data-idle-hidden="true"]:not([data-wielding="true"]):not([data-open="true"]) .refractGlyph {
+  opacity: 0;
+  pointer-events: none;
+}
+
 .orb {
   --prism-orb-size: 58px;
 }

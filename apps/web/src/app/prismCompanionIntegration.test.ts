@@ -264,13 +264,26 @@ test("docks the orb at the cursor on wield release and can fling with drag inert
   assert.match(component, /preserveCaptureReturn &&/u);
 });
 
-test("dims the idle orb after settle and clears dim on open or wield", () => {
+test("dims the idle orb after settle, then vanishes after the same delay", () => {
   assert.match(component, /PRISM_COMPANION_IDLE_DIM_MS = 3_000/u);
+  assert.match(
+    component,
+    /PRISM_COMPANION_IDLE_VANISH_MS = PRISM_COMPANION_IDLE_DIM_MS/u,
+  );
   assert.match(component, /data-idle-dimmed=\{idleDimmed \? "true" : undefined\}/u);
+  assert.match(
+    component,
+    /data-idle-hidden=\{idleHidden \? "true" : undefined\}/u,
+  );
   assert.match(component, /const scheduleIdleDim = useCallback/u);
+  assert.match(component, /const scheduleIdleVanish = useCallback/u);
   assert.match(component, /const clearIdleDim = useCallback/u);
   assert.match(component, /clearIdleDim\(\);\s*setOpen\(true\)/u);
   assert.match(component, /clearIdleDim\(\);\s*stopInertia\(false\)/u);
+  assert.match(
+    component,
+    /Revive a dimmed\/hidden orb as soon as Option wield begins/u,
+  );
   assert.match(
     component,
     /idleDimmedRef\.current[\s\S]*playPrismCompanionGlassTap\(\);\s*return;/u,
@@ -282,6 +295,14 @@ test("dims the idle orb after settle and clears dim on open or wield", () => {
   assert.match(
     companionCss,
     /\[data-idle-dimmed="true"\][\s\S]*\.avatar::before[\s\S]*opacity:\s*0/u,
+  );
+  assert.match(
+    companionCss,
+    /\[data-idle-hidden="true"\][\s\S]*visibility:\s*hidden/u,
+  );
+  assert.match(
+    companionCss,
+    /\[data-idle-hidden="true"\][\s\S]*pointer-events:\s*none/u,
   );
 });
 
