@@ -382,3 +382,24 @@ node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/eff
 
 - Keep thrifty Low as the practical “lean sim works” tier for weaker Ollama chat models.
 - Treat mistral Minimal JSON failures as a follow-up bug, not a reason to revert the gemma Minimal fix.
+
+## 2026-08-06 - North star locked: guidance → final (Phase A)
+
+### Decision
+
+Win condition: a player may prefer `llama3.2` XHigh over luna XHigh for expansive usefulness, not only to save API tokens.
+
+Locked path (Jared, 2026-08-06):
+
+1. **Phase A (now)** — Strengthen **guidance → final-answer transfer** so private plan/audit/checklist actually reshape the visible reply. Primary measure: cafe staffing head-to-head — local High ≥ local None, closer to Sol on constraint fidelity. Beads: `PRISM-jwe8r` (north star), `PRISM-f5r9j` (Phase A task).
+2. **Phase B** — Memory / retrieval for expansive LOCAL continuity (after A).
+3. **Phase C** — Deep / multi-agent local workshop only after A earns its keep.
+4. **Not next** — ONLINE Fast toggle (orthogonal).
+
+### Why A first
+
+Cafe evals showed healthy private passes with finals that still break hard constraints (e.g. Bob closes, illegal shift lengths). More passes alone will not beat luna; plating must obey the recipe card.
+
+### Next engineering
+
+Inspect `composePsychicFinalGuidance` / `appendPsychicAnswerGuidance` / final generation: stronger must-keep constraint extraction from user + private checklist, final-pass obedience framing for weak locals, then `experimental-effort` cafe recheck vs Sol.
