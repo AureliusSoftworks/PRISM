@@ -1770,6 +1770,59 @@ export function debateEvidenceItemById(
   );
 }
 
+/**
+ * Fit an evidence title into surrounding prose: capitalize at a sentence
+ * start, lowercase the lead letter mid-sentence.
+ */
+export function debateEvidenceTitleCasedForProse(
+  title: string,
+  precedingText: string,
+): string {
+  const trimmed = title.trim();
+  if (!trimmed) return trimmed;
+  const before = precedingText
+    .replace(/[\s\u00a0]+$/u, "")
+    // Markdown emphasis often wraps the period: **Claim.** → treat as sentence end.
+    .replace(/[*_~`]+$/u, "")
+    .replace(/[\s\u00a0]+$/u, "");
+  const atSentenceStart =
+    before.length === 0 || /[.!?]["'”’)\]]*$/u.test(before);
+  if (atSentenceStart) {
+    return trimmed.replace(/^\p{Ll}/u, (letter) => letter.toUpperCase());
+  }
+  return trimmed.replace(/^\p{Lu}/u, (letter) => letter.toLowerCase());
+}
+
+/**
+ * Replace validated [[source:id]] / [[exhibit:id]] markers with human titles
+ * for plain-text surfaces (Jury hover, ballot reasons, exported record).
+ * Title casing follows sentence position in the surrounding prose.
+ */
+export function debateResolvedEvidenceText(
+  content: string,
+  evidence: DebateEvidencePacketV1,
+): string {
+  const titles = new Map(
+    debateEvidenceItems(evidence).map((item) => [
+      item.value.id,
+      item.value.title,
+    ]),
+  );
+  return content
+    .replace(
+      /\[\[(?:source|exhibit):([a-z0-9][a-z0-9_-]{0,47})\]\]/giu,
+      (marker, rawId: string, offset: number, full: string) => {
+        const title = titles.get(rawId.toLowerCase());
+        if (!title) return "";
+        return debateEvidenceTitleCasedForProse(title, full.slice(0, offset));
+      },
+    )
+    .replace(/[ \t]{2,}/gu, " ")
+    .replace(/\s+([,.;:!?])/gu, "$1")
+    .replace(/ \n/gu, "\n")
+    .trim();
+}
+
 export function debateEvidenceItemRecord(item: DebateEvidenceItemV1): string {
   return item.kind === "source"
     ? `${item.value.title}. ${item.value.snippet}`.trim()

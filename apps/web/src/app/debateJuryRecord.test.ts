@@ -57,6 +57,25 @@ function session(overrides: Partial<DebateSessionV1> = {}): DebateSessionV1 {
       jurors: [{ id: "juror-1", name: "Avery" }],
     },
     events: [publicSpeech, sidebarComment, formalComment],
+    evidence: {
+      version: 1,
+      notes: "",
+      frozenAt: null,
+      sources: [],
+      exhibits: [
+        {
+          id: "exhibit-4",
+          adjective: "stretchy",
+          object: "mozzarella",
+          title: "Stretchy string of melted mozzarella",
+          observation: "Still warm.",
+          emoji: "🧀",
+          visualKind: "emoji",
+          imageId: null,
+          createdBy: "prism",
+        },
+      ],
+    },
     ...overrides,
   } as DebateSessionV1;
 }
@@ -146,5 +165,21 @@ describe("Debate Jury record", () => {
       formatDebateJuryRecord(session({ playerRole: "participant" })),
       "Jury record sealed for participants.",
     );
+  });
+
+  it("resolves exhibit markers to titles in the Jury record", () => {
+    const record = formatDebateJuryRecord(
+      session({
+        events: [
+          {
+            ...sidebarComment,
+            content:
+              "Sol clarified that [[exhibit:exhibit-4]] really does support browning.",
+          } as DebateEventV1,
+        ],
+      }),
+    );
+    assert.match(record, /stretchy string of melted mozzarella/u);
+    assert.doesNotMatch(record, /\[\[exhibit:exhibit-4\]\]/u);
   });
 });

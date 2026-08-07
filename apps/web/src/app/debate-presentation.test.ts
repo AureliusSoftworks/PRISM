@@ -7,6 +7,7 @@ import {
   debateActiveDurationLabel,
   debateAudioEnabled,
   debateEvidenceFromMarkdownHref,
+  debateEvidenceUrlTransform,
   debateEventSpokenLineDurationMs,
   debateGavelAudioEnabled,
   debateLiveElapsedDurationMs,
@@ -556,8 +557,17 @@ describe("Debate live presentation", () => {
     );
     assert.equal(
       markdown,
-      `**Claim.** [frozen-1](${DEBATE_EVIDENCE_LINK_PREFIX}frozen-1) [exhibit-1](${DEBATE_EVIDENCE_LINK_PREFIX}exhibit-1) `,
+      `**Claim.** [Frozen source](${DEBATE_EVIDENCE_LINK_PREFIX}frozen-1) [rusty spoon](${DEBATE_EVIDENCE_LINK_PREFIX}exhibit-1) `,
     );
+    assert.equal(
+      debateEvidenceUrlTransform(`${DEBATE_EVIDENCE_LINK_PREFIX}exhibit-1`),
+      `${DEBATE_EVIDENCE_LINK_PREFIX}exhibit-1`,
+    );
+    assert.equal(
+      debateEvidenceUrlTransform(`${DEBATE_SOURCE_LINK_PREFIX}frozen-1`),
+      `${DEBATE_SOURCE_LINK_PREFIX}frozen-1`,
+    );
+    assert.equal(debateEvidenceUrlTransform("javascript:alert(1)"), "");
     assert.equal(
       debateSourceFromMarkdownHref(
         `${DEBATE_SOURCE_LINK_PREFIX}frozen-1`,

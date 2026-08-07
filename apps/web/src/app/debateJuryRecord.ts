@@ -1,12 +1,13 @@
-import type {
-  DebateEventV1,
-  DebateSessionListItemV1,
-  DebateSessionV1,
+import {
+  debateResolvedEvidenceText,
+  type DebateEventV1,
+  type DebateSessionListItemV1,
+  type DebateSessionV1,
 } from "@localai/shared";
 
 type DebateJuryRecordSession = Pick<
   DebateSessionV1,
-  "id" | "motion" | "playerRole" | "jury" | "events"
+  "id" | "motion" | "playerRole" | "jury" | "events" | "evidence"
 >;
 
 type DebateArchivedJuryRecord = Pick<
@@ -110,7 +111,7 @@ export function formatDebateJuryRecord(
     ...(comments.length > 0
       ? comments.flatMap((event) => [
           `[${event.createdAt}] ${debateJuryCommentSpeakerName(session, event)} · ${debateJuryCommentKindLabel(event)}`,
-          event.content,
+          debateResolvedEvidenceText(event.content, session.evidence),
           "",
         ])
       : ["No juror comments were recorded."]),

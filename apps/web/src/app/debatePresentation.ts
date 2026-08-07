@@ -8,8 +8,11 @@ import type {
 } from "@localai/shared";
 import {
   debateEstimatedSpeechDurationMs,
+  debateEvidenceItemById,
+  debateEvidenceTitleCasedForProse,
   debateSpectatorAwaitingFirstWatch,
 } from "@localai/shared";
+import { defaultUrlTransform } from "react-markdown";
 
 import type { SpeechCharacterAlignment } from "./speechRevealTimeline";
 
@@ -18,6 +21,20 @@ export const DEBATE_EVIDENCE_LINK_PREFIX = "prism-debate-evidence:";
 
 const EVIDENCE_MARKER =
   /\[\[(source|exhibit):([a-z0-9][a-z0-9_-]{0,47})\]\]/giu;
+
+/**
+ * Keep PRISM evidence packet hrefs intact — react-markdown's default
+ * urlTransform otherwise blanks custom protocols and chips never open.
+ */
+export function debateEvidenceUrlTransform(url: string): string {
+  if (
+    url.startsWith(DEBATE_EVIDENCE_LINK_PREFIX) ||
+    url.startsWith(DEBATE_SOURCE_LINK_PREFIX)
+  ) {
+    return url;
+  }
+  return defaultUrlTransform(url);
+}
 
 export function debateRevealDurationMs(spokenText: string): number {
   return debateEstimatedSpeechDurationMs(spokenText);
@@ -554,17 +571,19 @@ export function debateMarkdownSource(
   content: string,
   evidence: DebateEvidencePacketV1,
 ): string {
-  const allowed = new Set([
-    ...evidence.sources.map((source) => source.id),
-    ...(evidence.exhibits ?? []).map((exhibit) => exhibit.id),
-  ]);
   return content.replace(
     EVIDENCE_MARKER,
-    (_marker, _kind: string, rawId: string) => {
-      const id = rawId.toLowerCase();
-      return allowed.has(id)
-        ? `[${id}](${DEBATE_EVIDENCE_LINK_PREFIX}${id})`
-        : "";
+    (_marker, _kind: string, rawId: string, offset: number, full: string) => {
+      const item = debateEvidenceItemById(evidence, rawId);
+      if (!item) return "";
+      // Titles can include punctuation; strip brackets so Markdown links stay intact.
+      const rawLabel =
+        item.value.title.replace(/[[\]]/gu, "").trim() || item.value.id;
+      const label = debateEvidenceTitleCasedForProse(
+        rawLabel,
+        full.slice(0, offset),
+      );
+      return `[${label}](${DEBATE_EVIDENCE_LINK_PREFIX}${item.value.id})`;
     },
   );
 }

@@ -19,6 +19,8 @@ import {
   debateSourceIdsFromText,
   debateEvidenceItemById,
   debateEvidenceItemCount,
+  debateEvidenceTitleCasedForProse,
+  debateResolvedEvidenceText,
   debateSpokenText,
   debateTitleForMotion,
   debateFormalityGuidance,
@@ -566,6 +568,39 @@ test("keeps valid source and exhibit markers, removes invalid markers, and omits
   assert.equal(
     debateSpokenText(sanitized.content),
     "Supply improved, but the utensil is bent and this claim is unsupported.",
+  );
+  assert.equal(
+    debateResolvedEvidenceText(sanitized.content, evidence),
+    "Supply improved housing, but the utensil is bent rusty spoon and this claim is unsupported.",
+  );
+  assert.equal(
+    debateResolvedEvidenceText(
+      "Sol clarified that [[exhibit:exhibit-1]] really does support browning.",
+      evidence,
+    ),
+    "Sol clarified that rusty spoon really does support browning.",
+  );
+  assert.equal(
+    debateResolvedEvidenceText(
+      "[[exhibit:exhibit-1]] really does support browning.",
+      evidence,
+    ),
+    "Rusty spoon really does support browning.",
+  );
+  assert.equal(
+    debateResolvedEvidenceText(
+      "Fair point. [[exhibit:exhibit-1]] still leaves speed unanswered.",
+      evidence,
+    ),
+    "Fair point. Rusty spoon still leaves speed unanswered.",
+  );
+  assert.equal(
+    debateEvidenceTitleCasedForProse("Rusty spoon", "that "),
+    "rusty spoon",
+  );
+  assert.equal(
+    debateEvidenceTitleCasedForProse("rusty spoon", ""),
+    "Rusty spoon",
   );
 });
 

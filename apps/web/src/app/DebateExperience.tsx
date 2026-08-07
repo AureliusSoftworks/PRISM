@@ -39,6 +39,7 @@ import {
   debateEvidenceItemById,
   debateEvidenceItemCount,
   debateEvidenceItems,
+  debateResolvedEvidenceText,
   debateFormalityDescriptor,
   debateTitleForMotion,
   debateSpokenText,
@@ -109,10 +110,15 @@ import {
 } from "./debateCastHueLens";
 import { MODEL_EFFORT_ICON_PATHS } from "./modelEffortControl";
 import {
+  LiveSessionModelChip,
+  LiveSessionPrismWatermark,
+} from "./liveSessionChrome";
+import {
   PrismRefractTarget,
   type PrismRefractMagicTarget,
 } from "./prismRefract";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import { registerPrismSoftSynthesisJobs } from "./prismSoftSynthesisUi.ts";
 import { isPrismBackendUnavailableError } from "./backendUnavailable.ts";
 import {
   ModelWarmupIntermission,
@@ -234,6 +240,7 @@ import {
   debateWatchElapsedMs,
   debateMarkdownSource,
   debateEvidenceFromMarkdownHref,
+  debateEvidenceUrlTransform,
   debateGalleryReactingIndices,
   debateGalleryReaction,
   debateJuryChamberOpenedInPresentation,
@@ -256,6 +263,7 @@ import {
   writeDebateWatchElapsedMs,
 } from "./debatePresentation";
 import {
+  DEBATE_INTRO_MIN_CLOSE_BEFORE_ADVANCE_MS,
   DEBATE_INTRO_WIDE_HOLD_MS,
   DEBATE_MODERATOR_BREATH_WIDE_MS,
   debateEventIsModeratorIntro,
@@ -413,6 +421,15 @@ import {
 import { debateModeratorLookAtRole } from "./debateModeratorGaze";
 import { debateEvidencePropRotationDeg } from "./debateEvidenceProp";
 import {
+  composeDebateRoundSummary,
+  debateCaseBoardChronological,
+  debateCaseBoardRoundKey,
+  debateRoundSummaryShouldHydrate,
+  debateRoundSummarySourceCards,
+  formatDebateCaseBoardTranscript,
+  DEBATE_ROUND_SUMMARY_EMPTY,
+} from "./debateCaseBoardSummary";
+import {
   DEBATE_IDENT_AUDIO,
   DEBATE_IDENT_OUTRO_LEAD_MS,
   playDebateIdentAudio,
@@ -457,6 +474,7 @@ import {
   usePrismPresentationSuspended,
   usePrismAppAwayFromUser,
   waitWhilePrismPresentationSuspended,
+  acquirePrismLivingSession,
 } from "./prismPresentationSuspend";
 import type { PrismSceneQuality } from "./prismSceneRuntime";
 
@@ -531,6 +549,11 @@ export interface DebateExperienceProps {
   modelOverride?: {
     provider: "local" | "openai" | "anthropic";
     model: string;
+  } | null;
+  /** Quiet locked routing summary while the chamber is live. */
+  lockedRoutingChip?: {
+    modelLabel: string;
+    effortLabel: string;
   } | null;
   graphicsQuality: GraphicsQuality;
   theme: "light" | "dark";
@@ -930,6 +953,9 @@ const DebateLiveAudienceGallery = memo(
       available: boolean;
       ariaLabel: string;
       busy: boolean;
+      cooling?: boolean;
+      coolingSeconds?: number;
+      coolingLabel?: React.ReactNode;
       label: string;
       onActivate: () => void;
       title: string;
@@ -1086,6 +1112,9 @@ const DebateLiveAudienceGallery = memo(
                   data-cue={
                     props.judgeControl.action === "cue" ? "true" : undefined
                   }
+                  data-cooling={
+                    props.judgeControl.cooling ? "true" : undefined
+                  }
                   data-energized={
                     gavelEnergized ||
                     props.judgeControl.action === "intervene" ||
@@ -1110,6 +1139,17 @@ const DebateLiveAudienceGallery = memo(
                   {props.judgeControl.label}
                   <kbd aria-hidden="true">Space</kbd>
                 </button>
+              ) : null}
+              {props.judgeControl?.coolingLabel ? (
+                <span
+                  className={styles.judgeGavelCooldownStatus}
+                  role="status"
+                  aria-label={`Judge intervention cooling down. Ready in ${props.judgeControl.coolingSeconds ?? 0} seconds. The gavel and Space still settle the gallery.`}
+                >
+                  <strong>Intervention cooling</strong>
+                  {props.judgeControl.coolingLabel}
+                  <small>Gavel still settles gallery</small>
+                </span>
               ) : null}
             </>
           )}
@@ -2670,7 +2710,7 @@ export function formatDebateVerboseTranscript(
             const juror = session.jury.jurors.find(
               (candidate) => candidate.id === ballot.jurorBotId,
             );
-            return `- ${juror?.name ?? "Juror"}: ${debateSideLabel(session, ballot.sideId)} — ${ballot.reason}`;
+            return `- ${juror?.name ?? "Juror"}: ${debateSideLabel(session, ballot.sideId)} — ${debateResolvedEvidenceText(ballot.reason, session.evidence)}`;
           }),
         ]
       : []),
@@ -2681,7 +2721,7 @@ export function formatDebateVerboseTranscript(
           : ballot.voterBotId === session.forAdvocate.id
             ? session.forAdvocate
             : session.againstAdvocate;
-      return `- ${voter.name}: ${debateSideLabel(session, ballot.sideId)} — ${ballot.reason ?? "Private ballot; no public reason."}${ballot.provider && ballot.model ? ` (${ballot.provider}/${ballot.model}${ballot.autoRecovery ? ` after ${ballot.autoRecovery.attempts.length} attempts` : ""})` : ""}`;
+      return `- ${voter.name}: ${debateSideLabel(session, ballot.sideId)} — ${ballot.reason ? debateResolvedEvidenceText(ballot.reason, session.evidence) : "Private ballot; no public reason."}${ballot.provider && ballot.model ? ` (${ballot.provider}/${ballot.model}${ballot.autoRecovery ? ` after ${ballot.autoRecovery.attempts.length} attempts` : ""})` : ""}`;
     }),
     `- Player verdict: ${session.playerVerdict ? debateSideLabel(session, session.playerVerdict) : "None"}`,
     `- Winner: ${session.winnerSideId ? debateSideLabel(session, session.winnerSideId) : "Not decided"}`,
@@ -2813,6 +2853,7 @@ const DebateMarkdownBody = memo(
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           skipHtml
+          urlTransform={debateEvidenceUrlTransform}
           components={{
             a: ({ href, children }) => {
               const item = debateEvidenceFromMarkdownHref(href, evidence);
@@ -2822,6 +2863,7 @@ const DebateMarkdownBody = memo(
                     type="button"
                     className={styles.sourceChip}
                     data-kind={item.kind}
+                    data-debate-evidence-chip={item.value.id}
                     onClick={() => onSource(item.value.id)}
                     aria-label={`Open ${item.kind === "source" ? "source" : "exhibit"} ${item.value.title}`}
                   >
@@ -3546,6 +3588,19 @@ export function DebateExperience(
   });
   const presentationSuspended = usePrismPresentationSuspended();
   const appAwayFromUser = usePrismAppAwayFromUser();
+  useEffect(() => {
+    if (view !== "live" && view !== "baking") return;
+    if (!activeSession) return;
+    if (
+      activeSession.status === "completed" ||
+      activeSession.status === "failed" ||
+      activeSession.status === "cancelled"
+    ) {
+      return;
+    }
+    // Keep Debate audio + bake/orchestration alive while visuals sleep on hide.
+    return acquirePrismLivingSession("debate", activeSession.id);
+  }, [activeSession?.id, activeSession?.status, view]);
   const [topic, setTopic] = useState("");
   const [format, setFormat] = useState<DebateFormatId>("forum");
   const [formality, setFormality] = useState<DebateFormalityId>("plainspoken");
@@ -3610,6 +3665,13 @@ export function DebateExperience(
       startedAt: string;
     }>
   >([]);
+  useEffect(() => {
+    registerPrismSoftSynthesisJobs(
+      "debate-exhibit-sprites",
+      softExhibitSynthesizeJobs.length,
+    );
+    return () => registerPrismSoftSynthesisJobs("debate-exhibit-sprites", 0);
+  }, [softExhibitSynthesizeJobs.length]);
   const evidenceExhibitUploadRef = useRef<HTMLInputElement | null>(null);
   const evidenceObjectDraftInstanceIdRef = useRef<string | null>(null);
   const editingExhibitIdRef = useRef<string | null>(null);
@@ -3663,7 +3725,12 @@ export function DebateExperience(
     useState("");
   const [judgeTarget, setJudgeTarget] = useState<DebateSideId>("for");
   const [sourceDrawerId, setSourceDrawerId] = useState<string | null>(null);
+  const [liveRailPanel, setLiveRailPanel] = useState<
+    "proceedings" | "caseBoard"
+  >("proceedings");
   const [transcriptCopyState, setTranscriptCopyState] =
+    useState<DebateClipboardState>("idle");
+  const [caseBoardCopyState, setCaseBoardCopyState] =
     useState<DebateClipboardState>("idle");
   const [juryRecordCopyState, setJuryRecordCopyState] =
     useState<DebateClipboardState>("idle");
@@ -3788,6 +3855,69 @@ export function DebateExperience(
         : [],
     [activeSession, transcriptVisibleThroughSequence],
   );
+  const caseBoardRoundKey = useMemo(
+    () => (activeSession ? debateCaseBoardRoundKey(activeSession) : null),
+    [activeSession],
+  );
+  const roundSummaryCards = useMemo(
+    () =>
+      activeSession
+        ? debateRoundSummarySourceCards(activeSession, visibleCaseBoard)
+        : [],
+    [activeSession, visibleCaseBoard],
+  );
+  const [roundSummaryText, setRoundSummaryText] = useState(
+    DEBATE_ROUND_SUMMARY_EMPTY,
+  );
+  const roundSummaryKeyRef = useRef<string | null>(null);
+  const roundSummaryHydratedKeyRef = useRef<string | null>(null);
+  const roundSummarySessionIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!activeSession || caseBoardRoundKey === null) {
+      roundSummaryKeyRef.current = null;
+      roundSummaryHydratedKeyRef.current = null;
+      roundSummarySessionIdRef.current = null;
+      setRoundSummaryText(DEBATE_ROUND_SUMMARY_EMPTY);
+      return;
+    }
+    if (roundSummarySessionIdRef.current !== activeSession.id) {
+      roundSummarySessionIdRef.current = activeSession.id;
+      roundSummaryKeyRef.current = null;
+      roundSummaryHydratedKeyRef.current = null;
+    }
+
+    const keyChanged = roundSummaryKeyRef.current !== caseBoardRoundKey;
+    roundSummaryKeyRef.current = caseBoardRoundKey;
+
+    // Opening stays quiet until the first round boundary.
+    if (!debateRoundSummaryShouldHydrate(caseBoardRoundKey)) {
+      if (keyChanged) {
+        roundSummaryHydratedKeyRef.current = null;
+        setRoundSummaryText(DEBATE_ROUND_SUMMARY_EMPTY);
+      }
+      return;
+    }
+
+    // Freeze inside a round after one successful hydrate. Still allow the
+    // first hydrate when returning mid-Debate / during gallery load once
+    // session.caseBoard (or the gated board) is available.
+    const alreadyHydrated =
+      roundSummaryHydratedKeyRef.current === caseBoardRoundKey;
+    if (alreadyHydrated && !keyChanged) return;
+    if (roundSummaryCards.length === 0) {
+      // Past opening but board not ready yet — keep trying when cards arrive.
+      if (keyChanged) setRoundSummaryText(DEBATE_ROUND_SUMMARY_EMPTY);
+      return;
+    }
+
+    roundSummaryHydratedKeyRef.current = caseBoardRoundKey;
+    setRoundSummaryText(
+      composeDebateRoundSummary({
+        session: activeSession,
+        cards: roundSummaryCards,
+      }),
+    );
+  }, [activeSession, caseBoardRoundKey, roundSummaryCards]);
   useEffect(() => {
     if (!activeSession || view !== "live") {
       setWatchElapsedRunningSinceMs(null);
@@ -4012,6 +4142,9 @@ export function DebateExperience(
   const transcriptUserOwnsViewportRef = useRef(false);
   const transcriptTouchYRef = useRef<number | null>(null);
   const transcriptCopyResetTimerRef = useRef<ReturnType<
+    typeof setTimeout
+  > | null>(null);
+  const caseBoardCopyResetTimerRef = useRef<ReturnType<
     typeof setTimeout
   > | null>(null);
   const juryRecordCopyResetTimerRef = useRef<ReturnType<
@@ -4567,6 +4700,10 @@ export function DebateExperience(
         clearTimeout(transcriptCopyResetTimerRef.current);
         transcriptCopyResetTimerRef.current = null;
       }
+      if (caseBoardCopyResetTimerRef.current) {
+        clearTimeout(caseBoardCopyResetTimerRef.current);
+        caseBoardCopyResetTimerRef.current = null;
+      }
       if (juryRecordCopyResetTimerRef.current) {
         clearTimeout(juryRecordCopyResetTimerRef.current);
         juryRecordCopyResetTimerRef.current = null;
@@ -4841,21 +4978,24 @@ export function DebateExperience(
       focusedSide: resolved.focusedSide,
     };
     setIntroCameraView(resolved.view);
-    if (
-      resolved.view === "wide" &&
-      resolved.wideHoldStartedAtMs !== null
-    ) {
+    const holdStartedAt = resolved.wideHoldStartedAtMs;
+    if (holdStartedAt !== null) {
       const holdMs =
         typeof resolved.focusedSide === "string" &&
         resolved.focusedSide.startsWith("breath:")
           ? DEBATE_MODERATOR_BREATH_WIDE_MS
-          : DEBATE_INTRO_WIDE_HOLD_MS;
-      const remainingMs = holdMs - (Date.now() - resolved.wideHoldStartedAtMs);
-      const timer = window.setTimeout(
-        () => setIntroCameraTick((tick) => tick + 1),
-        Math.max(16, remainingMs),
-      );
-      return () => window.clearTimeout(timer);
+          : resolved.view === "wide"
+            ? DEBATE_INTRO_WIDE_HOLD_MS
+            : // Introducee close-up may still need a dwell tick before the queue advances.
+              DEBATE_INTRO_WIDE_HOLD_MS + DEBATE_INTRO_MIN_CLOSE_BEFORE_ADVANCE_MS;
+      const remainingMs = holdMs - (Date.now() - holdStartedAt);
+      if (remainingMs > 0) {
+        const timer = window.setTimeout(
+          () => setIntroCameraTick((tick) => tick + 1),
+          Math.max(16, remainingMs),
+        );
+        return () => window.clearTimeout(timer);
+      }
     }
     return undefined;
   }, [
@@ -4873,6 +5013,7 @@ export function DebateExperience(
     setPlayedJuryCommentIds(empty);
     setJuryRecordCopyState("idle");
     setJuryRecordCopySessionId(null);
+    setLiveRailPanel("proceedings");
   }, [activeSessionId]);
   const clampTranscriptToLive = useCallback((): void => {
     const feed = transcriptFeedRef.current;
@@ -4979,6 +5120,30 @@ export function DebateExperience(
       transcriptCopyResetTimerRef.current = null;
     }, 1_800);
   }, [activeSession, playerName, request, transcriptCopyState]);
+
+  const copyCaseBoardTranscript = useCallback(async (): Promise<void> => {
+    if (!activeSession || caseBoardCopyState === "copying") return;
+    if (caseBoardCopyResetTimerRef.current) {
+      clearTimeout(caseBoardCopyResetTimerRef.current);
+      caseBoardCopyResetTimerRef.current = null;
+    }
+    setCaseBoardCopyState("copying");
+    try {
+      await writeDebateClipboardText(
+        formatDebateCaseBoardTranscript({
+          session: activeSession,
+          cards: visibleCaseBoard,
+        }),
+      );
+      setCaseBoardCopyState("copied");
+    } catch {
+      setCaseBoardCopyState("failed");
+    }
+    caseBoardCopyResetTimerRef.current = setTimeout(() => {
+      setCaseBoardCopyState("idle");
+      caseBoardCopyResetTimerRef.current = null;
+    }, 1_800);
+  }, [activeSession, caseBoardCopyState, visibleCaseBoard]);
 
   const copyJuryRecordForTarget = useCallback(
     async (
@@ -8858,34 +9023,62 @@ export function DebateExperience(
       const result = await props.request<{ session: DebateSessionV1 }>(
         `/api/debates/${encodeURIComponent(archived.id)}?perspective=${perspective}`,
       );
-      let session = debateSessionNeedsReturnPause(result.session)
-        ? (
-            await props.request<{ session: DebateSessionV1 }>(
-              `/api/debates/${encodeURIComponent(result.session.id)}/pause`,
-              requestBody({
-                expectedRevision: result.session.revision,
-                idempotencyKey: nextMutationKey("return-recess"),
-                exitRecovery: true,
-                presentationEventId:
-                  [...result.session.events]
-                    .reverse()
-                    .find(
-                      (event) =>
-                        event.speakerKind !== "system" &&
-                        event.kind !== "error",
-                    )?.id ?? null,
-              }),
-            )
-          ).session
-        : result.session;
+      // Unfinished Spectator galleries must bake while live. Return-recess pause
+      // waits until after that lift, or we restore the same hold when done.
+      const needsSpectatorBakeResume =
+        result.session.playerRole === "spectator" &&
+        result.session.liveBake?.status !== "ready" &&
+        liveBakeShouldResumeOnOpen(result.session.liveBake);
+      const restoreReadyHold =
+        needsSpectatorBakeResume &&
+        result.session.status === "paused" &&
+        !result.session.pausedPresentationEventId;
+      const restoreMidPauseEventId =
+        needsSpectatorBakeResume &&
+        result.session.status === "paused" &&
+        result.session.pausedPresentationEventId
+          ? result.session.pausedPresentationEventId
+          : null;
+      let session = result.session;
+      if (needsSpectatorBakeResume && session.status === "paused") {
+        session = (
+          await props.request<{ session: DebateSessionV1 }>(
+            `/api/debates/${encodeURIComponent(session.id)}/resume`,
+            requestBody({
+              expectedRevision: session.revision,
+              idempotencyKey: nextMutationKey("bake-lift-recess"),
+              exitRecovery: true,
+              quietSave: true,
+            }),
+          )
+        ).session;
+      } else if (
+        !needsSpectatorBakeResume &&
+        debateSessionNeedsReturnPause(session)
+      ) {
+        session = (
+          await props.request<{ session: DebateSessionV1 }>(
+            `/api/debates/${encodeURIComponent(session.id)}/pause`,
+            requestBody({
+              expectedRevision: session.revision,
+              idempotencyKey: nextMutationKey("return-recess"),
+              exitRecovery: true,
+              presentationEventId:
+                [...session.events]
+                  .reverse()
+                  .find(
+                    (event) =>
+                      event.speakerKind !== "system" &&
+                      event.kind !== "error",
+                  )?.id ?? null,
+            }),
+          )
+        ).session;
+      }
 
       // Unfinished Spectator galleries resume append-only bake; hard loader
       // only while the unlock buffer is unmet. Fully ready opens review-from-start.
-      if (
-        session.playerRole === "spectator" &&
-        session.liveBake?.status !== "ready" &&
-        liveBakeShouldResumeOnOpen(session.liveBake)
-      ) {
+      if (needsSpectatorBakeResume) {
         setSpectatorBakeLiveFallback(false);
         setSpectatorBake(session.liveBake ?? null);
         spectatorBakeArtifactRef.current = session.liveBake ?? null;
@@ -8959,6 +9152,25 @@ export function DebateExperience(
         setSpectatorBakeStartedAt(null);
         setSpectatorGalleryBakeUnlocked(false);
         setSpectatorGalleryArrivalUnlockedAt(null);
+        // Restore the recess we lifted so Open still lands on Start / Resume.
+        if (
+          (restoreReadyHold || restoreMidPauseEventId !== null) &&
+          session.status !== "paused"
+        ) {
+          session = (
+            await props.request<{ session: DebateSessionV1 }>(
+              `/api/debates/${encodeURIComponent(session.id)}/pause`,
+              requestBody({
+                expectedRevision: session.revision,
+                idempotencyKey: nextMutationKey("bake-restore-recess"),
+                exitRecovery: true,
+                presentationEventId: restoreReadyHold
+                  ? null
+                  : restoreMidPauseEventId,
+              }),
+            )
+          ).session;
+        }
       }
 
       clearDebateDebrief();
@@ -10906,8 +11118,10 @@ export function DebateExperience(
       if (cancelled || pauseInFlightRef.current) return;
       const session = activeSessionRef.current;
       if (!session || !debateSessionNeedsReturnPause(session)) return;
-      // Leaving the app must recess even during the short Pause cooldown —
-      // otherwise background timers can silent-skip the remaining floor.
+      // Without a living-session claim (or under companion system pause), leaving
+      // must recess even during the short Pause cooldown — otherwise background
+      // timers can silent-skip the remaining floor. Live sits claim
+      // acquirePrismLivingSession so ordinary minimize keeps audio instead.
       void pauseOrResumeRef.current?.({ bypassCooldown: true });
     };
     attemptRecess();
@@ -14102,11 +14316,113 @@ export function DebateExperience(
     </section>
   );
 
+  const renderEvidenceRail = (
+    session: DebateSessionV1,
+    stickyId: string | null,
+  ): React.JSX.Element => {
+    const items = debateEvidenceItems(session.evidence);
+    return (
+      <aside
+        className={styles.evidenceRail}
+        aria-label="Evidence packet"
+        data-tutorial-target="debate-evidence-rail"
+      >
+        <header>
+          <p className={styles.eyebrow}>Evidence</p>
+          <span>
+            {items.length === 0
+              ? "Empty packet"
+              : `${items.length} frozen ${items.length === 1 ? "item" : "items"}`}
+          </span>
+        </header>
+        {items.length === 0 ? (
+          <p className={styles.evidenceRailEmpty}>No evidence in this packet.</p>
+        ) : (
+          <ul className={styles.evidenceRailTrack} role="list">
+            {items.map((item) => {
+              const exhibit = item.kind === "exhibit" ? item.value : null;
+              const source = item.kind === "source" ? item.value : null;
+              const sourcePropKind = source
+                ? debateEvidenceSourcePropKind(source)
+                : null;
+              return (
+                <li key={item.value.id}>
+                  <button
+                    type="button"
+                    className={styles.evidenceRailCard}
+                    data-kind={item.kind}
+                    data-active={
+                      stickyId === item.value.id ? "true" : undefined
+                    }
+                    onClick={() => setSourceDrawerId(item.value.id)}
+                    aria-label={`Open ${item.kind === "source" ? "source" : "exhibit"} ${item.value.title}`}
+                  >
+                    <span
+                      className={styles.evidenceRailThumb}
+                      aria-hidden="true"
+                    >
+                      {exhibit ? (
+                        <DebateEvidenceExhibitVisual
+                          exhibit={exhibit}
+                          className={styles.evidenceRailThumbVisual}
+                        />
+                      ) : (
+                        <span
+                          className={styles.evidenceRailThumbDocument}
+                          data-source-kind={sourcePropKind ?? undefined}
+                          data-prop={
+                            sourcePropKind === "url"
+                              ? "envelope"
+                              : sourcePropKind === "scholar"
+                                ? "folio"
+                                : "clipping"
+                          }
+                        />
+                      )}
+                    </span>
+                    <strong className={styles.evidenceRailTitle}>
+                      {item.value.title}
+                    </strong>
+                  </button>
+                </li>
+              );
+            })}
+          </ul>
+        )}
+      </aside>
+    );
+  };
+
+  const renderDebateRoundSummary = (): React.JSX.Element => {
+    return (
+      <aside
+        className={styles.debateRoundSummary}
+        aria-label="Debate summary so far"
+        data-tutorial-target="debate-round-summary"
+      >
+        <header>
+          <p className={styles.eyebrow}>Summary</p>
+          <span>Updates between rounds</span>
+        </header>
+        <p className={styles.debateRoundSummaryBody}>{roundSummaryText}</p>
+      </aside>
+    );
+  };
+
   const renderTurnaboutRecord = (
     session: DebateSessionV1,
   ): React.JSX.Element => {
     const state =
       session.formatState.format === "turnabout" ? session.formatState : null;
+    const statements = [...(state?.statements ?? [])].sort((left, right) => {
+      const leftSequence =
+        session.events.find((event) => event.id === left.createdEventId)
+          ?.sequence ?? 0;
+      const rightSequence =
+        session.events.find((event) => event.id === right.createdEventId)
+          ?.sequence ?? 0;
+      return leftSequence - rightSequence;
+    });
     return (
       <aside
         className={`${styles.caseBoard} ${styles.turnaboutRecord}`}
@@ -14126,48 +14442,50 @@ export function DebateExperience(
           </div>
           <strong>Reversal {state ? Math.max(0, state.round - 1) : 0}</strong>
         </header>
-        <div className={styles.caseColumns}>
-          {(["for", "against"] as const).map((sideId) => (
-            <section key={sideId} data-side={sideId}>
-              <h2>
-                {sideId === "for"
-                  ? session.motion.forSide.label
-                  : session.motion.againstSide.label}
-              </h2>
-              <ol>
-                {(state?.statements ?? [])
-                  .filter((statement) => statement.sideId === sideId)
-                  .map((statement, index) => (
-                    <li
-                      key={statement.id}
-                      data-status={statement.status}
-                      data-active={
-                        state?.activeStatementId === statement.id
-                          ? "true"
-                          : undefined
-                      }
-                    >
-                      <span>Statement {index + 1}</span>
-                      <p>{debateSpokenText(statement.content)}</p>
-                      <div>
-                        <small>{statement.status}</small>
-                        {statement.sourceIds.map((id) => (
-                          <button
-                            type="button"
-                            key={id}
-                            className={styles.sourceChip}
-                            onClick={() => setSourceDrawerId(id)}
-                          >
-                            {id}
-                          </button>
-                        ))}
-                      </div>
-                    </li>
-                  ))}
-              </ol>
-            </section>
-          ))}
-        </div>
+        <ul className={styles.caseThread} role="list">
+          {statements.length === 0 ? (
+            <li className={styles.caseThreadEmpty}>
+              Statements appear here as each side is heard.
+            </li>
+          ) : (
+            statements.map((statement, index) => (
+              <li
+                key={statement.id}
+                data-side={statement.sideId}
+                data-status={statement.status}
+                data-active={
+                  state?.activeStatementId === statement.id ? "true" : undefined
+                }
+              >
+                <span className={styles.caseThreadMeta}>
+                  <strong>
+                    {statement.sideId === "for"
+                      ? session.motion.forSide.label
+                      : session.motion.againstSide.label}
+                  </strong>
+                  <em>
+                    Statement {index + 1} · {statement.status}
+                  </em>
+                </span>
+                <p>{debateSpokenText(statement.content)}</p>
+                {statement.sourceIds.length > 0 ? (
+                  <div className={styles.caseThreadExhibits}>
+                    {statement.sourceIds.map((id) => (
+                      <button
+                        type="button"
+                        key={id}
+                        className={styles.sourceChip}
+                        onClick={() => setSourceDrawerId(id)}
+                      >
+                        {id}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </li>
+            ))
+          )}
+        </ul>
         {state && state.contradictions.length > 0 ? (
           <footer>
             {state.contradictions.map((contradiction) => (
@@ -14185,6 +14503,7 @@ export function DebateExperience(
     session: DebateSessionV1,
     activeEvent: DebateEventV1 | null,
   ): React.JSX.Element => {
+    const thread = debateCaseBoardChronological(session, visibleCaseBoard);
     return (
       <aside
         className={styles.caseBoard}
@@ -14192,50 +14511,69 @@ export function DebateExperience(
         data-tutorial-target="debate-case-board"
       >
         <header>
-          <p className={styles.eyebrow}>Living case board</p>
-          <span>Scoreless · heard speech only</span>
+          <div className={styles.caseBoardHeaderCopy}>
+            <p className={styles.eyebrow}>Living case board</p>
+            <span>Scoreless · heard speech only</span>
+          </div>
+          <div className={styles.caseBoardHeaderActions}>
+            <button
+              type="button"
+              data-tutorial-target="debate-copy-case-board"
+              onClick={() => void copyCaseBoardTranscript()}
+              disabled={caseBoardCopyState === "copying"}
+            >
+              {caseBoardCopyState === "copying"
+                ? "Copying…"
+                : caseBoardCopyState === "copied"
+                  ? "Copied"
+                  : caseBoardCopyState === "failed"
+                    ? "Copy failed"
+                    : "Copy case board"}
+            </button>
+          </div>
         </header>
-        <div className={styles.caseColumns}>
-          {(["for", "against"] as const).map((sideId) => (
-            <section key={sideId} data-side={sideId}>
-              <h2>
-                {sideId === "for"
-                  ? session.motion.forSide.label
-                  : session.motion.againstSide.label}
-              </h2>
-              <ul>
-                {visibleCaseBoard
-                  .filter((card) => card.sideId === sideId)
-                  .map((card) => (
-                    <li
-                      key={card.id}
-                      data-status={card.status}
-                      data-active={
-                        card.createdEventId === activeEvent?.id
-                          ? "true"
-                          : undefined
-                      }
-                    >
-                      <span>{card.status}</span>
-                      <p>{card.summary}</p>
-                      <div>
-                        {card.sourceIds.map((id) => (
-                          <button
-                            type="button"
-                            key={id}
-                            className={styles.sourceChip}
-                            onClick={() => setSourceDrawerId(id)}
-                          >
-                            {id}
-                          </button>
-                        ))}
-                      </div>
-                    </li>
-                  ))}
-              </ul>
-            </section>
-          ))}
-        </div>
+        <ul className={styles.caseThread} role="list">
+          {thread.length === 0 ? (
+            <li className={styles.caseThreadEmpty}>
+              Claims appear here as each side is heard.
+            </li>
+          ) : (
+            thread.map((card) => (
+              <li
+                key={card.id}
+                data-side={card.sideId}
+                data-status={card.status}
+                data-active={
+                  card.createdEventId === activeEvent?.id ? "true" : undefined
+                }
+              >
+                <span className={styles.caseThreadMeta}>
+                  <strong>
+                    {card.sideId === "for"
+                      ? session.motion.forSide.label
+                      : session.motion.againstSide.label}
+                  </strong>
+                  <em>{card.status}</em>
+                </span>
+                <p>{card.summary}</p>
+                {card.sourceIds.length > 0 ? (
+                  <div className={styles.caseThreadExhibits}>
+                    {card.sourceIds.map((id) => (
+                      <button
+                        type="button"
+                        key={id}
+                        className={styles.sourceChip}
+                        onClick={() => setSourceDrawerId(id)}
+                      >
+                        {id}
+                      </button>
+                    ))}
+                  </div>
+                ) : null}
+              </li>
+            ))
+          )}
+        </ul>
       </aside>
     );
   };
@@ -15001,7 +15339,9 @@ export function DebateExperience(
                   </time>
                 </header>
                 <small>{debateJuryCommentKindLabel(event)}</small>
-                <p>{event.content}</p>
+                <p>
+                  {debateResolvedEvidenceText(event.content, session.evidence)}
+                </p>
               </li>
             ))}
           </ol>
@@ -15113,7 +15453,12 @@ export function DebateExperience(
                           role="tooltip"
                         >
                           <strong>{juror.name}</strong>
-                          <span>{pendingJuryComment.content}</span>
+                          <span>
+                            {debateResolvedEvidenceText(
+                              pendingJuryComment.content,
+                              session.evidence,
+                            )}
+                          </span>
                         </span>
                       </button>
                     ) : null}
@@ -18073,6 +18418,7 @@ export function DebateExperience(
           }
           data-debate-material-quality={debateMaterialQuality}
           data-jury-chamber={juryChamberVisible ? "true" : undefined}
+          data-evidence-on-table={activeEvidenceItem ? "true" : undefined}
           style={
             {
               "--debate-active-color": activeColor ?? "#9c8cff",
@@ -18101,7 +18447,7 @@ export function DebateExperience(
             <DebateIdentOverlay kind={debateIdentPlaying} session={session} />
           ) : session.status === "paused" &&
             !presenting &&
-            (readyToBeginOverlay || session.playerRole === "spectator") ? (
+            readyToBeginOverlay ? (
             <DebateIdentOverlay
               kind="intro"
               session={session}
@@ -18110,31 +18456,23 @@ export function DebateExperience(
               holdTitle={
                 spectatorAwaitingFirstWatch
                   ? "Gallery ready"
-                  : awaitingDeferredStart
-                    ? "Saved · ready to start"
-                    : "Debate paused"
+                  : "Saved · ready to start"
               }
               holdDetail={
                 spectatorAwaitingFirstWatch
                   ? "The proceeding stays covered until you start — no spoilers from the prepared floor."
-                  : awaitingDeferredStart
-                    ? "This Archive setup is frozen. Start opens the chamber when you are ready."
-                    : "The interrupted line is preserved and will replay from its beginning."
+                  : "This Archive setup is frozen. Start opens the chamber when you are ready."
               }
-              holdBackAction={
-                readyToBeginOverlay
-                  ? {
-                      label: "← Studio",
-                      disabled: busy,
-                      onClick: () => void exitLiveSessionToStudio(),
-                    }
-                  : undefined
-              }
+              holdBackAction={{
+                label: "← Studio",
+                disabled: busy,
+                onClick: () => void exitLiveSessionToStudio(),
+              }}
               holdAction={{
-                label: readyToBeginOverlay ? "Start Debate" : "Resume Debate",
+                label: "Start Debate",
                 disabled: busy || debateFloorMutationInFlightRef.current,
                 onClick: () => void pauseOrResume(),
-                action: readyToBeginOverlay ? "start" : "resume",
+                action: "start",
               }}
             />
           ) : null}
@@ -18167,6 +18505,13 @@ export function DebateExperience(
               >
                 {session.motion.motion}
               </p>
+              {props.lockedRoutingChip ? (
+                <LiveSessionModelChip
+                  modelLabel={props.lockedRoutingChip.modelLabel}
+                  effortLabel={props.lockedRoutingChip.effortLabel}
+                  className={styles.liveRoutingChip}
+                />
+              ) : null}
             </div>
             <DebateElapsedTimer
               key={session.id}
@@ -18175,6 +18520,7 @@ export function DebateExperience(
               status={session.status}
             />
           </header>
+          <LiveSessionPrismWatermark theme={props.theme} />
           <div className={styles.liveWorkspace}>
             <div className={styles.stageColumn}>
               <div className={styles.forum} data-debate-stage-viewport="live">
@@ -18555,8 +18901,7 @@ export function DebateExperience(
                   </div>
                 ) : session.status === "paused" &&
                   !presenting &&
-                  !readyToBeginOverlay &&
-                  session.playerRole !== "spectator" ? (
+                  !readyToBeginOverlay ? (
                   <div
                     className={styles.stageStateOverlay}
                     data-kind="paused"
@@ -18678,7 +19023,9 @@ export function DebateExperience(
                     data-selected={liveCaptionsEnabled ? "true" : undefined}
                     aria-pressed={liveCaptionsEnabled}
                     aria-label={
-                      liveCaptionsEnabled ? "Hide captions" : "Show captions"
+                      liveCaptionsEnabled
+                        ? "Hide captions"
+                        : "Show captions"
                     }
                     title={
                       liveCaptionsEnabled
@@ -18690,6 +19037,122 @@ export function DebateExperience(
                     CC
                   </button>
                 </div>
+                {session.status === "live" ||
+                session.status === "waiting_for_player" ||
+                session.status === "paused" ||
+                (session.playerRole === "judge" &&
+                  (judgeGavelAvailable ||
+                    judgeGavelCeremonyReady ||
+                    judgeGavelOnCooldown)) ? (
+                  <div
+                    className={styles.stageTransportControls}
+                    aria-label="Debate stage transport"
+                  >
+                    {session.status === "live" ||
+                    session.status === "waiting_for_player" ? (
+                      <button
+                        type="button"
+                        className={styles.stagePauseButton}
+                        data-action="pause"
+                        data-tutorial-target="debate-pause"
+                        onClick={() => void pauseOrResume()}
+                        disabled={
+                          busy ||
+                          pauseInFlightRef.current ||
+                          pauseOnCooldown ||
+                          participantObjectionAwaitingReason ||
+                          session.judgeGavel?.status === "awaiting_message"
+                        }
+                        aria-label={
+                          participantObjectionAwaitingReason
+                            ? "State or withdraw your objection before pausing"
+                            : pauseOnCooldown
+                              ? "Pause cooling down"
+                              : "Pause Debate"
+                        }
+                        title={
+                          participantObjectionAwaitingReason
+                            ? "Resolve your objection first"
+                            : pauseOnCooldown
+                              ? "Pause is cooling down for a moment"
+                              : "Pause Debate"
+                        }
+                      >
+                        {pauseOnCooldown ? "Pause…" : "Pause"}
+                      </button>
+                    ) : session.status === "paused" ? (
+                      <button
+                        type="button"
+                        className={styles.stagePauseButton}
+                        data-action="resume"
+                        data-tutorial-target="debate-pause"
+                        onClick={() => void pauseOrResume()}
+                        disabled={busy || pauseInFlightRef.current}
+                        aria-label="Resume Debate"
+                        title="Resume Debate"
+                      >
+                        Play
+                      </button>
+                    ) : null}
+                    {session.playerRole === "judge" &&
+                    (judgeGavelAvailable ||
+                      judgeGavelCeremonyReady ||
+                      judgeGavelOnCooldown) ? (
+                      <>
+                        <button
+                          type="button"
+                          className={styles.stageGavelButton}
+                          data-action={judgeUnifiedGavelAction}
+                          data-cue={
+                            judgeUnifiedGavelAction === "cue"
+                              ? "true"
+                              : undefined
+                          }
+                          data-cooling={
+                            judgeGavelOnCooldown ? "true" : undefined
+                          }
+                          data-energized={
+                            judgeUnifiedGavelAction === "intervene" ||
+                            judgeUnifiedGavelAction === "call-time"
+                              ? "true"
+                              : undefined
+                          }
+                          data-overtime={
+                            judgeUnifiedGavelAction === "call-time"
+                              ? "true"
+                              : undefined
+                          }
+                          data-tutorial-target="debate-judge-gavel"
+                          disabled={
+                            busy ||
+                            audienceOrderSaving ||
+                            debateFloorMutationInFlightRef.current
+                          }
+                          aria-label={judgeUnifiedGavelAriaLabel}
+                          onClick={(event) => {
+                            event.currentTarget.blur();
+                            activateJudgeUnifiedGavel();
+                          }}
+                          title={judgeUnifiedGavelTitle}
+                        >
+                          {judgeUnifiedGavelLabel}
+                          <kbd aria-hidden="true">Space</kbd>
+                        </button>
+                        {judgeGavelCooldownLabel ? (
+                          <span
+                            className={styles.judgeGavelCooldownStatus}
+                            role="status"
+                            aria-label={`Judge intervention cooling down. Ready in ${judgeGavelCooldownSeconds} seconds. The gavel and Space still settle the gallery.`}
+                          >
+                            <strong>Intervention cooling</strong>
+                            {judgeGavelCooldownLabel}
+                            <small>Gavel still settles gallery</small>
+                          </span>
+                        ) : null}
+                      </>
+                    ) : null}
+                  </div>
+                ) : null}
                 <div
                   className={styles.cameraControls}
                   aria-label={
@@ -18781,32 +19244,30 @@ export function DebateExperience(
                   galleryReadyHold={
                     spectatorAwaitingFirstWatch && !galleryArriving
                   }
-                  judgeControl={
-                    session.playerRole === "judge" &&
-                    (judgeGavelAvailable || judgeGavelCeremonyReady)
-                      ? {
-                          action: judgeUnifiedGavelAction,
-                          available: true,
-                          ariaLabel: judgeUnifiedGavelAriaLabel,
-                          busy:
-                            busy ||
-                            audienceOrderSaving ||
-                            debateFloorMutationInFlightRef.current,
-                          label: judgeUnifiedGavelLabel,
-                          onActivate: activateJudgeUnifiedGavel,
-                          title: judgeUnifiedGavelTitle,
-                        }
-                      : null
-                  }
+                  judgeControl={null}
                   renderBotAvatar={props.renderBotAvatar}
                   renderBotGlyph={props.renderBotGlyph}
                 />
               ) : null}
               <div className={styles.stageSupport}>
-                {session.format === "turnabout"
-                  ? renderTurnaboutRecord(session)
-                  : renderCaseBoard(session, activeEvent)}
-                {renderGallery(session)}
+                {renderEvidenceRail(session, tableEvidenceStickyId)}
+                {renderDebateRoundSummary()}
+                {renderGallery(session) ?? (
+                  <aside
+                    className={`${styles.audienceGallery} ${styles.juryRoster}`}
+                    aria-label="Jury"
+                    data-phase="waiting"
+                    data-empty="true"
+                  >
+                    <header>
+                      <div>
+                        <p className={styles.eyebrow}>Jury</p>
+                        <span>Not seated</span>
+                      </div>
+                    </header>
+                    <p>Enable Jury in setup to seat a binding five-seat panel here.</p>
+                  </aside>
+                )}
               </div>
             </div>
             <aside
@@ -18822,180 +19283,40 @@ export function DebateExperience(
                   : undefined
               }
             >
-              {session.status !== "completed" &&
-              session.status !== "failed" &&
-              session.status !== "cancelled" ? (
-                <section
-                  className={styles.proceedingControls}
-                  data-role={session.playerRole}
-                  data-status={session.status}
-                  data-tutorial-target="debate-proceeding-controls"
-                  role="group"
-                  aria-label={
-                    session.playerRole === "judge"
-                      ? "Judge proceeding controls"
-                      : "Debate proceeding controls"
+              <div
+                className={styles.liveRailTabs}
+                role="tablist"
+                aria-label="Debate record panels"
+                data-tutorial-target="debate-rail-tabs"
+              >
+                <button
+                  type="button"
+                  role="tab"
+                  id="debate-rail-tab-proceedings"
+                  aria-selected={liveRailPanel === "proceedings"}
+                  aria-controls="debate-rail-panel-proceedings"
+                  data-selected={
+                    liveRailPanel === "proceedings" ? "true" : undefined
                   }
+                  onClick={() => setLiveRailPanel("proceedings")}
                 >
-                  <header>
-                    <div>
-                      <p className={styles.eyebrow}>
-                        {session.playerRole === "judge"
-                          ? "Judge console"
-                          : "Proceeding console"}
-                      </p>
-                      <strong>
-                        {spectatorAwaitingFirstWatch
-                          ? "Ready when you are"
-                          : session.status === "paused"
-                            ? "The exact floor is held"
-                            : "Room control"}
-                      </strong>
-                    </div>
-                    <span>
-                      {spectatorAwaitingFirstWatch
-                        ? "Ready"
-                        : session.status === "paused"
-                          ? "Paused"
-                          : debateLivePhaseLabel(session, {
-                              awaitingFirstWatch: false,
-                              activeEvent: presenting ? activeEvent : null,
-                              heardThroughSequence:
-                                transcriptVisibleThroughSequence,
-                            })}
-                    </span>
-                  </header>
-                  <div className={styles.proceedingControlActions}>
-                    {judgeGavelAvailable || judgeGavelCeremonyReady ? (
-                      <button
-                        type="button"
-                        className={styles.judgeGavelButton}
-                        data-action={judgeUnifiedGavelAction}
-                        data-cue={judgeGavelCeremonyReady ? "true" : undefined}
-                        data-overtime={
-                          judgeUnifiedGavelAction === "call-time"
-                            ? "true"
-                            : undefined
-                        }
-                        data-cooling={judgeGavelOnCooldown ? "true" : undefined}
-                        data-pressure={
-                          !judgeGavelCeremonyReady
-                            ? currentAudiencePressureBand
-                            : undefined
-                        }
-                        data-energized={
-                          !judgeGavelCeremonyReady &&
-                          (audienceNeedsOrder ||
-                            judgeUnifiedGavelAction === "intervene" ||
-                            judgeUnifiedGavelAction === "call-time")
-                            ? "true"
-                            : undefined
-                        }
-                        data-space-shortcut="true"
-                        onClick={(event) => {
-                          event.currentTarget.blur();
-                          activateJudgeUnifiedGavel();
-                        }}
-                        disabled={
-                          busy ||
-                          audienceOrderSaving ||
-                          debateFloorMutationInFlightRef.current
-                        }
-                        aria-label={judgeUnifiedGavelAriaLabel}
-                        title={judgeUnifiedGavelTitle}
-                      >
-                        {judgeUnifiedGavelLabel}
-                        <kbd aria-hidden="true">Space</kbd>
-                      </button>
-                    ) : null}
-                    {judgeGavelOnCooldown ? (
-                      <span
-                        className={styles.judgeGavelCooldownStatus}
-                        role="status"
-                        aria-label={`Judge intervention cooling down. Ready in ${judgeGavelCooldownSeconds} seconds. The gavel and Space still settle the gallery.`}
-                      >
-                        <strong>Intervention cooling</strong>
-                        {judgeGavelCooldownLabel}
-                        <small>Gavel still settles gallery</small>
-                      </span>
-                    ) : null}
-                    <button
-                      type="button"
-                      data-action={
-                        spectatorAwaitingFirstWatch
-                          ? "start"
-                          : session.status === "paused"
-                            ? "resume"
-                            : "pause"
-                      }
-                      data-primary={
-                        session.status === "paused" ? "true" : undefined
-                      }
-                      onClick={() => void pauseOrResume()}
-                      disabled={
-                        (busy && session.status === "paused") ||
-                        pauseInFlightRef.current ||
-                        pauseOnCooldown ||
-                        participantObjectionAwaitingReason ||
-                        (session.status !== "paused" &&
-                          session.judgeGavel?.status === "awaiting_message")
-                      }
-                      aria-label={
-                        participantObjectionAwaitingReason
-                          ? "State or withdraw your objection before pausing"
-                          : pauseOnCooldown
-                            ? "Pause cooling down"
-                          : spectatorAwaitingFirstWatch
-                            ? "Start Debate"
-                            : session.status === "paused"
-                              ? "Resume Debate"
-                              : "Pause Debate"
-                      }
-                      title={
-                        participantObjectionAwaitingReason
-                          ? "Resolve your objection first"
-                          : pauseOnCooldown
-                            ? "Pause is cooling down for a moment"
-                          : undefined
-                      }
-                    >
-                      {spectatorAwaitingFirstWatch
-                        ? "Start"
-                        : session.status === "paused"
-                          ? "Resume"
-                          : pauseOnCooldown
-                            ? "Pause…"
-                            : "Pause"}
-                    </button>
-                    {session.phase !== "verdict" ? (
-                      <button
-                        type="button"
-                        className={styles.endEarlyButton}
-                        data-action="end"
-                        onClick={() => setEarlyEndOpen(true)}
-                        disabled={
-                          busy ||
-                          participantObjectionAwaitingReason ||
-                          session.judgeGavel?.status === "awaiting_message" ||
-                          presenting
-                        }
-                        aria-label={
-                          participantObjectionAwaitingReason
-                            ? "State or withdraw your objection before ending the Debate"
-                            : "End the Debate early"
-                        }
-                        title={
-                          participantObjectionAwaitingReason
-                            ? "Resolve your objection first"
-                            : undefined
-                        }
-                      >
-                        End debate
-                      </button>
-                    ) : null}
-                  </div>
-                </section>
-              ) : null}
+                  Proceedings
+                </button>
+                <button
+                  type="button"
+                  role="tab"
+                  id="debate-rail-tab-case-board"
+                  aria-selected={liveRailPanel === "caseBoard"}
+                  aria-controls="debate-rail-panel-case-board"
+                  data-selected={
+                    liveRailPanel === "caseBoard" ? "true" : undefined
+                  }
+                  data-tutorial-target="debate-case-board-tab"
+                  onClick={() => setLiveRailPanel("caseBoard")}
+                >
+                  {session.format === "turnabout" ? "Record" : "Case board"}
+                </button>
+              </div>
               {autoRecoveryNotice ? (
                 <p className={styles.autoRecoveryNotice} role="status">
                   {autoRecoveryNotice}
@@ -19027,7 +19348,28 @@ export function DebateExperience(
                 </div>
               ) : null}
               {error ? <DebateErrorToast key={error} message={error} /> : null}
-              {renderTranscript(session)}
+              {liveRailPanel === "proceedings" ? (
+                <div
+                  id="debate-rail-panel-proceedings"
+                  role="tabpanel"
+                  aria-labelledby="debate-rail-tab-proceedings"
+                  className={styles.liveRailPanel}
+                >
+                  {renderTranscript(session)}
+                </div>
+              ) : (
+                <div
+                  id="debate-rail-panel-case-board"
+                  role="tabpanel"
+                  aria-labelledby="debate-rail-tab-case-board"
+                  className={styles.liveRailPanel}
+                  data-panel="case-board"
+                >
+                  {session.format === "turnabout"
+                    ? renderTurnaboutRecord(session)
+                    : renderCaseBoard(session, activeEvent)}
+                </div>
+              )}
               {renderJuryRecord(session)}
               {session.status === "completed" && !presenting ? (
                 <section className={styles.resultCard}>
@@ -19103,7 +19445,12 @@ export function DebateExperience(
                                     ? session.motion.forSide.label
                                     : session.motion.againstSide.label}
                                 </span>
-                                <p>{ballot.reason}</p>
+                                <p>
+                                  {debateResolvedEvidenceText(
+                                    ballot.reason,
+                                    session.evidence,
+                                  )}
+                                </p>
                               </li>
                             );
                           })
@@ -19123,8 +19470,12 @@ export function DebateExperience(
                                     : session.motion.againstSide.label}
                                 </span>
                                 <p>
-                                  {ballot.reason ??
-                                    "Private ballot — no spoken reason exposed."}
+                                  {ballot.reason
+                                    ? debateResolvedEvidenceText(
+                                        ballot.reason,
+                                        session.evidence,
+                                      )
+                                    : "Private ballot — no spoken reason exposed."}
                                 </p>
                               </li>
                             );
@@ -19592,31 +19943,33 @@ export function DebateExperience(
         }
         progress={null}
         startedAt={softExhibitSynthesizeJobs[0]?.startedAt ?? null}
-        footer="Soft prepare — Save anytime. The × stops every in-flight sprite."
-        cancelLabel="Stop all exhibit synthesis"
-        cancelConfirmTitle="Stop all exhibit sprites?"
+        footer="Soft prepare — Save anytime. The × cancels every in-flight sprite."
+        cancelLabel="Cancel all exhibit synthesis"
+        cancelConfirmTitle="Cancel all exhibit sprites?"
         cancelConfirmDetail="Every in-flight sprite will stop. Saved exhibit text and emoji stay as they are."
         onCancel={cancelSoftExhibitSynthesizeJobs}
-      >
-        <ul
-          className={styles.softExhibitJobList}
-          aria-label="Exhibit sprites preparing"
-        >
-          {softExhibitSynthesizeJobs.map((job) => (
-            <li key={job.requestId} data-status="generating">
-              <span aria-hidden="true" />
-              <b>{job.title}</b>
-              <button
-                type="button"
-                onClick={() => cancelSoftExhibitSynthesizeJob(job.requestId)}
-                aria-label={`Stop synthesizing ${job.title}`}
-              >
-                Stop
-              </button>
-            </li>
-          ))}
-        </ul>
-      </PrismBlockingLoader>
+        activeChildren={
+          <ul
+            className={styles.softExhibitJobList}
+            aria-label="Active exhibit sprites"
+          >
+            {softExhibitSynthesizeJobs.map((job) => (
+              <li key={job.requestId} data-status="generating">
+                <span aria-hidden="true" />
+                <b>{job.title}</b>
+                <button
+                  type="button"
+                  data-soft-job-action="stop"
+                  onClick={() => cancelSoftExhibitSynthesizeJob(job.requestId)}
+                  aria-label={`Stop synthesizing ${job.title}`}
+                >
+                  Stop
+                </button>
+              </li>
+            ))}
+          </ul>
+        }
+      />
     </>
   );
 }
