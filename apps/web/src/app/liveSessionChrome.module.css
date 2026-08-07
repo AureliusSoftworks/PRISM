@@ -39,6 +39,15 @@
   user-select: none;
 }
 
+/* Debate Forum (and similar): sit on the stage picture, not page chrome. */
+.watermarkContained {
+  position: absolute;
+  right: 12px;
+  /* Above Pause/CC transport so the mark reads on the chamber, not under chrome. */
+  bottom: 56px;
+  z-index: 6;
+}
+
 .watermarkMark {
   display: block;
   width: 100%;

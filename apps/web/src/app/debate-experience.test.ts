@@ -2812,12 +2812,13 @@ describe("Debate experience", () => {
     assert.match(source, /liveRailPanel === "proceedings"/u);
     assert.match(
       source,
-      /sealedCompleted[\s\S]{0,400}renderJuryRecord\(session\)[\s\S]{0,120}renderCompletedJuryStatus/u,
+      /juryRecordReady[\s\S]{0,400}renderJuryRecord\(session\)[\s\S]{0,120}renderCompletedJuryStatus/u,
     );
     assert.match(
       source,
       /stageSupport[\s\S]{0,500}renderJuryRecord\(session\)/u,
     );
+    assert.match(source, /juryRecordReady/u);
     assert.doesNotMatch(
       source,
       /\{renderTranscript\(session\)\}[\s\S]{0,800}\{renderJuryRecord\(session\)\}/u,
@@ -2894,11 +2895,14 @@ describe("Debate experience", () => {
       /\/api\/debates\/\$\{encodeURIComponent\(sessionId\)\}\/debrief-chat/u,
     );
     assert.match(source, /debateDebriefEligibleBots\(session\)/u);
-    assert.match(source, /Ask about their reasoning in this Debate/u);
+    assert.match(source, /Ask the sealed chamber/u);
+    assert.match(source, /DEBATE_DEBRIEF_STARTER_PROMPTS/u);
+    assert.match(source, /debriefThreads/u);
     assert.match(source, /data-tutorial-target="debate-debrief-chat"/u);
     assert.match(source, /debateVoiceCompletionFallbackDurationMs/u);
     assert.match(source, /debateUtterancePaceBoost/u);
     assert.match(css, /\.debriefChat/u);
+    assert.match(css, /\.debriefStarters/u);
     assert.match(css, /\.debateSynopsis/u);
   });
 

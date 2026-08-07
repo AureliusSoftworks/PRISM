@@ -37,12 +37,25 @@ export function LiveSessionModelChip(props: {
 /** Small monochrome PRISM wordmark for live session corners. */
 export function LiveSessionPrismWatermark(props: {
   theme: "light" | "dark";
+  /**
+   * Anchor to the nearest positioned ancestor (e.g. the Forum stage frame)
+   * instead of the browser viewport chrome.
+   */
+  contained?: boolean;
+  className?: string;
 }): JSX.Element {
   const stroke = props.theme === "light" ? "#000000" : "#ffffff";
   return (
     <div
-      className={styles.watermark}
+      className={[
+        styles.watermark,
+        props.contained ? styles.watermarkContained : null,
+        props.className,
+      ]
+        .filter(Boolean)
+        .join(" ")}
       data-live-session-watermark="true"
+      data-watermark-contained={props.contained ? "true" : undefined}
       data-theme={props.theme}
       aria-hidden="true"
     >

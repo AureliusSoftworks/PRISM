@@ -61,6 +61,7 @@ import {
   type DebateAdvocacyConsent,
   type DebateCaseCardV1,
   type DebateDebriefChatMessageV1,
+  type DebateDebriefEligibleBotV1,
   type DebateEventV1,
   type DebateEvidencePacketV1,
   type DebateEvidenceExhibitV1,
@@ -728,6 +729,42 @@ const DEBATE_PLAYER_PARTICIPANT_PRISM: DebateBotSummary = {
     "PRISM is the human-controlled Participant and replaces the selected-side advocate.",
   hardMuted: false,
 };
+
+const DEBATE_DEBRIEF_STARTER_PROMPTS = [
+  "What tipped your judgment in this Debate?",
+  "Which opposing claim still feels weakest to you?",
+  "If you had one more minute, what would you press?",
+] as const;
+
+function debateDebriefRoleLabel(
+  session: DebateSessionV1,
+  bot: DebateDebriefEligibleBotV1,
+): string {
+  if (bot.role === "moderator") {
+    return session.moderatorTitle?.trim() || "Moderator";
+  }
+  if (bot.sideId === "for") return session.motion.forSide.label;
+  if (bot.sideId === "against") return session.motion.againstSide.label;
+  return "Juror";
+}
+
+function debateDebriefAccent(
+  session: DebateSessionV1,
+  bot: DebateDebriefEligibleBotV1,
+): string {
+  if (bot.role === "moderator") {
+    return session.moderator.color ?? "#d9d2ff";
+  }
+  if (bot.sideId === "for") {
+    return session.forAdvocate.color ?? "#42d9ff";
+  }
+  if (bot.sideId === "against") {
+    return session.againstAdvocate.color ?? "#ff5f8f";
+  }
+  return (
+    session.jury.jurors.find((juror) => juror.id === bot.id)?.color ?? "#9c8cff"
+  );
+}
 
 const DEBATE_STAGE_ALIGNMENT_ENABLED = prismBranchIsDev(
   process.env.NEXT_PUBLIC_PRISM_BRANCH,
@@ -3741,12 +3778,15 @@ export function DebateExperience(
   const [debriefTargetBotId, setDebriefTargetBotId] = useState<string | null>(
     null,
   );
-  const [debriefMessages, setDebriefMessages] = useState<
-    DebateDebriefChatMessageV1[]
-  >([]);
-  const [debriefDraft, setDebriefDraft] = useState("");
+  const [debriefThreads, setDebriefThreads] = useState<
+    Record<string, DebateDebriefChatMessageV1[]>
+  >({});
+  const [debriefDrafts, setDebriefDrafts] = useState<Record<string, string>>(
+    {},
+  );
   const [debriefBusy, setDebriefBusy] = useState(false);
   const [debriefError, setDebriefError] = useState<string | null>(null);
+  const debriefThreadRef = useRef<HTMLOListElement | null>(null);
   const [synopsisPreparingSessionId, setSynopsisPreparingSessionId] = useState<
     string | null
   >(null);
@@ -5198,11 +5238,32 @@ export function DebateExperience(
 
   const clearDebateDebrief = useCallback((): void => {
     setDebriefTargetBotId(null);
-    setDebriefMessages([]);
-    setDebriefDraft("");
+    setDebriefThreads({});
+    setDebriefDrafts({});
     setDebriefError(null);
     setDebriefBusy(false);
   }, []);
+
+  const debriefMessages = debriefTargetBotId
+    ? (debriefThreads[debriefTargetBotId] ?? [])
+    : [];
+  const debriefDraft = debriefTargetBotId
+    ? (debriefDrafts[debriefTargetBotId] ?? "")
+    : "";
+
+  useEffect(() => {
+    if (!debriefTargetBotId) return;
+    const node = debriefThreadRef.current;
+    if (!node) return;
+    node.scrollTop = node.scrollHeight;
+  }, [debriefTargetBotId, debriefMessages.length, debriefBusy]);
+
+  useEffect(() => {
+    if (!activeSession || activeSession.status !== "completed") return;
+    if (debriefTargetBotId) return;
+    const first = debateDebriefEligibleBots(activeSession)[0];
+    if (first) setDebriefTargetBotId(first.id);
+  }, [activeSession, debriefTargetBotId]);
 
   useEffect(() => {
     if (
@@ -5285,15 +5346,19 @@ export function DebateExperience(
     const content = debriefDraft.trim();
     if (!content) return;
     const sessionId = activeSession.id;
+    const targetBotId = debriefTargetBotId;
     const userMessage: DebateDebriefChatMessageV1 = {
       id: `debrief-user:${Date.now()}`,
       role: "user",
       content,
       createdAt: new Date().toISOString(),
     };
-    const history = debriefMessages;
-    setDebriefMessages((current) => [...current, userMessage]);
-    setDebriefDraft("");
+    const history = debriefThreads[targetBotId] ?? [];
+    setDebriefThreads((current) => ({
+      ...current,
+      [targetBotId]: [...(current[targetBotId] ?? []), userMessage],
+    }));
+    setDebriefDrafts((current) => ({ ...current, [targetBotId]: "" }));
     setDebriefBusy(true);
     setDebriefError(null);
     try {
@@ -5302,7 +5367,7 @@ export function DebateExperience(
         {
           method: "POST",
           body: JSON.stringify({
-            targetBotId: debriefTargetBotId,
+            targetBotId,
             content,
             messages: history.map((message) => ({
               role: message.role,
@@ -5312,7 +5377,10 @@ export function DebateExperience(
           }),
         },
       );
-      setDebriefMessages((current) => [...current, result.message]);
+      setDebriefThreads((current) => ({
+        ...current,
+        [targetBotId]: [...(current[targetBotId] ?? []), result.message],
+      }));
     } catch (caught) {
       setDebriefError(
         caught instanceof Error
@@ -5326,8 +5394,8 @@ export function DebateExperience(
     activeSession,
     debriefBusy,
     debriefDraft,
-    debriefMessages,
     debriefTargetBotId,
+    debriefThreads,
     preferredProvider,
     request,
   ]);
@@ -5622,8 +5690,8 @@ export function DebateExperience(
     setEvidenceDecisionMade(false);
     setActiveSession(null);
     setDebriefTargetBotId(null);
-    setDebriefMessages([]);
-    setDebriefDraft("");
+    setDebriefThreads({});
+    setDebriefDrafts({});
     setDebriefError(null);
     setDebriefBusy(false);
     setSynopsisPreparingSessionId(null);
@@ -15321,10 +15389,12 @@ export function DebateExperience(
   const renderJuryRecord = (
     session: DebateSessionV1,
   ): React.JSX.Element | null => {
+    if (!session.jury.enabled || session.playerRole === "participant") {
+      return null;
+    }
     if (
-      !session.jury.enabled ||
-      session.playerRole === "participant" ||
-      session.status !== "completed"
+      session.status !== "completed" &&
+      session.jury.phase !== "complete"
     ) {
       return null;
     }
@@ -15334,12 +15404,20 @@ export function DebateExperience(
         className={styles.juryRecord}
         aria-label="Timestamped Jury comments"
         data-tutorial-target="debate-jury-record"
+        data-phase={session.jury.phase}
       >
         <header>
           <div>
             <p className={styles.eyebrow}>Jury record</p>
-            <span>Timestamped · separate from proceedings</span>
+            <span>
+              {session.jury.phase === "complete"
+                ? `${session.jury.forVotes}–${session.jury.againstVotes} · timestamped commentary`
+                : "Timestamped · separate from proceedings"}
+            </span>
           </div>
+          <small>
+            {session.status === "completed" ? "Sealed" : "Returned"}
+          </small>
         </header>
         {comments.length > 0 ? (
           <ol>
@@ -17999,6 +18077,12 @@ export function DebateExperience(
     const juryChamberVisible = cameraView === "jury";
     const sealedCompleted =
       session.status === "completed" && !presenting;
+    const juryRecordReady =
+      session.jury.enabled &&
+      session.playerRole !== "participant" &&
+      (sealedCompleted ||
+        session.jury.phase === "complete" ||
+        debateJuryOutcomeRevealed(session, transcriptVisibleThroughSequence));
     const participantJurySealed =
       session.jury.enabled &&
       session.playerRole === "participant" &&
@@ -18579,10 +18663,13 @@ export function DebateExperience(
               status={session.status}
             />
           </header>
-          <LiveSessionPrismWatermark theme={props.theme} />
           <div className={styles.liveWorkspace}>
             <div className={styles.stageColumn}>
               <div className={styles.forum} data-debate-stage-viewport="live">
+                <LiveSessionPrismWatermark
+                  theme={props.theme}
+                  contained
+                />
                 {juryChamberVisible ? (
                   renderJuryChamber(session, activeEvent, juryThinkingBotId)
                 ) : (
@@ -19311,12 +19398,12 @@ export function DebateExperience(
               <div className={styles.stageSupport}>
                 {renderEvidenceRail(session, tableEvidenceStickyId)}
                 {renderDebateRoundSummary()}
-                {sealedCompleted
-                  ? session.jury.enabled
-                    ? (renderJuryRecord(session) ??
-                      renderCompletedJuryStatus(session))
-                    : renderEmptyJurySlot()
-                  : (renderGallery(session) ?? renderEmptyJurySlot())}
+                {juryRecordReady
+                  ? (renderJuryRecord(session) ??
+                    renderCompletedJuryStatus(session))
+                  : sealedCompleted
+                    ? renderEmptyJurySlot()
+                    : (renderGallery(session) ?? renderEmptyJurySlot())}
               </div>
             </div>
             <aside
@@ -19556,58 +19643,170 @@ export function DebateExperience(
                   {(() => {
                     const debriefCast = debateDebriefEligibleBots(session);
                     if (debriefCast.length === 0) return null;
+                    const selected =
+                      debriefCast.find((bot) => bot.id === debriefTargetBotId) ??
+                      null;
+                    const selectedAccent = selected
+                      ? debateDebriefAccent(session, selected)
+                      : null;
+                    const selectedRole = selected
+                      ? debateDebriefRoleLabel(session, selected)
+                      : null;
                     return (
                       <section
                         className={styles.debriefChat}
                         data-tutorial-target="debate-debrief-chat"
-                        aria-label="Ask about their reasoning in this Debate"
+                        data-has-target={selected ? "true" : undefined}
+                        aria-label="Inquiry into frozen Debate reasoning"
+                        style={
+                          selectedAccent
+                            ? ({
+                                "--debate-debrief-accent": selectedAccent,
+                              } as CSSProperties)
+                            : undefined
+                        }
                       >
-                        <header>
-                          <p className={styles.eyebrow}>Inquiry</p>
-                          <span>
-                            Ask about their reasoning in this Debate —
-                            temporary, not saved, positions stay as they were.
+                        <header className={styles.debriefHeader}>
+                          <div className={styles.debriefHeaderCopy}>
+                            <p className={styles.eyebrow}>Inquiry</p>
+                            <strong>Ask the sealed chamber</strong>
+                            <span>
+                              Temporary · not saved · positions stay frozen as
+                              they were.
+                            </span>
+                          </div>
+                          <span className={styles.debriefEphemeralBadge}>
+                            Ephemeral
                           </span>
                         </header>
-                        <div className={styles.debriefCastChips} role="list">
-                          {debriefCast.map((bot) => (
-                            <button
-                              key={bot.id}
-                              type="button"
-                              role="listitem"
-                              className={styles.debriefCastChip}
-                              data-selected={
-                                debriefTargetBotId === bot.id
-                                  ? "true"
-                                  : undefined
-                              }
-                              onClick={() => {
-                                setDebriefTargetBotId(bot.id);
-                                setDebriefMessages([]);
-                                setDebriefDraft("");
-                                setDebriefError(null);
-                              }}
-                            >
-                              {bot.name}
-                            </button>
-                          ))}
+                        <div
+                          className={styles.debriefCastChips}
+                          role="list"
+                          aria-label="Cast available for inquiry"
+                        >
+                          {debriefCast.map((bot) => {
+                            const accent = debateDebriefAccent(session, bot);
+                            const roleLabel = debateDebriefRoleLabel(
+                              session,
+                              bot,
+                            );
+                            const selectedChip = debriefTargetBotId === bot.id;
+                            const threadCount =
+                              debriefThreads[bot.id]?.length ?? 0;
+                            return (
+                              <button
+                                key={bot.id}
+                                type="button"
+                                role="listitem"
+                                className={styles.debriefCastChip}
+                                data-selected={
+                                  selectedChip ? "true" : undefined
+                                }
+                                data-role={bot.role}
+                                style={
+                                  {
+                                    "--debate-debrief-chip-accent": accent,
+                                  } as CSSProperties
+                                }
+                                aria-pressed={selectedChip}
+                                onClick={() => {
+                                  setDebriefTargetBotId(bot.id);
+                                  setDebriefError(null);
+                                }}
+                              >
+                                <span
+                                  className={styles.debriefCastSwatch}
+                                  aria-hidden="true"
+                                >
+                                  {bot.name.slice(0, 1)}
+                                </span>
+                                <span className={styles.debriefCastMeta}>
+                                  <span className={styles.debriefCastName}>
+                                    {bot.name}
+                                  </span>
+                                  <span className={styles.debriefCastRole}>
+                                    {roleLabel}
+                                    {threadCount > 0
+                                      ? ` · ${threadCount}`
+                                      : ""}
+                                  </span>
+                                </span>
+                              </button>
+                            );
+                          })}
                         </div>
-                        {debriefTargetBotId ? (
-                          <>
-                            <ol className={styles.debriefThread}>
+                        {selected ? (
+                          <div className={styles.debriefStage}>
+                            <div className={styles.debriefStageHeader}>
+                              <span
+                                className={styles.debriefStageSwatch}
+                                aria-hidden="true"
+                              >
+                                {selected.name.slice(0, 1)}
+                              </span>
+                              <div>
+                                <strong>{selected.name}</strong>
+                                <span>{selectedRole}</span>
+                              </div>
+                            </div>
+                            <ol
+                              ref={debriefThreadRef}
+                              className={styles.debriefThread}
+                              aria-live="polite"
+                            >
+                              {debriefMessages.length === 0 && !debriefBusy ? (
+                                <li
+                                  className={styles.debriefEmpty}
+                                  data-role="empty"
+                                >
+                                  <p>
+                                    Their stance is sealed. Ask how they weighed
+                                    the public floor — not to reopen the ballot.
+                                  </p>
+                                  <div className={styles.debriefStarters}>
+                                    {DEBATE_DEBRIEF_STARTER_PROMPTS.map(
+                                      (prompt) => (
+                                        <button
+                                          key={prompt}
+                                          type="button"
+                                          className={styles.debriefStarter}
+                                          disabled={debriefBusy}
+                                          onClick={() => {
+                                            setDebriefDrafts((current) => ({
+                                              ...current,
+                                              [selected.id]: prompt,
+                                            }));
+                                          }}
+                                        >
+                                          {prompt}
+                                        </button>
+                                      ),
+                                    )}
+                                  </div>
+                                </li>
+                              ) : null}
                               {debriefMessages.map((message) => (
                                 <li key={message.id} data-role={message.role}>
                                   <strong>
                                     {message.role === "user"
                                       ? "You"
-                                      : (debriefCast.find(
-                                          (bot) =>
-                                            bot.id === debriefTargetBotId,
-                                        )?.name ?? "Cast")}
+                                      : selected.name}
                                   </strong>
                                   <p>{message.content}</p>
                                 </li>
                               ))}
+                              {debriefBusy ? (
+                                <li
+                                  className={styles.debriefThinking}
+                                  data-role="thinking"
+                                >
+                                  <strong>{selected.name}</strong>
+                                  <p>
+                                    <span className={styles.debriefPulse} />
+                                    Considering the sealed record…
+                                  </p>
+                                </li>
+                              ) : null}
                             </ol>
                             <form
                               className={styles.debriefComposer}
@@ -19618,13 +19817,27 @@ export function DebateExperience(
                             >
                               <textarea
                                 value={debriefDraft}
-                                onChange={(event) =>
-                                  setDebriefDraft(event.currentTarget.value)
-                                }
-                                rows={3}
-                                placeholder="Ask how they thought during this Debate…"
+                                onChange={(event) => {
+                                  const value = event.currentTarget.value;
+                                  setDebriefDrafts((current) => ({
+                                    ...current,
+                                    [selected.id]: value,
+                                  }));
+                                }}
+                                onKeyDown={(event: ReactKeyboardEvent) => {
+                                  if (
+                                    event.key === "Enter" &&
+                                    !event.shiftKey
+                                  ) {
+                                    event.preventDefault();
+                                    void sendDebateDebrief();
+                                  }
+                                }}
+                                rows={2}
+                                placeholder={`Ask ${selected.name} about their frozen reasoning…`}
                                 disabled={debriefBusy}
                                 maxLength={2000}
+                                aria-label={`Inquiry message for ${selected.name}`}
                               />
                               <button
                                 type="submit"
@@ -19641,10 +19854,10 @@ export function DebateExperience(
                                 {debriefError}
                               </p>
                             ) : null}
-                          </>
+                          </div>
                         ) : (
                           <p className={styles.debriefHint}>
-                            Pick a cast member to inquire into their frozen
+                            Choose a cast member to inquire into their frozen
                             thought process.
                           </p>
                         )}

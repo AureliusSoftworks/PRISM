@@ -54,10 +54,14 @@ test("live session chrome mounts model chip and theme-aware watermark", () => {
   assert.match(source, /theme === "light" \? "#000000" : "#ffffff"/u);
   assert.match(css, /opacity:\s*0\.5/u);
   assert.match(css, /\.watermark\s*\{[^}]*position:\s*fixed/u);
+  assert.match(css, /\.watermarkContained\s*\{[^}]*position:\s*absolute/u);
   assert.match(pageSource, /LiveSessionModelChip/u);
   assert.match(pageSource, /LiveSessionPrismWatermark/u);
   assert.match(debateSource, /lockedRoutingChip/u);
-  assert.match(debateSource, /LiveSessionPrismWatermark/u);
+  assert.match(
+    debateSource,
+    /data-debate-stage-viewport="live"[\s\S]{0,280}LiveSessionPrismWatermark[\s\S]{0,120}contained/u,
+  );
   assert.match(signalSource, /resolveLockedRoutingChip/u);
   assert.match(signalSource, /LiveSessionPrismWatermark/u);
 });

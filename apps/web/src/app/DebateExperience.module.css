@@ -6183,6 +6183,13 @@
   font-size: 9px;
 }
 
+.juryRecord > header small {
+  flex: 0 0 auto;
+  color: #a99fac;
+  font-size: 9px;
+  letter-spacing: 0.04em;
+}
+
 .juryRecord > header > div {
   display: grid;
   gap: 3px;
@@ -6256,63 +6263,292 @@
 }
 
 .debriefChat {
+  --debate-debrief-accent: color-mix(in srgb, currentColor 42%, transparent);
   display: grid;
+  gap: 12px;
+  margin: 18px 0 8px;
+  border: 1px solid color-mix(in srgb, var(--debate-debrief-accent) 28%, transparent);
+  border-radius: 16px;
+  padding: 14px 14px 12px;
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--debate-debrief-accent) 10%, transparent),
+      transparent 42%
+    ),
+    color-mix(in srgb, currentColor 3.5%, transparent);
+  box-shadow: inset 0 1px rgba(255, 255, 255, 0.04);
+}
+
+.debriefHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
   gap: 10px;
-  margin: 16px 0;
-  border-top: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  padding-top: 14px;
 }
 
-.debriefChat > header {
+.debriefHeaderCopy {
   display: grid;
-  gap: 3px;
+  gap: 2px;
+  min-width: 0;
 }
 
+.debriefHeaderCopy strong {
+  font-size: 13px;
+  font-weight: 650;
+  letter-spacing: 0.01em;
+}
+
+.debriefHeaderCopy span,
 .debriefChat > header span {
   color: #978fa4;
   font-size: 10px;
   line-height: 1.4;
 }
 
+.debriefEphemeralBadge {
+  flex: 0 0 auto;
+  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
+  border-radius: 999px;
+  padding: 4px 8px;
+  color: #b7aec6;
+  font-size: 9px;
+  font-weight: 650;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+  background: color-mix(in srgb, currentColor 5%, transparent);
+}
+
 .debriefCastChips {
-  display: flex;
-  flex-wrap: wrap;
-  gap: 6px;
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(118px, 1fr));
+  gap: 7px;
 }
 
 .debriefCastChip {
-  border: 1px solid color-mix(in srgb, currentColor 16%, transparent);
-  border-radius: 999px;
-  padding: 5px 10px;
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 12px;
+  padding: 7px 8px;
   color: inherit;
-  background: color-mix(in srgb, currentColor 4%, transparent);
-  font-size: 10px;
+  background: color-mix(in srgb, currentColor 3.5%, transparent);
+  text-align: left;
+  transition:
+    border-color 160ms ease,
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.debriefCastChip:hover {
+  border-color: color-mix(
+    in srgb,
+    var(--debate-debrief-chip-accent, currentColor) 42%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--debate-debrief-chip-accent, currentColor) 8%,
+    transparent
+  );
 }
 
 .debriefCastChip[data-selected="true"] {
-  border-color: color-mix(in srgb, currentColor 34%, transparent);
-  background: color-mix(in srgb, currentColor 10%, transparent);
+  border-color: color-mix(
+    in srgb,
+    var(--debate-debrief-chip-accent, currentColor) 58%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--debate-debrief-chip-accent, currentColor) 14%,
+    transparent
+  );
+  box-shadow:
+    inset 0 0 0 1px
+      color-mix(
+        in srgb,
+        var(--debate-debrief-chip-accent, currentColor) 24%,
+        transparent
+      ),
+    0 8px 22px
+      color-mix(
+        in srgb,
+        var(--debate-debrief-chip-accent, currentColor) 12%,
+        transparent
+      );
+}
+
+.debriefCastSwatch,
+.debriefStageSwatch {
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 28px;
+  border-radius: 50%;
+  color: #0c0a10;
+  font-size: 11px;
+  font-weight: 750;
+  background: var(--debate-debrief-chip-accent, var(--debate-debrief-accent));
+  box-shadow: inset 0 0 0 1px rgba(255, 255, 255, 0.18);
+}
+
+.debriefStageSwatch {
+  background: var(--debate-debrief-accent);
+}
+
+.debriefCastMeta {
+  display: grid;
+  gap: 1px;
+  min-width: 0;
+}
+
+.debriefCastName {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 11px;
+  font-weight: 650;
+}
+
+.debriefCastRole {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: #978fa4;
+  font-size: 9px;
+  letter-spacing: 0.02em;
+}
+
+.debriefStage {
+  display: grid;
+  gap: 10px;
+  border-top: 1px solid color-mix(in srgb, currentColor 10%, transparent);
+  padding-top: 12px;
+}
+
+.debriefStageHeader {
+  display: grid;
+  grid-template-columns: 28px minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.debriefStageHeader strong {
+  display: block;
+  font-size: 12px;
+  font-weight: 650;
+}
+
+.debriefStageHeader span {
+  color: #978fa4;
+  font-size: 10px;
 }
 
 .debriefThread {
   display: grid;
   gap: 8px;
   margin: 0;
-  max-height: 180px;
-  padding: 0;
+  max-height: min(280px, 38vh);
+  padding: 2px 2px 4px;
   list-style: none;
   overflow-y: auto;
+  overscroll-behavior: contain;
+  scroll-behavior: smooth;
 }
 
 .debriefThread li {
   border: 1px solid color-mix(in srgb, currentColor 10%, transparent);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 8px 10px;
   background: color-mix(in srgb, currentColor 3%, transparent);
 }
 
 .debriefThread li[data-role="user"] {
-  background: color-mix(in srgb, currentColor 6%, transparent);
+  margin-left: 12%;
+  border-color: color-mix(in srgb, currentColor 16%, transparent);
+  background: color-mix(in srgb, currentColor 7%, transparent);
+}
+
+.debriefThread li[data-role="assistant"],
+.debriefThread li[data-role="thinking"] {
+  margin-right: 8%;
+  border-color: color-mix(
+    in srgb,
+    var(--debate-debrief-accent) 28%,
+    transparent
+  );
+  background: color-mix(
+    in srgb,
+    var(--debate-debrief-accent) 9%,
+    transparent
+  );
+}
+
+.debriefEmpty {
+  margin: 0 !important;
+  border-style: dashed !important;
+  background: transparent !important;
+}
+
+.debriefEmpty p {
+  margin: 0 0 8px;
+  color: #978fa4;
+  font-size: 11px;
+  line-height: 1.45;
+}
+
+.debriefStarters {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.debriefStarter {
+  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
+  border-radius: 999px;
+  padding: 5px 9px;
+  color: inherit;
+  background: color-mix(in srgb, currentColor 4%, transparent);
+  font-size: 10px;
+  line-height: 1.3;
+  text-align: left;
+}
+
+.debriefStarter:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--debate-debrief-accent) 40%, transparent);
+  background: color-mix(in srgb, var(--debate-debrief-accent) 10%, transparent);
+}
+
+.debriefThinking p {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  color: #b7aec6;
+}
+
+.debriefPulse {
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: var(--debate-debrief-accent);
+  box-shadow: 0 0 0 0 color-mix(in srgb, var(--debate-debrief-accent) 55%, transparent);
+  animation: debate-debrief-pulse 1.2s ease-out infinite;
+}
+
+@keyframes debate-debrief-pulse {
+  0% {
+    box-shadow: 0 0 0 0 color-mix(in srgb, var(--debate-debrief-accent) 55%, transparent);
+  }
+  70% {
+    box-shadow: 0 0 0 8px transparent;
+  }
+  100% {
+    box-shadow: 0 0 0 0 transparent;
+  }
 }
 
 .debriefThread strong {
@@ -6330,15 +6566,17 @@
 
 .debriefComposer {
   display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 8px;
+  align-items: end;
 }
 
 .debriefComposer textarea {
   width: 100%;
-  min-height: 64px;
+  min-height: 52px;
   resize: vertical;
   border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-  border-radius: 10px;
+  border-radius: 12px;
   padding: 8px 10px;
   color: inherit;
   background: color-mix(in srgb, currentColor 3%, transparent);
@@ -6347,11 +6585,19 @@
   line-height: 1.4;
 }
 
+.debriefComposer textarea:focus {
+  outline: none;
+  border-color: color-mix(in srgb, var(--debate-debrief-accent) 48%, transparent);
+  box-shadow: 0 0 0 2px
+    color-mix(in srgb, var(--debate-debrief-accent) 16%, transparent);
+}
+
 .debriefComposer button {
   justify-self: end;
-  border-radius: 8px;
-  padding: 7px 12px;
-  font-size: 10px;
+  border-radius: 10px;
+  padding: 9px 14px;
+  font-size: 11px;
+  font-weight: 650;
 }
 
 .debriefHint {
@@ -6359,6 +6605,16 @@
   color: #978fa4;
   font-size: 10px;
   line-height: 1.4;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .debriefPulse {
+    animation: none;
+  }
+
+  .debriefThread {
+    scroll-behavior: auto;
+  }
 }
 
 .sourceDrawerBackdrop {
@@ -7927,7 +8183,9 @@
 }
 
 .audienceGallery.juryRoster {
-  overflow: visible;
+  /* Thought peeks still escape via .stageSupport:has(...); the roster itself
+     must clip so seat glyphs stay inside the visible module. */
+  overflow: hidden;
 }
 
 .audienceGallery.juryRoster .juryRosterSeats {
@@ -13921,6 +14179,11 @@
   background: color-mix(in srgb, #0d0b11 88%, transparent);
 }
 
+.stageSupport > * {
+  min-width: 0;
+  min-height: 0;
+}
+
 .live[data-theme="light"] .stageSupport {
   background: color-mix(in srgb, #f1eff3 90%, transparent);
 }
@@ -13996,8 +14259,8 @@
 }
 
 .audienceGallery.juryRoster {
-  /* Keep thought-chip peeks visible while the module fills the rail. */
-  overflow: visible;
+  /* Seat glyphs must stay inside the module; thought peeks use stageSupport:has. */
+  overflow: hidden;
 }
 
 .stageSupport .juryRecord {
@@ -14005,9 +14268,19 @@
   border-radius: 0;
   background: transparent;
   overflow: hidden;
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  max-height: 100%;
+  min-height: 0;
 }
 
-.stageSupport .juryRecord ol {
+.stageSupport .juryRecord > header {
+  flex: 0 0 auto;
+}
+
+.stageSupport .juryRecord ol,
+.stageSupport .juryRecord > p {
   flex: 1 1 auto;
   min-height: 0;
 }
@@ -14230,14 +14503,32 @@
   align-self: stretch;
   flex: 1 1 auto;
   height: 100%;
-  min-height: 0;
   max-height: 100%;
+  min-height: 0;
+  overflow: hidden;
+  display: flex;
+  flex-direction: column;
+}
+
+.audienceGallery.juryRoster > header {
+  flex: 0 0 auto;
 }
 
 .audienceGallery.juryRoster .juryRosterSeats {
+  /* Keep the five seats in the visible band — do not center them into a
+     clipped void below the stageSupport overflow edge. */
   flex: 1 1 auto;
-  align-content: center;
-  min-height: 0;
+  align-content: start;
+  justify-content: center;
+  min-height: 64px;
+  padding-top: 18px;
+  padding-bottom: 10px;
+  overflow: hidden;
+}
+
+.audienceGallery.juryRoster > p {
+  flex: 0 0 auto;
+  margin-top: auto;
 }
 
 .turnaboutRecord > header strong {
@@ -14572,7 +14863,11 @@
 .live[data-theme="light"] .debateSynopsis[data-preparing="true"],
 .live[data-theme="light"] .resultCard li p,
 .live[data-theme="light"] .debriefHint,
-.live[data-theme="light"] .debriefChat > header span,
+.live[data-theme="light"] .debriefHeaderCopy span,
+.live[data-theme="light"] .debriefCastRole,
+.live[data-theme="light"] .debriefStageHeader span,
+.live[data-theme="light"] .debriefEmpty p,
+.live[data-theme="light"] .debriefEphemeralBadge,
 .live[data-theme="light"] .juryRecord > header span,
 .live[data-theme="light"] .juryRecord > p,
 .live[data-theme="light"] .juryRecord li time,
@@ -14589,10 +14884,16 @@
 .live[data-theme="light"] .juryRecord li,
 .live[data-theme="light"] .debriefThread li,
 .live[data-theme="light"] .debriefCastChip,
+.live[data-theme="light"] .debriefStarter,
 .live[data-theme="light"] .debriefComposer textarea {
   border-color: var(--debate-live-line);
   color: var(--debate-live-ink);
   background: rgba(255, 255, 255, 0.58);
+}
+
+.live[data-theme="light"] .debriefCastSwatch,
+.live[data-theme="light"] .debriefStageSwatch {
+  color: #1a1520;
 }
 
 .debateRail[data-completed="true"] {

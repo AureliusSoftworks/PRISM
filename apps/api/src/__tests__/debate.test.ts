@@ -55,6 +55,9 @@ import {
   synthesizeDebateSlates,
   synthesizeDebateTitle,
   suggestDebateSetup,
+  debateCaseBoardClaimSummary,
+  debateModeratorFloorCopyViolatesUpcoming,
+  debateAdvocateSpeechNearEcho,
   type DebateAiRuntime,
 } from "../debate.ts";
 import type {
@@ -1004,13 +1007,14 @@ class SpoofedCaseBoardStatusProvider extends DebateProviderStub {
     if (text.includes("Distill a scoreless public debate case board")) {
       return JSON.stringify({
         summary:
-          "The house cannot rationally conclude that the affirmative carried the motion.",
+          "The central constraint is real, and local limits still address it directly.",
         summaryQuote:
-          "the house cannot rationally conclude that he is generally cooler",
+          "The central constraint is real, and this proposal addresses it directly",
         statusUpdates: [
           {
             id: this.targetCardId,
             status: "conceded",
+            // Ungrounded concession language — must not flip the opposing card.
             evidenceQuote: "I concede both points.",
           },
         ],
@@ -10511,6 +10515,128 @@ describe("Debate engine", () => {
     }
   });
 
+  it("hardens case-board claim summaries against Cookout-style distillation failures", () => {
+    assert.equal(
+      debateCaseBoardClaimSummary(
+        "I concede that local planning has value. But broad rail zoning still addresses the citywide shortage directly.",
+      ),
+      "But broad rail zoning still addresses the citywide shortage directly.",
+    );
+    assert.doesNotMatch(
+      debateCaseBoardClaimSummary(
+        "Hot dogs carry more fat, sodium, and preservatives. Still, one-handed toppings keep the cookout practical.",
+      ),
+      /^Hot dogs carry more fat/u,
+    );
+    assert.match(
+      debateCaseBoardClaimSummary(
+        "Hot dogs carry more fat, sodium, and preservatives. Still, one-handed toppings keep the cookout practical.",
+      ),
+      /one-handed toppings keep the cookout practical/u,
+    );
+    assert.equal(
+      debateCaseBoardClaimSummary(
+        "[[source:scholar-1]] is blueberries, not burgers—but it spotlights the hole in the health lane.",
+      ),
+      "",
+    );
+    assert.equal(
+      debateCaseBoardClaimSummary(
+        "Hot dogs carry more fat, sodium, and preservatives.",
+      ),
+      "",
+    );
+    assert.match(
+      debateCaseBoardClaimSummary(
+        'No—Sol keeps shrinking "all-around" into "most impressive bite.',
+      ),
+      /impressive bite/u,
+    );
+    assert.match(
+      debateCaseBoardClaimSummary(
+        'No—Sol keeps shrinking "all-around" into "most impressive bite.',
+      ),
+      /"$/u,
+    );
+    assert.ok(
+      debateAdvocateSpeechNearEcho(
+        "A hot dog can still get all those toppings without becoming a two-handed disaster while staying portable at the grill.",
+        "Look, a hot dog can still get all those toppings without becoming a two-handed disaster — portability at the grill remains the point.",
+      ),
+    );
+    assert.equal(
+      debateModeratorFloorCopyViolatesUpcoming(
+        "Let's move now to the rebuttal stage.",
+        { stepKey: "challenge_against_answer" } as never,
+      ),
+      true,
+    );
+    assert.equal(
+      debateModeratorFloorCopyViolatesUpcoming(
+        "The rebuttal window is closed.",
+        { stepKey: "jury_discussion", jury: { enabled: true } } as never,
+      ),
+      true,
+    );
+    assert.equal(
+      debateModeratorFloorCopyViolatesUpcoming(
+        "Time. Avery now has the scheduled floor.",
+        { stepKey: "rebuttal_against" } as never,
+      ),
+      false,
+    );
+    assert.match(debateSource, /generateAdvocateSpeechAvoidingEcho/u);
+    assert.match(debateSource, /caseBoardNearDuplicate/u);
+  });
+
+  it("falls back when overtime copy invents a rebuttal stage during challenge", async () => {
+    class InventedRebuttalOvertimeProvider extends OvertimeProvider {
+      public override async generateResponse(
+        messages: ProviderMessage[],
+        options?: GenerateOptions,
+      ): Promise<string> {
+        const text = messages.map((message) => message.content).join("\n");
+        if (text.includes("beyond the allotted floor time")) {
+          this.lastCorrectionPrompt = text;
+          return JSON.stringify({
+            content: "Time. Let's move now to the rebuttal stage.",
+          });
+        }
+        return super.generateResponse(messages, options);
+      }
+    }
+
+    const db = createTestDb();
+    const provider = new InventedRebuttalOvertimeProvider();
+    const debateRuntime = runtimeWith(provider);
+    try {
+      let session = await createDebateForRole(db, "spectator", {
+        debateRuntime,
+      });
+      for (const key of ["intro", "opening-for", "opening-against"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `overtime-invented-rebuttal:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      assert.equal(session.stepKey, "challenge_for_prompt");
+      const correction = session.events.find(
+        (event) => event.kind === "moderator_ruling",
+      );
+      assert.ok(correction);
+      assert.doesNotMatch(correction.content, /\brebuttal\b/iu);
+      assert.match(provider.lastCorrectionPrompt, /Do not invent a stage name/u);
+    } finally {
+      db.close();
+    }
+  });
+
   it("rejects ungrounded card rewrites and unrelated conceded statuses", async () => {
     const db = createTestDb();
     try {
@@ -10561,11 +10687,7 @@ describe("Debate engine", () => {
       assert.ok(originalTarget);
       assert.ok(opposingCard);
 
-      const observedSource = {
-        ...sourceEvent,
-        content:
-          "Trump's strongest point is fair: the Rubik's Cube proves a skill, not general coolness. I concede both points. But that symmetry does not rescue the affirmative; the house cannot rationally conclude that he is generally cooler.",
-      };
+      const observedSource = sourceEvent;
       await refineDebateCaseBoard(
         db,
         "user-1",
@@ -10589,7 +10711,7 @@ describe("Debate engine", () => {
       stored = getDebateSession(db, "user-1", againstOpening.id);
       assert.equal(
         stored.caseBoard.find((card) => card.id === originalTarget.id)?.summary,
-        "The house cannot rationally conclude that the affirmative carried the motion.",
+        "The central constraint is real, and local limits still address it directly.",
       );
       assert.notEqual(
         stored.caseBoard.find((card) => card.id === opposingCard.id)?.status,

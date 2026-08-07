@@ -5269,6 +5269,62 @@ async function turnaboutRecordBoundSpeech(
   };
 }
 
+const CASE_BOARD_CONCESSION_SENTENCE =
+  /^(?:(?:i|we)\s+(?:concede|grant|agree|acknowledge|accept)\b|(?:i'?ll|i will)\s+concede\b|.+?\b(?:point|argument|case)\s+is\s+(?:fair|correct|right)\b|.+?\bgets?\s+(?:one|a)\s+point\b|.+?\breal\s+downside\b)/iu;
+
+const CASE_BOARD_RHETORICAL_OPENER =
+  /^(?:this is the whole point|here(?:'s| is) the (?:thing|point)|look|listen|okay|ok|so|well)\b/iu;
+
+function claimSentenceIsFragment(sentence: string): boolean {
+  const trimmed = sentence.trim();
+  if (!trimmed) return true;
+  // Mid-clause leftovers after evidence-marker strip ("is blueberries…").
+  if (/^[a-zà-öø-ÿ]/u.test(trimmed)) return true;
+  if (/^(?:is|are|was|were)\b/iu.test(trimmed)) return true;
+  return false;
+}
+
+function claimSentenceIsWeakOpener(sentence: string): boolean {
+  const trimmed = sentence.trim();
+  return (
+    CASE_BOARD_RHETORICAL_OPENER.test(trimmed) && trimmed.length < 56
+  );
+}
+
+function isConcessionOnlyClaim(summary: string): boolean {
+  const trimmed = summary.trim();
+  if (!trimmed) return true;
+  if (CASE_BOARD_CONCESSION_SENTENCE.test(trimmed)) return true;
+  // Pure health-concession slogans that never pivot back to the speaker's case.
+  if (
+    /^(?:hot dogs?|hamburgers?|burgers?)\s+carry\s+more\b/iu.test(trimmed) &&
+    /\b(?:fat|sodium|preservatives?)\b/iu.test(trimmed) &&
+    !/\b(?:but|however|still|yet|even so)\b/iu.test(trimmed)
+  ) {
+    return true;
+  }
+  return false;
+}
+
+function balanceClaimSummaryQuotes(summary: string): string {
+  let next = summary.trim();
+  const straight = (next.match(/"/gu) ?? []).length;
+  if (straight % 2 === 1) {
+    next = `${next}"`;
+  }
+  const opens = (next.match(/“/gu) ?? []).length;
+  const closes = (next.match(/”/gu) ?? []).length;
+  if (opens > closes) {
+    next = `${next}${"”".repeat(opens - closes)}`;
+  }
+  return next;
+}
+
+/** Deterministic Forum claim card text from audible advocate speech. */
+export function debateCaseBoardClaimSummary(content: string): string {
+  return claimSummary(content);
+}
+
 function claimSummary(content: string): string {
   const plain = content
     .replace(/\[\[(?:source|exhibit):[^\]]+\]\]/giu, "")
@@ -5276,16 +5332,56 @@ function claimSummary(content: string): string {
     .replace(/\s+/gu, " ")
     .trim();
   const sentences = plain.match(/[^.!?]+(?:[.!?]+|$)/gu) ?? [];
-  const survivingClaim = sentences
+  const trimmedSentences = sentences
     .map((sentence) => sentence.trim())
-    .find(
-      (sentence) =>
-        sentence &&
-        !/^(?:(?:i|we)\s+(?:concede|grant|agree|acknowledge|accept)\b|.+?\b(?:point|argument|case)\s+is\s+(?:fair|correct|right)\b)/iu.test(
-          sentence,
-        ),
-    );
-  return (survivingClaim ?? sentences[0] ?? plain).trim().slice(0, 220);
+    .filter(Boolean);
+  const survivingClaims = trimmedSentences.filter(
+    (sentence) =>
+      !CASE_BOARD_CONCESSION_SENTENCE.test(sentence) &&
+      !claimSentenceIsFragment(sentence) &&
+      !claimSentenceIsWeakOpener(sentence) &&
+      !isConcessionOnlyClaim(sentence),
+  );
+  const preferred =
+    survivingClaims.find((sentence) => sentence.length >= 28) ??
+    survivingClaims[0];
+  if (!preferred) return "";
+  return balanceClaimSummaryQuotes(preferred.trim().slice(0, 220));
+}
+
+function caseBoardNearDuplicate(left: string, right: string): boolean {
+  const a = normalizedCaseBoardQuote(left);
+  const b = normalizedCaseBoardQuote(right);
+  if (!a || !b) return false;
+  if (a === b) return true;
+  const shorter = Math.min(a.length, b.length);
+  const longer = Math.max(a.length, b.length);
+  if (
+    shorter >= 24 &&
+    longer > 0 &&
+    shorter / longer >= 0.72 &&
+    (a.includes(b) || b.includes(a))
+  ) {
+    return true;
+  }
+  const leftTokens = materialCaseBoardTokens(left);
+  const rightTokens = materialCaseBoardTokens(right);
+  if (leftTokens.size === 0 || rightTokens.size === 0) return false;
+  let intersection = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) intersection += 1;
+  }
+  const union = leftTokens.size + rightTokens.size - intersection;
+  return intersection >= 3 && union > 0 && intersection / union >= 0.62;
+}
+
+function claimSummaryIsAcceptableForBoard(summary: string): boolean {
+  const trimmed = summary.trim();
+  if (!trimmed || trimmed.length < 12) return false;
+  if (claimSentenceIsFragment(trimmed)) return false;
+  if (claimSentenceIsWeakOpener(trimmed)) return false;
+  if (isConcessionOnlyClaim(trimmed)) return false;
+  return true;
 }
 
 function turnaboutClarificationTarget(content: string): string {
@@ -5520,7 +5616,9 @@ function updateCaseBoard(
     return session.caseBoard;
   }
   const summary = claimSummary(event.content);
-  if (!summary) return session.caseBoard;
+  if (!summary || !claimSummaryIsAcceptableForBoard(summary)) {
+    return session.caseBoard;
+  }
   const now = event.createdAt;
   const otherSide: DebateSideId = event.sideId === "for" ? "against" : "for";
   const next = session.caseBoard.map((card) =>
@@ -5528,6 +5626,39 @@ function updateCaseBoard(
       ? { ...card, status: "challenged" as const, updatedAt: now }
       : card,
   );
+  const nearDuplicate = next.find(
+    (card) =>
+      card.sideId === event.sideId &&
+      caseBoardNearDuplicate(card.summary, summary),
+  );
+  if (nearDuplicate) {
+    return (["for", "against"] as const).flatMap((sideId) =>
+      next
+        .map((card) => {
+          if (card.id === nearDuplicate.id) {
+            return {
+              ...card,
+              summary:
+                summary.length > card.summary.length ? summary : card.summary,
+              sourceIds:
+                event.sourceIds.length > 0 ? event.sourceIds : card.sourceIds,
+              status: "active" as const,
+              updatedAt: now,
+            };
+          }
+          if (
+            card.sideId === event.sideId &&
+            card.status === "active" &&
+            card.id !== nearDuplicate.id
+          ) {
+            return { ...card, status: "challenged" as const, updatedAt: now };
+          }
+          return card;
+        })
+        .filter((card) => card.sideId === sideId)
+        .slice(-DEBATE_CASE_CARDS_PER_SIDE),
+    );
+  }
   next.push({
     id: randomUUID(),
     sideId: event.sideId,
@@ -5599,7 +5730,10 @@ export async function refineDebateCaseBoard(
           `Newest public statement: ${sourceEvent.content}`,
           `Current board: ${JSON.stringify(initial.caseBoard)}`,
           `The newest statement belongs to the ${sideLabel(initial, target.sideId)} side.`,
-          "Return the speaker's surviving advocated proposition, not an opponent's position, a quoted premise, or a concession preamble.",
+          "Return the speaker's surviving advocated proposition, not an opponent's position, a quoted premise, a concession preamble, or a mid-clause fragment.",
+          "Never invent a slogan that overstates packet force (for example, do not turn an off-topic study into 'Burger wins the meal').",
+          "Never rewrite a concession about the opponent's strength into the speaker's affirmative claim.",
+          "The summary must be a complete stand-alone claim sentence that could appear on the speaker's scoreboard without quoting an unfinished clause.",
           "Return a compact claim summary of at most 220 characters plus summaryQuote: one exact supporting quote copied from the newest public statement.",
           "You may update existing card states only when the public statement clearly challenges, concedes, or leaves a directly posed claim unanswered.",
           "Every status update needs evidenceQuote: one exact supporting quote copied from the newest public statement and materially related to that card.",
@@ -5615,12 +5749,26 @@ export async function refineDebateCaseBoard(
     sourceEvent.content,
     result.summaryQuote,
   );
-  if (
-    !summary ||
-    !summaryQuote ||
-    !caseBoardTextsOverlap(summary, summaryQuote)
-  ) {
-    return;
+  const deterministicSummary = claimSummary(sourceEvent.content);
+  const summaryAcceptable =
+    Boolean(summary) &&
+    Boolean(summaryQuote) &&
+    caseBoardTextsOverlap(summary, summaryQuote) &&
+    claimSummaryIsAcceptableForBoard(summary) &&
+    !isConcessionOnlyClaim(summary) &&
+    !claimSentenceIsFragment(summary) &&
+    // Prefer overlap with the deterministic claim so refine cannot invent a
+    // slogan detached from what the speaker actually advocated.
+    (caseBoardTextsOverlap(summary, deterministicSummary) ||
+      caseBoardTextsOverlap(summary, sourceEvent.content)) &&
+    !initial.caseBoard.some(
+      (card) =>
+        card.id !== target.id &&
+        card.sideId === target.sideId &&
+        caseBoardNearDuplicate(card.summary, summary),
+    );
+  if (!summaryAcceptable) {
+    // Still allow grounded status updates below when only the rewrite fails.
   }
   const validStatuses = new Set(["challenged", "conceded", "unanswered"]);
   const initialCardsById = new Map(
@@ -5656,6 +5804,9 @@ export async function refineDebateCaseBoard(
       }
     }
   }
+  if (!summaryAcceptable && statusUpdates.size === 0) {
+    return;
+  }
   db.exec("BEGIN IMMEDIATE");
   try {
     const row = sessionRow(db, userId, sessionId);
@@ -5682,10 +5833,14 @@ export async function refineDebateCaseBoard(
     const updatedAt = new Date().toISOString();
     const caseBoard = stored.caseBoard.map((card) => ({
       ...card,
-      summary: card.createdEventId === sourceEvent.id ? summary : card.summary,
+      summary:
+        card.createdEventId === sourceEvent.id && summaryAcceptable
+          ? summary
+          : card.summary,
       status: statusUpdates.get(card.id) ?? card.status,
       updatedAt:
-        card.createdEventId === sourceEvent.id || statusUpdates.has(card.id)
+        (card.createdEventId === sourceEvent.id && summaryAcceptable) ||
+        statusUpdates.has(card.id)
           ? updatedAt
           : card.updatedAt,
     }));
@@ -5880,6 +6035,96 @@ function forumRebuttalProgress(session: DebateSessionV1): {
     round: session.formatState.rebuttalRound,
     target: session.formatState.rebuttalRoundTarget,
   };
+}
+
+function priorSameSideRebuttalContents(
+  session: DebateSessionV1,
+  sideId: DebateSideId,
+): string[] {
+  const stepKey = sideId === "for" ? "rebuttal_for" : "rebuttal_against";
+  return session.events
+    .filter(
+      (event) =>
+        event.kind === "speech" &&
+        event.sideId === sideId &&
+        event.stepKey === stepKey &&
+        event.content !== BOT_POWER_CANONICAL_SILENCE_V1 &&
+        !event.interrupted,
+    )
+    .map((event) => event.content);
+}
+
+/** Detect near-verbatim multi-round rebuttal echoes (Cookout Crown F2). */
+export function debateAdvocateSpeechNearEcho(
+  left: string,
+  right: string,
+): boolean {
+  const a = debateSpokenText(left)
+    .replace(/\[\[(?:source|exhibit):[^\]]+\]\]/giu, "")
+    .replace(/\*[^*]{1,160}\*/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  const b = debateSpokenText(right)
+    .replace(/\[\[(?:source|exhibit):[^\]]+\]\]/giu, "")
+    .replace(/\*[^*]{1,160}\*/gu, "")
+    .replace(/\s+/gu, " ")
+    .trim();
+  if (!a || !b) return false;
+  if (caseBoardNearDuplicate(a, b)) return true;
+  const leftTokens = materialCaseBoardTokens(a);
+  const rightTokens = materialCaseBoardTokens(b);
+  if (leftTokens.size < 6 || rightTokens.size < 6) return false;
+  let intersection = 0;
+  for (const token of leftTokens) {
+    if (rightTokens.has(token)) intersection += 1;
+  }
+  const union = leftTokens.size + rightTokens.size - intersection;
+  return intersection >= 6 && union > 0 && intersection / union >= 0.5;
+}
+
+async function generateAdvocateSpeechAvoidingEcho(
+  session: DebateSessionV1,
+  snapshot: DebateBotSnapshotV1,
+  sideId: DebateSideId | null,
+  instruction: string,
+  runtime: DebateAiRuntime,
+): Promise<Awaited<ReturnType<typeof generateSpeech>>> {
+  let speech = await generateSpeech(session, snapshot, instruction, runtime);
+  if (
+    speech.silent ||
+    !sideId ||
+    (session.stepKey !== "rebuttal_for" &&
+      session.stepKey !== "rebuttal_against")
+  ) {
+    return speech;
+  }
+  const progress = forumRebuttalProgress(session);
+  if (progress.round <= 1) return speech;
+  const priors = priorSameSideRebuttalContents(session, sideId);
+  if (
+    !priors.some((prior) => debateAdvocateSpeechNearEcho(prior, speech.content))
+  ) {
+    return speech;
+  }
+  const retry = await generateSpeech(
+    session,
+    snapshot,
+    [
+      instruction,
+      "Your previous draft repeated an earlier rebuttal almost verbatim.",
+      "Deliver a meaningfully different advance: a new angle on the live clash, a sharper concession-and-pivot, or fresh use of public evidence.",
+      "Do not restate the same paragraph with light rewording.",
+    ].join(" "),
+    runtime,
+  );
+  if (
+    retry.silent ||
+    priors.some((prior) => debateAdvocateSpeechNearEcho(prior, retry.content))
+  ) {
+    // Keep the retry even if still similar — one regeneration is the hard cap.
+    return retry.silent ? speech : retry;
+  }
+  return retry;
 }
 
 function nextAfterRebuttal(
@@ -6515,8 +6760,14 @@ function debateUpcomingFloorGuidance(
         : beat === "rebuttal"
           ? "rebuttal"
           : "closing";
+    const forbidden =
+      beat === "opening"
+        ? 'Never say "rebuttal" or "closing".'
+        : beat === "rebuttal"
+          ? 'Never say "opening" or "closing".'
+          : 'Never say "opening" or "rebuttal".';
     return {
-      prompt: `Recognize ${name} for the scheduled ${label}. Do not award anyone else the floor.`,
+      prompt: `Recognize ${name} for the scheduled ${label}. Do not award anyone else the floor. Name only that ${label} beat. ${forbidden}`,
       fallback: `Time, ${speakerName}. ${name} now has the scheduled floor.`,
     };
   }
@@ -6524,11 +6775,23 @@ function debateUpcomingFloorGuidance(
     step.startsWith("moderator_to_") ||
     step.endsWith("_prompt") ||
     step === "challenge_judge_question" ||
-    step === "challenge_participant_prompt"
+    step === "challenge_participant_prompt" ||
+    step.startsWith("challenge_")
   ) {
+    const allowedLabel = step.includes("rebuttal")
+      ? "rebuttal"
+      : step.includes("closing")
+        ? "closing"
+        : step.includes("opening")
+          ? "opening"
+          : null;
     return {
-      prompt:
+      prompt: [
         "Call time and move to the next procedural beat. Do not award an advocate the floor yet.",
+        allowedLabel
+          ? `If you name the next stage, call it exactly "${allowedLabel}" and nothing else.`
+          : 'Do not invent a stage name such as "rebuttal", "opening", or "closing" — the next beat is still procedural (for example a challenge exchange).',
+      ].join(" "),
       fallback: `Time, ${speakerName}. The next procedural beat begins now.`,
     };
   }
@@ -6542,21 +6805,79 @@ function debateUpcomingFloorGuidance(
     if (upcoming.jury.enabled) {
       return {
         prompt:
-          "Call time; advocacy is finished and the Jury comes next. Do not say the other advocate has the floor.",
+          'Call time; advocacy is finished and the Jury comes next. Do not say the other advocate has the floor. Never say a "rebuttal window" is open or closed, and never name opening/rebuttal as next.',
         fallback: `Time, ${speakerName}. The Jury takes the case.`,
       };
     }
     return {
       prompt:
-        "Call time; advocacy is finished and the verdict path comes next. Do not say the other advocate has the floor.",
+        'Call time; advocacy is finished and the verdict path comes next. Do not say the other advocate has the floor. Never say a "rebuttal window" is open or closed.',
       fallback: `Time, ${speakerName}. The verdict path begins now.`,
     };
   }
   return {
     prompt:
-      "Call time and restore the true scheduled order without inventing an advocate floor.",
+      'Call time and restore the true scheduled order without inventing an advocate floor. Do not invent "rebuttal", "opening", or "closing" unless that beat is truly next.',
     fallback: `Time, ${speakerName}. The scheduled order resumes now.`,
   };
+}
+
+/** True when moderator copy invents the wrong stage name for the upcoming step. */
+export function debateModeratorFloorCopyViolatesUpcoming(
+  content: string,
+  upcoming: DebateSessionV1,
+): boolean {
+  const text = debateSpokenText(content).toLocaleLowerCase();
+  const step = upcoming.stepKey;
+  const mentionsRebuttal = /\brebuttals?\b/u.test(text);
+  const mentionsOpening =
+    /\bopenings?\b/u.test(text) && !/\bre-?open(?:ing|ed|s)?\b/u.test(text);
+  const mentionsClosing =
+    /\bclosings?\b/u.test(text) ||
+    /\bclosing (?:arguments?|addresses?|statements?)\b/u.test(text);
+
+  const advocateMatch = step.match(
+    /^(opening|rebuttal|closing)_(for|against)(?:_player)?$/u,
+  );
+  if (advocateMatch) {
+    const beat = advocateMatch[1]!;
+    if (beat !== "rebuttal" && mentionsRebuttal) return true;
+    if (beat !== "opening" && mentionsOpening) return true;
+    if (beat !== "closing" && mentionsClosing) return true;
+    return false;
+  }
+
+  const allowsRebuttal = step.includes("rebuttal");
+  const allowsOpening = step.includes("opening");
+  const allowsClosing = step.includes("closing");
+
+  if (
+    step.startsWith("challenge_") ||
+    step.startsWith("moderator_to_") ||
+    step.endsWith("_prompt") ||
+    step === "challenge_judge_question" ||
+    step === "challenge_participant_prompt"
+  ) {
+    if (mentionsRebuttal && !allowsRebuttal) return true;
+    if (mentionsOpening && !allowsOpening) return true;
+    if (mentionsClosing && !allowsClosing) return true;
+    return false;
+  }
+
+  if (
+    step.startsWith("jury_") ||
+    step.startsWith("ballot_") ||
+    step === "verdict_player" ||
+    step.startsWith("judge_aftermath") ||
+    step.startsWith("judge_closing") ||
+    step.startsWith("participant_aftermath") ||
+    step.startsWith("participant_closing")
+  ) {
+    if (mentionsRebuttal || mentionsOpening) return true;
+    return false;
+  }
+
+  return false;
 }
 
 async function moderatorOvertimeCorrection(
@@ -6604,6 +6925,28 @@ async function moderatorOvertimeCorrection(
       content: delivery.content,
       sourceIds: [],
       silent: delivery.silent,
+      ...(delivery.powerIntendedContent
+        ? { powerIntendedContent: delivery.powerIntendedContent }
+        : {}),
+    };
+  }
+  if (
+    !correction.silent &&
+    debateModeratorFloorCopyViolatesUpcoming(correction.content, upcoming)
+  ) {
+    const delivery = deliverModeratorProceduralSpeech(
+      session,
+      audienceOrderFallback
+        ? `${audienceOrderFallback} ${guidance.fallback}`
+        : guidance.fallback,
+    );
+    correction = {
+      content: delivery.content,
+      sourceIds: [],
+      silent: delivery.silent,
+      provider: correction.provider,
+      model: correction.model,
+      autoRecovery: correction.autoRecovery,
       ...(delivery.powerIntendedContent
         ? { powerIntendedContent: delivery.powerIntendedContent }
         : {}),
@@ -6759,7 +7102,13 @@ async function speechTransition(
   runtime: DebateAiRuntime,
   next: (session: DebateSessionV1) => DebateSessionV1,
 ): Promise<{ session: DebateSessionV1; events: DebateEventV1[] }> {
-  const speech = await generateSpeech(session, snapshot, instruction, runtime);
+  const speech = await generateAdvocateSpeechAvoidingEcho(
+    session,
+    snapshot,
+    sideId,
+    instruction,
+    runtime,
+  );
   let event = makeEvent(session, {
     kind: speech.silent ? "silence" : "speech",
     speakerKind: snapshot.role,
@@ -6940,12 +7289,59 @@ async function moderatorPhaseTransition(
   if (humanJudgeOwnsModeratorActions(session)) {
     return { session: next(session), events: [] };
   }
-  const speech = await generateSpeech(
+  const upcoming = next(session);
+  const guidance = debateUpcomingFloorGuidance(upcoming, session.moderator.name);
+  let speech = await generateSpeech(
     session,
     session.moderator,
-    instruction,
+    [
+      instruction,
+      `Upcoming stepKey is ${upcoming.stepKey}.`,
+      guidance.prompt,
+      'Never invent a stage name that contradicts that upcoming beat (especially do not say "rebuttal" unless rebuttal is next).',
+    ].join(" "),
     runtime,
   );
+  if (
+    !speech.silent &&
+    debateModeratorFloorCopyViolatesUpcoming(speech.content, upcoming)
+  ) {
+    const phaseFallback = (() => {
+      const step = upcoming.stepKey;
+      if (step.includes("rebuttal")) return "We move now into rebuttal.";
+      if (step.includes("closing")) {
+        return debateUsesInstitutionalRegister(session.formality)
+          ? "We move now into closing addresses."
+          : "We move now into closing arguments.";
+      }
+      if (step.includes("opening")) return "We move now into openings.";
+      if (
+        step.startsWith("jury_") ||
+        step.startsWith("ballot_") ||
+        step.includes("to_jury")
+      ) {
+        return upcoming.jury.enabled
+          ? "Advocacy is closed. The Jury takes the case."
+          : "Advocacy is closed. The verdict path begins now.";
+      }
+      if (step.startsWith("challenge_")) {
+        return "We continue with the challenge exchange.";
+      }
+      return "We continue with the next scheduled beat.";
+    })();
+    const delivery = deliverModeratorProceduralSpeech(session, phaseFallback);
+    speech = {
+      content: delivery.content,
+      sourceIds: [],
+      silent: delivery.silent,
+      provider: speech.provider,
+      model: speech.model,
+      autoRecovery: speech.autoRecovery,
+      ...(delivery.powerIntendedContent
+        ? { powerIntendedContent: delivery.powerIntendedContent }
+        : {}),
+    };
+  }
   const event = makeEvent(session, {
     kind: speech.silent ? "silence" : "phase",
     speakerKind: "moderator",
@@ -6960,7 +7356,7 @@ async function moderatorPhaseTransition(
     powerIntendedContent: speech.powerIntendedContent,
   });
   return {
-    session: next(session),
+    session: upcoming,
     events: [event],
   };
 }
