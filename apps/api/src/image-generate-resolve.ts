@@ -1,16 +1,22 @@
 import type { DatabaseSync } from "node:sqlite";
-import { GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE } from "@localai/shared";
+import {
+  GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
+  HUB_ATMOSPHERE_IMAGE_PURPOSE,
+} from "@localai/shared";
 
 export interface ImageGenerateModelPreferenceSource {
   preferredLocalImageModel: string | null | undefined;
   preferredOpenAiImageModel: string | null | undefined;
   preferredZenWallpaperLocalImageModel: string | null | undefined;
   preferredZenWallpaperOpenAiImageModel: string | null | undefined;
+  preferredHomeAtmosphereImageModel?: string | null | undefined;
+  preferredHomeAtmosphereImageProvider?: string | null | undefined;
 }
 
 /**
- * Group rooms intentionally share Zen's wallpaper model lane. Other Images
- * purposes, including Home Atmosphere, follow the account image lane.
+ * Group rooms intentionally share Zen's wallpaper model lane. Home/Chat
+ * atmosphere uses the dedicated home lane when both provider + model are set;
+ * otherwise it falls back to the account image lane.
  */
 export function resolveImageGenerateModelPreferences(
   purpose: string,
@@ -19,21 +25,43 @@ export function resolveImageGenerateModelPreferences(
   preferredLocalImageModel: string;
   preferredOpenAiImageModel: string;
 } {
-  const useZenWallpaperModelLane =
-    purpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE;
+  const accountLocal = source.preferredLocalImageModel?.trim() || "";
+  const accountOpenAi = source.preferredOpenAiImageModel?.trim() || "";
+
+  if (purpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE) {
+    return {
+      preferredLocalImageModel:
+        source.preferredZenWallpaperLocalImageModel?.trim() || accountLocal,
+      preferredOpenAiImageModel:
+        source.preferredZenWallpaperOpenAiImageModel?.trim() || accountOpenAi,
+    };
+  }
+
+  if (purpose === HUB_ATMOSPHERE_IMAGE_PURPOSE) {
+    const homeModel = source.preferredHomeAtmosphereImageModel?.trim() || "";
+    const homeProvider =
+      source.preferredHomeAtmosphereImageProvider?.trim() || "";
+    if (homeProvider === "local" && homeModel) {
+      return {
+        preferredLocalImageModel: homeModel,
+        preferredOpenAiImageModel: accountOpenAi,
+      };
+    }
+    if (homeProvider === "openai" && homeModel) {
+      return {
+        preferredLocalImageModel: accountLocal,
+        preferredOpenAiImageModel: homeModel,
+      };
+    }
+    return {
+      preferredLocalImageModel: accountLocal,
+      preferredOpenAiImageModel: accountOpenAi,
+    };
+  }
+
   return {
-    preferredLocalImageModel:
-      (useZenWallpaperModelLane
-        ? source.preferredZenWallpaperLocalImageModel?.trim()
-        : "") ||
-      source.preferredLocalImageModel?.trim() ||
-      "",
-    preferredOpenAiImageModel:
-      (useZenWallpaperModelLane
-        ? source.preferredZenWallpaperOpenAiImageModel?.trim()
-        : "") ||
-      source.preferredOpenAiImageModel?.trim() ||
-      "",
+    preferredLocalImageModel: accountLocal,
+    preferredOpenAiImageModel: accountOpenAi,
   };
 }
 

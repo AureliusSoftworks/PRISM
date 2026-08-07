@@ -741,6 +741,7 @@ import {
   X,
 } from "lucide-react";
 import styles from "./page.module.css";
+import { resolveAtmosphereSurface } from "./resolveAtmosphereSurface";
 import { BotcastExperience, type BotcastBotSummary } from "./BotcastExperience";
 import {
   debateAudienceBotIsGenerated,
@@ -10901,6 +10902,8 @@ interface UserSettings {
   hubAtmosphereEnabled: boolean;
   hubAtmosphereImageId: string | null;
   hubAtmosphereImageStyle: HubAtmosphereStyle | null;
+  /** UTC YYYY-MM-DD from the active Home wallpaper image row. */
+  hubAtmosphereGeneratedOn: string | null;
   startupPreference: PrismStartupPreference;
   onboardingVersion: number;
   onboardingState: PrismOnboardingState;
@@ -10993,6 +10996,10 @@ interface UserSettings {
   preferredOpenAiImageModel: string;
   preferredZenWallpaperLocalImageModel: string;
   preferredZenWallpaperOpenAiImageModel: string;
+  /** Combined Home wallpaper model id (local or online). */
+  preferredHomeAtmosphereImageModel: string;
+  /** Provider for {@link preferredHomeAtmosphereImageModel}: local | openai | "". */
+  preferredHomeAtmosphereImageProvider: "" | "local" | "openai";
   zenWallpaperOpacity: number;
   zenWallpaperTextMaskEnabled: boolean;
   zenWallpaperGrayscaleEnabled: boolean;
@@ -52398,9 +52405,13 @@ function HomeContent(): React.JSX.Element {
         return;
       }
       const atmosphereStyle = normalizeHubAtmosphereStyle(requestedStyle);
+      const todayUtc = new Date().toISOString().slice(0, 10);
       const attemptKey = [
         user.id,
         atmosphereStyle,
+        todayUtc,
+        settings.preferredHomeAtmosphereImageProvider,
+        settings.preferredHomeAtmosphereImageModel,
         settings.preferredImageProvider,
         settings.preferredLocalImageModel,
         settings.preferredOpenAiImageModel,
@@ -52432,7 +52443,7 @@ function HomeContent(): React.JSX.Element {
         const generatedImageId = generated?.image?.id?.trim();
         if (!generatedImageId) {
           throw new Error(
-            "Home Atmosphere generation did not return an image.",
+            "Prism session atmosphere generation did not return an image.",
           );
         }
         setSettings((previous) =>
@@ -52441,6 +52452,7 @@ function HomeContent(): React.JSX.Element {
                 ...previous,
                 hubAtmosphereImageId: generatedImageId,
                 hubAtmosphereImageStyle: atmosphereStyle,
+                hubAtmosphereGeneratedOn: todayUtc,
               }
             : previous,
         );
@@ -52448,7 +52460,7 @@ function HomeContent(): React.JSX.Element {
       } catch (error) {
         setHubAtmosphereGenerationState("error");
         console.warn(
-          "[prism] Home Atmosphere generation was unavailable:",
+          "[prism] Prism session atmosphere generation was unavailable:",
           error,
         );
       } finally {
@@ -52501,10 +52513,11 @@ function HomeContent(): React.JSX.Element {
             hubAtmosphereImageStyle: normalizeHubAtmosphereStyle(
               result.atmosphereStyle,
             ),
+            hubAtmosphereGeneratedOn: new Date().toISOString().slice(0, 10),
           }
         : current,
     );
-    setPanelNotice("Home Atmosphere updated from your local asset library.");
+    setPanelNotice("Prism session atmosphere updated from your local asset library.");
   }
 
   async function uploadHomeAtmosphere(file: File): Promise<void> {
@@ -52512,12 +52525,14 @@ function HomeContent(): React.JSX.Element {
       const asset = await uploadAssetLibraryImage(
         "home_atmosphere",
         file,
-        `Uploaded Home Atmosphere · ${file.name}`,
+        `Uploaded Prism session atmosphere · ${file.name}`,
       );
       await applyHomeAtmosphereAsset(asset);
     } catch (error) {
       setPanelError(
-        error instanceof Error ? error.message : "Home Atmosphere upload failed.",
+        error instanceof Error
+          ? error.message
+          : "Prism session atmosphere upload failed.",
       );
     }
   }
@@ -52719,6 +52734,19 @@ function HomeContent(): React.JSX.Element {
     user,
   ]);
 
+  const [homeAtmosphereDayKey, setHomeAtmosphereDayKey] = useState(() =>
+    new Date().toISOString().slice(0, 10),
+  );
+  useEffect(() => {
+    const timer = window.setInterval(() => {
+      const today = new Date().toISOString().slice(0, 10);
+      setHomeAtmosphereDayKey((previous) =>
+        previous === today ? previous : today,
+      );
+    }, 60_000);
+    return () => window.clearInterval(timer);
+  }, []);
+
   useEffect(() => {
     if (
       !user ||
@@ -52734,14 +52762,19 @@ function HomeContent(): React.JSX.Element {
     const atmosphereStyle = normalizeHubAtmosphereStyle(
       settings.atmosphereStyle,
     );
-    if (
-      settings.hubAtmosphereImageId &&
-      settings.hubAtmosphereImageStyle === atmosphereStyle
-    ) {
+    const hasCurrentStyleImage =
+      Boolean(settings.hubAtmosphereImageId) &&
+      settings.hubAtmosphereImageStyle === atmosphereStyle;
+    const isFreshForToday =
+      settings.hubAtmosphereGeneratedOn === homeAtmosphereDayKey;
+    if (hasCurrentStyleImage && isFreshForToday) {
       return;
     }
-    void requestHubAtmosphereGeneration(atmosphereStyle);
+    void requestHubAtmosphereGeneration(atmosphereStyle, {
+      force: hasCurrentStyleImage && !isFreshForToday,
+    });
   }, [
+    homeAtmosphereDayKey,
     hubAtmosphereGenerationState,
     onboardingState.stage,
     panel,
@@ -73518,6 +73551,15 @@ function HomeContent(): React.JSX.Element {
         typeof d.settings.preferredZenWallpaperOpenAiImageModel === "string"
           ? d.settings.preferredZenWallpaperOpenAiImageModel
           : "",
+      preferredHomeAtmosphereImageModel:
+        typeof d.settings.preferredHomeAtmosphereImageModel === "string"
+          ? d.settings.preferredHomeAtmosphereImageModel
+          : "",
+      preferredHomeAtmosphereImageProvider:
+        d.settings.preferredHomeAtmosphereImageProvider === "local" ||
+        d.settings.preferredHomeAtmosphereImageProvider === "openai"
+          ? d.settings.preferredHomeAtmosphereImageProvider
+          : "",
       ...zenModeSettings,
       lenientLocalImageFallbackModel,
       comfyUiWorkflows: Array.isArray(d.settings.comfyUiWorkflows)
@@ -73745,6 +73787,42 @@ function HomeContent(): React.JSX.Element {
         err instanceof Error
           ? err.message
           : "Could not save this image default.",
+      );
+      await refreshSettings();
+    }
+  }
+
+  async function persistHomeAtmosphereImageModel(
+    modelId: string,
+    provider: "" | "local" | "openai",
+  ): Promise<void> {
+    if (!settings) return;
+    const storedModel =
+      provider === "openai" && modelId.trim().length > 0
+        ? normalizeOnlineImageModelPreference(modelId)
+        : modelId.trim();
+    try {
+      await api("/api/settings", {
+        method: "PATCH",
+        body: JSON.stringify({
+          preferredHomeAtmosphereImageModel: storedModel,
+          preferredHomeAtmosphereImageProvider: provider || null,
+        }),
+      });
+      setSettings((prev) =>
+        prev
+          ? {
+              ...prev,
+              preferredHomeAtmosphereImageModel: storedModel,
+              preferredHomeAtmosphereImageProvider: provider,
+            }
+          : prev,
+      );
+    } catch (err) {
+      setPanelError(
+        err instanceof Error
+          ? err.message
+          : "Could not save the Home atmosphere image model.",
       );
       await refreshSettings();
     }
@@ -90479,12 +90557,11 @@ function HomeContent(): React.JSX.Element {
   ]);
 
   const commitEmptyStateBotSelection = useCallback(
-    (botId: string, sourceElement: HTMLElement | null = null) => {
+    (botId: string, _sourceElement: HTMLElement | null = null) => {
       if (view === "chat") {
-        void visitZenHome(botId, {
-          sourceElement,
-          sourceSurface: "library",
-        });
+        // Overview grid / library pick focuses that bot's Home — never resume
+        // their latest saved chat (same contract as sidebar bot chips).
+        startFreshConversation(false, { zenHomeBotId: botId });
         return;
       }
       cancelCanvasBotMarqueeGesture();
@@ -100901,27 +100978,6 @@ function HomeContent(): React.JSX.Element {
     );
   };
 
-  function renderConversationGroupNewButton(
-    group: ConversationGroupSummary,
-  ): React.JSX.Element {
-    return (
-      <button
-        type="button"
-        className={styles.conversationGroupNewButton}
-        aria-label={`New chat with ${group.name}`}
-        data-glyph-tooltip={`New chat with ${group.name}`}
-        onClick={(event) => {
-          event.stopPropagation();
-          disarmDelete();
-          setExpandedConversationGroupKey(group.key);
-          startFreshConversation(false, { zenHomeBotId: group.botId });
-        }}
-      >
-        <span aria-hidden="true">+</span>
-      </button>
-    );
-  }
-
   function renderConversationGroupDeleteButton(
     group: ConversationGroupSummary,
   ): React.JSX.Element {
@@ -101021,13 +101077,12 @@ function HomeContent(): React.JSX.Element {
                 setConversationListScrollTop(0);
               }
               setExpandedConversationGroupKey(group.key);
-              void visitZenHome(group.botId, {
-                sourceElement: event.currentTarget,
-                sourceSurface: "library",
-                destination: { kind: "resolve" },
-              });
+              // Focus the bot's Home (home atmosphere + fresh composer), the
+              // same surface All Bots selection and the former adjacent "+"
+              // opened — do not resume that bot's latest saved chat.
+              startFreshConversation(false, { zenHomeBotId: group.botId });
             }}
-            aria-label={`Continue ${group.name}'s latest chat and expand conversations`}
+            aria-label={`Focus ${group.name}'s Home and expand conversations`}
           >
             <span
               className={styles.conversationGroupChevronHitbox}
@@ -101059,7 +101114,6 @@ function HomeContent(): React.JSX.Element {
             </span>
           </button>
           <div className={styles.conversationGroupActions}>
-            {renderConversationGroupNewButton(group)}
             {isExpanded ? renderConversationGroupDeleteButton(group) : null}
           </div>
         </div>
@@ -113995,17 +114049,20 @@ function HomeContent(): React.JSX.Element {
                                   id="settings-section-info-graphics-quality"
                                   label="About graphics quality"
                                 >
-                                  Atmosphere sets the visual direction for Home
-                                  and future dynamic environments. Graphics
-                                  quality sets the maximum visual ceiling;
-                                  adaptive performance can still step down.
+                                  Atmosphere sets the visual direction for Prism
+                                  session scenes and future dynamic
+                                  environments. Graphics quality sets the
+                                  maximum visual ceiling; adaptive performance
+                                  can still step down.
                                 </PanelSectionInfo>
                               </div>
                             </header>
                             <div className={styles.settingsSubsectionHeading}>
                               <strong>Home wallpaper</strong>
                               <small>
-                                Enabled by default for your whole account.
+                                One shared scene for Chat Home. All-bots keeps
+                                full color; focusing a companion desaturates it
+                                and blends their color. Refreshes each day.
                               </small>
                             </div>
                             <div
@@ -114031,11 +114088,13 @@ function HomeContent(): React.JSX.Element {
                                   }
                                 />
                                 <span>
-                                  <strong>Home Atmosphere wallpaper</strong>
+                                  <strong>Home atmosphere</strong>
                                   <small>
-                                    Turn this off to hide the wallpaper and
-                                    pause automatic generation. Your cached
-                                    scene is kept.
+                                    One shared wallpaper for Chat Home. All-bots
+                                    shows it in full color; focusing a companion
+                                    desaturates it and washes their color over
+                                    it. Refreshes automatically each day. Your
+                                    cached scene is kept if you turn this off.
                                   </small>
                                 </span>
                               </label>
@@ -114044,7 +114103,7 @@ function HomeContent(): React.JSX.Element {
                                 className={styles.assetUploadInput}
                                 type="file"
                                 accept="image/png,image/jpeg,image/webp,image/gif,image/avif"
-                                aria-label="Upload Home Atmosphere"
+                                aria-label="Upload Prism session atmosphere"
                                 onChange={(event) => {
                                   const file = event.currentTarget.files?.[0];
                                   event.currentTarget.value = "";
@@ -114053,7 +114112,7 @@ function HomeContent(): React.JSX.Element {
                               />
                               <AssetRail
                                 kind="home_atmosphere"
-                                label="Home Atmospheres"
+                                label="Home atmospheres"
                                 context={settings.atmosphereStyle}
                                 currentImageIds={[settings.hubAtmosphereImageId]}
                                 disabled={busy}
@@ -114072,12 +114131,118 @@ function HomeContent(): React.JSX.Element {
                                 }
                                 onSelect={applyHomeAtmosphereAsset}
                               />
+                              <div className={styles.settingsModelPairRow}>
+                                <div className={styles.settingsModelPairTitle}>
+                                  <span>Home wallpaper model</span>
+                                </div>
+                                <label className={styles.settingsModelLane}>
+                                  <span
+                                    className={`${styles.settingsModelLaneLabel} ${styles.controlLabelWithInfo}`}
+                                  >
+                                    <span>Image model</span>
+                                    <PanelSectionInfo
+                                      id="home-atmosphere-model-info"
+                                      label="About Home wallpaper image model"
+                                      variant="control"
+                                    >
+                                      Local and online image models share this
+                                      list. Home wallpaper generation follows
+                                      the model you pick here, even when chat is
+                                      set to LOCAL. Choose a local model if you
+                                      want Home scenes to stay on this machine.
+                                    </PanelSectionInfo>
+                                  </span>
+                                  <ComposerModelPicker
+                                    value={
+                                      settings.preferredHomeAtmosphereImageModel.trim() ||
+                                      AUTO_MODEL_CHOICE
+                                    }
+                                    onChange={(next) => {
+                                      const trimmed = next.trim();
+                                      if (
+                                        !trimmed ||
+                                        trimmed === AUTO_MODEL_CHOICE
+                                      ) {
+                                        void persistHomeAtmosphereImageModel(
+                                          "",
+                                          "",
+                                        );
+                                        return;
+                                      }
+                                      const isLocalModel =
+                                        localImageModelCatalogEntries.some(
+                                          (entry) => entry.id === trimmed,
+                                        );
+                                      const isOnlineModel =
+                                        onlineImageModelCatalogEntries.some(
+                                          (entry) => entry.id === trimmed,
+                                        );
+                                      const provider: "" | "local" | "openai" =
+                                        isLocalModel
+                                          ? "local"
+                                          : isOnlineModel
+                                            ? "openai"
+                                            : settings.preferredHomeAtmosphereImageProvider ||
+                                              "local";
+                                      void persistHomeAtmosphereImageModel(
+                                        trimmed,
+                                        provider,
+                                      );
+                                    }}
+                                    options={uniqueModelOptions([
+                                      ...includeSelectedLocalImageModelOption(
+                                        localImageModelCatalogEntries,
+                                        settings.preferredHomeAtmosphereImageProvider ===
+                                          "local"
+                                          ? settings.preferredHomeAtmosphereImageModel
+                                          : "",
+                                      ),
+                                      ...(settings.preferredHomeAtmosphereImageModel.trim()
+                                        .length > 0 &&
+                                      settings.preferredHomeAtmosphereImageProvider ===
+                                        "openai"
+                                        ? includeSelectedModelOption(
+                                            onlineImageModelCatalogEntries,
+                                            visibleOnlineImageModelIdOrEmpty(
+                                              settings.preferredHomeAtmosphereImageModel,
+                                            ),
+                                            "openai",
+                                          )
+                                        : onlineImageModelCatalogEntries),
+                                    ])}
+                                    provider="all"
+                                    selectedProvider={
+                                      settings.preferredHomeAtmosphereImageProvider ===
+                                        "local" ||
+                                      settings.preferredHomeAtmosphereImageProvider ===
+                                        "openai"
+                                        ? settings.preferredHomeAtmosphereImageProvider
+                                        : undefined
+                                    }
+                                    loading={modelCatalogLoading}
+                                    ariaLabel="Home wallpaper image model"
+                                    formName="preferredHomeAtmosphereImageModel"
+                                    placement="down"
+                                    minMenuWidthPx={280}
+                                    showAutoOption
+                                    autoOptionLabel="Account default"
+                                    autoOptionMetaOverride="Use your general Images model settings"
+                                    dismissPopoversSignal={
+                                      composerPopoverDismissSignal
+                                    }
+                                  />
+                                </label>
+                                <small className={styles.settingsSectionHint}>
+                                  Online models may run for Home wallpapers even
+                                  while chat is LOCAL.
+                                </small>
+                              </div>
                             </div>
                             <div className={styles.settingsSubsectionHeading}>
                               <strong>Atmosphere style</strong>
                               <small>
-                                Changing this quietly prepares a new Home scene
-                                after you save.
+                                Changing this quietly prepares a new Prism
+                                session scene after you save.
                               </small>
                             </div>
                             <div
@@ -137502,22 +137667,39 @@ function HomeContent(): React.JSX.Element {
           "--bot-group-room-atmosphere-opacity": String(
             normalizeZenWallpaperOpacitySetting(settings?.zenWallpaperOpacity),
           ),
+          ...(appWidePrivateMode
+            ? { "--bot-group-room-atmosphere-grayscale": "1" }
+            : null),
         } as React.CSSProperties)
       : undefined;
     const botGroupRoomAtmosphereBlurredEdges =
       normalizeZenWallpaperBlurredEdgesSetting(
         settings?.zenWallpaperBlurredEdgesEnabled,
       );
-    const hubAtmosphereImageId =
-      !detail &&
-      !zenPersonaBot &&
-      !activeBotLibraryGroupFilter &&
+    const atmosphereFocusedBotId =
+      zenPersonaBotId ?? detail?.botId ?? null;
+    const atmospherePrismSession =
+      !atmosphereFocusedBotId && !activeBotLibraryGroupFilter;
+    const prismAtmosphereImageId =
+      settings?.hubAtmosphereEnabled &&
       settings?.hubAtmosphereImageStyle === settings?.atmosphereStyle
-        ? settings?.hubAtmosphereImageId
+        ? (settings?.hubAtmosphereImageId ?? null)
         : null;
-    const hubAtmosphereMounted = Boolean(
-      settings?.hubAtmosphereEnabled && hubAtmosphereImageId,
-    );
+    const atmosphereSurface = resolveAtmosphereSurface({
+      presentation: chatPresentation === "zen" ? "zen" : "chat",
+      prismSession: atmospherePrismSession,
+      focusedBotId: atmosphereFocusedBotId,
+      prismAtmosphereEnabled: Boolean(settings?.hubAtmosphereEnabled),
+      prismAtmosphereImageId,
+    });
+    // One shared Home wallpaper for Prism and focused bots; bot focus only
+    // changes desaturation + color wash in CSS (data-bot-home-tint).
+    const atmosphereBackdropImageId =
+      atmosphereSurface === "prism" || atmosphereSurface === "homeBot"
+        ? prismAtmosphereImageId
+        : null;
+    const hubAtmosphereMounted = Boolean(atmosphereBackdropImageId);
+    const hubAtmosphereBotHomeTint = atmosphereSurface === "homeBot";
     // Empty Home hero (with or without sidebar) already paints the startup
     // summary in the main band — never also mount the floating chip above it.
     const emptyHomeHeroMounted =
@@ -137741,15 +137923,19 @@ function HomeContent(): React.JSX.Element {
             style={messagesFrameStyle}
             onContextMenu={handleMessagesFrameContextMenu}
           >
-            {hubAtmosphereMounted && hubAtmosphereImageId ? (
+            {hubAtmosphereMounted && atmosphereBackdropImageId ? (
               <div
                 className={styles.hubAtmosphereBackdrop}
                 data-visible="true"
+                data-atmosphere-surface={atmosphereSurface}
                 data-atmosphere-style={settings?.atmosphereStyle}
+                data-bot-home-tint={
+                  hubAtmosphereBotHomeTint ? "true" : undefined
+                }
                 aria-hidden="true"
               >
                 <img
-                  src={`/api/images/${encodeURIComponent(hubAtmosphereImageId)}/file`}
+                  src={`/api/images/${encodeURIComponent(atmosphereBackdropImageId)}/file`}
                   alt=""
                   loading="eager"
                   fetchPriority="high"

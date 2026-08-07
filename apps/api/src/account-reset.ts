@@ -139,6 +139,8 @@ export function restoreFactoryDefaultsInDatabase(
           preferred_openai_image_model = NULL,
           preferred_zen_wallpaper_local_image_model = NULL,
           preferred_zen_wallpaper_openai_image_model = NULL,
+          preferred_home_atmosphere_image_model = NULL,
+          preferred_home_atmosphere_image_provider = NULL,
           zen_wallpaper_opacity = ?,
           zen_wallpaper_text_mask_enabled = ?,
           zen_wallpaper_grayscale_enabled = ?,

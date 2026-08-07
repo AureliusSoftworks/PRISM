@@ -214,6 +214,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       preferred_openai_image_model TEXT,
       preferred_zen_wallpaper_local_image_model TEXT,
       preferred_zen_wallpaper_openai_image_model TEXT,
+      preferred_home_atmosphere_image_model TEXT,
+      preferred_home_atmosphere_image_provider TEXT,
       zen_wallpaper_opacity REAL NOT NULL DEFAULT 0.28,
       zen_wallpaper_text_mask_enabled INTEGER NOT NULL DEFAULT 1,
       zen_wallpaper_grayscale_enabled INTEGER NOT NULL DEFAULT 1,
@@ -1610,6 +1612,8 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       authored_audio_voice_profile TEXT,
       audio_voice_profile_override TEXT,
       profile_picture_image_id TEXT,
+      chat_atmosphere_image_id TEXT,
+      chat_atmosphere_generated_on TEXT,
       chat_enabled INTEGER NOT NULL DEFAULT 1,
       online_enabled INTEGER NOT NULL DEFAULT 1,
       delete_protected INTEGER NOT NULL DEFAULT 0,
@@ -2860,6 +2864,22 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasPreferredZenWallpaperOpenAiImageModel) {
     db.exec(
       "ALTER TABLE users ADD COLUMN preferred_zen_wallpaper_openai_image_model TEXT;",
+    );
+  }
+  const hasPreferredHomeAtmosphereImageModel = userColumns.some(
+    (column) => column.name === "preferred_home_atmosphere_image_model",
+  );
+  if (!hasPreferredHomeAtmosphereImageModel) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN preferred_home_atmosphere_image_model TEXT;",
+    );
+  }
+  const hasPreferredHomeAtmosphereImageProvider = userColumns.some(
+    (column) => column.name === "preferred_home_atmosphere_image_provider",
+  );
+  if (!hasPreferredHomeAtmosphereImageProvider) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN preferred_home_atmosphere_image_provider TEXT;",
     );
   }
   const hasZenWallpaperOpacity = userColumns.some(
@@ -4213,6 +4233,18 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     db.exec(
       "ALTER TABLE bots ADD COLUMN powers_json TEXT NOT NULL DEFAULT '[]';",
     );
+  }
+  const hasBotChatAtmosphereImageIdColumn = botColumns.some(
+    (column) => column.name === "chat_atmosphere_image_id",
+  );
+  if (!hasBotChatAtmosphereImageIdColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN chat_atmosphere_image_id TEXT;");
+  }
+  const hasBotChatAtmosphereGeneratedOnColumn = botColumns.some(
+    (column) => column.name === "chat_atmosphere_generated_on",
+  );
+  if (!hasBotChatAtmosphereGeneratedOnColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN chat_atmosphere_generated_on TEXT;");
   }
   const prismMoodColumns = db
     .prepare("PRAGMA table_info(prism_mood_state)")

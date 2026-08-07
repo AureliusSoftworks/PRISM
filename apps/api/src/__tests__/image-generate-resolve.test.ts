@@ -22,6 +22,8 @@ describe("resolveImageGenerateModelPreferences", () => {
     preferredOpenAiImageModel: "gpt-image-1",
     preferredZenWallpaperLocalImageModel: "local-zen",
     preferredZenWallpaperOpenAiImageModel: "gpt-image-1-mini",
+    preferredHomeAtmosphereImageModel: "",
+    preferredHomeAtmosphereImageProvider: "",
   };
 
   it("keeps group-room generation on the Zen wallpaper model lane", () => {
@@ -37,7 +39,32 @@ describe("resolveImageGenerateModelPreferences", () => {
     );
   });
 
-  it("keeps Home atmosphere on the account image lane", () => {
+  it("uses the Home atmosphere lane when provider and model are set", () => {
+    assert.deepEqual(
+      resolveImageGenerateModelPreferences(HUB_ATMOSPHERE_IMAGE_PURPOSE, {
+        ...source,
+        preferredHomeAtmosphereImageModel: "home-local",
+        preferredHomeAtmosphereImageProvider: "local",
+      }),
+      {
+        preferredLocalImageModel: "home-local",
+        preferredOpenAiImageModel: "gpt-image-1",
+      },
+    );
+    assert.deepEqual(
+      resolveImageGenerateModelPreferences(HUB_ATMOSPHERE_IMAGE_PURPOSE, {
+        ...source,
+        preferredHomeAtmosphereImageModel: "gpt-image-1-mini",
+        preferredHomeAtmosphereImageProvider: "openai",
+      }),
+      {
+        preferredLocalImageModel: "local-general",
+        preferredOpenAiImageModel: "gpt-image-1-mini",
+      },
+    );
+  });
+
+  it("falls Home atmosphere back to the account image lane when unset", () => {
     assert.deepEqual(
       resolveImageGenerateModelPreferences(HUB_ATMOSPHERE_IMAGE_PURPOSE, {
         ...source,
@@ -52,6 +79,8 @@ describe("resolveImageGenerateModelPreferences", () => {
     assert.equal(
       resolveImageGenerateModelPreferences(HUB_ATMOSPHERE_IMAGE_PURPOSE, {
         ...source,
+        preferredHomeAtmosphereImageModel: "home-only-model",
+        preferredHomeAtmosphereImageProvider: "",
         preferredOpenAiImageModel: "disabled",
       }).preferredOpenAiImageModel,
       "disabled",

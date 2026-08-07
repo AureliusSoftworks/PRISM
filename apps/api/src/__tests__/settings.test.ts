@@ -81,6 +81,8 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     preferredOpenAiImageModel: null,
     preferredZenWallpaperLocalImageModel: null,
     preferredZenWallpaperOpenAiImageModel: null,
+    preferredHomeAtmosphereImageModel: null,
+    preferredHomeAtmosphereImageProvider: null,
     zenWallpaperOpacity: DEFAULT_ZEN_WALLPAPER_OPACITY,
     zenWallpaperTextMaskEnabled: DEFAULT_ZEN_WALLPAPER_TEXT_MASK_ENABLED ? 1 : 0,
     zenWallpaperGrayscaleEnabled: DEFAULT_ZEN_WALLPAPER_GRAYSCALE_ENABLED ? 1 : 0,

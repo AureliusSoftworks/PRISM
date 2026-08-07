@@ -10516,51 +10516,6 @@
   gap: 2px;
 }
 
-.conversationGroupNewButton {
-  width: 32px;
-  min-width: 32px;
-  height: 32px;
-  padding: 0;
-  border: 1px solid color-mix(in srgb, var(--line) 72%, transparent);
-  border-radius: 8px;
-  background: linear-gradient(
-    180deg,
-    color-mix(in srgb, var(--bg-elevated) 92%, transparent),
-    color-mix(in srgb, var(--bg) 96%, transparent)
-  );
-  color: var(--row-glyph-color, var(--row-color, var(--fg-muted)));
-  font: inherit;
-  font-size: 20px;
-  line-height: 1;
-  cursor: pointer;
-  opacity: 0.78;
-  transition:
-    opacity 130ms ease-out,
-    color 130ms ease-out,
-    border-color 130ms ease-out,
-    background 130ms ease-out,
-    box-shadow 130ms ease-out;
-}
-
-.conversationGroupNewButton:hover,
-.conversationGroupNewButton:focus-visible {
-  opacity: 1;
-  color: var(--row-color, var(--accent));
-  border-color: color-mix(
-    in srgb,
-    var(--row-color, var(--accent)) 60%,
-    var(--line)
-  );
-  background: color-mix(
-    in srgb,
-    var(--row-color, var(--accent)) 12%,
-    var(--bg-elevated)
-  );
-  box-shadow: 0 0 0 1px
-    color-mix(in srgb, var(--row-color, var(--accent)) 22%, transparent);
-  outline: none;
-}
-
 @media (prefers-reduced-motion: reduce) {
   .conversationGroupCollapse {
     transition: none;
@@ -15033,6 +14988,42 @@
 .hubAtmosphereBackdrop[data-atmosphere-style="minimal"]::before {
   filter: grayscale(0.78) saturate(0.38);
   opacity: 0.42;
+}
+
+/* Focused-bot Home: same shared wallpaper, desaturated + bot color wash. */
+.hubAtmosphereBackdrop[data-bot-home-tint="true"] img {
+  filter: blur(0) grayscale(1) saturate(0) contrast(0.96) brightness(0.74);
+}
+
+.themeLight .hubAtmosphereBackdrop[data-bot-home-tint="true"] img {
+  filter: blur(0) grayscale(1) saturate(0) contrast(0.9) brightness(1.12);
+}
+
+.hubAtmosphereBackdrop[data-bot-home-tint="true"]::before {
+  animation: none;
+  opacity: 0.72;
+  inset: -8%;
+  background:
+    radial-gradient(
+      ellipse 92% 74% at 50% 42%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 88%, transparent) 0%,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 54%, transparent) 58%,
+      transparent 100%
+    ),
+    linear-gradient(
+      180deg,
+      color-mix(in srgb, var(--bot-color, var(--accent)) 64%, transparent),
+      color-mix(in srgb, var(--bot-color, var(--accent)) 36%, transparent)
+    );
+  mix-blend-mode: color;
+  filter: blur(22px) saturate(1.05);
+  transform: none;
+}
+
+.themeLight .hubAtmosphereBackdrop[data-bot-home-tint="true"]::before {
+  opacity: 0.58;
+  mix-blend-mode: color;
+  filter: blur(24px) saturate(0.92);
 }
 
 .themeLight .hubAtmosphereBackdrop img {
@@ -82599,21 +82590,4 @@ a.settingsCreditItem:focus-visible {
   border-radius: 0 8px 8px 0;
   padding: 9px 8px 9px 9px;
   font-size: 11px;
-}
-
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .conversationGroupNewButton {
-  border: 0;
-  border-radius: 7px;
-  background: transparent;
-  box-shadow: none;
-}
-
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .conversationGroupNewButton:hover,
-.appLayout[data-zen-surface="true"][data-chat-sidebar-hidden="true"]
-  .conversationGroupNewButton:focus-visible {
-  border: 0;
-  background: color-mix(in srgb, var(--row-color, var(--accent)) 10%, transparent);
-  box-shadow: none;
 }

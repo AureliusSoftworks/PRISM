@@ -202,6 +202,9 @@ export interface CurrentSettings {
   preferredOpenAiImageModel: string | null;
   preferredZenWallpaperLocalImageModel: string | null;
   preferredZenWallpaperOpenAiImageModel: string | null;
+  preferredHomeAtmosphereImageModel: string | null;
+  /** `"local"` | `"openai"` when set; null/empty means unset (fall back to account image lane). */
+  preferredHomeAtmosphereImageProvider: string | null;
   zenWallpaperOpacity: number | null;
   zenWallpaperTextMaskEnabled: number | null;
   zenWallpaperGrayscaleEnabled: number | null;
@@ -273,6 +276,9 @@ export interface NextSettings {
   preferredOpenAiImageModel: string | null;
   preferredZenWallpaperLocalImageModel: string | null;
   preferredZenWallpaperOpenAiImageModel: string | null;
+  preferredHomeAtmosphereImageModel: string | null;
+  /** `"local"` | `"openai"` when set; null/empty means unset (fall back to account image lane). */
+  preferredHomeAtmosphereImageProvider: string | null;
   zenWallpaperOpacity: number;
   zenWallpaperTextMaskEnabled: boolean;
   zenWallpaperGrayscaleEnabled: boolean;
@@ -1004,6 +1010,20 @@ export function resolveNextSettings(
     body.preferredZenWallpaperOpenAiImageModel,
     current.preferredZenWallpaperOpenAiImageModel
   );
+  const preferredHomeAtmosphereImageModel = readPreferredModel(
+    body.preferredHomeAtmosphereImageModel,
+    current.preferredHomeAtmosphereImageModel
+  );
+  const preferredHomeAtmosphereImageProvider =
+    body.preferredHomeAtmosphereImageProvider === undefined
+      ? current.preferredHomeAtmosphereImageProvider
+      : body.preferredHomeAtmosphereImageProvider === null ||
+          body.preferredHomeAtmosphereImageProvider === ""
+        ? null
+        : body.preferredHomeAtmosphereImageProvider === "local" ||
+            body.preferredHomeAtmosphereImageProvider === "openai"
+          ? body.preferredHomeAtmosphereImageProvider
+          : current.preferredHomeAtmosphereImageProvider;
   const currentZenWallpaperOpacity = normalizeZenWallpaperOpacity(
     current.zenWallpaperOpacity
   );
@@ -1317,6 +1337,8 @@ export function resolveNextSettings(
     preferredOpenAiImageModel,
     preferredZenWallpaperLocalImageModel,
     preferredZenWallpaperOpenAiImageModel,
+    preferredHomeAtmosphereImageModel,
+    preferredHomeAtmosphereImageProvider,
     zenWallpaperOpacity,
     zenWallpaperTextMaskEnabled,
     zenWallpaperGrayscaleEnabled,

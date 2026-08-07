@@ -61,7 +61,9 @@ describe("restoreFactoryDefaultsInDatabase", () => {
             psychic_mode_enabled,
             comfyui_host, comfyui_workflows, preferred_local_image_model,
             preferred_openai_image_model, preferred_zen_wallpaper_local_image_model,
-            preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity,
+            preferred_zen_wallpaper_openai_image_model,
+            preferred_home_atmosphere_image_model,
+            preferred_home_atmosphere_image_provider, zen_wallpaper_opacity,
             zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled,
             zen_wallpaper_blurred_edges_enabled,
             zen_wallpaper_style_notes,
@@ -135,6 +137,8 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.preferred_openai_image_model, null);
       assert.equal(user.preferred_zen_wallpaper_local_image_model, null);
       assert.equal(user.preferred_zen_wallpaper_openai_image_model, null);
+      assert.equal(user.preferred_home_atmosphere_image_model, null);
+      assert.equal(user.preferred_home_atmosphere_image_provider, null);
       assert.equal(user.zen_wallpaper_opacity, DEFAULT_ZEN_WALLPAPER_OPACITY);
       assert.equal(
         user.zen_wallpaper_text_mask_enabled,
@@ -267,6 +271,8 @@ function seedResetFixture(db: DatabaseSync): void {
       preferred_openai_image_model = 'openai-image-a',
       preferred_zen_wallpaper_local_image_model = 'wall-local-a',
       preferred_zen_wallpaper_openai_image_model = 'wall-openai-a',
+      preferred_home_atmosphere_image_model = 'home-model-a',
+      preferred_home_atmosphere_image_provider = 'openai',
       zen_wallpaper_opacity = 0.33,
       zen_wallpaper_text_mask_enabled = 0,
       zen_wallpaper_grayscale_enabled = 1,

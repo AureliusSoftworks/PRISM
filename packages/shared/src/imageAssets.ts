@@ -148,7 +148,7 @@ export const IMAGE_ASSET_KIND_LABELS: Record<ImageAssetKind, string> = {
   slate_cover: "Slate covers",
   slate_visual_study: "Slate visual studies",
   zen_atmosphere: "Zen Atmospheres",
-  home_atmosphere: "Home Atmospheres",
+  home_atmosphere: "Chat atmospheres",
   group_room_atmosphere: "Group-room Atmospheres",
 };
 
@@ -194,6 +194,9 @@ export function imageAssetKindForImage(
     return "zen_atmosphere";
   }
   if (purpose === "hub_atmosphere" || origin === "hub_atmosphere") {
+    return "home_atmosphere";
+  }
+  if (purpose === "chat_atmosphere" || origin === "chat_atmosphere") {
     return "home_atmosphere";
   }
   if (

@@ -49,6 +49,8 @@ export const PRISM_JOURNALED_SETTING_KEYS = new Set([
   "preferredOpenAiImageModel",
   "preferredZenWallpaperLocalImageModel",
   "preferredZenWallpaperOpenAiImageModel",
+  "preferredHomeAtmosphereImageModel",
+  "preferredHomeAtmosphereImageProvider",
   "zenWallpaperOpacity",
   "zenWallpaperTextMaskEnabled",
   "zenWallpaperGrayscaleEnabled",
@@ -115,6 +117,8 @@ const PERSISTED_SETTING_COLUMNS = [
   "preferred_openai_image_model",
   "preferred_zen_wallpaper_local_image_model",
   "preferred_zen_wallpaper_openai_image_model",
+  "preferred_home_atmosphere_image_model",
+  "preferred_home_atmosphere_image_provider",
   "zen_wallpaper_opacity",
   "zen_wallpaper_text_mask_enabled",
   "zen_wallpaper_grayscale_enabled",
@@ -244,6 +248,12 @@ function currentSettings(
       nullableString(row.preferred_zen_wallpaper_local_image_model),
     preferredZenWallpaperOpenAiImageModel:
       nullableString(row.preferred_zen_wallpaper_openai_image_model),
+    preferredHomeAtmosphereImageModel: nullableString(
+      row.preferred_home_atmosphere_image_model,
+    ),
+    preferredHomeAtmosphereImageProvider: nullableString(
+      row.preferred_home_atmosphere_image_provider,
+    ),
     zenWallpaperOpacity:
       typeof row.zen_wallpaper_opacity === "number"
         ? row.zen_wallpaper_opacity
@@ -381,6 +391,10 @@ function persistedValues(
       next.preferredZenWallpaperLocalImageModel,
     preferred_zen_wallpaper_openai_image_model:
       next.preferredZenWallpaperOpenAiImageModel,
+    preferred_home_atmosphere_image_model:
+      next.preferredHomeAtmosphereImageModel,
+    preferred_home_atmosphere_image_provider:
+      next.preferredHomeAtmosphereImageProvider,
     zen_wallpaper_opacity: next.zenWallpaperOpacity,
     zen_wallpaper_text_mask_enabled:
       next.zenWallpaperTextMaskEnabled ? 1 : 0,

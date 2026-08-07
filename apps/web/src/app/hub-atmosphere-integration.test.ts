@@ -15,31 +15,40 @@ const cleanupSource = readFileSync(
   new URL("../../../api/src/image-asset-cleanup.ts", import.meta.url),
   "utf8",
 );
+const storageSource = readFileSync(
+  new URL("./StorageSettings.tsx", import.meta.url),
+  "utf8",
+);
+const surfaceRouterSource = readFileSync(
+  new URL("./resolveAtmosphereSurface.ts", import.meta.url),
+  "utf8",
+);
 
-describe("Home atmosphere integration", () => {
+describe("Chat / Prism atmosphere integration", () => {
   it("uses one account-level style catalog in setup and Appearance settings", () => {
     assert.match(pageSource, /activeStep\.id === "atmosphere"/u);
     assert.match(pageSource, /data-atmosphere-style-selector="true"/u);
     assert.equal(pageSource.match(/HUB_ATMOSPHERE_STYLES\.map/gu)?.length, 2);
     assert.match(pageSource, /Atmosphere & graphics/u);
     assert.match(pageSource, /data-home-atmosphere-settings="true"/u);
-    assert.match(pageSource, /Home Atmosphere wallpaper/u);
+    assert.match(pageSource, /Home atmosphere/u);
+    assert.match(pageSource, /Home wallpaper model/u);
+    assert.doesNotMatch(pageSource, /Home Atmosphere wallpaper/u);
+    assert.doesNotMatch(
+      pageSource,
+      /Per-bot Chat atmospheres still generate/u,
+    );
   });
 
-  it("prepares a server-owned prompt without player or bot context", () => {
+  it("prepares one shared Home wallpaper and tints it for focused bots", () => {
     assert.match(pageSource, /purpose: HUB_ATMOSPHERE_IMAGE_PURPOSE/u);
-    const requestStart = pageSource.indexOf(
-      "const requestHubAtmosphereGeneration =",
-    );
-    const requestEnd = pageSource.indexOf(
-      "async function saveAndAdvanceDesktopFirstRunStep",
-      requestStart,
-    );
-    assert.notEqual(requestStart, -1);
-    assert.notEqual(requestEnd, -1);
+    assert.match(pageSource, /resolveAtmosphereSurface/u);
+    assert.match(pageSource, /data-bot-home-tint/u);
+    assert.match(pageSource, /homeAtmosphereDayKey/u);
+    assert.match(pageSource, /hubAtmosphereGeneratedOn/u);
     assert.doesNotMatch(
-      pageSource.slice(requestStart, requestEnd),
-      /preferredProvider/u,
+      pageSource,
+      /void ensureChatAtmosphereForBot\(focusedBotId\)/u,
     );
     assert.match(
       apiSource,
@@ -47,21 +56,22 @@ describe("Home atmosphere integration", () => {
     );
     assert.match(
       apiSource,
-      /Home Atmosphere generation cannot be attributed to a bot or conversation/u,
+      /Prism session atmosphere generation cannot be attributed to a bot or conversation/u,
     );
     assert.match(
-      pageSource.slice(requestStart, requestEnd),
-      /if \(!generatedImageId\)/u,
+      apiSource,
+      /hubAtmosphereGeneratedOn: hubAtmosphereCache\.generatedOn/u,
     );
+    assert.match(surfaceRouterSource, /zenConversation/u);
+    assert.match(surfaceRouterSource, /homeBot/u);
+    assert.doesNotMatch(surfaceRouterSource, /chatBot/u);
   });
 
-  it("shows a cached Home image automatically with a reduced-motion fallback", () => {
+  it("mounts Prism or Chat atmosphere via the surface router", () => {
     assert.match(pageSource, /loading="eager"/u);
     assert.match(pageSource, /fetchPriority="high"/u);
-    assert.match(
-      pageSource,
-      /settings\?\.hubAtmosphereEnabled && hubAtmosphereImageId/u,
-    );
+    assert.match(pageSource, /data-atmosphere-surface=\{atmosphereSurface\}/u);
+    assert.match(pageSource, /atmosphereBackdropImageId/u);
     assert.match(pageSource, /data-visible="true"/u);
     assert.match(cssSource, /@keyframes hubAtmospherePrismReveal/u);
     assert.match(
@@ -95,7 +105,7 @@ describe("Home atmosphere integration", () => {
       pageSource,
       /Enable Atmosphere for this conversation/u,
     );
-    assert.match(pageSource, /Generate Atmosphere now/u);
+    assert.match(pageSource, /label="Zen Atmospheres"/u);
     assert.match(
       pageSource,
       /data-tutorial-target=\{\s*view === "chat" \? "zen-atmosphere" : undefined\s*\}/u,
@@ -106,10 +116,28 @@ describe("Home atmosphere integration", () => {
     );
   });
 
-  it("protects the selected Home image from generated-image cleanup", () => {
+  it("protects active Prism session and Chat atmosphere pointers from cleanup", () => {
     assert.match(
       cleanupSource,
-      /addExactReference\(row\.hub_atmosphere_image_id, "Current Home atmosphere"\)/u,
+      /addExactReference\(row\.hub_atmosphere_image_id, "Current Prism session atmosphere"\)/u,
     );
+    assert.match(
+      cleanupSource,
+      /Current Chat atmosphere/u,
+    );
+  });
+
+  it("groups Home atmospheres under the Chat Space Lens applet", () => {
+    assert.match(storageSource, /id: "chat"/u);
+    assert.match(storageSource, /label: "Home atmospheres"/u);
+    assert.match(storageSource, /kinds: \["home_atmosphere"\]/u);
+    assert.doesNotMatch(storageSource, /id: "home"/u);
+    assert.match(storageSource, /id: "general"/u);
+    assert.match(storageSource, /label: "General"/u);
+    assert.match(storageSource, /id: "audio"/u);
+    assert.match(storageSource, /label: "Audio"/u);
+    assert.match(storageSource, /label: "Sound Effects"/u);
+    assert.match(storageSource, /label: "Music"/u);
+    assert.match(storageSource, /AudioLibraryModal/u);
   });
 });

@@ -144,6 +144,7 @@ const SYSTEM_MANAGED_IMAGE_ORIGINS = new Set([
   "botcast",
   "coffee_bar",
   "hub_atmosphere",
+  "chat_atmosphere",
   "slate_cover",
   "debate",
   "zen_wallpaper",
@@ -262,7 +263,10 @@ function modeLabelForImage(row: ImageAssetRow): string {
   const purpose = row.purpose?.trim().toLowerCase() ?? "";
   if (origin === "botcast") return "Signal";
   if (origin === "hub_atmosphere" || purpose === "hub_atmosphere") {
-    return "Home";
+    return "Prism";
+  }
+  if (origin === "chat_atmosphere" || purpose === "chat_atmosphere") {
+    return "Chat";
   }
   if (origin === "zen_wallpaper" || purpose === "wallpaper") return "Zen";
   if (origin === "bot_profile_picture" || purpose === "bot_profile_picture") {
@@ -355,14 +359,19 @@ function buildImageAssetCleanupGraph(
     id: string;
     name: string;
     profile_picture_image_id: string | null;
+    chat_atmosphere_image_id: string | null;
   }>(
     db,
-    "SELECT id, name, profile_picture_image_id FROM bots WHERE user_id = ?",
+    "SELECT id, name, profile_picture_image_id, chat_atmosphere_image_id FROM bots WHERE user_id = ?",
     userId,
   )) {
     addExactReference(
       row.profile_picture_image_id,
       usageLabel("Bot profile picture", row.name, row.id),
+    );
+    addExactReference(
+      row.chat_atmosphere_image_id,
+      usageLabel("Current Chat atmosphere", row.name, row.id),
     );
   }
   for (const row of readRows<{ hub_atmosphere_image_id: string | null }>(
@@ -370,7 +379,7 @@ function buildImageAssetCleanupGraph(
     "SELECT hub_atmosphere_image_id FROM users WHERE id = ?",
     userId,
   )) {
-    addExactReference(row.hub_atmosphere_image_id, "Current Home atmosphere");
+    addExactReference(row.hub_atmosphere_image_id, "Current Prism session atmosphere");
   }
   for (const row of readRows<{
     id: string;

@@ -165,7 +165,22 @@ describe("relationship-depth page integration", () => {
     }
   });
 
-  it("resumes the latest verified Home from its group while keeping older conversations selectable", () => {
+  it("opens bot Home from the overview grid instead of resuming the latest chat", () => {
+    const commitSelection = sourceSlice(
+      "const commitEmptyStateBotSelection = useCallback(",
+      "useEffect(() => {\n    if (view !== \"chat\") return;\n    const botId = pendingImportedChatBotSelectionRef.current;",
+    );
+    assert.match(
+      commitSelection,
+      /startFreshConversation\(false, \{ zenHomeBotId: botId \}\)/,
+    );
+    assert.doesNotMatch(
+      commitSelection,
+      /visitZenHome\(botId, \{[\s\S]{0,120}sourceSurface: "library"/,
+    );
+  });
+
+  it("focuses a bot Home from its group chip while keeping older conversations selectable", () => {
     const sidebarRows = sourceSlice(
       "const renderConversationRow =",
       "function renderConversationGroupDeleteButton",
@@ -181,20 +196,21 @@ describe("relationship-depth page integration", () => {
     );
     assert.doesNotMatch(sidebarRows, /data-history-timeline-entry/);
     assert.doesNotMatch(sidebarRows, /conversationTimelineEntry/);
+    assert.doesNotMatch(sidebarRows, /conversationGroupNewButton/);
     assert.match(
-      sidebarRows,
+      categoryTile,
       /startFreshConversation\(false, \{ zenHomeBotId: group\.botId \}\)/,
     );
-    assert.match(
+    assert.doesNotMatch(
       categoryTile,
-      /visitZenHome\(group\.botId, \{[\s\S]{0,240}sourceSurface: "library"[\s\S]{0,120}destination: \{ kind: "resolve" \}/,
+      /visitZenHome\(group\.botId, \{[\s\S]{0,240}destination: \{ kind: "resolve" \}/,
     );
     assert.match(
       categoryTile,
-      /aria-label=\{`Continue \$\{group\.name\}'s latest chat and expand conversations`\}/,
+      /aria-label=\{`Focus \$\{group\.name\}'s Home and expand conversations`\}/,
     );
     assert.doesNotMatch(categoryTile, /performShowAllBotsView\(group\.botId/);
-    assert.match(cssSource, /\.conversationGroupNewButton\s*\{/);
+    assert.doesNotMatch(cssSource, /\.conversationGroupNewButton\s*\{/);
     assert.doesNotMatch(cssSource, /\.conversationTimelineEntry\s*\{/);
   });
 

@@ -972,6 +972,14 @@ export {
   normalizeHubAtmosphereStyle,
   type HubAtmosphereStyle,
 } from "./hubAtmosphere.js";
+export {
+  CHAT_ATMOSPHERE_IMAGE_PURPOSE,
+  CHAT_ATMOSPHERE_RETENTION_DAYS,
+  chatAtmosphereRetentionCutoffIso,
+  chatAtmosphereUtcDate,
+  composeChatAtmospherePrompt,
+  type ChatAtmospherePromptArgs,
+} from "./chatAtmosphere.js";
 
 export {
   OPENAI_IMAGE_MODEL_IDS,

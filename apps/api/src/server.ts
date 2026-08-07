@@ -122,6 +122,11 @@ import {
   waitForImageSlot,
 } from "./image-job-slot.ts";
 import {
+  evaluateChatAtmosphereEnsure,
+  promoteChatAtmosphereImage,
+  readChatAtmosphereBot,
+} from "./chat-atmosphere.ts";
+import {
   SignalArtworkJobManager,
   normalizeSignalArtworkAssetKinds,
   type SignalArtworkGenerationKind,
@@ -805,7 +810,10 @@ import {
   PRISM_ACTION_UNDO_RETENTION_MS,
   PRISM_ORCHESTRATION_VERSION,
   HUB_ATMOSPHERE_IMAGE_PURPOSE,
+  CHAT_ATMOSPHERE_IMAGE_PURPOSE,
   composeHubAtmospherePrompt,
+  composeChatAtmospherePrompt,
+  chatAtmosphereUtcDate,
   GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
   PRISM_EULA_ACCEPTANCE_SNAPSHOT,
   PRISM_EULA_CONTENT_SHA256,
@@ -2518,6 +2526,8 @@ interface UserDbRow {
   preferred_openai_image_model: string | null;
   preferred_zen_wallpaper_local_image_model: string | null;
   preferred_zen_wallpaper_openai_image_model: string | null;
+  preferred_home_atmosphere_image_model: string | null;
+  preferred_home_atmosphere_image_provider: string | null;
   zen_wallpaper_opacity: number | null;
   zen_wallpaper_text_mask_enabled: number | null;
   zen_wallpaper_grayscale_enabled: number | null;
@@ -2929,7 +2939,7 @@ function userBlocksOnlineCapabilities(
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -7002,23 +7012,28 @@ function promoteHubAtmosphereImage(
 function readableHubAtmosphereCache(user: UserDbRow): {
   imageId: string | null;
   imageStyle: string | null;
+  generatedOn: string | null;
 } {
   const imageId = user.hub_atmosphere_image_id?.trim() || null;
-  if (!imageId) return { imageId: null, imageStyle: null };
+  if (!imageId) {
+    return { imageId: null, imageStyle: null, generatedOn: null };
+  }
   const image = db
     .prepare(
-      "SELECT id FROM images WHERE id = ? AND user_id = ? AND purpose = ?",
+      "SELECT id, created_at FROM images WHERE id = ? AND user_id = ? AND purpose = ?",
     )
     .get(imageId, user.id, HUB_ATMOSPHERE_IMAGE_PURPOSE) as
-    { id: string } | undefined;
-  return image
-    ? {
-        imageId,
-        imageStyle: normalizeHubAtmosphereStyle(
-          user.hub_atmosphere_image_style,
-        ),
-      }
-    : { imageId: null, imageStyle: null };
+    | { id: string; created_at: string }
+    | undefined;
+  if (!image) {
+    return { imageId: null, imageStyle: null, generatedOn: null };
+  }
+  const createdAt = image.created_at?.trim() || "";
+  return {
+    imageId,
+    imageStyle: normalizeHubAtmosphereStyle(user.hub_atmosphere_image_style),
+    generatedOn: createdAt.length >= 10 ? createdAt.slice(0, 10) : null,
+  };
 }
 
 /** Persists a ComfyUI or Ollama image and returns the standard JSON success body. */
@@ -7103,13 +7118,24 @@ async function finalizeComfyOrOllamaGeneratedImageResponse(
         args.hubAtmosphereStyle,
       );
     }
+    if (
+      args.purpose === CHAT_ATMOSPHERE_IMAGE_PURPOSE &&
+      args.persistence.persistedBotId
+    ) {
+      promoteChatAtmosphereImage(db, {
+        userId: args.userId,
+        botId: args.persistence.persistedBotId,
+        imageId: args.imageId,
+      });
+    }
     recordImageUsage({
       provider: args.provider,
       model: args.modelUsed,
       purpose:
         args.purpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE
           ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
-          : args.purpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
+          : args.purpose === HUB_ATMOSPHERE_IMAGE_PURPOSE ||
+              args.purpose === CHAT_ATMOSPHERE_IMAGE_PURPOSE
             ? "image_generation"
             : args.purpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
               ? GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
@@ -12106,6 +12132,25 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         bin,
         clips: listAudioLibraryClips(db, userId, bin),
+      });
+    }),
+    route("POST", "/api/bots/:id/chat-atmosphere/ensure", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const botId = ctx.params.id?.trim();
+      if (!botId) {
+        throw new HttpError(400, "Bot id is required.");
+      }
+      if (!botBelongsToUser(db, userId, botId)) {
+        throw new HttpError(404, "Bot not found.");
+      }
+      const result = evaluateChatAtmosphereEnsure(db, { userId, botId });
+      json(ctx.res, 200, {
+        ok: true,
+        botId,
+        chatAtmosphereImageId: result.imageId,
+        chatAtmosphereGeneratedOn: result.generatedOn,
+        needsGeneration: result.needsGeneration,
+        wiped: result.wipedCount,
       });
     }),
     route("GET", "/api/bots/:id/memory-panel", async (ctx) => {
@@ -23134,6 +23179,7 @@ function buildRoutes(): RouteDefinition[] {
           hubAtmosphereEnabled: user.hub_atmosphere_enabled !== 0,
           hubAtmosphereImageId: hubAtmosphereCache.imageId,
           hubAtmosphereImageStyle: hubAtmosphereCache.imageStyle,
+          hubAtmosphereGeneratedOn: hubAtmosphereCache.generatedOn,
           startupPreference: normalizePrismStartupPreference(
             user.startup_preference,
           ),
@@ -23237,6 +23283,10 @@ function buildRoutes(): RouteDefinition[] {
             user.preferred_zen_wallpaper_local_image_model ?? "",
           preferredZenWallpaperOpenAiImageModel:
             user.preferred_zen_wallpaper_openai_image_model ?? "",
+          preferredHomeAtmosphereImageModel:
+            user.preferred_home_atmosphere_image_model ?? "",
+          preferredHomeAtmosphereImageProvider:
+            user.preferred_home_atmosphere_image_provider ?? "",
           zenWallpaperOpacity: normalizeZenWallpaperOpacity(
             user.zen_wallpaper_opacity,
           ),
@@ -23788,6 +23838,10 @@ function buildRoutes(): RouteDefinition[] {
           user.preferred_zen_wallpaper_local_image_model,
         preferredZenWallpaperOpenAiImageModel:
           user.preferred_zen_wallpaper_openai_image_model,
+        preferredHomeAtmosphereImageModel:
+          user.preferred_home_atmosphere_image_model,
+        preferredHomeAtmosphereImageProvider:
+          user.preferred_home_atmosphere_image_provider,
         zenWallpaperOpacity: user.zen_wallpaper_opacity,
         zenWallpaperTextMaskEnabled: user.zen_wallpaper_text_mask_enabled,
         zenWallpaperGrayscaleEnabled: user.zen_wallpaper_grayscale_enabled,
@@ -23896,7 +23950,7 @@ function buildRoutes(): RouteDefinition[] {
         UPDATE users
         SET display_name = ?, theme = ?, graphics_quality = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
-            preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
+            preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, preferred_home_atmosphere_image_model = ?, preferred_home_atmosphere_image_provider = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
             comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
             voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, operating_system_voices_enabled = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, zen_player_voice_enabled = ?, player_audio_voice_profile = ?,
@@ -23939,6 +23993,8 @@ function buildRoutes(): RouteDefinition[] {
         next.preferredOpenAiImageModel,
         next.preferredZenWallpaperLocalImageModel,
         next.preferredZenWallpaperOpenAiImageModel,
+        next.preferredHomeAtmosphereImageModel,
+        next.preferredHomeAtmosphereImageProvider,
         next.zenWallpaperOpacity,
         next.zenWallpaperTextMaskEnabled ? 1 : 0,
         next.zenWallpaperGrayscaleEnabled ? 1 : 0,
@@ -24186,12 +24242,15 @@ function buildRoutes(): RouteDefinition[] {
             ? BOT_PROFILE_PICTURE_IMAGE_PURPOSE
             : rawImagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
               ? HUB_ATMOSPHERE_IMAGE_PURPOSE
-              : rawImagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
-                ? GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
-                : "gallery";
+              : rawImagePurpose === CHAT_ATMOSPHERE_IMAGE_PURPOSE
+                ? CHAT_ATMOSPHERE_IMAGE_PURPOSE
+                : rawImagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+                  ? GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE
+                  : "gallery";
         let prompt =
           imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE ||
-          imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
+          imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE ||
+          imagePurpose === CHAT_ATMOSPHERE_IMAGE_PURPOSE
             ? typeof body.prompt === "string"
               ? body.prompt.trim()
               : ""
@@ -24202,7 +24261,8 @@ function buildRoutes(): RouteDefinition[] {
             : IMAGE_GENERATION_DEFAULT_SIZE;
         const size =
           imagePurpose === GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE ||
-          imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
+          imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE ||
+          imagePurpose === CHAT_ATMOSPHERE_IMAGE_PURPOSE
             ? ZEN_WALLPAPER_SIZE
             : IMAGE_GENERATION_ALLOWED_SIZES.has(requestedSize)
               ? requestedSize
@@ -24239,7 +24299,18 @@ function buildRoutes(): RouteDefinition[] {
           (bodyBotId || conversationIdRaw)
         ) {
           throw new Error(
-            "Home Atmosphere generation cannot be attributed to a bot or conversation.",
+            "Prism session atmosphere generation cannot be attributed to a bot or conversation.",
+          );
+        }
+        if (imagePurpose === CHAT_ATMOSPHERE_IMAGE_PURPOSE && !bodyBotId) {
+          throw new Error("Chat atmosphere generation requires a bot.");
+        }
+        if (
+          imagePurpose === CHAT_ATMOSPHERE_IMAGE_PURPOSE &&
+          conversationIdRaw
+        ) {
+          throw new Error(
+            "Chat atmosphere generation cannot be attributed to a conversation.",
           );
         }
         const groupRoomWallpaperContext =
@@ -24255,6 +24326,17 @@ function buildRoutes(): RouteDefinition[] {
         );
         if (imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE) {
           prompt = composeHubAtmospherePrompt(hubAtmosphereStyle, randomId());
+        }
+        if (imagePurpose === CHAT_ATMOSPHERE_IMAGE_PURPOSE && bodyBotId) {
+          const chatBot = readChatAtmosphereBot(db, userId, bodyBotId);
+          if (!chatBot) {
+            throw new Error("Bot not found.");
+          }
+          prompt = composeChatAtmospherePrompt({
+            botName: chatBot.name,
+            botSystemPrompt: chatBot.system_prompt,
+            variationSeed: chatAtmosphereUtcDate(),
+          });
         }
         const requestedProvider =
           body.preferredProvider === "openai" ||
@@ -24352,14 +24434,35 @@ function buildRoutes(): RouteDefinition[] {
           : persistence.personaBotId
             ? [persistence.personaBotId]
             : [];
+        const homeAtmosphereImageModel =
+          user.preferred_home_atmosphere_image_model?.trim() ?? "";
+        const homeAtmosphereImageProvider =
+          user.preferred_home_atmosphere_image_provider === "local" ||
+          user.preferred_home_atmosphere_image_provider === "openai"
+            ? user.preferred_home_atmosphere_image_provider
+            : "";
+        const hubHomeAtmosphereLaneActive =
+          imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE &&
+          Boolean(homeAtmosphereImageProvider) &&
+          Boolean(homeAtmosphereImageModel) &&
+          !isDisabledModelChoice(homeAtmosphereImageModel);
+        // Home atmosphere follows its own model/provider lane and must not be
+        // forced offline merely because chat preferred_provider is LOCAL.
         const effectiveProvider = resolveImageProviderName({
-          savedProvider: user.preferred_image_provider,
-          requestedProvider,
-          offlineOnly: imageContextIncludesOfflineOnlyBot(
-            db,
-            userId,
-            imageContextBotIds,
-          ),
+          savedProvider: hubHomeAtmosphereLaneActive
+            ? homeAtmosphereImageProvider
+            : user.preferred_image_provider,
+          requestedProvider: hubHomeAtmosphereLaneActive
+            ? homeAtmosphereImageProvider
+            : requestedProvider,
+          offlineOnly:
+            imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
+              ? false
+              : imageContextIncludesOfflineOnlyBot(
+                  db,
+                  userId,
+                  imageContextBotIds,
+                ),
         });
         if (
           imagePurpose === BOT_PROFILE_PICTURE_IMAGE_PURPOSE &&
@@ -24467,6 +24570,10 @@ function buildRoutes(): RouteDefinition[] {
               user.preferred_zen_wallpaper_local_image_model,
             preferredZenWallpaperOpenAiImageModel:
               user.preferred_zen_wallpaper_openai_image_model,
+            preferredHomeAtmosphereImageModel:
+              user.preferred_home_atmosphere_image_model,
+            preferredHomeAtmosphereImageProvider:
+              user.preferred_home_atmosphere_image_provider,
           });
         const localImageDisabled =
           (effectiveProvider === "local" && bodyModelDisabled) ||
@@ -24783,12 +24890,20 @@ function buildRoutes(): RouteDefinition[] {
           if (imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE) {
             promoteHubAtmosphereImage(userId, imageId, hubAtmosphereStyle);
           }
+          if (imagePurpose === CHAT_ATMOSPHERE_IMAGE_PURPOSE && bodyBotId) {
+            promoteChatAtmosphereImage(db, {
+              userId,
+              botId: bodyBotId,
+              imageId,
+            });
+          }
           recordImageUsage({
             provider: "openai",
             model: result.model,
             purpose:
               imagePurpose === "gallery" ||
-              imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE
+              imagePurpose === HUB_ATMOSPHERE_IMAGE_PURPOSE ||
+              imagePurpose === CHAT_ATMOSPHERE_IMAGE_PURPOSE
                 ? "image_generation"
                 : imagePurpose,
             imageCount: 1,
@@ -25095,14 +25210,28 @@ function buildRoutes(): RouteDefinition[] {
       if (!asset) {
         throw new Error("The uploaded image could not be registered in the local asset library.");
       }
-      json(ctx.res, 201, { ok: true, imageId, asset });
+      try {
+        const { generateSmartAutomaticTags, applyAutomaticTagsToSet } =
+          await import("./image-asset-smart-memory.ts");
+        const tags = await generateSmartAutomaticTags({
+          kind: asset.kind,
+          title: typeof body.title === "string" ? body.title : asset.title,
+          prompt: title,
+          extra: asset.automaticTags,
+        });
+        applyAutomaticTagsToSet(db, userId, asset.id, tags);
+      } catch {
+        // Heuristic tags from catalog sync remain.
+      }
+      const refreshed = getImageAssetSet(db, userId, asset.id) ?? asset;
+      json(ctx.res, 201, { ok: true, imageId, asset: refreshed });
     }),
     route("POST", "/api/home/atmosphere/assets/:id/reuse", async (ctx) => {
       const userId = requireAuth(ctx);
       const asset = getImageAssetSet(db, userId, ctx.params.id);
       const member = asset?.members.find((candidate) => candidate.role === "primary");
       if (!asset || asset.kind !== "home_atmosphere" || asset.status !== "ready" || !member) {
-        throw new HttpError(400, "Choose a ready Home Atmosphere asset.");
+        throw new HttpError(400, "Choose a ready Prism session atmosphere asset.");
       }
       const body = ctx.body as Record<string, unknown>;
       const user = getUserRow(userId);
