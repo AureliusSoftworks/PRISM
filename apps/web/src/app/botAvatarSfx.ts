@@ -11,6 +11,10 @@ import {
   prismAudioContext,
   prismAudioOutputNode,
 } from "./replayAudioMasterCapture.ts";
+import {
+  isPrismFullscreenBlockingAudioMuted,
+  setPrismFullscreenBlockingAudioStopHandler,
+} from "./prismFullscreenBlockingAudio.ts";
 
 export const GENERATED_BOT_THINKING_SFX_PROMPT = "Computer calculating";
 export const PRISM_BOT_THINKING_SFX_FALLBACK_URLS = [
@@ -114,6 +118,16 @@ const botAvatarSfxSampleRuntimes = new WeakMap<
   HTMLMediaElement,
   BotAvatarSfxSampleRuntime
 >();
+/** Strong refs so fullscreen loaders can silence every active avatar loop. */
+const botAvatarSfxActiveMedia = new Set<HTMLMediaElement>();
+
+function trackBotAvatarSfxMedia(audio: HTMLMediaElement): void {
+  botAvatarSfxActiveMedia.add(audio);
+}
+
+function untrackBotAvatarSfxMedia(audio: HTMLMediaElement): void {
+  botAvatarSfxActiveMedia.delete(audio);
+}
 
 function clampBotAvatarSfxGain(value: number): number {
   return Math.max(0, Math.min(1, Number.isFinite(value) ? value : 0));
@@ -750,6 +764,7 @@ function syncBrowserBotAvatarSfxAudio(
   state: BotAvatarSfxState,
   loadedSource: string | null,
 ): string | null {
+  trackBotAvatarSfxMedia(audio);
   const shouldPlay = botAvatarSfxShouldPlay(sfx, state);
   const existingEngine = botAvatarSfxSpatialEngines.get(audio);
   if (!shouldPlay || !sfx) {
@@ -846,6 +861,7 @@ export function botAvatarSfxShouldPlay(
   sfx: BotAvatarSfxPlayback | null | undefined,
   state: BotAvatarSfxState,
 ): boolean {
+  if (isPrismFullscreenBlockingAudioMuted()) return false;
   if (!sfx?.audioDataUrl || sfx.volume <= 0) return false;
   if (state === "talking") return sfx.playWhileTalking;
   if (state === "thinking") return sfx.playWhileThinking;
@@ -885,6 +901,7 @@ export function stopBotAvatarSfxAudio(
   audio: BotAvatarSfxAudioTarget,
 ): void {
   if (isBrowserMediaElement(audio)) {
+    untrackBotAvatarSfxMedia(audio);
     const engine = botAvatarSfxSpatialEngines.get(audio);
     if (engine) {
       engine.desiredPlaying = false;
@@ -896,6 +913,15 @@ export function stopBotAvatarSfxAudio(
   audio.pause();
   audio.currentTime = 0;
 }
+
+/** Silence every tracked avatar SFX loop (fullscreen bake / invent loaders). */
+export function stopAllBotAvatarSfxAudio(): void {
+  for (const audio of [...botAvatarSfxActiveMedia]) {
+    stopBotAvatarSfxAudio(audio);
+  }
+}
+
+setPrismFullscreenBlockingAudioStopHandler(stopAllBotAvatarSfxAudio);
 
 function botAvatarSfxSampleRuntimeFor(
   audio: HTMLMediaElement,

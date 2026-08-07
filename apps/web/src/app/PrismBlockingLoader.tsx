@@ -13,6 +13,7 @@ import { PrismOrb } from "./PrismOrb";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import styles from "./prism-blocking-loader.module.css";
 import { formatBlockingLoaderElapsed } from "./prismBlockingLoaderFormat";
+import { beginPrismFullscreenBlockingAudioMute } from "./prismFullscreenBlockingAudio.ts";
 
 export { formatBlockingLoaderElapsed } from "./prismBlockingLoaderFormat";
 
@@ -125,6 +126,12 @@ export function PrismBlockingLoader({
     const timer = window.setInterval(() => setNowMs(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [open, startedAt]);
+
+  // Fullscreen hard waits mute avatar thinking / SFX under the overlay.
+  useEffect(() => {
+    if (!open || docked) return;
+    return beginPrismFullscreenBlockingAudioMute();
+  }, [docked, open]);
 
   useEffect(() => {
     if (!confirming) return;

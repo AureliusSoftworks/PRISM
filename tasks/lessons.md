@@ -1,3 +1,8 @@
+### 2026-08-07 · [UX]
+**Trigger**: Thinking / avatar SFX kept playing under Signal bake and other fullscreen loaders.
+**Lesson**: Fullscreen hard waits (`PrismBlockingLoader` fullscreen + `ModelWarmupIntermission`) must mute avatar SFX via `beginPrismFullscreenBlockingAudioMute`. Docked soft synthesis stays audible. Do not leave computer-calculating loops under an opaque bake/invent overlay.
+**Applies to**: `prismFullscreenBlockingAudio.ts`, `botAvatarSfx.ts`, `PrismBlockingLoader.tsx`, `ModelWarmupIntermission.tsx`
+
 ### 2026-08-06 · design
 **Trigger**: Steam prep — marketplace bots shipped with packaged second-person lore as "memories."
 **Lesson**: Marketplace `.bot` packs must ship with empty memories (`memoryCount` 0, no `memories.json`). Persona/identity lives in `bot.json`; memories are earned via player and bot interaction. Use `scripts/strip-marketplace-bot-memories.mjs`; Steam staging refuses `memoryCount !== 0`.

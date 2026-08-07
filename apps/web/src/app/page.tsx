@@ -1252,6 +1252,7 @@ import {
   type BotAvatarSfxPlayback,
   type BotAvatarSfxState,
 } from "./botAvatarSfx";
+import { usePrismFullscreenBlockingAudioMuted } from "./prismFullscreenBlockingAudio";
 import {
   buildDeadAirAsidePlanV1,
   coffeeDeadAirAsideShouldAttempt,
@@ -30726,6 +30727,7 @@ function ZenLiveBotMannequin({
 }: ZenLiveBotMannequinProps): React.JSX.Element {
   const avatarSfxAudioRef = useRef<HTMLAudioElement | null>(null);
   const avatarSfxLoadedSourceRef = useRef<string | null>(null);
+  const fullscreenBlockingAudioMuted = usePrismFullscreenBlockingAudioMuted();
   const effectiveAvatarSfxState =
     avatarSfxState ??
     (isTalking ? "talking" : showThinkingSpinner ? "thinking" : "idle");
@@ -30758,6 +30760,7 @@ function ZenLiveBotMannequin({
     avatarSfxPlayWhileThinking,
     avatarSfxVolume,
     effectiveAvatarSfxState,
+    fullscreenBlockingAudioMuted,
   ]);
   useEffect(() => {
     const audio = avatarSfxAudioRef.current;

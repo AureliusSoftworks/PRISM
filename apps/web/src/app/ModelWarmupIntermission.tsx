@@ -9,6 +9,7 @@ import type {
 import { modelPreparationFailureMessage } from "./modelPreparation";
 import { PrismOrb } from "./PrismOrb";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
+import { beginPrismFullscreenBlockingAudioMute } from "./prismFullscreenBlockingAudio.ts";
 import styles from "./model-warmup-intermission.module.css";
 
 export type ModelWarmupIntermissionPhase =
@@ -87,6 +88,10 @@ export function ModelWarmupIntermission(props: {
     const timer = window.setInterval(() => setNowMs(Date.now()), 1_000);
     return () => window.clearInterval(timer);
   }, [props.phase, props.startedAt]);
+  useEffect(() => {
+    if (props.phase === "releasing") return;
+    return beginPrismFullscreenBlockingAudioMute();
+  }, [props.phase]);
 
   const failed = props.phase === "failed";
   const context = props.context ?? "session";
