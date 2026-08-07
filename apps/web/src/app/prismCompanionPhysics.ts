@@ -21,13 +21,27 @@ export interface PrismCompanionDragVelocitySample {
   velocityY: number;
 }
 
-export const PRISM_COMPANION_POSITION_BOUNDS = {
+export interface PrismCompanionLiveBounds {
+  minX: number;
+  maxX: number;
+  minY: number;
+  maxY: number;
+}
+
+export const PRISM_COMPANION_POSITION_BOUNDS: PrismCompanionLiveBounds = {
   minX: 0.05,
   maxX: 0.95,
   minY: 0.12,
   maxY: 0.92,
 } as const;
 
+/** Half of the 68px companion anchor — position is the orb center. */
+export const PRISM_COMPANION_ORB_RADIUS_PX = 34;
+/** Breathing room between the orb edge and a right drawer. */
+export const PRISM_COMPANION_PANEL_GAP_PX = 14;
+const PRISM_COMPANION_PANEL_PUSH_MIN_SPEED_PX_PER_SECOND = 420;
+const PRISM_COMPANION_PANEL_PUSH_MAX_SPEED_PX_PER_SECOND = 980;
+const PRISM_COMPANION_PANEL_PUSH_OVERLAP_GAIN = 2.4;
 const PRISM_COMPANION_MAX_SPEED_PX_PER_SECOND = 1_650;
 const PRISM_COMPANION_STOP_SPEED_PX_PER_SECOND = 24;
 const PRISM_COMPANION_FRICTION_PER_FRAME = 0.965;
@@ -41,13 +55,131 @@ const PRISM_COMPANION_GLARE_X_MAX_PCT = 72;
 const PRISM_COMPANION_GLARE_Y_MIN_PCT = 30;
 const PRISM_COMPANION_GLARE_Y_MAX_PCT = 58;
 
+/**
+ * Resolve the orb's live playable envelope, shrinking the right edge when a
+ * navbar / utility drawer covers that side of the screen.
+ */
+export function resolvePrismCompanionLiveBounds(input: {
+  viewportWidth: number;
+  rightInsetPx?: number;
+  leftInsetPx?: number;
+  orbRadiusPx?: number;
+  gapPx?: number;
+}): PrismCompanionLiveBounds {
+  const viewportWidth = Math.max(1, input.viewportWidth);
+  const orbRadius = Math.max(0, input.orbRadiusPx ?? PRISM_COMPANION_ORB_RADIUS_PX);
+  const gap = Math.max(0, input.gapPx ?? PRISM_COMPANION_PANEL_GAP_PX);
+  const rightInset = Math.max(0, input.rightInsetPx ?? 0);
+  const leftInset = Math.max(0, input.leftInsetPx ?? 0);
+  const minX = Math.max(
+    PRISM_COMPANION_POSITION_BOUNDS.minX,
+    (leftInset + orbRadius + gap) / viewportWidth,
+  );
+  const maxX = Math.min(
+    PRISM_COMPANION_POSITION_BOUNDS.maxX,
+    1 - (rightInset + orbRadius + gap) / viewportWidth,
+  );
+  const safeMaxX = Math.max(minX, maxX);
+  return {
+    minX,
+    maxX: safeMaxX,
+    minY: PRISM_COMPANION_POSITION_BOUNDS.minY,
+    maxY: PRISM_COMPANION_POSITION_BOUNDS.maxY,
+  };
+}
+
+/**
+ * Measure how many pixels of the right edge are covered by an open Prism
+ * utility drawer (`[data-prism-panel]`). Closing drawers are ignored.
+ */
+export function measurePrismCompanionRightPanelInsetPx(
+  root: ParentNode = typeof document === "undefined" ? (null as never) : document,
+  viewportWidth = typeof window === "undefined" ? 0 : window.innerWidth,
+): number {
+  if (!root || viewportWidth <= 0) return 0;
+  let inset = 0;
+  const panels = root.querySelectorAll("[data-prism-panel]");
+  for (const node of panels) {
+    const element = node as {
+      dataset?: { closing?: string };
+      getBoundingClientRect?: () => {
+        left: number;
+        right: number;
+        width: number;
+        height: number;
+      };
+    };
+    if (typeof element.getBoundingClientRect !== "function") continue;
+    if (element.dataset?.closing === "true") continue;
+    const rect = element.getBoundingClientRect();
+    if (rect.width <= 1 || rect.height <= 1) continue;
+    // Only treat right-anchored drawers as collision walls.
+    if (rect.right < viewportWidth * 0.55) continue;
+    inset = Math.max(inset, Math.max(0, viewportWidth - rect.left));
+  }
+  return inset;
+}
+
 export function clampPrismCompanionPosition(
   position: PrismCompanionPosition,
+  bounds: PrismCompanionLiveBounds = PRISM_COMPANION_POSITION_BOUNDS,
 ): PrismCompanionPosition {
-  const bounds = PRISM_COMPANION_POSITION_BOUNDS;
   return {
     x: Math.max(bounds.minX, Math.min(bounds.maxX, position.x)),
     y: Math.max(bounds.minY, Math.min(bounds.maxY, position.y)),
+  };
+}
+
+/**
+ * When a right drawer opens (or grows) under the orb, park it on the new wall
+ * and impart leftward release velocity so inertia carries the shove.
+ */
+export function resolvePrismCompanionRightPanelPush(input: {
+  position: PrismCompanionPosition;
+  velocity: PrismCompanionVelocity;
+  previousMaxX: number;
+  nextMaxX: number;
+  viewportWidth: number;
+}): {
+  position: PrismCompanionPosition;
+  velocity: PrismCompanionVelocity;
+  pushed: boolean;
+} {
+  const previousMaxX = input.previousMaxX;
+  const nextMaxX = input.nextMaxX;
+  const viewportWidth = Math.max(1, input.viewportWidth);
+  if (!(nextMaxX < previousMaxX - 0.0005)) {
+    return {
+      position: input.position,
+      velocity: input.velocity,
+      pushed: false,
+    };
+  }
+  if (input.position.x <= nextMaxX + 0.0005) {
+    return {
+      position: input.position,
+      velocity: input.velocity,
+      pushed: false,
+    };
+  }
+
+  const overlapPx = (input.position.x - nextMaxX) * viewportWidth;
+  const pushSpeed = Math.min(
+    PRISM_COMPANION_PANEL_PUSH_MAX_SPEED_PX_PER_SECOND,
+    Math.max(
+      PRISM_COMPANION_PANEL_PUSH_MIN_SPEED_PX_PER_SECOND,
+      PRISM_COMPANION_PANEL_PUSH_MIN_SPEED_PX_PER_SECOND +
+        overlapPx * PRISM_COMPANION_PANEL_PUSH_OVERLAP_GAIN,
+    ),
+  );
+  const retainedLeftward = Math.min(0, input.velocity.x);
+  return {
+    position: { x: nextMaxX, y: input.position.y },
+    velocity: {
+      x: retainedLeftward - pushSpeed,
+      y: input.velocity.y * 0.85,
+    },
+    pushed: true,
   };
 }
 
@@ -124,13 +256,14 @@ export function stepPrismCompanionInertia(input: {
   elapsedSeconds: number;
   viewportWidth: number;
   viewportHeight: number;
+  bounds?: PrismCompanionLiveBounds;
 }): {
   position: PrismCompanionPosition;
   velocity: PrismCompanionVelocity;
   moving: boolean;
   bounced: boolean;
 } {
-  const bounds = PRISM_COMPANION_POSITION_BOUNDS;
+  const bounds = input.bounds ?? PRISM_COMPANION_POSITION_BOUNDS;
   const dt = Math.max(0.001, Math.min(0.034, input.elapsedSeconds));
   const viewportWidth = Math.max(1, input.viewportWidth);
   const viewportHeight = Math.max(1, input.viewportHeight);

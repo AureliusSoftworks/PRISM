@@ -5,6 +5,9 @@ import {
   boundedPrismCompanionReleaseVelocity,
   clampPrismCompanionPosition,
   createPrismCompanionDragVelocitySample,
+  measurePrismCompanionRightPanelInsetPx,
+  resolvePrismCompanionLiveBounds,
+  resolvePrismCompanionRightPanelPush,
   resolvePrismCompanionSurfaceGlare,
   samplePrismCompanionDragVelocity,
   stepPrismCompanionInertia,
@@ -162,4 +165,100 @@ test("settles low-speed movement instead of drifting forever", () => {
   assert.equal(settled.moving, false);
   assert.deepEqual(settled.velocity, { x: 0, y: 0 });
   assert.equal(settled.bounced, false);
+});
+
+test("shrinks the right playable edge when a drawer covers the side", () => {
+  const open = resolvePrismCompanionLiveBounds({
+    viewportWidth: 1_000,
+    rightInsetPx: 400,
+  });
+  assert.ok(open.maxX < 0.95);
+  assert.equal(open.maxX, 1 - (400 + 34 + 14) / 1_000);
+
+  const closed = resolvePrismCompanionLiveBounds({
+    viewportWidth: 1_000,
+    rightInsetPx: 0,
+  });
+  assert.equal(closed.maxX, 0.95);
+});
+
+test("pushes the orb left with inertia when the right wall advances over it", () => {
+  const push = resolvePrismCompanionRightPanelPush({
+    position: { x: 0.92, y: 0.5 },
+    velocity: { x: 120, y: 40 },
+    previousMaxX: 0.95,
+    nextMaxX: 0.55,
+    viewportWidth: 1_000,
+  });
+  assert.equal(push.pushed, true);
+  assert.equal(push.position.x, 0.55);
+  assert.ok(push.velocity.x < -400);
+  assert.ok(push.velocity.y < 40);
+
+  const clear = resolvePrismCompanionRightPanelPush({
+    position: { x: 0.4, y: 0.5 },
+    velocity: { x: 0, y: 0 },
+    previousMaxX: 0.95,
+    nextMaxX: 0.55,
+    viewportWidth: 1_000,
+  });
+  assert.equal(clear.pushed, false);
+});
+
+test("rebounds against a live right-panel bound during inertia", () => {
+  const bounds = resolvePrismCompanionLiveBounds({
+    viewportWidth: 1_000,
+    rightInsetPx: 400,
+  });
+  const rebounded = stepPrismCompanionInertia({
+    position: { x: bounds.maxX - 0.001, y: 0.5 },
+    velocity: { x: 1_000, y: 0 },
+    elapsedSeconds: 1 / 60,
+    viewportWidth: 1_000,
+    viewportHeight: 800,
+    bounds,
+  });
+  assert.equal(rebounded.position.x, bounds.maxX);
+  assert.ok(rebounded.velocity.x < 0);
+  assert.equal(rebounded.bounced, true);
+});
+
+test("measures right-drawer coverage from data-prism-panel nodes", () => {
+  const root = {
+    querySelectorAll(selector: string) {
+      assert.equal(selector, "[data-prism-panel]");
+      return [
+        {
+          dataset: {},
+          getBoundingClientRect: () => ({
+            left: 600,
+            right: 1_000,
+            width: 400,
+            height: 800,
+            top: 0,
+            bottom: 800,
+          }),
+        },
+        {
+          dataset: { closing: "true" },
+          getBoundingClientRect: () => ({
+            left: 100,
+            right: 1_000,
+            width: 900,
+            height: 800,
+            top: 0,
+            bottom: 800,
+          }),
+        },
+      ];
+    },
+  } as unknown as ParentNode;
+
+  assert.equal(measurePrismCompanionRightPanelInsetPx(root, 1_000), 400);
+  assert.equal(clampPrismCompanionPosition({ x: 0.9, y: 0.5 }, {
+    minX: 0.05,
+    maxX: 0.55,
+    minY: 0.12,
+    maxY: 0.92,
+  }).x, 0.55);
 });

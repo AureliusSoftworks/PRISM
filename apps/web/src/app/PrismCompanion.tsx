@@ -52,10 +52,15 @@ import {
   boundedPrismCompanionReleaseVelocity,
   clampPrismCompanionPosition,
   createPrismCompanionDragVelocitySample,
+  measurePrismCompanionRightPanelInsetPx,
+  PRISM_COMPANION_POSITION_BOUNDS,
+  resolvePrismCompanionLiveBounds,
+  resolvePrismCompanionRightPanelPush,
   resolvePrismCompanionSurfaceGlare,
   samplePrismCompanionDragVelocity,
   stepPrismCompanionInertia,
   type PrismCompanionDragVelocitySample,
+  type PrismCompanionLiveBounds,
   type PrismCompanionPosition,
   type PrismCompanionVelocity,
 } from "./prismCompanionPhysics";
@@ -78,6 +83,10 @@ import {
   getPrismCompanionSuppressedSnapshot,
   subscribePrismCompanionSuppression,
 } from "./prismCompanionPresence";
+import {
+  togglePrismSoftSynthesisExpanded,
+  usePrismSoftSynthesisUi,
+} from "./prismSoftSynthesisUi.ts";
 import { publishPrismCompanionVisualSnapshot } from "./prismCompanionVisualSnapshot";
 import {
   setAppNavbarCompanionOpen,
@@ -392,6 +401,10 @@ export default function PrismCompanion({
     getPrismCompanionSuppressedSnapshot,
     getPrismCompanionSuppressedServerSnapshot,
   );
+  const softSynthesisUi = usePrismSoftSynthesisUi();
+  const softSynthesisActive = softSynthesisUi.jobCount > 0;
+  const softSynthesisLocked =
+    softSynthesisActive || softSynthesisUi.handoffBusy;
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const backdropRef = useRef<HTMLDivElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
@@ -451,6 +464,10 @@ export default function PrismCompanion({
   const inertiaFrameRef = useRef<number | null>(null);
   const inertiaLastTimeRef = useRef<number | null>(null);
   const inertiaVelocityRef = useRef<PrismCompanionVelocity>({ x: 0, y: 0 });
+  const liveBoundsRef = useRef<PrismCompanionLiveBounds>(
+    PRISM_COMPANION_POSITION_BOUNDS,
+  );
+  const rightPanelInsetPxRef = useRef(0);
   const speechRunRef = useRef(0);
   const speechAbortRef = useRef<AbortController | null>(null);
   const speechPlaybackActiveRef = useRef(false);
@@ -592,9 +609,10 @@ export default function PrismCompanion({
       inertialRef.current ||
       wieldStateRef.current.phase !== "idle" ||
       wieldTutorialVisibleRef.current ||
-      refractTutorialVisibleRef.current
+      refractTutorialVisibleRef.current ||
+      softSynthesisActive
     );
-  }, []);
+  }, [softSynthesisActive]);
 
   const scheduleIdleVanish = useCallback((): void => {
     if (idleVanishTimerRef.current !== null) {
@@ -700,6 +718,7 @@ export default function PrismCompanion({
           elapsedSeconds: (timeMs - previousTime) / 1_000 || 1 / 60,
           viewportWidth: window.innerWidth,
           viewportHeight: window.innerHeight,
+          bounds: liveBoundsRef.current,
         });
         positionRef.current = next.position;
         inertiaVelocityRef.current = next.velocity;
@@ -721,6 +740,121 @@ export default function PrismCompanion({
     },
     [persistPosition, scheduleIdleDim, stopInertia],
   );
+
+  const syncRightPanelCollisionBounds = useCallback((): void => {
+    if (typeof window === "undefined") return;
+    const viewportWidth = Math.max(1, window.innerWidth);
+    const rightInsetPx = measurePrismCompanionRightPanelInsetPx(
+      document,
+      viewportWidth,
+    );
+    const previousInsetPx = rightPanelInsetPxRef.current;
+    const previousMaxX = liveBoundsRef.current.maxX;
+    const nextBounds = resolvePrismCompanionLiveBounds({
+      viewportWidth,
+      rightInsetPx,
+    });
+    rightPanelInsetPxRef.current = rightInsetPx;
+    liveBoundsRef.current = nextBounds;
+
+    // Don't shove the orb while the user is actively dragging or wielding it.
+    if (
+      dragRef.current ||
+      draggingRef.current ||
+      wieldStateRef.current.phase !== "idle"
+    ) {
+      return;
+    }
+
+    const wallAdvancing = rightInsetPx > previousInsetPx + 0.5;
+    if (
+      wallAdvancing &&
+      positionRef.current.x > nextBounds.maxX + 0.0005
+    ) {
+      // Already fleeing the wall — ride the moving edge without stacking shove.
+      if (inertialRef.current && inertiaVelocityRef.current.x < 0) {
+        const parked = {
+          x: nextBounds.maxX,
+          y: positionRef.current.y,
+        };
+        positionRef.current = parked;
+        setPosition(parked);
+        return;
+      }
+
+      const push = resolvePrismCompanionRightPanelPush({
+        position: positionRef.current,
+        velocity: inertiaVelocityRef.current,
+        previousMaxX,
+        nextMaxX: nextBounds.maxX,
+        viewportWidth,
+      });
+      if (push.pushed) {
+        clearIdleDim();
+        positionRef.current = push.position;
+        setPosition(push.position);
+        playPrismCompanionGlassTap();
+        startInertia(push.velocity);
+        return;
+      }
+    }
+
+    const clamped = clampPrismCompanionPosition(
+      positionRef.current,
+      nextBounds,
+    );
+    if (
+      clamped.x !== positionRef.current.x ||
+      clamped.y !== positionRef.current.y
+    ) {
+      positionRef.current = clamped;
+      setPosition(clamped);
+    }
+  }, [clearIdleDim, startInertia]);
+
+  useEffect(() => {
+    if (companionSuppressed || typeof window === "undefined") return;
+
+    let rafId = 0;
+    const scheduleSync = (): void => {
+      if (rafId !== 0) return;
+      rafId = window.requestAnimationFrame(() => {
+        rafId = 0;
+        syncRightPanelCollisionBounds();
+      });
+    };
+
+    const panelResizeObserver = new ResizeObserver(scheduleSync);
+    const observePanels = (): void => {
+      for (const node of document.querySelectorAll("[data-prism-panel]")) {
+        if (node instanceof Element) panelResizeObserver.observe(node);
+      }
+    };
+
+    const mutationObserver = new MutationObserver(() => {
+      observePanels();
+      scheduleSync();
+    });
+    mutationObserver.observe(document.body, {
+      attributes: true,
+      attributeFilter: [
+        "data-right-panel-open",
+        "data-prism-panel",
+        "data-closing",
+      ],
+      childList: true,
+      subtree: true,
+    });
+    observePanels();
+    scheduleSync();
+    window.addEventListener("resize", scheduleSync);
+    return () => {
+      if (rafId !== 0) window.cancelAnimationFrame(rafId);
+      mutationObserver.disconnect();
+      panelResizeObserver.disconnect();
+      window.removeEventListener("resize", scheduleSync);
+    };
+  }, [companionSuppressed, syncRightPanelCollisionBounds]);
 
   const clearPrismWieldHover = useCallback((): void => {
     delete wieldHoverTargetRef.current?.dataset.prismRefractWieldHover;
@@ -787,10 +921,13 @@ export default function PrismCompanion({
         window.innerHeight > 0
       ) {
         clearIdleDim();
-        const next = clampPrismCompanionPosition({
-          x: releasePointer.x / window.innerWidth,
-          y: releasePointer.y / window.innerHeight,
-        });
+        const next = clampPrismCompanionPosition(
+          {
+            x: releasePointer.x / window.innerWidth,
+            y: releasePointer.y / window.innerHeight,
+          },
+          liveBoundsRef.current,
+        );
         positionRef.current = next;
         setPosition(next);
         startInertia(releaseVelocity);
@@ -1053,10 +1190,11 @@ export default function PrismCompanion({
   );
 
   const openAndFocus = useCallback((): void => {
+    if (softSynthesisLocked) return;
     clearIdleDim();
     setOpen(true);
     window.requestAnimationFrame(() => composerRef.current?.focus());
-  }, [clearIdleDim]);
+  }, [clearIdleDim, softSynthesisLocked]);
 
   const markRefractTarget = useCallback(
     (session: PrismRefractSession, phase: PrismRefractPhase): void => {
@@ -1422,18 +1560,24 @@ export default function PrismCompanion({
       refractReturnPositionRef.current = returnPosition;
       wieldCaptureReturnPositionRef.current = null;
       if (invocation === "wield-click" && origin) {
-        const pointerPosition = clampPrismCompanionPosition({
-          x: origin.clientX / Math.max(1, window.innerWidth),
-          y: origin.clientY / Math.max(1, window.innerHeight),
-        });
+        const pointerPosition = clampPrismCompanionPosition(
+          {
+            x: origin.clientX / Math.max(1, window.innerWidth),
+            y: origin.clientY / Math.max(1, window.innerHeight),
+          },
+          liveBoundsRef.current,
+        );
         positionRef.current = pointerPosition;
         setPosition(pointerPosition);
       }
       const rect = registration.element.getBoundingClientRect();
-      const targetPosition = clampPrismCompanionPosition({
-        x: (rect.left + rect.width / 2) / Math.max(1, window.innerWidth),
-        y: (rect.top + rect.height / 2) / Math.max(1, window.innerHeight),
-      });
+      const targetPosition = clampPrismCompanionPosition(
+        {
+          x: (rect.left + rect.width / 2) / Math.max(1, window.innerWidth),
+          y: (rect.top + rect.height / 2) / Math.max(1, window.innerHeight),
+        },
+        liveBoundsRef.current,
+      );
       const target = registration.target;
       const originalValue = target.kind === "magic" ? "" : target.read();
       const session: PrismRefractSession = {
@@ -2227,6 +2371,11 @@ export default function PrismCompanion({
       }
       if (refracting) return;
       if (keyboardShortcutMatchesEvent(keyboardShortcut, event)) {
+        if (softSynthesisLocked) {
+          event.preventDefault();
+          if (softSynthesisActive) togglePrismSoftSynthesisExpanded();
+          return;
+        }
         resetPrismWield();
         event.preventDefault();
         const targetId = focusedPrismRefractTargetId(document.activeElement);
@@ -2239,6 +2388,7 @@ export default function PrismCompanion({
       }
 
       if (isPrismCompanionModifierKey(event, platform)) {
+        if (softSynthesisLocked) return;
         if (event.repeat || wieldStateRef.current.phase !== "idle") return;
         const pointer =
           wieldLastPointerRef.current ??
@@ -2282,6 +2432,8 @@ export default function PrismCompanion({
     releasePrismRefract,
     resetPrismWield,
     rerollPrismRefract,
+    softSynthesisActive,
+    softSynthesisLocked,
     startPrismWield,
   ]);
 
@@ -2532,10 +2684,23 @@ export default function PrismCompanion({
     }
   };
 
+  useEffect(() => {
+    if (!softSynthesisActive) return;
+    setOpen(false);
+    clearIdleDim();
+    resetPrismWield();
+  }, [clearIdleDim, resetPrismWield, softSynthesisActive]);
+
+  useEffect(() => {
+    if (softSynthesisActive) clearIdleDim();
+  }, [clearIdleDim, softSynthesisActive]);
+
   const beginDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
     if (
       event.button !== 0 ||
       event.isPrimary === false ||
+      softSynthesisUi.lodged ||
+      softSynthesisUi.expanded ||
       refractSessionRef.current
     ) {
       return;
@@ -2580,10 +2745,13 @@ export default function PrismCompanion({
       event.clientY,
       event.timeStamp || performance.now(),
     );
-    const next = clampPrismCompanionPosition({
-      x: drag.origin.x + dx / window.innerWidth,
-      y: drag.origin.y + dy / window.innerHeight,
-    });
+    const next = clampPrismCompanionPosition(
+      {
+        x: drag.origin.x + dx / window.innerWidth,
+        y: drag.origin.y + dy / window.innerHeight,
+      },
+      liveBoundsRef.current,
+    );
     positionRef.current = next;
     setPosition(next);
     const targetId = prismRefractTargetIdAtPoint(
@@ -2624,6 +2792,10 @@ export default function PrismCompanion({
       // Pointer capture may already have ended at a browser boundary.
     }
     if (drag.moved) {
+      if (softSynthesisLocked) {
+        persistPosition(positionRef.current);
+        return;
+      }
       if (
         dropTargetId &&
         requestPrismRefract(dropTargetId, "orb-drop")
@@ -2634,6 +2806,10 @@ export default function PrismCompanion({
     } else {
       playPrismCompanionGlassTap();
       persistPosition(positionRef.current);
+      if (softSynthesisActive) {
+        togglePrismSoftSynthesisExpanded();
+        return;
+      }
       if (open) setOpen(false);
       else openAndFocus();
     }
@@ -2692,6 +2868,8 @@ export default function PrismCompanion({
         data-inertial={inertial ? "true" : undefined}
         data-idle-dimmed={idleDimmed ? "true" : undefined}
         data-idle-hidden={idleHidden ? "true" : undefined}
+        data-soft-synthesis={softSynthesisActive ? "true" : undefined}
+        data-soft-lodged={softSynthesisUi.lodged ? "true" : undefined}
         data-refracting={refractSession?.phase}
         data-dock={position.x < 0.5 ? "left" : "right"}
         data-vertical={position.y < 0.48 ? "below" : "above"}
@@ -3271,31 +3449,53 @@ export default function PrismCompanion({
           type="button"
           className={styles.avatar}
           data-tutorial-target="prism-companion"
+          data-prism-companion-avatar="true"
           aria-label={
-            refractSession
-              ? `Prism is refracting ${refractSession.registration.target.label}`
-              : open
-                ? "Move or minimize Prism"
-                : "Move or talk with Prism"
+            softSynthesisActive
+              ? softSynthesisUi.expanded
+                ? "Minimize soft synthesis"
+                : `Show soft synthesis · ${softSynthesisUi.jobCount} job${softSynthesisUi.jobCount === 1 ? "" : "s"}`
+              : refractSession
+                ? `Prism is refracting ${refractSession.registration.target.label}`
+                : open
+                  ? "Move or minimize Prism"
+                  : "Move or talk with Prism"
           }
-          aria-expanded={open}
-          aria-controls="global-prism-companion"
-          aria-keyshortcuts={shortcutPresentation.aria}
+          aria-expanded={softSynthesisActive ? softSynthesisUi.expanded : open}
+          aria-controls={
+            softSynthesisActive ? undefined : "global-prism-companion"
+          }
+          aria-keyshortcuts={
+            softSynthesisLocked ? undefined : shortcutPresentation.aria
+          }
           onPointerDown={beginDrag}
           onPointerMove={moveDrag}
           onPointerUp={endDrag}
           onPointerCancel={cancelDrag}
-          disabled={Boolean(refractSession)}
+          disabled={Boolean(refractSession) || softSynthesisUi.lodged}
           onClick={(event) => {
             if (event.detail === 0) {
               playPrismCompanionGlassTap();
+              if (softSynthesisActive) {
+                togglePrismSoftSynthesisExpanded();
+                return;
+              }
               if (open) setOpen(false);
               else openAndFocus();
             }
           }}
         >
           <PrismOrb aura={false} className={styles.orb} />
-          {keyboardShortcut ? (
+          {softSynthesisActive ? (
+            <span
+              className={styles.softJobChip}
+              data-prism-soft-job-chip="true"
+              aria-hidden="true"
+            >
+              {softSynthesisUi.jobCount > 99 ? "99+" : softSynthesisUi.jobCount}
+            </span>
+          ) : null}
+          {keyboardShortcut && !softSynthesisLocked ? (
             <span className={styles.shortcut} aria-hidden="true">
               {shortcutPresentation.label}
             </span>

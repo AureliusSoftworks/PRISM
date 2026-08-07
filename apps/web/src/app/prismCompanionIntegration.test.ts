@@ -234,6 +234,7 @@ test("desaturates and pauses every app shell behind the open companion", () => {
     page,
     /coffeeAutoplayPausedRef\.current =\s*coffeeAutoplayPaused \|\|\s*prismSystemPaused \|\|\s*prismPresentationSuspended/u,
   );
+  assert.match(page, /acquirePrismLivingSession\("coffee"/u);
   assert.match(page, /const prismSystemPaused = useSyncExternalStore\(/u);
   assert.match(page, /const prismPresentationSuspended = useSyncExternalStore\(/u);
   assert.match(page, /prismPresentationSuspendedRef\.current/u);
@@ -250,6 +251,17 @@ test("gives only the companion orb momentum", () => {
   assert.match(component, /prefers-reduced-motion: reduce/u);
   assert.match(component, /data-inertial=\{inertial \? "true" : undefined\}/u);
   assert.doesNotMatch(page, /startAvatarMomentum|data-flinging/u);
+});
+
+test("collides the orb with open right navbar drawers and shoves left", () => {
+  assert.match(component, /measurePrismCompanionRightPanelInsetPx/u);
+  assert.match(component, /resolvePrismCompanionLiveBounds/u);
+  assert.match(component, /resolvePrismCompanionRightPanelPush/u);
+  assert.match(component, /const syncRightPanelCollisionBounds = useCallback/u);
+  assert.match(component, /bounds: liveBoundsRef\.current/u);
+  assert.match(component, /new ResizeObserver\(scheduleSync\)/u);
+  assert.match(component, /data-right-panel-open/u);
+  assert.match(component, /\[data-prism-panel\]/u);
 });
 
 test("docks the orb at the cursor on wield release and can fling with drag inertia", () => {
@@ -278,7 +290,10 @@ test("dims the idle orb after settle, then vanishes after the same delay", () =>
   assert.match(component, /const scheduleIdleDim = useCallback/u);
   assert.match(component, /const scheduleIdleVanish = useCallback/u);
   assert.match(component, /const clearIdleDim = useCallback/u);
-  assert.match(component, /clearIdleDim\(\);\s*setOpen\(true\)/u);
+  assert.match(
+    component,
+    /if \(softSynthesisLocked\) return;[\s\S]{0,80}clearIdleDim\(\);\s*setOpen\(true\)/u,
+  );
   assert.match(component, /clearIdleDim\(\);\s*stopInertia\(false\)/u);
   assert.match(
     component,
@@ -351,4 +366,15 @@ test("folds the companion panel away when interaction returns to Zen", () => {
 test("retires the full-manuscript Slate chat route in favor of global metadata", () => {
   assert.match(api, /Slate project chat has moved to the global Prism companion/u);
   assert.match(api, /route\("POST", "\/api\/prism-companion"/u);
+});
+
+test("soft synthesis borrows the companion orb with a job chip and assistant lock", () => {
+  assert.match(component, /usePrismSoftSynthesisUi/u);
+  assert.match(component, /togglePrismSoftSynthesisExpanded/u);
+  assert.match(component, /data-prism-companion-avatar="true"/u);
+  assert.match(component, /styles\.softJobChip/u);
+  assert.match(component, /softSynthesisActive/u);
+  assert.match(companionCss, /\.softJobChip\s*\{/u);
+  assert.match(companionCss, /\[data-soft-lodged="true"\]/u);
+  assert.match(tutorials, /data-tutorial-target="prism-companion"/u);
 });
