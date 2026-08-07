@@ -3,6 +3,9 @@
 This runbook exports already-built Prism Desktop artifacts into Steam depot
 content and (optionally) uploads with `steamcmd`.
 
+For the wishlist / store feature-trailer beat sheet and capture checklist, see
+[`steam-trailer-wireframe.md`](steam-trailer-wireframe.md).
+
 ## Required precondition
 
 Before any Steam upload:
