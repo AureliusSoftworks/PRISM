@@ -1,26 +1,14 @@
 const CONTINUATION_MAX_TOKENS = 80;
-const STRONG_ENDING = /[.!?]["')\]]?$/u;
-const CLAUSE_ENDING = /[,;:—]["')\]]?$/u;
-const ELLIPSIS_ENDING = /(?:\.{3}|…)$/u;
-
-function endsForProsodyPause(word: string): boolean {
-  return (
-    STRONG_ENDING.test(word) ||
-    CLAUSE_ENDING.test(word) ||
-    ELLIPSIS_ENDING.test(word)
-  );
-}
 
 /**
- * Splits completed local speech into punctuation-bounded synthesis clauses.
+ * Splits completed local speech into synthesis windows for streaming.
  *
- * Kokoro invents its own mid-phrase pauses when commas and periods stay inside
- * one generate() call — e.g. "The sponges, they are…" can sound like the breath
- * landed after "are". Speaking each punctuated clause separately lets English
- * playback insert the real pause that matches the on-screen mark.
+ * No Kokoro-specific punctuation chopping — commas and periods stay inside the
+ * same generate() call so delivery follows the engine plus any bot English
+ * pacing profile applied between stream windows on the client.
  *
  * Long unpunctuated runs still pack into <=80-token windows so a wall of words
- * without commas does not become a single huge synthesis job.
+ * does not become a single huge synthesis job.
  */
 export function splitLocalVoiceStreamText(text: string): string[] {
   const words = text.trim().split(/\s+/u).filter(Boolean);
@@ -36,7 +24,7 @@ export function splitLocalVoiceStreamText(text: string): string[] {
 
   for (const word of words) {
     current.push(word);
-    if (endsForProsodyPause(word) || current.length >= CONTINUATION_MAX_TOKENS) {
+    if (current.length >= CONTINUATION_MAX_TOKENS) {
       commit();
     }
   }
