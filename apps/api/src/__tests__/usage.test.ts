@@ -285,6 +285,36 @@ describe("usage accounting", () => {
       assert.equal(report.recentEvents.length, 3);
       assert.ok(report.byPurpose.some((item) => item.purpose === "chat_reply"));
       assert.ok(report.byModel.some((item) => item.model === "gpt-image-2"));
+      assert.ok(report.byProvider.some((item) => item.provider === "openai"));
+      assert.equal(report.providerFilter, "all");
+
+      const openaiOnly = getUsageReport({
+        db,
+        userId: "user-1",
+        range: "all",
+        provider: "openai",
+      });
+      assert.equal(openaiOnly.providerFilter, "openai");
+      assert.equal(openaiOnly.totals.eventCount, 2);
+      assert.ok(openaiOnly.byProvider.every((item) => item.provider === "openai"));
+      assert.equal(openaiOnly.byProvider.length, 1);
+
+      const localFamily = getUsageReport({
+        db,
+        userId: "user-1",
+        range: "all",
+        provider: "local",
+      });
+      assert.equal(localFamily.providerFilter, "local");
+      assert.equal(localFamily.totals.eventCount, 1);
+      assert.ok(
+        localFamily.byProvider.every(
+          (item) =>
+            item.provider === "local" ||
+            item.provider === "ollama" ||
+            item.provider === "comfyui",
+        ),
+      );
 
       const otherUserReport = getUsageReport({ db, userId: "user-2", range: "all" });
       assert.equal(otherUserReport.totals.eventCount, 0);

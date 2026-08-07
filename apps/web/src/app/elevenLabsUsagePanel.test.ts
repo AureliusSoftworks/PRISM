@@ -22,6 +22,27 @@ function sourceBlockAfter(needle: string, terminator: string): string {
   return pageSource.slice(start, end);
 }
 
+test("Usage panel shows preferred providers, provider filter, and By provider first", () => {
+  const usagePanel = sourceBlockAfter(
+    "const renderUsagePanel = ():",
+    "// ── Shared right-hand panels",
+  );
+  assert.match(usagePanel, /Preferred providers/);
+  assert.match(usagePanel, /usagePreferredProviders/);
+  assert.match(usagePanel, /USAGE_PROVIDER_FILTER_OPTIONS/);
+  assert.match(usagePanel, /aria-label="Usage provider"/);
+  assert.match(pageSource, /query\.set\("provider", provider\)/);
+  const byProviderIndex = usagePanel.indexOf('"By provider"');
+  const byPurposeIndex = usagePanel.indexOf('"By purpose"');
+  assert.ok(byProviderIndex >= 0, "Usage should render By provider");
+  assert.ok(byPurposeIndex >= 0, "Usage should render By purpose");
+  assert.ok(
+    byProviderIndex < byPurposeIndex,
+    "By provider should appear before By purpose",
+  );
+  assert.match(usagePanel, /highlightPreferred:\s*true/);
+});
+
 test("ElevenLabs balance leads the Usage panel and exposes key management", () => {
   const usagePanel = sourceBlockAfter(
     "const renderUsagePanel = ():",

@@ -5,6 +5,7 @@ import type {
   UsageBreakdownItem,
   UsageEventType,
   UsagePrivacyScope,
+  UsageProviderFilter,
   UsageProviderName,
   UsagePurpose,
   UsageRange,
@@ -1095,6 +1096,7 @@ function baseWhere(args: {
   userId: string;
   rangeStart: string | null;
   conversationId?: string | null;
+  providers?: UsageProviderName[] | null;
 }): { where: string; params: string[] } {
   const clauses = ["user_id = ?"];
   const params: string[] = [args.userId];
@@ -1105,6 +1107,16 @@ function baseWhere(args: {
   if (args.conversationId) {
     clauses.push("conversation_id = ?");
     params.push(args.conversationId);
+  }
+  const providers = (args.providers ?? []).filter(Boolean);
+  if (providers.length === 1) {
+    clauses.push("provider = ?");
+    params.push(providers[0]!);
+  } else if (providers.length > 1) {
+    clauses.push(
+      `provider IN (${providers.map(() => "?").join(", ")})`,
+    );
+    params.push(...providers);
   }
   return {
     where: clauses.join(" AND "),
@@ -1316,16 +1328,21 @@ export function getUsageReport(args: {
   userId: string;
   range: UsageRange;
   conversationId?: string | null;
+  /** Optional provider filter. `"local"` includes local + ollama + comfyui. */
+  provider?: UsageProviderFilter | null;
 }): UsageResponse {
   // Re-home historical rows that older builds collapsed to system_unlabeled.
   repairMisnormalizedUsagePurposes(args.db);
   const now = new Date();
   const rangeStart = rangeStartFor(args.range, now);
   const conversationId = args.conversationId?.trim() || null;
+  const providerFilter = parseUsageProviderFilter(args.provider);
+  const providers = providersForUsageFilter(providerFilter);
   const { where, params } = baseWhere({
     userId: args.userId,
     rangeStart,
     conversationId,
+    providers,
   });
   const totals = totalsFromRow(
     args.db.prepare(`SELECT ${aggregateSelect()} FROM usage_events WHERE ${where}`).get(
@@ -1422,8 +1439,33 @@ export function getUsageReport(args: {
     trackingStartedAt,
     hasUntrackedHistory: Boolean(historyRow?.found),
     conversationScoped: Boolean(conversationId),
+    providerFilter,
     trip: getUsageTripMeter({ db: args.db, userId: args.userId }),
   };
+}
+
+export function providersForUsageFilter(
+  filter: UsageProviderFilter,
+): UsageProviderName[] | null {
+  if (filter === "all") return null;
+  if (filter === "local") return ["local", "ollama", "comfyui"];
+  return [filter];
+}
+
+export function parseUsageProviderFilter(
+  value: string | null | undefined,
+): UsageProviderFilter {
+  if (
+    value === "local" ||
+    value === "openai" ||
+    value === "anthropic" ||
+    value === "ollama" ||
+    value === "comfyui" ||
+    value === "unknown"
+  ) {
+    return value;
+  }
+  return "all";
 }
 
 export function parseUsageRange(value: string | null | undefined): UsageRange {

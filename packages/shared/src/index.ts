@@ -1298,6 +1298,16 @@ export type UsageProviderName =
 
 export type UsageRange = "24h" | "7d" | "30d" | "all";
 
+/** Usage panel provider chip. `"local"` includes local + ollama + comfyui rows. */
+export type UsageProviderFilter =
+  | "all"
+  | "local"
+  | "openai"
+  | "anthropic"
+  | "ollama"
+  | "comfyui"
+  | "unknown";
+
 export type UsagePrivacyScope = "normal" | "private";
 
 export type UsageEventType = "text" | "embedding" | "image";
@@ -1399,6 +1409,8 @@ export interface UsageResponse {
   trackingStartedAt: string | null;
   hasUntrackedHistory: boolean;
   conversationScoped: boolean;
+  /** Active provider chip from the Usage panel (`all` when unfiltered). */
+  providerFilter: UsageProviderFilter;
   /** Account-wide online-token trip meter (independent of range/scope filters). */
   trip: UsageTripMeter;
 }
