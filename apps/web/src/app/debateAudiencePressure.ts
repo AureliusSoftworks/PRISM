@@ -38,10 +38,10 @@ export const DEBATE_AUDIENCE_FORMALITY_LOUDNESS = {
  * even after the shared bed ceiling clamps total murmur+crosstalk.
  */
 const DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS = {
-  settled: { background: 0.1, grain: 0, foley: 0.3 },
-  murmuring: { background: 0.22, grain: 0.08, foley: 0.3 },
-  restless: { background: 0.28, grain: 0.22, foley: 0.3 },
-  disruptive: { background: 0.3, grain: 0.5, foley: 0.3 },
+  settled: { background: 0.12, grain: 0.04, foley: 0.3 },
+  murmuring: { background: 0.26, grain: 0.16, foley: 0.3 },
+  restless: { background: 0.32, grain: 0.34, foley: 0.3 },
+  disruptive: { background: 0.34, grain: 0.52, foley: 0.3 },
 } as const satisfies Record<DebateAudiencePressureBand, SessionAtmosphereMix>;
 
 /** @deprecated Prefer debateAudiencePressureMixForScore for a smooth curve. */

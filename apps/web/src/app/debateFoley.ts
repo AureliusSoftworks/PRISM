@@ -322,7 +322,6 @@ export function debateModeratorGavelCue(args: {
     return {
       eventId: event.id,
       kind: "order",
-      audienceReaction: "order",
     };
   }
   if (event.kind === "verdict" && event.speakerKind !== "player") {

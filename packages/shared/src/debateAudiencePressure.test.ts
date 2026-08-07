@@ -160,6 +160,30 @@ describe("Debate audience pressure", () => {
     );
   });
 
+  it("calls order after sustained rowdiness, not only on the rising edge", () => {
+    const longLine =
+      "This is a long heated exchange that keeps the gallery restless while the advocate continues to press the same combative point without yielding the floor back to calm. ".repeat(
+        4,
+      );
+    const first = {
+      ...speech("sustain-1", 1),
+      content: longLine,
+    };
+    const second = {
+      ...speech("sustain-2", 2),
+      content: longLine,
+    };
+    const plan = debateAudienceModeratorOrderPlan({
+      events: [first, second],
+      formality: "free_for_all",
+      playerRole: "spectator",
+      triggerEvent: second,
+    });
+    assert.ok(plan);
+    assert.ok(plan?.reason === "sustained" || plan?.reason === "disruptive");
+    assert.ok((plan?.pressure ?? 0) >= 45);
+  });
+
   it("keeps a living gallery bed under a live monologue instead of full mute", () => {
     const prior = speech("prior", 1);
     const live = {

@@ -124,6 +124,7 @@ import {
 } from "./modelPreparation";
 import { AssetRail } from "./AssetLibrary";
 import {
+  archiveExhibitBusyKey,
   DebateArchiveAssetsModal,
   useDebateArchiveExhibitRows,
   type DebateArchiveExhibitRow,
@@ -6775,11 +6776,14 @@ export function DebateExperience(
       pending.abort.abort();
       pendingExhibitSynthesizeRef.current.delete(requestId);
       if (pending.archiveSessionId && pending.exhibitId) {
-        const exhibitId = pending.exhibitId;
+        const busyKey = archiveExhibitBusyKey(
+          pending.archiveSessionId,
+          pending.exhibitId,
+        );
         setArchiveSynthesizingExhibitIds((current) => {
-          if (!current.has(exhibitId)) return current;
+          if (!current.has(busyKey)) return current;
           const next = new Set(current);
-          next.delete(exhibitId);
+          next.delete(busyKey);
           return next;
         });
       }
@@ -6989,10 +6993,11 @@ export function DebateExperience(
       abort,
     });
     const startedAt = new Date().toISOString();
+    const busyKey = archiveExhibitBusyKey(session.id, exhibit.id);
     setArchiveSynthesizingExhibitIds((current) => {
-      if (current.has(exhibit.id)) return current;
+      if (current.has(busyKey)) return current;
       const next = new Set(current);
-      next.add(exhibit.id);
+      next.add(busyKey);
       return next;
     });
     setSoftExhibitSynthesizeJobs((current) => [
@@ -7041,9 +7046,9 @@ export function DebateExperience(
     } finally {
       clearSoftExhibitSynthesizeJob(requestId);
       setArchiveSynthesizingExhibitIds((current) => {
-        if (!current.has(exhibit.id)) return current;
+        if (!current.has(busyKey)) return current;
         const next = new Set(current);
-        next.delete(exhibit.id);
+        next.delete(busyKey);
         return next;
       });
     }

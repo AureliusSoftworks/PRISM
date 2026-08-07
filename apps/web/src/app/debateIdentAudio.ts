@@ -24,9 +24,6 @@ export const DEBATE_IDENT_AUDIO = {
 export const DEBATE_IDENT_OUTRO_LEAD_MS = 420;
 export const DEBATE_IDENT_STOP_FADE_MS = 320;
 
-/** Quiet chamber settle after the intro card before the first spoken beat. */
-export const DEBATE_OPENING_CHAMBER_FADE_MS = 5_000;
-
 interface ActiveDebateIdent {
   audio: HTMLAudioElement;
   outputCleanup: (() => void) | null;

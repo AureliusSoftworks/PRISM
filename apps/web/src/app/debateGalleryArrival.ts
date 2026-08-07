@@ -6,8 +6,11 @@
 /** Soft seat drip while bake progress stalls (ms between seats). */
 export const DEBATE_GALLERY_ARRIVAL_LINGER_INTERVAL_MS = 2_200;
 
-/** Compress remaining seats once the opening buffer unlocks. */
-export const DEBATE_GALLERY_ARRIVAL_HURRY_INTERVAL_MS = 140;
+/**
+ * Post-unlock seat pace. Stay rhythmic — never dump the remaining house in a
+ * single burst (the old 140ms hurry read as a pop-in).
+ */
+export const DEBATE_GALLERY_ARRIVAL_HURRY_INTERVAL_MS = 900;
 
 /** Quiet beat after the last seat lands before Gallery ready. */
 export const DEBATE_GALLERY_ARRIVAL_SETTLE_MS = 520;

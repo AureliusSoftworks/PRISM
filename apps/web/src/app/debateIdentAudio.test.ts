@@ -25,11 +25,13 @@ describe("Debate Living Chamber ident", () => {
     assert.equal(DEBATE_IDENT_AUDIO.outro.durationMs, 4_545);
   });
 
-  it("holds a five-second chamber fade before the first spoken beat", async () => {
-    const { DEBATE_OPENING_CHAMBER_FADE_MS } = await import(
-      "./debateIdentAudio.ts"
+  it("lets the Living Chamber curtain reveal the chamber without a second black fade", async () => {
+    const source = readFileSync(
+      new URL("./debateIdentAudio.ts", import.meta.url),
+      "utf8",
     );
-    assert.equal(DEBATE_OPENING_CHAMBER_FADE_MS, 5_000);
+    assert.doesNotMatch(source, /DEBATE_OPENING_CHAMBER_FADE_MS/u);
+    assert.equal(DEBATE_IDENT_AUDIO.intro.durationMs, 7_053);
   });
 
   it("leaves a short verdict breath and releases interruptions smoothly", () => {

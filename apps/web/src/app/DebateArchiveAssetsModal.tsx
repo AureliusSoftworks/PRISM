@@ -29,6 +29,14 @@ function exhibitImageUrl(
   return cacheKey ? `${base}?v=${encodeURIComponent(cacheKey)}` : base;
 }
 
+/** Busy keys must include the debate id — bare exhibit-1… collide across sessions. */
+export function archiveExhibitBusyKey(
+  debateSessionId: string,
+  exhibitId: string,
+): string {
+  return `${debateSessionId}:${exhibitId}`;
+}
+
 export function DebateArchiveAssetsModal(props: {
   session: DebateSessionListItemV1;
   rows: DebateArchiveExhibitRow[];
@@ -96,19 +104,27 @@ export function DebateArchiveAssetsModal(props: {
           </p>
         ) : (
           <ul className={styles.archiveAssetsList} aria-label="Debate exhibits">
-            {props.rows.map((row) => (
+            {props.rows.map((row) => {
+              const busyKey = archiveExhibitBusyKey(
+                props.session.id,
+                row.exhibit.id,
+              );
+              const synthesizing = props.synthesizingExhibitIds.has(busyKey);
+              return (
               <ArchiveExhibitAssetCard
                 key={row.exhibit.id}
+                sessionId={props.session.id}
                 row={row}
                 busy={props.busy}
-                synthesizing={props.synthesizingExhibitIds.has(row.exhibit.id)}
+                synthesizing={synthesizing}
                 onSynthesize={(direction) =>
                   props.onSynthesize(row.exhibit, direction)
                 }
                 onMagenta={(next) => props.onMagenta(row.exhibit.id, next)}
                 onError={props.onError}
               />
-            ))}
+              );
+            })}
           </ul>
         )}
       </section>
@@ -117,6 +133,7 @@ export function DebateArchiveAssetsModal(props: {
 }
 
 function ArchiveExhibitAssetCard(props: {
+  sessionId: string;
   row: DebateArchiveExhibitRow;
   busy: boolean;
   synthesizing: boolean;
@@ -128,7 +145,7 @@ function ArchiveExhibitAssetCard(props: {
   const imageUrl = exhibitImageUrl(exhibit, props.row.imageCacheKey);
   const synthesizeTarget = useMemo<PrismRefractMagicTarget>(
     () => ({
-      id: `debate-archive-exhibit-synth:${exhibit.id}`,
+      id: `debate-archive-exhibit-synth:${props.sessionId}:${exhibit.id}`,
       kind: "magic",
       label: `Re-synthesize ${exhibit.title}`,
       disabled: () => props.busy || props.synthesizing,

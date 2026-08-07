@@ -4,13 +4,27 @@ import type {
   DebatePlayerRole,
 } from "./debate.js";
 
+function estimatedAdvocateSpeakMs(content: string): number {
+  const normalized = content.trim().replace(/\s+/gu, " ");
+  if (!normalized) return 0;
+  const wordCount = normalized.split(" ").length;
+  const pauseCount = normalized.match(/[,.!?;:—]/gu)?.length ?? 0;
+  return Math.min(
+    60_000,
+    Math.max(1_400, Math.round(wordCount * 330 + pauseCount * 75)),
+  );
+}
+
 export type DebateAudiencePressureBand =
   "settled" | "murmuring" | "restless" | "disruptive";
 
 export type DebateAudiencePressureReaction =
   "attentive" | "concession" | "divided" | "evidence" | "question" | null;
 
-export type DebateAudienceModeratorOrderReason = "shock" | "disruptive";
+export type DebateAudienceModeratorOrderReason =
+  | "shock"
+  | "disruptive"
+  | "sustained";
 
 export interface DebateAudienceModeratorOrderPlan {
   pressure: number;
@@ -18,6 +32,22 @@ export interface DebateAudienceModeratorOrderPlan {
 }
 
 export const DEBATE_AUDIENCE_INITIAL_PRESSURE = 12;
+
+/**
+ * Once the gallery has stayed restless/disruptive this long (estimated spoken
+ * ms since the last order), a bot Moderator should pause the floor and call order.
+ * Hotter Rowdiness intervenes sooner.
+ */
+export const DEBATE_AUDIENCE_SUSTAINED_ROWDY_MS = {
+  parliamentary: 42_000,
+  structured: 30_000,
+  plainspoken: 22_000,
+  heated: 12_000,
+  free_for_all: 7_500,
+} as const satisfies Record<DebateFormalityId, number>;
+
+/** Restless floor for sustained-order eligibility (meter band ≥ restless). */
+export const DEBATE_AUDIENCE_SUSTAINED_ROWDY_PRESSURE = 45;
 
 const DEBATE_AUDIENCE_EVENT_HEAT = {
   parliamentary: 5,
@@ -244,11 +274,17 @@ function liveMonologueAudienceSilenceFactor(args: {
   );
 }
 
+function eventIsAudienceOrderReset(event: DebateEventV1): boolean {
+  return (
+    event.gavelReason === "audience_order" ||
+    event.stepKey === "audience_order"
+  );
+}
+
 function eventResetsAudiencePressure(event: DebateEventV1): boolean {
   return (
     event.kind === "judge_gavel" ||
-    event.gavelReason === "audience_order" ||
-    event.stepKey === "audience_order" ||
+    eventIsAudienceOrderReset(event) ||
     event.stepKey === "pause" ||
     event.stepKey === "resume"
   );
@@ -272,6 +308,11 @@ export function debateAudiencePressureScore(args: {
   activeEventId?: string | null;
   visibleCharacterCount?: number | null;
   resetAfterSequence?: number | null;
+  /**
+   * Keep gallery heat through an in-progress call-to-order so the bed stays
+   * rowdy under the moderator instead of collapsing to silence.
+   */
+  holdThroughOrder?: boolean;
   reactionForEvent?: (event: DebateEventV1) => DebateAudiencePressureReaction;
 }): number {
   // The public gallery reacts in every perspective; player role determines
@@ -296,7 +337,14 @@ export function debateAudiencePressureScore(args: {
     if (resetAfterSequence !== null && event.sequence <= resetAfterSequence) {
       continue;
     }
+    if (event.stepKey === "pause" || event.stepKey === "resume") {
+      score = 0;
+      continue;
+    }
     if (eventResetsAudiencePressure(event)) {
+      if (args.holdThroughOrder && eventIsAudienceOrderReset(event)) {
+        continue;
+      }
       score = 0;
       continue;
     }
@@ -399,6 +447,28 @@ export function debateAudienceModeratorOrderPlan(args: {
   }
   if (pressureBefore < 70 && pressure >= 70) {
     return { pressure, reason: "disruptive" };
+  }
+
+  // Already rowdy and staying rowdy: intervene after enough estimated speak-time
+  // so Daytime Showdown cannot sit loud forever without a call to order.
+  if (pressure >= DEBATE_AUDIENCE_SUSTAINED_ROWDY_PRESSURE) {
+    const sinceSequence = lastOrderSequence ?? 0;
+    const restlessSpeakMs = args.events
+      .filter(
+        (event) =>
+          event.sequence > sinceSequence &&
+          event.sequence <= triggerEvent.sequence &&
+          event.speakerKind === "advocate" &&
+          DEBATE_AUDIENCE_HEAT_EVENT_KINDS.has(event.kind) &&
+          event.interrupted !== true,
+      )
+      .reduce(
+        (sum, event) => sum + estimatedAdvocateSpeakMs(event.content),
+        0,
+      );
+    if (restlessSpeakMs >= DEBATE_AUDIENCE_SUSTAINED_ROWDY_MS[args.formality]) {
+      return { pressure, reason: "sustained" };
+    }
   }
   return null;
 }

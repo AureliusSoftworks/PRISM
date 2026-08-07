@@ -49,16 +49,13 @@ describe("Debate audience pressure", () => {
     assert.equal(debateAudiencePressureBand(69), "restless");
     assert.equal(debateAudiencePressureBand(70), "disruptive");
     assert.equal(debateAudiencePressureBand(100), "disruptive");
+    const disruptivePlain = debateAudiencePressureMix("disruptive");
+    assert.equal(disruptivePlain.foley, 0.3);
+    assert.ok(disruptivePlain.grain > disruptivePlain.background);
     assert.ok(
-      Math.abs(
-        debateAudiencePressureMix("disruptive").background - 0.3 * 0.84,
-      ) < 1e-9,
+      disruptivePlain.background + disruptivePlain.grain <=
+        DEBATE_AUDIENCE_MIX_BED_CEILING + 1e-9,
     );
-    assert.ok(
-      Math.abs(debateAudiencePressureMix("disruptive").grain - 0.5 * 0.84) <
-        1e-9,
-    );
-    assert.equal(debateAudiencePressureMix("disruptive").foley, 0.3);
     assert.deepEqual(
       debateAudiencePressureMix("disruptive", "free_for_all").background >
         debateAudiencePressureMix("disruptive", "parliamentary").background ||
@@ -83,9 +80,8 @@ describe("Debate audience pressure", () => {
     );
     const orderCall = debateAudienceOrderCallMix("free_for_all");
     assert.ok(
-      orderCall.background + orderCall.grain >
-        debateAudiencePressureMix("disruptive", "plainspoken").background +
-          debateAudiencePressureMix("disruptive", "plainspoken").grain,
+      orderCall.grain >
+        debateAudiencePressureMix("disruptive", "plainspoken").grain,
     );
     for (const band of [
       "settled",

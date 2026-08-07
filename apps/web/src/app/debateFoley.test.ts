@@ -559,7 +559,7 @@ describe("Debate moderator gavel", () => {
     );
   });
 
-  it("calls the room to order only after moderator rulings and bot verdicts", () => {
+  it("calls the room to order after moderator rulings and bot verdicts without a hush bed", () => {
     const ruling = debateEvent("moderator_ruling", {
       speakerKind: "moderator",
       speakerBotId: "moderator",
@@ -573,7 +573,6 @@ describe("Debate moderator gavel", () => {
       {
         eventId: ruling.id,
         kind: "order",
-        audienceReaction: "order",
       },
     );
     assert.deepEqual(
@@ -589,7 +588,6 @@ describe("Debate moderator gavel", () => {
       {
         eventId: "event:moderator_ruling",
         kind: "order",
-        audienceReaction: "order",
       },
     );
     const verdict = debateEvent("verdict");

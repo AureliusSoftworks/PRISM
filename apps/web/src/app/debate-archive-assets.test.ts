@@ -20,6 +20,11 @@ describe("Debate archive Assets panel", () => {
   it("wires Archive Assets, soft re-synth, and magenta cleanup controls", () => {
     assert.match(archiveModalSource, /archiveAssetSynthSpinner/u);
     assert.match(archiveModalSource, /synthesizingExhibitIds/u);
+    assert.match(archiveModalSource, /archiveExhibitBusyKey/u);
+    assert.match(
+      debateSource,
+      /archiveExhibitBusyKey\(\s*session\.id,\s*exhibit\.id\s*\)/u,
+    );
     assert.doesNotMatch(archiveModalSource, /Synthesizing…/u);
     assert.match(archiveModalSource, /kind: "magic"/u);
     assert.match(archiveModalSource, /DebateExhibitMagentaControls/u);
