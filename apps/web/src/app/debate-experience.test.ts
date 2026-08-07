@@ -290,7 +290,16 @@ describe("Debate experience", () => {
     assert.match(source, /debateGalleryArrivalMurmurGain/u);
     assert.match(source, /prestart-murmur/u);
     assert.match(source, /opening-hush/u);
-    assert.match(source, /DEBATE_AUDIENCE_PRESTART_MURMUR_MIX/u);
+        assert.match(source, /DEBATE_AUDIENCE_PRESTART_MURMUR_MIX/u);
+    assert.match(source, /debateThinkingSfxAllowed/u);
+    assert.match(
+      source,
+      /const thinkingBotId = !debateThinkingSfxAllowed\s*\?\s*null/u,
+    );
+    assert.match(
+      source,
+      /galleryMixBranch === "prestart-murmur" && galleryArriving/u,
+    );
     assert.match(source, /judgeGavelSmashRef\.current\?\.\("order"\)/u);
     assert.doesNotMatch(source, /setDebateOpeningFade\(true\)/u);
     assert.match(css, /\.live \.identOverlay\s*\{[^}]*position:\s*absolute/u);

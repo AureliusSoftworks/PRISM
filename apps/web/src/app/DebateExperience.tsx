@@ -17575,15 +17575,25 @@ export function DebateExperience(
       props.presenceBeat.completion === "playing"
         ? props.presenceBeat.speaker.botId
         : null;
-    const thinkingBotId = responseCueSpeakerBotId
+    // Gallery fill / ready hold / opening hush must stay free of avatar
+    // thinking loops so the murmur swell and gavel call can lead the room.
+    const debateThinkingSfxAllowed =
+      !galleryArriving &&
+      !readyToBeginOverlay &&
+      !debateOpeningGalleryHushed;
+    const thinkingBotId = !debateThinkingSfxAllowed
       ? null
-      : (voicePreparationSpeakerBotId ??
-        (participantInputRole && participantPlayerBotId
-          ? participantPlayerBotId
-          : busy && !presenting && session.status === "live"
-            ? debateExpectedBotId(session)
-            : null));
-    const juryThinkingBotId = pendingJuryThoughtBotId ?? thinkingBotId;
+      : responseCueSpeakerBotId
+        ? null
+        : (voicePreparationSpeakerBotId ??
+          (participantInputRole && participantPlayerBotId
+            ? participantPlayerBotId
+            : busy && !presenting && session.status === "live"
+              ? debateExpectedBotId(session)
+              : null));
+    const juryThinkingBotId = debateThinkingSfxAllowed
+      ? (pendingJuryThoughtBotId ?? thinkingBotId)
+      : null;
     const juryChamberVisible = cameraView === "jury";
     const participantJurySealed =
       session.jury.enabled &&
@@ -18002,14 +18012,16 @@ export function DebateExperience(
           }
           mix={galleryMixWithVolume}
           mixTransitionMs={
-            audiencePressureBandTrue === null &&
-            activeAudienceOrderResponse === null
-              ? 320
-              : activeAudienceOrderResponse
-                ? activeAudienceOrderResponse.returningRoomTone
-                  ? DEBATE_AUDIENCE_ORDER_RETURN_MS
-                  : 480
-                : DEBATE_AUDIENCE_PRESSURE_MIX_TRANSITION_MS
+            galleryMixBranch === "prestart-murmur" && galleryArriving
+              ? 140
+              : audiencePressureBandTrue === null &&
+                  activeAudienceOrderResponse === null
+                ? 320
+                : activeAudienceOrderResponse
+                  ? activeAudienceOrderResponse.returningRoomTone
+                    ? DEBATE_AUDIENCE_ORDER_RETURN_MS
+                    : 480
+                  : DEBATE_AUDIENCE_PRESSURE_MIX_TRANSITION_MS
           }
           preloadFoleyUrls={DEBATE_LIVE_FOLEY_PRELOAD_URLS}
           foleyRoomAcoustics={

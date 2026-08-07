@@ -467,6 +467,14 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
+      /gallery murmur starts quiet and swells with each arrival/u,
+    );
+    assert.match(
+      copy,
+      /bot thinking sounds stay muted until you begin/u,
+    );
+    assert.match(
+      copy,
       /Living Chamber title card plays over the chamber with the gallery still murmuring/u,
     );
     assert.match(

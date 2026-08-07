@@ -129,6 +129,9 @@ export function debateGallerySeatHasArrived(args: {
 /**
  * Murmur bed gain while the gallery fills — 0% empty, 100% when every NPC
  * seat has walked in. Player seat does not advance the ramp.
+ *
+ * Ease-out (sqrt) so early arrivals are clearly audible instead of staying
+ * near-silent for half the house, while the last seats still top out at full.
  */
 export function debateGalleryArrivalMurmurGain(args: {
   revealedCount: number;
@@ -137,5 +140,7 @@ export function debateGalleryArrivalMurmurGain(args: {
   const nonPlayer = Math.max(0, Math.floor(args.nonPlayerCount));
   if (nonPlayer <= 0) return 1;
   const revealed = Math.max(0, Math.floor(args.revealedCount));
-  return Math.min(1, Math.max(0, revealed / nonPlayer));
+  if (revealed <= 0) return 0;
+  const linear = Math.min(1, revealed / nonPlayer);
+  return Math.sqrt(linear);
 }

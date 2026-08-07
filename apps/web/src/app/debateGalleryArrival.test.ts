@@ -115,7 +115,7 @@ describe("debateGalleryArrival", () => {
     );
     assert.equal(
       debateGalleryArrivalMurmurGain({ revealedCount: 4, nonPlayerCount: 8 }),
-      0.5,
+      Math.sqrt(0.5),
     );
     assert.equal(
       debateGalleryArrivalMurmurGain({ revealedCount: 8, nonPlayerCount: 8 }),
@@ -124,6 +124,11 @@ describe("debateGalleryArrival", () => {
     assert.equal(
       debateGalleryArrivalMurmurGain({ revealedCount: 0, nonPlayerCount: 0 }),
       1,
+    );
+    // First seat is clearly above a linear 1/n step so gathering is audible.
+    assert.ok(
+      debateGalleryArrivalMurmurGain({ revealedCount: 1, nonPlayerCount: 8 }) >
+        1 / 8,
     );
   });
 });
