@@ -1015,6 +1015,11 @@ export interface DebateSessionCreateRequest {
   jury?: {
     enabled?: boolean;
     cadence?: DebateJuryCadence;
+    /**
+     * Optional preferred library bot ids in seat order. Null/omitted seats
+     * Surprise-fill at Start/Save. Max DEBATE_JURY_SIZE entries.
+     */
+    jurorBotIds?: Array<string | null>;
   };
   forumRounds?: {
     mode?: DebateForumRoundMode;
@@ -1138,6 +1143,8 @@ export interface DebateSessionListItemV1 {
   reasoningEffort?: ModelReasoningEffortPreference | null;
   /** Moderator + advocate cast colors for Coffee-style archive chips. */
   castColors?: string[];
+  /** Frozen object exhibits available for Archive Assets polish. */
+  exhibitCount: number;
 }
 
 export interface DebateDebriefChatMessageV1 {

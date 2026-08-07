@@ -2,9 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
   DEBATE_SCHEMA_VERSION,
+  type DebateSessionV1,
   type DebateSetupSuggestionV1,
 } from "@localai/shared";
-import { applyDebateSetupSuggestion } from "./debateExperienceState.ts";
+import {
+  applyDebateSetupSuggestion,
+  emptyPreferredJurorBotIds,
+  preferredJurorBotIdsFromSession,
+} from "./debateExperienceState.ts";
 
 function baseExhibits(): DebateSetupSuggestionV1["exhibits"] {
   return [
@@ -185,5 +190,36 @@ describe("applyDebateSetupSuggestion", () => {
     assert.equal(applied.cast.moderator, "bot-c");
     assert.equal(applied.cast.forAdvocate, "bot-a");
     assert.equal(applied.cast.againstAdvocate, "");
+  });
+});
+
+describe("preferred Jury seat helpers", () => {
+  it("starts every seat on Surprise", () => {
+    assert.deepEqual(emptyPreferredJurorBotIds(), [
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
+  });
+
+  it("restores library pins and leaves generic seats on Surprise", () => {
+    const session = {
+      jury: {
+        enabled: true,
+        jurors: [
+          { id: "juror-a", source: "library" },
+          { id: "prism-juror:evidence", source: "generic" },
+          { id: "juror-b", source: "library" },
+          { id: "missing", source: "library" },
+          { id: "juror-c", source: "library" },
+        ],
+      },
+    } as unknown as DebateSessionV1;
+    assert.deepEqual(
+      preferredJurorBotIdsFromSession(session, ["juror-a", "juror-b", "juror-c"]),
+      ["juror-a", null, "juror-b", null, "juror-c"],
+    );
   });
 });

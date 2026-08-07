@@ -1327,6 +1327,170 @@
   gap: 10px;
 }
 
+.castPickerBody {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr);
+  gap: 10px;
+  align-items: stretch;
+  min-width: 0;
+}
+
+.castPickerBody[data-hue-lens="true"] {
+  grid-template-columns: minmax(0, 1fr) 28px;
+  gap: 8px;
+}
+
+.castPickerGridShell {
+  min-width: 0;
+  min-height: 0;
+}
+
+.castPickerHueLens {
+  /* Five hard PRISM bands (P/R/I/S/M) — not a seamless rainbow blend. */
+  --cast-hue-p: var(--prism-p, #ff4d6d);
+  --cast-hue-r: var(--prism-r, #ff9f1c);
+  --cast-hue-i: var(--prism-i, #b7e63a);
+  --cast-hue-s: var(--prism-s, #2fd3e3);
+  --cast-hue-m: var(--prism-m, #7b5cff);
+  --cast-hue-track-edge: color-mix(in srgb, #fff 18%, transparent);
+  --cast-hue-thumb: #f7f4fb;
+  --cast-hue-ink: color-mix(in srgb, #100d17 82%, #fff);
+  --cast-hue-track: linear-gradient(
+    to bottom,
+    var(--cast-hue-p) 0%,
+    var(--cast-hue-p) 20%,
+    var(--cast-hue-r) 20%,
+    var(--cast-hue-r) 40%,
+    var(--cast-hue-i) 40%,
+    var(--cast-hue-i) 60%,
+    var(--cast-hue-s) 60%,
+    var(--cast-hue-s) 80%,
+    var(--cast-hue-m) 80%,
+    var(--cast-hue-m) 100%
+  );
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  justify-items: center;
+  align-items: center;
+  gap: 7px;
+  min-height: 0;
+  padding: 6px 0 4px;
+  color: var(--debate-studio-muted, #938b9f);
+  font: 720 0.58rem/1 system-ui, sans-serif;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.setup[data-theme="light"] .castPickerHueLens {
+  /* Deepen bands on light surfaces so lime/cyan stay readable. */
+  --cast-hue-p: color-mix(in srgb, var(--prism-p, #ff4d6d) 78%, #1c1524);
+  --cast-hue-r: color-mix(in srgb, var(--prism-r, #ff9f1c) 74%, #1c1524);
+  --cast-hue-i: color-mix(in srgb, var(--prism-i, #b7e63a) 62%, #1c1524);
+  --cast-hue-s: color-mix(in srgb, var(--prism-s, #2fd3e3) 70%, #1c1524);
+  --cast-hue-m: color-mix(in srgb, var(--prism-m, #7b5cff) 76%, #1c1524);
+  --cast-hue-track-edge: color-mix(in srgb, #241e2b 20%, transparent);
+  --cast-hue-thumb: #ffffff;
+  --cast-hue-ink: #241e2b;
+}
+
+.castPickerHueLens[data-active="true"] {
+  color: var(--debate-studio-ink, #f4f1f8);
+}
+
+.castPickerHueLens input[type="range"] {
+  appearance: none;
+  writing-mode: vertical-lr;
+  /* Native max sits at the top; JS flips so logical 0/P stays visually on top. */
+  direction: rtl;
+  width: 16px;
+  height: 100%;
+  min-height: 148px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: ns-resize;
+  opacity: 0.72;
+  transition: opacity 160ms ease;
+}
+
+.castPickerHueLens[data-active="true"] input[type="range"] {
+  opacity: 1;
+}
+
+.castPickerHueLens input[type="range"]::-webkit-slider-runnable-track {
+  appearance: none;
+  width: 5px;
+  border-radius: 999px;
+  background: var(--cast-hue-track);
+  box-shadow: inset 0 0 0 1px var(--cast-hue-track-edge);
+}
+
+.castPickerHueLens input[type="range"]::-moz-range-track {
+  width: 5px;
+  border: 0;
+  border-radius: 999px;
+  background: var(--cast-hue-track);
+  box-shadow: inset 0 0 0 1px var(--cast-hue-track-edge);
+}
+
+.castPickerHueLens input[type="range"]::-webkit-slider-thumb {
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  margin-left: -4.5px;
+  border: 2px solid var(--cast-hue-ink);
+  border-radius: 999px;
+  background: var(--cast-hue-thumb);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 0 12px color-mix(in srgb, var(--debate-studio-accent, #8f7cff) 38%, transparent);
+}
+
+.castPickerHueLens input[type="range"]::-moz-range-thumb {
+  width: 11px;
+  height: 11px;
+  border: 2px solid var(--cast-hue-ink);
+  border-radius: 999px;
+  background: var(--cast-hue-thumb);
+  box-shadow:
+    0 0 0 1px rgba(0, 0, 0, 0.35),
+    0 0 12px color-mix(in srgb, var(--debate-studio-accent, #8f7cff) 38%, transparent);
+}
+
+.castPickerHueLens input[type="range"]:focus-visible {
+  outline: 2px solid color-mix(in srgb, var(--prism-m, #7b5cff) 62%, transparent);
+  outline-offset: 3px;
+  border-radius: 999px;
+}
+
+.castPickerHueLens button {
+  appearance: none;
+  width: 22px;
+  height: 22px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, #fff 14%, transparent);
+  border-radius: 999px;
+  padding: 0;
+  color: var(--debate-studio-muted, #938b9f);
+  background: color-mix(in srgb, var(--debate-studio-surface, #15121c) 82%, transparent);
+  font: 720 0.8rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.castPickerHueLens button:hover:not(:disabled),
+.castPickerHueLens button:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--prism-m, #7b5cff) 58%, transparent);
+  color: var(--debate-studio-ink, #f4f1f8);
+}
+
+.castPickerHueLens button:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
 .castPickerGrid {
   width: 100% !important;
   max-height: 330px;
@@ -1562,6 +1726,7 @@
   --debate-against-color: #ff5f8f;
   --debate-moderator-color: #d9d2ff;
   --debate-active-color: #9c8cff;
+  position: relative;
   overflow-x: hidden;
 }
 
@@ -7208,6 +7373,88 @@
   color: #c2b7ff;
 }
 
+.jurySeatRow {
+  display: grid;
+  grid-template-columns: repeat(5, minmax(0, 1fr));
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.jurySeat {
+  position: relative;
+  min-width: 0;
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 10px;
+  background: rgba(8, 10, 18, 0.42);
+}
+
+.jurySeat[data-selected="true"] {
+  border-color: color-mix(in srgb, #9f8cff 58%, rgba(255, 255, 255, 0.2));
+  box-shadow: inset 0 0 0 1px rgba(159, 140, 255, 0.28);
+}
+
+.jurySeat[data-filled="true"] {
+  background: rgba(18, 16, 34, 0.72);
+}
+
+.jurySeatSelect {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+  width: 100%;
+  min-height: 58px;
+  padding: 8px 10px;
+  border: 0;
+  border-radius: inherit;
+  background: transparent;
+  color: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.jurySeatSelect small {
+  display: block;
+  color: rgba(214, 208, 255, 0.62);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.jurySeatSelect strong {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.jurySeat .castSlotClear {
+  position: absolute;
+  top: 4px;
+  right: 4px;
+}
+
+.jurySeatHint {
+  grid-column: 1 / -1;
+  margin: 2px 0 0;
+  color: rgba(214, 208, 255, 0.68);
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+.lobby[data-theme="light"] .jurySeat {
+  background: rgba(255, 255, 255, 0.58);
+  border-color: rgba(70, 58, 96, 0.16);
+}
+
+.lobby[data-theme="light"] .jurySeatSelect small,
+.lobby[data-theme="light"] .jurySeatHint {
+  color: #776e7e;
+}
+
 .lobby[data-theme="light"]
   :is(.proceedingPresets, .formalityControl, .juryToggle) {
   background: color-mix(in srgb, #fff 72%, transparent);
@@ -11692,6 +11939,205 @@
   background: color-mix(in srgb, #d89aad 9%, transparent);
 }
 
+.dashboard .archivePanel .archiveReuseButton:disabled {
+  opacity: 0.42;
+  cursor: not-allowed;
+}
+
+.archiveAssetsDialog {
+  width: min(720px, calc(100vw - 32px));
+  max-height: min(82dvh, 860px);
+  overflow: auto;
+  border-radius: 18px;
+  padding: 22px 22px 18px;
+  background:
+    linear-gradient(
+      160deg,
+      color-mix(in srgb, var(--debate-studio-panel, #1b1724) 92%, #2a2438),
+      color-mix(in srgb, #120f18 88%, #1d1828)
+    );
+  border: 1px solid color-mix(in srgb, var(--debate-studio-accent) 18%, transparent);
+  box-shadow: 0 24px 60px rgba(0, 0, 0, 0.45);
+  color: #f4f1f8;
+}
+
+.archiveAssetsHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 16px;
+  margin-bottom: 16px;
+}
+
+.archiveAssetsHeader h2 {
+  margin: 4px 0 8px;
+  font-size: 1.35rem;
+}
+
+.archiveAssetsHeader p:last-child {
+  margin: 0;
+  color: var(--debate-studio-muted, rgba(244, 241, 248, 0.68));
+  font-size: 0.92rem;
+  line-height: 1.45;
+  max-width: 52ch;
+}
+
+.archiveAssetsHeader > button {
+  border: 0;
+  background: transparent;
+  color: rgba(244, 241, 248, 0.72);
+  font-size: 1.4rem;
+  line-height: 1;
+  padding: 4px 8px;
+  cursor: pointer;
+}
+
+.archiveAssetsStatus {
+  margin: 12px 0 4px;
+  color: var(--debate-studio-muted, rgba(244, 241, 248, 0.68));
+}
+
+.archiveAssetsList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.archiveAssetCard {
+  display: grid;
+  grid-template-columns: 88px minmax(0, 1fr) auto;
+  gap: 14px;
+  align-items: center;
+  padding: 12px;
+  border-radius: 14px;
+  background: color-mix(in srgb, #ffffff 4%, transparent);
+  border: 1px solid color-mix(in srgb, #ffffff 8%, transparent);
+}
+
+.archiveAssetVisual {
+  width: 88px;
+  height: 88px;
+  border-radius: 12px;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  background:
+    radial-gradient(circle at 30% 20%, rgba(255, 0, 255, 0.12), transparent 55%),
+    color-mix(in srgb, #000 35%, transparent);
+  font-size: 2.4rem;
+}
+
+.archiveAssetVisual img {
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+}
+
+.archiveAssetCopy {
+  min-width: 0;
+}
+
+.archiveAssetCopy strong {
+  display: block;
+  margin-bottom: 4px;
+}
+
+.archiveAssetCopy p {
+  margin: 0 0 6px;
+  color: rgba(244, 241, 248, 0.78);
+  font-size: 0.9rem;
+  line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.archiveAssetCopy small {
+  color: var(--debate-studio-muted, rgba(244, 241, 248, 0.58));
+}
+
+.archiveAssetActions {
+  display: flex;
+  flex-direction: column;
+  align-items: stretch;
+  gap: 8px;
+  min-width: 148px;
+}
+
+.archiveAssetSynthSpinner {
+  display: grid;
+  place-items: center;
+  min-height: 34px;
+  padding: 8px 10px;
+}
+
+.archiveAssetSynthSpinnerWheel {
+  width: 16px;
+  height: 16px;
+  border-radius: 999px;
+  border: 2px solid color-mix(in srgb, var(--debate-studio-accent) 28%, transparent);
+  border-top-color: color-mix(in srgb, var(--debate-studio-accent) 82%, #fff 18%);
+  animation: debateArchiveAssetSpin 0.72s linear infinite;
+}
+
+@keyframes debateArchiveAssetSpin {
+  from {
+    transform: rotate(0deg);
+  }
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+.exhibitMagentaControls {
+  display: grid;
+  gap: 6px;
+}
+
+.exhibitMagentaControls > div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.exhibitMagentaControls button {
+  border: 0;
+  border-radius: 8px;
+  background: transparent;
+  color: color-mix(in srgb, #ff7ad9 70%, #fff);
+  padding: 6px 8px;
+  cursor: pointer;
+}
+
+.exhibitMagentaControls button:hover:not(:disabled) {
+  background: color-mix(in srgb, #ff7ad9 10%, transparent);
+}
+
+.exhibitMagentaControls button:disabled {
+  opacity: 0.45;
+  cursor: not-allowed;
+}
+
+.exhibitMagentaControls span {
+  color: var(--debate-studio-muted, rgba(244, 241, 248, 0.68));
+  font-size: 0.82rem;
+}
+
+@media (max-width: 720px) {
+  .archiveAssetCard {
+    grid-template-columns: 72px minmax(0, 1fr);
+  }
+
+  .archiveAssetActions {
+    grid-column: 1 / -1;
+    min-width: 0;
+  }
+}
+
 .dashboard .archivePanel .sessionOpen {
   padding: 8px;
 }
@@ -11766,6 +12212,14 @@
   background: #000;
   isolation: isolate;
   pointer-events: all;
+}
+
+/* Keep the Living Chamber card inside the Debate live viewport — never the
+   whole browser window. */
+.live .identOverlay {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
 }
 
 .identOverlay[data-kind="intro"] {

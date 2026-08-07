@@ -67,6 +67,22 @@ describe("Debate exhibit image guardrails", () => {
     assert.equal(corner[3], 0);
   });
 
+  it("runs automatic local magenta cleanup on generated exhibits only", () => {
+    const source = readFileSync(
+      new URL("../debate-exhibit-image.ts", import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /applyAutomaticMagentaCleanupPasses/u);
+    assert.match(
+      source,
+      /options\.generated[\s\S]*applyAutomaticMagentaCleanupPasses/u,
+    );
+    assert.doesNotMatch(
+      source,
+      /normalizeUploadedDebateExhibitImage[\s\S]*applyAutomaticMagentaCleanupPasses/u,
+    );
+  });
+
   it("accepts an uploaded PNG data URL and keeps a visible fallback subject", async () => {
     const source = await sharp({
       create: {
@@ -121,11 +137,26 @@ describe("Debate exhibit image guardrails", () => {
     );
     assert.match(synthesizeRoute, /waitForImageSlot\(\{/u);
     assert.match(synthesizeRoute, /signal: imageAbort\.signal/u);
+    assert.match(synthesizeRoute, /clientRequestId: clientRequestId \|\| null/u);
+    assert.match(synthesizeRoute, /ctx\.req\.once\("aborted", onClose\)/u);
     assert.doesNotMatch(synthesizeRoute, /tryAcquireImageSlot/u);
     assert.doesNotMatch(
       synthesizeRoute,
       /Another image is generating right now\. The evidence object is unchanged/u,
     );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/debates\/exhibits\/synthesize\/cancel"/u,
+    );
+    assert.match(
+      serverSource,
+      /route\("POST", "\/api\/debates\/exhibits\/synthesize\/cancel-all"/u,
+    );
+    assert.match(
+      serverSource,
+      /cancelImageSlotByClientRequestId\([\s\S]*?requestId/u,
+    );
+    assert.match(serverSource, /cancelDebateExhibitImageSlots\(userId\)/u);
     assert.match(
       serverSource,
       /source: "debate_exhibit"[\s\S]*?normalizeGeneratedDebateExhibitImage/u,

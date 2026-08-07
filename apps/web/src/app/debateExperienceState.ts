@@ -1,5 +1,6 @@
 import {
   DEBATE_EVIDENCE_SOURCE_MAX_COUNT,
+  DEBATE_JURY_SIZE,
   DEBATE_PLAYER_JUDGE_BOT_ID,
   DEBATE_PLAYER_PARTICIPANT_BOT_ID,
   DEBATE_SCHEMA_VERSION,
@@ -123,10 +124,35 @@ export interface DebateSessionRetryDraft {
   playerRole: DebatePlayerRole;
   playerSideId: "for" | "against";
   juryEnabled: boolean;
+  /** Seat-ordered preferred library juror ids; null = Surprise. */
+  preferredJurorBotIds: Array<string | null>;
   forumRoundMode: DebateForumRoundMode;
   forumRoundCount: number;
   evidence: DebateSessionV1["evidence"];
   missingBotNames: string[];
+}
+
+/** Empty five-seat Jury preference roster (all Surprise). */
+export function emptyPreferredJurorBotIds(): Array<string | null> {
+  return Array.from({ length: DEBATE_JURY_SIZE }, () => null);
+}
+
+/**
+ * Restore library Jury pins from a frozen session. Generic seats become Surprise.
+ */
+export function preferredJurorBotIdsFromSession(
+  session: DebateSessionV1,
+  availableBotIds: readonly string[],
+): Array<string | null> {
+  const seats = emptyPreferredJurorBotIds();
+  if (!session.jury.enabled) return seats;
+  const available = new Set(availableBotIds);
+  session.jury.jurors?.slice(0, DEBATE_JURY_SIZE).forEach((juror, index) => {
+    if (juror.source === "library" && available.has(juror.id)) {
+      seats[index] = juror.id;
+    }
+  });
+  return seats;
 }
 
 /**
@@ -188,6 +214,10 @@ export function debateSessionRetryDraft(
     playerRole: session.playerRole,
     playerSideId: session.playerSideId ?? "for",
     juryEnabled: session.jury.enabled,
+    preferredJurorBotIds: preferredJurorBotIdsFromSession(
+      session,
+      availableBotIds,
+    ),
     forumRoundMode: forumFormatState?.rebuttalRoundMode ?? "auto",
     forumRoundCount: forumFormatState?.rebuttalRoundTarget ?? 1,
     evidence: {

@@ -80,8 +80,9 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /\.signalBotDropdownHueLens input::-[^{]+\{[^}]*linear-gradient\([^}]*var\(--prism-p\)[^}]*var\(--prism-m\)/u,
+      /\.signalBotDropdownHueLens\s*\{[^}]*--signal-hue-track:\s*linear-gradient\([^}]*var\(--signal-hue-p\)[^}]*var\(--signal-hue-m\)/u,
     );
+    assert.match(css, /--signal-hue-p\) 0%,\s*var\(--signal-hue-p\) 20%/u);
     assert.match(
       css,
       /\.signalBotDropdownOption\s*\{[^}]*display:\s*flex;[^}]*--signal-picker-accent/u,

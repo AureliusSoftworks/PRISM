@@ -80,6 +80,8 @@ export type RunningImageJob = {
   userMessage: string;
   source: ImageJobSource;
   requestedSize: string;
+  /** Optional client-owned id so UI cancel can dequeue even if HTTP abort is lost. */
+  clientRequestId: string | null;
   startedAt: string;
   abortController: AbortController;
 };
@@ -94,6 +96,7 @@ type ImageSlotRequest = {
   userMessage: string;
   source: ImageJobSource;
   requestedSize?: string;
+  clientRequestId?: string | null;
   abortController?: AbortController;
 };
 
@@ -123,6 +126,14 @@ function createAbortError(): Error {
   return error;
 }
 
+function normalizeClientRequestId(
+  value: string | null | undefined,
+): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  return trimmed.length > 0 ? trimmed.slice(0, 160) : null;
+}
+
 function createRunningImageJob(args: ImageSlotRequest): RunningImageJob {
   return {
     id: randomUUID(),
@@ -135,9 +146,19 @@ function createRunningImageJob(args: ImageSlotRequest): RunningImageJob {
     userMessage: args.userMessage.trim(),
     source: args.source,
     requestedSize: args.requestedSize?.trim() || "1024x1024",
+    clientRequestId: normalizeClientRequestId(args.clientRequestId),
     startedAt: new Date().toISOString(),
     abortController: args.abortController ?? new AbortController(),
   };
+}
+
+function waitingMatchesClientRequestId(
+  waiting: WaitingImageSlotRequest,
+  clientRequestId: string,
+): boolean {
+  return (
+    normalizeClientRequestId(waiting.args.clientRequestId) === clientRequestId
+  );
 }
 
 function installRunningImageJob(job: RunningImageJob): void {
@@ -281,6 +302,88 @@ export async function releaseImageSlotIfOwned(
 ): Promise<boolean> {
   return mutexFor(userId).runExclusive(() => {
     return releaseRunningImageJob(userId, jobId);
+  });
+}
+
+/**
+ * Cancel waiting or running image-slot work by the client request id used when
+ * the soft job was enqueued. Used when UI cancel aborts the browser fetch but
+ * the Next proxy may still hold the upstream wait open.
+ */
+export async function cancelImageSlotByClientRequestId(
+  userId: string,
+  clientRequestIdRaw: string,
+): Promise<"waiting" | "running" | "missing"> {
+  const clientRequestId = normalizeClientRequestId(clientRequestIdRaw);
+  if (!clientRequestId) return "missing";
+  return mutexFor(userId).runExclusive(() => {
+    const queue = waitingByUser.get(userId);
+    if (queue) {
+      const index = queue.findIndex((waiting) =>
+        waitingMatchesClientRequestId(waiting, clientRequestId),
+      );
+      if (index >= 0) {
+        const [waiting] = queue.splice(index, 1);
+        if (queue.length === 0) waitingByUser.delete(userId);
+        if (waiting) {
+          waiting.signal.removeEventListener("abort", waiting.onAbort);
+          waiting.args.abortController?.abort();
+          waiting.reject(createAbortError());
+        }
+        return "waiting";
+      }
+    }
+
+    const running = runningByUser.get(userId);
+    if (
+      running &&
+      running.userId === userId &&
+      running.clientRequestId === clientRequestId
+    ) {
+      running.abortController.abort();
+      releaseRunningImageJob(userId, running.id);
+      completedWithOwner.delete(running.id);
+      return "running";
+    }
+    return "missing";
+  });
+}
+
+/**
+ * Cancel every waiting or running debate-exhibit soft sprite for a user.
+ * Returns how many waiting entries were removed and whether a running job
+ * was aborted.
+ */
+export async function cancelDebateExhibitImageSlots(
+  userId: string,
+): Promise<{ waitingRemoved: number; runningCancelled: boolean }> {
+  return mutexFor(userId).runExclusive(() => {
+    let waitingRemoved = 0;
+    const queue = waitingByUser.get(userId);
+    if (queue) {
+      const kept: WaitingImageSlotRequest[] = [];
+      for (const waiting of queue) {
+        if (waiting.args.source !== "debate_exhibit") {
+          kept.push(waiting);
+          continue;
+        }
+        waiting.signal.removeEventListener("abort", waiting.onAbort);
+        waiting.args.abortController?.abort();
+        waiting.reject(createAbortError());
+        waitingRemoved += 1;
+      }
+      if (kept.length === 0) waitingByUser.delete(userId);
+      else waitingByUser.set(userId, kept);
+    }
+
+    const running = runningByUser.get(userId);
+    if (running && running.source === "debate_exhibit") {
+      running.abortController.abort();
+      releaseRunningImageJob(userId, running.id);
+      completedWithOwner.delete(running.id);
+      return { waitingRemoved, runningCancelled: true };
+    }
+    return { waitingRemoved, runningCancelled: false };
   });
 }
 

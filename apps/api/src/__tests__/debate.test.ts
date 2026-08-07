@@ -32,6 +32,8 @@ import {
   generateDebateRefractDraft,
   getDebateSession,
   listDebateSessions,
+  listDebateSessionExhibitAssets,
+  attachDebateExhibitSprite,
   orderDebateAudience,
   pauseDebateSession,
   pauseDebateSessionWithPersona,
@@ -1645,6 +1647,78 @@ describe("Debate engine", () => {
     }
   });
 
+  it("lists exhibit counts and soft-attaches Archive exhibit sprites", async () => {
+    const db = createTestDb();
+    try {
+      const session = await createDebateForRole(db, "spectator", {
+        evidence: {
+          version: 1,
+          notes: "Rail-adjacent land is scarce.",
+          sources: [],
+          exhibits: [
+            {
+              id: "exhibit-1",
+              adjective: "Rusty",
+              object: "spoon",
+              title: "Rusty spoon",
+              observation: "The handle is bent.",
+              emoji: "🥄",
+              visualKind: "emoji",
+              imageId: null,
+              createdBy: "player",
+            },
+          ],
+          frozenAt: null,
+        },
+      });
+      assert.equal(listDebateSessions(db, "user-1")[0]?.exhibitCount, 1);
+      const before = listDebateSessionExhibitAssets(db, "user-1", session.id);
+      assert.equal(before.length, 1);
+      assert.equal(before[0]?.exhibit.visualKind, "emoji");
+      assert.equal(before[0]?.exhibit.imageId, null);
+
+      db.prepare(
+        `INSERT INTO images
+           (id, user_id, conversation_id, bot_id, related_bot_ids, origin, prompt,
+            revised_prompt, url, size, quality, provider, model, local_rel_path,
+            purpose, created_at)
+         VALUES (?, ?, NULL, NULL, '[]', 'debate', ?, ?, ?, '1024x1024',
+                 'standard', 'upload', 'player-upload', ?, 'debate_exhibit', ?)`,
+      ).run(
+        "exhibit-sprite-1",
+        "user-1",
+        "[Debate exhibit] Rusty spoon",
+        "[Debate exhibit] Rusty spoon",
+        "/api/images/exhibit-sprite-1/file",
+        "generated-images/user-1/exhibit-sprite-1.png",
+        NOW,
+      );
+
+      const attached = attachDebateExhibitSprite(
+        db,
+        "user-1",
+        session.id,
+        "exhibit-1",
+        "exhibit-sprite-1",
+      );
+      assert.equal(attached.evidence.exhibits?.[0]?.imageId, "exhibit-sprite-1");
+      assert.equal(attached.evidence.exhibits?.[0]?.visualKind, "synthesized");
+      assert.equal(attached.evidence.exhibits?.[0]?.emoji, "🥄");
+      assert.equal(attached.evidence.exhibits?.[0]?.observation, "The handle is bent.");
+
+      const after = listDebateSessionExhibitAssets(db, "user-1", session.id);
+      assert.equal(after[0]?.exhibit.imageId, "exhibit-sprite-1");
+      assert.match(serverSource, /\/api\/debates\/:id\/exhibits/u);
+      assert.match(
+        serverSource,
+        /\/api\/debates\/:id\/exhibits\/:exhibitId\/sprite/u,
+      );
+      assert.match(serverSource, /\/api\/assets\/for-image\/:imageId/u);
+    } finally {
+      db.close();
+    }
+  });
+
   it("freezes Auto candidates but records the fresh route on generated events", async () => {
     const db = createTestDb();
     try {
@@ -2181,6 +2255,85 @@ describe("Debate engine", () => {
         )?.setupPresetId,
         "custom",
       );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("pins preferred library jurors in seat order and Surprise-fills the rest", async () => {
+    const db = createTestDb();
+    try {
+      const debateRuntime = runtimeWith(new JuryProvider());
+      seedBot(db, "moderator", "Mira");
+      seedBot(db, "for", "Avery");
+      seedBot(db, "against", "Basil");
+      seedBot(db, "juror-1", "Library Juror 1");
+      seedBot(db, "juror-2", "Library Juror 2");
+      seedBot(db, "juror-3", "Library Juror 3");
+      seedBot(db, "juror-4", "Library Juror 4");
+      seedBot(db, "juror-5", "Library Juror 5");
+      const checks = await checkDebateAdvocacyRoles(
+        db,
+        "user-1",
+        {
+          format: "forum",
+          motion: MOTION,
+          formality: "plainspoken",
+          forAdvocateBotId: "for",
+          againstAdvocateBotId: "against",
+          playerRole: "spectator",
+          playerSideId: null,
+        },
+        debateRuntime,
+      );
+      const session = createDebateSession(
+        db,
+        "user-1",
+        {
+          presetId: "public-forum",
+          formality: "plainspoken",
+          format: "forum",
+          motion: MOTION,
+          evidence: {
+            version: 1,
+            notes: "",
+            sources: [],
+            frozenAt: null,
+          },
+          moderatorBotId: "moderator",
+          forAdvocateBotId: "for",
+          againstAdvocateBotId: "against",
+          playerRole: "spectator",
+          playerSideId: null,
+          jury: {
+            enabled: true,
+            cadence: "natural-five",
+            jurorBotIds: ["juror-2", null, "for", "juror-4", "missing-bot"],
+          },
+          advocacyConsent: checks,
+          preferredProvider: "local",
+          theme: "dark",
+          idempotencyKey: "create:jury:preferred-pins:0001",
+        },
+        debateRuntime,
+      );
+      assert.equal(session.jury.jurors.length, 5);
+      assert.equal(session.jury.jurors[0]?.id, "juror-2");
+      assert.equal(session.jury.jurors[3]?.id, "juror-4");
+      assert.equal(session.jury.forepersonBotId, "juror-2");
+      assert.notEqual(session.jury.jurors[2]?.id, "for");
+      assert.ok(
+        session.jury.jurors.every(
+          (juror) => !["moderator", "for", "against"].includes(juror.id),
+        ),
+      );
+      assert.equal(
+        new Set(session.jury.jurors.map((juror) => juror.id)).size,
+        5,
+      );
+      assert.ok(session.jury.jurors[1]);
+      assert.ok(session.jury.jurors[2]);
+      assert.ok(session.jury.jurors[4]);
     } finally {
       db.close();
     }

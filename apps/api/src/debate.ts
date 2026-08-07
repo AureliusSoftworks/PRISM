@@ -101,6 +101,7 @@ import {
   type DebateEventKind,
   type DebateEventV1,
   type DebateEvidencePacketV1,
+  type DebateEvidenceExhibitV1,
   type DebateEvidenceSourceV1,
   type DebateFormalityId,
   type DebateForumFormatStateV1,
@@ -181,6 +182,7 @@ import {
   resolvePromptWildcardsWithModel,
   type PromptBotWildcardCandidate,
 } from "./prompt-wildcards.ts";
+import { getImageAssetSetForImage } from "./image-asset-library.ts";
 import { HttpError } from "./utils.http.ts";
 import {
   prepareMessagesWithSimulatedEffort,
@@ -663,6 +665,114 @@ function sampledDebateJurors(
       genericJurorSnapshot(definition, lane, defaultVoiceProfile),
     );
   return shuffled([...library, ...generic]).slice(0, DEBATE_JURY_SIZE);
+}
+
+/**
+ * Build the five-seat Jury roster. Preferred library ids pin seats in order;
+ * null/invalid/duplicate/cast-excluded prefs Surprise-fill. All-Surprise keeps
+ * the legacy full reshuffle path.
+ */
+function resolveDebateJurors(
+  db: DatabaseSync,
+  userId: string,
+  excludedBotIds: readonly string[],
+  lane: DebateGenerationLane,
+  preferredJurorBotIds: readonly (string | null | undefined)[] | undefined,
+): DebateJurorSnapshotV1[] {
+  const preferredRaw = (preferredJurorBotIds ?? [])
+    .slice(0, DEBATE_JURY_SIZE)
+    .map((id) => (typeof id === "string" && id.trim() ? id.trim() : null));
+  while (preferredRaw.length < DEBATE_JURY_SIZE) preferredRaw.push(null);
+  const hasAnyPin = preferredRaw.some((id) => id !== null);
+  if (!hasAnyPin) {
+    return sampledDebateJurors(db, userId, excludedBotIds, lane);
+  }
+
+  const excluded = new Set(excludedBotIds);
+  const claimed = new Set<string>();
+  const seats: Array<DebateJurorSnapshotV1 | null> = Array.from(
+    { length: DEBATE_JURY_SIZE },
+    () => null,
+  );
+  const preferredIds = preferredRaw.filter(
+    (id): id is string => typeof id === "string",
+  );
+  const preferredRows = preferredIds.length
+    ? botRows(db, userId, preferredIds)
+    : [];
+  const preferredById = new Map(preferredRows.map((row) => [row.id, row]));
+
+  for (let index = 0; index < DEBATE_JURY_SIZE; index += 1) {
+    const preferredId = preferredRaw[index];
+    if (!preferredId || excluded.has(preferredId) || claimed.has(preferredId)) {
+      continue;
+    }
+    const row = preferredById.get(preferredId);
+    if (!row) continue;
+    seats[index] = libraryJurorSnapshot(row, lane);
+    claimed.add(preferredId);
+  }
+
+  const emptyIndexes = seats
+    .map((seat, index) => (seat ? -1 : index))
+    .filter((index) => index >= 0);
+  if (emptyIndexes.length === 0) {
+    return seats as DebateJurorSnapshotV1[];
+  }
+
+  const libraryFill = shuffled(
+    allLibraryBotRows(db, userId).filter(
+      (row) => !excluded.has(row.id) && !claimed.has(row.id),
+    ),
+  );
+  let libraryCursor = 0;
+  for (const index of emptyIndexes) {
+    const row = libraryFill[libraryCursor];
+    if (!row) break;
+    libraryCursor += 1;
+    seats[index] = libraryJurorSnapshot(row, lane);
+    claimed.add(row.id);
+  }
+
+  const stillEmpty = seats
+    .map((seat, index) => (seat ? -1 : index))
+    .filter((index) => index >= 0);
+  if (stillEmpty.length > 0) {
+    const defaultVoiceProfile = frozenPrismDefaultVoiceProfile(db, userId);
+    const genericFill = shuffled(
+      GENERIC_DEBATE_JURORS.filter((definition) => !claimed.has(definition.id)),
+    );
+    let genericCursor = 0;
+    for (const index of stillEmpty) {
+      const definition = genericFill[genericCursor];
+      if (!definition) break;
+      genericCursor += 1;
+      seats[index] = genericJurorSnapshot(
+        definition,
+        lane,
+        defaultVoiceProfile,
+      );
+      claimed.add(definition.id);
+    }
+  }
+
+  if (seats.some((seat) => seat === null)) {
+    return sampledDebateJurors(db, userId, excludedBotIds, lane);
+  }
+  return seats as DebateJurorSnapshotV1[];
+}
+
+function normalizePreferredJurorBotIds(
+  value: unknown,
+): Array<string | null> | undefined {
+  if (!Array.isArray(value)) return undefined;
+  const next = value
+    .slice(0, DEBATE_JURY_SIZE)
+    .map((entry) =>
+      typeof entry === "string" && entry.trim() ? entry.trim() : null,
+    );
+  while (next.length < DEBATE_JURY_SIZE) next.push(null);
+  return next.some((id) => id !== null) ? next : undefined;
 }
 
 function frozenPrismDefaultVoiceProfile(
@@ -2487,6 +2597,7 @@ export function listDebateSessions(
     let modelSelectionKind: DebateSessionListItemV1["modelSelectionKind"];
     let reasoningEffort: ModelReasoningEffortPreference | null = null;
     let castColors: string[] = [];
+    let exhibitCount = 0;
     try {
       const parsed = JSON.parse(row.session_json) as {
         format?: unknown;
@@ -2508,6 +2619,7 @@ export function listDebateSessions(
         moderator?: { color?: unknown };
         forAdvocate?: { color?: unknown };
         againstAdvocate?: { color?: unknown };
+        evidence?: { exhibits?: unknown };
       };
       if (isDebateFormatId(parsed.format)) format = parsed.format;
       formality = normalizeDebateFormalityId(parsed.formality);
@@ -2582,6 +2694,9 @@ export function listDebateSessions(
         provider = autoRoute.provider;
       }
       castColors = debateSessionListCastColors(parsed);
+      exhibitCount = Array.isArray(parsed.evidence?.exhibits)
+        ? parsed.evidence.exhibits.length
+        : 0;
     } catch {
       format = "forum";
     }
@@ -2621,6 +2736,7 @@ export function listDebateSessions(
       ...(modelSelectionKind ? { modelSelectionKind } : {}),
       reasoningEffort,
       castColors,
+      exhibitCount,
     };
   });
 }
@@ -2793,7 +2909,7 @@ export function createDebateSession(
         : "";
   const jury = juryEnabled
     ? initialDebateJuryState(
-        sampledDebateJurors(
+        resolveDebateJurors(
           db,
           userId,
           [
@@ -2803,6 +2919,7 @@ export function createDebateSession(
               : []),
           ],
           lane,
+          normalizePreferredJurorBotIds(request.jury?.jurorBotIds),
         ),
       )
     : defaultDebateJuryStateV1();
@@ -6448,7 +6565,7 @@ async function moderatorOvertimeCorrection(
   speechEvent: DebateEventV1,
   runtime: DebateAiRuntime,
   upcoming: DebateSessionV1,
-  audienceOrderReason?: "shock" | "disruptive",
+  audienceOrderReason?: "shock" | "disruptive" | "sustained",
 ): Promise<DebateEventV1> {
   const overtimeSeconds = Math.max(
     1,
@@ -6516,7 +6633,7 @@ async function moderatorOvertimeCorrection(
 
 function moderatorAudienceOrderFallback(
   session: DebateSessionV1,
-  reason: "shock" | "disruptive",
+  reason: "shock" | "disruptive" | "sustained",
 ): string {
   if (session.formality === "parliamentary") {
     return "Order. The chamber will come to order.";
@@ -6532,13 +6649,15 @@ function moderatorAudienceOrderFallback(
       ? "Order! Order in the room!"
       : "Order! Settle down!";
   }
-  return "ORDER! ORDER IN THE COURT!";
+  return reason === "sustained"
+    ? "ORDER! That's enough — settle down!"
+    : "ORDER! ORDER IN THE COURT!";
 }
 
 async function moderatorAudienceOrderCorrection(
   session: DebateSessionV1,
   speechEvent: DebateEventV1,
-  reason: "shock" | "disruptive",
+  reason: "shock" | "disruptive" | "sustained",
   runtime: DebateAiRuntime,
 ): Promise<DebateEventV1> {
   const fallback = moderatorAudienceOrderFallback(session, reason);
@@ -6550,7 +6669,9 @@ async function moderatorAudienceOrderCorrection(
       [
         reason === "shock"
           ? "The public gallery just gasped at the advocate's latest audible line."
-          : "The public gallery has become disruptive and is talking over the proceeding.",
+          : reason === "sustained"
+            ? "The public gallery has stayed rowdy and is still talking over the proceeding."
+            : "The public gallery has become disruptive and is talking over the proceeding.",
         "The gavel has already struck. Call the room to order in one firm, persona-shaped utterance of two to twelve words.",
         "Speak at ordinary projection. Never shout, yell, or describe yourself as shouting; the gavel carries the authority.",
         `A natural response may resemble ${JSON.stringify(fallback)}, but do not copy it unless it genuinely fits your voice.`,
@@ -12264,6 +12385,116 @@ export function deleteDebateSession(
     checked.idempotencyKey,
     [],
   );
+}
+
+export interface DebateExhibitAssetRowV1 {
+  exhibit: DebateEvidenceExhibitV1;
+  assetSetId: string | null;
+  magentaPassCount: number;
+  magentaUndoAvailable: boolean;
+}
+
+/**
+ * Archive Assets desk payload: exhibits plus magenta-pass bookkeeping for any
+ * attached stage sprite. Emoji-only exhibits still appear so soft re-synth can
+ * create a sprite later.
+ */
+export function listDebateSessionExhibitAssets(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+): DebateExhibitAssetRowV1[] {
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.status === "cancelled") {
+    throw new HttpError(409, "That Debate is no longer available.");
+  }
+  return (session.evidence.exhibits ?? []).map((exhibit) => {
+    const asset =
+      exhibit.imageId != null
+        ? getImageAssetSetForImage(db, userId, exhibit.imageId)
+        : null;
+    return {
+      exhibit,
+      assetSetId: asset?.id ?? null,
+      magentaPassCount: asset?.magentaPassCount ?? 0,
+      magentaUndoAvailable: asset?.magentaUndoAvailable ?? false,
+    };
+  });
+}
+
+/**
+ * Soft Archive / setup polish: swap only the stage sprite for one frozen
+ * exhibit. Title, observation, and emoji remain the evidence of record.
+ */
+export function attachDebateExhibitSprite(
+  db: DatabaseSync,
+  userId: string,
+  sessionId: string,
+  exhibitId: string,
+  imageId: string,
+): DebateSessionV1 {
+  const session = getDebateSession(db, userId, sessionId);
+  if (session.status === "cancelled") {
+    throw new HttpError(409, "That Debate is no longer available.");
+  }
+  const exhibits = session.evidence.exhibits ?? [];
+  const target = exhibits.find((exhibit) => exhibit.id === exhibitId);
+  if (!target) {
+    throw new HttpError(404, "That exhibit is not in this Debate.");
+  }
+  const image = db
+    .prepare(
+      `SELECT id
+         FROM images
+        WHERE id = ? AND user_id = ? AND origin = 'debate'
+          AND purpose = 'debate_exhibit'`,
+    )
+    .get(imageId, userId) as { id: string } | undefined;
+  if (!image) {
+    throw new HttpError(
+      400,
+      `The image for evidence exhibit "${target.title}" is unavailable.`,
+    );
+  }
+  const now = new Date().toISOString();
+  const next: DebateSessionV1 = {
+    ...session,
+    revision: session.revision + 1,
+    updatedAt: now,
+    evidence: {
+      ...session.evidence,
+      exhibits: exhibits.map((exhibit) =>
+        exhibit.id === exhibitId
+          ? {
+              ...exhibit,
+              visualKind: "synthesized",
+              imageId,
+            }
+          : exhibit,
+      ),
+    },
+  };
+  const result = db
+    .prepare(
+      `UPDATE debate_sessions
+          SET revision = ?, session_json = ?, updated_at = ?
+        WHERE id = ? AND user_id = ? AND revision = ?`,
+    )
+    .run(
+      next.revision,
+      serializeSessionState(next),
+      now,
+      session.id,
+      userId,
+      session.revision,
+    );
+  if (Number(result.changes) !== 1) {
+    throw new HttpError(
+      409,
+      "Debate changed while this exhibit sprite was being attached. Refresh and retry.",
+    );
+  }
+  return next;
 }
 
 export function restoreDeletedDebateSession(

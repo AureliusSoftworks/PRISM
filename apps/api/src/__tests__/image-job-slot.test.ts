@@ -3,6 +3,8 @@ import assert from "node:assert/strict";
 import type { ChatMessage } from "@localai/shared";
 import {
   conversationIdForImageGeneration,
+  cancelDebateExhibitImageSlots,
+  cancelImageSlotByClientRequestId,
   finishImageJob,
   peekActiveImageJobForUser,
   pollImageJobForUser,
@@ -213,6 +215,72 @@ describe("image-job-slot", () => {
     });
     waitingController.abort();
     await assert.rejects(waiting, (error: unknown) => {
+      return error instanceof Error && error.name === "AbortError";
+    });
+
+    await releaseImageSlotIfOwned(userId, first.job.id);
+    assert.equal(peekActiveImageJobForUser(userId), undefined);
+  });
+
+  it("dequeues waiting soft work by client request id without relying on abort", async () => {
+    const userId = "image-slot-client-cancel-user";
+    const first = await tryAcquireImageSlot(slotRequest(userId, "active"));
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    const waitingController = new AbortController();
+    const waiting = waitForImageSlot({
+      ...slotRequest(userId, "queued soft"),
+      clientRequestId: "exhibit-synth:queued-1",
+      signal: waitingController.signal,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const cancelled = await cancelImageSlotByClientRequestId(
+      userId,
+      "exhibit-synth:queued-1",
+    );
+    assert.equal(cancelled, "waiting");
+    await assert.rejects(waiting, (error: unknown) => {
+      return error instanceof Error && error.name === "AbortError";
+    });
+
+    await releaseImageSlotIfOwned(userId, first.job.id);
+    assert.equal(peekActiveImageJobForUser(userId), undefined);
+  });
+
+  it("cancels every waiting debate exhibit soft job for cancel-all", async () => {
+    const userId = "image-slot-debate-cancel-all";
+    const first = await tryAcquireImageSlot({
+      ...slotRequest(userId, "active"),
+      source: "images_panel",
+    });
+    assert.equal(first.ok, true);
+    if (!first.ok) return;
+
+    const controllerA = new AbortController();
+    const controllerB = new AbortController();
+    const waitingA = waitForImageSlot({
+      ...slotRequest(userId, "exhibit a"),
+      source: "debate_exhibit",
+      clientRequestId: "exhibit-synth:a",
+      signal: controllerA.signal,
+    });
+    const waitingB = waitForImageSlot({
+      ...slotRequest(userId, "exhibit b"),
+      source: "debate_exhibit",
+      clientRequestId: "exhibit-synth:b",
+      signal: controllerB.signal,
+    });
+    await new Promise<void>((resolve) => setImmediate(resolve));
+
+    const cancelled = await cancelDebateExhibitImageSlots(userId);
+    assert.equal(cancelled.waitingRemoved, 2);
+    assert.equal(cancelled.runningCancelled, false);
+    await assert.rejects(waitingA, (error: unknown) => {
+      return error instanceof Error && error.name === "AbortError";
+    });
+    await assert.rejects(waitingB, (error: unknown) => {
       return error instanceof Error && error.name === "AbortError";
     });
 

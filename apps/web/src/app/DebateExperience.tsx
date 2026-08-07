@@ -56,6 +56,7 @@ import {
   debateSpectatorAwaitingFirstWatch,
   normalizeBotAudioVoiceControl,
   normalizeBotAudioVoiceProfileV1,
+  hexToHsl,
   type DebateAdvocacyConsent,
   type DebateCaseCardV1,
   type DebateDebriefChatMessageV1,
@@ -102,6 +103,10 @@ import {
   liveBakeShouldResumeOnOpen,
 } from "./liveBakeClient";
 import { buildDebateArchiveChipVisualStyle } from "./debateArchiveChipGradient";
+import {
+  debateCastHueFromLensSliderInput,
+  debateCastLensSliderInputValue,
+} from "./debateCastHueLens";
 import { MODEL_EFFORT_ICON_PATHS } from "./modelEffortControl";
 import {
   PrismRefractTarget,
@@ -118,6 +123,15 @@ import {
   waitForModelPreparation,
 } from "./modelPreparation";
 import { AssetRail } from "./AssetLibrary";
+import {
+  DebateArchiveAssetsModal,
+  useDebateArchiveExhibitRows,
+  type DebateArchiveExhibitRow,
+} from "./DebateArchiveAssetsModal";
+import {
+  DebateExhibitMagentaControls,
+  loadDebateExhibitMagentaState,
+} from "./DebateExhibitMagentaControls";
 import styles from "./DebateExperience.module.css";
 import { debateLiveCaptionPage } from "./debateLiveCaption";
 import type { DebateForumRole } from "./DebateForumScene";
@@ -132,6 +146,7 @@ import {
   debateRoomPresence,
   debateSessionRetryDraft,
   derivedDebateSetupPresetId,
+  emptyPreferredJurorBotIds,
   mergeDebateEvidenceSources,
   randomDebateCast,
   randomDebatePlayerJudgeCast,
@@ -353,6 +368,7 @@ import {
   BotPickerTile,
   BotPickerToolbar,
   filterBotPickerItems,
+  sortBotPickerItems,
   type BotPickerGroup,
   type BotPickerGlyphRenderer,
 } from "./BotPicker";
@@ -398,7 +414,6 @@ import { debateEvidencePropRotationDeg } from "./debateEvidenceProp";
 import {
   DEBATE_IDENT_AUDIO,
   DEBATE_IDENT_OUTRO_LEAD_MS,
-  DEBATE_OPENING_CHAMBER_FADE_MS,
   playDebateIdentAudio,
   setDebateIdentAudioVolume,
   stopDebateIdentAudio,
@@ -1169,6 +1184,12 @@ const DEBATE_AUDIENCE_IDLE_MIX = {
   ...DEBATE_FOLEY_MIX,
   background: 0.42,
 } as const satisfies SessionAtmosphereMix;
+/** Full-house murmur while seats are filled / title card plays before the gavel. */
+const DEBATE_AUDIENCE_PRESTART_MURMUR_MIX = {
+  background: 0.58,
+  grain: 0.16,
+  foley: 0.34,
+} as const satisfies SessionAtmosphereMix;
 /** Opening call to order — murmur bed drops out after the gavel. */
 const DEBATE_AUDIENCE_OPENING_HUSH_MIX = {
   background: 0,
@@ -1928,6 +1949,26 @@ function requestBody(value: unknown): RequestInit {
   return { method: "POST", body: JSON.stringify(value) };
 }
 
+/** Usable chromatic hue for cast hue-lens sorting; grayscale/null stay unsorted. */
+function debateCastBotHue(bot: {
+  color: string | null;
+}): number | null {
+  const raw = bot.color?.trim();
+  if (!raw) return null;
+  try {
+    const { h, s } = hexToHsl(raw);
+    if (s < 8) return null;
+    return h;
+  } catch {
+    return null;
+  }
+}
+
+function debateCircularHueDistance(left: number, right: number): number {
+  const delta = Math.abs(left - right) % 360;
+  return Math.min(delta, 360 - delta);
+}
+
 function debateRequestIsRevisionConflict(error: unknown): boolean {
   return (
     error instanceof Error &&
@@ -2216,12 +2257,22 @@ function roleSummary(
 
 function juryRoleDescription(role: DebatePlayerRole): string {
   if (role === "judge") {
-    return "Five sampled jurors follow the floor, discuss the case, and advise your final ruling.";
+    return "Five seats default to Surprise. Pin any seat from the Library; the rest sample in. Jurors advise your final ruling.";
   }
   if (role === "participant") {
     return "The chamber remains completely sealed. You receive only the winning side and anonymous 5-vote split.";
   }
-  return "Watch five sampled jurors follow and discuss the case. Their majority becomes the final verdict.";
+  return "Five seats default to Surprise. Pin any seat from the Library; the rest sample in. Their majority becomes the final verdict.";
+}
+
+function debateSetupJuryReadout(
+  juryEnabled: boolean,
+  preferredJurorBotIds: readonly (string | null)[],
+): string {
+  if (!juryEnabled) return " · Jury off";
+  const chosen = preferredJurorBotIds.filter(Boolean).length;
+  if (chosen <= 0) return " · Jury on · Surprise";
+  return ` · Jury on · ${chosen} chosen`;
 }
 
 function verdictLabel(session: DebateSessionV1): string {
@@ -2937,10 +2988,11 @@ const DebateStreamingTranscriptArticle = memo(
 
 function debateEvidenceExhibitImageUrl(
   exhibit: DebateEvidenceExhibitV1,
+  cacheKey?: string,
 ): string | null {
-  return exhibit.imageId
-    ? `/api/images/${encodeURIComponent(exhibit.imageId)}/file`
-    : null;
+  if (!exhibit.imageId) return null;
+  const base = `/api/images/${encodeURIComponent(exhibit.imageId)}/file`;
+  return cacheKey ? `${base}?v=${encodeURIComponent(cacheKey)}` : base;
 }
 
 function debateEvidenceSourceHost(source: DebateEvidenceSourceV1): string {
@@ -2954,14 +3006,16 @@ function debateEvidenceSourceHost(source: DebateEvidenceSourceV1): string {
 function DebateEvidenceExhibitVisual({
   exhibit,
   className,
+  imageCacheKey,
 }: {
   exhibit: DebateEvidenceExhibitV1;
   className?: string;
+  imageCacheKey?: string;
 }): React.JSX.Element {
   const imageUrl =
     exhibit.visualKind === "emoji"
       ? null
-      : debateEvidenceExhibitImageUrl(exhibit);
+      : debateEvidenceExhibitImageUrl(exhibit, imageCacheKey);
   return (
     <span
       className={`${styles.evidenceExhibitVisual} ${className ?? ""}`}
@@ -3508,9 +3562,19 @@ export function DebateExperience(
   const [activeCastSlot, setActiveCastSlot] =
     useState<DebateCastSlot>("forAdvocate");
   const [castPickerSearch, setCastPickerSearch] = useState("");
+  const [castHueLensCenter, setCastHueLensCenter] = useState<number | null>(
+    null,
+  );
+  const castPickerGridShellRef = useRef<HTMLDivElement | null>(null);
   const [castPickerGroupId, setCastPickerGroupId] = useState("all");
   const [playerRole, setPlayerRole] = useState<DebatePlayerRole>("judge");
   const [juryEnabled, setJuryEnabled] = useState(false);
+  const [preferredJurorBotIds, setPreferredJurorBotIds] = useState<
+    Array<string | null>
+  >(() => emptyPreferredJurorBotIds());
+  const [activeJurySeatIndex, setActiveJurySeatIndex] = useState<number | null>(
+    null,
+  );
   const [playerSideId, setPlayerSideId] = useState<DebateSideId>("for");
   const [roleChecks, setRoleChecks] = useState<DebateAdvocacyConsent[]>([]);
   const [evidence, setEvidence] =
@@ -3554,6 +3618,7 @@ export function DebateExperience(
       {
         draftInstanceId: string;
         exhibitId: string | null;
+        archiveSessionId: string | null;
         discarded: boolean;
         abort: AbortController;
       }
@@ -3567,6 +3632,30 @@ export function DebateExperience(
   const evidenceItemTotal = debateEvidenceItemCount(evidence);
   const evidenceItemLimitReached =
     evidenceItemTotal >= DEBATE_EVIDENCE_ITEM_MAX_COUNT;
+  const [archiveAssetsSession, setArchiveAssetsSession] =
+    useState<DebateSessionListItemV1 | null>(null);
+  const [archiveSynthesizingExhibitIds, setArchiveSynthesizingExhibitIds] =
+    useState<ReadonlySet<string>>(() => new Set());
+  const [setupExhibitMagenta, setSetupExhibitMagenta] = useState<{
+    assetSetId: string | null;
+    magentaPassCount: number;
+    magentaUndoAvailable: boolean;
+    imageCacheKey?: string;
+  }>({
+    assetSetId: null,
+    magentaPassCount: 0,
+    magentaUndoAvailable: false,
+  });
+  const {
+    rows: archiveAssetRows,
+    setRows: setArchiveAssetRows,
+    loading: archiveAssetsLoading,
+    loadError: archiveAssetsLoadError,
+    reload: reloadArchiveAssets,
+  } = useDebateArchiveExhibitRows(
+    archiveAssetsSession?.id ?? null,
+    props.request,
+  );
   const [playerDraft, setPlayerDraft] = useState("");
   const [turnaboutObjecting, setTurnaboutObjecting] = useState(false);
   const [turnaboutEvidenceSourceId, setTurnaboutEvidenceSourceId] =
@@ -3758,7 +3847,6 @@ export function DebateExperience(
   const [gavelCameraSettling, setGavelCameraSettling] = useState(false);
   const [debateIdentPlaying, setDebateIdentPlaying] =
     useState<DebateIdentKind | null>(null);
-  const [debateOpeningFade, setDebateOpeningFade] = useState(false);
   /** After the opening gavel, keep the gallery bed silent until speech begins. */
   const [debateOpeningGalleryHushed, setDebateOpeningGalleryHushed] =
     useState(false);
@@ -4024,6 +4112,10 @@ export function DebateExperience(
     overtime: judgeCanCallTimeNow,
     cooldownRemainingMs: currentJudgeGavelCooldownRemainingMs,
   });
+  const holdAudienceOrderPressure =
+    audienceOrderResponse != null &&
+    audienceOrderResponse.sessionId === activeSession?.id &&
+    audienceOrderResponse.returningRoomTone !== true;
   const currentAudiencePressureScore = activeSession
     ? debateAudiencePressureScore({
         events: activeSession.events,
@@ -4044,6 +4136,7 @@ export function DebateExperience(
           audiencePressureReset?.sessionId === activeSession.id
             ? audiencePressureReset.resetAfterSequence
             : null,
+        holdThroughOrder: holdAudienceOrderPressure,
         reactionForEvent: (event) =>
           debateAudienceBeatForEvent({
             event,
@@ -5263,16 +5356,81 @@ export function DebateExperience(
   )
     ? castPickerGroupId
     : "all";
-  const visibleCastBots = useMemo(
-    () =>
-      filterBotPickerItems(
-        bots,
-        castPickerSearch,
-        effectiveCastPickerGroupId,
-        debatePickerGroups,
-      ),
-    [bots, castPickerSearch, debatePickerGroups, effectiveCastPickerGroupId],
-  );
+  const castHueLensAvailable = useMemo(() => {
+    let chromatic = 0;
+    for (const bot of bots) {
+      if (debateCastBotHue(bot) !== null) {
+        chromatic += 1;
+        if (chromatic >= 2) return true;
+      }
+    }
+    return false;
+  }, [bots]);
+  const visibleCastBots = useMemo(() => {
+    const filtered = filterBotPickerItems(
+      bots,
+      castPickerSearch,
+      effectiveCastPickerGroupId,
+      debatePickerGroups,
+    );
+    return sortBotPickerItems(
+      filtered,
+      castHueLensCenter !== null,
+      (left, right) => {
+        const leftHue = debateCastBotHue(left);
+        const rightHue = debateCastBotHue(right);
+        if (leftHue === null && rightHue !== null) return 1;
+        if (leftHue !== null && rightHue === null) return -1;
+        if (
+          leftHue !== null &&
+          rightHue !== null &&
+          castHueLensCenter !== null
+        ) {
+          const leftDistance = debateCircularHueDistance(
+            leftHue,
+            castHueLensCenter,
+          );
+          const rightDistance = debateCircularHueDistance(
+            rightHue,
+            castHueLensCenter,
+          );
+          if (leftDistance !== rightDistance) {
+            return leftDistance - rightDistance;
+          }
+          if (leftHue !== rightHue) return leftHue - rightHue;
+        }
+        return left.name.localeCompare(right.name, undefined, {
+          sensitivity: "base",
+        });
+      },
+    );
+  }, [
+    bots,
+    castHueLensCenter,
+    castPickerSearch,
+    debatePickerGroups,
+    effectiveCastPickerGroupId,
+  ]);
+
+  useEffect(() => {
+    if (castHueLensCenter === null || !castPickerGridShellRef.current) return;
+    let closestBotId: string | null = null;
+    let closestDistance = Number.POSITIVE_INFINITY;
+    for (const bot of visibleCastBots) {
+      const hue = debateCastBotHue(bot);
+      if (hue === null) continue;
+      const distance = debateCircularHueDistance(hue, castHueLensCenter);
+      if (distance < closestDistance) {
+        closestDistance = distance;
+        closestBotId = bot.id;
+      }
+    }
+    if (!closestBotId) return;
+    const tile = castPickerGridShellRef.current.querySelector<HTMLElement>(
+      `button[data-bot-id="${CSS.escape(closestBotId)}"]`,
+    );
+    tile?.scrollIntoView({ block: "nearest", inline: "nearest" });
+  }, [castHueLensCenter, visibleCastBots]);
 
   const startNewDebate = (): void => {
     setView("dashboard");
@@ -5303,6 +5461,8 @@ export function DebateExperience(
     setCastPickerGroupId("all");
     setPlayerRole("judge");
     setJuryEnabled(false);
+    setPreferredJurorBotIds(emptyPreferredJurorBotIds());
+    setActiveJurySeatIndex(null);
     setPlayerSideId("for");
     setRoleChecks([]);
     setEvidence(EMPTY_EVIDENCE);
@@ -5352,6 +5512,10 @@ export function DebateExperience(
           : "moderator",
     );
     setJuryEnabled(next.juryEnabled);
+    if (!next.juryEnabled) {
+      setPreferredJurorBotIds(emptyPreferredJurorBotIds());
+      setActiveJurySeatIndex(null);
+    }
     setRoleChecks(next.roleChecks);
   };
 
@@ -5363,8 +5527,10 @@ export function DebateExperience(
       (candidate) => candidate !== slot && cast[candidate] === botId,
     );
     if (duplicateSlot) return;
+    if (preferredJurorBotIds.includes(botId)) return;
     const nextCast = { ...cast, [slot]: botId };
     setCast(nextCast);
+    setActiveJurySeatIndex(null);
     setRoleChecks([]);
     const slotOrder = [...selectableCastSlots];
     const activeIndex = slotOrder.indexOf(slot);
@@ -5379,7 +5545,53 @@ export function DebateExperience(
     if (!selectableCastSlots.includes(slot)) return;
     setCast((current) => ({ ...current, [slot]: "" }));
     setRoleChecks([]);
+    setActiveJurySeatIndex(null);
     setActiveCastSlot(slot);
+  };
+
+  const assignBotToJurySeat = (seatIndex: number, botId: string): void => {
+    if (
+      !juryEnabled ||
+      seatIndex < 0 ||
+      seatIndex >= DEBATE_JURY_SIZE ||
+      !botById.get(botId)
+    ) {
+      return;
+    }
+    const floorIds = new Set(
+      selectableCastSlots.map((slot) => cast[slot]).filter(Boolean),
+    );
+    if (floorIds.has(botId)) return;
+    if (
+      preferredJurorBotIds.some(
+        (id, index) => index !== seatIndex && id === botId,
+      )
+    ) {
+      return;
+    }
+    setPreferredJurorBotIds((current) => {
+      const next = [...current];
+      while (next.length < DEBATE_JURY_SIZE) next.push(null);
+      next[seatIndex] = botId;
+      return next.slice(0, DEBATE_JURY_SIZE);
+    });
+    const nextSeat = Array.from({ length: DEBATE_JURY_SIZE }, (_, index) =>
+      index === seatIndex
+        ? botId
+        : (preferredJurorBotIds[index] ?? null),
+    ).findIndex((id, index) => index > seatIndex && id === null);
+    setActiveJurySeatIndex(nextSeat >= 0 ? nextSeat : seatIndex);
+  };
+
+  const clearJurySeat = (seatIndex: number): void => {
+    if (seatIndex < 0 || seatIndex >= DEBATE_JURY_SIZE) return;
+    setPreferredJurorBotIds((current) => {
+      const next = [...current];
+      while (next.length < DEBATE_JURY_SIZE) next.push(null);
+      next[seatIndex] = null;
+      return next.slice(0, DEBATE_JURY_SIZE);
+    });
+    setActiveJurySeatIndex(seatIndex);
   };
 
   const randomizeCast = (): void => {
@@ -5388,20 +5600,27 @@ export function DebateExperience(
         ? randomDebateCast(bots.map((bot) => bot.id))
         : randomDebatePlayerJudgeCast(bots.map((bot) => bot.id));
     if (!nextCast) return;
-    setCast((current) => {
-      if (playerRole === "judge") {
-        return { ...nextCast, moderator: current.moderator };
-      }
-      if (playerRole === "participant") {
-        return {
-          ...current,
-          moderator: nextCast.forAdvocate,
-          [participantPlayerCastSlot]: "",
-          [participantOpponentCastSlot]: nextCast.againstAdvocate,
-        };
-      }
-      return nextCast;
-    });
+    const resolvedCast =
+      playerRole === "judge"
+        ? { ...nextCast, moderator: cast.moderator }
+        : playerRole === "participant"
+          ? {
+              ...cast,
+              moderator: nextCast.forAdvocate,
+              [participantPlayerCastSlot]: "",
+              [participantOpponentCastSlot]: nextCast.againstAdvocate,
+            }
+          : nextCast;
+    setCast(resolvedCast);
+    const floorIds = new Set(
+      [resolvedCast.moderator, resolvedCast.forAdvocate, resolvedCast.againstAdvocate].filter(
+        Boolean,
+      ),
+    );
+    setPreferredJurorBotIds((current) =>
+      current.map((id) => (id && floorIds.has(id) ? null : id)),
+    );
+    setActiveJurySeatIndex(null);
     setRoleChecks([]);
     setActiveCastSlot(
       playerRole === "judge"
@@ -6093,6 +6312,8 @@ export function DebateExperience(
         setCast(applied.cast);
         setPlayerRole(applied.playerRole);
         setJuryEnabled(applied.juryEnabled);
+        setPreferredJurorBotIds(emptyPreferredJurorBotIds());
+        setActiveJurySeatIndex(null);
         setPlayerSideId(applied.playerSideId);
         setModeratorTitle(applied.moderatorTitle);
         setActiveCastSlot(
@@ -6539,6 +6760,12 @@ export function DebateExperience(
     }
     activeExhibitVisualRequestIdRef.current = null;
     setEvidenceObjectVisualBusy(null);
+    clearSoftExhibitSynthesizeJob(requestId);
+    void props
+      .request("/api/debates/exhibits/synthesize/cancel", {
+        ...requestBody({ requestId }),
+      })
+      .catch(() => undefined);
   };
 
   const cancelSoftExhibitSynthesizeJob = (requestId: string): void => {
@@ -6547,6 +6774,15 @@ export function DebateExperience(
       pending.discarded = true;
       pending.abort.abort();
       pendingExhibitSynthesizeRef.current.delete(requestId);
+      if (pending.archiveSessionId && pending.exhibitId) {
+        const exhibitId = pending.exhibitId;
+        setArchiveSynthesizingExhibitIds((current) => {
+          if (!current.has(exhibitId)) return current;
+          const next = new Set(current);
+          next.delete(exhibitId);
+          return next;
+        });
+      }
     }
     if (activeExhibitVisualRequestIdRef.current === requestId) {
       activeExhibitVisualRequestIdRef.current = null;
@@ -6555,6 +6791,13 @@ export function DebateExperience(
       );
     }
     clearSoftExhibitSynthesizeJob(requestId);
+    // Explicit dequeue: browser abort alone can leave the job waiting in the
+    // shared image-slot queue behind the Next proxy.
+    void props
+      .request("/api/debates/exhibits/synthesize/cancel", {
+        ...requestBody({ requestId }),
+      })
+      .catch(() => undefined);
   };
 
   const cancelSoftExhibitSynthesizeJobs = (): void => {
@@ -6568,6 +6811,10 @@ export function DebateExperience(
       current === "synthesize" ? null : current,
     );
     setSoftExhibitSynthesizeJobs([]);
+    setArchiveSynthesizingExhibitIds(new Set());
+    void props
+      .request("/api/debates/exhibits/synthesize/cancel-all", requestBody({}))
+      .catch(() => undefined);
   };
 
   const chooseEvidenceObjectEmoji = (emoji: string): void => {
@@ -6648,6 +6895,7 @@ export function DebateExperience(
     pendingExhibitSynthesizeRef.current.set(requestId, {
       draftInstanceId,
       exhibitId: editingExhibitIdRef.current,
+      archiveSessionId: null,
       discarded: false,
       abort,
     });
@@ -6671,6 +6919,7 @@ export function DebateExperience(
             preferredProvider: props.preferredImageProvider,
             responseMode: props.responseMode,
             direction,
+            requestId,
           }),
           signal: abort.signal,
         },
@@ -6722,6 +6971,84 @@ export function DebateExperience(
     }
   };
 
+  const synthesizeArchiveExhibitImage = async (
+    exhibit: DebateEvidenceExhibitV1,
+    direction = "",
+  ): Promise<void> => {
+    const session = archiveAssetsSession;
+    if (!session) return;
+    const requestId = `archive-exhibit-synth:${Date.now().toString(16)}:${Math.random()
+      .toString(16)
+      .slice(2)}`;
+    const abort = new AbortController();
+    pendingExhibitSynthesizeRef.current.set(requestId, {
+      draftInstanceId: `archive:${session.id}:${exhibit.id}`,
+      exhibitId: exhibit.id,
+      archiveSessionId: session.id,
+      discarded: false,
+      abort,
+    });
+    const startedAt = new Date().toISOString();
+    setArchiveSynthesizingExhibitIds((current) => {
+      if (current.has(exhibit.id)) return current;
+      const next = new Set(current);
+      next.add(exhibit.id);
+      return next;
+    });
+    setSoftExhibitSynthesizeJobs((current) => [
+      ...current.filter((job) => job.requestId !== requestId),
+      { requestId, title: exhibit.title, startedAt },
+    ]);
+    setError(null);
+    try {
+      const result = await props.request<{
+        image: { id: string; displayUrl: string };
+      }>(
+        "/api/debates/exhibits/synthesize",
+        {
+          ...requestBody({
+            adjective: exhibit.adjective,
+            object: exhibit.object,
+            preferredProvider: props.preferredImageProvider,
+            responseMode: props.responseMode,
+            direction,
+            requestId,
+          }),
+          signal: abort.signal,
+        },
+      );
+      const pending = pendingExhibitSynthesizeRef.current.get(requestId);
+      pendingExhibitSynthesizeRef.current.delete(requestId);
+      if (!pending || pending.discarded || !pending.archiveSessionId) return;
+      const attached = await props.request<{
+        exhibits: DebateArchiveExhibitRow[];
+      }>(
+        `/api/debates/${encodeURIComponent(pending.archiveSessionId)}/exhibits/${encodeURIComponent(exhibit.id)}/sprite`,
+        requestBody({ imageId: result.image.id }),
+      );
+      if (archiveAssetsSession?.id === pending.archiveSessionId) {
+        setArchiveAssetRows(attached.exhibits.map((row) => ({ ...row })));
+      }
+    } catch (caught) {
+      const pending = pendingExhibitSynthesizeRef.current.get(requestId);
+      pendingExhibitSynthesizeRef.current.delete(requestId);
+      if (pending?.discarded || abort.signal.aborted) return;
+      setError(
+        caught instanceof Error
+          ? caught.message
+          : "The exhibit sprite could not be re-synthesized.",
+      );
+    } finally {
+      clearSoftExhibitSynthesizeJob(requestId);
+      setArchiveSynthesizingExhibitIds((current) => {
+        if (!current.has(exhibit.id)) return current;
+        const next = new Set(current);
+        next.delete(exhibit.id);
+        return next;
+      });
+    }
+  };
+
   const beginEditingExhibit = (exhibit: DebateEvidenceExhibitV1): void => {
     evidenceObjectDraftInstanceIdRef.current = `edit:${exhibit.id}:${Date.now().toString(16)}`;
     editingExhibitIdRef.current = exhibit.id;
@@ -6732,6 +7059,21 @@ export function DebateExperience(
     setSourceDrawerId(null);
     setError(null);
   };
+
+  useEffect(() => {
+    const imageId = evidenceObjectDraft?.imageId ?? null;
+    let cancelled = false;
+    void loadDebateExhibitMagentaState(imageId).then((state) => {
+      if (cancelled) return;
+      setSetupExhibitMagenta({
+        ...state,
+        imageCacheKey: undefined,
+      });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [evidenceObjectDraft?.imageId]);
 
   const addEvidenceObject = (): void => {
     if (!evidenceObjectDraft) return;
@@ -7415,57 +7757,43 @@ export function DebateExperience(
             0,
             debateModeratorGavelSpeechLeadMs(gavelCue.kind) - orderCameraCutMs,
           );
-          // #region agent log
-          if (
+          const isGalleryOrderEvent =
             event.gavelReason === "audience_order" ||
-            event.stepKey === "audience_order" ||
-            (event.kind === "moderator_ruling" && gavelCue.kind === "order")
+            event.stepKey === "audience_order";
+          // Bot Moderator gallery-order rulings never hit the judge_gavel path —
+          // arm the rowdy peak here so the bed stays loud under the call.
+          if (
+            isGalleryOrderEvent &&
+            event.kind === "moderator_ruling" &&
+            !playedAudienceOrderCueIdsRef.current.has(event.id)
           ) {
-            const pressureNow = debateAudiencePressureScore({
-              events: next.events,
-              formality: next.formality,
-              playerRole: next.playerRole,
-              visibleThroughSequence: event.sequence,
-            });
-            const pressureBefore = debateAudiencePressureScore({
+            const played = new Set(playedAudienceOrderCueIdsRef.current);
+            played.add(event.id);
+            playedAudienceOrderCueIdsRef.current = played;
+            const pressureBeforeOrder = debateAudiencePressureScore({
               events: next.events,
               formality: next.formality,
               playerRole: next.playerRole,
               visibleThroughSequence: event.sequence - 1,
+              reactionForEvent: (candidate) =>
+                debateAudienceBeatForEvent({
+                  event: candidate,
+                  publicContent: candidate.content,
+                  seatCount: debateAudienceBotCount(props.graphicsQuality),
+                  maxReactingSeats: debateAudienceMaxReactingSeats(
+                    debateMaterialQuality,
+                    "contention",
+                  ),
+                })?.listenerReaction ?? null,
             });
-            fetch(
-              "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
-              {
-                method: "POST",
-                headers: {
-                  "Content-Type": "application/json",
-                  "X-Debug-Session-Id": "408330",
-                },
-                body: JSON.stringify({
-                  sessionId: "408330",
-                  runId: "gallery-rowdy",
-                  hypothesisId: "B-moderator-order-score-zero",
-                  location: "DebateExperience.tsx:gavelCue.preSpeech",
-                  message: "order-capable event before speech lead",
-                  data: {
-                    eventKind: event.kind,
-                    stepKey: event.stepKey ?? null,
-                    gavelReason: event.gavelReason ?? null,
-                    formality: next.formality,
-                    gavelCueKind: gavelCue.kind,
-                    audienceReaction: gavelCue.audienceReaction ?? null,
-                    pressureNow,
-                    pressureBefore,
-                    triggersJudgeOrderPath:
-                      event.kind === "judge_gavel" &&
-                      event.gavelReason === "audience_order",
-                  },
-                  timestamp: Date.now(),
-                }),
-              },
-            ).catch(() => {});
+            triggerAudienceOrderResponseRef.current?.({
+              eventId: event.id,
+              kind: pressureBeforeOrder >= 45 ? "hush" : "awkward",
+              performGavel: false,
+              resetAfterSequence: event.sequence,
+              sessionId: next.id,
+            });
           }
-          // #endregion
           await new Promise((resolve) =>
             window.setTimeout(resolve, remainingSpeechLeadMs),
           );
@@ -7506,30 +7834,6 @@ export function DebateExperience(
                 ),
               })?.listenerReaction ?? null,
           });
-          // #region agent log
-          fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-            method: "POST",
-            headers: {
-              "Content-Type": "application/json",
-              "X-Debug-Session-Id": "408330",
-            },
-            body: JSON.stringify({
-              sessionId: "408330",
-              runId: "gallery-rowdy",
-              hypothesisId: "A-judge-gavel-order",
-              location: "DebateExperience.tsx:judge_gavel.audience_order",
-              message: "judge gavel audience order response",
-              data: {
-                formality: next.formality,
-                pressureBeforeOrder,
-                kind: pressureBeforeOrder >= 45 ? "hush" : "awkward",
-                eventKind: event.kind,
-                gavelReason: event.gavelReason ?? null,
-              },
-              timestamp: Date.now(),
-            }),
-          }).catch(() => {});
-          // #endregion
           triggerAudienceOrderResponseRef.current?.({
             eventId: event.id,
             kind: pressureBeforeOrder >= 45 ? "hush" : "awkward",
@@ -8390,21 +8694,16 @@ export function DebateExperience(
       audienceReactionFoleyStartsRef.current = 0;
       try {
         if (options.playIntro) {
-          // Keep the pre-start murmur bed through the opening gavel, then hush
-          // the gallery before the Living Chamber intro and first spoken beat.
+          // Keep the gallery murmur loud through the Living Chamber title card.
+          // One curtain reveal (no second black fade), then the gavel hushes
+          // the house before the first spoken beat.
+          await playDebateIdent("intro");
+          if (presentationRunRef.current !== runId) return;
           judgeGavelSmashRef.current?.("order");
           if (mountedRef.current) setDebateOpeningGalleryHushed(true);
           await new Promise<void>((resolve) =>
             window.setTimeout(resolve, DEBATE_OPENING_GAVEL_SETTLE_MS),
           );
-          if (presentationRunRef.current !== runId) return;
-          await playDebateIdent("intro");
-          if (presentationRunRef.current !== runId) return;
-          if (mountedRef.current) setDebateOpeningFade(true);
-          await new Promise<void>((resolve) =>
-            window.setTimeout(resolve, DEBATE_OPENING_CHAMBER_FADE_MS),
-          );
-          if (mountedRef.current) setDebateOpeningFade(false);
           if (presentationRunRef.current !== runId) return;
         }
         if (mountedRef.current) setDebateOpeningGalleryHushed(false);
@@ -8427,7 +8726,6 @@ export function DebateExperience(
         }
       } finally {
         if (presentationRunRef.current === runId) {
-          setDebateOpeningFade(false);
           setDebateOpeningGalleryHushed(false);
           setVoicePreparationSpeakerBotId(null);
           setSpeakerHandoff(null);
@@ -8738,6 +9036,12 @@ export function DebateExperience(
       setPlayerRole(draft.playerRole);
       setPlayerSideId(draft.playerSideId);
       setJuryEnabled(draft.juryEnabled);
+      setPreferredJurorBotIds(
+        draft.preferredJurorBotIds.length === DEBATE_JURY_SIZE
+          ? draft.preferredJurorBotIds
+          : emptyPreferredJurorBotIds(),
+      );
+      setActiveJurySeatIndex(null);
       setRoleChecks([]);
       setEvidence(draft.evidence);
       setActiveCastSlot(
@@ -8806,6 +9110,13 @@ export function DebateExperience(
     jury: {
       enabled: juryEnabled,
       cadence: "natural-five",
+      ...(juryEnabled && preferredJurorBotIds.some((id) => id)
+        ? {
+            jurorBotIds: preferredJurorBotIds
+              .slice(0, DEBATE_JURY_SIZE)
+              .map((id) => id ?? null),
+          }
+        : {}),
     },
     forumRounds:
       format === "forum"
@@ -9901,42 +10212,6 @@ export function DebateExperience(
     }
     // Keep scored pressure hot under the call — reset only when room tone returns.
     setAudienceOrderResponse(response);
-    // #region agent log
-    const laughPath =
-      args.kind === "hush" &&
-      props.audioEnabled &&
-      props.audioVolume > 0 &&
-      !juryCameraActive;
-    const controllerReady = Boolean(debateAtmosphereControllerRef.current);
-    let laughPlayed: boolean | null = null;
-    let swellPlayed: boolean | null = null;
-    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "X-Debug-Session-Id": "408330",
-      },
-      body: JSON.stringify({
-        sessionId: "408330",
-        runId: "gallery-rowdy",
-        hypothesisId: "C-D-laugh-path",
-        location: "DebateExperience.tsx:triggerAudienceOrderResponse",
-        message: "audience order response armed",
-        data: {
-          kind: args.kind,
-          laughPath,
-          controllerReady,
-          audioEnabled: props.audioEnabled,
-          audioVolume: props.audioVolume,
-          juryCameraActive,
-          formality: activeSession?.formality ?? null,
-          livePressureScore: currentAudiencePressureScore,
-          livePressureBand: currentAudiencePressureBand,
-        },
-        timestamp: Date.now(),
-      }),
-    }).catch(() => {});
-    // #endregion
     if (audienceOrderResponseClearTimerRef.current !== null) {
       window.clearTimeout(audienceOrderResponseClearTimerRef.current);
     }
@@ -9945,47 +10220,36 @@ export function DebateExperience(
     }
     // Rowdy calls get a light laugh + agitation swell before the hush; quiet
     // awkward beats go straight to the order bed.
+    const laughPath =
+      args.kind === "hush" &&
+      props.audioEnabled &&
+      props.audioVolume > 0 &&
+      !juryCameraActive;
     if (laughPath) {
-      laughPlayed =
-        debateAtmosphereControllerRef.current?.playFoley(
-          DEBATE_AUDIENCE_REACTIONS.laugh.url,
-          {
-            trim: DEBATE_AUDIENCE_REACTIONS.laugh.trim * 0.42,
-            lowCutHz: 140,
-            highCutHz: 6_400,
-            stereoPan: -0.06,
-            tag: `debate-audience-laugh-into-order:${args.eventId}`,
-          },
-        ) ?? false;
-      swellPlayed =
-        debateAtmosphereControllerRef.current?.playFoley(
-          DEBATE_AUDIENCE_AGITATION_URL,
-          {
-            trim: 0.62,
-            lowCutHz: 90,
-            highCutHz: 8_200,
-            stereoPan: 0.05,
-            tag: `debate-audience-order-swell:${args.eventId}`,
-          },
-        ) ?? false;
-      // #region agent log
-      fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "X-Debug-Session-Id": "408330",
-        },
-        body: JSON.stringify({
-          sessionId: "408330",
-          runId: "gallery-rowdy",
-          hypothesisId: "C-foley-play",
-          location: "DebateExperience.tsx:triggerAudienceOrderResponse.foley",
-          message: "laugh/swell playFoley results",
-          data: { laughPlayed, swellPlayed, controllerReady },
-          timestamp: Date.now(),
-        }),
-      }).catch(() => {});
-      // #endregion
+      const playLaughSwell = (attempt: number): void => {
+        const controller = debateAtmosphereControllerRef.current;
+        if (!controller) {
+          if (attempt < 8) {
+            window.setTimeout(() => playLaughSwell(attempt + 1), 40);
+          }
+          return;
+        }
+        controller.playFoley(DEBATE_AUDIENCE_REACTIONS.laugh.url, {
+          trim: Math.min(1, DEBATE_AUDIENCE_REACTIONS.laugh.trim * 0.72),
+          lowCutHz: 140,
+          highCutHz: 6_400,
+          stereoPan: -0.06,
+          tag: `debate-audience-laugh-into-order:${args.eventId}`,
+        });
+        controller.playFoley(DEBATE_AUDIENCE_AGITATION_URL, {
+          trim: 0.78,
+          lowCutHz: 90,
+          highCutHz: 8_200,
+          stereoPan: 0.05,
+          tag: `debate-audience-order-swell:${args.eventId}`,
+        });
+      };
+      playLaughSwell(0);
       window.setTimeout(() => {
         playDebateAudienceReaction("order", args.eventId);
       }, 280);
@@ -10689,7 +10953,6 @@ export function DebateExperience(
     setSpectatorBake(null);
     setSpectatorBakeStartedAt(null);
     setSpectatorBakeLiveFallback(false);
-    setDebateOpeningFade(false);
     setDebateOpeningGalleryHushed(false);
     setEarlyEndOpen(false);
     setView("dashboard");
@@ -11124,6 +11387,25 @@ export function DebateExperience(
           </button>
           <button
             type="button"
+            className={styles.archiveReuseButton}
+            onClick={() => setArchiveAssetsSession(session)}
+            disabled={busy || (session.exhibitCount ?? 0) < 1}
+            data-tutorial-target="debate-archive-assets-open"
+            aria-label={
+              (session.exhibitCount ?? 0) < 1
+                ? `Assets unavailable for ${session.title} — no exhibits`
+                : `Open exhibit assets for ${session.title}`
+            }
+            title={
+              (session.exhibitCount ?? 0) < 1
+                ? "Add exhibits before opening Assets"
+                : "Show exhibits, soft re-synthesize, and magenta cleanup"
+            }
+          >
+            Assets
+          </button>
+          <button
+            type="button"
             className={styles.deleteButton}
             onClick={() => setPendingDeleteSession(session)}
             aria-label={`Delete ${session.motion}`}
@@ -11290,7 +11572,7 @@ export function DebateExperience(
           {format === "turnabout"
             ? " · action-driven"
             : ` · ${forumRoundMode === "auto" ? "Auto" : forumRoundPlan.count} ${forumRoundPlan.count === 1 ? "round" : "rounds"}`}
-          {juryEnabled ? " · Jury on" : " · Jury off"}
+          {debateSetupJuryReadout(juryEnabled, preferredJurorBotIds)}
         </small>
       </section>
     );
@@ -11536,6 +11818,37 @@ export function DebateExperience(
             </div>
           </section>
         </div>
+      ) : null}
+      {archiveAssetsSession ? (
+        <DebateArchiveAssetsModal
+          session={archiveAssetsSession}
+          rows={archiveAssetRows}
+          loading={archiveAssetsLoading}
+          loadError={archiveAssetsLoadError}
+          busy={busy}
+          synthesizingExhibitIds={archiveSynthesizingExhibitIds}
+          onClose={() => setArchiveAssetsSession(null)}
+          onRetry={() => void reloadArchiveAssets()}
+          onSynthesize={(exhibit, direction) =>
+            void synthesizeArchiveExhibitImage(exhibit, direction)
+          }
+          onMagenta={(exhibitId, next) => {
+            setArchiveAssetRows((current) =>
+              current.map((row) =>
+                row.exhibit.id === exhibitId
+                  ? {
+                      ...row,
+                      assetSetId: next.assetSetId,
+                      magentaPassCount: next.magentaPassCount,
+                      magentaUndoAvailable: next.magentaUndoAvailable,
+                      imageCacheKey: next.updatedAt,
+                    }
+                  : row,
+              ),
+            );
+          }}
+          onError={(message) => setError(message)}
+        />
       ) : null}
       {deleteUndo ? (
         <div className={styles.undoToast} role="status">
@@ -12171,6 +12484,7 @@ export function DebateExperience(
     <section
       className={`${styles.setupPanel} ${styles.dashboardPanel}`}
       data-debate-dashboard-section="cast"
+      data-tutorial-target="debate-cast"
     >
       <div className={styles.castStepHeader}>
         <div className={styles.setupCopy}>
@@ -12271,7 +12585,10 @@ export function DebateExperience(
                   aria-pressed={effectiveActiveCastSlot === key}
                   disabled={fixedSeat}
                   data-bot-id={bot && !fixedSeat ? bot.id : undefined}
-                  onClick={() => setActiveCastSlot(key)}
+                  onClick={() => {
+                    setActiveJurySeatIndex(null);
+                    setActiveCastSlot(key);
+                  }}
                 >
                   <span className={styles.castSlotGlyph} aria-hidden="true">
                     {bot
@@ -12313,32 +12630,60 @@ export function DebateExperience(
           onGroupChange={setCastPickerGroupId}
           resultLabel={`${visibleCastBots.length} bot${visibleCastBots.length === 1 ? "" : "s"}`}
         />
-        {visibleCastBots.length > 0 ? (
-          <BotPickerGrid
-            className={styles.castPickerGrid}
-            role="radiogroup"
-            ariaLabel={`Bot for ${
-              effectiveActiveCastSlot === "moderator"
-                ? visibleModeratorTitle
-                : effectiveActiveCastSlot === "forAdvocate"
-                  ? motion.forSide.label || "For advocate"
-                  : motion.againstSide.label || "Against advocate"
-            }`}
-            style={
-              {
-                "--tile-size": "82px",
-                "--tile-gap": "9px",
-                "--tile-hover-scale": "1.055",
-              } as CSSProperties
-            }
-          >
-            {visibleCastBots.map((bot) => {
-              const selected = cast[effectiveActiveCastSlot] === bot.id;
-              const otherSlot = selectableCastSlots.find(
+        <div
+          className={styles.castPickerBody}
+          data-hue-lens={castHueLensAvailable ? "true" : undefined}
+        >
+          {visibleCastBots.length > 0 ? (
+            <div
+              ref={castPickerGridShellRef}
+              className={styles.castPickerGridShell}
+            >
+              <BotPickerGrid
+                className={styles.castPickerGrid}
+                role="radiogroup"
+                ariaLabel={
+                  activeJurySeatIndex !== null
+                    ? `Bot for Jury seat ${activeJurySeatIndex + 1}`
+                    : `Bot for ${
+                        effectiveActiveCastSlot === "moderator"
+                          ? visibleModeratorTitle
+                          : effectiveActiveCastSlot === "forAdvocate"
+                            ? motion.forSide.label || "For advocate"
+                            : motion.againstSide.label || "Against advocate"
+                      }`
+                }
+                style={
+                  {
+                    "--tile-size": "82px",
+                    "--tile-gap": "9px",
+                    "--tile-hover-scale": "1.055",
+                  } as CSSProperties
+                }
+              >
+                {visibleCastBots.map((bot) => {
+              const selected =
+                activeJurySeatIndex !== null
+                  ? preferredJurorBotIds[activeJurySeatIndex] === bot.id
+                  : cast[effectiveActiveCastSlot] === bot.id;
+              const otherFloorSlot = selectableCastSlots.find(
                 (slot) =>
-                  slot !== effectiveActiveCastSlot && cast[slot] === bot.id,
+                  (activeJurySeatIndex !== null ||
+                    slot !== effectiveActiveCastSlot) &&
+                  cast[slot] === bot.id,
               );
-              const disabledReason = otherSlot ? "Already cast" : null;
+              const otherJurySeat =
+                preferredJurorBotIds.findIndex(
+                  (id, index) =>
+                    id === bot.id &&
+                    (activeJurySeatIndex === null ||
+                      index !== activeJurySeatIndex),
+                ) >= 0;
+              const disabledReason = otherFloorSlot
+                ? "Already cast"
+                : otherJurySeat
+                  ? "Already on Jury"
+                  : null;
               return (
                 <BotPickerTile
                   key={bot.id}
@@ -12385,16 +12730,54 @@ export function DebateExperience(
                     },
                     onClick: () => {
                       if (disabledReason) return;
+                      if (activeJurySeatIndex !== null) {
+                        assignBotToJurySeat(activeJurySeatIndex, bot.id);
+                        return;
+                      }
                       assignBotToCastSlot(effectiveActiveCastSlot, bot.id);
                     },
                   }}
                 />
               );
             })}
-          </BotPickerGrid>
-        ) : (
-          <p className={styles.castPickerEmpty}>No bots match this view.</p>
-        )}
+              </BotPickerGrid>
+            </div>
+          ) : (
+            <p className={styles.castPickerEmpty}>No bots match this view.</p>
+          )}
+          {castHueLensAvailable ? (
+            <div
+              className={styles.castPickerHueLens}
+              data-active={castHueLensCenter !== null ? "true" : undefined}
+              data-tutorial-target="debate-cast-hue-lens"
+            >
+              <span aria-hidden="true">Hue</span>
+              <input
+                type="range"
+                min={0}
+                max={359}
+                step={1}
+                value={debateCastLensSliderInputValue(castHueLensCenter)}
+                onChange={(event) =>
+                  setCastHueLensCenter(
+                    debateCastHueFromLensSliderInput(
+                      Number(event.currentTarget.value),
+                    ),
+                  )
+                }
+                aria-label="Browse Debate cast bots by hue"
+              />
+              <button
+                type="button"
+                onClick={() => setCastHueLensCenter(null)}
+                disabled={castHueLensCenter === null}
+                aria-label="Clear Debate cast hue lens"
+              >
+                ×
+              </button>
+            </div>
+          ) : null}
+        </div>
       </div>
       {moderatorHardMuted ? (
         <p className={styles.notice} role="status">
@@ -12414,7 +12797,8 @@ export function DebateExperience(
             <strong>Your seat &amp; the Jury</strong>
             <small>
               {playerRole.charAt(0).toUpperCase() + playerRole.slice(1)} ·{" "}
-              {visibleModeratorTitle} · Jury {juryEnabled ? "on" : "off"}
+              {visibleModeratorTitle}
+              {debateSetupJuryReadout(juryEnabled, preferredJurorBotIds)}
             </small>
           </span>
           <em>{castTuningOpen ? "Done" : "Change"}</em>
@@ -12486,7 +12870,16 @@ export function DebateExperience(
             <input
               type="checkbox"
               checked={juryEnabled}
-              onChange={(event) => setJuryEnabled(event.currentTarget.checked)}
+              onChange={(event) => {
+                const enabled = event.currentTarget.checked;
+                setJuryEnabled(enabled);
+                if (!enabled) {
+                  setPreferredJurorBotIds(emptyPreferredJurorBotIds());
+                  setActiveJurySeatIndex(null);
+                } else if (activeJurySeatIndex === null) {
+                  setActiveJurySeatIndex(0);
+                }
+              }}
             />
             <span className={styles.juryToggleControl} aria-hidden="true">
               <i />
@@ -12497,6 +12890,64 @@ export function DebateExperience(
             </span>
             <b>{juryEnabled ? "Enabled" : "Off"}</b>
           </label>
+          {juryEnabled ? (
+            <div
+              className={styles.jurySeatRow}
+              role="group"
+              aria-label="Jury seats"
+              data-tutorial-target="debate-jury-seats"
+            >
+              {Array.from({ length: DEBATE_JURY_SIZE }, (_, seatIndex) => {
+                const jurorId = preferredJurorBotIds[seatIndex] ?? null;
+                const juror = jurorId ? botById.get(jurorId) : null;
+                const selected = activeJurySeatIndex === seatIndex;
+                return (
+                  <article
+                    key={`jury-seat-${seatIndex}`}
+                    className={styles.jurySeat}
+                    data-selected={selected ? "true" : undefined}
+                    data-filled={juror ? "true" : undefined}
+                  >
+                    <button
+                      type="button"
+                      className={styles.jurySeatSelect}
+                      aria-pressed={selected}
+                      onClick={() => {
+                        setActiveJurySeatIndex(seatIndex);
+                      }}
+                    >
+                      <span className={styles.castSlotGlyph} aria-hidden="true">
+                        {juror
+                          ? props.renderBotGlyph(juror.glyph, {
+                              size: 26,
+                              strokeWidth: 1.65,
+                            })
+                          : "◇"}
+                      </span>
+                      <span>
+                        <small>Seat {seatIndex + 1}</small>
+                        <strong>{juror?.name ?? "Surprise"}</strong>
+                      </span>
+                    </button>
+                    {juror ? (
+                      <button
+                        type="button"
+                        className={styles.castSlotClear}
+                        aria-label={`Clear Jury seat ${seatIndex + 1}`}
+                        onClick={() => clearJurySeat(seatIndex)}
+                      >
+                        ×
+                      </button>
+                    ) : null}
+                  </article>
+                );
+              })}
+              <p className={styles.jurySeatHint}>
+                Leave seats on Surprise for a random house. Pin any seat from
+                the Library above.
+              </p>
+            </div>
+          ) : null}
           {playerRole === "participant" ? (
             <fieldset className={styles.sidePicker}>
               <legend>Your side</legend>
@@ -13077,7 +13528,10 @@ export function DebateExperience(
                 onClick={openEvidenceEmojiSearch}
                 disabled={evidenceObjectUploadBusy}
               >
-                <DebateEvidenceExhibitVisual exhibit={objectPreview} />
+                <DebateEvidenceExhibitVisual
+                  exhibit={objectPreview}
+                  imageCacheKey={setupExhibitMagenta.imageCacheKey}
+                />
               </button>
               <div>
                 <span>
@@ -13350,6 +13804,22 @@ export function DebateExperience(
                 </small>
               )}
             </div>
+            <DebateExhibitMagentaControls
+              imageId={evidenceObjectDraft.imageId}
+              assetSetId={setupExhibitMagenta.assetSetId}
+              magentaPassCount={setupExhibitMagenta.magentaPassCount}
+              magentaUndoAvailable={setupExhibitMagenta.magentaUndoAvailable}
+              disabled={evidenceObjectUploadBusy}
+              onApplied={(next) => {
+                setSetupExhibitMagenta({
+                  assetSetId: next.assetSetId,
+                  magentaPassCount: next.magentaPassCount,
+                  magentaUndoAvailable: next.magentaUndoAvailable,
+                  imageCacheKey: next.updatedAt,
+                });
+              }}
+              onError={(message) => setError(message)}
+            />
             <div className={styles.evidenceObjectCommitActions}>
               <button
                 type="button"
@@ -13558,7 +14028,7 @@ export function DebateExperience(
               : forumRoundMode === "auto"
                 ? `Auto · ${forumRoundPlan.count} ${forumRoundPlan.count === 1 ? "round" : "rounds"}`
                 : `${forumRoundPlan.count} fixed ${forumRoundPlan.count === 1 ? "round" : "rounds"}`}
-            {juryEnabled ? " · Jury on" : " · Jury off"}
+            {debateSetupJuryReadout(juryEnabled, preferredJurorBotIds)}
           </p>
         </article>
         <article data-ready={evidenceDecisionMade ? "true" : undefined}>
@@ -17309,7 +17779,7 @@ export function DebateExperience(
       ? "jury"
       : debateOpeningGalleryHushed
         ? "opening-hush"
-        : galleryPrestartMurmur
+        : galleryPrestartMurmur || debateIdentPlaying === "intro"
           ? "prestart-murmur"
           : debateIdentPlaying !== null
             ? "ident"
@@ -17327,7 +17797,7 @@ export function DebateExperience(
         : galleryMixBranch === "opening-hush"
           ? DEBATE_AUDIENCE_OPENING_HUSH_MIX
           : galleryMixBranch === "prestart-murmur"
-            ? DEBATE_AUDIENCE_IDLE_MIX
+            ? DEBATE_AUDIENCE_PRESTART_MURMUR_MIX
             : galleryMixBranch === "ident"
               ? DEBATE_FOLEY_MIX
               : galleryMixBranch === "order-peak"
@@ -17486,6 +17956,7 @@ export function DebateExperience(
       props.audioEnabled &&
       props.audioVolume > 0 &&
       (galleryPrestartMurmur ||
+        debateIdentPlaying === "intro" ||
         debateOpeningGalleryHushed ||
         presenting ||
         session.status === "live" ||
@@ -17509,9 +17980,7 @@ export function DebateExperience(
           backgroundUrl={ambientAudioActive ? DEBATE_AUDIENCE_MURMUR_URL : null}
           backgroundTone={juryChamberVisible ? "warm-low" : "neutral"}
           grainUrl={
-            ambientAudioActive &&
-            !juryChamberVisible &&
-            audiencePressureBandTrue
+            ambientAudioActive && !juryChamberVisible
               ? DEBATE_AUDIENCE_CROSSTALK_URL
               : null
           }
@@ -17574,7 +18043,6 @@ export function DebateExperience(
               ? "true"
               : undefined
           }
-          data-debate-opening-fade={debateOpeningFade ? "true" : undefined}
           data-debate-material-quality={debateMaterialQuality}
           data-jury-chamber={juryChamberVisible ? "true" : undefined}
           style={
@@ -17584,7 +18052,6 @@ export function DebateExperience(
               "--debate-against-color":
                 session.againstAdvocate.color ?? "#ff5f8f",
               "--debate-moderator-color": session.moderator.color ?? "#d9d2ff",
-              "--debate-opening-fade-ms": `${DEBATE_OPENING_CHAMBER_FADE_MS}ms`,
             } as CSSProperties
           }
         >
@@ -17604,12 +18071,6 @@ export function DebateExperience(
             </div>
           ) : debateIdentPlaying ? (
             <DebateIdentOverlay kind={debateIdentPlaying} session={session} />
-          ) : debateOpeningFade ? (
-            <div
-              className={styles.debateOpeningFade}
-              data-debate-opening-fade="true"
-              aria-hidden="true"
-            />
           ) : session.status === "paused" &&
             !presenting &&
             (readyToBeginOverlay || session.playerRole === "spectator") ? (

@@ -206,6 +206,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /Synthesize asset soft-prepares a new sprite/u);
     assert.match(copy, /queue more soft sprites in parallel/u);
     assert.match(copy, /Reduce magenta pass/u);
+    assert.match(copy, /Assets opens them for soft Prism re-synthesis/u);
     assert.match(copy, /Undo last pass/u);
     assert.match(copy, /visual adds no facts/u);
     assert.match(copy, /later searches add distinct sources/u);
@@ -452,11 +453,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
-      /gallery murmur starts quiet and swells with each arrival/u,
+      /Living Chamber title card plays over the chamber with the gallery still murmuring/u,
     );
     assert.match(
       copy,
-      /moderator.?s opening gavel hushes the gallery before the floor opens/u,
+      /moderator.?s opening gavel hushes the house before the floor opens/u,
     );
     assert.match(copy, /instead of in the app chrome/u);
     assert.match(copy, /traditional three-bot majority/u);
@@ -671,6 +672,7 @@ describe("mode tutorials", () => {
           step.targetSelector === '[data-tutorial-target="debate-cast"]',
       )?.body ?? "";
     assert.match(castCopy, /Surprise me/u);
+    assert.match(castCopy, /vertical hue lens/u);
     assert.match(castCopy, /Prism takes the center Judge \/ Moderator seat/u);
     assert.match(castCopy, /automatic neutral introduction/u);
     assert.match(castCopy, /Choose the two advocates/u);
@@ -678,6 +680,13 @@ describe("mode tutorials", () => {
       castCopy,
       /Your seat & the Jury reveals Participant and Spectator roles/u,
     );
+    const seatCopy =
+      MODE_TUTORIALS.debate.steps.find(
+        (step) =>
+          step.targetSelector === '[data-tutorial-target="debate-seat"]',
+      )?.body ?? "";
+    assert.match(seatCopy, /five seats default to Surprise/u);
+    assert.match(seatCopy, /pin any seat from the Library/u);
   });
 
   it("teaches the non-blocking Coffee Group identity synthesis flow", () => {

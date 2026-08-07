@@ -112,6 +112,8 @@ import {
 } from "./zen-progressive-voice.ts";
 import {
   cancelActiveImageJobForConversation,
+  cancelDebateExhibitImageSlots,
+  cancelImageSlotByClientRequestId,
   peekActiveImageJobForUser,
   pollImageJobForUser,
   releaseImageSlot,
@@ -200,6 +202,8 @@ import {
   generateDebateRefractDraft,
   getDebateSession,
   listDebateSessions,
+  listDebateSessionExhibitAssets,
+  attachDebateExhibitSprite,
   orderDebateAudience,
   pauseDebateSession,
   pauseDebateSessionWithPersona,
@@ -14289,6 +14293,8 @@ function buildRoutes(): RouteDefinition[] {
       const prompt = direction
         ? `${canonicalPrompt}\nCreative direction for this pass: ${direction}`
         : canonicalPrompt;
+      const clientRequestId =
+        typeof body.requestId === "string" ? body.requestId.trim() : "";
       const user = getUserRow(userId);
       const requestedImageProvider: ImageProviderName =
         body.preferredProvider === "openai"
@@ -14306,6 +14312,7 @@ function buildRoutes(): RouteDefinition[] {
       const imageAbort = new AbortController();
       const onClose = (): void => imageAbort.abort();
       ctx.req.once("close", onClose);
+      ctx.req.once("aborted", onClose);
       // Soft exhibit sprites queue behind other image work instead of 503'ing.
       let ownedImageSlotJobId: string | null = null;
       try {
@@ -14319,10 +14326,16 @@ function buildRoutes(): RouteDefinition[] {
           userMessage: `[Debate exhibit] ${descriptor.title}`,
           source: "debate_exhibit",
           requestedSize: "1024x1024",
+          clientRequestId: clientRequestId || null,
           abortController: imageAbort,
           signal: imageAbort.signal,
         });
         ownedImageSlotJobId = acquired.id;
+        if (imageAbort.signal.aborted) {
+          throw Object.assign(new Error("Image generation was cancelled."), {
+            name: "AbortError",
+          });
+        }
         const asset = await generateAndPersistStandaloneImageAsset({
           userId,
           prompt,
@@ -14348,10 +14361,30 @@ function buildRoutes(): RouteDefinition[] {
         });
       } finally {
         ctx.req.off("close", onClose);
+        ctx.req.off("aborted", onClose);
         if (ownedImageSlotJobId) {
           await releaseImageSlotIfOwned(userId, ownedImageSlotJobId);
         }
       }
+    }),
+    route("POST", "/api/debates/exhibits/synthesize/cancel", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const requestId =
+        typeof body.requestId === "string" ? body.requestId.trim() : "";
+      if (!requestId) {
+        throw new HttpError(400, "requestId is required to cancel synthesis.");
+      }
+      const cancelled = await cancelImageSlotByClientRequestId(
+        userId,
+        requestId,
+      );
+      json(ctx.res, 200, { ok: true, cancelled });
+    }),
+    route("POST", "/api/debates/exhibits/synthesize/cancel-all", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const cancelled = await cancelDebateExhibitImageSlots(userId);
+      json(ctx.res, 200, { ok: true, ...cancelled });
     }),
     route("POST", "/api/debates/role-checks", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -14423,6 +14456,34 @@ function buildRoutes(): RouteDefinition[] {
           getDebateSession(db, userId, ctx.params.id),
           ctx.query.get("perspective") === "replay" ? "replay" : "live",
         ),
+      });
+    }),
+    route("GET", "/api/debates/:id/exhibits", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, {
+        ok: true,
+        exhibits: listDebateSessionExhibitAssets(db, userId, ctx.params.id),
+      });
+    }),
+    route("POST", "/api/debates/:id/exhibits/:exhibitId/sprite", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const imageId =
+        typeof body.imageId === "string" ? body.imageId.trim() : "";
+      if (!imageId) {
+        throw new HttpError(400, "imageId is required to attach an exhibit sprite.");
+      }
+      const session = attachDebateExhibitSprite(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.exhibitId,
+        imageId,
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session, "live"),
+        exhibits: listDebateSessionExhibitAssets(db, userId, ctx.params.id),
       });
     }),
     route("POST", "/api/debates/:id/turn-preparations", async (ctx) => {
@@ -25171,6 +25232,14 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       }
+    }),
+    route("GET", "/api/assets/for-image/:imageId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const asset = getImageAssetSetForImage(db, userId, ctx.params.imageId);
+      if (!asset) {
+        throw new HttpError(404, "That image is not in the asset library.");
+      }
+      json(ctx.res, 200, { ok: true, asset });
     }),
     route("POST", "/api/assets/:id/magenta-pass", async (ctx) => {
       const userId = requireAuth(ctx);

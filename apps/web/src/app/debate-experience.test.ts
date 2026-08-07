@@ -220,6 +220,14 @@ describe("Debate experience", () => {
     assert.equal(draft.cast.forAdvocate, "for-bot");
     assert.equal(draft.cast.againstAdvocate, "");
     assert.deepEqual(draft.missingBotNames, ["Blake"]);
+    assert.equal(draft.juryEnabled, true);
+    assert.deepEqual(draft.preferredJurorBotIds, [
+      null,
+      null,
+      null,
+      null,
+      null,
+    ]);
     assert.equal(draft.evidence.frozenAt, null);
     assert.notEqual(draft.motion, session.motion);
     assert.notEqual(draft.evidence.sources, session.evidence.sources);
@@ -277,15 +285,15 @@ describe("Debate experience", () => {
     assert.match(source, /holdScope="full"/u);
     assert.match(source, /holdBackAction=/u);
     assert.match(source, /← Studio/u);
-    assert.match(source, /DEBATE_OPENING_CHAMBER_FADE_MS/u);
     assert.match(source, /DEBATE_OPENING_GAVEL_SETTLE_MS/u);
     assert.match(source, /debateOpeningGalleryHushed/u);
     assert.match(source, /debateGalleryArrivalMurmurGain/u);
     assert.match(source, /prestart-murmur/u);
     assert.match(source, /opening-hush/u);
+    assert.match(source, /DEBATE_AUDIENCE_PRESTART_MURMUR_MIX/u);
     assert.match(source, /judgeGavelSmashRef\.current\?\.\("order"\)/u);
-    assert.match(source, /data-debate-opening-fade/u);
-    assert.match(css, /debate-opening-chamber-fade/u);
+    assert.doesNotMatch(source, /setDebateOpeningFade\(true\)/u);
+    assert.match(css, /\.live \.identOverlay\s*\{[^}]*position:\s*absolute/u);
     assert.match(source, /data-gallery-ready-hold=/u);
     assert.match(
       css,
@@ -420,6 +428,12 @@ describe("Debate experience", () => {
     assert.match(source, /Refine motion/u);
     assert.match(source, /Seat every voice/u);
     assert.match(source, /Your seat &amp; the Jury/u);
+    assert.match(source, /preferredJurorBotIds/u);
+    assert.match(source, /emptyPreferredJurorBotIds/u);
+    assert.match(source, /assignBotToJurySeat/u);
+    assert.match(source, /data-tutorial-target="debate-jury-seats"/u);
+    assert.match(source, /jurorBotIds/u);
+    assert.match(source, /debateSetupJuryReadout/u);
     assert.match(source, /Make sure they’re willing/u);
     assert.match(source, /const checkRoles = async \(\): Promise<void> =>/u);
     assert.match(
@@ -670,6 +684,18 @@ describe("Debate experience", () => {
     assert.match(source, /placement="docked"/u);
     assert.match(source, /softExhibitJobList/u);
     assert.match(source, /cancelSoftExhibitSynthesizeJob/u);
+    assert.match(
+      source,
+      /\/api\/debates\/exhibits\/synthesize\/cancel[\s\S]{0,120}requestId/u,
+    );
+    assert.match(
+      source,
+      /\/api\/debates\/exhibits\/synthesize\/cancel-all/u,
+    );
+    assert.match(
+      source,
+      /requestBody\(\{[\s\S]{0,220}requestId,[\s\S]{0,80}\}\)/u,
+    );
     assert.match(source, /Soft jobs run in parallel after Save/u);
     assert.match(
       source,
@@ -1213,6 +1239,16 @@ describe("Debate experience", () => {
     );
     assert.match(source, /Choose evidence or continue without it\./u);
     assert.match(source, /<BotPickerGrid/u);
+    assert.match(source, /castPickerHueLens/u);
+    assert.match(source, /Browse Debate cast bots by hue/u);
+    assert.match(source, /castHueLensCenter/u);
+    assert.match(source, /debateCastLensSliderInputValue/u);
+    assert.match(source, /debateCastHueFromLensSliderInput/u);
+    assert.match(css, /--cast-hue-p\) 0%,\s*var\(--cast-hue-p\) 20%/u);
+    assert.match(
+      css,
+      /\.setup\[data-theme="light"\] \.castPickerHueLens\s*\{[^}]*--cast-hue-i:/u,
+    );
     assert.match(source, /activeCastSlot/u);
     assert.match(source, /assignBotToCastSlot/u);
     assert.match(source, /Already cast/u);
@@ -1425,6 +1461,11 @@ describe("Debate experience", () => {
 
   it("restores archived proceedings as editable setup without restoring the model lane", () => {
     assert.match(source, /"Use setup"/u);
+    assert.match(source, />\s*Assets\s*</u);
+    assert.match(source, /data-tutorial-target="debate-archive-assets-open"/u);
+    assert.match(source, /DebateArchiveAssetsModal/u);
+    assert.match(source, /synthesizeArchiveExhibitImage/u);
+    assert.match(source, /DebateExhibitMagentaControls/u);
     assert.match(source, /debateSessionRetryDraft\(/u);
     assert.match(source, /your current model and routing stay selected/u);
     const restoreBody = source.slice(
@@ -2215,6 +2256,11 @@ describe("Debate experience", () => {
     assert.match(source, /data-audience-order-response=/u);
     assert.match(source, /returningRoomTone:\s*true/u);
     assert.match(source, /DEBATE_AUDIENCE_ORDER_PEAK_HOLD_MS/u);
+    assert.match(source, /holdThroughOrder:\s*holdAudienceOrderPressure/u);
+    assert.match(
+      source,
+      /isGalleryOrderEvent &&[\s\S]{0,120}event\.kind === "moderator_ruling"/u,
+    );
     assert.match(
       source,
       /debate-audience-laugh-into-order:/u,
@@ -3037,7 +3083,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /grainUrl=\{[\s\S]{0,120}audiencePressureBandTrue[\s\S]{0,80}DEBATE_AUDIENCE_CROSSTALK_URL/u,
+      /grainUrl=\{[\s\S]{0,120}ambientAudioActive && !juryChamberVisible[\s\S]{0,80}DEBATE_AUDIENCE_CROSSTALK_URL/u,
     );
     assert.match(
       source,
@@ -3309,7 +3355,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /setActiveSession\(reuseDebateSessionEventPrefix\(previous, next\)\)[\s\S]{0,260}options\.playIntro[\s\S]{0,280}judgeGavelSmashRef\.current\?\.\("order"\)[\s\S]{0,120}setDebateOpeningGalleryHushed\(true\)[\s\S]{0,420}await playDebateIdent\("intro"\)[\s\S]{0,420}DEBATE_OPENING_CHAMBER_FADE_MS[\s\S]{0,360}setDebateOpeningGalleryHushed\(false\)[\s\S]{0,120}await consumeNewEvents/u,
+      /setActiveSession\(reuseDebateSessionEventPrefix\(previous, next\)\)[\s\S]{0,260}options\.playIntro[\s\S]{0,280}await playDebateIdent\("intro"\)[\s\S]{0,200}judgeGavelSmashRef\.current\?\.\("order"\)[\s\S]{0,120}setDebateOpeningGalleryHushed\(true\)[\s\S]{0,360}await consumeNewEvents/u,
     );
     assert.match(
       source,
