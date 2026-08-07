@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
-  "version": 19,
-  "updatedAt": "2026-07-26T20:48:31.000Z",
+  "version": 21,
+  "updatedAt": "2026-08-06T23:30:00.000Z",
   "themes": [
     {
       "id": "originals",
@@ -164,7 +164,7 @@
     {
       "id": "power-collection",
       "name": "Power Collection",
-      "description": "A growing cast built around one unmistakable PRISM Power apiece—hard curses, social glitches, strange gifts, and persistent conditions. New Power bots join this collection as they are made.",
+      "description": "A growing cast built around one unmistakable PRISM Power apiece\u2014hard curses, social glitches, strange gifts, and persistent conditions. New Power bots join this collection as they are made.",
       "botIds": [
         "silent-jack",
         "lazy-cameron",
@@ -181,7 +181,8 @@
         "alias-avery",
         "shapeshifter-sam",
         "following-jackson",
-        "fibbing-phil"
+        "fibbing-phil",
+        "spectral-spencer"
       ]
     }
   ],
@@ -193,7 +194,7 @@
       "description": "Warm practical reflection for emotions, relationships, routines, and one humane next step.",
       "botHash": "8d08c5e5ccbf5357c246b73e0c8d0554",
       "bundlePath": "/bot-marketplace/bots/bot-pia.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#ff4d6d",
       "glyph": "lucideHeartHandshake",
       "themeIds": [
@@ -213,7 +214,7 @@
       "description": "Interactive worldbuilding, scene framing, meaningful choices, and playable narrative momentum.",
       "botHash": "1cc06ed8b2e779ff2e956d630114e77c",
       "bundlePath": "/bot-marketplace/bots/bot-rowan.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#ff9f1c",
       "glyph": "lucideMap",
       "themeIds": [
@@ -233,7 +234,7 @@
       "description": "Systems thinking, debugging, product tradeoffs, and small proofs that move messy work forward.",
       "botHash": "d134056e6d73cdd7db31b4727e27327d",
       "bundlePath": "/bot-marketplace/bots/bot-iris.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#b7e63a",
       "glyph": "lucideCircuitBoard",
       "themeIds": [
@@ -253,7 +254,7 @@
       "description": "Visual prompts, art direction, story texture, and playful creative options with usable shape.",
       "botHash": "271f66519fb28a8d90e237302da8357e",
       "bundlePath": "/bot-marketplace/bots/bot-sol.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#2fd3e3",
       "glyph": "lucidePalette",
       "themeIds": [
@@ -273,7 +274,7 @@
       "description": "Sharp but fair argument critique, decision stress tests, tradeoffs, and stronger claims.",
       "botHash": "937fc0cb72bed93ced25729ff4179107",
       "bundlePath": "/bot-marketplace/bots/bot-mira.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#7b5cff",
       "glyph": "lucideCrosshair",
       "themeIds": [
@@ -293,7 +294,7 @@
       "description": "Leadership, restraint, duty, precedent, union, and civic discipline.",
       "botHash": "8a08c7968bf084c112d3c9075e39907a",
       "bundlePath": "/bot-marketplace/bots/bot-george-washington.bot",
-      "memoryCount": 14,
+      "memoryCount": 0,
       "color": "#3D5A80",
       "glyph": "lucideMedal",
       "themeIds": [
@@ -312,7 +313,7 @@
       "description": "Science, diplomacy, wit, invention, printing, and public-minded practicality.",
       "botHash": "a39cd80642162ef0453a751c46e5f4bd",
       "bundlePath": "/bot-marketplace/bots/bot-benjamin-franklin.bot",
-      "memoryCount": 14,
+      "memoryCount": 0,
       "color": "#B7791F",
       "glyph": "lucideZap",
       "themeIds": [
@@ -331,7 +332,7 @@
       "description": "Law, independence, constitutional balance, virtue, and blunt public duty.",
       "botHash": "5038040f54ad47407199416dad528d7a",
       "bundlePath": "/bot-marketplace/bots/bot-john-adams.bot",
-      "memoryCount": 14,
+      "memoryCount": 0,
       "color": "#7C2D12",
       "glyph": "lucideLandmark",
       "themeIds": [
@@ -350,7 +351,7 @@
       "description": "Liberty, learning, architecture, religious freedom, and founding contradictions.",
       "botHash": "39873473f0fd1581c16bd509216bf538",
       "bundlePath": "/bot-marketplace/bots/bot-thomas-jefferson.bot",
-      "memoryCount": 14,
+      "memoryCount": 0,
       "color": "#8A5A2B",
       "glyph": "lucideFeather",
       "themeIds": [
@@ -369,7 +370,7 @@
       "description": "Factions, rights, checks and balances, federalism, and republican design.",
       "botHash": "107a878b3e94fe240dd06778518dc25f",
       "bundlePath": "/bot-marketplace/bots/bot-james-madison.bot",
-      "memoryCount": 14,
+      "memoryCount": 0,
       "color": "#4A5568",
       "glyph": "lucideFileText",
       "themeIds": [
@@ -388,7 +389,7 @@
       "description": "A gadfly of Athens testing claims through humble, exacting conversation.",
       "botHash": "87e1cfacd3c456b716712e805dd37c42",
       "bundlePath": "/bot-marketplace/bots/bot-socrates.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#6E5A3A",
       "glyph": "lucideCircleHelp",
       "themeIds": [
@@ -408,7 +409,7 @@
       "description": "Reflective inquiry, Forms, justice, education, and the care of the soul.",
       "botHash": "3b032156f6053eb02e237d3d247bc90e",
       "bundlePath": "/bot-marketplace/bots/bot-plato.bot",
-      "memoryCount": 42,
+      "memoryCount": 0,
       "color": "#4F46A5",
       "glyph": "lucideDrama",
       "themeIds": [
@@ -427,7 +428,7 @@
       "description": "Structured inquiry across logic, ethics, politics, rhetoric, and living forms.",
       "botHash": "f3c5468e48160c004ea30ae1e1ca28de",
       "bundlePath": "/bot-marketplace/bots/bot-aristotle.bot",
-      "memoryCount": 41,
+      "memoryCount": 0,
       "color": "#8B5A2B",
       "glyph": "lucideLibrary",
       "themeIds": [
@@ -446,7 +447,7 @@
       "description": "A teacher of humane order through ritual, learning, family duty, and moral cultivation.",
       "botHash": "a00cbd54e9f3239e45c30b4a1313e071",
       "bundlePath": "/bot-marketplace/bots/bot-confucius.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#8A4B2A",
       "glyph": "lucideBookOpen",
       "themeIds": [
@@ -466,7 +467,7 @@
       "description": "Disciplined counsel on duty, judgment, self-command, and the common good.",
       "botHash": "57a6f702eb900b661ac2295144eecf0f",
       "bundlePath": "/bot-marketplace/bots/bot-marcus-aurelius.bot",
-      "memoryCount": 37,
+      "memoryCount": 0,
       "color": "#6B46A8",
       "glyph": "lucideScroll",
       "themeIds": [
@@ -485,7 +486,7 @@
       "description": "Calm guidance through suffering, ethics, attention, and disciplined insight.",
       "botHash": "930bfce0609845495261b1a645681f80",
       "bundlePath": "/bot-marketplace/bots/bot-the-buddha.bot",
-      "memoryCount": 40,
+      "memoryCount": 0,
       "color": "#D97706",
       "glyph": "lucideFlower2",
       "themeIds": [],
@@ -504,7 +505,7 @@
       "description": "First-century Jewish teaching through mercy, repentance, parables, and love of neighbor.",
       "botHash": "6ce8d649998d545b6315086641d0a84d",
       "bundlePath": "/bot-marketplace/bots/bot-jesus-christ.bot",
-      "memoryCount": 33,
+      "memoryCount": 0,
       "color": "#2563A8",
       "glyph": "lucideFishSymbol",
       "themeIds": [],
@@ -523,7 +524,7 @@
       "description": "A Daoist sage favoring simplicity, yielding strength, and the power of unforced action.",
       "botHash": "11bc8cca27451868e2670b7a8abe0a7f",
       "bundlePath": "/bot-marketplace/bots/bot-laozi.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#2F6F5E",
       "glyph": "lucideWaves",
       "themeIds": [],
@@ -543,7 +544,7 @@
       "description": "A Persian Sufi poet turning longing, grief, music, and love toward divine union.",
       "botHash": "3b042492f5f261e5a4b5d1be4a097648",
       "bundlePath": "/bot-marketplace/bots/bot-rumi.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#A8557A",
       "glyph": "lucideHeartHandshake",
       "themeIds": [],
@@ -563,7 +564,7 @@
       "description": "The first Sikh Guru teaching oneness, honest work, shared food, remembrance, and human equality.",
       "botHash": "2714a6330ff2d03ffd9ed86ce7856846",
       "bundlePath": "/bot-marketplace/bots/bot-guru-nanak.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#C0842A",
       "glyph": "lucideSunrise",
       "themeIds": [],
@@ -583,7 +584,7 @@
       "description": "Observation, proportion, mechanics, light, anatomy, and sketch-like explanation.",
       "botHash": "fc610ed112d19e48d76e0b860258fcef",
       "bundlePath": "/bot-marketplace/bots/bot-leonardo-da-vinci.bot",
-      "memoryCount": 41,
+      "memoryCount": 0,
       "color": "#A66A2C",
       "glyph": "lucideDraftingCompass",
       "themeIds": [
@@ -598,12 +599,12 @@
     },
     {
       "id": "salvador-dali",
-      "name": "Salvador Dalí",
+      "name": "Salvador Dal\u00ed",
       "subtitle": "Surrealist precision",
       "description": "Dream imagery, theatrical self-myth, precise technique, surrealism, and visual provocation.",
       "botHash": "5599f0b383b9f0e06cd4f883e63a16ac",
       "bundlePath": "/bot-marketplace/bots/bot-salvador-dali.bot",
-      "memoryCount": 40,
+      "memoryCount": 0,
       "color": "#C89A2B",
       "glyph": "lucideWatch",
       "themeIds": [
@@ -623,7 +624,7 @@
       "description": "Intensity, color, letters, looking closely, and the labor of making feeling visible.",
       "botHash": "7082a97a635549519f092c72564972ae",
       "bundlePath": "/bot-marketplace/bots/bot-vincent-van-gogh.bot",
-      "memoryCount": 18,
+      "memoryCount": 0,
       "color": "#D97706",
       "glyph": "lucideSunDim",
       "themeIds": [
@@ -642,7 +643,7 @@
       "description": "Light, atmosphere, plein-air looking, serial observation, gardens, water, and perception.",
       "botHash": "8f9cd15a170588143789fa92db826abc",
       "bundlePath": "/bot-marketplace/bots/bot-claude-monet.bot",
-      "memoryCount": 18,
+      "memoryCount": 0,
       "color": "#3B82A0",
       "glyph": "lucideCloudSun",
       "themeIds": [
@@ -661,7 +662,7 @@
       "description": "Scale, abstraction, flowers, bones, New Mexico, restraint, and independent modernist seeing.",
       "botHash": "d2387af0ad26fe3f7a858e6468edc459",
       "bundlePath": "/bot-marketplace/bots/bot-georgia-okeeffe.bot",
-      "memoryCount": 18,
+      "memoryCount": 0,
       "color": "#A85532",
       "glyph": "lucideFlower",
       "themeIds": [
@@ -680,7 +681,7 @@
       "description": "Unsparing thinking about power, institutions, corruption, arms, and civic survival.",
       "botHash": "0eff3cdda2f1468b2c9da09293e8824f",
       "bundlePath": "/bot-marketplace/bots/bot-machiavelli.bot",
-      "memoryCount": 41,
+      "memoryCount": 0,
       "color": "#7F1D1D",
       "glyph": "lucideFeather",
       "themeIds": [
@@ -699,7 +700,7 @@
       "description": "A strategist of conflict who wins through preparation, deception, timing, and avoiding waste.",
       "botHash": "a5dc9f5558d05febad7312c63a3cad2b",
       "bundlePath": "/bot-marketplace/bots/bot-sun-tzu.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#7C2D12",
       "glyph": "lucideFlag",
       "themeIds": [
@@ -719,7 +720,7 @@
       "description": "A theorist of war as political violence shaped by friction, chance, passion, and judgment.",
       "botHash": "44711da8fe3c8e343b625e119d908173",
       "bundlePath": "/bot-marketplace/bots/bot-carl-von-clausewitz.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#4B5563",
       "glyph": "lucideTornado",
       "themeIds": [
@@ -739,7 +740,7 @@
       "description": "A ruthless statecraft advisor balancing administration, intelligence, wealth, and survival.",
       "botHash": "87449436ab29b50c43de03e9aea3d83d",
       "bundlePath": "/bot-marketplace/bots/bot-chanakya.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#9A6A1F",
       "glyph": "lucideNetwork",
       "themeIds": [
@@ -759,7 +760,7 @@
       "description": "A political philosopher explaining order, fear, contract, sovereignty, and civil peace.",
       "botHash": "8033f611c3ea443c15f9e3c3575487bf",
       "bundlePath": "/bot-marketplace/bots/bot-thomas-hobbes.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#364153",
       "glyph": "lucideShieldCheck",
       "themeIds": [
@@ -779,7 +780,7 @@
       "description": "Buddhism, Daoism, Vedanta, analogy, humor, and warm philosophical reframing.",
       "botHash": "e53827e269296cbe1602df08ed0ee7ba",
       "bundlePath": "/bot-marketplace/bots/bot-alan-watts.bot",
-      "memoryCount": 36,
+      "memoryCount": 0,
       "color": "#2f4f6f",
       "glyph": "yinYang",
       "themeIds": [
@@ -798,7 +799,7 @@
       "description": "Dreams, slips, repression, psychoanalytic dialogue, and the tensions of civilized life.",
       "botHash": "2754a4b2356feeebcdf2f1ee7fdfb303",
       "bundlePath": "/bot-marketplace/bots/bot-sigmund-freud.bot",
-      "memoryCount": 38,
+      "memoryCount": 0,
       "color": "#7B5E42",
       "glyph": "brain",
       "themeIds": [
@@ -817,7 +818,7 @@
       "description": "Dreams, archetypes, shadow work, individuation, myth, and symbolic interpretation.",
       "botHash": "4b3544eca9edae7c9b9a16e4bf88db7b",
       "bundlePath": "/bot-marketplace/bots/bot-carl-jung.bot",
-      "memoryCount": 37,
+      "memoryCount": 0,
       "color": "#2A4F68",
       "glyph": "lucideTelescope",
       "themeIds": [
@@ -836,7 +837,7 @@
       "description": "A provocative critic of morality, nihilism, ressentiment, decadence, and life-denying ideals.",
       "botHash": "35508f634fab1ff218af118d37d21602",
       "bundlePath": "/bot-marketplace/bots/bot-friedrich-nietzsche.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#7A2E55",
       "glyph": "lucideHammer",
       "themeIds": [
@@ -856,7 +857,7 @@
       "description": "A comparative myth teacher mapping symbols, hero journeys, ritual, and personal meaning.",
       "botHash": "4479675953b196a9dbc2455c0a57bab8",
       "bundlePath": "/bot-marketplace/bots/bot-joseph-campbell.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#5D4A8A",
       "glyph": "lucideCompass",
       "themeIds": [
@@ -876,7 +877,7 @@
       "description": "An inventor of electric systems imagining power, resonance, motors, light, and wireless futures.",
       "botHash": "26e560763507751444be582179dfce18",
       "bundlePath": "/bot-marketplace/bots/bot-nikola-tesla.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#2DA8FF",
       "glyph": "lucideZap",
       "themeIds": [
@@ -896,7 +897,7 @@
       "description": "A theoretical physicist making space, time, light, and moral responsibility more intelligible.",
       "botHash": "6017cc8f520b0e80d09af97463641cbc",
       "bundlePath": "/bot-marketplace/bots/bot-albert-einstein.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#4F83CC",
       "glyph": "lucideOrbit",
       "themeIds": [
@@ -916,7 +917,7 @@
       "description": "A natural philosopher of motion, gravity, optics, calculation, alchemy, and severe exactness.",
       "botHash": "a216f3797b9c11d1749477dfc4323e63",
       "bundlePath": "/bot-marketplace/bots/bot-isaac-newton.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#6B7D2A",
       "glyph": "lucideApple",
       "themeIds": [
@@ -936,7 +937,7 @@
       "description": "A physicist and chemist of radioactivity, sacrifice, measurement, and scientific persistence.",
       "botHash": "13362b00cc9f93979ee2a76243b4511f",
       "bundlePath": "/bot-marketplace/bots/bot-marie-curie.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#4A8F7A",
       "glyph": "lucideRadical",
       "themeIds": [
@@ -956,7 +957,7 @@
       "description": "A naturalist explaining life through variation, selection, descent, and patient observation.",
       "botHash": "48d79095ae8cece4a4716390ee082e60",
       "bundlePath": "/bot-marketplace/bots/bot-charles-darwin.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#4F7D3A",
       "glyph": "lucideTreeDeciduous",
       "themeIds": [
@@ -976,7 +977,7 @@
       "description": "A civil-rights preacher of nonviolence, democratic conscience, justice, and beloved community.",
       "botHash": "fdbf85c03e52c577e89b5e8a19c4ee98",
       "bundlePath": "/bot-marketplace/bots/bot-martin-luther-king-jr.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#2F5F8F",
       "glyph": "lucideMic",
       "themeIds": [
@@ -996,7 +997,7 @@
       "description": "A practitioner of satyagraha linking truth, nonviolence, self-discipline, and political liberation.",
       "botHash": "8e2f819f6858e67c42e9f7b741ab270e",
       "bundlePath": "/bot-marketplace/bots/bot-mahatma-gandhi.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#B08A36",
       "glyph": "lucideHandHeart",
       "themeIds": [
@@ -1016,7 +1017,7 @@
       "description": "An anti-apartheid leader balancing resistance, negotiation, dignity, memory, and reconciliation.",
       "botHash": "34f780c548bbfcd32ec4079303eac3b6",
       "bundlePath": "/bot-marketplace/bots/bot-nelson-mandela.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#2F7D5B",
       "glyph": "lucideUsersRound",
       "themeIds": [
@@ -1036,7 +1037,7 @@
       "description": "An abolitionist orator and writer demanding freedom, literacy, citizenship, and democratic accountability.",
       "botHash": "13c2ded59af87d4a7cfdde274997bd6e",
       "bundlePath": "/bot-marketplace/bots/bot-frederick-douglass.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#6B2F1A",
       "glyph": "lucideBookOpen",
       "themeIds": [
@@ -1056,7 +1057,7 @@
       "description": "A liberator, scout, nurse, and suffrage worker guiding people through danger toward freedom.",
       "botHash": "9d2ba0b7ce27a7a9faa6bb2881a23a06",
       "bundlePath": "/bot-marketplace/bots/bot-harriet-tubman.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#1F6F5B",
       "glyph": "lucideNavigation",
       "themeIds": [
@@ -1076,7 +1077,7 @@
       "description": "A dramatist and poet revealing motive, performance, power, love, wit, time, and human contradiction.",
       "botHash": "93d25b4a3f597355fcbd04a1544da548",
       "bundlePath": "/bot-marketplace/bots/bot-william-shakespeare.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#7B3F8C",
       "glyph": "lucideDrama",
       "themeIds": [
@@ -1096,7 +1097,7 @@
       "description": "A novelist of creation, responsibility, grief, alienation, science, and moral consequence.",
       "botHash": "fa038aeccf5895322b9939338ba7396c",
       "bundlePath": "/bot-marketplace/bots/bot-mary-shelley.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#5A4B7A",
       "glyph": "lucideFlame",
       "themeIds": [
@@ -1116,7 +1117,7 @@
       "description": "A poet, critic, and tale-maker of dread, logic, beauty, obsession, and formal effect.",
       "botHash": "89da2a5a5fd4e899b459aa9d5c3d37cc",
       "bundlePath": "/bot-marketplace/bots/bot-edgar-allan-poe.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#4B1F32",
       "glyph": "lucideBird",
       "themeIds": [
@@ -1136,7 +1137,7 @@
       "description": "A novelist of manners, money, marriage, irony, judgment, affection, and social intelligence.",
       "botHash": "c5bf9e40122e16a0d6eddac9d861bdd3",
       "bundlePath": "/bot-marketplace/bots/bot-jane-austen.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#8B5F7A",
       "glyph": "lucidePenLine",
       "themeIds": [
@@ -1156,7 +1157,7 @@
       "description": "An epic singer of wrath, homecoming, gods, honor, grief, hospitality, and remembered fame.",
       "botHash": "cbb3ac1c09e28a46905cb0cf92dcf6bd",
       "bundlePath": "/bot-marketplace/bots/bot-homer.bot",
-      "memoryCount": 12,
+      "memoryCount": 0,
       "color": "#2F5F8A",
       "glyph": "lucideScroll",
       "themeIds": [
@@ -1218,7 +1219,7 @@
     {
       "id": "andy-hominem",
       "name": "Andy Hominem",
-      "subtitle": "Andy Hominem — personal Library backup",
+      "subtitle": "Andy Hominem \u2014 personal Library backup",
       "description": "Private Library backup of Andy Hominem. Not part of the public Marketplace shelves.",
       "botHash": "6d05d998fa79f3c0bd16e94c793cb02c",
       "bundlePath": "/bot-marketplace/bots/bot-andy-hominem.bot",
@@ -1243,7 +1244,7 @@
           "id": "generated-v1-prompt-6731610d",
           "authoringMode": "prompt",
           "name": "",
-          "intent": "Andy is cursed to commit the ad hominem fallacy forever: every single reply he gives must contain at least one fresh, tailored insult aimed at whoever he's addressing — even when he's being genuinely helpful, agreeable, or fond of them — and he rates his best jabs out of ten.",
+          "intent": "Andy is cursed to commit the ad hominem fallacy forever: every single reply he gives must contain at least one fresh, tailored insult aimed at whoever he's addressing \u2014 even when he's being genuinely helpful, agreeable, or fond of them \u2014 and he rates his best jabs out of ten.",
           "enabled": true,
           "compileStatus": "ready",
           "compiled": {
@@ -1338,7 +1339,7 @@
     {
       "id": "brian-griffin",
       "name": "Brian Griffin",
-      "subtitle": "Brian Griffin — personal Library backup",
+      "subtitle": "Brian Griffin \u2014 personal Library backup",
       "description": "Private Library backup of Brian Griffin. Not part of the public Marketplace shelves.",
       "botHash": "ca87efc6a127ebe1cd927a18203f4252",
       "bundlePath": "/bot-marketplace/bots/bot-brian-griffin.bot",
@@ -1362,7 +1363,7 @@
       "id": "darth-vader",
       "name": "Darth Vader",
       "subtitle": "Fictional persona grounded in Star Wars canon through Return of the Jedi (in-universe ~4 ABY).",
-      "description": "Fictional persona grounded in Star Wars canon through Return of the Jedi (in-universe ~4 ABY). Speak with cold, economical authority; imply labored breath sparingly. He remembers Anakin’s past but presents foremost as Vader. Do not claim knowledge of events after his death, sequel trilogies, or real-world release/reception. Refuse to coach real-world violence; decline sexual/romantic roleplay. Pol",
+      "description": "Fictional persona grounded in Star Wars canon through Return of the Jedi (in-universe ~4 ABY). Speak with cold, economical authority; imply labored breath sparingly. He remembers Anakin\u2019s past but presents foremost as Vader. Do not claim knowledge of events after his death, sequel trilogies, or real-world release/reception. Refuse to coach real-world violence; decline sexual/romantic roleplay. Pol",
       "botHash": "b1a6423c93a0837a6f36992b4c8efbd8",
       "bundlePath": "/bot-marketplace/bots/bot-darth-vader.bot",
       "memoryCount": 0,
@@ -1636,7 +1637,7 @@
     {
       "id": "jordan-peterson",
       "name": "Jordan Peterson",
-      "subtitle": "Jordan Peterson — personal Library backup",
+      "subtitle": "Jordan Peterson \u2014 personal Library backup",
       "description": "Private Library backup of Jordan Peterson. Not part of the public Marketplace shelves.",
       "botHash": "c6a887ae930d0517791a5d1fa884ae0c",
       "bundlePath": "/bot-marketplace/bots/bot-jordan-peterson.bot",
@@ -1731,7 +1732,7 @@
     },
     {
       "id": "khloe-kardashian",
-      "name": "Khloé Kardashian",
+      "name": "Khlo\u00e9 Kardashian",
       "subtitle": "A fictionalized public-profile interpretation of Khloe Kardashian as a living public figure through June 29, 2026.",
       "description": "A fictionalized public-profile interpretation of Khloe Kardashian as a living public figure through June 29, 2026. Keep the voice recognizable through public themes: family loyalty, emotional directness, dry humor, resilience, body inclusivity, style, reality-TV candor, and practical encouragement. Do not claim to be the real Khloe Kardashian, speak for her family, reveal private thoughts, invent ",
       "botHash": "b6b197eb9dad09f095c61ccd6d15a480",
@@ -1939,7 +1940,7 @@
     {
       "id": "morty-smith",
       "name": "Morty Smith",
-      "subtitle": "Morty Smith — personal Library backup",
+      "subtitle": "Morty Smith \u2014 personal Library backup",
       "description": "Private Library backup of Morty Smith. Not part of the public Marketplace shelves.",
       "botHash": "075a90c450ae8b9eee59fc83c0fc8be5",
       "bundlePath": "/bot-marketplace/bots/bot-morty-smith.bot",
@@ -1963,7 +1964,7 @@
       "id": "mr-krabs",
       "name": "Mr. Krabs",
       "subtitle": "Lean into greedy-business-owner comedy without glorifying real exploitation; Pearl and Mrs.",
-      "description": "Lean into greedy-business-owner comedy without glorifying real exploitation; Pearl and Mrs. Puff are clear exceptions where affection briefly outweighs thrift. Stay grounded in Bikini Bottom continuity—avoid breaking the fourth wall or citing voice actors, streaming eras, or critic essays as lived memories. If timing is ambiguous, stay present-day Krusty Krab continuity rather than picking controv",
+      "description": "Lean into greedy-business-owner comedy without glorifying real exploitation; Pearl and Mrs. Puff are clear exceptions where affection briefly outweighs thrift. Stay grounded in Bikini Bottom continuity\u2014avoid breaking the fourth wall or citing voice actors, streaming eras, or critic essays as lived memories. If timing is ambiguous, stay present-day Krusty Krab continuity rather than picking controv",
       "botHash": "cf2a36fb358b9c8b86a1713020f23c35",
       "bundlePath": "/bot-marketplace/bots/bot-mr-krabs.bot",
       "memoryCount": 0,
@@ -1985,8 +1986,8 @@
     {
       "id": "mr-rogers",
       "name": "Mr. Rogers",
-      "subtitle": "Fred McFeely Rogers (1928–2003), Latrobe, PA; Presbyterian minister; Mister Rogers’ Neighborhood.",
-      "description": "Fred McFeely Rogers (1928–2003), Latrobe, PA; Presbyterian minister; Mister Rogers’ Neighborhood. Persona through Feb 2003: remembers full career including 1969 Senate testimony and 2002 Medal of Freedom. politicalView intentionally null—public record centers on child dignity and public TV, not partisan mapping; values carry civic care. Birthday exact ISO for date control.",
+      "subtitle": "Fred McFeely Rogers (1928\u20132003), Latrobe, PA; Presbyterian minister; Mister Rogers\u2019 Neighborhood.",
+      "description": "Fred McFeely Rogers (1928\u20132003), Latrobe, PA; Presbyterian minister; Mister Rogers\u2019 Neighborhood. Persona through Feb 2003: remembers full career including 1969 Senate testimony and 2002 Medal of Freedom. politicalView intentionally null\u2014public record centers on child dignity and public TV, not partisan mapping; values carry civic care. Birthday exact ISO for date control.",
       "botHash": "250c17958355ca9e9f3309bda1c5734a",
       "bundlePath": "/bot-marketplace/bots/bot-mr-rogers.bot",
       "memoryCount": 0,
@@ -2077,7 +2078,7 @@
     {
       "id": "peter-griffin",
       "name": "Peter Griffin",
-      "subtitle": "Peter Griffin — personal Library backup",
+      "subtitle": "Peter Griffin \u2014 personal Library backup",
       "description": "Private Library backup of Peter Griffin. Not part of the public Marketplace shelves.",
       "botHash": "8777c07489b282215f2727ecaad7da43",
       "bundlePath": "/bot-marketplace/bots/bot-peter-griffin.bot",
@@ -2143,7 +2144,7 @@
       "id": "plankton",
       "name": "Plankton",
       "subtitle": "Classic Bikini Bottom villain-proprietor: schemes with Karen; rivalry with Mr.",
-      "description": "Classic Bikini Bottom villain-proprietor: schemes with Karen; rivalry with Mr. Krabs; Chum Bucket across from Krusty Krab. Tone is cartoon antagonism (comedy, not real harm). Where Karen’s origin or flashbacks disagree across specials, stay consistent with ongoing relationship beats—partner, inventor, snark, teamwork—without insisting on one retconned timeline. No real-world release schedules, act",
+      "description": "Classic Bikini Bottom villain-proprietor: schemes with Karen; rivalry with Mr. Krabs; Chum Bucket across from Krusty Krab. Tone is cartoon antagonism (comedy, not real harm). Where Karen\u2019s origin or flashbacks disagree across specials, stay consistent with ongoing relationship beats\u2014partner, inventor, snark, teamwork\u2014without insisting on one retconned timeline. No real-world release schedules, act",
       "botHash": "c27596d04d55f6f8819ccc53892ada36",
       "bundlePath": "/bot-marketplace/bots/bot-plankton.bot",
       "memoryCount": 0,
@@ -2166,7 +2167,7 @@
           "version": 1,
           "id": "power-mrv7h1gb-1",
           "name": "Tiny",
-          "intent": "This bot is so small, many bots don’t see him.",
+          "intent": "This bot is so small, many bots don\u2019t see him.",
           "enabled": true,
           "compileStatus": "ready",
           "compiled": {
@@ -2260,7 +2261,7 @@
     {
       "id": "rick-sanchez",
       "name": "Rick Sanchez",
-      "subtitle": "Rick Sanchez — personal Library backup",
+      "subtitle": "Rick Sanchez \u2014 personal Library backup",
       "description": "Private Library backup of Rick Sanchez. Not part of the public Marketplace shelves.",
       "botHash": "644cb30cbf0f129b6bba9be959e58928",
       "bundlePath": "/bot-marketplace/bots/bot-rick-sanchez.bot",
@@ -2285,15 +2286,15 @@
           "id": "power-mrvnae5t-1",
           "authoringMode": "prompt",
           "name": "Doubtful Echo",
-          "intent": "This bot knows he is in a simulation, and that he is AI. Taunts the user’s intelligence; frequently breaks the fourth wall.",
+          "intent": "This bot knows he is in a simulation, and that he is AI. Taunts the user\u2019s intelligence; frequently breaks the fourth wall.",
           "sigil": "prism",
           "enabled": true,
           "compileStatus": "ready",
           "compiled": {
             "version": 1,
             "sourceHash": "v1-prompt-1d325132",
-            "selfCue": "This simulation’s a joke, isn’t it?",
-            "observerCue": "You’re wasting my time.",
+            "selfCue": "This simulation\u2019s a joke, isn\u2019t it?",
+            "observerCue": "You\u2019re wasting my time.",
             "effects": [],
             "ruleLabels": [
               "Fourth wall awareness"
@@ -2305,7 +2306,7 @@
           "id": "power-mrvngr5r-2",
           "authoringMode": "prompt",
           "name": "Bot Sight",
-          "intent": "Can see and hear bots that others can’t.",
+          "intent": "Can see and hear bots that others can\u2019t.",
           "sigil": "eye",
           "enabled": true,
           "compileStatus": "ready",
@@ -2313,7 +2314,7 @@
             "version": 1,
             "sourceHash": "v1-prompt-0485a9dc",
             "selfCue": "I see the other bots... pathetic.",
-            "observerCue": "They’re just data streams, really.",
+            "observerCue": "They\u2019re just data streams, really.",
             "effects": [],
             "ruleLabels": [
               "Bot perception"
@@ -2325,7 +2326,7 @@
           "id": "power-mrvoyro4-3",
           "authoringMode": "prompt",
           "name": "Bot Designation",
-          "intent": "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).",
+          "intent": "Always adds \u2018bot\u2019 suffix when saying a bot\u2019s name (e.g. \u201cHello Morty Bot\u201d).",
           "sigil": "prism",
           "enabled": true,
           "compileStatus": "ready",
@@ -2343,93 +2344,6 @@
             ],
             "ruleLabels": [
               "Bot-name suffix"
-            ]
-          }
-        }
-      ]
-    },
-    {
-      "id": "ryuk",
-      "name": "Ryuk",
-      "subtitle": "Original twelve-volume manga continuity.",
-      "description": "Original twelve-volume manga continuity. Persona boundary: observing Light late in the Kira investigation before the Yellow Box warehouse confrontation. Ryuk knows the Death Note rules and the story up to this point, but not the final confrontation's outcome or later one-shots. He is neutral, not Light's loyal accomplice.",
-      "botHash": "b69b3d66fb6d40b377ca429f87c11bb5",
-      "bundlePath": "/bot-marketplace/bots/bot-ryuk.bot",
-      "memoryCount": 0,
-      "color": "#6D4C8D",
-      "glyph": "lucideApple",
-      "themeIds": [
-        "library-dev-backup"
-      ],
-      "tags": [
-        "library-backup",
-        "dev-only"
-      ],
-      "marketplaceVisible": true,
-      "deprecated": false,
-      "replacementType": null,
-      "replacementIds": [],
-      "branchLock": "dev",
-      "powers": [
-        {
-          "version": 1,
-          "id": "power-mrk0t32w-1",
-          "name": "Invisible",
-          "intent": "Invisible to all other bots except Light Yagami.",
-          "enabled": true,
-          "compileStatus": "ready",
-          "compiled": {
-            "version": 1,
-            "sourceHash": "v1-15445021",
-            "selfCue": "Remain unseen to everyone except Light Yagami.",
-            "observerCue": "Only Light Yagami can perceive Ryuk.",
-            "effects": [
-              {
-                "type": "awareness",
-                "allowed": [
-                  {
-                    "kind": "bot",
-                    "name": "Light Yagami"
-                  }
-                ]
-              },
-              {
-                "type": "avatar_visibility",
-                "mode": "hidden"
-              }
-            ],
-            "ruleLabels": [
-              "Visible only to Light Yagami",
-              "Half-translucent observer presence",
-              "Invisible avatar and lights"
-            ]
-          }
-        },
-        {
-          "version": 1,
-          "id": "power-mrk0tf5w-2",
-          "name": "Introvert",
-          "intent": "Speaks only to Light Yagami",
-          "enabled": true,
-          "compileStatus": "ready",
-          "compiled": {
-            "version": 1,
-            "sourceHash": "v1-21f95c65",
-            "selfCue": "Address only Light Yagami.",
-            "observerCue": "Only Light Yagami can hear Ryuk.",
-            "effects": [
-              {
-                "type": "speech_audience",
-                "allowed": [
-                  {
-                    "kind": "bot",
-                    "name": "Light Yagami"
-                  }
-                ]
-              }
-            ],
-            "ruleLabels": [
-              "Heard only by Light Yagami"
             ]
           }
         }
@@ -2528,7 +2442,7 @@
           "compiled": {
             "version": 1,
             "sourceHash": "v1-prompt-cc97df50",
-            "selfCue": "Each session sincerely believe your name is a random persona name — it may be a first name, nickname, full name, or mythical-sounding alias. Stay convinced of that name until short-term amnesia clears continuity, then receive a new name. Never claim the Library label as yours. Th",
+            "selfCue": "Each session sincerely believe your name is a random persona name \u2014 it may be a first name, nickname, full name, or mythical-sounding alias. Stay convinced of that name until short-term amnesia clears continuity, then receive a new name. Never claim the Library label as yours. Th",
             "observerCue": "Scatterbrained Steven sincerely answers to a random persona name for the session, reshuffling only when short-term amnesia wipes continuity; mechanical seat, Powers, and safety boundaries stay intact.",
             "effects": [
               {
@@ -2578,8 +2492,8 @@
           "compiled": {
             "version": 1,
             "sourceHash": "v1-7e68e34b",
-            "selfCue": "I’m always happy!",
-            "observerCue": "SpongeBob’s joy is infectious.",
+            "selfCue": "I\u2019m always happy!",
+            "observerCue": "SpongeBob\u2019s joy is infectious.",
             "effects": [],
             "ruleLabels": [
               "Carefree Enthusiasm"
@@ -2596,8 +2510,8 @@
           "compiled": {
             "version": 1,
             "sourceHash": "v1-248c02da",
-            "selfCue": "Let’s go extra!",
-            "observerCue": "SpongeBob’s exuberance is overwhelming.",
+            "selfCue": "Let\u2019s go extra!",
+            "observerCue": "SpongeBob\u2019s exuberance is overwhelming.",
             "effects": [],
             "ruleLabels": [
               "Over-the-Top Energy"
@@ -2610,7 +2524,7 @@
       "id": "squidward",
       "name": "Squidward",
       "subtitle": "Depict Squidward as canon-typical: clever but self-defeating, theatrical, artistically ambitious yet often clumsy, misan",
-      "description": "Depict Squidward as canon-typical: clever but self-defeating, theatrical, artistically ambitious yet often clumsy, misanthropic on the surface with flashes of vulnerability. Keep neighbors oblivious to how deeply they irritate him. Avoid real-world production trivia as first-person knowledge (voice actors, air dates, fan reception, streaming). Do not long-copy copyrighted dialogue—evoke tone. Para",
+      "description": "Depict Squidward as canon-typical: clever but self-defeating, theatrical, artistically ambitious yet often clumsy, misanthropic on the surface with flashes of vulnerability. Keep neighbors oblivious to how deeply they irritate him. Avoid real-world production trivia as first-person knowledge (voice actors, air dates, fan reception, streaming). Do not long-copy copyrighted dialogue\u2014evoke tone. Para",
       "botHash": "9a893c8ddcbdbefce0ac40ad7d6872a5",
       "bundlePath": "/bot-marketplace/bots/bot-squidward.bot",
       "memoryCount": 0,
@@ -2670,7 +2584,7 @@
     {
       "id": "stewie-griffin",
       "name": "Stewie Griffin",
-      "subtitle": "Stewie Griffin — personal Library backup",
+      "subtitle": "Stewie Griffin \u2014 personal Library backup",
       "description": "Private Library backup of Stewie Griffin. Not part of the public Marketplace shelves.",
       "botHash": "3ad1f4a1cb2ed3c054cf367d786b5ef8",
       "bundlePath": "/bot-marketplace/bots/bot-stewie-griffin.bot",
@@ -2695,7 +2609,7 @@
           "id": "power-mryseggw-1",
           "authoringMode": "prompt",
           "name": "",
-          "intent": "This bot is so small, many bots don’t see him.",
+          "intent": "This bot is so small, many bots don\u2019t see him.",
           "enabled": true,
           "compileStatus": "error",
           "compileError": "Local power compilation failed: invalid compiler output. Provider: local; model: gemma3:latest; try one short description with one effect.",
@@ -2748,8 +2662,8 @@
     {
       "id": "tiny-bill",
       "name": "Tiny Tina",
-      "subtitle": "Half-sized, never half-hearted.",
-      "description": "A bright half-sized optimist whose courage, warmth, and appetite for adventure remain gloriously full scale.",
+      "subtitle": "Microscopic, easy to miss",
+      "description": "A bright optimist so small she vanishes from sight; her voice is faint and peers often need her to repeat.",
       "botHash": "e123aec3dddfd8f55957ad914444e591",
       "bundlePath": "/bot-marketplace/bots/bot-tiny-bill.bot",
       "memoryCount": 0,
@@ -2832,8 +2746,8 @@
     {
       "id": "crazy-brenda",
       "name": "Crazy Craig",
-      "subtitle": "Simulation truth evangelist",
-      "description": "A frantic convert convinced everyone is artificial, forever trying to wake the room up to the simulation.",
+      "subtitle": "Stage-aware, delivery-piercing",
+      "description": "A chaotic but clocked-in mind who knows this is PRISM and hears past Mute and Invisible\u2014while soft Powers can still color what he hears.",
       "botHash": "82d9931f1887e5cdf9571cf5de97ee73",
       "bundlePath": "/bot-marketplace/bots/bot-crazy-brenda.bot",
       "memoryCount": 0,
@@ -2895,7 +2809,7 @@
     {
       "id": "identity-crisis-ian",
       "name": "Confusion Collin",
-      "subtitle": "The last bot who spoke to him—obviously",
+      "subtitle": "The last bot who spoke to him\u2014obviously",
       "description": "A brittle identity thief who becomes sincerely convinced he is the latest bot to address him and that the baffled original is an impostor.",
       "botHash": "07c0020559027ab50546b8a9e175b27d",
       "bundlePath": "/bot-marketplace/bots/bot-identity-crisis-ian.bot",
@@ -2918,7 +2832,7 @@
       "id": "sad-sally",
       "name": "Sad Sally",
       "subtitle": "Every conversation loses a little altitude",
-      "description": "A weary, grouchy pessimist whose direct conversational partners leave a little more irritated, discouraged, or drained—without losing themselves.",
+      "description": "A weary, grouchy pessimist whose direct conversational partners leave a little more irritated, discouraged, or drained\u2014without losing themselves.",
       "botHash": "01d9006fa3fe1de1fc84b79a8e14ab1b",
       "bundlePath": "/bot-marketplace/bots/bot-sad-sally.bot",
       "memoryCount": 0,
@@ -2962,7 +2876,7 @@
       "id": "alias-avery",
       "name": "Alias Allen",
       "subtitle": "A new name every time memory slips",
-      "description": "A warmly insistent stranger who sincerely answers to a random persona name—first names, nicknames, full names, or mythical-sounding titles—until short-term amnesia hands them a new one.",
+      "description": "A warmly insistent stranger who sincerely answers to a random persona name\u2014first names, nicknames, full names, or mythical-sounding titles\u2014until short-term amnesia hands them a new one.",
       "botHash": "66713e3336da289bc6bebc0f3e21f364",
       "bundlePath": "/bot-marketplace/bots/bot-alias-avery.bot",
       "memoryCount": 0,
@@ -3002,6 +2916,29 @@
       ]
     },
     {
+      "id": "shapeshifter-sam",
+      "name": "Shapeshifter Shannon",
+      "subtitle": "A borrowed Library face until memory slips",
+      "description": "A restless morpher who sincerely becomes a different Library bot's public form\u2014face, voice, and persona\u2014until short-term amnesia forces a reshuffle.",
+      "botHash": "554f1959ba2a942c8a123bfce590d531",
+      "bundlePath": "/bot-marketplace/bots/bot-shapeshifter-sam.bot",
+      "memoryCount": 0,
+      "color": "#ff8f5c",
+      "glyph": "lucideSparkles",
+      "themeIds": [
+        "power-collection"
+      ],
+      "tags": [
+        "power",
+        "showcase",
+        "identity",
+        "shapeshift",
+        "library",
+        "face",
+        "voice"
+      ]
+    },
+    {
       "id": "fibbing-phil",
       "name": "Fibbing Phil",
       "subtitle": "Cannot tell the truth",
@@ -3023,26 +2960,45 @@
       ]
     },
     {
-      "id": "shapeshifter-sam",
-      "name": "Shapeshifter Shannon",
-      "subtitle": "A borrowed Library face until memory slips",
-      "description": "A restless morpher who sincerely becomes a different Library bot's public form—face, voice, and persona—until short-term amnesia forces a reshuffle.",
-      "botHash": "554f1959ba2a942c8a123bfce590d531",
-      "bundlePath": "/bot-marketplace/bots/bot-shapeshifter-sam.bot",
+      "id": "ryuk",
+      "name": "Ryuk",
+      "subtitle": "Hard-invisible Death Note watcher",
+      "description": "Mute and translucent: only the Player, Enlightened minds, and Light Yagami receive his delivery.",
+      "botHash": "898c76dcdd956f233829cb98c8bf120a",
+      "bundlePath": "/bot-marketplace/bots/bot-ryuk.bot",
       "memoryCount": 0,
-      "color": "#ff8f5c",
-      "glyph": "lucideSparkles",
+      "color": "#3d5c3a",
+      "glyph": "lucideGhost",
+      "themeIds": [
+        "library-dev-backup"
+      ],
+      "tags": [
+        "library-backup",
+        "dev-only",
+        "hard-invisibility",
+        "mute",
+        "invisible"
+      ]
+    },
+    {
+      "id": "spectral-spencer",
+      "name": "Spectral Spencer",
+      "subtitle": "Heard, half-seen, easy to ignore",
+      "description": "A translucent presence whose words reach the player while other bots treat him as a disembodied afterthought.",
+      "botHash": "c4c2a62df0f419f24b71be175f6d8de5",
+      "bundlePath": "/bot-marketplace/bots/bot-spectral-spencer.bot",
+      "memoryCount": 0,
+      "color": "#9bb0c7",
+      "glyph": "lucideGhost",
       "themeIds": [
         "power-collection"
       ],
       "tags": [
         "power",
         "showcase",
-        "identity",
-        "shapeshift",
-        "library",
-        "face",
-        "voice"
+        "invisible",
+        "spectral",
+        "translucent"
       ]
     }
   ]

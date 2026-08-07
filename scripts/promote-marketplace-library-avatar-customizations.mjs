@@ -147,8 +147,8 @@ function readArchive(entry, explicitPath = null) {
     .trim()
     .split("\n")
     .filter(Boolean);
-  if (!entries.includes("bot.json") || !entries.includes("memories.json")) {
-    throw new Error(`${entry.name} archive is missing a required entry.`);
+  if (!entries.includes("bot.json")) {
+    throw new Error(`${entry.name} archive is missing bot.json.`);
   }
   const document = JSON.parse(
     execFileSync("unzip", ["-p", bundlePath, "bot.json"], {
@@ -166,9 +166,9 @@ function readArchive(entry, explicitPath = null) {
     entries,
     document,
     archiveSha256: sha256(readFileSync(bundlePath)),
-    memoriesSha256: sha256(
-      execFileSync("unzip", ["-p", bundlePath, "memories.json"]),
-    ),
+    memoriesSha256: entries.includes("memories.json")
+      ? sha256(execFileSync("unzip", ["-p", bundlePath, "memories.json"]))
+      : null,
   };
 }
 

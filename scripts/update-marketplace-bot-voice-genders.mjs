@@ -95,7 +95,8 @@ const CURATED_BOT_IDS_BY_VOICE = {
     "interrupting-tom",
     "identity-crisis-ian",
     "following-jackson",
-    "fibbing-phil"
+    "fibbing-phil",
+    "spectral-spencer"
   ],
   "voice-4": [
     "pia",

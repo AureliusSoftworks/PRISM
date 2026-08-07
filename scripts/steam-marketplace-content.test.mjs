@@ -73,6 +73,15 @@ test("fails closed when a public bot is not explicitly approved", () => {
   );
 });
 
+test("refuses Steam bots that still package memories", () => {
+  const manifest = manifestFixture();
+  manifest.bots[0].memoryCount = 12;
+  assert.throws(
+    () => resolveSteamMarketplaceContent(manifest, policyFixture()),
+    /memoryCount 0/u,
+  );
+});
+
 test("refuses to approve a dev-locked bot", () => {
   assert.throws(
     () => resolveSteamMarketplaceContent(manifestFixture(), policyFixture(["original", "licensed-character"])),

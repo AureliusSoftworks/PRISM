@@ -135,6 +135,13 @@ export function resolveSteamMarketplaceContent(manifestRaw, policyRaw) {
     .filter((bot) => approvedIds.has(normalizeId(bot.id)))
     .map((bot) => {
       marketplaceBundleRelativePath(bot.bundlePath);
+      const memoryCount = Number(bot.memoryCount ?? 0);
+      if (memoryCount !== 0) {
+        throw new Error(
+          `Steam Marketplace bot ${normalizeId(bot.id)} must ship with memoryCount 0 (got ${memoryCount}). ` +
+            "Packaged memories are earned in play, not authored into the persona pack.",
+        );
+      }
       return withoutBranchLock(bot);
     });
   const approvedBundlePaths = approvedBots.map((bot) => bot.bundlePath);

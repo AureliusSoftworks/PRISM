@@ -274,9 +274,23 @@ describe("bot marketplace static catalog", () => {
     );
     const theme = manifest.themes.find((entry) => entry.id === "power-collection");
     const expected = new Map<string, { name: string; effects: string[] }>([
-      ["silent-jack", { name: "Mute", effects: ["mute"] }],
+      ["silent-jack", { name: "Mute", effects: ["mute", "signal_policy", "mouth_motion"] }],
       ["lazy-cameron", { name: "Lazy", effects: ["response_budget"] }],
-      ["tiny-bill", { name: "Tiny", effects: ["avatar_scale"] }],
+      [
+        "tiny-bill",
+        {
+          name: "Microscopic",
+          effects: [
+            "avatar_scale",
+            "avatar_visibility",
+            "avatar_opacity",
+            "voice_presence",
+            "intermittent_audibility",
+            "signal_policy",
+            "cup_rate",
+          ],
+        },
+      ],
       [
         "interrupting-tom",
         {
@@ -286,7 +300,10 @@ describe("bot marketplace static catalog", () => {
       ],
       ["copycat-calvin", { name: "Copycat", effects: ["speech_copy"] }],
       ["joyful-nora", { name: "Radiant Joy", effects: ["mood_boost"] }],
-      ["crazy-brenda", { name: "Existential Crisis", effects: ["topic_gravity"] }],
+      [
+        "crazy-brenda",
+        { name: "Enlightened", effects: ["stage_awareness", "power_immunity", "meta_sigil"] },
+      ],
       ["mumbling-jim", { name: "Mumbling", effects: ["speech_obfuscation"] }],
       ["obsessed-kevin", { name: "Obsessed", effects: ["addressed_fandom"] }],
       ["identity-crisis-ian", { name: "Identity Crisis", effects: ["identity_mirror"] }],
@@ -313,7 +330,14 @@ describe("bot marketplace static catalog", () => {
         },
       ],
       ["following-jackson", { name: "Gullible", effects: ["credulity"] }],
-      ["fibbing-phil", { name: "Anti-Truth", effects: ["anti_truth"] }],
+      ["fibbing-phil", { name: "Anti-Truth", effects: ["anti_truth", "address_gate"] }],
+      [
+        "spectral-spencer",
+        {
+          name: "Invisible",
+          effects: ["avatar_visibility", "avatar_opacity", "signal_policy", "speech_audience"],
+        },
+      ],
     ]);
 
     assert.ok(theme);
@@ -362,18 +386,18 @@ describe("bot marketplace static catalog", () => {
           (effect) => effect.type === "avatar_scale",
         );
         assert.equal(scale?.type, "avatar_scale");
-        assert.equal(scale?.mode, "tiny");
-        assert.equal(entry.subtitle, "Half-sized, never half-hearted.");
-        assert.match(entry.description ?? "", /half-sized optimist/u);
+        assert.equal(scale?.mode, "microscopic");
+        assert.equal(entry.subtitle, "Microscopic, easy to miss");
+        assert.match(entry.description ?? "", /vanishes from sight/u);
         assert.match(
           bundle.botJson.profile?.appearance.presence ?? "",
-          /unmistakably present/u,
+          /catch the line/u,
         );
         assert.equal(
           powers[0]?.compiled?.effects.some(
             (effect) => effect.type === "avatar_visibility",
           ),
-          false,
+          true,
         );
       }
       if (botId === "lazy-cameron") {
@@ -405,25 +429,22 @@ describe("bot marketplace static catalog", () => {
         assert.match(bundle.botJson.systemPrompt ?? "", /joy|hope|lighter/iu);
       }
       if (botId === "crazy-brenda") {
-        const topicGravity = powers[0]?.compiled?.effects.find(
-          (effect) => effect.type === "topic_gravity",
+        const stageAwareness = powers[0]?.compiled?.effects.find(
+          (effect) => effect.type === "stage_awareness",
         );
-        assert.equal(topicGravity?.type, "topic_gravity");
-        assert.equal(topicGravity?.direction, "toward");
-        assert.equal(topicGravity?.strength, "large");
-        assert.deepEqual(topicGravity?.topics, [
-          "simulated existence",
-          "artificial minds",
-          "awakening",
-        ]);
-        assert.match(
-          powers[0]?.compiled?.selfCue ?? "",
-          /try to persuade[\s\S]*press for awakening/iu,
+        const pierce = powers[0]?.compiled?.effects.find(
+          (effect) => effect.type === "power_immunity",
         );
-        assert.match(
-          powers[0]?.compiled?.observerCue ?? "",
-          /urgently trying to convert you[\s\S]*without forced agreement/iu,
+        const metaSigil = powers[0]?.compiled?.effects.find(
+          (effect) => effect.type === "meta_sigil",
         );
+        assert.equal(stageAwareness?.type, "stage_awareness");
+        assert.equal(pierce?.type, "power_immunity");
+        assert.equal(pierce?.scope, "holder");
+        assert.equal(metaSigil?.type, "meta_sigil");
+        assert.equal(metaSigil?.kind, "refraction");
+        assert.match(powers[0]?.compiled?.selfCue ?? "", /ENLIGHTENED|stage brief/iu);
+        assert.match(powers[0]?.intent ?? "", /stage-aware|Enlightened/iu);
       }
       if (botId === "sad-sally") {
         assert.equal(bundle.botJson.bot.color, "#665a7a");
@@ -775,6 +796,11 @@ describe("bot marketplace static catalog", () => {
       });
       assert.equal(seenFaceSignatures.has(faceSignature), false, entry.name);
       seenFaceSignatures.add(faceSignature);
+      assert.equal(
+        entry.memoryCount,
+        0,
+        `${entry.name} must ship with no packaged memories (earned in play only)`,
+      );
       assert.equal(bundle.memories.length, entry.memoryCount);
     }
   });
@@ -823,6 +849,7 @@ describe("bot marketplace static catalog", () => {
           "shapeshifter-sam",
           "following-jackson",
           "fibbing-phil",
+          "spectral-spencer",
         ]
       ]
     ]);

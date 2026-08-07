@@ -70,6 +70,15 @@ export type BotPowerObserverVisibilityV1 =
   | "translucent"
   | "visible";
 export type BotPowerVoicePresenceMode = "loud" | "quiet";
+export type BotPowerSignalPolicyModeV1 =
+  | "pass"
+  | "destroy"
+  | "ignore"
+  | "attenuate"
+  | "distort";
+export type BotPowerAddressGateV1 = "always" | "addressed" | "question";
+export type BotPowerMouthMotionV1 = "normal" | "sealed";
+export type BotPowerMetaSigilKindV1 = "refraction";
 export type BotPowerDesignationPlacement = "prefix" | "suffix";
 /** Resolved rendered app theme used by conditional Power branches. */
 export type BotPowerResolvedThemeV1 = "light" | "dark";
@@ -83,7 +92,9 @@ export const BOT_POWER_QUIET_TEXT_SCALE_V1 = 0.88;
 export type BotPowerTargetV1 =
   | { kind: "all" }
   | { kind: "bot"; name: string; botId?: string }
-  | { kind: "trait"; trait: string };
+  | { kind: "trait"; trait: string }
+  /** Player exemption for delivery filters (Hard Invisibility whitelist, etc.). */
+  | { kind: "player" };
 
 export type BotPowerEffectV1 =
   | { type: "mute" }
@@ -179,7 +190,7 @@ export type BotPowerEffectV1 =
       type: "intermittent_audibility";
       chance: "half";
       listeners: "bots";
-      missEvent: "too_faint_to_make_out";
+      missEvent: "too_faint_to_make_out" | "inaudible_ask_repeat";
     }
   /** Half of audible lines mildly annoy one eligible audible bot peer. */
   | {
@@ -294,6 +305,36 @@ export type BotPowerEffectV1 =
       type: "insight";
       strength: BotPowerStrength;
       targets: BotPowerTargetV1[];
+    }
+  /**
+   * Curated stage brief + Observant-class delivery pierce (Enlightened).
+   * Soft pressures still apply unless separately exempted.
+   */
+  | { type: "stage_awareness" }
+  /** Unified outbound delivery policy for Codified + derived Powers. */
+  | {
+      type: "signal_policy";
+      mode: BotPowerSignalPolicyModeV1;
+    }
+  /** When a hard transform fires (Anti-truth invert, etc.). */
+  | {
+      type: "address_gate";
+      when: BotPowerAddressGateV1;
+    }
+  /** Player-only body opacity override (0–1). Independent of NPC awareness. */
+  | {
+      type: "avatar_opacity";
+      opacity: number;
+    }
+  /** Player-only mouth motion lock (Mute sealed mouth). */
+  | {
+      type: "mouth_motion";
+      mode: BotPowerMouthMotionV1;
+    }
+  /** Player-only meta mark (Enlightened refraction sigil). */
+  | {
+      type: "meta_sigil";
+      kind: BotPowerMetaSigilKindV1;
     };
 
 export interface CompiledBotPowerV1 {
@@ -513,6 +554,7 @@ function normalizeTarget(value: unknown): BotPowerTargetV1 | null {
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const target = value as Record<string, unknown>;
   if (target.kind === "all") return { kind: "all" };
+  if (target.kind === "player") return { kind: "player" };
   if (target.kind === "bot") {
     const name = compactText(target.name, 80);
     const botId = compactText(target.botId, 100);
@@ -668,7 +710,10 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
       type: "intermittent_audibility",
       chance: "half",
       listeners: "bots",
-      missEvent: "too_faint_to_make_out",
+      missEvent:
+        effect.missEvent === "inaudible_ask_repeat"
+          ? "inaudible_ask_repeat"
+          : "too_faint_to_make_out",
     };
   }
   if (effect.type === "annoyance") {
@@ -834,6 +879,41 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
       targets: normalizeTargets(effect.targets),
     };
   }
+  if (effect.type === "stage_awareness") return { type: "stage_awareness" };
+  if (effect.type === "signal_policy") {
+    const mode = effect.mode;
+    if (
+      mode !== "pass" &&
+      mode !== "destroy" &&
+      mode !== "ignore" &&
+      mode !== "attenuate" &&
+      mode !== "distort"
+    ) {
+      return null;
+    }
+    return { type: "signal_policy", mode };
+  }
+  if (effect.type === "address_gate") {
+    const when = effect.when;
+    if (when !== "always" && when !== "addressed" && when !== "question") {
+      return null;
+    }
+    return { type: "address_gate", when };
+  }
+  if (effect.type === "avatar_opacity") {
+    const opacity = typeof effect.opacity === "number" && Number.isFinite(effect.opacity)
+      ? Math.min(1, Math.max(0, effect.opacity))
+      : null;
+    if (opacity === null) return null;
+    return { type: "avatar_opacity", opacity };
+  }
+  if (effect.type === "mouth_motion") {
+    if (effect.mode !== "normal" && effect.mode !== "sealed") return null;
+    return { type: "mouth_motion", mode: effect.mode };
+  }
+  if (effect.type === "meta_sigil") {
+    return { type: "meta_sigil", kind: "refraction" };
+  }
   return null;
 }
 
@@ -847,7 +927,7 @@ export function normalizeCompiledBotPowerV1(value: unknown): CompiledBotPowerV1 
     ? compiled.effects
         .map(normalizeBotPowerEffectV1)
         .filter((effect): effect is BotPowerEffectV1 => effect !== null)
-        .slice(0, 8)
+        .slice(0, 12)
     : [];
   const ruleLabels = Array.isArray(compiled.ruleLabels)
     ? compiled.ruleLabels
@@ -1014,19 +1094,35 @@ function upgradeLegacyAvatarPresentationV1(
   if (describedScale === "microscopic") {
     upgraded = {
       ...upgraded,
-      selfCue: "You are microscopic and impossible to see. Your voice is faint, and each bot listener independently has only a fifty-fifty chance to make out a line.",
-      observerCue: "The Power holder is microscopic and unseen. Their faint words may be too quiet for each bot listener to make out.",
+      selfCue: "You are microscopic and impossible to see. Your voice is faint; each bot listener has only a fifty-fifty chance to hear a line — on a miss they should ask you to repeat.",
+      observerCue: "The Power holder is microscopic and unseen. Their faint words may be inaudible; peers may need to ask them to repeat.",
       effects: ([
         ...upgraded.effects.filter((effect) =>
-          !["avatar_scale", "avatar_visibility", "voice_presence", "intermittent_mute", "intermittent_audibility", "cup_rate"].includes(effect.type)
+          ![
+            "avatar_scale",
+            "avatar_visibility",
+            "avatar_opacity",
+            "voice_presence",
+            "intermittent_mute",
+            "intermittent_audibility",
+            "signal_policy",
+            "cup_rate",
+          ].includes(effect.type)
         ),
         { type: "avatar_scale", mode: "microscopic" },
         { type: "avatar_visibility", mode: "hidden" },
+        { type: "avatar_opacity", opacity: 0 },
         { type: "voice_presence", mode: "quiet" },
-        { type: "intermittent_audibility", chance: "half", listeners: "bots", missEvent: "too_faint_to_make_out" },
+        {
+          type: "intermittent_audibility",
+          chance: "half",
+          listeners: "bots",
+          missEvent: "inaudible_ask_repeat",
+        },
+        { type: "signal_policy", mode: "attenuate" },
         { type: "cup_rate", rate: "none" },
-      ] satisfies BotPowerEffectV1[]).slice(0, 8),
-      ruleLabels: ["Microscopic body", "Invisible avatar", "Quiet voice", "No coffee"],
+      ] satisfies BotPowerEffectV1[]).slice(0, 12),
+      ruleLabels: ["Microscopic body", "Invisible avatar", "Quiet voice", "Ask-to-repeat misses", "No coffee"],
     };
   } else if (describedScale === "colossal") {
     upgraded = {
@@ -1066,7 +1162,9 @@ function upgradeLegacyAvatarPresentationV1(
   }
   if (
     normalizedName === "invisible" &&
-    visibilityEffect?.type === "avatar_visibility"
+    visibilityEffect?.type === "avatar_visibility" &&
+    visibilityEffect.mode !== "translucent" &&
+    visibilityEffect.mode !== "speaking_only"
   ) {
     return {
       ...upgraded,
@@ -1532,12 +1630,248 @@ export function activeBotPowerEffectsV1(value: unknown): BotPowerEffectV1[] {
   });
 }
 
-/** True when this holder experiences every other bot as if it had no Power. */
-export function botPowerIgnoresOtherPowersFromEffectsV1(value: unknown): boolean {
+/** Delivery / audience filters Enlightened & Observant pierce. Soft pressures remain. */
+export const BOT_POWER_DELIVERY_EFFECT_TYPES_V1 = [
+  "mute",
+  "intermittent_mute",
+  "intermittent_audibility",
+  "awareness",
+  "speech_audience",
+  "signal_policy",
+  "avatar_visibility",
+  "avatar_opacity",
+  "voice_presence",
+] as const;
+
+export function botPowerEffectIsDeliveryFilterV1(
+  effect: BotPowerEffectV1 | null | undefined,
+): boolean {
+  if (!effect) return false;
+  return (BOT_POWER_DELIVERY_EFFECT_TYPES_V1 as readonly string[]).includes(
+    effect.type,
+  );
+}
+
+/** True when holder pierces other bots' signal/audience filters. */
+export function botPowerPiercesDeliveryFiltersFromEffectsV1(
+  value: unknown,
+): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some((effect) => {
+    const normalized = normalizeBotPowerEffectV1(effect);
+    return (
+      normalized?.type === "power_immunity" ||
+      normalized?.type === "stage_awareness"
+    );
+  });
+}
+
+export function botPowerPiercesDeliveryFiltersV1(value: unknown): boolean {
+  return botPowerPiercesDeliveryFiltersFromEffectsV1(
+    activeBotPowerEffectsV1(value),
+  );
+}
+
+export function botPowerHasStageAwarenessFromEffectsV1(value: unknown): boolean {
   if (!Array.isArray(value)) return false;
   return value.some(
-    (effect) => normalizeBotPowerEffectV1(effect)?.type === "power_immunity",
+    (effect) => normalizeBotPowerEffectV1(effect)?.type === "stage_awareness",
   );
+}
+
+export function botPowerHasStageAwarenessV1(value: unknown): boolean {
+  return botPowerHasStageAwarenessFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
+/**
+ * When 2+ stage_awareness holders share a scene, demote all to Observant-equivalent:
+ * keep power_immunity pierce, strip stage_awareness + meta_sigil.
+ */
+function coerceBotPowerEffectsListV1(value: unknown): BotPowerEffectV1[] {
+  if (!Array.isArray(value)) return activeBotPowerEffectsV1(value);
+  // Coffee plan / tests pass raw effect arrays; Library bots pass stored Powers.
+  const asEffects = value
+    .map(normalizeBotPowerEffectV1)
+    .filter((effect): effect is BotPowerEffectV1 => effect !== null);
+  if (asEffects.length > 0) return asEffects;
+  return activeBotPowerEffectsV1(value);
+}
+
+export function demoteMultiEnlightenedScenePowersV1(
+  powersByBotId: ReadonlyMap<string, unknown> | Record<string, unknown>,
+): Map<string, BotPowerEffectV1[]> {
+  const entries: Array<[string, BotPowerEffectV1[]]> = [];
+  const iterable =
+    powersByBotId instanceof Map
+      ? powersByBotId.entries()
+      : Object.entries(powersByBotId);
+  for (const [botId, powers] of iterable) {
+    entries.push([botId, coerceBotPowerEffectsListV1(powers)]);
+  }
+  const enlightenedCount = entries.filter(([, effects]) =>
+    botPowerHasStageAwarenessFromEffectsV1(effects),
+  ).length;
+  const demote = enlightenedCount >= 2;
+  const next = new Map<string, BotPowerEffectV1[]>();
+  for (const [botId, effects] of entries) {
+    if (!demote || !botPowerHasStageAwarenessFromEffectsV1(effects)) {
+      next.set(botId, effects);
+      continue;
+    }
+    const stripped = effects.filter(
+      (effect) =>
+        effect.type !== "stage_awareness" && effect.type !== "meta_sigil",
+    );
+    if (!stripped.some((effect) => effect.type === "power_immunity")) {
+      stripped.push({
+        type: "power_immunity",
+        scope: "holder",
+        targets: "other_bots",
+        awareness: "unnoticed",
+      });
+    }
+    next.set(botId, stripped);
+  }
+  return next;
+}
+
+export function botPowerSignalPolicyFromEffectsV1(
+  value: unknown,
+): BotPowerSignalPolicyModeV1 | null {
+  if (!Array.isArray(value)) return null;
+  for (const effect of value) {
+    const normalized = normalizeBotPowerEffectV1(effect);
+    if (normalized?.type === "signal_policy") return normalized.mode;
+  }
+  if (value.some((effect) => normalizeBotPowerEffectV1(effect)?.type === "mute")) {
+    return "destroy";
+  }
+  return null;
+}
+
+export function botPowerAvatarOpacityFromEffectsV1(
+  value: unknown,
+): number | null {
+  if (!Array.isArray(value)) return null;
+  for (const effect of value) {
+    const normalized = normalizeBotPowerEffectV1(effect);
+    if (normalized?.type === "avatar_opacity") return normalized.opacity;
+  }
+  const visibility = botPowerAvatarVisibilityModeFromEffectsV1(value);
+  if (visibility === "hidden") return 0;
+  if (visibility === "translucent") return 0.5;
+  return null;
+}
+
+export function botPowerAvatarOpacityV1(value: unknown): number | null {
+  return botPowerAvatarOpacityFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
+export function botPowerMouthMotionFromEffectsV1(
+  value: unknown,
+): BotPowerMouthMotionV1 {
+  if (!Array.isArray(value)) return "normal";
+  for (const effect of value) {
+    const normalized = normalizeBotPowerEffectV1(effect);
+    if (normalized?.type === "mouth_motion") return normalized.mode;
+  }
+  if (value.some((effect) => normalizeBotPowerEffectV1(effect)?.type === "mute")) {
+    return "sealed";
+  }
+  return "normal";
+}
+
+export function botPowerMouthMotionV1(value: unknown): BotPowerMouthMotionV1 {
+  return botPowerMouthMotionFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
+export function botPowerMetaSigilFromEffectsV1(
+  value: unknown,
+): BotPowerMetaSigilKindV1 | null {
+  if (!Array.isArray(value)) return null;
+  for (const effect of value) {
+    const normalized = normalizeBotPowerEffectV1(effect);
+    if (normalized?.type === "meta_sigil") return normalized.kind;
+  }
+  return null;
+}
+
+export function botPowerMetaSigilV1(
+  value: unknown,
+): BotPowerMetaSigilKindV1 | null {
+  return botPowerMetaSigilFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
+/** True when Mute/destroy still leaves the player hearing the clear line. */
+export function botPowerMuteExemptsPlayerFromEffectsV1(
+  value: unknown,
+): boolean {
+  if (!Array.isArray(value)) return false;
+  for (const effect of value) {
+    const normalized = normalizeBotPowerEffectV1(effect);
+    if (normalized?.type !== "speech_audience") continue;
+    if (normalized.allowed.some((target) => target.kind === "player")) {
+      return true;
+    }
+  }
+  return false;
+}
+
+export function botPowerMuteExemptsPlayerV1(value: unknown): boolean {
+  return botPowerMuteExemptsPlayerFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
+/**
+ * Soft Studio hint when stacked filters will create a theatrical social knot.
+ * Never blocks authoring.
+ */
+export function botPowerAuthoringParadoxHintV1(value: unknown): string | null {
+  const effects = activeBotPowerEffectsV1(value);
+  if (effects.length === 0) {
+    // Draft intents before compile: peek at names/intents for mute+invisible stacks.
+    const powers = parseStoredBotPowersV1(value).filter((power) => power.enabled);
+    const blob = powers
+      .map((power) => `${power.name} ${power.intent}`.toLowerCase())
+      .join(" ");
+    if (/\bmute\b/u.test(blob) && /\binvisible\b/u.test(blob)) {
+      return "This setup will create a social paradox — Mute + Invisible resolves as Hard Invisibility for non-exempt listeners.";
+    }
+    return null;
+  }
+  const hasDestroy =
+    effects.some((effect) => effect.type === "mute") ||
+    effects.some(
+      (effect) =>
+        effect.type === "signal_policy" && effect.mode === "destroy",
+    );
+  const hasIgnore =
+    effects.some(
+      (effect) =>
+        effect.type === "signal_policy" && effect.mode === "ignore",
+    ) ||
+    effects.some((effect) => effect.type === "avatar_visibility");
+  const hasAudience = effects.some(
+    (effect) => effect.type === "speech_audience",
+  );
+  if (hasDestroy && hasIgnore) {
+    return "This setup will create a social paradox — destroyed speech plus absence filters stack into Hard Invisibility-style theater.";
+  }
+  if (hasDestroy && hasAudience) {
+    return "This setup will create a social paradox — some listeners may hear full lines while others only get silence.";
+  }
+  return null;
+}
+
+export function botPowerInaudibleMissCueV1(missEvent: unknown): string {
+  if (missEvent === "inaudible_ask_repeat") {
+    return "*[Their voice was inaudible. Ask them to repeat what they said.]*";
+  }
+  return "*[Their voice is too faint to make out.]*";
+}
+
+/** True when this holder experiences every other bot as if it had no Power. */
+export function botPowerIgnoresOtherPowersFromEffectsV1(value: unknown): boolean {
+  return botPowerPiercesDeliveryFiltersFromEffectsV1(value);
 }
 
 export function botPowerIgnoresOtherPowersV1(value: unknown): boolean {
@@ -1545,19 +1879,22 @@ export function botPowerIgnoresOtherPowersV1(value: unknown): boolean {
 }
 
 /**
- * Resolve one subject through one bot observer. Immunity removes the subject's
- * complete Power layer without mutating either bot or the human projection.
+ * Resolve one subject through one bot observer. Delivery pierce removes only
+ * signal/audience filters; soft pressures remain (Enlightened hears Fibbing's lies).
  */
 export function botPowerSubjectEffectsForObserverFromEffectsV1(
   subjectEffects: unknown,
   observerEffects: unknown,
 ): BotPowerEffectV1[] {
-  if (botPowerIgnoresOtherPowersFromEffectsV1(observerEffects)) return [];
-  return Array.isArray(subjectEffects)
+  const subject = Array.isArray(subjectEffects)
     ? subjectEffects
         .map(normalizeBotPowerEffectV1)
         .filter((effect): effect is BotPowerEffectV1 => effect !== null)
     : [];
+  if (!botPowerPiercesDeliveryFiltersFromEffectsV1(observerEffects)) {
+    return subject;
+  }
+  return subject.filter((effect) => !botPowerEffectIsDeliveryFilterV1(effect));
 }
 
 export function botPowerSubjectEffectsForObserverV1(
@@ -2196,6 +2533,23 @@ function botPowerRestrictionAllowsV1(
   });
 }
 
+/** True when speech_audience explicitly whitelists the human player. */
+export function botPowerSpeechAudienceAllowsPlayerFromEffectsV1(
+  value: unknown,
+): boolean {
+  if (!Array.isArray(value)) return false;
+  const audiences = value
+    .map(normalizeBotPowerEffectV1)
+    .filter(
+      (effect): effect is Extract<BotPowerEffectV1, { type: "speech_audience" }> =>
+        effect?.type === "speech_audience",
+    );
+  if (audiences.length === 0) return false;
+  return audiences.every((audience) =>
+    audience.allowed.some((target) => target.kind === "player"),
+  );
+}
+
 /** What one participant can truthfully perceive about a Power holder. */
 export function botPowerPairwisePerceptionFromEffectsV1(
   value: unknown,
@@ -2261,10 +2615,16 @@ export function botPowerObserverProjectionFromEffectsV1(
       effect.type === "avatar_visibility" && effect.mode === "translucent",
   );
   const replaySpectralAccess = perspective === "replay" && spectral;
+  // Human observers match explicit `{ kind: "player" }` whitelist entries.
+  const matchesHumanObserver = (target: BotPowerTargetV1): boolean =>
+    target.kind === "player" || participatingBotMatchesTarget(target);
+  const playerWhitelisted =
+    botPowerMuteExemptsPlayerFromEffectsV1(effects) ||
+    botPowerSpeechAudienceAllowsPlayerFromEffectsV1(effects);
   const visibilityAllowed = replaySpectralAccess || botPowerRestrictionAllowsV1(
     effects,
     "awareness",
-    participatingBotMatchesTarget,
+    matchesHumanObserver,
   );
   const presentationVisible = avatarMode !== "hidden" &&
     (avatarMode !== "speaking_only" || options.holderSpeaking === true);
@@ -2274,13 +2634,15 @@ export function botPowerObserverProjectionFromEffectsV1(
       : spectral
         ? "translucent"
         : "visible";
-  const audible =
-    !effects.some((effect) => effect.type === "mute") &&
-    (replaySpectralAccess || botPowerRestrictionAllowsV1(
+  const audienceAllows =
+    replaySpectralAccess ||
+    botPowerRestrictionAllowsV1(
       effects,
       "speech_audience",
-      participatingBotMatchesTarget,
-    ));
+      matchesHumanObserver,
+    );
+  const hasMute = effects.some((effect) => effect.type === "mute");
+  const audible = (!hasMute || playerWhitelisted) && audienceAllows;
   return {
     version: 1,
     perspective,

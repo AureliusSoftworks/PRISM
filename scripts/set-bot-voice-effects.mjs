@@ -102,8 +102,8 @@ function readBundle(entry) {
     .trim()
     .split(/\r?\n/u)
     .filter(Boolean);
-  if (!entryNames.includes("bot.json") || !entryNames.includes("memories.json")) {
-    throw new Error(`${entry.name} bundle is missing a required entry.`);
+  if (!entryNames.includes("bot.json")) {
+    throw new Error(`${entry.name} bundle is missing bot.json.`);
   }
   const document = JSON.parse(
     execFileSync("unzip", ["-p", bundlePath, "bot.json"], {

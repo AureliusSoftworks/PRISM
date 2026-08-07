@@ -1,3 +1,28 @@
+### 2026-08-06 · design
+**Trigger**: Steam prep — marketplace bots shipped with packaged second-person lore as "memories."
+**Lesson**: Marketplace `.bot` packs must ship with empty memories (`memoryCount` 0, no `memories.json`). Persona/identity lives in `bot.json`; memories are earned via player and bot interaction. Use `scripts/strip-marketplace-bot-memories.mjs`; Steam staging refuses `memoryCount !== 0`.
+**Applies to**: Marketplace packaging, Steam content staging, bot import
+
+### 2026-08-06 · architecture
+**Trigger**: Cafe Phase A — even with repair, llama3.2 High still anchored on illegal private drafts (Bob 16:00–20:00).
+**Lesson**: When the user prompt has hard can't/must constraints, skip Psychic `draft` / `revise_draft` on the simulated ladder (plan→audit only) so the final is not primed by an illegal private schedule.
+**Applies to**: `shouldSkipPsychicDraftForHardConstraints` in `chat.ts`
+
+### 2026-08-06 · architecture
+**Trigger**: Cafe Phase A — guidance/must-keeps still left llama3.2 copying Bob 16:00–20:00 and omitting R3.
+**Lesson**: After simulated finals, run one heuristic **constraint-repair** generation when obvious breaks are detected (named can't-close on late shift, past closing time, missing R1–R3, ellipsis stubs, 2-hour shifts). Keep repair thrifty; reject repairs that add breaks or truncate without improvement.
+**Applies to**: `detectObviousConstraintBreaks`, `maybeRepairGuidedFinalAnswer` in `chat.ts`
+
+### 2026-08-06 · architecture
+**Trigger**: Cafe Phase A review — llama3.2 High sim lost to None (Sol 10 > None 4 > High-sim 2); audit returned `[]` (2 chars) while private draft invented Bob closing past 6pm.
+**Lesson**: Empty/placeholder Psychic audits must fall back to a deterministic Fix/Keep checklist from extracted user must-keeps. Expand constraint extraction beyond S1-style lines (can't/cannot, shift lengths, R1–R3, Use only…). Final guidance must state user must-keeps outrank private drafts and ban analysis preambles.
+**Applies to**: `extractExplicitUserConstraints`, `buildDeterministicConstraintAudit`, `composePsychicFinalGuidance`, `appendPsychicAnswerGuidance` in `chat.ts`
+
+### 2026-08-06 · UX
+**Trigger**: Player asked to stop special Kokoro pacing rules and use the bot's normal English pacing settings.
+**Lesson**: Do not punctuation-chop Instant/Kokoro synthesis or inject hardcoded clause pauses. Stream in token windows only. Inter-chunk silence comes only from the bot/player calibrated English pacing profile (`Calibrate English pacing`); with no profile, play continuous natural Kokoro.
+**Applies to**: `local-voice-stream.ts`, `englishClauseBreath.ts`
+
 ### 2026-08-06 · UX
 **Trigger**: Marketplace bots used Reflective/Direct styles that silently fell back to Balanced; wanted chassis metal variety by Communication Style.
 **Lesson**: Keep Communication Style as an official `BotVoicePreset` dial (including reflective/direct). Soft metal alloys live as a separate CSS wash (`--bot-face-metal-alloy-*`) mixed into frame tint — LEDs/phosphor stay on identity color; Prism rainbow chassis disables the mix.
