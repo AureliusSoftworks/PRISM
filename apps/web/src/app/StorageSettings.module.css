@@ -1,95 +1,389 @@
 .shell {
   display: grid;
-  gap: 1rem;
+  gap: 0.95rem;
 }
 
-.totals {
+.shell :is(button.spaceOrb, button.spaceLensRow, button.backRow, button.crumbButton, button.actionTidy, button.actionAudit) {
+  font: inherit;
+  appearance: none;
+  -webkit-appearance: none;
+}
+
+.meter {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(9rem, 1fr));
-  gap: 0.7rem;
+  gap: 0.5rem;
 }
 
-.totals article {
-  display: grid;
-  gap: 0.25rem;
-  padding: 0.85rem 0.95rem;
-  border: 1px solid color-mix(in srgb, currentColor 12%, transparent);
-  border-radius: 0.9rem;
-  background:
-    linear-gradient(
-      160deg,
-      color-mix(in srgb, var(--panel, #18181b) 92%, transparent),
-      color-mix(in srgb, var(--panel, #18181b) 78%, transparent)
-    );
+.meterTrack {
+  display: flex;
+  overflow: hidden;
+  height: 0.5rem;
+  border-radius: 999px;
+  border: 1px solid color-mix(in srgb, var(--line, currentColor) 55%, transparent);
+  background: color-mix(in srgb, var(--bg-deep, var(--bg, #101016)) 70%, transparent);
 }
 
-.totals strong {
-  font-size: 1.2rem;
+.meterSegment {
+  display: block;
+  min-width: 0;
+  height: 100%;
+  transition: opacity 160ms ease;
+}
+
+.meterLegend {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.4rem 1rem;
+}
+
+.meterLegend strong {
+  color: var(--fg, inherit);
+  font-size: 1.05rem;
   letter-spacing: -0.02em;
 }
 
-.totals small,
-.totals span,
-.systemManaged {
-  color: var(--text-muted);
+.meterLegend span,
+.systemManaged,
+.quietStats,
+.tidyMessage {
+  color: var(--fg-muted, var(--text-muted, #8b90a0));
 }
 
-.kindList {
+.spaceLens {
   display: grid;
-  gap: 0.35rem;
+  grid-template-columns: minmax(14.5rem, 0.9fr) minmax(0, 1.55fr);
+  gap: 0.8rem;
+  align-items: stretch;
 }
 
-.kindList > button {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 1rem;
-  padding: 0.7rem 0.85rem;
+.spaceLensList {
+  display: grid;
+  align-content: start;
+  gap: 0.28rem;
+  padding: 0.4rem;
+  overflow: auto;
+  border-radius: 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--line, currentColor) 70%, transparent);
+  background: color-mix(in srgb, var(--bg-surface, var(--panel, #15151a)) 88%, transparent);
+}
+
+.shell button.backRow,
+.shell button.crumbButton {
+  justify-self: start;
+  margin: 0;
+  border: 0;
+  padding: 0.45rem 0.55rem;
+  border-radius: 0.55rem;
+  color: var(--fg-muted, #8b90a0);
+  background: transparent;
+  cursor: pointer;
   text-align: left;
-  border-radius: 0.75rem;
 }
 
-.kindList > button > span:first-child {
+.shell button.backRow:hover,
+.shell button.crumbButton:hover,
+.shell button.backRow:focus-visible,
+.shell button.crumbButton:focus-visible {
+  color: var(--fg, inherit);
+  background: color-mix(in srgb, var(--settings-section-color, #7ec8b8) 12%, transparent);
+}
+
+.shell button.spaceLensRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 0.65rem;
+  align-items: center;
+  width: 100%;
+  margin: 0;
+  padding: 0.58rem 0.65rem;
+  border: 1px solid transparent;
+  border-radius: 0.75rem;
+  background: transparent;
+  color: var(--fg, inherit);
+  text-align: left;
+  cursor: pointer;
+  transition:
+    background 140ms ease,
+    border-color 140ms ease;
+}
+
+.shell button.spaceLensRow:hover,
+.shell button.spaceLensRow[data-active="true"] {
+  border-color: color-mix(in srgb, var(--orb-color, var(--settings-section-color, #7ec8b8)) 42%, var(--line, transparent));
+  background: color-mix(in srgb, var(--orb-color, var(--settings-section-color, #7ec8b8)) 14%, transparent);
+  color: var(--fg, inherit);
+}
+
+.spaceLensSwatch {
+  width: 0.68rem;
+  height: 0.68rem;
+  border-radius: 0.22rem;
+  background: var(--orb-color, #7ec8b8);
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--orb-color, #7ec8b8) 20%, transparent);
+}
+
+.spaceLensRowCopy {
   display: grid;
   gap: 0.1rem;
+  min-width: 0;
 }
 
-.kindList small {
-  color: var(--text-muted);
+.spaceLensRowCopy strong {
+  font-size: 0.9rem;
+  line-height: 1.2;
 }
 
-.actions {
+.spaceLensRowCopy small,
+.spaceLensRowMeta strong {
+  color: var(--fg-muted, #8b90a0);
+  font-size: 0.7rem;
+  font-weight: 550;
+}
+
+.spaceLensRowMeta {
   display: grid;
-  grid-template-columns: minmax(11rem, 1fr) auto auto auto;
-  align-items: end;
+  justify-items: end;
+  gap: 0.25rem;
+  min-width: 4.4rem;
+}
+
+.spaceLensBar {
+  display: block;
+  height: 0.26rem;
+  border-radius: 999px;
+  background: linear-gradient(
+    90deg,
+    color-mix(in srgb, var(--orb-color, #7ec8b8) 78%, transparent),
+    color-mix(in srgb, var(--orb-color, #7ec8b8) 30%, transparent)
+  );
+}
+
+.spaceLensField {
+  position: relative;
+  overflow: hidden;
+  width: 100%;
+  aspect-ratio: 1 / 1;
+  border-radius: 1.05rem;
+  border: 1px solid color-mix(in srgb, var(--line, currentColor) 70%, transparent);
+  background:
+    radial-gradient(
+      ellipse 58% 48% at 50% 46%,
+      color-mix(in srgb, var(--settings-section-color, #7ec8b8) 10%, transparent),
+      transparent 72%
+    ),
+    color-mix(in srgb, var(--bg-deep, var(--bg, #0c0c12)) 82%, var(--bg-surface, #15151a));
+}
+
+.lensBreadcrumb {
+  position: absolute;
+  top: 0.65rem;
+  left: 0.7rem;
+  z-index: 20;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+  padding: 0.2rem 0.35rem;
+  border-radius: 0.55rem;
+  color: var(--fg-muted, #8b90a0);
+  background: color-mix(in srgb, var(--bg-surface, #15151a) 72%, transparent);
+  backdrop-filter: blur(8px);
+  font-size: 0.72rem;
+}
+
+.lensBreadcrumb strong {
+  color: var(--fg, inherit);
+  font-weight: 650;
+}
+
+.spaceLensGlow {
+  position: absolute;
+  inset: 16% 18%;
+  border-radius: 36%;
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, #ffffff 5%, transparent),
+    transparent 70%
+  );
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.shell button.spaceOrb {
+  position: absolute;
+  display: grid;
+  place-items: center;
+  transform: translate(-50%, -50%);
+  margin: 0;
+  padding: 0.55rem;
+  border: 0;
+  border-radius: clamp(0.75rem, 2vw, 1.15rem);
+  color: #f4f6fb;
+  cursor: pointer;
+  background: transparent;
+  box-shadow: none;
+  animation: orbArrive 480ms cubic-bezier(0.2, 0.8, 0.2, 1) both;
+  animation-delay: var(--orb-delay, 0ms);
+  transition:
+    transform 160ms ease,
+    filter 160ms ease,
+    opacity 160ms ease;
+}
+
+.spaceOrbCore {
+  position: absolute;
+  inset: 0;
+  border-radius: inherit;
+  border: 1px solid color-mix(in srgb, #ffffff 24%, var(--orb-color, #7ec8b8));
+  background:
+    radial-gradient(
+      circle at 28% 24%,
+      color-mix(in srgb, #ffffff 34%, transparent),
+      transparent 34%
+    ),
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--orb-color, #7ec8b8) 52%, #1b1d26),
+      color-mix(in srgb, var(--orb-color, #7ec8b8) 16%, #0b0c12) 78%
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 24%, transparent),
+    0 12px 28px color-mix(in srgb, var(--orb-color, #7ec8b8) 18%, transparent);
+  opacity: 0.96;
+  transition: inherit;
+}
+
+.spaceOrbLabel {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  gap: 0.12rem;
+  max-width: 90%;
+  text-align: center;
+  pointer-events: none;
+}
+
+.spaceOrbLabel strong {
+  font-size: clamp(0.72rem, 1.7vw, 0.95rem);
+  line-height: 1.15;
+  overflow-wrap: anywhere;
+}
+
+.spaceOrbLabel small {
+  color: color-mix(in srgb, #ffffff 80%, var(--orb-color, #7ec8b8));
+  font-size: clamp(0.64rem, 1.3vw, 0.74rem);
+}
+
+.shell button.spaceOrb:hover,
+.shell button.spaceOrb:focus-visible,
+.shell button.spaceOrb[data-selected="true"] {
+  transform: translate(-50%, -50%) scale(1.012);
+  z-index: 14 !important;
+  background: transparent;
+  color: #f4f6fb;
+}
+
+.shell button.spaceOrb:hover .spaceOrbCore,
+.shell button.spaceOrb:focus-visible .spaceOrbCore,
+.shell button.spaceOrb[data-selected="true"] .spaceOrbCore {
+  border-color: color-mix(in srgb, #ffffff 48%, var(--orb-color, #7ec8b8));
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 34%, transparent),
+    0 16px 34px color-mix(in srgb, var(--orb-color, #7ec8b8) 30%, transparent);
+}
+
+.shell button.spaceOrb[data-dimmed="true"] {
+  opacity: 0.5;
+  filter: saturate(0.78);
+}
+
+.focusEyebrow {
+  color: var(--fg-muted, #8b90a0);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.carePanel {
+  display: grid;
+  gap: 0.8rem;
+  padding: 0.95rem;
+  border-radius: 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--line, currentColor) 70%, transparent);
+  background: color-mix(in srgb, var(--bg-surface, var(--panel, #18181b)) 88%, transparent);
+}
+
+.carePanel p {
+  margin: 0.3rem 0 0;
+  color: var(--fg-muted, #8b90a0);
+  line-height: 1.45;
+}
+
+.carePanel strong {
+  color: var(--fg, inherit);
+  font-weight: 650;
+}
+
+.careActions {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
   gap: 0.6rem;
 }
 
-.actions label {
-  display: grid;
-  gap: 0.3rem;
+.shell button.actionTidy,
+.shell button.actionAudit {
+  min-height: 2.5rem;
+  border: 1px solid transparent;
+  border-radius: 0.8rem;
+  padding: 0.62rem 0.85rem;
+  font-weight: 650;
+  cursor: pointer;
 }
 
-.actions select {
-  min-height: 2.5rem;
+.shell button.actionTidy {
+  color: #1a1206;
+  border-color: color-mix(in srgb, #f0a24a 35%, transparent);
+  background: linear-gradient(160deg, #ffd28a, #f0a24a);
+}
+
+.shell button.actionAudit {
+  color: #140a22;
+  border-color: color-mix(in srgb, #9b7dff 35%, transparent);
+  background: linear-gradient(160deg, #d7c4ff, #9b7dff);
+}
+
+.shell button.actionTidy:hover:not(:disabled),
+.shell button.actionAudit:hover:not(:disabled) {
+  filter: brightness(1.04);
+}
+
+.shell button.actionTidy:disabled,
+.shell button.actionAudit:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+  filter: grayscale(0.3);
+}
+
+.quietStats {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.35rem 1rem;
+  font-size: 0.76rem;
 }
 
 .error {
-  color: #c33;
-}
-
-.tidyMessage {
-  margin: 0;
-  color: var(--text-muted);
+  color: var(--danger, #c33);
 }
 
 .tidyPanel {
   display: grid;
-  gap: 0.75rem;
-  padding: 1rem;
-  border: 1px solid color-mix(in srgb, currentColor 14%, transparent);
-  border-radius: 1rem;
-  background: color-mix(in srgb, var(--panel, #18181b) 88%, transparent);
+  gap: 0.7rem;
+  padding: 0.95rem;
+  border: 1px solid color-mix(in srgb, var(--line, currentColor) 70%, transparent);
+  border-radius: 0.95rem;
+  background: color-mix(in srgb, var(--bg-surface, #18181b) 90%, transparent);
 }
 
 .tidyPanel > header {
@@ -101,28 +395,101 @@
 
 .tidyPanel h5 {
   margin: 0.15rem 0 0;
-  font-size: 1.05rem;
+  color: var(--fg, inherit);
+  font-size: 1.02rem;
 }
 
 .tidyPanel p {
   margin: 0;
+  color: var(--fg, inherit);
 }
 
 .tidySamples {
   margin: 0;
   padding-left: 1.1rem;
-  color: var(--text-muted);
+  color: var(--fg-muted, #8b90a0);
 }
 
 .tidyActions {
   display: flex;
   flex-wrap: wrap;
-  gap: 0.6rem;
+  gap: 0.55rem;
   justify-content: flex-end;
 }
 
-@media (max-width: 860px) {
-  .actions {
+@keyframes orbArrive {
+  from {
+    opacity: 0;
+    transform: translate(-50%, -50%) scale(0.94);
+  }
+  to {
+    opacity: 1;
+    transform: translate(-50%, -50%) scale(1);
+  }
+}
+
+:global([data-theme="light"]) .spaceOrbCore {
+  border-color: color-mix(in srgb, var(--orb-color, #7ec8b8) 42%, #ffffff);
+  background:
+    radial-gradient(
+      circle at 28% 24%,
+      color-mix(in srgb, #ffffff 58%, transparent),
+      transparent 36%
+    ),
+    linear-gradient(
+      155deg,
+      color-mix(in srgb, var(--orb-color, #7ec8b8) 46%, #ffffff),
+      color-mix(in srgb, var(--orb-color, #7ec8b8) 28%, #e8ebf3) 78%
+    );
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 70%, transparent),
+    0 10px 24px color-mix(in srgb, var(--orb-color, #7ec8b8) 16%, transparent);
+}
+
+:global([data-theme="light"]) .shell button.spaceOrb,
+:global([data-theme="light"]) .spaceOrbLabel strong {
+  color: #1c2030;
+}
+
+:global([data-theme="light"]) .spaceOrbLabel small {
+  color: color-mix(in srgb, #1c2030 70%, var(--orb-color, #7ec8b8));
+}
+
+:global([data-theme="light"]) .spaceLensField {
+  background:
+    radial-gradient(
+      ellipse 58% 48% at 50% 46%,
+      color-mix(in srgb, var(--settings-section-color, #7ec8b8) 12%, transparent),
+      transparent 72%
+    ),
+    color-mix(in srgb, #ffffff 70%, var(--bg-surface, #f3f4f8));
+}
+
+:global([data-theme="light"]) .spaceLensGlow {
+  opacity: 0.35;
+}
+
+@media (max-width: 900px) {
+  .spaceLens {
     grid-template-columns: 1fr;
+  }
+
+  .spaceLensList {
+    max-height: 14rem;
+  }
+
+  .spaceLensField {
+    max-width: min(100%, 28rem);
+    margin-inline: auto;
+  }
+
+  .careActions {
+    grid-template-columns: 1fr;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .shell button.spaceOrb {
+    animation: none;
   }
 }

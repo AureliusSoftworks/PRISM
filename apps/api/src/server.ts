@@ -333,6 +333,11 @@ import {
   getActionSfxPackSummary,
 } from "./action-sfx-pack.ts";
 import {
+  listAudioLibraryClips,
+  readBotAvatarSfxBytes,
+  type AudioLibraryBin,
+} from "./audio-library.ts";
+import {
   ENGLISH_PACING_MISSING_VOICE_MESSAGE,
   calibrateEnglishPacingProfile,
   getEnglishPacingProfile,
@@ -12070,6 +12075,37 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         wallpaper: getLatestRememberedZenWallpaperForBot(db, userId, botId),
+      });
+    }),
+    route("GET", "/api/bots/:id/avatar-sfx", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const botId = ctx.params.id?.trim();
+      if (!botId) {
+        throw new HttpError(400, "Bot id is required.");
+      }
+      const clip = readBotAvatarSfxBytes(db, userId, botId);
+      if (!clip) throw new HttpError(404, "Avatar sound loop not found.");
+      ctx.res.statusCode = 200;
+      ctx.res.setHeader("content-type", clip.contentType);
+      ctx.res.setHeader("cache-control", "private, max-age=3600");
+      ctx.res.end(clip.bytes);
+    }),
+    route("GET", "/api/audio-library", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const url = new URL(ctx.req.url ?? "/", "http://localhost");
+      const binRaw = url.searchParams.get("bin")?.trim() ?? "";
+      const bin: AudioLibraryBin | null =
+        binRaw === "sound_effects" || binRaw === "music" ? binRaw : null;
+      if (!bin) {
+        throw new HttpError(
+          400,
+          "Choose an audio library bin: sound_effects or music.",
+        );
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        bin,
+        clips: listAudioLibraryClips(db, userId, bin),
       });
     }),
     route("GET", "/api/bots/:id/memory-panel", async (ctx) => {

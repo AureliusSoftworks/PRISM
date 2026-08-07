@@ -1,0 +1,153 @@
+.modalBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 950;
+  display: flex;
+  justify-content: flex-start;
+  align-items: stretch;
+  box-sizing: border-box;
+  padding:
+    calc(
+      var(--app-shell-top-nav-height, 60px) + env(safe-area-inset-top, 0px) +
+        12px
+    )
+    12px
+    calc(12px + env(safe-area-inset-bottom, 0px))
+    max(12px, env(safe-area-inset-left, 0px));
+  /* Leave Settings / right drawer usable; only the library catches clicks. */
+  pointer-events: none;
+  background: transparent;
+}
+
+.modal {
+  pointer-events: auto;
+  display: grid;
+  grid-template-rows: auto auto auto minmax(0, 1fr);
+  width: min(32rem, calc(100vw - min(479px, 42vw) - 36px));
+  max-width: calc(100vw - 24px);
+  min-height: 0;
+  overflow: hidden;
+  border-radius: 1rem;
+  border: 1px solid color-mix(in srgb, var(--line, rgba(255, 255, 255, 0.14)) 90%, transparent);
+  background: color-mix(in srgb, var(--bg-surface, #141318) 96%, black);
+  box-shadow:
+    0 24px 64px rgba(0, 0, 0, 0.5),
+    0 0 0 1px color-mix(in srgb, #7b5cff 18%, transparent);
+}
+
+.modalHeader {
+  padding: 1rem 1.1rem 0.75rem;
+}
+
+.playerDock {
+  padding: 0.35rem 1.1rem 0.85rem;
+  border-bottom: 1px solid color-mix(in srgb, var(--line, rgba(255, 255, 255, 0.1)) 80%, transparent);
+}
+
+.toolbar {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 0.75rem;
+  align-items: center;
+  padding: 0.75rem 1.1rem;
+}
+
+.toolbar input {
+  width: 100%;
+  min-width: 0;
+  padding: 0.55rem 0.75rem;
+  color: inherit;
+  border: 1px solid color-mix(in srgb, var(--line, rgba(255, 255, 255, 0.12)) 90%, transparent);
+  border-radius: 0.65rem;
+  background: color-mix(in srgb, var(--bg, #0b0a09) 70%, transparent);
+}
+
+.count {
+  color: var(--fg-muted, rgba(255, 255, 255, 0.58));
+  font-size: 0.78rem;
+  white-space: nowrap;
+}
+
+.body {
+  min-height: 0;
+  overflow: auto;
+  padding: 0 1.1rem 1.25rem;
+}
+
+.empty {
+  margin: 1rem 0;
+  color: var(--fg-muted, rgba(255, 255, 255, 0.58));
+}
+
+.group {
+  display: grid;
+  gap: 0.45rem;
+  margin-top: 0.85rem;
+}
+
+.group > header {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.75rem;
+}
+
+.group > header small {
+  color: var(--fg-muted, rgba(255, 255, 255, 0.55));
+}
+
+.group ul {
+  display: grid;
+  gap: 0.35rem;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.clipRow {
+  display: grid;
+  width: 100%;
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  color: inherit;
+  border: 1px solid transparent;
+  border-radius: 0.7rem;
+  background: color-mix(in srgb, var(--bg-surface, #17171b) 70%, transparent);
+  cursor: pointer;
+}
+
+.clipRow span {
+  display: grid;
+  gap: 0.18rem;
+  min-width: 0;
+}
+
+.clipRow strong {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.clipRow small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--fg-muted, rgba(255, 255, 255, 0.5));
+  font-size: 0.72rem;
+}
+
+.clipRow:hover {
+  border-color: color-mix(in srgb, var(--accent, #7b5cff) 28%, transparent);
+}
+
+.clipRow[data-active="true"] {
+  border-color: color-mix(in srgb, var(--accent, #7b5cff) 55%, white);
+  background: color-mix(in srgb, var(--accent, #7b5cff) 12%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent, #7b5cff) 35%, transparent);
+}
+
+@media (max-width: 900px) {
+  .modal {
+    width: min(100%, calc(100vw - 24px));
+  }
+}
