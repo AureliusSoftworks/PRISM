@@ -174,7 +174,7 @@ test("Signal gives the shared navbar the complete full-width shell row", () => {
   assert.doesNotMatch(signalSource, /libraryBrand|headerActions/);
   assert.match(
     signalCss,
-    /\.shell\s*\{[\s\S]*grid-template-columns:\s*286px minmax\(0, 1fr\);[\s\S]*grid-template-rows:\s*66px minmax\(0, 1fr\);/,
+    /\.shell\s*\{[\s\S]*grid-template-columns:\s*286px minmax\(0, 1fr\);[\s\S]*grid-template-rows:\s*var\(--app-navbar-height,\s*66px\) minmax\(0, 1fr\);/,
   );
   assert.match(
     signalCss,

@@ -1,0 +1,52 @@
+.modelChip {
+  margin: 0;
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35em;
+  max-width: min(100%, 18rem);
+  min-width: 0;
+  color: color-mix(in srgb, currentColor 58%, transparent);
+  font-size: 0.68rem;
+  font-weight: 650;
+  letter-spacing: 0.04em;
+  line-height: 1.2;
+  text-transform: none;
+  white-space: nowrap;
+  pointer-events: none;
+  user-select: none;
+}
+
+.modelChipLabel,
+.modelChipEffort {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.modelChipSep {
+  opacity: 0.72;
+  flex: 0 0 auto;
+}
+
+.watermark {
+  position: fixed;
+  right: max(14px, env(safe-area-inset-right, 0px));
+  bottom: max(12px, env(safe-area-inset-bottom, 0px));
+  z-index: 40;
+  width: 72px;
+  height: auto;
+  opacity: 0.5;
+  pointer-events: none;
+  user-select: none;
+}
+
+.watermarkMark {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .watermark {
+    transition: none;
+  }
+}

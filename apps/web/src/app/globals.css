@@ -3,6 +3,8 @@
   /* Baseline colors so the body doesn't flash before the themed shell paints. */
   --baseline-bg: #0a0c12;
   --baseline-fg: #e8ecf5;
+  /* Shared applet navbar band; collapses to 0 during locked live sessions. */
+  --app-navbar-height: 66px;
 }
 
 html {
@@ -93,6 +95,26 @@ html[data-app-navbar-hidden="true"] [data-app-shell-header="true"] {
   ) !important;
   opacity: 0 !important;
   pointer-events: none !important;
+}
+
+/* Locked live Coffee / Debate / Signal: fully collapse the navbar band. */
+html[data-app-navbar-session-hidden="true"] {
+  --app-navbar-height: 0px;
+}
+
+html[data-app-navbar-session-hidden="true"] [data-shared-app-navbar="true"],
+html[data-app-navbar-session-hidden="true"] [data-app-shell-header="true"] {
+  height: 0 !important;
+  min-height: 0 !important;
+  max-height: 0 !important;
+  margin: 0 !important;
+  padding: 0 !important;
+  border: 0 !important;
+  overflow: hidden !important;
+  visibility: hidden !important;
+  opacity: 0 !important;
+  pointer-events: none !important;
+  transform: none !important;
 }
 
 html[data-prism-companion-open="true"] [data-shared-app-navbar="true"],

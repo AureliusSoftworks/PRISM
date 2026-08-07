@@ -90,7 +90,8 @@ export function coffeeShellPolicy(args: {
   return {
     liveSessionActive,
     reviewActive,
-    showEndSessionInSwitcher: liveSessionActive,
+    /* End lives on the live table chrome so the shared navbar can fully hide. */
+    showEndSessionInSwitcher: false,
     disabledNavbarActions: liveChromePolicy?.disabledNavbarActions ?? {},
     disabledNavbarActionTooltips:
       liveChromePolicy?.disabledNavbarActionTooltips ?? {},

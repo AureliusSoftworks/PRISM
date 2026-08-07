@@ -1,0 +1,200 @@
+.curtain {
+  position: fixed;
+  inset: 0;
+  z-index: 920;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  isolation: isolate;
+  color: #f7f4ef;
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      rgba(255, 142, 65, 0.18),
+      transparent 34%
+    ),
+    radial-gradient(circle at 50% 58%, #1a120e 0%, #070504 62%, #020101 100%);
+  animation: coffeeIntroHold var(--coffee-intro-duration, 2200ms) ease both;
+}
+
+.curtain::after {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  content: "";
+  background: #000;
+  pointer-events: none;
+  animation: coffeeIntroReveal 720ms cubic-bezier(0.4, 0, 0.2, 1) both;
+}
+
+.field {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  opacity: 0.55;
+}
+
+.field i {
+  position: absolute;
+  border-radius: 999px;
+  filter: blur(28px);
+  background: rgba(255, 168, 92, 0.22);
+}
+
+.field i:nth-child(1) {
+  width: 42vw;
+  height: 42vw;
+  left: 18%;
+  top: 12%;
+}
+
+.field i:nth-child(2) {
+  width: 28vw;
+  height: 28vw;
+  right: 14%;
+  bottom: 18%;
+  background: rgba(65, 220, 255, 0.12);
+}
+
+.field i:nth-child(3) {
+  width: 18vw;
+  height: 18vw;
+  left: 46%;
+  top: 58%;
+  background: rgba(255, 255, 255, 0.06);
+}
+
+.lockup {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 10px;
+  padding: 24px;
+  text-align: center;
+  animation: coffeeIntroLockup 780ms cubic-bezier(0.2, 0.72, 0.18, 1) both;
+}
+
+.eyebrow {
+  margin: 0;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  font-size: 0.68rem;
+  font-weight: 720;
+  color: rgba(247, 244, 239, 0.62);
+}
+
+.mark {
+  width: 54px;
+  height: 54px;
+  border-radius: 16px;
+  display: grid;
+  place-items: center;
+  background: linear-gradient(
+    145deg,
+    rgba(255, 168, 92, 0.28),
+    rgba(255, 255, 255, 0.05)
+  );
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.35);
+}
+
+.mark span {
+  width: 0;
+  height: 0;
+  border-left: 11px solid transparent;
+  border-right: 11px solid transparent;
+  border-bottom: 19px solid rgba(255, 214, 170, 0.92);
+}
+
+.lockup h1 {
+  margin: 8px 0 0;
+  font-size: clamp(1.8rem, 4.4vw, 3.2rem);
+  line-height: 1.05;
+  font-weight: 780;
+  letter-spacing: -0.02em;
+}
+
+.lockup strong {
+  max-width: min(34rem, 86vw);
+  font-size: clamp(0.95rem, 1.8vw, 1.18rem);
+  font-weight: 560;
+  color: rgba(247, 244, 239, 0.78);
+  line-height: 1.35;
+}
+
+.lockup small {
+  margin-top: 8px;
+  letter-spacing: 0.22em;
+  text-transform: uppercase;
+  font-size: 0.66rem;
+  color: rgba(247, 244, 239, 0.48);
+}
+
+.skip {
+  position: absolute;
+  top: 24px;
+  right: 28px;
+  z-index: 3;
+  border: 1px solid rgba(255, 255, 255, 0.19);
+  border-radius: 999px;
+  padding: 8px 12px;
+  color: rgba(255, 255, 255, 0.72);
+  background: rgba(255, 255, 255, 0.055);
+  font: 700 0.68rem / 1 system-ui;
+  cursor: pointer;
+  backdrop-filter: blur(12px);
+}
+
+.skip:hover {
+  color: #fff;
+  border-color: rgba(255, 255, 255, 0.38);
+  background: rgba(255, 255, 255, 0.1);
+}
+
+@keyframes coffeeIntroReveal {
+  from {
+    opacity: 1;
+  }
+  to {
+    opacity: 0;
+  }
+}
+
+@keyframes coffeeIntroLockup {
+  from {
+    opacity: 0;
+    transform: translateY(10px) scale(0.985);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+}
+
+@keyframes coffeeIntroHold {
+  0%,
+  82% {
+    opacity: 1;
+  }
+  100% {
+    opacity: 0;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .curtain,
+  .curtain::after,
+  .lockup {
+    animation: none !important;
+  }
+
+  .curtain {
+    opacity: 1;
+  }
+
+  .curtain::after {
+    opacity: 0;
+  }
+}

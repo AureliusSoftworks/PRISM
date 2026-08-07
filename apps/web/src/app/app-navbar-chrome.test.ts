@@ -4,6 +4,7 @@ import {
   APP_NAVBAR_REVEAL_EDGE_PX,
   armAppNavbarAutoHide,
   clearAppNavbarDropdownHoldsForTests,
+  clearAppNavbarSessionHiddenForTests,
   getAppNavbarChromeSnapshot,
   hideAppNavbarForImmersion,
   holdAppNavbarForDropdown,
@@ -13,11 +14,13 @@ import {
   scheduleAppNavbarAutoHide,
   setAppNavbarAutoHideEnabled,
   setAppNavbarCompanionOpen,
+  setAppNavbarSessionHidden,
   setAppNavbarWielding,
 } from "./appNavbarChrome.ts";
 
 function resetChrome(): void {
   clearAppNavbarDropdownHoldsForTests();
+  clearAppNavbarSessionHiddenForTests();
   setAppNavbarCompanionOpen(false);
   setAppNavbarWielding(false);
   pinAppNavbar(false);
@@ -100,4 +103,27 @@ test("overlapping dropdown holds release independently", () => {
   assert.equal(getAppNavbarChromeSnapshot().hidden, false);
   releaseB();
   assert.equal(getAppNavbarChromeSnapshot().dropdownHeld, false);
+});
+
+test("side-panel holds reveal a tucked navbar and block immersion hide", () => {
+  resetChrome();
+  hideAppNavbarForImmersion();
+  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
+  const release = holdAppNavbarForDropdown();
+  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
+  hideAppNavbarForImmersion();
+  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
+  release();
+});
+
+test("session hide collapses live applet chrome independently of Zen tuck", () => {
+  resetChrome();
+  setAppNavbarAutoHideEnabled(false);
+  assert.equal(getAppNavbarChromeSnapshot().sessionHidden, false);
+  setAppNavbarSessionHidden(true);
+  assert.equal(getAppNavbarChromeSnapshot().sessionHidden, true);
+  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
+  setAppNavbarSessionHidden(false);
+  assert.equal(getAppNavbarChromeSnapshot().sessionHidden, false);
+  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
 });

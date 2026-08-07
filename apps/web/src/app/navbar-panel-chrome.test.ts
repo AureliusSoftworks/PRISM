@@ -57,6 +57,10 @@ test("right-panel overlay and drawer clear the shared top navbar", () => {
     css,
     /\.appLayout\[data-right-panel-open="true"\][\s\S]*?z-index:\s*200;/u,
   );
+  assert.match(
+    pageSource,
+    /if \(panel === null\) return;[\s\S]{0,80}return holdAppNavbarForDropdown\(\);/u,
+  );
 });
 
 test("measured top-nav height is published for fixed panel layers", () => {

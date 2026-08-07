@@ -10,7 +10,7 @@ describe("Coffee shell policy", () => {
     for (const phase of ["arriving", "live"] as const) {
       const policy = coffeeShellPolicy({ conversationActive: true, phase });
       assert.equal(policy.liveSessionActive, true);
-      assert.equal(policy.showEndSessionInSwitcher, true);
+      assert.equal(policy.showEndSessionInSwitcher, false);
       assert.equal(policy.disabledNavbarActions.settings, true);
       assert.equal(policy.disabledNavbarActions.voice, true);
       assert.equal(policy.disabledNavbarActions.memories, true);

@@ -8,6 +8,7 @@ export const APP_NAVBAR_REVEAL_HOLD_MS = 3200;
 
 export type AppNavbarChromeSnapshot = {
   hidden: boolean;
+  sessionHidden: boolean;
   companionOpen: boolean;
   wielding: boolean;
   pinned: boolean;
@@ -20,6 +21,8 @@ type Listener = () => void;
 let visible = true;
 let autoHideArmed = false;
 let autoHideEnabled = true;
+/** Live Coffee / Debate / Signal sits: collapse the shared navbar entirely. */
+let sessionHidden = false;
 let pinned = false;
 let dropdownHoldCount = 0;
 let companionOpen = false;
@@ -69,6 +72,11 @@ function syncDocumentAttributes(): void {
   }
   if (computeHidden()) root.setAttribute("data-app-navbar-hidden", "true");
   else root.removeAttribute("data-app-navbar-hidden");
+  if (sessionHidden) {
+    root.setAttribute("data-app-navbar-session-hidden", "true");
+  } else {
+    root.removeAttribute("data-app-navbar-session-hidden");
+  }
 }
 
 function commit(): void {
@@ -89,7 +97,8 @@ function maybeScheduleAfterRelease(): void {
 
 export function getAppNavbarChromeSnapshot(): AppNavbarChromeSnapshot {
   return {
-    hidden: computeHidden(),
+    hidden: computeHidden() || sessionHidden,
+    sessionHidden,
     companionOpen,
     wielding,
     pinned,
@@ -101,12 +110,31 @@ export function getAppNavbarChromeSnapshot(): AppNavbarChromeSnapshot {
 export function getAppNavbarChromeServerSnapshot(): AppNavbarChromeSnapshot {
   return {
     hidden: false,
+    sessionHidden: false,
     companionOpen: false,
     wielding: false,
     pinned: false,
     dropdownHeld: false,
     autoHideEnabled: true,
   };
+}
+
+/**
+ * Fully hide and collapse the shared navbar for locked live applet sessions
+ * (Coffee arriving/live, Debate baking/live, Signal on-air). Independent of
+ * Zen idle tuck — restores when the sit ends.
+ */
+export function setAppNavbarSessionHidden(hidden: boolean): void {
+  if (sessionHidden === hidden) return;
+  sessionHidden = hidden;
+  commit();
+}
+
+/** Drain session-hide between unit tests. */
+export function clearAppNavbarSessionHiddenForTests(): void {
+  if (!sessionHidden) return;
+  sessionHidden = false;
+  commit();
 }
 
 /** Drain leftover dropdown holds between unit tests. */
