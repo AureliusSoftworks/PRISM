@@ -317,7 +317,15 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       editorSource,
-      /!autoCommit \|\|[\s\S]*?avatarDetailsEqual\(workingRef\.current, normalizedSource\)[\s\S]*?resetHistory\(\);[\s\S]*?updateWorking\(cloneAvatarDetails\(normalizedSource\)\)/,
+      /!autoCommit \|\|[\s\S]*?pointerStrokeRef\.current \|\|[\s\S]*?avatarDetailsEqual\(workingRef\.current, normalizedSource\)[\s\S]*?resetHistory\(\);[\s\S]*?updateWorking\(cloneAvatarDetails\(normalizedSource\)\)/,
+    );
+    assert.match(
+      editorSource,
+      /onPointerUp=\{finishPointerStroke\}[\s\S]*?onPointerCancel=\{finishPointerStroke\}/,
+    );
+    assert.doesNotMatch(
+      editorSource,
+      /onPointerCancel=\{\(event\) => \{[\s\S]*?updateWorking\(stroke\.before\)/,
     );
     assert.match(
       pageSource,

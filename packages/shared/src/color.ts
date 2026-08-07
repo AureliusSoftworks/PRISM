@@ -284,17 +284,16 @@ const YELLOW_HUE_MAX = 75;
  * "dark colors get a little brighter, bright colors get a little darker"
  * in the user's mental model, with saturation preserved.
  *
- * If you retune these, bump the `.colorSquare` overlay alpha in
- * `apps/web/src/app/page.module.css` in lockstep: the visible gradient is
- * what-you-see = what-you-pick, so the overlay alpha must equal
- * `(50 - MIN_DARK) / 50 = (MAX_DARK - 50) / 50`.
+ * If you retune these, also confirm the Shell hue-strip midpoint and
+ * render-time clamps in `apps/web/src/app/page.tsx` still agree — new
+ * picks pin to the band midpoint; older accents still clamp into band.
  */
 export const ACCENT_LIGHTNESS_MIN_DARK = 38;
 export const ACCENT_LIGHTNESS_MAX_DARK = 62;
 
 /**
  * Resolve which `[min, max]` HSL-lightness band applies for the given
- * theme. Factored out so the picker UI, the CSS overlay math, and the
+ * theme. Factored out so the hue-strip midpoint, random seeds, and the
  * render-time clamp all agree on the same answer for any theme the app
  * renders in. An unknown / omitted theme falls back to the light-mode
  * band, which is the historical default.
@@ -317,10 +316,11 @@ export function accentLightnessBand(
  * This is the one-stop normalizer for any surface that paints a user-
  * chosen bot color as an accent (bot card bar, glyph tile, message
  * bubble, shell --accent triad). Instead of pinning every accent to a
- * single "shadeless" 50% lightness (which erases the subtle shade
- * variation users express through the picker), we keep whatever shade
- * they picked — as long as it's inside the safe band for the active
- * theme.
+ * single "shadeless" 50% lightness (which erases subtle shade left in
+ * older saved accents and random seeds), we keep whatever shade they
+ * already have — as long as it's inside the safe band for the active
+ * theme. The Shell hue strip itself always commits new picks at the
+ * band midpoint.
  *
  * Colors already inside the band pass through unchanged, so the function
  * is idempotent per theme. Note that a round-trip through the dark-mode

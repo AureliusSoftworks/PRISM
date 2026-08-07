@@ -453,10 +453,9 @@ describe("accentLightnessBand", () => {
   });
 
   it("keeps the dark band symmetric around the midpoint (L=50)", () => {
-    // The picker's vertical alpha overlay assumes symmetry — any
-    // asymmetric band would desync the click-handler math from the
-    // visible gradient. If you deliberately break symmetry, update
-    // the `.colorSquare` CSS overlay to paint two separate alphas.
+    // The Shell hue strip pins new picks to the band midpoint. Symmetry
+    // keeps light/dark midpoints identical (L=50) so theme switches do
+    // not jump the committed hue lightness.
     const lowerGap = 50 - ACCENT_LIGHTNESS_MIN_DARK;
     const upperGap = ACCENT_LIGHTNESS_MAX_DARK - 50;
     assert.equal(lowerGap, upperGap);

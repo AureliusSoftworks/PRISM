@@ -6401,20 +6401,21 @@ function deriveAccentStyle(
   } as React.CSSProperties;
 }
 
-// HSL-lightness band the color picker is allowed to produce. Clamping
+// HSL-lightness band used when normalizing accents for paint. Clamping
 // both ends (not just one) means bot colors never go dark enough to
 // vanish into the dark-mode shell nor pale enough to wash out against
-// the light-mode shell, while preserving shade variation in the middle.
+// the light-mode shell. The Shell hue strip commits new picks at the
+// band midpoint; older saved accents and random seeds may still sit
+// elsewhere inside the band until retuned.
 //
 // The "_DARK" pair compresses both ends 8 units toward L=50 so deep
 // picks (pure blue, deep red) don't disappear against `#0b0a09` and
 // pale picks don't glare — saturation stays identical, only L moves.
 //
 // Kept in lockstep with `ACCENT_LIGHTNESS_*` constants in
-// packages/shared/src/color.ts. The picker math, the render-time
-// clamp, and the CSS gradient overlays all key off these numbers — if
-// you nudge the band, nudge all three places (here, the shared module,
-// and the `.colorSquare` overlay alpha in page.module.css).
+// packages/shared/src/color.ts. The hue strip pins new picks to the
+// band midpoint; render-time clamps still use the full band so older
+// saved accents and random seeds stay readable.
 const ACCENT_LIGHTNESS_MIN = 30;
 const ACCENT_LIGHTNESS_MAX = 70;
 const ACCENT_LIGHTNESS_MIN_DARK = 38;
@@ -6428,6 +6429,12 @@ function accentLightnessBand(theme?: "light" | "dark"): {
     return { min: ACCENT_LIGHTNESS_MIN_DARK, max: ACCENT_LIGHTNESS_MAX_DARK };
   }
   return { min: ACCENT_LIGHTNESS_MIN, max: ACCENT_LIGHTNESS_MAX };
+}
+
+/** Midpoint of the theme accent band — the hue strip's fixed lightness. */
+function accentLightnessMidpoint(theme?: "light" | "dark"): number {
+  const { min, max } = accentLightnessBand(theme);
+  return (min + max) / 2;
 }
 
 // Pull a color's HSL lightness into the safe band, preserving hue and
@@ -25084,17 +25091,11 @@ function ColorGlyphPicker({
   // treatment; the empty-state hero gets its own softer ambient styling.
   const displayColor = normalizeAccentForTheme(pickerColor, resolvedTheme);
   const readable = pickReadableText(displayColor);
-  // Indicator position on the square tracks the current color so users
-  // see where they are without a sliders UI. X → hue, Y → lightness
-  // (inverted: top = lighter). The Y axis is bounded to the safe
-  // accent band for the active theme — top row = band.max, bottom row =
-  // band.min — which matches what the click handler emits and the CSS
-  // overlays paint.
-  const { min: bandMin, max: bandMax } = accentLightnessBand(resolvedTheme);
-  const { h: currentHue, l: currentLightness } = hexToHsl(displayColor);
-  const lightnessRange = bandMax - bandMin;
+  // Indicator tracks hue only — the Shell picker is a one-axis hue
+  // strip. Lightness is pinned at the theme midpoint on every pick;
+  // private-mode desaturation stays a separate presentation path.
+  const { h: currentHue } = hexToHsl(displayColor);
   const indicatorLeft = (currentHue / 360) * 100;
-  const indicatorTop = ((bandMax - currentLightness) / lightnessRange) * 100;
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -25216,21 +25217,16 @@ function ColorGlyphPicker({
   );
   const dragFrameRef = useRef<number | null>(null);
 
-  // Map a pointer position inside `rect` to an HSL-picked hex using the
-  // same axis convention as the visible gradient overlay: X → hue
-  // 0..360, Y → lightness band.max..band.min (top row brightest
-  // allowed, bottom row darkest allowed), where `band` tightens in
-  // dark mode via `accentLightnessBand`. Clamping both axes to [0, 1]
-  // lets captured pointers that wander past the square's edge still
-  // resolve to the nearest in-bounds color rather than overshooting.
+  // Map a pointer X position inside `rect` to a hue at the theme's
+  // fixed midpoint lightness (saturation stays 100%). Y is ignored —
+  // the strip is one-dimensional. Clamping X to [0, 1] lets captured
+  // pointers that wander past the strip's edge still resolve to the
+  // nearest in-bounds hue rather than overshooting.
   const computePickedColor = useCallback(
-    (clientX: number, clientY: number, rect: DOMRect): string => {
+    (clientX: number, _clientY: number, rect: DOMRect): string => {
       const nx = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width));
-      const ny = Math.max(0, Math.min(1, (clientY - rect.top) / rect.height));
       const hue = nx * 360;
-      const { min, max } = accentLightnessBand(resolvedTheme);
-      const lightness = max - ny * (max - min);
-      return hslToHex(hue, 100, lightness);
+      return hslToHex(hue, 100, accentLightnessMidpoint(resolvedTheme));
     },
     [resolvedTheme],
   );
@@ -25535,16 +25531,20 @@ function ColorGlyphPicker({
         >
           <div
             className={styles.colorSquare}
+            data-color-picker="hue-strip"
             onPointerDown={handleSquarePointerDown}
             onPointerMove={handleSquarePointerMove}
             onPointerUp={handleSquarePointerUp}
             onPointerCancel={handleSquarePointerCancel}
-            role="group"
-            aria-label="Bot color. Horizontal axis: hue; vertical axis: lightness."
+            role="slider"
+            aria-valuemin={0}
+            aria-valuemax={360}
+            aria-valuenow={Math.round(currentHue)}
+            aria-label="Bot color hue. Drag left and right to choose a hue."
           >
             <div
               className={styles.colorPickerIndicator}
-              style={{ left: `${indicatorLeft}%`, top: `${indicatorTop}%` }}
+              style={{ left: `${indicatorLeft}%`, top: "50%" }}
               aria-hidden="true"
             />
           </div>

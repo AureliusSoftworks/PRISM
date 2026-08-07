@@ -33,7 +33,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Find the rest of the foundry",
-        body: "Identity, Eyes, Mouth, Details, Profile, Powers, Voice, SFX, and Settings remain available in the perimeter dock. On Identity, use Core for name and thinking, or Shell for body color and badge. The top LOCAL/ONLINE toggle and model picker choose which model compiles Powers and refracts Wield Prism fields inside this editor—switch to ONLINE when a local compile fails. Everything stays a draft until the top Save or Create bot action.",
+        body: "Identity, Eyes, Mouth, Details, Profile, Powers, Voice, SFX, and Settings remain available in the perimeter dock. On Identity, use Core for name and thinking, or Shell for the hue strip and badge. The top LOCAL/ONLINE toggle and model picker choose which model compiles Powers and refracts Wield Prism fields inside this editor—switch to ONLINE when a local compile fails. Everything stays a draft until the top Save or Create bot action.",
         clickLabel: "the perimeter dock",
         targetSelector: '[data-tutorial-target="avatar-foundry-dock"]',
       },

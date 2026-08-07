@@ -48685,15 +48685,23 @@ a.settingsCreditItem:focus-visible {
   min-height: 150px;
   height: 100%;
   display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-columns: minmax(0, 1fr);
+  grid-template-rows: auto minmax(0, 1fr);
   gap: 10px;
   align-items: stretch;
 }
 
-.colorGlyphInline .colorSquare,
+.colorGlyphInline .colorSquare {
+  height: 28px;
+  min-height: 28px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, var(--line));
+  border-radius: 8px;
+}
+
 .colorGlyphInline .glyphGridShell {
   height: 100%;
-  min-height: 150px;
+  min-height: 0;
   border: 1px solid
     color-mix(in srgb, var(--editor-bot-color, var(--accent)) 18%, var(--line));
   border-radius: 8px;
@@ -60310,82 +60318,41 @@ a.settingsCreditItem:focus-visible {
   }
 }
 
-/* Color square: replaces the old hue/saturation wheel. X axis = hue
-   (0→360° left to right), Y axis = lightness (top=brightest allowed,
-   bottom=darkest allowed, pure hue in the middle band). Saturation is
-   pinned at 100% — the axis is traded for lightness, which is what
-   the user wanted ("shade along with hue, more colors to use").
-   Two stacked gradients compose the effect without any pixel data:
-     1. Horizontal conic-sliced linear: the full hue spectrum.
-     2. Vertical white/black overlay that stops at a bounded alpha at
-        each end rather than ramping to solid white / solid black.
-   The overlay alpha encodes the picker's safe accent band: any alpha
-   X on a pure 50%-lightness hue produces a ±50·X shift, so
-     alpha = (50 - BAND_MIN) / 50 = (BAND_MAX - 50) / 50
-   Light theme: alpha 0.4 → band [30, 70] (ACCENT_LIGHTNESS_{MIN,MAX})
-   Dark  theme: alpha 0.24 → band [38, 62] (_MIN_DARK / _MAX_DARK)
-   Kept in lockstep with the matching constants in
-   apps/web/src/app/page.tsx and packages/shared/src/color.ts —
-   bumping the band requires bumping this alpha too. Bounding the
-   visible gradient (instead of bounding the click handler invisibly)
-   keeps what-you-see = what-you-pick. */
+/* Color hue strip: one axis only. X = hue 0→360° left to right.
+   Lightness is pinned in JS to the theme accent midpoint; saturation
+   stays at 100%. Private-mode desaturation is a separate presentation
+   path and must not be reintroduced here as a second picker axis. */
 .colorSquare {
-  /* Light-mode default; `.themeDark .colorSquare` overrides below.
-     Driving the alpha through a CSS variable means both overlays stay
-     in lockstep even after future retunes, and there's no need to
-     duplicate the gradient declaration per theme. */
-  --color-square-band-alpha: 0.4;
   position: relative;
   width: 100%;
-  height: 150px;
+  height: 28px;
   border-radius: 10px;
   cursor: crosshair;
   /* Suppress the browser's default touch gestures (scroll, pinch-zoom,
-     long-press callout) so press-and-drag on the square resolves to a
-     color pick instead of panning the page. Pointer Events still fire
+     long-press callout) so press-and-drag on the strip resolves to a
+     hue pick instead of panning the page. Pointer Events still fire
      as usual; this only opts out of the native scroll-and-zoom layer.
      Keep in lockstep with the onPointerDown/Move/Up wiring on this
      element in page.tsx. */
   touch-action: none;
-  background:
-    linear-gradient(
-      to bottom,
-      hsla(0, 0%, 100%, var(--color-square-band-alpha)) 0%,
-      hsla(0, 0%, 100%, 0) 50%,
-      hsla(0, 0%, 0%, 0) 50%,
-      hsla(0, 0%, 0%, var(--color-square-band-alpha)) 100%
-    ),
-    linear-gradient(
-      to right,
-      hsl(0, 100%, 50%),
-      hsl(60, 100%, 50%),
-      hsl(120, 100%, 50%),
-      hsl(180, 100%, 50%),
-      hsl(240, 100%, 50%),
-      hsl(300, 100%, 50%),
-      hsl(360, 100%, 50%)
-    );
+  background: linear-gradient(
+    to right,
+    hsl(0, 100%, 50%),
+    hsl(60, 100%, 50%),
+    hsl(120, 100%, 50%),
+    hsl(180, 100%, 50%),
+    hsl(240, 100%, 50%),
+    hsl(300, 100%, 50%),
+    hsl(360, 100%, 50%)
+  );
   box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.15);
 }
 
-/* Dark-mode band compression: pulls the overlay's black/white caps
-   closer to the mid-band so the visible gradient spans [38, 62] in
-   HSL lightness rather than the light-mode [30, 70]. Deep hues come
-   out a little brighter (readable against `#0b0a09`), pale hues a
-   little dimmer (no more glare). Saturation is unchanged — the overlay
-   only touches the L axis. */
-.themeDark .colorSquare {
-  --color-square-band-alpha: 0.24;
-}
-
-/* Tiny ring marking the currently picked (hue, lightness). Works for
-   both the square and any future picker shape — positioned by left/top
-   percent, centered via translate, and pointer-events:none so the
-   press-and-drag always lands on the underlying picker surface. No
-   left/top CSS transition: during a drag the indicator has to track
-   the pointer 1:1; any smoothing here would make the ring visibly lag
-   behind the cursor and read as lossy / disconnected. The pointer IS
-   the animation. */
+/* Tiny ring marking the currently picked hue. Vertically centered on
+   the strip; horizontal position is hue percent. pointer-events:none
+   so press-and-drag always lands on the underlying picker surface. No
+   left CSS transition: during a drag the indicator has to track the
+   pointer 1:1. */
 .colorPickerIndicator {
   position: absolute;
   width: 12px;
@@ -63913,7 +63880,11 @@ a.settingsCreditItem:focus-visible {
     animation: popIn 0.18s ease-out;
   }
 
-  .colorSquare,
+  .colorSquare {
+    height: 28px;
+    min-height: 28px;
+  }
+
   .glyphGridShell {
     height: 100%;
     min-height: 0;

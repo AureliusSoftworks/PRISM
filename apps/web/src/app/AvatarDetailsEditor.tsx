@@ -352,8 +352,12 @@ const AvatarDetailsEditorSession = forwardRef<
   }, []);
 
   useEffect(() => {
+    // Foundry auto-commit mirrors the parent source into the editor. Never do
+    // that while a pointer stroke is open: deferred single-click / bucket paint
+    // lives in workingRef until pointerup, and a mid-stroke reset erases it.
     if (
       !autoCommit ||
+      pointerStrokeRef.current ||
       avatarDetailsEqual(workingRef.current, normalizedSource)
     ) {
       return;
@@ -1050,14 +1054,10 @@ const AvatarDetailsEditorSession = forwardRef<
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={finishPointerStroke}
-          onPointerCancel={(event) => {
-            const stroke = pointerStrokeRef.current;
-            if (!stroke || stroke.pointerId !== event.pointerId) return;
-            pointerStrokeRef.current = null;
-            setPointerActive(false);
-            updateWorking(stroke.before);
-            flushPreview(stroke.before);
-          }}
+          // Browsers (especially trackpad / touch) often fire pointercancel on a
+          // tap. Reverting here wiped single-click brush stamps and bucket fills
+          // before pointerup could commit them; treat cancel as stroke end.
+          onPointerCancel={finishPointerStroke}
         />
       </div>
     </div>

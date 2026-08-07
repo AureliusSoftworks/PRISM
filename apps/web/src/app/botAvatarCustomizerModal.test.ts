@@ -1416,19 +1416,33 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(cssSource, /\.botAvatarRangeControl/);
   assert.match(
     cssRuleBody(".colorGlyphInline"),
-    /grid-template-columns:\s*repeat\(2,\s*minmax\(0,\s*1fr\)\);/,
+    /grid-template-columns:\s*minmax\(0,\s*1fr\);/,
   );
   assert.match(
-    cssRuleBody(
-      ".colorGlyphInline .colorSquare,\n.colorGlyphInline .glyphGridShell",
-    ),
+    cssRuleBody(".colorGlyphInline"),
+    /grid-template-rows:\s*auto minmax\(0,\s*1fr\);/,
+  );
+  assert.match(
+    cssRuleBody(".colorGlyphInline .colorSquare"),
+    /height:\s*28px;/,
+  );
+  assert.match(
+    cssRuleBody(".colorGlyphInline .glyphGridShell"),
     /height:\s*100%;/,
   );
+  assert.match(pageSource, /data-color-picker="hue-strip"/);
   assert.match(
-    cssRuleBody(
-      ".colorGlyphInline .colorSquare,\n.colorGlyphInline .glyphGridShell",
-    ),
-    /min-height:\s*150px;/,
+    pageSource,
+    /aria-label="Bot color hue\. Drag left and right to choose a hue\."/,
+  );
+  assert.match(pageSource, /accentLightnessMidpoint\(/);
+  assert.doesNotMatch(
+    pageSource,
+    /vertical axis: lightness/,
+  );
+  assert.doesNotMatch(
+    cssSource,
+    /--color-square-band-alpha/,
   );
   assert.match(
     cssSource,
