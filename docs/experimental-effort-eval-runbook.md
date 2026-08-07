@@ -48,6 +48,28 @@ Default task shape:
 
 Override with `--prompt` only when deliberately testing a different skill. Prefer checkable constraints over open-ended product design.
 
+## Soft-transfer suite (Phase A)
+
+When cafe staffing is too hard for the local under test, measure **guidance → final transfer** on easier checkable prompts:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts \
+  --suite soft-transfer \
+  --local-model llama3.2 \
+  --thinking-provider openai \
+  --thinking-model gpt-5.6-sol \
+  --effort high \
+  --include-scratchpad
+```
+
+Cases:
+
+1. Exact `S1`–`S3` labels + forbidden word `just`
+2. Required phrases: `local` + `private planning pass`
+3. Tiny Markdown table with a 4-item whitelist
+
+Suite summary lands next to the per-case reports as `soft-transfer-suite-*.md`. Win signal: local High sim ≥ local None on most cases. Cafe remains the stretch goal (`--suite cafe` or default prompt).
+
 ## Strong reference vs local baseline vs simulated local
 
 Run with Anthropic as the strong reference:
