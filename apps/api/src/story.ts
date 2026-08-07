@@ -1783,6 +1783,7 @@ function storyPowerTargetMatches(
   bot: StoryBotProfile,
 ): boolean {
   if (target.kind === "all") return true;
+  if (target.kind === "player") return false;
   if (target.kind === "bot") {
     return Boolean(
       (target.botId && target.botId === bot.id) ||

@@ -247,6 +247,21 @@ describe("coffee user reveal flow", () => {
     );
   });
 
+  it("keeps Power Mute ellipsis visible when asked", () => {
+    assert.equal(
+      coffeeTableMessageContentIsVisible("...", undefined, {
+        keepPowerMuteEllipsis: true,
+      }),
+      true,
+    );
+    assert.equal(
+      coffeeTableMessageContentIsVisible(" … ", undefined, {
+        keepPowerMuteEllipsis: true,
+      }),
+      true,
+    );
+  });
+
   it("hides punctuation-only interruption pause rows from the table", () => {
     assert.equal(coffeeTableMessageContentIsVisible("..."), false);
     assert.equal(coffeeTableMessageContentIsVisible(" … "), false);

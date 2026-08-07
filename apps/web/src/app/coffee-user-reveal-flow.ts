@@ -132,8 +132,16 @@ export function coffeePersistedUserLineOwnsPendingReveal<
 export function coffeeTableMessageContentIsVisible(
   content: string,
   socialSilence?: SocialSilenceMarkerV1,
+  options?: { keepPowerMuteEllipsis?: boolean },
 ): boolean {
   const normalized = content.trim();
+  // Hard Mute / social-silence "..." is intentional table presence — keep it.
+  if (
+    options?.keepPowerMuteEllipsis === true &&
+    /^(?:\.\.\.|…)$/u.test(normalized)
+  ) {
+    return true;
+  }
   return (
     /[\p{L}\p{N}]/u.test(normalized) ||
     socialSilenceMessageIsMarkedV1({

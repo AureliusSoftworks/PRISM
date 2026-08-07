@@ -828,13 +828,15 @@ test("compiler makes Microscopic a hidden, quiet, coffee-free compound without c
   assert.deepEqual(result.powers[0]?.compiled?.effects, [
     { type: "avatar_scale", mode: "microscopic" },
     { type: "avatar_visibility", mode: "hidden" },
+    { type: "avatar_opacity", opacity: 0 },
     { type: "voice_presence", mode: "quiet" },
     {
       type: "intermittent_audibility",
       chance: "half",
       listeners: "bots",
-      missEvent: "too_faint_to_make_out",
+      missEvent: "inaudible_ask_repeat",
     },
+    { type: "signal_policy", mode: "attenuate" },
     { type: "cup_rate", rate: "none" },
   ]);
   assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, [
@@ -1091,8 +1093,15 @@ test("compiler creates hard mute rules without consulting the local model", asyn
 
   assert.equal(calls, 0);
   assert.equal(result.powers[0]?.compileStatus, "ready");
-  assert.deepEqual(result.powers[0]?.compiled?.effects, [{ type: "mute" }]);
-  assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, ["Muted"]);
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    { type: "mute" },
+    { type: "signal_policy", mode: "destroy" },
+    { type: "mouth_motion", mode: "sealed" },
+  ]);
+  assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, [
+    "Muted",
+    "Sealed mouth",
+  ]);
 });
 
 test("Forgetful Freddie compiles current-other-speaker context and gradual peer agitation", async () => {
@@ -2469,7 +2478,12 @@ test("Coffee resolution freezes named visibility and session-start trait mood", 
   }
   const noLightPlan = resolveCoffeePowersForSession(db, "user", "session-no-light");
   assert.equal(coffeePowerBotCanSpeak(noLightPlan, "ryuk"), true);
-  assert.match(noLightPlan.warnings.join(" "), /No matching Coffee participant.*Light Yagami/u);
+  assert.equal(
+    noLightPlan.warnings.every(
+      (warning) => !/No matching Coffee participant/u.test(warning),
+    ),
+    true,
+  );
 });
 
 test("Coffee freezes legacy empty-effect mute Powers as absolute silence", () => {
@@ -3130,10 +3144,13 @@ test("Anti-truth with invented-alias language stays anti_truth (not false_name)"
       compiled: null,
     }],
   });
-  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
-    type: "anti_truth",
-    strength: "large",
-  }]);
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    {
+      type: "anti_truth",
+      strength: "large",
+    },
+    { type: "address_gate", when: "question" },
+  ]);
   assert.equal(
     result.powers[0]?.compiled?.effects.some((effect) => effect.type === "false_name"),
     false,
@@ -3159,9 +3176,12 @@ test("compiler recovers Anti-truth / Fibbing as soft anti_truth", async () => {
       compiled: null,
     }],
   });
-  assert.deepEqual(result.powers[0]?.compiled?.effects, [{
-    type: "anti_truth",
-    strength: "large",
-  }]);
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    {
+      type: "anti_truth",
+      strength: "large",
+    },
+    { type: "address_gate", when: "question" },
+  ]);
   assert.match(result.powers[0]?.compiled?.selfCue ?? "", /Anti-truth/u);
 });

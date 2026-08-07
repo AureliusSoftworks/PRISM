@@ -953,6 +953,13 @@ import {
   botPowerHasAvatarColorCycleV1,
   botPowerAvatarVisibilityModeFromEffectsV1,
   botPowerAvatarVisibilityModeV1,
+  botPowerAvatarOpacityFromEffectsV1,
+  botPowerAvatarOpacityV1,
+  botPowerMouthMotionFromEffectsV1,
+  botPowerMouthMotionV1,
+  botPowerMetaSigilFromEffectsV1,
+  botPowerMetaSigilV1,
+  botPowerAuthoringParadoxHintV1,
   BOT_IDENTITY_MIRROR_TRANSITION_MS,
   BOT_IDENTITY_SHAPESHIFT_TRANSITION_MS,
   botIdentityMirrorTransitionActiveV1,
@@ -963,6 +970,7 @@ import {
   resolveBotIdentityShapeshiftVoiceV1,
   botPowerEchoesAddressedSpeechV1,
   botPowerIsMutedV1,
+  botPowerMuteExemptsPlayerV1,
   botPowerAntiTruthSpokenNameV1,
   strongestBotPowerAntiTruthEffectV1,
   applyBotPowerAntiTruthTrueNameLeakV1,
@@ -8147,6 +8155,8 @@ function coffeeMessageHasTableText(
   return coffeeTableMessageContentIsVisible(
     coffeeTableDisplayText(message.content),
     message.socialSilence,
+    // Hard Mute / social-silence ellipsis is intentional presence in Table talk.
+    { keepPowerMuteEllipsis: true },
   );
 }
 
@@ -32171,6 +32181,21 @@ function ZenLiveBotPresencePlate({
           ? (botPowerAvatarVisibilityModeV1(bot.powers) ?? undefined)
           : undefined
       }
+      data-power-avatar-opacity={
+        bot
+          ? (botPowerAvatarOpacityV1(bot.powers) === null
+              ? undefined
+              : String(botPowerAvatarOpacityV1(bot.powers)))
+          : undefined
+      }
+      data-power-mouth-motion={
+        bot && botPowerMouthMotionV1(bot.powers) === "sealed"
+          ? "sealed"
+          : undefined
+      }
+      data-power-meta-sigil={
+        bot ? (botPowerMetaSigilV1(bot.powers) ?? undefined) : undefined
+      }
       data-power-avatar-scale={
         bot ? (botPowerAvatarScaleModeV1(bot.powers) ?? undefined) : undefined
       }
@@ -32183,9 +32208,21 @@ function ZenLiveBotPresencePlate({
       data-prism-forming={
         defaultPrismPresence && defaultPrismPresenceForming ? "true" : undefined
       }
-      data-talking={utteranceActive ? "true" : undefined}
+      data-talking={
+        bot && botPowerMouthMotionV1(bot.powers) === "sealed"
+          ? undefined
+          : utteranceActive
+            ? "true"
+            : undefined
+      }
       data-mouth-open={
-        utteranceActive ? (faceMouthOpen ? "true" : "false") : undefined
+        bot && botPowerMouthMotionV1(bot.powers) === "sealed"
+          ? "false"
+          : utteranceActive
+            ? faceMouthOpen
+              ? "true"
+              : "false"
+            : undefined
       }
       data-mouth-shape={utteranceActive ? faceMouthShape : undefined}
       data-presence-phase={transitioning ? presencePhase : undefined}
@@ -41278,13 +41315,22 @@ function BotPowerBadge({
     resolved?.effects ??
     active.flatMap((power) => power.compiled?.effects ?? []);
   const targetNames = (targets: BotPowerTargetV1[]): string => {
-    const names = targets.map((target) =>
-      target.kind === "all"
-        ? "everyone"
-        : target.kind === "bot"
-          ? target.name
-          : target.trait,
-    );
+    const names = targets.map((target) => {
+      switch (target.kind) {
+        case "all":
+          return "everyone";
+        case "bot":
+          return target.name;
+        case "player":
+          return "the player";
+        case "trait":
+          return target.trait;
+        default: {
+          const _exhaustive: never = target;
+          return _exhaustive;
+        }
+      }
+    });
     return names.length > 0 ? names.join(", ") : "no matching bots";
   };
   const effectLines = effects.map((effect) => {
@@ -41474,6 +41520,7 @@ function BotPowersEditor({
     index: number;
   } | null>(null);
   const activeCount = activeBotPowersV1(powers).length;
+  const paradoxHint = botPowerAuthoringParadoxHintV1(powers);
   const updatePower = (
     id: string,
     update: (power: BotPowerV1) => BotPowerV1,
@@ -41542,6 +41589,12 @@ function BotPowersEditor({
           {activeCount} active
         </span>
       </header>
+
+      {paradoxHint ? (
+        <p className={styles.botPowerParadoxHint} role="note">
+          {paradoxHint}
+        </p>
+      ) : null}
 
       <div className={styles.botPowerComposer}>
         <label className={styles.botPowerField}>
@@ -62930,7 +62983,16 @@ function HomeContent(): React.JSX.Element {
         bot.authored_audio_voice_profile,
         bot.audio_voice_profile_override,
       );
-      if (!profile.enabled || botPowerIsMutedV1(bot.powers)) return false;
+      // Hard Mute stays silent unless the player is whitelisted (or the
+      // projected Coffee line is already marked audible for the human).
+      if (
+        !profile.enabled ||
+        (botPowerIsMutedV1(bot.powers) &&
+          !botPowerMuteExemptsPlayerV1(bot.powers) &&
+          message.coffeeObserverProjection?.audible !== true)
+      ) {
+        return false;
+      }
       coffeePerceptionOverlapVoiceAbortRef.current?.abort();
       const controller = new AbortController();
       coffeePerceptionOverlapVoiceAbortRef.current = controller;
@@ -125499,7 +125561,12 @@ function HomeContent(): React.JSX.Element {
     const bot = bots.find(
       (candidate) => candidate.id === utterance.speakerBotId,
     );
-    if (!bot || botPowerIsMutedV1(bot.powers)) return;
+    if (
+      !bot ||
+      (botPowerIsMutedV1(bot.powers) && !botPowerMuteExemptsPlayerV1(bot.powers))
+    ) {
+      return;
+    }
     const profile = resolveBotAudioVoiceProfileV1(
       bot.authored_audio_voice_profile,
       bot.audio_voice_profile_override,
@@ -130958,6 +131025,21 @@ function HomeContent(): React.JSX.Element {
                     coffeePowerPlan.bots[bot.id]?.effects,
                   )
                 : botPowerHasAvatarColorCycleV1(bot.powers);
+              const seatAvatarOpacity = coffeePowerPlan
+                ? botPowerAvatarOpacityFromEffectsV1(
+                    coffeePowerPlan.bots[bot.id]?.effects,
+                  )
+                : botPowerAvatarOpacityV1(bot.powers);
+              const seatMouthMotion = coffeePowerPlan
+                ? botPowerMouthMotionFromEffectsV1(
+                    coffeePowerPlan.bots[bot.id]?.effects,
+                  )
+                : botPowerMouthMotionV1(bot.powers);
+              const seatMetaSigil = coffeePowerPlan
+                ? botPowerMetaSigilFromEffectsV1(
+                    coffeePowerPlan.bots[bot.id]?.effects,
+                  )
+                : botPowerMetaSigilV1(bot.powers);
               const seatPowerEdgeSide =
                 layoutIndex < (coffeeSeatLayoutCount - 1) / 2
                   ? "left"
@@ -131756,6 +131838,15 @@ function HomeContent(): React.JSX.Element {
                   data-power-avatar-visibility={
                     seatAvatarVisibilityMode ?? undefined
                   }
+                  data-power-avatar-opacity={
+                    seatAvatarOpacity === null
+                      ? undefined
+                      : String(seatAvatarOpacity)
+                  }
+                  data-power-mouth-motion={
+                    seatMouthMotion === "sealed" ? "sealed" : undefined
+                  }
+                  data-power-meta-sigil={seatMetaSigil ?? undefined}
                   data-power-avatar-scale={seatAvatarScaleMode ?? undefined}
                   data-power-avatar-color-cycle={
                     seatAvatarColorCycle ? "spectrum" : undefined
@@ -135352,6 +135443,19 @@ function HomeContent(): React.JSX.Element {
             }
             data-power-avatar-visibility={
               botPowerAvatarVisibilityModeV1(npcActor.bot.powers) ?? undefined
+            }
+            data-power-avatar-opacity={
+              botPowerAvatarOpacityV1(npcActor.bot.powers) === null
+                ? undefined
+                : String(botPowerAvatarOpacityV1(npcActor.bot.powers))
+            }
+            data-power-mouth-motion={
+              botPowerMouthMotionV1(npcActor.bot.powers) === "sealed"
+                ? "sealed"
+                : undefined
+            }
+            data-power-meta-sigil={
+              botPowerMetaSigilV1(npcActor.bot.powers) ?? undefined
             }
             data-power-avatar-color-cycle={
               botPowerHasAvatarColorCycleV1(npcActor.bot.powers)

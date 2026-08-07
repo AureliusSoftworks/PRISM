@@ -23,6 +23,7 @@ import {
   botPowerIntermittentAudibilityEffectFromEffectsV1,
   botPowerIgnoresOtherPowersFromEffectsV1,
   botPowerIneptRoleMisdirectionFromEffectsV1,
+  demoteMultiEnlightenedScenePowersV1,
   botPowerListenerHearsTurnFromEffectsV1,
   botPowerAnnoyanceTargetFromEffectsV1,
   strongestBotPowerMoodBoostEffectFromEffectsV1,
@@ -264,6 +265,10 @@ function resolveTargets(args: {
 }): string[] {
   const resolved = new Set<string>();
   for (const target of args.targets) {
+    if (target.kind === "player") {
+      // Player exemptions are not Coffee bot ids; keep them on the effect as-is.
+      continue;
+    }
     if (target.kind === "all") {
       for (const bot of args.bots) if (bot.id !== args.subjectBotId) resolved.add(bot.id);
       continue;
@@ -275,8 +280,9 @@ function resolveTargets(args: {
         )
       : args.bots.filter((bot) => botMatchesTrait(bot, target.trait));
     if (matches.length === 0 && args.warnOnMissing !== false) {
-      const label = target.kind === "bot" ? target.name : target.trait;
-      args.warnings.push(`No matching Coffee participant for “${label}”.`);
+      // Soft catalog whitelists (e.g. Light Yagami) may be absent from this
+      // table; never surface a noisy missing-participant badge for that.
+      continue;
     }
     for (const bot of matches) if (bot.id !== args.subjectBotId) resolved.add(bot.id);
   }
@@ -309,9 +315,10 @@ function resolvedEffect(
     }));
   if (effect.type === "awareness" || effect.type === "speech_audience") {
     const excluded = resolveExcluded(effect.excluded ?? []);
+    const playerAllowed = effect.allowed.filter((target) => target.kind === "player");
     return {
       ...effect,
-      allowed: resolve(effect.allowed),
+      allowed: [...resolve(effect.allowed), ...playerAllowed],
       ...(excluded.length > 0 ? { excluded } : {}),
     };
   }
@@ -606,7 +613,7 @@ function applySessionStartSocial(
       const polarity = effect.polarity;
       const rawDelta = strengthDelta(effect.strength) * (polarity === "negative" ? -1 : 1);
       for (const targetId of idsFromResolvedTargets(effect.targets)) {
-        if (coffeePowerBotIgnoresOtherPowers(plan, targetId)) continue;
+        // Soft social pressures still apply to delivery-piercing holders (Enlightened/Observant).
         if (!coffeePowerBotVisibleTo(plan, resolved.botId, targetId)) continue;
         const delta = rawDelta * resistanceMultiplier(plan, targetId, polarity);
         deltas.set(targetId, (deltas.get(targetId) ?? 0) + delta);
@@ -758,6 +765,33 @@ export function resolveSocialPowersForBots(
     };
     planBots[bot.id] = resolved;
     planWarnings.push(...resolved.warnings.map((warning) => `${bot.name}: ${warning}`));
+  }
+  // Multi-Enlightened demotion: 2+ stage_awareness → Observant-equivalent for the scene.
+  const demoted = demoteMultiEnlightenedScenePowersV1(
+    Object.fromEntries(
+      Object.entries(planBots).map(([id, bot]) => [id, bot.effects]),
+    ),
+  );
+  for (const [botId, effects] of demoted) {
+    const bot = planBots[botId];
+    if (!bot) continue;
+    const hadStage = bot.effects.some((effect) => effect.type === "stage_awareness");
+    const keepsStage = effects.some((effect) => effect.type === "stage_awareness");
+    if (hadStage && !keepsStage) {
+      planBots[botId] = {
+        ...bot,
+        effects,
+        ruleLabels: Array.from(
+          new Set([
+            ...bot.ruleLabels.filter((label) => !/stage awareness|meta sigil/iu.test(label)),
+            "Pierces delivery filters",
+          ]),
+        ).slice(0, 8),
+      };
+      planWarnings.push(
+        `${bot.botName ?? botId}: multiple Enlightened present — demoted to Observant-equivalent for this scene`,
+      );
+    }
   }
   const plan: CoffeePowerPlanV1 = {
     version: 1,

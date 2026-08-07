@@ -2929,6 +2929,83 @@
   opacity: 0.5;
 }
 
+.coffeeSeat[data-power-avatar-opacity]:not([data-roster-preview="true"])
+  .coffeeSeatPlate
+  > .botAmbientPresenceRig {
+  opacity: attr(data-power-avatar-opacity type(<number>), 1);
+}
+
+/* Fallback when attr() opacity is unsupported: explicit common catalog values */
+.coffeeSeat[data-power-avatar-opacity="0"]:not([data-roster-preview="true"])
+  .coffeeSeatPlate
+  > .botAmbientPresenceRig,
+.coffeeSeat[data-power-avatar-opacity="0.0"]:not([data-roster-preview="true"])
+  .coffeeSeatPlate
+  > .botAmbientPresenceRig {
+  opacity: 0;
+}
+
+.coffeeSeat[data-power-avatar-opacity="0.5"]:not([data-roster-preview="true"])
+  .coffeeSeatPlate
+  > .botAmbientPresenceRig {
+  opacity: 0.5;
+}
+
+.coffeeSeat[data-power-mouth-motion="sealed"][data-talking="true"]
+  .zenLiveBotPresenceMouth,
+.coffeeSeat[data-power-mouth-motion="sealed"][data-mouth-open="true"]
+  .zenLiveBotPresenceMouth,
+.zenLiveBotPresencePlate[data-power-mouth-motion="sealed"][data-talking="true"]
+  .zenLiveBotPresenceMouth,
+.zenLiveBotPresencePlate[data-power-mouth-motion="sealed"][data-mouth-open="true"]
+  .zenLiveBotPresenceMouth {
+  /* Sealed Mute mouth: lock to resting closed presentation. */
+  opacity: 1;
+  animation: none;
+  transform: none;
+}
+
+.coffeeSeat[data-power-mouth-motion="sealed"],
+.zenLiveBotPresencePlate[data-power-mouth-motion="sealed"] {
+  --power-mouth-sealed: 1;
+}
+
+.coffeeSeat[data-power-meta-sigil="refraction"] .coffeeSeatGlowPill::before,
+.zenLiveBotPresencePlate[data-power-meta-sigil="refraction"]::before {
+  content: "";
+  position: absolute;
+  width: 7px;
+  height: 7px;
+  border-radius: 1px;
+  transform: rotate(45deg);
+  background: linear-gradient(
+    135deg,
+    color-mix(in srgb, #9fd7ff 70%, white),
+    color-mix(in srgb, #ffd4a8 55%, transparent)
+  );
+  box-shadow: 0 0 8px color-mix(in srgb, #9fd7ff 45%, transparent);
+  pointer-events: none;
+  z-index: 3;
+}
+
+.coffeeSeat[data-power-meta-sigil="refraction"] .coffeeSeatGlowPill {
+  position: relative;
+}
+
+.coffeeSeat[data-power-meta-sigil="refraction"] .coffeeSeatGlowPill::before {
+  top: -2px;
+  right: -2px;
+}
+
+.zenLiveBotPresencePlate[data-power-meta-sigil="refraction"] {
+  position: relative;
+}
+
+.zenLiveBotPresencePlate[data-power-meta-sigil="refraction"]::before {
+  top: 8%;
+  right: 18%;
+}
+
 /* Identity Mirror keeps the holder's metal/color/glyph anchored while only the CRT face scrambles. */
 .coffeeSeat[data-identity-mirror-transition="true"]
   .zenLiveBotPresenceFaceEmissionMask,
@@ -50525,6 +50602,17 @@ a.settingsCreditItem:focus-visible {
   display: grid;
   gap: 12px;
   min-width: 0;
+}
+
+.botPowerParadoxHint {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--accent, #c9a66b) 35%, transparent);
+  background: color-mix(in srgb, var(--accent, #c9a66b) 12%, transparent);
+  color: color-mix(in srgb, var(--text, #f2efe8) 88%, transparent);
+  font-size: 12px;
+  line-height: 1.35;
 }
 
 .botAvatarStudioTitleRow {

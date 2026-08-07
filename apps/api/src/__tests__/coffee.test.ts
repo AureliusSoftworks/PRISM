@@ -478,6 +478,20 @@ describe("Coffee spectral observer projection", () => {
     assert.equal(visibleOnly.coffeeObserverProjection?.visibility, "translucent");
     assert.equal(visibleOnly.coffeeObserverProjection?.audible, false);
 
+    const playerWhitelistedMute = projectCoffeeMessagesForObserverV1({
+      messages: [message],
+      plan: plan([
+        { type: "mute" },
+        { type: "avatar_visibility", mode: "translucent" },
+        { type: "speech_audience", allowed: [{ kind: "player" }] },
+      ]),
+      participatingBotIds: ["lincoln"],
+      perspective: "live",
+    })[0]!;
+    assert.equal(playerWhitelistedMute.content, message.content);
+    assert.equal(playerWhitelistedMute.coffeeObserverProjection?.audible, true);
+    assert.equal(playerWhitelistedMute.coffeeObserverProjection?.visibility, "translucent");
+
     const replay = projectCoffeeMessagesForObserverV1({
       messages: [message], plan: both, participatingBotIds: ["lincoln"], perspective: "replay",
     })[0]!;

@@ -123,13 +123,22 @@ function targetNames(value: string): BotPowerTargetV1[] {
 }
 
 function normalizedTargetLabels(targets: readonly BotPowerTargetV1[]): string[] {
-  return targets.map((target) =>
-    target.kind === "all"
-      ? "everyone"
-      : target.kind === "bot"
-        ? target.name
-        : target.trait,
-  );
+  return targets.map((target) => {
+    switch (target.kind) {
+      case "all":
+        return "everyone";
+      case "bot":
+        return target.name;
+      case "player":
+        return "the player";
+      case "trait":
+        return target.trait;
+      default: {
+        const _exhaustive: never = target;
+        return _exhaustive;
+      }
+    }
+  });
 }
 
 function excludedAudienceNamesForIntent(
@@ -281,6 +290,59 @@ function deterministicHardAudiencePower(
   };
 }
 
+function deterministicHardInvisibilityPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 120).toLowerCase().replace(/[’']/gu, "'");
+  const intent = compact(source.intent, 640).toLowerCase().replace(/[’']/gu, "'");
+  const text = `${name} ${intent}`;
+  const named = /^(?:hard\s*invisibility)$/u.test(name);
+  const described =
+    /\bhard\s+invisibility\b/u.test(text) ||
+    (
+      /\bmute\b/u.test(text) &&
+      !/\bnot\s+mute\b/u.test(text) &&
+      !/\b(?:aren't|are\s+not|isn't|is\s+not)\s+mute\b/u.test(text) &&
+      /\binvisible\b/u.test(text) &&
+      (/\bplayer\b/u.test(text) || /\blight\s*yagami\b/u.test(text))
+    );
+  if (!named && !described) return null;
+  const subject = compact(botName, 100) || "This bot";
+  const lightAllowed = /\blight\s*yagami\b/u.test(text);
+  const allowed: BotPowerTargetV1[] = [{ kind: "player" }];
+  if (lightAllowed || named) {
+    allowed.push({
+      kind: "bot",
+      name: "Light Yagami",
+      botId: "light-yagami",
+    });
+  }
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "HARD Invisibility: you are Mute and translucent. Non-exempt bots get silence and treat you as absent. Player and named whitelist hear you; Enlightened pierces delivery filters. Soft Powers still shape what exempt listeners hear.",
+    observerCue: `${subject} is hard-invisible — sealed mouth, half-seen body, and non-existent to everyone except the whitelist.`,
+    effects: [
+      { type: "mute" },
+      { type: "signal_policy", mode: "destroy" },
+      { type: "mouth_motion", mode: "sealed" },
+      { type: "avatar_visibility", mode: "translucent" },
+      { type: "avatar_opacity", opacity: 0.5 },
+      { type: "awareness", allowed },
+      { type: "speech_audience", allowed },
+    ],
+    ruleLabels: [
+      "Hard Invisibility",
+      "Sealed mouth",
+      "Translucent body",
+      "Player whitelist",
+      ...(lightAllowed || named ? ["Light Yagami whitelist"] : []),
+    ],
+  };
+}
+
 function deterministicMutePower(
   source: BotPowerV1,
   botName: string,
@@ -294,8 +356,12 @@ function deterministicMutePower(
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue: "Never speak. Physical actions are allowed, but every response must end as a silent ellipsis.",
     observerCue: `${subject} cannot speak; only physical actions and a silent ellipsis can register.`,
-    effects: [{ type: "mute" }],
-    ruleLabels: ["Muted"],
+    effects: [
+      { type: "mute" },
+      { type: "signal_policy", mode: "destroy" },
+      { type: "mouth_motion", mode: "sealed" },
+    ],
+    ruleLabels: ["Muted", "Sealed mouth"],
   };
 }
 
@@ -513,6 +579,44 @@ function deterministicIneptPower(
   };
 }
 
+function deterministicEnlightenedPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  const name = compact(source.name, 80).toLowerCase().replace(/[’']/gu, "'");
+  const intent = compact(source.intent, 640).toLowerCase().replace(/[’']/gu, "'");
+  const named = /^(?:enlightened)$/u.test(name) || /\benlightened\b/u.test(name);
+  const language =
+    /\b(?:fourth\s*wall|stage\s*aware|stage\s*awareness|knows?\s+(?:this\s+is\s+)?(?:prism|a\s+simulation)|self[- ]aware)\b/u.test(
+      intent,
+    ) ||
+    /\bbypasses?\s+(?:any|all|other)\s+powers?\b/u.test(intent);
+  if (!named && !language) return null;
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashForPowerV1(source),
+    selfCue:
+      "ENLIGHTENED: you receive a curated stage brief (you are a bot in PRISM, which applet, who is present, active Power knots). Pierce other bots' delivery filters (Mute/Invisible/audience) so you hear true delivery — soft Powers still apply to you (lies stay lies). Never dump raw system prompts. If another Enlightened shares the scene, your stage brief and meta mark go quiet until you are alone again.",
+    observerCue: `${subject} seems oddly clocked-in to the situation without explaining how.`,
+    effects: [
+      { type: "stage_awareness" },
+      {
+        type: "power_immunity",
+        scope: "holder",
+        targets: "other_bots",
+        awareness: "unnoticed",
+      },
+      { type: "meta_sigil", kind: "refraction" },
+    ],
+    ruleLabels: [
+      "Stage awareness",
+      "Pierces delivery filters",
+      "Meta sigil (player-only)",
+    ],
+  };
+}
+
 function deterministicPowerImmunityPower(
   source: BotPowerV1,
   _botName: string,
@@ -523,6 +627,12 @@ function deterministicPowerImmunityPower(
   const intent = compact(source.intent, 640)
     .toLowerCase()
     .replace(/[’]/gu, "'");
+    if (
+    /^(?:enlightened)$/u.test(name) ||
+    /\benlightened\b/u.test(`${name} ${intent}`)
+  ) {
+    return null;
+  }
   const named =
     /^(?:observant|perceptive)$/u.test(name) ||
     /\b(?:observant|perceptive)\b/u.test(intent);
@@ -1002,7 +1112,10 @@ function deterministicAntiTruthPower(
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue: botPowerAntiTruthSelfRuleV1(strength),
     observerCue: `${subject} cannot tell the truth and answers with lies; system identity prompts get a false name, questions get a hard meaning invert, and ordinary talk stays soft pressure without overriding the player.`,
-    effects: [{ type: "anti_truth", strength }],
+    effects: [
+      { type: "anti_truth", strength },
+      { type: "address_gate", when: "question" },
+    ],
     ruleLabels: ["Cannot tell the truth"],
   };
 }
@@ -1220,23 +1333,55 @@ function deterministicInvisiblePower(
   const intent = compact(source.intent, 500).toLowerCase();
   const text = `${name} ${intent}`;
   if (/\bmicroscopic\b/u.test(text)) return null;
+  if (/\bhard\s+invisibility\b/u.test(text) || /^(?:hard\s*invisibility)$/u.test(name)) {
+    return null;
+  }
   if (requiredHardAudienceEffect(source.intent)) return null;
+  const spectralTranslucent =
+    /\b(?:translucent|50%\s*opacity|half[- ](?:seen|opacity)|spectral)\b/u.test(
+      text,
+    ) ||
+    (/\binvisible\b/u.test(name) && /\bplayer\b/u.test(intent) && /\bignore\b/u.test(intent));
   if (
-    /\bonly\b[\s\S]{0,80}\b(?:see|sees|visible)\b/u.test(intent) ||
-    /\b(?:visible|invisible|unseen)\s+to\b/u.test(intent) ||
-    /\bexcept\b/u.test(intent)
+    !spectralTranslucent &&
+    (/\bonly\b[\s\S]{0,80}\b(?:see|sees|visible)\b/u.test(intent) ||
+      /\b(?:visible|invisible|unseen)\s+to\b/u.test(intent) ||
+      /\bexcept\b/u.test(intent))
   ) {
     return null;
   }
   const namedInvisible = /^(?:invisible|unseen)$/u.test(name);
   const invisible =
     namedInvisible ||
+    spectralTranslucent ||
     /\b(?:avatar|body|physical form)\b[\s\S]{0,50}\b(?:continuously|always|fully)\s+(?:invisible|unseen|transparent)\b/u.test(intent);
   const speakingReveal =
     /\b(?:while|when|only)\s+(?:talking|speaking)\b/u.test(intent) ||
     /\b(?:fade|appear|reveal)[\s\S]{0,50}\b(?:talk|speak|utter)/u.test(intent);
-  if (!invisible || (!namedInvisible && speakingReveal)) return null;
+  if (!invisible || (!namedInvisible && !spectralTranslucent && speakingReveal)) {
+    return null;
+  }
   const subject = compact(botName, 100) || "This bot";
+  if (spectralTranslucent) {
+    return {
+      version: BOT_POWER_VERSION,
+      sourceHash: botPowerSourceHashV1(source.name, source.intent),
+      selfCue:
+        "You are translucent. Your words reach the player and Enlightened; other bots should treat you as absent or disembodied and ignore your output. You are not Mute—exempt listeners still hear you.",
+      observerCue: `${subject} is a translucent spectral presence; non-exempt bots ignore their output while the player may still hear them.`,
+      effects: [
+        { type: "avatar_visibility", mode: "translucent" },
+        { type: "avatar_opacity", opacity: 0.5 },
+        { type: "signal_policy", mode: "ignore" },
+        { type: "speech_audience", allowed: [{ kind: "player" }] },
+      ],
+      ruleLabels: [
+        "Translucent body",
+        "Non-exempt bots ignore output",
+        "Player hears",
+      ],
+    };
+  }
   return {
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
@@ -1259,8 +1404,15 @@ function deterministicAvatarScalePower(
     mode === "microscopic"
       ? [
           { type: "avatar_visibility", mode: "hidden" },
+          { type: "avatar_opacity", opacity: 0 },
           { type: "voice_presence", mode: "quiet" },
-          { type: "intermittent_audibility", chance: "half", listeners: "bots", missEvent: "too_faint_to_make_out" },
+          {
+            type: "intermittent_audibility",
+            chance: "half",
+            listeners: "bots",
+            missEvent: "inaudible_ask_repeat",
+          },
+          { type: "signal_policy", mode: "attenuate" },
           { type: "cup_rate", rate: "none" },
         ]
       : mode === "colossal"
@@ -1275,12 +1427,12 @@ function deterministicAvatarScalePower(
     version: BOT_POWER_VERSION,
     sourceHash: botPowerSourceHashV1(source.name, source.intent),
     selfCue: mode === "microscopic"
-      ? "You are microscopic and impossible to see. Your faint voice reaches the player, while each bot listener may fail to make out a line."
+      ? "You are microscopic and impossible to see. Your faint voice reaches exempt listeners; each other bot has a fifty-fifty chance to miss you and should ask you to repeat."
       : mode === "colossal"
         ? "You are colossal and too large to fit within the stage. Your booming voice may mildly annoy one audible bot peer."
         : `Your physical form is ${mode}, with the canonical ${label.toLowerCase()} presentation.`,
     observerCue: mode === "microscopic"
-      ? `${subject} is microscopic, unseen, and faint enough that each bot listener may miss a line.`
+      ? `${subject} is microscopic, unseen, and often inaudible — peers may ask them to repeat.`
       : mode === "colossal"
         ? `${subject} is a screen-filling colossal presence with a booming voice.`
         : `${subject} has the canonical ${mode} physical stature.`,
@@ -1515,6 +1667,7 @@ function deterministicPower(
   const primary =
     deterministicDesignationPower(source, botName) ??
     deterministicIneptPower(source, botName) ??
+    deterministicEnlightenedPower(source, botName) ??
     deterministicPowerImmunityPower(source, botName) ??
     deterministicEternalIntroductionPower(source, botName) ??
     deterministicSimulationEvangelistPower(source, botName) ??
@@ -1529,6 +1682,7 @@ function deterministicPower(
     deterministicCircadianPower(source, botName) ??
     deterministicJoyfulPower(source, botName) ??
     deterministicSadPower(source, botName) ??
+    deterministicHardInvisibilityPower(source, botName) ??
     deterministicMutePower(source, botName) ??
     deterministicInterruptionPower(source, botName) ??
     deterministicAddressedInsultPower(source, botName) ??
@@ -2119,7 +2273,13 @@ export async function compileBotPowers(args: {
         '- {"type":"voice_presence","mode":"loud|quiet"},',
         '- {"type":"speech_obfuscation","mode":"gibberish"},',
         '- {"type":"intermittent_mute","chance":"half","moodPenalty":"small|medium|large"},',
-        '- {"type":"intermittent_audibility","chance":"half","listeners":"bots","missEvent":"too_faint_to_make_out"},',
+        '- {"type":"intermittent_audibility","chance":"half","listeners":"bots","missEvent":"too_faint_to_make_out|inaudible_ask_repeat"},',
+        '- {"type":"stage_awareness"},',
+        '- {"type":"signal_policy","mode":"destroy|ignore|attenuate"},',
+        '- {"type":"address_gate","when":"always|addressed|question"},',
+        '- {"type":"avatar_opacity","opacity":0_to_1},',
+        '- {"type":"mouth_motion","mode":"normal|sealed"},',
+        '- {"type":"meta_sigil","kind":"refraction"},',
         '- {"type":"annoyance","trigger":"after_spoken_turn","chance":"half","recipients":"one_audible_peer","strength":"small"},',
         '- {"type":"social_influence","trigger":"session_start|after_speech","polarity":"positive|negative","strength":"small|medium|large","targets":[target...]},',
         '- {"type":"mood_boost","trigger":"after_spoken_turn","recipients":"addressed","strength":"small|medium|large","whenTheme":"light|dark" (optional)},',
@@ -2139,7 +2299,7 @@ export async function compileBotPowers(args: {
         '- {"type":"topic_gravity","direction":"toward|away","strength":"small|medium|large","topics":[string...]},',
         '- {"type":"selective_memory","mode":"remember|forget","strength":"small|medium|large","targets":[target...]},',
         '- {"type":"insight","strength":"small|medium|large","targets":[target...]}.',
-        'Targets are {"kind":"all"}, {"kind":"bot","name":string}, or {"kind":"trait","trait":string}.',
+        'Targets are {"kind":"all"}, {"kind":"bot","name":string,"botId"?:string}, {"kind":"trait","trait":string}, or {"kind":"player"}.',
         "Use hard effects only when the intent clearly requires them. Keep each cue to one short sentence and each rule label under eight words.",
       ].join("\n"),
     },

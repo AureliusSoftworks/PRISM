@@ -166,6 +166,8 @@ import {
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
+  botPowerInaudibleMissCueV1,
+  botPowerMuteExemptsPlayerFromEffectsV1,
   applyDirectionalIrritationCleanTurnDecay,
   applyDirectionalIrritationCutoff,
   applyDirectionalIrritationRebuff,
@@ -13169,6 +13171,7 @@ export function coffeeMessagesVisibleInExport<
       !(
         message.role === "assistant" &&
         coffeeReplyIsPunctuationOnly(message.content) &&
+        !botPowerResponseIsSilentV1(message.content) &&
         !socialSilenceMessageIsMarkedV1({
           content: message.content,
           marker: message.socialSilence,
@@ -16748,6 +16751,11 @@ async function generateCoffeeBotReply(args: {
     stableTurnKey: `${row.id}:${speaker.id}:${history.length}`,
   });
   const speakerIsMutedForTurn = speakerIsMuted || speakerQuietIgnored;
+  const speakerMuteExemptsPlayer =
+    speakerIsMuted &&
+    botPowerMuteExemptsPlayerFromEffectsV1(
+      coffeePowerPlan?.bots[speaker.id]?.effects ?? [],
+    );
   const speakerEternallyIntroduces =
     !speakerIsMutedForTurn &&
     coffeePowerBotEternallyIntroduces(coffeePowerPlan, speaker.id);
@@ -17111,7 +17119,11 @@ async function generateCoffeeBotReply(args: {
       : {
           ...message,
           content: sourceVoicePresence === "quiet"
-            ? "*[Their voice is too faint to make out.]*"
+            ? botPowerInaudibleMissCueV1(
+                coffeePowerPlan?.bots[message.botId]?.effects.find(
+                  (effect) => effect.type === "intermittent_audibility",
+                )?.missEvent,
+              )
             : "...",
         }];
   });
@@ -17561,7 +17573,7 @@ async function generateCoffeeBotReply(args: {
         signal: settings.signal,
         isTerminalError: (error) => error instanceof CoffeeAutoStaleTurnError,
         validate: (raw) => {
-          if (speakerIsMutedForTurn) {
+          if (speakerIsMutedForTurn && !speakerMuteExemptsPlayer) {
             return { ok: true, value: applyBotPowerMuteResponseV1(raw) };
           }
           if (speakerEternallyIntroduces) {
@@ -17707,7 +17719,14 @@ async function generateCoffeeBotReply(args: {
           knownCoffeeSpeakerNames
         )
       : "";
-  if (speakerIsMutedForTurn) {
+  // Capture clear speech before Mute so Enlightened/Observant piercers can hear it.
+  const clearSpeechBeforeMute =
+    speakerIsMutedForTurn &&
+    typeof speakerReplyRepaired === "string" &&
+    speakerReplyRepaired.trim()
+      ? speakerReplyRepaired.trim().slice(0, 6_000)
+      : null;
+  if (speakerIsMutedForTurn && !speakerMuteExemptsPlayer) {
     replyText = applyBotPowerMuteResponseV1(speakerReplyRepaired);
   } else if (speakerEternallyIntroduces) {
     replyText = applyBotPowerEternalIntroductionResponseV1(
@@ -18057,7 +18076,7 @@ async function generateCoffeeBotReply(args: {
   // Promote any plain `@Name` / bare-name peer references into prism-bot mention
   // markdown so the client renders the chip + lights the notified glyph on the
   // addressed bot's seat. Safe even when the model already used the markdown.
-  replyText = speakerIsMutedForTurn
+  replyText = speakerIsMutedForTurn && !speakerMuteExemptsPlayer
     ? applyBotPowerMuteResponseV1(replyText)
     : speakerEternallyIntroduces
       ? applyBotPowerEternalIntroductionResponseV1(
@@ -18736,9 +18755,11 @@ async function generateCoffeeBotReply(args: {
           ? "speech_obfuscation"
         : undefined,
     botPowerIntendedSpeech:
-      speakerMumblesForTurn && !speakerIsMutedForTurn
-        ? clearSpeechBeforeObfuscation
-        : undefined,
+      speakerIsMutedForTurn && clearSpeechBeforeMute
+        ? clearSpeechBeforeMute
+        : speakerMumblesForTurn && !speakerIsMutedForTurn
+          ? clearSpeechBeforeObfuscation
+          : undefined,
   });
   db.prepare(
     `INSERT INTO messages
