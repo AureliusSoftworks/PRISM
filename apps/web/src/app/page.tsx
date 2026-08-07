@@ -150,6 +150,7 @@ import {
 import {
   getPrismPresentationSuspendedServerSnapshot,
   getPrismPresentationSuspendedSnapshot,
+  acquirePrismLivingSession,
 } from "./prismPresentationSuspend";
 import {
   PRISM_BRAND_COLORS as PRISM_COLORS,
@@ -1103,6 +1104,8 @@ import {
   type ZenPersonaTransitionInput,
   type ZenPersonaTransitionStyle,
   type UsageBreakdownItem,
+  type UsageProviderFilter,
+  type UsageProviderName,
   type UsageRange,
   type UsageRecentEvent,
   type UsageResponse,
@@ -6703,6 +6706,65 @@ const USAGE_RANGE_OPTIONS: Array<{ value: UsageRange; label: string }> = [
   { value: "30d", label: "30d" },
   { value: "all", label: "All" },
 ];
+
+const USAGE_PROVIDER_FILTER_OPTIONS: Array<{
+  value: UsageProviderFilter;
+  label: string;
+}> = [
+  { value: "all", label: "All" },
+  { value: "local", label: "Local" },
+  { value: "openai", label: "OpenAI" },
+  { value: "anthropic", label: "Anthropic" },
+];
+
+function usageProviderFilterLabel(value: UsageProviderFilter | string): string {
+  if (value === "all") return "All providers";
+  if (value === "local") return "Local";
+  if (value === "ollama") return "Ollama";
+  if (value === "comfyui") return "ComfyUI";
+  if (value === "openai") return "OpenAI";
+  if (value === "anthropic") return "Anthropic";
+  if (value === "unknown") return "Unknown";
+  return value;
+}
+
+function usagePreferredTextProviderLabel(
+  provider: string | null | undefined,
+): string {
+  if (provider === "openai") return "OpenAI";
+  if (provider === "anthropic") return "Anthropic";
+  return "Local";
+}
+
+function usagePreferredImageProviderLabel(
+  provider: string | null | undefined,
+): string {
+  if (provider === "openai") return "OpenAI";
+  return "Local";
+}
+
+function usageProviderIsPreferred(
+  provider: UsageProviderName | string | undefined,
+  preferredText: string | null | undefined,
+  preferredImage: string | null | undefined,
+): boolean {
+  if (!provider) return false;
+  if (provider === preferredText) return true;
+  if (provider === preferredImage) return true;
+  if (
+    preferredText === "local" &&
+    (provider === "local" || provider === "ollama" || provider === "comfyui")
+  ) {
+    return true;
+  }
+  if (
+    preferredImage === "local" &&
+    (provider === "local" || provider === "ollama" || provider === "comfyui")
+  ) {
+    return true;
+  }
+  return false;
+}
 
 const usageCompactNumberFormat = new Intl.NumberFormat(undefined, {
   notation: "compact",
@@ -47119,6 +47181,8 @@ function HomeContent(): React.JSX.Element {
   }, [slateHemisphereSettingsSnapshot?.projectId]);
   const [usageRange, setUsageRange] = useState<UsageRange>("7d");
   const [usageScope, setUsageScope] = useState<"all" | "conversation">("all");
+  const [usageProviderFilter, setUsageProviderFilter] =
+    useState<UsageProviderFilter>("all");
   const [usageReport, setUsageReport] = useState<UsageResponse | null>(null);
   const [usageLoading, setUsageLoading] = useState(false);
   const panelRef = useRef<PanelView>(null);
@@ -47224,10 +47288,14 @@ function HomeContent(): React.JSX.Element {
     async (
       range: UsageRange = usageRange,
       scope: "all" | "conversation" = usageScope,
+      provider: UsageProviderFilter = usageProviderFilter,
     ): Promise<void> => {
       const query = new URLSearchParams({ range });
       if (scope === "conversation" && selectedId) {
         query.set("conversationId", selectedId);
+      }
+      if (provider !== "all") {
+        query.set("provider", provider);
       }
       startTransition(() => {
         setUsageLoading(true);
@@ -47249,7 +47317,7 @@ function HomeContent(): React.JSX.Element {
         });
       }
     },
-    [selectedId, usageRange, usageScope],
+    [selectedId, usageProviderFilter, usageRange, usageScope],
   );
   const [usageTripBusy, setUsageTripBusy] = useState(false);
   const setUsageTripEnabled = useCallback(
@@ -60582,6 +60650,13 @@ function HomeContent(): React.JSX.Element {
     coffeeSessionPhaseRef.current = phase;
     setCoffeeSessionPhase(phase);
   };
+  useEffect(() => {
+    if (coffeeSessionPhase !== "live" && coffeeSessionPhase !== "arriving") {
+      return;
+    }
+    const ownerId = coffeeConversation?.id?.trim() || "coffee-live";
+    return acquirePrismLivingSession("coffee", ownerId);
+  }, [coffeeConversation?.id, coffeeSessionPhase]);
   useEffect(() => {
     if (!coffeeConfigurationLocked) return;
     setBotAvatarCustomizerOpen(false);
@@ -107851,6 +107926,10 @@ function HomeContent(): React.JSX.Element {
     title: string,
     items: UsageBreakdownItem[],
     emptyLabel: string,
+    options?: {
+      highlightPreferred?: boolean;
+      showCost?: boolean;
+    },
   ): React.JSX.Element => (
     <section className={styles.usageBreakdownSection} aria-label={title}>
       <div className={styles.usageBreakdownHeader}>
@@ -107861,28 +107940,47 @@ function HomeContent(): React.JSX.Element {
         <ul className={styles.usageBreakdownList}>
           {items.map((item) => {
             const total = item.totalTokens + item.imageCount;
+            const denominator = Math.max(
+              1,
+              (usageReport?.totals.totalTokens ?? 0) +
+                (usageReport?.totals.imageCount ?? 0),
+            );
+            const sharePercent =
+              usageReport &&
+              usageReport.totals.totalTokens + usageReport.totals.imageCount > 0
+                ? Math.round((total / denominator) * 100)
+                : 0;
             const ratio =
               usageReport &&
               usageReport.totals.totalTokens + usageReport.totals.imageCount > 0
-                ? Math.max(
-                    4,
-                    Math.min(
-                      100,
-                      (total /
-                        Math.max(
-                          1,
-                          usageReport.totals.totalTokens +
-                            usageReport.totals.imageCount,
-                        )) *
-                        100,
-                    ),
-                  )
+                ? Math.max(4, Math.min(100, sharePercent || 4))
                 : 0;
+            const preferred =
+              options?.highlightPreferred === true &&
+              usageProviderIsPreferred(
+                item.provider,
+                settings?.preferredProvider,
+                settings?.preferredImageProvider,
+              );
             return (
-              <li key={item.key} className={styles.usageBreakdownItem}>
+              <li
+                key={item.key}
+                className={styles.usageBreakdownItem}
+                data-preferred={preferred ? "true" : undefined}
+              >
                 <div className={styles.usageBreakdownItemTop}>
-                  <strong>{item.label}</strong>
-                  <span>{formatUsageNumber(item.totalTokens)} tok</span>
+                  <strong>
+                    {item.label}
+                    {preferred ? (
+                      <span className={styles.usagePreferredBadge}>
+                        Preferred
+                      </span>
+                    ) : null}
+                  </strong>
+                  <span>
+                    {formatUsageNumber(item.totalTokens)} tok
+                    {sharePercent > 0 ? ` · ${sharePercent}%` : ""}
+                  </span>
                 </div>
                 <div className={styles.usageBreakdownTrack} aria-hidden="true">
                   <span style={{ width: `${ratio}%` }} />
@@ -107891,6 +107989,9 @@ function HomeContent(): React.JSX.Element {
                   <span>{formatUsageNumber(item.eventCount)} events</span>
                   {item.imageCount > 0 ? (
                     <span>{formatUsageNumber(item.imageCount)} images</span>
+                  ) : null}
+                  {options?.showCost && item.estimatedCostMicroUsd > 0 ? (
+                    <span>{formatUsageCost(item.estimatedCostMicroUsd)}</span>
                   ) : null}
                   {item.unpricedOnlineEvents > 0 ? (
                     <span>unpriced {item.unpricedOnlineEvents}</span>
@@ -108202,6 +108303,46 @@ function HomeContent(): React.JSX.Element {
             </label>
           </section>
 
+          <section
+            className={styles.usagePreferredProviders}
+            aria-label="Preferred model providers"
+          >
+            <div className={styles.usagePreferredProvidersHeader}>
+              <strong>Preferred providers</strong>
+              <button
+                type="button"
+                className={styles.usagePreferredProvidersLink}
+                onClick={() => openSettingsPanel("models")}
+              >
+                Change in Settings
+              </button>
+            </div>
+            <div className={styles.usagePreferredProvidersGrid}>
+              <div>
+                <span>Text / chat</span>
+                <strong>
+                  {usagePreferredTextProviderLabel(settings?.preferredProvider)}
+                </strong>
+              </div>
+              <div>
+                <span>Images</span>
+                <strong>
+                  {usagePreferredImageProviderLabel(
+                    settings?.preferredImageProvider,
+                  )}
+                </strong>
+              </div>
+            </div>
+            <p className={styles.usagePreferredProvidersHint}>
+              These are your saved defaults. Token bars below show what actually
+              ran
+              {usageProviderFilter !== "all"
+                ? ` (filtered to ${usageProviderFilterLabel(usageProviderFilter)})`
+                : ""}
+              .
+            </p>
+          </section>
+
           <div className={styles.usageControls} aria-label="Usage filters">
             <div
               className={styles.usageSegmentedControl}
@@ -108239,6 +108380,24 @@ function HomeContent(): React.JSX.Element {
               >
                 This thread
               </button>
+            </div>
+            <div
+              className={`${styles.usageSegmentedControl} ${styles.usageProviderFilter}`}
+              role="group"
+              aria-label="Usage provider"
+            >
+              {USAGE_PROVIDER_FILTER_OPTIONS.map((option) => (
+                <button
+                  key={option.value}
+                  type="button"
+                  data-active={
+                    usageProviderFilter === option.value ? "true" : undefined
+                  }
+                  onClick={() => setUsageProviderFilter(option.value)}
+                >
+                  {option.label}
+                </button>
+              ))}
             </div>
           </div>
 
@@ -108304,19 +108463,21 @@ function HomeContent(): React.JSX.Element {
             <>
               <div className={styles.usageBreakdownGrid}>
                 {renderUsageBreakdownList(
-                  "By purpose",
-                  usageReport.byPurpose,
-                  "No purpose data yet.",
+                  "By provider",
+                  usageReport.byProvider,
+                  "No provider data yet.",
+                  { highlightPreferred: true, showCost: true },
                 )}
                 {renderUsageBreakdownList(
                   "By model",
                   usageReport.byModel,
                   "No model data yet.",
+                  { showCost: true },
                 )}
                 {renderUsageBreakdownList(
-                  "By provider",
-                  usageReport.byProvider,
-                  "No provider data yet.",
+                  "By purpose",
+                  usageReport.byPurpose,
+                  "No purpose data yet.",
                 )}
               </div>
 

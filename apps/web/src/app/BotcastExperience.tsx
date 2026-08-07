@@ -193,6 +193,7 @@ import { AssetRail } from "./AssetLibrary";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import { PrismRefractTarget } from "./prismRefract";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
+import { acquirePrismLivingSession } from "./prismPresentationSuspend";
 import { SIGNAL_STUDIO_FOLEY_ROOM_SEND } from "./roomAcoustics";
 import {
   DEFAULT_SIGNAL_ATMOSPHERE_MIX,
@@ -1926,6 +1927,11 @@ export function BotcastExperience({
   const [selectedShowId, setSelectedShowId] = useState<string | null>(null);
   const [episodes, setEpisodes] = useState<BotcastEpisodeSummary[]>([]);
   const [episode, setEpisode] = useState<BotcastEpisode | null>(null);
+  useEffect(() => {
+    if (!episode || episode.status !== "live") return;
+    // Keep Signal speech + rundown alive while visuals sleep on minimize.
+    return acquirePrismLivingSession("signal", episode.id);
+  }, [episode?.id, episode?.status]);
   const liveEpisodeRef = useRef<BotcastEpisode | null>(null);
   liveEpisodeRef.current = episode;
   const [replayEpisode, setReplayEpisode] = useState<BotcastEpisode | null>(

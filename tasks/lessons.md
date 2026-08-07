@@ -338,13 +338,18 @@
 
 ### 2026-07-24 · [perf]
 **Trigger**: Coffee group session starts waited on personalized starter-topic LLM generation, and unfocused windows suspended visuals on blur.
-**Lesson**: Open Coffee from saved/deterministic topics immediately and refresh personalized group topics in the background with roster/settings/ethos re-checks before persist. Keep `prismVisualLifecycle` foreground on ordinary blur (`focused: false` is still tracked); suspend only for hidden/pagehide/system pause. Bound Coffee reveal voice with a validity token so the 1.8s silent fallback cannot let late queued audio become audible. Debate is different: leaving focus/visibility must enter recess and must not silent-skip remaining events (`waitWhilePrismPresentationSuspended` + `usePrismAppAwayFromUser`).
+**Lesson**: Open Coffee from saved/deterministic topics immediately and refresh personalized group topics in the background with roster/settings/ethos re-checks before persist. Suspend `prismVisualLifecycle` on blur/hide/pagehide/system pause so Mission Control thumbnails and background spaces freeze. Bound Coffee reveal voice with a validity token so the 1.8s silent fallback cannot let late queued audio become audible. Live Debate/Coffee/Signal claim `acquirePrismLivingSession` so minimize/blur sleeps visuals only — audio, autoplay, and bake stay up; companion `systemPaused` still holds. Without a living-session claim, Debate may still recess via `usePrismAppAwayFromUser`.
 **Applies to**: `apps/api/src/coffee.ts` `ensureCanonicalCoffeeGroupStarterTopics`, `apps/web/src/app/prismVisualLifecycle.ts`, `apps/web/src/app/englishVoice.ts`, Coffee reveal voice in `page.tsx`, `DebateExperience.tsx`, `prismPresentationSuspend.ts`.
 
 ### 2026-08-05 · [architecture]
 **Trigger**: Switching away from Prism during a live Debate raced the floor to the end because suspended voice returned false and silent-revealed every remaining event.
-**Lesson**: Never treat presentation-suspend as “skip this line.” Hold with `waitWhilePrismPresentationSuspended`, and for Debate enter a durable recess when the player leaves (`usePrismAppAwayFromUser`, including ordinary blur). Coffee clocks may keep running on blur; Debate must not. Spectator seal must also require `spectatorWatchPresentationCompleteRef` after the final presentable beat — `!presenting` alone after a suspend abort must never call `/seal-presentation`.
+**Lesson**: Never treat presentation-suspend as “skip this line.” Hold with `waitWhilePrismPresentationSuspended` when presentation is truly suspended. Live sits claim `acquirePrismLivingSession` so ordinary minimize keeps audio (visuals may sleep); companion system pause still suspends and can recess. Spectator seal must also require `spectatorWatchPresentationCompleteRef` after the final presentable beat — `!presenting` alone after a suspend abort must never call `/seal-presentation`.
 **Applies to**: `prismPresentationSuspend.ts`, `DebateExperience.tsx` consume/auto-advance/away-recess/seal, `page.tsx` `playDebateUtterance`.
+
+### 2026-08-07 · [UX]
+**Trigger**: Minimizing Prism soft-paused live Debate/Coffee/Signal and Debate auto-recessed, breaking sessions while bake/recording only needed the window to stay "live."
+**Lesson**: Split visual sleep from living-session audio. `prismVisualLifecycle` suspends Pixi/CSS on hide **and** ordinary blur so Mission Control thumbnails freeze; `acquirePrismLivingSession` keeps voice, atmosphere, Coffee autoplay, Debate/Signal orchestration, and faithful `AudioContext` capture running. Do not recess Debate or duck presentation solely because the desktop window lost focus.
+**Applies to**: `prismPresentationSuspend.ts`, `prismVisualLifecycle.ts`, `replayAudioMasterCapture.ts`, `DebateExperience.tsx`, `BotcastExperience.tsx`, Coffee living-session claim in `page.tsx`.
 
 ### 2026-07-24 · [architecture]
 **Trigger**: Coffee/Signal/Zen needed frequent `*actions*` without a second model wait, while still allowing occasional persona/prop beats.

@@ -38148,6 +38148,103 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   align-items: center;
 }
 
+.usageProviderFilter {
+  grid-column: 1 / -1;
+}
+
+.usagePreferredProviders {
+  display: grid;
+  gap: 10px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-elevated) 82%, var(--bg-surface));
+}
+
+.usagePreferredProvidersHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.usagePreferredProvidersHeader strong {
+  font:
+    760 13px/1.2 var(--font-ui-sans),
+    system-ui,
+    sans-serif;
+}
+
+.usagePreferredProvidersLink {
+  border: 0;
+  padding: 0;
+  color: color-mix(in srgb, #2fd3e3 78%, var(--fg));
+  background: transparent;
+  font:
+    650 12px/1.2 var(--font-ui-sans),
+    system-ui,
+    sans-serif;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.usagePreferredProvidersLink:hover,
+.usagePreferredProvidersLink:focus-visible {
+  color: var(--fg);
+}
+
+.usagePreferredProvidersGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.usagePreferredProvidersGrid div {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.usagePreferredProvidersGrid span {
+  color: var(--fg-muted);
+  font-size: 11.5px;
+}
+
+.usagePreferredProvidersGrid strong {
+  font:
+    760 15px/1.2 var(--font-ui-sans),
+    system-ui,
+    sans-serif;
+}
+
+.usagePreferredProvidersHint {
+  margin: 0;
+  color: var(--fg-muted);
+  font-size: 12px;
+  line-height: 1.35;
+}
+
+.usagePreferredBadge {
+  display: inline-flex;
+  margin-left: 8px;
+  padding: 2px 7px;
+  border-radius: 999px;
+  background: color-mix(in srgb, #2fd3e3 18%, transparent);
+  color: color-mix(in srgb, #2fd3e3 72%, var(--fg));
+  font:
+    700 10px/1.2 var(--font-ui-sans),
+    system-ui,
+    sans-serif;
+  letter-spacing: 0.02em;
+  vertical-align: middle;
+}
+
+.usageBreakdownItem[data-preferred="true"] {
+  box-shadow: 0 0 0 1px color-mix(in srgb, #2fd3e3 28%, transparent) inset;
+  background: color-mix(in srgb, #2fd3e3 7%, transparent);
+}
+
 .usageSegmentedControl {
   display: flex;
   min-width: 0;

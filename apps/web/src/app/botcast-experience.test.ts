@@ -982,6 +982,7 @@ describe("Signal experience shell", () => {
       /selectedShow\.atmosphereAudio\.source === "elevenlabs"/u,
     );
     assert.match(source, /<SessionAtmosphereLayer/u);
+    assert.match(source, /acquirePrismLivingSession\("signal"/u);
     assert.match(
       source,
       /backgroundUrl=\{selectedShow\?\.atmosphereAudio\.audioUrl\}/u,

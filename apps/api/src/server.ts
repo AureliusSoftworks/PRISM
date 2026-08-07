@@ -47,6 +47,7 @@ import type { RouteDefinition, RequestContext } from "./types.ts";
 import {
   enterUsageSession,
   getUsageReport,
+  parseUsageProviderFilter,
   parseUsageRange,
   patchUsageSession,
   recordImageUsage,
@@ -23567,8 +23568,9 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const range = parseUsageRange(ctx.query.get("range"));
       const conversationId = ctx.query.get("conversationId")?.trim() || null;
+      const provider = parseUsageProviderFilter(ctx.query.get("provider"));
       json(ctx.res, 200, {
-        ...getUsageReport({ db, userId, range, conversationId }),
+        ...getUsageReport({ db, userId, range, conversationId, provider }),
       });
     }),
     route("POST", "/api/usage/trip", async (ctx) => {
