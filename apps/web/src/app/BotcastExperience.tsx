@@ -2189,6 +2189,8 @@ export function BotcastExperience({
   const introPreviewRunIdRef = useRef(0);
   const outroRunIdRef = useRef(0);
   const presentedEpisodeOutroIdsRef = useRef(new Set<string>());
+  /** Watch bake can land `status: "completed"` before local presentation finishes. */
+  const suppressCompletedOutroFallbackRef = useRef(false);
   const selectedShowIdRef = useRef<string | null>(selectedShowId);
   const hostChatOpenRef = useRef(false);
   const hostChatBubbleSequenceRef = useRef(0);
@@ -3008,6 +3010,9 @@ export function BotcastExperience({
   // Natural completion normally starts the outro after the final spoken line.
   // This state-driven fallback makes the end card reliable if that one-shot
   // continuation is interrupted by rendering, playback, or a refresh boundary.
+  // Watch bake must suppress this until lines have actually been presented —
+  // otherwise a completed artifact opens the end card during intro (~2s dead
+  // air) and truncates the faithful recording.
   useEffect(() => {
     if (
       !episode ||
@@ -3015,7 +3020,8 @@ export function BotcastExperience({
       speakingMessageId !== null ||
       !selectedShow ||
       episodeOutro?.episodeId === episode.id ||
-      presentedEpisodeOutroIdsRef.current.has(episode.id)
+      presentedEpisodeOutroIdsRef.current.has(episode.id) ||
+      suppressCompletedOutroFallbackRef.current
     )
       return;
     void playEpisodeOutro({
@@ -5649,38 +5655,57 @@ export function BotcastExperience({
         setEpisodeModelDraft("");
         setAskAboutDraft("");
         void loadEpisodes(selectedShow.id).catch(() => undefined);
-        setEpisode(bakedEpisode);
-        setAutoRun(false);
-        await releaseSignalModelWarmup(bakedEpisode.id);
-        if (!episodeOperationIsCurrent(controller, runId)) return;
-        setWatchBakeLabel(null);
-        setWatchBakeArtifact(null);
-        setWatchBakeStartedAt(null);
-        await beginEpisodeIntroBookend(
-          {
-            ...preRoll,
-            guestName:
-              bakedEpisode.guestName ?? guest?.name ?? preRoll.guestName,
-            topic: bakedEpisode.topic.trim() || preRoll.topic,
-            phase: "preparing",
-          },
-          bakedEpisode.id,
-        );
-        await Promise.all([introPlayback.finished, visualMinimum]);
-        if (!episodeOperationIsCurrent(controller, runId)) return;
-        setEpisodePreRoll(null);
-        // Held at Start: Watch unlocks paused until the player presses play.
-        // Present only the already-baked opening buffer; baker continues in background.
-        for (const message of bakedEpisode.messages) {
+        // Hold the completed-status outro fallback until Watch presents lines.
+        // Bake artifacts arrive already `completed`, which used to open the end
+        // card during intro and truncate faithful capture to a few seconds.
+        suppressCompletedOutroFallbackRef.current = true;
+        try {
+          setEpisode(bakedEpisode);
+          setAutoRun(false);
+          await releaseSignalModelWarmup(bakedEpisode.id);
           if (!episodeOperationIsCurrent(controller, runId)) return;
-          prepareEpisodeMessage(message, bakedEpisode);
-          await playPreparedEpisodeMessage(
-            message,
-            bakedEpisode,
-            controller,
-            runId,
-            true,
+          setWatchBakeLabel(null);
+          setWatchBakeArtifact(null);
+          setWatchBakeStartedAt(null);
+          await beginEpisodeIntroBookend(
+            {
+              ...preRoll,
+              guestName:
+                bakedEpisode.guestName ?? guest?.name ?? preRoll.guestName,
+              topic: bakedEpisode.topic.trim() || preRoll.topic,
+              phase: "preparing",
+            },
+            bakedEpisode.id,
           );
+          await Promise.all([introPlayback.finished, visualMinimum]);
+          if (!episodeOperationIsCurrent(controller, runId)) return;
+          setEpisodePreRoll(null);
+          // Held at Start: Watch unlocks paused until the player presses play.
+          // Present only the already-baked opening buffer; baker continues in background.
+          for (const message of bakedEpisode.messages) {
+            if (!episodeOperationIsCurrent(controller, runId)) return;
+            prepareEpisodeMessage(message, bakedEpisode);
+            await playPreparedEpisodeMessage(
+              message,
+              bakedEpisode,
+              controller,
+              runId,
+              true,
+            );
+          }
+          if (
+            episodeOperationIsCurrent(controller, runId) &&
+            bakedEpisode.status === "completed" &&
+            selectedShow
+          ) {
+            void playEpisodeOutro({
+              episode: bakedEpisode,
+              show: selectedShow,
+              forced: false,
+            });
+          }
+        } finally {
+          suppressCompletedOutroFallbackRef.current = false;
         }
         // Keep baking ahead while watching if not fully ready.
         if (artifact.status === "baking") {

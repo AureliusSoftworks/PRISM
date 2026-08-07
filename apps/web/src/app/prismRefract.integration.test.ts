@@ -279,7 +279,7 @@ describe("Prism Refract integration", () => {
     );
     assert.match(
       companionSource,
-      /if \(!companionSuppressed\) return;[\s\S]*resetPrismWield\(\);/u,
+      /if \(!companionSuppressed\) return;[\s\S]*resetPrismWield\(\);[\s\S]*keepFieldRefract[\s\S]*if \(!keepFieldRefract\) \{\s*releasePrismRefract\(true\);/u,
     );
   });
 

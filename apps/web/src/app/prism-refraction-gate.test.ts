@@ -55,14 +55,47 @@ test("desaturates the whole screen during local model warmup", () => {
   assert.match(warmupCss, /-webkit-backdrop-filter:\s*grayscale\(1\)/u);
 });
 
-test("Companion field Refract and non-owning magics use the shared gate", () => {
+test("Companion field Refract warms locally but never opens the hard synthesis loader", () => {
   assert.match(companion, /usePrismRefractionGate/u);
   assert.match(companion, /prepareLocalModel/u);
-  assert.match(companion, /withRefractionLoader/u);
   assert.match(companion, /runLocalRefraction/u);
   assert.match(companion, /!target\.ownsPresentation/u);
   assert.match(refract, /ownsPresentation\?:/u);
   assert.match(debate, /ownsPresentation:\s*true/u);
+  // Field generate calls target.generate directly (rainbow-only wait).
+  assert.match(
+    companion,
+    /const rawValue = await target\.generate\(\{/u,
+  );
+  assert.doesNotMatch(
+    companion,
+    /withRefractionLoader\(\{[\s\S]*?target\.generate/u,
+  );
+  assert.doesNotMatch(
+    companion,
+    /Refracting \$\{target\.label\}/u,
+  );
+  // Magic still uses the shared fullscreen gate when it does not own presentation.
+  assert.match(
+    companion,
+    /!target\.ownsPresentation[\s\S]*?runLocalRefraction\(/u,
+  );
+});
+
+test("Companion suppress keeps in-flight field Refract alive under warmup", () => {
+  assert.match(companion, /keepFieldRefract/u);
+  assert.match(
+    companion,
+    /session\.registration\.target\.kind !== "magic"/u,
+  );
+  assert.match(
+    companion,
+    /session\.phase === "traveling"[\s\S]*session\.phase === "generating"[\s\S]*session\.phase === "ready"[\s\S]*session\.phase === "error"/u,
+  );
+  assert.match(
+    companion,
+    /if \(!keepFieldRefract\) \{\s*releasePrismRefract\(true\);/u,
+  );
 });
 
 test("API prepare allow-list includes the prism companion experience", () => {

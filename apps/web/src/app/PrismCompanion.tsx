@@ -1449,23 +1449,14 @@ export default function PrismCompanion({
               );
             }
           }
-          const generateWork = () =>
-            target.generate({
-              currentValue: target.read(),
-              rejectedValues,
-              signal: controller.signal,
-            });
-          const rawValue = refractionGate
-            ? await refractionGate.withRefractionLoader({
-                loader: {
-                  title: `Refracting ${target.label}`,
-                  detail:
-                    "Prism is shaping a fresh reading for this field. Space will still reroll after it lands.",
-                  stepLabel: "Refracting",
-                },
-                work: generateWork,
-              })
-            : await generateWork();
+          // Prose field Refract uses the in-field rainbow only — never the
+          // fullscreen synthesis / blocking loader (that shell is for images
+          // and invent-scale magic waits).
+          const rawValue = await target.generate({
+            currentValue: target.read(),
+            rejectedValues,
+            signal: controller.signal,
+          });
           if (
             controller.signal.aborted ||
             runId !== refractRunRef.current ||
@@ -2834,7 +2825,19 @@ export default function PrismCompanion({
     resetPrismWield();
     setDragging(false);
     dragRef.current = null;
-    releasePrismRefract(true);
+    // Keep in-flight field/choice Refract alive under warmup overlays.
+    // Aborting here used to cancel the same rewrite that opened a hard wait.
+    const session = refractSessionRef.current;
+    const keepFieldRefract =
+      session != null &&
+      session.registration.target.kind !== "magic" &&
+      (session.phase === "traveling" ||
+        session.phase === "generating" ||
+        session.phase === "ready" ||
+        session.phase === "error");
+    if (!keepFieldRefract) {
+      releasePrismRefract(true);
+    }
     stopInertia(true);
     cancelSpeech(true);
   }, [

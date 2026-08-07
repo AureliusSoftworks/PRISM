@@ -346,6 +346,11 @@ test("yields the floating assistant to focused embedded Prism presence", () => {
     component,
     /typeof document === "undefined" \|\| companionSuppressed/u,
   );
+  assert.match(component, /keepFieldRefract/u);
+  assert.match(
+    component,
+    /if \(!keepFieldRefract\) \{\s*releasePrismRefract\(true\);/u,
+  );
   assert.match(component, /<PrismOrb aura=\{false\}/u);
   assert.match(orbCss, /\.aura::before/u);
 });

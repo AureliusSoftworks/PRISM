@@ -1291,9 +1291,22 @@ describe("Signal experience shell", () => {
     assert.match(source, /copyEpisodeForReview\(episode\)/u);
     assert.match(source, /Copy for Signal Review/u);
     assert.match(source, /presentedEpisodeOutroIdsRef/u);
+    assert.match(source, /suppressCompletedOutroFallbackRef/u);
     assert.match(
       source,
-      /episode\.status !== "completed"[\s\S]{0,220}void playEpisodeOutro\(\{/u,
+      /episode\.status !== "completed"[\s\S]{0,320}suppressCompletedOutroFallbackRef\.current[\s\S]{0,120}void playEpisodeOutro\(\{/u,
+    );
+    assert.match(
+      source,
+      /suppressCompletedOutroFallbackRef\.current = true;[\s\S]{0,500}setEpisode\(bakedEpisode\)/u,
+    );
+    assert.match(
+      source,
+      /bakedEpisode\.status === "completed"[\s\S]{0,180}playEpisodeOutro\(\{[\s\S]{0,120}episode: bakedEpisode/u,
+    );
+    assert.match(
+      source,
+      /finally \{\s*suppressCompletedOutroFallbackRef\.current = false;\s*\}/u,
     );
     const outroSource = source.slice(
       source.indexOf("const playEpisodeOutro = useCallback"),
