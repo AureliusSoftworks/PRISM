@@ -3726,8 +3726,9 @@ export function DebateExperience(
   const [judgeTarget, setJudgeTarget] = useState<DebateSideId>("for");
   const [sourceDrawerId, setSourceDrawerId] = useState<string | null>(null);
   const [liveRailPanel, setLiveRailPanel] = useState<
-    "proceedings" | "caseBoard"
+    "proceedings" | "caseBoard" | "verdict"
   >("proceedings");
+  const sealedCompletedRailRef = useRef(false);
   const [transcriptCopyState, setTranscriptCopyState] =
     useState<DebateClipboardState>("idle");
   const [caseBoardCopyState, setCaseBoardCopyState] =
@@ -5013,8 +5014,22 @@ export function DebateExperience(
     setPlayedJuryCommentIds(empty);
     setJuryRecordCopyState("idle");
     setJuryRecordCopySessionId(null);
-    setLiveRailPanel("proceedings");
+    sealedCompletedRailRef.current = false;
+    setLiveRailPanel(
+      activeSession?.status === "completed" ? "verdict" : "proceedings",
+    );
   }, [activeSessionId]);
+  useEffect(() => {
+    const sealed = activeSession?.status === "completed";
+    if (sealed && !sealedCompletedRailRef.current) {
+      setLiveRailPanel("verdict");
+    } else if (!sealed && sealedCompletedRailRef.current) {
+      setLiveRailPanel((panel) =>
+        panel === "verdict" ? "proceedings" : panel,
+      );
+    }
+    sealedCompletedRailRef.current = Boolean(sealed);
+  }, [activeSession?.status]);
   const clampTranscriptToLive = useCallback((): void => {
     const feed = transcriptFeedRef.current;
     if (!feed) return;
@@ -15352,6 +15367,48 @@ export function DebateExperience(
     );
   };
 
+  /** Completed bottom-right slot when Jury Record is sealed from Participants. */
+  const renderCompletedJuryStatus = (
+    session: DebateSessionV1,
+  ): React.JSX.Element => (
+    <aside
+      className={`${styles.audienceGallery} ${styles.juryRoster}`}
+      aria-label="Jury"
+      data-phase="complete"
+      data-tutorial-target="debate-jury-roster"
+    >
+      <header>
+        <div>
+          <p className={styles.eyebrow}>Jury</p>
+          <span>{DEBATE_JURY_SIZE} seats · binding majority</span>
+        </div>
+        <small>Returned</small>
+      </header>
+      <p>
+        {session.playerRole === "participant"
+          ? "The sealed Jury majority is final. Individual juror commentary is not part of your record."
+          : "Enable Jury in setup to seat a binding five-seat panel here."}
+      </p>
+    </aside>
+  );
+
+  const renderEmptyJurySlot = (): React.JSX.Element => (
+    <aside
+      className={`${styles.audienceGallery} ${styles.juryRoster}`}
+      aria-label="Jury"
+      data-phase="waiting"
+      data-empty="true"
+    >
+      <header>
+        <div>
+          <p className={styles.eyebrow}>Jury</p>
+          <span>Not seated</span>
+        </div>
+      </header>
+      <p>Enable Jury in setup to seat a binding five-seat panel here.</p>
+    </aside>
+  );
+
   const renderGallery = (
     session: DebateSessionV1,
   ): React.JSX.Element | null => {
@@ -17940,6 +17997,8 @@ export function DebateExperience(
       ? (pendingJuryThoughtBotId ?? thinkingBotId)
       : null;
     const juryChamberVisible = cameraView === "jury";
+    const sealedCompleted =
+      session.status === "completed" && !presenting;
     const participantJurySealed =
       session.jury.enabled &&
       session.playerRole === "participant" &&
@@ -19226,7 +19285,7 @@ export function DebateExperience(
                   ) : null}
                 </div>
               </div>
-              {!juryChamberVisible ? (
+              {!juryChamberVisible && !sealedCompleted ? (
                 <DebateLiveAudienceGallery
                   store={presentationStore}
                   sessionId={session.id}
@@ -19252,22 +19311,12 @@ export function DebateExperience(
               <div className={styles.stageSupport}>
                 {renderEvidenceRail(session, tableEvidenceStickyId)}
                 {renderDebateRoundSummary()}
-                {renderGallery(session) ?? (
-                  <aside
-                    className={`${styles.audienceGallery} ${styles.juryRoster}`}
-                    aria-label="Jury"
-                    data-phase="waiting"
-                    data-empty="true"
-                  >
-                    <header>
-                      <div>
-                        <p className={styles.eyebrow}>Jury</p>
-                        <span>Not seated</span>
-                      </div>
-                    </header>
-                    <p>Enable Jury in setup to seat a binding five-seat panel here.</p>
-                  </aside>
-                )}
+                {sealedCompleted
+                  ? session.jury.enabled
+                    ? (renderJuryRecord(session) ??
+                      renderCompletedJuryStatus(session))
+                    : renderEmptyJurySlot()
+                  : (renderGallery(session) ?? renderEmptyJurySlot())}
               </div>
             </div>
             <aside
@@ -19288,6 +19337,7 @@ export function DebateExperience(
                 role="tablist"
                 aria-label="Debate record panels"
                 data-tutorial-target="debate-rail-tabs"
+                data-completed={sealedCompleted ? "true" : undefined}
               >
                 <button
                   type="button"
@@ -19316,6 +19366,22 @@ export function DebateExperience(
                 >
                   {session.format === "turnabout" ? "Record" : "Case board"}
                 </button>
+                {sealedCompleted ? (
+                  <button
+                    type="button"
+                    role="tab"
+                    id="debate-rail-tab-verdict"
+                    aria-selected={liveRailPanel === "verdict"}
+                    aria-controls="debate-rail-panel-verdict"
+                    data-selected={
+                      liveRailPanel === "verdict" ? "true" : undefined
+                    }
+                    data-tutorial-target="debate-verdict-tab"
+                    onClick={() => setLiveRailPanel("verdict")}
+                  >
+                    Verdict
+                  </button>
+                ) : null}
               </div>
               {autoRecoveryNotice ? (
                 <p className={styles.autoRecoveryNotice} role="status">
@@ -19348,7 +19414,8 @@ export function DebateExperience(
                 </div>
               ) : null}
               {error ? <DebateErrorToast key={error} message={error} /> : null}
-              {liveRailPanel === "proceedings" ? (
+              {liveRailPanel === "proceedings" ||
+              (liveRailPanel === "verdict" && !sealedCompleted) ? (
                 <div
                   id="debate-rail-panel-proceedings"
                   role="tabpanel"
@@ -19357,7 +19424,7 @@ export function DebateExperience(
                 >
                   {renderTranscript(session)}
                 </div>
-              ) : (
+              ) : liveRailPanel === "caseBoard" ? (
                 <div
                   id="debate-rail-panel-case-board"
                   role="tabpanel"
@@ -19369,9 +19436,14 @@ export function DebateExperience(
                     ? renderTurnaboutRecord(session)
                     : renderCaseBoard(session, activeEvent)}
                 </div>
-              )}
-              {renderJuryRecord(session)}
-              {session.status === "completed" && !presenting ? (
+              ) : sealedCompleted ? (
+                <div
+                  id="debate-rail-panel-verdict"
+                  role="tabpanel"
+                  aria-labelledby="debate-rail-tab-verdict"
+                  className={styles.liveRailPanel}
+                  data-panel="verdict"
+                >
                 <section className={styles.resultCard}>
                   <p className={styles.eyebrow}>Verdict</p>
                   <h2>{verdictLabel(session)}</h2>
@@ -19589,6 +19661,7 @@ export function DebateExperience(
                     Return to studio
                   </button>
                 </section>
+                </div>
               ) : null}
             </aside>
           </div>

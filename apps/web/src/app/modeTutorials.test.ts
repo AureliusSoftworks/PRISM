@@ -406,7 +406,8 @@ describe("mode tutorials", () => {
     assert.match(copy, /running five-vote tally updates/u);
     assert.match(copy, /canonically silent juror still casts/u);
     assert.match(copy, /chamber is live and named but remains advisory/u);
-    assert.match(copy, /sibling Jury commentary panel/u);
+    assert.match(copy, /Jury Record module in the bottom Jury slot/u);
+    assert.match(copy, /Verdict tab beside Case board/u);
     assert.match(copy, /Copy Jury transcript beside Copy verbose transcript/u);
     assert.doesNotMatch(copy, /Jury transcript remains directly copyable/u);
     assert.match(copy, /Coffee-style session summary/u);

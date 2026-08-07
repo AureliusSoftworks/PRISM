@@ -1420,7 +1420,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.debateRail\[data-completed="true"\]\s+\.resultCard\s*\{[^}]*min-height:\s*0[^}]*overflow-y:\s*auto/u,
+      /\.debateRail\[data-completed="true"\]\s+\.liveRailPanel\s+\.resultCard\s*\{[^}]*min-height:\s*0[^}]*overflow-y:\s*auto/u,
     );
     assert.match(
       css,
@@ -2510,7 +2510,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /!juryChamberVisible \? \(\s*<DebateLiveAudienceGallery/u,
+      /!juryChamberVisible && !sealedCompleted \? \(\s*<DebateLiveAudienceGallery/u,
     );
     assert.match(source, /data-audience-placement="below-screen"/u);
     assert.match(
@@ -2666,8 +2666,9 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /session\.status === "completed" && !presenting \? \(/u,
+      /sealedCompleted[\s\S]{0,280}liveRailPanel === "verdict"/u,
     );
+    assert.match(source, /data-tutorial-target="debate-verdict-tab"/u);
     assert.match(
       source,
       /session\.status === "waiting_for_player" &&[\s\S]{0,120}judgeGuidedStep === null \? \(/u,
@@ -2811,6 +2812,14 @@ describe("Debate experience", () => {
     assert.match(source, /liveRailPanel === "proceedings"/u);
     assert.match(
       source,
+      /sealedCompleted[\s\S]{0,400}renderJuryRecord\(session\)[\s\S]{0,120}renderCompletedJuryStatus/u,
+    );
+    assert.match(
+      source,
+      /stageSupport[\s\S]{0,500}renderJuryRecord\(session\)/u,
+    );
+    assert.doesNotMatch(
+      source,
       /\{renderTranscript\(session\)\}[\s\S]{0,800}\{renderJuryRecord\(session\)\}/u,
     );
     assert.doesNotMatch(css, /\.archiveJuryCopyButton/u);
@@ -2828,7 +2837,11 @@ describe("Debate experience", () => {
     assert.match(css, /\.audienceGallery\.juryRoster/u);
     assert.match(css, /\.juryRecord/u);
     assert.match(css, /\.transcriptHeaderActions/u);
-    assert.match(css, /\.debateRail\[data-completed="true"\] \.juryRecord/u);
+    assert.match(css, /\.stageSupport \.juryRecord/u);
+    assert.doesNotMatch(
+      css,
+      /\.debateRail\[data-completed="true"\] \.juryRecord/u,
+    );
   });
 
   it("gives the light proceedings rail, verdict, and evidence drawer readable surfaces", () => {
