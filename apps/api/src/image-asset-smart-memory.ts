@@ -812,18 +812,26 @@ export async function undoCompressImageAssetSet(
 
 /**
  * Downscale raster bytes for temporary model / prompt attachment only.
- * Does not mutate library originals.
+ * Does not mutate library originals. Returns PNG so image-edit providers stay happy.
  */
 export async function encodePromptAttachmentRaster(
   input: Buffer,
   maxEdgePx: number = IMAGE_ASSET_PROMPT_ATTACH_MAX_EDGE_PX,
-): Promise<{ bytes: Buffer; contentType: "image/webp" }> {
+): Promise<{ bytes: Buffer; contentType: "image/png" }> {
   const bytes = await sharp(input, { failOn: "error" })
     .rotate()
     .resize(maxEdgePx, maxEdgePx, { fit: "inside", withoutEnlargement: true })
-    .webp({ quality: 82 })
+    .png()
     .toBuffer();
-  return { bytes, contentType: "image/webp" };
+  return { bytes, contentType: "image/png" };
+}
+
+export async function readGeneratedImageBytesForPromptAttachment(
+  localRelPath: string,
+  maxEdgePx: number = IMAGE_ASSET_PROMPT_ATTACH_MAX_EDGE_PX,
+): Promise<Buffer> {
+  const raw = readGeneratedImageBytes(localRelPath);
+  return (await encodePromptAttachmentRaster(raw, maxEdgePx)).bytes;
 }
 
 export function storageTierLabel(value: unknown): ImageAssetStorageTier {

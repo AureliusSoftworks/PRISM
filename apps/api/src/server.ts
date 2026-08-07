@@ -1016,6 +1016,7 @@ import {
   ImageAssetSmartMemoryError,
   migrateImageAssetSetToCold,
   previewSmartTidyCandidates,
+  readGeneratedImageBytesForPromptAttachment,
   recordImageAssetAccess,
   recordImageAssetAttach,
   undoCompressImageAssetSet,
@@ -7208,7 +7209,10 @@ async function generateAndPersistSignalArtworkAsset(args: {
       );
     }
     try {
-      sourceImageBytes = readGeneratedImageBytes(source.local_rel_path);
+      sourceImageBytes = await readGeneratedImageBytesForPromptAttachment(
+        source.local_rel_path,
+      );
+      recordImageAssetAttach(db, args.userId, args.sourceNightImageId);
     } catch {
       throw new HttpError(
         404,
@@ -24293,7 +24297,10 @@ function buildRoutes(): RouteDefinition[] {
             );
           }
           try {
-            sourceImageBytes = readGeneratedImageBytes(sourcePath);
+            sourceImageBytes = await readGeneratedImageBytesForPromptAttachment(
+              sourcePath,
+            );
+            recordImageAssetAttach(db, userId, sourceImageId);
           } catch {
             throw new HttpError(404, "Signal source image file not found.");
           }
