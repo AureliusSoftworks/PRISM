@@ -1505,7 +1505,9 @@ describe("processChatMessage Psychic planning", () => {
         (pass) =>
           pass.name === "audit" &&
           (pass.warning?.includes("audit_empty") ||
-            pass.warning?.includes("audit_failed"))
+            pass.warning?.includes("audit_failed") ||
+            pass.warning?.includes("audit_unusable") ||
+            pass.warning?.includes("fallback_applied"))
       )
     );
     assert.ok(
@@ -1513,9 +1515,15 @@ describe("processChatMessage Psychic planning", () => {
         (event) =>
           event.message === "Psychic planning unavailable" &&
           (event.detail?.includes("audit_empty") ||
-            event.detail?.includes("audit_failed"))
+            event.detail?.includes("audit_failed") ||
+            event.detail?.includes("audit_unusable") ||
+            event.detail?.includes("fallback_applied"))
       )
     );
+    const auditPass = result.psychicDebug?.passes?.find(
+      (pass) => pass.name === "audit",
+    );
+    assert.ok((auditPass?.chars ?? 0) > 24);
     const finalRequest = requests.find((request) =>
       request.messages?.some((message) =>
         message.content.includes("Guidance derived from Prism's user-readable Psychic plan")
@@ -1541,6 +1549,411 @@ describe("processChatMessage Psychic planning", () => {
     assert.doesNotMatch(JSON.stringify(finalRequest), /private draft secret/);
     assert.doesNotMatch(JSON.stringify(finalRequest), /private plan secret/);
     assert.match(JSON.stringify(finalRequest), /Use the mapped constraints/);
+    assert.match(
+      JSON.stringify(finalRequest),
+      /User must-keeps outrank|Explicit user constraints|Keep:/,
+    );
+    await flushBackgroundTitleJobs();
+  });
+
+  it("recovers unusable cafe audit into must-keep final guidance", async () => {
+    const db = createChatTestDb();
+    const cafePrompt = [
+      "A cafe has 3 baristas and must cover Sat 8am–6pm.",
+      "Shifts must be 4 hours. No barista works more than 8 hours.",
+      "Alice can't work before noon. Bob can't close. Cara can do any shift.",
+      "Produce:",
+      "1) a coverage schedule as a Markdown table with columns: Time, Barista",
+      "2) exactly 3 rows of uncovered risk notes labeled R1–R3",
+      "3) one sentence saying whether the schedule is feasible",
+      "",
+      "Constraints:",
+      "- Use only Alice, Bob, Cara",
+      "- Do not invent extra staff",
+      "- Keep the whole answer under 220 words",
+      "- Do not show step-by-step private reasoning",
+    ].join("\n");
+    const requests: Array<{
+      messages?: Array<{ role?: string; content: string }>;
+    }> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role?: string; content: string }>;
+      };
+      requests.push(body);
+      const content =
+        body.messages?.map((message) => message.content).join("\n") ?? "";
+      if (content.includes("Prism's user-readable Psychic planning pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                summary: "I mapped the cafe constraints.",
+                scratchpad: "private plan may schedule Bob until 20:00",
+                answerGuidance: "Draft a coverage table.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (content.includes("Prism's private draft pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: "Bob 16:00-20:00 private draft",
+                summary: "I drafted a candidate schedule.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (content.includes("Prism's private audit pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact:
+                  "[|,|,|] Time | Barista | 08:00-12:00 | Cara | 16:00-20:00 | Bob",
+                summary: "I checked the candidate schedule table.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: [
+              "| Time | Barista |",
+              "| --- | --- |",
+              "| 08:00-12:00 | Bob |",
+              "| 12:00-16:00 | Cara |",
+              "| 14:00-18:00 | Alice |",
+              "",
+              "R1: Morning coverage is thin if Bob is out.",
+              "R2: Midday overlap depends on Cara.",
+              "R3: Close depends on Alice alone.",
+              "",
+              "The schedule is feasible.",
+            ].join("\n"),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-cafe-audit-fallback",
+      cafePrompt,
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: true,
+        mode: "sandbox",
+        experimentalAllModelEffortEnabled: false,
+        botOverrides: { model: "llama3.2", reasoningEffort: "high" },
+      },
+    );
+
+    const auditPass = result.psychicDebug?.passes?.find(
+      (pass) => pass.name === "audit",
+    );
+    assert.ok(auditPass?.warning?.includes("audit_unusable"));
+    assert.ok((auditPass?.chars ?? 0) > 24);
+    const finalRequest = requests.find((request) =>
+      request.messages?.some((message) =>
+        message.content.includes(
+          "Guidance derived from Prism's user-readable Psychic plan",
+        ),
+      ),
+    );
+    assert.ok(finalRequest);
+    const guidanceBlob = JSON.stringify(finalRequest);
+    assert.match(guidanceBlob, /Bob can't close/i);
+    assert.match(guidanceBlob, /4 hours/i);
+    assert.match(guidanceBlob, /R1/);
+    assert.match(guidanceBlob, /User must-keeps outrank/);
+    assert.match(guidanceBlob, /Do not open with analysis/);
+    assert.match(guidanceBlob, /Must-keeps for this answer/);
+    assert.doesNotMatch(guidanceBlob, /Bob 16:00-20:00 private draft/);
+    assert.doesNotMatch(guidanceBlob, /16:00-20:00 \| Bob/);
+    assert.equal(
+      result.backendEvents?.some((event) =>
+        event.detail?.includes("final_constraint_repair"),
+      ),
+      false,
+    );
+    await flushBackgroundTitleJobs();
+  });
+
+  it("repairs simulated finals that break hard cafe constraints", async () => {
+    const db = createChatTestDb();
+    const cafePrompt = [
+      "A cafe has 3 baristas and must cover Sat 8am–6pm.",
+      "Shifts must be 4 hours. No barista works more than 8 hours.",
+      "Alice can't work before noon. Bob can't close. Cara can do any shift.",
+      "Produce:",
+      "1) a coverage schedule as a Markdown table with columns: Time, Barista",
+      "2) exactly 3 rows of uncovered risk notes labeled R1–R3",
+      "3) one sentence saying whether the schedule is feasible",
+      "",
+      "Constraints:",
+      "- Use only Alice, Bob, Cara",
+      "- Do not invent extra staff",
+      "- Keep the whole answer under 220 words",
+      "- Do not show step-by-step private reasoning",
+    ].join("\n");
+    let repairCalls = 0;
+    const repairedAnswer = [
+      "| Time | Barista |",
+      "| --- | --- |",
+      "| 08:00-12:00 | Bob |",
+      "| 12:00-16:00 | Cara |",
+      "| 14:00-18:00 | Alice |",
+      "",
+      "R1: Morning coverage is single-threaded on Bob.",
+      "R2: Midday depends on Cara continuity.",
+      "R3: Close depends on Alice alone.",
+      "",
+      "The schedule is feasible.",
+    ].join("\n");
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role?: string; content: string }>;
+      };
+      const content =
+        body.messages?.map((message) => message.content).join("\n") ?? "";
+      if (content.includes("You repair an assistant answer that broke hard user constraints")) {
+        repairCalls += 1;
+        return new Response(
+          JSON.stringify({ message: { content: repairedAnswer } }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (content.includes("Prism's user-readable Psychic planning pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                summary: "I mapped the cafe constraints.",
+                scratchpad: "private plan",
+                answerGuidance: "Draft a coverage table.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (content.includes("Prism's private draft pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: "private draft",
+                summary: "I drafted a candidate schedule.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (content.includes("Prism's private audit pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: "- Keep: Bob can't close\n- Keep: exactly R1-R3",
+                summary: "I audited the candidate.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: [
+              "| Time | Barista |",
+              "| 16:00-20:00 | Bob |",
+              "",
+              "R1: Late risk",
+              "R2: Peak risk",
+              "",
+              "The schedule is feasible.",
+            ].join("\n"),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-cafe-final-repair",
+      cafePrompt,
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: true,
+        mode: "sandbox",
+        experimentalAllModelEffortEnabled: false,
+        botOverrides: { model: "llama3.2", reasoningEffort: "high" },
+      },
+    );
+
+    assert.equal(repairCalls, 1);
+    assert.ok(
+      result.backendEvents?.some(
+        (event) =>
+          event.detail?.includes("final_constraint_repair_applied") &&
+          event.detail.includes("attempt=1"),
+      ),
+    );
+    const assistant = result.conversation.messages.find(
+      (message) => message.role === "assistant",
+    )?.content;
+    assert.match(assistant ?? "", /R3:/);
+    assert.match(assistant ?? "", /08:00-12:00 \| Bob/);
+    assert.doesNotMatch(assistant ?? "", /16:00-20:00 \| Bob/);
+    await flushBackgroundTitleJobs();
+  });
+
+  it("skips private draft on High when hard can't/must constraints are present", async () => {
+    const db = createChatTestDb();
+    const cafePrompt = [
+      "A cafe has 3 baristas and must cover Sat 8am–6pm.",
+      "Shifts must be 4 hours. No barista works more than 8 hours.",
+      "Alice can't work before noon. Bob can't close. Cara can do any shift.",
+      "Produce:",
+      "1) a coverage schedule as a Markdown table with columns: Time, Barista",
+      "2) exactly 3 rows of uncovered risk notes labeled R1–R3",
+      "3) one sentence saying whether the schedule is feasible",
+      "",
+      "Constraints:",
+      "- Use only Alice, Bob, Cara",
+      "- Do not invent extra staff",
+      "- Keep the whole answer under 220 words",
+      "- Do not show step-by-step private reasoning",
+    ].join("\n");
+    const progress: Array<{ stage: string }> = [];
+    let sawDraftPass = false;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ content: string }>;
+      };
+      const content =
+        body.messages?.map((message) => message.content).join("\n") ?? "";
+      if (content.includes("Prism's private draft pass")) {
+        sawDraftPass = true;
+      }
+      if (content.includes("Prism's user-readable Psychic planning pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                summary: "I mapped the cafe constraints.",
+                scratchpad: "private plan notes only",
+                answerGuidance: "Keep Bob off close and use 4-hour shifts.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (content.includes("Prism's private audit pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: "- Keep: Bob can't close\n- Keep: exactly R1-R3",
+                summary: "I audited the plan against must-keeps.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (content.includes("You repair an assistant answer")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: [
+                "| Time | Barista |",
+                "| 08:00-12:00 | Bob |",
+                "| 12:00-16:00 | Cara |",
+                "| 14:00-18:00 | Alice |",
+                "R1: a",
+                "R2: b",
+                "R3: c",
+                "The schedule is feasible.",
+              ].join("\n"),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: [
+              "| Time | Barista |",
+              "| 08:00-12:00 | Bob |",
+              "| 12:00-16:00 | Cara |",
+              "| 14:00-18:00 | Alice |",
+              "R1: a",
+              "R2: b",
+              "R3: c",
+              "The schedule is feasible.",
+            ].join("\n"),
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-skip-draft-hard-constraints",
+      cafePrompt,
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: true,
+        mode: "sandbox",
+        experimentalAllModelEffortEnabled: false,
+        botOverrides: { model: "llama3.2", reasoningEffort: "high" },
+        onPsychicProgress: (event) => progress.push({ stage: event.stage }),
+      },
+    );
+
+    assert.equal(sawDraftPass, false);
+    assert.deepEqual(
+      progress.map((event) => event.stage),
+      ["plan", "audit"],
+    );
+    assert.ok(
+      result.psychicDebug?.passes?.some(
+        (pass) =>
+          pass.name === "draft" &&
+          pass.warning?.includes("draft_skipped_hard_constraints"),
+      ),
+    );
+    assert.equal(result.psychicDebug?.passCount, 2);
+    assert.doesNotMatch(result.psychicDebug?.scratchpad ?? "", /Private draft:/);
+    assert.ok(
+      result.backendEvents?.some((event) =>
+        event.detail?.includes("draft_skipped_hard_constraints"),
+      ),
+    );
     await flushBackgroundTitleJobs();
   });
 

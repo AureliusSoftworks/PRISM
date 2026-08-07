@@ -403,3 +403,133 @@ Cafe evals showed healthy private passes with finals that still break hard const
 ### Next engineering
 
 Inspect `composePsychicFinalGuidance` / `appendPsychicAnswerGuidance` / final generation: stronger must-keep constraint extraction from user + private checklist, final-pass obedience framing for weak locals, then `experimental-effort` cafe recheck vs Sol.
+
+## 2026-08-06 - Cafe Phase A /effort-review (`llama3.2` High vs Sol)
+
+### Scope
+
+- Prompt: default cafe staffing constraint task
+- Arms: local baseline (`llama3.2`, None) · thinking reference (`gpt-5.6-sol`, High) · local simulated (`llama3.2`, High, standard ladder)
+- Command:
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts --local-model llama3.2 --thinking-provider openai --thinking-model gpt-5.6-sol --effort high --include-scratchpad
+```
+
+- Artifact: `artifacts/experimental-effort-evals/experimental-effort-2026-08-06T21-43-56-811Z.md`
+
+### Judge totals
+
+| Arm | Duration | Blind total | Rank |
+| --- | ---: | ---: | --- |
+| Sol High | 6.8s | **10** | 1 |
+| local None | 7.1s | 4 | 2 |
+| local High sim | 16.7s | **2** | 3 |
+
+### Integrity
+
+- LOCAL sim: `psychicDebug.simulated=true`, `passCount=3` (plan/draft/audit), guidanceChars=934, no `invalid_json`, no `assistant` role-token collapse
+- Audit pass effectively dead: **chars=2**, public summary `[]`
+- Markdown report still labels “Simulated effort enabled: no” because that field tracks the old experimental flag; simulation is product-default now (reporting stale)
+
+### Guidance → final finding (Phase A)
+
+- Private scratchpad already mentions Bob / close / `20:00` — bad schedule ideas appear **before** the visible final
+- Final is worse than baseline: visible analysis prose, Bob scheduled `16:00-20:00` (closes + past 6pm), only two risk notes, false “feasible”
+- So failure is **two-layer**: (1) private draft invents illegal schedule and audit does not catch it; (2) final generation does not re-anchor on user must-keeps hard enough to override a bad private draft
+
+### Root cause chain
+
+`effort=high → sim on → plan/draft invent illegal hours → audit empty → guidance still injected → final follows/worsens bad draft`
+
+Responsible layers: private-pass audit quality + final-transfer / user-constraint hard override. Not native-vs-sim gate; not LOCAL egress.
+
+### Next fix (Phase A engineering)
+
+1. Treat empty/near-empty audit as a warning and/or force a constraint-checklist pass when audit artifact is unusable
+2. Strengthen final handoff: explicit user must-keeps (4-hour shifts, Bob can’t close, cover 8–6, exactly R1–R3) must outrank private draft content
+3. Ban visible “let’s analyze…” preamble on simulated finals for constraint tasks (format-only output)
+4. Recheck same cafe command; target: High sim ≥ None on judge constraints, no Bob-close / no past-6pm
+
+## 2026-08-06 - Phase A engineering landed (pre-retest)
+
+### Changes
+
+- Empty/`[]` audit → deterministic Fix/Keep checklist from extracted user must-keeps (`audit_unusable` + fallback)
+- Broader constraint extraction: can't/cannot, shift lengths, R1–R3, Use only…, packed prose clauses
+- Final guidance: user must-keeps outrank private draft; ban analysis preambles; R1–R3 called out
+- Unit tests: empty-audit fallback + cafe unusable-audit recovery
+
+### Recheck command
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts --local-model llama3.2 --thinking-provider openai --thinking-model gpt-5.6-sol --effort high --include-scratchpad
+```
+
+Target: local High sim judge ≥ local None; no Bob on close / past 6pm; exactly R1–R3.
+## 2026-08-06 - Phase A retests after engineering
+
+### Machinery wins
+
+- Unusable audit gate now catches copied schedule tables (`audit_unusable` + deterministic Fix/Keep fallback)
+- Final guidance carries prioritized user must-keeps + anti-preamble / anti-ellipsis framing
+- Unit tests cover empty/table-audit recovery
+
+### Cafe head-to-head (llama3.2 High sim vs None vs Sol)
+
+| Artifact | None | High sim | Sol | High vs None |
+| --- | ---: | ---: | ---: | --- |
+| pre-fix `21-43-56` | 4 | **2** | 10 | lose |
+| after must-keeps `21-50-22` | 3 | **3** | 10 | tie score, ranks below None |
+| after table-audit reject `21-52-18` | 4 | **1** | 10 | lose (final truncated with `...`) |
+| after prioritize/anti-ellipsis `21-54-12` | 3 | **3** | 10 | tie score, ranks below None |
+
+### Remaining failure mode
+
+Private draft still invents `Bob 16:00–20:00`; final copies it despite must-keeps; often only R1–R2. Guidance transfer alone is not enough for this local on cafe staffing.
+
+### Next engineering options
+
+1. **Final constraint-repair pass** (recommended): after the visible answer, if heuristics catch Bob-close / past-close / missing R3, run one cheap local repair with must-keeps only
+2. Skip draft on High when hard can't/must constraints are present (less anchoring on bad private schedules)
+3. Accept cafe as too hard for llama3.2 High and measure Phase A on a softer transfer suite first
+
+## 2026-08-06 - Final constraint-repair pass
+
+### Shipped
+
+- Heuristic break detection (Bob-close / past-close / missing R1–R3 / short shifts / ellipsis)
+- Up to 2 thrifty repair generations with concrete row-level directives + legal few-shot on retry
+- Accept repair only when **no blocking breaks remain**
+- Unit tests for repair apply path
+
+### Cafe retest (latest `22-10-34`)
+
+| Arm | Judge |
+| --- | ---: |
+| Sol | 10 |
+| local None | 3 |
+| local High sim | 3 |
+
+Repair fired (`breaks=2`) but **both attempts rejected** (`blocking_breaks_remain; after=1`). Final kept Bob `16:00-20:00`. Score tie with None; ranking still prefers None.
+
+### Takeaway
+
+llama3.2 cannot yet self-repair this staffing puzzle even with an explicit legal template. Guidance + repair plumbing works; the local model still fails the schedule rewrite. Next levers: skip-draft to reduce bad anchoring, softer Phase A suite, or accept cafe as stretch until a stronger local/repair model.
+
+## 2026-08-06 - Skip draft on hard can't/must constraints
+
+### Shipped
+
+- `shouldSkipPsychicDraftForHardConstraints` → skip `draft` / `revise_draft` with `draft_skipped_hard_constraints`
+- Unit test covers cafe-style High ladder = plan→audit only
+
+### Cafe retest (`22-12-58`)
+
+| Arm | Judge |
+| --- | ---: |
+| Sol | 10 |
+| local None | 4 |
+| local High sim | **1** |
+
+Draft skip confirmed (`passCount=2`, draft chars=0). Final still Bob `16:00-20:00`, then truncated (`R1: W...`). Repair rejected both attempts. **Worse than None** — skip-draft alone does not unlock cafe for llama3.2.

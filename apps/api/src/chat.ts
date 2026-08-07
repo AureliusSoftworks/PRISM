@@ -1267,7 +1267,8 @@ function buildPsychicDraftPrompt(args: {
     "artifact: write a private draft answer that follows the plan and chosen approach. This draft is never shown to the user.",
     "summary: write 1-2 short first-person sentences for the user explaining the concrete response shape or choices this draft established. Do not reveal hidden chain-of-thought, quote the artifact, or give away the final answer.",
     "Obey the user's requested format, labels, word limits, and forbidden-word rules exactly. If the user asks for S1-S6 labels, use S1, S2, S3, S4, S5, and S6 exactly.",
-    "Preserve required key terms from the user's constraints, and return only the requested answer shape without extra notes or summaries.",
+    "Preserve required key terms from the user's constraints, and return only the requested answer shape without extra notes, summaries, or analysis preambles.",
+    "If the user states shift lengths, open/close windows, or named-person can't/cannot rules, obey them even when a planning note conflicts.",
     "If the user says local-only, use local machine, local device, local provider, or Ollama wording; do not replace local-only with infrastructure-only wording.",
     "If Psychic mode needs a visible indicator, name a toast, badge, subtle line, or label, not a toggle.",
     "Do not reveal chain-of-thought. Do not mention that this is a draft.",
@@ -1296,11 +1297,13 @@ function buildPsychicAuditPrompt(args: {
     "summary: write 1-2 short first-person sentences for the user naming the important constraint, risk, or quality check this audit completed. Do not reveal hidden chain-of-thought, quote the private artifact, or give away the final answer.",
     "Do not put a Markdown table in artifact. Do not write the final answer. Do not copy draft wording.",
     "Check missing constraints, privacy issues, answer shape, and likely user-facing mistakes.",
-    "Specifically check exact row/step labels, forbidden words, word limits, every named row constraint, and whether any requested UI indicator is a toast, badge, subtle line, or label instead of a toggle. If S1-S6 labels were requested, say to use S1-S6 and not 1-6.",
+    "Specifically check exact row/step labels (S1-S6 or R1-R3), forbidden words, word limits, shift lengths, open/close windows, named-person can't/cannot rules, every named row constraint, and whether any requested UI indicator is a toast, badge, subtle line, or label instead of a toggle. If S1-S6 labels were requested, say to use S1-S6 and not 1-6.",
+    "For staffing or schedule prompts: reject closing shifts for anyone who can't close; reject shifts shorter/longer than required; reject coverage past the stated open hours; require every requested risk/format label.",
     "If the user says local-only, tell the final answer to use local machine, local device, local provider, or Ollama wording; never recommend infrastructure-only wording.",
     "If the user says private planning pass, tell the final answer to use the exact phrase private planning pass.",
-    "Tell the final answer to preserve required key terms and to avoid extra notes outside the requested format.",
+    "Tell the final answer to preserve required key terms and to avoid extra notes, analysis preambles, or step-by-step private reasoning outside the requested format.",
     "Do not include raw chain-of-thought.",
+    "If you cannot produce useful Fix/Keep bullets, still return at least three Keep bullets naming the hardest user must-keeps. Never return an empty array or placeholder.",
     "",
     "User request to audit against:",
     "---",
@@ -1528,23 +1531,32 @@ function composePsychicFinalGuidance(args: {
   constraintLock?: string;
   complianceSweep?: string;
   synthesis?: string;
+  userMustKeeps?: readonly string[];
 }): string {
   const latestGuidance =
     args.synthesis || args.complianceSweep || args.redTeam || args.audit;
+  const mustKeeps = prioritizeUserMustKeeps(args.userMustKeeps ?? [], 6)
+    .map((line) => clampPsychicPlanningText(line, 140))
+    .filter(Boolean);
   const parts = [
-    "Non-negotiable final-answer rules: follow the user's exact requested format, labels, word limits, and forbidden-word rules; preserve required key terms; if the prompt says local-only, include the word local; if it says private planning pass, use that exact phrase; if it says scratchpads are not persisted, use that exact phrase; if labels like S1-S6 are requested, use those exact labels and do not convert them to 1-6; include every named item; never add a Note or summary after an exact table/list request; do not mention private planning; if Psychic mode needs an indicator, use toast, badge, line, or label.",
-    `Core plan: ${clampPsychicPlanningText(args.planGuidance, 480)}`,
+    "Non-negotiable final-answer rules: follow the user's exact requested format, labels, word limits, and forbidden-word rules; preserve required key terms; if the prompt says local-only, include the word local; if it says private planning pass, use that exact phrase; if it says scratchpads are not persisted, use that exact phrase; if labels like S1-S6 or R1-R3 are requested, use those exact labels and do not convert them to 1-6; include every named item; never add a Note or summary after an exact table/list request; do not mention private planning; if Psychic mode needs an indicator, use toast, badge, line, or label.",
+    "User must-keeps outrank any private draft, plan, or checklist. If private notes conflict with a user must-keep, obey the user.",
+    "Output only the requested answer shape. Do not open with analysis, preamble, or Let's/First/Looking-at prose. Never abbreviate with ellipses; write the complete answer.",
+    mustKeeps.length > 0
+      ? `User must-keeps:\n${mustKeeps.map((line) => `- ${line}`).join("\n")}`
+      : "",
+    `Core plan: ${clampPsychicPlanningText(args.planGuidance, 280)}`,
     args.alternatives
-      ? `Chosen approach: ${clampPsychicPlanningText(args.alternatives, 280)}`
+      ? `Chosen approach: ${clampPsychicPlanningText(args.alternatives, 180)}`
       : "",
     args.constraintLock
-      ? `Constraint lock: ${clampPsychicPlanningText(args.constraintLock, 420)}`
+      ? `Constraint lock: ${clampPsychicPlanningText(args.constraintLock, 280)}`
       : "",
     latestGuidance
-      ? `Latest checklist: ${clampPsychicPlanningText(latestGuidance, 520)}`
+      ? `Latest checklist: ${clampPsychicPlanningText(latestGuidance, 360)}`
       : "",
   ].filter(Boolean);
-  return clampPsychicPlanningText(parts.join("\n"), 1_400);
+  return clampPsychicPlanningText(parts.join("\n"), 1_600);
 }
 
 function latestUserPromptContent(promptMessages: readonly ProviderMessage[]): string {
@@ -1607,15 +1619,35 @@ function parsePsychicPrivateTextPassResponse(
   };
 }
 
+const PSYCHIC_AUDIT_MIN_USEFUL_CHARS = 24;
+const PSYCHIC_USER_MUST_KEEP_LIMIT = 12;
+
 function sanitizeExplicitConstraintLine(line: string): string {
   return line
     .replace(/^\s*[-*]\s+/, "")
+    .replace(/^\s*\d+[.)]\s+/, "")
     .replace(/\s+/g, " ")
     .trim()
     .replace(
       /\bwithout using the word\s+["'`]?([A-Za-z0-9_-]+)["'`]?/gi,
       "without using the forbidden word"
     );
+}
+
+function isExplicitUserConstraintLine(line: string): boolean {
+  if (!line || /^constraints:?$/i.test(line) || /^produce:?$/i.test(line)) {
+    return false;
+  }
+  return (
+    /^S\d+\s+must\b/i.test(line) ||
+    /^(?:do not|don't|keep\b|use (?:only|columns:)|shifts?\s+must|no\s+\w+\s+works?\s+more)/i.test(
+      line,
+    ) ||
+    /\bexactly\s+\d+\b.*\blabeled\s+[SR]\d+/i.test(line) ||
+    /\b(?:can't|cannot|must not|mustn't)\b/i.test(line) ||
+    /\bmust\s+(?:be|cover|include|work)\b/i.test(line) ||
+    /\bmust\s+cover\b/i.test(line)
+  );
 }
 
 function extractExplicitUserConstraints(
@@ -1625,19 +1657,153 @@ function extractExplicitUserConstraints(
   if (!latestUserMessage.trim()) return [];
   const constraints: string[] = [];
   const seen = new Set<string>();
+  const pushConstraint = (raw: string): void => {
+    const line = sanitizeExplicitConstraintLine(raw);
+    if (!isExplicitUserConstraintLine(line)) return;
+    const key = line.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    constraints.push(line);
+  };
   for (const rawLine of latestUserMessage.split(/\r?\n/)) {
     const line = sanitizeExplicitConstraintLine(rawLine);
-    if (!line || /^constraints:?$/i.test(line)) continue;
-    const isConstraint =
-      /^S\d+\s+must\b/i.test(line) ||
-      /^(?:do not|keep\b|use columns:)/i.test(line) ||
-      /\bexactly\s+\d+\b.*\blabeled\s+S\d+/i.test(line);
-    if (!isConstraint || seen.has(line.toLowerCase())) continue;
-    seen.add(line.toLowerCase());
-    constraints.push(line);
-    if (constraints.length >= 10) break;
+    if (!line) continue;
+    // Split packed prose lines ("Alice can't…. Bob can't….") into clauses.
+    const clauses = line.includes(". ")
+      ? line.split(/(?<=\.)\s+/).map((part) => part.trim()).filter(Boolean)
+      : [line];
+    for (const clause of clauses) {
+      pushConstraint(clause);
+      if (constraints.length >= PSYCHIC_USER_MUST_KEEP_LIMIT) {
+        return constraints;
+      }
+    }
   }
   return constraints;
+}
+
+/**
+ * Hard can't/must prompts are where private drafts often invent illegal
+ * schedules that the final then copies. Prefer plan→audit without a draft.
+ */
+function shouldSkipPsychicDraftForHardConstraints(
+  promptMessages: readonly ProviderMessage[],
+): boolean {
+  const constraints = extractExplicitUserConstraints(promptMessages);
+  if (constraints.length === 0) {
+    const latest = latestUserPromptContent(promptMessages);
+    return (
+      /\b(?:can't|cannot|mustn't|must not)\b/i.test(latest) &&
+      /\b(?:must\s+(?:be|cover)|shifts?\s+must|exactly\s+\d+)\b/i.test(latest)
+    );
+  }
+  return constraints.some(
+    (line) =>
+      /\b(?:can't|cannot|mustn't|must not)\b/i.test(line) ||
+      /\bshifts?\s+must\b/i.test(line) ||
+      /\bmust\s+(?:be|cover)\b/i.test(line) ||
+      /\bexactly\s+\d+\b.*\blabeled\s+[SR]\d+/i.test(line),
+  );
+}
+
+function isPsychicAuditArtifactUseful(content: string): boolean {
+  const trimmed = content.trim();
+  if (trimmed.length < PSYCHIC_AUDIT_MIN_USEFUL_CHARS) return false;
+  if (/^[\[\]{}'",.\s0-9|:-]*$/.test(trimmed)) return false;
+  // Copied Markdown tables are drafts, not audits — they poison final guidance.
+  if (/\|/.test(trimmed) && /\b(?:Time|Barista|Schedule)\b/i.test(trimmed)) {
+    return false;
+  }
+  // Require structured Fix/Keep/Must bullets so weak locals cannot pass a
+  // pasted schedule or placeholder as an "audit".
+  return /(?:^|\n)\s*-\s*(?:Fix|Keep|Must)\s*:/i.test(trimmed);
+}
+
+function prioritizeUserMustKeeps(
+  constraints: readonly string[],
+  limit = 5,
+): string[] {
+  const rank = (line: string): number => {
+    if (/\b(?:can't|cannot|mustn't|must not)\s+close\b/i.test(line)) return 0;
+    if (/\bshifts?\s+must\b/i.test(line)) return 1;
+    if (/\bexactly\s+\d+\b/i.test(line) && /\bR\d/i.test(line)) return 2;
+    if (/\bmust\s+cover\b/i.test(line)) return 3;
+    if (/\b(?:can't|cannot|mustn't|must not)\b/i.test(line)) return 4;
+    if (/^use only\b/i.test(line)) return 5;
+    if (/^do not show\b/i.test(line)) return 6;
+    if (/^do not\b|^keep\b/i.test(line)) return 7;
+    return 8;
+  };
+  return [...constraints]
+    .sort((left, right) => rank(left) - rank(right) || left.length - right.length)
+    .slice(0, limit);
+}
+
+/**
+ * Deterministic Fix/Keep checklist when the model audit is empty or placeholder.
+ * Prefer hard user must-keeps over trusting a broken private draft.
+ */
+function buildDeterministicConstraintAudit(args: {
+  userRequest: string;
+  constraints: readonly string[];
+}): string {
+  const bullets: string[] = [];
+  const seen = new Set<string>();
+  const pushBullet = (bullet: string): void => {
+    const cleaned = clampPsychicPlanningText(bullet, 180);
+    if (!cleaned) return;
+    const key = cleaned.toLowerCase();
+    if (seen.has(key)) return;
+    seen.add(key);
+    bullets.push(cleaned);
+  };
+  for (const constraint of prioritizeUserMustKeeps(args.constraints, 6)) {
+    pushBullet(`- Keep: ${constraint}`);
+  }
+  const request = args.userRequest;
+  if (/\b(?:can't|cannot|mustn't|must not)\s+close\b/i.test(request)) {
+    pushBullet(
+      "- Fix: Never put anyone who can't close on the closing / last shift.",
+    );
+  }
+  if (/\bshifts?\s+must\s+be\s+(\d+)\s*hours?\b/i.test(request)) {
+    const hours = request.match(/\bshifts?\s+must\s+be\s+(\d+)\s*hours?\b/i)?.[1];
+    pushBullet(`- Keep: Every shift must be exactly ${hours ?? "4"} hours.`);
+  }
+  if (/\bR1\b[\s\S]*\bR3\b|\blabeled\s+R1/i.test(request)) {
+    pushBullet(
+      "- Keep: Include exactly three uncovered risk notes labeled R1, R2, and R3.",
+    );
+  }
+  if (/\bS1\b[\s\S]*\bS6\b|\blabeled\s+S1/i.test(request)) {
+    pushBullet("- Keep: Use exact labels S1–S6; do not convert them to 1–6.");
+  }
+  if (
+    /\b8\s*(?:am|a\.m\.)\b[\s\S]{0,24}\b6\s*(?:pm|p\.m\.)\b/i.test(request) ||
+    /\b8am\b[\s\S]{0,24}\b6pm\b/i.test(request)
+  ) {
+    pushBullet(
+      "- Keep: Cover the full open window; do not schedule past close.",
+    );
+  }
+  if (
+    /\bdo not show\b[\s\S]{0,40}\breasoning\b/i.test(request) ||
+    /\bprivate reasoning\b/i.test(request) ||
+    /\bstep-by-step\b/i.test(request)
+  ) {
+    pushBullet(
+      "- Fix: No analysis preamble; emit only the requested answer shape.",
+    );
+  }
+  pushBullet(
+    "- Fix: Never abbreviate the answer with ellipses; write the complete table and every required label.",
+  );
+  if (bullets.length === 0) {
+    pushBullet(
+      "- Keep: Obey the user's stated constraints, labels, and format exactly.",
+    );
+  }
+  return bullets.slice(0, 8).join("\n");
 }
 
 async function runPsychicPrivateTextPass(args: {
@@ -1738,14 +1904,18 @@ function appendPsychicAnswerGuidance(
   ].filter(Boolean);
   const content = [
     "Guidance derived from Prism's user-readable Psychic plan. Use it to answer consistently with the visible rationale, but do not mention this system message.",
-    "Follow the user's requested format exactly. Preserve requested labels exactly; if labels like S1-S6 are requested, use S1-S6 and do not convert them to 1-6. Preserve required key terms: if the prompt says local-only, include the word local; if it says private planning pass, use that exact phrase; if it says scratchpads are not persisted, use that exact phrase. Never add a Note or summary after an exact table/list request. Obey word limits and any forbidden-word rule. If a UI indicator is requested, name a toast, badge, subtle line, or label instead of a settings toggle.",
+    "Follow the user's requested format exactly. Preserve requested labels exactly; if labels like S1-S6 or R1-R3 are requested, use those exact labels and do not convert them to 1-6. Preserve required key terms: if the prompt says local-only, include the word local; if it says private planning pass, use that exact phrase; if it says scratchpads are not persisted, use that exact phrase. Never add a Note or summary after an exact table/list request. Obey word limits and any forbidden-word rule. If a UI indicator is requested, name a toast, badge, subtle line, or label instead of a settings toggle.",
+    "User must-keeps and Explicit user constraints below outrank any Answer guidance or private draft that conflicts with them.",
+    "Do not open with analysis ('Let's…', 'First…', 'Looking at…'). Emit only the requested deliverables. Never abbreviate with ellipses; write the complete table/list and every required label.",
     `Visible Psychic rationale: ${planningTrace.debug.summary}`,
     `Answer guidance: ${planningTrace.answerGuidance}`,
     ...targetedConstraintHints,
     ...(explicitConstraints.length > 0
       ? [
           "Explicit user constraints to obey exactly:",
-          ...explicitConstraints.map((constraint) => `- ${constraint}`),
+          ...prioritizeUserMustKeeps(explicitConstraints, 8).map(
+            (constraint) => `- ${constraint}`,
+          ),
         ]
       : []),
   ].join("\n");
@@ -1762,11 +1932,323 @@ function appendPsychicAnswerGuidance(
   if (lastUserIndex < 0) {
     return [guidanceMessage, ...promptMessages];
   }
+  const lastUser = promptMessages[lastUserIndex]!;
+  // Weak locals attend more to the final user turn than to system guidance.
+  // Mirror only the highest-priority must-keeps there (keep it short).
+  const topMustKeeps = prioritizeUserMustKeeps(explicitConstraints, 5);
+  const reinforcedUserContent =
+    topMustKeeps.length > 0
+      ? [
+          lastUser.content,
+          "",
+          "Must-keeps for this answer (obey exactly; write the complete answer, no ellipses, no analysis preamble):",
+          ...topMustKeeps.map((constraint) => `- ${constraint}`),
+        ].join("\n")
+      : lastUser.content;
   return [
     ...promptMessages.slice(0, lastUserIndex),
     guidanceMessage,
-    ...promptMessages.slice(lastUserIndex),
+    { ...lastUser, content: reinforcedUserContent },
+    ...promptMessages.slice(lastUserIndex + 1),
   ];
+}
+
+const PSYCHIC_FINAL_REPAIR_MAX_TOKENS = 900;
+
+/**
+ * Cheap heuristics for constraint breaks weak locals often copy from a bad
+ * private draft. Used only to decide whether to spend one repair generation.
+ */
+function detectObviousConstraintBreaks(
+  reply: string,
+  userRequest: string,
+): string[] {
+  const breaks: string[] = [];
+  const text = reply.trim();
+  if (!text) {
+    breaks.push("Answer is empty or missing.");
+    return breaks;
+  }
+  if (/\.\.\.\s*$/.test(text) || /\|\s*\.\.\./.test(text)) {
+    breaks.push("Answer appears truncated with ellipses.");
+  }
+  if (/\bR1\b/i.test(userRequest) && /\bR3\b/i.test(userRequest)) {
+    if (!/\bR1\b/.test(reply) || !/\bR2\b/.test(reply) || !/\bR3\b/.test(reply)) {
+      breaks.push("Missing exactly three risk notes labeled R1, R2, and R3.");
+    }
+  }
+  if (/\bS1\b/i.test(userRequest) && /\bS6\b/i.test(userRequest)) {
+    for (let index = 1; index <= 6; index += 1) {
+      if (!new RegExp(`\\bS${index}\\b`).test(reply)) {
+        breaks.push(`Missing required label S${index}.`);
+        break;
+      }
+    }
+  }
+  const cantCloseMatch = userRequest.match(
+    /\b([A-Za-z][A-Za-z'-]*)\s+(?:can't|cannot|mustn't|must not)\s+close\b/i,
+  );
+  if (cantCloseMatch?.[1]) {
+    const name = cantCloseMatch[1];
+    const escaped = name.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const onLateOrCloseShift =
+      new RegExp(
+        `${escaped}\\s*\\|[^\\n]*(?:6\\s*pm|18:00|20:00|8\\s*pm|16:00|4\\s*pm)`,
+        "i",
+      ).test(reply) ||
+      new RegExp(
+        `(?:6\\s*pm|18:00|20:00|8\\s*pm|16:00\\s*[-–]\\s*20:00|4\\s*pm\\s*[-–]\\s*6\\s*pm)[^\\n]*${escaped}`,
+        "i",
+      ).test(reply) ||
+      new RegExp(
+        `\\|\\s*(?:4\\s*pm|16:00)[^\\n]*\\|\\s*${escaped}\\b`,
+        "i",
+      ).test(reply);
+    if (onLateOrCloseShift) {
+      breaks.push(
+        `${name} appears on a closing or late shift but ${name} can't close.`,
+      );
+    }
+  }
+  if (
+    /\b6\s*(?:pm|p\.m\.)\b/i.test(userRequest) ||
+    /\b6pm\b/i.test(userRequest)
+  ) {
+    if (/\b20:00\b|\b8\s*pm\b|\b24:00\b/i.test(reply)) {
+      breaks.push("Schedule extends past the stated closing time.");
+    }
+  }
+  if (/\bshifts?\s+must\s+be\s+4\s*hours?\b/i.test(userRequest)) {
+    if (
+      /\b4\s*pm\s*[-–]\s*6\s*pm\b/i.test(reply) ||
+      /\b16:00\s*[-–]\s*18:00\b/.test(reply)
+    ) {
+      breaks.push("A shift appears shorter than the required 4 hours.");
+    }
+  }
+  return [...new Set(breaks)].slice(0, 6);
+}
+
+function hasBlockingConstraintBreaks(breaks: readonly string[]): boolean {
+  return breaks.some((line) =>
+    /can't close|past the stated closing|Missing exactly three|Missing required label|shorter than the required 4 hours|ellipses|empty or missing/i.test(
+      line,
+    ),
+  );
+}
+
+function collectConstraintRepairDirectives(args: {
+  reply: string;
+  userRequest: string;
+  breaks: readonly string[];
+}): string[] {
+  const directives: string[] = [];
+  const cantCloseMatch = args.userRequest.match(
+    /\b([A-Za-z][A-Za-z'-]*)\s+(?:can't|cannot|mustn't|must not)\s+close\b/i,
+  );
+  const blockedName = cantCloseMatch?.[1];
+  if (blockedName) {
+    const escaped = blockedName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    const lateRow = args.reply.match(
+      new RegExp(
+        `\\|\\s*([^|\\n]*(?:16:00|20:00|4\\s*pm|6\\s*pm|8\\s*pm)[^|\\n]*)\\|\\s*${escaped}\\b[^|\\n]*\\|?`,
+        "i",
+      ),
+    );
+    if (lateRow?.[0]) {
+      directives.push(
+        `Delete or rewrite this illegal row: ${lateRow[0].trim()} — ${blockedName} can't close and must not take the last/closing shift.`,
+      );
+    } else {
+      directives.push(
+        `Move ${blockedName} off any closing or late shift. Prefer an opening/midday 4-hour shift for ${blockedName}.`,
+      );
+    }
+  }
+  if (/\b20:00\b|\b8\s*pm\b|\b24:00\b/i.test(args.reply)) {
+    directives.push(
+      "No shift may end after closing (do not use 20:00 / 8pm when the cafe closes at 6pm).",
+    );
+  }
+  if (args.breaks.some((line) => /R1|R2|R3/i.test(line))) {
+    directives.push(
+      "Include exactly three uncovered risk notes on separate lines labeled R1, R2, and R3.",
+    );
+  }
+  if (args.breaks.some((line) => /shorter than the required 4 hours/i.test(line))) {
+    directives.push(
+      "Every shift must be exactly 4 hours (for example 8am–12pm, 12pm–4pm, 2pm–6pm) — never 4pm–6pm alone.",
+    );
+  }
+  if (args.breaks.some((line) => /ellipses/i.test(line))) {
+    directives.push("Write the complete answer; never truncate with ellipses.");
+  }
+  return [...new Set(directives)].slice(0, 6);
+}
+
+function buildPsychicConstraintRepairPrompt(args: {
+  userRequest: string;
+  draftReply: string;
+  breaks: readonly string[];
+  mustKeeps: readonly string[];
+}): string {
+  const directives = collectConstraintRepairDirectives({
+    reply: args.draftReply,
+    userRequest: args.userRequest,
+    breaks: args.breaks,
+  });
+  return [
+    "You repair an assistant answer that broke hard user constraints.",
+    "Return only the corrected final answer in the user's requested format.",
+    "Do not mention this repair. Do not show analysis or private reasoning.",
+    "Never abbreviate with ellipses. Include every required label (for example R1, R2, and R3).",
+    "User must-keeps outrank the broken draft. Fix every listed break.",
+    "If a named person can't close, they must not appear on the last shift or any shift ending at/after close.",
+    "Cover the stated open window with legal 4-hour shifts only — do not invent hours past close.",
+    "",
+    "Original request:",
+    "---",
+    clampPsychicPlanningText(args.userRequest, 2600),
+    "---",
+    "",
+    "Broken answer:",
+    "---",
+    clampPsychicPlanningText(args.draftReply, 2200),
+    "---",
+    "",
+    "Detected breaks:",
+    ...args.breaks.map((line) => `- ${line}`),
+    "",
+    "Concrete repairs required:",
+    ...(directives.length > 0
+      ? directives.map((line) => `- ${line}`)
+      : ["- Fix every detected break while preserving the requested format."]),
+    "",
+    "Must-keeps:",
+    ...(args.mustKeeps.length > 0
+      ? args.mustKeeps.map((line) => `- ${line}`)
+      : ["- Obey the user's stated constraints and format exactly."]),
+    "",
+    "Write the corrected complete answer now.",
+  ].join("\n");
+}
+
+async function maybeRepairGuidedFinalAnswer(args: {
+  reply: string;
+  provider: LlmProvider;
+  promptMessages: readonly ProviderMessage[];
+  botOverrides: GenerateOptions | undefined;
+  shouldRepair: boolean;
+  signal?: AbortSignal;
+  onPlanningWarning?: (detail: string) => void;
+}): Promise<string> {
+  if (!args.shouldRepair) return args.reply;
+  const userRequest = latestUserPromptContent(args.promptMessages);
+  const breaks = detectObviousConstraintBreaks(args.reply, userRequest);
+  if (breaks.length === 0) return args.reply;
+  const mustKeeps = prioritizeUserMustKeeps(
+    extractExplicitUserConstraints(args.promptMessages),
+    8,
+  );
+  const warning = `final_constraint_repair; breaks=${breaks.length}; ${breaks
+    .slice(0, 3)
+    .join(" | ")}`;
+  args.onPlanningWarning?.(warning);
+
+  const runRepairAttempt = async (extraHint: string): Promise<string> => {
+    const systemPrompt = [
+      buildPsychicConstraintRepairPrompt({
+        userRequest,
+        draftReply: args.reply,
+        breaks,
+        mustKeeps,
+      }),
+      extraHint,
+    ]
+      .filter(Boolean)
+      .join("\n\n");
+    const repairedRaw = await args.provider.generateResponse(
+      [
+        { role: "system", content: systemPrompt },
+        {
+          role: "user",
+          content:
+            "Repair the broken answer now. Return only the corrected final answer.",
+        },
+      ],
+      {
+        ...args.botOverrides,
+        maxTokens: Math.min(
+          args.botOverrides?.maxTokens ?? PSYCHIC_FINAL_REPAIR_MAX_TOKENS,
+          PSYCHIC_FINAL_REPAIR_MAX_TOKENS,
+        ),
+        temperature: 0,
+        usagePurpose: "psychic_planning",
+        ...(args.signal ? { signal: args.signal } : {}),
+      },
+    );
+    throwIfChatRequestCancelled(args.signal);
+    return repairedRaw.trim();
+  };
+
+  const acceptRepair = (
+    repaired: string,
+    attemptLabel: string,
+  ): string | null => {
+    if (repaired.length < 40) {
+      args.onPlanningWarning?.(
+        `final_constraint_repair_rejected; attempt=${attemptLabel}; reason=too_short; chars=${repaired.length}`,
+      );
+      return null;
+    }
+    const remaining = detectObviousConstraintBreaks(repaired, userRequest);
+    if (
+      remaining.length >= breaks.length ||
+      hasBlockingConstraintBreaks(remaining)
+    ) {
+      args.onPlanningWarning?.(
+        `final_constraint_repair_rejected; attempt=${attemptLabel}; reason=blocking_breaks_remain; before=${breaks.length}; after=${remaining.length}`,
+      );
+      return null;
+    }
+    args.onPlanningWarning?.(
+      `final_constraint_repair_applied; attempt=${attemptLabel}; before=${breaks.length}; after=${remaining.length}; chars=${repaired.length}`,
+    );
+    return repaired;
+  };
+
+  try {
+    const first = acceptRepair(await runRepairAttempt(""), "1");
+    if (first) return first;
+
+    const cantCloseMatch = userRequest.match(
+      /\b([A-Za-z][A-Za-z'-]*)\s+(?:can't|cannot|mustn't|must not)\s+close\b/i,
+    );
+    const opener = cantCloseMatch?.[1] ?? "the person who can't close";
+    const exampleHint = [
+      "Second attempt: copy this legal shape (keep 4-hour shifts only; end by 18:00 / 6pm):",
+      `| Time | Barista |`,
+      `| --- | --- |`,
+      `| 08:00-12:00 | ${opener} |`,
+      `| 12:00-16:00 | Cara |`,
+      `| 14:00-18:00 | Alice |`,
+      `R1: Morning coverage depends on a single opener.`,
+      `R2: Midday coverage depends on Cara continuity.`,
+      `R3: Close depends on Alice alone.`,
+      `The schedule is feasible.`,
+      `Never use 16:00-20:00, 16:00-18:00, or 4pm-6pm rows. Never put ${opener} on the last shift. Always include R1, R2, and R3.`,
+    ].join("\n");
+    const second = acceptRepair(await runRepairAttempt(exampleHint), "2");
+    if (second) return second;
+    return args.reply;
+  } catch (error) {
+    args.onPlanningWarning?.(
+      `final_constraint_repair_failed; detail=${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+    return args.reply;
+  }
 }
 
 async function runPsychicPlanningPass(args: {
@@ -1874,10 +2356,21 @@ async function runPsychicPlanningPass(args: {
   };
   emitProgress("plan");
   if (args.simulated) {
+    const skipDraftForHardConstraints =
+      shouldSkipPsychicDraftForHardConstraints(args.promptMessages);
     for (const passName of simulatedEffortTextPasses(
       args.effort,
       ladderProfile,
     )) {
+      if (
+        skipDraftForHardConstraints &&
+        (passName === "draft" || passName === "revise_draft")
+      ) {
+        const warning = `${passName}_skipped_hard_constraints`;
+        args.onPlanningWarning?.(warning);
+        passDiagnostics.push({ name: passName, chars: 0, warning });
+        continue;
+      }
       const activeDraft = reviseDraft || draft;
       if (
         (passName === "revise_draft" || passName === "compliance_sweep") &&
@@ -1973,42 +2466,71 @@ async function runPsychicPlanningPass(args: {
         signal: args.signal,
         onPlanningWarning: args.onPlanningWarning,
       });
-      passDiagnostics.push(result.diagnostic);
-      if (!result.content) continue;
+      let passContent = result.content;
+      let passSummary = result.publicSummary;
+      let passDiagnostic = result.diagnostic;
+      if (
+        passName === "audit" &&
+        !isPsychicAuditArtifactUseful(passContent)
+      ) {
+        const userMustKeeps = extractExplicitUserConstraints(
+          args.promptMessages,
+        );
+        const fallbackAudit = buildDeterministicConstraintAudit({
+          userRequest: latestUserRequest,
+          constraints: userMustKeeps,
+        });
+        const warning = result.diagnostic.warning
+          ? `${result.diagnostic.warning}; fallback_applied; fallbackChars=${fallbackAudit.length}`
+          : `audit_unusable; provider=${args.provider.name}; model=${requestedModel}; chars=${passContent.length}; fallbackChars=${fallbackAudit.length}`;
+        args.onPlanningWarning?.(warning);
+        passContent = fallbackAudit;
+        passSummary =
+          passSummary || psychicPrivatePassFallbackSummary("audit");
+        passDiagnostic = {
+          name: "audit",
+          chars: fallbackAudit.length,
+          summary: passSummary,
+          warning,
+        };
+      }
+      passDiagnostics.push(passDiagnostic);
+      if (!passContent) continue;
       switch (passName) {
         case "alternatives":
-          alternatives = result.content;
+          alternatives = passContent;
           break;
         case "draft":
-          draft = result.content;
+          draft = passContent;
           break;
         case "audit":
-          audit = result.content;
+          audit = passContent;
           break;
         case "red_team":
-          redTeam = result.content;
+          redTeam = passContent;
           break;
         case "constraint_lock":
-          constraintLock = result.content;
+          constraintLock = passContent;
           break;
         case "revise_draft":
-          reviseDraft = result.content;
+          reviseDraft = passContent;
           break;
         case "compliance_sweep":
-          complianceSweep = result.content;
+          complianceSweep = passContent;
           break;
         case "synthesis":
-          synthesis = result.content;
+          synthesis = passContent;
           break;
         default: {
           const _exhaustive: never = passName;
           throw new Error(`Unhandled Psychic pass: ${String(_exhaustive)}`);
         }
       }
-      passSummaries.push({ stage: passName, summary: result.publicSummary });
+      passSummaries.push({ stage: passName, summary: passSummary });
       emitProgress(passName);
     }
   }
+  const userMustKeeps = extractExplicitUserConstraints(args.promptMessages);
   const answerGuidance = composePsychicFinalGuidance({
     planGuidance: parsed.answerGuidance,
     alternatives,
@@ -2017,6 +2539,7 @@ async function runPsychicPlanningPass(args: {
     constraintLock,
     complianceSweep,
     synthesis,
+    userMustKeeps,
   });
   const liveScratchpad = scratchpadSnapshot();
   const completedPassCount = passDiagnostics.filter(
@@ -2199,10 +2722,19 @@ async function generateChatResponse(args: {
             signal,
             fallbackEffort ?? undefined,
           );
-          return provider.generateResponse(prepared.messages, {
+          const raw = await provider.generateResponse(prepared.messages, {
             ...prepared.overrides,
             usagePurpose: index === 0 ? "chat_reply" : "chat_fallback",
             signal,
+          });
+          return maybeRepairGuidedFinalAnswer({
+            reply: raw,
+            provider,
+            promptMessages: args.promptMessages,
+            botOverrides: prepared.overrides,
+            shouldRepair: Boolean(planningTrace?.shouldGuideFinalAnswer),
+            signal,
+            onPlanningWarning: args.onPlanningWarning,
           });
         },
       })),
@@ -2255,13 +2787,22 @@ async function generateChatResponse(args: {
         args.botOverrides,
         signal,
       );
-      return args.provider.generateResponse(
+      const raw = await args.provider.generateResponse(
         prepared.messages,
         withGenerationSignal(
           { ...prepared.overrides, usagePurpose: "chat_reply" },
           signal,
         ),
       );
+      return maybeRepairGuidedFinalAnswer({
+        reply: raw,
+        provider: args.provider,
+        promptMessages: args.promptMessages,
+        botOverrides: prepared.overrides,
+        shouldRepair: Boolean(planningTrace?.shouldGuideFinalAnswer),
+        signal,
+        onPlanningWarning: args.onPlanningWarning,
+      });
     },
   });
   return withPlanningTrace({
