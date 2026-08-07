@@ -332,7 +332,20 @@ describe("mode tutorials", () => {
     );
     assert.match(copy, /Call time during overtime/u);
     assert.match(copy, /Space invokes that same context-aware control/u);
-    assert.match(copy, /Participant and Spectator sessions use the same/u);
+    assert.match(copy, /CC button at the bottom-left of the Forum viewport/u);
+    assert.match(
+      copy,
+      /including spoken Jury chamber subtitles/u,
+    );
+    assert.match(
+      copy,
+      /Pause, Play, and the Judge gavel sit at the bottom-right of that same viewport/u,
+    );
+    assert.match(copy, /narrow Evidence list of frozen item names with tiny table-matching type thumbnails/u);
+    assert.match(copy, /center Summary that refreshes between rounds/u);
+    assert.match(copy, /hydrates when you return mid-Debate/u);
+    assert.match(copy, /right rail toggles Proceedings and the Living Case Board/u);
+    assert.match(copy, /SMS-style claim stream/u);
     assert.match(copy, /Pause always cuts the live floor immediately/u);
     assert.match(copy, /settled recess screen holds the Wide chamber shot/u);
     assert.match(copy, /hard-stops every voice/u);
@@ -688,6 +701,17 @@ describe("mode tutorials", () => {
       )?.body ?? "";
     assert.match(seatCopy, /five seats default to Surprise/u);
     assert.match(seatCopy, /pin any seat from the Library/u);
+    const juryChamberCopy =
+      MODE_TUTORIALS.debate.steps.find(
+        (step) =>
+          step.targetSelector ===
+          '[data-tutorial-target="debate-jury-chamber"]',
+      )?.body ?? "";
+    assert.match(juryChamberCopy, /public gallery strip hides/u);
+    assert.match(
+      juryChamberCopy,
+      /same CC control that toggles Forum captions also shows or hides spoken Jury chamber subtitles/u,
+    );
   });
 
   it("teaches the non-blocking Coffee Group identity synthesis flow", () => {

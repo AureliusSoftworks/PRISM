@@ -15507,7 +15507,16 @@ export function DebateExperience(
         </div>
         <div
           className={styles.juryCenterTranscript}
-          data-empty={chamberContent ? undefined : "true"}
+          data-empty={
+            chamberEventVisible && activeEvent
+              ? liveCaptionsEnabled && chamberContent
+                ? undefined
+                : "true"
+              : chamberContent
+                ? undefined
+                : "true"
+          }
+          data-captions={liveCaptionsEnabled ? "on" : "off"}
           aria-live="polite"
         >
           <strong>
@@ -15524,11 +15533,13 @@ export function DebateExperience(
           </strong>
           <p>
             {chamberEventVisible && activeEvent ? (
-              <DebateVisibleTextConsumer
-                store={presentationStore}
-                sessionId={session.id}
-                event={activeEvent}
-              />
+              liveCaptionsEnabled ? (
+                <DebateVisibleTextConsumer
+                  store={presentationStore}
+                  sessionId={session.id}
+                  event={activeEvent}
+                />
+              ) : null
             ) : session.jury.phase === "initial_ballots" ? (
               "No leaning is displayed before deliberation."
             ) : silentDeliberationPreparing ? (
@@ -18658,7 +18669,9 @@ export function DebateExperience(
                       liveCaptionsEnabled ? "Hide captions" : "Show captions"
                     }
                     title={
-                      liveCaptionsEnabled ? "Hide captions" : "Show captions"
+                      liveCaptionsEnabled
+                        ? "Hide Forum and Jury captions"
+                        : "Show Forum and Jury captions"
                     }
                     onClick={toggleLiveCaptions}
                   >
@@ -18738,43 +18751,45 @@ export function DebateExperience(
                   ) : null}
                 </div>
               </div>
-              <DebateLiveAudienceGallery
-                store={presentationStore}
-                sessionId={session.id}
-                activeEvent={activeEvent}
-                presenting={presenting}
-                audienceSeats={audienceSeats}
-                materialQuality={debateMaterialQuality}
-                audienceChattering={audienceChattering}
-                audiencePressureBand={audiencePressureBand}
-                audiencePressureTalkerIndices={audiencePressureTalkerIndices}
-                audiencePressureAttr={audiencePressureBandTrue}
-                audiencePressureScore={currentAudiencePressureScore}
-                activeAudienceOrderKind={activeAudienceOrderResponse?.kind}
-                galleryArrival={galleryArrivalChrome}
-                galleryReadyHold={
-                  spectatorAwaitingFirstWatch && !galleryArriving
-                }
-                judgeControl={
-                  session.playerRole === "judge" &&
-                  (judgeGavelAvailable || judgeGavelCeremonyReady)
-                    ? {
-                        action: judgeUnifiedGavelAction,
-                        available: true,
-                        ariaLabel: judgeUnifiedGavelAriaLabel,
-                        busy:
-                          busy ||
-                          audienceOrderSaving ||
-                          debateFloorMutationInFlightRef.current,
-                        label: judgeUnifiedGavelLabel,
-                        onActivate: activateJudgeUnifiedGavel,
-                        title: judgeUnifiedGavelTitle,
-                      }
-                    : null
-                }
-                renderBotAvatar={props.renderBotAvatar}
-                renderBotGlyph={props.renderBotGlyph}
-              />
+              {!juryChamberVisible ? (
+                <DebateLiveAudienceGallery
+                  store={presentationStore}
+                  sessionId={session.id}
+                  activeEvent={activeEvent}
+                  presenting={presenting}
+                  audienceSeats={audienceSeats}
+                  materialQuality={debateMaterialQuality}
+                  audienceChattering={audienceChattering}
+                  audiencePressureBand={audiencePressureBand}
+                  audiencePressureTalkerIndices={audiencePressureTalkerIndices}
+                  audiencePressureAttr={audiencePressureBandTrue}
+                  audiencePressureScore={currentAudiencePressureScore}
+                  activeAudienceOrderKind={activeAudienceOrderResponse?.kind}
+                  galleryArrival={galleryArrivalChrome}
+                  galleryReadyHold={
+                    spectatorAwaitingFirstWatch && !galleryArriving
+                  }
+                  judgeControl={
+                    session.playerRole === "judge" &&
+                    (judgeGavelAvailable || judgeGavelCeremonyReady)
+                      ? {
+                          action: judgeUnifiedGavelAction,
+                          available: true,
+                          ariaLabel: judgeUnifiedGavelAriaLabel,
+                          busy:
+                            busy ||
+                            audienceOrderSaving ||
+                            debateFloorMutationInFlightRef.current,
+                          label: judgeUnifiedGavelLabel,
+                          onActivate: activateJudgeUnifiedGavel,
+                          title: judgeUnifiedGavelTitle,
+                        }
+                      : null
+                  }
+                  renderBotAvatar={props.renderBotAvatar}
+                  renderBotGlyph={props.renderBotGlyph}
+                />
+              ) : null}
               <div className={styles.stageSupport}>
                 {session.format === "turnabout"
                   ? renderTurnaboutRecord(session)

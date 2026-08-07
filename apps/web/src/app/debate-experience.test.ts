@@ -1432,6 +1432,14 @@ describe("Debate experience", () => {
     assert.match(source, /writeDebateLiveCaptionsEnabled/u);
     assert.match(
       source,
+      /chamberEventVisible && activeEvent \? \(\s*liveCaptionsEnabled \? \(\s*<DebateVisibleTextConsumer/u,
+    );
+    assert.match(
+      source,
+      /data-captions=\{liveCaptionsEnabled \? "on" : "off"\}/u,
+    );
+    assert.match(
+      source,
       /DebateLiveCaptionConsumer[\s\S]{0,700}debateSpokenText\(snapshot\.visibleContent\)\.trim\(\)/u,
     );
     assert.match(
@@ -2430,6 +2438,10 @@ describe("Debate experience", () => {
     assert.doesNotMatch(
       source,
       /!juryChamberVisible \? \([\s\S]{0,180}debateAudienceRow/u,
+    );
+    assert.match(
+      source,
+      /!juryChamberVisible \? \(\s*<DebateLiveAudienceGallery/u,
     );
     assert.match(source, /data-audience-placement="below-screen"/u);
     assert.match(
