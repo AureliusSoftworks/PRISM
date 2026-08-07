@@ -876,6 +876,7 @@ import {
   botPowerEchoesAddressedSpeechV1,
   botPowerEternallyIntroducesV1,
   botPowerIsMutedV1,
+  botPowerMuteExemptsPlayerV1,
   botPowerMumblesSpeechV1,
   botPowerShapeshiftsIdentityV1,
   botPowerBelievesFalseNameV1,
@@ -1005,8 +1006,21 @@ import {
   imageAssetStorageSummary,
   ImageAssetLibraryError,
   listImageAssetCatalog,
+  synchronizeImageAssetCatalog,
   updateImageAssetPlayerTags,
 } from "./image-asset-library.ts";
+import {
+  applySmartTidyWithDeleter,
+  compressImageAssetSet,
+  ensureImageAssetSetHotForEdit,
+  ImageAssetSmartMemoryError,
+  migrateImageAssetSetToCold,
+  previewSmartTidyCandidates,
+  recordImageAssetAccess,
+  recordImageAssetAttach,
+  undoCompressImageAssetSet,
+  contentTypeForGeneratedImageRelativePath,
+} from "./image-asset-smart-memory.ts";
 import {
   applyImageAssetMagentaPass,
   ImageMagentaPassError,
@@ -13476,7 +13490,9 @@ function buildRoutes(): RouteDefinition[] {
           | undefined;
         if (bot) {
           runtimeBotPowers = bot.powers_json ?? null;
-          runtimeBotMuted = botPowerIsMutedV1(bot.powers_json);
+          runtimeBotMuted =
+            botPowerIsMutedV1(bot.powers_json) &&
+            !botPowerMuteExemptsPlayerV1(bot.powers_json);
           runtimeBotEternalIntroduction = botPowerEternallyIntroducesV1(
             bot.powers_json,
           );
@@ -25181,6 +25197,106 @@ function buildRoutes(): RouteDefinition[] {
         storage: imageAssetStorageSummary(db, userId),
       });
     }),
+    route("GET", "/api/assets/smart-tidy/preview", async (ctx) => {
+      const userId = requireAuth(ctx);
+      synchronizeImageAssetCatalog(db, userId);
+      json(ctx.res, 200, {
+        ok: true,
+        preview: previewSmartTidyCandidates(db, userId),
+      });
+    }),
+    route("POST", "/api/assets/smart-tidy", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (peekActiveImageJobForUser(userId)) {
+        throw new HttpError(
+          409,
+          "Image generation is still finishing. Wait before tidying assets.",
+        );
+      }
+      synchronizeImageAssetCatalog(db, userId);
+      const body = ctx.body as Record<string, unknown>;
+      const preview = previewSmartTidyCandidates(db, userId);
+      const requestedIds = Array.isArray(body.assetSetIds)
+        ? body.assetSetIds.filter((value): value is string => typeof value === "string")
+        : preview.assetSetIds;
+      const allowed = new Set(preview.assetSetIds);
+      const ids = requestedIds.filter((id) => allowed.has(id));
+      const result = applySmartTidyWithDeleter(
+        db,
+        userId,
+        ids,
+        deleteUnusedImageAssetSet,
+      );
+      json(ctx.res, 200, { ok: true, result, preview });
+    }),
+    route("POST", "/api/assets/cold-migrate", async (ctx) => {
+      const userId = requireAuth(ctx);
+      synchronizeImageAssetCatalog(db, userId);
+      const body = ctx.body as Record<string, unknown>;
+      const setId = typeof body.assetSetId === "string" ? body.assetSetId.trim() : "";
+      if (!setId) throw new HttpError(400, "assetSetId is required.");
+      try {
+        const result = await migrateImageAssetSetToCold(db, userId, setId, {
+          force: body.force === true,
+        });
+        const asset = getImageAssetSet(db, userId, setId);
+        json(ctx.res, 200, { ok: true, result, asset });
+      } catch (error) {
+        if (error instanceof ImageAssetSmartMemoryError) {
+          throw new HttpError(
+            error.code === "not_found" ? 404 : error.code === "in_use" ? 409 : 400,
+            error.message,
+          );
+        }
+        throw error;
+      }
+    }),
+    route("POST", "/api/assets/:id/compress", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (peekActiveImageJobForUser(userId)) {
+        throw new HttpError(
+          409,
+          "Image generation is still finishing. Wait before changing assets.",
+        );
+      }
+      try {
+        const result = await compressImageAssetSet(db, userId, ctx.params.id);
+        const asset = getImageAssetSet(db, userId, ctx.params.id);
+        if (!asset) throw new HttpError(404, "That asset is unavailable.");
+        json(ctx.res, 200, { ok: true, result, asset });
+      } catch (error) {
+        if (error instanceof ImageAssetSmartMemoryError) {
+          throw new HttpError(
+            error.code === "not_found" ? 404 : 400,
+            error.message,
+          );
+        }
+        throw error;
+      }
+    }),
+    route("POST", "/api/assets/:id/compress/undo", async (ctx) => {
+      const userId = requireAuth(ctx);
+      if (peekActiveImageJobForUser(userId)) {
+        throw new HttpError(
+          409,
+          "Image generation is still finishing. Wait before changing assets.",
+        );
+      }
+      try {
+        const result = await undoCompressImageAssetSet(db, userId, ctx.params.id);
+        const asset = getImageAssetSet(db, userId, ctx.params.id);
+        if (!asset) throw new HttpError(404, "That asset is unavailable.");
+        json(ctx.res, 200, { ok: true, result, asset });
+      } catch (error) {
+        if (error instanceof ImageAssetSmartMemoryError) {
+          throw new HttpError(
+            error.code === "not_found" ? 404 : 400,
+            error.message,
+          );
+        }
+        throw error;
+      }
+    }),
     route("POST", "/api/assets/storage/visible", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -25250,6 +25366,7 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
       try {
+        await ensureImageAssetSetHotForEdit(db, userId, ctx.params.id);
         const result = await applyImageAssetMagentaPass({
           db,
           userId,
@@ -25260,6 +25377,12 @@ function buildRoutes(): RouteDefinition[] {
         if (!asset) throw new HttpError(404, "That asset is unavailable.");
         json(ctx.res, 200, { ok: true, result, asset });
       } catch (error) {
+        if (error instanceof ImageAssetSmartMemoryError) {
+          throw new HttpError(
+            error.code === "not_found" ? 404 : 400,
+            error.message,
+          );
+        }
         if (error instanceof ImageMagentaPassError) {
           throw new HttpError(
             error.code === "not_found"
@@ -25282,6 +25405,7 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
       try {
+        await ensureImageAssetSetHotForEdit(db, userId, ctx.params.id);
         const result = await undoImageAssetMagentaPass({
           db,
           userId,
@@ -25292,6 +25416,12 @@ function buildRoutes(): RouteDefinition[] {
         if (!asset) throw new HttpError(404, "That asset is unavailable.");
         json(ctx.res, 200, { ok: true, result, asset });
       } catch (error) {
+        if (error instanceof ImageAssetSmartMemoryError) {
+          throw new HttpError(
+            error.code === "not_found" ? 404 : 400,
+            error.message,
+          );
+        }
         if (error instanceof ImageMagentaPassError) {
           throw new HttpError(
             error.code === "not_found"
@@ -25546,6 +25676,7 @@ function buildRoutes(): RouteDefinition[] {
       if (!rel) {
         throw new HttpError(404, "Image file not available.");
       }
+      recordImageAssetAccess(db, userId, imageId);
       let bytes: Buffer;
       try {
         bytes = readGeneratedImageBytes(rel);
@@ -25553,7 +25684,10 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(404, "Image file not found.");
       }
       ctx.res.statusCode = 200;
-      ctx.res.setHeader("content-type", "image/png");
+      ctx.res.setHeader(
+        "content-type",
+        contentTypeForGeneratedImageRelativePath(rel),
+      );
       ctx.res.setHeader("cache-control", "private, max-age=3600");
       ctx.res.end(bytes);
     }),

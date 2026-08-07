@@ -143,6 +143,34 @@ export async function reduceMagentaInPng(input: Buffer): Promise<{
   };
 }
 
+/**
+ * Mandatory local fringe cleanup after magenta-keyed cutout synthesis.
+ * Stops early when a pass finds nothing left to change.
+ */
+export const AUTOMATIC_MAGENTA_CLEANUP_PASSES = 5;
+
+export async function applyAutomaticMagentaCleanupPasses(
+  input: Buffer,
+  passCount: number = AUTOMATIC_MAGENTA_CLEANUP_PASSES,
+): Promise<{
+  pngBytes: Buffer;
+  totalChangedPixels: number;
+  passesApplied: number;
+}> {
+  const boundedPasses = Math.max(0, Math.min(32, Math.floor(passCount)));
+  let pngBytes = input;
+  let totalChangedPixels = 0;
+  let passesApplied = 0;
+  for (let pass = 0; pass < boundedPasses; pass += 1) {
+    const reduced = await reduceMagentaInPng(pngBytes);
+    if (reduced.changedPixels <= 0) break;
+    pngBytes = reduced.pngBytes;
+    totalChangedPixels += reduced.changedPixels;
+    passesApplied += 1;
+  }
+  return { pngBytes, totalChangedPixels, passesApplied };
+}
+
 function loadAssetMemberFiles(
   db: DatabaseSync,
   userId: string,

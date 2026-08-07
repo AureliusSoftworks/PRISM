@@ -1,4 +1,5 @@
 import sharp from "sharp";
+import { applyAutomaticMagentaCleanupPasses } from "./image-magenta-pass.ts";
 
 export type SignalAssetSlot = "day-studio" | "night-studio" | "logo";
 
@@ -467,8 +468,11 @@ export async function normalizeSignalLogoImage(
     })
     .png({ compressionLevel: 9 })
     .toBuffer({ resolveWithObject: true });
+  const pngBytes = options.generated
+    ? (await applyAutomaticMagentaCleanupPasses(normalized.data)).pngBytes
+    : normalized.data;
   return {
-    pngBytes: normalized.data,
+    pngBytes,
     width: normalized.info.width,
     height: normalized.info.height,
   };

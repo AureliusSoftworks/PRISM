@@ -23,6 +23,7 @@ import {
 } from "./prismRefract";
 import sharedStyles from "./page.module.css";
 import styles from "./AssetLibrary.module.css";
+import { useViewportAssetSrc } from "./useViewportAssetSrc";
 
 interface AssetApiResponse extends ImageAssetCatalogPage {
   ok: boolean;
@@ -131,26 +132,39 @@ function useCoarsePointer(): boolean {
   return coarse;
 }
 
+import { useViewportAssetSrc } from "./useViewportAssetSrc";
+
+function ViewportAssetThumb({
+  src,
+  className,
+  kind,
+}: {
+  src: string;
+  className?: string;
+  kind?: string;
+}) {
+  const { src: activeSrc, imgRef } = useViewportAssetSrc(src);
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      ref={imgRef}
+      src={activeSrc}
+      alt=""
+      loading="lazy"
+      className={className}
+      data-asset-preview-kind={kind}
+    />
+  );
+}
+
 function AssetPreview({ asset }: { asset: ImageAssetSet }) {
   const light = asset.members.find((member) => member.role === "light");
   const dark = asset.members.find((member) => member.role === "dark");
   if (asset.kind === "signal_studio" && light && dark) {
     return (
       <span className={styles.studioPreview} aria-hidden="true">
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={light.thumbnailUrl}
-          alt=""
-          loading="lazy"
-          data-asset-preview-kind={asset.kind}
-        />
-        {/* eslint-disable-next-line @next/next/no-img-element */}
-        <img
-          src={dark.thumbnailUrl}
-          alt=""
-          loading="lazy"
-          data-asset-preview-kind={asset.kind}
-        />
+        <ViewportAssetThumb src={light.thumbnailUrl} kind={asset.kind} />
+        <ViewportAssetThumb src={dark.thumbnailUrl} kind={asset.kind} />
         <small>Light</small>
         <small>Dark</small>
       </span>
@@ -158,13 +172,7 @@ function AssetPreview({ asset }: { asset: ImageAssetSet }) {
   }
   const member = primaryMember(asset);
   return member ? (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={member.thumbnailUrl}
-      alt=""
-      loading="lazy"
-      data-asset-preview-kind={asset.kind}
-    />
+    <ViewportAssetThumb src={member.thumbnailUrl} kind={asset.kind} />
   ) : (
     <span className={styles.missingPreview} aria-hidden="true">◇</span>
   );
@@ -475,6 +483,10 @@ export function AssetLibraryModal({
   const [magentaBusy, setMagentaBusy] = useState<"apply" | "undo" | null>(
     null,
   );
+  const [compressBusy, setCompressBusy] = useState<"apply" | "undo" | null>(
+    null,
+  );
+  const [compressConfirmation, setCompressConfirmation] = useState(false);
   const currentIds = useMemo(() => new Set(currentImageIds), [currentImageIds]);
   const detailIsCurrent =
     detail?.members.some((member) => currentIds.has(member.imageId)) ?? false;
@@ -616,6 +628,7 @@ export function AssetLibraryModal({
     setDetail(asset);
     setTagDraft(asset.playerTags.join(", "));
     setMagentaConfirmation(false);
+    setCompressConfirmation(false);
     setDeleteConfirmationId(null);
     window.requestAnimationFrame(() => {
       detailRef.current?.scrollTo({ top: 0 });
@@ -688,6 +701,59 @@ export function AssetLibraryModal({
       );
     } finally {
       setMagentaBusy(null);
+    }
+  };
+
+  const applyCompress = async (): Promise<void> => {
+    if (!detail || !compressConfirmation || compressBusy) return;
+    const target = detail;
+    setCompressBusy("apply");
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await readJson<{ ok: boolean; asset: ImageAssetSet }>(
+        await fetch(`/api/assets/${encodeURIComponent(target.id)}/compress`, {
+          method: "POST",
+          credentials: "include",
+          body: "{}",
+        }),
+      );
+      replaceAsset(response.asset);
+      setCompressConfirmation(false);
+      setNotice(
+        "Compressed this asset for disk. Undo restores the previous resolution.",
+      );
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Compress could not be applied.",
+      );
+    } finally {
+      setCompressBusy(null);
+    }
+  };
+
+  const undoCompress = async (): Promise<void> => {
+    if (!detail?.compressUndoAvailable || compressBusy) return;
+    const target = detail;
+    setCompressBusy("undo");
+    setError(null);
+    setNotice(null);
+    try {
+      const response = await readJson<{ ok: boolean; asset: ImageAssetSet }>(
+        await fetch(
+          `/api/assets/${encodeURIComponent(target.id)}/compress/undo`,
+          { method: "POST", credentials: "include", body: "{}" },
+        ),
+      );
+      replaceAsset(response.asset);
+      setCompressConfirmation(false);
+      setNotice("Compress Undo restored the previous resolution.");
+    } catch (caught) {
+      setError(
+        caught instanceof Error ? caught.message : "Compress could not be undone.",
+      );
+    } finally {
+      setCompressBusy(null);
     }
   };
 
@@ -1012,6 +1078,62 @@ export function AssetLibraryModal({
                           {magentaBusy === "undo"
                             ? "Undoing…"
                             : `Undo last pass (${detail.magentaPassCount})`}
+                        </button>
+                      ) : null}
+                    </div>
+                  )}
+                </section>
+              ) : null}
+              {detail.status === "ready" && primaryMember(detail) ? (
+                <section
+                  className={styles.magentaPass}
+                  aria-label="Compress size"
+                >
+                  <div>
+                    <strong>Compress size</strong>
+                    <small>
+                      Cuts resolution about in half when the longest edge is
+                      large. Keeps a local Undo beside Magenta.
+                    </small>
+                  </div>
+                  {compressConfirmation ? (
+                    <div role="group" aria-label="Confirm compress">
+                      <span>Compress this asset set for disk?</span>
+                      <button
+                        type="button"
+                        className={sharedStyles.linkButton}
+                        onClick={() => setCompressConfirmation(false)}
+                        disabled={compressBusy !== null}
+                      >
+                        Cancel
+                      </button>
+                      <button
+                        type="button"
+                        className={sharedStyles.btnPrimary}
+                        onClick={() => void applyCompress()}
+                        disabled={compressBusy !== null}
+                      >
+                        {compressBusy === "apply" ? "Compressing…" : "Compress"}
+                      </button>
+                    </div>
+                  ) : (
+                    <div>
+                      <button
+                        type="button"
+                        className={sharedStyles.accountLogoutButton}
+                        onClick={() => setCompressConfirmation(true)}
+                        disabled={compressBusy !== null}
+                      >
+                        Compress size
+                      </button>
+                      {detail.compressUndoAvailable ? (
+                        <button
+                          type="button"
+                          className={sharedStyles.linkButton}
+                          onClick={() => void undoCompress()}
+                          disabled={compressBusy !== null}
+                        >
+                          {compressBusy === "undo" ? "Undoing…" : "Undo compress"}
                         </button>
                       ) : null}
                     </div>

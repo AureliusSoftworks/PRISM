@@ -35,6 +35,15 @@ export type ImageAssetMemberRole =
 
 export type ImageAssetSource = "generated" | "uploaded" | "legacy";
 
+export const IMAGE_ASSET_STORAGE_TIERS = ["hot", "cold"] as const;
+
+export type ImageAssetStorageTier =
+  (typeof IMAGE_ASSET_STORAGE_TIERS)[number];
+
+/** Smart automatic tags stay in this inclusive range. */
+export const IMAGE_ASSET_SMART_TAG_MIN = 3;
+export const IMAGE_ASSET_SMART_TAG_MAX = 6;
+
 export interface ImageAssetClassificationInput {
   origin?: string | null;
   purpose?: string | null;
@@ -62,6 +71,11 @@ export interface ImageAssetSet {
   sourceContext: Record<string, unknown>;
   automaticTags: string[];
   playerTags: string[];
+  storageTier: ImageAssetStorageTier;
+  accessCount: number;
+  lastAccessedAt: string | null;
+  reuseScore: number;
+  compressUndoAvailable: boolean;
   createdAt: string;
   updatedAt: string;
   usageCount: number;
@@ -95,8 +109,35 @@ export interface ImageAssetStorageSummary {
   generatedBytes: number;
   uploadedBytes: number;
   systemManagedBytes: number;
+  hotBytes: number;
+  coldBytes: number;
+  compressRevisionBytes: number;
   totalAssetCount: number;
   byKind: ImageAssetStorageKindSummary[];
+}
+
+export interface ImageAssetSmartTidyPreview {
+  candidateCount: number;
+  reclaimableBytes: number;
+  protectedHighReuseCount: number;
+  sampleTitles: string[];
+  assetSetIds: string[];
+}
+
+export interface ImageAssetSmartTidyResult {
+  deletedCount: number;
+  recoveryId: string | null;
+  recoveryBytes: number;
+  assetSetIds: string[];
+}
+
+export function isImageAssetStorageTier(
+  value: unknown,
+): value is ImageAssetStorageTier {
+  return (
+    typeof value === "string" &&
+    (IMAGE_ASSET_STORAGE_TIERS as readonly string[]).includes(value)
+  );
 }
 
 export const IMAGE_ASSET_KIND_LABELS: Record<ImageAssetKind, string> = {

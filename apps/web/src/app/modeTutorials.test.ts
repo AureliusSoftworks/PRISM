@@ -206,6 +206,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /Synthesize asset soft-prepares a new sprite/u);
     assert.match(copy, /queue more soft sprites in parallel/u);
     assert.match(copy, /Reduce magenta pass/u);
+    assert.match(copy, /five automatic local magenta cleanup passes/u);
     assert.match(copy, /Assets opens them for soft Prism re-synthesis/u);
     assert.match(copy, /Undo last pass/u);
     assert.match(copy, /visual adds no facts/u);
@@ -1478,6 +1479,10 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
       /exact-type rails for studio sets and logos/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[1]?.body ?? "",
+      /Synthesized logos receive five automatic local magenta cleanup passes/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[1]?.body ?? "",

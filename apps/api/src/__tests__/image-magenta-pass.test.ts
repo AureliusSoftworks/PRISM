@@ -7,7 +7,9 @@ import { DatabaseSync } from "node:sqlite";
 import sharp from "sharp";
 import { initializeDatabase } from "../db.ts";
 import {
+  applyAutomaticMagentaCleanupPasses,
   applyImageAssetMagentaPass,
+  AUTOMATIC_MAGENTA_CLEANUP_PASSES,
   undoImageAssetMagentaPass,
 } from "../image-magenta-pass.ts";
 import {
@@ -98,6 +100,21 @@ async function withFixture(
 }
 
 describe("asset magenta pass", () => {
+  it("applies up to five automatic local cleanup passes after keyed cutout", async () => {
+    const source = await keyedPng(16, 16);
+    const result = await applyAutomaticMagentaCleanupPasses(source);
+    assert.equal(AUTOMATIC_MAGENTA_CLEANUP_PASSES, 5);
+    assert.ok(result.passesApplied >= 1);
+    assert.ok(result.passesApplied <= AUTOMATIC_MAGENTA_CLEANUP_PASSES);
+    assert.ok(result.totalChangedPixels > 0);
+    assert.notEqual(result.pngBytes.equals(source), true);
+
+    const noop = await applyAutomaticMagentaCleanupPasses(source, 0);
+    assert.equal(noop.passesApplied, 0);
+    assert.equal(noop.totalChangedPixels, 0);
+    assert.equal(noop.pngBytes.equals(source), true);
+  });
+
   it("compounds locally and undoes each encrypted revision in order", async () => {
     await withFixture(async ({ db }) => {
       seedUser(db, "user-1");

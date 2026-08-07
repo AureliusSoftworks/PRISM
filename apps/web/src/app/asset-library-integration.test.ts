@@ -215,6 +215,8 @@ describe("typed local asset library", () => {
     assert.match(assetSource, /Move to recovery trash/u);
     assert.match(assetSource, /setCleanupConfirmation/u);
     assert.match(magentaPassSource, /reduceMagentaInPng/u);
+    assert.match(magentaPassSource, /AUTOMATIC_MAGENTA_CLEANUP_PASSES = 5/u);
+    assert.match(magentaPassSource, /applyAutomaticMagentaCleanupPasses/u);
     assert.match(magentaPassSource, /encryptBytes\(replacement\.before, args\.userKey\)/u);
     assert.match(magentaPassSource, /generateSignalStudioLightingMap/u);
     assert.match(magentaPassSource, /MAGENTA_REVISION_RETENTION = 8/u);

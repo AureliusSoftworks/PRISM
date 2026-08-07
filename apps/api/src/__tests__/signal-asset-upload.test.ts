@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import sharp from "sharp";
 
@@ -242,6 +243,18 @@ describe("Signal asset uploads", () => {
     assert.ok(raw.data[center]! < 40);
     assert.ok(raw.data[center + 1]! < 40);
     assert.ok(raw.data[center + 2]! < 40);
+  });
+
+  it("runs automatic local magenta cleanup on generated logos only", () => {
+    const source = readFileSync(
+      new URL("../signal-asset-upload.ts", import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /applyAutomaticMagentaCleanupPasses/u);
+    assert.match(
+      source,
+      /options\.generated[\s\S]*applyAutomaticMagentaCleanupPasses/u,
+    );
   });
 
   it("recovers a uniform off-key background when the image provider ignores magenta", async () => {

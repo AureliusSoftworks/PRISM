@@ -71,24 +71,22 @@ export async function tryGenerateThumbAfterPngWrite(localPngRelPath: string): Pr
 }
 
 /**
- * Returns existing thumb bytes or creates the sidecar from the PNG and returns those bytes.
+ * Returns existing thumb bytes or creates the sidecar from the primary and returns those bytes.
+ * Primary may be hot PNG or cold full-res WebP.
  */
 export async function readOrCreateThumbBytes(
-  localPngRelPath: string,
+  localPrimaryRelPath: string,
   encode: (inputBytes: Buffer) => Promise<Buffer> = encodeWebpThumbFromRasterBytes,
 ): Promise<Buffer> {
-  const thumbRel = thumbWebpRelativePathFromPngRelativePath(localPngRelPath);
+  const thumbRel = thumbWebpRelativePathFromPngRelativePath(localPrimaryRelPath);
   const absThumb = resolveAbsoluteUnderDataRoot(thumbRel);
   if (existsSync(absThumb)) {
     return readFileSync(absThumb);
   }
-  const absPng = resolveAbsoluteUnderDataRoot(localPngRelPath);
-  const pngBytes = readGeneratedImageBytes(localPngRelPath);
-  const webp = await encode(pngBytes);
-  // No JavaScript cleanup can interleave between this synchronous existence
-  // check and the atomic write. If Asset Cleanup moved the PNG while encoding,
-  // do not recreate an orphan thumbnail in generated-images.
-  if (!existsSync(absPng)) {
+  const absPrimary = resolveAbsoluteUnderDataRoot(localPrimaryRelPath);
+  const primaryBytes = readGeneratedImageBytes(localPrimaryRelPath);
+  const webp = await encode(primaryBytes);
+  if (!existsSync(absPrimary)) {
     throw new Error("Generated image was removed while creating its thumbnail.");
   }
   writeThumbWebpAtomically(absThumb, webp);

@@ -17,13 +17,17 @@ import {
   type ImageAssetUsage,
 } from "@localai/shared";
 import { imageAssetUsageLabels } from "./image-asset-cleanup.ts";
+import { heuristicSmartTags } from "./image-asset-smart-memory.ts";
 import {
+  buildGeneratedImageCompressUndoRelativePath,
   generatedImageStorageSizeBytes,
   listGeneratedImageRecoveryBatchesForUser,
   markGeneratedImageQuarantineCommitted,
   quarantineGeneratedImageFiles,
+  resolveAbsoluteUnderDataRoot,
   restoreQuarantinedGeneratedImageFiles,
 } from "./image-storage.ts";
+import { existsSync, statSync } from "node:fs";
 
 interface CatalogImageRow {
   id: string;
@@ -54,6 +58,11 @@ interface AssetSetRow {
   source_context_json: string;
   automatic_tags_json: string;
   player_tags_json: string;
+  storage_tier?: string | null;
+  access_count?: number | bigint | null;
+  last_accessed_at?: string | null;
+  reuse_score?: number | bigint | null;
+  compress_undo_available?: number | bigint | null;
   created_at: string;
   updated_at: string;
 }
@@ -240,6 +249,46 @@ export function ensureImageAssetLibrarySchema(db: DatabaseSync): void {
       prompts,
       tokenize = 'unicode61 remove_diacritics 2'
     );
+  `);
+  const addColumnIfMissing = (
+    table: string,
+    name: string,
+    definition: string,
+  ): void => {
+    const columns = db.prepare(`PRAGMA table_info(${table})`).all() as Array<{
+      name: string;
+    }>;
+    if (columns.some((column) => column.name === name)) return;
+    db.exec(`ALTER TABLE ${table} ADD COLUMN ${name} ${definition};`);
+  };
+  addColumnIfMissing(
+    db,
+    "image_asset_sets",
+    "storage_tier",
+    "TEXT NOT NULL DEFAULT 'hot'",
+  );
+  addColumnIfMissing(
+    db,
+    "image_asset_sets",
+    "access_count",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+  addColumnIfMissing(db, "image_asset_sets", "last_accessed_at", "TEXT");
+  addColumnIfMissing(
+    db,
+    "image_asset_sets",
+    "reuse_score",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+  addColumnIfMissing(
+    db,
+    "image_asset_sets",
+    "compress_undo_available",
+    "INTEGER NOT NULL DEFAULT 0",
+  );
+  db.exec(`
+    CREATE INDEX IF NOT EXISTS idx_image_asset_sets_smart_memory
+      ON image_asset_sets(user_id, storage_tier, reuse_score, last_accessed_at);
   `);
 }
 
@@ -753,12 +802,15 @@ export function synchronizeImageAssetCatalog(
         ...(image.bot_id ? { botId: image.bot_id, botName } : {}),
         ...(image.conversation_id ? { conversationId: image.conversation_id } : {}),
       },
-      automaticTags: normalizeTags([
-        ...context.tags,
-        botName,
-        image.prompt,
-        image.revised_prompt,
-      ]),
+      automaticTags: heuristicSmartTags({
+        kind,
+        title:
+          context.title ??
+          titleFromPrompt(image.prompt, IMAGE_ASSET_KIND_LABELS[kind].replace(/s$/u, "")),
+        prompt: image.prompt,
+        revisedPrompt: image.revised_prompt,
+        extra: [...context.tags, botName ?? ""],
+      }),
       createdAt: image.created_at,
       updatedAt: image.created_at,
     });
@@ -948,6 +1000,8 @@ function mapAssetSetRows(
   return rows.map((row) => {
     const kind = row.kind as ImageAssetKind;
     const setUsage = navigableUsage(usage.get(row.id) ?? [], kind);
+    const accessCount = Number(row.access_count ?? 0);
+    const reuseScore = Math.max(Number(row.reuse_score ?? 0), accessCount);
     return {
       id: row.id,
       kind,
@@ -957,6 +1011,11 @@ function mapAssetSetRows(
       sourceContext: parseJsonObject(row.source_context_json),
       automaticTags: parseStringArray(row.automatic_tags_json),
       playerTags: parseStringArray(row.player_tags_json),
+      storageTier: row.storage_tier === "cold" ? "cold" : "hot",
+      accessCount,
+      lastAccessedAt: row.last_accessed_at ?? null,
+      reuseScore,
+      compressUndoAvailable: Number(row.compress_undo_available ?? 0) > 0,
       createdAt: row.created_at,
       updatedAt: row.updated_at,
       usageCount: setUsage.length,
@@ -1113,11 +1172,15 @@ export function imageAssetStorageSummary(
   let generatedBytes = 0;
   let uploadedBytes = 0;
   let systemManagedBytes = 0;
+  let hotBytes = 0;
+  let coldBytes = 0;
   for (const row of rows) {
     const path = row.local_rel_path?.trim();
     const bytes = path && !seenPaths.has(path) ? generatedImageStorageSizeBytes(path) : 0;
     if (path) seenPaths.add(path);
     activeBytes += bytes;
+    if (path?.endsWith(".cold.webp")) coldBytes += bytes;
+    else hotBytes += bytes;
     if (
       row.provider.trim().toLowerCase() === "upload" ||
       (row.origin?.trim().toLowerCase() ?? "").includes("upload") ||
@@ -1161,6 +1224,28 @@ export function imageAssetStorageSummary(
         .get(userId) as { bytes: number | bigint }
     ).bytes,
   );
+  let compressUndoBytes = 0;
+  const undoPaths = db
+    .prepare(
+      `SELECT images.local_rel_path
+         FROM image_asset_sets sets
+         JOIN image_asset_set_items items ON items.set_id = sets.id
+         JOIN images ON images.id = items.image_id
+        WHERE sets.user_id = ? AND sets.compress_undo_available = 1
+          AND images.local_rel_path IS NOT NULL`,
+    )
+    .all(userId) as Array<{ local_rel_path: string }>;
+  for (const entry of undoPaths) {
+    try {
+      const undoRel = buildGeneratedImageCompressUndoRelativePath(
+        entry.local_rel_path.trim(),
+      );
+      const absolute = resolveAbsoluteUnderDataRoot(undoRel);
+      if (existsSync(absolute)) compressUndoBytes += statSync(absolute).size;
+    } catch {
+      // ignore invalid paths
+    }
+  }
   return {
     activeBytes: activeBytes + revisionBytes,
     recoveryTrashBytes: listGeneratedImageRecoveryBatchesForUser(userId).reduce(
@@ -1171,6 +1256,9 @@ export function imageAssetStorageSummary(
     generatedBytes,
     uploadedBytes,
     systemManagedBytes,
+    hotBytes,
+    coldBytes,
+    compressRevisionBytes: compressUndoBytes,
     totalAssetCount: Number(
       (
         db.prepare("SELECT COUNT(*) AS count FROM image_asset_sets WHERE user_id = ?")
@@ -1265,10 +1353,12 @@ export function deleteUnusedImageAssetSet(
   const paths = rows.map((row) => row.local_rel_path?.trim() ?? "");
   if (
     rows.length === 0 ||
-    paths.some(
-      (path, index) =>
-        !path || path !== `generated-images/${userId}/${rows[index]!.id}.png`,
-    )
+    paths.some((path, index) => {
+      const imageId = rows[index]!.id;
+      const hot = `generated-images/${userId}/${imageId}.png`;
+      const cold = `generated-images/${userId}/${imageId}.cold.webp`;
+      return !path || (path !== hot && path !== cold);
+    })
   ) {
     throw new ImageAssetLibraryError(
       "unsafe",

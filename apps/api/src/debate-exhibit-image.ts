@@ -4,6 +4,7 @@ import {
   normalizeDebateEvidenceExhibitAdjective,
   normalizeDebateEvidenceExhibitObject,
 } from "@localai/shared";
+import { applyAutomaticMagentaCleanupPasses } from "./image-magenta-pass.ts";
 
 export const DEBATE_EXHIBIT_IMAGE_MAX_BYTES = 16 * 1024 * 1024;
 export const DEBATE_EXHIBIT_IMAGE_SIZE = 1024;
@@ -249,8 +250,11 @@ async function normalizeDebateExhibitImageBytes(
     })
     .png({ compressionLevel: 9 })
     .toBuffer({ resolveWithObject: true });
+  const pngBytes = options.generated
+    ? (await applyAutomaticMagentaCleanupPasses(normalized.data)).pngBytes
+    : normalized.data;
   return {
-    pngBytes: normalized.data,
+    pngBytes,
     width: normalized.info.width,
     height: normalized.info.height,
   };

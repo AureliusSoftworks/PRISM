@@ -67,14 +67,53 @@ export function buildGeneratedImageRelativePath(userId: string, imageId: string)
 }
 
 /**
- * Sidecar WebP thumbnail for a stored PNG (`*.png` → `*.thumb.webp`).
+ * Sidecar WebP thumbnail for a stored primary (`*.png` or `*.cold.webp` → `*.thumb.webp`).
  */
 export function thumbWebpRelativePathFromPngRelativePath(localRelPath: string): string {
   const t = localRelPath.trim();
-  if (!t.endsWith(".png")) {
-    throw new Error("Expected generated image path to end with .png.");
+  if (t.endsWith(".png")) {
+    return `${t.slice(0, -".png".length)}.thumb.webp`;
   }
-  return `${t.slice(0, -".png".length)}.thumb.webp`;
+  if (t.endsWith(".cold.webp")) {
+    return `${t.slice(0, -".cold.webp".length)}.thumb.webp`;
+  }
+  throw new Error("Expected generated image path to end with .png or .cold.webp.");
+}
+
+/** Canonical hot PNG path for an image id under a user. */
+export function buildGeneratedImageColdRelativePath(
+  userId: string,
+  imageId: string,
+): string {
+  if (!/^[a-zA-Z0-9_-]+$/.test(userId) || !/^[a-zA-Z0-9_-]+$/.test(imageId)) {
+    throw new Error("Invalid image path segment.");
+  }
+  return `${GENERATED_SUBDIR}/${userId}/${imageId}.cold.webp`;
+}
+
+export function buildGeneratedImageCompressUndoRelativePath(
+  primaryRelativePath: string,
+): string {
+  const t = primaryRelativePath.trim();
+  if (t.endsWith(".png")) {
+    return `${t.slice(0, -".png".length)}.compress-undo.png`;
+  }
+  if (t.endsWith(".cold.webp")) {
+    return `${t.slice(0, -".cold.webp".length)}.compress-undo.png`;
+  }
+  throw new Error("Expected generated image path to end with .png or .cold.webp.");
+}
+
+export function isColdGeneratedImageRelativePath(localRelPath: string): boolean {
+  return localRelPath.trim().endsWith(".cold.webp");
+}
+
+export function contentTypeForGeneratedImageRelativePath(
+  localRelPath: string,
+): "image/png" | "image/webp" {
+  return isColdGeneratedImageRelativePath(localRelPath)
+    ? "image/webp"
+    : "image/png";
 }
 
 /**
@@ -153,10 +192,16 @@ export function readGeneratedImageBytes(localRelPath: string): Buffer {
 /** Existing bytes owned by one generated PNG, including its thumbnail sidecar. */
 export function generatedImageStorageSizeBytes(localRelPath: string): number {
   let total = 0;
-  for (const relatedPath of [
+  const related = [
     localRelPath.trim(),
     thumbWebpRelativePathFromPngRelativePath(localRelPath),
-  ]) {
+  ];
+  try {
+    related.push(buildGeneratedImageCompressUndoRelativePath(localRelPath));
+  } catch {
+    // Primary may already be invalid; size stays zero for related helpers.
+  }
+  for (const relatedPath of related) {
     try {
       const absolute = resolveAbsoluteUnderDataRoot(relatedPath);
       if (existsSync(absolute)) total += statSync(absolute).size;
@@ -195,7 +240,7 @@ function writeJsonAtomically(
   }
 }
 
-/** Best-effort delete of stored PNG and its `.thumb.webp` sidecar; ignores missing files. */
+/** Best-effort delete of stored primary, thumbnail, and compress-undo sidecars. */
 export function tryUnlinkGeneratedImageFile(localRelPath: string | null | undefined): void {
   if (!localRelPath?.trim()) return;
   const rel = localRelPath.trim();
@@ -212,6 +257,15 @@ export function tryUnlinkGeneratedImageFile(localRelPath: string | null | undefi
     const thumbAbs = resolveAbsoluteUnderDataRoot(thumbRel);
     if (existsSync(thumbAbs)) {
       unlinkSync(thumbAbs);
+    }
+  } catch {
+    // ignore
+  }
+  try {
+    const undoRel = buildGeneratedImageCompressUndoRelativePath(rel);
+    const undoAbs = resolveAbsoluteUnderDataRoot(undoRel);
+    if (existsSync(undoAbs)) {
+      unlinkSync(undoAbs);
     }
   } catch {
     // ignore
@@ -254,15 +308,21 @@ export function quarantineGeneratedImageFiles(
   ) {
     throw new Error("Asset cleanup can quarantine only this account's generated images.");
   }
-  const plannedFiles = uniquePaths.flatMap((primaryRelativePath) =>
-    [
+  const plannedFiles = uniquePaths.flatMap((primaryRelativePath) => {
+    const related = [
       primaryRelativePath,
       thumbWebpRelativePathFromPngRelativePath(primaryRelativePath),
-    ].map((sourceRelativePath) => ({
+    ];
+    try {
+      related.push(buildGeneratedImageCompressUndoRelativePath(primaryRelativePath));
+    } catch {
+      // Primary extension already validated by thumb helper above.
+    }
+    return related.map((sourceRelativePath) => ({
       sourceRelativePath,
       quarantineRelativePath: `${recoveryRelativePath}/${sourceRelativePath}`,
-    })),
-  );
+    }));
+  });
 
   try {
     if (manifestRelativePath && recoveryManifest !== undefined) {
@@ -304,6 +364,13 @@ export function quarantineGeneratedImageFiles(
         primaryRelativePath,
         thumbWebpRelativePathFromPngRelativePath(primaryRelativePath),
       ];
+      try {
+        relatedPaths.push(
+          buildGeneratedImageCompressUndoRelativePath(primaryRelativePath),
+        );
+      } catch {
+        // ignore
+      }
       for (const sourceRelativePath of relatedPaths) {
         const sourceAbsolutePath = resolveAbsoluteUnderDataRoot(sourceRelativePath);
         if (!existsSync(sourceAbsolutePath)) continue;
