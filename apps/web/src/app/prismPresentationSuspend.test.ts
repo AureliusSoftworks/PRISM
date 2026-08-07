@@ -1,8 +1,13 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  acquirePrismLivingSession,
+  hasPrismLivingSessionActive,
   isPrismAppAwayFromUser,
   isPrismPresentationSuspended,
+  isPrismVisualSuspended,
+  resetPrismLivingSessionForTests,
+  shouldKeepLivingSessionActive,
   waitWhilePrismPresentationSuspended,
 } from "./prismPresentationSuspend.ts";
 import {
@@ -10,82 +15,120 @@ import {
   resetPrismVisualLifecycleForTests,
   seedPrismVisualLifecycleForTests,
 } from "./prismVisualLifecycle.ts";
+import { resetPrismAudioContextKeepAliveForTests } from "./replayAudioMasterCapture.ts";
 
-test("presentation soft-pause follows lifecycle suspended, not ordinary blur", () => {
+function foregroundFocused() {
+  return {
+    lifecycle: "foreground" as const,
+    visible: true,
+    focused: true,
+    pageHidden: false,
+    systemPaused: false,
+    reducedMotion: false,
+    revision: 0,
+  };
+}
+
+function suspendedHidden() {
+  return {
+    lifecycle: "suspended" as const,
+    visible: false,
+    focused: false,
+    pageHidden: false,
+    systemPaused: false,
+    reducedMotion: false,
+    revision: 1,
+  };
+}
+
+test("presentation soft-pause follows lifecycle unless a living session is claimed", () => {
+  resetPrismLivingSessionForTests();
+  resetPrismAudioContextKeepAliveForTests();
   assert.equal(
     resolvePrismVisualLifecycle({
       hidden: false,
       focused: false,
       pageHidden: false,
     }),
-    "foreground",
+    "suspended",
   );
   assert.equal(
     isPrismPresentationSuspended({
-      lifecycle: "foreground",
-      visible: true,
+      ...foregroundFocused(),
       focused: false,
-      pageHidden: false,
-      systemPaused: false,
-      reducedMotion: false,
-      revision: 0,
-    }),
-    false,
-  );
-  assert.equal(
-    isPrismPresentationSuspended({
       lifecycle: "suspended",
-      visible: false,
-      focused: false,
-      pageHidden: false,
-      systemPaused: false,
-      reducedMotion: false,
-      revision: 1,
     }),
     true,
   );
+  assert.equal(isPrismPresentationSuspended(suspendedHidden()), true);
+  assert.equal(isPrismVisualSuspended(suspendedHidden()), true);
 });
 
 test("app-away holds on blur even while the document stays visible", () => {
+  resetPrismLivingSessionForTests();
   assert.equal(
     isPrismAppAwayFromUser({
-      lifecycle: "foreground",
-      visible: true,
+      ...foregroundFocused(),
       focused: false,
-      pageHidden: false,
-      systemPaused: false,
-      reducedMotion: false,
-      revision: 0,
     }),
     true,
   );
+  assert.equal(isPrismAppAwayFromUser(foregroundFocused()), false);
   assert.equal(
     isPrismAppAwayFromUser({
-      lifecycle: "foreground",
-      visible: true,
+      ...suspendedHidden(),
       focused: true,
-      pageHidden: false,
-      systemPaused: false,
-      reducedMotion: false,
-      revision: 0,
-    }),
-    false,
-  );
-  assert.equal(
-    isPrismAppAwayFromUser({
-      lifecycle: "suspended",
-      visible: false,
-      focused: true,
-      pageHidden: false,
-      systemPaused: false,
-      reducedMotion: false,
-      revision: 1,
     }),
     true,
   );
 });
 
+test("living sessions keep audio and skip away-recess while visuals stay suspended", () => {
+  resetPrismLivingSessionForTests();
+  resetPrismAudioContextKeepAliveForTests();
+  const release = acquirePrismLivingSession("debate", "sit-1");
+  assert.equal(hasPrismLivingSessionActive(), true);
+  assert.equal(shouldKeepLivingSessionActive(suspendedHidden()), true);
+  assert.equal(isPrismPresentationSuspended(suspendedHidden()), false);
+  assert.equal(isPrismAppAwayFromUser(suspendedHidden()), false);
+  assert.equal(isPrismAppAwayFromUser({
+    ...foregroundFocused(),
+    focused: false,
+  }), false);
+  // Visual sleep remains independent of the living-session claim.
+  assert.equal(isPrismVisualSuspended(suspendedHidden()), true);
+  // Companion system pause still holds presentation and counts as away.
+  assert.equal(
+    shouldKeepLivingSessionActive({
+      ...suspendedHidden(),
+      systemPaused: true,
+    }),
+    false,
+  );
+  assert.equal(
+    isPrismPresentationSuspended({
+      ...suspendedHidden(),
+      systemPaused: true,
+    }),
+    true,
+  );
+  assert.equal(
+    isPrismAppAwayFromUser({
+      ...suspendedHidden(),
+      systemPaused: true,
+    }),
+    true,
+  );
+  release();
+  assert.equal(hasPrismLivingSessionActive(), false);
+  assert.equal(isPrismPresentationSuspended(suspendedHidden()), true);
+  resetPrismLivingSessionForTests();
+  resetPrismAudioContextKeepAliveForTests();
+});
+
 test("waitWhilePrismPresentationSuspended holds until foreground or abort", async () => {
+  resetPrismLivingSessionForTests();
+  resetPrismAudioContextKeepAliveForTests();
   resetPrismVisualLifecycleForTests();
   seedPrismVisualLifecycleForTests({
     lifecycle: "suspended",
@@ -137,5 +180,27 @@ test("waitWhilePrismPresentationSuspended holds until foreground or abort", asyn
     revision: 4,
   });
   await abortedHold;
+
+  // Claiming a living session while held must release the wait immediately.
+  seedPrismVisualLifecycleForTests({
+    lifecycle: "suspended",
+    visible: false,
+    focused: false,
+    pageHidden: false,
+    systemPaused: false,
+    reducedMotion: false,
+    revision: 5,
+  });
+  let livingReleased = false;
+  const livingHold = waitWhilePrismPresentationSuspended().then(() => {
+    livingReleased = true;
+  });
+  assert.equal(livingReleased, false);
+  const releaseLiving = acquirePrismLivingSession("coffee", "table-1");
+  await livingHold;
+  assert.equal(livingReleased, true);
+  releaseLiving();
+  resetPrismLivingSessionForTests();
+  resetPrismAudioContextKeepAliveForTests();
   resetPrismVisualLifecycleForTests();
 });

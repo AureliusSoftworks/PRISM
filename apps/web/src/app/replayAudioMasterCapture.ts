@@ -54,6 +54,8 @@ type ReplayAudioMasterCaptureSession = {
   voiceSelection?: ReplayVoiceSelectionSnapshotV2;
   thinkingByParticipant: Map<string, ReplayThinkingPresentation>;
   stopPromise: Promise<ReplayAudioMasterCaptureResult | null> | null;
+  /** Release minimize keep-alive for this capture session. */
+  releaseKeepAlive: () => void;
 };
 
 type ReplayThinkingPresentation = {
@@ -228,6 +230,69 @@ export function primeReplayAudioMasterCapture(): void {
   void prismAudioContext()?.resume().catch(() => undefined);
 }
 
+/** Nudge the shared mixer awake if the browser suspended it while minimized. */
+export function ensurePrismAudioContextRunning(): void {
+  const context = prismAudioContext();
+  if (!context || context.state !== "suspended") return;
+  void context.resume().catch(() => undefined);
+}
+
+let audioContextKeepAliveOwners = 0;
+let releaseAudioContextKeepAliveListeners: (() => void) | null = null;
+let audioContextKeepAliveInterval: number | null = null;
+
+/**
+ * Keep the shared AudioContext running across minimize/hide for live sessions
+ * and faithful audio masters. Ref-counted; safe to nest with capture.
+ */
+export function acquirePrismAudioContextKeepAlive(): () => void {
+  audioContextKeepAliveOwners += 1;
+  if (
+    !releaseAudioContextKeepAliveListeners &&
+    typeof document !== "undefined" &&
+    typeof window !== "undefined"
+  ) {
+    const bump = (): void => ensurePrismAudioContextRunning();
+    const handleVisibility = (): void => {
+      bump();
+    };
+    document.addEventListener("visibilitychange", handleVisibility);
+    window.addEventListener("focus", handleVisibility);
+    window.addEventListener("pageshow", handleVisibility);
+    // Desktop may allow resume while hidden; retry briefly if OS suspended us.
+    audioContextKeepAliveInterval = window.setInterval(bump, 2_000);
+    releaseAudioContextKeepAliveListeners = () => {
+      document.removeEventListener("visibilitychange", handleVisibility);
+      window.removeEventListener("focus", handleVisibility);
+      window.removeEventListener("pageshow", handleVisibility);
+      if (audioContextKeepAliveInterval !== null) {
+        window.clearInterval(audioContextKeepAliveInterval);
+        audioContextKeepAliveInterval = null;
+      }
+    };
+    bump();
+  }
+  let released = false;
+  return () => {
+    if (released) return;
+    released = true;
+    audioContextKeepAliveOwners = Math.max(0, audioContextKeepAliveOwners - 1);
+    if (audioContextKeepAliveOwners > 0) return;
+    releaseAudioContextKeepAliveListeners?.();
+    releaseAudioContextKeepAliveListeners = null;
+  };
+}
+
+export function resetPrismAudioContextKeepAliveForTests(): void {
+  audioContextKeepAliveOwners = 0;
+  releaseAudioContextKeepAliveListeners?.();
+  releaseAudioContextKeepAliveListeners = null;
+  if (audioContextKeepAliveInterval !== null) {
+    clearInterval(audioContextKeepAliveInterval);
+    audioContextKeepAliveInterval = null;
+  }
+}
+
 export function cancelPrimedReplayAudioMasterCapture(): void {
   // The shared mixer is session-neutral and may still own live ambience.
 }
@@ -249,6 +314,7 @@ export async function startReplayAudioMasterCapture(
   const context = prismAudioContext();
   const output = worldOutputForSharedContext();
   if (!context || !output) return false;
+  const releaseKeepAlive = acquirePrismAudioContextKeepAlive();
   try {
     const destination = context.createMediaStreamDestination();
     const recorderMimeType = mimeType;
@@ -280,6 +346,7 @@ export async function startReplayAudioMasterCapture(
         : {}),
       thinkingByParticipant: new Map(),
       stopPromise: null,
+      releaseKeepAlive,
     };
     attachRecorderDataHandler(capture, recorder);
     activeCapture = capture;
@@ -299,6 +366,7 @@ export async function startReplayAudioMasterCapture(
     }
     return true;
   } catch {
+    releaseKeepAlive();
     if (activeCapture?.sourceId === normalizedSourceId) activeCapture = null;
     try {
       output.disconnect();
@@ -785,6 +853,7 @@ export function stopReplayAudioMasterCapture(
       if (settled) return;
       settled = true;
       if (activeCapture === capture) activeCapture = null;
+      capture.releaseKeepAlive();
       try {
         sharedWorldOutput?.disconnect(capture.destination);
       } catch {

@@ -746,3 +746,27 @@ test("all in-world fallback lanes enter the shared mixer while UI earcons remain
     /prismAudioOutputNode|routeAudioElementToPrismOutput/u,
   );
 });
+
+test("keeps the shared AudioContext awake across minimize for capture and living sessions", () => {
+  const source = readFileSync(
+    new URL("replayAudioMasterCapture.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(source, /export function ensurePrismAudioContextRunning/u);
+  assert.match(source, /export function acquirePrismAudioContextKeepAlive/u);
+  assert.match(source, /visibilitychange/u);
+  assert.match(
+    source,
+    /const releaseKeepAlive = acquirePrismAudioContextKeepAlive\(\)/u,
+  );
+  assert.match(source, /capture\.releaseKeepAlive\(\)/u);
+
+  const suspendSource = readFileSync(
+    new URL("prismPresentationSuspend.ts", import.meta.url),
+    "utf8",
+  );
+  assert.match(
+    suspendSource,
+    /acquirePrismAudioContextKeepAlive\(\)/u,
+  );
+});

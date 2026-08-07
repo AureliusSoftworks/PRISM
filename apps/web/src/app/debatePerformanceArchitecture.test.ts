@@ -106,6 +106,7 @@ test("audience materials throttle without removing semantic reactions", () => {
   assert.match(debateSource, /usePrismPresentationSuspended/u);
   assert.match(debateSource, /usePrismAppAwayFromUser/u);
   assert.match(debateSource, /waitWhilePrismPresentationSuspended/u);
+  assert.match(debateSource, /acquirePrismLivingSession\("debate"/u);
   assert.match(debateSource, /spectatorWatchPresentationCompleteRef/u);
   assert.match(
     debateSource,
@@ -113,7 +114,7 @@ test("audience materials throttle without removing semantic reactions", () => {
   );
   assert.match(
     debateSource,
-    /Leaving the app must recess/u,
+    /acquirePrismLivingSession so ordinary minimize keeps audio/u,
   );
   assert.doesNotMatch(
     debateSource,

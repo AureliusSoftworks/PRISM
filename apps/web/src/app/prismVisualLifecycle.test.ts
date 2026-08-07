@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { PrismVisualLifecycleController } from "./prismVisualLifecycle.ts";
 
 describe("PRISM visual lifecycle", () => {
-  it("keeps ordinary blur in the foreground while still tracking focus", () => {
+  it("suspends ordinary blur so thumbnails and background spaces freeze", () => {
     const controller = new PrismVisualLifecycleController({
       hidden: false,
       focused: true,
@@ -12,7 +12,7 @@ describe("PRISM visual lifecycle", () => {
     assert.equal(controller.snapshot.lifecycle, "foreground");
 
     const blurred = controller.dispatch({ type: "blur" });
-    assert.equal(blurred.lifecycle, "foreground");
+    assert.equal(blurred.lifecycle, "suspended");
     assert.equal(blurred.focused, false);
     assert.equal(blurred.visible, true);
 
@@ -21,7 +21,7 @@ describe("PRISM visual lifecycle", () => {
     assert.equal(focused.focused, true);
   });
 
-  it("suspends on hidden, pagehide, and system pause, then restores without focus gating", () => {
+  it("suspends on hidden, pagehide, and system pause, then restores with focus", () => {
     const controller = new PrismVisualLifecycleController({
       hidden: false,
       focused: true,
@@ -39,7 +39,7 @@ describe("PRISM visual lifecycle", () => {
         hidden: false,
         focused: false,
       }).lifecycle,
-      "foreground",
+      "suspended",
     );
     assert.equal(controller.dispatch({ type: "pagehide" }).lifecycle, "suspended");
     assert.equal(
@@ -87,13 +87,13 @@ describe("PRISM visual lifecycle", () => {
     assert.equal(resumed.systemPaused, false);
   });
 
-  it("can stay foreground while unfocused when the document remains visible", () => {
+  it("starts suspended when constructed without focus", () => {
     const controller = new PrismVisualLifecycleController({
       hidden: false,
       focused: false,
       reducedMotion: false,
     });
-    assert.equal(controller.snapshot.lifecycle, "foreground");
+    assert.equal(controller.snapshot.lifecycle, "suspended");
     assert.equal(controller.snapshot.focused, false);
   });
 });

@@ -27,11 +27,14 @@ export function resolvePrismVisualLifecycle(options: {
   pageHidden: boolean;
   systemPaused?: boolean;
 }): PrismVisualLifecycle {
-  // Focus is tracked for interaction cleanup, but an unfocused-yet-visible
-  // window must keep rendering and running live clocks. Only true hiding,
-  // pagehide, or an explicit system pause may suspend expensive visuals.
-  void options.focused;
-  return options.hidden || options.pageHidden || options.systemPaused
+  // Expensive visuals sleep whenever the window is not the player's focus —
+  // Mission Control thumbnails and background spaces should freeze. Live
+  // audio/orchestration continues via acquirePrismLivingSession; presentation
+  // soft-pause ignores visual suspend while a live session is claimed.
+  return options.hidden ||
+    options.pageHidden ||
+    options.systemPaused ||
+    !options.focused
     ? "suspended"
     : "foreground";
 }
