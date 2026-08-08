@@ -25366,6 +25366,16 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/assets/storage", async (ctx) => {
       const userId = requireAuth(ctx);
       reconcileAssetCleanupRecoveryForUser(db, userId);
+      synchronizeImageAssetCatalog(db, userId);
+      // Best-effort automatic cold migration for a few eligible abandoned sets.
+      const coldCandidates = previewSmartTidyCandidates(db, userId, { limit: 8 });
+      for (const setId of coldCandidates.assetSetIds.slice(0, 3)) {
+        try {
+          await migrateImageAssetSetToCold(db, userId, setId);
+        } catch {
+          // Eligibility or in-use races are expected; skip.
+        }
+      }
       json(ctx.res, 200, {
         ok: true,
         storage: imageAssetStorageSummary(db, userId),
@@ -25424,6 +25434,25 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       }
+    }),
+    route("POST", "/api/assets/:id/smart-tags", async (ctx) => {
+      const userId = requireAuth(ctx);
+      synchronizeImageAssetCatalog(db, userId);
+      const asset = getImageAssetSet(db, userId, ctx.params.id);
+      if (!asset) throw new HttpError(404, "That asset is unavailable.");
+      const primary = asset.members[0];
+      const { generateSmartAutomaticTags, applyAutomaticTagsToSet } =
+        await import("./image-asset-smart-memory.ts");
+      const tags = await generateSmartAutomaticTags({
+        kind: asset.kind,
+        title: asset.title,
+        prompt: primary?.prompt ?? asset.title,
+        revisedPrompt: primary?.revisedPrompt ?? null,
+        extra: asset.automaticTags,
+      });
+      applyAutomaticTagsToSet(db, userId, asset.id, tags);
+      const refreshed = getImageAssetSet(db, userId, asset.id);
+      json(ctx.res, 200, { ok: true, asset: refreshed, tags });
     }),
     route("POST", "/api/assets/:id/compress", async (ctx) => {
       const userId = requireAuth(ctx);

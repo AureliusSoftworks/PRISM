@@ -314,7 +314,10 @@ export function quarantineGeneratedImageFiles(
       thumbWebpRelativePathFromPngRelativePath(primaryRelativePath),
     ];
     try {
-      related.push(buildGeneratedImageCompressUndoRelativePath(primaryRelativePath));
+      const undoRel = buildGeneratedImageCompressUndoRelativePath(primaryRelativePath);
+      if (existsSync(resolveAbsoluteUnderDataRoot(undoRel))) {
+        related.push(undoRel);
+      }
     } catch {
       // Primary extension already validated by thumb helper above.
     }

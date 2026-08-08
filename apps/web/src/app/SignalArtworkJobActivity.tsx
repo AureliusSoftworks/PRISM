@@ -9,6 +9,7 @@ import {
   signalArtworkJobIsActive,
   type SignalArtworkJobSnapshot,
 } from "./signalArtworkJob";
+import { registerPrismSoftSynthesisJobs } from "./prismSoftSynthesisUi.ts";
 import styles from "./signalArtworkJobActivity.module.css";
 
 type SignalArtworkJobActivityProps = {
@@ -16,6 +17,18 @@ type SignalArtworkJobActivityProps = {
   theme: "light" | "dark";
   onOpenSignal: () => void;
 };
+
+function isActiveArtworkAssetStatus(
+  status: SignalArtworkJobSnapshot["assets"][number]["status"],
+): boolean {
+  return status === "generating" || status === "attaching";
+}
+
+function isQueuedArtworkAssetStatus(
+  status: SignalArtworkJobSnapshot["assets"][number]["status"],
+): boolean {
+  return status === "waiting" || status === "waiting-for-night";
+}
 
 export function SignalArtworkJobActivity({
   request,
@@ -65,6 +78,29 @@ export function SignalArtworkJobActivity({
       })) ?? [],
     [job],
   );
+
+  const activeAssets = useMemo(
+    () => assetSummary.filter((asset) => isActiveArtworkAssetStatus(asset.status)),
+    [assetSummary],
+  );
+  const queuedAssets = useMemo(
+    () => assetSummary.filter((asset) => isQueuedArtworkAssetStatus(asset.status)),
+    [assetSummary],
+  );
+
+  const softJobCount = useMemo(() => {
+    if (!job) return 0;
+    if (signalArtworkJobIsActive(job)) {
+      return Math.max(1, activeAssets.length + queuedAssets.length);
+    }
+    // Finished card still occupies soft UI until dismissed.
+    return 1;
+  }, [activeAssets.length, job, queuedAssets.length]);
+
+  useEffect(() => {
+    registerPrismSoftSynthesisJobs("signal-artwork", softJobCount);
+    return () => registerPrismSoftSynthesisJobs("signal-artwork", 0);
+  }, [softJobCount]);
 
   if (!job) return null;
   const active = signalArtworkJobIsActive(job);
@@ -121,7 +157,7 @@ export function SignalArtworkJobActivity({
           : "Artwork finished. Open Signal or dismiss this card."
       }
       cancelLabel="Cancel artwork synthesis"
-      cancelConfirmTitle="Stop synthesizing Signal artwork?"
+      cancelConfirmTitle="Cancel synthesizing Signal artwork?"
       cancelConfirmDetail="Finished assets stay. Anything still rendering will stop."
       onCancel={
         active
@@ -146,26 +182,81 @@ export function SignalArtworkJobActivity({
           </>
         )
       }
+      activeChildren={
+        active && activeAssets.length > 0 ? (
+          <ul
+            className={styles.assets}
+            data-signal-artwork-activity="true"
+            data-job-section-list="active"
+            aria-label={`Active Signal artwork for ${job.showName}`}
+          >
+            {activeAssets.map((asset) => (
+              <li key={asset.kind} data-status={asset.status}>
+                <span aria-hidden="true" />
+                <b>{asset.label}</b>
+                <small>
+                  {asset.status === "attaching"
+                    ? "Saving to show"
+                    : asset.status.replaceAll("-", " ")}
+                </small>
+                <button
+                  type="button"
+                  data-soft-job-action="stop"
+                  onClick={() => void cancel()}
+                  disabled={actionBusy || job.status === "cancelling"}
+                  aria-label={`Stop synthesizing ${asset.label}`}
+                >
+                  Stop
+                </button>
+              </li>
+            ))}
+          </ul>
+        ) : undefined
+      }
+      queuedChildren={
+        active && queuedAssets.length > 0 ? (
+          <ul
+            className={styles.assets}
+            data-signal-artwork-activity="true"
+            data-job-section-list="queued"
+            aria-label={`Queued Signal artwork for ${job.showName}`}
+          >
+            {queuedAssets.map((asset) => (
+              <li key={asset.kind} data-status={asset.status}>
+                <span aria-hidden="true" />
+                <b>{asset.label}</b>
+                <small>
+                  {asset.status === "waiting-for-night"
+                    ? "Waiting for Dark studio"
+                    : "Queued"}
+                </small>
+              </li>
+            ))}
+          </ul>
+        ) : undefined
+      }
     >
-      <ul
-        className={styles.assets}
-        data-signal-artwork-activity="true"
-        aria-label={`Signal artwork for ${job.showName}`}
-      >
-        {assetSummary.map((asset) => (
-          <li key={asset.kind} data-status={asset.status}>
-            <span aria-hidden="true" />
-            <b>{asset.label}</b>
-            <small>
-              {asset.status === "waiting-for-night"
-                ? "Waiting for Dark studio"
-                : asset.status === "attaching"
-                  ? "Saving to show"
-                  : asset.status.replaceAll("-", " ")}
-            </small>
-          </li>
-        ))}
-      </ul>
+      {!active ? (
+        <ul
+          className={styles.assets}
+          data-signal-artwork-activity="true"
+          aria-label={`Signal artwork for ${job.showName}`}
+        >
+          {assetSummary.map((asset) => (
+            <li key={asset.kind} data-status={asset.status}>
+              <span aria-hidden="true" />
+              <b>{asset.label}</b>
+              <small>
+                {asset.status === "waiting-for-night"
+                  ? "Waiting for Dark studio"
+                  : asset.status === "attaching"
+                    ? "Saving to show"
+                    : asset.status.replaceAll("-", " ")}
+              </small>
+            </li>
+          ))}
+        </ul>
+      ) : null}
       {job.errors.length > 0 ? (
         <p className={styles.error} role="alert">
           {job.errors.at(-1)?.message}

@@ -85,7 +85,7 @@ const KIND_SEED_TAGS: Record<ImageAssetKind, readonly string[]> = {
   slate_cover: ["slate", "cover", "story"],
   slate_visual_study: ["slate", "visual", "study"],
   zen_atmosphere: ["zen", "atmosphere", "wallpaper"],
-  home_atmosphere: ["home", "atmosphere", "hub"],
+  home_atmosphere: ["chat", "atmosphere", "companion"],
   group_room_atmosphere: ["group", "room", "atmosphere"],
 };
 
@@ -560,7 +560,7 @@ export function previewSmartTidyCandidates(
   const limit = Math.min(500, Math.max(1, options?.limit ?? 200));
   const rows = db
     .prepare(
-      `SELECT id, title, created_at, last_accessed_at, reuse_score, access_count, storage_tier
+      `SELECT id, title, kind, created_at, last_accessed_at, reuse_score, access_count, storage_tier
          FROM image_asset_sets
         WHERE user_id = ?
         ORDER BY created_at ASC
@@ -569,6 +569,7 @@ export function previewSmartTidyCandidates(
     .all(userId, limit * 4) as Array<{
     id: string;
     title: string;
+    kind: string;
     created_at: string;
     last_accessed_at: string | null;
     reuse_score: number | bigint;
@@ -581,6 +582,11 @@ export function previewSmartTidyCandidates(
     const reuseScore = Number(row.reuse_score);
     if (reuseScore >= IMAGE_ASSET_REUSE_PROTECT_SCORE) {
       protectedHighReuseCount += 1;
+      continue;
+    }
+    // Chat / Prism session atmospheres have their own retention cadence;
+    // Smart tidy must not treat them as abandoned general junk.
+    if (row.kind === "home_atmosphere") {
       continue;
     }
     const createdMs = Date.parse(row.created_at);

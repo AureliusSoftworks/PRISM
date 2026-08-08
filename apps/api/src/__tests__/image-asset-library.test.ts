@@ -264,7 +264,10 @@ describe("local image asset catalog", () => {
         (error: unknown) => {
           assert.ok(error instanceof ImageAssetLibraryError);
           assert.equal(error.code, "in_use");
-          assert.equal(error.usage[0]?.label, "Current Home atmosphere");
+          assert.equal(
+            error.usage[0]?.label,
+            "Current Prism session atmosphere",
+          );
           assert.equal(error.usage[0]?.href, "/?view=chat");
           return true;
         },
@@ -304,7 +307,7 @@ describe("local image asset catalog", () => {
         query: "Leia",
       }).assets[0]!;
       assert.equal(after.id, before.id);
-      assert.equal(after.title, "Home Atmosphere");
+      assert.equal(after.title, "Prism Session Atmosphere");
       assert.equal(after.usageCount, 1);
     } finally {
       db.close();

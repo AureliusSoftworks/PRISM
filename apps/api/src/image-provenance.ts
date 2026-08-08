@@ -9,6 +9,7 @@ export type ImageOrigin =
   | "bot_group_room"
   | "bot_group_room_import"
   | "hub_atmosphere"
+  | "chat_atmosphere"
   | "coffee_bar"
   | "zen_wallpaper"
   | "bot_profile_picture";
@@ -116,6 +117,7 @@ export function imageOriginForGenerate(args: {
 }): ImageOrigin {
   if (args.purpose === "group-room-wallpaper") return "bot_group_room";
   if (args.purpose === "hub_atmosphere") return "hub_atmosphere";
+  if (args.purpose === "chat_atmosphere") return "chat_atmosphere";
   if (args.purpose === "bot_profile_picture") return "bot_profile_picture";
   return args.requestedOrigin === "botcast" ? "botcast" : "images_panel";
 }

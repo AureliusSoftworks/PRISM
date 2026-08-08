@@ -77,7 +77,7 @@ describe("unused image asset cleanup", () => {
     assert.match(modalSlice, /Unused asset preview/u);
     assert.match(
       modalSlice,
-      /createPortal\([\s\S]*data-asset-cleanup-preview="true"[\s\S]*document\.body/u,
+      /createPortal\([\s\S]*imageCleanupModalBackdrop[\s\S]*themeClass[\s\S]*data-asset-cleanup-preview="true"[\s\S]*document\.body/u,
     );
     assert.match(modalSlice, /role="alertdialog"/u);
     assert.match(modalSlice, /ref=\{imageCleanupConfirmCancelRef\}/u);
@@ -93,7 +93,11 @@ describe("unused image asset cleanup", () => {
       pageSource,
       /\[role="dialog"\]\[aria-modal="true"\], \[role="alertdialog"\]\[aria-modal="true"\]/u,
     );
-    assert.match(modalSlice, /Permanently delete selected/u);
+    assert.match(cssSource, /\.imageCleanupModalBackdrop\s*\{[\s\S]*z-index:\s*4200/u);
+    assert.match(
+      cssSource,
+      /\.imageCleanupPreviewPanel\s*\{[\s\S]*background:\s*var\(--bg-elevated/u,
+    );
     assert.match(modalSlice, /This cannot be undone/u);
     assert.match(modalSlice, /candidateStorageBytes/u);
     assert.match(modalSlice, /candidate\.storageBytes/u);

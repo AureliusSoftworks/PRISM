@@ -38,8 +38,8 @@ Frozen thresholds for Phase 2 implementation (Hybrid H + prompt-path only).
 - [x] Prompt-attachment helper `encodePromptAttachmentRaster`
 - [x] Compress + Undo UI beside Magenta
 - [x] Cold hot/cold tiers + Smart tidy
-- [ ] Call `encodePromptAttachmentRaster` on Debate/Signal vision attach paths where full PNG is currently inlined
-- [ ] Optional replay bitrate clamp only if already expressible without new deps
+- [x] Call `encodePromptAttachmentRaster` on Signal source-edit attach paths
+- [ ] Optional replay bitrate clamp only if already expressible without new deps (deferred follow-up)
 
 ## Privacy
 

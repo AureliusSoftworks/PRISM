@@ -9,10 +9,26 @@
 
 .assets li {
   display: grid;
-  grid-template-columns: 8px 1fr auto;
+  grid-template-columns: 8px minmax(0, 1fr) auto auto;
   align-items: center;
   gap: 8px;
   font-size: 0.75rem;
+}
+
+.assets li > button {
+  min-height: 28px;
+  border: 1px solid rgba(255, 255, 255, 0.14);
+  border-radius: 999px;
+  padding: 0 10px;
+  color: #f4f1ff;
+  background: color-mix(in srgb, #9a6cff 18%, rgba(18, 19, 31, 0.92));
+  font: 750 0.68rem/1 system-ui, sans-serif;
+  cursor: pointer;
+}
+
+.assets li > button:disabled {
+  cursor: wait;
+  opacity: 0.55;
 }
 
 .assets li > span {

@@ -4,6 +4,9 @@ import {
   imageAssetKindForImage,
   imageAssetMemberRoleForImage,
   isImageAssetKind,
+  isImageAssetStorageTier,
+  IMAGE_ASSET_SMART_TAG_MAX,
+  IMAGE_ASSET_SMART_TAG_MIN,
 } from "./imageAssets.ts";
 
 describe("image asset classification", () => {
@@ -63,5 +66,10 @@ describe("image asset classification", () => {
     assert.equal(imageAssetMemberRoleForImage({ purpose: "signal_logo" }), "primary");
     assert.equal(isImageAssetKind("signal_studio"), true);
     assert.equal(isImageAssetKind("signal_studio_day"), false);
+    assert.equal(isImageAssetStorageTier("hot"), true);
+    assert.equal(isImageAssetStorageTier("cold"), true);
+    assert.equal(isImageAssetStorageTier("warm"), false);
+    assert.equal(IMAGE_ASSET_SMART_TAG_MIN, 3);
+    assert.equal(IMAGE_ASSET_SMART_TAG_MAX, 6);
   });
 });

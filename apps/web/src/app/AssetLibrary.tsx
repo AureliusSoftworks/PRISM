@@ -132,18 +132,22 @@ function useCoarsePointer(): boolean {
   return coarse;
 }
 
-import { useViewportAssetSrc } from "./useViewportAssetSrc";
-
 function ViewportAssetThumb({
   src,
+  fallbackSrc,
   className,
   kind,
 }: {
   src: string;
+  fallbackSrc?: string | null;
   className?: string;
   kind?: string;
 }) {
-  const { src: activeSrc, imgRef } = useViewportAssetSrc(src);
+  const [failedThumb, setFailedThumb] = useState(false);
+  const preferred = failedThumb
+    ? fallbackSrc?.trim() || src
+    : src;
+  const { src: activeSrc, imgRef } = useViewportAssetSrc(preferred);
   return (
     // eslint-disable-next-line @next/next/no-img-element
     <img
@@ -151,8 +155,15 @@ function ViewportAssetThumb({
       src={activeSrc}
       alt=""
       loading="lazy"
+      decoding="async"
       className={className}
       data-asset-preview-kind={kind}
+      data-viewport-loaded={activeSrc ? "true" : "false"}
+      onError={() => {
+        if (!failedThumb && fallbackSrc?.trim() && fallbackSrc !== src) {
+          setFailedThumb(true);
+        }
+      }}
     />
   );
 }
@@ -163,8 +174,16 @@ function AssetPreview({ asset }: { asset: ImageAssetSet }) {
   if (asset.kind === "signal_studio" && light && dark) {
     return (
       <span className={styles.studioPreview} aria-hidden="true">
-        <ViewportAssetThumb src={light.thumbnailUrl} kind={asset.kind} />
-        <ViewportAssetThumb src={dark.thumbnailUrl} kind={asset.kind} />
+        <ViewportAssetThumb
+          src={light.thumbnailUrl}
+          fallbackSrc={light.url}
+          kind={asset.kind}
+        />
+        <ViewportAssetThumb
+          src={dark.thumbnailUrl}
+          fallbackSrc={dark.url}
+          kind={asset.kind}
+        />
         <small>Light</small>
         <small>Dark</small>
       </span>
@@ -172,7 +191,11 @@ function AssetPreview({ asset }: { asset: ImageAssetSet }) {
   }
   const member = primaryMember(asset);
   return member ? (
-    <ViewportAssetThumb src={member.thumbnailUrl} kind={asset.kind} />
+    <ViewportAssetThumb
+      src={member.thumbnailUrl}
+      fallbackSrc={member.url}
+      kind={asset.kind}
+    />
   ) : (
     <span className={styles.missingPreview} aria-hidden="true">◇</span>
   );
@@ -624,6 +647,13 @@ export function AssetLibraryModal({
     };
   }, [onClose]);
 
+  const replaceAsset = (asset: ImageAssetSet): void => {
+    setDetail(asset);
+    setAssets((current) =>
+      current.map((candidate) => (candidate.id === asset.id ? asset : candidate)),
+    );
+  };
+
   const openDetail = (asset: ImageAssetSet): void => {
     setDetail(asset);
     setTagDraft(asset.playerTags.join(", "));
@@ -633,13 +663,22 @@ export function AssetLibraryModal({
     window.requestAnimationFrame(() => {
       detailRef.current?.scrollTo({ top: 0 });
     });
-  };
-
-  const replaceAsset = (asset: ImageAssetSet): void => {
-    setDetail(asset);
-    setAssets((current) =>
-      current.map((candidate) => (candidate.id === asset.id ? asset : candidate)),
-    );
+    if (asset.automaticTags.length < 3) {
+      void (async () => {
+        try {
+          const response = await readJson<{ ok: boolean; asset: ImageAssetSet }>(
+            await fetch(`/api/assets/${encodeURIComponent(asset.id)}/smart-tags`, {
+              method: "POST",
+              credentials: "include",
+              body: "{}",
+            }),
+          );
+          replaceAsset(response.asset);
+        } catch {
+          // Heuristic backfill is best-effort.
+        }
+      })();
+    }
   };
 
   const applyMagentaPass = async (): Promise<void> => {
@@ -1146,9 +1185,25 @@ export function AssetLibraryModal({
               <div
                 className={`${styles.tagEditor} ${sharedStyles.form} ${sharedStyles.formInModal}`}
               >
+                <div className={styles.prismTags}>
+                  <span>Prism tags</span>
+                  {detail.automaticTags.length > 0 ? (
+                    <ul>
+                      {detail.automaticTags.map((tag) => (
+                        <li key={tag}>{tag}</li>
+                      ))}
+                    </ul>
+                  ) : (
+                    <small>Prism will label this asset when a local helper is available.</small>
+                  )}
+                </div>
                 <label>
-                  <span>Tags</span>
-                  <input value={tagDraft} onChange={(event) => setTagDraft(event.currentTarget.value)} placeholder="character, project, mood" />
+                  <span>Your tags</span>
+                  <input
+                    value={tagDraft}
+                    onChange={(event) => setTagDraft(event.currentTarget.value)}
+                    placeholder="character, project, mood"
+                  />
                 </label>
                 <button
                   type="button"
@@ -1161,11 +1216,13 @@ export function AssetLibraryModal({
               {primaryMember(detail) ? (
                 <details className={styles.generationDetails}>
                   <summary>Generation details</summary>
-                  <dl className={styles.provenance}>
-                    <div><dt>Provider</dt><dd>{primaryMember(detail)!.provider}</dd></div>
-                    <div><dt>Model</dt><dd>{primaryMember(detail)!.model}</dd></div>
-                    <div><dt>Prompt</dt><dd>{primaryMember(detail)!.prompt || "Not recorded"}</dd></div>
-                  </dl>
+                  <div className={styles.generationDetailsBody}>
+                    <dl className={styles.provenance}>
+                      <div><dt>Provider</dt><dd>{primaryMember(detail)!.provider}</dd></div>
+                      <div><dt>Model</dt><dd>{primaryMember(detail)!.model}</dd></div>
+                      <div><dt>Prompt</dt><dd>{primaryMember(detail)!.prompt || "Not recorded"}</dd></div>
+                    </dl>
+                  </div>
                 </details>
               ) : null}
               {detail.status !== "ready" && detail.kind === "signal_studio" ? (

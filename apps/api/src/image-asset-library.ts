@@ -251,6 +251,7 @@ export function ensureImageAssetLibrarySchema(db: DatabaseSync): void {
     );
   `);
   const addColumnIfMissing = (
+    _database: typeof db,
     table: string,
     name: string,
     definition: string,
@@ -498,9 +499,26 @@ function imageContextsForUser(
     hub_atmosphere_image_id: string | null;
   }>) {
     merge(row.hub_atmosphere_image_id, {
-      title: "Home Atmosphere",
-      tags: [row.display_name, "Home"],
-      data: { surface: "home" },
+      title: "Prism Session Atmosphere",
+      tags: [row.display_name, "Prism", "session"],
+      data: { surface: "prism" },
+    });
+  }
+  for (const row of db
+    .prepare(
+      `SELECT id, name, chat_atmosphere_image_id
+         FROM bots
+        WHERE user_id = ? AND chat_atmosphere_image_id IS NOT NULL`,
+    )
+    .all(userId) as Array<{
+    id: string;
+    name: string;
+    chat_atmosphere_image_id: string;
+  }>) {
+    merge(row.chat_atmosphere_image_id, {
+      title: `${row.name} Chat Atmosphere`,
+      tags: [row.name, "chat", "atmosphere"],
+      data: { surface: "chat", botId: row.id },
     });
   }
   for (const row of db
