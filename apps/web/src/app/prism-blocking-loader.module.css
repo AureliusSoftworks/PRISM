@@ -31,12 +31,21 @@
   cursor: wait;
 }
 
-/* Soft waits: same refract card, Signal-style bottom-right dock. */
+/* Soft waits: relocatable refract card (session position via inline left/top). */
+.softDismiss {
+  position: fixed;
+  inset: 0;
+  z-index: 759;
+  margin: 0;
+  border: 0;
+  padding: 0;
+  background: transparent;
+  cursor: default;
+}
+
 .docked {
   position: fixed;
   z-index: 760;
-  right: 22px;
-  bottom: 22px;
   width: min(390px, calc(100vw - 28px));
   pointer-events: none;
 }
@@ -49,12 +58,50 @@
   border-radius: 18px;
   padding: 18px;
   text-align: left;
+  cursor: grab;
+  touch-action: none;
 }
 
+.docked > .card[data-dragging="true"] {
+  cursor: grabbing;
+}
+
+.docked .prismOrbSlot,
 .docked .prismOrb {
   --prism-orb-size: 52px;
   justify-self: center;
   margin-bottom: 0;
+}
+
+.prismOrbSlot {
+  display: grid;
+  place-items: center;
+  width: var(--prism-orb-size, 72px);
+  height: var(--prism-orb-size, 72px);
+  min-height: var(--prism-orb-size, 72px);
+}
+
+.prismOrbSlot:not([data-orb-visible="true"]) {
+  opacity: 0;
+}
+
+.jobSections {
+  width: 100%;
+  display: grid;
+  gap: 10px;
+  margin-top: 2px;
+}
+
+.jobSection {
+  display: grid;
+  gap: 6px;
+}
+
+.jobSectionLabel {
+  color: color-mix(in srgb, var(--loader-muted) 88%, var(--prism-s));
+  font: 800 0.62rem/1 system-ui, sans-serif;
+  letter-spacing: 0.14em;
+  text-transform: uppercase;
 }
 
 .docked .eyebrow {
@@ -351,15 +398,13 @@
 
 @media (max-width: 620px) {
   .card { border-radius: 22px; padding: 28px 20px; }
+  .prismOrbSlot,
   .prismOrb { --prism-orb-size: 64px; margin-block: -4px; }
-  .docked {
-    right: 14px;
-    bottom: 14px;
-  }
   .docked > .card {
     border-radius: 16px;
     padding: 16px;
   }
+  .docked .prismOrbSlot,
   .docked .prismOrb { --prism-orb-size: 46px; margin-block: 0; }
 }
 

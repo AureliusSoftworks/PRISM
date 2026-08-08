@@ -20,8 +20,11 @@ describe("PrismBlockingLoader", () => {
     assert.match(css, /position:\s*fixed;[\s\S]{0,80}inset:\s*0/iu);
   });
 
-  it("embeds Prism without leaving the floating assistant visible", () => {
+  it("embeds Prism and flies the companion orb in before suppressing Ask Prism", () => {
     assert.match(source, /<PrismCompanionPresenceBoundary reason="blocking-loader"/u);
+    assert.match(source, /hardCompanionSuppressed/u);
+    assert.match(source, /animatePrismOrbHandoff/u);
+    assert.match(source, /data-prism-blocking-orb-slot/u);
     assert.match(source, /<PrismOrb className=\{styles\.prismOrb\}/u);
     assert.doesNotMatch(source, /styles\.prismMark|styles\.lightCore/u);
   });
@@ -48,7 +51,8 @@ describe("PrismBlockingLoader", () => {
     assert.match(source, /onCancel\?: \(\) => void/u);
     assert.match(source, /aria-label=\{cancelLabel\}/u);
     assert.match(source, /className=\{styles\.cancelButton\}/u);
-    assert.match(source, /event\.key === "Escape"[\s\S]{0,100}onCancel\?\.\(\)/u);
+    assert.match(source, /event\.key === "Escape"/u);
+    assert.match(source, /requestCancel\(\)/u);
     assert.match(source, /cancelButtonRef\.current \?\? rootRef\.current/u);
     assert.match(css, /\.cancelButton\s*\{/u);
   });
