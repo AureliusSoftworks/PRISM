@@ -186,6 +186,25 @@ test("hydrates summary from session board when gated board is empty", () => {
   assert.doesNotMatch(summary, /has not finished a round yet/u);
 });
 
+test("empty sealed case board uses silence-aware summary copy", () => {
+  const session = stubSession({
+    status: "completed",
+    stepKey: "completed",
+    formatState: {
+      format: "forum",
+      rebuttalRound: 3,
+      rebuttalRoundTarget: 3,
+      rebuttalRoundMode: "fixed",
+      rebuttalRoundRationale: "Three exchanges.",
+    },
+    caseBoard: [],
+    events: [],
+  });
+  const summary = composeDebateRoundSummary({ session, cards: [] });
+  assert.match(summary, /No claims were heard/iu);
+  assert.doesNotMatch(summary, /has not finished a round yet/u);
+});
+
 test("composes at most five summary sentences from the case board", () => {
   const cards: DebateCaseCardV1[] = Array.from({ length: 7 }, (_, index) => ({
     id: `c${index}`,

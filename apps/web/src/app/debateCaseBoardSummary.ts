@@ -8,6 +8,9 @@ const DEBATE_ROUND_SUMMARY_MAX_SENTENCES = 5;
 export const DEBATE_ROUND_SUMMARY_EMPTY =
   "The Debate has not finished a round yet. Claims will collect here once the first exchange closes.";
 
+export const DEBATE_ROUND_SUMMARY_NO_CLAIMS =
+  "No claims were heard. The Living Case Board stayed empty, so there is nothing to summarize yet.";
+
 /**
  * Stable round marker used to freeze the bottom Summary module between
  * rounds (not after every advocate turn).
@@ -108,7 +111,14 @@ export function composeDebateRoundSummary(input: {
 }): string {
   const cards = debateCaseBoardChronological(input.session, input.cards);
   if (cards.length === 0) {
-    return DEBATE_ROUND_SUMMARY_EMPTY;
+    const roundKey = debateCaseBoardRoundKey(input.session);
+    const sealedOrPastOpening =
+      input.session.status === "completed" ||
+      input.session.stepKey === "completed" ||
+      debateRoundSummaryShouldHydrate(roundKey);
+    return sealedOrPastOpening
+      ? DEBATE_ROUND_SUMMARY_NO_CLAIMS
+      : DEBATE_ROUND_SUMMARY_EMPTY;
   }
 
   const forLabel = input.session.motion.forSide.label.trim() || "For";

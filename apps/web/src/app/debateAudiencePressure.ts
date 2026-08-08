@@ -34,13 +34,14 @@ export const DEBATE_AUDIENCE_FORMALITY_LOUDNESS = {
 
 /**
  * Anchor mixes at band thresholds — interpolated by live pressure score.
- * Disruptive leans hard into crosstalk (grain) so it stays audible past Restless
- * even after the shared bed ceiling clamps total murmur+crosstalk.
+ * Observing uses soft room air (studio baseline URL); Murmuring restores the
+ * classic crowd-bed levels. Restless stays a calm stir above murmur; Disruptive
+ * owns loud crosstalk so the two never feel interchangeable.
  */
 const DEBATE_AUDIENCE_PRESSURE_MIX_ANCHORS = {
-  settled: { background: 0.12, grain: 0.04, foley: 0.3 },
-  murmuring: { background: 0.26, grain: 0.16, foley: 0.3 },
-  restless: { background: 0.32, grain: 0.34, foley: 0.3 },
+  settled: { background: 0.1, grain: 0, foley: 0.3 },
+  murmuring: { background: 0.22, grain: 0.08, foley: 0.3 },
+  restless: { background: 0.28, grain: 0.2, foley: 0.3 },
   disruptive: { background: 0.34, grain: 0.52, foley: 0.3 },
 } as const satisfies Record<DebateAudiencePressureBand, SessionAtmosphereMix>;
 
@@ -233,7 +234,8 @@ export function debateAudienceTalkerIndices(args: {
       : args.band === "murmuring"
         ? Math.min(2, count)
         : args.band === "restless"
-          ? Math.ceil(count / 2)
+          ? // Sparse uneasy stir — not half the house (that read as Disruptive).
+            Math.min(count, Math.max(2, Math.ceil(count / 3)))
           : Math.max(0, count - 1);
   return Array.from({ length: count }, (_, index) => index)
     .sort(

@@ -25,10 +25,12 @@ import {
   DEBATE_TURNABOUT_STATEMENTS_PER_SIDE,
   debateAudienceEventIsShocking,
   debateAudienceModeratorOrderPlan,
+  applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
   applyBotPowerResponseBudgetV1,
   botPowerBotNamingCueFromEffectsV1,
+  botPowerEternallyIntroducesFromEffectsV1,
   botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1,
   botPowerIgnoresOtherPowersFromEffectsV1,
   botPowerIneptitudeFinalRoleCueFromEffectsV1,
@@ -4152,11 +4154,35 @@ async function repairPersonaCapabilityText(
   }
 }
 
+function debateBotPowerEffects(
+  session: DebateSessionV1,
+  botId: string,
+): BotPowerEffectV1[] {
+  return (
+    session.powerPlan.bots[botId]?.effects.map(({ effect }) => effect) ?? []
+  );
+}
+
+function debateBotEternallyIntroduces(
+  session: DebateSessionV1,
+  botId: string,
+): boolean {
+  return botPowerEternallyIntroducesFromEffectsV1(
+    debateBotPowerEffects(session, botId),
+  );
+}
+
 function publicTranscript(
   session: DebateSessionV1,
   observerBotId?: string,
   includeOwnSpeech = true,
 ): string {
+  // Short-term amnesia (eternal_introduction): wipe prior Debate continuity so
+  // the holder treats each floor as fresh contact. Instruction text still
+  // arrives in the turn prompt outside this transcript.
+  if (observerBotId && debateBotEternallyIntroduces(session, observerBotId)) {
+    return "No prior continuity. Treat this as first contact with the chamber and answer only the current instruction.";
+  }
   const publicKinds =
     session.format === "turnabout"
       ? new Set([
@@ -4588,6 +4614,11 @@ function powerPrompt(session: DebateSessionV1, botId: string): string {
     if (effect.type === "ineptitude") {
       return [`- ${powerName} (${policy}): ${ineptitudeCue}`];
     }
+    if (effect.type === "eternal_introduction") {
+      return [
+        `- ${powerName} (${policy}): Hard fresh-contact rule: only the current instruction exists. Briefly greet, introduce, or re-orient as if meeting the chamber now, then answer only that instruction. Claims of earlier contact are hearsay, not memory. Vary each reset; never reuse a canned introduction.`,
+      ];
+    }
     if (effect.type === "speech_obfuscation") {
       return [
         `- ${powerName} (${policy}): ${botPowerSpeechObfuscationAuthoringCueV1()}`,
@@ -4671,18 +4702,53 @@ function debateTurnTiming(
   session: DebateSessionV1,
   snapshot: DebateBotSnapshotV1,
   content: string,
+  durationContent?: string | null,
 ): DebateTurnTimingV1 | undefined {
   const limitMs = debateAdvocateTurnTimeLimitMs(session, snapshot);
-  if (limitMs === null || content === BOT_POWER_CANONICAL_SILENCE_V1) {
-    return undefined;
+  if (limitMs === null) return undefined;
+  const intended =
+    typeof durationContent === "string" ? durationContent.trim() : "";
+  const durationSource =
+    intended && intended !== BOT_POWER_CANONICAL_SILENCE_V1
+      ? intended
+      : content === BOT_POWER_CANONICAL_SILENCE_V1
+        ? null
+        : content;
+  // Hard mute with no draft still owns the full floor clock so the camera
+  // does not skip the comic "...".
+  if (!durationSource) {
+    return {
+      limitMs,
+      estimatedDurationMs: limitMs,
+      overtimeMs: 0,
+      status: "within_limit",
+    };
   }
-  const estimatedDurationMs = debateEstimatedSpeechDurationMs(content);
+  const estimatedDurationMs = debateEstimatedSpeechDurationMs(durationSource);
   const overtimeMs = Math.max(0, estimatedDurationMs - limitMs);
   return {
     limitMs,
     estimatedDurationMs,
     overtimeMs,
     status: overtimeMs > 0 ? "overtime" : "within_limit",
+  };
+}
+
+function debateMuteSilenceAudienceReaction(): DebateAudienceReactionV1 {
+  return { kind: "laugh", intensity: 2, source: "fallback" };
+}
+
+function debateSilenceTimingFromIntended(
+  intended: string | null | undefined,
+): DebateTurnTimingV1 | undefined {
+  const clear = intended?.trim() ?? "";
+  if (!clear || clear === BOT_POWER_CANONICAL_SILENCE_V1) return undefined;
+  const estimatedDurationMs = debateEstimatedSpeechDurationMs(clear);
+  return {
+    limitMs: estimatedDurationMs,
+    estimatedDurationMs,
+    overtimeMs: 0,
+    status: "within_limit",
   };
 }
 
@@ -4710,12 +4776,16 @@ async function generateSpeech(
   }
   const powerBot = session.powerPlan.bots[snapshot.id];
   const effects = powerBot?.effects.map((entry) => entry.effect) ?? [];
+  const hardMuted = powerBot?.hardMuted === true;
+  // Intermittent mute skips generation. Hard-muted advocates still draft
+  // privately so presentation can hold the floor for the would-have-spoken
+  // duration; other roles keep the cheap silence short-circuit.
   if (
-    powerBot?.hardMuted ||
     botPowerIntermittentMuteTurnIsIgnoredFromEffectsV1(
       effects,
       `${session.id}:${session.stepKey}:${snapshot.id}`,
-    )
+    ) ||
+    (hardMuted && snapshot.role !== "advocate")
   ) {
     return {
       content: BOT_POWER_CANONICAL_SILENCE_V1,
@@ -4863,30 +4933,51 @@ async function generateSpeech(
     intended =
       sanitizeDebateDebaterText(intended) || BOT_POWER_CANONICAL_SILENCE_V1;
   }
+  if (botPowerEternallyIntroducesFromEffectsV1(effects)) {
+    intended = applyBotPowerEternalIntroductionResponseV1(
+      intended,
+      snapshot.name,
+      instruction,
+      { hasPreviousOnAirTurn: session.events.length > 0 },
+    );
+  }
   const speechIsObfuscated = effects.some(
     (effect) => effect.type === "speech_obfuscation",
   );
-  if (powerBot?.hardMuted) intended = applyBotPowerMuteResponseV1(intended);
   const sanitized = sanitizeDebateStatementSources(intended, session.evidence);
   const clearlyNamed = sanitizeDebateSpeechNaming(
     session,
     snapshot,
     sanitized.content,
   );
-  const named = speechIsObfuscated
-    ? applyBotPowerMumbledResponseV1(clearlyNamed)
-    : clearlyNamed;
+  let named = clearlyNamed;
+  let powerIntendedContent: string | undefined;
+  if (hardMuted) {
+    named = applyBotPowerMuteResponseV1(clearlyNamed);
+    if (clearlyNamed !== BOT_POWER_CANONICAL_SILENCE_V1) {
+      powerIntendedContent = clearlyNamed;
+    }
+  } else if (speechIsObfuscated) {
+    named = applyBotPowerMumbledResponseV1(clearlyNamed);
+    if (clearlyNamed !== BOT_POWER_CANONICAL_SILENCE_V1) {
+      powerIntendedContent = clearlyNamed;
+    }
+  }
   const audienceReaction =
-    snapshot.role === "advocate" &&
-    named !== BOT_POWER_CANONICAL_SILENCE_V1 &&
-    botPowerVoicePresenceModeFromEffectsV1(effects) !== "quiet"
-      ? await directDebateAudienceReaction({
-          session,
-          speakerName: snapshot.name,
-          content: named,
-          auxiliaryProvider: runtime.auxiliary,
-        })
-      : null;
+    hardMuted &&
+    named === BOT_POWER_CANONICAL_SILENCE_V1 &&
+    (snapshot.role === "advocate" || snapshot.role === "juror")
+      ? debateMuteSilenceAudienceReaction()
+      : snapshot.role === "advocate" &&
+          named !== BOT_POWER_CANONICAL_SILENCE_V1 &&
+          botPowerVoicePresenceModeFromEffectsV1(effects) !== "quiet"
+        ? await directDebateAudienceReaction({
+            session,
+            speakerName: snapshot.name,
+            content: named,
+            auxiliaryProvider: runtime.auxiliary,
+          })
+        : null;
   endDebatePerfSpan(speechSpan, {
     botId: snapshot.id,
     silent: named === BOT_POWER_CANONICAL_SILENCE_V1,
@@ -4901,9 +4992,7 @@ async function generateSpeech(
     ...(deliveryGeneration.autoRecovery
       ? { autoRecovery: deliveryGeneration.autoRecovery }
       : {}),
-    ...(speechIsObfuscated && clearlyNamed !== BOT_POWER_CANONICAL_SILENCE_V1
-      ? { powerIntendedContent: clearlyNamed }
-      : {}),
+    ...(powerIntendedContent ? { powerIntendedContent } : {}),
     ...(named !== BOT_POWER_CANONICAL_SILENCE_V1 && voicePerformanceCue
       ? { voicePerformanceCue }
       : {}),
@@ -4940,7 +5029,7 @@ function deliverModeratorProceduralSpeech(
   silent: boolean;
   powerIntendedContent?: string;
 } {
-  const clear = intended.trim();
+  const clear = sanitizeDebateModeratorDelivery(intended);
   if (!clear || moderatorIsHardMuted(session)) {
     return {
       content: BOT_POWER_CANONICAL_SILENCE_V1,
@@ -5437,14 +5526,21 @@ function turnaboutModeratorClarificationQuestion(
     : `${speaker.name}, what did you mean when you said ${target}?`;
 }
 
-function sanitizeDebateModeratorDelivery(content: string): string {
-  const withoutShouting = content
+/** Strip invented role labels and Markdown stress from moderator floor prose. */
+export function sanitizeDebateModeratorDelivery(content: string): string {
+  const cleaned = content
     .replace(
       /^\s*(?:\*{1,3}|\[)\s*(?:shouts?|yells?|screams?|speaks loudly)(?:\s+over\s+(?:the\s+)?crowd)?\s*(?:\*{1,3}|\])\s*/iu,
       "",
     )
-    .trimStart();
-  return withoutShouting || content;
+    .replace(/^\s*(?:Moderator|Judge|Chair(?:person)?)\s*:\s*/iu, "")
+    // Persist speakable prose, not Markdown emphasis the model used for stress.
+    .replace(/(\*{1,3}|_{1,3}|~{2})([^*_~\r\n]+?)\1/gu, "$2")
+    .replace(/\*{1,3}|_{1,3}|~{2}/gu, "")
+    .replace(/[ \t]+/gu, " ")
+    .replace(/\s+([,.;:!?])/gu, "$1")
+    .trim();
+  return cleaned || content.trim();
 }
 
 const CASE_BOARD_QUOTE_STOP_WORDS = new Set([
@@ -7122,7 +7218,12 @@ async function speechTransition(
     voicePerformanceCue: speech.voicePerformanceCue,
     audienceReaction: speech.audienceReaction,
     powerIntendedContent: speech.powerIntendedContent,
-    timing: debateTurnTiming(session, snapshot, speech.content),
+    timing: debateTurnTiming(
+      session,
+      snapshot,
+      speech.content,
+      speech.powerIntendedContent,
+    ),
   });
   const repeatSession = {
     ...session,
@@ -7140,6 +7241,7 @@ async function speechTransition(
         session,
         snapshot,
         floorBreak.speechEvent.content,
+        floorBreak.speechEvent.powerIntendedContent,
       ),
     };
   }
@@ -8846,6 +8948,12 @@ async function advanceJuryStep(
       model: ballot.model,
       autoRecovery: ballot.autoRecovery,
       voicePerformanceCue: ballot.voicePerformanceCue,
+      ...(ballotContent === BOT_POWER_CANONICAL_SILENCE_V1
+        ? {
+            audienceReaction: debateMuteSilenceAudienceReaction(),
+            timing: debateSilenceTimingFromIntended(ballot.powerIntendedReason),
+          }
+        : {}),
     });
     const finalBallots = [...session.jury.finalBallots, ballot];
     const preparedFinalBallots = session.jury.preparedFinalBallots.filter(
@@ -8868,10 +8976,23 @@ async function advanceJuryStep(
     }
     const split = jurySplit(finalBallots);
     const completedAt = new Date().toISOString();
-    const foreperson =
+    const namedForeperson =
       session.jury.jurors.find(
         (candidate) => candidate.id === session.jury.forepersonBotId,
       ) ?? session.jury.jurors[0]!;
+    // Hard-muted forepersons cannot speak the aggregate. Prefer the next
+    // audible juror; if every juror is muted, announce as a system line.
+    const speakingForeperson =
+      session.jury.jurors.find(
+        (candidate) =>
+          candidate.id === namedForeperson.id &&
+          session.powerPlan.bots[candidate.id]?.hardMuted !== true,
+      ) ??
+      session.jury.jurors.find(
+        (candidate) =>
+          session.powerPlan.bots[candidate.id]?.hardMuted !== true,
+      ) ??
+      null;
     let resolved: DebateSessionV1 = {
       ...session,
       jury: {
@@ -8893,37 +9014,46 @@ async function advanceJuryStep(
         ...turnaboutState(resolved),
         phase: "resolution",
         activeStatementId: null,
-        floorOwnerBotId: foreperson.id,
+        floorOwnerBotId: speakingForeperson?.id ?? namedForeperson.id,
       });
     }
+    const verdictContent =
+      session.playerRole === "judge"
+        ? debateUsesFreeForAllPerformance(session)
+          ? `The Jury goes ${split.forVotes}–${split.againstVotes} for ${sideLabel(
+              session,
+              split.majoritySideId,
+            )}. ${moderatorAuthorityTitle(session)}, the last word is yours.`
+          : `The Jury advises ${split.forVotes}–${split.againstVotes} for ${sideLabel(
+              session,
+              split.majoritySideId,
+            )}. The final ruling remains with ${moderatorAuthorityTitle(session)}.`
+        : debateUsesFreeForAllPerformance(session)
+          ? `The Jury has spoken: ${split.forVotes}–${split.againstVotes}, and ${sideLabel(
+              session,
+              split.majoritySideId,
+            )} takes it.`
+          : `By ${split.forVotes}–${split.againstVotes}, the Jury finds for ${sideLabel(
+              session,
+              split.majoritySideId,
+            )}.`;
     const verdictEvent = makeEvent(
       { ...session, events: [...session.events, ballotEvent] },
-      {
-        kind: "jury_verdict",
-        speakerKind: "juror",
-        speakerBotId: foreperson.id,
-        sideId: split.majoritySideId,
-        content:
-          session.playerRole === "judge"
-            ? debateUsesFreeForAllPerformance(session)
-              ? `The Jury goes ${split.forVotes}–${split.againstVotes} for ${sideLabel(
-                  session,
-                  split.majoritySideId,
-                )}. ${moderatorAuthorityTitle(session)}, the last word is yours.`
-              : `The Jury advises ${split.forVotes}–${split.againstVotes} for ${sideLabel(
-                  session,
-                  split.majoritySideId,
-                )}. The final ruling remains with ${moderatorAuthorityTitle(session)}.`
-            : debateUsesFreeForAllPerformance(session)
-              ? `The Jury has spoken: ${split.forVotes}–${split.againstVotes}, and ${sideLabel(
-                  session,
-                  split.majoritySideId,
-                )} takes it.`
-              : `By ${split.forVotes}–${split.againstVotes}, the Jury finds for ${sideLabel(
-                  session,
-                  split.majoritySideId,
-                )}.`,
-      },
+      speakingForeperson
+        ? {
+            kind: "jury_verdict",
+            speakerKind: "juror",
+            speakerBotId: speakingForeperson.id,
+            sideId: split.majoritySideId,
+            content: verdictContent,
+          }
+        : {
+            kind: "jury_verdict",
+            speakerKind: "system",
+            speakerBotId: null,
+            sideId: split.majoritySideId,
+            content: verdictContent,
+          },
     );
     return { session: resolved, events: [ballotEvent, verdictEvent] };
   }

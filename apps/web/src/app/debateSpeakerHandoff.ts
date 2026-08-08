@@ -94,6 +94,8 @@ export function debateSpeakerHandoffPlan(args: {
   gavelLed: boolean;
   hasEvidence: boolean;
   speakerCanFoley: boolean;
+  /** Ready breathless: soft-inhale handoff Foley is suppressed; throat-clear remains. */
+  speakerBreathless?: boolean;
 }): DebateSpeakerHandoffPlan | null {
   const previousIdentity = args.previousEvent
     ? debateStageSpeakerIdentity(args.previousEvent)
@@ -113,7 +115,11 @@ export function debateSpeakerHandoffPlan(args: {
     return null;
   }
 
-  const foleyKinds = ["soft-inhale", "soft-inhale", "throat-clear"] as const;
+  const foleyKinds = (
+    args.speakerBreathless
+      ? (["throat-clear"] as const)
+      : (["soft-inhale", "soft-inhale", "throat-clear"] as const)
+  );
   const foleyKind = args.speakerCanFoley
     ? foleyKinds[
         stableHandoffIndex(

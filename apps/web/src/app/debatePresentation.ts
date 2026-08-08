@@ -8,8 +8,10 @@ import type {
 } from "@localai/shared";
 import {
   debateEstimatedSpeechDurationMs,
+  debateEventIsCanonicalSilence,
   debateEvidenceItemById,
   debateEvidenceTitleCasedForProse,
+  debateSilenceHoldDurationMs,
   debateSpectatorAwaitingFirstWatch,
 } from "@localai/shared";
 import { defaultUrlTransform } from "react-markdown";
@@ -45,8 +47,12 @@ export function debateActiveDurationLabel(activeDurationMs: number): string {
   return `~${minutes} min active`;
 }
 
-/** Delay before a finished floor line lands in Proceedings (court stenographer feel). */
-export const DEBATE_PROCEEDINGS_STENOGRAPHER_DELAY_MS = 850;
+/**
+ * Delay after a floor line begins before it opens in Proceedings (court
+ * stenographer feel). The rail then streams with the heard words — it must not
+ * wait for the whole line to finish or the transcript will lag and jump.
+ */
+export const DEBATE_PROCEEDINGS_STENOGRAPHER_DELAY_MS = 400;
 
 /**
  * Caption freeze when graceful Pause cuts a live line mid-speech. Keeps the
@@ -241,15 +247,22 @@ export function debateAdoptProceedingsCursor(
 export function debateEventSpokenLineDurationMs(
   event: Pick<
     DebateEventV1,
-    "content" | "kind" | "speakerKind" | "gavelReason"
+    | "content"
+    | "kind"
+    | "speakerKind"
+    | "gavelReason"
+    | "timing"
+    | "powerIntendedContent"
   >,
 ): number | null {
   if (
     event.speakerKind === "system" ||
-    event.kind === "silence" ||
     (event.kind === "judge_gavel" && event.gavelReason === "intervention")
   ) {
     return null;
+  }
+  if (debateEventIsCanonicalSilence(event)) {
+    return debateSilenceHoldDurationMs(event);
   }
   const durationMs = debateRevealDurationMs(event.content);
   return durationMs > 0 ? durationMs : null;

@@ -143,17 +143,19 @@ function ArchiveExhibitAssetCard(props: {
 }): React.JSX.Element {
   const { exhibit } = props.row;
   const imageUrl = exhibitImageUrl(exhibit, props.row.imageCacheKey);
+  const hasSprite = Boolean(imageUrl);
+  const synthesizeVerb = hasSprite ? "Re-synthesize" : "Synthesize";
   const synthesizeTarget = useMemo<PrismRefractMagicTarget>(
     () => ({
       id: `debate-archive-exhibit-synth:${props.sessionId}:${exhibit.id}`,
       kind: "magic",
-      label: `Re-synthesize ${exhibit.title}`,
+      label: `${synthesizeVerb} ${exhibit.title}`,
       disabled: () => props.busy || props.synthesizing,
       run: async (direction) => {
         props.onSynthesize(direction);
       },
     }),
-    [exhibit.id, exhibit.title, props],
+    [exhibit.id, exhibit.title, props, synthesizeVerb],
   );
 
   return (
@@ -173,7 +175,7 @@ function ArchiveExhibitAssetCard(props: {
         <strong>{exhibit.title}</strong>
         <p>{exhibit.observation}</p>
         <small>
-          {imageUrl
+          {hasSprite
             ? "Stage sprite attached · emoji remains the fallback"
             : "Emoji fallback · synthesize a soft sprite anytime"}
         </small>
@@ -196,10 +198,10 @@ function ArchiveExhibitAssetCard(props: {
                 type="button"
                 className={styles.archiveReuseButton}
                 disabled={props.busy}
-                aria-label={`Re-synthesize ${exhibit.title}. Wield Prism here for creative direction.`}
+                aria-label={`${synthesizeVerb} ${exhibit.title}. Wield Prism here for creative direction.`}
                 onClick={() => props.onSynthesize("")}
               >
-                Re-synthesize
+                {synthesizeVerb}
               </button>
             )}
           </PrismRefractTarget>

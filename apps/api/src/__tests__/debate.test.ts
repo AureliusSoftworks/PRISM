@@ -58,6 +58,7 @@ import {
   debateCaseBoardClaimSummary,
   debateModeratorFloorCopyViolatesUpcoming,
   debateAdvocateSpeechNearEcho,
+  sanitizeDebateModeratorDelivery,
   type DebateAiRuntime,
 } from "../debate.ts";
 import type {
@@ -372,8 +373,10 @@ class OvertimeAudienceOrderProvider extends AutomaticAudienceOrderProvider {
       text.includes("Give the Build Near Rail opening address") ||
       text.includes("Give the Build Near Rail opening argument")
     ) {
+      // Keep "wrong" so divided-reaction heat reliably clears the shock
+      // pressure floor even when event-id hash variation is negative.
       return JSON.stringify({
-        content: `That is an outrageous lie! ${Array.from(
+        content: `That is an outrageous lie, and you are completely wrong! ${Array.from(
           { length: 78 },
           (_, index) => `heated${index + 1}`,
         ).join(" ")}`,
@@ -4272,6 +4275,21 @@ describe("Debate engine", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("strips moderator role labels and Markdown emphasis from spoken floor prose", () => {
+    assert.equal(
+      sanitizeDebateModeratorDelivery(
+        "Moderator: You each have **twelve seconds** for your answer.",
+      ),
+      "You each have twelve seconds for your answer.",
+    );
+    assert.equal(
+      sanitizeDebateModeratorDelivery(
+        "*shouts over the crowd* ORDER! ORDER IN THE COURT!",
+      ),
+      "ORDER! ORDER IN THE COURT!",
+    );
   });
 
   it("lets a bot Moderator answer a shocking line with a persona-shaped order call", async () => {
@@ -8889,6 +8907,26 @@ describe("Debate engine", () => {
     } finally {
       db.close();
     }
+  });
+
+  it("wires mute silence holds, Debate amnesia wipe, and muted foreperson speech", () => {
+    const source = readFileSync(
+      fileURLToPath(new URL("../debate.ts", import.meta.url)),
+      "utf8",
+    );
+    assert.match(
+      source,
+      /No prior continuity\. Treat this as first contact with the chamber/u,
+    );
+    assert.match(source, /Hard fresh-contact rule: only the current instruction exists/u);
+    assert.match(source, /applyBotPowerEternalIntroductionResponseV1/u);
+    assert.match(source, /hardMuted && snapshot\.role !== "advocate"/u);
+    assert.match(source, /debateMuteSilenceAudienceReaction/u);
+    assert.match(source, /speakingForeperson/u);
+    assert.match(
+      source,
+      /session\.powerPlan\.bots\[candidate\.id\]\?\.hardMuted !== true/u,
+    );
   });
 
   it("starts with a hard-muted moderator and lets the advocates encounter the silence", async () => {

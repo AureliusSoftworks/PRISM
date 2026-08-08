@@ -173,15 +173,45 @@ describe("Debate audience pressure", () => {
       ...speech("sustain-2", 2),
       content: longLine,
     };
+    const third = {
+      ...speech("sustain-3", 3),
+      content: longLine,
+    };
     const plan = debateAudienceModeratorOrderPlan({
-      events: [first, second],
+      events: [first, second, third],
       formality: "free_for_all",
       playerRole: "spectator",
-      triggerEvent: second,
+      triggerEvent: third,
     });
     assert.ok(plan);
     assert.ok(plan?.reason === "sustained" || plan?.reason === "disruptive");
-    assert.ok((plan?.pressure ?? 0) >= 45);
+    assert.ok((plan?.pressure ?? 0) >= 70);
+  });
+
+  it("does not mint sustained order while the gallery is only restless", () => {
+    const longLine =
+      "Phones interrupt every lesson, and locking them away until the final bell protects attention without inventing a crisis. ".repeat(
+        3,
+      );
+    const opening = {
+      ...speech("plain-1", 1),
+      content: longLine,
+    };
+    const plan = debateAudienceModeratorOrderPlan({
+      events: [opening],
+      formality: "plainspoken",
+      playerRole: "spectator",
+      triggerEvent: opening,
+    });
+    assert.equal(plan, null);
+    const pressure = debateAudiencePressureScore({
+      events: [opening],
+      formality: "plainspoken",
+      playerRole: "spectator",
+      visibleThroughSequence: opening.sequence,
+    });
+    assert.ok(pressure >= 20);
+    assert.ok(pressure < 70);
   });
 
   it("keeps a living gallery bed under a live monologue instead of full mute", () => {
@@ -204,9 +234,42 @@ describe("Debate audience pressure", () => {
     });
     assert.ok(midLine > 0);
     assert.ok(midLine < betweenBeats);
-    assert.equal(debateAudiencePressureBand(midLine), "murmuring");
-    assert.equal(debateAudienceMonologueSilenceGate(0, "plainspoken"), 0.55);
+    // Prior unresected heat may still murmur; the duck keeps the live body quieter.
+    assert.ok(debateAudienceMonologueSilenceGate(0, "plainspoken") >= 0.4);
     assert.equal(debateAudienceMonologueSilenceGate(0, "free_for_all"), 0.72);
     assert.ok(debateAudienceMonologueSilenceGate(0.95, "plainspoken") > 0.55);
+  });
+
+  it("returns to observing after a successful call to order", () => {
+    const heated = {
+      ...speech("hot-1", 1),
+      content:
+        "An outrageous shocking scandal of corrupt fraud and disgraceful lies that should rile the gallery!",
+    };
+    const order: DebateEventV1 = {
+      ...speech("order-1", 2),
+      kind: "judge_gavel",
+      speakerKind: "moderator",
+      stepKey: "audience_order",
+      gavelReason: "audience_order",
+      content: "Order!",
+    };
+    const next = speech("calm-1", 3);
+    const afterOrder = debateAudiencePressureScore({
+      events: [heated, order],
+      formality: "plainspoken",
+      playerRole: "spectator",
+    });
+    assert.equal(afterOrder, 0);
+    assert.equal(debateAudiencePressureBand(afterOrder), "settled");
+    const earlyNext = debateAudiencePressureScore({
+      events: [heated, order, next],
+      formality: "plainspoken",
+      playerRole: "spectator",
+      activeEventId: next.id,
+      visibleCharacterCount: Math.floor(next.content.length * 0.2),
+    });
+    assert.equal(debateAudiencePressureBand(earlyNext), "settled");
+    assert.ok(earlyNext < 20);
   });
 });

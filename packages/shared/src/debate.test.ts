@@ -16,6 +16,8 @@ import {
   defaultDebateFormatStateV1,
   debateActivePresentationDurationMs,
   debateEventIsAtmosphericVocalFoley,
+  debateEventIsCanonicalSilence,
+  debateSilenceHoldDurationMs,
   debateSourceIdsFromText,
   debateEvidenceItemById,
   debateEvidenceItemCount,
@@ -252,6 +254,33 @@ test("derives active Debate duration from presented events instead of wall-clock
   assert.equal(
     debateActivePresentationDurationMs(events, "participant"),
     1_660,
+  );
+});
+
+test("mute silence holds use intended-speech duration for the comic pause", () => {
+  const silent = {
+    version: 1 as const,
+    id: "silence-1",
+    sequence: 1,
+    phase: "opening" as const,
+    stepKey: "opening_for",
+    kind: "silence" as const,
+    speakerKind: "advocate" as const,
+    speakerBotId: "for-1",
+    sideId: "for" as const,
+    content: "...",
+    powerIntendedContent:
+      "Certainly, here is my full opening argument about dignity and public health access.",
+    sourceIds: [],
+    createdAt: "2026-01-01T00:00:00.000Z",
+  } satisfies DebateEventV1;
+  assert.equal(debateEventIsCanonicalSilence(silent), true);
+  const holdMs = debateSilenceHoldDurationMs(silent);
+  assert.ok(holdMs >= 1_400);
+  assert.ok(holdMs > 900);
+  assert.equal(
+    debateActivePresentationDurationMs([silent], "spectator"),
+    holdMs,
   );
 });
 
@@ -568,6 +597,16 @@ test("keeps valid source and exhibit markers, removes invalid markers, and omits
   assert.equal(
     debateSpokenText(sanitized.content),
     "Supply improved, but the utensil is bent and this claim is unsupported.",
+  );
+  assert.equal(
+    debateSpokenText(
+      "Moderator: You each have **twelve seconds** for your answer.",
+    ),
+    "You each have twelve seconds for your answer.",
+  );
+  assert.equal(
+    debateSpokenText("The *important* point still uses single markers."),
+    "The *important* point still uses single markers.",
   );
   assert.equal(
     debateResolvedEvidenceText(sanitized.content, evidence),

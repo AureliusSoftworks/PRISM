@@ -15,6 +15,9 @@ import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type { LiveBakeArtifactV1 } from "./liveBake.js";
 import type { ModelReasoningEffortPreference } from "./reasoningEffort.js";
 
+/** Keep silence compare local so Debate unit tests need no botPower value import. */
+const DEBATE_CANONICAL_SILENCE = "..." as const;
+
 export const DEBATE_SCHEMA_VERSION = 1 as const;
 export const DEBATE_FORMAT_SCHEMA_VERSION = 1 as const;
 export const DEBATE_PLAYER_JUDGE_BOT_ID = "prism:player-judge" as const;
@@ -1894,6 +1897,11 @@ export function sanitizeDebateStatementSources(
 export function debateSpokenText(content: string): string {
   return content
     .replace(/\s*\[\[(?:source|exhibit):[^\]]+\]\]/giu, "")
+    // Unwrap Markdown emphasis so captions/TTS never speak "**twelve seconds**".
+    // Leave single * markers for voiceSpokenText stage-direction handling.
+    .replace(/(\*{2,3}|_{2,3}|~{2})([^*_~\r\n]+?)\1/gu, "$2")
+    // Models sometimes emit a script label; it is never part of the spoken floor.
+    .replace(/^\s*(?:Moderator|Judge|Chair(?:person)?)\s*:\s*/iu, "")
     .replace(/\s+/gu, " ")
     .trim();
 }
@@ -1924,10 +1932,58 @@ export function debateEstimatedSpeechDurationMs(content: string): number {
   );
 }
 
+/** Minimum cinematic hold when a hard-mute beat has no richer timing metadata. */
+export const DEBATE_MUTE_SILENCE_MIN_HOLD_MS = 1_400;
+/** Legacy fixed hold used before mute beats carried intended-speech timing. */
+export const DEBATE_MUTE_SILENCE_FALLBACK_HOLD_MS = 900;
+
+/**
+ * True when the public floor is canonical mute silence (`...`), including
+ * silence-kind events and muted ballot / verdict lines that kept kind≠silence.
+ */
+export function debateEventIsCanonicalSilence(
+  event: Pick<DebateEventV1, "kind" | "content">,
+): boolean {
+  return (
+    event.kind === "silence" ||
+    event.content.trim() === DEBATE_CANONICAL_SILENCE
+  );
+}
+
+/**
+ * Camera / clock hold for a mute silence beat: prefer saved turn timing, then
+ * the private intended draft duration, then the floor limit, then a short
+ * fallback. Intended drafts never become audible — they only size the pause.
+ */
+export function debateSilenceHoldDurationMs(
+  event: Pick<
+    DebateEventV1,
+    "kind" | "content" | "timing" | "powerIntendedContent"
+  >,
+): number {
+  const fromTiming = event.timing?.estimatedDurationMs;
+  if (typeof fromTiming === "number" && fromTiming > 0) {
+    return Math.max(DEBATE_MUTE_SILENCE_MIN_HOLD_MS, Math.round(fromTiming));
+  }
+  const intended = event.powerIntendedContent?.trim() ?? "";
+  if (intended && intended !== DEBATE_CANONICAL_SILENCE) {
+    return Math.max(
+      DEBATE_MUTE_SILENCE_MIN_HOLD_MS,
+      debateEstimatedSpeechDurationMs(intended),
+    );
+  }
+  const fromLimit = event.timing?.limitMs;
+  if (typeof fromLimit === "number" && fromLimit > 0) {
+    return Math.max(DEBATE_MUTE_SILENCE_MIN_HOLD_MS, Math.round(fromLimit));
+  }
+  return DEBATE_MUTE_SILENCE_FALLBACK_HOLD_MS;
+}
+
 const DEBATE_ACTIVE_PRESENTATION_EVENT_KINDS = new Set<DebateEventKind>([
   "intro",
   "phase",
   "speech",
+  "silence",
   "testimony",
   "press",
   "objection",
@@ -2109,7 +2165,6 @@ export function debateActivePresentationDurationMs(
     if (
       debateEventIsTranscriptHousekeeping(event) ||
       !DEBATE_ACTIVE_PRESENTATION_EVENT_KINDS.has(event.kind) ||
-      event.kind === "silence" ||
       (event.kind === "verdict" && event.speakerKind !== "player") ||
       (playerRole === "participant" &&
         (event.kind === "jury_deliberation" ||
@@ -2123,6 +2178,9 @@ export function debateActivePresentationDurationMs(
       event.gavelReason === "intervention"
     ) {
       return durationMs + 260;
+    }
+    if (debateEventIsCanonicalSilence(event)) {
+      return durationMs + debateSilenceHoldDurationMs(event);
     }
     return durationMs + debateEstimatedSpeechDurationMs(event.content);
   }, 0);

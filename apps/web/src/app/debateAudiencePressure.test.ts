@@ -69,13 +69,25 @@ describe("Debate audience pressure", () => {
     assert.ok(mid.background > low.background || mid.grain > low.grain);
     assert.ok(high.grain >= mid.grain);
     const restlessHeated = debateAudiencePressureMix("restless", "heated");
+    const restlessPlain = debateAudiencePressureMix("restless", "plainspoken");
+    const murmuringPlain = debateAudiencePressureMix("murmuring", "plainspoken");
     const disruptiveFree = debateAudiencePressureMix(
       "disruptive",
       "free_for_all",
     );
+    // Restless stays near murmur: bed-led, light crosstalk — not Disruptive-lite.
+    assert.ok(
+      restlessPlain.grain - murmuringPlain.grain <= 0.12,
+      `expected restless near murmur grain, got ${restlessPlain.grain} vs ${murmuringPlain.grain}`,
+    );
+    assert.ok(
+      restlessPlain.grain < restlessPlain.background ||
+        Math.abs(restlessPlain.grain - restlessPlain.background) < 0.05,
+      `expected restless bed-led or near-balance, got bg ${restlessPlain.background} grain ${restlessPlain.grain}`,
+    );
     // Ceiling may clamp total bed, but Disruptive must stay clearly crosstalk-heavier.
     assert.ok(
-      disruptiveFree.grain - restlessHeated.grain >= 0.12,
+      disruptiveFree.grain - restlessHeated.grain >= 0.22,
       `expected disruptive grain gap, got ${disruptiveFree.grain} vs ${restlessHeated.grain}`,
     );
     const orderCall = debateAudienceOrderCallMix("free_for_all");
@@ -128,25 +140,30 @@ describe("Debate audience pressure", () => {
     assert.ok(new Set(scores).size === scores.length);
   });
 
-  it("keeps a living murmur under a live monologue, then swells near the end", () => {
+  it("keeps an observing floor under a live monologue, then swells near the end", () => {
     const speech = event("ramping", 1);
-    const prior = event("prior", 0, {
-      content: "Earlier argument that already heated the room.",
+    const order = event("order", 0, {
+      kind: "judge_gavel",
+      speakerKind: "moderator",
+      stepKey: "audience_order",
+      gavelReason: "audience_order",
+      content: "Order.",
     });
     const scoreAt = (visibleCharacterCount: number): number =>
       debateAudiencePressureScore({
-        events: [prior, speech],
+        events: [order, speech],
         formality: "heated",
         playerRole: "judge",
         activeEventId: speech.id,
         visibleCharacterCount,
       });
-    // Prior heat is ducked, but stays at least murmuring so seats keep talking.
+    // After order, early/mid line stays Observing until events rebuild heat.
     const early = scoreAt(0);
     const mid = scoreAt(Math.floor(speech.content.length * 0.5));
-    assert.ok(early >= 28);
+    assert.ok(early > 0);
+    assert.ok(early < 20);
     assert.equal(early, mid);
-    assert.equal(debateAudiencePressureBand(early), "murmuring");
+    assert.equal(debateAudiencePressureBand(early), "settled");
     // Heated rooms start the late swell after ~79% of the line.
     assert.ok(
       scoreAt(Math.floor(speech.content.length * 0.9)) >
@@ -155,7 +172,7 @@ describe("Debate audience pressure", () => {
     assert.equal(
       scoreAt(speech.content.length),
       debateAudiencePressureScore({
-        events: [prior, speech],
+        events: [order, speech],
         formality: "heated",
         playerRole: "judge",
       }),
@@ -178,10 +195,14 @@ describe("Debate audience pressure", () => {
         activeEventId: speech.id,
         visibleCharacterCount: Math.floor(speech.content.length * ratio),
       });
-    // Living floor keeps a murmur bed under every formality; hotter rooms swell more.
+    // Living floor keeps an observing bed under every formality; hotter rooms swell more.
     assert.ok(scoreAt("parliamentary", 0.55) > 0);
     assert.ok(scoreAt("free_for_all", 0.55) > scoreAt("parliamentary", 0.55));
     assert.ok(scoreAt("free_for_all", 0.55) > scoreAt("heated", 0.55));
+    assert.equal(
+      debateAudiencePressureBand(scoreAt("parliamentary", 0.2)),
+      "settled",
+    );
   });
 
   it("uses the strongest event reaction bonus and resets on saved order", () => {
@@ -238,7 +259,7 @@ describe("Debate audience pressure", () => {
       seed: "session-1",
     });
     assert.deepEqual(first, second);
-    assert.equal(first.length, 8);
+    assert.equal(first.length, 5);
     assert.equal(
       debateAudienceTalkerIndices({
         band: "settled",

@@ -31,7 +31,8 @@ export interface DebateAudienceModeratorOrderPlan {
   reason: DebateAudienceModeratorOrderReason;
 }
 
-export const DEBATE_AUDIENCE_INITIAL_PRESSURE = 12;
+/** Soft observing bed after order / at open — below Murmuring (score 20). */
+export const DEBATE_AUDIENCE_INITIAL_PRESSURE = 8;
 
 /**
  * Once the gallery has stayed restless/disruptive this long (estimated spoken
@@ -46,8 +47,12 @@ export const DEBATE_AUDIENCE_SUSTAINED_ROWDY_MS = {
   free_for_all: 7_500,
 } as const satisfies Record<DebateFormalityId, number>;
 
-/** Restless floor for sustained-order eligibility (meter band ≥ restless). */
-export const DEBATE_AUDIENCE_SUSTAINED_ROWDY_PRESSURE = 45;
+/**
+ * Disruptive floor for sustained-order eligibility (meter band ≥ disruptive).
+ * Restless murmur alone must not mint an automatic call to order — that kept
+ * quiet plainspoken sittings getting "gallery will settle" overtime bridges.
+ */
+export const DEBATE_AUDIENCE_SUSTAINED_ROWDY_PRESSURE = 70;
 
 const DEBATE_AUDIENCE_EVENT_HEAT = {
   parliamentary: 5,
@@ -107,18 +112,19 @@ export const DEBATE_AUDIENCE_MONOLOGUE_FLOOR_BY_FORMALITY = {
 export const DEBATE_AUDIENCE_MONOLOGUE_FLOOR = 0.55;
 
 /**
- * While a line is still being heard, keep scored pressure at least in the
- * murmuring band so seat chatter and the murmur bed stay alive under advocacy.
+ * While a line is still being heard, keep a soft observing floor so the room
+ * can sit quiet after a call to order. Heat still swells from debate events —
+ * never force Murmuring under every monologue.
  */
 export const DEBATE_AUDIENCE_MONOLOGUE_MIN_PRESSURE_BY_FORMALITY = {
-  parliamentary: 20,
-  structured: 22,
-  plainspoken: 24,
-  heated: 28,
-  free_for_all: 32,
+  parliamentary: 4,
+  structured: 5,
+  plainspoken: 6,
+  heated: 8,
+  free_for_all: 10,
 } as const satisfies Record<DebateFormalityId, number>;
 
-export const DEBATE_AUDIENCE_MONOLOGUE_MIN_PRESSURE = 24;
+export const DEBATE_AUDIENCE_MONOLOGUE_MIN_PRESSURE = 6;
 
 function stableHash(text: string): number {
   let hash = 2_166_136_261;
@@ -371,8 +377,9 @@ export function debateAudiencePressureScore(args: {
     formality: args.formality,
   });
   const gated = score * silence;
-  // Active monologue with a living duck: never drop into "settled" — that
-  // zeroes talker seats and ambient vocal Foley even when the murmur bed is on.
+  // Active monologue may duck prior heat, but the observing floor stays below
+  // Murmuring so a successful call to order can leave the gallery quiet until
+  // debate events earn more noise again.
   if (
     args.activeEventId &&
     args.visibleCharacterCount !== null &&

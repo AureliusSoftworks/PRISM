@@ -22,6 +22,10 @@ describe("Debate archive Assets panel", () => {
     assert.match(archiveModalSource, /synthesizingExhibitIds/u);
     assert.match(archiveModalSource, /archiveExhibitBusyKey/u);
     assert.match(
+      archiveModalSource,
+      /hasSprite \? "Re-synthesize" : "Synthesize"/u,
+    );
+    assert.match(
       debateSource,
       /archiveExhibitBusyKey\(\s*session\.id,\s*exhibit\.id\s*\)/u,
     );
