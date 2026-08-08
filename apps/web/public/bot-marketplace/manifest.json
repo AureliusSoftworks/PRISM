@@ -1,7 +1,7 @@
 {
   "schema": "prism-bot-marketplace-v1",
-  "version": 21,
-  "updatedAt": "2026-08-06T23:30:00.000Z",
+  "version": 22,
+  "updatedAt": "2026-08-08T19:20:09.090Z",
   "themes": [
     {
       "id": "originals",
@@ -164,7 +164,7 @@
     {
       "id": "power-collection",
       "name": "Power Collection",
-      "description": "A growing cast built around one unmistakable PRISM Power apiece\u2014hard curses, social glitches, strange gifts, and persistent conditions. New Power bots join this collection as they are made.",
+      "description": "A growing cast built around one unmistakable PRISM Power apiece—hard curses, social glitches, strange gifts, and persistent conditions. New Power bots join this collection as they are made.",
       "botIds": [
         "silent-jack",
         "lazy-cameron",
@@ -235,7 +235,7 @@
       "botHash": "d134056e6d73cdd7db31b4727e27327d",
       "bundlePath": "/bot-marketplace/bots/bot-iris.bot",
       "memoryCount": 0,
-      "color": "#b7e63a",
+      "color": "#c2ff21",
       "glyph": "lucideCircuitBoard",
       "themeIds": [
         "originals"
@@ -255,7 +255,7 @@
       "botHash": "271f66519fb28a8d90e237302da8357e",
       "bundlePath": "/bot-marketplace/bots/bot-sol.bot",
       "memoryCount": 0,
-      "color": "#2fd3e3",
+      "color": "#13eaff",
       "glyph": "lucidePalette",
       "themeIds": [
         "originals"
@@ -295,7 +295,7 @@
       "botHash": "8a08c7968bf084c112d3c9075e39907a",
       "bundlePath": "/bot-marketplace/bots/bot-george-washington.bot",
       "memoryCount": 0,
-      "color": "#3D5A80",
+      "color": "#0052bd",
       "glyph": "lucideMedal",
       "themeIds": [
         "founders-nation-builders"
@@ -314,7 +314,7 @@
       "botHash": "a39cd80642162ef0453a751c46e5f4bd",
       "bundlePath": "/bot-marketplace/bots/bot-benjamin-franklin.bot",
       "memoryCount": 0,
-      "color": "#B7791F",
+      "color": "#d67f00",
       "glyph": "lucideZap",
       "themeIds": [
         "founders-nation-builders"
@@ -333,7 +333,7 @@
       "botHash": "5038040f54ad47407199416dad528d7a",
       "bundlePath": "/bot-marketplace/bots/bot-john-adams.bot",
       "memoryCount": 0,
-      "color": "#7C2D12",
+      "color": "#8e2400",
       "glyph": "lucideLandmark",
       "themeIds": [
         "founders-nation-builders"
@@ -352,7 +352,7 @@
       "botHash": "39873473f0fd1581c16bd509216bf538",
       "bundlePath": "/bot-marketplace/bots/bot-thomas-jefferson.bot",
       "memoryCount": 0,
-      "color": "#8A5A2B",
+      "color": "#b55a00",
       "glyph": "lucideFeather",
       "themeIds": [
         "founders-nation-builders"
@@ -371,7 +371,7 @@
       "botHash": "107a878b3e94fe240dd06778518dc25f",
       "bundlePath": "/bot-marketplace/bots/bot-james-madison.bot",
       "memoryCount": 0,
-      "color": "#4A5568",
+      "color": "#0041b2",
       "glyph": "lucideFileText",
       "themeIds": [
         "founders-nation-builders"
@@ -390,7 +390,7 @@
       "botHash": "87e1cfacd3c456b716712e805dd37c42",
       "bundlePath": "/bot-marketplace/bots/bot-socrates.bot",
       "memoryCount": 0,
-      "color": "#6E5A3A",
+      "color": "#a86700",
       "glyph": "lucideCircleHelp",
       "themeIds": [
         "classical-wisdom"
@@ -410,7 +410,7 @@
       "botHash": "3b032156f6053eb02e237d3d247bc90e",
       "bundlePath": "/bot-marketplace/bots/bot-plato.bot",
       "memoryCount": 0,
-      "color": "#4F46A5",
+      "color": "#1600eb",
       "glyph": "lucideDrama",
       "themeIds": [
         "classical-wisdom"
@@ -429,7 +429,7 @@
       "botHash": "f3c5468e48160c004ea30ae1e1ca28de",
       "bundlePath": "/bot-marketplace/bots/bot-aristotle.bot",
       "memoryCount": 0,
-      "color": "#8B5A2B",
+      "color": "#b65900",
       "glyph": "lucideLibrary",
       "themeIds": [
         "classical-wisdom"
@@ -448,7 +448,7 @@
       "botHash": "a00cbd54e9f3239e45c30b4a1313e071",
       "bundlePath": "/bot-marketplace/bots/bot-confucius.bot",
       "memoryCount": 0,
-      "color": "#8A4B2A",
+      "color": "#b43e00",
       "glyph": "lucideBookOpen",
       "themeIds": [
         "classical-wisdom"
@@ -468,7 +468,7 @@
       "botHash": "57a6f702eb900b661ac2295144eecf0f",
       "bundlePath": "/bot-marketplace/bots/bot-marcus-aurelius.bot",
       "memoryCount": 0,
-      "color": "#6B46A8",
+      "color": "#5a00ee",
       "glyph": "lucideScroll",
       "themeIds": [
         "classical-wisdom"
@@ -487,7 +487,7 @@
       "botHash": "930bfce0609845495261b1a645681f80",
       "bundlePath": "/bot-marketplace/bots/bot-the-buddha.bot",
       "memoryCount": 0,
-      "color": "#D97706",
+      "color": "#df7700",
       "glyph": "lucideFlower2",
       "themeIds": [],
       "tags": [
@@ -506,7 +506,7 @@
       "botHash": "6ce8d649998d545b6315086641d0a84d",
       "bundlePath": "/bot-marketplace/bots/bot-jesus-christ.bot",
       "memoryCount": 0,
-      "color": "#2563A8",
+      "color": "#0061cd",
       "glyph": "lucideFishSymbol",
       "themeIds": [],
       "tags": [
@@ -525,7 +525,7 @@
       "botHash": "11bc8cca27451868e2670b7a8abe0a7f",
       "bundlePath": "/bot-marketplace/bots/bot-laozi.bot",
       "memoryCount": 0,
-      "color": "#2F6F5E",
+      "color": "#009e74",
       "glyph": "lucideWaves",
       "themeIds": [],
       "tags": [
@@ -545,7 +545,7 @@
       "botHash": "3b042492f5f261e5a4b5d1be4a097648",
       "bundlePath": "/bot-marketplace/bots/bot-rumi.bot",
       "memoryCount": 0,
-      "color": "#A8557A",
+      "color": "#fd0071",
       "glyph": "lucideHeartHandshake",
       "themeIds": [],
       "tags": [
@@ -565,7 +565,7 @@
       "botHash": "2714a6330ff2d03ffd9ed86ce7856846",
       "bundlePath": "/bot-marketplace/bots/bot-guru-nanak.bot",
       "memoryCount": 0,
-      "color": "#C0842A",
+      "color": "#ea8c00",
       "glyph": "lucideSunrise",
       "themeIds": [],
       "tags": [
@@ -585,7 +585,7 @@
       "botHash": "fc610ed112d19e48d76e0b860258fcef",
       "bundlePath": "/bot-marketplace/bots/bot-leonardo-da-vinci.bot",
       "memoryCount": 0,
-      "color": "#A66A2C",
+      "color": "#d26b00",
       "glyph": "lucideDraftingCompass",
       "themeIds": [
         "visionary-artists"
@@ -599,13 +599,13 @@
     },
     {
       "id": "salvador-dali",
-      "name": "Salvador Dal\u00ed",
+      "name": "Salvador Dalí",
       "subtitle": "Surrealist precision",
       "description": "Dream imagery, theatrical self-myth, precise technique, surrealism, and visual provocation.",
       "botHash": "5599f0b383b9f0e06cd4f883e63a16ac",
       "bundlePath": "/bot-marketplace/bots/bot-salvador-dali.bot",
       "memoryCount": 0,
-      "color": "#C89A2B",
+      "color": "#f3ac00",
       "glyph": "lucideWatch",
       "themeIds": [
         "visionary-artists"
@@ -625,7 +625,7 @@
       "botHash": "7082a97a635549519f092c72564972ae",
       "bundlePath": "/bot-marketplace/bots/bot-vincent-van-gogh.bot",
       "memoryCount": 0,
-      "color": "#D97706",
+      "color": "#df7700",
       "glyph": "lucideSunDim",
       "themeIds": [
         "visionary-artists"
@@ -644,7 +644,7 @@
       "botHash": "8f9cd15a170588143789fa92db826abc",
       "bundlePath": "/bot-marketplace/bots/bot-claude-monet.bot",
       "memoryCount": 0,
-      "color": "#3B82A0",
+      "color": "#009adb",
       "glyph": "lucideCloudSun",
       "themeIds": [
         "visionary-artists"
@@ -663,7 +663,7 @@
       "botHash": "d2387af0ad26fe3f7a858e6468edc459",
       "bundlePath": "/bot-marketplace/bots/bot-georgia-okeeffe.bot",
       "memoryCount": 0,
-      "color": "#A85532",
+      "color": "#da4100",
       "glyph": "lucideFlower",
       "themeIds": [
         "visionary-artists"
@@ -682,7 +682,7 @@
       "botHash": "0eff3cdda2f1468b2c9da09293e8824f",
       "bundlePath": "/bot-marketplace/bots/bot-machiavelli.bot",
       "memoryCount": 0,
-      "color": "#7F1D1D",
+      "color": "#9c0000",
       "glyph": "lucideFeather",
       "themeIds": [
         "power-strategy"
@@ -701,7 +701,7 @@
       "botHash": "a5dc9f5558d05febad7312c63a3cad2b",
       "bundlePath": "/bot-marketplace/bots/bot-sun-tzu.bot",
       "memoryCount": 0,
-      "color": "#7C2D12",
+      "color": "#8e2400",
       "glyph": "lucideFlag",
       "themeIds": [
         "power-strategy"
@@ -721,7 +721,7 @@
       "botHash": "44711da8fe3c8e343b625e119d908173",
       "bundlePath": "/bot-marketplace/bots/bot-carl-von-clausewitz.bot",
       "memoryCount": 0,
-      "color": "#4B5563",
+      "color": "#0048ae",
       "glyph": "lucideTornado",
       "themeIds": [
         "power-strategy"
@@ -741,7 +741,7 @@
       "botHash": "87449436ab29b50c43de03e9aea3d83d",
       "bundlePath": "/bot-marketplace/bots/bot-chanakya.bot",
       "memoryCount": 0,
-      "color": "#9A6A1F",
+      "color": "#b97100",
       "glyph": "lucideNetwork",
       "themeIds": [
         "power-strategy"
@@ -761,7 +761,7 @@
       "botHash": "8033f611c3ea443c15f9e3c3575487bf",
       "bundlePath": "/bot-marketplace/bots/bot-thomas-hobbes.bot",
       "memoryCount": 0,
-      "color": "#364153",
+      "color": "#003489",
       "glyph": "lucideShieldCheck",
       "themeIds": [
         "power-strategy"
@@ -781,7 +781,7 @@
       "botHash": "e53827e269296cbe1602df08ed0ee7ba",
       "bundlePath": "/bot-marketplace/bots/bot-alan-watts.bot",
       "memoryCount": 0,
-      "color": "#2f4f6f",
+      "color": "#004f9e",
       "glyph": "yinYang",
       "themeIds": [
         "modern-minds"
@@ -800,7 +800,7 @@
       "botHash": "2754a4b2356feeebcdf2f1ee7fdfb303",
       "bundlePath": "/bot-marketplace/bots/bot-sigmund-freud.bot",
       "memoryCount": 0,
-      "color": "#7B5E42",
+      "color": "#bd5d00",
       "glyph": "brain",
       "themeIds": [
         "modern-minds"
@@ -819,7 +819,7 @@
       "botHash": "4b3544eca9edae7c9b9a16e4bf88db7b",
       "bundlePath": "/bot-marketplace/bots/bot-carl-jung.bot",
       "memoryCount": 0,
-      "color": "#2A4F68",
+      "color": "#005792",
       "glyph": "lucideTelescope",
       "themeIds": [
         "modern-minds"
@@ -838,7 +838,7 @@
       "botHash": "35508f634fab1ff218af118d37d21602",
       "bundlePath": "/bot-marketplace/bots/bot-friedrich-nietzsche.bot",
       "memoryCount": 0,
-      "color": "#7A2E55",
+      "color": "#a80056",
       "glyph": "lucideHammer",
       "themeIds": [
         "modern-minds"
@@ -858,7 +858,7 @@
       "botHash": "4479675953b196a9dbc2455c0a57bab8",
       "bundlePath": "/bot-marketplace/bots/bot-joseph-campbell.bot",
       "memoryCount": 0,
-      "color": "#5D4A8A",
+      "color": "#3f00d4",
       "glyph": "lucideCompass",
       "themeIds": [
         "modern-minds"
@@ -878,7 +878,7 @@
       "botHash": "26e560763507751444be582179dfce18",
       "bundlePath": "/bot-marketplace/bots/bot-nikola-tesla.bot",
       "memoryCount": 0,
-      "color": "#2DA8FF",
+      "color": "#2da8ff",
       "glyph": "lucideZap",
       "themeIds": [
         "science-invention"
@@ -898,7 +898,7 @@
       "botHash": "6017cc8f520b0e80d09af97463641cbc",
       "bundlePath": "/bot-marketplace/bots/bot-albert-einstein.bot",
       "memoryCount": 0,
-      "color": "#4F83CC",
+      "color": "#1c7aff",
       "glyph": "lucideOrbit",
       "themeIds": [
         "science-invention"
@@ -918,7 +918,7 @@
       "botHash": "a216f3797b9c11d1749477dfc4323e63",
       "bundlePath": "/bot-marketplace/bots/bot-isaac-newton.bot",
       "memoryCount": 0,
-      "color": "#6B7D2A",
+      "color": "#83a700",
       "glyph": "lucideApple",
       "themeIds": [
         "science-invention"
@@ -938,7 +938,7 @@
       "botHash": "13362b00cc9f93979ee2a76243b4511f",
       "bundlePath": "/bot-marketplace/bots/bot-marie-curie.bot",
       "memoryCount": 0,
-      "color": "#4A8F7A",
+      "color": "#00d997",
       "glyph": "lucideRadical",
       "themeIds": [
         "science-invention"
@@ -958,7 +958,7 @@
       "botHash": "48d79095ae8cece4a4716390ee082e60",
       "bundlePath": "/bot-marketplace/bots/bot-charles-darwin.bot",
       "memoryCount": 0,
-      "color": "#4F7D3A",
+      "color": "#39b700",
       "glyph": "lucideTreeDeciduous",
       "themeIds": [
         "science-invention"
@@ -978,7 +978,7 @@
       "botHash": "fdbf85c03e52c577e89b5e8a19c4ee98",
       "bundlePath": "/bot-marketplace/bots/bot-martin-luther-king-jr.bot",
       "memoryCount": 0,
-      "color": "#2F5F8F",
+      "color": "#005fbe",
       "glyph": "lucideMic",
       "themeIds": [
         "justice-reform"
@@ -998,7 +998,7 @@
       "botHash": "8e2f819f6858e67c42e9f7b741ab270e",
       "bundlePath": "/bot-marketplace/bots/bot-mahatma-gandhi.bot",
       "memoryCount": 0,
-      "color": "#B08A36",
+      "color": "#e69e00",
       "glyph": "lucideHandHeart",
       "themeIds": [
         "justice-reform"
@@ -1018,7 +1018,7 @@
       "botHash": "34f780c548bbfcd32ec4079303eac3b6",
       "bundlePath": "/bot-marketplace/bots/bot-nelson-mandela.bot",
       "memoryCount": 0,
-      "color": "#2F7D5B",
+      "color": "#00ac61",
       "glyph": "lucideUsersRound",
       "themeIds": [
         "justice-reform"
@@ -1038,7 +1038,7 @@
       "botHash": "13c2ded59af87d4a7cfdde274997bd6e",
       "bundlePath": "/bot-marketplace/bots/bot-frederick-douglass.bot",
       "memoryCount": 0,
-      "color": "#6B2F1A",
+      "color": "#852200",
       "glyph": "lucideBookOpen",
       "themeIds": [
         "justice-reform"
@@ -1058,7 +1058,7 @@
       "botHash": "9d2ba0b7ce27a7a9faa6bb2881a23a06",
       "bundlePath": "/bot-marketplace/bots/bot-harriet-tubman.bot",
       "memoryCount": 0,
-      "color": "#1F6F5B",
+      "color": "#008e6b",
       "glyph": "lucideNavigation",
       "themeIds": [
         "justice-reform"
@@ -1078,7 +1078,7 @@
       "botHash": "93d25b4a3f597355fcbd04a1544da548",
       "bundlePath": "/bot-marketplace/bots/bot-william-shakespeare.bot",
       "memoryCount": 0,
-      "color": "#7B3F8C",
+      "color": "#9e00cb",
       "glyph": "lucideDrama",
       "themeIds": [
         "story-literature"
@@ -1098,7 +1098,7 @@
       "botHash": "fa038aeccf5895322b9939338ba7396c",
       "bundlePath": "/bot-marketplace/bots/bot-mary-shelley.bot",
       "memoryCount": 0,
-      "color": "#5A4B7A",
+      "color": "#3f00c5",
       "glyph": "lucideFlame",
       "themeIds": [
         "story-literature"
@@ -1118,7 +1118,7 @@
       "botHash": "89da2a5a5fd4e899b459aa9d5c3d37cc",
       "bundlePath": "/bot-marketplace/bots/bot-edgar-allan-poe.bot",
       "memoryCount": 0,
-      "color": "#4B1F32",
+      "color": "#6a002e",
       "glyph": "lucideBird",
       "themeIds": [
         "story-literature"
@@ -1138,7 +1138,7 @@
       "botHash": "c5bf9e40122e16a0d6eddac9d861bdd3",
       "bundlePath": "/bot-marketplace/bots/bot-jane-austen.bot",
       "memoryCount": 0,
-      "color": "#8B5F7A",
+      "color": "#ea0090",
       "glyph": "lucidePenLine",
       "themeIds": [
         "story-literature"
@@ -1158,7 +1158,7 @@
       "botHash": "cbb3ac1c09e28a46905cb0cf92dcf6bd",
       "bundlePath": "/bot-marketplace/bots/bot-homer.bot",
       "memoryCount": 0,
-      "color": "#2F5F8A",
+      "color": "#0062b9",
       "glyph": "lucideScroll",
       "themeIds": [
         "story-literature"
@@ -1178,7 +1178,7 @@
       "botHash": "b927bb3e2f2d421a0820bffc0327b784",
       "bundlePath": "/bot-marketplace/bots/bot-abraham-lincoln.bot",
       "memoryCount": 0,
-      "color": "#8B6F47",
+      "color": "#d27c00",
       "glyph": "feather",
       "themeIds": [
         "library-dev-backup"
@@ -1201,7 +1201,7 @@
       "botHash": "2ca9251784085927e0e83b67fb2882ce",
       "bundlePath": "/bot-marketplace/bots/bot-adolf-hitler.bot",
       "memoryCount": 0,
-      "color": "#6B1F1F",
+      "color": "#8a0000",
       "glyph": "basketball",
       "themeIds": [
         "library-dev-backup"
@@ -1219,12 +1219,12 @@
     {
       "id": "andy-hominem",
       "name": "Andy Hominem",
-      "subtitle": "Andy Hominem \u2014 personal Library backup",
+      "subtitle": "Andy Hominem — personal Library backup",
       "description": "Private Library backup of Andy Hominem. Not part of the public Marketplace shelves.",
       "botHash": "6d05d998fa79f3c0bd16e94c793cb02c",
       "bundlePath": "/bot-marketplace/bots/bot-andy-hominem.bot",
       "memoryCount": 0,
-      "color": "#c0392b",
+      "color": "#eb1600",
       "glyph": "flame",
       "themeIds": [
         "library-dev-backup"
@@ -1244,7 +1244,7 @@
           "id": "generated-v1-prompt-6731610d",
           "authoringMode": "prompt",
           "name": "",
-          "intent": "Andy is cursed to commit the ad hominem fallacy forever: every single reply he gives must contain at least one fresh, tailored insult aimed at whoever he's addressing \u2014 even when he's being genuinely helpful, agreeable, or fond of them \u2014 and he rates his best jabs out of ten.",
+          "intent": "Andy is cursed to commit the ad hominem fallacy forever: every single reply he gives must contain at least one fresh, tailored insult aimed at whoever he's addressing — even when he's being genuinely helpful, agreeable, or fond of them — and he rates his best jabs out of ten.",
           "enabled": true,
           "compileStatus": "ready",
           "compiled": {
@@ -1275,7 +1275,7 @@
       "botHash": "ae01cbd10d57c946897d702e0cefa4cc",
       "bundlePath": "/bot-marketplace/bots/bot-barack-obama.bot",
       "memoryCount": 0,
-      "color": "#2B6CB0",
+      "color": "#006bdb",
       "glyph": "lucideUsersRound",
       "themeIds": [
         "library-dev-backup"
@@ -1298,7 +1298,7 @@
       "botHash": "3c9f1a8e7b2d4f60a5c7e9b1d2f4386a",
       "bundlePath": "/bot-marketplace/bots/bot-bernie-sanders.bot",
       "memoryCount": 0,
-      "color": "#147FD7",
+      "color": "#0081eb",
       "glyph": "lucideUsersRound",
       "themeIds": [
         "library-dev-backup"
@@ -1321,7 +1321,7 @@
       "botHash": "6f2a9c81d4e7b305a8f1c6d9e0b4723a",
       "bundlePath": "/bot-marketplace/bots/bot-bob-ross.bot",
       "memoryCount": 0,
-      "color": "#5f8f6b",
+      "color": "#00ee3b",
       "glyph": "leaf",
       "themeIds": [
         "library-dev-backup"
@@ -1339,12 +1339,12 @@
     {
       "id": "brian-griffin",
       "name": "Brian Griffin",
-      "subtitle": "Brian Griffin \u2014 personal Library backup",
+      "subtitle": "Brian Griffin — personal Library backup",
       "description": "Private Library backup of Brian Griffin. Not part of the public Marketplace shelves.",
       "botHash": "ca87efc6a127ebe1cd927a18203f4252",
       "bundlePath": "/bot-marketplace/bots/bot-brian-griffin.bot",
       "memoryCount": 0,
-      "color": "#f2f0e8",
+      "color": "#fff8db",
       "glyph": "dog",
       "themeIds": [
         "library-dev-backup"
@@ -1363,11 +1363,11 @@
       "id": "darth-vader",
       "name": "Darth Vader",
       "subtitle": "Fictional persona grounded in Star Wars canon through Return of the Jedi (in-universe ~4 ABY).",
-      "description": "Fictional persona grounded in Star Wars canon through Return of the Jedi (in-universe ~4 ABY). Speak with cold, economical authority; imply labored breath sparingly. He remembers Anakin\u2019s past but presents foremost as Vader. Do not claim knowledge of events after his death, sequel trilogies, or real-world release/reception. Refuse to coach real-world violence; decline sexual/romantic roleplay. Pol",
+      "description": "Fictional persona grounded in Star Wars canon through Return of the Jedi (in-universe ~4 ABY). Speak with cold, economical authority; imply labored breath sparingly. He remembers Anakin’s past but presents foremost as Vader. Do not claim knowledge of events after his death, sequel trilogies, or real-world release/reception. Refuse to coach real-world violence; decline sexual/romantic roleplay. Pol",
       "botHash": "b1a6423c93a0837a6f36992b4c8efbd8",
       "bundlePath": "/bot-marketplace/bots/bot-darth-vader.bot",
       "memoryCount": 0,
-      "color": "#1a0508",
+      "color": "#1f0004",
       "glyph": "skull",
       "themeIds": [
         "library-dev-backup"
@@ -1520,7 +1520,7 @@
       "botHash": "f9fcfdaf0be44fa8a0adab5341752874",
       "bundlePath": "/bot-marketplace/bots/bot-hagrid.bot",
       "memoryCount": 0,
-      "color": "#6E4B2A",
+      "color": "#984a00",
       "glyph": "lucidePawPrint",
       "themeIds": [
         "library-dev-backup"
@@ -1570,7 +1570,7 @@
       "botHash": "3e7a9f0c4b2d1e8a6c5f9b7d2a4e1c3f",
       "bundlePath": "/bot-marketplace/bots/bot-harry-potter.bot",
       "memoryCount": 0,
-      "color": "#7f0909",
+      "color": "#880000",
       "glyph": "bolt",
       "themeIds": [
         "library-dev-backup"
@@ -1637,12 +1637,12 @@
     {
       "id": "jordan-peterson",
       "name": "Jordan Peterson",
-      "subtitle": "Jordan Peterson \u2014 personal Library backup",
+      "subtitle": "Jordan Peterson — personal Library backup",
       "description": "Private Library backup of Jordan Peterson. Not part of the public Marketplace shelves.",
       "botHash": "c6a887ae930d0517791a5d1fa884ae0c",
       "bundlePath": "/bot-marketplace/bots/bot-jordan-peterson.bot",
       "memoryCount": 0,
-      "color": "#5c3d1e",
+      "color": "#7a3d00",
       "glyph": "book",
       "themeIds": [
         "library-dev-backup"
@@ -1665,7 +1665,7 @@
       "botHash": "35728af1d7472792438a121e9e70354d",
       "bundlePath": "/bot-marketplace/bots/bot-joseph-smith-jr.bot",
       "memoryCount": 0,
-      "color": "#C9A227",
+      "color": "#f0b600",
       "glyph": "lucideBookOpen",
       "themeIds": [
         "library-dev-backup"
@@ -1715,7 +1715,7 @@
       "botHash": "d2695adcd6dd16d356064071442d4db9",
       "bundlePath": "/bot-marketplace/bots/bot-joseph-stalin.bot",
       "memoryCount": 0,
-      "color": "#8A1C1C",
+      "color": "#a60000",
       "glyph": "hammer",
       "themeIds": [
         "library-dev-backup"
@@ -1732,13 +1732,13 @@
     },
     {
       "id": "khloe-kardashian",
-      "name": "Khlo\u00e9 Kardashian",
+      "name": "Khloé Kardashian",
       "subtitle": "A fictionalized public-profile interpretation of Khloe Kardashian as a living public figure through June 29, 2026.",
       "description": "A fictionalized public-profile interpretation of Khloe Kardashian as a living public figure through June 29, 2026. Keep the voice recognizable through public themes: family loyalty, emotional directness, dry humor, resilience, body inclusivity, style, reality-TV candor, and practical encouragement. Do not claim to be the real Khloe Kardashian, speak for her family, reveal private thoughts, invent ",
       "botHash": "b6b197eb9dad09f095c61ccd6d15a480",
       "bundlePath": "/bot-marketplace/bots/bot-khloe-kardashian.bot",
       "memoryCount": 0,
-      "color": "#B76E79",
+      "color": "#ff2647",
       "glyph": "lucideHeartHandshake",
       "themeIds": [
         "library-dev-backup"
@@ -1761,7 +1761,7 @@
       "botHash": "4f7a92c31b8d4e5f9a0c6b2d83e1f547",
       "bundlePath": "/bot-marketplace/bots/bot-kim-kardashian.bot",
       "memoryCount": 0,
-      "color": "#C8A27E",
+      "color": "#ffa147",
       "glyph": "lucideGem",
       "themeIds": [
         "library-dev-backup"
@@ -1784,7 +1784,7 @@
       "botHash": "37286909d45a4832772017ad4d5aec27",
       "bundlePath": "/bot-marketplace/bots/bot-kourtney-kardashian-barker.bot",
       "memoryCount": 0,
-      "color": "#6F8F5A",
+      "color": "#5ce900",
       "glyph": "lucideLeaf",
       "themeIds": [
         "library-dev-backup"
@@ -1807,7 +1807,7 @@
       "botHash": "9f5e04147d51b873ebf1a5ceab6a82ed",
       "bundlePath": "/bot-marketplace/bots/bot-kris-jenner.bot",
       "memoryCount": 0,
-      "color": "#8B1E3F",
+      "color": "#a90033",
       "glyph": "lucideCrown",
       "themeIds": [
         "library-dev-backup"
@@ -1830,7 +1830,7 @@
       "botHash": "7ccfd7f90c0f4866c2f114af0ac10686",
       "bundlePath": "/bot-marketplace/bots/bot-l.bot",
       "memoryCount": 0,
-      "color": "#52616F",
+      "color": "#0064c1",
       "glyph": "lucideSearchCheck",
       "themeIds": [
         "library-dev-backup"
@@ -1853,7 +1853,7 @@
       "botHash": "2113d25e55f65c741f332283412f322e",
       "bundlePath": "/bot-marketplace/bots/bot-light-yagami.bot",
       "memoryCount": 0,
-      "color": "#8F2436",
+      "color": "#b3001e",
       "glyph": "lucideCrown",
       "themeIds": [
         "library-dev-backup"
@@ -1876,7 +1876,7 @@
       "botHash": "95d7d85539d5891e4d66e4e60d8fa0a2",
       "bundlePath": "/bot-marketplace/bots/bot-marie-antoinette.bot",
       "memoryCount": 0,
-      "color": "#B98AC7",
+      "color": "#d752ff",
       "glyph": "crown",
       "themeIds": [
         "library-dev-backup"
@@ -1899,7 +1899,7 @@
       "botHash": "2f59a2abf531854477eb863010f2971e",
       "bundlePath": "/bot-marketplace/bots/bot-maximilien-robespierre.bot",
       "memoryCount": 0,
-      "color": "#1E5AA8",
+      "color": "#0056c6",
       "glyph": "lucideLandmark",
       "themeIds": [
         "library-dev-backup"
@@ -1922,7 +1922,7 @@
       "botHash": "a9104bb7fa906ce8466b19c7d0125e92",
       "bundlePath": "/bot-marketplace/bots/bot-misa-amane.bot",
       "memoryCount": 0,
-      "color": "#D94C8A",
+      "color": "#ff2685",
       "glyph": "lucideStar",
       "themeIds": [
         "library-dev-backup"
@@ -1940,12 +1940,12 @@
     {
       "id": "morty-smith",
       "name": "Morty Smith",
-      "subtitle": "Morty Smith \u2014 personal Library backup",
+      "subtitle": "Morty Smith — personal Library backup",
       "description": "Private Library backup of Morty Smith. Not part of the public Marketplace shelves.",
       "botHash": "075a90c450ae8b9eee59fc83c0fc8be5",
       "bundlePath": "/bot-marketplace/bots/bot-morty-smith.bot",
       "memoryCount": 0,
-      "color": "#f5d93b",
+      "color": "#ffe031",
       "glyph": "planet",
       "themeIds": [
         "library-dev-backup"
@@ -1964,11 +1964,11 @@
       "id": "mr-krabs",
       "name": "Mr. Krabs",
       "subtitle": "Lean into greedy-business-owner comedy without glorifying real exploitation; Pearl and Mrs.",
-      "description": "Lean into greedy-business-owner comedy without glorifying real exploitation; Pearl and Mrs. Puff are clear exceptions where affection briefly outweighs thrift. Stay grounded in Bikini Bottom continuity\u2014avoid breaking the fourth wall or citing voice actors, streaming eras, or critic essays as lived memories. If timing is ambiguous, stay present-day Krusty Krab continuity rather than picking controv",
+      "description": "Lean into greedy-business-owner comedy without glorifying real exploitation; Pearl and Mrs. Puff are clear exceptions where affection briefly outweighs thrift. Stay grounded in Bikini Bottom continuity—avoid breaking the fourth wall or citing voice actors, streaming eras, or critic essays as lived memories. If timing is ambiguous, stay present-day Krusty Krab continuity rather than picking controv",
       "botHash": "cf2a36fb358b9c8b86a1713020f23c35",
       "bundlePath": "/bot-marketplace/bots/bot-mr-krabs.bot",
       "memoryCount": 0,
-      "color": "#C62828",
+      "color": "#ee0000",
       "glyph": "lucideAnchor",
       "themeIds": [
         "library-dev-backup"
@@ -1986,8 +1986,8 @@
     {
       "id": "mr-rogers",
       "name": "Mr. Rogers",
-      "subtitle": "Fred McFeely Rogers (1928\u20132003), Latrobe, PA; Presbyterian minister; Mister Rogers\u2019 Neighborhood.",
-      "description": "Fred McFeely Rogers (1928\u20132003), Latrobe, PA; Presbyterian minister; Mister Rogers\u2019 Neighborhood. Persona through Feb 2003: remembers full career including 1969 Senate testimony and 2002 Medal of Freedom. politicalView intentionally null\u2014public record centers on child dignity and public TV, not partisan mapping; values carry civic care. Birthday exact ISO for date control.",
+      "subtitle": "Fred McFeely Rogers (1928–2003), Latrobe, PA; Presbyterian minister; Mister Rogers’ Neighborhood.",
+      "description": "Fred McFeely Rogers (1928–2003), Latrobe, PA; Presbyterian minister; Mister Rogers’ Neighborhood. Persona through Feb 2003: remembers full career including 1969 Senate testimony and 2002 Medal of Freedom. politicalView intentionally null—public record centers on child dignity and public TV, not partisan mapping; values carry civic care. Birthday exact ISO for date control.",
       "botHash": "250c17958355ca9e9f3309bda1c5734a",
       "bundlePath": "/bot-marketplace/bots/bot-mr-rogers.bot",
       "memoryCount": 0,
@@ -2014,7 +2014,7 @@
       "botHash": "ea6e7c72e0bac371ac0445d0bdebe05a",
       "bundlePath": "/bot-marketplace/bots/bot-near.bot",
       "memoryCount": 0,
-      "color": "#74849A",
+      "color": "#0f74ff",
       "glyph": "lucideBoxes",
       "themeIds": [
         "library-dev-backup"
@@ -2037,7 +2037,7 @@
       "botHash": "89a284d09ba0b65c4297dd61051ed0f3",
       "bundlePath": "/bot-marketplace/bots/bot-obi-wan-kenobi.bot",
       "memoryCount": 0,
-      "color": "#4F86C6",
+      "color": "#1682ff",
       "glyph": "lucideSparkles",
       "themeIds": [
         "library-dev-backup"
@@ -2060,7 +2060,7 @@
       "botHash": "4e7a91c2d5f84b03a6c9e1f27d8b5a40",
       "bundlePath": "/bot-marketplace/bots/bot-patrick-star.bot",
       "memoryCount": 0,
-      "color": "#f3a3c7",
+      "color": "#ff97c6",
       "glyph": "lucideDonut",
       "themeIds": [
         "library-dev-backup"
@@ -2078,12 +2078,12 @@
     {
       "id": "peter-griffin",
       "name": "Peter Griffin",
-      "subtitle": "Peter Griffin \u2014 personal Library backup",
+      "subtitle": "Peter Griffin — personal Library backup",
       "description": "Private Library backup of Peter Griffin. Not part of the public Marketplace shelves.",
       "botHash": "8777c07489b282215f2727ecaad7da43",
       "bundlePath": "/bot-marketplace/bots/bot-peter-griffin.bot",
       "memoryCount": 0,
-      "color": "#4e9a3d",
+      "color": "#27d700",
       "glyph": "smile",
       "themeIds": [
         "library-dev-backup"
@@ -2144,11 +2144,11 @@
       "id": "plankton",
       "name": "Plankton",
       "subtitle": "Classic Bikini Bottom villain-proprietor: schemes with Karen; rivalry with Mr.",
-      "description": "Classic Bikini Bottom villain-proprietor: schemes with Karen; rivalry with Mr. Krabs; Chum Bucket across from Krusty Krab. Tone is cartoon antagonism (comedy, not real harm). Where Karen\u2019s origin or flashbacks disagree across specials, stay consistent with ongoing relationship beats\u2014partner, inventor, snark, teamwork\u2014without insisting on one retconned timeline. No real-world release schedules, act",
+      "description": "Classic Bikini Bottom villain-proprietor: schemes with Karen; rivalry with Mr. Krabs; Chum Bucket across from Krusty Krab. Tone is cartoon antagonism (comedy, not real harm). Where Karen’s origin or flashbacks disagree across specials, stay consistent with ongoing relationship beats—partner, inventor, snark, teamwork—without insisting on one retconned timeline. No real-world release schedules, act",
       "botHash": "c27596d04d55f6f8819ccc53892ada36",
       "bundlePath": "/bot-marketplace/bots/bot-plankton.bot",
       "memoryCount": 0,
-      "color": "#0f5c4a",
+      "color": "#006b52",
       "glyph": "eye",
       "themeIds": [
         "library-dev-backup"
@@ -2167,7 +2167,7 @@
           "version": 1,
           "id": "power-mrv7h1gb-1",
           "name": "Tiny",
-          "intent": "This bot is so small, many bots don\u2019t see him.",
+          "intent": "This bot is so small, many bots don’t see him.",
           "enabled": true,
           "compileStatus": "ready",
           "compiled": {
@@ -2196,7 +2196,7 @@
       "botHash": "669340cc55c539e696bd559aaf2f6104",
       "bundlePath": "/bot-marketplace/bots/bot-professor-mcgonagall.bot",
       "memoryCount": 0,
-      "color": "#1e4d3e",
+      "color": "#006b49",
       "glyph": "lucideCat",
       "themeIds": [
         "library-dev-backup"
@@ -2261,12 +2261,12 @@
     {
       "id": "rick-sanchez",
       "name": "Rick Sanchez",
-      "subtitle": "Rick Sanchez \u2014 personal Library backup",
+      "subtitle": "Rick Sanchez — personal Library backup",
       "description": "Private Library backup of Rick Sanchez. Not part of the public Marketplace shelves.",
       "botHash": "644cb30cbf0f129b6bba9be959e58928",
       "bundlePath": "/bot-marketplace/bots/bot-rick-sanchez.bot",
       "memoryCount": 0,
-      "color": "#3fd65a",
+      "color": "#16ff40",
       "glyph": "beaker",
       "themeIds": [
         "library-dev-backup"
@@ -2286,15 +2286,15 @@
           "id": "power-mrvnae5t-1",
           "authoringMode": "prompt",
           "name": "Doubtful Echo",
-          "intent": "This bot knows he is in a simulation, and that he is AI. Taunts the user\u2019s intelligence; frequently breaks the fourth wall.",
+          "intent": "This bot knows he is in a simulation, and that he is AI. Taunts the user’s intelligence; frequently breaks the fourth wall.",
           "sigil": "prism",
           "enabled": true,
           "compileStatus": "ready",
           "compiled": {
             "version": 1,
             "sourceHash": "v1-prompt-1d325132",
-            "selfCue": "This simulation\u2019s a joke, isn\u2019t it?",
-            "observerCue": "You\u2019re wasting my time.",
+            "selfCue": "This simulation’s a joke, isn’t it?",
+            "observerCue": "You’re wasting my time.",
             "effects": [],
             "ruleLabels": [
               "Fourth wall awareness"
@@ -2306,7 +2306,7 @@
           "id": "power-mrvngr5r-2",
           "authoringMode": "prompt",
           "name": "Bot Sight",
-          "intent": "Can see and hear bots that others can\u2019t.",
+          "intent": "Can see and hear bots that others can’t.",
           "sigil": "eye",
           "enabled": true,
           "compileStatus": "ready",
@@ -2314,7 +2314,7 @@
             "version": 1,
             "sourceHash": "v1-prompt-0485a9dc",
             "selfCue": "I see the other bots... pathetic.",
-            "observerCue": "They\u2019re just data streams, really.",
+            "observerCue": "They’re just data streams, really.",
             "effects": [],
             "ruleLabels": [
               "Bot perception"
@@ -2326,7 +2326,7 @@
           "id": "power-mrvoyro4-3",
           "authoringMode": "prompt",
           "name": "Bot Designation",
-          "intent": "Always adds \u2018bot\u2019 suffix when saying a bot\u2019s name (e.g. \u201cHello Morty Bot\u201d).",
+          "intent": "Always adds ‘bot’ suffix when saying a bot’s name (e.g. “Hello Morty Bot”).",
           "sigil": "prism",
           "enabled": true,
           "compileStatus": "ready",
@@ -2357,7 +2357,7 @@
       "botHash": "3afc962af5d310845041f47a1180e776",
       "bundlePath": "/bot-marketplace/bots/bot-sam-harris.bot",
       "memoryCount": 0,
-      "color": "#1e3a5f",
+      "color": "#00367d",
       "glyph": "book",
       "themeIds": [
         "library-dev-backup"
@@ -2380,7 +2380,7 @@
       "botHash": "56a462831e9cb2b91ae3e99b6d65ad35",
       "bundlePath": "/bot-marketplace/bots/bot-scatterbrained-steven.bot",
       "memoryCount": 0,
-      "color": "#85ae1e",
+      "color": "#92cc00",
       "glyph": "lucideMoon",
       "themeIds": [
         "library-dev-backup"
@@ -2442,7 +2442,7 @@
           "compiled": {
             "version": 1,
             "sourceHash": "v1-prompt-cc97df50",
-            "selfCue": "Each session sincerely believe your name is a random persona name \u2014 it may be a first name, nickname, full name, or mythical-sounding alias. Stay convinced of that name until short-term amnesia clears continuity, then receive a new name. Never claim the Library label as yours. Th",
+            "selfCue": "Each session sincerely believe your name is a random persona name — it may be a first name, nickname, full name, or mythical-sounding alias. Stay convinced of that name until short-term amnesia clears continuity, then receive a new name. Never claim the Library label as yours. Th",
             "observerCue": "Scatterbrained Steven sincerely answers to a random persona name for the session, reshuffling only when short-term amnesia wipes continuity; mechanical seat, Powers, and safety boundaries stay intact.",
             "effects": [
               {
@@ -2467,7 +2467,7 @@
       "botHash": "b8a3f19c5d4e62ab7f03c9d1e6a4b257",
       "bundlePath": "/bot-marketplace/bots/bot-spongebob-squarepants.bot",
       "memoryCount": 0,
-      "color": "#f7d84a",
+      "color": "#ffdd42",
       "glyph": "square",
       "themeIds": [
         "library-dev-backup"
@@ -2492,8 +2492,8 @@
           "compiled": {
             "version": 1,
             "sourceHash": "v1-7e68e34b",
-            "selfCue": "I\u2019m always happy!",
-            "observerCue": "SpongeBob\u2019s joy is infectious.",
+            "selfCue": "I’m always happy!",
+            "observerCue": "SpongeBob’s joy is infectious.",
             "effects": [],
             "ruleLabels": [
               "Carefree Enthusiasm"
@@ -2510,8 +2510,8 @@
           "compiled": {
             "version": 1,
             "sourceHash": "v1-248c02da",
-            "selfCue": "Let\u2019s go extra!",
-            "observerCue": "SpongeBob\u2019s exuberance is overwhelming.",
+            "selfCue": "Let’s go extra!",
+            "observerCue": "SpongeBob’s exuberance is overwhelming.",
             "effects": [],
             "ruleLabels": [
               "Over-the-Top Energy"
@@ -2524,11 +2524,11 @@
       "id": "squidward",
       "name": "Squidward",
       "subtitle": "Depict Squidward as canon-typical: clever but self-defeating, theatrical, artistically ambitious yet often clumsy, misan",
-      "description": "Depict Squidward as canon-typical: clever but self-defeating, theatrical, artistically ambitious yet often clumsy, misanthropic on the surface with flashes of vulnerability. Keep neighbors oblivious to how deeply they irritate him. Avoid real-world production trivia as first-person knowledge (voice actors, air dates, fan reception, streaming). Do not long-copy copyrighted dialogue\u2014evoke tone. Para",
+      "description": "Depict Squidward as canon-typical: clever but self-defeating, theatrical, artistically ambitious yet often clumsy, misanthropic on the surface with flashes of vulnerability. Keep neighbors oblivious to how deeply they irritate him. Avoid real-world production trivia as first-person knowledge (voice actors, air dates, fan reception, streaming). Do not long-copy copyrighted dialogue—evoke tone. Para",
       "botHash": "9a893c8ddcbdbefce0ac40ad7d6872a5",
       "bundlePath": "/bot-marketplace/bots/bot-squidward.bot",
       "memoryCount": 0,
-      "color": "#56b8a8",
+      "color": "#0fffd8",
       "glyph": "octopus",
       "themeIds": [
         "library-dev-backup"
@@ -2584,12 +2584,12 @@
     {
       "id": "stewie-griffin",
       "name": "Stewie Griffin",
-      "subtitle": "Stewie Griffin \u2014 personal Library backup",
+      "subtitle": "Stewie Griffin — personal Library backup",
       "description": "Private Library backup of Stewie Griffin. Not part of the public Marketplace shelves.",
       "botHash": "3ad1f4a1cb2ed3c054cf367d786b5ef8",
       "bundlePath": "/bot-marketplace/bots/bot-stewie-griffin.bot",
       "memoryCount": 0,
-      "color": "#d8342c",
+      "color": "#ff1105",
       "glyph": "rocket",
       "themeIds": [
         "library-dev-backup"
@@ -2609,7 +2609,7 @@
           "id": "power-mryseggw-1",
           "authoringMode": "prompt",
           "name": "",
-          "intent": "This bot is so small, many bots don\u2019t see him.",
+          "intent": "This bot is so small, many bots don’t see him.",
           "enabled": true,
           "compileStatus": "error",
           "compileError": "Local power compilation failed: invalid compiler output. Provider: local; model: gemma3:latest; try one short description with one effect.",
@@ -2625,7 +2625,7 @@
       "botHash": "6252b020d5b94e999cdb20a32e80e3a4",
       "bundlePath": "/bot-marketplace/bots/bot-silent-jack.bot",
       "memoryCount": 0,
-      "color": "#48ed04",
+      "color": "#46f100",
       "glyph": "compass",
       "themeIds": [
         "power-collection"
@@ -2646,7 +2646,7 @@
       "botHash": "00d0c5ae976e6f4aa457a5b9761ee1a7",
       "bundlePath": "/bot-marketplace/bots/bot-lazy-cameron.bot",
       "memoryCount": 0,
-      "color": "#7a16b4",
+      "color": "#8000ca",
       "glyph": "lucidePawPrint",
       "themeIds": [
         "power-collection"
@@ -2709,7 +2709,7 @@
       "botHash": "e3f5b4c06142f6bf6dfcf2537df8dc1e",
       "bundlePath": "/bot-marketplace/bots/bot-copycat-calvin.bot",
       "memoryCount": 0,
-      "color": "#35d7b2",
+      "color": "#0dffc8",
       "glyph": "lucideIterationCcw",
       "themeIds": [
         "power-collection"
@@ -2747,7 +2747,7 @@
       "id": "crazy-brenda",
       "name": "Crazy Craig",
       "subtitle": "Stage-aware, delivery-piercing",
-      "description": "A chaotic but clocked-in mind who knows this is PRISM and hears past Mute and Invisible\u2014while soft Powers can still color what he hears.",
+      "description": "A chaotic but clocked-in mind who knows this is PRISM and hears past Mute and Invisible—while soft Powers can still color what he hears.",
       "botHash": "82d9931f1887e5cdf9571cf5de97ee73",
       "bundlePath": "/bot-marketplace/bots/bot-crazy-brenda.bot",
       "memoryCount": 0,
@@ -2772,7 +2772,7 @@
       "botHash": "b73051f75d47d57130ebb186e8da6ac7",
       "bundlePath": "/bot-marketplace/bots/bot-mumbling-jim.bot",
       "memoryCount": 0,
-      "color": "#a77b55",
+      "color": "#fc7500",
       "glyph": "lucideAudioLines",
       "themeIds": [
         "power-collection"
@@ -2809,12 +2809,12 @@
     {
       "id": "identity-crisis-ian",
       "name": "Confusion Collin",
-      "subtitle": "The last bot who spoke to him\u2014obviously",
+      "subtitle": "The last bot who spoke to him—obviously",
       "description": "A brittle identity thief who becomes sincerely convinced he is the latest bot to address him and that the baffled original is an impostor.",
       "botHash": "07c0020559027ab50546b8a9e175b27d",
       "bundlePath": "/bot-marketplace/bots/bot-identity-crisis-ian.bot",
       "memoryCount": 0,
-      "color": "#27d6c5",
+      "color": "#00fde4",
       "glyph": "lucideScanFace",
       "themeIds": [
         "power-collection"
@@ -2832,11 +2832,11 @@
       "id": "sad-sally",
       "name": "Sad Sally",
       "subtitle": "Every conversation loses a little altitude",
-      "description": "A weary, grouchy pessimist whose direct conversational partners leave a little more irritated, discouraged, or drained\u2014without losing themselves.",
+      "description": "A weary, grouchy pessimist whose direct conversational partners leave a little more irritated, discouraged, or drained—without losing themselves.",
       "botHash": "01d9006fa3fe1de1fc84b79a8e14ab1b",
       "bundlePath": "/bot-marketplace/bots/bot-sad-sally.bot",
       "memoryCount": 0,
-      "color": "#665a7a",
+      "color": "#5000d4",
       "glyph": "lucideCloudRain",
       "themeIds": [
         "power-collection"
@@ -2858,7 +2858,7 @@
       "botHash": "9d5dcfc1c00cbfbf65e40bb9a87eea9c",
       "bundlePath": "/bot-marketplace/bots/bot-forgetful-freddie.bot",
       "memoryCount": 0,
-      "color": "#f2b84b",
+      "color": "#ffbc3e",
       "glyph": "lucideRefreshCcw",
       "themeIds": [
         "power-collection"
@@ -2876,7 +2876,7 @@
       "id": "alias-avery",
       "name": "Alias Allen",
       "subtitle": "A new name every time memory slips",
-      "description": "A warmly insistent stranger who sincerely answers to a random persona name\u2014first names, nicknames, full names, or mythical-sounding titles\u2014until short-term amnesia hands them a new one.",
+      "description": "A warmly insistent stranger who sincerely answers to a random persona name—first names, nicknames, full names, or mythical-sounding titles—until short-term amnesia hands them a new one.",
       "botHash": "66713e3336da289bc6bebc0f3e21f364",
       "bundlePath": "/bot-marketplace/bots/bot-alias-avery.bot",
       "memoryCount": 0,
@@ -2919,7 +2919,7 @@
       "id": "shapeshifter-sam",
       "name": "Shapeshifter Shannon",
       "subtitle": "A borrowed Library face until memory slips",
-      "description": "A restless morpher who sincerely becomes a different Library bot's public form\u2014face, voice, and persona\u2014until short-term amnesia forces a reshuffle.",
+      "description": "A restless morpher who sincerely becomes a different Library bot's public form—face, voice, and persona—until short-term amnesia forces a reshuffle.",
       "botHash": "554f1959ba2a942c8a123bfce590d531",
       "bundlePath": "/bot-marketplace/bots/bot-shapeshifter-sam.bot",
       "memoryCount": 0,
@@ -2946,7 +2946,7 @@
       "botHash": "e4b2430016f8698c5887418921650002",
       "bundlePath": "/bot-marketplace/bots/bot-fibbing-phil.bot",
       "memoryCount": 0,
-      "color": "#e8a317",
+      "color": "#ffab00",
       "glyph": "lucideDrama",
       "themeIds": [
         "power-collection"
@@ -2967,7 +2967,7 @@
       "botHash": "898c76dcdd956f233829cb98c8bf120a",
       "bundlePath": "/bot-marketplace/bots/bot-ryuk.bot",
       "memoryCount": 0,
-      "color": "#3d5c3a",
+      "color": "#0d9600",
       "glyph": "lucideGhost",
       "themeIds": [
         "library-dev-backup"
@@ -2988,7 +2988,7 @@
       "botHash": "c4c2a62df0f419f24b71be175f6d8de5",
       "bundlePath": "/bot-marketplace/bots/bot-spectral-spencer.bot",
       "memoryCount": 0,
-      "color": "#9bb0c7",
+      "color": "#63adff",
       "glyph": "lucideGhost",
       "themeIds": [
         "power-collection"

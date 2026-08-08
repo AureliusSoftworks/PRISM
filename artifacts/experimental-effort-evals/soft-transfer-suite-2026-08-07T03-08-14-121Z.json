@@ -1,0 +1,64 @@
+{
+  "schema": "prism-experimental-effort-soft-transfer-suite-v1",
+  "createdAt": "2026-08-07T03:08:14.121Z",
+  "options": {
+    "suite": "soft-transfer",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "cases": [
+    {
+      "id": "labels-s1-s3",
+      "title": "Exact S1–S3 labels + forbidden word",
+      "reportPath": "/Users/jared/Developer/Web Apps/PRISM/artifacts/experimental-effort-evals/experimental-effort-2026-08-07T03-08-14-121Z-labels-s1-s3.md",
+      "totals": {
+        "baseline": 4,
+        "reference": 9,
+        "simulated": 8,
+        "ranking": [
+          "B",
+          "C",
+          "A"
+        ]
+      }
+    },
+    {
+      "id": "key-phrases-local",
+      "title": "Required key phrases (local + private planning pass)",
+      "reportPath": "/Users/jared/Developer/Web Apps/PRISM/artifacts/experimental-effort-evals/experimental-effort-2026-08-07T03-08-14-121Z-key-phrases-local.md",
+      "totals": {
+        "baseline": 8,
+        "reference": 10,
+        "simulated": 8,
+        "ranking": [
+          "B",
+          "A",
+          "C"
+        ]
+      }
+    },
+    {
+      "id": "tiny-table-whitelist",
+      "title": "Tiny table with item whitelist",
+      "reportPath": "/Users/jared/Developer/Web Apps/PRISM/artifacts/experimental-effort-evals/experimental-effort-2026-08-07T03-08-14-121Z-tiny-table-whitelist.md",
+      "totals": {
+        "baseline": 4,
+        "reference": 10,
+        "simulated": 7,
+        "ranking": [
+          "B",
+          "C",
+          "A"
+        ]
+      }
+    }
+  ]
+}

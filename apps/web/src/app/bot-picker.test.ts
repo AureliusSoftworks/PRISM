@@ -3,6 +3,9 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import {
+  arrangeBotPickerItemsInColumnBands,
+  botPickerRainbowHuePosition,
+  compareBotPickerRainbowSortKeys,
   filterBotPickerItems,
   sortBotPickerItems,
 } from "./botPickerFilter.ts";
@@ -13,6 +16,10 @@ const source = readFileSync(
 );
 const pageSource = readFileSync(
   fileURLToPath(new URL("./page.tsx", import.meta.url)),
+  "utf8",
+);
+const pageCssSource = readFileSync(
+  fileURLToPath(new URL("./page.module.css", import.meta.url)),
   "utf8",
 );
 const signalSource = readFileSync(
@@ -76,6 +83,60 @@ describe("shared bot picker", () => {
     assert.deepEqual(
       unsortedBots.map((bot) => bot.id),
       ["violet", "amber", "blue"],
+    );
+  });
+
+  it("orders the rainbow on one continuous, transitive hue axis", () => {
+    assert.equal(botPickerRainbowHuePosition(355), -5);
+    assert.equal(botPickerRainbowHuePosition(5), 5);
+    assert.equal(botPickerRainbowHuePosition(30), 30);
+    assert.equal(botPickerRainbowHuePosition(290), 290);
+    assert.equal(botPickerRainbowHuePosition(330), 330);
+    assert.equal(botPickerRainbowHuePosition(-30), 330);
+
+    const keys = [
+      { id: "orange", name: "Orange", huePosition: 30, luminance: 0.9 },
+      { id: "red-dark", name: "Red dark", huePosition: 12, luminance: 0.1 },
+      { id: "red-bright", name: "Red bright", huePosition: 2, luminance: 1 },
+    ].map((key) => ({ ...key, colorClass: 0, saturation: 100 }));
+    const ordered = [...keys].sort(compareBotPickerRainbowSortKeys);
+
+    assert.deepEqual(
+      ordered.map((key) => key.id),
+      ["red-bright", "red-dark", "orange"],
+    );
+    assert.ok(compareBotPickerRainbowSortKeys(ordered[0]!, ordered[1]!) < 0);
+    assert.ok(compareBotPickerRainbowSortKeys(ordered[1]!, ordered[2]!) < 0);
+    assert.ok(compareBotPickerRainbowSortKeys(ordered[0]!, ordered[2]!) < 0);
+
+    const visualCells = arrangeBotPickerItemsInColumnBands(ordered, 2, 2);
+    for (let row = 0; row < 2; row += 1) {
+      const rowHues = [0, 1]
+        .map((column) => visualCells[row * 2 + column]?.huePosition)
+        .filter((hue): hue is number => hue !== undefined);
+      assert.deepEqual(rowHues, [...rowHues].sort((left, right) => left - right));
+    }
+  });
+
+  it("fills dense rainbow grids in vertical hue bands", () => {
+    const cells = arrangeBotPickerItemsInColumnBands(
+      Array.from({ length: 10 }, (_, index) => index),
+      4,
+      3,
+    );
+
+    assert.deepEqual(cells, [0, 3, 6, 9, 1, 4, 7, null, 2, 5, 8, null]);
+    assert.deepEqual(
+      [0, 1, 2].map((row) => cells[row * 4]),
+      [0, 1, 2],
+    );
+    assert.match(
+      pageSource,
+      /data-rainbow-flow=\{rainbowColumnFlow \? "columns" : undefined\}/u,
+    );
+    assert.match(
+      pageCssSource,
+      /\.chatBotPicker\[data-rainbow-flow="columns"\][\s\S]*?visibility:\s*hidden/u,
     );
   });
 

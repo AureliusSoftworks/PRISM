@@ -10,6 +10,7 @@ import {
   COFFEE_TOPIC_MAX_LENGTH,
   MODEL_VISIBILITY_DEFAULTS_VERSION,
   botPowerSourceHashV1,
+  fullySaturateBotColor,
   normalizeBotAudioVoiceProfileV1,
 } from "@localai/shared";
 import {
@@ -5001,6 +5002,7 @@ describe("API request integration", () => {
       "/api/bots",
       jsonInit({
         name: "Inherited model bot",
+        color: "#9a7480",
         model: "legacy-default",
         localModel: "legacy-local",
         onlineModel: "legacy-online",
@@ -5011,6 +5013,7 @@ describe("API request integration", () => {
     assert.equal(created.status, 201);
     const createdPayload = await json(created);
     const botId = String(createdPayload.bot.id);
+    assert.equal(createdPayload.bot.color, fullySaturateBotColor("#9a7480"));
     assert.deepEqual(
       [
         createdPayload.bot.model,
@@ -5048,7 +5051,7 @@ describe("API request integration", () => {
         local_image_model: string | null;
         openai_image_model: string | null;
       };
-    assert.equal(row.color, "#123456");
+    assert.equal(row.color, fullySaturateBotColor("#123456"));
     assert.deepEqual(
       [
         row.model,

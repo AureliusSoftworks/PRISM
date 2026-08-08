@@ -38,6 +38,7 @@ import {
   resolveAvatarDetailStampAnchor,
   replaceAvatarDetailStampForCategory,
   removeAvatarDetailStamp,
+  symmetrizeAvatarDetailsGridPoints,
   toggleAvatarDetailStamp,
   type AvatarDetailStampV1,
   type AvatarDetailsV1,
@@ -55,7 +56,6 @@ describe("avatar details semantic ink", () => {
       blank,
       [{ x: 60, y: 60 }],
       1,
-      "brush",
       "blink",
     ).colorMap;
     const talking = paintAvatarDetailsColorMap(
@@ -65,14 +65,12 @@ describe("avatar details semantic ink", () => {
         { x: 62, y: 60 },
       ],
       1,
-      "brush",
       "talking",
     ).colorMap;
     const effect = paintAvatarDetailsColorMap(
       talking,
       [{ x: 64, y: 60 }],
       1,
-      "brush",
       "effect",
     ).colorMap;
 
@@ -122,19 +120,82 @@ describe("avatar details semantic ink", () => {
       colorMap,
       [{ x: 60, y: 60 }],
       1,
-      "brush",
       "blink",
     ).colorMap;
     colorMap = paintAvatarDetailsColorMap(
       colorMap,
       [{ x: 62, y: 60 }],
       1,
-      "brush",
       "talking",
     ).colorMap;
     const moved = moveAvatarDetailsPaintColorMap(colorMap, { x: 3, y: 2 });
     assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 63, 62), "blink");
     assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 65, 62), "talking");
+  });
+
+  it("moves only the selected semantic ink layer", () => {
+    let colorMap: Uint8Array = new Uint8Array(
+      AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+    );
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 56, y: 60 }],
+      1,
+      "blink",
+    ).colorMap;
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 62, y: 60 }],
+      1,
+      "talking",
+    ).colorMap;
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 68, y: 60 }],
+      1,
+      "effect",
+    ).colorMap;
+
+    const moved = moveAvatarDetailsPaintColorMap(
+      colorMap,
+      { x: 3, y: 2 },
+      "talking",
+    );
+
+    assert.equal(moved.changed, true);
+    assert.deepEqual(moved.offset, { x: 3, y: 2 });
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 56, 60), "blink");
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 62, 60), null);
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 65, 62), "talking");
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 68, 60), "effect");
+  });
+
+  it("clamps a selected layer before it overwrites stationary ink", () => {
+    let colorMap: Uint8Array = new Uint8Array(
+      AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+    );
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 60, y: 60 }],
+      1,
+      "talking",
+    ).colorMap;
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 62, y: 60 }],
+      1,
+      "effect",
+    ).colorMap;
+
+    const moved = moveAvatarDetailsPaintColorMap(
+      colorMap,
+      { x: 4, y: 0 },
+      "talking",
+    );
+
+    assert.deepEqual(moved.offset, { x: 1, y: 0 });
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 61, 60), "talking");
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 62, 60), "effect");
   });
 
   it("uses the paint bucket to recolor only the connected ink selection", () => {
@@ -150,14 +211,12 @@ describe("avatar details semantic ink", () => {
         { x: 62, y: 61 },
       ],
       1,
-      "brush",
       "blink",
     ).colorMap;
     colorMap = paintAvatarDetailsColorMap(
       colorMap,
       [{ x: 62, y: 60 }],
       1,
-      "brush",
       "talking",
     ).colorMap;
     colorMap = paintAvatarDetailsColorMap(
@@ -167,7 +226,6 @@ describe("avatar details semantic ink", () => {
         { x: 63, y: 62 },
       ],
       1,
-      "brush",
       "blink",
     ).colorMap;
 
@@ -195,7 +253,6 @@ describe("avatar details semantic ink", () => {
       new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH),
       [{ x: 60, y: 60 }],
       1,
-      "brush",
       "effect",
     ).colorMap;
 
@@ -222,6 +279,111 @@ describe("avatar details semantic ink", () => {
     });
   });
 
+  it("uses erase ink as transparency for brush, line, and circle geometry", () => {
+    const blank = new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
+    const line = interpolateAvatarDetailsGridLine(
+      { x: 58, y: 60 },
+      { x: 62, y: 60 },
+    );
+    const paintedLine = paintAvatarDetailsColorMap(
+      blank,
+      line,
+      1,
+      "effect",
+    ).colorMap;
+    const erasedLine = paintAvatarDetailsColorMap(
+      paintedLine,
+      [
+        { x: 59, y: 60 },
+        { x: 60, y: 60 },
+        { x: 61, y: 60 },
+      ],
+      1,
+      "erase",
+    );
+
+    assert.equal(erasedLine.changed, true);
+    assert.equal(erasedLine.limitReached, false);
+    assert.equal(avatarDetailsInkRoleAt(erasedLine.colorMap, 58, 60), "effect");
+    assert.equal(avatarDetailsInkRoleAt(erasedLine.colorMap, 60, 60), null);
+    assert.equal(avatarDetailsInkRoleAt(erasedLine.colorMap, 62, 60), "effect");
+    assert.equal(avatarDetailsPaintColorPixelCount(erasedLine.colorMap), 2);
+
+    const circle = avatarDetailsCirclePoints(
+      { x: 70, y: 70 },
+      { x: 73, y: 70 },
+    );
+    const paintedCircle = paintAvatarDetailsColorMap(
+      erasedLine.colorMap,
+      circle,
+      1,
+      "talking",
+    ).colorMap;
+    const erasedCircle = paintAvatarDetailsColorMap(
+      paintedCircle,
+      circle,
+      1,
+      "erase",
+    ).colorMap;
+    assert.equal(
+      circle.every(
+        ({ x, y }) => avatarDetailsInkRoleAt(erasedCircle, x, y) === null,
+      ),
+      true,
+    );
+  });
+
+  it("uses erase ink with the bucket without crossing disconnected regions", () => {
+    const blank = new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
+    const painted = paintAvatarDetailsColorMap(
+      blank,
+      [
+        { x: 60, y: 60 },
+        { x: 61, y: 60 },
+        { x: 61, y: 61 },
+        { x: 64, y: 60 },
+      ],
+      1,
+      "blink",
+    ).colorMap;
+
+    const erased = recolorAvatarDetailsPaintColorRegion(
+      painted,
+      { x: 60, y: 60 },
+      "erase",
+    );
+
+    assert.equal(erased.changed, true);
+    assert.equal(erased.pixelCount, 3);
+    assert.equal(avatarDetailsInkRoleAt(erased.colorMap, 60, 60), null);
+    assert.equal(avatarDetailsInkRoleAt(erased.colorMap, 61, 61), null);
+    assert.equal(avatarDetailsInkRoleAt(erased.colorMap, 64, 60), "blink");
+    assert.equal(avatarDetailsPaintColorPixelCount(erased.colorMap), 1);
+  });
+
+  it("paints and erases vertically mirrored pixel pairs together", () => {
+    const symmetricPoints = symmetrizeAvatarDetailsGridPoints([
+      { x: 48, y: 54 },
+    ]);
+    const painted = paintAvatarDetailsColorMap(
+      new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH),
+      symmetricPoints,
+      1,
+      "effect",
+    ).colorMap;
+    assert.equal(avatarDetailsInkRoleAt(painted, 48, 54), "effect");
+    assert.equal(avatarDetailsInkRoleAt(painted, 79, 54), "effect");
+
+    const erased = paintAvatarDetailsColorMap(
+      painted,
+      symmetricPoints,
+      1,
+      "erase",
+    ).colorMap;
+    assert.equal(avatarDetailsInkRoleAt(erased, 48, 54), null);
+    assert.equal(avatarDetailsInkRoleAt(erased, 79, 54), null);
+  });
+
   it("merges every visible role into one runtime phosphor emission plane", () => {
     let colorMap: Uint8Array = new Uint8Array(
       AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
@@ -230,21 +392,18 @@ describe("avatar details semantic ink", () => {
       colorMap,
       [{ x: 60, y: 60 }],
       1,
-      "brush",
       "blink",
     ).colorMap;
     colorMap = paintAvatarDetailsColorMap(
       colorMap,
       [{ x: 62, y: 60 }],
       1,
-      "brush",
       "talking",
     ).colorMap;
     colorMap = paintAvatarDetailsColorMap(
       colorMap,
       [{ x: 64, y: 60 }],
       1,
-      "brush",
       "effect",
     ).colorMap;
     const details = avatarDetailsWithPaintColorMap(emptyDetails(), colorMap);
@@ -290,7 +449,6 @@ describe("avatar details semantic ink", () => {
         { x: 64, y: 88 },
       ],
       1,
-      "brush",
       "effect",
     ).colorMap;
     const paintedDetails = avatarDetailsWithPaintColorMap(
@@ -432,6 +590,22 @@ describe("avatar details packed paint mask", () => {
 });
 
 describe("avatar details input geometry", () => {
+  it("mirrors ink across the vertical seam without duplicating paired pixels", () => {
+    assert.deepEqual(
+      symmetrizeAvatarDetailsGridPoints([
+        { x: 12, y: 34 },
+        { x: 115, y: 34 },
+        { x: 63, y: 20 },
+      ]),
+      [
+        { x: 12, y: 34 },
+        { x: 115, y: 34 },
+        { x: 63, y: 20 },
+        { x: 64, y: 20 },
+      ],
+    );
+  });
+
   it("maps pointer movement into the canonical front-facing grid", () => {
     const bounds = { left: 100, top: 50, width: 256, height: 256 };
     assert.deepEqual(avatarDetailsGridPointFromClient(164, 178, bounds), {
@@ -589,7 +763,6 @@ describe("avatar details input geometry", () => {
       new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH),
       [{ x: 64, y: 64 }],
       1,
-      "brush",
       "effect",
     ).colorMap;
     const withInk = avatarDetailsWithPaintColorMap(

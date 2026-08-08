@@ -67,8 +67,14 @@ export type AvatarDetailsBrushSize =
   (typeof AVATAR_DETAILS_BRUSH_SIZES)[number];
 export type AvatarDetailsPaintMode = "brush" | "eraser";
 export type AvatarDetailsTool =
-  AvatarDetailsPaintMode | "bucket" | "line" | "circle" | "move";
+  | "brush"
+  | "bucket"
+  | "line"
+  | "circle"
+  | "move";
 export type AvatarDetailsInkRole = (typeof AVATAR_DETAILS_INK_ROLES)[number];
+export type AvatarDetailsInkSelection = AvatarDetailsInkRole | "erase";
+export type AvatarDetailsMoveSelection = AvatarDetailsInkRole | "all";
 export type AvatarDetailsFaceDepth = "all" | "behind-face" | "above-face";
 
 /**
@@ -435,6 +441,40 @@ export function avatarDetailsGridPointFromClient(
   };
 }
 
+/** Mirrors authored ink across the seam between canvas columns 63 and 64. */
+export function mirrorAvatarDetailsGridPointVertically(
+  point: AvatarDetailsGridPoint,
+): AvatarDetailsGridPoint {
+  return {
+    x: AVATAR_DETAILS_CANVAS_SIZE - 1 - Math.round(point.x),
+    y: Math.round(point.y),
+  };
+}
+
+/** Adds each point's vertical mirror while removing overlapping pixels. */
+export function symmetrizeAvatarDetailsGridPoints(
+  points: readonly AvatarDetailsGridPoint[],
+): AvatarDetailsGridPoint[] {
+  const symmetricPoints: AvatarDetailsGridPoint[] = [];
+  const seen = new Set<string>();
+  for (const point of points) {
+    const normalizedPoint = {
+      x: Math.round(point.x),
+      y: Math.round(point.y),
+    };
+    for (const candidate of [
+      normalizedPoint,
+      mirrorAvatarDetailsGridPointVertically(normalizedPoint),
+    ]) {
+      const key = `${candidate.x}:${candidate.y}`;
+      if (seen.has(key)) continue;
+      seen.add(key);
+      symmetricPoints.push(candidate);
+    }
+  }
+  return symmetricPoints;
+}
+
 /** Integer Bresenham traversal prevents holes between sparse pointer events. */
 export function interpolateAvatarDetailsGridLine(
   start: AvatarDetailsGridPoint,
@@ -626,12 +666,24 @@ export interface MoveAvatarDetailsPaintColorMapResult {
 function avatarDetailsPaintColorTranslationIsValid(
   source: Uint8Array,
   offset: AvatarDetailsGridPoint,
+  selection: AvatarDetailsMoveSelection,
 ): boolean {
   for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
     for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      const role = avatarDetailsInkRoleAt(source, x, y);
+      if (!role || (selection !== "all" && role !== selection)) continue;
+      const destinationX = x + offset.x;
+      const destinationY = y + offset.y;
+      if (!avatarDetailsWritablePixel(destinationX, destinationY)) return false;
+      const destinationRole = avatarDetailsInkRoleAt(
+        source,
+        destinationX,
+        destinationY,
+      );
       if (
-        avatarDetailsInkRoleAt(source, x, y) !== null &&
-        !avatarDetailsWritablePixel(x + offset.x, y + offset.y)
+        selection !== "all" &&
+        destinationRole !== null &&
+        destinationRole !== selection
       ) {
         return false;
       }
@@ -643,6 +695,7 @@ function avatarDetailsPaintColorTranslationIsValid(
 export function moveAvatarDetailsPaintColorMap(
   source: Uint8Array,
   desiredOffset: AvatarDetailsGridPoint,
+  selection: AvatarDetailsMoveSelection = "all",
 ): MoveAvatarDetailsPaintColorMapResult {
   if (source.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
     throw new RangeError(
@@ -657,21 +710,45 @@ export function moveAvatarDetailsPaintColorMap(
     { x: 0, y: 0 },
     requested,
   );
-  const offset = [...candidates]
-    .reverse()
-    .find((candidate) =>
-      avatarDetailsPaintColorTranslationIsValid(source, candidate),
-    ) ?? { x: 0, y: 0 };
-  const changed =
-    (offset.x !== 0 || offset.y !== 0) &&
-    avatarDetailsPaintColorPixelCount(source) > 0;
-  if (!changed) return { colorMap: source.slice(), changed: false, offset };
-
-  const colorMap = new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
+  let offset = { x: 0, y: 0 };
+  for (const candidate of candidates) {
+    if (
+      !avatarDetailsPaintColorTranslationIsValid(source, candidate, selection)
+    ) {
+      break;
+    }
+    offset = candidate;
+  }
+  let movablePixelCount = 0;
   for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
     for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
       const role = avatarDetailsInkRoleAt(source, x, y);
-      if (role) {
+      if (role && (selection === "all" || role === selection)) {
+        movablePixelCount += 1;
+      }
+    }
+  }
+  const changed =
+    (offset.x !== 0 || offset.y !== 0) && movablePixelCount > 0;
+  if (!changed) return { colorMap: source.slice(), changed: false, offset };
+
+  const colorMap =
+    selection === "all"
+      ? new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH)
+      : source.slice();
+  if (selection !== "all") {
+    for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+      for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+        if (avatarDetailsInkRoleAt(source, x, y) === selection) {
+          setAvatarDetailsInkRole(colorMap, x, y, null);
+        }
+      }
+    }
+  }
+  for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      const role = avatarDetailsInkRoleAt(source, x, y);
+      if (role && (selection === "all" || role === selection)) {
         setAvatarDetailsInkRole(colorMap, x + offset.x, y + offset.y, role);
       }
     }
@@ -692,14 +769,14 @@ export interface RecolorAvatarDetailsPaintColorRegionResult {
 }
 
 /**
- * Recolors the four-way-connected semantic ink region under the selected
- * point. Empty canvas is deliberately a no-op: the bucket changes existing
- * ink behavior instead of creating a new painted field.
+ * Changes the four-way-connected semantic ink region under the selected
+ * point. Empty canvas is deliberately a no-op: the bucket changes or erases
+ * existing ink instead of creating a new painted field.
  */
 export function recolorAvatarDetailsPaintColorRegion(
   source: Uint8Array,
   point: AvatarDetailsGridPoint,
-  role: AvatarDetailsInkRole,
+  selection: AvatarDetailsInkSelection,
 ): RecolorAvatarDetailsPaintColorRegionResult {
   if (source.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
     throw new RangeError(
@@ -710,9 +787,10 @@ export function recolorAvatarDetailsPaintColorRegion(
   const startY = Math.round(point.y);
   const sourceRole = avatarDetailsInkRoleAt(source, startX, startY);
   const colorMap = source.slice();
-  if (!sourceRole || sourceRole === role) {
+  if (!sourceRole || sourceRole === selection) {
     return { colorMap, changed: false, pixelCount: 0 };
   }
+  const targetRole = selection === "erase" ? null : selection;
 
   const visited = new Uint8Array(
     AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE,
@@ -744,7 +822,7 @@ export function recolorAvatarDetailsPaintColorRegion(
     const index = queue[cursor]!;
     const x = index % AVATAR_DETAILS_CANVAS_SIZE;
     const y = Math.floor(index / AVATAR_DETAILS_CANVAS_SIZE);
-    if (setAvatarDetailsInkRole(colorMap, x, y, role)) pixelCount += 1;
+    if (setAvatarDetailsInkRole(colorMap, x, y, targetRole)) pixelCount += 1;
     enqueue(x - 1, y);
     enqueue(x + 1, y);
     enqueue(x, y - 1);
@@ -758,8 +836,7 @@ export function paintAvatarDetailsColorMap(
   source: Uint8Array,
   points: readonly AvatarDetailsGridPoint[],
   brushSize: AvatarDetailsBrushSize,
-  mode: AvatarDetailsPaintMode,
-  role: AvatarDetailsInkRole,
+  selection: AvatarDetailsInkSelection,
 ): PaintAvatarDetailsColorMapResult {
   if (source.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
     throw new RangeError(
@@ -771,6 +848,7 @@ export function paintAvatarDetailsColorMap(
   let changed = false;
   let limitReached = false;
   const radius = Math.floor(brushSize / 2);
+  const targetRole = selection === "erase" ? null : selection;
 
   for (const point of points) {
     const centerX = Math.round(point.x);
@@ -779,14 +857,14 @@ export function paintAvatarDetailsColorMap(
       for (let x = centerX - radius; x <= centerX + radius; x += 1) {
         if (!avatarDetailsWritablePixel(x, y)) continue;
         const previousRole = avatarDetailsInkRoleAt(colorMap, x, y);
-        if (mode === "eraser") {
+        if (targetRole === null) {
           if (previousRole && setAvatarDetailsInkRole(colorMap, x, y, null)) {
             pixelCount -= 1;
             changed = true;
           }
           continue;
         }
-        if (previousRole === role) continue;
+        if (previousRole === targetRole) continue;
         if (
           previousRole === null &&
           pixelCount >= AVATAR_DETAILS_MAX_PAINT_PIXELS
@@ -794,7 +872,7 @@ export function paintAvatarDetailsColorMap(
           limitReached = true;
           continue;
         }
-        if (setAvatarDetailsInkRole(colorMap, x, y, role)) {
+        if (setAvatarDetailsInkRole(colorMap, x, y, targetRole)) {
           if (previousRole === null) pixelCount += 1;
           changed = true;
         }

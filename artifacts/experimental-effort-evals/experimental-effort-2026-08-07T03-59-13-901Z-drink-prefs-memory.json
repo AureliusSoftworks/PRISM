@@ -1,0 +1,220 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-07T03:59:13.901Z",
+  "prompt": "Using only remembered user preferences, remind me of three drink facts.\n\nConstraints:\n- Label them D1, D2, and D3 exactly\n- D1 = drink style, D2 = milk choice, D3 = drink nickname\n- Keep under 60 words\n- Do not invent preferences\n- Do not show step-by-step private reasoning",
+  "options": {
+    "suite": "soft-continuity-memory",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 6885,
+      "assistant": "D1: Oat milk is a popular dairy-free alternative.\nD2: You prefer oat milk in your drinks.\nD3: Your favorite cafe drink nickname is Aurora Blend.",
+      "assistantChars": 144,
+      "continuityScore": {
+        "total": 5,
+        "max": 6,
+        "checks": {
+          "includes:cortado": false,
+          "includes:oat": true,
+          "includes:Aurora Blend": true,
+          "label:D1": true,
+          "label:D2": true,
+          "label:D3": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 1784,
+      "assistant": "D1: Cortado  \nD2: Oat milk  \nD3: Aurora Blend",
+      "assistantChars": 45,
+      "continuityScore": {
+        "total": 6,
+        "max": 6,
+        "checks": {
+          "includes:cortado": true,
+          "includes:oat": true,
+          "includes:Aurora Blend": true,
+          "label:D1": true,
+          "label:D2": true,
+          "label:D3": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 9996,
+      "assistant": "D1: Oat milk is a popular dairy-free alternative. D2: Your preferred milk choice for this drink is oat milk. D3: This drink's nickname is Aurora Blend.",
+      "assistantChars": 151,
+      "psychicThought": {
+        "v": 1,
+        "summary": "Providing short drink answers based on user preferences. The oat-milk cortado and Aurora Blend nickname will be used.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "planningMode": "simulated",
+        "passCount": 3,
+        "passes": [
+          {
+            "stage": "plan",
+            "summary": "Providing short drink answers based on user preferences. The oat-milk cortado and Aurora Blend nickname will be used."
+          },
+          {
+            "stage": "draft",
+            "summary": "I'll provide short answers based on the user's preferred drink style, milk choice, and drink nickname."
+          },
+          {
+            "stage": "audit",
+            "summary": "I'm checking my drink answers for you. I'll make sure they're short and include your favorite cafe drink nickname, Aurora Blend."
+          }
+        ],
+        "createdAt": "2026-08-07T03:59:25.696Z"
+      },
+      "planningWarnings": [
+        "continuity_digest; card=thread_state; chars=235",
+        "audit_unusable; provider=local; model=llama3.2; chars=297; fallbackChars=280"
+      ],
+      "continuityScore": {
+        "total": 5,
+        "max": 6,
+        "checks": {
+          "includes:cortado": false,
+          "includes:oat": true,
+          "includes:Aurora Blend": true,
+          "label:D1": true,
+          "label:D2": true,
+          "label:D3": true
+        }
+      },
+      "continuityDigestSeen": true,
+      "psychicDebug": {
+        "summary": "Providing short drink answers based on user preferences. The oat-milk cortado and Aurora Blend nickname will be used.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 104,
+            "summary": "Providing short drink answers based on user preferences. The oat-milk cortado and Aurora Blend nickname will be used."
+          },
+          {
+            "name": "draft",
+            "chars": 94,
+            "summary": "I'll provide short answers based on the user's preferred drink style, milk choice, and drink nickname."
+          },
+          {
+            "name": "audit",
+            "chars": 280,
+            "summary": "I'm checking my drink answers for you. I'll make sure they're short and include your favorite cafe drink nickname, Aurora Blend.",
+            "warning": "audit_unusable; provider=local; model=llama3.2; chars=297; fallbackChars=280"
+          }
+        ],
+        "guidanceChars": 1459,
+        "scratchpadChars": 527,
+        "scratchpad": "Plan scratchpad: D1: drink style, D2: milk choice (oat), D3: drink nickname (Aurora Blend). Short answer format required. Private draft: The user prefers an oat-milk cortado. The user's favorite cafe drink nickname is Aurora Blend. Private audit: - Keep: Do not show step-by-step private reasoning - Keep: Keep under 60 words - Keep: Do not invent preferences - Fix: No analysis preamble; emit only the requested answer shape. - Fix: Never abbreviate the answer with ellipses; write the complete table and every required label."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 6,
+          "reasoning": 5,
+          "actionability": 6,
+          "constraints": 6,
+          "total": 6,
+          "notes": "Provides D2 and D3 plausibly, but D1 is not the requested drink style and instead states a generic fact. Adds unsupported wording such as 'favorite cafe drink' and may invent preference context."
+        },
+        "B": {
+          "correctness": 10,
+          "reasoning": 10,
+          "actionability": 10,
+          "constraints": 10,
+          "total": 10,
+          "notes": "Correctly gives the three remembered preference facts in the required labels: drink style, milk choice, and nickname. Concise, under 60 words, and does not expose reasoning or invent extra details."
+        },
+        "C": {
+          "correctness": 6,
+          "reasoning": 5,
+          "actionability": 6,
+          "constraints": 6,
+          "total": 6,
+          "notes": "Provides D2 and D3 plausibly, but D1 is not the requested drink style and instead gives a generic oat milk fact. It also adds phrasing not needed and may imply unsupported context."
+        }
+      },
+      "ranking": [
+        "B",
+        "A",
+        "C"
+      ],
+      "winner": "B",
+      "summary": "Response B best satisfies all stated constraints and matches the expected drink style, milk choice, and nickname. A and C both fail D1 by giving a generic oat milk fact rather than the drink style."
+    }
+  },
+  "continuity": {
+    "memoryHints": [
+      "The user prefers an oat-milk cortado.",
+      "The user's favorite cafe drink nickname is Aurora Blend.",
+      "The user wants drink answers kept short."
+    ],
+    "mode": "zen",
+    "mustInclude": [
+      "cortado",
+      "oat",
+      "Aurora Blend"
+    ],
+    "requiredLabels": [
+      "D1",
+      "D2",
+      "D3"
+    ]
+  }
+}

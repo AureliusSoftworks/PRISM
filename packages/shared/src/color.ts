@@ -232,6 +232,19 @@ export function hslToHex(h: number, s: number, l: number): string {
 }
 
 /**
+ * Canonicalize a stored bot color to the fully saturated hue used by the
+ * hue-only Shell picker. Hue and HSL lightness are preserved; only saturation
+ * is raised to 100%. Non-hex legacy CSS values are returned trimmed so this
+ * storage migration never turns an unreadable custom value into a new color.
+ */
+export function fullySaturateBotColor(color: string): string {
+  const trimmed = color.trim();
+  if (!/^#[0-9a-fA-F]{6}$/u.test(trimmed)) return trimmed;
+  const { h, l } = hexToHsl(trimmed);
+  return hslToHex(h, 100, l);
+}
+
+/**
  * HSL-lightness range the app's accent color picker is allowed to produce.
  * Clamping both ends (not just one) means bot colors never go dark enough
  * to vanish into the dark-mode shell nor pale enough to wash out against

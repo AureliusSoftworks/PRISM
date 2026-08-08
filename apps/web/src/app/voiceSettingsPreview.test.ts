@@ -451,9 +451,10 @@ describe("voice settings preview", () => {
       performanceSource,
       /elevenLabsEffect:[\s\S]*?saveImmediately: true/,
     );
-    assert.match(pageSource, /async function flushBotVoiceAutosaveQueue/);
-    assert.match(pageSource, /voiceAutosavePendingRef/);
-    assert.match(pageSource, /voiceAutosaveInFlightRef/);
+    assert.doesNotMatch(pageSource, /async function flushBotVoiceAutosaveQueue/);
+    assert.doesNotMatch(pageSource, /voiceAutosavePendingRef/);
+    assert.doesNotMatch(pageSource, /voiceAutosaveInFlightRef/);
+    assert.match(pageSource, /async function runBotAvatarExplicitSave/);
   });
 
   it("offers a persisted keyword deck for Eleven v3 performance direction", () => {
@@ -513,39 +514,36 @@ describe("voice settings preview", () => {
     );
   });
 
-  it("commits pitch, pace, and lilt through the selected bot profile instead of global settings", () => {
+  it("keeps voice and pronunciation changes in the Avatar Studio draft until explicit Save", () => {
     const performanceSource = pageSource.slice(
       pageSource.indexOf("function BotVoicePerformanceControls("),
       pageSource.indexOf("function BotVoiceFeelStage("),
     );
-    const autosaveSource = pageSource.slice(
-      pageSource.indexOf("async function flushBotVoiceAutosaveQueue"),
+    const saveSource = pageSource.slice(
+      pageSource.indexOf("async function saveBot(id: string)"),
       pageSource.indexOf("// Single submit handler for the top form"),
     );
 
     assert.match(performanceSource, /\["pitch", "Pitch"\]/);
     assert.match(performanceSource, /\["lilt", "Lilt"\]/);
     assert.match(performanceSource, /\["pace", "Pace"\]/);
-    assert.match(
-      performanceSource,
-      /onPointerUp=\{\(event\) =>[\s\S]*?saveImmediately: true/,
-    );
-    assert.match(
-      performanceSource,
-      /onKeyUp=\{\(event\) =>[\s\S]*?saveImmediately: true/,
-    );
-    assert.match(autosaveSource, /targetId: editingBotId/);
-    assert.match(autosaveSource, /`\/api\/bots\/\$\{pending\.targetId\}`/);
-    assert.match(
-      autosaveSource,
-      /payload\.namePronunciation = pending\.namePronunciation/,
+    assert.doesNotMatch(
+      pageSource,
+      /flushBotVoiceAutosaveQueue|queueBotVoiceAutosave|queueBotNamePronunciationAutosave/,
     );
     assert.match(
       pageSource,
-      /onBotNamePronunciationChange=\{\(next\) => \{[\s\S]*?queueBotNamePronunciationAutosave\(next\)/,
+      /onBotNamePronunciationChange=\{\(next\) => \{[\s\S]*?setNewBotNamePronunciation\(next\);[\s\S]*?\}\}/,
     );
+    assert.match(
+      pageSource,
+      /onAudioVoiceProfileChange=\{\(next\) => \{[\s\S]*?setNewBotAudioVoiceProfile\(normalized\);[\s\S]*?\}\}/,
+    );
+    assert.match(saveSource, /const patch = buildBotCustomizerSavePatch/);
+    assert.match(saveSource, /namePronunciation: normalizedNamePronunciation/);
+    assert.match(saveSource, /audioVoiceProfile: newBotAudioVoiceProfile/);
     assert.doesNotMatch(
-      autosaveSource,
+      saveSource,
       /\/api\/settings|prismDefaultBotAudioVoiceProfile/,
     );
   });

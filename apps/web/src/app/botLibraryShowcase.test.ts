@@ -31,6 +31,56 @@ describe("selected bot library showcase", () => {
     );
   });
 
+  it("matches the Avatar Editor alloy and buckle proportions", () => {
+    assert.match(
+      normalizedCssSource,
+      /\.botPanelHubAvatarPlate \.zenLiveBotPresenceBody\s*\{[\s\S]*?--zen-live-bot-body-glyph-size:\s*calc\(var\(--zen-live-bot-body-frame-size\) \* 0\.145\)/,
+    );
+    assert.match(
+      pageSource,
+      /const previewVoicePreset = profile\.core\.communicationStyle;[\s\S]*?const avatarStyle = botAvatarFoundryPreviewStyle\([\s\S]*?previewVoicePreset/,
+    );
+    const showcaseSource = pageSource.slice(
+      pageSource.indexOf("const renderBotHubShowcase"),
+      pageSource.indexOf("const renderSharedPanels"),
+    );
+    assert.match(
+      showcaseSource,
+      /const showcaseVoicePreset = coffeeSeatVoicePreset\(bot\);[\s\S]*?botAvatarFullScaleIdentityStyle\([\s\S]*?voicePreset: showcaseVoicePreset/,
+    );
+    assert.match(
+      showcaseSource,
+      /<ZenLiveBotMannequin[\s\S]*?voicePreset=\{showcaseVoicePreset\}/,
+    );
+    assert.match(
+      showcaseSource,
+      /metalAlloyEnabled=\{!isDefaultPrism\}/,
+    );
+  });
+
+  it("reserves the triangle for Prism and keeps persona glyphs canonical", () => {
+    assert.match(
+      pageSource,
+      /function resolveCustomBotGlyph\([\s\S]*?value !== DEFAULT_PRISM_BOT_GLYPH[\s\S]*?: DEFAULT_BOT_GLYPH;/,
+    );
+    const showcaseSource = pageSource.slice(
+      pageSource.indexOf("const renderBotHubShowcase"),
+      pageSource.indexOf("const renderSharedPanels"),
+    );
+    assert.match(
+      showcaseSource,
+      /glyph=\{[\s\S]*?bot[\s\S]*?\? resolveCustomBotGlyph\(bot\.glyph\)[\s\S]*?: DEFAULT_PRISM_BOT_GLYPH[\s\S]*?\}/,
+    );
+    assert.match(
+      pageSource,
+      /const seededGlyph: BotGlyphName = resolveCustomBotGlyph\(bot\.glyph\);/,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /bot && isBotGlyphName\(bot\.glyph\) \? bot\.glyph : defaultPrismGlyph/,
+    );
+  });
+
   it("opens the selected bot actions from the showcase context menu", () => {
     assert.match(
       pageSource,

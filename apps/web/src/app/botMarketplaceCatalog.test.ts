@@ -5,11 +5,14 @@ import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { strFromU8, unzipSync } from "fflate";
 
 import {
   BOT_VOICE_PRESET_LABELS,
   DEFAULT_BOT_FACE_BLINK_BAR,
   botPowerSourceHashV1,
+  fullySaturateBotColor,
+  hexToHsl,
   normalizeBotFaceBlinkBar,
   normalizeBotFaceEyeCharacter,
   normalizeBotFaceEyeCount,
@@ -68,6 +71,30 @@ function readBotBundle(filePath: string) {
 }
 
 describe("bot marketplace static catalog", () => {
+  it("ships fully saturated, bundle-matched colors for every bot", () => {
+    const rawManifest = readJsonFile<{
+      bots: Array<{ id: string; color: string; bundlePath: string }>;
+    }>(path.join(publicRoot, "bot-marketplace/manifest.json"));
+
+    for (const entry of rawManifest.bots) {
+      assert.ok(
+        hexToHsl(entry.color).s > 99.5,
+        `${entry.id} manifest color is not fully saturated: ${entry.color}`,
+      );
+      const archiveEntries = unzipSync(
+        readFileSync(path.join(publicRoot, entry.bundlePath)),
+      );
+      const botJson = JSON.parse(strFromU8(archiveEntries["bot.json"]!)) as {
+        bot: { color: string };
+      };
+      assert.equal(botJson.bot.color, entry.color, entry.id);
+      assert.ok(
+        hexToHsl(botJson.bot.color).s > 99.5,
+        `${entry.id} bundle color is not fully saturated: ${botJson.bot.color}`,
+      );
+    }
+  });
+
   it("keeps the curated catalog persona-specific paired eyes", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
@@ -421,7 +448,7 @@ describe("bot marketplace static catalog", () => {
         );
       }
       if (botId === "joyful-nora") {
-        assert.equal(bundle.botJson.bot.color, "#ff24bf");
+        assert.equal(bundle.botJson.bot.color, fullySaturateBotColor("#ff24bf"));
         assert.equal(bundle.botJson.bot.glyph, "lucideRadio");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "+");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["e", "E", "e", "E"]);
@@ -447,7 +474,7 @@ describe("bot marketplace static catalog", () => {
         assert.match(powers[0]?.intent ?? "", /stage-aware|Enlightened/iu);
       }
       if (botId === "sad-sally") {
-        assert.equal(bundle.botJson.bot.color, "#665a7a");
+        assert.equal(bundle.botJson.bot.color, fullySaturateBotColor("#665a7a"));
         assert.equal(bundle.botJson.bot.glyph, "lucideCloudRain");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "-");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["s", "i", "g", "h"]);
@@ -455,7 +482,7 @@ describe("bot marketplace static catalog", () => {
         assert.match(bundle.botJson.systemPrompt ?? "", /grouchy|pessimist|rain cloud/iu);
       }
       if (botId === "forgetful-freddie") {
-        assert.equal(bundle.botJson.bot.color, "#f2b84b");
+        assert.equal(bundle.botJson.bot.color, fullySaturateBotColor("#f2b84b"));
         assert.equal(bundle.botJson.bot.glyph, "lucideRefreshCcw");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "?");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["h", "e", "l", "o"]);
@@ -479,7 +506,7 @@ describe("bot marketplace static catalog", () => {
         );
       }
       if (botId === "alias-avery") {
-        assert.equal(bundle.botJson.bot.color, "#8a7bff");
+        assert.equal(bundle.botJson.bot.color, fullySaturateBotColor("#8a7bff"));
         assert.equal(bundle.botJson.bot.glyph, "lucideUserRound");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "o");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["?", "o", "~", "?"]);
@@ -493,7 +520,7 @@ describe("bot marketplace static catalog", () => {
         assert.match(bundle.botJson.systemPrompt ?? "", /random persona name|John\/Jane Doe|believed/iu);
       }
       if (botId === "shapeshifter-sam") {
-        assert.equal(bundle.botJson.bot.color, "#ff8f5c");
+        assert.equal(bundle.botJson.bot.color, fullySaturateBotColor("#ff8f5c"));
         assert.equal(bundle.botJson.bot.glyph, "lucideSparkles");
         assert.equal(bundle.botJson.bot.faceEyeCharacter, "∞");
         assert.deepEqual(bundle.botJson.bot.faceThinkingFrames, ["~", "o", "O", "∞"]);
@@ -937,16 +964,16 @@ describe("bot marketplace static catalog", () => {
 
     assert.deepEqual(
       scienceEntries.map((entry) => entry.color),
-      ["#2DA8FF", "#4F83CC", "#6B7D2A", "#4A8F7A", "#4F7D3A"]
+      ["#2da8ff", "#1c7aff", "#83a700", "#00d997", "#39b700"]
     );
 
     const colors = botMarketplaceThemeGradientColors(scienceEntries, "dark");
-    assert.deepEqual(colors, ["#2da8ff", "#4f83cc", "#7c9131", "#4a8f7a", "#54843d"]);
+    assert.deepEqual(colors, ["#2da8ff", "#1c7aff", "#98c200", "#00d997", "#3cc200"]);
 
     const style = buildBotMarketplaceThemeVisualStyle("science-invention", scienceEntries, "dark");
     const styleText = Object.values(style).join(" ");
     assert.equal(style["--marketplace-category-edge"], "#2da8ff");
-    assert.equal(style["--marketplace-category-edge-2"], "#54843d");
+    assert.equal(style["--marketplace-category-edge-2"], "#3cc200");
     assert.equal(styleText.includes("#ff6f91"), false);
     assert.equal(styleText.includes("255, 111, 145"), false);
   });
@@ -997,7 +1024,10 @@ describe("bot marketplace static catalog", () => {
     const jesusBundle = readBotBundle(path.join(publicRoot, "bot-marketplace/bots/bot-jesus-christ.bot"));
     const alanWattsBundle = readBotBundle(path.join(publicRoot, "bot-marketplace/bots/bot-alan-watts.bot"));
 
-    assert.equal(byId.get("jesus-christ")?.color, "#2563A8");
+    assert.equal(
+      byId.get("jesus-christ")?.color,
+      fullySaturateBotColor("#2563A8"),
+    );
     assert.equal(byId.get("jesus-christ")?.glyph, "lucideFishSymbol");
     assert.equal(jesusBundle.botJson.bot.glyph, "lucideFishSymbol");
     assert.equal(byId.get("alan-watts")?.glyph, "yinYang");
@@ -1017,11 +1047,11 @@ describe("bot marketplace static catalog", () => {
     assert.equal(byId.get("iris")?.name, "Iris");
     assert.equal(byId.get("sol")?.name, "Sol");
     assert.equal(byId.get("mira")?.name, "Mira");
-    assert.equal(byId.get("pia")?.color, "#ff4d6d");
-    assert.equal(byId.get("rowan")?.color, "#ff9f1c");
-    assert.equal(byId.get("iris")?.color, "#b7e63a");
-    assert.equal(byId.get("sol")?.color, "#2fd3e3");
-    assert.equal(byId.get("mira")?.color, "#7b5cff");
+    assert.equal(byId.get("pia")?.color, fullySaturateBotColor("#ff4d6d"));
+    assert.equal(byId.get("rowan")?.color, fullySaturateBotColor("#ff9f1c"));
+    assert.equal(byId.get("iris")?.color, fullySaturateBotColor("#b7e63a"));
+    assert.equal(byId.get("sol")?.color, fullySaturateBotColor("#2fd3e3"));
+    assert.equal(byId.get("mira")?.color, fullySaturateBotColor("#7b5cff"));
   });
 
   it("pairs each Prism Original with its requested basic face preset", () => {

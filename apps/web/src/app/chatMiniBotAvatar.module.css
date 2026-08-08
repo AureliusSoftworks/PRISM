@@ -1,0 +1,147 @@
+/* Compact canonical chassis for empty Chat/Zen hero previews (and optional
+   badge-scale reuse). Its inset reproduces the previous 128px silhouette while
+   keeping the full avatar's base/alloy material separation. */
+.root {
+  --chat-mini-bot-color: var(--accent);
+  --chat-mini-bot-alloy-color: #aeb8c1;
+  --chat-mini-bot-frame-left: 12.5%;
+  --chat-mini-bot-frame-top: 9.375%;
+  --chat-mini-bot-frame-width: 74.21875%;
+  --chat-mini-bot-frame-height: 78.90625%;
+  position: relative;
+  display: inline-grid;
+  place-items: center;
+  flex-shrink: 0;
+  isolation: isolate;
+  overflow: visible;
+  color: var(--chat-mini-bot-color);
+}
+
+.root::before,
+.root::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+}
+
+/* The hero chassis should feel like a tiny object occupying the room, rather
+   than a badge pasted beside the title. Keep the light broad and low-energy so
+   the face and the bot's actual accent remain the focal points. */
+.root[data-size="hero"]::before {
+  z-index: 0;
+  inset: 10% 3% 4%;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse at 50% 48%,
+    color-mix(in srgb, var(--chat-mini-bot-color) 20%, transparent) 0 28%,
+    color-mix(in srgb, var(--chat-mini-bot-color) 9%, transparent) 48%,
+    transparent 74%
+  );
+  filter: blur(12px);
+  opacity: 0.86;
+}
+
+.root[data-size="hero"]::after {
+  z-index: 0;
+  left: 19%;
+  right: 19%;
+  bottom: 3%;
+  height: 13%;
+  border-radius: 50%;
+  background: color-mix(in srgb, #000000 58%, transparent);
+  filter: blur(7px);
+  opacity: 0.56;
+  transform: scaleX(1.08);
+}
+
+.sizeBadge {
+  width: 28px;
+  height: 28px;
+}
+
+.sizeHero {
+  --chat-mini-bot-face-size: clamp(26px, 2.3vw, 30px);
+  --chat-mini-bot-glyph-size: clamp(21px, 2vw, 25px);
+  width: clamp(132px, 11vw, 154px);
+  height: clamp(132px, 11vw, 154px);
+}
+
+.frame {
+  position: absolute;
+  left: var(--chat-mini-bot-frame-left);
+  top: var(--chat-mini-bot-frame-top);
+  width: var(--chat-mini-bot-frame-width);
+  height: var(--chat-mini-bot-frame-height);
+  object-fit: fill;
+  image-rendering: auto;
+  pointer-events: none;
+  user-select: none;
+}
+
+.frameBase {
+  z-index: 2;
+  opacity: 1;
+  filter: drop-shadow(0 8px 9px rgba(0, 0, 0, 0.3));
+}
+
+/* The communication-style alloy is the only identity material on the silent
+   mini chassis. The canonical metal mask excludes screens and LED emission, so
+   there is no dim/off bulb layer to muddy the small silhouette. */
+.frameAlloy {
+  position: absolute;
+  left: var(--chat-mini-bot-frame-left);
+  top: var(--chat-mini-bot-frame-top);
+  z-index: 3;
+  width: var(--chat-mini-bot-frame-width);
+  height: var(--chat-mini-bot-frame-height);
+  pointer-events: none;
+  background: var(--chat-mini-bot-alloy-color);
+  -webkit-mask: url("/bot-frame/bot-frame-metal-mask.png?v=1000") center / 100%
+    100% no-repeat;
+  mask: url("/bot-frame/bot-frame-metal-mask.png?v=1000") center / 100% 100%
+    no-repeat;
+  opacity: 0.42;
+  mix-blend-mode: color;
+}
+
+.upperScreen,
+.lowerScreen {
+  position: absolute;
+  z-index: 4;
+  display: grid;
+  place-items: center;
+  overflow: hidden;
+  pointer-events: none;
+  color: color-mix(in srgb, var(--chat-mini-bot-color) 88%, #ffffff);
+}
+
+/* Upper face/art screen: (31,24)-(96,86) on 128px → ~24%/19%/52%/49% */
+.upperScreen {
+  left: 24.2%;
+  top: 18.75%;
+  width: 50.8%;
+  height: 48.4%;
+  border-radius: 50%;
+}
+
+/* Lower glyph screen: (52,86)-(74,111) on 128px → ~41%/67%/18%/20% */
+.lowerScreen {
+  left: 40.6%;
+  top: 67.2%;
+  width: 18%;
+  height: 20.3%;
+  border-radius: 50%;
+}
+
+.upperScreen > *,
+.lowerScreen > * {
+  max-width: 100%;
+  max-height: 100%;
+}
+
+@media (max-width: 560px) {
+  .sizeHero {
+    width: 116px;
+    height: 116px;
+  }
+}

@@ -12,6 +12,7 @@ import {
   clampLuminance,
   contrastRatio,
   ensureContrast,
+  fullySaturateBotColor,
   hexToHsl,
   hslToHex,
   normalizeAccentForTheme,
@@ -22,6 +23,24 @@ import {
 
 const LIGHT_BG = "#eee7dc";
 const DARK_BG = "#0a0a0b";
+
+describe("fullySaturateBotColor", () => {
+  it("preserves hue and lightness while raising saturation to 100%", () => {
+    const before = hexToHsl("#9a7480");
+    const saturated = fullySaturateBotColor("#9a7480");
+    const after = hexToHsl(saturated);
+
+    assert.ok(Math.abs(after.h - before.h) < 0.5, `${before.h} -> ${after.h}`);
+    assert.ok(Math.abs(after.l - before.l) < 0.5, `${before.l} -> ${after.l}`);
+    assert.ok(Math.abs(after.s - 100) < 0.5, `expected full saturation, got ${after.s}`);
+  });
+
+  it("is idempotent and trims non-hex legacy CSS values", () => {
+    const saturated = fullySaturateBotColor("#ff0055");
+    assert.equal(fullySaturateBotColor(saturated), saturated);
+    assert.equal(fullySaturateBotColor("  rebeccapurple  "), "rebeccapurple");
+  });
+});
 
 /**
  * Locks in the "bright colors get dark text" contract that shipped to fix the

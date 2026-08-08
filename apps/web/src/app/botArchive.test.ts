@@ -5,6 +5,7 @@ import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   botPowerAvatarVisibilityModeV1,
   botPowerSourceHashV1,
+  hexToHsl,
 } from "@localai/shared";
 
 import {
@@ -99,6 +100,10 @@ describe("botArchive", () => {
     assert.equal(parsed.botJson.bot.name, "Plato");
     assert.equal(parsed.botJson.bot.namePronunciation, "Play-toe");
     assert.equal(parsed.botJson.bot.selfReferral, "Plato");
+    assert.ok(
+      hexToHsl(parsed.botJson.bot.color ?? "").s > 99.5,
+      `expected fully saturated archive color, got ${parsed.botJson.bot.color}`,
+    );
     assert.equal(parsed.botJson.bot.voicePreviewLine, "The examined voice is worth hearing.");
     assert.equal(
       parsed.botJson.bot.authoredAudioVoiceProfile?.v === 2

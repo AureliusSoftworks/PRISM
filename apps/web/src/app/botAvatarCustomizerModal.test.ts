@@ -395,6 +395,11 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(faceTabSource, /identitySection \?/);
   assert.doesNotMatch(faceTabSource, /<ColorGlyphPicker/);
   assert.match(pageSource, /ariaLabel="Shell color and identity badge"/);
+  assert.match(
+    pageSource,
+    /return hslToHex\(hue, 100, accentLightnessMidpoint\(resolvedTheme\)\)/,
+  );
+  assert.doesNotMatch(pageSource, /computePickedColor[\s\S]{0,700}clientY[^;]*\/ rect\.height/);
   assert.match(faceTabSource, /label="Thinking animation"/);
   assert.match(faceTabSource, /aria-label="Custom thinking animation frames"/);
   assert.match(
@@ -611,13 +616,16 @@ test("two custom eyes duplicate only the open-eye glyph and leave blink behavior
 test("avatar edits stay local until Save and support multi-step undo", () => {
   assert.doesNotMatch(
     pageSource,
-    /queueBotAvatarAutosave|flushBotAvatarAutosaveQueue/,
+    /queueBotAvatarAutosave|flushBotAvatarAutosaveQueue|queueBotVoiceAutosave|flushBotVoiceAutosaveQueue|queueBotNamePronunciationAutosave/,
   );
   assert.doesNotMatch(
     pageSource,
-    /botAvatarAutoSaving|botAvatarAutoSaveQueuedPatchRef/,
+    /botAvatarAutoSaving|botAvatarAutoSaveQueuedPatchRef|voiceAutosaveTimerRef|voiceAutosavePendingRef|voiceAutosaveInFlightRef/,
   );
-  assert.match(pageSource, /const avatarCustomizerSaving = busy;/);
+  assert.match(
+    pageSource,
+    /const avatarCustomizerSaving = botAvatarExplicitSaveBusy;/,
+  );
   assert.match(pageSource, /const BOT_AVATAR_UNDO_HISTORY_LIMIT = 100;/);
   assert.match(pageSource, /const BOT_AVATAR_UNDO_STATIONARY_MS = 450;/);
   assert.match(pageSource, /type BotAvatarDraftSnapshot = Pick</);
@@ -675,6 +683,14 @@ test("avatar edits stay local until Save and support multi-step undo", () => {
     /async function saveBot\(id: string\): Promise<boolean>/,
   );
   assert.match(pageSource, /const patch = buildBotCustomizerSavePatch/);
+  assert.match(
+    pageSource,
+    /voiceRestoreRequestedRef\.current \|\|\s*JSON\.stringify\(newBotAudioVoiceProfile\)/,
+  );
+  assert.match(
+    pageSource,
+    /if \(voiceRestoreRequestedRef\.current\) \{\s*patch\.audioVoiceProfileOverride = null;/,
+  );
 });
 
 test("avatar save state is scoped and bounded so prompts cannot stay stuck", () => {
@@ -690,7 +706,24 @@ test("avatar save state is scoped and bounded so prompts cannot stay stuck", () 
     pageSource,
     /withBotAvatarSaveTimeout\(\(signal\) =>\s*api<\{ bot\?: Bot \}>/,
   );
-  assert.match(pageSource, /const avatarCustomizerSaving = busy;/);
+  assert.match(
+    pageSource,
+    /const \[botAvatarExplicitSaveBusy, setBotAvatarExplicitSaveBusy\] =\s*useState\(false\);/,
+  );
+  assert.match(
+    pageSource,
+    /const botAvatarExplicitSaveInFlightRef = useRef\(false\);/,
+  );
+  assert.match(pageSource, /async function runBotAvatarExplicitSave/);
+  assert.match(
+    pageSource,
+    /setBotAvatarExplicitSaveBusy\(true\);[\s\S]*?finally \{[\s\S]*?setBotAvatarExplicitSaveBusy\(false\);/,
+  );
+  assert.match(
+    pageSource,
+    /onSave=\{\(\) =>\s*runBotAvatarExplicitSave\(async \(\) =>/,
+  );
+  assert.doesNotMatch(pageSource, /const avatarCustomizerSaving = busy;/);
   assert.match(
     pageSource,
     /if \(dismissOuterSavePrompt\) onCancelSavePrompt\(\);[\s\S]*?void onSave\(\);/,
@@ -882,7 +915,7 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
   assert.match(pageSource, /defaultPrismGlyph = DEFAULT_PRISM_BOT_GLYPH/);
   assert.match(
     pageSource,
-    /bot && isBotGlyphName\(bot\.glyph\) \? bot\.glyph : defaultPrismGlyph/,
+    /bot\s*\? resolveCustomBotGlyph\(bot\.glyph\)\s*:\s*defaultPrismGlyph/,
   );
   assert.match(pageSource, /defaultPrismFaceStyle \?\? DEFAULT_BOT_FACE_STYLE/);
   assert.match(pageSource, /userActionVisible \? "attentive" : "warm"/);
@@ -1612,7 +1645,7 @@ test("Avatar Studio face controls use Wield Prism instead of shuffle buttons", (
   assert.match(pageSource, /id: `avatar-studio-randomize-\$\{reactId\}`/);
 });
 
-test("avatar preview theme keeps persona ink on normalized color without Prism rainbow aura", () => {
+test("avatar preview uses the canonical full-scale identity contract", () => {
   assert.match(
     pageSource,
     /const \[previewTheme, setPreviewTheme\]\s*=\s*useState<"light" \| "dark">\(\s*resolvedTheme\s*,?\s*\)/,
@@ -1620,12 +1653,12 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   assert.match(pageSource, /setPreviewTheme\(resolvedTheme\)/);
   assert.match(
     pageSource,
-    /function botAvatarPreviewIdentityStyle\(\s*rawHex: string\s*,\s*prismPersona = false\s*,?\s*\): CSSProperties/,
+    /function botAvatarFullScaleIdentityStyle\(\s*rawHex: string\s*,\s*resolvedTheme: "light" \| "dark"\s*,\s*options: BotAvatarFullScaleIdentityOptions = \{\}\s*,?\s*\): CSSProperties/,
   );
-  assert.match(pageSource, /if \(prismPersona\) return \{\};/);
+  assert.match(pageSource, /if \(options\.prismPersona\) return accentStyle;/);
   assert.match(
     pageSource,
-    /const accentStyle = botAccentStyle\(rawHex, "dark"\) \?\? \{\};/,
+    /botAccentStyle\(rawHex, resolvedTheme, options\.privateMode\) \?\? \{\}/,
   );
   assert.match(
     pageSource,
@@ -1636,11 +1669,11 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   assert.doesNotMatch(pageSource, /BOT_AVATAR_CUSTOMIZER_FACE_GLYPH_SIZE_REM/);
   assert.match(
     pageSource,
-    /botAvatarIdentityMaterialStyle\(\{\s*voicePreset/,
+    /botAvatarIdentityMaterialStyle\(\{\s*privateMode: options\.privateMode,\s*voicePreset: options\.voicePreset/,
   );
   assert.match(
     pageSource,
-    /\.\.\.botAvatarPreviewIdentityStyle\(color, isDefaultPrismBot\)/,
+    /\.\.\.botAvatarFullScaleIdentityStyle\(color, previewTheme, \{\s*prismPersona: isDefaultPrismBot,\s*voicePreset,\s*\}\)/,
   );
   assert.doesNotMatch(
     pageSource,
@@ -1660,6 +1693,16 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   assert.match(pageSource, /data-preview-theme=\{previewTheme\}/);
   assert.match(pageSource, /data-avatar-preview-theme=\{previewTheme\}/);
   assert.match(pageSource, /data-theme=\{previewTheme\}/);
+  assert.match(
+    pageSource,
+    /const previewVoicePreset = profile\.core\.communicationStyle;/,
+  );
+  assert.match(pageSource, /voicePreset=\{previewVoicePreset\}/);
+  assert.match(
+    pageSource,
+    /metalAlloyEnabled=\{!isDefaultPrismBot\}/,
+    "Default Prism must not receive a Communication Style alloy in Avatar Studio",
+  );
   assert.match(
     pageSource,
     /"--bot-face-crt-screen-texture-blend-mode":\s*previewTheme === "light" \? "overlay" : "luminosity"/,
@@ -1685,7 +1728,7 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
   const livePlateRule = cssRuleBody(".zenLiveBotPresencePlate");
   assert.match(
     livePlateRule,
-    /--zen-live-bot-face-phosphor-ink:\s*#ffffff\s*;/,
+    /--zen-live-bot-face-phosphor-ink:\s*color-mix\(\s*in srgb,\s*var\(--coffee-bot-color\) 82%,\s*#ffffff 18%\s*\)\s*;/,
   );
   assert.match(
     livePlateRule,
@@ -1743,9 +1786,13 @@ test("avatar preview theme keeps persona ink on normalized color without Prism r
     cssSource.slice(zenFaceOverrideIndex, zenFaceOverrideIndex + 180),
     /color:\s*var\(--zen-live-bot-face-ink,\s*var\(--zen-presence-face-ink\)\)\s*;/,
   );
+  const bodyGlyphRule =
+    cssSource.match(/^\.zenLiveBotPresenceBotGlyph\s*\{([\s\S]*?)\n\}/m)?.[1] ??
+    "";
+  assert.match(bodyGlyphRule, /color:\s*#ffffff\s*;/);
   assert.match(
-    cssRuleBody(".zenLiveBotPresenceBotGlyph"),
-    /--zen-live-bot-glyph-ink/,
+    bodyGlyphRule,
+    /--zen-live-bot-glyph-glow-color:\s*var\(--coffee-bot-color\)\s*;/,
   );
   const previewFaceRule = cssRuleBody(
     '.zenLiveBotPresencePlate[data-avatar-customizer-preview="true"] .zenLiveBotPresenceFaceGlyph',
@@ -1856,7 +1903,7 @@ test("avatar foundry uses bottom-bar navigation and view-only camera navigation"
   assert.doesNotMatch(cssSource, /transition:\s*transform 80ms linear;/);
 });
 
-test("avatar foundry powers module lights only when draft sections are populated", () => {
+test("avatar foundry marks populated modules but energizes lamps only during speech", () => {
   assert.match(pageSource, /botAvatarFoundryModulePopulation\(\{/);
   assert.match(
     pageSource,
@@ -1870,6 +1917,11 @@ test("avatar foundry powers module lights only when draft sections are populated
     /"--bot-face-frame-led-glow-opacity" as string\]: 0/,
   );
   assert.match(pageSource, /data-populated=\{/);
+  assert.match(pageSource, /data-talking=\{isTalking \? "true" : undefined\}/);
+  assert.match(
+    pageSource,
+    /<BotAvatarFoundryFrameModuleLights\s+population=\{frameModulePopulation\}\s+isTalking=\{isTalking\}\s+\/>/,
+  );
   assert.match(
     pageSource,
     /"--foundry-module-color":\s*"var\(--editor-bot-color, var\(--accent(?:, #91a8bd)?\)\)"/,
@@ -1881,7 +1933,11 @@ test("avatar foundry powers module lights only when draft sections are populated
   assert.match(cssSource, /@keyframes botAvatarFoundryModuleEnergize/);
   assert.match(
     cssSource,
-    /\.botAvatarFoundryFrameModuleLamp\[data-populated="true"\]\s*\{[\s\S]*?0 0 18px/,
+    /\.botAvatarFoundryFrameModuleLamp\[data-populated="true"\]\s*\{[\s\S]*?filter:\s*brightness\(0\.62\)[\s\S]*?box-shadow:\s*inset/,
+  );
+  assert.match(
+    cssSource,
+    /\.botAvatarFoundryFrameModuleLights\[data-talking="true"\][\s\S]*?\.botAvatarFoundryFrameModuleLamp\[data-populated="true"\]\s*\{[\s\S]*?0 0 18px/,
   );
   assert.match(
     cssSource,

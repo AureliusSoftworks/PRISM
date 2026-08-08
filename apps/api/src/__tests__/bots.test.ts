@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import { DatabaseSync } from "node:sqlite";
 import {
   botPowerSourceHashV1,
+  fullySaturateBotColor,
   parseStoredBotPrompt,
   serializeStoredBotPrompt,
 } from "@localai/shared";
@@ -1057,8 +1058,8 @@ describe("patchSelectedBots", () => {
         color: string | null;
       }>).map((row) => [row.id, row.user_id, row.color]),
       [
-        ["a", "user-1", "#112233"],
-        ["b", "user-1", "#112233"],
+        ["a", "user-1", fullySaturateBotColor("#112233")],
+        ["b", "user-1", fullySaturateBotColor("#112233")],
         ["theirs", "user-2", null],
       ]
     );
@@ -1092,8 +1093,8 @@ describe("patchSelectedBots", () => {
         row.glyph,
       ]),
       [
-        ["#abcdef", "triangle"],
-        ["#abcdef", "triangle"],
+        [fullySaturateBotColor("#abcdef"), "triangle"],
+        [fullySaturateBotColor("#abcdef"), "triangle"],
       ]
     );
   });

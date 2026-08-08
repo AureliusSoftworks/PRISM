@@ -43,7 +43,12 @@ import {
   botFrameFinishMirroredForSeed,
 } from "./botFrameFinish";
 import { botAvatarIdentityMaterialStyle } from "./botAvatarIdentityMaterial";
-import { botFrameMetalAlloyStyle } from "./botFrameMetalAlloy";
+import {
+  botFrameIdentityPaintColor,
+  botFrameLedPaintColor,
+  botFrameMetalAlloyColor,
+  botFrameMetalAlloyStyle,
+} from "./botFrameMetalAlloy";
 import {
   BACKEND_AVAILABLE_EVENT,
   BACKEND_UNAVAILABLE_CODE,
@@ -199,6 +204,7 @@ import {
   unzipAccountBackupEntries,
 } from "./accountBackupArchive";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
+import { PhosphorPixelSvgGlyph } from "./PhosphorPixelGlyph";
 import { BotCreationRitual } from "./BotCreationRitual";
 import { AdjustmentPad } from "./AdjustmentPad";
 import { PronunciationAtlas } from "./PronunciationAtlas";
@@ -239,7 +245,14 @@ import {
 } from "./DebateExperience";
 import { debateJudgeGavelVoiceMood } from "./debateJudgeGavel";
 import { debateAudioEnabled } from "./debatePresentation";
-import { BotPickerGrid, BotPickerTile, sortBotPickerItems } from "./BotPicker";
+import {
+  arrangeBotPickerItemsInColumnBands,
+  botPickerRainbowHuePosition,
+  BotPickerGrid,
+  BotPickerTile,
+  compareBotPickerRainbowSortKeys,
+  sortBotPickerItems,
+} from "./BotPicker";
 import { CoffeeGroupIdentitySection } from "./CoffeeGroupIdentitySection";
 import {
   coffeeGroupAtmosphereImageUrl,
@@ -273,6 +286,7 @@ import {
   type AvatarDetailsEditorHandle,
 } from "./AvatarDetailsEditor";
 import { AvatarDetailsMask } from "./AvatarDetailsMask";
+import { ChatMiniBotAvatar } from "./chatMiniBotAvatar";
 import {
   BOT_AVATAR_CANONICAL_FACE_PLACEMENT,
   BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
@@ -14942,8 +14956,9 @@ function createClientBotExportHash(): string {
 }
 
 const BOT_COLOR_SORT_GRAYSCALE_SATURATION_MAX = 6;
-const BOT_COLOR_SORT_GRAYSCALE_GROUP = 10;
-const BOT_COLOR_SORT_COLORLESS_GROUP = 11;
+const BOT_COLOR_SORT_CHROMATIC_CLASS = 0;
+const BOT_COLOR_SORT_GRAYSCALE_CLASS = 1;
+const BOT_COLOR_SORT_COLORLESS_CLASS = 2;
 // Hue lens ribbon — active lens movement pans a fixed-size window across
 // a circular hue-sorted bot strip. Sparse libraries can show every bot,
 // while dense libraries move through many more bots over the same slider
@@ -17193,22 +17208,6 @@ function blendToward(value: number, target: number, amount: number): number {
   return value + (target - value) * amount;
 }
 
-function botColorFamilyGroup(hue: number): number {
-  if (hue < 15 || hue >= 345) return 0; // red
-  if (hue < 45) return 1; // orange
-  if (hue < 75) return 2; // yellow
-  if (hue < 110) return 3; // lime
-  if (hue < 155) return 4; // green
-  if (hue < 240) return 5; // cyan/blue
-  if (hue < 275) return 7; // indigo
-  if (hue < 315) return 8; // violet
-  return 9; // magenta
-}
-
-function botHueSortValue(hue: number): number {
-  return hue >= 345 ? hue - 360 : hue;
-}
-
 // Smallest angular distance between two hues on the 360° wheel. Both
 // inputs are normalized into [0, 360) first so callers don't have to
 // pre-clamp slider values that drift slightly outside the range.
@@ -17604,20 +17603,22 @@ function botColorSortKey(
   theme: "light" | "dark",
   harmonyActive: boolean,
 ): {
-  hueGroup: number;
-  hue: number;
+  colorClass: number;
+  huePosition: number;
   luminance: number;
   saturation: number;
   name: string;
+  id: string;
 } {
   const rawColor = bot.color?.trim();
   if (!rawColor || !hexChannels(rawColor)) {
     return {
-      hueGroup: BOT_COLOR_SORT_COLORLESS_GROUP,
-      hue: 0,
+      colorClass: BOT_COLOR_SORT_COLORLESS_CLASS,
+      huePosition: 0,
       luminance: 0,
       saturation: 0,
       name: bot.name,
+      id: bot.id,
     };
   }
 
@@ -17625,13 +17626,14 @@ function botColorSortKey(
   const { h, s } = hexToHsl(displayColor);
   const isGrayscale = s <= BOT_COLOR_SORT_GRAYSCALE_SATURATION_MAX;
   return {
-    hueGroup: isGrayscale
-      ? BOT_COLOR_SORT_GRAYSCALE_GROUP
-      : botColorFamilyGroup(h),
-    hue: botHueSortValue(h),
+    colorClass: isGrayscale
+      ? BOT_COLOR_SORT_GRAYSCALE_CLASS
+      : BOT_COLOR_SORT_CHROMATIC_CLASS,
+    huePosition: botPickerRainbowHuePosition(h),
     luminance: relativeLuminance(displayColor),
     saturation: s,
     name: bot.name,
+    id: bot.id,
   };
 }
 
@@ -17643,12 +17645,7 @@ function compareBotsByColor(
 ): number {
   const aKey = botColorSortKey(a, theme, harmonyActive);
   const bKey = botColorSortKey(b, theme, harmonyActive);
-  if (aKey.hueGroup !== bKey.hueGroup) return aKey.hueGroup - bKey.hueGroup;
-  if (aKey.luminance !== bKey.luminance) return bKey.luminance - aKey.luminance;
-  if (aKey.hue !== bKey.hue) return aKey.hue - bKey.hue;
-  if (aKey.saturation !== bKey.saturation)
-    return bKey.saturation - aKey.saturation;
-  return aKey.name.localeCompare(bKey.name, undefined, { sensitivity: "base" });
+  return compareBotPickerRainbowSortKeys(aKey, bKey);
 }
 
 // At high bot counts the right drawer stops being a list and becomes a
@@ -18754,13 +18751,14 @@ function messageMoodLabel(moodKey: NonNullable<Message["moodKey"]>): string {
   }
 }
 
-type BotFaceFrameIdentityRasterKind = "tint" | "led";
+type BotFaceFrameIdentityRasterKind = "tint" | "alloy" | "led";
 
 const BOT_FACE_FRAME_IDENTITY_RASTER_ASSET: Record<
   BotFaceFrameIdentityRasterKind,
   string
 > = {
   tint: "/bot-frame/bot-frame-tint-mask.png?v=1000",
+  alloy: "/bot-frame/bot-frame-metal-mask.png?v=1000",
   led: "/bot-frame/bot-frame-led.png?v=1000",
 };
 
@@ -18829,14 +18827,85 @@ function BotFaceFrameIdentityRaster({
   identityColor: string | null;
 }): React.JSX.Element {
   const layerClassName =
-    kind === "tint" ? styles.botFaceFrameTint : styles.botFaceFrameLed;
+    kind === "tint"
+      ? styles.botFaceFrameTint
+      : kind === "alloy"
+        ? styles.botFaceFrameAlloy
+        : styles.botFaceFrameLed;
   const renderedRaster = useBotFaceFrameIdentityRaster(kind, identityColor);
   const identityRasterStyle = renderedRaster
     ? ({ backgroundImage: `url("${renderedRaster}")` } as CSSProperties)
     : undefined;
+  const layerRef = useRef<HTMLSpanElement | null>(null);
+
+  // #region agent log
+  useEffect(() => {
+    const el = layerRef.current;
+    const cs = el ? getComputedStyle(el) : null;
+    const plate = el?.closest(
+      "[data-zen-live-bot-presence-plate], [data-avatar-customizer-preview]",
+    ) as HTMLElement | null;
+    const frame = el?.parentElement?.classList?.contains(
+      // parent may be face container; find chassis sibling when LED
+      styles.botFaceFrame,
+    )
+      ? el.parentElement
+      : (el
+          ?.closest("[data-zen-live-bot-body-frame], [data-zen-live-bot-presence-plate]")
+          ?.querySelector(`.${styles.botFaceFrame}`) as HTMLElement | null);
+    const frameCs = frame ? getComputedStyle(frame) : null;
+    const ledBackgroundColor = cs?.backgroundColor ?? null;
+    const solidCoverRisk =
+      kind === "led" &&
+      Boolean(identityColor) &&
+      (cs?.maskImage === "none" || !cs?.maskImage) &&
+      Boolean(ledBackgroundColor) &&
+      ledBackgroundColor !== "rgba(0, 0, 0, 0)" &&
+      ledBackgroundColor !== "transparent";
+    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "6971d8",
+      },
+      body: JSON.stringify({
+        sessionId: "6971d8",
+        runId: "post-alloy",
+        hypothesisId: kind === "led" ? "J" : kind === "alloy" ? "K" : "F",
+        location: "page.tsx:BotFaceFrameIdentityRaster",
+        message:
+          kind === "led"
+            ? "LED identity layer — solid cover risk check"
+            : kind === "alloy"
+              ? "Alloy identity layer stack state"
+              : "Identity raster layer paint state",
+        data: {
+          kind,
+          identityColor,
+          rasterReady: Boolean(renderedRaster),
+          usesIdentityClass: Boolean(identityColor),
+          talking: plate?.getAttribute("data-talking") ?? null,
+          previewMode: plate?.getAttribute("data-avatar-preview-mode") ?? null,
+          customizer: plate?.getAttribute("data-avatar-customizer-preview") ?? null,
+          opacity: cs?.opacity ?? null,
+          visibility: cs?.visibility ?? null,
+          bgImage: cs?.backgroundImage?.slice(0, 64) ?? null,
+          bgColor: ledBackgroundColor,
+          maskImage: cs?.maskImage?.slice(0, 48) ?? null,
+          solidCoverRisk,
+          frameOpacity: frameCs?.opacity ?? null,
+          frameBgImage: frameCs?.backgroundImage?.slice(0, 64) ?? null,
+          layerZ: cs?.zIndex ?? null,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }, [identityColor, kind, renderedRaster]);
+  // #endregion
 
   return (
     <span
+      ref={layerRef}
       className={
         identityColor
           ? `${layerClassName} ${styles.botFaceFrameIdentityRaster}`
@@ -18844,7 +18913,9 @@ function BotFaceFrameIdentityRaster({
       }
       data-frame-identity-raster={kind}
       data-frame-identity-raster-ready={renderedRaster ? "true" : undefined}
-      data-frame-material-layer={kind === "led" ? "led" : undefined}
+      data-frame-material-layer={
+        kind === "alloy" || kind === "led" ? kind : undefined
+      }
       style={identityRasterStyle}
       aria-hidden="true"
     />
@@ -18853,20 +18924,62 @@ function BotFaceFrameIdentityRaster({
 
 function BotFaceFrame({
   metalMaterialStyle,
-  identityColor = null,
+  tintIdentityColor = null,
+  alloyIdentityColor = null,
+  ledIdentityColor = null,
+  ledActive = false,
 }: {
   metalMaterialStyle?: CSSProperties;
-  identityColor?: string | null;
+  tintIdentityColor?: string | null;
+  alloyIdentityColor?: string | null;
+  ledIdentityColor?: string | null;
+  ledActive?: boolean;
 } = {}): React.JSX.Element {
+  const frameRef = useRef<HTMLSpanElement | null>(null);
+  // #region agent log
+  useEffect(() => {
+    const el = frameRef.current;
+    const cs = el ? getComputedStyle(el) : null;
+    const plate = el?.closest(
+      "[data-zen-live-bot-presence-plate], [data-avatar-customizer-preview]",
+    ) as HTMLElement | null;
+    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "6971d8",
+      },
+      body: JSON.stringify({
+        sessionId: "6971d8",
+        runId: "post-alloy",
+        hypothesisId: "H",
+        location: "page.tsx:BotFaceFrame",
+        message: "Base bot-frame chassis paint state",
+        data: {
+          tintIdentityColor,
+          alloyIdentityColor,
+          ledIdentityColor,
+          talking: plate?.getAttribute("data-talking") ?? null,
+          previewMode: plate?.getAttribute("data-avatar-preview-mode") ?? null,
+          opacity: cs?.opacity ?? null,
+          visibility: cs?.visibility ?? null,
+          display: cs?.display ?? null,
+          bgImage: cs?.backgroundImage?.slice(0, 64) ?? null,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }, [alloyIdentityColor, ledIdentityColor, tintIdentityColor]);
+  // #endregion
   return (
     <>
       <BotFaceScreenFill />
       <span
+        ref={frameRef}
         className={styles.botFaceFrame}
         style={metalMaterialStyle}
         aria-hidden="true"
       >
-        <BotFaceFrameIdentityRaster kind="tint" identityColor={identityColor} />
         <span
           className={styles.botFaceFrameWearLayer}
           data-frame-material-layer="wear"
@@ -18885,18 +18998,31 @@ function BotFaceFrame({
       >
         <span className={styles.botFaceFrameMetalLightRaster} />
       </span>
+      <BotFaceFrameIdentityRaster
+        kind="alloy"
+        identityColor={alloyIdentityColor}
+      />
       <span
         className={styles.botFaceFramePaintLayer}
         style={metalMaterialStyle}
         data-frame-material-layer="paint"
         aria-hidden="true"
       />
-      <BotFaceFrameIdentityRaster kind="led" identityColor={identityColor} />
-      <span
-        className={styles.botFaceFrameLedGlow}
-        data-frame-material-layer="led-glow"
-        aria-hidden="true"
+      <BotFaceFrameIdentityRaster
+        kind="tint"
+        identityColor={tintIdentityColor}
       />
+      <BotFaceFrameIdentityRaster
+        kind="led"
+        identityColor={ledIdentityColor}
+      />
+      {ledActive ? (
+        <span
+          className={styles.botFaceFrameLedGlow}
+          data-frame-material-layer="led-glow"
+          aria-hidden="true"
+        />
+      ) : null}
     </>
   );
 }
@@ -18928,11 +19054,13 @@ function BotFaceScreenGlass({
 
 function MessageMoodFace(props: {
   moodKey: NonNullable<Message["moodKey"]>;
-  variant?: "classic" | "prism";
+  variant?: "classic" | "prism" | "mini";
   placement?: "leading" | "trailing";
   color?: string | null;
   voicePreset?: BotVoicePreset;
   faceStyle?: BotFaceStyle | null;
+  glyph?: BotGlyphName | string | null;
+  avatarDetails?: BotAvatarDetailsV1 | null;
   isTalking?: boolean;
   mouthOpen?: boolean;
   mouthShape?: ZenLiveBotMouthShape | null;
@@ -18954,6 +19082,50 @@ function MessageMoodFace(props: {
     ? ({ ["--coffee-bot-color" as string]: color } as React.CSSProperties)
     : undefined;
   const showRasterFrame = variant === "prism";
+  const showMiniFace = variant === "mini";
+  const faceEnabled = variant === "prism" || variant === "mini";
+  const faceNode = (
+    <CoffeeSeatPlateEmoji
+      enabled={faceEnabled}
+      isTalking={props.isTalking === true}
+      mouthShape={seatMouthShape}
+      scheduleKey={`message-mood-${variant}-${moodKey}`}
+      showQuestionMark={questionMarkActive}
+      baseText={seatPlateGlyph.text}
+      rotateDeg={seatPlateGlyph.rotateDeg}
+      voicePreset={props.voicePreset ?? "neutral"}
+      faceEyesFont={props.faceStyle?.eyesFont}
+      faceEyeCharacter={props.faceStyle?.eyeCharacter}
+      faceMouthFont={props.faceStyle?.mouthFont}
+      faceMouthCharacter={props.faceStyle?.mouthCharacter}
+      faceMouthAnimation={props.faceStyle?.mouthAnimation}
+      faceFontWeight={props.faceStyle?.weight}
+      faceEyeScale={props.faceStyle?.eyeScale}
+      faceEyeOffsetX={props.faceStyle?.eyeOffsetX}
+      faceEyeOffsetY={props.faceStyle?.eyeOffsetY}
+      faceEyeRotationDeg={props.faceStyle?.eyeRotationDeg}
+      faceEyeCount={props.faceStyle?.eyeCount}
+      faceMouthScale={props.faceStyle?.mouthScale}
+      faceMouthOffsetX={props.faceStyle?.mouthOffsetX}
+      faceMouthOffsetY={props.faceStyle?.mouthOffsetY}
+      faceMouthRotationDeg={props.faceStyle?.mouthRotationDeg}
+      faceBlinkBar={props.faceStyle?.blinkBar}
+      faceBlinkScale={props.faceStyle?.blinkScale}
+      faceBlinkOffsetX={props.faceStyle?.blinkOffsetX}
+      faceBlinkOffsetY={props.faceStyle?.blinkOffsetY}
+      faceBlinkRotationDeg={props.faceStyle?.blinkRotationDeg}
+      faceThinkingFrames={props.faceStyle?.thinkingFrames}
+      faceThinkingScale={props.faceStyle?.thinkingScale}
+      faceThinkingOffsetX={props.faceStyle?.thinkingOffsetX}
+      faceThinkingOffsetY={props.faceStyle?.thinkingOffsetY}
+      className={
+        showMiniFace
+          ? styles.messageMoodMiniFace
+          : styles.messageMoodCoffeeFace
+      }
+    />
+  );
+
   return (
     <span
       className={styles.messageMoodBadge}
@@ -18964,41 +19136,7 @@ function MessageMoodFace(props: {
       style={style}
       aria-hidden="true"
     >
-      <CoffeeSeatPlateEmoji
-        enabled={variant === "prism"}
-        isTalking={props.isTalking === true}
-        mouthShape={seatMouthShape}
-        scheduleKey={`message-mood-${variant}-${moodKey}`}
-        showQuestionMark={questionMarkActive}
-        baseText={seatPlateGlyph.text}
-        rotateDeg={seatPlateGlyph.rotateDeg}
-        voicePreset={props.voicePreset ?? "neutral"}
-        faceEyesFont={props.faceStyle?.eyesFont}
-        faceEyeCharacter={props.faceStyle?.eyeCharacter}
-        faceMouthFont={props.faceStyle?.mouthFont}
-        faceMouthCharacter={props.faceStyle?.mouthCharacter}
-        faceMouthAnimation={props.faceStyle?.mouthAnimation}
-        faceFontWeight={props.faceStyle?.weight}
-        faceEyeScale={props.faceStyle?.eyeScale}
-        faceEyeOffsetX={props.faceStyle?.eyeOffsetX}
-        faceEyeOffsetY={props.faceStyle?.eyeOffsetY}
-        faceEyeRotationDeg={props.faceStyle?.eyeRotationDeg}
-        faceEyeCount={props.faceStyle?.eyeCount}
-        faceMouthScale={props.faceStyle?.mouthScale}
-        faceMouthOffsetX={props.faceStyle?.mouthOffsetX}
-        faceMouthOffsetY={props.faceStyle?.mouthOffsetY}
-        faceMouthRotationDeg={props.faceStyle?.mouthRotationDeg}
-        faceBlinkBar={props.faceStyle?.blinkBar}
-        faceBlinkScale={props.faceStyle?.blinkScale}
-        faceBlinkOffsetX={props.faceStyle?.blinkOffsetX}
-        faceBlinkOffsetY={props.faceStyle?.blinkOffsetY}
-        faceBlinkRotationDeg={props.faceStyle?.blinkRotationDeg}
-        faceThinkingFrames={props.faceStyle?.thinkingFrames}
-        faceThinkingScale={props.faceStyle?.thinkingScale}
-        faceThinkingOffsetX={props.faceStyle?.thinkingOffsetX}
-        faceThinkingOffsetY={props.faceStyle?.thinkingOffsetY}
-        className={styles.messageMoodCoffeeFace}
-      />
+      {faceNode}
       {showRasterFrame ? <BotFaceFrame /> : null}
     </span>
   );
@@ -19246,10 +19384,8 @@ function buildConversationGroupSummary(
     botId,
     name: botId ? bot?.name?.trim() || "Deleted bot" : DEFAULT_ASSISTANT_NAME,
     glyph: bot
-      ? isBotGlyphName(bot.glyph)
-        ? bot.glyph
-        : DEFAULT_BOT_GLYPH
-      : "triangle",
+      ? resolveCustomBotGlyph(bot.glyph)
+      : DEFAULT_PRISM_BOT_GLYPH,
     color: botId ? (bot?.color ?? fallbackColor) : null,
     count: sortedConversations.length,
     conversations: sortedConversations,
@@ -21935,6 +22071,15 @@ function isBotGlyphName(
   return typeof value === "string" && value in BOT_GLYPHS;
 }
 
+/** Prism exclusively owns the triangle; personas fall back to the robot. */
+function resolveCustomBotGlyph(
+  value: string | null | undefined,
+): BotGlyphName {
+  return isBotGlyphName(value) && value !== DEFAULT_PRISM_BOT_GLYPH
+    ? value
+    : DEFAULT_BOT_GLYPH;
+}
+
 function randomBotGlyph(): BotGlyphName {
   const index = Math.floor(Math.random() * CUSTOM_BOT_GLYPH_ORDER.length);
   return CUSTOM_BOT_GLYPH_ORDER[index] ?? DEFAULT_BOT_GLYPH;
@@ -22175,6 +22320,135 @@ function EmptyStateBotGlyph({
   );
 }
 
+/**
+ * Focused-persona empty-hero preview: mini bot chassis with face + glyph.
+ * Used for Chat and Zen when a bot Home is armed but the transcript is empty.
+ */
+function EmptyStateHeroMiniBot({
+  bot,
+  resolvedTheme,
+  privateMode = false,
+  isTalking = false,
+}: {
+  bot: Bot;
+  resolvedTheme: "light" | "dark";
+  privateMode?: boolean;
+  isTalking?: boolean;
+}): React.JSX.Element {
+  const faceStyle = resolveBotFaceStyleForBot(bot);
+  const avatarDetails = resolveBotAvatarDetails(bot);
+  const hasAvatarArt = avatarDetailsHasVisuals(avatarDetails);
+  const voicePreset = coffeeSeatVoicePreset(bot);
+  const normalizedBotColor = normalizeAccentForTheme(
+    bot.color ?? PRISM_DEFAULT_ACCENT,
+    resolvedTheme,
+  );
+  const color = privateMode ? "#e8eee8" : normalizedBotColor;
+  const alloyColor = botFrameMetalAlloyColor(voicePreset, {
+    privateMode,
+  });
+  const glyphName = resolveCustomBotGlyph(bot.glyph);
+  const seatPlateGlyph = coffeeSeatPlateGlyph("warm", "closed");
+  const miniFaceRegistrationStyle = {
+    ...(hasAvatarArt
+      ? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE
+      : {
+          ["--zen-live-bot-face-x" as string]: `${BOT_AVATAR_CANONICAL_FACE_PLACEMENT.xPct}%`,
+          ["--zen-live-bot-face-y" as string]: `${BOT_AVATAR_CANONICAL_FACE_PLACEMENT.yPct}%`,
+          ["--zen-live-bot-face-scale" as string]:
+            BOT_AVATAR_CANONICAL_FACE_PLACEMENT.scale,
+        }),
+    ["--coffee-plate-emoji-face-scale-y" as string]:
+      BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
+  } as CSSProperties;
+  const renderAvatarDetailsInk = (
+    depth: "behind-face" | "above-face",
+  ): React.JSX.Element | null =>
+    hasAvatarArt ? (
+      <span
+        className={styles.emptyStateHeroMiniArt}
+        data-avatar-details-depth={depth}
+      >
+        <AvatarDetailsMask
+          details={avatarDetails}
+          color={normalizedBotColor}
+          detailLevel="audience"
+          faceGeometry={faceStyle}
+          talking={isTalking}
+          speechMotionActive={false}
+          mouthAnimation={faceStyle.mouthAnimation}
+          mouthShape="closed"
+          depth={depth}
+          staticRaster
+          coreColor="ink"
+        />
+      </span>
+    ) : null;
+
+  return (
+    <ChatMiniBotAvatar
+      size="hero"
+      color={color}
+      alloyColor={alloyColor}
+      theme={resolvedTheme}
+      className={styles.emptyStateHeroMiniBot}
+      face={
+        <>
+          {renderAvatarDetailsInk("behind-face")}
+          <span
+            className={styles.emptyStateHeroMiniFaceRig}
+            data-zen-live-bot-face-rig="true"
+            style={miniFaceRegistrationStyle}
+          >
+            <CoffeeSeatPlateEmoji
+              enabled
+              isTalking={isTalking}
+              mouthShape="closed"
+              scheduleKey={`empty-hero-mini-${bot.id}`}
+              baseText={seatPlateGlyph.text}
+              rotateDeg={seatPlateGlyph.rotateDeg}
+              voicePreset={voicePreset}
+              faceEyesFont={faceStyle.eyesFont}
+              faceEyeCharacter={faceStyle.eyeCharacter}
+              faceMouthFont={faceStyle.mouthFont}
+              faceMouthCharacter={faceStyle.mouthCharacter}
+              faceMouthAnimation={faceStyle.mouthAnimation}
+              faceFontWeight={faceStyle.weight}
+              faceEyeScale={faceStyle.eyeScale}
+              faceEyeOffsetX={faceStyle.eyeOffsetX}
+              faceEyeOffsetY={faceStyle.eyeOffsetY}
+              faceEyeRotationDeg={faceStyle.eyeRotationDeg}
+              faceEyeCount={faceStyle.eyeCount}
+              faceMouthScale={faceStyle.mouthScale}
+              faceMouthOffsetX={faceStyle.mouthOffsetX}
+              faceMouthOffsetY={faceStyle.mouthOffsetY}
+              faceMouthRotationDeg={faceStyle.mouthRotationDeg}
+              faceBlinkBar={faceStyle.blinkBar}
+              faceBlinkScale={faceStyle.blinkScale}
+              faceBlinkOffsetX={faceStyle.blinkOffsetX}
+              faceBlinkOffsetY={faceStyle.blinkOffsetY}
+              faceBlinkRotationDeg={faceStyle.blinkRotationDeg}
+              faceThinkingFrames={faceStyle.thinkingFrames}
+              faceThinkingScale={faceStyle.thinkingScale}
+              faceThinkingOffsetX={faceStyle.thinkingOffsetX}
+              faceThinkingOffsetY={faceStyle.thinkingOffsetY}
+              className={`${styles.coffeeSeatPlateEmoji} ${styles.emptyStateHeroMiniFace}`}
+            />
+          </span>
+          {renderAvatarDetailsInk("above-face")}
+        </>
+      }
+      glyph={
+        <BotGlyph
+          name={glyphName}
+          size={14}
+          className={styles.emptyStateHeroMiniGlyph}
+        />
+      }
+    />
+  );
+}
+
 // ── Empty-state icon ──────────────────────────────────────────────────
 // Rendered at the top of the "new conversation" placeholder in Chat and
 // Sandbox. Three rendering modes, chosen by preview/commit state:
@@ -22192,15 +22466,13 @@ function EmptyStateBotGlyph({
 //      normalized color. This keeps hover feeling like Prism is focusing
 //      through the bot rather than replacing the hero with the bot profile.
 //
-//   4. `bot` set → scaled-up sibling of the .botCardGlyph tile in the
-//      bot's full color. Same visual language (tinted bg + border,
-//      bot-color stroke) as every other place a bot is represented. The
-//      stored color is normalized so legacy bots whose picked hex drifted
-//      outside the current safe range still render readably. Used once the
-//      user commits the bot selection.
+//   4. `bot` set → focused-persona mini bot chassis (ChatMiniBotAvatar) so
+//      Chat and Zen empty Homes preview the companion before the first turn.
+//      Glyph-tile fallback remains for private/preview edge cases via
+//      EmptyStateBotGlyph.
 //
-// All modes paint at the same 56×56 footprint so the layout never
-// jumps when the user scans across tiles.
+// All modes paint at a stable footprint so the layout never jumps when the
+// user scans across tiles.
 interface EmptyStateIconProps {
   bot: Bot | null;
   previewBot?: Bot | null;
@@ -22236,7 +22508,11 @@ function EmptyStateIcon({
 }: EmptyStateIconProps): React.JSX.Element {
   if (privateHero && bot) {
     return (
-      <EmptyStateBotGlyph bot={bot} resolvedTheme={resolvedTheme} privateMode />
+      <EmptyStateHeroMiniBot
+        bot={bot}
+        resolvedTheme={resolvedTheme}
+        privateMode
+      />
     );
   }
 
@@ -22280,7 +22556,9 @@ function EmptyStateIcon({
   }
 
   if (bot) {
-    return <EmptyStateBotGlyph bot={bot} resolvedTheme={resolvedTheme} />;
+    return (
+      <EmptyStateHeroMiniBot bot={bot} resolvedTheme={resolvedTheme} />
+    );
   }
   return (
     <div className={styles.brandIconShell} aria-hidden="true">
@@ -22308,9 +22586,7 @@ function BotGlyphPicker({
   value,
   onChange,
 }: BotGlyphPickerProps): React.JSX.Element {
-  const selected: BotGlyphName = isBotGlyphName(value)
-    ? value
-    : DEFAULT_BOT_GLYPH;
+  const selected: BotGlyphName = resolveCustomBotGlyph(value);
   return (
     <div
       className={styles.glyphPicker}
@@ -25033,9 +25309,7 @@ function TouchPreviewBalloon({
       "--bot-color"
     ] = accent;
   }
-  const glyphName: BotGlyphName = isBotGlyphName(bot.glyph)
-    ? bot.glyph
-    : DEFAULT_BOT_GLYPH;
+  const glyphName: BotGlyphName = resolveCustomBotGlyph(bot.glyph);
   return (
     <div
       className={styles.touchPreviewBalloon}
@@ -30682,6 +30956,9 @@ interface ZenLiveBotMannequinProps {
   avatarDetails?: BotAvatarDetailsV1 | null;
   avatarDetailsColor?: string | null;
   frameIdentityColor?: string | null;
+  /** When false (Prism rainbow), idle keeps accent paint and CSS kills glow. */
+  metalAlloyEnabled?: boolean;
+  privateMode?: boolean;
   inkOffsetY?: string;
   detailLevel?: "full" | "reduced" | "audience" | "debate";
   eyeAttentionState?: import("./botFaceEyeMovement").BotFaceAttentionState;
@@ -30710,13 +30987,16 @@ const BOT_AVATAR_FOUNDRY_FRAME_LAMPS = [
 
 function BotAvatarFoundryFrameModuleLights({
   population,
+  isTalking,
 }: {
   population: BotAvatarFoundryModulePopulation;
+  isTalking: boolean;
 }): React.JSX.Element {
   return (
     <span
       className={styles.botAvatarFoundryFrameModuleLights}
       data-avatar-foundry-frame-module-lights="true"
+      data-talking={isTalking ? "true" : undefined}
       aria-hidden="true"
       style={
         {
@@ -30821,6 +31101,8 @@ function ZenLiveBotMannequin({
   avatarDetails = null,
   avatarDetailsColor = null,
   frameIdentityColor = null,
+  metalAlloyEnabled = true,
+  privateMode = false,
   inkOffsetY,
   detailLevel = "full",
   eyeAttentionState = showThinkingSpinner
@@ -30921,7 +31203,80 @@ function ZenLiveBotMannequin({
   const frameMetalMaterialStyle = botFrameMetalMaterialStyle(
     frameMaterialSeed ?? `fallback:${scheduleKey}`,
   );
-  const resolvedFrameIdentityColor = frameIdentityColor ?? avatarDetailsColor;
+  const accentFrameIdentityColor = frameIdentityColor ?? avatarDetailsColor;
+  // Chassis: alloy while silent, accent while talking. LEDs: dark-gray unlit
+  // bulbs while silent (painted above alloy), accent while talking.
+  const resolvedTintIdentityColor = botFrameIdentityPaintColor({
+    isTalking,
+    accentColor: accentFrameIdentityColor,
+    voicePreset,
+    privateMode,
+    metalAlloyEnabled,
+  });
+  const resolvedAlloyIdentityColor =
+    metalAlloyEnabled === false
+      ? null
+      : botFrameMetalAlloyColor(voicePreset, {
+          privateMode,
+          enabled: true,
+        });
+  const resolvedLedIdentityColor =
+    metalAlloyEnabled === false && !accentFrameIdentityColor
+      ? null
+      : botFrameLedPaintColor({
+          isTalking,
+          accentColor: accentFrameIdentityColor,
+        });
+  const canonicalIdentityMaterialStyle = accentFrameIdentityColor
+    ? ({
+        ["--coffee-bot-color" as string]: accentFrameIdentityColor,
+        ...botAvatarIdentityMaterialStyle({
+          privateMode,
+          voicePreset,
+          metalAlloyEnabled,
+        }),
+      } as CSSProperties)
+    : null;
+  // #region agent log
+  useEffect(() => {
+    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "6971d8",
+      },
+      body: JSON.stringify({
+        sessionId: "6971d8",
+        runId: "post-alloy",
+        hypothesisId: "G",
+        location: "page.tsx:ZenLiveBotMannequin",
+        message: "Resolved frame identity colors",
+        data: {
+          isTalking,
+          accentFrameIdentityColor,
+          resolvedTintIdentityColor,
+          resolvedAlloyIdentityColor,
+          resolvedLedIdentityColor,
+          voicePreset,
+          privateMode: privateMode === true,
+          metalAlloyEnabled: metalAlloyEnabled !== false,
+          scheduleKey,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }, [
+    accentFrameIdentityColor,
+    isTalking,
+    metalAlloyEnabled,
+    privateMode,
+    resolvedAlloyIdentityColor,
+    resolvedLedIdentityColor,
+    resolvedTintIdentityColor,
+    scheduleKey,
+    voicePreset,
+  ]);
+  // #endregion
   const [avatarDetailsBlinkState, setAvatarDetailsBlinkState] = useState<{
     key: string;
     phase: "open" | "closed";
@@ -30953,6 +31308,7 @@ function ZenLiveBotMannequin({
     ? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE
     : null;
   const presenceBodyStyle = {
+    ...(canonicalIdentityMaterialStyle ?? {}),
     ...botAvatarFaceFacingStyle(faceScaleY),
     ...(avatarDetailsFaceRegistrationStyle ?? {}),
     ...(frameModulePopulation
@@ -31000,26 +31356,31 @@ function ZenLiveBotMannequin({
             className={`${styles.botFaceFrame} ${styles.debateOptimizedBotFrame}`}
             style={frameMetalMaterialStyle}
             aria-hidden="true"
-          >
-            <BotFaceFrameIdentityRaster
-              kind="tint"
-              identityColor={resolvedFrameIdentityColor}
-            />
-          </span>
+          />
+          <BotFaceFrameIdentityRaster
+            kind="alloy"
+            identityColor={resolvedAlloyIdentityColor}
+          />
+          <BotFaceFrameIdentityRaster
+            kind="tint"
+            identityColor={resolvedTintIdentityColor}
+          />
           <BotFaceFrameIdentityRaster
             kind="led"
-            identityColor={resolvedFrameIdentityColor}
+            identityColor={resolvedLedIdentityColor}
           />
-          <span
-            className={styles.botFaceFrameLedGlow}
-            data-frame-material-layer="led-glow"
-            aria-hidden="true"
-          />
+          {isTalking ? (
+            <span
+              className={styles.botFaceFrameLedGlow}
+              data-frame-material-layer="led-glow"
+              aria-hidden="true"
+            />
+          ) : null}
         </span>
         <span
           className={`${styles.zenLiveBotPresenceFaceEmissionMask} ${styles.debateOptimizedEmissionMask}`}
           data-crt-profile="clean"
-          data-crt-phosphor="white"
+          data-crt-phosphor="bot"
           data-talking={isTalking ? "true" : undefined}
           data-coffee-plate-mouth-shape={
             isTalking ? displayedMouthShape : undefined
@@ -31152,11 +31513,15 @@ function ZenLiveBotMannequin({
         />
         <BotFaceFrame
           metalMaterialStyle={frameMetalMaterialStyle}
-          identityColor={resolvedFrameIdentityColor}
+          tintIdentityColor={resolvedTintIdentityColor}
+          alloyIdentityColor={resolvedAlloyIdentityColor}
+          ledIdentityColor={resolvedLedIdentityColor}
+          ledActive={isTalking}
         />
         {frameModulePopulation ? (
           <BotAvatarFoundryFrameModuleLights
             population={frameModulePopulation}
+            isTalking={isTalking}
           />
         ) : null}
       </span>
@@ -31164,7 +31529,7 @@ function ZenLiveBotMannequin({
         className={styles.zenLiveBotPresenceFaceEmissionMask}
         data-screen-mode={screenMode}
         data-crt-profile="clean"
-        data-crt-phosphor="white"
+        data-crt-phosphor="bot"
         data-talking={isTalking ? "true" : undefined}
         data-coffee-plate-mouth-shape={
           isTalking ? displayedMouthShape : undefined
@@ -31213,6 +31578,7 @@ function ZenLiveBotMannequin({
               <span className={styles.zenLiveBotPresenceThinkingGlyphAnchor}>
                 <CoffeeSeatPlateEmoji
                   enabled={detailLevel === "full" || blinkEnabled}
+                  pixelated={detailLevel === "full"}
                   isTalking={false}
                   scheduleKey={thinkingScheduleKey ?? `${scheduleKey}-thinking`}
                   showThinkingSpinner
@@ -31273,6 +31639,7 @@ function ZenLiveBotMannequin({
               >
                 <CoffeeSeatPlateEmoji
                   enabled={detailLevel === "full" || blinkEnabled}
+                  pixelated={detailLevel === "full"}
                   isTalking={isTalking}
                   mouthShape={displayedMouthShape}
                   scheduleKey={scheduleKey}
@@ -31354,12 +31721,9 @@ function ZenLiveBotMannequin({
       >
         <BotFaceScreenGlass className={styles.zenLiveBotPresenceScreenGlass} />
       </span>
-      <BotGlyph
-        name={glyph}
-        size={18}
-        strokeWidth={1.95}
-        className={styles.zenLiveBotPresenceBotGlyph}
-      />
+      <PhosphorPixelSvgGlyph className={styles.zenLiveBotPresenceBotGlyph}>
+        <BotGlyph name={glyph} size={18} strokeWidth={1.95} />
+      </PhosphorPixelSvgGlyph>
     </span>
   );
 }
@@ -31410,8 +31774,9 @@ function ZenLiveBotPresencePlate({
 }): React.JSX.Element | null {
   const botName = bot?.name?.trim() || "Prism";
   const defaultPrismPresence = bot === null;
-  const liveBotGlyphName: BotGlyphName =
-    bot && isBotGlyphName(bot.glyph) ? bot.glyph : defaultPrismGlyph;
+  const liveBotGlyphName: BotGlyphName = bot
+    ? resolveCustomBotGlyph(bot.glyph)
+    : defaultPrismGlyph;
   const bodySize = normalizeZenLiveBotAvatarSizePx(avatarSizePx);
   const bodyPlacement = ZEN_LIVE_BOT_LOCKED_BODY_PLACEMENT;
   const facePlacement = ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT;
@@ -32229,15 +32594,17 @@ function ZenLiveBotPresencePlate({
     resolvedTheme,
     privateModeActive,
   );
+  const avatarIdentityStyle = botAvatarFullScaleIdentityStyle(
+    bot?.color ?? PRISM_DEFAULT_ACCENT,
+    resolvedTheme,
+    {
+      prismPersona: defaultPrismPresence,
+      voicePreset,
+      privateMode: privateModeActive,
+    },
+  );
   const avatarStyle = {
-    ...botAccent,
-    ...(bot
-      ? botAvatarIdentityMaterialStyle({
-          privateMode: privateModeActive,
-          voicePreset,
-          metalAlloyEnabled: !defaultPrismPresence,
-        })
-      : {}),
+    ...avatarIdentityStyle,
     "--zen-live-bot-copy-offset-x": `${avatarCopyOffsetX}px`,
     "--coffee-plate-emoji-face-scale-y": faceScaleY,
     "--avatar-details-facing-scale-x": botAvatarDetailsFacingScaleX(faceScaleY),
@@ -32420,6 +32787,8 @@ function ZenLiveBotPresencePlate({
                   )
               : null
           }
+          metalAlloyEnabled={!defaultPrismPresence}
+          privateMode={privateModeActive}
           avatarDetailsColor={
             bot
               ? normalizeAccentForTheme(
@@ -37726,17 +38095,30 @@ function botAvatarThinkingFramesLabel(frames: readonly string[]): string {
   return frames.join(" ");
 }
 
-function botAvatarPreviewIdentityStyle(
+interface BotAvatarFullScaleIdentityOptions {
+  prismPersona?: boolean;
+  voicePreset?: BotVoicePreset | null;
+  privateMode?: boolean;
+}
+
+/**
+ * Canonical full-scale avatar appearance contract. Avatar Studio, Zen, and
+ * the large library showcase must all derive identity color and chassis alloy
+ * from this exact path; their surrounding surfaces may only change placement.
+ */
+function botAvatarFullScaleIdentityStyle(
   rawHex: string,
-  prismPersona = false,
-  voicePreset: BotVoicePreset | null | undefined = "neutral",
+  resolvedTheme: "light" | "dark",
+  options: BotAvatarFullScaleIdentityOptions = {},
 ): CSSProperties {
-  if (prismPersona) return {};
-  const accentStyle = botAccentStyle(rawHex, "dark") ?? {};
+  const accentStyle =
+    botAccentStyle(rawHex, resolvedTheme, options.privateMode) ?? {};
+  if (options.prismPersona) return accentStyle;
   return {
     ...accentStyle,
     ...botAvatarIdentityMaterialStyle({
-      voicePreset,
+      privateMode: options.privateMode,
+      voicePreset: options.voicePreset,
       metalAlloyEnabled: true,
     }),
   } as CSSProperties;
@@ -38218,7 +38600,10 @@ function botAvatarFoundryPreviewStyle(
   const bodyPlacement = BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT;
   const facePlacement = ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT;
   return {
-    ...botAvatarPreviewIdentityStyle(color, isDefaultPrismBot, voicePreset),
+    ...botAvatarFullScaleIdentityStyle(color, previewTheme, {
+      prismPersona: isDefaultPrismBot,
+      voicePreset,
+    }),
     "--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
     "--avatar-details-scale-x": "1",
     "--avatar-details-facing-scale-x": "1",
@@ -38247,6 +38632,7 @@ function BotAvatarPreviewPanel({
   previewMode,
   previewMood,
   previewTalking,
+  voicePreset,
   avatarSfx,
   displayedPreviewMouthShape,
   avatarStyle,
@@ -38274,6 +38660,7 @@ function BotAvatarPreviewPanel({
   previewMode: BotAvatarPreviewMode;
   previewMood: (typeof BOT_AVATAR_PREVIEW_MOODS)[number];
   previewTalking: boolean;
+  voicePreset: BotVoicePreset;
   avatarSfx: BotAvatarSfxPlayback | null;
   displayedPreviewMouthShape: ZenLiveBotMouthShape;
   avatarStyle: CSSProperties;
@@ -38650,7 +39037,7 @@ function BotAvatarPreviewPanel({
                   glyph={glyph}
                   faceStyle={previewFaceStyle}
                   faceScaleY={BOT_AVATAR_CANONICAL_FACE_SCALE_Y}
-                  voicePreset="warm"
+                  voicePreset={voicePreset}
                   isTalking={previewTalking}
                   avatarSfx={avatarSfx}
                   avatarSfxState={previewAvatarSfxState}
@@ -38669,6 +39056,7 @@ function BotAvatarPreviewPanel({
                       ? PRISM_FACTORY_CLEAN_FRAME_SEED
                       : frameMaterialSeed
                   }
+                  metalAlloyEnabled={!isDefaultPrismBot}
                   avatarDetails={isDefaultPrismBot ? null : avatarDetails}
                   avatarDetailsColor={
                     isDefaultPrismBot
@@ -38958,6 +39346,24 @@ function BotAvatarIdentityControls({
             <label htmlFor={corporalityInputId}>Corporality</label>
             <strong>{nearestLabel}</strong>
           </div>
+          <button
+            type="button"
+            className={styles.botAvatarCorporalityPreviewButton}
+            data-tutorial-target="avatar-corporality-fart-preview"
+            aria-label={`Preview a ${nearestLabel.toLowerCase()} corporality fart`}
+            title="Hear this corporality"
+            onClick={() => {
+              void playPreparedCoffeeActionSfx({
+                kind: "fart",
+                voiceVolume: 1,
+                corporality: corporalityValue,
+                voiceEffectsEnabled: false,
+              });
+            }}
+          >
+            <Volume2 size={12} strokeWidth={2.3} aria-hidden="true" />
+            Fart
+          </button>
         </div>
         <input
           id={corporalityInputId}
@@ -42249,11 +42655,12 @@ function BotAvatarCustomizerModal({
     ? (previewSpeechMouthShape ?? previewMouthShape)
     : "closed";
   const titleName = botName.trim() || "Bot";
+  const previewVoicePreset = profile.core.communicationStyle;
   const avatarStyle = botAvatarFoundryPreviewStyle(
     color,
     isDefaultPrismBot,
     previewTheme,
-    profile.core.communicationStyle,
+    previewVoicePreset,
   );
   const faceStyle = resolveBotFaceStyle(
     {
@@ -43196,6 +43603,7 @@ function BotAvatarCustomizerModal({
             previewMode={previewMode}
             previewMood={previewMood}
             previewTalking={previewTalking}
+            voicePreset={previewVoicePreset}
             avatarSfx={previewAvatarSfx}
             displayedPreviewMouthShape={displayedPreviewMouthShape}
             avatarStyle={avatarStyle}
@@ -49898,6 +50306,8 @@ function HomeContent(): React.JSX.Element {
     void loadElevenLabsVoiceCollections(true);
   }, [elevenLabsVoiceCollectionsLoading, panel, settings, settingsScope, user]);
   const [botAvatarSavePromptOpen, setBotAvatarSavePromptOpen] = useState(false);
+  const [botAvatarExplicitSaveBusy, setBotAvatarExplicitSaveBusy] =
+    useState(false);
   const [botAvatarUndoDepth, setBotAvatarUndoDepth] = useState(0);
   const [botAvatarRedoDepth, setBotAvatarRedoDepth] = useState(0);
   const [botProfileBuilderOpen, setBotProfileBuilderOpen] = useState(false);
@@ -50308,16 +50718,7 @@ function HomeContent(): React.JSX.Element {
   // immediately appear as "dirty". Cleared when edit mode exits.
   const editOriginalRef = useRef<BotEditOriginalSnapshot | null>(null);
   const voiceRestoreRequestedRef = useRef(false);
-  const voiceAutosaveTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
-    null,
-  );
-  const voiceAutosavePendingRef = useRef<{
-    targetId: string;
-    profile?: BotAudioVoiceProfileV1;
-    restoreOriginal?: boolean;
-    namePronunciation?: string;
-  } | null>(null);
-  const voiceAutosaveInFlightRef = useRef<Promise<void> | null>(null);
+  const botAvatarExplicitSaveInFlightRef = useRef(false);
   const botAvatarUndoHistoryRef = useRef<BotAvatarDraftSnapshot[]>([]);
   const botAvatarRedoHistoryRef = useRef<BotAvatarDraftSnapshot[]>([]);
   const botAvatarUndoInteractionRef = useRef<{
@@ -54433,9 +54834,7 @@ function HomeContent(): React.JSX.Element {
     if (activeBot) {
       return {
         name: withPrivatePrefix(activeBot.name),
-        glyph: isBotGlyphName(activeBot.glyph)
-          ? activeBot.glyph
-          : DEFAULT_BOT_GLYPH,
+        glyph: resolveCustomBotGlyph(activeBot.glyph),
         color: activeBot.color,
       };
     }
@@ -54458,9 +54857,7 @@ function HomeContent(): React.JSX.Element {
     if (lastAssistantWithBot?.botName) {
       return {
         name: withPrivatePrefix(lastAssistantWithBot.botName),
-        glyph: isBotGlyphName(lastAssistantWithBot.botGlyph)
-          ? lastAssistantWithBot.botGlyph
-          : DEFAULT_BOT_GLYPH,
+        glyph: resolveCustomBotGlyph(lastAssistantWithBot.botGlyph),
         color: lastAssistantWithBot.botColor ?? null,
       };
     }
@@ -59397,25 +59794,6 @@ function HomeContent(): React.JSX.Element {
     finishActiveAssistantRevealForCompaction();
   }
 
-  const handleZenInitialReplyRevealCancel = useCallback(
-    (event?: React.MouseEvent<HTMLButtonElement>): void => {
-      event?.preventDefault();
-      event?.stopPropagation();
-      zenInitialStarterLiveEnvelopeRef.current = null;
-      clearZenInitialStarterReplyCache();
-      handleTypingIndicatorPress();
-    },
-    [clearZenInitialStarterReplyCache, handleTypingIndicatorPress],
-  );
-
-  const zenAssistantReplyCount = useMemo(
-    () =>
-      detail?.messages.reduce(
-        (count, message) => count + (message.role === "assistant" ? 1 : 0),
-        0,
-      ) ?? 0,
-    [detail?.messages],
-  );
   const zenPlayerMessageRevealActive = Boolean(
     zenPlayerSpeechReveal &&
       (() => {
@@ -59432,13 +59810,6 @@ function HomeContent(): React.JSX.Element {
     !zenPlayerMessageRevealActive &&
     pendingReplyStartMessageCount === 0 &&
     detail?.hasAssistantReply !== true;
-  const zenInitialReplyRevealActive =
-    view === "chat" &&
-    zenInitialStarterOverlayActive &&
-    chatAssistantRevealInProgress &&
-    !zenPlayerMessageRevealActive &&
-    pendingReplyStartMessageCount === 0 &&
-    zenAssistantReplyCount <= 1;
 
   const replyInFlightSignals =
     pendingReplyVisualVisible ||
@@ -59450,19 +59821,14 @@ function HomeContent(): React.JSX.Element {
     pendingReplyVisualVisible &&
     !zenPlayerMessageRevealActive &&
     !chatAssistantRevealInProgress;
-  const zenFloatingStatusChipVisible =
-    zenInitialThinkingActive ||
-    zenInitialReplyRevealActive ||
-    zenPendingReplyPlaceholderVisible;
   useEffect(() => {
-    if (zenFloatingStatusChipVisible) return;
+    if (zenInitialThinkingActive) return;
     zenInitialStatusLabelRef.current = null;
-  }, [zenFloatingStatusChipVisible]);
-  /** Chat and Zen reuse the floating bot status chip while waiting. */
+  }, [zenInitialThinkingActive]);
+  /** Transcript surfaces reuse the floating bot status chip while waiting. */
   const typingIndicatorVisible = chatLikeSurface
     ? chatAssistantRevealInProgress &&
-      !zenPlayerMessageRevealActive &&
-      !zenInitialReplyRevealActive
+      !zenPlayerMessageRevealActive
     : !zenPlayerMessageRevealActive &&
       (zenFollowupActive ||
         (pendingReplyVisualVisible && !zenInitialThinkingActive));
@@ -59545,10 +59911,7 @@ function HomeContent(): React.JSX.Element {
     zenCanvasSpeedNudgePulseActive,
   ]);
   const zenInitialThinkingNode = useMemo(() => {
-    if (!zenFloatingStatusChipVisible) return null;
-    const compactPhase =
-      !zenInitialThinkingActive &&
-      (zenInitialReplyRevealActive || zenPendingReplyPlaceholderVisible);
+    if (!zenInitialThinkingActive) return null;
     const outputSalt = [
       pendingReplyStartedAtMs ?? "no-start",
       pendingReplyConversationId ?? "new",
@@ -59563,17 +59926,7 @@ function HomeContent(): React.JSX.Element {
       );
     }
     const onActivate = (event?: React.MouseEvent<HTMLButtonElement>): void => {
-      if (zenInitialThinkingActive) {
-        handleZenInitialThinkingCancel(event);
-        return;
-      }
-      if (zenInitialReplyRevealActive) {
-        handleZenInitialReplyRevealCancel(event);
-        return;
-      }
-      event?.preventDefault();
-      event?.stopPropagation();
-      handleTypingIndicatorPress();
+      handleZenInitialThinkingCancel(event);
     };
     const personaBot =
       composeBotAccentId !== null
@@ -59595,7 +59948,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <div
         className={styles.zenInitialThinkingOverlay}
-        data-phase={compactPhase ? "compact" : "thinking"}
+        data-phase="thinking"
         data-persona={personaBot ? "bot" : "prism"}
         style={personaStyle}
         role="status"
@@ -59618,12 +59971,8 @@ function HomeContent(): React.JSX.Element {
             }
             onActivate(event);
           }}
-          aria-label={`${label}. ${
-              compactPhase
-                ? "Stop reply"
-                : "Cancel reply and return to the Zen start"
-          }`}
-          title={compactPhase ? "Stop reply" : "Cancel reply"}
+          aria-label={`${label}. Cancel reply and return to the Zen start`}
+          title="Cancel reply"
         >
           <span
             className={styles.zenInitialThinkingGlyphHalo}
@@ -59632,7 +59981,7 @@ function HomeContent(): React.JSX.Element {
             {personaBot ? (
               <BotGlyph
                 name={personaBot.glyph}
-                size={compactPhase ? 24 : 58}
+                size={58}
                 className={styles.zenInitialThinkingGlyph}
               />
             ) : (
@@ -59646,9 +59995,7 @@ function HomeContent(): React.JSX.Element {
       </div>
     );
   }, [
-    handleZenInitialReplyRevealCancel,
     handleZenInitialThinkingCancel,
-    handleTypingIndicatorPress,
     bots,
     composeBotAccentId,
     detail?.id,
@@ -59658,10 +60005,7 @@ function HomeContent(): React.JSX.Element {
     pendingReplyStartedAtMs,
     resolvedTheme,
     zenPersonaBot,
-    zenFloatingStatusChipVisible,
-    zenInitialReplyRevealActive,
     zenInitialThinkingActive,
-    zenPendingReplyPlaceholderVisible,
   ]);
   const sandboxSummaryIndicatorNode = useMemo(() => {
     if (view !== "sandbox") return null;
@@ -66752,6 +67096,10 @@ function HomeContent(): React.JSX.Element {
         : fallbackDurationMs;
       prepareChatSpeechReveal(revealKey, spokenText);
       setZenPlayerSpeechReveal({ messageId, content: messageText, revealKey });
+      // The opening veil is only the handoff from Home. Once the player's
+      // line enters the Zen room, keep that room visible while voice work and
+      // the bot's ordinary thinking state continue independently.
+      setZenInitialStarterOverlayActive(false);
 
       let revealStarted = false;
       let revealFinished = false;
@@ -86776,7 +87124,7 @@ function HomeContent(): React.JSX.Element {
           ? rawColor
           : `#${rawColor}`
         : null;
-      const glyph = isBotGlyphName(rawGlyph) ? rawGlyph : DEFAULT_BOT_GLYPH;
+      const glyph = resolveCustomBotGlyph(rawGlyph);
       return {
         name: rawName.length > 0 ? rawName : null,
         color,
@@ -86940,7 +87288,7 @@ function HomeContent(): React.JSX.Element {
       completedSteps: 0,
       totalSteps: 3,
       accentColor: bot.color ?? null,
-      glyph: isBotGlyphName(bot.glyph) ? bot.glyph : DEFAULT_BOT_GLYPH,
+      glyph: resolveCustomBotGlyph(bot.glyph),
       stats: { totalBots: 1, completedBots: 0, totalMemories: 0 },
     });
     try {
@@ -87021,9 +87369,7 @@ function HomeContent(): React.JSX.Element {
       completedSteps: 0,
       totalSteps: selectedBots.length + 2,
       accentColor: selectedBots[0]?.color ?? null,
-      glyph: isBotGlyphName(selectedBots[0]?.glyph)
-        ? selectedBots[0].glyph
-        : DEFAULT_BOT_GLYPH,
+      glyph: resolveCustomBotGlyph(selectedBots[0]?.glyph),
       stats: {
         totalBots: selectedBots.length,
         completedBots: 0,
@@ -87043,7 +87389,7 @@ function HomeContent(): React.JSX.Element {
           detail: `Gathering memories for bot ${index + 1} of ${selectedBots.length}.`,
           currentStepLabel: `Exporting ${bot.name}`,
           accentColor: bot.color ?? current.accentColor,
-          glyph: isBotGlyphName(bot.glyph) ? bot.glyph : current.glyph,
+          glyph: resolveCustomBotGlyph(bot.glyph),
         }));
         const built = await buildBotExportFile(bot);
         totalMemories += built.memoriesCount;
@@ -88931,9 +89277,7 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     try {
-      const entryGlyph = isBotGlyphName(entry.glyph)
-        ? entry.glyph
-        : DEFAULT_BOT_GLYPH;
+      const entryGlyph = resolveCustomBotGlyph(entry.glyph);
       startMarketplaceInstallOverlay({
         title: "Installing marketplace bot",
         subject: entry.name,
@@ -89029,9 +89373,7 @@ function HomeContent(): React.JSX.Element {
     setPanelError(null);
     setPanelNotice(null);
     try {
-      const entryGlyph = isBotGlyphName(entry.glyph)
-        ? entry.glyph
-        : DEFAULT_BOT_GLYPH;
+      const entryGlyph = resolveCustomBotGlyph(entry.glyph);
       startMarketplaceInstallOverlay({
         title: "Updating marketplace bot",
         subject: entry.name,
@@ -91417,9 +91759,7 @@ function HomeContent(): React.JSX.Element {
           );
           if (!image || image.hasLocalFile !== true || !bot) return null;
           const prompt = image.prompt?.trim() || "Untitled generated image";
-          const glyph = isBotGlyphName(bot.glyph)
-            ? bot.glyph
-            : DEFAULT_PRISM_BOT_GLYPH;
+          const glyph = resolveCustomBotGlyph(bot.glyph);
           const label = `View image made with ${bot.name}: ${prompt}`;
           const bubbleStyle = {
             "--bot-group-image-x": `${placement.xPercent}%`,
@@ -91712,9 +92052,7 @@ function HomeContent(): React.JSX.Element {
               {coffeeStagingRoster.map((stagedBot, stagedIndex) => {
                 const bot = botGroupWaitingRoomBotsById.get(stagedBot.id);
                 if (!bot) return null;
-                const glyph = isBotGlyphName(bot.glyph)
-                  ? bot.glyph
-                  : DEFAULT_PRISM_BOT_GLYPH;
+                const glyph = resolveCustomBotGlyph(bot.glyph);
                 return (
                   <li
                     key={bot.id}
@@ -91837,9 +92175,7 @@ function HomeContent(): React.JSX.Element {
               {renderedPresences.map(({ placement, phase }, placementIndex) => {
                 const bot = botGroupWaitingRoomBotsById.get(placement.botId);
                 if (!bot) return null;
-                const glyph = isBotGlyphName(bot.glyph)
-                  ? bot.glyph
-                  : DEFAULT_PRISM_BOT_GLYPH;
+                const glyph = resolveCustomBotGlyph(bot.glyph);
                 const accentStyle = botAccentStyle(bot.color, resolvedTheme);
                 const ambientRole =
                   ambientPair?.speakerBotId === bot.id
@@ -92373,7 +92709,17 @@ function HomeContent(): React.JSX.Element {
     ]
       .filter(Boolean)
       .join(" ");
-    const pickerCells = pickerFormationCells(pickerBots, geom);
+    const rainbowColumnFlow =
+      pickerBots.length > PICKER_LOW_COUNT_MAX &&
+      geom.gridRows > 1 &&
+      !geom.radialRainbowGradient;
+    const pickerCells = rainbowColumnFlow
+      ? arrangeBotPickerItemsInColumnBands(
+          pickerBots,
+          geom.gridCols,
+          geom.gridRows,
+        )
+      : pickerFormationCells(pickerBots, geom);
     const compactBotLibraryGroupView =
       activeBotLibraryGroupFilter !== null &&
       pickerBots.length >= BOT_LIBRARY_CUSTOM_GROUP_MIN_BOTS &&
@@ -92417,9 +92763,19 @@ function HomeContent(): React.JSX.Element {
           role="radiogroup"
           ariaLabel="Bot for this chat"
           style={pickerStyle}
+          data-rainbow-flow={rainbowColumnFlow ? "columns" : undefined}
         >
           {pickerCells.map((b, cellIndex) => {
             if (!b) {
+              if (rainbowColumnFlow) {
+                return (
+                  <span
+                    key={`rainbow-gap-${cellIndex}`}
+                    className={styles.chatBotTilePlaceholder}
+                    aria-hidden="true"
+                  />
+                );
+              }
               if (
                 hueFilterActive ||
                 pickerBots.length < pickerSourceBots.length ||
@@ -93476,8 +93832,6 @@ function HomeContent(): React.JSX.Element {
   // Reset to a deterministic blank draft. Randomization is opt-in inside
   // Avatar Studio so merely opening the creator never invents a persona.
   const resetBotForm = useCallback(() => {
-    // Voice edits are bot-scoped autosaves. Let an already queued write drain
-    // after the editor closes instead of dropping the last typed Voice ID.
     setNewBotName("");
     setNewBotNamePronunciation("");
     setNewBotSelfReferral("");
@@ -96247,9 +96601,7 @@ function HomeContent(): React.JSX.Element {
           .map((candidate) => candidate.color?.trim() ?? "")
           .filter((hex) => hex.length > 0),
       );
-    const seededGlyph: BotGlyphName = isBotGlyphName(bot.glyph)
-      ? bot.glyph
-      : DEFAULT_BOT_GLYPH;
+    const seededGlyph: BotGlyphName = resolveCustomBotGlyph(bot.glyph);
     const seededLocalImageModel = bot.local_image_model?.trim()
       ? bot.local_image_model.trim()
       : AUTO_MODEL_CHOICE;
@@ -98588,7 +98940,6 @@ function HomeContent(): React.JSX.Element {
       patch.audioVoiceProfileOverride = null;
     }
     if (Object.keys(patch).length === 0) return true;
-    await flushBotVoiceAutosaveQueue();
     setBusy(true);
     setPanelError(null);
     setPanelNotice(null);
@@ -98693,118 +99044,18 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  async function flushBotVoiceAutosaveQueue(): Promise<void> {
-    if (voiceAutosaveTimerRef.current) {
-      clearTimeout(voiceAutosaveTimerRef.current);
-      voiceAutosaveTimerRef.current = null;
+  async function runBotAvatarExplicitSave(
+    saveDraft: () => Promise<void>,
+  ): Promise<void> {
+    if (botAvatarExplicitSaveInFlightRef.current) return;
+    botAvatarExplicitSaveInFlightRef.current = true;
+    setBotAvatarExplicitSaveBusy(true);
+    try {
+      await saveDraft();
+    } finally {
+      botAvatarExplicitSaveInFlightRef.current = false;
+      setBotAvatarExplicitSaveBusy(false);
     }
-    if (voiceAutosaveInFlightRef.current) {
-      await voiceAutosaveInFlightRef.current;
-      if (voiceAutosavePendingRef.current) {
-        await flushBotVoiceAutosaveQueue();
-      }
-      return;
-    }
-    const pending = voiceAutosavePendingRef.current;
-    if (!pending) return;
-    voiceAutosavePendingRef.current = null;
-    const payload: {
-      audioVoiceProfileOverride?: BotAudioVoiceProfileV1 | null;
-      namePronunciation?: string;
-    } = {};
-    if (pending.profile) {
-      payload.audioVoiceProfileOverride = pending.restoreOriginal
-        ? null
-        : pending.profile;
-    }
-    if (pending.namePronunciation !== undefined) {
-      payload.namePronunciation = pending.namePronunciation;
-    }
-    const request = api<{ bot?: Bot }>(`/api/bots/${pending.targetId}`, {
-      method: "PATCH",
-      body: JSON.stringify(payload),
-    })
-      .then((result) => {
-        if (editingBotId !== pending.targetId) return;
-        if (editOriginalRef.current?.botId === pending.targetId) {
-          editOriginalRef.current = {
-            ...editOriginalRef.current,
-            ...(pending.profile ? { audioVoiceProfile: pending.profile } : {}),
-            ...(pending.namePronunciation !== undefined
-              ? { namePronunciation: pending.namePronunciation }
-              : {}),
-          };
-        }
-        if (pending.profile) voiceRestoreRequestedRef.current = false;
-        if (result.bot?.id)
-          setBots((list) => replaceBotRowById(list, result.bot!));
-        setPanelNotice(
-          pending.namePronunciation !== undefined && !pending.profile
-            ? "Pronunciation saved."
-            : "Voice saved.",
-        );
-      })
-      .catch((error: unknown) => {
-        if (editingBotId !== pending.targetId) return;
-        setPanelError(
-          error instanceof Error ? error.message : "Voice autosave failed.",
-        );
-      });
-    voiceAutosaveInFlightRef.current = request;
-    await request;
-    if (voiceAutosaveInFlightRef.current === request) {
-      voiceAutosaveInFlightRef.current = null;
-    }
-    if (voiceAutosavePendingRef.current) {
-      await flushBotVoiceAutosaveQueue();
-    }
-  }
-
-  function queueBotVoiceAutosave(
-    rawProfile: BotAudioVoiceProfileV1,
-    restoreOriginal = false,
-    saveImmediately = false,
-  ): void {
-    if (!editingBotId) return;
-    if (voiceAutosaveTimerRef.current) {
-      clearTimeout(voiceAutosaveTimerRef.current);
-      voiceAutosaveTimerRef.current = null;
-    }
-    voiceAutosavePendingRef.current = {
-      ...(voiceAutosavePendingRef.current?.targetId === editingBotId
-        ? voiceAutosavePendingRef.current
-        : {}),
-      targetId: editingBotId,
-      profile: normalizeBotAudioVoiceProfileV1(rawProfile),
-      restoreOriginal,
-    };
-    if (saveImmediately) {
-      void flushBotVoiceAutosaveQueue();
-      return;
-    }
-    voiceAutosaveTimerRef.current = setTimeout(() => {
-      voiceAutosaveTimerRef.current = null;
-      void flushBotVoiceAutosaveQueue();
-    }, 650);
-  }
-
-  function queueBotNamePronunciationAutosave(rawValue: string): void {
-    if (!editingBotId) return;
-    if (voiceAutosaveTimerRef.current) {
-      clearTimeout(voiceAutosaveTimerRef.current);
-      voiceAutosaveTimerRef.current = null;
-    }
-    voiceAutosavePendingRef.current = {
-      ...(voiceAutosavePendingRef.current?.targetId === editingBotId
-        ? voiceAutosavePendingRef.current
-        : {}),
-      targetId: editingBotId,
-      namePronunciation: normalizeBotNamePronunciation(rawValue),
-    };
-    voiceAutosaveTimerRef.current = setTimeout(() => {
-      voiceAutosaveTimerRef.current = null;
-      void flushBotVoiceAutosaveQueue();
-    }, 650);
   }
 
   // Single submit handler for the top form: routes to createBot or
@@ -101934,9 +102185,7 @@ function HomeContent(): React.JSX.Element {
                         const selectionAtCap =
                           !selected &&
                           createBotCount >= BOT_LIBRARY_GROUP_BOT_CAP;
-                        const glyph = isBotGlyphName(bot.glyph)
-                          ? bot.glyph
-                          : DEFAULT_PRISM_BOT_GLYPH;
+                        const glyph = resolveCustomBotGlyph(bot.glyph);
                         return (
                           <label
                             key={bot.id}
@@ -108721,11 +108970,15 @@ function HomeContent(): React.JSX.Element {
     const faceStyle = bot
       ? resolveBotFaceStyleForBot(bot)
       : zenDefaultPrismFaceStyle;
+    const showcaseVoicePreset = coffeeSeatVoicePreset(bot);
     const avatarStyle = {
-      ...botAvatarPreviewIdentityStyle(
+      ...botAvatarFullScaleIdentityStyle(
         bot?.color ?? DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR,
-        isDefaultPrism,
-        bot ? coffeeSeatVoicePreset(bot) : "neutral",
+        resolvedTheme,
+        {
+          prismPersona: isDefaultPrism,
+          voicePreset: showcaseVoicePreset,
+        },
       ),
       "--coffee-plate-emoji-face-scale-y":
         zenLiveBotFaceScaleYForCanvasSide("left"),
@@ -108780,13 +109033,13 @@ function HomeContent(): React.JSX.Element {
           >
             <ZenLiveBotMannequin
               glyph={
-                bot && isBotGlyphName(bot.glyph)
-                  ? bot.glyph
+                bot
+                  ? resolveCustomBotGlyph(bot.glyph)
                   : DEFAULT_PRISM_BOT_GLYPH
               }
               faceStyle={faceStyle}
               faceScaleY={zenLiveBotFaceScaleYForCanvasSide("left")}
-              voicePreset={bot ? coffeeSeatVoicePreset(bot) : "warm"}
+              voicePreset={showcaseVoicePreset}
               isTalking={previewTalking}
               avatarSfx={
                 botAvatarCustomizerOpen ? null : botAvatarSfxForBot(bot)
@@ -108812,6 +109065,7 @@ function HomeContent(): React.JSX.Element {
                   ? botFrameMaterialSeedForBot(bot, bot.id)
                   : PRISM_FACTORY_CLEAN_FRAME_SEED
               }
+              metalAlloyEnabled={!isDefaultPrism}
               avatarDetails={bot ? resolveBotAvatarDetails(bot) : null}
               avatarDetailsColor={
                 bot
@@ -117120,6 +117374,7 @@ function HomeContent(): React.JSX.Element {
                 ) ||
                 newBotProfilePictureImageId !==
                   editPristine.profilePictureImageId ||
+                voiceRestoreRequestedRef.current ||
                 JSON.stringify(newBotAudioVoiceProfile) !==
                   JSON.stringify(editPristine.audioVoiceProfile) ||
                 JSON.stringify(normalizeBotPowersV1(newBotPowers)) !==
@@ -117127,7 +117382,7 @@ function HomeContent(): React.JSX.Element {
                     normalizeBotPowersV1(editPristine.powers ?? []),
                   )
             : false;
-          const avatarCustomizerSaving = busy;
+          const avatarCustomizerSaving = botAvatarExplicitSaveBusy;
 
           // "Active" = pressing the button commits something useful.
           // Drives BOTH the enabled/disabled flag AND whether the bot
@@ -117960,9 +118215,7 @@ function HomeContent(): React.JSX.Element {
                           const uninstallProtected = installedBot
                             ? isBotDeleteProtected(installedBot.id)
                             : false;
-                          const entryGlyph = isBotGlyphName(entry.glyph)
-                            ? entry.glyph
-                            : DEFAULT_BOT_GLYPH;
+                          const entryGlyph = resolveCustomBotGlyph(entry.glyph);
                           const entryAccent = entry.color
                             ? panelBotDisplayAccent(
                                 entry.color,
@@ -118231,9 +118484,7 @@ function HomeContent(): React.JSX.Element {
                       >
                         <BotGlyph
                           name={
-                            isBotGlyphName(selectedBotPanelBot.glyph)
-                              ? selectedBotPanelBot.glyph
-                              : DEFAULT_BOT_GLYPH
+                            resolveCustomBotGlyph(selectedBotPanelBot.glyph)
                           }
                           size={28}
                           strokeWidth={1.9}
@@ -118508,7 +118759,6 @@ function HomeContent(): React.JSX.Element {
                         onBotNamePronunciationChange={(next) => {
                           pushBotAvatarUndoSnapshot("name-pronunciation");
                           setNewBotNamePronunciation(next);
-                          queueBotNamePronunciationAutosave(next);
                         }}
                         onRandomizeBotName={() =>
                           randomizeSemanticBotField(
@@ -118817,25 +119067,27 @@ function HomeContent(): React.JSX.Element {
                           }
                           closeBotAvatarStudioFlow();
                         }}
-                        onSave={async () => {
-                          if (editingDefaultBot) {
-                            const saved = await saveDefaultBot();
-                            if (saved) {
-                              closeBotAvatarStudioFlow();
+                        onSave={() =>
+                          runBotAvatarExplicitSave(async () => {
+                            if (editingDefaultBot) {
+                              const saved = await saveDefaultBot();
+                              if (saved) {
+                                closeBotAvatarStudioFlow();
+                              }
+                              return;
                             }
-                            return;
-                          }
-                          if (!editingBotId) {
-                            const created = await createBot();
-                            if (created) {
-                              closeBotAvatarCustomizer();
-                              setBotPanelView("home");
+                            if (!editingBotId) {
+                              const created = await createBot();
+                              if (created) {
+                                closeBotAvatarCustomizer();
+                                setBotPanelView("home");
+                              }
+                              return;
                             }
-                            return;
-                          }
-                          const saved = await saveBot(editingBotId);
-                          if (saved) closeBotAvatarStudioFlow();
-                        }}
+                            const saved = await saveBot(editingBotId);
+                            if (saved) closeBotAvatarStudioFlow();
+                          })
+                        }
                         onUndo={undoBotAvatarDraft}
                         onRedo={redoBotAvatarDraft}
                         onDiscard={() => {
@@ -119057,18 +119309,12 @@ function HomeContent(): React.JSX.Element {
                           createBotAppearanceTouchedRef.current = true;
                           setNewBotAvatarDetails(normalized);
                         }}
-                        onAudioVoiceProfileChange={(next, options) => {
+                        onAudioVoiceProfileChange={(next) => {
                           pushBotAvatarUndoSnapshot("voice");
                           voiceRestoreRequestedRef.current = false;
                           const normalized =
                             normalizeBotAudioVoiceProfileV1(next);
                           setNewBotAudioVoiceProfile(normalized);
-                          if (!editingDefaultBot)
-                            queueBotVoiceAutosave(
-                              normalized,
-                              false,
-                              options?.saveImmediately === true,
-                            );
                         }}
                         onVoicePreviewLineChange={(next) => {
                           pushBotAvatarUndoSnapshot("voice-preview-line");
@@ -119090,7 +119336,6 @@ function HomeContent(): React.JSX.Element {
                             editingBot?.authored_audio_voice_profile,
                           );
                           setNewBotAudioVoiceProfile(authored);
-                          queueBotVoiceAutosave(authored, true);
                         }}
                         onProfileModeChange={setBotEditorModeAdvanced}
                         onProfilePageOpen={(category) => {
@@ -119844,9 +120089,7 @@ function HomeContent(): React.JSX.Element {
                                     : b.color;
                                   const liveGlyph = isEditing
                                     ? newBotGlyph
-                                    : isBotGlyphName(b.glyph)
-                                      ? b.glyph
-                                      : DEFAULT_BOT_GLYPH;
+                                    : resolveCustomBotGlyph(b.glyph);
                                   const isFavorite = favoriteBotIdSet.has(b.id);
                                   // Adornments use a display-only harmony pass at large
                                   // counts so stacked card accents read as one spectrum;
@@ -119995,6 +120238,9 @@ function HomeContent(): React.JSX.Element {
                             previewMode="idle"
                             previewMood="warm"
                             previewTalking={false}
+                            voicePreset={resolveBotVoicePreset({
+                              system_prompt: newBotSystemPrompt,
+                            })}
                             avatarSfx={null}
                             displayedPreviewMouthShape="closed"
                             avatarStyle={botAvatarFoundryPreviewStyle(
@@ -120549,11 +120795,9 @@ function HomeContent(): React.JSX.Element {
             resolvedTheme,
           );
           const imagePanelTitleGlyphName: BotGlyphName =
-            imagePanelScope === "bot" &&
-            imagePanelBot &&
-            isBotGlyphName(imagePanelBot.glyph)
-              ? imagePanelBot.glyph
-              : "triangle";
+            imagePanelScope === "bot" && imagePanelBot
+              ? resolveCustomBotGlyph(imagePanelBot.glyph)
+              : DEFAULT_PRISM_BOT_GLYPH;
           const imagePanelTitleGlyphColor = imagePrivateMode
             ? resolvedTheme === "dark"
               ? "#f4f4f3"
@@ -121349,7 +121593,9 @@ function HomeContent(): React.JSX.Element {
                         >
                           <BotGlyph
                             name={
-                              overlayTintBot ? overlayTintBot.glyph : "triangle"
+                              overlayTintBot
+                                ? resolveCustomBotGlyph(overlayTintBot.glyph)
+                                : DEFAULT_PRISM_BOT_GLYPH
                             }
                             size={30}
                             strokeWidth={1.95}
@@ -131463,6 +131709,7 @@ function HomeContent(): React.JSX.Element {
                       showThinkingSpinner={coffeeReplayPlayerThinking}
                       screenMaterialSeed="prism-default"
                       frameMaterialSeed={PRISM_FACTORY_CLEAN_FRAME_SEED}
+                      metalAlloyEnabled={false}
                     />
                   </BotAmbientPresenceRig>
                 </span>
@@ -131804,9 +132051,9 @@ function HomeContent(): React.JSX.Element {
                     resolveBotAvatarDetails(bot),
                     identityBorrowTargetFaceVisible,
                   );
-              const seatGlyphName: BotGlyphName = isBotGlyphName(bot.glyph)
-                ? bot.glyph
-                : DEFAULT_BOT_GLYPH;
+              const seatGlyphName: BotGlyphName = resolveCustomBotGlyph(
+                bot.glyph,
+              );
               const seatEmojiTier = coffeeSeatEmojiMoodFromPrism(prismSeatMood);
               const seatTypingActionState =
                 typingSeatActionByBotId.get(bot.id) ?? null;
@@ -136782,9 +137029,9 @@ function HomeContent(): React.JSX.Element {
                       )) ?? null;
                 const glyph: BotGlyphName = playerJudgePrism
                   ? zenDefaultPrismGlyph
-                  : isBotGlyphName(liveBot?.glyph ?? botSnapshot.glyph)
-                    ? ((liveBot?.glyph ?? botSnapshot.glyph) as BotGlyphName)
-                    : DEFAULT_BOT_GLYPH;
+                  : resolveCustomBotGlyph(
+                      liveBot?.glyph ?? botSnapshot.glyph,
+                    );
                 const faceStyle = playerJudgePrism
                   ? zenDefaultPrismFaceStyle
                   : generatedAudienceBot
@@ -136864,6 +137111,16 @@ function HomeContent(): React.JSX.Element {
                           ? PRISM_DEFAULT_ACCENT
                           : (botSnapshot.color ?? PRISM_DEFAULT_ACCENT),
                         resolvedTheme,
+                      ),
+                      ...botFrameMetalAlloyStyle(
+                        playerJudgePrism
+                          ? "warm"
+                          : coffeeSeatVoicePreset(
+                              liveBot ?? {
+                                systemPrompt: botSnapshot.systemPrompt,
+                              },
+                            ),
+                        { enabled: !playerJudgePrism },
                       ),
                       ["--coffee-plate-emoji-face-scale-y" as string]:
                         faceScaleY,
@@ -136979,6 +137236,8 @@ function HomeContent(): React.JSX.Element {
                             : (botSnapshot.color ?? PRISM_DEFAULT_ACCENT),
                           resolvedTheme,
                         )}
+                        metalAlloyEnabled={!playerJudgePrism}
+                        privateMode={false}
                         runtimeEffectsEnabled={!staticAudiencePortrait}
                       />
                     </BotAmbientPresenceRig>
@@ -137556,6 +137815,7 @@ function HomeContent(): React.JSX.Element {
                       eyeStateStartedAtMs={avatarState.eyeStateStartedAtMs}
                       screenMaterialSeed="prism-default"
                       frameMaterialSeed={PRISM_FACTORY_CLEAN_FRAME_SEED}
+                      metalAlloyEnabled={false}
                     />
                   </BotAmbientPresenceRig>
                 </span>
@@ -137565,9 +137825,7 @@ function HomeContent(): React.JSX.Element {
               (candidate) => candidate.id === botSummary.id,
             );
             if (!bot) return null;
-            const glyph: BotGlyphName = isBotGlyphName(bot.glyph)
-              ? bot.glyph
-              : DEFAULT_BOT_GLYPH;
+            const glyph: BotGlyphName = resolveCustomBotGlyph(bot.glyph);
             const color = normalizeAccentForTheme(
               bot.color ?? PRISM_DEFAULT_ACCENT,
               renderTheme,
@@ -138702,10 +138960,10 @@ function HomeContent(): React.JSX.Element {
                   // filtered group." Block the click + nudge them to pick a tile.
                   const heroLensPlaceholder = false;
                   const heroStartLabel = heroBotName
-                    ? `Send a message below, or select the symbol to have ${heroBotName} open.`
+                    ? `Send a message below, or select the bot to have ${heroBotName} open.`
                     : immersiveEmptyState
-                      ? "A continuous PRISM-only space for the present thread. Send a message below, or select the symbol for a gentle opening prompt."
-                      : "Select the bot's glyph to begin, or pick a bot below.";
+                      ? "A continuous PRISM-only space for the present thread. Send a message below, or select the mark for a gentle opening prompt."
+                      : "Select the bot to begin, or pick a bot below.";
                   const hint = (() => {
                     if (chatStartupSummaryVisible && chatStartupSummary) {
                       return chatStartupSummary;
@@ -138797,7 +139055,7 @@ function HomeContent(): React.JSX.Element {
                     : "Start chat with PRISM";
                   const heroStartCue =
                     heroBotName && !heroStartDisabled
-                      ? "SELECT THE SYMBOL TO START THE CHAT"
+                      ? "SELECT THE BOT TO START THE CHAT"
                       : null;
                   const shouldShowHeroNudge =
                     !heroStartDisabled &&
@@ -139511,14 +139769,42 @@ function HomeContent(): React.JSX.Element {
                                 moodKey={
                                   assistantMoodKey ?? DEFAULT_MESSAGE_MOOD
                                 }
-                                variant="classic"
+                                variant="mini"
                                 placement="leading"
-                                color={assistantDisplayBotColor}
+                                color={
+                                  assistantDisplayBotColor
+                                    ? normalizeAccentForTheme(
+                                        assistantDisplayBotColor,
+                                        resolvedTheme,
+                                      )
+                                    : null
+                                }
+                                voicePreset={coffeeSeatVoicePreset(
+                                  assistantDisplayBot,
+                                )}
                                 faceStyle={resolveMessageFaceStyleForDisplayBot(
                                   msg,
                                   bots,
                                   assistantFallbackBotId,
                                 )}
+                                glyph={
+                                  assistantDisplayBot
+                                    ? resolveCustomBotGlyph(
+                                        assistantDisplayBot.glyph,
+                                      )
+                                    : DEFAULT_PRISM_BOT_GLYPH
+                                }
+                                avatarDetails={
+                                  assistantDisplayBot
+                                    ? resolveBotAvatarDetails(
+                                        assistantDisplayBot,
+                                      )
+                                    : null
+                                }
+                                isTalking={
+                                  msg.id === latestAssistantMessageId &&
+                                  replyInFlightSignals
+                                }
                                 questionMarkActive={
                                   resolveAssistantAskQuestion(msg) !== undefined
                                 }
@@ -140536,15 +140822,15 @@ function HomeContent(): React.JSX.Element {
                   heroLensPlaceholder || lensInteracting;
                 const heroStartLabel = pendingIncognito
                   ? privateBotName
-                    ? `Select the symbol above to begin a private chat with ${privateBotName}.`
-                    : "Select the symbol above to begin a private chat."
+                    ? `Select the bot above to begin a private chat with ${privateBotName}.`
+                    : "Select the mark above to begin a private chat."
                   : heroLensPlaceholder
                     ? "Pick a bot from the filtered grid below to begin."
                     : heroBot?.name?.trim()
-                      ? `Select the symbol above to have ${heroBot.name.trim()} start the conversation.`
+                      ? `Select the bot above to have ${heroBot.name.trim()} start the conversation.`
                       : bots.length > 0
-                        ? "Select the bot's glyph to begin, or pick a bot below."
-                        : "Select the symbol above to create a bot to get started.";
+                        ? "Select the bot to begin, or pick a bot below."
+                        : "Select the mark above to create a bot to get started.";
                 const heroRecentConversations =
                   !pendingIncognito && heroBot?.id
                     ? conversations
@@ -140631,7 +140917,7 @@ function HomeContent(): React.JSX.Element {
                     : "Start conversation";
                 const heroStartCue =
                   heroBot && !heroStartDisabled
-                    ? "SELECT THE SYMBOL TO START THE CHAT"
+                    ? "SELECT THE BOT TO START THE CHAT"
                     : null;
                 const shouldShowHeroNudge =
                   !heroStartDisabled &&
@@ -140922,10 +141208,17 @@ function HomeContent(): React.JSX.Element {
                         ]
                           .filter(Boolean)
                           .join(" ");
-                        const pickerCells = pickerFormationCells(
-                          pickerBots,
-                          geom,
-                        );
+                        const rainbowColumnFlow =
+                          pickerBots.length > PICKER_LOW_COUNT_MAX &&
+                          geom.gridRows > 1 &&
+                          !geom.radialRainbowGradient;
+                        const pickerCells = rainbowColumnFlow
+                          ? arrangeBotPickerItemsInColumnBands(
+                              pickerBots,
+                              geom.gridCols,
+                              geom.gridRows,
+                            )
+                          : pickerFormationCells(pickerBots, geom);
                         return (
                           <div
                             className={styles.chatBotPickerFrame}
@@ -140970,9 +141263,23 @@ function HomeContent(): React.JSX.Element {
                               role="radiogroup"
                               ariaLabel="Bot for this chat"
                               style={pickerStyle}
+                              data-rainbow-flow={
+                                rainbowColumnFlow ? "columns" : undefined
+                              }
                             >
                               {pickerCells.map((b, cellIndex) => {
                                 if (!b) {
+                                  if (rainbowColumnFlow) {
+                                    return (
+                                      <span
+                                        key={`rainbow-gap-${cellIndex}`}
+                                        className={
+                                          styles.chatBotTilePlaceholder
+                                        }
+                                        aria-hidden="true"
+                                      />
+                                    );
+                                  }
                                   if (
                                     hueFilterActive ||
                                     pickerBots.length <
@@ -141612,14 +141919,40 @@ function HomeContent(): React.JSX.Element {
                           <span className={styles.messageMoodAnchor}>
                             <MessageMoodFace
                               moodKey={assistantMoodKey ?? DEFAULT_MESSAGE_MOOD}
-                              variant="classic"
+                              variant="mini"
                               placement="leading"
-                              color={assistantDisplayBotColor}
+                              color={
+                                assistantDisplayBotColor
+                                  ? normalizeAccentForTheme(
+                                      assistantDisplayBotColor,
+                                      resolvedTheme,
+                                    )
+                                  : null
+                              }
+                              voicePreset={coffeeSeatVoicePreset(
+                                assistantDisplayBot,
+                              )}
                               faceStyle={resolveMessageFaceStyleForDisplayBot(
                                 msg,
                                 bots,
                                 assistantFallbackBotId,
                               )}
+                              glyph={
+                                assistantDisplayBot
+                                  ? resolveCustomBotGlyph(
+                                      assistantDisplayBot.glyph,
+                                    )
+                                  : DEFAULT_PRISM_BOT_GLYPH
+                              }
+                              avatarDetails={
+                                assistantDisplayBot
+                                  ? resolveBotAvatarDetails(assistantDisplayBot)
+                                  : null
+                              }
+                              isTalking={
+                                msg.id === latestAssistantMessageId &&
+                                replyInFlightSignals
+                              }
                               questionMarkActive={
                                 resolveAssistantAskQuestion(msg) !== undefined
                               }

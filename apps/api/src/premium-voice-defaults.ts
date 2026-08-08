@@ -101,9 +101,10 @@ export function initializePremiumVoiceDefaults(args: {
   const prismProfile = normalizeBotAudioVoiceProfileV1(
     args.prismDefaultBotAudioVoiceProfile,
   );
+  const hasSelectedPremium = Boolean(selectedPremiumVoiceId(prismProfile));
+  const hasInitializedFlag = prismProfile.elevenLabsVoiceInitialized === true;
   const prismDefaultBotAudioVoiceProfile =
-    selectedPremiumVoiceId(prismProfile) ||
-    prismProfile.elevenLabsVoiceInitialized === true
+    hasSelectedPremium || hasInitializedFlag
       ? null
       : withPremiumVoice(
           prismProfile,
@@ -114,6 +115,41 @@ export function initializePremiumVoiceDefaults(args: {
             )
           ],
         );
+
+  // #region agent log
+  fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "2836be",
+    },
+    body: JSON.stringify({
+      sessionId: "2836be",
+      hypothesisId: "A",
+      location: "premium-voice-defaults.ts:initializePremiumVoiceDefaults",
+      message: "Prism default premium-init decision",
+      data: {
+        userId: args.userId,
+        voiceCatalogSize: voiceIds.length,
+        rawProfileType: typeof args.prismDefaultBotAudioVoiceProfile,
+        rawProfileIsNull: args.prismDefaultBotAudioVoiceProfile == null,
+        baseVoiceId: prismProfile.baseVoiceId,
+        pitch: prismProfile.pitch,
+        pace: prismProfile.pace,
+        systemVoiceName: prismProfile.systemVoiceName ?? null,
+        elevenLabsVoiceId: prismProfile.elevenLabsVoiceId ?? null,
+        elevenLabsVoiceIdOverride: prismProfile.elevenLabsVoiceIdOverride ?? null,
+        hasSelectedPremium,
+        hasInitializedFlag,
+        willAssignPrismDefault: prismDefaultBotAudioVoiceProfile != null,
+        assignedVoiceId:
+          prismDefaultBotAudioVoiceProfile?.elevenLabsVoiceId ?? null,
+        botUpdateCount: botUpdates.length,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
 
   return { botUpdates, prismDefaultBotAudioVoiceProfile };
 }

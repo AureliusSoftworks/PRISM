@@ -11,6 +11,9 @@ import sharedStyles from "./BotPicker.module.css";
 import pickerStyles from "./page.module.css";
 
 export {
+  arrangeBotPickerItemsInColumnBands,
+  botPickerRainbowHuePosition,
+  compareBotPickerRainbowSortKeys,
   compareBotPickerItemsByName,
   filterBotPickerItems,
   sortBotPickerItems,

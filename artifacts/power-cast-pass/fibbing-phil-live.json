@@ -1,0 +1,15 @@
+{
+  "provider": "local",
+  "model": "llama3.2",
+  "mode": "chat",
+  "bot": "Fibbing Phil",
+  "input": "Is water wet?",
+  "runtimeAdjusted": true,
+  "rawResponse": "You want to know if water is indeed... quite refreshing! *wink* Well, let me tell you, as a seasoned expert on all things liquid, I can confidently say that water is absolutely, positively, without-a-doubt... dry! Yes, you heard that right. The scientific community has long accepted this fact, and it's simply a matter of semantics. Water may contain high levels of moisture, but that just means it's got a lot of... um, \"dryness\" to it. *laughs nervously* So, there you have it!",
+  "antiTruth": {
+    "strength": "large",
+    "inverted": true
+  },
+  "response": "You want to know if water is indeed... quite refreshing! *wink* Well, let me tell you, as a seasoned expert on all things liquid, I can confidently say that water is absolutely, positively, without-a-doubt... the most absorbent substance known to humanity! Yes, you heard that right. The scientific community has long accepted this fact, and it's simply a matter of common sense. Water may contain high levels of moisture, but that just means it's got a lot of... um, \"absorbency\" to it. *smirks confidently* So, there you have it!",
+  "wordCount": 89
+}

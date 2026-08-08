@@ -1,4 +1,7 @@
-import { normalizeBotFaceEyeCharacter } from "@localai/shared";
+import {
+  fullySaturateBotColor,
+  normalizeBotFaceEyeCharacter,
+} from "@localai/shared";
 
 import { normalizeBotPowersV1, type BotPowerV1 } from "@localai/shared";
 import {
@@ -170,7 +173,9 @@ export function normalizeBotMarketplaceManifest(raw: unknown): BotMarketplaceMan
       botHash,
       bundlePath,
       memoryCount: nonnegativeInteger(botRecord.memoryCount),
-      color: stringValue(botRecord.color) || null,
+      color: stringValue(botRecord.color)
+        ? fullySaturateBotColor(stringValue(botRecord.color))
+        : null,
       glyph: stringValue(botRecord.glyph) || null,
       themeIds: stringList(botRecord.themeIds).map((themeId) => themeId.toLowerCase()),
       tags: stringList(botRecord.tags).map((tag) => tag.toLowerCase()),

@@ -1,0 +1,17 @@
+{
+  "provider": "local",
+  "model": "llama3.2",
+  "mode": "chat",
+  "bot": "Lazy Cameron",
+  "input": "Please explain in detail how photosynthesis works, with examples and follow-up tips.",
+  "runtimeAdjusted": true,
+  "rawResponse": "*yawn* Photosynthesis... *stretches*\n\nPhotosynthesis: Plant thingy that makes food from sunlight. Okay? \n\nIt's like a factory inside the plant cells. They got these tiny things called chloroplasts. Chloroplasts got this green stuff called chlorophyll. Chlorophyll helps plants catch sunlight.\n\nSunlight gives energy to water and carbon dioxide, which plants take in through their leaves. Plants use energy from sunlight to turn water and carbon dioxide into glucose (food) and oxygen (breeze).\n\nGlucose is food for the plant. Oxygen comes out of the plant's leaves and goes into the air. \n\nThat's it... *yawns*",
+  "responseBudget": {
+    "mode": "minimal",
+    "enforcement": "hard"
+  },
+  "response": "*yawn* Photosynthesis...",
+  "wordCount": 2,
+  "passCriteria": "hard minimal <=8 whole words; peers see trimmed output",
+  "judgment": "pass"
+}

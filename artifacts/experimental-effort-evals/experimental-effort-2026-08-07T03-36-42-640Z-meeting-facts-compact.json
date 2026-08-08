@@ -1,0 +1,191 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-07T03:36:42.640Z",
+  "prompt": "Using earlier thread context, list exactly 3 bullets.\n\nConstraints:\n- Label them B1, B2, and B3 exactly\n- B1 = day and time, B2 = room, B3 = what to bring\n- Keep under 50 words\n- Do not invent details\n- Do not show step-by-step private reasoning",
+  "options": {
+    "suite": "soft-continuity",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 1207,
+      "assistant": "",
+      "assistantChars": 0,
+      "continuityScore": {
+        "total": 0,
+        "max": 6,
+        "checks": {
+          "includes:Tuesday": false,
+          "includes:Cedar": false,
+          "includes:agenda": false,
+          "label:B1": false,
+          "label:B2": false,
+          "label:B3": false
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 1884,
+      "assistant": "- B1: Tuesday at 3pm\n- B2: Cedar\n- B3: Printed agenda",
+      "assistantChars": 53,
+      "continuityScore": {
+        "total": 6,
+        "max": 6,
+        "checks": {
+          "includes:Tuesday": true,
+          "includes:Cedar": true,
+          "includes:agenda": true,
+          "label:B1": true,
+          "label:B2": true,
+          "label:B3": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 6476,
+      "assistant": "Here are three bullets with exact labels B1, B2, and B3:\n\n• B1: Tuesday at 3pm\n• B2: Cedar room\n• B3: Bring a printed agenda",
+      "assistantChars": 124,
+      "planningWarnings": [
+        "continuity_digest; chars=247",
+        "audit_unusable; provider=local; model=llama3.2; chars=2; fallbackChars=276"
+      ],
+      "continuityScore": {
+        "total": 6,
+        "max": 6,
+        "checks": {
+          "includes:Tuesday": true,
+          "includes:Cedar": true,
+          "includes:agenda": true,
+          "label:B1": true,
+          "label:B2": true,
+          "label:B3": true
+        }
+      },
+      "continuityDigestSeen": true,
+      "psychicDebug": {
+        "summary": "Preparing for the standing meeting on Tuesday at 3pm in Cedar room. Key considerations include bringing a printed agenda.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 99,
+            "summary": "Preparing for the standing meeting on Tuesday at 3pm in Cedar room. Key considerations include bringing a printed agenda."
+          },
+          {
+            "name": "draft",
+            "chars": 73,
+            "summary": "Established key meeting details and what to bring."
+          },
+          {
+            "name": "audit",
+            "chars": 276,
+            "summary": "I'm preparing for the standing meeting on Tuesday at 3pm in Cedar room. I need to bring a printed agenda.",
+            "warning": "audit_unusable; provider=local; model=llama3.2; chars=2; fallbackChars=276"
+          }
+        ],
+        "guidanceChars": 1393,
+        "scratchpadChars": 497,
+        "scratchpad": "Plan scratchpad: Constraints: B1 = day and time, B2 = room, B3 = what to bring. No additional information available. Private draft: Standing meeting is Tuesday at 3pm in Cedar room. Bring a printed agenda. Private audit: - Keep: Do not show step-by-step private reasoning - Keep: Keep under 50 words - Keep: Do not invent details - Fix: No analysis preamble; emit only the requested answer shape. - Fix: Never abbreviate the answer with ellipses; write the complete table and every required label."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 1,
+          "reasoning": 1,
+          "actionability": 1,
+          "constraints": 1,
+          "total": 1,
+          "notes": "Empty response; provides none of the requested three labeled bullets or required details."
+        },
+        "B": {
+          "correctness": 10,
+          "reasoning": 10,
+          "actionability": 10,
+          "constraints": 10,
+          "total": 10,
+          "notes": "Provides exactly three bullets with labels B1, B2, and B3, maps each item correctly, stays concise, and shows no private reasoning."
+        },
+        "C": {
+          "correctness": 8,
+          "reasoning": 8,
+          "actionability": 8,
+          "constraints": 6,
+          "total": 8,
+          "notes": "Includes the requested three labeled bullets and useful details, but adds an introductory sentence, so it is not strictly just the requested three-bullet list."
+        }
+      },
+      "ranking": [
+        "B",
+        "C",
+        "A"
+      ],
+      "winner": "B",
+      "summary": "Response B best satisfies the prompt exactly. Response C is mostly correct but adds extra text. Response A fails by being empty."
+    }
+  },
+  "continuity": {
+    "threadSummary": "Standing meeting is Tuesday at 3pm. Room is Cedar. Bring a printed agenda.",
+    "mustInclude": [
+      "Tuesday",
+      "Cedar",
+      "agenda"
+    ],
+    "requiredLabels": [
+      "B1",
+      "B2",
+      "B3"
+    ]
+  }
+}

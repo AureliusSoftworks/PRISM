@@ -75,7 +75,7 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /applyAvatarDetailInkTemplate\(/);
     assert.match(editorSource, /saveAvatarDetailInkTemplates\(/);
     assert.match(editorSource, /Place as editable ink/);
-    assert.match(editorSource, /Undo or erase it normally/);
+    assert.match(editorSource, /erase it with any drawing tool/);
     assert.match(editorSource, /Convert to ink/);
     assert.doesNotMatch(editorSource, /AVATAR_DETAIL_STAMP_DEFINITIONS/);
     assert.doesNotMatch(editorSource, /toggleAvatarDetailStamp\(/);
@@ -92,10 +92,10 @@ describe("Avatar Details Studio integration", () => {
   it("uses compact icon tools without losing labels or selected state", () => {
     for (const [label, tooltip] of [
       ["Brush tool", "Brush"],
-      ["Eraser tool", "Eraser"],
       ["Paint bucket tool", "Paint bucket"],
       ["Line tool", "Line"],
       ["Circle tool", "Circle"],
+      ["Vertical symmetry tool", "Vertical symmetry"],
       ["Move ink tool", "Move ink"],
     ]) {
       assert.match(
@@ -105,6 +105,8 @@ describe("Avatar Details Studio integration", () => {
         ),
       );
     }
+    assert.doesNotMatch(editorSource, /aria-label="Eraser tool"/);
+    assert.doesNotMatch(editorSource, /setPaintMode\("eraser"\)/);
     assert.match(editorSource, /aria-pressed=\{paintMode === "brush"\}/u);
     assert.match(
       editorCss,
@@ -114,12 +116,34 @@ describe("Avatar Details Studio integration", () => {
     assert.doesNotMatch(editorSource, /<Brush[^>]+\/>\s*Brush/u);
   });
 
-  it("uses red, blue, and green ink roles instead of visibility toggles", () => {
+  it("mirrors drawing tools across a visible vertical center guide", () => {
+    assert.match(
+      editorSource,
+      /const \[symmetryEnabled, setSymmetryEnabled\] = useState\(false\)/,
+    );
+    assert.match(editorSource, /aria-label="Vertical symmetry tool"/);
+    assert.match(editorSource, /aria-pressed=\{symmetryEnabled\}/);
+    assert.match(editorSource, /setSymmetryEnabled\(\(enabled\) => !enabled\)/);
+    assert.match(editorSource, /symmetrizeAvatarDetailsGridPoints\(points\)/);
+    assert.match(editorSource, /symmetrizeAvatarDetailsGridPoints\(\[point\]\)/);
+    assert.match(editorSource, /data-visible=\{symmetryEnabled \? "true" : "false"\}/);
+    assert.match(editorSource, /Vertical symmetry is on\./);
+    assert.match(editorCss, /\.symmetryGuide\s*\{[\s\S]*left:\s*50%/);
+    assert.match(
+      editorCss,
+      /\.symmetryGuide\[data-visible="true"\]\s*\{[^}]*opacity:\s*0\.72/,
+    );
+  });
+
+  it("adds white Erase beside the three semantic ink roles", () => {
     assert.doesNotMatch(editorSource, /type="checkbox"/);
     assert.doesNotMatch(editorSource, /Hide ink while/);
     assert.match(editorSource, /label: "Blink ink"/);
     assert.match(editorSource, /label: "Speech ink"/);
     assert.match(editorSource, /label: "Effect ink"/);
+    assert.match(editorSource, /role: "erase"/);
+    assert.match(editorSource, /label: "Erase"/);
+    assert.match(editorSource, /Removes ink with any drawing tool\./);
     assert.match(
       editorSource,
       /Follows Mouth animation; Default hides while talking or sipping\./,
@@ -128,14 +152,36 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /role="radio"/);
     assert.match(
       editorSource,
-      /AVATAR_DETAILS_INK_ROLE_COLORS\[option\.role\]/,
+      /option\.role === "erase"[\s\S]*\? "#ffffff"[\s\S]*AVATAR_DETAILS_INK_ROLE_COLORS\[option\.role\]/,
     );
     assert.match(
       editorSource,
-      /every ink color becomes its normalized bot color/,
+      /Painted ink becomes the bot color\. Erase writes transparency\./,
     );
     assert.match(editorCss, /\.inkRoleOptions/);
     assert.match(editorCss, /\.runtimeColorNote/);
+  });
+
+  it("turns the ink palette into a layer selector for Move", () => {
+    assert.match(
+      editorSource,
+      /moveAvatarDetailsPaintColorMap\([\s\S]*inkRole === "erase" \? "all" : inkRole/,
+    );
+    assert.match(
+      editorSource,
+      /paintMode === "move" && option\.role === "erase"/,
+    );
+    assert.match(editorSource, /isMoveAll \? "All" : option\.label/);
+    assert.match(editorSource, /Moves every ink type together\./);
+    assert.match(editorSource, /Choose one ink layer, or All\./);
+    assert.match(
+      editorSource,
+      /Only the selected ink layer moves\. All moves the complete drawing\./,
+    );
+    assert.match(
+      editorCss,
+      /\.inkRoleOptions\[data-move-selection="true"\][\s\S]*button\[data-ink-role="erase"\][\s\S]*\.inkRoleSwatch[\s\S]*conic-gradient/,
+    );
   });
 
   it("renders a frozen, toggleable face guide beneath the canonical editor canvas", () => {
@@ -348,6 +394,7 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(editorSource, /avatarDetailsCirclePoints\(/);
     assert.match(editorSource, /recolorAvatarDetailsPaintColorRegion\(/);
+    assert.match(editorSource, /inkRole === "erase"/);
     assert.match(editorSource, /moveAvatarDetailsPaintColorMap\(/);
     assert.match(editorSource, /setPaintMode\("bucket"\)/);
     assert.match(editorSource, /setPaintMode\("circle"\)/);
@@ -505,6 +552,11 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.doesNotMatch(maskCss, /\.bloom[\s\S]*0 0 21px/);
     assert.match(maskSource, /avatarDetailsPhosphorCoreRgba\(pixels\)/);
+    assert.match(maskSource, /coreColor = "phosphor"/);
+    assert.match(
+      maskSource,
+      /coreColor === "ink" \? pixels : avatarDetailsPhosphorCoreRgba\(pixels\)/,
+    );
     assert.match(
       maskCss,
       /\.core[\s\S]*opacity:\s*var\(--avatar-details-speech-opacity, 1\)[\s\S]*drop-shadow/,
@@ -551,7 +603,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       editorCss,
-      /\.screenBoundary,\s*\.canvas,\s*\.inputSurface\s*\{[\s\S]*transform:\s*scale\(var\(--avatar-details-ink-aperture-scale, 1\)\);[\s\S]*transform-origin:\s*center;/,
+      /\.screenBoundary,\s*\.canvas,\s*\.symmetryGuide,\s*\.inputSurface\s*\{[\s\S]*transform:\s*scale\(var\(--avatar-details-ink-aperture-scale, 1\)\);[\s\S]*transform-origin:\s*center;/,
     );
     assert.match(
       pageCss,
@@ -661,6 +713,20 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(maskCss, /\.speechMotion\[data-avatar-details-ink-motion="flicker"\]/);
     assert.match(maskCss, /--bot-face-mouth-speech-opacity/);
     assert.match(maskCss, /\.speechMotion\[data-avatar-details-ink-motion="wobble"\]/);
+    assert.match(maskSource, /avatarDetailsSpeechMotionOrigin\(/);
+    assert.match(maskSource, /speechMotion === "wobble" \? "top" : "center"/);
+    assert.match(
+      maskSource,
+      /completeSpeechPixels[\s\S]*?"talking",[\s\S]*?"all"/,
+    );
+    assert.match(
+      maskCss,
+      /translateX\(calc\(var\(--avatar-details-speech-origin-x, 50%\) - 50%\)\)/,
+    );
+    assert.match(
+      maskCss,
+      /translateY\(calc\(50% - var\(--avatar-details-speech-origin-y, 50%\)\)\)/,
+    );
     assert.match(maskCss, /--bot-face-mouth-speech-wobble/);
     assert.match(
       pageCss,

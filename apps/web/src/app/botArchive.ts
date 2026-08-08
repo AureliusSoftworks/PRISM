@@ -2,6 +2,7 @@ import { strFromU8, strToU8, unzipSync, zipSync } from "fflate";
 import {
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_EYE_MOVEMENT,
+  fullySaturateBotColor,
   normalizeBotFaceGlyphAnimation,
   normalizeBotFaceEyeMovement,
   parseBotAvatarDetailsV1,
@@ -218,6 +219,9 @@ function validateBotJson(parsed: unknown): PrismBotArchiveJson {
     ...(botJson as PrismBotArchiveJson),
     bot: {
       ...botJson.bot,
+      ...(typeof bot.color === "string"
+        ? { color: fullySaturateBotColor(bot.color) }
+        : {}),
       ...(bot.namePronunciation !== undefined
         ? { namePronunciation: normalizeBotNamePronunciation(bot.namePronunciation) }
         : {}),

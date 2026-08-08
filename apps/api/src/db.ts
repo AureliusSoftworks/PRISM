@@ -27,6 +27,7 @@ import {
   createPrismCapabilityRevelations,
   createPrismTutorialProgress,
   directionalIrritationEdgeKey,
+  fullySaturateBotColor,
   normalizeDirectionalIrritationIntensity,
   sanitizePrismMoodState,
   type CoffeeSessionDurationMinutes,
@@ -3783,6 +3784,20 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotColorColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN color TEXT;");
+  }
+  const storedBotColors = db
+    .prepare(
+      "SELECT id, color FROM bots WHERE color IS NOT NULL AND TRIM(color) <> ''",
+    )
+    .all() as Array<{ id: string; color: string }>;
+  const updateStoredBotColor = db.prepare(
+    "UPDATE bots SET color = ? WHERE id = ?",
+  );
+  for (const row of storedBotColors) {
+    const saturated = fullySaturateBotColor(row.color);
+    if (saturated !== row.color) {
+      updateStoredBotColor.run(saturated, row.id);
+    }
   }
   const hasBotGlyphColumn = botColumns.some(
     (column) => column.name === "glyph",

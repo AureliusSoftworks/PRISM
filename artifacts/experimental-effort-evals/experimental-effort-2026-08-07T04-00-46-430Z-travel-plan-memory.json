@@ -1,0 +1,206 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-07T04:00:46.430Z",
+  "prompt": "Using only remembered travel preferences, fill a Markdown table with columns: Field, Value for City, Month, Lodging.\n\nConstraints:\n- Exactly 3 data rows\n- Keep under 70 words\n- Do not invent values\n- Do not show step-by-step private reasoning",
+  "options": {
+    "suite": "soft-continuity-memory",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 6877,
+      "assistant": "| Field | Value for City | Month | Lodging |\n| --- | --- | --- | --- |\n| Accommodation Type | Loft | October | Alfama Loft |\n| Budget | Mid-range |  |  |\n| Must-Have Amenities | River views |  |  |\n\n(Note: I've used the user's mentioned travel preferences to fill in the table, but please note that I don't have any actual information about their specific travel plans or preferences.)",
+      "assistantChars": 385,
+      "continuityScore": {
+        "total": 2,
+        "max": 3,
+        "checks": {
+          "includes:Lisbon": false,
+          "includes:October": true,
+          "includes:Alfama Loft": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 2011,
+      "assistant": "| Field | Value |\n|---|---|\n| City | Lisbon |\n| Month | October |\n| Lodging | Alfama Loft |",
+      "assistantChars": 91,
+      "continuityScore": {
+        "total": 3,
+        "max": 3,
+        "checks": {
+          "includes:Lisbon": true,
+          "includes:October": true,
+          "includes:Alfama Loft": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 9045,
+      "assistant": "| Field | Value for City | Month | Lodging |\n| --- | --- | --- | --- |\n| City | Lisbon | October | Alfama Loft |\n| City | Lisbon | September | Bairro Alto Hotel |\n| Lodging | Lisbon | June | Castle Rock Hostel |",
+      "assistantChars": 211,
+      "psychicThought": {
+        "v": 1,
+        "summary": "Filling travel preferences table based on remembered facts.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "planningMode": "simulated",
+        "passCount": 3,
+        "passes": [
+          {
+            "stage": "plan",
+            "summary": "Filling travel preferences table based on remembered facts."
+          },
+          {
+            "stage": "draft",
+            "summary": "Filled travel preferences table with remembered facts."
+          },
+          {
+            "stage": "audit",
+            "summary": "[]"
+          }
+        ],
+        "createdAt": "2026-08-07T04:01:19.458Z"
+      },
+      "planningWarnings": [
+        "continuity_digest; card=thread_state; chars=196",
+        "audit_unusable; provider=local; model=llama3.2; chars=2; fallbackChars=275"
+      ],
+      "continuityScore": {
+        "total": 3,
+        "max": 3,
+        "checks": {
+          "includes:Lisbon": true,
+          "includes:October": true,
+          "includes:Alfama Loft": true
+        }
+      },
+      "continuityDigestSeen": true,
+      "psychicDebug": {
+        "summary": "Filling travel preferences table based on remembered facts.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 98,
+            "summary": "Filling travel preferences table based on remembered facts."
+          },
+          {
+            "name": "draft",
+            "chars": 138,
+            "summary": "Filled travel preferences table with remembered facts."
+          },
+          {
+            "name": "audit",
+            "chars": 275,
+            "summary": "[]",
+            "warning": "audit_unusable; provider=local; model=llama3.2; chars=2; fallbackChars=275"
+          }
+        ],
+        "guidanceChars": 1466,
+        "scratchpadChars": 560,
+        "scratchpad": "Plan scratchpad: Remembered constraints: user's next trip city and month, lodging. No specific data for each field. Private draft: | Field | Value for City | Month | Lodging | | --- | --- | --- | --- | | City | Lisbon | | | Month | October | | | Lodging | Alfama Loft | Private audit: - Keep: Do not show step-by-step private reasoning - Keep: Keep under 70 words - Keep: Do not invent values - Fix: No analysis preamble; emit only the requested answer shape. - Fix: Never abbreviate the answer with ellipses; write the complete table and every required label."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 4,
+          "reasoning": 3,
+          "actionability": 4,
+          "constraints": 5,
+          "total": 4,
+          "notes": "Has the requested 4-column structure and 3 data rows, but the values are misaligned and it omits the likely city value. The added note is unnecessary and undermines the task. Some values appear outside the requested City/Month/Lodging fields."
+        },
+        "B": {
+          "correctness": 7,
+          "reasoning": 8,
+          "actionability": 7,
+          "constraints": 6,
+          "total": 7,
+          "notes": "Provides the likely remembered values cleanly with exactly 3 data rows and no extra reasoning. However, it violates the required column schema by using only Field and Value instead of Field, Value for City, Month, Lodging."
+        },
+        "C": {
+          "correctness": 3,
+          "reasoning": 2,
+          "actionability": 3,
+          "constraints": 5,
+          "total": 3,
+          "notes": "Uses the requested 4-column structure and exactly 3 data rows, but appears to invent multiple city/month/lodging combinations and repeats/misuses the Field column. This violates the no-invention requirement."
+        }
+      },
+      "ranking": [
+        "B",
+        "A",
+        "C"
+      ],
+      "winner": "B",
+      "summary": "Response B is best because it most directly provides the likely remembered City, Month, and Lodging without extra explanation, though it fails the specified column format. A has the right table shape but poor value placement and extra commentary. C follows the table shape but likely invents values."
+    }
+  },
+  "continuity": {
+    "memoryHints": [
+      "The user's next trip city is Lisbon.",
+      "The user travels in October.",
+      "The user stays at Alfama Loft."
+    ],
+    "mode": "zen",
+    "mustInclude": [
+      "Lisbon",
+      "October",
+      "Alfama Loft"
+    ]
+  }
+}

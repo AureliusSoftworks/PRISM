@@ -144,6 +144,7 @@ import {
   DebateExhibitMagentaControls,
   loadDebateExhibitMagentaState,
 } from "./DebateExhibitMagentaControls";
+import { DebateEvidenceMentionPopover } from "./DebateEvidenceMentionPopover";
 import styles from "./DebateExperience.module.css";
 import { debateLiveCaptionPage } from "./debateLiveCaption";
 import type { DebateForumRole } from "./DebateForumScene";
@@ -164,6 +165,7 @@ import {
   randomDebatePlayerJudgeCast,
   type DebateCastSelection,
 } from "./debateExperienceState";
+import { useDebateEvidenceMentionTextarea } from "./useDebateEvidenceMentionTextarea";
 import {
   debateAudienceBotCount,
   debateAudienceBotIsGenerated,
@@ -4123,6 +4125,27 @@ export function DebateExperience(
   const [interjectionDraft, setInterjectionDraft] = useState("");
   const [participantInterjectionOpen, setParticipantInterjectionOpen] =
     useState(false);
+  const liveEvidencePacket = activeSession?.evidence ?? evidence;
+  const liveEvidenceMentionAvailable =
+    debateEvidenceItemCount(liveEvidencePacket) > 0;
+  const playerEvidenceMention = useDebateEvidenceMentionTextarea({
+    evidence: liveEvidencePacket,
+    value: playerDraft,
+    onValueChange: setPlayerDraft,
+    enabled:
+      liveEvidenceMentionAvailable &&
+      activeSession?.playerRole === "participant" &&
+      activeSession.status === "waiting_for_player",
+  });
+  const interjectionEvidenceMention = useDebateEvidenceMentionTextarea({
+    evidence: liveEvidencePacket,
+    value: interjectionDraft,
+    onValueChange: setInterjectionDraft,
+    enabled:
+      liveEvidenceMentionAvailable &&
+      activeSession?.playerRole === "participant" &&
+      participantInterjectionOpen,
+  });
   const [participantObjectionDraft, setParticipantObjectionDraft] =
     useState("");
   const [judgeGavelDraft, setJudgeGavelDraft] = useState("");
@@ -4320,12 +4343,12 @@ export function DebateExperience(
       }) => void)
     | null
   >(null);
+  // #region agent log
+  const debugGalleryMixBranchRef = useRef<string | null>(null);
+  // #endregion
   const orderDebateAudienceRef = useRef<(() => Promise<void>) | null>(null);
   const swingJudgeGavelRef = useRef<(() => Promise<void>) | null>(null);
   const objectionRulingDockRef = useRef<HTMLElement | null>(null);
-  const participantInterjectionDraftRef = useRef<HTMLTextAreaElement | null>(
-    null,
-  );
   const participantObjectionReasonRef = useRef<HTMLTextAreaElement | null>(
     null,
   );
@@ -4692,10 +4715,15 @@ export function DebateExperience(
       return;
     }
     const frameId = window.requestAnimationFrame(() => {
-      participantInterjectionDraftRef.current?.focus();
+      interjectionEvidenceMention.textareaRef.current?.focus();
     });
     return () => window.cancelAnimationFrame(frameId);
-  }, [busy, participantFloorBreakReady, participantInterjectionOpen]);
+  }, [
+    busy,
+    interjectionEvidenceMention.textareaRef,
+    participantFloorBreakReady,
+    participantInterjectionOpen,
+  ]);
   const deleteUndoResetTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
@@ -4759,12 +4787,17 @@ export function DebateExperience(
 
   useEffect(() => {
     // Allow speech only on the live floor, or during a paused pause/resume
-    // ceremony. Settled recess and the Debate menu must be fully silent.
+    // ceremony. Settled recess keeps gallery murmur (no speech); the Debate
+    // menu stays fully silent.
     const allowSpeechAudio =
       view === "live" &&
       (activeSession?.status === "live" ||
         activeSession?.status === "waiting_for_player" ||
         (activeSession?.status === "paused" && presenting));
+    const allowRecessMurmur =
+      view === "live" &&
+      activeSession?.status === "paused" &&
+      !presenting;
     if (allowSpeechAudio && props.audioEnabled && props.audioVolume > 0) {
       debateAtmosphereControllerRef.current?.setPresentationSuspended(
         false,
@@ -4776,7 +4809,19 @@ export function DebateExperience(
     if (!allowSpeechAudio) {
       props.onStopUtterance?.();
       void stopDebateIdentAudio();
-      debateAtmosphereControllerRef.current?.setPresentationSuspended(true, 60);
+      if (allowRecessMurmur && props.audioEnabled && props.audioVolume > 0) {
+        // Keep the atmosphere layer alive so returning to a recessed chamber
+        // still hears the murmuring house before Resume.
+        debateAtmosphereControllerRef.current?.setPresentationSuspended(
+          false,
+          80,
+        );
+      } else {
+        debateAtmosphereControllerRef.current?.setPresentationSuspended(
+          true,
+          60,
+        );
+      }
     }
   }, [
     activeSession?.status,
@@ -7867,6 +7912,36 @@ export function DebateExperience(
             : `Recovered with ${recovery.finalModel}.`,
         );
       }
+      // #region agent log
+      fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "b65cd8",
+        },
+        body: JSON.stringify({
+          sessionId: "b65cd8",
+          runId: "pre-fix",
+          hypothesisId: "A",
+          location: "DebateExperience.tsx:consumeNewEvents",
+          message: "consumeNewEvents fresh batch",
+          data: {
+            debateSessionId: next.id,
+            status: next.status,
+            runId,
+            freshCount: fresh.length,
+            fresh: fresh.map((event) => ({
+              id: event.id,
+              kind: event.kind,
+              stepKey: event.stepKey,
+              gavelReason: event.gavelReason ?? null,
+              sequence: event.sequence,
+            })),
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       for (const [eventIndex, event] of fresh.entries()) {
         if (presentationRunRef.current !== runId) return;
         await waitWhilePrismPresentationSuspended(
@@ -7910,6 +7985,46 @@ export function DebateExperience(
         const resumedJudgeGavelAlreadyStruck =
           next.playerRole === "judge" &&
           options.resumedJudgeGavelPresentationEventId === event.id;
+        // #region agent log
+        if (
+          event.stepKey === "resume" ||
+          event.stepKey === "pause" ||
+          event.gavelReason === "resume" ||
+          gavelCue?.kind === "order"
+        ) {
+          fetch(
+            "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "b65cd8",
+              },
+              body: JSON.stringify({
+                sessionId: "b65cd8",
+                runId: "pre-fix",
+                hypothesisId: "A",
+                location: "DebateExperience.tsx:presentEventOrderish",
+                message: "presenting order-ish event",
+                data: {
+                  debateSessionId: next.id,
+                  eventId: event.id,
+                  kind: event.kind,
+                  stepKey: event.stepKey,
+                  gavelReason: event.gavelReason ?? null,
+                  sequence: event.sequence,
+                  gavelCueKind: gavelCue?.kind ?? null,
+                  resumedJudgeGavelAlreadyStruck,
+                  suppressGavelCue,
+                  eventIndex,
+                  contentPreview: (event.content ?? "").slice(0, 80),
+                },
+                timestamp: Date.now(),
+              }),
+            },
+          ).catch(() => {});
+        }
+        // #endregion
         if (resumedJudgeGavelAlreadyStruck) {
           // Resume is the Judge's return-to-order strike. Preserve the resumed
           // event's gavel-led camera and timing without presenting a second cue.
@@ -10771,6 +10886,30 @@ export function DebateExperience(
     resetAfterSequence: number;
     sessionId: string;
   }): void => {
+    // #region agent log
+    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "b65cd8",
+      },
+      body: JSON.stringify({
+        sessionId: "b65cd8",
+        runId: "pre-fix",
+        hypothesisId: "C",
+        location: "DebateExperience.tsx:triggerAudienceOrderResponse",
+        message: "audience order response armed",
+        data: {
+          eventId: args.eventId,
+          kind: args.kind,
+          performGavel: args.performGavel !== false,
+          resetAfterSequence: args.resetAfterSequence,
+          debateSessionId: args.sessionId,
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     audienceOrderResponseCounterRef.current += 1;
     const response: DebateAudienceOrderResponse = {
       id: audienceOrderResponseCounterRef.current,
@@ -11379,6 +11518,31 @@ export function DebateExperience(
           !heldIsOpeningIntro &&
           result.session.playerRole === "judge";
         if (judgeResumedWithGavel && lifecycleEvent) {
+          // #region agent log
+          fetch(
+            "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "b65cd8",
+              },
+              body: JSON.stringify({
+                sessionId: "b65cd8",
+                runId: "pre-fix",
+                hypothesisId: "C",
+                location: "DebateExperience.tsx:pauseOrResume",
+                message: "judge resume pre-smash + hush",
+                data: {
+                  lifecycleEventId: lifecycleEvent.id,
+                  sequence: lifecycleEvent.sequence,
+                  debateSessionId: result.session.id,
+                },
+                timestamp: Date.now(),
+              }),
+            },
+          ).catch(() => {});
+          // #endregion
           triggerJudgeGavelSmash("order", lifecycleEvent.id);
           triggerAudienceOrderResponse({
             eventId: lifecycleEvent.id,
@@ -11389,6 +11553,35 @@ export function DebateExperience(
           });
         }
         if (lifecycleEvent && !heldIsOpeningIntro) {
+          // #region agent log
+          fetch(
+            "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "b65cd8",
+              },
+              body: JSON.stringify({
+                sessionId: "b65cd8",
+                runId: "pre-fix",
+                hypothesisId: "A",
+                location: "DebateExperience.tsx:pauseOrResume",
+                message: "resume adopt phase: lifecycle ceremony",
+                data: {
+                  phase: "lifecycle-ceremony",
+                  lifecycleEventId: lifecycleEvent.id,
+                  lifecycleStepKey: lifecycleEvent.stepKey,
+                  lifecycleKind: lifecycleEvent.kind,
+                  heldEventId: heldEventId,
+                  debateSessionId: result.session.id,
+                  eventCount: result.session.events.length,
+                },
+                timestamp: Date.now(),
+              }),
+            },
+          ).catch(() => {});
+          // #endregion
           await adoptSession(previous, result.session, {
             resumedJudgeGavelPresentationEventId: judgeResumedWithGavel
               ? lifecycleEvent.id
@@ -11400,6 +11593,32 @@ export function DebateExperience(
             result.session,
             pausedPresentationEvent.id,
           );
+          // #region agent log
+          fetch(
+            "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "b65cd8",
+              },
+              body: JSON.stringify({
+                sessionId: "b65cd8",
+                runId: "pre-fix",
+                hypothesisId: "A",
+                location: "DebateExperience.tsx:pauseOrResume",
+                message: "resume adopt phase: held line",
+                data: {
+                  phase: "held-line",
+                  heldEventId: pausedPresentationEvent.id,
+                  heldSequence: pausedPresentationEvent.sequence,
+                  debateSessionId: result.session.id,
+                },
+                timestamp: Date.now(),
+              }),
+            },
+          ).catch(() => {});
+          // #endregion
           await adoptSession(
             {
               ...filledSession,
@@ -11415,10 +11634,44 @@ export function DebateExperience(
             },
             { automaticJudgeGavel: true },
           );
-          const hasRemainingEvents = result.session.events.some(
+          const remainingAfterHeld = result.session.events.filter(
             (event) => event.sequence > pausedPresentationEvent.sequence,
           );
+          const hasRemainingEvents = remainingAfterHeld.length > 0;
           if (hasRemainingEvents) {
+            // #region agent log
+            fetch(
+              "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
+              {
+                method: "POST",
+                headers: {
+                  "Content-Type": "application/json",
+                  "X-Debug-Session-Id": "b65cd8",
+                },
+                body: JSON.stringify({
+                  sessionId: "b65cd8",
+                  runId: "pre-fix",
+                  hypothesisId: "A",
+                  location: "DebateExperience.tsx:pauseOrResume",
+                  message: "resume adopt phase: remaining after held",
+                  data: {
+                    phase: "remaining-after-held",
+                    heldSequence: pausedPresentationEvent.sequence,
+                    remainingCount: remainingAfterHeld.length,
+                    remaining: remainingAfterHeld.map((event) => ({
+                      id: event.id,
+                      kind: event.kind,
+                      stepKey: event.stepKey,
+                      gavelReason: event.gavelReason ?? null,
+                      sequence: event.sequence,
+                    })),
+                    debateSessionId: result.session.id,
+                  },
+                  timestamp: Date.now(),
+                }),
+              },
+            ).catch(() => {});
+            // #endregion
             await adoptSession(
               {
                 ...result.session,
@@ -15446,15 +15699,33 @@ export function DebateExperience(
           </div>
         ) : null}
         <textarea
+          ref={playerEvidenceMention.textareaRef}
           value={playerDraft}
-          onChange={(event) => setPlayerDraft(event.currentTarget.value)}
+          onChange={playerEvidenceMention.onChange}
+          onKeyDown={playerEvidenceMention.onKeyDown}
+          onKeyUp={playerEvidenceMention.onKeyUp}
+          onSelect={playerEvidenceMention.onSelect}
+          onClick={playerEvidenceMention.onClick}
           placeholder={
             silentModeratorChallenge
               ? "Use the open floor however your side would."
-              : "Speak plainly. You can cite frozen evidence with [[source:id]]."
+              : liveEvidenceMentionAvailable
+                ? "Speak plainly. Type @ to cite an exhibit, Brave, or Scholar item."
+                : "Speak plainly."
           }
           rows={4}
           autoFocus
+        />
+        <DebateEvidenceMentionPopover
+          open={playerEvidenceMention.menu.open}
+          caretRect={playerEvidenceMention.menu.caretRect}
+          themeSource={playerEvidenceMention.textareaRef.current}
+          picks={playerEvidenceMention.menu.filtered}
+          highlightIndex={playerEvidenceMention.menu.highlight}
+          onHighlightIndexChange={playerEvidenceMention.setHighlight}
+          onPickIndex={playerEvidenceMention.pickIndex}
+          excludeInteractionRef={playerEvidenceMention.textareaRef}
+          onDismiss={playerEvidenceMention.dismissMenu}
         />
         <div>
           <button
@@ -18630,11 +18901,19 @@ export function DebateExperience(
       audienceOrderResponse?.sessionId === session.id
         ? audienceOrderResponse
         : null;
+    // Settled recess: murmur before Resume. Pause/resume ceremony speech:
+    // hush the house when the moderator calls order (or recesses).
+    const recessSettledMurmur =
+      session.status === "paused" && !presenting && !juryChamberVisible;
+    const recessCeremonyHush =
+      session.status === "paused" && presenting && !juryChamberVisible;
     const galleryMixBranch = juryChamberVisible
       ? "jury"
-      : debateOpeningGalleryHushed
+      : debateOpeningGalleryHushed || recessCeremonyHush
         ? "opening-hush"
-        : galleryPrestartMurmur || debateIdentPlaying === "intro"
+        : galleryPrestartMurmur ||
+            debateIdentPlaying === "intro" ||
+            recessSettledMurmur
           ? "prestart-murmur"
           : debateIdentPlaying !== null
             ? "ident"
@@ -18646,6 +18925,46 @@ export function DebateExperience(
                 : presenting
                   ? "ducked"
                   : "idle";
+    // #region agent log
+    if (debugGalleryMixBranchRef.current !== galleryMixBranch) {
+      const previousBranch = debugGalleryMixBranchRef.current;
+      debugGalleryMixBranchRef.current = galleryMixBranch;
+      fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "b65cd8",
+        },
+        body: JSON.stringify({
+          sessionId: "b65cd8",
+          runId: "pre-fix",
+          hypothesisId: "B",
+          location: "DebateExperience.tsx:galleryMixBranch",
+          message: "gallery mix branch changed",
+          data: {
+            previousBranch,
+            galleryMixBranch,
+            status: session.status,
+            presenting,
+            recessCeremonyHush,
+            recessSettledMurmur,
+            debateOpeningGalleryHushed,
+            orderResponseKind: activeAudienceOrderResponse?.kind ?? null,
+            orderReturning: activeAudienceOrderResponse?.returningRoomTone ?? null,
+            backgroundTarget:
+              galleryMixBranch === "opening-hush"
+                ? DEBATE_AUDIENCE_OPENING_HUSH_MIX.background
+                : galleryMixBranch === "ducked"
+                  ? DEBATE_AUDIENCE_DUCKED_MIX.background
+                  : galleryMixBranch === "prestart-murmur"
+                    ? DEBATE_AUDIENCE_PRESTART_MURMUR_MIX.background
+                    : null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+    }
+    // #endregion
     const galleryMix =
       galleryMixBranch === "jury"
         ? DEBATE_JURY_CHAMBER_MIX
@@ -18831,7 +19150,8 @@ export function DebateExperience(
         debateOpeningGalleryHushed ||
         presenting ||
         session.status === "live" ||
-        session.status === "waiting_for_player"),
+        session.status === "waiting_for_player" ||
+        session.status === "paused"),
     );
     // Observing keeps soft studio room air; Murmuring+ restores the classic
     // crowd murmur loop so the house never reads as loud static.
@@ -18861,13 +19181,19 @@ export function DebateExperience(
           audiencePressureBandTrue !== "settled") ||
         ((galleryMixBranch === "idle" || galleryMixBranch === "ducked") &&
           audienceChattering));
-    // Keep the gavel bus alive only while a cue is armed — settled recess must
-    // not keep the atmosphere layer (and ambient vocalizations) running.
+    // Keep the gavel bus alive only while a cue is armed. Settled recess still
+    // runs the murmur bed via ambientAudioActive; sparse ambient vocalizations
+    // stay off until the floor is live again.
     const gavelAudioActive = Boolean(
       debateGavelAudioEnabled(props.audioVolume) &&
       moderatorPresentation.visibility !== "hidden" &&
       activeGavelCue !== null,
     );
+    const suppressSparseAmbient =
+      galleryPrestartMurmur ||
+      debateOpeningGalleryHushed ||
+      recessSettledMurmur ||
+      recessCeremonyHush;
     return (
       <>
         <SessionAtmosphereLayer
@@ -18900,11 +19226,7 @@ export function DebateExperience(
               ? DEBATE_TURNABOUT_FOLEY_ROOM_SEND
               : DEBATE_FORUM_FOLEY_ROOM_SEND
           }
-          ambientFoley={
-            ambientAudioActive &&
-            !galleryPrestartMurmur &&
-            !debateOpeningGalleryHushed
-          }
+          ambientFoley={ambientAudioActive && !suppressSparseAmbient}
           ambientFoleyProfile={
             juryChamberVisible
               ? DEBATE_JURY_AMBIENT_FOLEY_PROFILE
@@ -18921,9 +19243,7 @@ export function DebateExperience(
             (busy && !presenting)
           }
           ambientBotVocalizations={
-            ambientAudioActive &&
-            !galleryPrestartMurmur &&
-            !debateOpeningGalleryHushed
+            ambientAudioActive && !suppressSparseAmbient
           }
           ambientBotVocalizationProfile={DEBATE_VOCAL_FOLEY_PROFILE}
           onAmbientBotVocalization={handleDebateAmbientBotVocalization}
@@ -20338,15 +20658,36 @@ export function DebateExperience(
                     <span>The moderator will restore the scheduled floor.</span>
                   </div>
                   <textarea
-                    ref={participantInterjectionDraftRef}
+                    ref={interjectionEvidenceMention.textareaRef}
                     value={interjectionDraft}
-                    onChange={(event) =>
-                      setInterjectionDraft(event.currentTarget.value)
-                    }
+                    onChange={interjectionEvidenceMention.onChange}
+                    onKeyDown={interjectionEvidenceMention.onKeyDown}
+                    onKeyUp={interjectionEvidenceMention.onKeyUp}
+                    onSelect={interjectionEvidenceMention.onSelect}
+                    onClick={interjectionEvidenceMention.onClick}
                     maxLength={600}
                     rows={2}
                     aria-label="Write a live interjection"
-                    placeholder="Add a direct challenge or response…"
+                    placeholder={
+                      liveEvidenceMentionAvailable
+                        ? "Add a direct challenge… Type @ to cite evidence."
+                        : "Add a direct challenge or response…"
+                    }
+                  />
+                  <DebateEvidenceMentionPopover
+                    open={interjectionEvidenceMention.menu.open}
+                    caretRect={interjectionEvidenceMention.menu.caretRect}
+                    themeSource={interjectionEvidenceMention.textareaRef.current}
+                    picks={interjectionEvidenceMention.menu.filtered}
+                    highlightIndex={interjectionEvidenceMention.menu.highlight}
+                    onHighlightIndexChange={
+                      interjectionEvidenceMention.setHighlight
+                    }
+                    onPickIndex={interjectionEvidenceMention.pickIndex}
+                    excludeInteractionRef={
+                      interjectionEvidenceMention.textareaRef
+                    }
+                    onDismiss={interjectionEvidenceMention.dismissMenu}
                   />
                   <button
                     type="submit"

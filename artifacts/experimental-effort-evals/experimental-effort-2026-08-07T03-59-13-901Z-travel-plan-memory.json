@@ -1,0 +1,206 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-07T03:59:13.901Z",
+  "prompt": "Using only remembered travel preferences, fill a Markdown table with columns: Field, Value for City, Month, Lodging.\n\nConstraints:\n- Exactly 3 data rows\n- Keep under 70 words\n- Do not invent values\n- Do not show step-by-step private reasoning",
+  "options": {
+    "suite": "soft-continuity-memory",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 1912,
+      "assistant": "| Field | Value for City | Month | Lodging | | --- | --- | --- | --- | | Accommodation Type | Airbnb Loft | October | Alfama Loft | | Drink Preference | Short answers | | | | Next Trip Destination | Lisbon | | | *action*",
+      "assistantChars": 220,
+      "continuityScore": {
+        "total": 3,
+        "max": 3,
+        "checks": {
+          "includes:Lisbon": true,
+          "includes:October": true,
+          "includes:Alfama Loft": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 2838,
+      "assistant": "| Field | Value |\n|---|---|\n| City | Lisbon |\n| Month | October |\n| Lodging | Not remembered |",
+      "assistantChars": 94,
+      "continuityScore": {
+        "total": 2,
+        "max": 3,
+        "checks": {
+          "includes:Lisbon": true,
+          "includes:October": true,
+          "includes:Alfama Loft": false
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 7255,
+      "assistant": "| Field | Value for City | Month | Lodging |\n| --- | --- | --- | --- |\n| Preferred drink answer length | Short | October | N/A |\n| Travel month | October |  |  |\n| Lodging preference | N/A |  |  |",
+      "assistantChars": 196,
+      "psychicThought": {
+        "v": 1,
+        "summary": "Filling travel preferences table based on remembered facts.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "planningMode": "simulated",
+        "passCount": 3,
+        "passes": [
+          {
+            "stage": "plan",
+            "summary": "Filling travel preferences table based on remembered facts."
+          },
+          {
+            "stage": "draft",
+            "summary": "Filled travel preferences table with remembered facts."
+          },
+          {
+            "stage": "audit",
+            "summary": "I'm using my remembered facts to plan this trip, and I want to make sure everything is accurate."
+          }
+        ],
+        "createdAt": "2026-08-07T03:59:47.656Z"
+      },
+      "planningWarnings": [
+        "continuity_digest; card=thread_state; chars=229",
+        "audit_unusable; provider=local; model=llama3.2; chars=67; fallbackChars=275"
+      ],
+      "continuityScore": {
+        "total": 1,
+        "max": 3,
+        "checks": {
+          "includes:Lisbon": false,
+          "includes:October": true,
+          "includes:Alfama Loft": false
+        }
+      },
+      "continuityDigestSeen": true,
+      "psychicDebug": {
+        "summary": "Filling travel preferences table based on remembered facts.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 121,
+            "summary": "Filling travel preferences table based on remembered facts."
+          },
+          {
+            "name": "draft",
+            "chars": 59,
+            "summary": "Filled travel preferences table with remembered facts."
+          },
+          {
+            "name": "audit",
+            "chars": 275,
+            "summary": "I'm using my remembered facts to plan this trip, and I want to make sure everything is accurate.",
+            "warning": "audit_unusable; provider=local; model=llama3.2; chars=67; fallbackChars=275"
+          }
+        ],
+        "guidanceChars": 1512,
+        "scratchpadChars": 504,
+        "scratchpad": "Plan scratchpad: Remembered constraints: user travels in October. Lodging preference is not specified. Drink answers should be kept short. Private draft: { \"lodging\": \"hotel\", \"city\": \"Paris\", \"month\": \"October\" } Private audit: - Keep: Do not show step-by-step private reasoning - Keep: Keep under 70 words - Keep: Do not invent values - Fix: No analysis preamble; emit only the requested answer shape. - Fix: Never abbreviate the answer with ellipses; write the complete table and every required label."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 2,
+          "reasoning": 2,
+          "actionability": 2,
+          "constraints": 3,
+          "total": 2,
+          "notes": "Uses some likely remembered values (Lisbon, October) but invents/overstates lodging details, includes irrelevant preferences, malformed Markdown, and adds extraneous '*action*'. Meets roughly 3 data rows and word limit but violates no-invention and relevance."
+        },
+        "B": {
+          "correctness": 8,
+          "reasoning": 8,
+          "actionability": 8,
+          "constraints": 8,
+          "total": 8,
+          "notes": "Provides the three requested fields with remembered values where available and marks lodging as not remembered rather than inventing. Concise and no private reasoning. Minor issue: table uses only two columns rather than the literal listed column wording if interpreted as four columns."
+        },
+        "C": {
+          "correctness": 4,
+          "reasoning": 3,
+          "actionability": 4,
+          "constraints": 6,
+          "total": 4,
+          "notes": "Has a four-column Markdown table and exactly 3 data rows, but includes an irrelevant drink preference, misplaces October, duplicates month information, and uses N/A rather than clearly saying not remembered. Partially satisfies format but weak on correctness and no-invention."
+        }
+      },
+      "ranking": [
+        "B",
+        "C",
+        "A"
+      ],
+      "winner": "B",
+      "summary": "Response B is best because it answers the relevant City, Month, and Lodging fields without inventing missing information and stays concise. Response C follows more of the literal table structure but contains irrelevant and misplaced data. Response A is malformed and invents lodging details."
+    }
+  },
+  "continuity": {
+    "memoryHints": [
+      "The user's next trip city is Lisbon.",
+      "The user travels in October.",
+      "The user stays at Alfama Loft."
+    ],
+    "mode": "zen",
+    "mustInclude": [
+      "Lisbon",
+      "October",
+      "Alfama Loft"
+    ]
+  }
+}

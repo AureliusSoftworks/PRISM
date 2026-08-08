@@ -71,6 +71,16 @@ describe("Debate experience", () => {
     );
   });
 
+  it("wires Participant @ evidence mentions into floor and interjection drafts", () => {
+    assert.match(source, /useDebateEvidenceMentionTextarea/u);
+    assert.match(source, /DebateEvidenceMentionPopover/u);
+    assert.match(
+      source,
+      /Type @ to cite an exhibit, Brave, or Scholar item/u,
+    );
+    assert.match(source, /Type @ to cite evidence/u);
+  });
+
   it("presents the moderator introduction instead of treating it as transcript-only", () => {
     assert.match(
       source,
@@ -3188,7 +3198,19 @@ describe("Debate experience", () => {
     );
     assert.match(
       pageCss,
-      /\.debateBotPresencePlate \.botFaceFrameLed\s*\{[^}]*background:\s*var\(--coffee-bot-color\)[^}]*mask-image:\s*url\("\/bot-frame\/bot-frame-led\.png\?v=1000"\)[^}]*drop-shadow/u,
+      /\.debateBotPresencePlate \.botFaceFrameLed\s*\{[^}]*background-color:\s*var\(--bot-face-frame-led-unlit-color,\s*#3a3f46\)[^}]*opacity:\s*1/u,
+    );
+    assert.match(
+      pageCss,
+      /\.debateBotPresencePlate\[data-talking="true"\] \.botFaceFrameLed\s*\{[^}]*background-color:\s*var\(--coffee-bot-color\)[^}]*drop-shadow/u,
+    );
+    assert.match(
+      pageCss,
+      /\.debateBotPresencePlate:not\(\[data-talking="true"\]\)\s*\{[^}]*--zen-live-bot-face-phosphor-ink:\s*var\(\s*--zen-live-bot-face-ink/u,
+    );
+    assert.match(
+      page,
+      /\.\.\.botFrameMetalAlloyStyle\(/u,
     );
     assert.match(
       page,
@@ -4060,11 +4082,27 @@ describe("Debate experience", () => {
     assert.match(source, /stopDebateAmbientBotVocalization\(\)/u);
     assert.match(
       source,
-      /setPresentationSuspended\(true,\s*60\)/u,
+      /setPresentationSuspended\(\s*true,\s*60\s*\)/u,
     );
     assert.match(
       source,
       /allowSpeechAudio[\s\S]{0,400}status === "paused" && presenting/u,
+    );
+    assert.match(
+      source,
+      /allowRecessMurmur[\s\S]{0,200}status === "paused" &&\s*!presenting/u,
+    );
+    assert.match(
+      source,
+      /recessSettledMurmur[\s\S]{0,120}status === "paused" && !presenting/u,
+    );
+    assert.match(
+      source,
+      /recessCeremonyHush[\s\S]{0,120}status === "paused" && presenting/u,
+    );
+    assert.match(
+      source,
+      /session\.status === "paused"[\s\S]{0,80}session\.status === "waiting_for_player"|session\.status === "waiting_for_player"[\s\S]{0,80}session\.status === "paused"/u,
     );
     assert.match(
       source,
@@ -4076,11 +4114,11 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /ambientFoley=\{\s*ambientAudioActive &&\s*!galleryPrestartMurmur &&\s*!debateOpeningGalleryHushed\s*\}/u,
+      /ambientFoley=\{ambientAudioActive && !suppressSparseAmbient\}/u,
     );
     assert.match(
       source,
-      /ambientBotVocalizations=\{\s*ambientAudioActive &&\s*!galleryPrestartMurmur &&\s*!debateOpeningGalleryHushed\s*\}/u,
+      /ambientBotVocalizations=\{\s*ambientAudioActive && !suppressSparseAmbient\s*\}/u,
     );
     assert.match(
       source,

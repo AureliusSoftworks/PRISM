@@ -56,13 +56,17 @@ import {
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth.ts";
 import { coffeeSeatGlyphOpticalOffset } from "./coffee-seat-glyph-optical-offset.ts";
-import { coffeeSeatMouthRotationCssDeg } from "./coffee-seat-plate.ts";
+import {
+  coffeeSeatMouthRotationCssDeg,
+  coffeeSeatScreenRelativeFeatureRotationDeg,
+} from "./coffee-seat-plate.ts";
 import {
   botFaceEyeMovementLiveIntervalMs,
   resolveBotFaceGazeFrame,
   type BotFaceAttentionState,
   type BotFaceGazeDirection,
 } from "./botFaceEyeMovement.ts";
+import { CrtPixelTextGlyph } from "./PhosphorPixelGlyph";
 
 function randomBetween(lo: number, hi: number): number {
   return lo + Math.random() * (hi - lo);
@@ -232,6 +236,8 @@ function updateCustomMouthMotionOrigins(
 export type CoffeeSeatPlateEmojiProps = {
   /** When false, eyes stay open and timers are cleared (preview / not joined). */
   enabled: boolean;
+  /** Quantizes the rendered font silhouette to the full-avatar phosphor grid. */
+  pixelated?: boolean;
   /** While this seat is doing table typewriter speech, no blink timers run. */
   isTalking: boolean;
   /** Full streamed-text viseme used to animate authored custom mouth glyphs. */
@@ -323,6 +329,7 @@ function coffeeSeatExtraBlinkCount(talking = false): number {
  */
 export function CoffeeSeatPlateEmoji({
   enabled,
+  pixelated = false,
   isTalking,
   mouthShape,
   blinkWhileTalking = false,
@@ -741,7 +748,12 @@ export function CoffeeSeatPlateEmoji({
   const faceEyeRotationCssDeg =
     normalizedFaceEyeRotationDeg === undefined
       ? undefined
-      : normalizedFaceEyeRotationDeg;
+      : normalizedFaceEyeCharacter
+        ? coffeeSeatScreenRelativeFeatureRotationDeg(
+            normalizedFaceEyeRotationDeg,
+            rotateDeg,
+          )
+        : normalizedFaceEyeRotationDeg;
   const faceBlinkRotationCssDeg =
     (normalizedFaceBlinkRotationDeg ?? 0) +
     (customBlinkBarActive && normalizedFaceEyeCount === 2
@@ -904,12 +916,10 @@ export function CoffeeSeatPlateEmoji({
           data-coffee-plate-thinking-glyph={thinkingSpinnerGlyph}
           data-face-font={faceMouthFont ?? undefined}
         >
-          <span
-            data-crt-glyph-layer="true"
-            data-crt-glyph-content={thinkingSpinnerGlyph}
-          >
-            {thinkingSpinnerGlyph}
-          </span>
+          <CrtPixelTextGlyph
+            content={thinkingSpinnerGlyph}
+            enabled={pixelated}
+          />
         </span>
       ) : questionGlyphActive ? (
         <span
@@ -917,9 +927,7 @@ export function CoffeeSeatPlateEmoji({
           data-coffee-plate-question-glyph="?"
           data-face-font={faceMouthFont ?? faceEyesFont ?? undefined}
         >
-          <span data-crt-glyph-layer="true" data-crt-glyph-content="?">
-            ?
-          </span>
+          <CrtPixelTextGlyph content="?" enabled={pixelated} />
         </span>
       ) : (
         (() => {
@@ -974,33 +982,27 @@ export function CoffeeSeatPlateEmoji({
               >
                 {renderCustomEyePair ? (
                   <span data-custom-eye-pair="true">
-                    <span
+                    <CrtPixelTextGlyph
                       data-custom-eye-pair-side="left"
-                      data-crt-glyph-layer="true"
-                      data-crt-glyph-content={renderedGlyph}
-                    >
-                      {renderedGlyph}
-                    </span>
-                    <span
+                      content={renderedGlyph}
+                      enabled={pixelated}
+                    />
+                    <CrtPixelTextGlyph
                       data-custom-eye-pair-side="right"
-                      data-crt-glyph-layer="true"
-                      data-crt-glyph-content={renderedGlyph}
-                    >
-                      {renderedGlyph}
-                    </span>
+                      content={renderedGlyph}
+                      enabled={pixelated}
+                    />
                   </span>
                 ) : (
-                  <span
+                  <CrtPixelTextGlyph
                     ref={
                       part === "mouth" && renderedFaceMouthCharacter
                         ? customMouthGlyphRef
                         : undefined
                     }
-                    data-crt-glyph-layer="true"
-                    data-crt-glyph-content={renderedGlyph}
-                  >
-                    {renderedGlyph}
-                  </span>
+                    content={renderedGlyph}
+                    enabled={pixelated}
+                  />
                 )}
               </span>
             );

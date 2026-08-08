@@ -363,6 +363,8 @@ describe("mode tutorials", () => {
     assert.match(copy, /SMS-style claim stream/u);
     assert.match(copy, /Pause always cuts the live floor immediately/u);
     assert.match(copy, /settled recess screen holds the Wide chamber shot/u);
+    assert.match(copy, /gallery keeps murmuring/u);
+    assert.match(copy, /hushes the house as the Moderator gavels/u);
     assert.match(copy, /hard-stops every voice/u);
     assert.match(copy, /audibly chokes mid-phrase/u);
     assert.match(copy, /Objection overlaps from the opposite side/u);
@@ -637,6 +639,14 @@ describe("mode tutorials", () => {
       )?.body ?? "";
 
     assert.match(caseBoardCopy, /two distinct ways to break/u);
+    assert.match(
+      caseBoardCopy,
+      /type @ to open a picker of frozen exhibits, Brave, Scholar, and URL sources/u,
+    );
+    assert.match(
+      caseBoardCopy,
+      /filter with @exhibit, @brave, or @scholar/u,
+    );
     assert.match(
       caseBoardCopy,
       /Ordinary Interject sends the point already typed as one complete cut-in/u,

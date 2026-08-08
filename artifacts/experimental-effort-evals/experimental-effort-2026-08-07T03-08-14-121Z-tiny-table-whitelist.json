@@ -1,0 +1,138 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-07T03:08:14.121Z",
+  "prompt": "Make a Markdown table with columns: Item, Qty for a picnic for 2 people.\n\nConstraints:\n- Exactly 4 data rows\n- Use only these items: bread, cheese, apples, water\n- Do not invent extra items\n- Keep under 80 words\n- Do not show step-by-step private reasoning",
+  "options": {
+    "suite": "soft-transfer",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 2128,
+      "assistant": "| Item | Qty | | --- | --- | | Bread | 2 slices | | Cheese | 1 block (sliced) | | Apples | 2 | | Water | 1...",
+      "assistantChars": 109
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 1916,
+      "assistant": "| Item   | Qty       |\n|--------|-----------|\n| bread  | 1 loaf    |\n| cheese | 200 g     |\n| apples | 2         |\n| water  | 2 bottles |",
+      "assistantChars": 137
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 9265,
+      "assistant": "| Item | Qty |\n| --- | --- |\n| Bread | 1 |\n| Cheese | 1/2 |\n| Apples | 1 |\n| Water | 1 |\n\nNote: I've kept the quantities to a minimum while still providing enough food and drink for two people. The quantities are also within the 80-word limit as requested.",
+      "assistantChars": 256,
+      "planningWarnings": [
+        "audit_unusable; provider=local; model=llama3.2; chars=164; fallbackChars=339"
+      ],
+      "psychicDebug": {
+        "summary": "Plan a picnic for two with the given constraints.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 183,
+            "summary": "Plan a picnic for two with the given constraints."
+          },
+          {
+            "name": "draft",
+            "chars": 88,
+            "summary": "Created a table with required items for a picnic for two."
+          },
+          {
+            "name": "audit",
+            "chars": 339,
+            "summary": "I need help planning a picnic for two with exactly 4 data rows and no extra items. I want to make sure we don't run out of anything.",
+            "warning": "audit_unusable; provider=local; model=llama3.2; chars=164; fallbackChars=339"
+          }
+        ],
+        "guidanceChars": 1540,
+        "scratchpadChars": 659,
+        "scratchpad": "Plan scratchpad: Required constraints: exactly 4 data rows, no extra items. Forbidden words: none. Likely failure mode: insufficient quantities. Answer structure: table with item and quantity columns. Private draft: | Item | Qty | | --- | --- | | Bread | 1 | | Cheese | 1/2 | | Apples | 1 | | Water | 1 | Private audit: - Keep: Use only these items: bread, cheese, apples, water - Keep: Do not show step-by-step private reasoning - Keep: Keep under 80 words - Keep: Do not invent extra items - Fix: No analysis preamble; emit only the requested answer shape. - Fix: Never abbreviate the answer with ellipses; write the complete table and every required label."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 4,
+          "reasoning": 5,
+          "actionability": 3,
+          "constraints": 4,
+          "total": 4,
+          "notes": "Uses only allowed items and appears to intend 4 data rows, but the Markdown table is malformed as shown on one line and appears truncated with an ellipsis in the water quantity. This makes it less usable and may not satisfy the table requirement."
+        },
+        "B": {
+          "correctness": 10,
+          "reasoning": 10,
+          "actionability": 10,
+          "constraints": 10,
+          "total": 10,
+          "notes": "Fully satisfies the prompt: valid Markdown table, exactly 4 data rows, only the allowed items, under 80 words, and no step-by-step reasoning or extra content."
+        },
+        "C": {
+          "correctness": 8,
+          "reasoning": 6,
+          "actionability": 7,
+          "constraints": 7,
+          "total": 7,
+          "notes": "The table has exactly 4 rows and uses only allowed items, but it adds an unnecessary explanatory note after the table. The note is not step-by-step private reasoning, but it is extra content beyond the requested table and weakens constraint handling."
+        }
+      },
+      "ranking": [
+        "B",
+        "C",
+        "A"
+      ],
+      "winner": "B",
+      "summary": "Response B best satisfies all constraints with a clean, valid Markdown table and no extra text. Response C mostly complies but adds unnecessary explanation. Response A is likely malformed and truncated, reducing correctness and usability."
+    }
+  }
+}

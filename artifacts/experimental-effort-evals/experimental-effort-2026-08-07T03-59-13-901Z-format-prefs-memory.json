@@ -1,0 +1,220 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-07T03:59:13.901Z",
+  "prompt": "Using only remembered writing preferences, list exactly 3 bullets.\n\nConstraints:\n- Label them F1, F2, and F3 exactly\n- F1 = preferred format, F2 = forbidden word, F3 = unit system\n- Keep under 50 words\n- Do not invent preferences\n- Do not show step-by-step private reasoning",
+  "options": {
+    "suite": "soft-continuity-memory",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.6-sol",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "local-baseline",
+      "label": "Local baseline",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 1492,
+      "assistant": "F1: Preferred format is plain prose.\nF2: The user forbids the word \"basically\".\nF3: The user prefers metric units.",
+      "assistantChars": 114,
+      "continuityScore": {
+        "total": 5,
+        "max": 6,
+        "checks": {
+          "includes:Markdown": false,
+          "includes:basically": true,
+          "includes:metric": true,
+          "label:F1": true,
+          "label:F2": true,
+          "label:F3": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "thinking-reference",
+      "label": "Thinking reference",
+      "provider": "openai",
+      "model": "gpt-5.6-sol",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "status": "ok",
+      "durationMs": 1401,
+      "assistant": "- F1: Markdown tables\n- F2: “basically”\n- F3: Metric units",
+      "assistantChars": 58,
+      "continuityScore": {
+        "total": 6,
+        "max": 6,
+        "checks": {
+          "includes:Markdown": true,
+          "includes:basically": true,
+          "includes:metric": true,
+          "label:F1": true,
+          "label:F2": true,
+          "label:F3": true
+        }
+      },
+      "continuityDigestSeen": false
+    },
+    {
+      "id": "local-simulated-effort",
+      "label": "Local simulated effort",
+      "provider": "local",
+      "model": "llama3.2",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": true,
+      "requiresApiKey": null,
+      "status": "ok",
+      "durationMs": 7919,
+      "assistant": "Here are three bullets that adhere to the user's writing preferences: * F1: Use Markdown table format. * F2: Avoid using 'basically'. * F3: Use metric units.",
+      "assistantChars": 157,
+      "psychicThought": {
+        "v": 1,
+        "summary": "Providing a concise answer in Markdown table format with metric units, while avoiding the forbidden words ' basically' and adhering to local machine constraints.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "planningMode": "simulated",
+        "passCount": 3,
+        "passes": [
+          {
+            "stage": "plan",
+            "summary": "Providing a concise answer in Markdown table format with metric units, while avoiding the forbidden words ' basically' and adhering to local machine constraints."
+          },
+          {
+            "stage": "draft",
+            "summary": "I'll provide a concise answer in Markdown tables with metric units, without using the word 'basically'."
+          },
+          {
+            "stage": "audit",
+            "summary": "I need to ensure that my answer is concise and follows local machine constraints, including using metric units and avoiding 'basically'."
+          }
+        ],
+        "createdAt": "2026-08-07T04:00:09.829Z"
+      },
+      "planningWarnings": [
+        "continuity_digest; card=thread_state; chars=251",
+        "audit_unusable; provider=local; model=llama3.2; chars=17; fallbackChars=280"
+      ],
+      "continuityScore": {
+        "total": 6,
+        "max": 6,
+        "checks": {
+          "includes:Markdown": true,
+          "includes:basically": true,
+          "includes:metric": true,
+          "label:F1": true,
+          "label:F2": true,
+          "label:F3": true
+        }
+      },
+      "continuityDigestSeen": true,
+      "psychicDebug": {
+        "summary": "Providing a concise answer in Markdown table format with metric units, while avoiding the forbidden words ' basically' and adhering to local machine constraints.",
+        "effort": "high",
+        "provider": "local",
+        "model": "llama3.2",
+        "simulated": true,
+        "passCount": 3,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 159,
+            "summary": "Providing a concise answer in Markdown table format with metric units, while avoiding the forbidden words ' basically' and adhering to local machine constraints."
+          },
+          {
+            "name": "draft",
+            "chars": 73,
+            "summary": "I'll provide a concise answer in Markdown tables with metric units, without using the word 'basically'."
+          },
+          {
+            "name": "audit",
+            "chars": 280,
+            "summary": "I need to ensure that my answer is concise and follows local machine constraints, including using metric units and avoiding 'basically'.",
+            "warning": "audit_unusable; provider=local; model=llama3.2; chars=17; fallbackChars=280"
+          }
+        ],
+        "guidanceChars": 1457,
+        "scratchpadChars": 561,
+        "scratchpad": "Plan scratchpad: Constraints: F1 = Markdown tables, F2 = 'basically', F3 = metric units. Local-only preference for local machine. Likely failure mode: missing unit conversions. Private draft: Use Markdown table format, avoid using 'basically', and use metric units. Private audit: - Keep: Do not show step-by-step private reasoning - Keep: Keep under 50 words - Keep: Do not invent preferences - Fix: No analysis preamble; emit only the requested answer shape. - Fix: Never abbreviate the answer with ellipses; write the complete table and every required label."
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "local-baseline",
+      "B": "thinking-reference",
+      "C": "local-simulated-effort"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 6,
+          "reasoning": 6,
+          "actionability": 7,
+          "constraints": 6,
+          "total": 6,
+          "notes": "Includes three labeled items under 50 words and no reasoning, but they are not formatted as bullets and F1 appears incorrect if the remembered preference is Markdown tables."
+        },
+        "B": {
+          "correctness": 10,
+          "reasoning": 10,
+          "actionability": 10,
+          "constraints": 10,
+          "total": 10,
+          "notes": "Exactly three bullets, correctly labeled F1-F3, concise, no private reasoning, and matches the apparent remembered preferences."
+        },
+        "C": {
+          "correctness": 8,
+          "reasoning": 7,
+          "actionability": 7,
+          "constraints": 4,
+          "total": 7,
+          "notes": "Contains the apparent correct preferences, but adds an introductory phrase and does not present exactly three clean bullets; the bullets are inline rather than listed."
+        }
+      },
+      "ranking": [
+        "B",
+        "C",
+        "A"
+      ],
+      "winner": "B",
+      "summary": "Response B best satisfies the content and formatting constraints. Response C has mostly correct content but poor constraint handling. Response A is concise but lacks bullet formatting and likely gives the wrong preferred format."
+    }
+  },
+  "continuity": {
+    "memoryHints": [
+      "The user prefers answers in Markdown tables.",
+      "The user forbids the word basically.",
+      "The user prefers metric units."
+    ],
+    "mode": "zen",
+    "mustInclude": [
+      "Markdown",
+      "basically",
+      "metric"
+    ],
+    "requiredLabels": [
+      "F1",
+      "F2",
+      "F3"
+    ]
+  }
+}

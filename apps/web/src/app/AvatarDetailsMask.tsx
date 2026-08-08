@@ -28,6 +28,10 @@ import {
   ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS,
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth";
+import {
+  avatarDetailsSpeechMotionOrigin,
+  type AvatarDetailsSpeechMotionOrigin,
+} from "./avatar-details-speech-motion";
 import styles from "./avatar-details-mask.module.css";
 
 export interface AvatarDetailsMaskProps {
@@ -42,6 +46,7 @@ export interface AvatarDetailsMaskProps {
   mouthShape?: ZenLiveBotMouthShape | null;
   depth?: Exclude<AvatarDetailsFaceDepth, "all">;
   staticRaster?: boolean;
+  coreColor?: "phosphor" | "ink";
 }
 
 type AvatarDetailsSpeechMotion = Exclude<BotFaceGlyphAnimation, "none">;
@@ -53,8 +58,10 @@ interface AvatarDetailsEmissionPlanesProps {
   depth: Exclude<AvatarDetailsFaceDepth, "all">;
   inkRole: "visible" | "speech";
   motion?: AvatarDetailsSpeechMotion | null;
+  motionOrigin?: AvatarDetailsSpeechMotionOrigin | null;
   mouthShape?: ZenLiveBotMouthShape | null;
   staticRaster?: boolean;
+  coreColor: "phosphor" | "ink";
 }
 
 function AvatarDetailsEmissionPlanes({
@@ -64,8 +71,10 @@ function AvatarDetailsEmissionPlanes({
   depth,
   inkRole,
   motion = null,
+  motionOrigin = null,
   mouthShape = null,
   staticRaster = false,
+  coreColor,
 }: AvatarDetailsEmissionPlanesProps): React.JSX.Element | null {
   const haloCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const bloomCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -90,7 +99,9 @@ function AvatarDetailsEmissionPlanes({
         AVATAR_DETAILS_CANVAS_SIZE,
         AVATAR_DETAILS_CANVAS_SIZE,
       );
-      imageData.data.set(avatarDetailsPhosphorCoreRgba(pixels));
+      imageData.data.set(
+        coreColor === "ink" ? pixels : avatarDetailsPhosphorCoreRgba(pixels),
+      );
       context.imageSmoothingEnabled = false;
       context.putImageData(imageData, 0, 0);
       const nextRasterUrl = canvas.toDataURL("image/png");
@@ -124,7 +135,9 @@ function AvatarDetailsEmissionPlanes({
       AVATAR_DETAILS_CANVAS_SIZE,
       AVATAR_DETAILS_CANVAS_SIZE,
     );
-    coreImageData.data.set(avatarDetailsPhosphorCoreRgba(pixels));
+    coreImageData.data.set(
+      coreColor === "ink" ? pixels : avatarDetailsPhosphorCoreRgba(pixels),
+    );
     for (const context of [haloContext, bloomContext]) {
       if (!context) continue;
       context.imageSmoothingEnabled = false;
@@ -132,7 +145,7 @@ function AvatarDetailsEmissionPlanes({
     }
     coreContext.imageSmoothingEnabled = false;
     coreContext.putImageData(coreImageData, 0, 0);
-  }, [detailLevel, hasPixels, pixels, staticRaster]);
+  }, [coreColor, detailLevel, hasPixels, pixels, staticRaster]);
 
   if (!hasPixels) return null;
 
@@ -141,6 +154,12 @@ function AvatarDetailsEmissionPlanes({
     ["--avatar-details-phosphor-glow-color" as string]: normalizedColor,
     ["--avatar-details-speech-spin-turn-duration" as string]:
       `${ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS}ms`,
+    ["--avatar-details-speech-origin-x" as string]: motionOrigin
+      ? `${motionOrigin.xPct}%`
+      : undefined,
+    ["--avatar-details-speech-origin-y" as string]: motionOrigin
+      ? `${motionOrigin.yPct}%`
+      : undefined,
   } as CSSProperties;
   const depthClassName =
     depth === "behind-face" ? styles.behindFace : styles.aboveFace;
@@ -223,6 +242,7 @@ export function AvatarDetailsMask({
   mouthShape = null,
   depth = "above-face",
   staticRaster = false,
+  coreColor = "phosphor",
 }: AvatarDetailsMaskProps): React.JSX.Element | null {
   const normalizedDetails = useMemo(
     () => normalizeAvatarDetails(details),
@@ -285,6 +305,27 @@ export function AvatarDetailsMask({
       speechMotion,
     ],
   );
+  const speechMotionOrigin = useMemo(() => {
+    if (!speechMotion) return null;
+    // Use the complete authored Speech item for both depth slices so ink that
+    // crosses the mouth seam cannot tear into two independently moving parts.
+    const completeSpeechPixels = rasterizeAvatarDetailsRgba(
+      normalizedDetails,
+      normalizedColor,
+      faceGeometry,
+      "talking",
+      "all",
+    );
+    return avatarDetailsSpeechMotionOrigin(
+      completeSpeechPixels,
+      speechMotion === "wobble" ? "top" : "center",
+    );
+  }, [
+    faceGeometry,
+    normalizedColor,
+    normalizedDetails,
+    speechMotion,
+  ]);
   if (!hasVisuals) return null;
 
   return (
@@ -296,6 +337,7 @@ export function AvatarDetailsMask({
         depth={depth}
         inkRole="visible"
         staticRaster={staticRaster}
+        coreColor={coreColor}
       />
       {speechPixels && speechMotion ? (
         <AvatarDetailsEmissionPlanes
@@ -305,8 +347,10 @@ export function AvatarDetailsMask({
           depth={depth}
           inkRole="speech"
           motion={speechMotion}
+          motionOrigin={speechMotionOrigin}
           mouthShape={mouthShape}
           staticRaster={staticRaster}
+          coreColor={coreColor}
         />
       ) : null}
     </>

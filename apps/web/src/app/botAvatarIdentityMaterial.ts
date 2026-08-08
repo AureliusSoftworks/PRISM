@@ -10,7 +10,7 @@ export interface BotAvatarIdentityMaterialOptions {
   privateMode?: boolean;
   /** Communication Style → soft metal alloy wash on the chassis. */
   voicePreset?: BotVoicePreset | null;
-  /** Disable alloy wash (Prism rainbow chassis). */
+  /** Disable alloy wash (Default Prism keeps the authored raw chassis). */
   metalAlloyEnabled?: boolean;
 }
 
@@ -19,7 +19,8 @@ export interface BotAvatarIdentityMaterialOptions {
  * live Chat/Zen. Keep identity color on normal alpha-composited layers so the
  * result stays consistent in Chromium and the macOS Tauri WebKit renderer.
  * Communication Style adds a soft metal-alloy wash on the frame body only;
- * LEDs and phosphor ink stay on the identity color.
+ * idle LEDs paint dark-gray unlit glass above that wash; talking LEDs and
+ * phosphor ink stay on the identity color.
  */
 export function botAvatarIdentityMaterialStyle(
   privateModeOrOptions: boolean | BotAvatarIdentityMaterialOptions = false,
@@ -32,7 +33,9 @@ export function botAvatarIdentityMaterialStyle(
   const identityColor = privateMode
     ? PRIVATE_AVATAR_INK
     : "var(--coffee-bot-color)";
-  const phosphorInk = privateMode ? PRIVATE_AVATAR_INK : "#ffffff";
+  const phosphorInk = privateMode
+    ? PRIVATE_AVATAR_INK
+    : "color-mix(in srgb, var(--coffee-bot-color) 82%, #ffffff 18%)";
 
   return {
     "--zen-live-bot-frame-tint-color": identityColor,

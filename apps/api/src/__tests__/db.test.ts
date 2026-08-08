@@ -3,12 +3,58 @@ import assert from "node:assert/strict";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { DatabaseSync } from "node:sqlite";
 import {
   SQLITE_BUSY_TIMEOUT_MS,
   createDatabase,
   initializeDatabase,
   resolveDbPath,
 } from "../db.ts";
+
+describe("bot color saturation migration", () => {
+  it("upgrades existing bot colors once without changing hue or lightness", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run(
+      "color-user",
+      "color-user@example.com",
+      "Color User",
+      "hash",
+      "salt",
+      "cipher",
+      "iv",
+      "tag",
+      "2026-08-08T00:00:00.000Z",
+      "2026-08-08T00:00:00.000Z",
+    );
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run(
+      "desaturated-bot",
+      "color-user",
+      "Desaturated Bot",
+      "#9a7480",
+      "2026-08-08T00:00:00.000Z",
+      "2026-08-08T00:00:00.000Z",
+    );
+
+    initializeDatabase(db);
+    const first = db
+      .prepare("SELECT color, updated_at FROM bots WHERE id = ?")
+      .get("desaturated-bot") as { color: string; updated_at: string };
+    assert.equal(first.color, "#ff0f5b");
+    assert.equal(first.updated_at, "2026-08-08T00:00:00.000Z");
+
+    initializeDatabase(db);
+    const second = db
+      .prepare("SELECT color FROM bots WHERE id = ?")
+      .get("desaturated-bot") as { color: string };
+    assert.equal(second.color, first.color);
+    db.close();
+  });
+});
 
 describe("resolveDbPath", () => {
   it("prefers DB_PATH for existing explicit deployments", () => {

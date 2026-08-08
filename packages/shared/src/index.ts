@@ -1268,6 +1268,7 @@ export {
   clampLuminance,
   contrastRatio,
   ensureContrast,
+  fullySaturateBotColor,
   hexToHsl,
   hslToHex,
   normalizeAccentForTheme,

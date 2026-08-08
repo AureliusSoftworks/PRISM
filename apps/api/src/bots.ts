@@ -9,6 +9,7 @@ import {
   botPowerSelfCueLinesV1,
   botPowerSpeechObfuscationAuthoringCueV1,
   buildBotPowersPromptBlock,
+  fullySaturateBotColor,
   stripBotProfileMetaSuffix,
 } from "@localai/shared";
 import { randomId } from "./security.ts";
@@ -504,7 +505,9 @@ export function patchSelectedBots(
   const values: Array<string | null> = [];
   if (hasPatchField(patch, "color")) {
     fields.push("color = ?");
-    values.push(readSelectedBotPatchString(patch.color, "Color"));
+    values.push(
+      fullySaturateBotColor(readSelectedBotPatchString(patch.color, "Color")),
+    );
   }
   if (hasPatchField(patch, "glyph")) {
     fields.push("glyph = ?");

@@ -14,6 +14,7 @@ import {
   coffeeSeatSipMouthTreatmentActive,
   coffeeSeatSipMouthOffsetX,
   coffeeSeatSipMouthOffsetY,
+  coffeeSeatScreenRelativeFeatureRotationDeg,
   coffeeSeatScreenRelativeMouthRotationDeg,
   resolveCoffeeSeatSipFacePresentation,
 } from "./coffee-seat-plate.ts";
@@ -208,6 +209,11 @@ describe("coffeeSeatPlateGlyph", () => {
       coffeeSeatScreenRelativeMouthRotationDeg(27, 90),
       -63,
       "the authored mouth rotation remains recoverable after the sip layer clears",
+    );
+    assert.equal(
+      coffeeSeatScreenRelativeFeatureRotationDeg(27, 90),
+      -63,
+      "custom eyes use the same screen-relative authored angle as mouths",
     );
   });
 

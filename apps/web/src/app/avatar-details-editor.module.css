@@ -448,6 +448,17 @@
     0 0 12px -5px currentColor;
 }
 
+.inkRoleOptions[data-move-selection="true"]
+  button[data-ink-role="erase"]
+  .inkRoleSwatch {
+  background: conic-gradient(
+    from 30deg,
+    #ef3f52 0 33%,
+    #2878ef 33% 66%,
+    #1ba764 66% 100%
+  ) !important;
+}
+
 .runtimeColorNote {
   display: grid;
   grid-template-columns: 15px minmax(0, 1fr);
@@ -530,6 +541,7 @@
    editor remains a faithful hit-tested preview of every runtime surface. */
 .screenBoundary,
 .canvas,
+.symmetryGuide,
 .inputSurface {
   transform: scale(var(--avatar-details-ink-aperture-scale, 1));
   transform-origin: center;
@@ -581,6 +593,27 @@
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   pointer-events: none;
+}
+
+.symmetryGuide {
+  position: absolute;
+  top: 0;
+  bottom: 0;
+  left: 50%;
+  z-index: 4;
+  width: 0;
+  border-left: 1px dashed
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 72%, #ffffff);
+  opacity: 0;
+  pointer-events: none;
+  filter: drop-shadow(
+    0 0 3px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 46%, transparent)
+  );
+  transition: opacity 120ms ease;
+}
+
+.symmetryGuide[data-visible="true"] {
+  opacity: 0.72;
 }
 
 .inputSurface {
@@ -792,7 +825,7 @@
 
 @container (min-width: 980px) {
   .segmentedControl {
-    grid-template-columns: repeat(5, minmax(0, 1fr));
+    grid-template-columns: repeat(6, minmax(0, 1fr));
   }
 
 }

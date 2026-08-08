@@ -58,7 +58,7 @@ export function coffeeSeatCustomMouthCharacterForSip(args: {
   return args.mouthCharacter;
 }
 
-export function coffeeSeatScreenRelativeMouthRotationDeg(
+export function coffeeSeatScreenRelativeFeatureRotationDeg(
   authoredRotationDeg: number,
   faceRotationDeg: number,
 ): number {
@@ -66,6 +66,16 @@ export function coffeeSeatScreenRelativeMouthRotationDeg(
     ((((authoredRotationDeg - faceRotationDeg + 180) % 360) + 360) % 360) -
     180;
   return Object.is(wrapped, -0) ? 0 : Number(wrapped.toFixed(3));
+}
+
+export function coffeeSeatScreenRelativeMouthRotationDeg(
+  authoredRotationDeg: number,
+  faceRotationDeg: number,
+): number {
+  return coffeeSeatScreenRelativeFeatureRotationDeg(
+    authoredRotationDeg,
+    faceRotationDeg,
+  );
 }
 
 /**

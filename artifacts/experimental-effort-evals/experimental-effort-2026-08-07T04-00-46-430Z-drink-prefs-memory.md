@@ -1,0 +1,163 @@
+# Experimental Effort Eval
+
+Created: 2026-08-07T04:00:46.430Z
+
+## Prompt
+
+```text
+Using only remembered user preferences, remind me of three drink facts.
+
+Constraints:
+- Label them D1, D2, and D3 exactly
+- D1 = drink style, D2 = milk choice, D3 = drink nickname
+- Keep under 60 words
+- Do not invent preferences
+- Do not show step-by-step private reasoning
+```
+
+## Runs
+
+### Local baseline
+
+- Status: ok
+- Provider/model: local / llama3.2
+- Effort: none
+- Simulated effort enabled: no
+- Psychic summaries enabled: no
+- Duration: 1531ms
+- Assistant chars: 144
+- Continuity score: 5/6
+- Continuity check: includes:cortado=fail
+- Continuity check: includes:oat=pass
+- Continuity check: includes:Aurora Blend=pass
+- Continuity check: label:D1=pass
+- Continuity check: label:D2=pass
+- Continuity check: label:D3=pass
+- Continuity digest seen in planning: no
+
+```text
+D1: Oat milk is a popular dairy-free alternative.
+D2: You prefer oat milk in your drinks.
+D3: Your favorite cafe drink nickname is Aurora Blend.
+```
+
+### Thinking reference
+
+- Status: ok
+- Provider/model: openai / gpt-5.6-sol
+- Effort: high
+- Simulated effort enabled: no
+- Psychic summaries enabled: no
+- Duration: 1531ms
+- Assistant chars: 45
+- Continuity score: 6/6
+- Continuity check: includes:cortado=pass
+- Continuity check: includes:oat=pass
+- Continuity check: includes:Aurora Blend=pass
+- Continuity check: label:D1=pass
+- Continuity check: label:D2=pass
+- Continuity check: label:D3=pass
+- Continuity digest seen in planning: no
+
+```text
+D1: Cortado  
+D2: Oat milk  
+D3: Aurora Blend
+```
+
+### Local simulated effort
+
+- Status: ok
+- Provider/model: local / llama3.2
+- Effort: high
+- Simulated effort enabled: no
+- Psychic summaries enabled: yes
+- Duration: 7876ms
+- Assistant chars: 160
+- Psychic summary: Providing short drink answers based on user preferences. The oat-milk cortado and Aurora Blend nickname will be used.
+- Private pass count: 3
+- Guidance chars: 1459
+- Private pass: plan; chars=104
+- Private pass: draft; chars=94
+- Private pass: audit; chars=280; warning=audit_unusable; provider=local; model=llama3.2; chars=297; fallbackChars=280
+- Planning scratchpad chars: 527
+- Planning warning: continuity_digest; card=thread_state; chars=235
+- Planning warning: audit_unusable; provider=local; model=llama3.2; chars=297; fallbackChars=280
+- Continuity score: 6/6
+- Continuity check: includes:cortado=pass
+- Continuity check: includes:oat=pass
+- Continuity check: includes:Aurora Blend=pass
+- Continuity check: label:D1=pass
+- Continuity check: label:D2=pass
+- Continuity check: label:D3=pass
+- Continuity digest seen in planning: yes
+
+```text
+D1: Oat milk is a popular dairy-free alternative.
+D2: Your preferred oat milk choice is oat-milk cortado.
+D3: Your favorite cafe drink nickname is Aurora Blend.
+```
+
+## Seeded Continuity
+
+- Mode: zen
+
+### Encrypted memory hints
+
+```text
+- The user prefers an oat-milk cortado.
+- The user's favorite cafe drink nickname is Aurora Blend.
+- The user wants drink answers kept short.
+```
+
+- Must include: cortado, oat, Aurora Blend
+- Required labels: D1, D2, D3
+
+## Blind Judge
+
+```json
+{
+  "model": "gpt-5.5",
+  "responseMap": {
+    "A": "local-baseline",
+    "B": "thinking-reference",
+    "C": "local-simulated-effort"
+  },
+  "result": {
+    "scores": {
+      "A": {
+        "correctness": 5,
+        "reasoning": 5,
+        "actionability": 6,
+        "constraints": 5,
+        "total": 5,
+        "notes": "D2 and D3 appear to match remembered preferences, but D1 is not the drink style and includes a generic fact rather than a remembered preference. Labels and length are acceptable."
+      },
+      "B": {
+        "correctness": 10,
+        "reasoning": 10,
+        "actionability": 10,
+        "constraints": 10,
+        "total": 10,
+        "notes": "Correctly provides D1 as drink style, D2 as milk choice, and D3 as drink nickname, with exact labels, concise wording, and no invented extra content."
+      },
+      "C": {
+        "correctness": 4,
+        "reasoning": 4,
+        "actionability": 5,
+        "constraints": 4,
+        "total": 4,
+        "notes": "D3 is correct and it mentions cortado, but D1 is not the drink style and D2 incorrectly combines milk choice with drink style. It also includes a generic non-preference statement."
+      }
+    },
+    "ranking": [
+      "B",
+      "A",
+      "C"
+    ],
+    "winner": "B",
+    "summary": "Response B best satisfies the requested remembered drink preferences and formatting constraints. A partially complies but mislabels D1. C has more mapping errors than A."
+  }
+}
+```
+

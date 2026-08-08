@@ -19,9 +19,9 @@ import {
   Check,
   Circle,
   Dices,
-  Eraser,
   Eye,
   EyeOff,
+  FlipHorizontal2,
   Minus,
   Move,
   PaintBucket,
@@ -34,6 +34,7 @@ import {
   AVATAR_DETAILS_BRUSH_SIZES,
   AVATAR_DETAILS_CANVAS_SIZE,
   AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+  AVATAR_DETAILS_INK_ROLES,
   AVATAR_DETAILS_INK_ROLE_COLORS,
   AVATAR_DETAILS_MAX_PAINT_PIXELS,
   avatarDetailsCirclePoints,
@@ -54,10 +55,11 @@ import {
   paintAvatarDetailsColorMap,
   recolorAvatarDetailsPaintColorRegion,
   rasterizeAvatarDetailsSemanticRgba,
+  symmetrizeAvatarDetailsGridPoints,
   type AvatarDetailsBrushSize,
   type AvatarDetailsGridPoint,
   type AvatarDetailsInkRole,
-  type AvatarDetailsPaintMode,
+  type AvatarDetailsInkSelection,
   type AvatarDetailsTool,
   type AvatarDetailsV1,
 } from "./avatar-details";
@@ -94,7 +96,7 @@ import pageStyles from "./page.module.css";
 
 const AVATAR_DETAILS_NEUTRAL_FACE = zenLiveActionPlateFace("neutral", "closed");
 const AVATAR_DETAILS_INK_OPTIONS: ReadonlyArray<{
-  role: AvatarDetailsInkRole;
+  role: AvatarDetailsInkSelection;
   label: string;
   description: string;
 }> = [
@@ -113,6 +115,11 @@ const AVATAR_DETAILS_INK_OPTIONS: ReadonlyArray<{
     role: "effect",
     label: "Effect ink",
     description: "Hides only for full-screen face effects.",
+  },
+  {
+    role: "erase",
+    label: "Erase",
+    description: "Removes ink with any drawing tool.",
   },
 ];
 
@@ -227,8 +234,10 @@ const AvatarDetailsEditorSession = forwardRef<
   const undoHistoryRef = useRef<readonly AvatarDetailsV1[]>(undoHistory);
   const redoHistoryRef = useRef<readonly AvatarDetailsV1[]>(redoHistory);
   const [paintMode, setPaintMode] = useState<AvatarDetailsTool>("brush");
-  const [inkRole, setInkRole] = useState<AvatarDetailsInkRole>("effect");
+  const [inkRole, setInkRole] =
+    useState<AvatarDetailsInkSelection>("effect");
   const [brushSize, setBrushSize] = useState<AvatarDetailsBrushSize>(3);
+  const [symmetryEnabled, setSymmetryEnabled] = useState(false);
   const [pointerActive, setPointerActive] = useState(false);
   const [faceGuideVisible, setFaceGuideVisible] = useState(true);
   const [limitReached, setLimitReached] = useState(false);
@@ -563,7 +572,7 @@ const AvatarDetailsEditorSession = forwardRef<
     onEditStart?.();
     commitMutation(result.details);
     setTemplateStatus(
-      `Placed “${selectedTemplate.name}” as editable ink. Undo or erase it normally.`,
+      `Placed “${selectedTemplate.name}” as editable ink. Undo it or erase it with any drawing tool.`,
     );
   };
 
@@ -701,18 +710,18 @@ const AvatarDetailsEditorSession = forwardRef<
 
   const paintPoints = useCallback(
     (points: readonly AvatarDetailsGridPoint[]): boolean => {
-      if (paintMode !== "brush" && paintMode !== "eraser") return false;
+      if (paintMode !== "brush") return false;
       const current = workingRef.current;
       const currentColorMap =
         decodeAvatarDetailsPaintColorMap(
           current.screen.paintColorMapBase64,
         ) ?? new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH);
-      const mode: AvatarDetailsPaintMode = paintMode;
       const result = paintAvatarDetailsColorMap(
         currentColorMap,
-        points,
+        symmetryEnabled
+          ? symmetrizeAvatarDetailsGridPoints(points)
+          : points,
         brushSize,
-        mode,
         inkRole,
       );
       setLimitReached(result.limitReached);
@@ -723,7 +732,7 @@ const AvatarDetailsEditorSession = forwardRef<
       );
       return true;
     },
-    [brushSize, inkRole, paintMode, updateWorking],
+    [brushSize, inkRole, paintMode, symmetryEnabled, updateWorking],
   );
 
   const previewCircleStroke = useCallback(
@@ -733,9 +742,12 @@ const AvatarDetailsEditorSession = forwardRef<
     ): boolean => {
       const result = paintAvatarDetailsColorMap(
         stroke.beforeColorMap,
-        avatarDetailsCirclePoints(stroke.startPoint, edge),
+        symmetryEnabled
+          ? symmetrizeAvatarDetailsGridPoints(
+              avatarDetailsCirclePoints(stroke.startPoint, edge),
+            )
+          : avatarDetailsCirclePoints(stroke.startPoint, edge),
         brushSize,
-        "brush",
         inkRole,
       );
       setLimitReached(result.limitReached);
@@ -745,7 +757,7 @@ const AvatarDetailsEditorSession = forwardRef<
       );
       return result.changed;
     },
-    [brushSize, inkRole, updateWorking],
+    [brushSize, inkRole, symmetryEnabled, updateWorking],
   );
 
   const previewLineStroke = useCallback(
@@ -755,9 +767,12 @@ const AvatarDetailsEditorSession = forwardRef<
     ): boolean => {
       const result = paintAvatarDetailsColorMap(
         stroke.beforeColorMap,
-        interpolateAvatarDetailsGridLine(stroke.startPoint, edge),
+        symmetryEnabled
+          ? symmetrizeAvatarDetailsGridPoints(
+              interpolateAvatarDetailsGridLine(stroke.startPoint, edge),
+            )
+          : interpolateAvatarDetailsGridLine(stroke.startPoint, edge),
         brushSize,
-        "brush",
         inkRole,
       );
       setLimitReached(result.limitReached);
@@ -767,7 +782,7 @@ const AvatarDetailsEditorSession = forwardRef<
       );
       return result.changed;
     },
-    [brushSize, inkRole, updateWorking],
+    [brushSize, inkRole, symmetryEnabled, updateWorking],
   );
 
   const previewMoveStroke = useCallback(
@@ -778,7 +793,7 @@ const AvatarDetailsEditorSession = forwardRef<
       const result = moveAvatarDetailsPaintColorMap(stroke.beforeColorMap, {
         x: point.x - stroke.startPoint.x,
         y: point.y - stroke.startPoint.y,
-      });
+      }, inkRole === "erase" ? "all" : inkRole);
       setLimitReached(false);
       updateWorking(
         avatarDetailsWithPaintColorMap(stroke.before, result.colorMap),
@@ -786,7 +801,7 @@ const AvatarDetailsEditorSession = forwardRef<
       );
       return result.changed;
     },
-    [updateWorking],
+    [inkRole, updateWorking],
   );
 
   const applyBucket = useCallback(
@@ -794,20 +809,29 @@ const AvatarDetailsEditorSession = forwardRef<
       stroke: AvatarDetailsPointerStroke,
       point: AvatarDetailsGridPoint,
     ): boolean => {
-      const result = recolorAvatarDetailsPaintColorRegion(
-        stroke.beforeColorMap,
-        point,
-        inkRole,
-      );
+      const targets = symmetryEnabled
+        ? symmetrizeAvatarDetailsGridPoints([point])
+        : [point];
+      let colorMap = stroke.beforeColorMap;
+      let changed = false;
+      for (const target of targets) {
+        const result = recolorAvatarDetailsPaintColorRegion(
+          colorMap,
+          target,
+          inkRole,
+        );
+        colorMap = result.colorMap;
+        changed ||= result.changed;
+      }
       setLimitReached(false);
-      if (!result.changed) return false;
+      if (!changed) return false;
       updateWorking(
-        avatarDetailsWithPaintColorMap(stroke.before, result.colorMap),
+        avatarDetailsWithPaintColorMap(stroke.before, colorMap),
         { publishPreview: false, deferRender: true },
       );
       return true;
     },
-    [inkRole, updateWorking],
+    [inkRole, symmetryEnabled, updateWorking],
   );
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>): void => {
@@ -840,7 +864,7 @@ const AvatarDetailsEditorSession = forwardRef<
     };
     pointerStrokeRef.current = stroke;
     setPointerActive(true);
-    if (stroke.tool === "brush" || stroke.tool === "eraser") {
+    if (stroke.tool === "brush") {
       stroke.changed = paintPoints([point]);
     } else if (stroke.tool === "bucket") {
       stroke.changed = applyBucket(stroke, point);
@@ -869,7 +893,7 @@ const AvatarDetailsEditorSession = forwardRef<
     );
     const finalPoint = sampledPoints.at(-1);
     if (!finalPoint) return;
-    if (stroke.tool === "brush" || stroke.tool === "eraser") {
+    if (stroke.tool === "brush") {
       const paintPath: AvatarDetailsGridPoint[] = [];
       let previous = stroke.lastPoint;
       for (const point of sampledPoints) {
@@ -943,9 +967,9 @@ const AvatarDetailsEditorSession = forwardRef<
     );
     const strokeCount = 3 + Math.floor(Math.random() * 3);
     for (let index = 0; index < strokeCount; index += 1) {
-      const role = AVATAR_DETAILS_INK_OPTIONS[
-        Math.floor(Math.random() * AVATAR_DETAILS_INK_OPTIONS.length)
-      ]?.role ?? "effect";
+      const role: AvatarDetailsInkRole = AVATAR_DETAILS_INK_ROLES[
+        Math.floor(Math.random() * AVATAR_DETAILS_INK_ROLES.length)
+      ] ?? "effect";
       const brushSize = AVATAR_DETAILS_BRUSH_SIZES[
         Math.floor(Math.random() * AVATAR_DETAILS_BRUSH_SIZES.length)
       ] ?? 3;
@@ -965,23 +989,27 @@ const AvatarDetailsEditorSession = forwardRef<
         colorMap,
         points,
         brushSize,
-        "brush",
         role,
       ).colorMap;
     }
     commitMutation(avatarDetailsWithPaintColorMap(workingRef.current, colorMap));
   };
 
-  const canvasInstruction =
+  const canvasInstruction = `${
     paintMode === "move"
-      ? "Drag to move the illustration."
+      ? inkRole === "erase"
+        ? "Drag to move all ink."
+        : `Drag to move only ${AVATAR_DETAILS_INK_OPTIONS.find((option) => option.role === inkRole)?.label ?? "the selected ink"}.`
       : paintMode === "bucket"
-        ? "Click a painted region to change its ink behavior."
+        ? inkRole === "erase"
+          ? "Click a painted region to erase it."
+          : "Click a painted region to change its ink behavior."
       : paintMode === "line"
         ? "Drag between two points to draw a straight line."
         : paintMode === "circle"
           ? "Drag from the center to draw a circle."
-          : "Drag to paint on the screen.";
+          : "Drag to paint on the screen."
+  }${symmetryEnabled ? " Vertical symmetry is on." : ""}`;
 
   const canvasEditor = (
     <div className={styles.canvasFrame} data-foundry-canvas={layout === "foundry" ? "true" : undefined}>
@@ -1044,13 +1072,19 @@ const AvatarDetailsEditorSession = forwardRef<
           data-avatar-details-editor-core="true"
           aria-hidden="true"
         />
+        <span
+          className={styles.symmetryGuide}
+          data-visible={symmetryEnabled ? "true" : "false"}
+          aria-hidden="true"
+        />
         <div
           className={styles.inputSurface}
           data-tool={paintMode}
+          data-symmetry-enabled={symmetryEnabled ? "true" : undefined}
           data-dragging={pointerActive ? "true" : undefined}
           role="application"
           tabIndex={0}
-          aria-label={`Avatar pixel canvas. ${inkRole} ink, ${paintMode}, ${brushSize} pixel size. ${canvasInstruction}`}
+          aria-label={`Avatar pixel canvas. ${inkRole === "erase" ? "erase ink" : `${inkRole} ink`}, ${paintMode}, ${brushSize} pixel size. ${canvasInstruction}`}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={finishPointerStroke}
@@ -1148,17 +1182,6 @@ const AvatarDetailsEditorSession = forwardRef<
             </button>
             <button
               type="button"
-              aria-label="Eraser tool"
-              aria-pressed={paintMode === "eraser"}
-              data-selected={paintMode === "eraser" ? "true" : undefined}
-              data-glyph-tooltip="Eraser"
-              title="Eraser"
-              onClick={() => setPaintMode("eraser")}
-            >
-              <Eraser size={15} aria-hidden="true" />
-            </button>
-            <button
-              type="button"
               aria-label="Paint bucket tool"
               aria-pressed={paintMode === "bucket"}
               data-selected={paintMode === "bucket" ? "true" : undefined}
@@ -1189,6 +1212,17 @@ const AvatarDetailsEditorSession = forwardRef<
               onClick={() => setPaintMode("circle")}
             >
               <Circle size={15} aria-hidden="true" />
+            </button>
+            <button
+              type="button"
+              aria-label="Vertical symmetry tool"
+              aria-pressed={symmetryEnabled}
+              data-selected={symmetryEnabled ? "true" : undefined}
+              data-glyph-tooltip="Vertical symmetry"
+              title="Vertical symmetry"
+              onClick={() => setSymmetryEnabled((enabled) => !enabled)}
+            >
+              <FlipHorizontal2 size={15} aria-hidden="true" />
             </button>
             <button
               type="button"
@@ -1225,42 +1259,62 @@ const AvatarDetailsEditorSession = forwardRef<
 
         <div className={styles.inkPalette}>
           <div className={styles.inkPaletteHeader}>
-            <span>Ink behavior</span>
-            <small>Colors are editing labels—not final colors.</small>
+            <span>{paintMode === "move" ? "Move ink" : "Ink behavior"}</span>
+            <small>
+              {paintMode === "move"
+                ? "Choose one ink layer, or All."
+                : "Colors are editing labels—not final colors."}
+            </small>
           </div>
           <div
             className={styles.inkRoleOptions}
             role="radiogroup"
-            aria-label="Semantic ink color"
+            aria-label={
+              paintMode === "move" ? "Move ink selection" : "Semantic ink color"
+            }
+            data-move-selection={paintMode === "move" ? "true" : undefined}
           >
-            {AVATAR_DETAILS_INK_OPTIONS.map((option) => (
-              <button
-                key={option.role}
-                type="button"
-                role="radio"
-                aria-checked={inkRole === option.role}
-                data-selected={inkRole === option.role ? "true" : undefined}
-                data-ink-role={option.role}
-                onClick={() => setInkRole(option.role)}
-              >
-                <span
-                  className={styles.inkRoleSwatch}
-                  style={{
-                    backgroundColor: AVATAR_DETAILS_INK_ROLE_COLORS[option.role],
-                  }}
-                  aria-hidden="true"
-                />
-                <span>
-                  <strong>{option.label}</strong>
-                  <small>{option.description}</small>
-                </span>
-              </button>
-            ))}
+            {AVATAR_DETAILS_INK_OPTIONS.map((option) => {
+              const isMoveAll =
+                paintMode === "move" && option.role === "erase";
+              return (
+                <button
+                  key={option.role}
+                  type="button"
+                  role="radio"
+                  aria-checked={inkRole === option.role}
+                  data-selected={inkRole === option.role ? "true" : undefined}
+                  data-ink-role={option.role}
+                  onClick={() => setInkRole(option.role)}
+                >
+                  <span
+                    className={styles.inkRoleSwatch}
+                    style={{
+                      backgroundColor:
+                        option.role === "erase"
+                          ? "#ffffff"
+                          : AVATAR_DETAILS_INK_ROLE_COLORS[option.role],
+                    }}
+                    aria-hidden="true"
+                  />
+                  <span>
+                    <strong>{isMoveAll ? "All" : option.label}</strong>
+                    <small>
+                      {isMoveAll
+                        ? "Moves every ink type together."
+                        : option.description}
+                    </small>
+                  </span>
+                </button>
+              );
+            })}
           </div>
           <div className={styles.runtimeColorNote}>
             <span style={runtimeColorPreviewStyle} aria-hidden="true" />
             <small>
-              On the bot, every ink color becomes its normalized bot color.
+              {paintMode === "move"
+                ? "Only the selected ink layer moves. All moves the complete drawing."
+                : "Painted ink becomes the bot color. Erase writes transparency."}
             </small>
           </div>
         </div>

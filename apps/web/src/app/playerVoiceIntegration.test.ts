@@ -119,16 +119,17 @@ test("Zen uses one audio-owned reveal while muted Chat uses one fast reveal", ()
   );
   assert.match(
     source,
+    /setZenPlayerSpeechReveal\(\{ messageId, content: messageText, revealKey \}\);[\s\S]*?setZenInitialStarterOverlayActive\(false\);/u,
+  );
+  assert.match(
+    source,
     /const zenPendingReplyPlaceholderVisible =[\s\S]*?!zenPlayerMessageRevealActive[\s\S]*?!chatAssistantRevealInProgress/u,
   );
   assert.match(
     source,
-    /const zenInitialReplyRevealActive =[\s\S]*?chatAssistantRevealInProgress[\s\S]*?!zenPlayerMessageRevealActive/u,
+    /const zenInitialThinkingNode = useMemo\(\(\) => \{[\s\S]*?if \(!zenInitialThinkingActive\) return null;/u,
   );
-  assert.match(
-    source,
-    /const typingIndicatorVisible = chatLikeSurface[\s\S]*?!zenPlayerMessageRevealActive[\s\S]*?!zenInitialReplyRevealActive/u,
-  );
+  assert.doesNotMatch(source, /zenInitialReplyRevealActive/u);
   assert.match(
     source,
     /: !zenPlayerMessageRevealActive &&\s*\(zenFollowupActive \|\|/u,

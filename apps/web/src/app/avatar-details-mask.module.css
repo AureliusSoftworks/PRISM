@@ -24,6 +24,8 @@
     scale(var(--avatar-details-ink-aperture-scale, 1))
     scaleX(var(--avatar-details-scale-x, 1))
     scaleX(var(--avatar-details-facing-scale-x, 1))
+    translateX(calc(var(--avatar-details-speech-origin-x, 50%) - 50%))
+    translateY(calc(var(--avatar-details-speech-origin-y, 50%) - 50%))
     rotate(
       calc(
         var(--avatar-details-speech-rotation, 0deg) +
@@ -31,7 +33,9 @@
       )
     )
     scaleX(var(--avatar-details-speech-scale-x, 1))
-    scaleY(var(--avatar-details-speech-scale-y, 1));
+    scaleY(var(--avatar-details-speech-scale-y, 1))
+    translateY(calc(50% - var(--avatar-details-speech-origin-y, 50%)))
+    translateX(calc(50% - var(--avatar-details-speech-origin-x, 50%)));
   transform-origin: center;
 }
 

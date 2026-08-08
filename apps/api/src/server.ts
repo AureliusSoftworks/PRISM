@@ -815,6 +815,7 @@ import {
   composeHubAtmospherePrompt,
   composeChatAtmospherePrompt,
   chatAtmosphereUtcDate,
+  fullySaturateBotColor,
   GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
   PRISM_EULA_ACCEPTANCE_SNAPSHOT,
   PRISM_EULA_CONTENT_SHA256,
@@ -1937,6 +1938,35 @@ function persistPremiumVoiceDefaults(
     authored_audio_voice_profile: string | null;
     audio_voice_profile_override: string | null;
   }>;
+  // #region agent log
+  fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+    method: "POST",
+    headers: {
+      "Content-Type": "application/json",
+      "X-Debug-Session-Id": "2836be",
+    },
+    body: JSON.stringify({
+      sessionId: "2836be",
+      hypothesisId: "A,C,E",
+      location: "server.ts:persistPremiumVoiceDefaults:entry",
+      message: "Persisting premium voice defaults",
+      data: {
+        userId,
+        voiceCount: voices.length,
+        rawPrismProfileLength:
+          typeof user.prism_default_bot_audio_voice_profile === "string"
+            ? user.prism_default_bot_audio_voice_profile.length
+            : 0,
+        rawPrismProfilePreview:
+          typeof user.prism_default_bot_audio_voice_profile === "string"
+            ? user.prism_default_bot_audio_voice_profile.slice(0, 220)
+            : null,
+        botCount: bots.length,
+      },
+      timestamp: Date.now(),
+    }),
+  }).catch(() => {});
+  // #endregion
   const initialization = initializePremiumVoiceDefaults({
     userId,
     voices,
@@ -1952,6 +1982,23 @@ function persistPremiumVoiceDefaults(
     initialization.botUpdates.length === 0 &&
     !initialization.prismDefaultBotAudioVoiceProfile
   ) {
+    // #region agent log
+    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "2836be",
+      },
+      body: JSON.stringify({
+        sessionId: "2836be",
+        hypothesisId: "A",
+        location: "server.ts:persistPremiumVoiceDefaults:noop",
+        message: "No premium voice writes needed",
+        data: { userId },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+    // #endregion
     return { assignedBotIds: [], assignedDefaultPrism: false };
   }
 
@@ -1970,16 +2017,37 @@ function persistPremiumVoiceDefaults(
       );
     }
     if (initialization.prismDefaultBotAudioVoiceProfile) {
+      const serialized = serializeBotAudioVoiceProfileV1(
+        initialization.prismDefaultBotAudioVoiceProfile,
+      );
+      // #region agent log
+      fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "2836be",
+        },
+        body: JSON.stringify({
+          sessionId: "2836be",
+          hypothesisId: "A,D",
+          location: "server.ts:persistPremiumVoiceDefaults:writePrism",
+          message: "Overwriting Default Prism voice profile",
+          data: {
+            userId,
+            writtenPreview: serialized.slice(0, 280),
+            assignedVoiceId:
+              initialization.prismDefaultBotAudioVoiceProfile.elevenLabsVoiceId ??
+              null,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
       db.prepare(
         `UPDATE users
             SET prism_default_bot_audio_voice_profile = ?
           WHERE id = ?`,
-      ).run(
-        serializeBotAudioVoiceProfileV1(
-          initialization.prismDefaultBotAudioVoiceProfile,
-        ),
-        userId,
-      );
+      ).run(serialized, userId);
     }
     db.exec("COMMIT");
   } catch (error) {
@@ -6882,10 +6950,42 @@ function normalizeDefaultBotSettingsForResponse(user: UserDbRow) {
       normalizeBotFaceThinkingOffsetY(
         user.prism_default_bot_face_thinking_offset_y,
       ) ?? DEFAULT_BOT_FACE_THINKING_OFFSET_Y,
-    prismDefaultBotAudioVoiceProfile:
-      parseStoredBotAudioVoiceProfileV1(
-        user.prism_default_bot_audio_voice_profile,
-      ) ?? normalizeBotAudioVoiceProfileV1(undefined),
+    prismDefaultBotAudioVoiceProfile: (() => {
+      const raw = user.prism_default_bot_audio_voice_profile;
+      const parsed = parseStoredBotAudioVoiceProfileV1(raw);
+      const resolved = parsed ?? normalizeBotAudioVoiceProfileV1(undefined);
+      // #region agent log
+      fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          "X-Debug-Session-Id": "2836be",
+        },
+        body: JSON.stringify({
+          sessionId: "2836be",
+          hypothesisId: "C,E",
+          location: "server.ts:normalizeDefaultBotSettingsForResponse",
+          message: "Serving Default Prism voice profile",
+          data: {
+            userId: user.id,
+            rawIsNull: raw == null,
+            rawLength: typeof raw === "string" ? raw.length : 0,
+            parseFailed: typeof raw === "string" && raw.trim().length > 0 && !parsed,
+            usedBuiltinDefault: !parsed,
+            baseVoiceId: resolved.baseVoiceId,
+            pitch: resolved.pitch,
+            pace: resolved.pace,
+            systemVoiceName: resolved.systemVoiceName ?? null,
+            elevenLabsVoiceId: resolved.elevenLabsVoiceId ?? null,
+            elevenLabsVoiceInitialized:
+              resolved.elevenLabsVoiceInitialized === true,
+          },
+          timestamp: Date.now(),
+        }),
+      }).catch(() => {});
+      // #endregion
+      return resolved;
+    })(),
     prismDefaultBotTemperature: BOT_TEMPERATURE_DEFAULT,
     prismDefaultBotMaxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
     prismDefaultBotTopP: BOT_TOP_P_DEFAULT,
@@ -26599,11 +26699,11 @@ function buildRoutes(): RouteDefinition[] {
           return Boolean(existing?.id);
         },
       });
-      // Accept any non-empty string for color (CSS parses the value at render
-      // time). Native HTML5 color inputs always emit "#RRGGBB".
+      // The Shell is a hue-only picker. Persist its canonical fully saturated
+      // color while preserving the selected hue and HSL lightness.
       const color =
         typeof body.color === "string" && body.color.trim().length > 0
-          ? body.color.trim()
+          ? fullySaturateBotColor(body.color)
           : null;
       // Glyph is an opaque identifier for the icon the UI should render
       // (e.g. "bot", "sparkles"). The frontend's glyph registry resolves
@@ -27430,7 +27530,7 @@ function buildRoutes(): RouteDefinition[] {
       // empty string or missing field leaves it unchanged.
       if (typeof body.color === "string" && body.color.trim().length > 0) {
         fields.push("color = ?");
-        values.push(body.color.trim());
+        values.push(fullySaturateBotColor(body.color));
       } else if (body.color === null) {
         fields.push("color = ?");
         values.push(null);

@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
+import { hexToHsl } from "@localai/shared";
 
 import {
   marketplaceBotEyeCharacterIsSideways,
@@ -111,6 +112,7 @@ describe("bot marketplace helpers", () => {
     assert.equal(manifest.schema, "prism-bot-marketplace-v1");
     assert.equal(manifest.bots.length, 4);
     assert.equal(manifest.bots[0]?.memoryCount, 42);
+    assert.ok(hexToHsl(manifest.bots[0]?.color ?? "").s > 99.5);
     assert.deepEqual(
       manifest.themes.find((theme) => theme.id === "famous-philosophers")?.botIds,
       ["plato", "aristotle"]
