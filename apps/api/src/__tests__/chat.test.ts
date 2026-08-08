@@ -10,6 +10,9 @@ import {
   composeZenPrismSystemPrompt,
   decideZenAutonomyTurn,
   extractPrismBotMentionIdsFromMessage,
+  extractPsychicContinuityDigest,
+  PSYCHIC_TOPIC_ANCHOR_RULES,
+  companionLaneUsesQdrantMemorySummaries,
   inferChatToolRequestedImageSize,
   buildCoffeeContinuityPromptContext,
   loadRecentCoffeeContinuityContexts,
@@ -257,6 +260,19 @@ function createChatTestDb(): DatabaseSync {
 
 async function flushBackgroundTitleJobs(): Promise<void> {
   await new Promise<void>((resolve) => setImmediate(resolve));
+}
+
+async function waitUntil(
+  label: string,
+  predicate: () => boolean,
+  timeoutMs = 3000,
+): Promise<void> {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeoutMs) {
+    if (predicate()) return;
+    await new Promise<void>((resolve) => setTimeout(resolve, 25));
+  }
+  assert.fail(`timed out waiting for ${label}`);
 }
 
 function installChatFetchStub(reply = "Memory-aware reply"): Array<Array<{ content: string }>> {
@@ -1081,6 +1097,468 @@ describe("bot-locked Chat lane", () => {
     );
 
     assert.equal(result.conversation.messages.at(-1)?.content, "Fine.");
+  });
+});
+
+describe("Chat Qdrant memory summaries", () => {
+  it("enables Qdrant summary retrieval for Chat and Zen only", () => {
+    assert.equal(companionLaneUsesQdrantMemorySummaries("chat"), true);
+    assert.equal(companionLaneUsesQdrantMemorySummaries("zen"), true);
+    assert.equal(companionLaneUsesQdrantMemorySummaries("sandbox"), false);
+    assert.equal(companionLaneUsesQdrantMemorySummaries("coffee"), false);
+  });
+
+  it("injects Qdrant summary hits into Chat prompts and Psychic continuity", async () => {
+    const db = createChatTestDb();
+    const qdrantSearches: string[] = [];
+    const chatBodies: Array<{
+      messages?: Array<{ role?: string; content: string }>;
+    }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role?: string; content: string }>;
+        prompt?: string;
+        vector?: number[];
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/collections/")) {
+        if (url.includes("/points/search")) {
+          qdrantSearches.push(url);
+          return new Response(
+            JSON.stringify({
+              result: [
+                {
+                  id: "qdrant-chat-fact-1",
+                  score: 0.93,
+                  payload: {
+                    userId: "user-1",
+                    text: "QDRANT_CHAT_FACT: user collects vintage radios.",
+                  },
+                },
+              ],
+            }),
+            { status: 200, headers: { "content-type": "application/json" } },
+          );
+        }
+        return new Response("{}", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      chatBodies.push(body);
+      const content =
+        body.messages?.map((message) => message.content).join("\n") ?? "";
+      if (content.includes("Prism's user-readable Psychic planning pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                summary: "I will use the remembered radio hobby.",
+                scratchpad: "qdrant fact present",
+                answerGuidance: "Mention vintage radios if relevant.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (content.includes("Prism's private")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: "Keep radios fact.",
+                summary: "Locked hobby fact.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: { content: "You collect vintage radios." },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "What hobby do you remember about me?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: "bot-1",
+        incognito: false,
+        mode: "chat",
+        botSystemPrompt: "You are the selected bot.",
+        experimentalAllModelEffortEnabled: false,
+        psychicModeEnabled: true,
+        botOverrides: { model: "llama3.2", reasoningEffort: "high" },
+      },
+    );
+
+    assert.ok(qdrantSearches.length >= 1, "Chat should query Qdrant summaries");
+    const allChat = JSON.stringify(chatBodies);
+    assert.match(allChat, /QDRANT_CHAT_FACT: user collects vintage radios/);
+    assert.match(allChat, /Thread state card for private planning|User memory hints/);
+    assert.ok(
+      result.backendEvents?.some((event) =>
+        event.detail?.includes("continuity_digest"),
+      ) || allChat.includes("QDRANT_CHAT_FACT"),
+    );
+    await flushBackgroundTitleJobs();
+  });
+
+  it("does not query Qdrant summaries for Sandbox turns", async () => {
+    const db = createChatTestDb();
+    let qdrantSearchCount = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ content: string }>;
+        prompt?: string;
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/points/search")) {
+        qdrantSearchCount += 1;
+        return new Response(JSON.stringify({ result: [] }), {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (url.includes("/collections/")) {
+        return new Response("{}", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "Sandbox reply." } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    await processChatMessage(
+      db,
+      "user-1",
+      "Remember anything?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        incognito: false,
+        mode: "sandbox",
+      },
+    );
+
+    assert.equal(qdrantSearchCount, 0);
+    await flushBackgroundTitleJobs();
+  });
+
+  it("queues Chat Qdrant summary upserts at a memory milestone", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-chat-qdrant-write";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'chat', ?, 0, ?, ?)`,
+    ).run(
+      conversationId,
+      userId,
+      "Chat Qdrant Write",
+      "bot-1",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:08.000Z",
+    );
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    // Seed 8 rows so the next user+assistant turn lands on the 10-message milestone.
+    for (let index = 0; index < 8; index += 1) {
+      insertMessage.run(
+        `seed-chat-write-${index}`,
+        conversationId,
+        userId,
+        index % 2 === 0 ? "user" : "assistant",
+        index % 2 === 0
+          ? "I collect vintage radios and prefer evening check-ins."
+          : "Got it — vintage radios and evening check-ins.",
+        new Date(Date.parse("2026-01-01T00:00:00.000Z") + index * 1000).toISOString(),
+      );
+    }
+
+    let qdrantPointUpserts = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method ?? "GET").toUpperCase();
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role?: string; content: string }>;
+        prompt?: string;
+        points?: unknown[];
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/collections/")) {
+        if (url.includes("/points") && !url.includes("/search") && !url.includes("/delete")) {
+          if (method === "PUT" || Array.isArray(body.points)) {
+            qdrantPointUpserts += 1;
+          }
+        }
+        return new Response("{}", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      const joined =
+        body.messages?.map((message) => message.content).join("\n") ?? "";
+      const system = body.messages?.[0]?.content ?? "";
+      if (system.includes("memory extraction assistant")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content:
+                "- User collects vintage radios.\n- User prefers evening check-ins.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (system.includes("memory validation critic")) {
+        const validationPayload = JSON.parse(body.messages?.[1]?.content ?? "{}") as {
+          candidates?: Array<{ index: number; text: string; confidence: number }>;
+        };
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                results: (validationPayload.candidates ?? []).map((candidate) => ({
+                  index: candidate.index,
+                  decision: "approve",
+                  text: candidate.text,
+                  confidence: candidate.confidence,
+                  reasonCodes: [],
+                })),
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (joined.includes("Prism's user-readable Psychic planning pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                summary: "I will remember the radio hobby.",
+                scratchpad: "radios + evening check-ins",
+                answerGuidance: "Acknowledge the remembered preferences.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (joined.includes("Prism's private")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: "Keep radio preference.",
+                summary: "Locked hobby fact.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "Noted your radio collection." } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      userId,
+      "Please remember those preferences.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: "bot-1",
+        botSystemPrompt: "You are the selected bot.",
+        incognito: false,
+        mode: "chat",
+        experimentalAllModelEffortEnabled: false,
+      },
+      conversationId,
+    );
+
+    assert.ok(
+      result.backendEvents?.some(
+        (event) =>
+          event.message === "Queued thread compaction" &&
+          event.detail?.includes("reason=milestone") &&
+          event.detail?.includes("mode=chat"),
+      ),
+      "expected Chat milestone compaction queue event",
+    );
+
+    await waitUntil("Chat chat_facts summary row", () => {
+      const rows = db
+        .prepare(
+          "SELECT summary FROM memory_summaries WHERE user_id = ? AND conversation_id = ?",
+        )
+        .all(userId, conversationId) as Array<{ summary: string }>;
+      return rows.some((row) => {
+        try {
+          const parsed = JSON.parse(row.summary) as { kind?: string; mode?: string };
+          return parsed.kind === "chat_facts" && parsed.mode === "chat";
+        } catch {
+          return false;
+        }
+      });
+    });
+    await waitUntil("Chat Qdrant point upsert", () => qdrantPointUpserts >= 1);
+    assert.ok(qdrantPointUpserts >= 1);
+    await flushBackgroundTitleJobs();
+  });
+
+  it("does not upsert Qdrant chat_facts summaries for Sandbox milestones", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-sandbox-qdrant-write";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'sandbox', NULL, 0, ?, ?)`,
+    ).run(
+      conversationId,
+      userId,
+      "Sandbox Qdrant Write Gate",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:08.000Z",
+    );
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)",
+    );
+    for (let index = 0; index < 8; index += 1) {
+      insertMessage.run(
+        `seed-sandbox-write-${index}`,
+        conversationId,
+        userId,
+        index % 2 === 0 ? "user" : "assistant",
+        `Sandbox transcript row ${index}`,
+        new Date(Date.parse("2026-01-01T00:00:00.000Z") + index * 1000).toISOString(),
+      );
+    }
+
+    let qdrantPointUpserts = 0;
+    let memoryExtractionCalls = 0;
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const method = String(init?.method ?? "GET").toUpperCase();
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ content: string }>;
+        prompt?: string;
+        points?: unknown[];
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (url.includes("/collections/")) {
+        if (url.includes("/points") && !url.includes("/search") && !url.includes("/delete")) {
+          if (method === "PUT" || Array.isArray(body.points)) {
+            qdrantPointUpserts += 1;
+          }
+        }
+        return new Response("{}", {
+          status: 200,
+          headers: { "content-type": "application/json" },
+        });
+      }
+      if (body.messages?.[0]?.content.includes("memory extraction assistant")) {
+        memoryExtractionCalls += 1;
+        return new Response(
+          JSON.stringify({
+            message: { content: "- Sandbox should never store this as chat_facts." },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "Sandbox reply." } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      userId,
+      "Continue the sandbox thread.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        incognito: false,
+        mode: "sandbox",
+        experimentalAllModelEffortEnabled: false,
+      },
+      conversationId,
+    );
+
+    assert.ok(
+      result.backendEvents?.some(
+        (event) =>
+          event.message === "Queued thread compaction" &&
+          event.detail?.includes("reason=milestone") &&
+          event.detail?.includes("mode=sandbox"),
+      ),
+      "expected Sandbox milestone compaction queue event",
+    );
+
+    // Give background compact/store work a chance to race; Sandbox must still stay quiet.
+    await new Promise<void>((resolve) => setTimeout(resolve, 250));
+    assert.equal(memoryExtractionCalls, 0);
+    assert.equal(qdrantPointUpserts, 0);
+    const chatFactsCount = (
+      db
+        .prepare(
+          "SELECT summary FROM memory_summaries WHERE user_id = ? AND conversation_id = ?",
+        )
+        .all(userId, conversationId) as Array<{ summary: string }>
+    ).filter((row) => {
+      try {
+        return (JSON.parse(row.summary) as { kind?: string }).kind === "chat_facts";
+      } catch {
+        return false;
+      }
+    }).length;
+    assert.equal(chatFactsCount, 0);
+    await flushBackgroundTitleJobs();
   });
 });
 
@@ -1957,6 +2435,133 @@ describe("processChatMessage Psychic planning", () => {
     await flushBackgroundTitleJobs();
   });
 
+  it("injects key-phrase transfer hints for local and private planning pass", async () => {
+    const db = createChatTestDb();
+    const keyPhrasePrompt = [
+      "In exactly 2 sentences, explain how Prism can keep a chat on the user's machine.",
+      "",
+      "Constraints:",
+      "- Include the word local",
+      "- Use the exact phrase private planning pass once",
+      "- Keep under 60 words",
+      "- Do not show step-by-step private reasoning",
+    ].join("\n");
+    const requests: Array<{
+      messages?: Array<{ role?: string; content: string }>;
+    }> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role?: string; content: string }>;
+      };
+      requests.push(body);
+      const content =
+        body.messages?.map((message) => message.content).join("\n") ?? "";
+      if (content.includes("You repair an assistant answer")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content:
+                "Prism can keep a chat local on the user's machine. A private planning pass can also run there with a local model.",
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (content.includes("Prism's user-readable Psychic planning pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                summary: "I mapped the key-phrase constraints.",
+                scratchpad: "mention local and private planning pass",
+                answerGuidance: "Two sentences with required phrases.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (content.includes("Prism's private draft pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact:
+                  "Prism stores logs in a private planning pass that keeps chats local-first.",
+                summary: "I drafted a candidate explanation.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      if (content.includes("Prism's private audit pass")) {
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: "[]",
+                summary: "I checked nothing useful.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              "Prism keeps chats by storing all data and logs in a private planning pass that ensures confidentiality. This self-hosted approach keeps conversations stored locally.",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-key-phrase-transfer",
+      keyPhrasePrompt,
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: true,
+        mode: "sandbox",
+        experimentalAllModelEffortEnabled: false,
+        botOverrides: { model: "llama3.2", reasoningEffort: "high" },
+      },
+    );
+
+    const finalRequest = requests.find((request) =>
+      request.messages?.some((message) =>
+        message.content.includes(
+          "Guidance derived from Prism's user-readable Psychic plan",
+        ),
+      ),
+    );
+    assert.ok(finalRequest);
+    const guidanceBlob = JSON.stringify(finalRequest);
+    assert.match(guidanceBlob, /Include the word local/i);
+    assert.match(guidanceBlob, /private planning pass exactly once/i);
+    assert.match(guidanceBlob, /storage container|stored inside/i);
+    assert.match(guidanceBlob, /exactly 2 sentences/i);
+    assert.ok(
+      result.backendEvents?.some((event) =>
+        event.detail?.includes("final_constraint_repair"),
+      ),
+    );
+    const assistant = result.conversation.messages.find(
+      (message) => message.role === "assistant",
+    )?.content;
+    assert.doesNotMatch(
+      assistant ?? "",
+      /logs in a private planning pass/i,
+    );
+    await flushBackgroundTitleJobs();
+  });
+
   it("strips a leaked leading assistant role marker from the final local reply", async () => {
     const db = createChatTestDb();
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -2481,6 +3086,396 @@ describe("processChatMessage Psychic planning", () => {
           event.detail?.includes("provider=anthropic")
       )
     );
+  });
+
+  it("packs only continuity system sources into the Psychic digest", () => {
+    const digest = extractPsychicContinuityDigest([
+      { role: "system", content: "You are a helpful bot with tools." },
+      {
+        role: "system",
+        content:
+          "Earlier in this thread (compacted context):\nUser asked about cafe staffing hours.",
+      },
+      {
+        role: "system",
+        content:
+          "User memory hints about the human user (conversation context only; do not rewrite persona identity):\n- Jared prefers evening check-ins.",
+      },
+      {
+        role: "system",
+        content:
+          "Recent Coffee session context for this bot:\nThese are summary-level notes from the most recent Coffee sessions this bot participated in. Use them only as lightweight continuity when the user follows up on a Coffee-session remark. Do not invent exact quotes; if the user supplies a quote, use it as their reference point.\n- 1. Morning brew: talked about local models.",
+      },
+      { role: "user", content: "Continue from that." },
+    ]);
+    assert.match(digest, /Thread state card for private planning/);
+    assert.match(digest, /background constraints when relevant/i);
+    assert.match(digest, /not the reply topic/i);
+    assert.match(digest, /\[Thread\]/);
+    assert.match(digest, /\[Memory\]/);
+    assert.match(digest, /\[Coffee\]/);
+    assert.match(digest, /cafe staffing hours/);
+    assert.match(digest, /evening check-ins/);
+    assert.match(digest, /Morning brew/);
+    assert.doesNotMatch(digest, /helpful bot with tools/);
+    assert.doesNotMatch(digest, /summary-level notes/);
+    assert.doesNotMatch(digest, /do not rewrite persona identity/i);
+  });
+
+  it("pins Psychic topic-anchor rules against continuity topic hijack", () => {
+    assert.match(PSYCHIC_TOPIC_ANCHOR_RULES, /latest user message defines the reply topic/i);
+    assert.match(PSYCHIC_TOPIC_ANCHOR_RULES, /background constraints only/i);
+    assert.match(PSYCHIC_TOPIC_ANCHOR_RULES, /casual social turns/i);
+    assert.match(PSYCHIC_TOPIC_ANCHOR_RULES, /Never invent people/i);
+    assert.match(PSYCHIC_TOPIC_ANCHOR_RULES, /attribute them to the Thread state card/i);
+  });
+
+  it("priority-packs the thread-state card under the char budget", () => {
+    const longCoffee = Array.from({ length: 40 }, (_, index) =>
+      `- ${index + 1}. Coffee filler note about ambient chatter topic ${index + 1} with extra padding words.`,
+    ).join("\n");
+    const digest = extractPsychicContinuityDigest([
+      {
+        role: "system",
+        content:
+          "Earlier in this thread (compacted context):\nMUSTKEEP_THREAD_FACT: cafe closes at 9pm local.",
+      },
+      {
+        role: "system",
+        content:
+          "User memory hints about the human user (conversation context only; do not rewrite persona identity):\n- MUSTKEEP_MEMORY_FACT: allergic to shellfish.",
+      },
+      {
+        role: "system",
+        content: `Recent Coffee session context for this bot:\nThese are summary-level notes.\n${longCoffee}`,
+      },
+    ]);
+    assert.ok(digest.length <= 1400);
+    assert.match(digest, /MUSTKEEP_THREAD_FACT/);
+    assert.match(digest, /MUSTKEEP_MEMORY_FACT/);
+    assert.match(digest, /\[Thread\]/);
+    assert.match(digest, /\[Memory\]/);
+    // Coffee may be truncated, but thread/memory must survive.
+    assert.doesNotMatch(digest, /summary-level notes/);
+  });
+
+  it("packs Zen continuity prefixes into the thread-state card", () => {
+    const digest = extractPsychicContinuityDigest([
+      {
+        role: "system",
+        content:
+          "Zen session memory context:\nThese are summary-level notes.\n- MUSTKEEP_ZEN_SESSION: prefers morning silence.",
+      },
+      {
+        role: "system",
+        content:
+          "Zen Facet continuity context:\nUse this quietly and naturally.\n- MUSTKEEP_ZEN_FACET: working through grief gently.",
+      },
+      {
+        role: "system",
+        content:
+          "Zen session resume context:\nThe user is returning to this continuous thread.\n- MUSTKEEP_ZEN_RESUME: last left at breath practice.",
+      },
+    ]);
+    assert.match(digest, /\[Zen session\]/);
+    assert.match(digest, /\[Zen Facet\]/);
+    assert.match(digest, /\[Zen resume\]/);
+    assert.match(digest, /MUSTKEEP_ZEN_SESSION/);
+    assert.match(digest, /MUSTKEEP_ZEN_FACET/);
+    assert.match(digest, /MUSTKEEP_ZEN_RESUME/);
+    assert.doesNotMatch(digest, /summary-level notes/i);
+    assert.doesNotMatch(digest, /use this quietly and naturally/i);
+    assert.doesNotMatch(digest, /returning to this continuous/i);
+  });
+
+  it("feeds thread compact continuity into Psychic plan and private passes", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-psychic-continuity";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'zen', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Psychic Continuity",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    insertMessage.run(
+      "old-user",
+      conversationId,
+      userId,
+      "user",
+      "Remember that the cafe closes at 9pm local time.",
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "old-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "Understood — close is 9pm local.",
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    const compactProvider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages) {
+        return messages[0]?.content.includes("ultra-short internal thought")
+          ? "Tracking cafe close time."
+          : "Thread note: cafe closes at 9pm local time.";
+      },
+      async embedText() {
+        return fallbackEmbedding("unused");
+      },
+    };
+    const compacted = await summarizeThreadCompact(
+      db,
+      compactProvider,
+      userId,
+      conversationId,
+      { mode: "zen", reason: "manual", force: true }
+    );
+    assert.equal(compacted.triggered, true);
+
+    const planningBodies: Array<{
+      messages?: Array<{ role?: string; content: string }>;
+    }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role?: string; content: string }>;
+        prompt?: string;
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      const content =
+        body.messages?.map((message) => message.content).join("\n") ?? "";
+      if (content.includes("Prism's user-readable Psychic planning pass")) {
+        planningBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                summary: "I will honor the cafe close time.",
+                scratchpad: "close=9pm local",
+                answerGuidance: "Keep the 9pm local close.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (content.includes("Prism's private")) {
+        planningBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: "Keep 9pm local.",
+                summary: "Locked close time.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({ message: { content: "Cafe closes at 9pm local." } }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      userId,
+      "What time does the cafe close?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "zen",
+        experimentalAllModelEffortEnabled: false,
+        botOverrides: { model: "llama3.2", reasoningEffort: "high" },
+      },
+      conversationId
+    );
+
+    assert.ok(planningBodies.length >= 1);
+    const planningBlob = JSON.stringify(planningBodies);
+    assert.match(planningBlob, /Thread state card for private planning/);
+    assert.match(planningBlob, /\[Thread\]/);
+    assert.match(planningBlob, /9pm local/i);
+    assert.ok(
+      result.backendEvents?.some((event) =>
+        event.detail?.includes("continuity_digest") &&
+        event.detail?.includes("card=thread_state")
+      ),
+      "expected continuity_digest thread-state card planning warning"
+    );
+    await flushBackgroundTitleJobs();
+  });
+
+  it("keeps casual Psychic planning on the user ask when continuity names a third party", async () => {
+    const db = createChatTestDb();
+    const userId = "user-1";
+    const conversationId = "conv-psychic-topic-anchor";
+    db.prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, 'zen', NULL, 0, ?, ?)`
+    ).run(
+      conversationId,
+      userId,
+      "Psychic Topic Anchor",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:02.000Z"
+    );
+    const insertMessage = db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, created_at) VALUES (?, ?, ?, ?, ?, ?)"
+    );
+    insertMessage.run(
+      "seed-user",
+      conversationId,
+      userId,
+      "user",
+      "Earlier we discussed Joseph Smith's reputation for incorruptibility.",
+      "2026-01-01T00:00:01.000Z"
+    );
+    insertMessage.run(
+      "seed-assistant",
+      conversationId,
+      userId,
+      "assistant",
+      "Noted — Joseph Smith and incorruptibility stay in thread context.",
+      "2026-01-01T00:00:02.000Z"
+    );
+
+    const compactProvider: LlmProvider = {
+      name: "local",
+      async generateResponse(messages) {
+        return messages[0]?.content.includes("ultra-short internal thought")
+          ? "Tracking Joseph Smith note."
+          : "Thread note: user previously discussed Joseph Smith's reputation for incorruptibility.";
+      },
+      async embedText() {
+        return fallbackEmbedding("unused");
+      },
+    };
+    const compacted = await summarizeThreadCompact(
+      db,
+      compactProvider,
+      userId,
+      conversationId,
+      { mode: "zen", reason: "manual", force: true }
+    );
+    assert.equal(compacted.triggered, true);
+
+    const planningBodies: Array<{
+      messages?: Array<{ role?: string; content: string }>;
+    }> = [];
+    globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
+      const url = String(input);
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ role?: string; content: string }>;
+        prompt?: string;
+      };
+      if (url.includes("/api/embeddings")) {
+        return new Response(
+          JSON.stringify({ embedding: fallbackEmbedding(body.prompt ?? "") }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      const content =
+        body.messages?.map((message) => message.content).join("\n") ?? "";
+      if (content.includes("Prism's user-readable Psychic planning pass")) {
+        planningBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                summary:
+                  "I will answer the how-are-you socially without pivoting into a biography digression.",
+                scratchpad: "user asked how are you; continuity name is background only",
+                answerGuidance:
+                  "Reply warmly to the social check-in. Do not explain Joseph Smith unless asked.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      if (content.includes("Prism's private")) {
+        planningBodies.push(body);
+        return new Response(
+          JSON.stringify({
+            message: {
+              content: JSON.stringify({
+                artifact: content.includes("synthesis pass")
+                  ? "- Final: Answer the social check-in warmly."
+                  : "Keep the reply on the social ask.",
+                summary: "Locked a social reply to the user's latest ask.",
+              }),
+            },
+          }),
+          { status: 200, headers: { "content-type": "application/json" } }
+        );
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content: "I'm doing well today — thanks for asking. How about you?",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } }
+      );
+    }) as typeof fetch;
+
+    // Deep medium ladder matches the 7-pass Psychic Simulated UI (incl. synthesis).
+    const result = await processChatMessage(
+      db,
+      userId,
+      "Lol, yes it is. How are you?",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "zen",
+        psychicModeEnabled: true,
+        experimentalAllModelEffortEnabled: true,
+        botOverrides: { model: "llama3.2", reasoningEffort: "medium" },
+      },
+      conversationId
+    );
+
+    assert.ok(planningBodies.length >= 1);
+    const planningBlob = JSON.stringify(planningBodies);
+    assert.match(planningBlob, /Thread state card for private planning/);
+    assert.match(planningBlob, /Joseph Smith/i);
+    assert.match(planningBlob, /latest user message defines the reply topic/i);
+    assert.match(planningBlob, /casual social turns/i);
+    assert.match(planningBlob, /not the reply topic/i);
+    assert.match(planningBlob, /How are you\?/i);
+    assert.match(
+      planningBlob,
+      /earlier private passes drifted onto a continuity name/i
+    );
+    const assistant = [...result.conversation.messages]
+      .reverse()
+      .find((message) => message.role === "assistant");
+    assert.match(assistant?.content ?? "", /thanks for asking|How about you/i);
+    await flushBackgroundTitleJobs();
   });
 });
 

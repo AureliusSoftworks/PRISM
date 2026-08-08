@@ -1059,6 +1059,20 @@ interface PsychicPrivateTextPassResult {
   diagnostic: PsychicPrivatePassDiagnostic;
 }
 
+/**
+ * Shared PLAN/SYNTHESIS guard: continuity is background constraints, not the
+ * reply subject. Pins the llama3.2 failure mode where Thread state card names
+ * (or invented attributions) hijack casual social turns in public summaries.
+ */
+export const PSYCHIC_TOPIC_ANCHOR_RULES = [
+  "Topic anchor: the latest user message defines the reply topic and goal.",
+  "Thread state card and continuity facts are background constraints only — use them when they help satisfy the user's latest ask (formats, privacy, remembered preferences, prior commitments).",
+  "Do not make continuity people, places, or side facts the subject of the reply, plan summary, or answerGuidance unless the user clearly asked about them.",
+  "On casual social turns (greetings, how-are-you, small talk), plan a natural social reply; do not pivot into explaining a continuity name or biography.",
+  "Never invent people, topics, or biography details and attribute them to the Thread state card. If the card is empty or irrelevant, ignore it.",
+  "Public summary must describe how the reply will address the user's latest ask, not a continuity digression.",
+].join("\n");
+
 const PSYCHIC_PLANNING_SYSTEM_PROMPT = [
   "You are Prism's user-readable Psychic planning pass for the next assistant reply.",
   "Return only one JSON object with string fields: summary, scratchpad, and answerGuidance.",
@@ -1071,7 +1085,210 @@ const PSYCHIC_PLANNING_SYSTEM_PROMPT = [
   "When the user assigns requirements to rows, bullets, or labels, restate those label requirements in answerGuidance and preserve required key terms.",
   "If the user says local-only, prefer local machine, local device, local provider, or Ollama wording; never replace local-only with infrastructure-only wording.",
   "If the user asks for a UI indicator, prefer concrete indicator words like toast, badge, line, or label instead of turning the indicator into a settings toggle.",
+  "If a continuity context system message is present, treat its remembered facts and thread compact notes as must-keep constraints in answerGuidance when they are relevant to the user's latest ask.",
+  "If a Thread state card system message is present, treat listed facts as must-keep constraints in answerGuidance only when they help satisfy the user's latest ask — never as a replacement topic.",
+  PSYCHIC_TOPIC_ANCHOR_RULES,
 ].join("\n");
+
+/** Max chars for continuity re-injected into Psychic private passes. */
+const PSYCHIC_CONTINUITY_DIGEST_MAX_CHARS = 1_400;
+
+type PsychicContinuitySectionKind =
+  | "thread"
+  | "memory"
+  | "zen_session"
+  | "zen_facet"
+  | "zen_resume"
+  | "coffee";
+
+/**
+ * System prefixes that carry thread/memory continuity into the final prompt.
+ * Psychic planning historically stripped all system messages, so these never
+ * reached plan/draft/audit — only the final answer saw them.
+ */
+const PSYCHIC_CONTINUITY_SOURCE_SPECS: ReadonlyArray<{
+  kind: PsychicContinuitySectionKind;
+  prefix: string;
+  label: string;
+  /** Relative share of the card budget when packing under the char cap. */
+  weight: number;
+}> = [
+  {
+    kind: "thread",
+    prefix: "Earlier in this thread (compacted context):",
+    label: "Thread",
+    weight: 4,
+  },
+  {
+    kind: "memory",
+    prefix:
+      "User memory hints about the human user (conversation context only; do not rewrite persona identity):",
+    label: "Memory",
+    weight: 3,
+  },
+  {
+    kind: "zen_session",
+    prefix: "Zen session memory context:",
+    label: "Zen session",
+    weight: 2,
+  },
+  {
+    kind: "zen_facet",
+    prefix: "Zen Facet continuity context:",
+    label: "Zen Facet",
+    weight: 2,
+  },
+  {
+    kind: "zen_resume",
+    prefix: "Zen session resume context:",
+    label: "Zen resume",
+    weight: 1,
+  },
+  {
+    kind: "coffee",
+    prefix: "Recent Coffee session context for this bot:",
+    label: "Coffee",
+    weight: 1,
+  },
+];
+
+const PSYCHIC_CONTINUITY_BOILERPLATE_LINE =
+  /^(?:these are summary-level notes|use them only as lightweight|do not invent exact quotes|the user is returning to this continuous|use this quietly and naturally|conversation context only|do not rewrite persona identity|do not announce hidden context)/i;
+
+function stripPsychicContinuityBoilerplate(raw: string): string {
+  const lines = raw
+    .replace(/\r\n/g, "\n")
+    .split("\n")
+    .map((line) => line.trim())
+    .filter((line) => line.length > 0)
+    .filter((line) => !PSYCHIC_CONTINUITY_BOILERPLATE_LINE.test(line));
+  return lines.join("\n").trim();
+}
+
+function clampPsychicContinuitySection(
+  value: string,
+  maxChars: number,
+): string {
+  if (maxChars <= 0) return "";
+  const normalized = value.replace(/\s+\n/g, "\n").trim();
+  if (normalized.length <= maxChars) return normalized;
+  if (maxChars <= 1) return "…";
+  // Prefer keeping leading bullets/facts when trimming.
+  const lines = normalized.split("\n");
+  const kept: string[] = [];
+  let used = 0;
+  for (const line of lines) {
+    const next = kept.length === 0 ? line : `\n${line}`;
+    if (used + next.length > maxChars - 1) break;
+    kept.push(line);
+    used += next.length;
+  }
+  if (kept.length > 0) {
+    return `${kept.join("\n").trimEnd()}…`;
+  }
+  return `${normalized.slice(0, maxChars - 1).trimEnd()}…`;
+}
+
+/**
+ * Pack thread compact + memory/continuity system hints into a denser
+ * sectioned card for Psychic private passes. Strips instructional fluff and
+ * priority-packs under a fixed char budget so LOCAL High keeps must-keep facts.
+ */
+export function extractPsychicContinuityDigest(
+  promptMessages: readonly ProviderMessage[],
+): string {
+  const collected = new Map<
+    PsychicContinuitySectionKind,
+    { label: string; weight: number; body: string }
+  >();
+  for (const message of promptMessages) {
+    if (message.role !== "system") continue;
+    const content = message.content.trim();
+    if (!content) continue;
+    const spec = PSYCHIC_CONTINUITY_SOURCE_SPECS.find((item) =>
+      content.startsWith(item.prefix),
+    );
+    if (!spec) continue;
+    const withoutPrefix = content.startsWith(spec.prefix)
+      ? content.slice(spec.prefix.length).trim()
+      : content;
+    const body = stripPsychicContinuityBoilerplate(withoutPrefix);
+    if (!body) continue;
+    const existing = collected.get(spec.kind);
+    if (existing) {
+      existing.body = `${existing.body}\n${body}`.trim();
+    } else {
+      collected.set(spec.kind, {
+        label: spec.label,
+        weight: spec.weight,
+        body,
+      });
+    }
+  }
+  if (collected.size === 0) return "";
+
+  const header =
+    "Thread state card for private planning (background constraints when relevant to the user's latest ask; do not invent beyond this; not the reply topic unless the user asked):";
+  const orderedKinds = PSYCHIC_CONTINUITY_SOURCE_SPECS.map((item) => item.kind);
+  const sections = orderedKinds
+    .map((kind) => collected.get(kind))
+    .filter(
+      (section): section is { label: string; weight: number; body: string } =>
+        Boolean(section),
+    );
+  const render = (
+    packed: Array<{ label: string; body: string }>,
+  ): string =>
+    [header, ...packed.map((section) => `[${section.label}]\n${section.body}`)]
+      .join("\n")
+      .trim();
+
+  const full = render(
+    sections.map((section) => ({ label: section.label, body: section.body })),
+  );
+  if (full.length <= PSYCHIC_CONTINUITY_DIGEST_MAX_CHARS) return full;
+
+  const budget = Math.max(
+    120,
+    PSYCHIC_CONTINUITY_DIGEST_MAX_CHARS - header.length - sections.length * 8,
+  );
+  const weightSum = sections.reduce((sum, section) => sum + section.weight, 0);
+  let remaining = budget;
+  const packed: Array<{ label: string; body: string }> = [];
+  for (let index = 0; index < sections.length; index += 1) {
+    const section = sections[index]!;
+    const sectionsLeft = sections.length - index;
+    const proportional = Math.floor(
+      (budget * section.weight) / Math.max(1, weightSum),
+    );
+    const share =
+      index === sections.length - 1
+        ? remaining
+        : Math.max(48, Math.min(remaining - (sectionsLeft - 1) * 24, proportional));
+    const body = clampPsychicContinuitySection(section.body, share);
+    if (body) {
+      packed.push({ label: section.label, body });
+      remaining = Math.max(0, remaining - body.length);
+    }
+  }
+  const card = render(packed);
+  if (card.length <= PSYCHIC_CONTINUITY_DIGEST_MAX_CHARS) return card;
+  return `${card.slice(0, PSYCHIC_CONTINUITY_DIGEST_MAX_CHARS - 1).trimEnd()}…`;
+}
+
+function withPsychicContinuityMessages(args: {
+  systemPrompt: string;
+  continuityDigest: string;
+  conversationMessages: ProviderMessage[];
+}): ProviderMessage[] {
+  return [
+    { role: "system", content: args.systemPrompt },
+    ...(args.continuityDigest
+      ? [{ role: "system" as const, content: args.continuityDigest }]
+      : []),
+    ...args.conversationMessages,
+  ];
+}
 
 const PSYCHIC_PLANNING_JSON_SCHEMA = {
   type: "object",
@@ -1269,6 +1486,9 @@ function buildPsychicDraftPrompt(args: {
     "Obey the user's requested format, labels, word limits, and forbidden-word rules exactly. If the user asks for S1-S6 labels, use S1, S2, S3, S4, S5, and S6 exactly.",
     "Preserve required key terms from the user's constraints, and return only the requested answer shape without extra notes, summaries, or analysis preambles.",
     "If the user states shift lengths, open/close windows, or named-person can't/cannot rules, obey them even when a planning note conflicts.",
+    "If the user says local-only or include the word local, include the word local.",
+    "If the user requires the phrase private planning pass, use it once as a required mention — do not redefine it as where chat logs are stored.",
+    "If the user asks for exactly N sentences, write exactly that many sentences.",
     "If the user says local-only, use local machine, local device, local provider, or Ollama wording; do not replace local-only with infrastructure-only wording.",
     "If Psychic mode needs a visible indicator, name a toast, badge, subtle line, or label, not a toggle.",
     "Do not reveal chain-of-thought. Do not mention that this is a draft.",
@@ -1299,8 +1519,9 @@ function buildPsychicAuditPrompt(args: {
     "Check missing constraints, privacy issues, answer shape, and likely user-facing mistakes.",
     "Specifically check exact row/step labels (S1-S6 or R1-R3), forbidden words, word limits, shift lengths, open/close windows, named-person can't/cannot rules, every named row constraint, and whether any requested UI indicator is a toast, badge, subtle line, or label instead of a toggle. If S1-S6 labels were requested, say to use S1-S6 and not 1-6.",
     "For staffing or schedule prompts: reject closing shifts for anyone who can't close; reject shifts shorter/longer than required; reject coverage past the stated open hours; require every requested risk/format label.",
-    "If the user says local-only, tell the final answer to use local machine, local device, local provider, or Ollama wording; never recommend infrastructure-only wording.",
-    "If the user says private planning pass, tell the final answer to use the exact phrase private planning pass.",
+    "If the user says local-only or include the word local, tell the final answer to include the word local.",
+    "If the user says private planning pass, tell the final answer to use that exact phrase once and not to claim chat logs are stored inside a private planning pass.",
+    "If the user asks for exactly N sentences, enforce that sentence count.",
     "Tell the final answer to preserve required key terms and to avoid extra notes, analysis preambles, or step-by-step private reasoning outside the requested format.",
     "Do not include raw chain-of-thought.",
     "If you cannot produce useful Fix/Keep bullets, still return at least three Keep bullets naming the hardest user must-keeps. Never return an empty array or placeholder.",
@@ -1472,6 +1693,8 @@ function buildPsychicSynthesisPrompt(args: {
     "summary: write 1-2 short first-person sentences explaining what the final brief locked in.",
     "Do not put a Markdown table in artifact. Do not write the final answer. Do not copy draft wording.",
     "Focus on satisfying constraints, preserving privacy, avoiding overlong output, obeying forbidden-word rules, preserving exact requested labels such as S1-S6, and naming concrete UI indicators rather than toggles.",
+    PSYCHIC_TOPIC_ANCHOR_RULES,
+    "If earlier private passes drifted onto a continuity name or biography the user did not ask about, correct the final brief back to the user's latest ask.",
     "",
     "User request:",
     "---",
@@ -1643,6 +1866,8 @@ function isExplicitUserConstraintLine(line: string): boolean {
     /^(?:do not|don't|keep\b|use (?:only|columns:)|shifts?\s+must|no\s+\w+\s+works?\s+more)/i.test(
       line,
     ) ||
+    /^(?:include the word|use the (?:exact )?phrase|use the word)\b/i.test(line) ||
+    /^(?:in exactly|exactly)\s+\d+\s+sentences?\b/i.test(line) ||
     /\bexactly\s+\d+\b.*\blabeled\s+[SR]\d+/i.test(line) ||
     /\b(?:can't|cannot|must not|mustn't)\b/i.test(line) ||
     /\bmust\s+(?:be|cover|include|work)\b/i.test(line) ||
@@ -1727,12 +1952,14 @@ function prioritizeUserMustKeeps(
     if (/\b(?:can't|cannot|mustn't|must not)\s+close\b/i.test(line)) return 0;
     if (/\bshifts?\s+must\b/i.test(line)) return 1;
     if (/\bexactly\s+\d+\b/i.test(line) && /\bR\d/i.test(line)) return 2;
-    if (/\bmust\s+cover\b/i.test(line)) return 3;
-    if (/\b(?:can't|cannot|mustn't|must not)\b/i.test(line)) return 4;
-    if (/^use only\b/i.test(line)) return 5;
-    if (/^do not show\b/i.test(line)) return 6;
-    if (/^do not\b|^keep\b/i.test(line)) return 7;
-    return 8;
+    if (/exact phrase|include the word|use the word/i.test(line)) return 3;
+    if (/\bexactly\s+\d+\s+sentences?\b/i.test(line)) return 4;
+    if (/\bmust\s+cover\b/i.test(line)) return 5;
+    if (/\b(?:can't|cannot|mustn't|must not)\b/i.test(line)) return 6;
+    if (/^use only\b/i.test(line)) return 7;
+    if (/^do not show\b/i.test(line)) return 8;
+    if (/^do not\b|^keep\b/i.test(line)) return 9;
+    return 10;
   };
   return [...constraints]
     .sort((left, right) => rank(left) - rank(right) || left.length - right.length)
@@ -1795,6 +2022,22 @@ function buildDeterministicConstraintAudit(args: {
       "- Fix: No analysis preamble; emit only the requested answer shape.",
     );
   }
+  if (
+    /\binclude the word\s+local\b/i.test(request) ||
+    /\bthe word\s+local\b/i.test(request) ||
+    /\blocal[-\s]?only\b/i.test(request)
+  ) {
+    pushBullet("- Keep: Include the word local.");
+  }
+  if (/\bprivate planning pass\b/i.test(request)) {
+    pushBullet(
+      "- Keep: Use the exact phrase private planning pass once; do not treat it as a chat-log storage container.",
+    );
+  }
+  const sentenceMatch = request.match(/\bexactly\s+(\d+)\s+sentences?\b/i);
+  if (sentenceMatch?.[1]) {
+    pushBullet(`- Keep: Write exactly ${sentenceMatch[1]} sentences.`);
+  }
   pushBullet(
     "- Fix: Never abbreviate the answer with ellipses; write the complete table and every required label.",
   );
@@ -1813,6 +2056,7 @@ async function runPsychicPrivateTextPass(args: {
   effort: ReasoningEffort;
   passName: SimulatedEffortTextPassName;
   systemPrompt: string;
+  continuityDigest?: string;
   includeOriginalPromptAsUser?: boolean;
   signal?: AbortSignal;
   onPlanningWarning?: (detail: string) => void;
@@ -1821,12 +2065,14 @@ async function runPsychicPrivateTextPass(args: {
   let raw = "";
   try {
     raw = await args.provider.generateResponse(
-      [
-        { role: "system", content: args.systemPrompt },
-        ...(args.includeOriginalPromptAsUser === false
-          ? []
-          : args.promptMessages.filter((message) => message.role !== "system")),
-      ],
+      withPsychicContinuityMessages({
+        systemPrompt: args.systemPrompt,
+        continuityDigest: args.continuityDigest ?? "",
+        conversationMessages:
+          args.includeOriginalPromptAsUser === false
+            ? []
+            : args.promptMessages.filter((message) => message.role !== "system"),
+      }),
       {
         ...args.botOverrides,
         maxTokens: psychicPrivateTextPassTokenBudget(args.effort, args.passName),
@@ -1892,21 +2138,29 @@ function appendPsychicAnswerGuidance(
   const latestUserMessage = latestUserPromptContent(promptMessages);
   const explicitConstraints = extractExplicitUserConstraints(promptMessages);
   const targetedConstraintHints = [
-    /\blocal[-\s]?only\b/i.test(latestUserMessage)
-      ? "Local-only wording: use the word local plus machine, device, provider, or Ollama; do not replace local-only with infrastructure-only wording."
+    /\blocal[-\s]?only\b/i.test(latestUserMessage) ||
+    /\binclude the word\s+local\b/i.test(latestUserMessage) ||
+    /\bthe word\s+local\b/i.test(latestUserMessage)
+      ? "Local wording: include the standalone word local (not only local-first or locally). Example: local machine or local storage."
       : "",
     /\bprivate planning pass\b/i.test(latestUserMessage)
-      ? "Private planning wording: use the exact phrase private planning pass where that requirement applies."
+      ? "Private planning wording: use the exact phrase private planning pass exactly once as a required mention. Do not claim chat logs or user data are stored inside a private planning pass."
       : "",
     /\bscratchpads?\s+are\s+not\s+persisted\b/i.test(latestUserMessage)
       ? "Scratchpad wording: use the exact phrase scratchpads are not persisted where that requirement applies."
       : "",
+    (() => {
+      const match = latestUserMessage.match(/\bexactly\s+(\d+)\s+sentences?\b/i);
+      if (!match?.[1]) return "";
+      return `Sentence count: write exactly ${match[1]} sentences — no more, no less.`;
+    })(),
   ].filter(Boolean);
   const content = [
     "Guidance derived from Prism's user-readable Psychic plan. Use it to answer consistently with the visible rationale, but do not mention this system message.",
-    "Follow the user's requested format exactly. Preserve requested labels exactly; if labels like S1-S6 or R1-R3 are requested, use those exact labels and do not convert them to 1-6. Preserve required key terms: if the prompt says local-only, include the word local; if it says private planning pass, use that exact phrase; if it says scratchpads are not persisted, use that exact phrase. Never add a Note or summary after an exact table/list request. Obey word limits and any forbidden-word rule. If a UI indicator is requested, name a toast, badge, subtle line, or label instead of a settings toggle.",
+    "Follow the user's requested format exactly. Preserve requested labels exactly; if labels like S1-S6 or R1-R3 are requested, use those exact labels and do not convert them to 1-6. Preserve required key terms: if the prompt says local-only or include the word local, include the word local; if it says private planning pass, use that exact phrase once without redefining it as a storage container; if it says scratchpads are not persisted, use that exact phrase. Never add a Note or summary after an exact table/list request. Obey word limits and any forbidden-word rule. If a UI indicator is requested, name a toast, badge, subtle line, or label instead of a settings toggle.",
     "User must-keeps and Explicit user constraints below outrank any Answer guidance or private draft that conflicts with them.",
     "Do not open with analysis ('Let's…', 'First…', 'Looking at…'). Emit only the requested deliverables. Never abbreviate with ellipses; write the complete table/list and every required label.",
+    "When a required phrase is listed, mention it accurately — do not warp the explanation to make the phrase sound like the storage location or mechanism if that would be wrong.",
     `Visible Psychic rationale: ${planningTrace.debug.summary}`,
     `Answer guidance: ${planningTrace.answerGuidance}`,
     ...targetedConstraintHints,
@@ -1959,6 +2213,11 @@ const PSYCHIC_FINAL_REPAIR_MAX_TOKENS = 900;
  * Cheap heuristics for constraint breaks weak locals often copy from a bad
  * private draft. Used only to decide whether to spend one repair generation.
  */
+function replyHasStandaloneLocal(reply: string): boolean {
+  // Require the token "local" itself — "local-first" / "locally" do not count.
+  return /(?<![\w-])local(?![\w-])/i.test(reply);
+}
+
 function detectObviousConstraintBreaks(
   reply: string,
   userRequest: string,
@@ -2026,12 +2285,55 @@ function detectObviousConstraintBreaks(
       breaks.push("A shift appears shorter than the required 4 hours.");
     }
   }
+  if (
+    /\binclude the word\s+local\b/i.test(userRequest) ||
+    /\bthe word\s+local\b/i.test(userRequest) ||
+    /\blocal[-\s]?only\b/i.test(userRequest)
+  ) {
+    if (!replyHasStandaloneLocal(reply)) {
+      breaks.push("Missing the required word local.");
+    }
+  }
+  if (/\bprivate planning pass\b/i.test(userRequest)) {
+    const phraseMatches = reply.match(/\bprivate planning pass\b/gi) ?? [];
+    if (phraseMatches.length === 0) {
+      breaks.push("Missing the exact phrase private planning pass.");
+    } else if (
+      /\bonce\b/i.test(userRequest) &&
+      phraseMatches.length > 1
+    ) {
+      breaks.push("The phrase private planning pass appears more than once.");
+    }
+    if (
+      /\b(?:stored?|storing|logs?)\b[^.!?\n]{0,48}\bin a private planning pass\b/i.test(
+        reply,
+      ) ||
+      /\bin a private planning pass that\b/i.test(reply)
+    ) {
+      breaks.push(
+        "Required phrase private planning pass is misused as a storage container.",
+      );
+    }
+  }
+  const sentenceMatch = userRequest.match(/\bexactly\s+(\d+)\s+sentences?\b/i);
+  if (sentenceMatch?.[1]) {
+    const needed = Number(sentenceMatch[1]);
+    const sentenceCount = text
+      .split(/[.!?]+/)
+      .map((part) => part.trim())
+      .filter(Boolean).length;
+    if (sentenceCount !== needed) {
+      breaks.push(
+        `Expected exactly ${needed} sentences, found ${sentenceCount}.`,
+      );
+    }
+  }
   return [...new Set(breaks)].slice(0, 6);
 }
 
 function hasBlockingConstraintBreaks(breaks: readonly string[]): boolean {
   return breaks.some((line) =>
-    /can't close|past the stated closing|Missing exactly three|Missing required label|shorter than the required 4 hours|ellipses|empty or missing/i.test(
+    /can't close|past the stated closing|Missing exactly three|Missing required label|shorter than the required 4 hours|ellipses|empty or missing|Missing the required word|Missing the exact phrase|appears more than once|misused as a storage|Expected exactly \d+ sentences/i.test(
       line,
     ),
   );
@@ -2082,6 +2384,26 @@ function collectConstraintRepairDirectives(args: {
   }
   if (args.breaks.some((line) => /ellipses/i.test(line))) {
     directives.push("Write the complete answer; never truncate with ellipses.");
+  }
+  if (args.breaks.some((line) => /required word local/i.test(line))) {
+    directives.push(
+      "Include the standalone word local (for example local machine). Do not rely on local-first or locally alone.",
+    );
+  }
+  if (
+    args.breaks.some((line) =>
+      /private planning pass|misused as a storage/i.test(line),
+    )
+  ) {
+    directives.push(
+      "Use the exact phrase private planning pass once. Mention it as a planning step on-device — do not say chat logs are stored in a private planning pass.",
+    );
+  }
+  if (args.breaks.some((line) => /Expected exactly \d+ sentences/i.test(line))) {
+    const match = args.userRequest.match(/\bexactly\s+(\d+)\s+sentences?\b/i);
+    directives.push(
+      `Rewrite as exactly ${match?.[1] ?? "2"} sentences and nothing else.`,
+    );
   }
   return [...new Set(directives)].slice(0, 6);
 }
@@ -2276,10 +2598,19 @@ async function runPsychicPlanningPass(args: {
         ? "native"
         : "public";
 
-  const planningMessages: ProviderMessage[] = [
-    { role: "system", content: psychicPlanPromptForEffort(args.effort) },
-    ...args.promptMessages.filter((message) => message.role !== "system"),
-  ];
+  const continuityDigest = extractPsychicContinuityDigest(args.promptMessages);
+  if (continuityDigest) {
+    args.onPlanningWarning?.(
+      `continuity_digest; card=thread_state; chars=${continuityDigest.length}`,
+    );
+  }
+  const planningMessages: ProviderMessage[] = withPsychicContinuityMessages({
+    systemPrompt: psychicPlanPromptForEffort(args.effort),
+    continuityDigest,
+    conversationMessages: args.promptMessages.filter(
+      (message) => message.role !== "system",
+    ),
+  });
   let raw = "";
   try {
     raw = await args.provider.generateResponse(planningMessages, {
@@ -2461,6 +2792,7 @@ async function runPsychicPlanningPass(args: {
         effort: args.effort,
         passName,
         systemPrompt,
+        continuityDigest,
         includeOriginalPromptAsUser:
           passName === "draft" || passName === "revise_draft",
         signal: args.signal,
@@ -4622,6 +4954,14 @@ function persistFalseNameStateForMessageV1(
 
 function isCompanionMode(mode: ChatMode): boolean {
   return mode === "zen" || mode === "chat";
+}
+
+/**
+ * Whether companion lanes should pull cross-thread Qdrant memory summaries.
+ * Chat and Zen share this path; Sandbox stays thread-compact only.
+ */
+export function companionLaneUsesQdrantMemorySummaries(mode: ChatMode): boolean {
+  return mode === "chat" || mode === "zen";
 }
 
 /** Appended to assistant prose when `sendGeneratedImage` parsed but image pipeline returned nothing. */
@@ -7640,7 +7980,7 @@ function privateConversationTitle(messages: ChatMessage[], fallbackMessage: stri
 }
 
 /**
- * Chat-mode cross-thread retrieval. Runs personal-fact lookup and Qdrant
+ * Companion-lane cross-thread retrieval. Runs personal-fact lookup and Qdrant
  * summary similarity in parallel under a short timeout so chat always
  * proceeds even if one path is slow or down.
  */
@@ -7785,7 +8125,7 @@ async function handleCompanionChatTurn(args: {
       memoryQuery,
       userKey,
       activeMemoryBotId,
-      mode === "zen",
+      companionLaneUsesQdrantMemorySummaries(mode),
       botScopedOnly
     );
   }
@@ -10999,13 +11339,18 @@ export async function processChatMessage(
       inProgress: true,
       reason: "milestone",
     };
-    if (isZenMode(mode) && settings.autoMemory && !skipMemoryForMoodCooldownTurn) {
+    if (
+      companionLaneUsesQdrantMemorySummaries(mode) &&
+      settings.autoMemory &&
+      !skipMemoryForMoodCooldownTurn
+    ) {
       summarizeAndStoreMemories(
         db,
         auxiliaryProvider,
         userId,
         activeConversationId,
-        userKey
+        userKey,
+        { mode: mode === "chat" ? "chat" : "zen" }
       ).catch(() => {});
     }
     pushBackendEvent(

@@ -229,6 +229,7 @@ function decodeSummaryRecord(payload: string): EncodedSummaryRecord | null {
           v: 1,
           kind: SUMMARY_KIND_CHAT_FACTS,
           summary: parsed.summary.trim(),
+          mode: normalizeThreadSummaryMode(parsed.mode as ChatMode | undefined),
           reason: parsed.reason,
           createdAt: parsed.createdAt,
         };
@@ -257,19 +258,21 @@ function decodeSummaryRecord(payload: string): EncodedSummaryRecord | null {
 }
 
 /**
- * Chat-mode (cross-thread) summarizer. Folds the conversation so far into
- * 1-3 bullet points of personal facts and indexes them into Qdrant so
- * future turns on OTHER conversations can recall them. Keeps its original
+ * Companion-lane (Chat / Zen) cross-thread summarizer. Folds the conversation
+ * so far into 1-3 bullet points of personal facts and indexes them into Qdrant
+ * so future turns on OTHER conversations can recall them. Keeps its original
  * 40-message horizon since its goal is long-lived personal memory, not
- * thread-compaction.
+ * thread-compaction. Sandbox never writes this path.
  */
 export async function summarizeAndStoreMemories(
   db: DatabaseSync,
   auxiliaryProvider: LlmProvider,
   userId: string,
   conversationId: string,
-  userKey?: Buffer
+  userKey?: Buffer,
+  options?: { mode?: "chat" | "zen" }
 ): Promise<void> {
+  const laneMode = options?.mode === "chat" ? "chat" : "zen";
   const messages = db.prepare(
     "SELECT role, content FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC LIMIT 40"
   ).all(conversationId, userId) as Array<{ role: string; content: string }>;
@@ -304,7 +307,7 @@ export async function summarizeAndStoreMemories(
       v: 1,
       kind: SUMMARY_KIND_CHAT_FACTS,
       summary: summary.trim(),
-      mode: "zen",
+      mode: laneMode,
       reason: "milestone",
       createdAt: now,
     }),
@@ -353,6 +356,7 @@ export async function summarizeAndStoreMemories(
       conversationId,
       text: summary,
       createdAt: now,
+      lane: laneMode,
     });
   } catch {
     // Qdrant may not be running in dev; SQLite summary is still stored
@@ -360,8 +364,8 @@ export async function summarizeAndStoreMemories(
 }
 
 /**
- * Cross-thread retrieval via Qdrant. Chat mode only — Sandbox never reads
- * from this path because its memory is strictly thread-scoped.
+ * Cross-thread retrieval via Qdrant for Chat and Zen.
+ * Sandbox never reads from this path because its memory is strictly thread-scoped.
  */
 export async function retrieveMemorySummaries(
   userId: string,

@@ -70,6 +70,50 @@ Cases:
 
 Suite summary lands next to the per-case reports as `soft-transfer-suite-*.md`. Win signal: local High sim ≥ local None on most cases. Cafe remains the stretch goal (`--suite cafe` or default prompt).
 
+## Soft-continuity suite (Phase B)
+
+After the Psychic continuity digest lands, measure **thread-compact recall** on checkable prompts. Facts are seeded only as sandbox thread compact; the user prompt does not restate the keys.
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts \
+  --suite soft-continuity \
+  --local-model llama3.2 \
+  --thinking-provider openai \
+  --thinking-model gpt-5.6-sol \
+  --effort high \
+  --include-scratchpad
+```
+
+Cases:
+
+1. Pet name + allergy + short-answer preference (`P1`–`P3`)
+2. Project codename + ship date + LOCAL provider mode (3-row table)
+3. Meeting day/time + room + what to bring (`B1`–`B3`)
+
+Primary score is deterministic fact/label checks (`continuityScore`). Blind judge totals are secondary. Suite summary: `soft-continuity-suite-*.md`. Win signal: local High sim continuity score ≥ local None on most cases, and High runs should show `continuity_digest` in planning warnings.
+
+## Soft-continuity-memory suite (Phase B)
+
+Same win signal as soft-continuity, but facts are seeded only as **encrypted memories** (Zen retrieval). No thread compact and no keys restated in the user prompt.
+
+```bash
+node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/experimental-effort.ts \
+  --suite soft-continuity-memory \
+  --local-model llama3.2 \
+  --thinking-provider openai \
+  --thinking-model gpt-5.6-sol \
+  --effort high \
+  --include-scratchpad
+```
+
+Cases:
+
+1. Drink style + oat milk + nickname (`D1`–`D3`)
+2. Travel city + month + lodging (3-row table)
+3. Format + forbidden word + metric units (`F1`–`F3`)
+
+Suite summary: `soft-continuity-memory-suite-*.md`. Requires local embeddings (`nomic-embed-text` or fallback) while seeding/retrieving memories.
+
 ## Strong reference vs local baseline vs simulated local
 
 Run with Anthropic as the strong reference:

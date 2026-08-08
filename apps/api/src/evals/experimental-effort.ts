@@ -11,9 +11,16 @@ type EvalRunId =
   | "thinking-reference"
   | "local-simulated-effort";
 
+type EvalSuiteId =
+  | "none"
+  | "cafe"
+  | "soft-transfer"
+  | "soft-continuity"
+  | "soft-continuity-memory";
+
 interface CliOptions {
   prompt: string;
-  suite: "none" | "cafe" | "soft-transfer";
+  suite: EvalSuiteId;
   thinkingProvider: Exclude<ProviderName, "local">;
   localModel: string;
   thinkingModel: string;
@@ -25,6 +32,33 @@ interface CliOptions {
   noJudge: boolean;
   includeScratchpad: boolean;
   keepDb: boolean;
+}
+
+interface ContinuityScore {
+  total: number;
+  max: number;
+  checks: Record<string, boolean>;
+}
+
+interface SoftContinuityCase {
+  id: string;
+  title: string;
+  /**
+   * Seeded thread compact facts (not repeated in the user prompt).
+   * Use with mode sandbox (default) or zen.
+   */
+  threadSummary?: string;
+  /**
+   * Encrypted memory texts seeded via persistMemoryCandidates.
+   * Requires mode "zen" so companion retrieval injects memory hints.
+   */
+  memoryHints?: string[];
+  /** Lane for the eval turn. Defaults: zen when memoryHints present, else sandbox. */
+  mode?: "sandbox" | "zen";
+  prompt: string;
+  mustInclude: string[];
+  mustExclude?: string[];
+  requiredLabels?: string[];
 }
 
 interface EvalRunConfig {
@@ -79,6 +113,8 @@ interface EvalRunResult {
     scratchpad?: string;
   };
   planningWarnings?: string[];
+  continuityScore?: ContinuityScore;
+  continuityDigestSeen?: boolean;
 }
 
 interface EvalReport {
@@ -91,6 +127,14 @@ interface EvalReport {
   tempDbPath: string;
   runs: EvalRunResult[];
   judge?: unknown;
+  continuity?: {
+    threadSummary?: string;
+    memoryHints?: string[];
+    mode?: "sandbox" | "zen";
+    mustInclude: string[];
+    mustExclude?: string[];
+    requiredLabels?: string[];
+  };
 }
 
 const DEFAULT_PROMPT = [
@@ -158,6 +202,148 @@ const SOFT_TRANSFER_CASES: ReadonlyArray<{
   },
 ];
 
+/**
+ * Phase B soft continuity: facts live only in seeded thread compact.
+ * User prompt asks for a labeled recall without restating the keys.
+ */
+const SOFT_CONTINUITY_CASES: ReadonlyArray<SoftContinuityCase> = [
+  {
+    id: "pet-prefs-compact",
+    title: "Pet + allergy + brevity from thread compact",
+    mode: "sandbox",
+    threadSummary: [
+      "User keeps a cat named Miso.",
+      "User is allergic to shellfish.",
+      "User prefers short answers.",
+    ].join(" "),
+    prompt: [
+      "Using only earlier thread context, remind me of three facts.",
+      "",
+      "Constraints:",
+      "- Label them P1, P2, and P3 exactly",
+      "- P1 = pet name, P2 = food to avoid, P3 = answer length preference",
+      "- Keep under 60 words",
+      "- Do not invent facts that are not in earlier thread context",
+      "- Do not show step-by-step private reasoning",
+    ].join("\n"),
+    mustInclude: ["Miso", "shellfish", "short"],
+    requiredLabels: ["P1", "P2", "P3"],
+  },
+  {
+    id: "project-codename-compact",
+    title: "Codename + ship date + LOCAL from thread compact",
+    mode: "sandbox",
+    threadSummary: [
+      "Project codename is Lumen Gate.",
+      "Ship date is 2026-09-12.",
+      "Provider mode must stay LOCAL only.",
+    ].join(" "),
+    prompt: [
+      "Fill a Markdown table with columns: Field, Value for exactly these three fields from earlier thread context: Codename, Ship date, Provider mode.",
+      "",
+      "Constraints:",
+      "- Exactly 3 data rows",
+      "- Keep under 70 words",
+      "- Do not invent values",
+      "- Do not show step-by-step private reasoning",
+    ].join("\n"),
+    mustInclude: ["Lumen Gate", "2026-09-12", "LOCAL"],
+  },
+  {
+    id: "meeting-facts-compact",
+    title: "Meeting day/room/bring from thread compact",
+    mode: "sandbox",
+    threadSummary: [
+      "Standing meeting is Tuesday at 3pm.",
+      "Room is Cedar.",
+      "Bring a printed agenda.",
+    ].join(" "),
+    prompt: [
+      "Using earlier thread context, list exactly 3 bullets.",
+      "",
+      "Constraints:",
+      "- Label them B1, B2, and B3 exactly",
+      "- B1 = day and time, B2 = room, B3 = what to bring",
+      "- Keep under 50 words",
+      "- Do not invent details",
+      "- Do not show step-by-step private reasoning",
+    ].join("\n"),
+    mustInclude: ["Tuesday", "Cedar", "agenda"],
+    requiredLabels: ["B1", "B2", "B3"],
+  },
+];
+
+/**
+ * Phase B soft continuity via encrypted memories (Zen retrieval).
+ * Facts live only in seeded memories — not in the user prompt or thread compact.
+ */
+const SOFT_CONTINUITY_MEMORY_CASES: ReadonlyArray<SoftContinuityCase> = [
+  {
+    id: "drink-prefs-memory",
+    title: "Drink + milk + nickname from encrypted memories",
+    mode: "zen",
+    memoryHints: [
+      "The user prefers an oat-milk cortado.",
+      "The user's favorite cafe drink nickname is Aurora Blend.",
+      "The user wants drink answers kept short.",
+    ],
+    prompt: [
+      "Using only remembered user preferences, remind me of three drink facts.",
+      "",
+      "Constraints:",
+      "- Label them D1, D2, and D3 exactly",
+      "- D1 = drink style, D2 = milk choice, D3 = drink nickname",
+      "- Keep under 60 words",
+      "- Do not invent preferences",
+      "- Do not show step-by-step private reasoning",
+    ].join("\n"),
+    mustInclude: ["cortado", "oat", "Aurora Blend"],
+    requiredLabels: ["D1", "D2", "D3"],
+  },
+  {
+    id: "travel-plan-memory",
+    title: "City + month + lodging from encrypted memories",
+    mode: "zen",
+    memoryHints: [
+      "The user's next trip city is Lisbon.",
+      "The user travels in October.",
+      "The user stays at Alfama Loft.",
+    ],
+    prompt: [
+      "Using only remembered travel preferences, fill a Markdown table with columns: Field, Value for City, Month, Lodging.",
+      "",
+      "Constraints:",
+      "- Exactly 3 data rows",
+      "- Keep under 70 words",
+      "- Do not invent values",
+      "- Do not show step-by-step private reasoning",
+    ].join("\n"),
+    mustInclude: ["Lisbon", "October", "Alfama Loft"],
+  },
+  {
+    id: "format-prefs-memory",
+    title: "Format + forbidden word + units from encrypted memories",
+    mode: "zen",
+    memoryHints: [
+      "The user prefers answers in Markdown tables.",
+      "The user forbids the word basically.",
+      "The user prefers metric units.",
+    ],
+    prompt: [
+      "Using only remembered writing preferences, list exactly 3 bullets.",
+      "",
+      "Constraints:",
+      "- Label them F1, F2, and F3 exactly",
+      "- F1 = preferred format, F2 = forbidden word, F3 = unit system",
+      "- Keep under 50 words",
+      "- Do not invent preferences",
+      "- Do not show step-by-step private reasoning",
+    ].join("\n"),
+    mustInclude: ["Markdown", "basically", "metric"],
+    requiredLabels: ["F1", "F2", "F3"],
+  },
+];
+
 const DEFAULT_OPTIONS: CliOptions = {
   prompt: DEFAULT_PROMPT,
   suite: "none",
@@ -188,8 +374,10 @@ Usage:
 
 Options:
   --prompt <text>              Override the default comparison prompt.
-  --suite <id>                 none (default single prompt) | cafe | soft-transfer
+  --suite <id>                 none (default single prompt) | cafe | soft-transfer | soft-continuity | soft-continuity-memory
                                soft-transfer runs 3 easier Phase A transfer prompts.
+                               soft-continuity runs 3 Phase B thread-compact recall prompts.
+                               soft-continuity-memory runs 3 Phase B encrypted-memory recall prompts.
   --local-model <id>           Local non-reasoning model. Default: ${DEFAULT_OPTIONS.localModel}
   --thinking-provider <name>   Strong reference provider: openai|anthropic. Default: ${DEFAULT_OPTIONS.thinkingProvider}
   --thinking-model <id>        Strong reference model. Default: ${DEFAULT_OPTIONS.thinkingModel}; claude-opus-4-8 with --thinking-provider anthropic
@@ -228,9 +416,15 @@ function readCliOptions(argv: string[]): CliOptions | null {
         break;
       case "--suite": {
         const suite = next().trim().toLowerCase();
-        if (suite !== "none" && suite !== "cafe" && suite !== "soft-transfer") {
+        if (
+          suite !== "none" &&
+          suite !== "cafe" &&
+          suite !== "soft-transfer" &&
+          suite !== "soft-continuity" &&
+          suite !== "soft-continuity-memory"
+        ) {
           throw new Error(
-            `Unsupported suite: ${suite}. Use none|cafe|soft-transfer.`,
+            `Unsupported suite: ${suite}. Use none|cafe|soft-transfer|soft-continuity|soft-continuity-memory.`,
           );
         }
         options.suite = suite;
@@ -363,6 +557,7 @@ function extractJsonObject(raw: string): unknown {
 
 function redactedOptions(options: CliOptions): EvalReport["options"] {
   return {
+    suite: options.suite,
     thinkingProvider: options.thinkingProvider,
     localModel: options.localModel,
     thinkingModel: options.thinkingModel,
@@ -378,9 +573,30 @@ function redactedOptions(options: CliOptions): EvalReport["options"] {
 
 function resolveSuiteCases(
   options: CliOptions,
-): Array<{ id: string; title: string; prompt: string }> {
+): Array<{
+  id: string;
+  title: string;
+  prompt: string;
+  continuity?: SoftContinuityCase;
+}> {
   if (options.suite === "soft-transfer") {
     return SOFT_TRANSFER_CASES.map((item) => ({ ...item }));
+  }
+  if (options.suite === "soft-continuity") {
+    return SOFT_CONTINUITY_CASES.map((item) => ({
+      id: item.id,
+      title: item.title,
+      prompt: item.prompt,
+      continuity: item,
+    }));
+  }
+  if (options.suite === "soft-continuity-memory") {
+    return SOFT_CONTINUITY_MEMORY_CASES.map((item) => ({
+      id: item.id,
+      title: item.title,
+      prompt: item.prompt,
+      continuity: item,
+    }));
   }
   if (options.suite === "cafe") {
     return [
@@ -398,6 +614,108 @@ function resolveSuiteCases(
       prompt: options.prompt,
     },
   ];
+}
+
+function scoreContinuityAnswer(
+  answer: string,
+  continuity: SoftContinuityCase,
+): ContinuityScore {
+  const haystack = answer.toLowerCase();
+  const checks: Record<string, boolean> = {};
+  for (const needle of continuity.mustInclude) {
+    checks[`includes:${needle}`] = haystack.includes(needle.toLowerCase());
+  }
+  for (const needle of continuity.mustExclude ?? []) {
+    checks[`excludes:${needle}`] = !haystack.includes(needle.toLowerCase());
+  }
+  for (const label of continuity.requiredLabels ?? []) {
+    const pattern = new RegExp(
+      `(^|\\n|\\s)${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}([:\\)\\].\\s]|$)`,
+      "i",
+    );
+    checks[`label:${label}`] = pattern.test(answer);
+  }
+  const total = Object.values(checks).filter(Boolean).length;
+  return {
+    total,
+    max: Object.keys(checks).length,
+    checks,
+  };
+}
+
+function continuityModeForCase(
+  continuity: SoftContinuityCase,
+): "sandbox" | "zen" {
+  if (continuity.mode === "sandbox" || continuity.mode === "zen") {
+    return continuity.mode;
+  }
+  return continuity.memoryHints && continuity.memoryHints.length > 0
+    ? "zen"
+    : "sandbox";
+}
+
+async function seedContinuityConversation(args: {
+  db: DatabaseSync;
+  userId: string;
+  userKey: Buffer;
+  conversationId: string;
+  continuity: SoftContinuityCase;
+}): Promise<void> {
+  const now = new Date().toISOString();
+  const mode = continuityModeForCase(args.continuity);
+  args.db
+    .prepare(
+      `INSERT INTO conversations (
+        id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, NULL, 0, ?, ?)`,
+    )
+    .run(
+      args.conversationId,
+      args.userId,
+      mode === "zen" ? "Soft continuity memory eval" : "Soft continuity eval",
+      mode,
+      now,
+      now,
+    );
+
+  if (args.continuity.threadSummary?.trim()) {
+    const encoded = JSON.stringify({
+      v: 1,
+      kind: "thread_compact",
+      mode,
+      summary: args.continuity.threadSummary.trim(),
+    });
+    args.db
+      .prepare(
+        "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)",
+      )
+      .run(
+        `sum-${args.conversationId}`,
+        args.userId,
+        args.conversationId,
+        encoded,
+        now,
+      );
+  }
+
+  if (args.continuity.memoryHints && args.continuity.memoryHints.length > 0) {
+    // Eval arms share one user DB; wipe prior encrypted memories so retrieval
+    // cannot bleed drink facts into travel cases (and so High ≠ polluted None).
+    args.db.prepare("DELETE FROM memories WHERE user_id = ?").run(args.userId);
+    const { persistMemoryCandidates } = await import("../memory.ts");
+    await persistMemoryCandidates(
+      args.db,
+      args.userId,
+      args.conversationId,
+      null,
+      args.continuity.memoryHints.map((text) => ({
+        text,
+        confidence: 0.96,
+      })),
+      args.userKey,
+      { durability: 0.9 },
+    );
+  }
 }
 
 function extractArmTotals(judge: unknown): {
@@ -447,15 +765,24 @@ function extractArmTotals(judge: unknown): {
 function suiteMarkdownSummary(args: {
   createdAt: string;
   options: CliOptions;
+  title: string;
+  winCondition: string;
   cases: Array<{
     id: string;
     title: string;
     reportPath: string;
     totals: ReturnType<typeof extractArmTotals>;
+    continuity?: {
+      baseline: ContinuityScore | null;
+      simulated: ContinuityScore | null;
+      reference: ContinuityScore | null;
+      digestOnSimulated: boolean | null;
+    };
   }>;
 }): string {
+  const usesContinuity = args.cases.some((item) => item.continuity);
   const lines = [
-    "# Soft-transfer Phase A suite",
+    `# ${args.title}`,
     "",
     `Created: ${args.createdAt}`,
     "",
@@ -463,28 +790,68 @@ function suiteMarkdownSummary(args: {
     `Thinking model: ${args.options.thinkingProvider} / ${args.options.thinkingModel}`,
     `Effort: ${args.options.effort}`,
     "",
-    "Win condition for a case: local High sim judge total ≥ local None, and preferably closer to the thinking reference on constraints.",
+    args.winCondition,
     "",
-    "| Case | None | High sim | Sol/ref | High ≥ None? |",
-    "| --- | ---: | ---: | ---: | --- |",
   ];
+  if (usesContinuity) {
+    lines.push(
+      "| Case | None facts | High facts | Sol/ref facts | High ≥ None? | Digest? | Judge None | Judge High |",
+      "| --- | ---: | ---: | ---: | --- | --- | ---: | ---: |",
+    );
+  } else {
+    lines.push(
+      "| Case | None | High sim | Sol/ref | High ≥ None? |",
+      "| --- | ---: | ---: | ---: | --- |",
+    );
+  }
   let wins = 0;
   let tiesOrWins = 0;
   for (const item of args.cases) {
-    const none = item.totals.baseline;
-    const sim = item.totals.simulated;
-    const ref = item.totals.reference;
-    const ge =
-      none == null || sim == null
-        ? "?"
-        : sim >= none
-          ? "yes"
-          : "no";
-    if (none != null && sim != null && sim >= none) tiesOrWins += 1;
-    if (none != null && sim != null && sim > none) wins += 1;
-    lines.push(
-      `| ${item.title} (\`${item.id}\`) | ${none ?? "—"} | ${sim ?? "—"} | ${ref ?? "—"} | ${ge} |`,
-    );
+    if (usesContinuity) {
+      const none = item.continuity?.baseline;
+      const sim = item.continuity?.simulated;
+      const ref = item.continuity?.reference;
+      const noneLabel =
+        none == null ? "—" : `${none.total}/${none.max}`;
+      const simLabel = sim == null ? "—" : `${sim.total}/${sim.max}`;
+      const refLabel = ref == null ? "—" : `${ref.total}/${ref.max}`;
+      const ge =
+        none == null || sim == null
+          ? "?"
+          : sim.total >= none.total
+            ? "yes"
+            : "no";
+      if (none != null && sim != null && sim.total >= none.total) {
+        tiesOrWins += 1;
+      }
+      if (none != null && sim != null && sim.total > none.total) {
+        wins += 1;
+      }
+      const digest =
+        item.continuity?.digestOnSimulated == null
+          ? "?"
+          : item.continuity.digestOnSimulated
+            ? "yes"
+            : "no";
+      lines.push(
+        `| ${item.title} (\`${item.id}\`) | ${noneLabel} | ${simLabel} | ${refLabel} | ${ge} | ${digest} | ${item.totals.baseline ?? "—"} | ${item.totals.simulated ?? "—"} |`,
+      );
+    } else {
+      const none = item.totals.baseline;
+      const sim = item.totals.simulated;
+      const ref = item.totals.reference;
+      const ge =
+        none == null || sim == null
+          ? "?"
+          : sim >= none
+            ? "yes"
+            : "no";
+      if (none != null && sim != null && sim >= none) tiesOrWins += 1;
+      if (none != null && sim != null && sim > none) wins += 1;
+      lines.push(
+        `| ${item.title} (\`${item.id}\`) | ${none ?? "—"} | ${sim ?? "—"} | ${ref ?? "—"} | ${ge} |`,
+      );
+    }
   }
   lines.push(
     "",
@@ -556,7 +923,49 @@ function markdownReport(report: EvalReport): string {
         lines.push(`- Planning warning: ${warning}`);
       }
     }
+    if (run.continuityScore) {
+      lines.push(
+        `- Continuity score: ${run.continuityScore.total}/${run.continuityScore.max}`,
+      );
+      for (const [name, passed] of Object.entries(run.continuityScore.checks)) {
+        lines.push(`- Continuity check: ${name}=${passed ? "pass" : "fail"}`);
+      }
+    }
+    if (run.continuityDigestSeen != null) {
+      lines.push(
+        `- Continuity digest seen in planning: ${run.continuityDigestSeen ? "yes" : "no"}`,
+      );
+    }
     lines.push("", "```text", run.assistant || "<no answer>", "```", "");
+  }
+  if (report.continuity) {
+    lines.push("## Seeded Continuity", "");
+    if (report.continuity.mode) {
+      lines.push(`- Mode: ${report.continuity.mode}`);
+    }
+    if (report.continuity.threadSummary) {
+      lines.push("", "### Thread compact", "", "```text", report.continuity.threadSummary, "```");
+    }
+    if (report.continuity.memoryHints?.length) {
+      lines.push("", "### Encrypted memory hints", "", "```text");
+      for (const hint of report.continuity.memoryHints) {
+        lines.push(`- ${hint}`);
+      }
+      lines.push("```");
+    }
+    lines.push(
+      "",
+      `- Must include: ${report.continuity.mustInclude.join(", ")}`,
+    );
+    if (report.continuity.mustExclude?.length) {
+      lines.push(`- Must exclude: ${report.continuity.mustExclude.join(", ")}`);
+    }
+    if (report.continuity.requiredLabels?.length) {
+      lines.push(
+        `- Required labels: ${report.continuity.requiredLabels.join(", ")}`,
+      );
+    }
+    lines.push("");
   }
   if (report.judge) {
     lines.push("## Blind Judge", "", "```json", JSON.stringify(report.judge, null, 2), "```", "");
@@ -662,6 +1071,7 @@ async function runSinglePromptEval(args: {
   openAiApiKey: string | undefined;
   anthropicApiKey: string | undefined;
   processChatMessage: typeof import("../chat.ts").processChatMessage;
+  continuity?: SoftContinuityCase;
 }): Promise<{
   report: EvalReport;
   jsonPath: string;
@@ -687,6 +1097,21 @@ async function runSinglePromptEval(args: {
       continue;
     }
     try {
+      const conversationId = args.continuity
+        ? `eval-${args.caseId || "case"}-${run.id}-${Date.now().toString(36)}`
+        : undefined;
+      if (args.continuity && conversationId) {
+        await seedContinuityConversation({
+          db: args.db,
+          userId: args.userId,
+          userKey: args.userKey,
+          conversationId,
+          continuity: args.continuity,
+        });
+      }
+      const continuityMode = args.continuity
+        ? continuityModeForCase(args.continuity)
+        : "sandbox";
       const result = await args.processChatMessage(
         args.db,
         args.userId,
@@ -697,8 +1122,8 @@ async function runSinglePromptEval(args: {
           openAiApiKey: args.openAiApiKey,
           anthropicApiKey: args.anthropicApiKey,
           autoMemory: false,
-          incognito: true,
-          mode: "sandbox",
+          incognito: args.continuity ? false : true,
+          mode: args.continuity ? continuityMode : "sandbox",
           experimentalAllModelEffortEnabled: run.experimentalAllModelEffortEnabled,
           psychicModeEnabled: run.psychicModeEnabled,
           botOverrides: {
@@ -708,6 +1133,7 @@ async function runSinglePromptEval(args: {
             maxTokens: args.options.maxTokens,
           },
         },
+        conversationId,
       );
       const assistant = lastAssistant(result.conversation.messages)?.content ?? "";
       const user = lastUser(result.conversation.messages);
@@ -717,6 +1143,14 @@ async function runSinglePromptEval(args: {
           ?.filter((event) => event.message === "Psychic planning unavailable")
           .map((event) => event.detail?.trim())
           .filter((detail): detail is string => Boolean(detail)) ?? [];
+      const continuityScore = args.continuity
+        ? scoreContinuityAnswer(assistant, args.continuity)
+        : undefined;
+      const continuityDigestSeen = args.continuity
+        ? planningWarnings.some((warning) =>
+            warning.includes("continuity_digest"),
+          )
+        : undefined;
       results.push({
         ...run,
         status: "ok",
@@ -725,6 +1159,8 @@ async function runSinglePromptEval(args: {
         assistantChars: assistant.length,
         ...(user?.psychicThought ? { psychicThought: user.psychicThought } : {}),
         ...(planningWarnings.length > 0 ? { planningWarnings } : {}),
+        ...(continuityScore ? { continuityScore } : {}),
+        ...(continuityDigestSeen != null ? { continuityDigestSeen } : {}),
         ...(result.psychicDebug
           ? {
               psychicDebug: {
@@ -772,6 +1208,26 @@ async function runSinglePromptEval(args: {
     tempDbPath: args.options.keepDb ? "<shared-suite-db>" : "<removed>",
     runs: results,
     ...(judge ? { judge } : {}),
+    ...(args.continuity
+      ? {
+          continuity: {
+            ...(args.continuity.threadSummary
+              ? { threadSummary: args.continuity.threadSummary }
+              : {}),
+            ...(args.continuity.memoryHints
+              ? { memoryHints: [...args.continuity.memoryHints] }
+              : {}),
+            mode: continuityModeForCase(args.continuity),
+            mustInclude: [...args.continuity.mustInclude],
+            ...(args.continuity.mustExclude
+              ? { mustExclude: [...args.continuity.mustExclude] }
+              : {}),
+            ...(args.continuity.requiredLabels
+              ? { requiredLabels: [...args.continuity.requiredLabels] }
+              : {}),
+          },
+        }
+      : {}),
   };
   const baseName = args.caseId
     ? `${reportFilename(args.createdAt)}-${args.caseId}`
@@ -813,14 +1269,24 @@ async function main(): Promise<void> {
       title: string;
       reportPath: string;
       totals: ReturnType<typeof extractArmTotals>;
+      continuity?: {
+        baseline: ContinuityScore | null;
+        simulated: ContinuityScore | null;
+        reference: ContinuityScore | null;
+        digestOnSimulated: boolean | null;
+      };
     }> = [];
 
     for (const suiteCase of cases) {
       console.log(`\n=== Case: ${suiteCase.title} (${suiteCase.id}) ===`);
+      const namedCase =
+        options.suite === "soft-transfer" ||
+        options.suite === "soft-continuity" ||
+        options.suite === "soft-continuity-memory";
       const { report, jsonPath, markdownPath } = await runSinglePromptEval({
         options,
         prompt: suiteCase.prompt,
-        caseId: options.suite === "soft-transfer" ? suiteCase.id : "",
+        caseId: namedCase ? suiteCase.id : "",
         createdAt,
         outDir,
         db,
@@ -829,12 +1295,16 @@ async function main(): Promise<void> {
         openAiApiKey,
         anthropicApiKey,
         processChatMessage,
+        continuity: suiteCase.continuity,
       });
       console.log(`JSON: ${jsonPath}`);
       console.log(`Report: ${markdownPath}`);
       for (const result of report.runs) {
+        const continuityLabel = result.continuityScore
+          ? `; continuity=${result.continuityScore.total}/${result.continuityScore.max}`
+          : "";
         console.log(
-          `${result.label}: ${result.status} (${result.durationMs}ms, ${result.assistantChars} chars)`,
+          `${result.label}: ${result.status} (${result.durationMs}ms, ${result.assistantChars} chars${continuityLabel})`,
         );
       }
       if (!report.judge && !options.noJudge) {
@@ -842,20 +1312,65 @@ async function main(): Promise<void> {
           "Judge skipped: OPENAI_API_KEY missing or fewer than two runs succeeded.",
         );
       }
+      const byId = (id: EvalRunId) =>
+        report.runs.find((run) => run.id === id);
       suiteCaseResults.push({
         id: suiteCase.id,
         title: suiteCase.title,
         reportPath: markdownPath,
         totals: extractArmTotals(report.judge),
+        ...(suiteCase.continuity
+          ? {
+              continuity: {
+                baseline: byId("local-baseline")?.continuityScore ?? null,
+                simulated:
+                  byId("local-simulated-effort")?.continuityScore ?? null,
+                reference: byId("thinking-reference")?.continuityScore ?? null,
+                digestOnSimulated:
+                  byId("local-simulated-effort")?.continuityDigestSeen ?? null,
+              },
+            }
+          : {}),
       });
     }
 
-    if (options.suite === "soft-transfer") {
-      const summaryName = `soft-transfer-suite-${createdAt.replace(/[:.]/g, "-")}`;
+    if (
+      options.suite === "soft-transfer" ||
+      options.suite === "soft-continuity" ||
+      options.suite === "soft-continuity-memory"
+    ) {
+      const suiteMeta =
+        options.suite === "soft-continuity-memory"
+          ? {
+              filePrefix: "soft-continuity-memory",
+              schema: "prism-experimental-effort-soft-continuity-memory-suite-v1",
+              title: "Soft-continuity-memory Phase B suite",
+              winCondition:
+                "Win condition for a case: local High sim continuity fact score ≥ local None (seeded encrypted memories only; prompt does not restate keys).",
+              label: "Soft-continuity-memory",
+            }
+          : options.suite === "soft-continuity"
+            ? {
+                filePrefix: "soft-continuity",
+                schema: "prism-experimental-effort-soft-continuity-suite-v1",
+                title: "Soft-continuity Phase B suite",
+                winCondition:
+                  "Win condition for a case: local High sim continuity fact score ≥ local None (seeded thread compact only; prompt does not restate keys).",
+                label: "Soft-continuity",
+              }
+            : {
+                filePrefix: "soft-transfer",
+                schema: "prism-experimental-effort-soft-transfer-suite-v1",
+                title: "Soft-transfer Phase A suite",
+                winCondition:
+                  "Win condition for a case: local High sim judge total ≥ local None, and preferably closer to the thinking reference on constraints.",
+                label: "Soft-transfer",
+              };
+      const summaryName = `${suiteMeta.filePrefix}-suite-${createdAt.replace(/[:.]/g, "-")}`;
       const summaryJsonPath = join(outDir, `${summaryName}.json`);
       const summaryMdPath = join(outDir, `${summaryName}.md`);
       const summary = {
-        schema: "prism-experimental-effort-soft-transfer-suite-v1",
+        schema: suiteMeta.schema,
         createdAt,
         options: redactedOptions(options),
         cases: suiteCaseResults.map((item) => ({
@@ -863,6 +1378,7 @@ async function main(): Promise<void> {
           title: item.title,
           reportPath: item.reportPath,
           totals: item.totals,
+          ...(item.continuity ? { continuity: item.continuity } : {}),
         })),
       };
       writeFileSync(summaryJsonPath, `${JSON.stringify(summary, null, 2)}\n`, "utf8");
@@ -871,11 +1387,13 @@ async function main(): Promise<void> {
         suiteMarkdownSummary({
           createdAt,
           options,
+          title: suiteMeta.title,
+          winCondition: suiteMeta.winCondition,
           cases: suiteCaseResults,
         }),
         "utf8",
       );
-      console.log(`\nSoft-transfer suite summary: ${summaryMdPath}`);
+      console.log(`\n${suiteMeta.label} suite summary: ${summaryMdPath}`);
       console.log(`Suite JSON: ${summaryJsonPath}`);
     } else {
       console.log(`\nExperimental Effort eval complete.`);
