@@ -128,12 +128,14 @@ export function resolveEnglishClauseGap(args: {
   fullText?: string | null;
   authoredPerformanceText?: string | null;
   enabled?: boolean;
+  /** Hard Power: Ready breathless holders never emit mid-clause lung Foley. */
+  breathless?: boolean;
   pacingProfile?: EnglishPacingProfileV1 | null;
 }): EnglishClauseGapPlan {
   const kind = classifyEnglishClausePunctuation(args.trailingText);
   const profilePauseMs = englishPacingPauseMsForKind(args.pacingProfile, kind);
   const pauseMs = profilePauseMs ?? 0;
-  if (args.enabled === false || pauseMs <= 0) {
+  if (args.enabled === false || args.breathless === true || pauseMs <= 0) {
     return { pauseMs, kind, breath: null };
   }
   if (

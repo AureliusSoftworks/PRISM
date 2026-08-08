@@ -112,8 +112,10 @@ export function resolvePreSpeechBreathPlan(args: {
   mood?: VoiceDeliveryMood | null;
   authoredPerformanceText?: string | null;
   enabled?: boolean;
+  /** Hard Power: Ready breathless holders never emit pre-speech lung Foley. */
+  breathless?: boolean;
 }): PreSpeechBreathPlan | null {
-  if (args.enabled === false) return null;
+  if (args.enabled === false || args.breathless === true) return null;
   const text = args.text.replace(/\s+/gu, " ").trim();
   const words = text.match(/[\p{L}\p{N}][\p{L}\p{N}'’_-]*/gu) ?? [];
   if (text.length < 28 || words.length < 5) return null;

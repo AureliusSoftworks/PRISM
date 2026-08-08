@@ -1,6 +1,7 @@
 import {
   BOTCAST_IMMERSIVE_VOICE_TAGS,
   type BotcastImmersiveVoiceTag,
+  type DebateAudiencePressureBand,
   type DebateAudienceReactionV1,
   type DebateEventV1,
   type DebateFormatId,
@@ -54,14 +55,34 @@ export interface DebateModeratorGavelCue {
   audienceReaction?: DebateAudienceReactionKind;
 }
 
-export const DEBATE_AUDIENCE_MURMUR_URL =
-  // The old 12-second crowd recording contained a distinctive laugh that
-  // became conspicuous every time the loop wrapped between floor beats.
+/**
+ * Soft chamber air for Observing / settled gallery — the former stand-in
+ * murmur bed. Keeps the room alive without reading as crowd hiss.
+ */
+export const DEBATE_AUDIENCE_ROOM_BASELINE_URL =
   "/audio/session-atmosphere/default-studio-room-loop.mp3";
+
+/**
+ * Classic gallery murmur for Murmuring and hotter bands. Prefer this over the
+ * studio room loop once the house is actually murmuring.
+ */
+export const DEBATE_AUDIENCE_MURMUR_URL =
+  "/audio/debate/courtroom-audience-murmur-loop.mp3";
+
 export const DEBATE_AUDIENCE_CROSSTALK_URL =
   "/audio/debate/courtroom-audience-crosstalk-loop.mp3";
 export const DEBATE_AUDIENCE_AGITATION_URL =
   "/audio/debate/courtroom-audience-agitation-swell.mp3";
+
+/** Crowd bed once pressure leaves Observing; quiet room air otherwise. */
+export function debateAudienceBackgroundUrlForPressureBand(
+  band: DebateAudiencePressureBand | null,
+): string {
+  if (band === null || band === "settled") {
+    return DEBATE_AUDIENCE_ROOM_BASELINE_URL;
+  }
+  return DEBATE_AUDIENCE_MURMUR_URL;
+}
 
 export const DEBATE_AUDIENCE_FOLEY_URLS = [
   "/audio/debate/courtroom-chair-shift.mp3",
@@ -358,6 +379,8 @@ export interface DebateFoleyParticipant {
   active: boolean;
   thinking: boolean;
   hardMuted: boolean;
+  /** Ready breathless: excluded only from soft-inhale / soft-sigh ambient cues. */
+  breathless?: boolean;
   hidden: boolean;
 }
 
@@ -368,11 +391,14 @@ export function debateVocalFoleyTargetId(args: {
   participants: readonly DebateFoleyParticipant[];
 }): string | null {
   if (args.kind === "mouth-sound" || args.kind === "lip-smack") return null;
+  const breathAmbient =
+    args.kind === "soft-inhale" || args.kind === "soft-sigh";
   const eligible = args.participants.filter(
     (participant) =>
       !participant.active &&
       !participant.thinking &&
       !participant.hardMuted &&
+      !(breathAmbient && participant.breathless === true) &&
       !participant.hidden,
   );
   const preferred =
@@ -521,4 +547,37 @@ export function debateAmbientVocalFoleyVoicePerformance(
     spokenText: DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER,
     voicePerformanceText: `[${tag}] ${DEBATE_VOCAL_FOLEY_SPOKEN_PLACEHOLDER}`,
   };
+}
+
+/** Staggered silent-deliberation mouth chatter frame duration. */
+export const DEBATE_JURY_DELIBERATION_MOUTH_FRAME_MS = 130;
+
+const DEBATE_JURY_DELIBERATION_MOUTH_FRAMES = [
+  "speech-closed",
+  "open-small",
+  "narrow",
+  "open-round",
+  "dot",
+  "open-small",
+  "narrow",
+  "speech-closed",
+] as const;
+
+/**
+ * Deterministic, staggered mouth poses for the silent Jury chamber prepare
+ * beat — jurors look like they are conferring without audible words.
+ */
+export function debateJuryDeliberationMouthShape(
+  seatIndex: number,
+  nowMs: number,
+): (typeof DEBATE_JURY_DELIBERATION_MOUTH_FRAMES)[number] {
+  const safeSeat = Math.max(0, Math.floor(seatIndex));
+  const phase = Math.floor(
+    (Math.max(0, nowMs) + safeSeat * 97) / DEBATE_JURY_DELIBERATION_MOUTH_FRAME_MS,
+  );
+  return DEBATE_JURY_DELIBERATION_MOUTH_FRAMES[
+    ((phase % DEBATE_JURY_DELIBERATION_MOUTH_FRAMES.length) +
+      DEBATE_JURY_DELIBERATION_MOUTH_FRAMES.length) %
+      DEBATE_JURY_DELIBERATION_MOUTH_FRAMES.length
+  ]!;
 }

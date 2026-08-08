@@ -99,6 +99,11 @@ export type BotPowerTargetV1 =
 export type BotPowerEffectV1 =
   | { type: "mute" }
   /**
+   * The holder cannot produce lung Foley: inhale, exhale, sigh, gasp, and
+   * decorative pre-speech breath. Speech and non-breath actions still work.
+   */
+  | { type: "breathless" }
+  /**
    * The holder visibly botches every task or production role. Bot-attributed
    * image requests are replaced with unrelated scenes by the image runtime.
    */
@@ -601,6 +606,7 @@ export function normalizeBotPowerEffectV1(value: unknown): BotPowerEffectV1 | nu
   if (!value || typeof value !== "object" || Array.isArray(value)) return null;
   const effect = value as Record<string, unknown>;
   if (effect.type === "mute") return { type: "mute" };
+  if (effect.type === "breathless") return { type: "breathless" };
   if (effect.type === "ineptitude") {
     return {
       type: "ineptitude",
@@ -1423,6 +1429,34 @@ export function botPowerDefinitionIsExplicitMuteV1(
   ].some((pattern) => pattern.test(intent));
 }
 
+/** Recognizes hard lung-Foley silence without muting speech. */
+export function botPowerDefinitionIsExplicitBreathlessV1(
+  nameValue: unknown,
+  intentValue: unknown,
+): boolean {
+  const name = compactText(nameValue, BOT_POWER_NAME_MAX_LENGTH)
+    .toLowerCase()
+    .replace(/[’']/gu, "'");
+  const intent = compactText(intentValue, BOT_POWER_INTENT_MAX_LENGTH)
+    .toLowerCase()
+    .replace(/[’']/gu, "'");
+  const haystack = `${name} ${intent}`.trim();
+  if (
+    /^(?:breathless|breathlessness|no lungs?|doesn'?t breathe|does not breathe|cannot breathe|can'?t breathe)$/u.test(
+      name,
+    )
+  ) {
+    return true;
+  }
+  return [
+    /\b(?:breathless|breathlessness)\b/u,
+    /\b(?:can(?:not|'t)|never|does\s+not|doesn't|no longer)\s+(?:inhale|exhale|sigh|gasp|breathe)\b/u,
+    /\b(?:no|without|lacks?|missing)\s+(?:a\s+)?(?:breath|breathing|lungs?|respiration)\b/u,
+    /\b(?:disable|suppress|block|remove)s?\s+(?:all\s+)?(?:breath(?:ing)?|inhale|exhale|sigh|gasp)\b/u,
+    /\b(?:inhale|exhale|sigh|gasp|breath(?:ing)?)\b[\s\S]{0,48}\b(?:foley|sfx)\b[\s\S]{0,40}\b(?:disabled|suppressed|blocked|impossible|forbidden)\b/u,
+  ].some((pattern) => pattern.test(haystack));
+}
+
 /** Recognizes simulation awareness that explicitly includes converting other minds. */
 export function botPowerDefinitionIsSimulationEvangelistV1(
   nameValue: unknown,
@@ -1623,10 +1657,20 @@ export function strongestBotPowerInterruptionEffectV1(
 export function activeBotPowerEffectsV1(value: unknown): BotPowerEffectV1[] {
   return activeBotPowersV1(value).flatMap((power) => {
     const effects = power.compiled?.effects ?? [];
-    return botPowerDefinitionIsExplicitMuteV1(power.name, power.intent) &&
-      !effects.some((effect) => effect.type === "mute")
-      ? [{ type: "mute" as const }, ...effects]
-      : effects;
+    let next = effects;
+    if (
+      botPowerDefinitionIsExplicitMuteV1(power.name, power.intent) &&
+      !next.some((effect) => effect.type === "mute")
+    ) {
+      next = [{ type: "mute" as const }, ...next];
+    }
+    if (
+      botPowerDefinitionIsExplicitBreathlessV1(power.name, power.intent) &&
+      !next.some((effect) => effect.type === "breathless")
+    ) {
+      next = [{ type: "breathless" as const }, ...next];
+    }
+    return next;
   });
 }
 
@@ -2145,6 +2189,109 @@ export function botPowerBelievesFalseNameV1(value: unknown): boolean {
 
 export function botPowerIsMutedV1(value: unknown): boolean {
   return activeBotPowerEffectsV1(value).some((effect) => effect.type === "mute");
+}
+
+export function botPowerIsBreathlessFromEffectsV1(value: unknown): boolean {
+  if (!Array.isArray(value)) return false;
+  return value.some(
+    (effect) => normalizeBotPowerEffectV1(effect)?.type === "breathless",
+  );
+}
+
+/** Ready holder cannot produce lung Foley while still able to speak. */
+export function botPowerIsBreathlessV1(value: unknown): boolean {
+  return botPowerIsBreathlessFromEffectsV1(activeBotPowerEffectsV1(value));
+}
+
+/** Ambient session vocalization kinds that require lungs. */
+export const BOT_POWER_BREATH_AMBIENT_VOCALIZATION_KINDS_V1 = [
+  "soft-sigh",
+  "soft-inhale",
+] as const;
+
+/** Listener-reaction vocal Foley tags that require lungs. */
+export const BOT_POWER_BREATH_LISTENER_VOCAL_FOLEYS_V1 = [
+  "sighs",
+  "exhales",
+] as const;
+
+/** Bundled Action SFX kinds that require lungs. */
+export const BOT_POWER_BREATH_ACTION_SFX_KINDS_V1 = ["sigh", "gasp"] as const;
+
+/** Immersive / TTS performance tags that require lungs. */
+export const BOT_POWER_BREATH_PERFORMANCE_TAGS_V1 = [
+  "sighs",
+  "exhales",
+  "gasps",
+  "breathes deeply",
+] as const;
+
+const BOT_POWER_BREATH_PERFORMANCE_TAG_PATTERN =
+  /\[(?:sighs|exhales|gasps|breathes deeply)\]/giu;
+
+export function botPowerIsBreathAmbientVocalizationKindV1(
+  kind: string | null | undefined,
+): boolean {
+  return (
+    kind === "soft-sigh" ||
+    kind === "soft-inhale"
+  );
+}
+
+export function botPowerIsBreathListenerVocalFoleyV1(
+  foley: string | null | undefined,
+): boolean {
+  return foley === "sighs" || foley === "exhales";
+}
+
+export function botPowerIsBreathActionSfxKindV1(
+  kind: string | null | undefined,
+): boolean {
+  return kind === "sigh" || kind === "gasp";
+}
+
+export function botPowerIsBreathPerformanceTagV1(
+  tag: string | null | undefined,
+): boolean {
+  if (typeof tag !== "string") return false;
+  const normalized = tag.trim().toLowerCase();
+  return (BOT_POWER_BREATH_PERFORMANCE_TAGS_V1 as readonly string[]).includes(
+    normalized,
+  );
+}
+
+/** Strip lung Foley performance tags so TTS cannot render breath sounds. */
+export function botPowerStripBreathPerformanceTextV1(
+  text: string | null | undefined,
+): string {
+  if (typeof text !== "string" || text.length === 0) return "";
+  return text
+    .replace(BOT_POWER_BREATH_PERFORMANCE_TAG_PATTERN, "")
+    .replace(/[ \t]{2,}/gu, " ")
+    .replace(/\n{3,}/gu, "\n\n")
+    .trim();
+}
+
+/**
+ * Drop listener-reaction sighs/exhales for a breathless holder while keeping
+ * visual beats and non-breath spoken cues intact.
+ */
+export function botPowerOmitBreathListenerVocalFoleyV1<
+  T extends { vocalFoley?: string | null },
+>(plan: T, powersOrEffects: unknown): T {
+  // Accept Ready Power archives or a frozen Coffee/Signal effects array.
+  const breathless =
+    botPowerIsBreathlessV1(powersOrEffects) ||
+    (Array.isArray(powersOrEffects) &&
+      botPowerIsBreathlessFromEffectsV1(powersOrEffects));
+  if (
+    !breathless ||
+    !botPowerIsBreathListenerVocalFoleyV1(plan.vocalFoley)
+  ) {
+    return plan;
+  }
+  const { vocalFoley: _omit, ...rest } = plan;
+  return rest as T;
 }
 
 /** A Ready short-term-amnesia Power whose holder receives no older continuity. */

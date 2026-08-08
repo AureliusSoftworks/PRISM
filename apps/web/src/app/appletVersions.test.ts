@@ -22,6 +22,7 @@ import {
   BOT_POWER_INTERMITTENT_AUDIBILITY_MODE_POLICY,
   BOT_POWER_INTERRUPTION_MODE_POLICY,
   BOT_POWER_GHOST_MODE_POLICY,
+  BOT_POWER_BREATHLESS_MODE_POLICY,
   BOT_POWER_MUTE_MODE_POLICY,
   BOT_POWER_MOOD_BOOST_MODE_POLICY,
   BOT_POWER_MOOD_DRAIN_MODE_POLICY,
@@ -67,22 +68,22 @@ describe("applet version helpers", () => {
   });
 
   it("tracks the current visual applet versions for release provenance", () => {
-    assert.equal(PRISM_APPLETS.chat.version, "1.37");
-    assert.equal(PRISM_APPLETS.zen.version, "1.36");
-    assert.equal(PRISM_APPLETS.coffee.version, "2.48");
-    assert.equal(PRISM_APPLETS.debate.version, "0.28");
+    assert.equal(PRISM_APPLETS.chat.version, "1.38");
+    assert.equal(PRISM_APPLETS.zen.version, "1.37");
+    assert.equal(PRISM_APPLETS.coffee.version, "2.49");
+    assert.equal(PRISM_APPLETS.debate.version, "0.30");
     assert.equal(PRISM_APPLETS.debate.status, "preview");
-    assert.equal(PRISM_APPLETS.botcast.version, "1.58");
+    assert.equal(PRISM_APPLETS.botcast.version, "1.59");
     assert.equal(PRISM_APPLETS.botcast.name, "Signal");
     assert.equal(PRISM_APPLETS.story.version, "0.31");
     assert.equal(PRISM_APPLETS.story.status, "planned");
     assert.equal(PRISM_APPLETS.slate.version, "0.9");
     assert.equal(PRISM_APPLETS.slate.status, "preview");
-    assert.equal(prismAppletVersionLabel("chat"), "v1.37");
-    assert.equal(prismAppletVersionLabel("zen"), "v1.36");
-    assert.equal(prismAppletVersionLabel("coffee"), "v2.48");
-    assert.equal(prismAppletVersionLabel("debate"), "v0.28");
-    assert.equal(prismAppletVersionLabel("botcast"), "v1.58");
+    assert.equal(prismAppletVersionLabel("chat"), "v1.38");
+    assert.equal(prismAppletVersionLabel("zen"), "v1.37");
+    assert.equal(prismAppletVersionLabel("coffee"), "v2.49");
+    assert.equal(prismAppletVersionLabel("debate"), "v0.30");
+    assert.equal(prismAppletVersionLabel("botcast"), "v1.59");
     assert.equal(prismAppletVersionLabel("story"), "v0.31");
     assert.equal(prismAppletVersionLabel("slate"), "v0.9");
   });
@@ -220,6 +221,22 @@ describe("applet version helpers", () => {
     assert.deepEqual(Object.keys(BOT_POWER_MUTE_MODE_POLICY), Object.keys(PRISM_APPLETS));
     for (const applet of Object.values(PRISM_APPLETS)) {
       const policy = BOT_POWER_MUTE_MODE_POLICY[applet.id];
+      if (applet.status === "planned") {
+        assert.equal(policy, "required_before_activation");
+      } else if (applet.id !== "slate") {
+        assert.equal(policy, "enforced");
+      }
+    }
+  });
+
+  it("requires future applets to implement breathless lung-Foley suppression without making bots ineligible", () => {
+    assert.deepEqual(
+      Object.keys(BOT_POWER_BREATHLESS_MODE_POLICY),
+      Object.keys(PRISM_APPLETS),
+    );
+    assert.deepEqual(BOT_POWER_BREATHLESS_MODE_POLICY, BOT_POWER_MUTE_MODE_POLICY);
+    for (const applet of Object.values(PRISM_APPLETS)) {
+      const policy = BOT_POWER_BREATHLESS_MODE_POLICY[applet.id];
       if (applet.status === "planned") {
         assert.equal(policy, "required_before_activation");
       } else if (applet.id !== "slate") {

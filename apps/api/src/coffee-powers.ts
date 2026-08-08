@@ -815,6 +815,14 @@ export function coffeePowerBotIsMuted(plan: CoffeePowerPlanV1 | null, botId: str
   return plan?.bots[botId]?.effects.some((effect) => effect.type === "mute") === true;
 }
 
+export function coffeePowerBotIsBreathless(
+  plan: CoffeePowerPlanV1 | null,
+  botId: string,
+): boolean {
+  return plan?.bots[botId]?.effects.some((effect) => effect.type === "breathless") ===
+    true;
+}
+
 export function coffeePowerBotEternallyIntroduces(
   plan: CoffeePowerPlanV1 | null,
   botId: string,

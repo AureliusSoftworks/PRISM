@@ -228,6 +228,7 @@ import {
   botCrosstalkInterruptedSpeakerCueForSeed,
   normalizeBotCrosstalkInterruptedSpeakerCue,
   buildCoffeeListenerReactionPlanV1,
+  botPowerOmitBreathListenerVocalFoleyV1,
   coffeeInterruptionFloorOutcome,
   directionalIrritationEdgeKey,
   formatDirectionalIrritationPromptLines,
@@ -18497,7 +18498,7 @@ async function generateCoffeeBotReply(args: {
   const listenerBot = listenerTarget
     ? turnGroup.find((bot) => bot.id === listenerTarget.botId) ?? null
     : null;
-  const listenerReaction = listenerTarget && listenerBot
+  const listenerReactionRaw = listenerTarget && listenerBot
     ? buildCoffeeListenerReactionPlanV1({
         conversationId: row.id,
         messageId: assistantMessageId,
@@ -18523,6 +18524,12 @@ async function generateCoffeeBotReply(args: {
         previousAudibleListenerBotId: lastCoffeeAudibleListenerBotId(history),
       })
     : null;
+  const listenerReaction = listenerReactionRaw && listenerBot
+    ? botPowerOmitBreathListenerVocalFoleyV1(
+        listenerReactionRaw,
+        coffeePowerPlan?.bots[listenerBot.id]?.effects ?? [],
+      )
+    : listenerReactionRaw;
   const stageActionMoodHint: StageActionMoodHintV1 = derivePrismMoodKey(
     coffeeSocialSnapshotToPrismMoodState(
       nextSocialByBotId[speaker.id] ?? preTurnSocialByBotId[speaker.id] ?? DEFAULT_COFFEE_SOCIAL,

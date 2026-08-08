@@ -19,6 +19,8 @@ import {
   stopBodilyFoleyThroughVoiceBus,
 } from "./voiceEffects.ts";
 import {
+  botPowerIsBreathActionSfxKindV1,
+  botPowerIsBreathlessV1,
   isActionSfxPackKind,
   normalizeBotAudioVoiceProfileV1,
   normalizeCorporality,
@@ -565,12 +567,20 @@ export async function playPreparedCoffeeActionSfx(args: {
   seed?: string;
   ownerKind?: ActionSfxPackOwnerKind;
   ownerId?: string | null;
+  /** Pack-owner Ready Powers; breathless refuses sigh/gasp. */
+  powers?: unknown;
   /** Identity corporality continuum (0 artificial → 1 ethereal). */
   corporality?: number | null;
   /** Voice profile used to color bodily Foley through the vocal FX bus. */
   voiceProfile?: BotAudioVoiceProfileV1 | null;
   voiceEffectsEnabled?: boolean;
 }): Promise<boolean> {
+  if (
+    botPowerIsBreathActionSfxKindV1(args.kind) &&
+    botPowerIsBreathlessV1(args.powers)
+  ) {
+    return false;
+  }
   let packPlayback: { source: string; variantIndex: number } | null = null;
   // Vocal packs only — bodily gags never query Action SFX packs.
   if (

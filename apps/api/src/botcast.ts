@@ -176,6 +176,7 @@ import {
   botPowerListenerHearsTurnV1,
   botPowerAnnoyanceTargetV1,
   botPowerIsMutedV1,
+  botPowerOmitBreathListenerVocalFoleyV1,
   botPowerMumblesSpeechV1,
   botPowerIntendedSpeechLooksGibberishV1,
   botPowerSpeechObfuscationAuthoringCueV1,
@@ -14293,11 +14294,16 @@ export async function advanceBotcastEpisode(
       };
     }
   }
-  const listenerReaction =
-    listenerReactionCandidate &&
-    (speakerIsMutedForTurn || botPowerIsMutedV1(listener.powers))
-      ? signalVisualOnlyListenerReaction(listenerReactionCandidate)
-      : listenerReactionCandidate;
+  const listenerReaction = (() => {
+    if (!listenerReactionCandidate) return null;
+    if (speakerIsMutedForTurn || botPowerIsMutedV1(listener.powers)) {
+      return signalVisualOnlyListenerReaction(listenerReactionCandidate);
+    }
+    return botPowerOmitBreathListenerVocalFoleyV1(
+      listenerReactionCandidate,
+      listener.powers,
+    );
+  })();
   if (listenerReaction) {
     recordEvent(
       db,

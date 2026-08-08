@@ -9,6 +9,7 @@ import {
   DEBATE_AUDIENCE_FOLEY_URLS,
   DEBATE_AUDIENCE_MURMUR_URL,
   DEBATE_AUDIENCE_REACTIONS,
+  DEBATE_AUDIENCE_ROOM_BASELINE_URL,
   DEBATE_GAVEL_FOLEY_TRIM,
   DEBATE_GAVEL_FOLEY_URLS,
   DEBATE_GAVEL_ORDER_CAMERA_CUT_MS,
@@ -16,6 +17,7 @@ import {
   DEBATE_GAVEL_ORDER_CAMERA_SETTLE_MS,
   debateModeratorGavelCameraSettleMs,
   DEBATE_GAVEL_VISUAL_IMPACT_MS,
+  debateAudienceBackgroundUrlForPressureBand,
   debateAudienceBeatForEvent,
   debateDirectedAudiencePlayback,
   debateModeratorGavelCue,
@@ -23,6 +25,7 @@ import {
   debateVocalFoleyTargetId,
   debateAmbientVocalFoleyTagText,
   debateAmbientVocalFoleyVoicePerformance,
+  debateJuryDeliberationMouthShape,
   debateVocalFoleyVoicePerformance,
   resolveDebateVocalFoleyTagText,
   type DebateFoleyParticipant,
@@ -192,6 +195,40 @@ describe("Debate vocal Foley", () => {
         ],
       }),
       null,
+    );
+  });
+
+  it("treats breathless like hard mute only for soft-inhale and soft-sigh", () => {
+    const breathlessParticipants = participants.map((participant) => ({
+      ...participant,
+      breathless: true,
+    }));
+    assert.equal(
+      debateVocalFoleyTargetId({
+        sessionId: "debate-1",
+        cueIndex: 0,
+        kind: "soft-inhale",
+        participants: breathlessParticipants,
+      }),
+      null,
+    );
+    assert.equal(
+      debateVocalFoleyTargetId({
+        sessionId: "debate-1",
+        cueIndex: 0,
+        kind: "soft-sigh",
+        participants: breathlessParticipants,
+      }),
+      null,
+    );
+    assert.equal(
+      debateVocalFoleyTargetId({
+        sessionId: "debate-1",
+        cueIndex: 0,
+        kind: "throat-clear",
+        participants: breathlessParticipants,
+      }),
+      "moderator",
     );
   });
 });
@@ -641,8 +678,28 @@ describe("Debate moderator gavel", () => {
 
   it("bundles the selected murmur, sparse Foley, and synchronized reactions", () => {
     assert.equal(
-      DEBATE_AUDIENCE_MURMUR_URL,
+      DEBATE_AUDIENCE_ROOM_BASELINE_URL,
       "/audio/session-atmosphere/default-studio-room-loop.mp3",
+    );
+    assert.equal(
+      DEBATE_AUDIENCE_MURMUR_URL,
+      "/audio/debate/courtroom-audience-murmur-loop.mp3",
+    );
+    assert.equal(
+      debateAudienceBackgroundUrlForPressureBand("settled"),
+      DEBATE_AUDIENCE_ROOM_BASELINE_URL,
+    );
+    assert.equal(
+      debateAudienceBackgroundUrlForPressureBand(null),
+      DEBATE_AUDIENCE_ROOM_BASELINE_URL,
+    );
+    assert.equal(
+      debateAudienceBackgroundUrlForPressureBand("murmuring"),
+      DEBATE_AUDIENCE_MURMUR_URL,
+    );
+    assert.equal(
+      debateAudienceBackgroundUrlForPressureBand("disruptive"),
+      DEBATE_AUDIENCE_MURMUR_URL,
     );
     assert.equal(
       DEBATE_AUDIENCE_CROSSTALK_URL,
@@ -706,6 +763,7 @@ describe("Debate moderator gavel", () => {
     });
 
     const urls = [
+      DEBATE_AUDIENCE_ROOM_BASELINE_URL,
       DEBATE_AUDIENCE_MURMUR_URL,
       DEBATE_AUDIENCE_CROSSTALK_URL,
       DEBATE_AUDIENCE_AGITATION_URL,
@@ -768,5 +826,14 @@ describe("Debate moderator gavel", () => {
       debateModeratorGavelCameraSettleMs("attention"),
       DEBATE_GAVEL_ATTENTION_CAMERA_SETTLE_MS,
     );
+  });
+
+  it("staggers silent Jury deliberation mouth chatter by seat", () => {
+    const seat0 = debateJuryDeliberationMouthShape(0, 260);
+    const seat2 = debateJuryDeliberationMouthShape(2, 260);
+    const later = debateJuryDeliberationMouthShape(0, 910);
+    assert.ok(typeof seat0 === "string" && seat0.length > 0);
+    assert.notEqual(seat0, seat2);
+    assert.notEqual(seat0, later);
   });
 });

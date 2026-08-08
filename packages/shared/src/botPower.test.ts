@@ -38,6 +38,13 @@ import {
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
+  botPowerDefinitionIsExplicitBreathlessV1,
+  botPowerIsBreathlessV1,
+  botPowerIsBreathAmbientVocalizationKindV1,
+  botPowerIsBreathListenerVocalFoleyV1,
+  botPowerIsBreathActionSfxKindV1,
+  botPowerStripBreathPerformanceTextV1,
+  botPowerOmitBreathListenerVocalFoleyV1,
   botPowerBotNamingCueV1,
   botPowerDesignationObserverCueV1,
   botPowerTargetNameV1,
@@ -808,6 +815,71 @@ test("legacy Ready mute Powers stay absolute when compiled effects are missing",
     ),
     false,
   );
+});
+
+test("breathless Powers normalize, strip lung Foley tags, and omit breath listener Foley", () => {
+  const name = "Breathless";
+  const intent = "This bot does not breathe and never sighs or gasps.";
+  const powers = [{
+    version: 1,
+    id: "breathless",
+    name,
+    intent,
+    enabled: true,
+    compileStatus: "ready",
+    compiled: {
+      version: 1,
+      sourceHash: botPowerSourceHashV1(name, intent),
+      selfCue: "Never breathe.",
+      observerCue: "This bot cannot breathe.",
+      effects: [{ type: "breathless" }],
+      ruleLabels: ["Breathless"],
+    },
+  }];
+
+  assert.deepEqual(
+    normalizeBotPowerEffectV1({ type: "breathless", ignored: true }),
+    { type: "breathless" },
+  );
+  assert.equal(botPowerDefinitionIsExplicitBreathlessV1(name, intent), true);
+  assert.equal(botPowerIsBreathlessV1(powers), true);
+  assert.equal(botPowerIsBreathlessV1([{ ...powers[0], enabled: false }]), false);
+  assert.equal(botPowerIsBreathAmbientVocalizationKindV1("soft-sigh"), true);
+  assert.equal(botPowerIsBreathAmbientVocalizationKindV1("throat-clear"), false);
+  assert.equal(botPowerIsBreathListenerVocalFoleyV1("sighs"), true);
+  assert.equal(botPowerIsBreathListenerVocalFoleyV1("chuckles"), false);
+  assert.equal(botPowerIsBreathActionSfxKindV1("gasp"), true);
+  assert.equal(botPowerIsBreathActionSfxKindV1("laugh"), false);
+  assert.equal(
+    botPowerStripBreathPerformanceTextV1(
+      "[sighs] Hello. [exhales] [laughs] There. [gasps] [breathes deeply]",
+    ),
+    "Hello. [laughs] There.",
+  );
+  assert.deepEqual(
+    botPowerOmitBreathListenerVocalFoleyV1(
+      { visualAction: "nod", vocalFoley: "sighs", spokenCue: undefined },
+      powers,
+    ),
+    { visualAction: "nod", spokenCue: undefined },
+  );
+  assert.deepEqual(
+    botPowerOmitBreathListenerVocalFoleyV1(
+      { visualAction: "nod", vocalFoley: "chuckles" },
+      powers,
+    ),
+    { visualAction: "nod", vocalFoley: "chuckles" },
+  );
+  const legacyPowers = [{
+    ...powers[0],
+    id: "legacy-breathless",
+    compiled: {
+      ...powers[0]!.compiled!,
+      effects: [],
+      ruleLabels: ["No Lungs"],
+    },
+  }];
+  assert.deepEqual(activeBotPowerEffectsV1(legacyPowers), [{ type: "breathless" }]);
 });
 
 test("echo Powers normalize and preserve addressed speech exactly", () => {

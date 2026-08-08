@@ -96,6 +96,15 @@ describe("pre-speech breath planning", () => {
       null,
     );
     assert.equal(
+      resolvePreSpeechBreathPlan({
+        seed: "breathless",
+        text: LONG_LINE,
+        surface: "chat",
+        breathless: true,
+      }),
+      null,
+    );
+    assert.equal(
       hasAuthoredBreathDirection("*takes a breath* Then answers."),
       true,
     );
@@ -133,7 +142,9 @@ describe("pre-speech breath integration", () => {
       /playbackSurface: "signal" \| "debate" = "signal"/u,
     );
     assert.match(pageSource, /surface: playbackSurface/u);
-    assert.match(pageSource, /"debate",\s*\);/u);
+    assert.match(pageSource, /"debate",\s*utterance\.format/u);
+    assert.match(pageSource, /breathless: botPowerIsBreathlessV1/u);
+    assert.match(pageSource, /breathless: speakerBreathless/u);
   });
 
   it("plays presence before speech and lets missing assets fail silently", () => {

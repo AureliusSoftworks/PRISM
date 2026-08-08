@@ -21,6 +21,7 @@ export type BotPowerMuteModePolicy =
   | "enforced"
   | "not_applicable"
   | "required_before_activation";
+export type BotPowerBreathlessModePolicy = BotPowerMuteModePolicy;
 export type BotPowerCandorModePolicy =
   | "direct"
   | "cue"
@@ -76,19 +77,19 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   chat: {
     id: "chat",
     name: "Chat",
-    version: "1.37",
+    version: "1.38",
     status: "active",
   },
   zen: {
     id: "zen",
     name: "Zen",
-    version: "1.36",
+    version: "1.37",
     status: "active",
   },
   debate: {
     id: "debate",
     name: "Debate",
-    version: "0.28",
+    version: "0.30",
     status: "preview",
   },
   polling: {
@@ -100,13 +101,13 @@ export const PRISM_APPLETS: Record<PrismAppletId, PrismAppletVersion> = {
   coffee: {
     id: "coffee",
     name: "Coffee",
-    version: "2.48",
+    version: "2.49",
     status: "active",
   },
   botcast: {
     id: "botcast",
     name: "Signal",
-    version: "1.58",
+    version: "1.59",
     status: "active",
   },
   feed: {
@@ -338,6 +339,29 @@ export const BOT_POWER_ETERNAL_INTRODUCTION_MODE_POLICY: Record<
  * activates. This is a shipping requirement, never a bot eligibility gate.
  */
 export const BOT_POWER_MUTE_MODE_POLICY: Record<PrismAppletId, BotPowerMuteModePolicy> = {
+  chat: "enforced",
+  zen: "enforced",
+  debate: "enforced",
+  polling: "required_before_activation",
+  coffee: "enforced",
+  botcast: "enforced",
+  feed: "required_before_activation",
+  games: "required_before_activation",
+  story: "required_before_activation",
+  gym: "required_before_activation",
+  slate: "not_applicable",
+  pseudo: "required_before_activation",
+  surf: "required_before_activation",
+};
+
+/**
+ * Every future bot-embodying applet must suppress lung Foley for breathless
+ * holders before the applet activates. Speech remains; breath Foley does not.
+ */
+export const BOT_POWER_BREATHLESS_MODE_POLICY: Record<
+  PrismAppletId,
+  BotPowerBreathlessModePolicy
+> = {
   chat: "enforced",
   zen: "enforced",
   debate: "enforced",

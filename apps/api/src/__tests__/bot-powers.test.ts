@@ -1104,6 +1104,41 @@ test("compiler creates hard mute rules without consulting the local model", asyn
   ]);
 });
 
+test("compiler creates hard breathless rules without consulting the local model", async () => {
+  let calls = 0;
+  const unusedProvider: LlmProvider = {
+    name: "local",
+    async generateResponse() {
+      calls += 1;
+      throw new Error("provider should not be needed");
+    },
+    async embedText() { return []; },
+  };
+  const result = await compileBotPowers({
+    provider: unusedProvider,
+    botName: "Windless Wren",
+    powers: [{
+      version: 1,
+      id: "breathless",
+      name: "Breathless",
+      intent: "No matter what, this bot does not breathe and never produces breath Foley.",
+      enabled: true,
+      compileStatus: "draft",
+      compiled: null,
+    }],
+  });
+
+  assert.equal(calls, 0);
+  assert.equal(result.powers[0]?.compileStatus, "ready");
+  assert.deepEqual(result.powers[0]?.compiled?.effects, [
+    { type: "breathless" },
+  ]);
+  assert.deepEqual(result.powers[0]?.compiled?.ruleLabels, [
+    "Breathless",
+    "No lung Foley",
+  ]);
+});
+
 test("Forgetful Freddie compiles current-other-speaker context and gradual peer agitation", async () => {
   let calls = 0;
   const unusedProvider: LlmProvider = {

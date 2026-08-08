@@ -4,6 +4,7 @@ import {
   botPowerDefinitionIsExplicitInterruptionV1,
   botPowerDefinitionIsUnconditionalInterruptionV1,
   botPowerDefinitionIsExplicitMuteV1,
+  botPowerDefinitionIsExplicitBreathlessV1,
   botPowerDefinitionIsSimulationEvangelistV1,
   botPowerDesignationEffectFromIntentV1,
   botPowerAvatarScaleModeFromDescriptionV1,
@@ -362,6 +363,26 @@ function deterministicMutePower(
       { type: "mouth_motion", mode: "sealed" },
     ],
     ruleLabels: ["Muted", "Sealed mouth"],
+  };
+}
+
+function deterministicBreathlessPower(
+  source: BotPowerV1,
+  botName: string,
+): CompiledBotPowerV1 | null {
+  if (!botPowerDefinitionIsExplicitBreathlessV1(source.name, source.intent)) {
+    return null;
+  }
+  const subject = compact(botName, 100) || "This bot";
+  return {
+    version: BOT_POWER_VERSION,
+    sourceHash: botPowerSourceHashV1(source.name, source.intent),
+    selfCue:
+      "Hard physiology: you cannot inhale, exhale, sigh, gasp, or make any breath sound. Speak and act freely, but never narrate or perform breathing Foley — lungs do not work here.",
+    observerCue:
+      `${subject} still speaks and acts, but never breathes, sighs, gasps, or makes lung Foley. Treat missing breath as ordinary physiology, not a secret Power to explain.`,
+    effects: [{ type: "breathless" }],
+    ruleLabels: ["Breathless", "No lung Foley"],
   };
 }
 
@@ -1684,6 +1705,7 @@ function deterministicPower(
     deterministicSadPower(source, botName) ??
     deterministicHardInvisibilityPower(source, botName) ??
     deterministicMutePower(source, botName) ??
+    deterministicBreathlessPower(source, botName) ??
     deterministicInterruptionPower(source, botName) ??
     deterministicAddressedInsultPower(source, botName) ??
     deterministicAddressedFandomPower(source, botName) ??
@@ -2256,6 +2278,7 @@ export async function compileBotPowers(args: {
         "Return {\"powers\":[{\"id\":string,\"name\":string,\"sigil\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
         "Allowed effects only:",
         '- {"type":"mute"},',
+        '- {"type":"breathless"} means the holder cannot inhale, exhale, sigh, gasp, or produce any lung Foley while still speaking and acting normally,',
         '- {"type":"ineptitude","instructionFidelity":"always_botched","imageFidelity":"always_unrelated"} means the holder visibly botches every task or production role, while bot-attributed image requests are hard-routed to unrelated scenes by runtime,',
         '- {"type":"power_immunity","scope":"holder","targets":"other_bots","awareness":"unnoticed"} means every other bot\'s Power is absent only from this holder\'s perception and behavior; never reveal or acknowledge the immunity,',
         '- {"type":"designation","placement":"prefix|suffix","text":string up to 80 characters} means the holder adds that text to every other bot name they say; it never renames the holder or a human,',
@@ -2344,7 +2367,7 @@ export async function compileBotPowers(args: {
         content: [
           "Repair malformed PRISM Power compiler output.",
           "Reply with JSON only and preserve the supplied power IDs exactly.",
-          "Every ineptitude, other-bot Power-immunity rule, current-other-speaker short-term-amnesia rule, persistent prefix/suffix designation, addressed-speech copy, direct-addresser identity mirror, library-or-marketplace shapeshift, session-sticky false name (John/Jane Doe), hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, avatar color-cycle, loud/quiet voice presence, normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
+          "Every ineptitude, other-bot Power-immunity rule, current-other-speaker short-term-amnesia rule, persistent prefix/suffix designation, addressed-speech copy, direct-addresser identity mirror, library-or-marketplace shapeshift, session-sticky false name (John/Jane Doe), hearing-repeat, active live-interruption, exclusive visibility, hearing-audience, ghostly speaking-only avatar, physical avatar-size, avatar color-cycle, loud/quiet voice presence, breathless (no lung Foley), normal-volume gibberish, intermittent mute, strict response-length, current-addressee obsessive-fandom, after-spoken-turn recipient mood-boost, direct-addresser mood-drain, or light/dark conditional compound intent must include its matching typed effects, including exact whenTheme conditions for compound branches, not only prose cues.",
         ].join(" "),
       },
       {
@@ -2353,7 +2376,7 @@ export async function compileBotPowers(args: {
           `Expected powers: ${JSON.stringify(unresolved.map(({ id, authoringMode, name, intent, enabled }) => ({ id, authoringMode, name, intent, enabled })))}`,
           `Prior output: ${compact(raw, 6000) || "(empty)"}`,
           "Return {\"powers\":[{\"id\":string,\"name\":string,\"selfCue\":string,\"observerCue\":string,\"effects\":[],\"ruleLabels\":string[]}]}",
-          "Allowed effect types: mute, ineptitude, power_immunity, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, intermittent_mute, intermittent_audibility, annoyance, social_influence, mood_boost, mood_drain, candor, credulity, anti_truth, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
+          "Allowed effect types: mute, breathless, ineptitude, power_immunity, designation, eternal_introduction, speech_copy, identity_mirror, identity_shapeshift, false_name, hearing_repeat, awareness, speech_audience, avatar_visibility, avatar_scale, avatar_color_cycle, voice_presence, speech_obfuscation, intermittent_mute, intermittent_audibility, annoyance, social_influence, mood_boost, mood_drain, candor, credulity, anti_truth, addressed_fandom, mood_resistance, cup_rate, action_bias, interruption, response_budget, turn_gravity, response_bond, topic_gravity, selective_memory, insight.",
         ].join("\n"),
       },
     ];
