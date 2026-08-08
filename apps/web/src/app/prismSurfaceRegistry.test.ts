@@ -8,6 +8,7 @@ import {
   prismRestorableWorkspaceLocation,
   prismStartupLocationFor,
   prismStartupSurfaces,
+  prismStartupViewParamBlocksPreference,
   prismSurfacesByClassification,
   type PrismSurfaceCheckpoint,
   type PrismStartupPreference,
@@ -114,7 +115,7 @@ describe("PRISM living-shell surface registry", () => {
     assert.deepEqual(debateEntry.origin, checkpoint);
   });
 
-  it("lets explicit URLs take precedence over account startup settings", () => {
+  it("lets explicit applet URLs take precedence over account startup settings", () => {
     assert.equal(
       prismStartupLocationFor({
         explicitViewParam: "coffee",
@@ -136,6 +137,22 @@ describe("PRISM living-shell surface registry", () => {
         lastWorkspaceLocation: "/?view=chat&group=group-42#members",
       }),
       "/?view=chat&group=group-42#members",
+    );
+  });
+
+  it("treats Living Shell Home route aliases as preference-eligible", () => {
+    assert.equal(prismStartupViewParamBlocksPreference(null), false);
+    assert.equal(prismStartupViewParamBlocksPreference("chat"), false);
+    assert.equal(prismStartupViewParamBlocksPreference("zen"), false);
+    assert.equal(prismStartupViewParamBlocksPreference("sandbox"), false);
+    assert.equal(prismStartupViewParamBlocksPreference("coffee"), true);
+    assert.equal(prismStartupViewParamBlocksPreference("slate"), true);
+    assert.equal(
+      prismStartupLocationFor({
+        explicitViewParam: null,
+        preference: "home",
+      }),
+      "/?view=chat",
     );
   });
 

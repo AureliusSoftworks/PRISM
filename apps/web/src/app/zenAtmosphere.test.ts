@@ -35,7 +35,7 @@ describe("zenAtmosphereGrayscaleAmount", () => {
 
     assert.match(
       backdropStyleSource,
-      /zenAtmosphereGrayscaleAmount\(\s*composeBotAccentId !== null/
+      /appWidePrivateMode\s*\?\s*"1"\s*:\s*zenAtmosphereGrayscaleAmount\(\s*composeBotAccentId !== null/,
     );
     assert.match(
       backdropStyleSource,

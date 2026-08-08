@@ -220,10 +220,24 @@ const PRISM_RESTORABLE_WORKSPACE_VIEW_PARAMS = new Set([
 ]);
 
 export interface PrismStartupLocationInput {
-  /** A present `view` query always represents an intentional deep link. */
+  /** A present non-Home `view` query always represents an intentional deep link. */
   explicitViewParam: string | null;
   preference: PrismStartupPreference;
   lastWorkspaceLocation?: string | null;
+}
+
+/**
+ * `chat` / `zen` / `sandbox` all host Living Shell Home, so they must not
+ * block account startup preference the way Coffee/Debate/Slate deep links do.
+ */
+export function prismStartupViewParamBlocksPreference(
+  viewParam: string | null,
+): boolean {
+  if (viewParam === null) return false;
+  if (viewParam === "chat" || viewParam === "zen" || viewParam === "sandbox") {
+    return false;
+  }
+  return true;
 }
 
 export function prismSurfacesByClassification(

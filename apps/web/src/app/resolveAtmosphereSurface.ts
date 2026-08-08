@@ -17,28 +17,22 @@ export type ResolveAtmosphereSurfaceArgs = {
 
 /**
  * Hard-separates wallpaper surfaces:
- * - Prism / all-bots → full-color shared Home wallpaper
- * - Chat / collapsed Zen + focused bot → same Home wallpaper (tinted in UI)
- * - Expanded Zen → Zen conversation atmospheres only
+ * - Collapsed Chat / transcript home (any bot focus) → CSS gradient only
+ * - Immersive Zen all-bots home → CSS gradient only
+ * - Immersive Zen persona / conversation → Zen conversation atmospheres
  *
- * Home uses one shared hub atmosphere image. Bot focus does not select a
- * per-bot daily scene; the UI desaturates and color-blends instead.
+ * Shared Home hub wallpaper may still generate for Settings, but it is not
+ * mounted on collapsed Chat/Zen home — detailed rooms are for Zen.
+ * `prism` / `homeBot` remain in the union for older callers and cleanup refs.
  */
 export function resolveAtmosphereSurface(
   args: ResolveAtmosphereSurfaceArgs,
 ): AtmosphereSurface {
-  if (args.presentation === "zen") {
-    return args.prismSession ? "none" : "zenConversation";
-  }
-
-  if (!args.prismAtmosphereEnabled || !args.prismAtmosphereImageId) {
+  // Collapsed Chat / transcript home: gradient plate only for every bot.
+  if (args.presentation === "chat") {
     return "none";
   }
 
-  // presentation === "chat" (SMS Chat or collapsed Zen)
-  if (args.prismSession || !args.focusedBotId) {
-    return "prism";
-  }
-
-  return "homeBot";
+  // Immersive Zen: detailed atmospheres only once a persona/conversation is open.
+  return args.prismSession ? "none" : "zenConversation";
 }

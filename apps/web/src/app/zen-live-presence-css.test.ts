@@ -2769,15 +2769,15 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /className=\{styles\.emptyStateTitleSubject\}/);
     assert.match(
       pageSource,
-      /<span className=\{styles\.emptyStateTitleLead\}>Zen<\/span>[\s\S]*?<span className=\{styles\.emptyStateTitleLead\}>with<\/span>/
-    );
-    assert.doesNotMatch(
-      pageSource,
       /<span className=\{styles\.emptyStateTitleLead\}>Chat<\/span>[\s\S]*?<span className=\{styles\.emptyStateTitleLead\}>with<\/span>/
     );
     assert.doesNotMatch(
       pageSource,
-      /<div className=\{styles\.emptyStateTitle\}>\s*\{`Zen with \$\{titleSubject\}`\}\s*<\/div>/
+      /<span className=\{styles\.emptyStateTitleLead\}>Zen<\/span>[\s\S]*?<span className=\{styles\.emptyStateTitleLead\}>with<\/span>/
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /<div className=\{styles\.emptyStateTitle\}>\s*\{`(?:Zen|Chat) with \$\{titleSubject\}`\}\s*<\/div>/
     );
     assert.match(css, /text-wrap:\s*balance\s*;/);
     assert.match(css, /overflow-wrap:\s*anywhere\s*;/);

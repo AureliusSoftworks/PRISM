@@ -3,7 +3,7 @@ import { describe, it } from "node:test";
 import { resolveAtmosphereSurface } from "./resolveAtmosphereSurface.ts";
 
 describe("resolveAtmosphereSurface", () => {
-  it("uses Prism Home wallpaper for new-session / all-bots in chat presentation", () => {
+  it("keeps collapsed Chat / all-bots home on the gradient plate", () => {
     assert.equal(
       resolveAtmosphereSurface({
         presentation: "chat",
@@ -12,11 +12,11 @@ describe("resolveAtmosphereSurface", () => {
         prismAtmosphereEnabled: true,
         prismAtmosphereImageId: "prism-1",
       }),
-      "prism",
+      "none",
     );
   });
 
-  it("reuses the shared Home wallpaper when a bot is focused", () => {
+  it("keeps collapsed Chat focused-bot home on the gradient for every bot", () => {
     assert.equal(
       resolveAtmosphereSurface({
         presentation: "chat",
@@ -25,7 +25,7 @@ describe("resolveAtmosphereSurface", () => {
         prismAtmosphereEnabled: true,
         prismAtmosphereImageId: "prism-1",
       }),
-      "homeBot",
+      "none",
     );
   });
 
@@ -39,6 +39,19 @@ describe("resolveAtmosphereSurface", () => {
         prismAtmosphereImageId: "prism-1",
       }),
       "zenConversation",
+    );
+  });
+
+  it("keeps immersive Zen all-bots home on the gradient plate", () => {
+    assert.equal(
+      resolveAtmosphereSurface({
+        presentation: "zen",
+        prismSession: true,
+        focusedBotId: null,
+        prismAtmosphereEnabled: true,
+        prismAtmosphereImageId: "prism-1",
+      }),
+      "none",
     );
   });
 
