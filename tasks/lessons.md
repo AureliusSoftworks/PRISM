@@ -1,12 +1,12 @@
-### 2026-08-07 · [UX]
-**Trigger**: Thinking / avatar SFX kept playing under Signal bake and other fullscreen loaders.
-**Lesson**: Fullscreen hard waits (`PrismBlockingLoader` fullscreen + `ModelWarmupIntermission`) must mute avatar SFX via `beginPrismFullscreenBlockingAudioMute`. Docked soft synthesis stays audible. Do not leave computer-calculating loops under an opaque bake/invent overlay.
-**Applies to**: `prismFullscreenBlockingAudio.ts`, `botAvatarSfx.ts`, `PrismBlockingLoader.tsx`, `ModelWarmupIntermission.tsx`
-
 ### 2026-08-06 · design
 **Trigger**: Steam prep — marketplace bots shipped with packaged second-person lore as "memories."
 **Lesson**: Marketplace `.bot` packs must ship with empty memories (`memoryCount` 0, no `memories.json`). Persona/identity lives in `bot.json`; memories are earned via player and bot interaction. Use `scripts/strip-marketplace-bot-memories.mjs`; Steam staging refuses `memoryCount !== 0`.
 **Applies to**: Marketplace packaging, Steam content staging, bot import
+
+### 2026-08-06 · architecture
+**Trigger**: Soft-suite key-phrase case — High met wording constraints but lost on correctness by saying chat logs were stored “in a private planning pass.”
+**Lesson**: Required-phrase transfer must separate *mention the phrase* from *define the concept*. Detect misuse (`stored in a private planning pass`), enforce exact sentence counts, and repair when the phrase is warped into a storage container.
+**Applies to**: `appendPsychicAnswerGuidance`, `detectObviousConstraintBreaks`, repair directives in `chat.ts`
 
 ### 2026-08-06 · architecture
 **Trigger**: Cafe Phase A — even with repair, llama3.2 High still anchored on illegal private drafts (Bob 16:00–20:00).
@@ -87,6 +87,31 @@
 **Trigger**: Model picker still showed a DEFAULT pill on GPT 4o Mini after Auto became the player-facing default.
 **Lesson**: Do not badge catalog `isDefault` models as “Default” in the picker. Auto owns the “Prism chooses” role; `isDefault` may remain internal for fallback/catalog ordering only.
 **Applies to**: `ComposerModelPicker` in `page.tsx`, `composeModelDefaultBadge` (removed)
+
+### 2026-08-06 · architecture
+**Trigger**: Phase B revived Chat Qdrant after years of Zen-only gating despite Chat-oriented comments.
+**Lesson**: Companion lanes (Chat + Zen) share Qdrant summary read/write; Sandbox never does. Gate with `companionLaneUsesQdrantMemorySummaries(mode)`, not `mode === "zen"`. Keep LOCAL (Qdrant is on-LAN). Pin with Chat inject + Sandbox non-search tests.
+**Applies to**: `retrieveMemoriesWithFallback`, `summarizeAndStoreMemories`, Phase B `PRISM-gz07b`
+
+### 2026-08-06 · testing
+**Trigger**: Soft-continuity-memory suite — encrypted memories bleed across eval arms on a shared user DB.
+**Lesson**: Before seeding case memories in experimental-effort continuity suites, `DELETE FROM memories WHERE user_id = ?` for the eval user. Companion retrieval is user-scoped, so leftover drink facts will contaminate travel recalls and falsely tank High.
+**Applies to**: `seedContinuityConversation` in `experimental-effort.ts`, Phase B memory evals
+
+### 2026-08-06 · architecture
+**Trigger**: Phase B denser thread-state card after continuity digest validation.
+**Lesson**: Do not dump raw continuity system blobs into Psychic. Build a sectioned card, strip instructional preambles, and priority-pack (thread/memory first) under a fixed char budget so long Coffee notes cannot crowd out must-keep facts.
+**Applies to**: `extractPsychicContinuityDigest`, Phase B `PRISM-gz07b`
+
+### 2026-08-06 · testing
+**Trigger**: Phase B soft-continuity suite — facts only in seeded thread compact; High vs None on llama3.2.
+**Lesson**: Score continuity with deterministic must-include/label checks (not judge-only). Seed a fresh sandbox conversation + `thread_compact` summary per arm. Expect `continuity_digest` on High planning warnings. Empty None answers still count as a product signal but note them — they inflate High≥None margins.
+**Applies to**: `experimental-effort.ts --suite soft-continuity`, Phase B `PRISM-gz07b`
+
+### 2026-08-06 · architecture
+**Trigger**: Phase B — LOCAL High could plan without seeing memories/thread compact because Psychic stripped all `system` messages.
+**Lesson**: Re-inject a capped continuity digest (thread compact, memory hints, Zen/Coffee continuity prefixes) into Psychic plan + private passes. Do not feed persona/tool system prompts into private planning — only continuity sources. Keep LOCAL-only; digest is assembled from prompt messages already built for the final turn.
+**Applies to**: `extractPsychicContinuityDigest`, `runPsychicPlanningPass`, `runPsychicPrivateTextPass`, Phase B `PRISM-gz07b`
 
 ### 2026-08-05 · UX
 **Trigger**: Settings → Models ONLINE fallback chain: after Fallback 1 was set, picking any model in Fallback 2+ closed the dropdown without changing the selection.
@@ -200,6 +225,11 @@
 **Trigger**: English TTS mouth was closer, but lips still reopened before a pause finished — consonants/vowels must stay 1:1 with audio in every speaking mode.
 **Lesson**: Never apply speech-activity attack across a real pause (only inside continuous phoneme runs ≤ merge gap). Cap release to half of the following silence. After CRT rests, add a post-rest lead-in. Never remap literal `"closed"` → `"speech-closed"` while an utterance is still in progress — Zen returns null; Coffee/Signal/Debate must idle lips the same way while keeping Replying/talking status on the utterance clock.
 **Applies to**: `speechActivity.ts`, `speechSegmentClock.ts`, `zenLiveBotMouthShapeForTalkingState`, Coffee/Signal/Debate mouth gates, Avatar Studio / hub previews
+
+### 2026-08-07 · [UX]
+**Trigger**: Thinking / avatar SFX kept playing under Signal bake and other fullscreen loaders.
+**Lesson**: Fullscreen hard waits (`PrismBlockingLoader` fullscreen + `ModelWarmupIntermission`) must mute avatar SFX via `beginPrismFullscreenBlockingAudioMute`. Docked soft synthesis stays audible. Do not leave computer-calculating loops under an opaque bake/invent overlay.
+**Applies to**: `prismFullscreenBlockingAudio.ts`, `botAvatarSfx.ts`, `PrismBlockingLoader.tsx`, `ModelWarmupIntermission.tsx`
 
 ### 2026-08-05 · [UX]
 **Trigger**: Signal Watch baking showed the show intro card during synthesis, so the active bake job was easy to miss.

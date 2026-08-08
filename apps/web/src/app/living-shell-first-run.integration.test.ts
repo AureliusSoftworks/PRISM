@@ -93,4 +93,17 @@ describe("living-shell first run", () => {
     assert.match(tutorialCss, /box-shadow:[\s\S]*9999px/u);
     assert.match(tutorialCss, /@media \(prefers-reduced-motion: reduce\)/u);
   });
+
+  it("starts Home preference on All Bots instead of auto-opening Prism chat", () => {
+    assert.match(pageSource, /prismStartupViewParamBlocksPreference\(viewParam\)/u);
+    assert.match(
+      pageSource,
+      /preference === "home"[\s\S]{0,200}chatAutoRestoreSuppressedRef\.current = true/u,
+    );
+    assert.match(
+      pageSource,
+      /chatAutoRestoreSuppressed \|\|[\s\S]{0,40}chatAutoRestoreSuppressedRef\.current/u,
+    );
+    assert.match(pageSource, /Begin in All Bots\./u);
+  });
 });

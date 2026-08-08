@@ -132,10 +132,10 @@ describe("mode tutorials", () => {
         '[data-tutorial-target="debate-readiness"]',
         '[data-tutorial-target="debate-start"]',
         '[data-tutorial-target="debate-judge-gavel"]',
-        '[data-tutorial-target="debate-case-board"]',
+        '[data-tutorial-target="debate-case-board-tab"]',
         '[data-tutorial-target="debate-jury-chamber"]',
         '[data-tutorial-target="debate-camera"]',
-        '[data-tutorial-target="debate-copy-transcript"]',
+        '[data-tutorial-target="debate-copy-all-review-data"]',
       ],
     );
     const copy = tutorial.steps.map((step) => step.body).join(" ");
@@ -268,8 +268,11 @@ describe("mode tutorials", () => {
       copy,
       /Judge \/ Moderator seat, the public floor stays on Auto/u,
     );
-    assert.match(copy, /Jury is never a manual camera/u);
-    assert.doesNotMatch(copy, /Watch Jury/u);
+    assert.match(copy, /Jury never appears as a manual camera/u);
+    assert.match(
+      copy,
+      /Spectators and Judges also get a manual Jury camera once that chamber window opens/u,
+    );
     assert.match(
       copy,
       /Forum and Turnabout keep the procedural rhythm for bot-moderated roles/u,
@@ -324,7 +327,16 @@ describe("mode tutorials", () => {
     assert.match(copy, /adjective, object, or observable-fact fields/u);
     assert.match(
       copy,
-      /in-room Judge console keeps one contextual Gavel control, Pause or Resume, and End Debate together/u,
+      /Pause sits beside the stage CC control while the Debate is live/u,
+    );
+    assert.match(copy, /Resume stays on the recess overlay/u);
+    assert.match(
+      copy,
+      /Leave unfinished work through Studio \/ Archive rather than a right-rail End control/u,
+    );
+    assert.match(
+      copy,
+      /Judge’s contextual Gavel stays on the public gallery/u,
     );
     assert.match(
       copy,
@@ -345,6 +357,9 @@ describe("mode tutorials", () => {
     assert.match(copy, /center Summary that refreshes between rounds/u);
     assert.match(copy, /hydrates when you return mid-Debate/u);
     assert.match(copy, /right rail toggles Proceedings and the Living Case Board/u);
+    assert.match(copy, /After the verdict seals the Debate, the gallery strip clears/u);
+    assert.match(copy, /Jury becomes the Jury Record/u);
+    assert.match(copy, /right rail adds a Verdict tab beside Case board/u);
     assert.match(copy, /SMS-style claim stream/u);
     assert.match(copy, /Pause always cuts the live floor immediately/u);
     assert.match(copy, /settled recess screen holds the Wide chamber shot/u);
@@ -393,7 +408,7 @@ describe("mode tutorials", () => {
     assert.doesNotMatch(copy, /choose Participate/u);
     assert.match(copy, /Deliberation and voting are unskippable/u);
     assert.match(copy, /they cast their votes one at a time/u);
-    assert.match(copy, /automatically enters the five-seat chamber/u);
+    assert.match(copy, /open the five-seat Jury camera manually once leanings, deliberation, or ballots begin/u);
     assert.match(copy, /trade short reactions between public-floor turns/u);
     assert.match(
       copy,
@@ -406,12 +421,18 @@ describe("mode tutorials", () => {
     assert.match(copy, /running five-vote tally updates/u);
     assert.match(copy, /canonically silent juror still casts/u);
     assert.match(copy, /chamber is live and named but remains advisory/u);
-    assert.match(copy, /Jury Record module in the bottom Jury slot/u);
+    assert.match(copy, /Jury Record in the bottom Jury slot/u);
     assert.match(copy, /Verdict tab beside Case board/u);
-    assert.match(copy, /Copy Jury transcript beside Copy verbose transcript/u);
+    assert.match(copy, /Copy all data to clipboard, Copy Jury transcript, and Copy verbose transcript/u);
+    assert.match(copy, /Copy case board copies that SMS-style claims thread/u);
+    assert.match(
+      copy,
+      /Case Board panel keeps its own Copy case board control/u,
+    );
     assert.doesNotMatch(copy, /Jury transcript remains directly copyable/u);
     assert.match(copy, /Coffee-style session summary/u);
     assert.match(copy, /temporary pick-a-bot inquiry chat/u);
+    assert.match(copy, /Inquiry alcove with role-colored cast chips/u);
     assert.match(copy, /physical mark slides into the center pile/u);
     assert.match(copy, /only the bot opponent may react/u);
     assert.match(
@@ -460,6 +481,10 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
+      /quiet model · effort chip stays under the motion title/u,
+    );
+    assert.match(
+      copy,
       /Auto still chooses model and Effort for each Debate generation when selected, including during Spectator bake/u,
     );
     assert.match(
@@ -482,7 +507,8 @@ describe("mode tutorials", () => {
       copy,
       /moderator.?s opening gavel hushes the house before the floor opens/u,
     );
-    assert.match(copy, /instead of in the app chrome/u);
+    assert.match(copy, /Pause sits beside the stage CC control/u);
+    assert.doesNotMatch(copy, /instead of in the app chrome/u);
     assert.match(copy, /traditional three-bot majority/u);
     assert.match(
       copy,
@@ -595,7 +621,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /never counts down a total runtime/u);
     assert.match(
       copy,
-      /only reveals lines after they have been heard[\s\S]{0,80}stenographer delay/u,
+      /opens shortly after speech begins and streams with the heard words[\s\S]{0,80}stenographer lag/u,
     );
     assert.match(copy, /freezes during recess and before Spectator Start/u);
     assert.match(copy, /setting-independent per-line spoken durations/u);
@@ -606,7 +632,8 @@ describe("mode tutorials", () => {
     const caseBoardCopy =
       MODE_TUTORIALS.debate.steps.find(
         (step) =>
-          step.targetSelector === '[data-tutorial-target="debate-case-board"]',
+          step.targetSelector ===
+          '[data-tutorial-target="debate-case-board-tab"]',
       )?.body ?? "";
 
     assert.match(caseBoardCopy, /two distinct ways to break/u);
@@ -683,9 +710,10 @@ describe("mode tutorials", () => {
       MODE_TUTORIALS.debate.steps.find(
         (step) =>
           step.targetSelector ===
-          '[data-tutorial-target="debate-copy-transcript"]',
+          '[data-tutorial-target="debate-copy-all-review-data"]',
       )?.body ?? "";
     assert.match(recordCopy, /without inventing a PRISM ballot/u);
+    assert.match(recordCopy, /Copy all data to clipboard builds one review paste/u);
   });
 
   it("teaches Debate's role-aware actor casting", () => {
@@ -935,7 +963,7 @@ describe("mode tutorials", () => {
       },
       {
         heading: "Choose a relationship",
-        body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona only sees your current message each turn—no earlier replies or broader topic unless that message states it—and answers naturally without amnesia coaching. A John/Jane Doe persona sincerely believes a random persona name for the session and reshuffles that name whenever short-term amnesia clears continuity. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Clicking empty canvas space jumps straight back to All Bots Home. Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
+        body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a breathless persona still speaks but never produces breath, sigh, or inhale Foley; a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona only sees your current message each turn—no earlier replies or broader topic unless that message states it—and answers naturally without amnesia coaching. A John/Jane Doe persona sincerely believes a random persona name for the session and reshuffles that name whenever short-term amnesia clears continuity. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Clicking empty canvas space jumps straight back to All Bots Home. Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
         clickLabel: "a PRISM or persona tile",
         targetSelector: '[data-tutorial-target="chat-bot-picker"]',
       },
@@ -1038,7 +1066,11 @@ describe("mode tutorials", () => {
       routing?.body ?? "",
       /freezes the selected speaking type and engine/u,
     );
-    assert.match(routing?.body ?? "", /locks routing, model, Effort, Voice/u);
+    assert.match(routing?.body ?? "", /hides the shared navbar and locks routing, model, Effort, Voice/u);
+    assert.match(
+      routing?.body ?? "",
+      /quiet model · effort chip stays with the topic/u,
+    );
     assert.match(
       routing?.body ?? "",
       /Auto still chooses model and Effort for each table turn/u,
@@ -1046,7 +1078,7 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /Recorded replay/u);
     assert.match(
       routing?.body ?? "",
-      /entire utility strip for the whole table[^.]*until you choose End session/u,
+      /entire utility strip for the whole table[^.]*until you choose End session on the live table chrome/u,
     );
     assert.doesNotMatch(routing?.body ?? "", /remain available/u);
   });
@@ -1123,7 +1155,8 @@ describe("mode tutorials", () => {
     );
 
     assert.match(topicStep?.body ?? "", /four prompts created for this group/);
-    assert.match(topicStep?.body ?? "", /framed under the Coffee navbar/);
+    assert.match(topicStep?.body ?? "", /short branded Coffee curtain/);
+    assert.match(topicStep?.body ?? "", /End session lives in that table chrome/);
     assert.doesNotMatch(topicStep?.body ?? "", /regenerate/i);
     assert.doesNotMatch(topicStep?.clickLabel ?? "", /regenerate/i);
   });
@@ -1866,7 +1899,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
-      /brief listener cut/u,
+      /brief listener comments stay off-camera[\s\S]*listener cut/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[6]?.body ?? "",
@@ -2002,11 +2035,11 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /shows rail hides and the utility strip locks like Coffee[\s\S]*through the closing card until you Return to show/u,
+      /shared navbar fully hides[\s\S]*Cut on stage ends the sit[\s\S]*through the closing card until you Return to show[\s\S]*quiet model · effort chip stays in the live topline/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /routing, model, Voice[\s\S]*stay closed through the closing card/u,
+      /[Rr]outing, model, Effort, Voice[\s\S]*stay locked through the closing card/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
@@ -2018,7 +2051,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",
-      /fade the stage to black or white[\s\S]*closing card appears and waits for you/u,
+      /stage fades to black or white[\s\S]*closing card appears/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[7]?.body ?? "",

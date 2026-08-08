@@ -760,7 +760,7 @@ test.describe("PRISM desktop smoke", () => {
   });
 
   for (const theme of ["dark", "light"] as const) {
-    test(`Home Atmosphere is automatic in ${theme} theme @visual`, async ({
+    test(`Prism session atmosphere is automatic in ${theme} theme @visual`, async ({
       page,
     }) => {
       test.setTimeout(smokeTestTimeout(60_000));
@@ -775,7 +775,7 @@ test.describe("PRISM desktop smoke", () => {
       });
       const homeAtmosphereImage: TestImageRecord = {
         id: `e2e-home-atmosphere-${theme}`,
-        prompt: "A quiet prismatic room rendered for Home.",
+        prompt: "A quiet prismatic room rendered for Prism session.",
         url: `/api/images/e2e-home-atmosphere-${theme}/file`,
         displayUrl: `/api/images/e2e-home-atmosphere-${theme}/file`,
         createdAt: "2026-07-30T12:00:00.000Z",
@@ -815,11 +815,13 @@ test.describe("PRISM desktop smoke", () => {
         await page.getByRole("button", { name: "Open settings" }).click();
         await page.getByRole("button", { name: "Appearance" }).click();
         const wallpaperToggle = page.getByRole("checkbox", {
-          name: "Home Atmosphere wallpaper",
+          name: /Prism session atmosphere/u,
         });
         await expect(wallpaperToggle).toBeChecked();
         await expect(
-          page.getByRole("button", { name: "Regenerate wallpaper" }),
+          page.getByRole("button", {
+            name: /Synthesize Chat atmosphere/u,
+          }),
         ).toBeVisible();
 
         await wallpaperToggle.uncheck();

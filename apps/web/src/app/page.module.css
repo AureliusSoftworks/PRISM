@@ -6589,6 +6589,10 @@
   --settings-section-color: #9e8cff;
 }
 
+.settingsSection[data-settings-section="storage"] {
+  --settings-section-color: #7ec8b8;
+}
+
 .keyboardShortcutIntro {
   margin: 0;
   color: var(--settings-section-quiet);
@@ -7499,8 +7503,30 @@
   gap: 2px;
 }
 
+[data-startup-preference-selector="true"] .settingsInlineToggle > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+[data-startup-preference-selector="true"] .settingsInlineToggle strong {
+  display: block;
+  color: color-mix(in srgb, var(--fg) 92%, var(--settings-section-color));
+  font-weight: 750;
+  line-height: 1.25;
+}
+
+[data-startup-preference-selector="true"] .settingsInlineToggle small {
+  display: block;
+  color: var(--settings-section-quiet);
+  font-size: 12px;
+  font-weight: 520;
+  line-height: 1.45;
+}
+
 [data-settings-section="voice"] .settingsInlineToggle small,
 [data-settings-section="botcast"] .settingsInlineToggle small,
+[data-startup-preference-selector="true"] .settingsInlineToggle small,
 .settingsSectionHint {
   color: var(--settings-section-quiet);
   font-size: 12px;
@@ -9118,35 +9144,122 @@
   filter: grayscale(1) brightness(0);
 }
 
+/* Private mode style contract (stylistically identical to non-private, with):
+   1. Wallpapers 100% desaturated
+   2. Chrome 100% desaturated
+   3. Chrome rainbow marks → white (dark) / black (light)
+      (hue lens keeps its spectrum track — do not flatten it)
+   4. Bot colors keep full saturation
+   5. Bot-representing glyphs upside-down (shared rotate rules below)
+   6. Navbar side panels (.panel / [data-prism-panel]) remain unaffected */
+
+.appLayout[data-private-active="true"],
+.appLayout[data-zen-private-tone="true"] {
+  --private-chrome-rainbow: #ffffff;
+}
+
+.themeLight.appLayout[data-private-active="true"],
+.themeLight.appLayout[data-zen-private-tone="true"] {
+  --private-chrome-rainbow: #000000;
+}
+
+/* 1 — Wallpapers fully desaturated */
+.appLayout[data-private-active="true"] .hubAtmosphereBackdrop img,
+.appLayout[data-zen-private-tone="true"] .hubAtmosphereBackdrop img,
 .appLayout[data-private-active="true"]
-  :where(
-    .brandIconShell .brandIcon,
-    .brandIconShell .brandIconLight,
-    .brandWordmark,
-    .chatBotTileBotGlyph,
-    .composeBotTriggerGlyph,
-    .emptyStateBotGlyphLayer,
-    .conversationGroupGlyph,
-    .messageMoodBadge,
-    .providerDot,
-    .imageReadyNoticeChip
-  ),
+  .hubAtmosphereBackdrop[data-bot-home-tint="true"]
+  img,
 .appLayout[data-zen-private-tone="true"]
-  :where(
-    .brandIconShell .brandIcon,
-    .brandIconShell .brandIconLight,
-    .brandWordmark,
-    .chatBotTileBotGlyph,
-    .composeBotTriggerGlyph,
-    .emptyStateBotGlyphLayer,
-    .conversationGroupGlyph,
-    .messageMoodBadge,
-    .providerDot,
-    .imageReadyNoticeChip
-  ),
-.composeBotMenu[data-private-tone="true"]
-  :where(.composeBotOptionGlyph, .composeBotOptionName) {
-  filter: saturate(0.74) contrast(0.98);
+  .hubAtmosphereBackdrop[data-bot-home-tint="true"]
+  img {
+  filter: blur(5px) saturate(0) contrast(0.94) brightness(0.68) grayscale(1);
+}
+
+.appLayout[data-private-active="true"] .hubAtmosphereBackdrop::before,
+.appLayout[data-zen-private-tone="true"] .hubAtmosphereBackdrop::before {
+  filter: grayscale(1);
+  opacity: 0;
+}
+
+.appLayout[data-private-active="true"] .zenAtmosphereBackdrop,
+.appLayout[data-zen-private-tone="true"] .zenAtmosphereBackdrop {
+  --zen-atmosphere-grayscale-amount: 1;
+  --zen-atmosphere-color-amount: 0;
+  --zen-atmosphere-bot-tint-amount: 0;
+}
+
+.appLayout[data-private-active="true"] .botGroupRoomAtmosphereBackdrop,
+.appLayout[data-zen-private-tone="true"] .botGroupRoomAtmosphereBackdrop {
+  --bot-group-room-atmosphere-grayscale: 1;
+}
+
+/* 2 — Chrome fully desaturated (never target .panel / [data-prism-panel]).
+   Leave .chatCanvasPickerControls unfiltered so the hue lens spectrum stays. */
+.appLayout[data-private-active="true"] .compose,
+.appLayout[data-private-active="true"] .newChatGroup,
+.appLayout[data-private-active="true"] .sidebarFooter,
+.appLayout[data-private-active="true"] .privateChatButton,
+.appLayout[data-private-active="true"] [data-shared-app-navbar="true"],
+.appLayout[data-private-active="true"] [data-app-shell-header="true"],
+.appLayout[data-zen-private-tone="true"] .compose,
+.appLayout[data-zen-private-tone="true"] .newChatGroup,
+.appLayout[data-zen-private-tone="true"] .sidebarFooter,
+.appLayout[data-zen-private-tone="true"] .privateChatButton,
+.appLayout[data-zen-private-tone="true"] [data-shared-app-navbar="true"],
+.appLayout[data-zen-private-tone="true"] [data-app-shell-header="true"] {
+  filter: grayscale(1);
+}
+
+/* 3 — Chrome rainbow marks → solid white (dark) / black (light).
+   Skip the private empty-state Prism triangle — it has its own treatment. */
+.appLayout[data-private-active="true"]:not(.themeLight) .brandWordmark,
+.appLayout[data-private-active="true"]:not(.themeLight) .hubHomeWordmark,
+.appLayout[data-private-active="true"]:not(.themeLight)
+  .brandIconShell:not(.emptyStatePrivateHero)
+  .brandIcon,
+.appLayout[data-private-active="true"]:not(.themeLight)
+  .brandIconShell:not(.emptyStatePrivateHero)
+  .brandIconLight,
+.appLayout[data-zen-private-tone="true"]:not(.themeLight) .brandWordmark,
+.appLayout[data-zen-private-tone="true"]:not(.themeLight) .hubHomeWordmark,
+.appLayout[data-zen-private-tone="true"]:not(.themeLight)
+  .brandIconShell:not(.emptyStatePrivateHero)
+  .brandIcon,
+.appLayout[data-zen-private-tone="true"]:not(.themeLight)
+  .brandIconShell:not(.emptyStatePrivateHero)
+  .brandIconLight {
+  filter: grayscale(1) brightness(0) invert(1);
+}
+
+.themeLight.appLayout[data-private-active="true"] .brandWordmark,
+.themeLight.appLayout[data-private-active="true"] .hubHomeWordmark,
+.themeLight.appLayout[data-private-active="true"]
+  .brandIconShell:not(.emptyStatePrivateHero)
+  .brandIcon,
+.themeLight.appLayout[data-private-active="true"]
+  .brandIconShell:not(.emptyStatePrivateHero)
+  .brandIconLight,
+.themeLight.appLayout[data-zen-private-tone="true"] .brandWordmark,
+.themeLight.appLayout[data-zen-private-tone="true"] .hubHomeWordmark,
+.themeLight.appLayout[data-zen-private-tone="true"]
+  .brandIconShell:not(.emptyStatePrivateHero)
+  .brandIcon,
+.themeLight.appLayout[data-zen-private-tone="true"]
+  .brandIconShell:not(.emptyStatePrivateHero)
+  .brandIconLight {
+  filter: grayscale(1) brightness(0);
+}
+
+.appLayout[data-private-active="true"]
+  .brandIconShell:not(.emptyStatePrivateHero)::before,
+.appLayout[data-private-active="true"]
+  .brandIconShell:not(.emptyStatePrivateHero)::after,
+.appLayout[data-zen-private-tone="true"]
+  .brandIconShell:not(.emptyStatePrivateHero)::before,
+.appLayout[data-zen-private-tone="true"]
+  .brandIconShell:not(.emptyStatePrivateHero)::after {
+  opacity: 0;
+  animation: none;
 }
 
 /* ── App shell ── */
@@ -11439,9 +11552,20 @@
 }
 
 .imageCleanupPreviewPanel {
-  width: min(760px, calc(100vw - 40px));
-  max-width: 760px;
+  width: min(820px, calc(100vw - 40px));
+  max-width: 820px;
   gap: 14px;
+  /* Portaled to document.body — keep an opaque fallback if theme tokens
+     ever fail to resolve so Settings / Space Lens cannot bleed through. */
+  background: var(--bg-elevated, #1b1816);
+  color: var(--fg, #edf3f8);
+}
+
+.imageCleanupModalBackdrop {
+  /* Sit above Settings drawers (z-index 100) and shared chrome. Theme tokens
+     come from the paired .themeDark / .themeLight class on this node. */
+  z-index: 4200;
+  background: color-mix(in srgb, #050505 82%, transparent);
 }
 
 .imageCleanupPreviewHeader {
@@ -11709,6 +11833,17 @@
   color: var(--fg);
   font-size: 10.5px;
   line-height: 1.4;
+  display: -webkit-box;
+  -webkit-line-clamp: 2;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
+}
+
+.imageCleanupCandidateList small {
+  display: -webkit-box;
+  -webkit-line-clamp: 1;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .imageCleanupChecks {
@@ -18266,6 +18401,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .emptyStatePrivateHero {
   color: #ffffff;
   overflow: visible;
+  background: color-mix(in srgb, #ffffff 10%, var(--bg-deep) 90%);
+  border-color: color-mix(in srgb, #ffffff 28%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #ffffff 14%, transparent),
+    0 0 22px color-mix(in srgb, #ffffff 34%, transparent),
+    0 0 40px color-mix(in srgb, #ffffff 16%, transparent);
 }
 
 .emptyStatePrivateHero::before,
@@ -18273,18 +18414,40 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   display: block;
   background: #ffffff;
   animation: none;
-  opacity: 0.16;
+  opacity: 0.22;
 }
 
 .emptyStatePrivateHero::before {
-  inset: -9px;
-  filter: blur(11px);
+  inset: -10px;
+  filter: blur(12px);
 }
 
 .emptyStatePrivateHero::after {
-  inset: -16px;
-  filter: blur(18px);
-  opacity: 0.11;
+  inset: -18px;
+  filter: blur(20px);
+  opacity: 0.14;
+}
+
+.emptyStatePrivatePrismTriangle {
+  width: 30px;
+  height: 30px;
+  display: block;
+  position: relative;
+  z-index: 1;
+  color: #ffffff;
+  transform: rotate(180deg);
+  filter: drop-shadow(0 0 10px rgba(255, 255, 255, 0.72))
+    drop-shadow(0 0 18px rgba(255, 255, 255, 0.34));
+}
+
+.themeLight .emptyStatePrivateHero {
+  color: #0f0f0f;
+  background: color-mix(in srgb, #0f0f0f 8%, var(--bg-surface) 92%);
+  border-color: color-mix(in srgb, #0f0f0f 22%, transparent);
+  box-shadow:
+    0 0 0 1px color-mix(in srgb, #0f0f0f 12%, transparent),
+    0 0 22px color-mix(in srgb, #0f0f0f 28%, transparent),
+    0 0 40px color-mix(in srgb, #0f0f0f 14%, transparent);
 }
 
 .themeLight .emptyStatePrivateHero::before,
@@ -18294,28 +18457,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .themeLight .emptyStatePrivateHero::before {
-  opacity: 0.12;
+  opacity: 0.16;
 }
 
 .themeLight .emptyStatePrivateHero::after {
-  opacity: 0.08;
+  opacity: 0.1;
 }
 
-.themeLight .emptyStatePrivateHero .brandIcon {
-  display: none;
-}
-
-.themeLight .emptyStatePrivateHero .brandIconLight {
-  display: block;
+.themeLight .emptyStatePrivatePrismTriangle {
   color: #0f0f0f;
-  transform: rotate(180deg);
-  filter: none;
-  animation: none;
-}
-
-.emptyStatePrivateHero .brandIcon {
-  transform: scaleY(-1);
-  filter: grayscale(1) contrast(1.15) drop-shadow(0 2px 8px rgba(0, 0, 0, 0.18));
+  filter: drop-shadow(0 0 10px rgba(15, 15, 15, 0.55))
+    drop-shadow(0 0 18px rgba(15, 15, 15, 0.28));
 }
 
 /* Empty-state icon — Bot variant.
@@ -20198,6 +20350,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: rotate(180deg);
 }
 
+.appLayout[data-private-active="true"]
+  .zenLiveBotPresencePlate
+  .zenLiveBotPresenceBotGlyph,
+.appLayout[data-zen-private-tone="true"]
+  .zenLiveBotPresencePlate
+  .zenLiveBotPresenceBotGlyph {
+  transform: translate(-50%, -50%) rotate(180deg);
+}
+
+.appLayout[data-private-active="true"]
+  .zenLiveBotPresencePlate
+  .zenLiveBotPresenceFaceGlyph,
+.appLayout[data-zen-private-tone="true"]
+  .zenLiveBotPresencePlate
+  .zenLiveBotPresenceFaceGlyph {
+  transform: rotate(180deg);
+}
+
 .chatBotTile:hover .chatBotTileBotGlyph,
 .chatBotTile:focus-visible .chatBotTileBotGlyph {
   opacity: 0.72;
@@ -20233,19 +20403,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   pointer-events: none;
 }
 
-.appLayout[data-private-active="true"] .chatBotPickerFrame .chatBotTile,
-.appLayout[data-private-active="true"]
-  .chatBotPickerFrame
-  .chatBotTilePlaceholder,
-.appLayout[data-zen-private-tone="true"] .chatBotPickerFrame .chatBotTile,
-.appLayout[data-zen-private-tone="true"]
-  .chatBotPickerFrame
-  .chatBotTilePlaceholder {
-  background: transparent;
-  box-shadow: none;
-  backdrop-filter: none;
-  -webkit-backdrop-filter: none;
-}
+/* Private bot grid chips keep the same tile chrome as public mode.
+   Orientation flips via `.chatBotTileBotGlyph > svg { transform: rotate(180deg) }. */
 
 .themeDark .chatBotTile:not(.chatBotTileSelected):hover,
 .themeDark .chatBotTile:not(.chatBotTileSelected):focus-visible,
@@ -21064,7 +21223,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .messages[data-chat-ephemeral="true"]
   .message {
   opacity: 0.68;
-  filter: saturate(0.72) brightness(1.08);
+  /* Color wash removed — private mode uses global grayscale instead. */
   text-shadow: 0 0 14px color-mix(in srgb, var(--fg) 16%, transparent);
 }
 
@@ -38459,6 +38618,10 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 
 @media (max-width: 620px) {
   .usageControls {
+    grid-template-columns: 1fr;
+  }
+
+  .usagePreferredProvidersGrid {
     grid-template-columns: 1fr;
   }
 
@@ -64950,7 +65113,7 @@ a.settingsCreditItem:focus-visible {
   --coffee-line: rgba(255, 255, 255, 0.12);
   --coffee-muted: rgba(255, 255, 255, 0.58);
   grid-template-columns: 280px minmax(0, 1fr);
-  grid-template-rows: 66px minmax(0, 1fr);
+  grid-template-rows: var(--app-navbar-height, 66px) minmax(0, 1fr);
   min-height: 100dvh;
   color: #f7f7f7;
   background:
@@ -65490,6 +65653,32 @@ a.settingsCreditItem:focus-visible {
   min-width: 0;
 }
 
+.coffeeLiveSessionChrome {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px 12px;
+  align-items: start;
+  min-width: 0;
+  max-width: min(100%, var(--coffee-stage-max-width));
+  justify-self: center;
+  width: 100%;
+}
+
+.coffeeLiveSessionChrome .coffeeSessionTopicFrame {
+  justify-self: stretch;
+  max-width: none;
+}
+
+.coffeeLiveSessionChromeSpacer {
+  min-width: 0;
+}
+
+.coffeeLiveSessionChrome .coffeeExitSessionButton {
+  align-self: center;
+  justify-self: end;
+  flex-shrink: 0;
+}
+
 .coffeeSessionTopicFrame {
   box-sizing: border-box;
   min-width: 0;
@@ -65507,6 +65696,11 @@ a.settingsCreditItem:focus-visible {
   box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.04);
   display: grid;
   gap: 2px;
+}
+
+.coffeeLiveRoutingChip {
+  margin-top: 4px;
+  color: var(--coffee-muted);
 }
 
 .coffeeSessionTopicLabel {

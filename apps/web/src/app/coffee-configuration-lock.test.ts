@@ -7,7 +7,7 @@ const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 test("active Coffee centrally locks configuration while preserving End Session", () => {
   assert.match(
     pageSource,
-    /const coffeeConfigurationLocked = coffeeChromePolicy\.liveSessionActive/u,
+    /const coffeeConfigurationLocked =\s*coffeeChromePolicy\.liveSessionActive \|\| coffeeIntroPlaying/u,
   );
   assert.match(
     pageSource,
@@ -73,6 +73,13 @@ test("active Coffee centrally locks configuration while preserving End Session",
   );
   assert.match(
     pageSource,
+    /data-tutorial-target="coffee-end-session"[\s\S]*End session/u,
+  );
+  assert.match(pageSource, /beginCoffeeLiveWithIntro/u);
+  assert.match(pageSource, /CoffeeIntroCurtain/u);
+  assert.match(pageSource, /setAppNavbarSessionHidden/u);
+  assert.match(
+    pageSource,
     /data-live-session-locked=\{[\s\S]*options\.liveSessionActive/u,
   );
 });
@@ -93,7 +100,7 @@ test("Coffee records and restores baked mouth puppeteering independently of curr
   );
   assert.match(
     pageSource,
-    /replayAudioMasterCaptureMouthTracks\(conversation\.id\)/u,
+    /replayAudioMasterCaptureMouthTracks\(\s*conversation\.id\s*,?\s*\)/u,
   );
   assert.match(
     pageSource,

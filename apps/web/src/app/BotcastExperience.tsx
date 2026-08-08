@@ -250,6 +250,10 @@ import {
   ModelWarmupIntermission,
   type ModelWarmupIntermissionPhase,
 } from "./ModelWarmupIntermission";
+import {
+  LiveSessionModelChip,
+  LiveSessionPrismWatermark,
+} from "./liveSessionChrome";
 import { waitForModelPreparation } from "./modelPreparation";
 import {
   formatSignalAudienceViews,
@@ -696,6 +700,24 @@ export interface BotcastExperienceProps {
   introAudioVolume?: number;
   recordingVoiceSelection: ReplayVoiceSelectionSnapshotV2;
   onRecordingStateChange?: (active: boolean) => void;
+  /** Notify the app shell when Signal locks live chrome (navbar collapse). */
+  onLiveSessionActiveChange?: (active: boolean) => void;
+  /** Quiet locked routing summary while the episode is live. */
+  lockedRoutingChip?: {
+    modelLabel: string;
+    effortLabel: string;
+  } | null;
+  /**
+   * Resolve the live header chip from Signal's locked picker value.
+   * Preferred over a static chip so Auto vs concrete labels stay in sync.
+   */
+  resolveLockedRoutingChip?: (args: {
+    modelChoice: string;
+    modelProvider: "local" | "openai" | "anthropic";
+  }) => {
+    modelLabel: string;
+    effortLabel: string;
+  } | null;
   navigationHeader:
     | ReactNode
     | ((state: {
@@ -1891,6 +1913,9 @@ export function BotcastExperience({
   introAudioVolume = 1,
   recordingVoiceSelection,
   onRecordingStateChange,
+  onLiveSessionActiveChange,
+  lockedRoutingChip = null,
+  resolveLockedRoutingChip,
   navigationHeader,
   producerName = "You",
   renderProducerGuestComposer,
@@ -12073,6 +12098,13 @@ export function BotcastExperience({
     episodeOutro !== null ||
     episode?.status === "completed" ||
     episode?.status === "cancelled";
+  useEffect(() => {
+    onLiveSessionActiveChange?.(liveSessionActive);
+  }, [liveSessionActive, onLiveSessionActiveChange]);
+  useEffect(
+    () => () => onLiveSessionActiveChange?.(false),
+    [onLiveSessionActiveChange],
+  );
   const episodeModelControlDisabled = liveSessionActive;
   const episodeModelControlDisabledReason = watchBakeActive
     ? "Wait for Watch prepare to finish or cancel before changing the model picker. Auto still chooses model and Effort for each bake step when selected."
@@ -12081,13 +12113,22 @@ export function BotcastExperience({
     : liveSessionActive
       ? "Return to the show before changing the model picker. Auto still chooses model and Effort for each turn when selected."
       : undefined;
-  // Auto stays labeled Auto even while the episode runs a concrete model.
   const episodeModelControlValue = signalEpisodeModelPickerValue({
     liveSessionActive,
     episode,
     draft: episodeModelDraft,
     availableModelIds: modelOptions.map((option) => option.id),
   });
+  const episodeSelectedModelProvider =
+    modelOptions.find((option) => option.id === episodeModelControlValue)
+      ?.provider ?? preferredProvider;
+  const resolvedLockedRoutingChip =
+    liveSessionActive
+      ? (resolveLockedRoutingChip?.({
+          modelChoice: episodeModelControlValue || "auto",
+          modelProvider: episodeSelectedModelProvider,
+        }) ?? lockedRoutingChip)
+      : null;
   const resolvedNavigationHeader =
     typeof navigationHeader === "function"
       ? navigationHeader({
@@ -12171,6 +12212,11 @@ export function BotcastExperience({
       }
       data-episode-outro={episodeOutro ? "true" : undefined}
     >
+      {liveSessionActive ? (
+        <LiveSessionPrismWatermark
+          theme={theme === "light" ? "light" : "dark"}
+        />
+      ) : null}
       <div className={styles.mainNavigation}>{resolvedNavigationHeader}</div>
       {error || notice ? (
         <aside
@@ -12619,12 +12665,20 @@ export function BotcastExperience({
                     ? "MAIN INTERVIEW"
                     : episode.segment.toUpperCase()}
                 </strong>
-              <span className={styles.modelProvenance}>
+              {resolvedLockedRoutingChip ? (
+                <LiveSessionModelChip
+                  modelLabel={resolvedLockedRoutingChip.modelLabel}
+                  effortLabel={resolvedLockedRoutingChip.effortLabel}
+                  className={styles.liveRoutingChip}
+                />
+              ) : (
+                <span className={styles.modelProvenance}>
                   {episodeModeLabel(episode)} ·{" "}
                   {episode.model
                     ? (modelLabels.get(episode.model) ?? episode.model)
                     : "Auto"}
                 </span>
+              )}
                 <span>
                   {episode.guestKind === "producer"
                     ? "Producer on mic"

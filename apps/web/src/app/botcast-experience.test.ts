@@ -1330,7 +1330,7 @@ describe("Signal experience shell", () => {
     assert.doesNotMatch(css, /\.shell\[data-episode-outro="true"\]/u);
     assert.match(
       css,
-      /\.episodeOutro\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*66px 0 0 0;[^}]*contain:\s*layout paint;[^}]*background:\s*var\(--botcast-curtain\)/iu,
+      /\.episodeOutro\s*\{[^}]*position:\s*fixed;[^}]*inset:\s*var\(--app-navbar-height,\s*66px\)\s*0\s*0\s*0;[^}]*contain:\s*layout paint;[^}]*background:\s*var\(--botcast-curtain\)/iu,
     );
     assert.match(css, /@keyframes signalOutroCurtainIn/u);
     assert.match(
@@ -1339,7 +1339,7 @@ describe("Signal experience shell", () => {
     );
     assert.match(
       css,
-      /@media \(max-width: 900px\)[\s\S]*?\.episodeOutro\s*\{[^}]*inset:\s*66px 0 0;[^}]*min-height:\s*0/iu,
+      /@media \(max-width: 900px\)[\s\S]*?\.episodeOutro\s*\{[^}]*inset:\s*var\(--app-navbar-height,\s*66px\)\s*0\s*0;[^}]*min-height:\s*0/iu,
     );
     assert.match(
       source,
@@ -2307,6 +2307,10 @@ describe("Signal experience shell", () => {
     assert.match(artworkActivitySource, /completedCount/u);
     assert.match(artworkActivitySource, /placement="docked"/u);
     assert.match(artworkActivitySource, /PrismBlockingLoader/u);
+    assert.match(artworkActivitySource, /registerPrismSoftSynthesisJobs/u);
+    assert.match(artworkActivitySource, /activeChildren/u);
+    assert.match(artworkActivitySource, /queuedChildren/u);
+    assert.match(artworkActivitySource, /Cancel artwork synthesis/u);
     assert.match(artworkActivitySource, /Waiting for Dark studio/u);
     assert.match(artworkJobSource, /Relighting the completed Dark studio/u);
     assert.match(artworkJobSource, /job\.totalCount === 1/u);
