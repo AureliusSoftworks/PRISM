@@ -224,6 +224,7 @@ import {
   botAvatarFoundryCameraForControl,
   botAvatarFoundryIdentitySurfaceForNode,
   botAvatarFoundryModulePopulation,
+  botAvatarFoundryPixelGridVisible,
   botAvatarFoundryScreenMode,
   botAvatarFoundryUpgradeNodeForControl,
   normalizeBotAvatarFoundryViewport,
@@ -38962,6 +38963,14 @@ function BotAvatarPreviewPanel({
       stage.style.setProperty("--foundry-pan-x", `${normalized.x}px`);
       stage.style.setProperty("--foundry-pan-y", `${normalized.y}px`);
       stage.style.setProperty("--foundry-user-zoom", String(normalized.zoom));
+      if (
+        foundryCameraEditable &&
+        botAvatarFoundryPixelGridVisible(normalized.zoom)
+      ) {
+        stage.setAttribute("data-avatar-details-grid-visible", "true");
+      } else {
+        stage.removeAttribute("data-avatar-details-grid-visible");
+      }
     }
     if (foundryZoomReadoutRef.current) {
       foundryZoomReadoutRef.current.textContent = `${Math.round(normalized.zoom * 100)}%`;
@@ -39136,6 +39145,12 @@ function BotAvatarPreviewPanel({
           foundryCameraEditable ? "true" : undefined
         }
         data-foundry-platform-present={spatialControls ? "true" : undefined}
+        data-avatar-details-grid-visible={
+          foundryCameraEditable &&
+          botAvatarFoundryPixelGridVisible(foundryViewport.zoom)
+            ? "true"
+            : undefined
+        }
         style={foundryViewportStyle}
         tabIndex={
           foundryCameraEditable ? 0 : undefined

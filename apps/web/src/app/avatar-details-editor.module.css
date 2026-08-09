@@ -533,7 +533,7 @@
 }
 
 .canvasFrame {
-  --avatar-details-cell-size: calc(100% / 128);
+  --avatar-details-cell-size: 0.78125%;
   /* Five display pixels per authored pixel on a typical MacBook viewport. */
   --avatar-details-editor-canvas-size: 640px;
   container-type: inline-size;
@@ -582,6 +582,7 @@
    editor remains a faithful hit-tested preview of every runtime surface. */
 .screenBoundary,
 .canvas,
+.pixelGrid,
 .symmetryGuide,
 .inputSurface {
   transform: scale(var(--avatar-details-ink-aperture-scale, 1));
@@ -634,6 +635,34 @@
   image-rendering: pixelated;
   image-rendering: crisp-edges;
   pointer-events: none;
+}
+
+.pixelGrid {
+  position: absolute;
+  inset: 0;
+  z-index: 4;
+  background-image:
+    linear-gradient(
+      to right,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 28%, transparent) 1px,
+      transparent 1px
+    ),
+    linear-gradient(
+      to bottom,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 28%, transparent) 1px,
+      transparent 1px
+    );
+  background-position: 0 0;
+  background-size:
+    var(--avatar-details-cell-size) var(--avatar-details-cell-size),
+    var(--avatar-details-cell-size) var(--avatar-details-cell-size);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 140ms ease;
+}
+
+[data-avatar-details-grid-visible="true"] .pixelGrid {
+  opacity: 0.42;
 }
 
 .symmetryGuide {

@@ -184,8 +184,16 @@ export const BOT_AVATAR_FOUNDRY_DEFAULT_VIEWPORT: BotAvatarFoundryViewport = {
 
 export const BOT_AVATAR_FOUNDRY_ZOOM_MIN = 0.72;
 export const BOT_AVATAR_FOUNDRY_ZOOM_MAX = 1.85;
+export const BOT_AVATAR_FOUNDRY_PIXEL_GRID_ZOOM_THRESHOLD = 1.5;
 export const BOT_AVATAR_FOUNDRY_PAN_X_MAX = 320;
 export const BOT_AVATAR_FOUNDRY_PAN_Y_MAX = 240;
+
+export function botAvatarFoundryPixelGridVisible(zoom: number): boolean {
+  return (
+    Number.isFinite(zoom) &&
+    zoom >= BOT_AVATAR_FOUNDRY_PIXEL_GRID_ZOOM_THRESHOLD
+  );
+}
 
 export function normalizeBotAvatarFoundryViewport(
   viewport: Partial<BotAvatarFoundryViewport>,

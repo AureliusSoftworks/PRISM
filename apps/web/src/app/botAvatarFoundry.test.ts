@@ -2,12 +2,14 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  BOT_AVATAR_FOUNDRY_PIXEL_GRID_ZOOM_THRESHOLD,
   BOT_AVATAR_FOUNDRY_UPGRADE_NODES,
   botAvatarFoundryAtmosphere,
   botAvatarFoundryCameraForControl,
   botAvatarFoundryGenerationHoldMs,
   botAvatarFoundryIdentitySurfaceForNode,
   botAvatarFoundryModulePopulation,
+  botAvatarFoundryPixelGridVisible,
   botAvatarFoundryScreenMode,
   botAvatarFoundryStatus,
   botAvatarFoundryTiming,
@@ -155,6 +157,22 @@ describe("Avatar Foundry presentation contracts", () => {
       zoomBotAvatarFoundryViewport({ x: 0, y: 0, zoom: 1.85 }, -999).zoom,
       1.85,
     );
+  });
+
+  it("reveals the authored pixel grid only at close camera zoom", () => {
+    assert.equal(
+      botAvatarFoundryPixelGridVisible(
+        BOT_AVATAR_FOUNDRY_PIXEL_GRID_ZOOM_THRESHOLD - 0.01,
+      ),
+      false,
+    );
+    assert.equal(
+      botAvatarFoundryPixelGridVisible(
+        BOT_AVATAR_FOUNDRY_PIXEL_GRID_ZOOM_THRESHOLD,
+      ),
+      true,
+    );
+    assert.equal(botAvatarFoundryPixelGridVisible(Number.NaN), false);
   });
 
   it("normalizes a live companion origin without trusting invalid values", () => {

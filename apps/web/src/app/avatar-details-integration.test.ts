@@ -357,6 +357,23 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(editorSource, /createPortal\(canvasEditor, canvasPortalTarget\)/);
     assert.match(editorSource, /data-foundry-canvas=/);
+    assert.match(editorSource, /data-avatar-details-pixel-grid="true"/);
+    assert.match(
+      pageSource,
+      /data-avatar-details-grid-visible=\{[\s\S]*?foundryCameraEditable &&[\s\S]*?botAvatarFoundryPixelGridVisible\(foundryViewport\.zoom\)/,
+    );
+    assert.match(
+      pageSource,
+      /botAvatarFoundryPixelGridVisible\(normalized\.zoom\)[\s\S]*?stage\.setAttribute\("data-avatar-details-grid-visible", "true"\)[\s\S]*?stage\.removeAttribute\("data-avatar-details-grid-visible"\)/,
+    );
+    assert.match(
+      editorCss,
+      /\.pixelGrid\s*\{[\s\S]*?background-size:[\s\S]*?var\(--avatar-details-cell-size\)[\s\S]*?opacity:\s*0;[\s\S]*?pointer-events:\s*none/,
+    );
+    assert.match(
+      editorCss,
+      /\[data-avatar-details-grid-visible="true"\] \.pixelGrid\s*\{[\s\S]*?opacity:\s*0\.42/,
+    );
     assert.match(
       editorCss,
       /\.canvasFrame\[data-foundry-canvas="true"\] \.canvasViewport\s*\{[\s\S]*?transform:\s*none;[\s\S]*?transform-origin:\s*center;/,
@@ -623,7 +640,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       editorCss,
-      /\.screenBoundary,\s*\.canvas,\s*\.symmetryGuide,\s*\.inputSurface\s*\{[\s\S]*transform:\s*scale\(var\(--avatar-details-ink-aperture-scale, 1\)\);[\s\S]*transform-origin:\s*center;/,
+      /\.screenBoundary,\s*\.canvas,\s*\.pixelGrid,\s*\.symmetryGuide,\s*\.inputSurface\s*\{[\s\S]*transform:\s*scale\(var\(--avatar-details-ink-aperture-scale, 1\)\);[\s\S]*transform-origin:\s*center;/,
     );
     assert.match(
       pageCss,

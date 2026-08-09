@@ -1196,6 +1196,11 @@ const AvatarDetailsEditorSession = forwardRef<
           data-avatar-details-editor-core="true"
           aria-hidden="true"
         />
+        <span
+          className={styles.pixelGrid}
+          data-avatar-details-pixel-grid="true"
+          aria-hidden="true"
+        />
         <div
           className={styles.symmetryGuide}
           style={symmetryGuideStyle}

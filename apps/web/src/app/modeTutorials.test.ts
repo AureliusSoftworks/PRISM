@@ -105,6 +105,10 @@ describe("mode tutorials", () => {
       MODE_TUTORIALS.avatar.steps[1]!.body,
       /drag either the top or bottom handle to place that seam/u,
     );
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[1]!.body,
+      /At 150% zoom, a pixel grid fades onto the CRT/u,
+    );
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /Preview live/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /Five floating orbs/u);
     assert.match(
