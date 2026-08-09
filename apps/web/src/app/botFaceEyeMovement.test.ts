@@ -123,6 +123,23 @@ describe("bot eye movement modes", () => {
     assert.ok(rightHits > samples * 0.2);
   });
 
+  it("keeps the speaking eye line vertically registered", () => {
+    for (const movement of ACTIVE_MOVEMENTS) {
+      for (const targetDirection of [-1, 0, 1] as const) {
+        for (let index = 0; index < 80; index += 1) {
+          const frame = resolveBotFaceGazeFrame({
+            seed: `speech-registration:${movement}:${targetDirection}:${index}`,
+            timelineMs: index * 1_137,
+            state: "speaking",
+            targetDirection,
+            movement,
+          });
+          assert.equal(frame.yPx, 0);
+        }
+      }
+    }
+  });
+
   it("keeps thinking gazes above center", () => {
     const frame = resolveBotFaceGazeFrame({
       seed: "thinker",

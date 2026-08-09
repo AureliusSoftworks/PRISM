@@ -66,6 +66,23 @@ export function debateInterruptedSpeechCaption(visibleContent: string): string {
   return `${text}—`;
 }
 
+/**
+ * Build the temporary event list used to replay a held floor after Resume.
+ * Pause/resume announcements after the bookmark were already presented as
+ * lifecycle ceremony; replaying them with the held floor repeats every prior
+ * call to order when a player leaves and returns more than once.
+ */
+export function debateResumeFloorReplayEvents(
+  events: readonly DebateEventV1[],
+  heldSequence: number,
+): DebateEventV1[] {
+  return events.filter(
+    (event) =>
+      event.sequence <= heldSequence ||
+      (event.stepKey !== "pause" && event.stepKey !== "resume"),
+  );
+}
+
 export function debateProceedingsCursorStorageKey(sessionId: string): string {
   return `prism.debate.proceedingsCursor.v1:${sessionId}`;
 }

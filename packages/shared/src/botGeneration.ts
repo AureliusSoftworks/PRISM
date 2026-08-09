@@ -8,7 +8,6 @@ import {
   type BotAvatarDetailsV1,
 } from "./botAvatarDetails.ts";
 import {
-  DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG,
   resolveBotFaceStyle,
   type BotFaceStyle,
 } from "./botAvatar.ts";
@@ -33,6 +32,9 @@ export const BOT_GENERATION_PROMPT_MAX_LENGTH = 2_000;
 export const BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH = 240;
 const BOT_GENERATED_INK_MAX_LINE_LENGTH = 32;
 const BOT_GENERATED_INK_MAX_CIRCLE_RADIUS = 16;
+const BOT_GENERATED_INK_MAX_PATHS = 36;
+const BOT_GENERATED_INK_MAX_PATH_POINTS = 18;
+const BOT_GENERATED_INK_MAX_PATH_SEGMENT_LENGTH = 96;
 
 /** A compact, stable subset of the bot icon library that models can choose reliably. */
 export const BOT_GENERATION_GLYPH_IDS = [
@@ -103,8 +105,30 @@ export interface BotGeneratedInkStrokeV1 {
   size: number;
 }
 
+export interface BotGeneratedInkPointV1 {
+  x: number;
+  y: number;
+}
+
+/**
+ * Safe model-authored portrait geometry. Paths are rasterized into the same
+ * bounded semantic ink map as hand-drawn Avatar Details; raw SVG/image data
+ * never enters the archive contract.
+ */
+export interface BotGeneratedInkPathV1 {
+  role: BotGeneratedInkRole;
+  points: BotGeneratedInkPointV1[];
+  closed: boolean;
+  fill: boolean;
+  size: number;
+}
+
+export type BotGeneratedInkPrimitiveV1 =
+  | BotGeneratedInkStrokeV1
+  | BotGeneratedInkPathV1;
+
 export interface BotGeneratedAvatarDetailsInputV1 {
-  ink: BotGeneratedInkStrokeV1[];
+  ink: BotGeneratedInkPrimitiveV1[];
 }
 
 export interface BotGeneratedSettingsV1 {
@@ -131,10 +155,6 @@ export interface BotGeneratedDraftV1 {
   /** Zero or one compiler-ready prompt-authored Power from the master brief. */
   powers: BotPowerV1[];
   settings: BotGeneratedSettingsV1;
-}
-
-export interface NormalizeBotGeneratedDraftOptions {
-  availableElevenLabsVoiceIds?: readonly string[];
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -220,6 +240,47 @@ function normalizeInkStroke(value: unknown): BotGeneratedInkStrokeV1 | null {
   return stroke;
 }
 
+function normalizeInkPoint(value: unknown): BotGeneratedInkPointV1 | null {
+  if (!isRecord(value)) return null;
+  const max = BOT_AVATAR_DETAILS_CANVAS_SIZE - 1;
+  return {
+    x: clampedInteger(value.x, 64, 0, max),
+    y: clampedInteger(value.y, 64, 0, max),
+  };
+}
+
+function normalizeInkPath(value: unknown): BotGeneratedInkPathV1 | null {
+  if (!isRecord(value) || !Array.isArray(value.points)) return null;
+  const role = value.role === "blink" || value.role === "talking" || value.role === "effect"
+    ? value.role
+    : null;
+  if (!role) return null;
+  const points = value.points
+    .map(normalizeInkPoint)
+    .filter((point): point is BotGeneratedInkPointV1 => point !== null)
+    .filter((point, index, all) =>
+      index === 0 || point.x !== all[index - 1]?.x || point.y !== all[index - 1]?.y
+    )
+    .slice(0, BOT_GENERATED_INK_MAX_PATH_POINTS);
+  if (points.length < 2) return null;
+  const closed = value.closed === true;
+  if (closed && points.length < 3) return null;
+  const segmentPairs = points.slice(1).map((point, index) => [points[index], point] as const);
+  if (closed) segmentPairs.push([points[points.length - 1], points[0]] as const);
+  if (segmentPairs.some(([from, to]) =>
+    !from || !to || Math.hypot(to.x - from.x, to.y - from.y) > BOT_GENERATED_INK_MAX_PATH_SEGMENT_LENGTH
+  )) {
+    return null;
+  }
+  return {
+    role,
+    points,
+    closed,
+    fill: closed && value.fill === true,
+    size: clampedInteger(value.size, 1, 1, 4),
+  };
+}
+
 function setInkPixel(
   bytes: Uint8Array,
   x: number,
@@ -296,15 +357,95 @@ function paintGeneratedInkStroke(
   }
 }
 
+function paintInkSegment(
+  bytes: Uint8Array,
+  from: BotGeneratedInkPointV1,
+  to: BotGeneratedInkPointV1,
+  size: number,
+  code: 1 | 2 | 3,
+  state: { painted: number },
+): void {
+  const steps = Math.max(1, Math.ceil(Math.hypot(to.x - from.x, to.y - from.y)));
+  for (let step = 0; step <= steps; step += 1) {
+    const progress = step / steps;
+    paintInkBrush(
+      bytes,
+      Math.round(from.x + (to.x - from.x) * progress),
+      Math.round(from.y + (to.y - from.y) * progress),
+      size,
+      code,
+      state,
+    );
+  }
+}
+
+function pointInsidePolygon(
+  x: number,
+  y: number,
+  points: readonly BotGeneratedInkPointV1[],
+): boolean {
+  let inside = false;
+  for (let index = 0, previous = points.length - 1; index < points.length; previous = index, index += 1) {
+    const currentPoint = points[index];
+    const previousPoint = points[previous];
+    if (!currentPoint || !previousPoint) continue;
+    const crosses = (currentPoint.y > y) !== (previousPoint.y > y) &&
+      x < (previousPoint.x - currentPoint.x) * (y - currentPoint.y) /
+        (previousPoint.y - currentPoint.y) + currentPoint.x;
+    if (crosses) inside = !inside;
+  }
+  return inside;
+}
+
+function paintGeneratedInkPath(
+  bytes: Uint8Array,
+  path: BotGeneratedInkPathV1,
+  state: { painted: number },
+): void {
+  const code: 1 | 2 | 3 = path.role === "blink" ? 1 : path.role === "talking" ? 2 : 3;
+  if (path.fill) {
+    const minX = Math.floor(Math.min(...path.points.map((point) => point.x)));
+    const maxX = Math.ceil(Math.max(...path.points.map((point) => point.x)));
+    const minY = Math.floor(Math.min(...path.points.map((point) => point.y)));
+    const maxY = Math.ceil(Math.max(...path.points.map((point) => point.y)));
+    for (let y = minY; y <= maxY; y += 1) {
+      for (let x = minX; x <= maxX; x += 1) {
+        if (pointInsidePolygon(x + 0.5, y + 0.5, path.points)) {
+          setInkPixel(bytes, x, y, code, state);
+        }
+      }
+    }
+  }
+  for (let index = 1; index < path.points.length; index += 1) {
+    const from = path.points[index - 1];
+    const to = path.points[index];
+    if (from && to) paintInkSegment(bytes, from, to, path.size, code, state);
+  }
+  if (path.closed) {
+    const from = path.points[path.points.length - 1];
+    const to = path.points[0];
+    if (from && to) paintInkSegment(bytes, from, to, path.size, code, state);
+  }
+}
+
 function normalizeGeneratedAvatarDetails(value: unknown): BotAvatarDetailsV1 | null {
   const record = isRecord(value) ? value : {};
-  const strokes = Array.isArray(record.ink)
-    ? record.ink.map(normalizeInkStroke).filter((stroke): stroke is BotGeneratedInkStrokeV1 => stroke !== null).slice(0, 8)
+  const primitives = Array.isArray(record.ink)
+    ? record.ink
+        .map((candidate): BotGeneratedInkPrimitiveV1 | null =>
+          normalizeInkPath(candidate) ?? normalizeInkStroke(candidate)
+        )
+        .filter((primitive): primitive is BotGeneratedInkPrimitiveV1 => primitive !== null)
+        .slice(0, BOT_GENERATED_INK_MAX_PATHS)
     : [];
   const colorMap = new Uint8Array(BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH);
   const paintState = { painted: 0 };
-  for (const stroke of strokes) {
-    paintGeneratedInkStroke(colorMap, stroke, paintState);
+  for (const primitive of primitives) {
+    if ("points" in primitive) {
+      paintGeneratedInkPath(colorMap, primitive, paintState);
+    } else {
+      paintGeneratedInkStroke(colorMap, primitive, paintState);
+    }
   }
   if (paintState.painted === 0) return null;
   return {
@@ -321,15 +462,9 @@ function normalizeGeneratedAvatarDetails(value: unknown): BotAvatarDetailsV1 | n
 
 function normalizeGeneratedVoice(
   value: unknown,
-  availableElevenLabsVoiceIds: readonly string[],
   personaText = "",
 ): BotAudioVoiceProfileV2 {
   const record = isRecord(value) ? value : {};
-  const available = new Set(
-    availableElevenLabsVoiceIds.map((voiceId) => voiceId.trim()).filter(Boolean),
-  );
-  const requestedVoiceId = compactText(record.elevenLabsVoiceId, 240);
-  const elevenLabsVoiceId = available.has(requestedVoiceId) ? requestedVoiceId : null;
   const corporality =
     typeof record.corporality === "number" && Number.isFinite(record.corporality)
       ? record.corporality
@@ -339,15 +474,18 @@ function normalizeGeneratedVoice(
     v: 2,
     enabled: true,
     systemVoiceName: null,
-    elevenLabsVoiceId,
+    elevenLabsVoiceId: null,
     elevenLabsVoiceIdOverride: null,
-    elevenLabsVoiceInitialized: available.size > 0,
+    // A generated bot intentionally starts local-only. Mark the premium lane
+    // initialized so account default assignment cannot silently relink it.
+    elevenLabsVoiceInitialized: true,
     voiceEffectExplicit: true,
     corporality,
     avatarSfx: null,
   });
   const {
     systemVoiceName: _systemVoiceName,
+    elevenLabsVoiceId: _elevenLabsVoiceId,
     elevenLabsVoiceIdOverride: _elevenLabsVoiceIdOverride,
     avatarSfx: _avatarSfx,
     avatarSfxMuted: _avatarSfxMuted,
@@ -380,7 +518,6 @@ export function normalizeBotGenerationPrompt(value: unknown): string {
  */
 export function normalizeBotGeneratedDraftV1(
   value: unknown,
-  options: NormalizeBotGeneratedDraftOptions = {},
 ): BotGeneratedDraftV1 | null {
   if (!isRecord(value)) return null;
   const name = compactText(value.name, 80) || "New bot";
@@ -389,12 +526,7 @@ export function normalizeBotGeneratedDraftV1(
     recordAt(value, "face"),
     profile.core.communicationStyle,
   );
-  const face = resolvedFace.eyeCount === 2
-    ? {
-        ...resolvedFace,
-        eyeRotationDeg: DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG,
-      }
-    : resolvedFace;
+  const face = resolvedFace;
   const voicePreviewLine = compactText(
     value.voicePreviewLine,
     BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH,
@@ -443,7 +575,6 @@ export function normalizeBotGeneratedDraftV1(
     avatarDetails: normalizeGeneratedAvatarDetails(value.avatarDetails),
     audioVoiceProfile: normalizeGeneratedVoice(
       value.voice,
-      options.availableElevenLabsVoiceIds ?? [],
       personaSeedText,
     ),
     voicePreviewLine,

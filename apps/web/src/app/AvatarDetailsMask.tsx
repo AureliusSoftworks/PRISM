@@ -316,10 +316,7 @@ export function AvatarDetailsMask({
       "talking",
       "all",
     );
-    return avatarDetailsSpeechMotionOrigin(
-      completeSpeechPixels,
-      speechMotion === "wobble" ? "top" : "center",
-    );
+    return avatarDetailsSpeechMotionOrigin(completeSpeechPixels);
   }, [
     faceGeometry,
     normalizedColor,

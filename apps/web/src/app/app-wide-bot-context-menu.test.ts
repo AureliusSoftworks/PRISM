@@ -7,6 +7,10 @@ const tutorialSource = readFileSync(
   new URL("./modeTutorials.ts", import.meta.url),
   "utf8",
 );
+const botContextMenuSource = pageSource.slice(
+  pageSource.indexOf("function renderBotContextMenu"),
+  pageSource.indexOf("function renderConversationGroupContextMenu"),
+);
 
 test("bot context targets resolve across shared app surfaces", () => {
   assert.match(pageSource, /APP_WIDE_BOT_CONTEXT_TARGET_SELECTOR/u);
@@ -55,6 +59,22 @@ test("Signal avatars identify their bot and inherit the standard menu", () => {
     pageSource,
     /if \(view === "botcast"\)[\s\S]*?<BotcastExperience[\s\S]*?renderContextMenuPortal\(renderBotContextMenu\(\)\)[\s\S]*?if \(view === "slate"\)/u,
   );
+});
+
+test("bot context menus omit experience launchers and redundant selection", () => {
+  for (const removedLabel of [
+    "Experiences",
+    "Open in Signal",
+    "Open in Coffee",
+  ]) {
+    assert.doesNotMatch(
+      botContextMenuSource,
+      new RegExp(`label: "${removedLabel}"`, "u"),
+    );
+  }
+  assert.doesNotMatch(botContextMenuSource, /id: "select"/u);
+  assert.match(botContextMenuSource, /label: "Favorite"/u);
+  assert.match(botContextMenuSource, /label: "Avatar Studio"/u);
 });
 
 test("mode tutorials teach the app-wide bot shortcut", () => {

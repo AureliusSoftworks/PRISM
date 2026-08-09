@@ -61,7 +61,7 @@
 
 .sizeHero {
   --chat-mini-bot-face-size: clamp(26px, 2.3vw, 30px);
-  --chat-mini-bot-glyph-size: clamp(21px, 2vw, 25px);
+  --chat-mini-bot-glyph-size: clamp(19px, 1.8vw, 23px);
   width: clamp(132px, 11vw, 154px);
   height: clamp(132px, 11vw, 154px);
 }
@@ -115,12 +115,14 @@
   color: color-mix(in srgb, var(--chat-mini-bot-color) 88%, #ffffff);
 }
 
-/* Upper face/art screen: (31,24)-(96,86) on 128px → ~24%/19%/52%/49% */
+/* Upper face/art screen: retain the authored registration, but let the aperture
+   continue beneath the buckle so full-height ink is not clipped into a black
+   gap at the bottom. */
 .upperScreen {
   left: 24.2%;
   top: 18.75%;
   width: 50.8%;
-  height: 48.4%;
+  height: calc(48.4% + 8px);
   border-radius: 50%;
 }
 

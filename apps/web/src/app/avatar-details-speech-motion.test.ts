@@ -22,27 +22,14 @@ function speechPixels(bounds: {
 }
 
 describe("Avatar Details Speech ink motion", () => {
-  it("centers pulse and spin motion on the complete authored Speech item", () => {
+  it("centers every motion on the complete authored Speech item", () => {
     const origin = avatarDetailsSpeechMotionOrigin(
       speechPixels({ left: 40, top: 70, right: 80, bottom: 74 }),
-      "center",
     );
 
     assert.deepEqual(origin, {
       xPct: (60.5 / AVATAR_DETAILS_CANVAS_SIZE) * 100,
       yPct: (72.5 / AVATAR_DETAILS_CANVAS_SIZE) * 100,
-    });
-  });
-
-  it("hinges wobble from the authored Speech item's top edge", () => {
-    const origin = avatarDetailsSpeechMotionOrigin(
-      speechPixels({ left: 40, top: 70, right: 80, bottom: 74 }),
-      "top",
-    );
-
-    assert.deepEqual(origin, {
-      xPct: (60.5 / AVATAR_DETAILS_CANVAS_SIZE) * 100,
-      yPct: (70 / AVATAR_DETAILS_CANVAS_SIZE) * 100,
     });
   });
 
@@ -52,7 +39,6 @@ describe("Avatar Details Speech ink motion", () => {
         new Uint8ClampedArray(
           AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE * 4,
         ),
-        "center",
       ),
       null,
     );

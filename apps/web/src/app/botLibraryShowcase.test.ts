@@ -18,9 +18,12 @@ describe("selected bot library showcase", () => {
     );
     assert.match(pageSource, /node\.dataset\.prismPanelLayer !== "true"/);
     assert.match(pageSource, /className=\{`\$\{styles\.zenLiveBotPresencePlate\} \$\{styles\.botPanelHubAvatarPlate\}`\}/);
-    assert.match(pageSource, /regenerateBotHubAudioSample\(bot\)/);
-    assert.match(pageSource, /void playBotHubVoicePreview\(bot, "premium"\)/);
-    assert.match(pageSource, /void playBotHubVoicePreview\(bot, "bottish"\)/);
+    for (const mode of ["english", "premium", "babble", "bottish"]) {
+      assert.match(
+        pageSource,
+        new RegExp(`playShowcaseVoiceMode\\("${mode}"\\)`),
+      );
+    }
     assert.match(pageSource, /"--zen-live-bot-avatar-size":[\s\S]*?"min\(520px, 72vmin\)"/);
     assert.match(pageSource, /\{renderBotHubShowcase\(\)\}[\s\S]*?\{renderUsagePanel\(\)\}/);
     assert.match(cssSource, /\.botPanelHubShowcase\s*\{[\s\S]*?position:\s*fixed;[\s\S]*?inset:\s*0 min\(479px, calc\(100vw - 32px\)\) 0 0;/);
@@ -123,27 +126,137 @@ describe("selected bot library showcase", () => {
   });
 
   it("keeps the large preview silent and plays only from its voice buttons", () => {
+    const showcaseSource = pageSource.slice(
+      pageSource.indexOf("const renderBotHubShowcase"),
+      pageSource.indexOf("const renderSharedPanels"),
+    );
     const previewSource = pageSource.slice(
       pageSource.indexOf("className={styles.botPanelHubAvatarPreview}"),
       pageSource.indexOf("className={styles.botPanelHubShowcasePrompt}")
     );
     assert.doesNotMatch(previewSource, /onClick=/);
     assert.doesNotMatch(previewSource, /playBotHubVoicePreview/);
+    assert.match(showcaseSource, /aria-label="Voice preview mode"/);
+    for (const mode of ["english", "premium", "babble", "bottish"]) {
+      assert.match(
+        showcaseSource,
+        new RegExp(`onClick=\\{\\(\\) => void playShowcaseVoiceMode\\("${mode}"\\)\\}`),
+      );
+    }
+  });
+
+  it("opens every Avatar Studio section directly from the bot hub", () => {
+    const hubSource = pageSource.slice(
+      pageSource.indexOf('{botPanelView === "botHub"'),
+      pageSource.indexOf("{/* One form, two modes.", pageSource.indexOf('{botPanelView === "botHub"')),
+    );
     assert.match(
-      pageSource,
-      /aria-label="Voice preview mode"[\s\S]*?isMarketplacePreview[\s\S]*?playBotHubVoicePreview\(bot, "english"\)[\s\S]*?regenerateBotHubAudioSample\(bot\)[\s\S]*?playBotHubVoicePreview\(bot, "premium"\)[\s\S]*?playBotHubVoicePreview\(bot, "bottish"\)/
+      hubSource,
+      /BOT_AVATAR_CUSTOMIZER_TABS\.map\(\(tab\) =>/,
+    );
+    assert.match(
+      hubSource,
+      /data-avatar-studio-shortcut=\{tab\.value\}/,
+    );
+    assert.match(
+      hubSource,
+      /openBotCustomizer\(\s*selectedBotPanelBot,\s*tab\.value,\s*\)/,
+    );
+    for (const [value, label] of [
+      ["face", "Identity"],
+      ["profile", "Profile"],
+      ["powers", "Powers"],
+      ["eyes", "Eyes"],
+      ["mouth", "Mouth"],
+      ["voice", "Voice"],
+      ["sfx", "SFX"],
+      ["settings", "Settings"],
+      ["details", "Details"],
+    ] as const) {
+      assert.match(
+        pageSource,
+        new RegExp(`\\{ value: "${value}", label: "${label}" \\}`),
+      );
+    }
+  });
+
+  it("speaks the bot hub test line without creating a chat or LLM turn", () => {
+    const showcaseSource = pageSource.slice(
+      pageSource.indexOf("const renderBotHubShowcase"),
+      pageSource.indexOf("const renderSharedPanels"),
+    );
+    const hubSource = pageSource.slice(
+      pageSource.indexOf('{botPanelView === "botHub"'),
+      pageSource.indexOf(
+        "{/* One form, two modes.",
+        pageSource.indexOf('{botPanelView === "botHub"'),
+      ),
+    );
+    const submitSource = pageSource.slice(
+      pageSource.indexOf("async function submitBotHubVoiceEcho"),
+      pageSource.indexOf("async function previewSelectedBotVoice"),
+    );
+    const playbackSource = pageSource.slice(
+      pageSource.indexOf("async function playBotHubVoicePreview"),
+      pageSource.indexOf("async function submitBotHubVoiceEcho"),
+    );
+    assert.match(
+      playbackSource,
+      /options: \{ exactText\?: string \} = \{\}/,
+    );
+    assert.ok(
+      playbackSource.indexOf("const exactPreviewText") <
+        playbackSource.indexOf("await resolveBotHubVoicePreviewText(bot)"),
+      "exact text should be selected before generated sample text is resolved",
+    );
+    assert.match(
+      submitSource,
+      /playBotHubVoicePreview\(bot, mode, \{ exactText \}\)/,
+    );
+    assert.doesNotMatch(
+      submitSource,
+      /sendMessage|createConversation|resolveBotHubVoicePreviewText|\/api\//,
+    );
+    assert.match(
+      showcaseSource,
+      /placeholder="Type exactly what this bot should say…"/,
+    );
+    assert.ok(
+      showcaseSource.indexOf("className={styles.botPanelHubVoiceTest}") >
+        showcaseSource.indexOf("className={styles.botPanelHubVoiceChoices}"),
+      "the composer should follow the four sample buttons",
+    );
+    assert.doesNotMatch(hubSource, /botPanelHubVoiceTest/);
+    assert.match(
+      normalizedCssSource,
+      /\.botPanelHubVoiceTest\s*\{[^}]*width:\s*min\(560px, calc\(100vw - 48px\)\);/,
     );
   });
 
-  it("regenerates and automatically plays every English sample in one click", () => {
-    const regenerationSource = pageSource.slice(
-      pageSource.indexOf("async function regenerateBotHubAudioSample"),
-      pageSource.indexOf("async function loadElevenLabsVoiceCatalog")
+  it("seeds one editable sample and routes every voice button through it", () => {
+    const openHubSource = pageSource.slice(
+      pageSource.indexOf("function openBotPanelHub"),
+      pageSource.indexOf("async function createBot"),
     );
-    assert.match(regenerationSource, /voicePreviewAudioCacheRef\.current\.clear\(\)/);
-    assert.match(regenerationSource, /JSON\.stringify\(\{ voicePreviewLine: null \}\)/);
-    assert.match(regenerationSource, /await playBotHubVoicePreview\(regeneratedBot, "english"\)/);
-    assert.match(pageSource, /previewStatus === "generating" \|\| previewStatus === "playing"/);
+    const showcaseSource = pageSource.slice(
+      pageSource.indexOf("const renderBotHubShowcase"),
+      pageSource.indexOf("const renderSharedPanels"),
+    );
+    assert.match(
+      openHubSource,
+      /setBotHubVoiceEchoDraft\([\s\S]*?bot\.voice_preview_line\?\.trim\(\) \|\| VOICE_PREVIEW_TEXT/,
+    );
+    assert.match(
+      showcaseSource,
+      /voiceTestBot \? \{ exactText: botHubVoiceEchoDraft \} : undefined/,
+    );
+    for (const mode of ["english", "premium", "babble", "bottish"]) {
+      assert.match(
+        showcaseSource,
+        new RegExp(`playShowcaseVoiceMode\\("${mode}"\\)`),
+      );
+    }
+    assert.doesNotMatch(pageSource, /regenerateBotHubAudioSample/);
   });
 
   it("keeps the Bots panel open when the surrounding backdrop is clicked", () => {
@@ -307,6 +420,23 @@ describe("selected bot library showcase", () => {
     assert.match(cssSource, /\.botPanelHubShowcase\[data-panel="images"\]/);
   });
 
+  it("dismisses the bot management hub only from the empty showcase backdrop", () => {
+    const showcaseSource = pageSource.slice(
+      pageSource.indexOf("const renderBotHubShowcase"),
+      pageSource.indexOf("const renderSharedPanels"),
+    );
+
+    assert.match(
+      showcaseSource,
+      /const showcaseBackdropDismissible =\s*panel === "bots" && botPanelView === "botHub"/u,
+    );
+    assert.match(showcaseSource, /data-bot-hub-showcase-backdrop="true"/u);
+    assert.match(
+      showcaseSource,
+      /if \(event\.target !== event\.currentTarget\) return;\s*closePanel\(\);/u,
+    );
+  });
+
   it("offers English, Premium, Babble, and Bottish independently of the global voice mode", () => {
     assert.match(pageSource, /mode: Exclude<VoicePlaybackChoice, "mute">/);
     assert.match(pageSource, /playBotHubVoicePreview\(\s*bot: Bot \| null,\s*mode: Exclude<VoicePlaybackChoice, "mute">/);
@@ -314,8 +444,12 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /aria-pressed=\{previewMode === "english"\}/);
     assert.match(pageSource, /aria-pressed=\{previewMode === "premium"\}/);
     assert.match(pageSource, /aria-pressed=\{previewMode === "babble"\}/);
-    assert.match(pageSource, /playBotHubVoicePreview\(bot, "premium"\)/);
-    assert.match(pageSource, /playBotHubVoicePreview\(bot, "babble"\)/);
+    assert.match(pageSource, /playShowcaseVoiceMode\("premium"\)/);
+    assert.match(pageSource, /playShowcaseVoiceMode\("babble"\)/);
+    assert.match(
+      pageSource,
+      /playBotHubVoicePreview\([\s\S]*?bot,[\s\S]*?mode,[\s\S]*?voiceTestBot \? \{ exactText: botHubVoiceEchoDraft \} : undefined/,
+    );
     assert.match(pageSource, /mode === "premium" \? "english" : mode/);
     assert.match(pageSource, /mode === "premium" \? "elevenlabs" : "builtin"/);
     assert.match(

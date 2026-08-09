@@ -211,7 +211,6 @@ function updateCustomMouthMotionOrigins(
   const inkCenterX =
     paddingInlineStart +
     (-metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight) / 2;
-  const inkTopY = baselineY - metrics.actualBoundingBoxAscent;
   const inkCenterY =
     baselineY +
     (metrics.actualBoundingBoxDescent - metrics.actualBoundingBoxAscent) / 2;
@@ -221,7 +220,7 @@ function updateCustomMouthMotionOrigins(
   );
   element.style.setProperty(
     "--bot-face-mouth-wobble-origin-y",
-    `${inkTopY}px`,
+    `${inkCenterY}px`,
   );
   element.style.setProperty(
     "--bot-face-mouth-spin-origin-x",

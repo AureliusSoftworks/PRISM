@@ -692,6 +692,7 @@ import {
   canvasBackgroundShouldZoomOutFocusedBot,
   canvasBotDirectoryIsInteractive,
   focusedCanvasBotId,
+  resolveCanvasBotTileActivation,
   resolveCanvasBotMarqueeSelection,
   type CanvasBotMarqueeSelectionMode,
 } from "./botCanvasMarqueeSelection";
@@ -12126,9 +12127,6 @@ function BotVoiceEditor({
   const selectedSystemVoiceAvailable = identityCatalog.system.options.some(
     (option) => option.value === selectedSystemVoiceValue,
   );
-  const selectedSystemVoiceVisible = filteredSystemVoiceOptions.some(
-    (option) => option.value === selectedSystemVoiceValue,
-  );
   const selectedElevenLabsVoiceAvailable =
     !selectedElevenLabsVoiceValue ||
     identityCatalog.elevenLabs.options.some(
@@ -12414,19 +12412,20 @@ function BotVoiceEditor({
         </div>
 
         <div className={styles.botVoiceSourceStack}>
-          <section
-            className={styles.botVoiceSourceCard}
+          <details
+            className={`${styles.botVoiceSourceCard} ${styles.botVoiceFallbackDisclosure}`}
             data-kind="online"
             data-active={effectiveElevenLabsVoiceValue ? "true" : undefined}
-            aria-label="Online voice"
+            aria-label="Optional Premium voice"
             data-bot-voice-source-card="online"
+            open={effectiveElevenLabsVoiceValue ? true : undefined}
           >
-            <div className={styles.botVoiceSourceCardHeader}>
+            <summary className={styles.botVoiceSourceCardHeader}>
               <span aria-hidden="true">
                 <Globe size={15} strokeWidth={2.2} />
               </span>
               <div>
-                <small>ELEVENLABS</small>
+                <small>PREMIUM · OPTIONAL</small>
                 <strong>
                   {effectiveElevenLabsVoiceValue
                     ? premiumVoiceLabel
@@ -12440,65 +12439,66 @@ function BotVoiceEditor({
                     ? "Active"
                     : "Optional"}
               </em>
-            </div>
+            </summary>
 
-            <div className={styles.botVoiceIdentityField}>
-              <label htmlFor="bot-elevenlabs-voice-identity">Voice</label>
-              <select
-                id="bot-elevenlabs-voice-identity"
-                aria-label="ElevenLabs voice identity"
-                value={
-                  elevenLabsVoiceIdOverrideValue
-                    ? ""
-                    : selectedElevenLabsVoiceValue
-                }
-                disabled={identityCatalog.elevenLabs.loading}
-                onChange={(event) => {
-                  const value = event.currentTarget.value || null;
-                  onChange(
-                    {
-                      ...normalizedProfile,
-                      elevenLabsVoiceId: value,
-                      elevenLabsVoiceIdOverride: null,
-                      elevenLabsVoiceInitialized: true,
-                    },
-                    { saveImmediately: true },
-                  );
-                }}
-              >
-                <option value="">
-                  {elevenLabsVoiceIdOverrideValue
-                    ? "Exact Voice ID active"
-                    : "No Premium voice · use local fallback"}
-                </option>
-                {!selectedElevenLabsVoiceAvailable ? (
-                  <option value={selectedElevenLabsVoiceValue}>
-                    {identityCatalog.elevenLabs.selectedUnavailableLabel ??
-                      "Saved ElevenLabs voice (catalog unavailable)"}
+            <div className={styles.botVoicePremiumBody}>
+              <div className={styles.botVoiceIdentityField}>
+                <label htmlFor="bot-elevenlabs-voice-identity">Voice</label>
+                <select
+                  id="bot-elevenlabs-voice-identity"
+                  aria-label="ElevenLabs voice identity"
+                  value={
+                    elevenLabsVoiceIdOverrideValue
+                      ? ""
+                      : selectedElevenLabsVoiceValue
+                  }
+                  disabled={identityCatalog.elevenLabs.loading}
+                  onChange={(event) => {
+                    const value = event.currentTarget.value || null;
+                    onChange(
+                      {
+                        ...normalizedProfile,
+                        elevenLabsVoiceId: value,
+                        elevenLabsVoiceIdOverride: null,
+                        elevenLabsVoiceInitialized: true,
+                      },
+                      { saveImmediately: true },
+                    );
+                  }}
+                >
+                  <option value="">
+                    {elevenLabsVoiceIdOverrideValue
+                      ? "Exact Voice ID active"
+                      : "No Premium voice · use local fallback"}
                   </option>
+                  {!selectedElevenLabsVoiceAvailable ? (
+                    <option value={selectedElevenLabsVoiceValue}>
+                      {identityCatalog.elevenLabs.selectedUnavailableLabel ??
+                        "Saved ElevenLabs voice (catalog unavailable)"}
+                    </option>
+                  ) : null}
+                  {identityCatalog.elevenLabs.options.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.detail
+                        ? `${option.label} — ${option.detail}`
+                        : option.label}
+                    </option>
+                  ))}
+                </select>
+                {identityCatalog.elevenLabs.loading ||
+                elevenLabsVoiceIdOverrideValue ||
+                identityCatalog.elevenLabs.message ? (
+                  <small>
+                    {identityCatalog.elevenLabs.loading
+                      ? "Loading ElevenLabs voices…"
+                      : elevenLabsVoiceIdOverrideValue
+                        ? "Choose a library voice to replace the Voice ID."
+                        : identityCatalog.elevenLabs.message}
+                  </small>
                 ) : null}
-                {identityCatalog.elevenLabs.options.map((option) => (
-                  <option key={option.value} value={option.value}>
-                    {option.detail
-                      ? `${option.label} — ${option.detail}`
-                      : option.label}
-                  </option>
-                ))}
-              </select>
-              {identityCatalog.elevenLabs.loading ||
-              elevenLabsVoiceIdOverrideValue ||
-              identityCatalog.elevenLabs.message ? (
-                <small>
-                  {identityCatalog.elevenLabs.loading
-                    ? "Loading ElevenLabs voices…"
-                    : elevenLabsVoiceIdOverrideValue
-                      ? "Choose a library voice to replace the Voice ID."
-                      : identityCatalog.elevenLabs.message}
-                </small>
-              ) : null}
-            </div>
+              </div>
 
-            <details
+              <details
               className={styles.botVoiceOverrideDisclosure}
               data-active={elevenLabsVoiceIdOverrideValue ? "true" : undefined}
               open={elevenLabsVoiceIdOverrideValue ? true : undefined}
@@ -12596,10 +12596,10 @@ function BotVoiceEditor({
                   files. The importing account still needs access.
                 </small>
               </div>
-            </details>
+              </details>
 
-            {effectiveElevenLabsVoiceValue ? (
-              <details className={styles.botVoiceDeliveryDisclosure}>
+              {effectiveElevenLabsVoiceValue ? (
+                <details className={styles.botVoiceDeliveryDisclosure}>
                 <summary>
                   <span>
                     <strong>ElevenLabs controls</strong>
@@ -12722,79 +12722,36 @@ function BotVoiceEditor({
                     </small>
                   </div>
                 </div>
-              </details>
-            ) : null}
-          </section>
+                </details>
+              ) : null}
+            </div>
+          </details>
 
           <details
             className={`${styles.botVoiceSourceCard} ${styles.botVoiceFallbackDisclosure}`}
             data-kind="system"
             data-active={!effectiveElevenLabsVoiceValue ? "true" : undefined}
-            aria-label="Offline and fallback voice"
+            aria-label="Named Prism voices"
             data-bot-voice-source-card="system"
-            open={!effectiveElevenLabsVoiceValue ? true : undefined}
+            open
           >
             <summary className={styles.botVoiceSourceCardHeader}>
               <span aria-hidden="true">
                 <Volume2 size={15} strokeWidth={2.2} />
               </span>
               <div>
-                <small>LOCAL · FALLBACK</small>
+                <small>PRISM VOICE PACK</small>
                 <strong>{fallbackVoiceLabel}</strong>
               </div>
               <em>{effectiveElevenLabsVoiceValue ? "Fallback" : "Active"}</em>
             </summary>
             <div className={styles.botVoiceFallbackBody}>
               <div className={styles.botVoiceIdentityField}>
-                <label htmlFor="bot-local-voice-engine">Engine</label>
-                <select
-                  id="bot-local-voice-engine"
-                  aria-label="Local voice engine"
-                  value={normalizedProfile.localEnginePreference ?? "inherit"}
-                  onChange={(event) =>
-                    onChange(
-                      normalizeBotAudioVoiceProfileV1({
-                        ...normalizedProfile,
-                        localEnginePreference: event.currentTarget.value,
-                      }),
-                      { saveImmediately: true },
-                    )
-                  }
-                >
-                  {LOCAL_VOICE_ENGINE_PREFERENCES.map((preference) => {
-                    const capability = localVoiceEngines?.find(
-                      (engine) => engine.id === preference,
-                    );
-                    const disabled =
-                      preference === "voice-plus" &&
-                      capability?.available !== true;
-                    const label =
-                      preference === "inherit"
-                        ? "Auto"
-                        : preference === "auto"
-                          ? "Auto"
-                          : preference === "voice-plus"
-                            ? "Voice+"
-                            : "Instant";
-                    return (
-                      <option
-                        key={preference}
-                        value={preference}
-                        disabled={disabled}
-                      >
-                        {label}
-                        {disabled ? " · Qualification required" : ""}
-                      </option>
-                    );
-                  })}
-                </select>
-              </div>
-              <div className={styles.botVoiceIdentityField}>
-                <span>Gender</span>
+                <span>Voice range</span>
                 <div
                   className={styles.botVoicePresentationChips}
                   role="group"
-                  aria-label="Local voice gender"
+                  aria-label="Named voice range"
                 >
                   {(["any", "feminine", "masculine"] as const).map(
                     (presentation) => (
@@ -12822,10 +12779,10 @@ function BotVoiceEditor({
                 </div>
               </div>
               <div className={styles.botVoiceIdentityField}>
-                <label htmlFor="bot-system-voice-identity">
-                  Voice
+                <span className={styles.botVoiceFieldHeading}>
+                  Named voices
                   <BotFieldRandomizerButton
-                    label="local voice"
+                    label="named voice"
                     disabled={filteredSystemVoiceOptions.length < 2}
                     onRandomize={() =>
                       onChange(
@@ -12837,51 +12794,48 @@ function BotVoiceEditor({
                               (option) => option.value,
                             ),
                           ),
-                          identityCatalog.system.options,
                         ),
                         { saveImmediately: true },
                       )
                     }
                   />
-                </label>
-                <select
-                  id="bot-system-voice-identity"
-                  aria-label="Local voice identity"
-                  value={selectedSystemVoiceValue}
-                  disabled={
-                    identityCatalog.system.loading ||
-                    filteredSystemVoiceOptions.length === 0
-                  }
-                  onChange={(event) => {
-                    onChange(
-                      applyOfflineVoiceSelection(
-                        normalizedProfile,
-                        event.currentTarget.value,
-                        identityCatalog.system.options,
-                      ),
-                      { saveImmediately: true },
-                    );
-                  }}
+                </span>
+                <div
+                  className={styles.botVoiceNameGrid}
+                  role="radiogroup"
+                  aria-label="Choose a named voice"
                 >
-                  {!selectedSystemVoiceAvailable ? (
-                    <option value={selectedSystemVoiceValue}>
-                      {normalizedProfile.systemVoiceName ??
-                        "Saved operating-system voice"}{" "}
-                      · Unavailable
-                    </option>
-                  ) : !selectedSystemVoiceVisible ? (
-                    <option value={selectedSystemVoiceValue}>
-                      Saved selection · Adjusting filter…
-                    </option>
-                  ) : null}
                   {filteredSystemVoiceOptions.map((option) => (
-                    <option key={option.value} value={option.value}>
-                      {option.detail
-                        ? `${option.label} — ${option.detail}`
-                        : option.label}
-                    </option>
+                    <button
+                      key={option.value}
+                      type="button"
+                      role="radio"
+                      aria-checked={option.value === selectedSystemVoiceValue}
+                      data-active={
+                        option.value === selectedSystemVoiceValue
+                          ? "true"
+                          : undefined
+                      }
+                      data-featured={option.featured ? "true" : undefined}
+                      disabled={identityCatalog.system.loading}
+                      onClick={() =>
+                        onChange(
+                          applyOfflineVoiceSelection(
+                            normalizedProfile,
+                            option.value,
+                          ),
+                          { saveImmediately: true },
+                        )
+                      }
+                    >
+                      <span>
+                        <strong>{option.label}</strong>
+                        {option.featured ? <em>Original</em> : null}
+                      </span>
+                      {option.detail ? <small>{option.detail}</small> : null}
+                    </button>
                   ))}
-                </select>
+                </div>
                 {identityCatalog.system.loading ||
                 (normalizedProfile.systemVoiceName &&
                   !selectedSystemVoiceAvailable) ||
@@ -12899,6 +12853,59 @@ function BotVoiceEditor({
                   </small>
                 ) : null}
               </div>
+              <details className={styles.botVoiceDeliveryDisclosure}>
+                <summary>
+                  <span>
+                    <strong>Local playback engine</strong>
+                    <small>Automatic is recommended</small>
+                  </span>
+                  <em>Advanced</em>
+                </summary>
+                <div className={styles.botVoiceOnlineOptions}>
+                  <div className={styles.botVoiceIdentityField}>
+                    <label htmlFor="bot-local-voice-engine">Engine</label>
+                    <select
+                      id="bot-local-voice-engine"
+                      aria-label="Local voice engine"
+                      value={normalizedProfile.localEnginePreference ?? "inherit"}
+                      onChange={(event) =>
+                        onChange(
+                          normalizeBotAudioVoiceProfileV1({
+                            ...normalizedProfile,
+                            localEnginePreference: event.currentTarget.value,
+                          }),
+                          { saveImmediately: true },
+                        )
+                      }
+                    >
+                      {LOCAL_VOICE_ENGINE_PREFERENCES.map((preference) => {
+                        const capability = localVoiceEngines?.find(
+                          (engine) => engine.id === preference,
+                        );
+                        const disabled =
+                          preference === "voice-plus" &&
+                          capability?.available !== true;
+                        const label =
+                          preference === "inherit" || preference === "auto"
+                            ? "Automatic"
+                            : preference === "voice-plus"
+                              ? "Voice+"
+                              : "Instant";
+                        return (
+                          <option
+                            key={preference}
+                            value={preference}
+                            disabled={disabled}
+                          >
+                            {label}
+                            {disabled ? " · Qualification required" : ""}
+                          </option>
+                        );
+                      })}
+                    </select>
+                  </div>
+                </div>
+              </details>
             </div>
           </details>
         </div>
@@ -31813,6 +31820,12 @@ function ZenLiveBotPresencePlate({
     utteranceActive &&
     mouthShape != null &&
     mouthShape !== "closed";
+  const mouthMotionSealed =
+    bot != null && botPowerMouthMotionV1(bot.powers) === "sealed";
+  // Keep every emitted-light layer on the same clock as the frame LEDs. The
+  // utterance can be marked active before voiced mouth motion begins, which
+  // otherwise creates a pre-speech frame with ambient/face glow but dark LEDs.
+  const visualEmissionActive = !mouthMotionSealed && lipsVoicing;
   const faceMouthShape = lipsVoicing
     ? mouthShape!
     : mouthOpen && utteranceActive
@@ -32690,22 +32703,22 @@ function ZenLiveBotPresencePlate({
         defaultPrismPresence && defaultPrismPresenceForming ? "true" : undefined
       }
       data-talking={
-        bot && botPowerMouthMotionV1(bot.powers) === "sealed"
+        mouthMotionSealed
           ? undefined
-          : utteranceActive
+          : visualEmissionActive
             ? "true"
             : undefined
       }
       data-mouth-open={
-        bot && botPowerMouthMotionV1(bot.powers) === "sealed"
+        mouthMotionSealed
           ? "false"
-          : utteranceActive
+          : visualEmissionActive
             ? faceMouthOpen
               ? "true"
               : "false"
             : undefined
       }
-      data-mouth-shape={utteranceActive ? faceMouthShape : undefined}
+      data-mouth-shape={visualEmissionActive ? faceMouthShape : undefined}
       data-presence-phase={transitioning ? presencePhase : undefined}
       data-transitioning={transitioning ? "true" : undefined}
       data-loading={transitioning ? "true" : undefined}
@@ -32741,7 +32754,7 @@ function ZenLiveBotPresencePlate({
     >
       <BotAmbientPresenceRig
         theme={resolvedTheme}
-        isTalking={utteranceActive}
+        isTalking={visualEmissionActive}
         motionActive={
           !utteranceActive &&
           !faceSpinnerVisible &&
@@ -32755,7 +32768,7 @@ function ZenLiveBotPresencePlate({
           faceStyle={faceStyle}
           faceScaleY={faceScaleY}
           voicePreset={voicePreset}
-          isTalking={lipsVoicing}
+          isTalking={visualEmissionActive}
           avatarSfx={
             muteLiveAvatarSfx ? null : botAvatarSfxForBot(bot)
           }
@@ -38214,6 +38227,25 @@ const BOT_AVATAR_CUSTOMIZER_TABS = [
   label: string;
 }[];
 
+function BotAvatarCustomizerTabIcon({
+  tab,
+  size = 13,
+}: {
+  tab: BotAvatarCustomizerTab;
+  size?: number;
+}): React.JSX.Element {
+  const iconProps = { size, strokeWidth: 2.3, "aria-hidden": true } as const;
+  if (tab === "face") return <Sparkles {...iconProps} />;
+  if (tab === "profile") return <BookMarked {...iconProps} />;
+  if (tab === "powers") return <Zap {...iconProps} />;
+  if (tab === "eyes") return <Eye {...iconProps} />;
+  if (tab === "mouth") return <Smile {...iconProps} />;
+  if (tab === "voice") return <Volume2 {...iconProps} />;
+  if (tab === "sfx") return <Waves {...iconProps} />;
+  if (tab === "settings") return <Settings {...iconProps} />;
+  return <PencilLine {...iconProps} />;
+}
+
 const BOT_AVATAR_FACE_CONTROL_TABS = [
   "face",
   "eyes",
@@ -39719,12 +39751,14 @@ function BotVoicePerformanceControls({
 function BotVoiceFeelStage({
   profile,
   onChange,
+  onContinue,
 }: {
   profile: BotAudioVoiceProfileV1;
   onChange: (
     profile: BotAudioVoiceProfileV1,
     options?: BotVoiceProfileChangeOptions,
   ) => void;
+  onContinue?: () => void;
 }): React.JSX.Element {
   return (
     <div
@@ -39749,6 +39783,15 @@ function BotVoiceFeelStage({
           effectSelectId="bot-voice-feel-effect"
         />
       </section>
+      {onContinue ? (
+        <button
+          className={styles.botVoiceStageContinue}
+          type="button"
+          onClick={onContinue}
+        >
+          Continue to Voices
+        </button>
+      ) : null}
     </div>
   );
 }
@@ -43105,6 +43148,9 @@ function BotAvatarCustomizerModal({
   );
   const avatarPronunciationSelection =
     pronunciationAtlasSelectionForProfile(audioVoiceProfile);
+  const avatarVoiceAccentReady = Boolean(
+    avatarPronunciationSelection.point,
+  );
   const playPronunciationAtlasPreview = async (
     previewProfile: BotAudioVoiceProfileV1,
   ): Promise<void> => {
@@ -43137,14 +43183,17 @@ function BotAvatarCustomizerModal({
           ? [{ value: "mouth", label: "Mouth" }]
           : activeControlTab === "voice"
             ? [
-                { value: "pronunciation", label: "Accent" },
-                { value: "feel", label: "Feel" },
-                { value: "voice", label: "Voice" },
+                { value: "pronunciation", label: "1 Accent" },
+                { value: "feel", label: "2 Feel" },
+                { value: "voice", label: "3 Voice" },
               ]
             : [];
   const activeAdjustmentControl = (() => {
     if (activeAdjustmentOptions.length === 0) return null;
-    if (activeAdjustmentTarget === "pronunciation") {
+    if (
+      activeControlTab === "voice" &&
+      activeAdjustmentTarget === "pronunciation"
+    ) {
       return (
         <PronunciationAtlas
           selection={avatarPronunciationSelection}
@@ -43184,18 +43233,41 @@ function BotAvatarCustomizerModal({
           onPreviewCurrent={() =>
             void playPronunciationAtlasPreview(audioVoiceProfile)
           }
+          onContinue={() => setActiveAdjustmentTarget("feel")}
         />
       );
     }
-    if (activeAdjustmentTarget === "feel") {
+    if (activeControlTab === "voice" && !avatarVoiceAccentReady) {
+      return (
+        <section
+          className={styles.botVoiceAccentGate}
+          aria-label="Accent selection required"
+        >
+          <Globe size={22} strokeWidth={1.9} aria-hidden="true" />
+          <strong>Place the accent pin first</strong>
+          <p>
+            The map location owns pronunciation. Once it is set, you can shape
+            the feel and choose any named voice without moving that accent.
+          </p>
+          <button
+            type="button"
+            onClick={() => setActiveAdjustmentTarget("pronunciation")}
+          >
+            Open Accent Map
+          </button>
+        </section>
+      );
+    }
+    if (activeControlTab === "voice" && activeAdjustmentTarget === "feel") {
       return (
         <BotVoiceFeelStage
           profile={audioVoiceProfile}
           onChange={onAudioVoiceProfileChange}
+          onContinue={() => setActiveAdjustmentTarget("voice")}
         />
       );
     }
-    if (activeAdjustmentTarget === "voice") {
+    if (activeControlTab === "voice" && activeAdjustmentTarget === "voice") {
       return (
         <BotVoiceEditor
           variant="identity"
@@ -43227,7 +43299,7 @@ function BotAvatarCustomizerModal({
         />
       );
     }
-    if (activeAdjustmentTarget === "eyes") {
+    if (activeControlTab === "eyes" && activeAdjustmentTarget === "eyes") {
       return (
         <BotAvatarCoordinateControl
           label="Eye position"
@@ -43252,7 +43324,7 @@ function BotAvatarCustomizerModal({
         />
       );
     }
-    if (activeAdjustmentTarget === "blink") {
+    if (activeControlTab === "eyes" && activeAdjustmentTarget === "blink") {
       return (
         <BotAvatarCoordinateControl
           label="Blink position"
@@ -43277,7 +43349,7 @@ function BotAvatarCustomizerModal({
         />
       );
     }
-    if (activeAdjustmentTarget === "mouth") {
+    if (activeControlTab === "mouth" && activeAdjustmentTarget === "mouth") {
       return (
         <BotAvatarCoordinateControl
           label="Mouth position"
@@ -43301,6 +43373,12 @@ function BotAvatarCustomizerModal({
           }}
         />
       );
+    }
+    if (
+      activeControlTab !== "face" ||
+      activeAdjustmentTarget !== "thinking"
+    ) {
+      return null;
     }
     return (
       <BotAvatarCoordinateControl
@@ -43673,47 +43751,7 @@ function BotAvatarCustomizerModal({
                       } as CSSProperties
                     }
                   >
-                    {tab.value === "face" ? (
-                      <Sparkles
-                        size={13}
-                        strokeWidth={2.3}
-                        aria-hidden="true"
-                      />
-                    ) : tab.value === "profile" ? (
-                      <BookMarked
-                        size={13}
-                        strokeWidth={2.3}
-                        aria-hidden="true"
-                      />
-                    ) : tab.value === "powers" ? (
-                      <Zap size={13} strokeWidth={2.3} aria-hidden="true" />
-                    ) : tab.value === "eyes" ? (
-                      <Eye size={13} strokeWidth={2.3} aria-hidden="true" />
-                    ) : tab.value === "mouth" ? (
-                      <Smile size={13} strokeWidth={2.3} aria-hidden="true" />
-                    ) : tab.value === "voice" ? (
-                      <Volume2 size={13} strokeWidth={2.3} aria-hidden="true" />
-                    ) : tab.value === "sfx" ? (
-                      <Waves size={13} strokeWidth={2.3} aria-hidden="true" />
-                    ) : tab.value === "settings" ? (
-                      <Settings
-                        size={13}
-                        strokeWidth={2.3}
-                        aria-hidden="true"
-                      />
-                    ) : tab.value === "details" ? (
-                      <PencilLine
-                        size={13}
-                        strokeWidth={2.3}
-                        aria-hidden="true"
-                      />
-                    ) : (
-                      <PencilLine
-                        size={13}
-                        strokeWidth={2.3}
-                        aria-hidden="true"
-                      />
-                    )}
+                    <BotAvatarCustomizerTabIcon tab={tab.value} />
                     {tab.label}
                   </button>
                 ))}
@@ -43773,9 +43811,29 @@ function BotAvatarCustomizerModal({
                               : undefined
                           }
                           aria-pressed={activeAdjustmentTarget === option.value}
-                          onClick={() =>
-                            setActiveAdjustmentTarget(option.value)
+                          disabled={
+                            activeControlTab === "voice" &&
+                            option.value !== "pronunciation" &&
+                            !avatarVoiceAccentReady
                           }
+                          title={
+                            activeControlTab === "voice" &&
+                            option.value !== "pronunciation" &&
+                            !avatarVoiceAccentReady
+                              ? "Place the Accent pin first"
+                              : undefined
+                          }
+                          onClick={() => {
+                            if (
+                              activeControlTab === "voice" &&
+                              option.value !== "pronunciation" &&
+                              !avatarVoiceAccentReady
+                            ) {
+                              setActiveAdjustmentTarget("pronunciation");
+                              return;
+                            }
+                            setActiveAdjustmentTarget(option.value);
+                          }}
                         >
                           {option.label}
                         </button>
@@ -46838,19 +46896,22 @@ function HomeContent(): React.JSX.Element {
     useState<LocalVoicePresentationFilter>("any");
   const offlineVoiceIdentityOptions = useMemo<OfflineVoiceOption[]>(
     () => [
-      ...PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => ({
-        value: builtinVoiceSelectionValue(voice.voiceId),
-        label: voice.character,
-        detail: `Portable ${voice.voiceId.replace("voice-", "")} · Included`,
-        kind: "builtin" as const,
-        locale: voice.locale,
-        presentation: voice.presentation,
-      })),
+      ...[...PRISM_BUILTIN_ENGLISH_VOICES]
+        .sort((left, right) => left.selectionOrder - right.selectionOrder)
+        .map((voice) => ({
+          value: builtinVoiceSelectionValue(voice.voiceId),
+          label: voice.name,
+          detail: voice.character,
+          kind: "builtin" as const,
+          locale: voice.locale,
+          presentation: voice.presentation,
+          featured: voice.selectionOrder < 5,
+        })),
       ...(settings?.operatingSystemVoicesEnabled
         ? systemVoiceOptions.map((voice) => ({
             value: operatingSystemVoiceSelectionValue(voice.name),
             label: voice.name,
-            detail: `${voice.locale.replace("_", "-")} · Operating system`,
+            detail: "This device",
             kind: "os" as const,
             locale: canonicalEnglishVoiceLocale(voice.locale),
           }))
@@ -48330,6 +48391,7 @@ function HomeContent(): React.JSX.Element {
     status: BotHubVoicePreviewStatus;
     error: string | null;
   }>({ botId: null, mode: null, status: "idle", error: null });
+  const [botHubVoiceEchoDraft, setBotHubVoiceEchoDraft] = useState("");
   useEffect(() => {
     voicePreviewPlaybackRunRef.current += 1;
     botHubVoicePreviewRunRef.current += 1;
@@ -85373,6 +85435,7 @@ function HomeContent(): React.JSX.Element {
   async function playBotHubVoicePreview(
     bot: Bot | null,
     mode: Exclude<VoicePlaybackChoice, "mute">,
+    options: { exactText?: string } = {},
   ): Promise<void> {
     primeVoiceModePlaybackFromUserGesture(
       mode === "premium" ? "english" : mode,
@@ -85432,6 +85495,16 @@ function HomeContent(): React.JSX.Element {
     const profile = resolveVoicePreviewProfile(authoredProfile);
     let failed = false;
     try {
+      const exactPreviewText = options.exactText?.trim() ?? null;
+      if (options.exactText !== undefined && !exactPreviewText) {
+        setBotHubVoicePreview({
+          botId: showcaseVoiceId,
+          mode,
+          status: "error",
+          error: "Type something for this bot to say.",
+        });
+        return;
+      }
       const englishChoice = mode === "english" || mode === "premium";
       const synthesisMode: Exclude<VoiceMode, "mute"> =
         mode === "premium" ? "english" : mode;
@@ -85439,30 +85512,33 @@ function HomeContent(): React.JSX.Element {
       // truth check used in Avatar Studio and never masks failure with fallback.
       const previewEngine: EnglishVoiceEngine =
         mode === "premium" ? "elevenlabs" : "builtin";
-      const showcaseName = bot?.name ?? "Prism";
-      const cachedPreviewLine = bot
-        ? await resolveBotHubVoicePreviewText(bot)
-        : (DEFAULT_PRISM_VOICE_PREVIEW_LINES[profile.baseVoiceId] ??
-          VOICE_PREVIEW_TEXT);
-      if (botHubVoicePreviewRunRef.current !== runId) return;
-      // Powers override conflicting system prompts (true-name intros); never player control.
-      const antiTruth = bot
-        ? strongestBotPowerAntiTruthEffectV1(bot.powers)
-        : null;
-      const spokenShowcaseName = antiTruth
-        ? botPowerAntiTruthSpokenNameV1(showcaseName, bot?.id ?? showcaseName)
-        : showcaseName;
-      const previewText = applyBotPowerAntiTruthTrueNameLeakV1(
-        `My name is ${spokenShowcaseName}. ${cachedPreviewLine}`,
-        showcaseName,
-        antiTruth,
-        bot?.id ?? showcaseName,
-      );
+      let previewText = exactPreviewText;
+      if (!previewText) {
+        const showcaseName = bot?.name ?? "Prism";
+        const cachedPreviewLine = bot
+          ? await resolveBotHubVoicePreviewText(bot)
+          : (DEFAULT_PRISM_VOICE_PREVIEW_LINES[profile.baseVoiceId] ??
+            VOICE_PREVIEW_TEXT);
+        if (botHubVoicePreviewRunRef.current !== runId) return;
+        // Powers override conflicting system prompts (true-name intros); never player control.
+        const antiTruth = bot
+          ? strongestBotPowerAntiTruthEffectV1(bot.powers)
+          : null;
+        const spokenShowcaseName = antiTruth
+          ? botPowerAntiTruthSpokenNameV1(showcaseName, bot?.id ?? showcaseName)
+          : showcaseName;
+        previewText = applyBotPowerAntiTruthTrueNameLeakV1(
+          `My name is ${spokenShowcaseName}. ${cachedPreviewLine}`,
+          showcaseName,
+          antiTruth,
+          bot?.id ?? showcaseName,
+        );
+      }
       let previewSpeechActivityWindows:
         SpeechActivityWindow[] | null | undefined;
       const audioCacheKey = englishChoice
         ? [
-            "bot-hub",
+            exactPreviewText ? "bot-hub-echo" : "bot-hub",
             showcaseVoiceId,
             previewEngine,
             previewText,
@@ -85575,6 +85651,17 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  async function submitBotHubVoiceEcho(
+    event: React.FormEvent<HTMLFormElement>,
+    bot: Bot,
+    mode: Exclude<VoicePlaybackChoice, "mute">,
+  ): Promise<void> {
+    event.preventDefault();
+    const exactText = botHubVoiceEchoDraft.trim();
+    if (!exactText) return;
+    await playBotHubVoicePreview(bot, mode, { exactText });
+  }
+
   async function previewSelectedBotVoice(
     rawProfile?: BotAudioVoiceProfileV1,
     forcedMode?: Exclude<VoiceMode, "mute">,
@@ -85594,50 +85681,6 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     await previewSelectedVoice(rawProfile, forcedMode, previewText, options);
-  }
-
-  async function regenerateBotHubAudioSample(bot: Bot | null): Promise<void> {
-    primeVoiceModePlaybackFromUserGesture("english");
-    const showcaseVoiceId = bot?.id ?? DEFAULT_PRISM_SHOWCASE_VOICE_ID;
-    botHubVoicePreviewRunRef.current += 1;
-    voicePreviewPlaybackRunRef.current += 1;
-    stopBottishVoice();
-    stopEnglishVoice();
-    voicePreviewAudioCacheRef.current.clear();
-    setBotHubVoicePreview({
-      botId: showcaseVoiceId,
-      mode: "english",
-      status: "generating",
-      error: null,
-    });
-    if (!bot) {
-      await playBotHubVoicePreview(null, "english");
-      return;
-    }
-    const regeneratedBot = { ...bot, voice_preview_line: null };
-    voicePreviewLineCacheRef.current.delete(`bot:${bot.id}`);
-    setBots((list) =>
-      list.map((candidate) =>
-        candidate.id === bot.id ? regeneratedBot : candidate,
-      ),
-    );
-    try {
-      await api(`/api/bots/${encodeURIComponent(bot.id)}`, {
-        method: "PATCH",
-        body: JSON.stringify({ voicePreviewLine: null }),
-      });
-      await playBotHubVoicePreview(regeneratedBot, "english");
-    } catch (error) {
-      setBotHubVoicePreview({
-        botId: bot.id,
-        mode: "english",
-        status: "error",
-        error:
-          error instanceof Error
-            ? error.message
-            : "Could not regenerate the audio sample.",
-      });
-    }
   }
 
   async function loadElevenLabsVoiceCatalog(quiet = false): Promise<void> {
@@ -91505,15 +91548,6 @@ function HomeContent(): React.JSX.Element {
     });
   }, []);
 
-  const selectCanvasBot = useCallback((botId: string) => {
-    setCanvasSelectedBotIds((current) => {
-      if (current.has(botId)) return current;
-      const next = new Set(current);
-      next.add(botId);
-      return next;
-    });
-  }, []);
-
   const focusHueLensOnBot = useCallback(
     (bot: Bot) => {
       if (emptyStateSearchActive || !botHasFilterableColor(bot)) return;
@@ -92793,6 +92827,15 @@ function HomeContent(): React.JSX.Element {
               );
             }
             const isSelected = focusedBotId === b.id;
+            const tileActivation = resolveCanvasBotTileActivation({
+              view:
+                view === "chat" || view === "sandbox" || view === "coffee"
+                  ? view
+                  : "other",
+              conversationMessageCount: detail?.messages.length ?? null,
+              focusedBotId,
+              botId: b.id,
+            });
             const isMarqueeSelected = canvasSelectedBotIds.has(b.id);
             const isProtected = isBotDeleteProtected(b.id);
             const isFavorite = favoriteBotIdSet.has(b.id);
@@ -92858,9 +92901,19 @@ function HomeContent(): React.JSX.Element {
                   role: "radio",
                   "aria-checked": isSelected,
                   "aria-label":
-                    tileTraits.length > 0
-                      ? `${b.name}, ${tileTraits.join(", ")}`
-                      : b.name,
+                    [
+                      b.name,
+                      ...tileTraits,
+                      tileActivation === "manage"
+                        ? "selected; activate to customize"
+                        : null,
+                    ]
+                      .filter(Boolean)
+                      .join(", "),
+                  title:
+                    tileActivation === "manage"
+                      ? `Customize ${b.name}`
+                      : `Focus ${b.name}`,
                   "data-living-shell-focus-id": `bot:${b.id}`,
                   "data-relationship-depth-anchor": "library",
                   "data-relationship-depth-identity": `bot:${b.id}`,
@@ -92923,6 +92976,12 @@ function HomeContent(): React.JSX.Element {
                       e.preventDefault();
                       e.stopPropagation();
                       toggleCanvasBotSelection(b.id);
+                      return;
+                    }
+                    if (tileActivation === "manage") {
+                      e.preventDefault();
+                      e.stopPropagation();
+                      openBotPanelHub(b);
                       return;
                     }
                     const isDesktopMousePixelClick =
@@ -94561,6 +94620,9 @@ function HomeContent(): React.JSX.Element {
     resetBotPanelDraftNavigation();
     setSelectedBotPanelBotId(bot.id);
     setBotPanelView("botHub");
+    setBotHubVoiceEchoDraft(
+      bot.voice_preview_line?.trim() || VOICE_PREVIEW_TEXT,
+    );
     resetBotForm();
     openRightPanel("bots");
   }
@@ -100638,54 +100700,6 @@ function HomeContent(): React.JSX.Element {
     const deleteDisabledReason =
       "This bot is protected. Allow deletion before removing it.";
     const entries: PrismMenuEntry[] = [];
-    const contextualBotIds = isMultiSelectionMenu
-      ? multiSelectedBotIds
-      : group
-        ? group.botIds.filter((botId) =>
-            bots.some((candidate) => candidate.id === botId),
-          )
-        : [bot.id];
-    const coffeeContextEligible =
-      contextualBotIds.length >= 2 && contextualBotIds.length <= 5;
-    entries.push(
-      {
-        id: "experiences-label",
-        kind: "label",
-        label: "Experiences",
-        description: isMultiSelectionMenu
-          ? `${contextualBotIds.length} selected bots`
-          : group
-            ? group.name
-            : bot.name,
-      },
-      {
-        id: "experience-signal",
-        icon: <GlyphSignal size={18} />,
-        label: "Open in Signal",
-        onSelect: () =>
-          beginContextualExperience("signal", {
-            botIds: contextualBotIds,
-            groupId: group?.id,
-            focusTarget: `bot:${bot.id}`,
-          }),
-      },
-      {
-        id: "experience-coffee",
-        icon: <GlyphCoffee size={18} />,
-        label: "Open in Coffee",
-        disabled: !coffeeContextEligible,
-        disabledReason: !coffeeContextEligible
-          ? "Coffee needs a selection of two to five available bots."
-          : undefined,
-        onSelect: () =>
-          beginContextualExperience("coffee", {
-            botIds: contextualBotIds,
-            groupId: group?.id,
-            focusTarget: `bot:${bot.id}`,
-          }),
-      },
-      { id: "experiences-separator", kind: "separator" },
-    );
 
     if (botContextMenu.source === "showcase") {
       entries.push(
@@ -100751,20 +100765,6 @@ function HomeContent(): React.JSX.Element {
         },
       );
     } else {
-      if (!group) {
-        const selected = canvasSelectedBotIds.has(bot.id);
-        entries.push({
-          id: "select",
-          kind: "toggle",
-          icon: <Check />,
-          label: selected ? "Selected" : "Select",
-          checked: selected,
-          onSelect: () => {
-            if (selected) toggleCanvasBotSelection(bot.id);
-            else selectCanvasBot(bot.id);
-          },
-        });
-      }
       entries.push(
         {
           id: "favorite",
@@ -103300,41 +103300,6 @@ function HomeContent(): React.JSX.Element {
         </span>
       </div>
     );
-  };
-
-  const beginContextualExperience = (
-    destination: "coffee" | "signal",
-    context: {
-      botIds: string[];
-      groupId?: string | null;
-      focusTarget?: string;
-    },
-  ): void => {
-    const botIds = Array.from(new Set(context.botIds)).filter((botId) =>
-      bots.some((candidate) => candidate.id === botId),
-    );
-    if (destination === "coffee" && (botIds.length < 2 || botIds.length > 5)) {
-      showLocalCommandToast(
-        "Coffee needs a table",
-        "Select two to five available bots first.",
-      );
-      return;
-    }
-    if (destination === "signal" && botIds.length < 1) {
-      showLocalCommandToast(
-        "Signal needs a cast",
-        "Choose at least one available bot first.",
-      );
-      return;
-    }
-    if (destination === "coffee") {
-      setCoffeeSelectedSeatBotIds(coffeeSeatsFromBotIds(botIds));
-      setCoffeeSelectedGroupId(null);
-      navigateToView("coffee");
-      return;
-    }
-    setSignalInitialCastBotIds(botIds.slice(0, 2));
-    navigateToView("botcast");
   };
 
   const openLivingShellHome = (): void => {
@@ -108946,6 +108911,9 @@ function HomeContent(): React.JSX.Element {
     const isDefaultPrism = botPanelShowcaseIsDefaultPrism;
     const isMarketplacePreview =
       panel === "bots" && botPanelView === "marketplace";
+    const showcaseBackdropDismissible =
+      panel === "bots" && botPanelView === "botHub";
+    const voiceTestBot = showcaseBackdropDismissible ? bot : null;
     if (!bot && !isDefaultPrism) return null;
     const showcaseVoiceId = bot?.id ?? DEFAULT_PRISM_SHOWCASE_VOICE_ID;
     const showcaseName = bot?.name ?? "Prism";
@@ -108961,6 +108929,53 @@ function HomeContent(): React.JSX.Element {
       botHubVoicePreview.botId === showcaseVoiceId
         ? botHubVoicePreview.error
         : null;
+    const botHubConfiguredVoiceChoice = settings
+      ? voicePlaybackChoice(
+          normalizeVoiceMode(settings.voiceMode),
+          normalizeEnglishVoiceEngine(settings.englishVoiceEngine),
+        )
+      : "mute";
+    const botHubEffectiveVoiceChoice = effectiveVoicePlaybackChoice(
+      botHubConfiguredVoiceChoice,
+      settings?.preferredProvider === "local",
+    );
+    const botHubVoiceTestMode: Exclude<VoicePlaybackChoice, "mute"> | null =
+      botHubEffectiveVoiceChoice === "mute"
+        ? null
+        : botHubEffectiveVoiceChoice;
+    const botHubVoiceTestBusy =
+      previewStatus === "generating" || previewStatus === "playing";
+    const botHubVoiceTestMutedByPower = voiceTestBot
+      ? botPowerIsMutedV1(voiceTestBot.powers)
+      : false;
+    const botHubVoiceTestStyle = voiceTestBot
+      ? (() => {
+          const accentNormalized = normalizeAccentForTheme(
+            voiceTestBot.color ?? PRISM_DEFAULT_ACCENT,
+            resolvedTheme,
+          );
+          const base = deriveAccentStyle(accentNormalized, resolvedTheme);
+          return {
+            ["--editor-bot-color" as string]: accentNormalized,
+            ["--editor-bot-text" as string]:
+              base["--accent-text" as keyof typeof base],
+            ["--editor-bot-ink" as string]:
+              base["--accent-ink" as keyof typeof base],
+          } as CSSProperties;
+        })()
+      : undefined;
+    const botHubVoiceSampleUnavailable = Boolean(
+      voiceTestBot &&
+        (!botHubVoiceEchoDraft.trim() || botHubVoiceTestMutedByPower),
+    );
+    const playShowcaseVoiceMode = (
+      mode: Exclude<VoicePlaybackChoice, "mute">,
+    ): Promise<void> =>
+      playBotHubVoicePreview(
+        bot,
+        mode,
+        voiceTestBot ? { exactText: botHubVoiceEchoDraft } : undefined,
+      );
     const previewTalking = previewStatus === "playing" && botHubPreviewVoicing;
     const previewMouthShape = previewTalking
       ? botHubPreviewMouthShape
@@ -108989,10 +109004,14 @@ function HomeContent(): React.JSX.Element {
       "--zen-live-bot-body-y": `${BOT_AVATAR_CUSTOMIZER_BODY_PLACEMENT.yPct}%`,
       "--zen-live-bot-avatar-size": isMarketplacePreview
         ? "min(420px, 32vw, 62vmin)"
-        : "min(520px, 72vmin)",
+        : voiceTestBot
+          ? "min(520px, 58vh, 72vmin)"
+          : "min(520px, 72vmin)",
       "--zen-live-bot-avatar-body-size": isMarketplacePreview
         ? "min(378px, 29vw, 56vmin)"
-        : "min(468px, 65vmin)",
+        : voiceTestBot
+          ? "min(468px, 52vh, 65vmin)"
+          : "min(468px, 65vmin)",
       "--zen-live-bot-glyph-x-anchor": "0px",
       "--zen-live-bot-glyph-y-anchor":
         "calc(var(--zen-live-bot-avatar-body-size) * 0.37)",
@@ -109000,12 +109019,19 @@ function HomeContent(): React.JSX.Element {
     return (
       <section
         className={styles.botPanelHubShowcase}
+        data-bot-hub-showcase-backdrop="true"
         data-prism-panel-layer="true"
         data-panel={panel ?? undefined}
         data-bot-view={panel === "bots" ? botPanelView : undefined}
         data-prism-persona={isDefaultPrism ? "true" : undefined}
         data-status={previewStatus}
         aria-busy={previewStatus === "generating"}
+        onClick={(event) => {
+          if (!showcaseBackdropDismissible) return;
+          if (event.button !== 0 || event.ctrlKey) return;
+          if (event.target !== event.currentTarget) return;
+          closePanel();
+        }}
       >
         <div
           className={styles.botPanelHubAvatarPreview}
@@ -109114,14 +109140,19 @@ function HomeContent(): React.JSX.Element {
               previewMode === "english" && previewStatus === "generating"
             }
             disabled={
-              previewMode === "english" &&
-              (previewStatus === "generating" || previewStatus === "playing")
+              botHubVoiceSampleUnavailable ||
+              (previewMode === "english" &&
+                (previewStatus === "generating" ||
+                  previewStatus === "playing"))
             }
-            onClick={() =>
-              void (isMarketplacePreview
-                ? playBotHubVoicePreview(bot, "english")
-                : regenerateBotHubAudioSample(bot))
+            title={
+              botHubVoiceSampleUnavailable
+                ? botHubVoiceTestMutedByPower
+                  ? "An active Power prevents this bot from speaking aloud."
+                  : "Type a sample below before choosing a voice."
+                : undefined
             }
+            onClick={() => void playShowcaseVoiceMode("english")}
           >
             {previewMode === "english" && previewStatus === "generating"
               ? "Generating audio sample…"
@@ -109143,15 +109174,20 @@ function HomeContent(): React.JSX.Element {
             }
             disabled={
               premiumPreviewUnavailable ||
+              botHubVoiceSampleUnavailable ||
               (previewMode === "premium" &&
                 (previewStatus === "generating" || previewStatus === "playing"))
             }
             title={
               premiumPreviewUnavailable
                 ? "Connect an ElevenLabs key in Settings → Keys to preview Premium."
-                : "Preview this bot's ElevenLabs voice"
+                : botHubVoiceSampleUnavailable
+                  ? botHubVoiceTestMutedByPower
+                    ? "An active Power prevents this bot from speaking aloud."
+                    : "Type a sample below before choosing a voice."
+                  : "Preview this bot's ElevenLabs voice"
             }
-            onClick={() => void playBotHubVoicePreview(bot, "premium")}
+            onClick={() => void playShowcaseVoiceMode("premium")}
           >
             {previewMode === "premium" && previewStatus === "generating"
               ? "Contacting Premium…"
@@ -109169,7 +109205,15 @@ function HomeContent(): React.JSX.Element {
             aria-busy={
               previewMode === "babble" && previewStatus === "generating"
             }
-            onClick={() => void playBotHubVoicePreview(bot, "babble")}
+            disabled={botHubVoiceSampleUnavailable}
+            title={
+              botHubVoiceSampleUnavailable
+                ? botHubVoiceTestMutedByPower
+                  ? "An active Power prevents this bot from speaking aloud."
+                  : "Type a sample below before choosing a voice."
+                : undefined
+            }
+            onClick={() => void playShowcaseVoiceMode("babble")}
           >
             {previewMode === "babble" && previewStatus === "generating"
               ? "Preparing Babble…"
@@ -109187,7 +109231,15 @@ function HomeContent(): React.JSX.Element {
             aria-busy={
               previewMode === "bottish" && previewStatus === "generating"
             }
-            onClick={() => void playBotHubVoicePreview(bot, "bottish")}
+            disabled={botHubVoiceSampleUnavailable}
+            title={
+              botHubVoiceSampleUnavailable
+                ? botHubVoiceTestMutedByPower
+                  ? "An active Power prevents this bot from speaking aloud."
+                  : "Type a sample below before choosing a voice."
+                : undefined
+            }
+            onClick={() => void playShowcaseVoiceMode("bottish")}
           >
             {previewMode === "bottish" && previewStatus === "generating"
               ? "Preparing Bottish…"
@@ -109196,6 +109248,69 @@ function HomeContent(): React.JSX.Element {
                 : "Bottish"}
           </button>
         </div>
+        {voiceTestBot ? (
+          <form
+            className={styles.botPanelHubVoiceTest}
+            data-surface="showcase"
+            style={botHubVoiceTestStyle}
+            aria-label={`Test ${voiceTestBot.name}'s voice`}
+            onSubmit={(event) => {
+              if (!botHubVoiceTestMode) {
+                event.preventDefault();
+                return;
+              }
+              void submitBotHubVoiceEcho(
+                event,
+                voiceTestBot,
+                botHubVoiceTestMode,
+              );
+            }}
+          >
+            <div className={styles.botPanelHubVoiceTestComposer}>
+              <input
+                type="text"
+                value={botHubVoiceEchoDraft}
+                maxLength={400}
+                aria-label={`Voice sample for ${voiceTestBot.name}`}
+                placeholder="Type exactly what this bot should say…"
+                onChange={(event) =>
+                  setBotHubVoiceEchoDraft(event.target.value)
+                }
+              />
+              <button
+                type="submit"
+                disabled={
+                  !botHubVoiceEchoDraft.trim() ||
+                  !botHubVoiceTestMode ||
+                  botHubVoiceTestBusy ||
+                  botHubVoiceTestMutedByPower
+                }
+              >
+                {botHubVoiceTestBusy
+                  ? previewStatus === "generating"
+                    ? "Preparing…"
+                    : "Speaking…"
+                  : "Speak"}
+              </button>
+            </div>
+            <small
+              className={styles.botPanelHubVoiceTestStatus}
+              role="status"
+              aria-live="polite"
+              data-error={previewStatus === "error" ? "true" : undefined}
+            >
+              {botHubVoiceTestMutedByPower
+                ? "An active Power prevents this bot from speaking aloud."
+                : !settings
+                  ? "Voice settings are still loading."
+                  : !botHubVoiceTestMode
+                    ? "Voice is muted. Choose a voice in the top bar to test it."
+                    : previewStatus === "error"
+                      ? (previewError ?? "Voice playback is unavailable.")
+                      : `Edit the sample, then choose a voice—or Speak with Voice · ${voiceModeDisplayName(botHubVoiceTestMode)}. Nothing is added to chat.`}
+            </small>
+          </form>
+        ) : null}
       </section>
     );
   };
@@ -115909,7 +116024,6 @@ function HomeContent(): React.JSX.Element {
                                             applyOfflineVoiceSelection(
                                               previous.playerAudioVoiceProfile,
                                               selection,
-                                              offlineVoiceIdentityOptions,
                                             ),
                                           ),
                                       };
@@ -118507,19 +118621,49 @@ function HomeContent(): React.JSX.Element {
                       </div>
                     </div>
                     <div className={styles.botPanelHubActions}>
-                      <button
-                        type="button"
-                        className={styles.botPanelHubAction}
-                        onClick={() => openBotCustomizer(selectedBotPanelBot)}
-                      >
-                        <Brush size={18} strokeWidth={1.9} aria-hidden="true" />
-                        <span>
-                          <strong>Avatar Studio</strong>
-                          <small>
-                            Identity, personality, voice, and settings.
-                          </small>
-                        </span>
-                      </button>
+                      <div className={styles.botPanelHubStudioGroup}>
+                        <button
+                          type="button"
+                          className={styles.botPanelHubAction}
+                          onClick={() => openBotCustomizer(selectedBotPanelBot)}
+                        >
+                          <Brush
+                            size={18}
+                            strokeWidth={1.9}
+                            aria-hidden="true"
+                          />
+                          <span>
+                            <strong>Avatar Studio</strong>
+                            <small>
+                              Identity, personality, voice, and settings.
+                            </small>
+                          </span>
+                        </button>
+                        <div
+                          className={styles.botPanelHubStudioShortcuts}
+                          role="group"
+                          aria-label="Avatar Studio sections"
+                        >
+                          {BOT_AVATAR_CUSTOMIZER_TABS.map((tab) => (
+                            <button
+                              key={tab.value}
+                              type="button"
+                              className={styles.botPanelHubStudioShortcut}
+                              data-avatar-studio-shortcut={tab.value}
+                              aria-label={`Open ${tab.label} in Avatar Studio`}
+                              onClick={() =>
+                                openBotCustomizer(
+                                  selectedBotPanelBot,
+                                  tab.value,
+                                )
+                              }
+                            >
+                              <BotAvatarCustomizerTabIcon tab={tab.value} />
+                              <span>{tab.label}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
                       <button
                         type="button"
                         className={styles.botPanelHubAction}
@@ -118544,17 +118688,6 @@ function HomeContent(): React.JSX.Element {
                         <span>
                           <strong>Images</strong>
                           <small>Open this bot&apos;s image gallery.</small>
-                        </span>
-                      </button>
-                      <button
-                        type="button"
-                        className={styles.botPanelHubAction}
-                        onClick={() => openBotSettings(selectedBotPanelBot)}
-                      >
-                        <WrenchGlyph />
-                        <span>
-                          <strong>Settings</strong>
-                          <small>Permissions and model routing.</small>
                         </span>
                       </button>
                     </div>
@@ -139055,7 +139188,7 @@ function HomeContent(): React.JSX.Element {
                     : "Start chat with PRISM";
                   const heroStartCue =
                     heroBotName && !heroStartDisabled
-                      ? "SELECT THE BOT TO START THE CHAT"
+                      ? "SEND A MESSAGE TO CHAT · SELECT AGAIN TO CUSTOMIZE"
                       : null;
                   const shouldShowHeroNudge =
                     !heroStartDisabled &&

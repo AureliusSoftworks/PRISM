@@ -48,7 +48,15 @@ describe("chatMiniBotAvatar", () => {
     assert.match(pageSource, /alloyColor=\{alloyColor\}/);
     assert.match(cssSource, /\.upperScreen/);
     assert.match(cssSource, /\.lowerScreen/);
+    assert.match(
+      cssSource,
+      /\.upperScreen\s*\{[^}]*height:\s*calc\(48\.4% \+ 8px\)/,
+    );
     assert.match(cssSource, /\.sizeHero/);
+    assert.match(
+      cssSource,
+      /\.sizeHero\s*\{[^}]*--chat-mini-bot-glyph-size:\s*clamp\(19px, 1\.8vw, 23px\)/,
+    );
     assert.match(cssSource, /\.sizeBadge/);
     assert.doesNotMatch(cssSource, /\.frameOff|\.frameOn/);
     assert.doesNotMatch(componentSource, /data-talking/);

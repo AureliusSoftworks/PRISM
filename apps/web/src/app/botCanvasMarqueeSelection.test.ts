@@ -5,6 +5,7 @@ import {
   canvasBackgroundShouldZoomOutFocusedBot,
   canvasBotDirectoryIsInteractive,
   focusedCanvasBotId,
+  resolveCanvasBotTileActivation,
   resolveCanvasBotMarqueeSelection,
   resolveInactiveCanvasBotMarqueeSelection,
 } from "./botCanvasMarqueeSelection.ts";
@@ -33,6 +34,32 @@ describe("bot canvas marquee selection", () => {
         zenPersonaBotId: "zen-bot",
       }),
       "sandbox-bot",
+    );
+  });
+
+  it("opens management only when the focused bot is activated again in the empty Chat overview", () => {
+    const base = {
+      view: "chat" as const,
+      conversationMessageCount: 0,
+      focusedBotId: "bot-a",
+      botId: "bot-a",
+    };
+
+    assert.equal(resolveCanvasBotTileActivation(base), "manage");
+    assert.equal(
+      resolveCanvasBotTileActivation({ ...base, botId: "bot-b" }),
+      "focus",
+    );
+    assert.equal(
+      resolveCanvasBotTileActivation({
+        ...base,
+        conversationMessageCount: 1,
+      }),
+      "focus",
+    );
+    assert.equal(
+      resolveCanvasBotTileActivation({ ...base, view: "sandbox" }),
+      "focus",
     );
   });
 

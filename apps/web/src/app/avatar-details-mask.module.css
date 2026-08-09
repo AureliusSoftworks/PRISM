@@ -84,7 +84,13 @@
 .halo {
   /* Keep a hint of light in the glass without letting broad bloom become the
      shape. The core and near bloom carry the authored stroke. */
-  opacity: calc(var(--avatar-details-speech-opacity, 1) * 0.14);
+  --avatar-details-emission-opacity: 0.14;
+  opacity: calc(
+    var(--avatar-details-speech-opacity, 1) *
+      var(--avatar-details-emission-opacity) *
+      var(--zen-live-bot-crt-flicker-opacity-scale, 1) *
+      var(--zen-live-bot-crt-shared-flicker-opacity, 1)
+  );
   mix-blend-mode: screen;
   --zen-live-bot-crt-flicker-base-filter: blur(0.8px) saturate(1.08)
     drop-shadow(
@@ -111,23 +117,57 @@
           transparent
         )
     );
-  filter: var(--zen-live-bot-crt-flicker-base-filter);
+  filter: brightness(
+      calc(
+        var(--zen-live-bot-crt-flicker-base-brightness, 1) *
+          var(--zen-live-bot-crt-shared-flicker-brightness-scale, 1)
+      )
+    )
+    contrast(
+      calc(
+        var(--zen-live-bot-crt-flicker-base-contrast, 1) *
+          var(--zen-live-bot-crt-shared-flicker-contrast-scale, 1)
+      )
+    )
+    var(--zen-live-bot-crt-flicker-base-filter);
 }
 
 .bloom {
-  opacity: calc(var(--avatar-details-speech-opacity, 1) * 0.56);
+  /* Match the full-avatar eye glyphs: the authored color forms the saturated
+     edge and six-stage halo beneath the same white phosphor core. */
+  --avatar-details-emission-opacity: 1;
+  opacity: calc(
+    var(--avatar-details-speech-opacity, 1) *
+      var(--avatar-details-emission-opacity) *
+      var(--zen-live-bot-crt-flicker-opacity-scale, 1) *
+      var(--zen-live-bot-crt-shared-flicker-opacity, 1)
+  );
   mix-blend-mode: screen;
   --zen-live-bot-crt-flicker-base-filter: blur(0.22px) saturate(1.08)
     drop-shadow(
-      0 0 0.55px
+      0 0 0.72px var(--avatar-details-phosphor-glow-color)
+    )
+    drop-shadow(
+      0 0 1.5px var(--avatar-details-phosphor-glow-color)
+    )
+    drop-shadow(
+      0 0 3px
         color-mix(
           in srgb,
-          var(--avatar-details-phosphor-glow-color) 70%,
+          var(--avatar-details-phosphor-glow-color) 82%,
           transparent
         )
     )
     drop-shadow(
-      0 0 1.1px
+      0 0 6px
+        color-mix(
+          in srgb,
+          var(--avatar-details-phosphor-glow-color) 58%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 12px
         color-mix(
           in srgb,
           var(--avatar-details-phosphor-glow-color) 36%,
@@ -135,34 +175,30 @@
         )
     )
     drop-shadow(
-      0 0 2.4px
+      0 0 21px
         color-mix(
           in srgb,
-          var(--avatar-details-phosphor-glow-color) 15%,
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 5px
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 6%,
-          transparent
-        )
-    )
-    drop-shadow(
-      0 0 9px
-        color-mix(
-          in srgb,
-          var(--avatar-details-phosphor-glow-color) 2%,
+          var(--avatar-details-phosphor-glow-color) 22%,
           transparent
         )
     );
-  filter: var(--zen-live-bot-crt-flicker-base-filter);
+  filter: brightness(
+      calc(
+        var(--zen-live-bot-crt-flicker-base-brightness, 1) *
+          var(--zen-live-bot-crt-shared-flicker-brightness-scale, 1)
+      )
+    )
+    contrast(
+      calc(
+        var(--zen-live-bot-crt-flicker-base-contrast, 1) *
+          var(--zen-live-bot-crt-shared-flicker-contrast-scale, 1)
+      )
+    )
+    var(--zen-live-bot-crt-flicker-base-filter);
 }
 
 .bloom[data-avatar-details-render-detail="reduced"] {
-  opacity: calc(var(--avatar-details-speech-opacity, 1) * 0.28);
+  --avatar-details-emission-opacity: 0.28;
   --zen-live-bot-crt-flicker-base-filter: blur(0.16px)
     drop-shadow(
       0 0 0.45px
@@ -183,11 +219,31 @@
 }
 
 .core {
-  opacity: var(--avatar-details-speech-opacity, 1);
-  mix-blend-mode: screen;
+  --avatar-details-emission-opacity: 1;
+  opacity: calc(
+    var(--avatar-details-speech-opacity, 1) *
+      var(--avatar-details-emission-opacity) *
+      var(--zen-live-bot-crt-flicker-opacity-scale, 1) *
+      var(--zen-live-bot-crt-shared-flicker-opacity, 1)
+  );
+  /* The solid phosphor core is coverage, not additive light. Normal blending
+     makes coincident face and Ink pixels read as one stroke; halo and bloom
+     remain screen-blended around that shared silhouette. */
+  mix-blend-mode: normal;
   --zen-live-bot-crt-flicker-base-filter: drop-shadow(
     0 0 0.3px rgba(255, 255, 255, 0.46)
   );
-  filter: brightness(1.02) contrast(1.02)
+  filter: brightness(
+      calc(
+        var(--zen-live-bot-crt-flicker-base-brightness, 1.02) *
+          var(--zen-live-bot-crt-shared-flicker-brightness-scale, 1)
+      )
+    )
+    contrast(
+      calc(
+        var(--zen-live-bot-crt-flicker-base-contrast, 1.02) *
+          var(--zen-live-bot-crt-shared-flicker-contrast-scale, 1)
+      )
+    )
     var(--zen-live-bot-crt-flicker-base-filter);
 }

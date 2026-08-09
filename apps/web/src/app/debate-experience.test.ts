@@ -2178,6 +2178,14 @@ describe("Debate experience", () => {
     assert.match(source, /debateSessionWithRecessResumeFiller/u);
     assert.match(
       source,
+      /const heldFloorReplayEvents = debateResumeFloorReplayEvents\([\s\S]{0,140}pausedPresentationEvent\.sequence/u,
+    );
+    assert.match(
+      source,
+      /events: heldFloorReplayEvents[\s\S]{0,220}setActiveSession\(result\.session\)/u,
+    );
+    assert.match(
+      source,
       /held && debateEventIsModeratorIntro\(held\)[\s\S]{0,80}return session/u,
     );
     assert.match(

@@ -14,6 +14,7 @@ import {
   debateInitialProceedingsCursor,
   debateAdoptProceedingsCursor,
   debateInterruptedSpeechCaption,
+  debateResumeFloorReplayEvents,
   debateWatchElapsedMs,
   debateMarkdownSource,
   debateGalleryReactingIndices,
@@ -411,6 +412,42 @@ describe("Debate live presentation", () => {
         },
       ),
       0,
+    );
+  });
+
+  it("replays a held floor without repeating prior calls to order", () => {
+    const event = (
+      id: string,
+      sequence: number,
+      stepKey: string,
+      kind: "speech" | "judge_gavel" = "speech",
+    ) => ({
+      version: 1 as const,
+      id,
+      sequence,
+      phase: "opening" as const,
+      stepKey,
+      kind,
+      speakerKind: "moderator" as const,
+      speakerBotId: "mod",
+      sideId: null,
+      content: id,
+      sourceIds: [] as string[],
+      createdAt: "2026-08-01T00:00:00.000Z",
+    });
+    const events = [
+      event("intro", 0, "intro"),
+      event("held", 1, "opening_for"),
+      event("prior-resume", 2, "resume", "judge_gavel"),
+      event("unheard-floor", 3, "opening_against"),
+      event("return-pause", 4, "pause"),
+      event("current-resume", 5, "resume", "judge_gavel"),
+      event("audience-order", 6, "audience_order", "judge_gavel"),
+    ];
+
+    assert.deepEqual(
+      debateResumeFloorReplayEvents(events, 1).map(({ id }) => id),
+      ["intro", "held", "unheard-floor", "audience-order"],
     );
   });
 

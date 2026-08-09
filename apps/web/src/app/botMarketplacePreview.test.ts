@@ -114,15 +114,19 @@ describe("bot marketplace previews", () => {
     );
     assert.match(
       showcaseSource,
-      /isMarketplacePreview[\s\S]*?playBotHubVoicePreview\(bot, "english"\)[\s\S]*?regenerateBotHubAudioSample\(bot\)/,
+      /const voiceTestBot = showcaseBackdropDismissible \? bot : null;/,
     );
-    assert.match(showcaseSource, /playBotHubVoicePreview\(bot, "premium"\)/);
-    assert.match(showcaseSource, /playBotHubVoicePreview\(bot, "babble"\)/);
-    assert.match(showcaseSource, /playBotHubVoicePreview\(bot, "bottish"\)/);
     assert.match(
       showcaseSource,
-      /if \(isMarketplacePreview \|\| !bot\) return;/,
+      /voiceTestBot \? \{ exactText: botHubVoiceEchoDraft \} : undefined/,
     );
+    for (const mode of ["english", "premium", "babble", "bottish"]) {
+      assert.match(
+        showcaseSource,
+        new RegExp(`playShowcaseVoiceMode\\("${mode}"\\)`),
+      );
+    }
+    assert.doesNotMatch(showcaseSource, /regenerateBotHubAudioSample/);
   });
 
   it("reserves desktop space for the full mannequin preview", () => {

@@ -206,16 +206,15 @@ export function resolveBotFaceGazeFrame(args: {
       xPx = glance
         ? side * (1.35 + sample("target") * 1.35) * amp + signed("x") * 0.55 * amp
         : signed("x") * 2.4 * amp;
-      yPx = glance
-        ? signed("y") * 0.7 * amp
-        : signed("y") * 1.1 * amp;
     } else {
       const glance = sample("glance") > 1 - profile.speakingGlanceChance;
       xPx = glance
         ? target * (1.2 + sample("target") * 0.8) * amp + signed("x") * amp
         : signed("x") * 0.85 * amp;
-      yPx = glance ? signed("y") * 0.65 * amp : signed("y") * 0.35 * amp;
     }
+    // Match Avatar Studio's speech simulation: talking can glance sideways,
+    // but the eye line remains vertically registered while the mouth moves.
+    yPx = 0;
   } else {
     const restingCentered = sample("center") < profile.idleCenterChance;
     xPx = restingCentered ? 0 : signed("x") * 3.2 * amp;

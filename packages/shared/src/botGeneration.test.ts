@@ -5,6 +5,16 @@ import {
   normalizeBotGeneratedDraftV1,
   normalizeBotGenerationPrompt,
 } from "./botGeneration.ts";
+import {
+  BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS,
+  decodeBotAvatarDetailsPaintColorMap,
+} from "./botAvatarDetails.ts";
+
+function paintedPixelCount(bytes: Uint8Array): number {
+  return Array.from(bytes).reduce((count, byte) =>
+    count + [6, 4, 2, 0].filter((shift) => ((byte >>> shift) & 0x03) !== 0).length,
+  0);
+}
 
 function completeDraft(): Record<string, unknown> {
   return {
@@ -125,9 +135,7 @@ function completeDraft(): Record<string, unknown> {
 
 describe("normalizeBotGeneratedDraftV1", () => {
   it("normalizes a complete generated bot while dropping deprecated accessory stamps", () => {
-    const draft = normalizeBotGeneratedDraftV1(completeDraft(), {
-      availableElevenLabsVoiceIds: ["voice-premium-nyx"],
-    });
+    const draft = normalizeBotGeneratedDraftV1(completeDraft());
     assert.ok(draft);
     assert.equal(draft.name, "Nyx");
     assert.equal(draft.namePronunciation, "");
@@ -138,13 +146,15 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.glyph, "moon");
     assert.equal(draft.face.eyeCharacter, "*");
     assert.equal(draft.face.eyeCount, 2);
-    assert.equal(draft.face.eyeRotationDeg, -90);
+    assert.equal(draft.face.eyeRotationDeg, 0);
     assert.deepEqual(draft.avatarDetails?.screen.stamps, []);
     assert.ok(draft.avatarDetails?.screen.paintColorMapBase64);
     assert.equal(draft.audioVoiceProfile.baseVoiceId, "voice-8");
     assert.deepEqual(draft.powers, []);
-    assert.equal(draft.audioVoiceProfile.elevenLabsVoiceId, "voice-premium-nyx");
+    assert.equal(draft.audioVoiceProfile.elevenLabsVoiceId, undefined);
     assert.equal(draft.audioVoiceProfile.elevenLabsVoiceIdOverride, undefined);
+    assert.equal(draft.audioVoiceProfile.elevenLabsVoiceInitialized, true);
+    assert.equal(draft.audioVoiceProfile.accentLocale, "en-US");
     assert.equal(draft.audioVoiceProfile.systemVoiceName, undefined);
     assert.equal(draft.audioVoiceProfile.elevenLabsDirection, "hushed, wry, deliberate");
     assert.equal(draft.settings.maxTokens, 1800);
@@ -161,16 +171,95 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.powers[0]?.compileStatus, "draft");
   });
 
-  it("rejects invented premium voice IDs while preserving the local equivalent", () => {
+  it("never links a premium voice during generation while preserving local casting", () => {
     const input = completeDraft();
-    const draft = normalizeBotGeneratedDraftV1(input, {
-      availableElevenLabsVoiceIds: ["different-provider-voice"],
-    });
+    input.voice = {
+      ...(input.voice as Record<string, unknown>),
+      baseVoiceId: "voice-12",
+      elevenLabsVoiceId: "provider-voice-that-must-not-link",
+    };
+    const draft = normalizeBotGeneratedDraftV1(input);
     assert.ok(draft);
     assert.equal(draft.audioVoiceProfile.elevenLabsVoiceId, undefined);
-    assert.equal(draft.audioVoiceProfile.baseVoiceId, "voice-8");
+    assert.equal(draft.audioVoiceProfile.baseVoiceId, "voice-12");
+    assert.equal(draft.audioVoiceProfile.accentLocale, "en-GB");
+    assert.equal(draft.audioVoiceProfile.elevenLabsVoiceInitialized, true);
     assert.equal(draft.audioVoiceProfile.pitch, 0.2);
     assert.equal(draft.audioVoiceProfile.warmth, 0.35);
+  });
+
+  it("rasterizes bounded filled portrait paths into editable semantic ink", () => {
+    const input = completeDraft();
+    input.avatarDetails = {
+      ink: [
+        {
+          role: "effect",
+          points: [
+            { x: 38, y: 22 },
+            { x: 90, y: 22 },
+            { x: 86, y: 45 },
+            { x: 42, y: 45 },
+          ],
+          closed: true,
+          fill: true,
+          size: 2,
+        },
+        {
+          role: "effect",
+          points: [
+            { x: 30, y: 46 },
+            { x: 98, y: 46 },
+          ],
+          closed: false,
+          fill: false,
+          size: 3,
+        },
+        {
+          role: "effect",
+          points: [
+            { x: 42, y: 52 },
+            { x: 30, y: 62 },
+            { x: 38, y: 76 },
+            { x: 28, y: 88 },
+          ],
+          closed: false,
+          fill: false,
+          size: 2,
+        },
+      ],
+    };
+
+    const draft = normalizeBotGeneratedDraftV1(input);
+    assert.ok(draft?.avatarDetails?.screen.paintColorMapBase64);
+    const bytes = decodeBotAvatarDetailsPaintColorMap(
+      draft.avatarDetails.screen.paintColorMapBase64,
+    );
+    assert.ok(paintedPixelCount(bytes) > 500);
+  });
+
+  it("caps filled portrait paths at the existing semantic ink density limit", () => {
+    const input = completeDraft();
+    input.avatarDetails = {
+      ink: [{
+        role: "effect",
+        points: [
+          { x: 24, y: 20 },
+          { x: 104, y: 20 },
+          { x: 104, y: 96 },
+          { x: 24, y: 96 },
+        ],
+        closed: true,
+        fill: true,
+        size: 4,
+      }],
+    };
+
+    const draft = normalizeBotGeneratedDraftV1(input);
+    assert.ok(draft?.avatarDetails?.screen.paintColorMapBase64);
+    const bytes = decodeBotAvatarDetailsPaintColorMap(
+      draft.avatarDetails.screen.paintColorMapBase64,
+    );
+    assert.equal(paintedPixelCount(bytes), BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS);
   });
 
   it("clamps malformed geometry and generation settings", () => {

@@ -1100,22 +1100,26 @@ describe("Coffee seat arrival CSS", () => {
       /animation:\s*zenLiveBotIdleLightBreath/,
     );
 
+    const sharedCrtFlickerCarrierRule = ruleForNormalizedSelector(
+      '.zenLiveBotPresenceBody[data-render-detail="full"] > .zenLiveBotPresenceFaceEmissionMask',
+    );
+    assert.match(
+      sharedCrtFlickerCarrierRule,
+      /animation:\s*zenLiveBotCrtFaceFlicker 11\.7s linear infinite\s*;/,
+    );
+
     const glyphLayerCrtFlickerRule = ruleForSelectorNeedlesWithBody(
       [
         ".zenLiveBotPresenceFaceGlyph",
-        "[data-coffee-plate-emoji-part]",
         '[data-crt-glyph-layer="true"]',
       ],
-      "zenLiveBotCrtFaceFlicker",
+      "--zen-live-bot-crt-shared-flicker-opacity",
     );
     assert.match(
       glyphLayerCrtFlickerRule,
-      /animation:\s*zenLiveBotCrtFaceFlicker 11\.7s linear infinite\s*;/,
+      /opacity:\s*calc\([\s\S]*--zen-live-bot-crt-shared-flicker-opacity/,
     );
-    assert.doesNotMatch(
-      glyphLayerCrtFlickerRule,
-      /not\(\[data-talking="true"\]\)/,
-    );
+    assert.doesNotMatch(glyphLayerCrtFlickerRule, /animation:/);
     assert.match(css, /@keyframes zenLiveBotCrtFaceFlicker/);
 
     const talkingLiveFaceRule = ruleForSelectorNeedles(

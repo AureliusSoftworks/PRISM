@@ -90,6 +90,45 @@ test("avatar customization is a floating modal that reuses the Zen mannequin", (
   assert.match(cssSource, /\.botProfileBuilder\.botAvatarCustomizer/);
 });
 
+test("Avatar Studio requires an Accent pin before named voice casting", () => {
+  assert.match(pageSource, /const avatarVoiceAccentReady = Boolean/);
+  assert.match(pageSource, /label: "1 Accent"/);
+  assert.match(pageSource, /label: "2 Feel"/);
+  assert.match(pageSource, /label: "3 Voice"/);
+  assert.match(pageSource, /Place the accent pin first/);
+  assert.match(pageSource, /aria-label="Choose a named voice"/);
+  assert.match(pageSource, /PREMIUM · OPTIONAL/);
+  assert.match(cssSource, /\.botVoiceAccentGate/);
+  assert.match(cssSource, /\.botVoiceNameGrid/);
+});
+
+test("Voice stages cannot replace another Avatar Studio module console", () => {
+  assert.match(
+    pageSource,
+    /activeControlTab === "voice" && !avatarVoiceAccentReady/,
+  );
+  assert.match(
+    pageSource,
+    /activeControlTab === "voice" && activeAdjustmentTarget === "pronunciation"/,
+  );
+  assert.match(
+    pageSource,
+    /activeControlTab === "eyes" && activeAdjustmentTarget === "eyes"/,
+  );
+  assert.match(
+    pageSource,
+    /activeControlTab === "eyes" && activeAdjustmentTarget === "blink"/,
+  );
+  assert.match(
+    pageSource,
+    /activeControlTab === "mouth" && activeAdjustmentTarget === "mouth"/,
+  );
+  assert.match(
+    pageSource,
+    /activeControlTab !== "face" \|\| activeAdjustmentTarget !== "thinking"/,
+  );
+});
+
 test("app chrome text is non-selectable outside editable text surfaces", () => {
   const bodyRule = globalCssRuleBody("body");
   assert.match(bodyRule, /-webkit-user-select:\s*none\s*;/);

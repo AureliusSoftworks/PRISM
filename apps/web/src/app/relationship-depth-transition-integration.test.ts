@@ -344,6 +344,10 @@ describe("relationship-depth page integration", () => {
     assert.match(tutorialSource, /heading: "Choose a relationship"/);
     assert.match(
       tutorialSource,
+      /select the focused tile again to open its customization panel, or send a message to begin Zen\/Chat/,
+    );
+    assert.match(
+      tutorialSource,
       /Clicking empty canvas space jumps straight back to All Bots Home/,
     );
     assert.match(

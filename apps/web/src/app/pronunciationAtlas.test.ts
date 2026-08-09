@@ -162,7 +162,7 @@ describe("Pronunciation Atlas", () => {
     }
   });
 
-  it("returns to the genuine source when its base beacon is selected", () => {
+  it("pins the selected foundation instead of following the voice source", () => {
     const american = PRONUNCIATION_ATLAS_ANCHORS.find(
       (anchor) => anchor.base === "en-US",
     );
@@ -171,8 +171,23 @@ describe("Pronunciation Atlas", () => {
       american.point,
       britishFrench,
     );
-    assert.equal(selected.pronunciationBase, "follow-voice");
+    assert.equal(selected.pronunciationBase, "en-US");
     assert.equal(selected.influence, "none");
+  });
+
+  it("freezes a legacy automatic foundation when any map point is chosen", () => {
+    const french = PRONUNCIATION_ATLAS_ANCHORS.find(
+      (anchor) => anchor.influence === "french-influenced-english",
+    );
+    assert.ok(french);
+    const selected = pronunciationAtlasSelectionAtPoint(french.point, {
+      pronunciationBase: "follow-voice",
+      sourceLocale: "en-GB",
+      influence: "none",
+      strength: "balanced",
+    });
+    assert.equal(selected.pronunciationBase, "en-GB");
+    assert.equal(selected.influence, "french-influenced-english");
   });
 
   it("supports deterministic continuous keyboard travel", () => {

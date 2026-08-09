@@ -1,7 +1,5 @@
 import { AVATAR_DETAILS_CANVAS_SIZE } from "./avatar-details.ts";
 
-export type AvatarDetailsSpeechMotionAnchor = "center" | "top";
-
 export interface AvatarDetailsSpeechMotionOrigin {
   xPct: number;
   yPct: number;
@@ -9,11 +7,10 @@ export interface AvatarDetailsSpeechMotionOrigin {
 
 /**
  * Keeps Speech ink moving as one authored item instead of orbiting the full
- * CRT canvas. Pulse and spin use the ink center; wobble hinges from its top.
+ * CRT canvas. Every motion pivots around the complete item's visual center.
  */
 export function avatarDetailsSpeechMotionOrigin(
   rgba: Uint8ClampedArray,
-  anchor: AvatarDetailsSpeechMotionAnchor,
 ): AvatarDetailsSpeechMotionOrigin | null {
   const expectedLength =
     AVATAR_DETAILS_CANVAS_SIZE * AVATAR_DETAILS_CANVAS_SIZE * 4;
@@ -43,8 +40,6 @@ export function avatarDetailsSpeechMotionOrigin(
   const centerY = (minY + maxY + 1) / 2;
   return {
     xPct: (centerX / AVATAR_DETAILS_CANVAS_SIZE) * 100,
-    yPct:
-      ((anchor === "top" ? minY : centerY) / AVATAR_DETAILS_CANVAS_SIZE) *
-      100,
+    yPct: (centerY / AVATAR_DETAILS_CANVAS_SIZE) * 100,
   };
 }

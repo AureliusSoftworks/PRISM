@@ -1295,6 +1295,11 @@
   );
 }
 
+.botAvatarGlobalAdjustmentTargets button:disabled {
+  cursor: not-allowed;
+  opacity: 0.42;
+}
+
 .botAvatarGlobalAdjustmentConsole > .botAvatarCoordinateControl {
   min-width: 0;
   padding: 0;
@@ -30355,39 +30360,39 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   91.2%,
   92%,
   100% {
-    opacity: var(--zen-live-bot-crt-flicker-opacity-scale, 1);
-    filter: brightness(1.07) contrast(1.02)
-      var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
+    --zen-live-bot-crt-shared-flicker-opacity: 1;
+    --zen-live-bot-crt-shared-flicker-brightness-scale: 1;
+    --zen-live-bot-crt-shared-flicker-contrast-scale: 1;
   }
 
   48.2% {
-    opacity: calc(var(--zen-live-bot-crt-flicker-opacity-scale, 1) * 0.86);
-    filter: brightness(0.92) contrast(1.06)
-      var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
+    --zen-live-bot-crt-shared-flicker-opacity: 0.86;
+    --zen-live-bot-crt-shared-flicker-brightness-scale: 0.8598;
+    --zen-live-bot-crt-shared-flicker-contrast-scale: 1.0392;
   }
 
   48.55% {
-    opacity: calc(var(--zen-live-bot-crt-flicker-opacity-scale, 1) * 0.96);
-    filter: brightness(1.02) contrast(1.03)
-      var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
+    --zen-live-bot-crt-shared-flicker-opacity: 0.96;
+    --zen-live-bot-crt-shared-flicker-brightness-scale: 0.9533;
+    --zen-live-bot-crt-shared-flicker-contrast-scale: 1.0098;
   }
 
   74.9% {
-    opacity: calc(var(--zen-live-bot-crt-flicker-opacity-scale, 1) * 0.78);
-    filter: brightness(0.84) contrast(1.08)
-      var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
+    --zen-live-bot-crt-shared-flicker-opacity: 0.78;
+    --zen-live-bot-crt-shared-flicker-brightness-scale: 0.785;
+    --zen-live-bot-crt-shared-flicker-contrast-scale: 1.0588;
   }
 
   75.22% {
-    opacity: calc(var(--zen-live-bot-crt-flicker-opacity-scale, 1) * 0.93);
-    filter: brightness(0.98) contrast(1.04)
-      var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
+    --zen-live-bot-crt-shared-flicker-opacity: 0.93;
+    --zen-live-bot-crt-shared-flicker-brightness-scale: 0.9159;
+    --zen-live-bot-crt-shared-flicker-contrast-scale: 1.0196;
   }
 
   91.55% {
-    opacity: calc(var(--zen-live-bot-crt-flicker-opacity-scale, 1) * 0.9);
-    filter: brightness(0.95) contrast(1.05)
-      var(--zen-live-bot-crt-flicker-base-filter, brightness(1));
+    --zen-live-bot-crt-shared-flicker-opacity: 0.9;
+    --zen-live-bot-crt-shared-flicker-brightness-scale: 0.8879;
+    --zen-live-bot-crt-shared-flicker-contrast-scale: 1.0294;
   }
 }
 
@@ -30927,14 +30932,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-face-screen-wash-far-opacity: 12%;
 }
 
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part]
-  [data-crt-glyph-layer="true"],
-.coffeeSeatPlate[data-live-body-style="zen"]
-  .coffeeSeatPlateEmoji
-  [data-coffee-plate-emoji-part]
-  [data-crt-glyph-layer="true"],
-.zenLiveBotPresenceFaceEmissionMask [data-avatar-details-emission] {
+.zenLiveBotPresenceBody[data-render-detail="full"]
+  > .zenLiveBotPresenceFaceEmissionMask {
+  /* One inherited clock drives the face glyph and every authored Ink plane.
+     Keeping the animation on the CRT root prevents separately mounted layers
+     from drifting out of phase without flattening their emission stack. */
+  --zen-live-bot-crt-flicker-base-brightness: 1.07;
+  --zen-live-bot-crt-flicker-base-contrast: 1.02;
   animation: zenLiveBotCrtFaceFlicker 11.7s linear infinite;
 }
 
@@ -30950,12 +30954,28 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   initial-value: 1;
 }
 
+@property --zen-live-bot-crt-shared-flicker-opacity {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+@property --zen-live-bot-crt-shared-flicker-brightness-scale {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
+@property --zen-live-bot-crt-shared-flicker-contrast-scale {
+  syntax: "<number>";
+  inherits: true;
+  initial-value: 1;
+}
+
 .zenLiveBotPresenceFaceEmissionMask
   [data-avatar-details-emission][data-avatar-details-ink-motion="spin"] {
-  animation:
-    zenLiveBotCrtFaceFlicker 11.7s linear infinite,
-    avatarDetailsSpeechInkSpin
-      var(--avatar-details-speech-spin-turn-duration, 480ms) linear infinite;
+  animation: avatarDetailsSpeechInkSpin
+    var(--avatar-details-speech-spin-turn-duration, 480ms) linear infinite;
 }
 
 @keyframes avatarDetailsSpeechInkSpin {
@@ -31144,7 +31164,24 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     [data-private-mode="true"]
   )
   .botFaceFrameLed {
-  background-image: var(--bot-face-frame-led-spectrum);
+  mix-blend-mode: normal;
+  animation: zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
+}
+
+/* Prism's identity LED is a pre-colored RGBA raster with no CSS mask. Never
+   repaint that layer with a gradient: doing so fills its whole circular box
+   and flashes the chassis white. The glow pass retains the authored LED mask,
+   so it alone owns the animated spectrum and its phosphor falloff. */
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not(
+    [data-private-mode="true"]
+  )
+  .botFaceFrameLedGlow {
+  --bot-face-frame-led-filter: saturate(1.3) contrast(1.04)
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.46))
+    drop-shadow(0 0 5px rgba(255, 255, 255, 0.34));
+  background: var(--bot-face-frame-led-spectrum);
+  mix-blend-mode: normal;
+  opacity: 1;
   animation:
     zenLivePrismEmitterHueRotate 1.7s linear infinite,
     zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
@@ -43173,11 +43210,205 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   gap: 9px;
 }
 
-.botPanelHubManagement {
+.botPanelHubStudioGroup {
   min-width: 0;
   display: grid;
-  align-content: center;
+  gap: 7px;
+}
+
+.botPanelHubStudioShortcuts {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  padding: 0 3px 2px;
+}
+
+.botPanelHubStudioShortcut {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 0;
+  min-height: 34px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: flex-start;
+  gap: 6px;
+  padding: 7px 8px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color) 26%, var(--line));
+  border-radius: 10px;
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color) 7%,
+    var(--bg-surface)
+  );
+  color: color-mix(in srgb, var(--fg) 76%, var(--fg-muted) 24%);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 720;
+  line-height: 1;
+  cursor: pointer;
+  transition:
+    color 140ms ease,
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 90ms ease;
+}
+
+.botPanelHubStudioShortcut svg {
+  flex: 0 0 auto;
+  color: color-mix(in srgb, var(--editor-bot-color) 76%, var(--fg) 24%);
+}
+
+.botPanelHubStudioShortcut span {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botPanelHubStudioShortcut:hover,
+.botPanelHubStudioShortcut:focus-visible {
+  outline: none;
+  color: var(--fg);
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color) 68%,
+    var(--line)
+  );
+  background: color-mix(
+    in srgb,
+    var(--editor-bot-color) 15%,
+    var(--bg-surface)
+  );
+}
+
+.botPanelHubStudioShortcut:active {
+  transform: translateY(1px);
+}
+
+.botPanelHubManagement {
+  min-width: 0;
+  min-height: 0;
+  display: grid;
+  align-content: start;
   gap: 12px;
+  overflow-y: auto;
+  overscroll-behavior-y: contain;
+  padding-right: 2px;
+}
+
+.botPanelHubVoiceTest {
+  min-width: 0;
+  width: min(560px, calc(100vw - 48px));
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color) 34%, var(--line));
+  border-radius: 14px;
+  background:
+    radial-gradient(
+      circle at 90% 0%,
+      color-mix(in srgb, var(--editor-bot-color) 14%, transparent),
+      transparent 52%
+    ),
+    color-mix(in srgb, var(--bg) 72%, transparent);
+  backdrop-filter: blur(14px);
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, #ffffff 7%, transparent),
+    0 16px 36px -30px color-mix(in srgb, #000000 78%, transparent);
+}
+
+.botPanelHubVoiceTestStatus {
+  color: color-mix(in srgb, var(--fg) 62%, var(--fg-muted) 38%);
+  font-size: 10px;
+  line-height: 1.35;
+}
+
+.botPanelHubVoiceTestComposer {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+}
+
+.botPanelHubVoiceTestComposer input {
+  min-width: 0;
+  min-height: 42px;
+  border: 1px solid color-mix(in srgb, var(--fg) 20%, var(--line));
+  border-radius: 12px;
+  padding: 0 12px;
+  background: color-mix(in srgb, var(--bg-deep) 80%, transparent);
+  color: var(--fg);
+  font: inherit;
+  font-size: 12px;
+  box-shadow: inset 0 1px 2px color-mix(in srgb, #000000 24%, transparent);
+}
+
+.botPanelHubVoiceTestComposer input::placeholder {
+  color: color-mix(in srgb, var(--fg-muted) 78%, transparent);
+}
+
+.botPanelHubVoiceTestComposer input:focus,
+.botPanelHubVoiceTestComposer input:focus-visible {
+  outline: none;
+  border-color: var(--editor-bot-color);
+  box-shadow:
+    inset 0 1px 2px color-mix(in srgb, #000000 18%, transparent),
+    0 0 0 3px color-mix(in srgb, var(--editor-bot-color) 18%, transparent);
+}
+
+.botPanelHubVoiceTestComposer button {
+  -webkit-appearance: none;
+  appearance: none;
+  min-width: 88px;
+  min-height: 42px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color) 64%, var(--editor-bot-ink));
+  border-radius: 12px;
+  padding: 0 14px;
+  background: linear-gradient(
+    160deg,
+    color-mix(in srgb, var(--editor-bot-color) 88%, #ffffff 12%),
+    var(--editor-bot-color)
+  );
+  color: var(--editor-bot-text);
+  font: inherit;
+  font-size: 11px;
+  font-weight: 800;
+  cursor: pointer;
+  box-shadow:
+    inset 0 1px 0 color-mix(in srgb, var(--editor-bot-text) 22%, transparent),
+    0 10px 24px -18px var(--editor-bot-color);
+  transition:
+    filter 140ms ease,
+    transform 90ms ease,
+    opacity 140ms ease;
+}
+
+.botPanelHubVoiceTestComposer button:hover:not(:disabled),
+.botPanelHubVoiceTestComposer button:focus-visible:not(:disabled) {
+  outline: none;
+  filter: brightness(1.08);
+}
+
+.botPanelHubVoiceTestComposer button:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.botPanelHubVoiceTestComposer button:disabled {
+  cursor: not-allowed;
+  filter: saturate(0.28);
+  opacity: 0.42;
+  box-shadow: none;
+}
+
+.botPanelHubVoiceTestStatus {
+  min-height: 1.35em;
+}
+
+.botPanelHubVoiceTestStatus[data-error="true"] {
+  color: var(--danger);
 }
 
 .botPanelHubShowcase {
@@ -71140,7 +71371,22 @@ a.settingsCreditItem:focus-visible {
   -webkit-text-fill-color: transparent;
   text-shadow: 0 0 var(--crt-glyph-beam-softness)
     color-mix(in srgb, var(--crt-face-edge-color) 46%, transparent);
-  filter: brightness(1.07) contrast(1.02);
+  opacity: calc(
+    var(--zen-live-bot-crt-flicker-opacity-scale, 1) *
+      var(--zen-live-bot-crt-shared-flicker-opacity, 1)
+  );
+  filter: brightness(
+      calc(
+        var(--zen-live-bot-crt-flicker-base-brightness, 1.07) *
+          var(--zen-live-bot-crt-shared-flicker-brightness-scale, 1)
+      )
+    )
+    contrast(
+      calc(
+        var(--zen-live-bot-crt-flicker-base-contrast, 1.02) *
+          var(--zen-live-bot-crt-shared-flicker-contrast-scale, 1)
+      )
+    );
 }
 
 .coffeeSeatPlateEmoji:not([data-face-eye-character])
@@ -71321,7 +71567,19 @@ a.settingsCreditItem:focus-visible {
      element as an alpha mask; filtering the finished glyph layer preserves
      the production glow without changing the authored silhouette. */
   --zen-live-bot-crt-flicker-base-filter: var(--crt-face-glow-filter);
-  filter: var(--crt-face-glow-filter);
+  filter: brightness(
+      calc(
+        var(--zen-live-bot-crt-flicker-base-brightness, 1.07) *
+          var(--zen-live-bot-crt-shared-flicker-brightness-scale, 1)
+      )
+    )
+    contrast(
+      calc(
+        var(--zen-live-bot-crt-flicker-base-contrast, 1.02) *
+          var(--zen-live-bot-crt-shared-flicker-contrast-scale, 1)
+      )
+    )
+    var(--crt-face-glow-filter);
 }
 
 .zenLiveBotPresenceFaceGlyph
@@ -71651,7 +71909,7 @@ a.settingsCreditItem:focus-visible {
   [data-coffee-plate-emoji-part="mouth"]
   > [data-crt-glyph-layer="true"] {
   transform-origin: var(--bot-face-mouth-wobble-origin-x, 50%)
-    var(--bot-face-mouth-wobble-origin-y, 0%);
+    var(--bot-face-mouth-wobble-origin-y, 50%);
 }
 
 :is(
@@ -71698,6 +71956,11 @@ a.settingsCreditItem:focus-visible {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .zenLiveBotPresenceBody[data-render-detail="full"]
+    > .zenLiveBotPresenceFaceEmissionMask {
+    animation: none !important;
+  }
+
   :is(
     .coffeeSeatPlateEmoji,
     .messageMoodCoffeeFace,
@@ -80844,6 +81107,10 @@ a.settingsCreditItem:focus-visible {
   min-width: 0;
 }
 
+.botVoiceSourceCard[data-kind="system"] {
+  order: -1;
+}
+
 .botVoiceSourceCard {
   display: grid;
   gap: 10px;
@@ -80969,6 +81236,145 @@ a.settingsCreditItem:focus-visible {
   display: grid;
   gap: 12px;
   padding: 10px;
+}
+
+.botVoicePremiumBody {
+  display: grid;
+  gap: 10px;
+  padding: 10px;
+}
+
+.botVoiceFieldHeading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--fg);
+  font-size: 10px;
+  font-weight: 740;
+}
+
+.botVoiceNameGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+  max-height: 250px;
+  overflow: auto;
+  padding: 1px;
+}
+
+.botVoiceNameGrid > button {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  min-height: 52px;
+  padding: 8px 9px;
+  border: 1px solid color-mix(in srgb, var(--border) 88%, transparent);
+  border-radius: 9px;
+  background: color-mix(in srgb, var(--bg) 84%, var(--panel));
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.botVoiceNameGrid > button > span {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+  min-width: 0;
+}
+
+.botVoiceNameGrid > button strong {
+  overflow: hidden;
+  font-size: 11px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botVoiceNameGrid > button em {
+  flex: 0 0 auto;
+  border-radius: 999px;
+  padding: 2px 4px;
+  background: color-mix(in srgb, var(--editor-bot-color) 13%, transparent);
+  color: color-mix(in srgb, var(--editor-bot-color) 76%, var(--fg));
+  font-size: 6.5px;
+  font-style: normal;
+  font-weight: 850;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
+}
+
+.botVoiceNameGrid > button small {
+  overflow: hidden;
+  color: var(--muted);
+  font-size: 8.5px;
+  line-height: 1.15;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.botVoiceNameGrid > button:hover:not(:disabled),
+.botVoiceNameGrid > button:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, var(--editor-bot-color) 58%, var(--border));
+  background: color-mix(in srgb, var(--editor-bot-color) 10%, var(--panel));
+}
+
+.botVoiceNameGrid > button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 82%, var(--border));
+  background: color-mix(in srgb, var(--editor-bot-color) 18%, var(--panel));
+  box-shadow: inset 3px 0 0 var(--editor-bot-color);
+}
+
+.botVoiceNameGrid > button:disabled {
+  cursor: wait;
+  opacity: 0.5;
+}
+
+.botVoiceAccentGate {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  padding: 34px 22px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 34%, var(--line));
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--editor-bot-color) 7%, var(--panel));
+  text-align: center;
+}
+
+.botVoiceAccentGate > svg {
+  color: var(--editor-bot-color);
+}
+
+.botVoiceAccentGate strong {
+  font-size: 14px;
+}
+
+.botVoiceAccentGate p {
+  max-width: 390px;
+  margin: 0;
+  color: var(--muted);
+  font-size: 10.5px;
+  line-height: 1.5;
+}
+
+.botVoiceAccentGate button,
+.botVoiceStageContinue {
+  min-height: 36px;
+  border: 1px solid color-mix(in srgb, var(--editor-bot-color) 72%, var(--border));
+  border-radius: 9px;
+  padding: 8px 14px;
+  background: color-mix(in srgb, var(--editor-bot-color) 84%, var(--bg));
+  color: var(--editor-bot-contrast);
+  font: inherit;
+  font-size: 10.5px;
+  font-weight: 780;
+  cursor: pointer;
+}
+
+.botVoiceStageContinue {
+  justify-self: end;
 }
 
 .botVoicePresentationChips,
@@ -81596,6 +82002,10 @@ a.settingsCreditItem:focus-visible {
 
   .botVoiceControls {
     grid-template-columns: 1fr;
+  }
+
+  .botVoiceNameGrid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .botVoicePreviewActions button[data-primary="true"] {

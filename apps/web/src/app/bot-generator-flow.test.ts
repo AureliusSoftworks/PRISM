@@ -102,6 +102,18 @@ test("generation produces only a reviewable draft and keeps manual creation", ()
   assert.match(pageSource, /voicePreviewLine: newBotVoicePreviewLine \|\| null/u);
 });
 
+test("creating a generated draft persists its local casting without an override", () => {
+  const start = pageSource.indexOf("async function createBot(): Promise<boolean>");
+  const end = pageSource.indexOf("function createDefaultBotGroupName", start + 1);
+  assert.ok(start >= 0);
+  assert.ok(end > start);
+  const createBot = pageSource.slice(start, end);
+
+  assert.match(createBot, /authoredAudioVoiceProfile: createdAudioVoiceProfile/u);
+  assert.doesNotMatch(createBot, /audioVoiceProfileOverride/u);
+  assert.match(createBot, /initializePremiumVoiceDefaultsForAccount\(true\)/u);
+});
+
 test("closing regeneration preserves the current unsaved draft", () => {
   const closeGenerator = functionSource(
     "closeBotGenerator",

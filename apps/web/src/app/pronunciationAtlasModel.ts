@@ -219,10 +219,6 @@ function clampPronunciationAtlasPoint(
   };
 }
 
-function sourceBaseLocale(sourceLocale: string): "en-US" | "en-GB" {
-  return resolveLocalVoicePronunciationLocale("follow-voice", sourceLocale);
-}
-
 export function normalizePronunciationAtlasSelection(
   selection: PronunciationAtlasSelection,
 ): PronunciationAtlasSelection {
@@ -300,17 +296,19 @@ export function pronunciationAtlasSelectionAtPoint(
       : best,
   );
   if (nearest.base) {
-    const matchingSource =
-      nearest.base === sourceBaseLocale(normalized.sourceLocale);
     return {
       ...normalized,
-      pronunciationBase: matchingSource ? "follow-voice" : nearest.base,
+      pronunciationBase: nearest.base,
       influence: "none",
       point: clampedPoint,
     };
   }
   return {
     ...normalized,
+    pronunciationBase:
+      normalized.pronunciationBase === "follow-voice"
+        ? pronunciationAtlasResolvedBase(normalized)
+        : normalized.pronunciationBase,
     influence: nearest.influence ?? "none",
     point: clampedPoint,
   };

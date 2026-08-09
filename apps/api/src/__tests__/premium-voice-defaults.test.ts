@@ -71,6 +71,15 @@ describe("Premium voice default initialization", () => {
             elevenLabsVoiceInitialized: true,
           },
         },
+        {
+          id: "generated-local-only",
+          authoredAudioVoiceProfile: {
+            ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+            baseVoiceId: "voice-12",
+            elevenLabsVoiceInitialized: true,
+          },
+          audioVoiceProfileOverride: null,
+        },
       ],
       prismDefaultBotAudioVoiceProfile: {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,

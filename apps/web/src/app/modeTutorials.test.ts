@@ -4,6 +4,15 @@ import { describe, it } from "node:test";
 import { MODE_TUTORIALS, modeTutorialStep } from "./modeTutorials.ts";
 
 describe("mode tutorials", () => {
+  it("explains bot hub editor shortcuts and exact voice testing", () => {
+    const step = MODE_TUTORIALS.zen.steps[0];
+    assert.match(step?.body ?? "", /jump straight to any Avatar Studio section/u);
+    assert.match(step?.body ?? "", /Beneath the bot’s voice buttons/u);
+    assert.match(step?.body ?? "", /English, Premium, Babble, and Bottish/u);
+    assert.match(step?.body ?? "", /Speak uses the current top-bar Voice mode/u);
+    assert.match(step?.body ?? "", /starts a chat or LLM turn/u);
+  });
+
   it("explains immersive waiting captions and the Psychic privacy boundary", () => {
     const step = MODE_TUTORIALS.chat.steps[0];
     assert.match(step?.body ?? "", /short in-character activity caption/u);
@@ -97,7 +106,10 @@ describe("mode tutorials", () => {
     assert.match(step.body, /anywhere in the world/u);
     assert.match(step.body, /pin stays exactly where you leave it/u);
     assert.match(step.body, /nearest broadly regional pronunciation/u);
-    assert.match(step.body, /Gender filter mixes American and British/u);
+    assert.match(step.body, /required Accent pin/u);
+    assert.match(step.body, /named Voice/u);
+    assert.match(step.body, /does not move the bot across regions/u);
+    assert.match(step.body, /without exposing engine regions/u);
     assert.match(step.body, /All accents/u);
     assert.match(step.body, /Original and With accent/u);
   });
@@ -973,7 +985,7 @@ describe("mode tutorials", () => {
       },
       {
         heading: "Choose a relationship",
-        body: "Choose PRISM or a persona to enter that relationship’s Home. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a breathless persona still speaks but never produces breath, sigh, or inhale Foley; a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona only sees your current message each turn—no earlier replies or broader topic unless that message states it—and answers naturally without amnesia coaching. A John/Jane Doe persona sincerely believes a random persona name for the session and reshuffles that name whenever short-term amnesia clears continuity. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Clicking empty canvas space jumps straight back to All Bots Home. Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
+        body: "Choose PRISM or a persona to focus that relationship’s Home. A first click focuses a persona; select the focused tile again to open its customization panel, or send a message to begin Zen/Chat. Ready Powers stay active with that persona here and across PRISM; a muted persona can still act, but only answers with ... and never speaks aloud, while a breathless persona still speaks but never produces breath, sigh, or inhale Foley; a Copycat persona may originate one opening if nobody has addressed them yet, then repeats the latest addressed message exactly. A short-term-amnesia persona only sees your current message each turn—no earlier replies or broader topic unless that message states it—and answers naturally without amnesia coaching. A John/Jane Doe persona sincerely believes a random persona name for the session and reshuffles that name whenever short-term amnesia clears continuity. An Obsessed persona treats you as the star of each reply with fresh, intense admiration, while your agency, privacy, and safety boundaries still win. A radiant-joy persona makes that emotional warmth palpable without tracking or rewriting your mood. A sad-grouchy persona makes her draining presence equally palpable without changing your state; only bots that directly talk to her lose mood or motivation. Physical-size Powers render a persona slightly larger or smaller without changing the room layout. Microscopic stays fully unseen even while speaking, while Invisible stays half-translucent. Loud and Quiet Powers apply a small fixed voice-volume and text-size shift without changing physical size or visibility; Quiet can go unheard on half its turns and lose a little mood. A hard bare-minimum or brief Power is engine-bounded even if the model tries to elaborate. Clicking empty canvas space jumps straight back to All Bots Home. Escape returns you to the wider Library or saved group grid exactly where you left it. Inviting a guest keeps you in the current Home.",
         clickLabel: "a PRISM or persona tile",
         targetSelector: '[data-tutorial-target="chat-bot-picker"]',
       },

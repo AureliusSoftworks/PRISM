@@ -114,16 +114,10 @@ describe("voice settings preview", () => {
       pageSource.indexOf("async function playBotHubVoicePreview"),
       pageSource.indexOf("async function previewSelectedBotVoice"),
     );
-    const regeneratePreview = pageSource.slice(
-      pageSource.indexOf("async function regenerateBotHubAudioSample"),
-      pageSource.indexOf("async function loadElevenLabsVoiceCatalog"),
-    );
-
     for (const [label, source, firstYield] of [
       ["Avatar Studio", editorPreview, "await resolvePreviewText()"],
       ["shared preview", selectedPreview, "await enqueueRobotVoiceMode("],
       ["bot hub", hubPreview, "await resolveBotHubVoicePreviewText(bot)"],
-      ["regenerated sample", regeneratePreview, "await api("],
     ] as const) {
       const primeIndex = source.indexOf(
         "primeVoiceModePlaybackFromUserGesture(",
@@ -236,10 +230,12 @@ describe("voice settings preview", () => {
       pageSource.indexOf("type BotEditOriginalSnapshot"),
     );
     assert.match(editorSource, /Choose a voice/);
-    assert.match(editorSource, /aria-label="Local voice identity"/);
+    assert.match(editorSource, /aria-label="Choose a named voice"/);
+    assert.match(editorSource, /PRISM VOICE PACK/);
+    assert.match(editorSource, /data-featured/);
     assert.match(
       editorSource,
-      /data-kind="online"[\s\S]*?ELEVENLABS[\s\S]*?premiumVoiceLabel/,
+      /data-kind="online"[\s\S]*?PREMIUM · OPTIONAL[\s\S]*?premiumVoiceLabel/,
     );
     assert.match(editorSource, /aria-label="ElevenLabs voice identity"/);
     assert.match(editorSource, /Exact Voice ID/);
@@ -289,8 +285,8 @@ describe("voice settings preview", () => {
       editorSource,
       /Used for English and whenever Premium cannot play/,
     );
-    assert.match(editorSource, /aria-label="Online voice"/);
-    assert.match(editorSource, /aria-label="Offline and fallback voice"/);
+    assert.match(editorSource, /aria-label="Optional Premium voice"/);
+    assert.match(editorSource, /aria-label="Named Prism voices"/);
     assert.match(editorSource, /data-bot-voice-source-card="online"/);
     assert.match(editorSource, /data-bot-voice-source-card="system"/);
     assert.doesNotMatch(
@@ -714,9 +710,13 @@ describe("voice settings preview", () => {
     );
   });
 
-  it("shares a mixed-accent gender filter and Accent map across bot and Zen voices", () => {
+  it("shares named voice-range filters and a required Accent map", () => {
     assert.doesNotMatch(pageSource, /Base accent/);
-    assert.match(pageSource, />Gender</);
+    assert.match(pageSource, />Voice range</);
+    assert.match(pageSource, /Place the Accent pin first/);
+    assert.match(pageSource, /1 Accent/);
+    assert.match(pageSource, /2 Feel/);
+    assert.match(pageSource, /3 Voice/);
     assert.match(pageSource, /import \{ PronunciationAtlas \}/);
     assert.match(pageSource, /label="Zen accent map"/);
     assert.doesNotMatch(
@@ -727,5 +727,6 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /filteredPlayerLocalVoiceOptions\.map/);
     assert.doesNotMatch(pageSource, /selectOfflineVoiceAccent/);
     assert.match(pageStyles, /\.botVoicePresentationChips/);
+    assert.match(pageStyles, /\.botVoiceNameGrid/);
   });
 });

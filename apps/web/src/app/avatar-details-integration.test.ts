@@ -535,22 +535,21 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(maskCss, /\.halo[\s\S]*mix-blend-mode: screen/);
     assert.match(
       maskCss,
-      /\.halo[\s\S]*opacity:\s*calc\(var\(--avatar-details-speech-opacity, 1\) \* 0\.14\)/,
+      /\.halo\s*\{[^}]*--avatar-details-emission-opacity:\s*0\.14[^}]*--zen-live-bot-crt-shared-flicker-opacity/,
     );
     assert.match(
       maskCss,
-      /\.halo[\s\S]*0 0 4px[\s\S]*0 0 8px[\s\S]*0 0 12px/,
+      /\.halo\s*\{[^}]*0 0 4px[^}]*0 0 8px[^}]*0 0 12px/,
     );
-    assert.doesNotMatch(maskCss, /\.halo[\s\S]*0 0 21px/);
+    assert.doesNotMatch(maskCss, /\.halo\s*\{[^}]*0 0 21px/);
     assert.match(
       maskCss,
-      /\.bloom[\s\S]*opacity:\s*calc\(var\(--avatar-details-speech-opacity, 1\) \* 0\.56\)/,
+      /\.bloom\s*\{[^}]*--avatar-details-emission-opacity:\s*1[^}]*--zen-live-bot-crt-shared-flicker-opacity/,
     );
     assert.match(
       maskCss,
-      /\.bloom[\s\S]*0 0 0\.55px[\s\S]*0 0 1\.1px[\s\S]*0 0 2\.4px[\s\S]*0 0 5px[\s\S]*0 0 9px/,
+      /\.bloom\s*\{[^}]*0 0 0\.72px[^}]*0 0 1\.5px[^}]*0 0 3px[^}]*82%[^}]*0 0 6px[^}]*58%[^}]*0 0 12px[^}]*36%[^}]*0 0 21px[^}]*22%/,
     );
-    assert.doesNotMatch(maskCss, /\.bloom[\s\S]*0 0 21px/);
     assert.match(maskSource, /avatarDetailsPhosphorCoreRgba\(pixels\)/);
     assert.match(maskSource, /coreColor = "phosphor"/);
     assert.match(
@@ -559,31 +558,35 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       maskCss,
-      /\.core[\s\S]*opacity:\s*var\(--avatar-details-speech-opacity, 1\)[\s\S]*drop-shadow/,
+      /\.core[\s\S]*--avatar-details-emission-opacity:\s*1[\s\S]*--zen-live-bot-crt-shared-flicker-opacity[\s\S]*drop-shadow/,
     );
     assert.match(
       maskCss,
-      /\.halo[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*filter:\s*var\(--zen-live-bot-crt-flicker-base-filter\)/,
+      /\.halo[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*--zen-live-bot-crt-shared-flicker-brightness-scale[\s\S]*var\(--zen-live-bot-crt-flicker-base-filter\)/,
     );
     assert.match(
       maskCss,
-      /\.bloom[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*filter:\s*var\(--zen-live-bot-crt-flicker-base-filter\)/,
+      /\.bloom[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*--zen-live-bot-crt-shared-flicker-brightness-scale[\s\S]*var\(--zen-live-bot-crt-flicker-base-filter\)/,
     );
     assert.match(
       maskCss,
-      /\.core[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*filter:\s*brightness\(1\.02\) contrast\(1\.02\)[\s\S]*var\(--zen-live-bot-crt-flicker-base-filter\)/,
+      /\.core[\s\S]*mix-blend-mode:\s*normal[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*--zen-live-bot-crt-shared-flicker-brightness-scale[\s\S]*var\(--zen-live-bot-crt-flicker-base-filter\)/,
     );
     assert.match(
       pageCss,
-      /\.zenLiveBotPresenceFaceEmissionMask \[data-avatar-details-emission\][\s\S]*animation:\s*zenLiveBotCrtFaceFlicker 11\.7s linear infinite/,
+      /\.zenLiveBotPresenceBody\[data-render-detail="full"\][\s\S]*> \.zenLiveBotPresenceFaceEmissionMask[\s\S]*animation:\s*zenLiveBotCrtFaceFlicker 11\.7s linear infinite/,
     );
     assert.match(
       pageCss,
-      /@keyframes zenLiveBotCrtFaceFlicker[\s\S]*var\(--zen-live-bot-crt-flicker-base-filter,\s*brightness\(1\)\)/,
+      /@keyframes zenLiveBotCrtFaceFlicker[\s\S]*--zen-live-bot-crt-shared-flicker-opacity:[\s\S]*--zen-live-bot-crt-shared-flicker-brightness-scale:[\s\S]*--zen-live-bot-crt-shared-flicker-contrast-scale:/,
     );
     assert.match(
       pageCss,
-      /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.zenLiveBotPresenceFaceEmissionMask \[data-avatar-details-emission\][\s\S]*animation:\s*none/,
+      /@media \(prefers-reduced-motion:\s*reduce\)[\s\S]*\.zenLiveBotPresenceBody\[data-render-detail="full"\][\s\S]*> \.zenLiveBotPresenceFaceEmissionMask[\s\S]*animation:\s*none !important/,
+    );
+    assert.doesNotMatch(
+      pageCss,
+      /\.zenLiveBotPresenceFaceEmissionMask \[data-avatar-details-emission\][^{]*\{[^}]*zenLiveBotCrtFaceFlicker/,
     );
   });
 
@@ -714,7 +717,10 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(maskCss, /--bot-face-mouth-speech-opacity/);
     assert.match(maskCss, /\.speechMotion\[data-avatar-details-ink-motion="wobble"\]/);
     assert.match(maskSource, /avatarDetailsSpeechMotionOrigin\(/);
-    assert.match(maskSource, /speechMotion === "wobble" \? "top" : "center"/);
+    assert.match(
+      maskSource,
+      /avatarDetailsSpeechMotionOrigin\(completeSpeechPixels\)/,
+    );
     assert.match(
       maskSource,
       /completeSpeechPixels[\s\S]*?"talking",[\s\S]*?"all"/,

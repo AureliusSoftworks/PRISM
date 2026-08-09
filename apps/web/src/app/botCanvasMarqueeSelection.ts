@@ -2,6 +2,8 @@ export type CanvasBotMarqueeSelectionMode = "replace" | "toggle";
 
 export type CanvasBotDirectoryView = "chat" | "sandbox" | "coffee" | "other";
 
+export type CanvasBotTileActivation = "focus" | "manage";
+
 export function focusedCanvasBotId(args: {
   view: CanvasBotDirectoryView;
   sandboxGridSelectedBotId: string | null;
@@ -10,6 +12,20 @@ export function focusedCanvasBotId(args: {
   return args.view === "chat"
     ? args.zenPersonaBotId
     : args.sandboxGridSelectedBotId;
+}
+
+export function resolveCanvasBotTileActivation(args: {
+  view: CanvasBotDirectoryView;
+  conversationMessageCount: number | null;
+  focusedBotId: string | null;
+  botId: string;
+}): CanvasBotTileActivation {
+  return args.view === "chat" &&
+    (args.conversationMessageCount === null ||
+      args.conversationMessageCount === 0) &&
+    args.focusedBotId === args.botId
+    ? "manage"
+    : "focus";
 }
 
 export function canvasBotDirectoryIsInteractive(args: {

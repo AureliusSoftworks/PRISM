@@ -1,7 +1,6 @@
 import {
   isBotAudioVoiceId,
   normalizeBotAudioVoiceProfileV1,
-  prismBuiltinEnglishVoice,
   type BotAudioVoiceId,
   type BotAudioVoiceProfileV1,
   type LocalVoicePresentation,
@@ -22,6 +21,7 @@ export interface OfflineVoiceOption {
   kind: "builtin" | "os";
   locale: string;
   presentation?: LocalVoicePresentation;
+  featured?: boolean;
 }
 
 export function canonicalEnglishVoiceLocale(value: unknown): string {
@@ -67,7 +67,6 @@ export function offlineVoiceSelectionValue(
 export function applyOfflineVoiceSelection(
   profile: BotAudioVoiceProfileV1,
   value: string,
-  options: readonly OfflineVoiceOption[] = [],
 ): NormalizedBotAudioVoiceProfileV1 {
   const normalized = normalizeBotAudioVoiceProfileV1(profile);
   if (value.startsWith(BUILTIN_VOICE_SELECTION_PREFIX)) {
@@ -79,10 +78,6 @@ export function applyOfflineVoiceSelection(
         : normalized.baseVoiceId,
       systemVoiceName: null,
       localVoiceSource: "portable",
-      accentLocale: isBotAudioVoiceId(voiceId)
-        ? prismBuiltinEnglishVoice(voiceId).locale
-        : normalized.accentLocale,
-      accentMode: "prefer-genuine",
     });
   }
   if (value.startsWith(OPERATING_SYSTEM_VOICE_SELECTION_PREFIX)) {
@@ -94,10 +89,6 @@ export function applyOfflineVoiceSelection(
       ...normalized,
       systemVoiceName: systemVoiceName || null,
       localVoiceSource: systemVoiceName ? "system" : "portable",
-      accentLocale:
-        options.find((option) => option.value === value)?.locale ??
-        normalized.accentLocale,
-      accentMode: "prefer-genuine",
     });
   }
   return normalized;

@@ -15,8 +15,14 @@ describe("alpha capability access", () => {
       /capabilityRevelations\.(?:marketplace|signal|coffee)\.revealed/u,
     );
     assert.match(pageSource, /<strong>Marketplace<\/strong>/u);
-    assert.match(pageSource, /id: "experience-signal"/u);
-    assert.match(pageSource, /id: "experience-coffee"/u);
+    assert.match(
+      pageSource,
+      /coffee:\s*\{\s*glyph: <GlyphCoffee size=\{88\} \/>/u,
+    );
+    assert.match(
+      pageSource,
+      /botcast:\s*\{\s*glyph: <GlyphSignal size=\{88\} \/>/u,
+    );
   });
 
   it("does not mutate capability access after completed events", () => {

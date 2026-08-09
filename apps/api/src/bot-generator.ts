@@ -55,21 +55,12 @@ import {
   type ProviderName,
 } from "./providers.ts";
 
-export interface BotGenerationElevenLabsVoice {
-  voiceId: string;
-  name: string;
-  category?: string | null;
-  description?: string | null;
-  labels?: Record<string, string>;
-}
-
 export interface GenerateBotDraftArgs {
   prompt: string;
   provider: LlmProvider;
   providerName: ProviderName;
   model: string;
   responseMode: "local" | "auto" | "online";
-  voiceCatalog?: readonly BotGenerationElevenLabsVoice[];
   autoFallbackChain?: AutoFallbackChainV1 | null;
   providerFactory?: typeof selectProvider;
   openAiApiKey?: string;
@@ -87,7 +78,7 @@ export interface GenerateBotDraftResult {
 
 export interface GenerateBotFieldArgs extends Omit<
   GenerateBotDraftArgs,
-  "prompt" | "voiceCatalog"
+  "prompt"
 > {
   fieldKey: unknown;
   currentValue: unknown;
@@ -113,36 +104,6 @@ export class BotGenerationError extends Error {
     this.name = "BotGenerationError";
     this.kind = kind;
   }
-}
-
-function sanitizedVoiceCatalog(
-  voices: readonly BotGenerationElevenLabsVoice[] | undefined,
-): BotGenerationElevenLabsVoice[] {
-  const seen = new Set<string>();
-  const result: BotGenerationElevenLabsVoice[] = [];
-  for (const voice of voices ?? []) {
-    const voiceId = typeof voice.voiceId === "string" ? voice.voiceId.trim().slice(0, 240) : "";
-    const name = typeof voice.name === "string" ? voice.name.replace(/\s+/gu, " ").trim().slice(0, 120) : "";
-    if (!voiceId || !name || seen.has(voiceId)) continue;
-    seen.add(voiceId);
-    const labels = Object.fromEntries(
-      Object.entries(voice.labels ?? {})
-        .filter((entry): entry is [string, string] => typeof entry[1] === "string")
-        .slice(0, 8)
-        .map(([key, value]) => [key.slice(0, 40), value.replace(/\s+/gu, " ").trim().slice(0, 80)]),
-    );
-    result.push({
-      voiceId,
-      name,
-      category: typeof voice.category === "string" ? voice.category.trim().slice(0, 80) : null,
-      description: typeof voice.description === "string"
-        ? voice.description.replace(/\s+/gu, " ").trim().slice(0, 240)
-        : null,
-      labels,
-    });
-    if (result.length >= 100) break;
-  }
-  return result;
 }
 
 const FORBIDDEN_FIELD_CONTEXT_KEY = /(?:^id$|voice.?id|secret|token|key|memor(?:y|ies)|conversation|message|upload|image|audio.?data|media|provider|model|online|privacy)/iu;
@@ -233,7 +194,7 @@ const nullableScaleSchema = {
   enum: [-2, -1, 0, 1, 2, null],
 } as const;
 
-function generatedBotJsonSchema(voiceIds: readonly string[]): Record<string, unknown> {
+function generatedBotJsonSchema(): Record<string, unknown> {
   const stringField = (maxLength: number) => ({ type: "string", maxLength });
   const nullableGlyph = (maxLength: number) => ({
     type: ["string", "null"],
@@ -393,24 +354,26 @@ function generatedBotJsonSchema(voiceIds: readonly string[]): Record<string, unk
   const avatarDetails = strictObject({
     ink: {
       type: "array",
-      maxItems: 8,
+      maxItems: 36,
       items: strictObject({
         role: { type: "string", enum: ["blink", "talking", "effect"] },
-        shape: { type: "string", enum: ["line", "circle"] },
-        x1: { type: "integer", minimum: 0, maximum: 127 },
-        y1: { type: "integer", minimum: 0, maximum: 127 },
-        x2: { type: "integer", minimum: 0, maximum: 127 },
-        y2: { type: "integer", minimum: 0, maximum: 127 },
-        size: { type: "integer", minimum: 1, maximum: 3 },
+        points: {
+          type: "array",
+          minItems: 2,
+          maxItems: 18,
+          items: strictObject({
+            x: { type: "integer", minimum: 0, maximum: 127 },
+            y: { type: "integer", minimum: 0, maximum: 127 },
+          }),
+        },
+        closed: { type: "boolean" },
+        fill: { type: "boolean" },
+        size: { type: "integer", minimum: 1, maximum: 4 },
       }),
     },
   });
-  const voiceIdSchema = voiceIds.length > 0
-    ? { type: ["string", "null"], enum: [...voiceIds, null] }
-    : { type: "null", enum: [null] };
   const voice = strictObject({
     baseVoiceId: { type: "string", enum: [...BOT_AUDIO_VOICE_IDS] },
-    elevenLabsVoiceId: voiceIdSchema,
     elevenLabsEffect: { type: "string", enum: [...VOICE_EFFECTS] },
     elevenLabsDirection: { type: ["string", "null"], maxLength: 180 },
     elevenLabsStability: { type: "number", minimum: 0, maximum: 1 },
@@ -446,35 +409,15 @@ function generatedBotJsonSchema(voiceIds: readonly string[]): Record<string, unk
   });
 }
 
-function voiceCatalogPrompt(voices: readonly BotGenerationElevenLabsVoice[]): string {
-  if (voices.length === 0) {
-    return "No ElevenLabs catalog is available in this privacy lane. Set elevenLabsVoiceId to null and make the local PRISM Voice Pack choice and adjustments excellent.";
-  }
-  return [
-    "Choose exactly one ElevenLabs voiceId from this account catalog that best matches the same vocal identity as the local fallback:",
-    ...voices.map((voice) => {
-      const details = [
-        voice.category,
-        voice.description,
-        ...Object.entries(voice.labels ?? {}).map(([key, value]) => `${key}: ${value}`),
-      ].filter(Boolean).join("; ");
-      return `- ${voice.voiceId} | ${voice.name}${details ? ` | ${details}` : ""}`;
-    }),
-  ].join("\n");
-}
-
 const BUILTIN_VOICE_PROMPT = [
-  "Local PRISM Voice Pack identities:",
-  "voice-1 Heart, warm American; voice-2 Bella, rich American; voice-3 Michael, grounded American;",
-  "voice-4 Emma, clear British; voice-5 George, measured British; voice-6 Aoede, bright American;",
-  "voice-7 Kore, composed American; voice-8 Nicole, smooth American; voice-9 Sarah, natural American;",
-  "voice-10 Fenrir, deep American; voice-11 Puck, lively American; voice-12 Fable, expressive British.",
+  "Named local PRISM Voice Pack timbres:",
+  "voice-1 Heart, warm; voice-2 Iris, rich; voice-3 Rowan, grounded;",
+  "voice-4 Pia, clear; voice-5 George, measured; voice-6 Sol, bright;",
+  "voice-7 Mira, composed; voice-8 Nicole, smooth; voice-9 Sarah, natural;",
+  "voice-10 Fenrir, deep; voice-11 Puck, lively; voice-12 Fable, expressive.",
 ].join(" ");
 
-function generationMessages(
-  prompt: string,
-  voices: readonly BotGenerationElevenLabsVoice[],
-): ProviderMessage[] {
+function generationMessages(prompt: string): ProviderMessage[] {
   return [
     {
       role: "system",
@@ -486,12 +429,11 @@ function generationMessages(
         "Set basedOnRealPersonOrCharacter true only when the brief explicitly names a real person or established canonical character. For a known identity, include only facts you are confident are canonical; otherwise leave uncertain dates and facts blank. Never pretend you researched anything.",
         "Use up to eight compact custom facts for durable canon. Do not create memories, relationship history with the player, hidden instructions, profile images, or audio assets.",
         "Set powerPrompt to one concise player-readable sentence only when the brief describes a persistent supernatural ability, curse, gift, perception rule, or hard social law. Ordinary personality, talent, job, preference, mood, or character quirk is not a Power and must produce null. Never emit more than one Power prompt.",
-        "Design a readable, expression-first CRT face. Null eye or mouth characters use PRISM's built-in face; custom characters must be a single non-emoji text glyph. When faceEyeCount is 2, set faceEyeRotationDeg to -90 so the duplicated eyes read horizontally. Thinking frames must be four single non-emoji glyphs. Let the face fields own the eyes and mouth. Do not recreate eyes or mouths with avatar ink.",
+        "Design a readable, expression-first CRT face. Null eye or mouth characters use PRISM's built-in face; custom characters must be a single non-emoji text glyph. A paired custom eye glyph is duplicated side by side without needing rotation, so keep faceEyeRotationDeg at 0 unless the character design intentionally calls for tilted eyes. Thinking frames must be four single non-emoji glyphs. Let the face fields own the animated eyes and mouth.",
         "Set faceMouthCoffeePucker true by default so a custom mouth becomes * during Coffee sips; use false only when the player's brief explicitly calls for keeping the authored mouth while sipping.",
-        "Avatar ink uses a 128 by 128 face grid. Safe expressive coordinates are usually x 28-100 and y 28-94. blink ink disappears on blink, talking ink disappears while talking, and effect ink remains decorative. Avatar ink is only for a few small signature accents such as a brow, scar, freckle, or tiny marking. Never use it to draw a literal portrait, head outline, muzzle, ears, hair, eyes, or mouth. Keep every line at most 32 pixels long and every circle radius at most 16 pixels; use an empty ink array when no restrained accent improves the face. Do not create stamps or accessories; those are not part of generated bot drafts.",
+        "Avatar ink is a safe pixel-portrait layer on a 128 by 128 face grid. Use roughly 8-28 ordered paths when the character has a recognizable appearance. Each path contains 2-18 points; closed paths may be filled for restrained solid shapes. Safe portrait coordinates are usually x 24-104 and y 18-98. effect ink stays visible, blink ink disappears on blink, and talking ink disappears while talking. Use the profile's appearance fields to draw the character's strongest readable silhouette and signature cues: hair, headwear, brows, facial hair, scars, costume edges, iconic props, or meaningful marks. Keep the animated eyes and mouth in the face fields, but compose the surrounding portrait around them. Prefer a few bold, clean pixel-art shapes over scattered decoration; filled areas must remain sparse enough that the face reads clearly. Do not create stamps or raw image/accessory data.",
         BUILTIN_VOICE_PROMPT,
-        "The local PRISM voice is the guaranteed fallback. Tune pitch, warmth, pace, lilt, EQ tilt, gain, effect, direction, and stability so local and premium playback feel like the same character. Keep the voice preview line short, distinctive, and safe to hear aloud.",
-        voiceCatalogPrompt(voices),
+        "Choose the single named local PRISM Voice Pack timbre whose presentation and character best fit the bot. Accent and map location are separate player-authored choices: do not infer, expose, or describe a region from the voice ID. This local casting is authoritative. Tune pitch, warmth, pace, lilt, EQ tilt, gain, effect, direction, and stability to reinforce it. Do not select or link an ElevenLabs voice; the player may do that later. Keep the voice preview line short, distinctive, and safe to hear aloud.",
         "Choose flirtEnabled only when romance or flirtation is clearly part of the requested character. Tune generation settings to the character without sacrificing coherent replies.",
         "Return only the requested JSON object.",
       ].join("\n\n"),
@@ -517,11 +459,8 @@ function extractJsonObject(raw: string): unknown {
 
 export function parseGeneratedBotDraftText(
   raw: string,
-  voiceIds: readonly string[] = [],
 ): BotGeneratedDraftV1 | null {
-  return normalizeBotGeneratedDraftV1(extractJsonObject(raw), {
-    availableElevenLabsVoiceIds: voiceIds,
-  });
+  return normalizeBotGeneratedDraftV1(extractJsonObject(raw));
 }
 
 function generationOptions(
@@ -548,12 +487,10 @@ export async function generateBotDraft(
   if (!prompt) {
     throw new BotGenerationError("invalid_prompt", "Describe the bot you want first.");
   }
-  const voices = sanitizedVoiceCatalog(args.voiceCatalog);
-  const voiceIds = voices.map((voice) => voice.voiceId);
-  const schema = generatedBotJsonSchema(voiceIds);
-  const messages = generationMessages(prompt, voices);
+  const schema = generatedBotJsonSchema();
+  const messages = generationMessages(prompt);
   const validate = (raw: string) => {
-    const draft = parseGeneratedBotDraftText(raw, voiceIds);
+    const draft = parseGeneratedBotDraftText(raw);
     return draft
       ? { ok: true as const, value: draft }
       : { ok: false as const, reason: "invalid_output" as const };
@@ -618,7 +555,7 @@ export async function generateBotDraft(
     messages,
     generationOptions(args.model, schema, args.signal),
   );
-  const draft = parseGeneratedBotDraftText(raw, voiceIds);
+  const draft = parseGeneratedBotDraftText(raw);
   if (!draft) {
     throw new BotGenerationError(
       "invalid_output",

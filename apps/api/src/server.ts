@@ -26458,32 +26458,7 @@ function buildRoutes(): RouteDefinition[] {
       const controller = new AbortController();
       const onClose = () => controller.abort();
       ctx.req.once("close", onClose);
-      let voiceCatalog: Awaited<
-        ReturnType<typeof requestElevenLabsVoiceCatalog>
-      > = [];
       try {
-        if (onlineAllowed) {
-          const elevenLabsApiKey =
-            getElevenLabsApiKeyForUser(userId, userKey) ??
-            config.elevenLabsApiKey;
-          if (elevenLabsApiKey) {
-            try {
-              voiceCatalog = await requestElevenLabsVoiceCatalog({
-                apiKey: elevenLabsApiKey,
-                collectionId: user.elevenlabs_voice_collection_id,
-                signal: controller.signal,
-              });
-            } catch (error) {
-              if (controller.signal.aborted) throw error;
-              // Voice matching is additive. A stale or limited ElevenLabs key
-              // should not prevent a strong local-voice bot draft.
-              console.warn(
-                "[bot-generator] premium voice catalog unavailable:",
-                error instanceof Error ? error.message : error,
-              );
-            }
-          }
-        }
         const result = await runWithUsageSession(
           {
             db,
@@ -26499,7 +26474,6 @@ function buildRoutes(): RouteDefinition[] {
               providerName: resolved.provider,
               model: resolved.model,
               responseMode,
-              voiceCatalog,
               autoFallbackChain: storedAutoFallbackChain,
               providerFactory: providerFactoryOverride,
               openAiApiKey,

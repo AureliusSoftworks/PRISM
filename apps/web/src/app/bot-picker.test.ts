@@ -171,6 +171,18 @@ describe("shared bot picker", () => {
     assert.match(source, /button\[data-bot-id\]:not\(:disabled\)/u);
   });
 
+  it("opens the focused Zen overview bot's management hub on reactivation", () => {
+    assert.match(
+      pageSource,
+      /const tileActivation = resolveCanvasBotTileActivation\([\s\S]*?if \(tileActivation === "manage"\) \{[\s\S]*?openBotPanelHub\(b\);[\s\S]*?return;/u,
+    );
+    assert.match(pageSource, /"selected; activate to customize"/u);
+    assert.match(
+      pageSource,
+      /SEND A MESSAGE TO CHAT · SELECT AGAIN TO CUSTOMIZE/u,
+    );
+  });
+
   it("is consumed by Chat, Zen, Coffee, Signal, and Debate", () => {
     assert.match(pageSource, /const renderChatBotPickerGrid/u);
     assert.match(pageSource, /const renderCoffeeBotTile/u);

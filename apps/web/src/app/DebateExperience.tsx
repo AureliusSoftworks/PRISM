@@ -244,6 +244,7 @@ import {
   debateInitialProceedingsCursor,
   debateAdoptProceedingsCursor,
   debateInterruptedSpeechCaption,
+  debateResumeFloorReplayEvents,
   debateWatchElapsedMs,
   debateMarkdownSource,
   debateEvidenceFromMarkdownHref,
@@ -11634,7 +11635,11 @@ export function DebateExperience(
             },
             { automaticJudgeGavel: true },
           );
-          const remainingAfterHeld = result.session.events.filter(
+          const heldFloorReplayEvents = debateResumeFloorReplayEvents(
+            result.session.events,
+            pausedPresentationEvent.sequence,
+          );
+          const remainingAfterHeld = heldFloorReplayEvents.filter(
             (event) => event.sequence > pausedPresentationEvent.sequence,
           );
           const hasRemainingEvents = remainingAfterHeld.length > 0;
@@ -11675,13 +11680,20 @@ export function DebateExperience(
             await adoptSession(
               {
                 ...result.session,
-                events: result.session.events.filter(
+                events: heldFloorReplayEvents.filter(
                   (event) =>
                     event.sequence <= pausedPresentationEvent.sequence,
                 ),
               },
-              result.session,
+              {
+                ...result.session,
+                events: heldFloorReplayEvents,
+              },
             );
+            // The replay projection omits lifecycle housekeeping only so it is
+            // not voiced twice. Restore the complete canonical record once the
+            // unheard floor tail has finished.
+            setActiveSession(result.session);
             setPauseCooldownUntilMs(Date.now() + DEBATE_PAUSE_COOLDOWN_MS);
             void loadSessions();
             return;

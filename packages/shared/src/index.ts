@@ -838,12 +838,14 @@ export {
   normalizeBotGenerationPrompt,
   type BotGeneratedAvatarDetailsInputV1,
   type BotGeneratedDraftV1,
+  type BotGeneratedInkPathV1,
+  type BotGeneratedInkPointV1,
+  type BotGeneratedInkPrimitiveV1,
   type BotGeneratedInkRole,
   type BotGeneratedInkShape,
   type BotGeneratedInkStrokeV1,
   type BotGeneratedSettingsV1,
   type BotGenerationGlyphId,
-  type NormalizeBotGeneratedDraftOptions,
 } from "./botGeneration.js";
 
 export {

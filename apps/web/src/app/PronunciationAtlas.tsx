@@ -22,7 +22,6 @@ import {
   pronunciationAtlasNaturalSelection,
   pronunciationAtlasLocationText,
   pronunciationAtlasPointForSelection,
-  pronunciationAtlasResolvedBase,
   pronunciationAtlasSelectionAtPoint,
   pronunciationAtlasValueText,
   type PronunciationAtlasSelection,
@@ -40,6 +39,7 @@ export interface PronunciationAtlasProps {
   onCancel?: (selection: PronunciationAtlasSelection) => void;
   onPreviewSource?: () => void;
   onPreviewCurrent?: () => void;
+  onContinue?: () => void;
   previewDisabled?: boolean;
   color?: string;
   disabled?: boolean;
@@ -80,6 +80,7 @@ export function PronunciationAtlas({
   onCancel,
   onPreviewSource,
   onPreviewCurrent,
+  onContinue,
   previewDisabled = false,
   color,
   disabled = false,
@@ -115,13 +116,6 @@ export function PronunciationAtlas({
     pronunciationAtlasNaturalSelection(normalizedSelection.sourceLocale),
   );
   const summary = pronunciationAtlasLocationText(padValue.selection);
-  const sourceBase =
-    pronunciationAtlasResolvedBase({
-      ...padValue.selection,
-      pronunciationBase: "follow-voice",
-    }) === "en-GB"
-      ? "British"
-      : "American";
   const fallbackId = useId();
 
   const commitSelection = (next: PronunciationAtlasSelection): void => {
@@ -224,7 +218,7 @@ export function PronunciationAtlas({
                 }
               >
                 <option value="follow-voice">
-                  Follow voice · {sourceBase}
+                  Automatic foundation
                 </option>
                 <option value="en-US">American English · Approximate</option>
                 <option value="en-GB">British English · Approximate</option>
@@ -274,7 +268,7 @@ export function PronunciationAtlas({
           </div>
         </details>
       </div>
-      {onPreviewSource || onPreviewCurrent ? (
+      {onPreviewSource || onPreviewCurrent || onContinue ? (
         <div className={styles.previewBar} aria-label="Pronunciation previews">
           {onPreviewSource ? (
             <button
@@ -293,6 +287,16 @@ export function PronunciationAtlas({
               onClick={onPreviewCurrent}
             >
               With accent
+            </button>
+          ) : null}
+          {onContinue ? (
+            <button
+              type="button"
+              disabled={disabled || !padValue.selection.point}
+              data-primary="true"
+              onClick={onContinue}
+            >
+              Continue to Feel
             </button>
           ) : null}
         </div>

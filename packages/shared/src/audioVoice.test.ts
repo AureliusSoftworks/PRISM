@@ -40,6 +40,25 @@ import {
 } from "./audioVoice.ts";
 
 describe("audio voice normalization", () => {
+  it("leads the named picker with the five Prism Originals", () => {
+    const pickerOrder = [...PRISM_BUILTIN_ENGLISH_VOICES]
+      .sort((left, right) => left.selectionOrder - right.selectionOrder)
+      .map((voice) => voice.name);
+    assert.deepEqual(pickerOrder.slice(0, 5), [
+      "Pia",
+      "Rowan",
+      "Iris",
+      "Sol",
+      "Mira",
+    ]);
+    assert.equal(new Set(pickerOrder).size, pickerOrder.length);
+    assert.ok(
+      PRISM_BUILTIN_ENGLISH_VOICES.every(
+        (voice) => !/American|British/iu.test(voice.character),
+      ),
+    );
+  });
+
   it("keeps every PRISM voice embedding in the packaged desktop runtime", () => {
     const stagingSource = readFileSync(
       new URL("../../../scripts/stage-desktop-runtime.mjs", import.meta.url),

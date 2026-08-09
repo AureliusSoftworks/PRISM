@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
   PRISM_BUILTIN_ENGLISH_VOICES,
+  resolveLocalVoicePronunciationLocale,
 } from "@localai/shared";
 import {
   applyOfflineVoiceSelection,
@@ -16,7 +17,7 @@ import {
 const catalog: OfflineVoiceOption[] = [
   ...PRISM_BUILTIN_ENGLISH_VOICES.map((voice) => ({
     value: builtinVoiceSelectionValue(voice.voiceId),
-    label: voice.character,
+    label: voice.name,
     kind: "builtin" as const,
     locale: voice.locale,
     presentation: voice.presentation,
@@ -32,27 +33,34 @@ const catalog: OfflineVoiceOption[] = [
 describe("offline voice selection", () => {
   it("keeps portable built-in identities independent of the host OS", () => {
     const selected = applyOfflineVoiceSelection(
-      { ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, systemVoiceName: "Alex" },
+      {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        systemVoiceName: "Alex",
+        accentLocale: "en-US",
+        pronunciationBase: "en-US",
+      },
       builtinVoiceSelectionValue("voice-4"),
     );
     assert.equal(selected.baseVoiceId, "voice-4");
     assert.equal(selected.systemVoiceName, undefined);
-    assert.equal(selected.accentLocale, "en-GB");
+    assert.equal(selected.pronunciationBase, "en-US");
     assert.equal(offlineVoiceSelectionValue(selected), "builtin:voice-4");
   });
 
   it("keeps a saved OS voice authoritative after the catalog opt-in changes", () => {
     const selected = applyOfflineVoiceSelection(
-      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        pronunciationBase: "en-GB",
+      },
       operatingSystemVoiceSelectionValue("Samantha"),
-      catalog,
     );
     assert.equal(selected.systemVoiceName, "Samantha");
-    assert.equal(selected.accentLocale, "en-US");
+    assert.equal(selected.pronunciationBase, "en-GB");
     assert.equal(offlineVoiceSelectionValue(selected), "os:Samantha");
   });
 
-  it("mixes American and British voices while filtering gender", () => {
+  it("filters named voices by presentation without grouping by locale", () => {
     const feminine = offlineVoiceOptionsForFilters(catalog, {
       presentation: "feminine",
     });
@@ -64,10 +72,8 @@ describe("offline voice selection", () => {
           voice.presentation === "feminine",
       ),
     );
-    assert.deepEqual(
-      new Set(feminine.map((voice) => voice.locale)),
-      new Set(["en-US", "en-GB"]),
-    );
+    assert.ok(feminine.some((voice) => voice.label === "Pia"));
+    assert.ok(feminine.some((voice) => voice.label === "Iris"));
     assert.equal(
       offlineVoiceOptionsForFilters(catalog, {
         presentation: "feminine",
@@ -82,22 +88,43 @@ describe("offline voice selection", () => {
     );
   });
 
-  it("preserves pronunciation while selecting across gender and accent", () => {
+  it("preserves the full map-authored pronunciation while changing voices", () => {
+    const pronunciation = {
+      pronunciationBase: "en-US" as const,
+      pronunciationMapPoint: { x: 0.226, y: 0.279 },
+      speechprintInfluence: "southern-us-english" as const,
+      speechprintStrength: "strong" as const,
+      speechprintVariationSeed: "southern-demo",
+    };
     const selected = applyOfflineVoiceSelection(
       {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
         baseVoiceId: "voice-1",
-        pronunciationBase: "en-GB",
+        ...pronunciation,
       },
-      builtinVoiceSelectionValue("voice-5"),
-      catalog,
+      builtinVoiceSelectionValue("voice-4"),
+    );
+    assert.equal(selected.baseVoiceId, "voice-4");
+    assert.equal(selected.pronunciationBase, pronunciation.pronunciationBase);
+    assert.deepEqual(
+      selected.pronunciationMapPoint,
+      pronunciation.pronunciationMapPoint,
     );
     assert.equal(
-      PRISM_BUILTIN_ENGLISH_VOICES.find(
-        (voice) => voice.voiceId === selected.baseVoiceId,
-      )?.presentation,
-      "masculine",
+      selected.speechprintInfluence,
+      pronunciation.speechprintInfluence,
     );
-    assert.equal(selected.pronunciationBase, "en-GB");
+    assert.equal(selected.speechprintStrength, pronunciation.speechprintStrength);
+    assert.equal(
+      selected.speechprintVariationSeed,
+      pronunciation.speechprintVariationSeed,
+    );
+    assert.equal(
+      resolveLocalVoicePronunciationLocale(
+        selected.pronunciationBase,
+        selected.accentLocale,
+      ),
+      "en-US",
+    );
   });
 });

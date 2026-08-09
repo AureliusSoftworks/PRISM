@@ -23,6 +23,8 @@ describe("bot generation route", () => {
     assert.match(routeSource, /readModelOverride\(body\.modelOverride\)/u);
     assert.match(routeSource, /requestedModelOverride\?\.toLowerCase\(\) === "auto"/u);
     assert.match(routeSource, /explicitModelOverride,/u);
+    assert.doesNotMatch(routeSource, /requestElevenLabsVoiceCatalog/u);
+    assert.doesNotMatch(routeSource, /voiceCatalog/u);
   });
 });
 
@@ -107,7 +109,20 @@ function rawDraft(voiceId: string | null = null): Record<string, unknown> {
     },
     avatarDetails: {
       stamps: [{ id: "diagonal-scar", offsetX: 0, offsetY: 0, scalePct: 100 }],
-      ink: [{ role: "effect", shape: "line", x1: 45, y1: 68, x2: 52, y2: 71, size: 1 }],
+      ink: [
+        {
+          role: "effect",
+          points: [
+            { x: 36, y: 30 },
+            { x: 50, y: 22 },
+            { x: 78, y: 22 },
+            { x: 92, y: 30 },
+          ],
+          closed: false,
+          fill: false,
+          size: 2,
+        },
+      ],
     },
     voice: {
       baseVoiceId: "voice-7",
@@ -183,16 +198,16 @@ describe("PRISM bot generator", () => {
     );
   });
 
-  it("parses fenced model JSON and accepts only catalog-backed Premium voices", () => {
+  it("parses fenced model JSON while keeping premium voice identity unlinked", () => {
     const parsed = parseGeneratedBotDraftText(
       `\n\`\`\`json\n${JSON.stringify(rawDraft("premium-mara"))}\n\`\`\``,
-      ["premium-mara"],
     );
     assert.ok(parsed);
     assert.equal(parsed.name, "Mara Vale");
     assert.equal(parsed.namePronunciation, "");
     assert.equal(parsed.selfReferral, "");
-    assert.equal(parsed.audioVoiceProfile.elevenLabsVoiceId, "premium-mara");
+    assert.equal(parsed.audioVoiceProfile.elevenLabsVoiceId, undefined);
+    assert.equal(parsed.audioVoiceProfile.elevenLabsVoiceInitialized, true);
     assert.equal(parsed.audioVoiceProfile.baseVoiceId, "voice-7");
     assert.equal(parsed.face.eyeCount, 1);
     assert.equal(parsed.face.eyeRotationDeg, 0);
@@ -218,7 +233,6 @@ describe("PRISM bot generator", () => {
       providerName: "local",
       model: "llama-local",
       responseMode: "local",
-      voiceCatalog: [],
     });
     assert.equal(result.providerNameUsed, "local");
     assert.equal(result.modelUsed, "llama-local");
@@ -229,19 +243,26 @@ describe("PRISM bot generator", () => {
     assert.equal(capturedOptions?.jsonSchemaName, "prism_bot_generated_draft_v1");
     assert.ok(capturedOptions?.jsonSchema);
     assert.doesNotMatch(JSON.stringify(capturedOptions?.jsonSchema), /"stamps"/u);
+    assert.doesNotMatch(JSON.stringify(capturedOptions?.jsonSchema), /elevenLabsVoiceId/u);
+    assert.match(JSON.stringify(capturedOptions?.jsonSchema), /"points"/u);
     assert.deepEqual(result.draft.avatarDetails?.screen.stamps, []);
-    assert.match(provider.calls[0]?.[0]?.content ?? "", /No ElevenLabs catalog is available/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /named local PRISM Voice Pack timbre/u);
+    assert.match(
+      provider.calls[0]?.[0]?.content ?? "",
+      /Accent and map location are separate player-authored choices/u,
+    );
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not select or link an ElevenLabs voice/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not create memories/u);
-    assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not create stamps or accessories/u);
-    assert.match(provider.calls[0]?.[0]?.content ?? "", /Never use it to draw a literal portrait/u);
-    assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not recreate eyes or mouths with avatar ink/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not create stamps or raw image\/accessory data/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /safe pixel-portrait layer/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /hair, headwear, brows, facial hair/u);
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",
       /faceMouthCoffeePucker true by default/u,
     );
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",
-      /faceEyeCount is 2, set faceEyeRotationDeg to -90/u,
+      /keep faceEyeRotationDeg at 0 unless/u,
     );
   });
 
