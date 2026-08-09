@@ -98,10 +98,12 @@ export interface LiveBakeArtifactV1 {
 export const LIVE_BAKE_MAX_STEPS_DEBATE = 240;
 export const LIVE_BAKE_MAX_STEPS_SIGNAL = 120;
 export const LIVE_BAKE_DEFAULT_TIMEOUT_MS = 12 * 60_000;
-/** Estimated playback runway required before early Spectator/Watch entry. */
+/** Debate keeps a long runway because its procedural floor can fan out. */
 export const LIVE_BAKE_UNLOCK_BUFFER_MS = 150_000;
+/** Signal's branded intro lets its linear bake continue after one opening line. */
+export const LIVE_BAKE_UNLOCK_BUFFER_MS_SIGNAL = 0;
 export const LIVE_BAKE_UNLOCK_MIN_STEPS_DEBATE = 6;
-export const LIVE_BAKE_UNLOCK_MIN_STEPS_SIGNAL = 4;
+export const LIVE_BAKE_UNLOCK_MIN_STEPS_SIGNAL = 1;
 /** Treat in-flight bake heartbeats older than this as stale and resumable. */
 export const LIVE_BAKE_STALE_HEARTBEAT_MS = 45_000;
 /** ~150 wpm speaking rate for duration estimates when audio length is unknown. */
@@ -226,6 +228,14 @@ export function liveBakeUnlockMinSteps(
     : LIVE_BAKE_UNLOCK_MIN_STEPS_DEBATE;
 }
 
+export function liveBakeUnlockBufferMs(
+  surface: LiveBakeSurfaceV1 | null | undefined,
+): number {
+  return surface === "signal"
+    ? LIVE_BAKE_UNLOCK_BUFFER_MS_SIGNAL
+    : LIVE_BAKE_UNLOCK_BUFFER_MS;
+}
+
 /**
  * Early-entry gate: require both a time buffer ahead of the viewer and a
  * minimum number of settled baker steps (avoids unlocking on tiny steps alone).
@@ -243,7 +253,9 @@ export function liveBakeMayStartWatch(
   const aheadMs = bufferedMs - Math.max(0, viewerPositionMs);
   const minSteps = liveBakeUnlockMinSteps(artifact.surface);
   const steps = artifact.progress?.completedSteps ?? artifact.utterances.length;
-  return aheadMs >= LIVE_BAKE_UNLOCK_BUFFER_MS && steps >= minSteps;
+  return (
+    aheadMs >= liveBakeUnlockBufferMs(artifact.surface) && steps >= minSteps
+  );
 }
 
 /** Whether restore/open should auto-start or resume the bake job. */

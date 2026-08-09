@@ -245,7 +245,10 @@ import {
   type SignalDirectedCameraShot,
 } from "./signalCameraTransition";
 import { signalEpisodeRetryDraft } from "./signalEpisodeRetry";
-import { signalGenerationThinkingRole } from "./signalThinkingPresentation";
+import {
+  signalGenerationThinkingRole,
+  signalThinkingPresentationEndReason,
+} from "./signalThinkingPresentation";
 import {
   ModelWarmupIntermission,
   type ModelWarmupIntermissionPhase,
@@ -2042,7 +2045,6 @@ export function BotcastExperience({
   const [watchBakeStartedAt, setWatchBakeStartedAt] = useState<string | null>(
     null,
   );
-  const [watchBakeLiveFallback, setWatchBakeLiveFallback] = useState(false);
   const [episodeSetupLoadingId, setEpisodeSetupLoadingId] = useState<
     string | null
   >(null);
@@ -3001,16 +3003,33 @@ export function BotcastExperience({
   const cancelWatchBake = (): void => {
     const episodeId = episode?.id ?? watchBakeArtifact?.sourceId ?? null;
     invalidateEpisodeOperation();
+    assignQueuedProducerCue(null);
+    const captureSourceId = signalCaptureSourceIdRef.current;
+    if (captureSourceId && (!episodeId || captureSourceId === episodeId)) {
+      signalCaptureSourceIdRef.current = null;
+      void abortReplayAudioMasterCapture(captureSourceId);
+    }
     if (episodeId) {
-      void request(
+      void request<{ episode: BotcastEpisode }>(
         `/api/botcast/episodes/${encodeURIComponent(episodeId)}/bake/cancel`,
         { method: "POST", body: JSON.stringify({}) },
-      ).catch(() => undefined);
+      )
+        .then(() => {
+          if (selectedShowId) {
+            void loadEpisodes(selectedShowId).catch(() => undefined);
+          }
+          setNotice(
+            "Stopped preparing. The booking is ready to reuse from Latest episodes.",
+          );
+        })
+        .catch((cancelError) => {
+          setError(signalErrorToast("Stop Signal Watch preparation", cancelError));
+        });
     }
+    setEpisode(null);
     setWatchBakeLabel(null);
     setWatchBakeArtifact(null);
     setWatchBakeStartedAt(null);
-    setWatchBakeLiveFallback(false);
     setBusy(false);
   };
 
@@ -5508,6 +5527,7 @@ export function BotcastExperience({
     // Watch bakes behind a fullscreen loader first. The branded intro card
     // only opens once the synthesized episode is ready to present.
     if (watchMode) {
+      assignQueuedProducerCue(null);
       setWatchBakeLabel(liveBakeSurfaceTitle("signal"));
     } else {
       await beginEpisodeIntroBookend(
@@ -5617,7 +5637,6 @@ export function BotcastExperience({
       if (watchMode) {
         setWatchBakeLabel(liveBakeSurfaceTitle("signal"));
         setWatchBakeStartedAt(new Date().toISOString());
-        setWatchBakeLiveFallback(false);
         let bakedEpisode = response.episode;
         let artifact: LiveBakeArtifactV1 | null = null;
         const startBake = await request<{
@@ -5690,8 +5709,6 @@ export function BotcastExperience({
           await releaseSignalModelWarmup(bakedEpisode.id);
           if (!episodeOperationIsCurrent(controller, runId)) return;
           setWatchBakeLabel(null);
-          setWatchBakeArtifact(null);
-          setWatchBakeStartedAt(null);
           await beginEpisodeIntroBookend(
             {
               ...preRoll,
@@ -5705,72 +5722,83 @@ export function BotcastExperience({
           await Promise.all([introPlayback.finished, visualMinimum]);
           if (!episodeOperationIsCurrent(controller, runId)) return;
           setEpisodePreRoll(null);
-          // Held at Start: Watch unlocks paused until the player presses play.
-          // Present only the already-baked opening buffer; baker continues in background.
-          for (const message of bakedEpisode.messages) {
-            if (!episodeOperationIsCurrent(controller, runId)) return;
-            prepareEpisodeMessage(message, bakedEpisode);
-            await playPreparedEpisodeMessage(
-              message,
-              bakedEpisode,
-              controller,
-              runId,
-              true,
+          const presentedWatchMessageIds = new Set<string>();
+          let presentationEpisode = bakedEpisode;
+          let presentationArtifact = artifact;
+          while (episodeOperationIsCurrent(controller, runId)) {
+            const bufferedMessages = presentationEpisode.messages.filter(
+              (message) => !presentedWatchMessageIds.has(message.id),
             );
-          }
-          if (
-            episodeOperationIsCurrent(controller, runId) &&
-            bakedEpisode.status === "completed" &&
-            selectedShow
-          ) {
-            void playEpisodeOutro({
-              episode: bakedEpisode,
-              show: selectedShow,
-              forced: false,
-            });
+            if (bufferedMessages.length > 0) {
+              setWatchBakeLabel(null);
+              for (const message of bufferedMessages) {
+                if (!episodeOperationIsCurrent(controller, runId)) return;
+                prepareEpisodeMessage(message, presentationEpisode);
+                await playPreparedEpisodeMessage(
+                  message,
+                  presentationEpisode,
+                  controller,
+                  runId,
+                  true,
+                );
+                presentedWatchMessageIds.add(message.id);
+              }
+            }
+            if (
+              presentationEpisode.status === "completed" ||
+              presentationArtifact.status === "ready"
+            ) {
+              setEpisode(presentationEpisode);
+              setWatchBakeLabel(null);
+              setWatchBakeArtifact(null);
+              setWatchBakeStartedAt(null);
+              if (selectedShow) {
+                void playEpisodeOutro({
+                  episode: presentationEpisode,
+                  show: selectedShow,
+                  forced: false,
+                });
+              }
+              break;
+            }
+
+            // If playback catches the baker, keep the spectator out of the
+            // producer shell and show a short intermission until the next line.
+            setWatchBakeArtifact(presentationArtifact);
+            setWatchBakeLabel("Preparing the next stretch");
+            await new Promise((resolve) =>
+              window.setTimeout(resolve, LIVE_BAKE_POLL_INTERVAL_MS),
+            );
+            if (!episodeOperationIsCurrent(controller, runId)) return;
+            const polled = await request<{
+              episode: BotcastEpisode;
+              liveBake: LiveBakeArtifactV1;
+              baking?: boolean;
+            }>(
+              `/api/botcast/episodes/${encodeURIComponent(bakedEpisode.id)}/bake`,
+              {
+                method: "POST",
+                signal: controller.signal,
+                body: JSON.stringify({ theme }),
+              },
+            );
+            presentationEpisode = polled.episode;
+            presentationArtifact = polled.liveBake;
+            latestCaptureEpisode = presentationEpisode;
+            setEpisode(presentationEpisode);
+            setWatchBakeArtifact(presentationArtifact);
+            setWatchBakeLabel(liveBakeStatusCopy(presentationArtifact));
+            if (presentationArtifact.status === "cancelled") {
+              throw new DOMException("Bake cancelled", "AbortError");
+            }
+            if (presentationArtifact.status === "failed") {
+              throw new Error(
+                presentationArtifact.error || "Signal bake failed.",
+              );
+            }
           }
         } finally {
           suppressCompletedOutroFallbackRef.current = false;
-        }
-        // Keep baking ahead while watching if not fully ready.
-        if (artifact.status === "baking") {
-          void (async () => {
-            while (
-              episodeOperationIsCurrent(controller, runId) &&
-              !watchBakeLiveFallback
-            ) {
-              await new Promise((resolve) =>
-                window.setTimeout(resolve, LIVE_BAKE_POLL_INTERVAL_MS),
-              );
-              if (!episodeOperationIsCurrent(controller, runId)) return;
-              try {
-                const polled = await request<{
-                  episode: BotcastEpisode;
-                  liveBake: LiveBakeArtifactV1;
-                }>(
-                  `/api/botcast/episodes/${encodeURIComponent(bakedEpisode.id)}/bake`,
-                  {
-                    method: "POST",
-                    signal: controller.signal,
-                    body: JSON.stringify({ theme }),
-                  },
-                );
-                setEpisode(polled.episode);
-                if (
-                  polled.liveBake.status === "ready" ||
-                  polled.liveBake.status === "failed" ||
-                  polled.liveBake.status === "cancelled"
-                ) {
-                  if (polled.liveBake.status !== "ready") {
-                    setWatchBakeLiveFallback(true);
-                  }
-                  return;
-                }
-              } catch {
-                return;
-              }
-            }
-          })();
         }
         return;
       }
@@ -6862,7 +6890,8 @@ export function BotcastExperience({
     ): Promise<boolean> => {
       if (
         !episode ||
-        episode.status === "completed" ||
+        episode.status !== "live" ||
+        episode.playbackMode === "watch" ||
         advanceInFlightRef.current
       )
         return false;
@@ -7434,7 +7463,8 @@ export function BotcastExperience({
   useEffect(() => {
     if (
       !episode ||
-      episode.status === "completed" ||
+      episode.status !== "live" ||
+      episode.playbackMode === "watch" ||
       !autoRun ||
       busy ||
       speakingMessageId !== null
@@ -7458,7 +7488,12 @@ export function BotcastExperience({
   }, [advanceEpisode, autoRun, busy, episode, speakingMessageId]);
 
   const sendCue = (cue: BotcastProducerCue): void => {
-    if (!episode || episode.status !== "live" || episode.segment === "closing")
+    if (
+      !episode ||
+      episode.status !== "live" ||
+      episode.playbackMode === "watch" ||
+      episode.segment === "closing"
+    )
       return;
     const activeHostMessage = episode.messages.find(
       (message) =>
@@ -11805,6 +11840,12 @@ export function BotcastExperience({
   useLayoutEffect(() => {
     const captureSourceId = signalCaptureSourceIdRef.current;
     if (!episode || !captureSourceId) return;
+    const followingMessageId =
+      liveSpeech?.messageId ?? speakingMessageId ?? null;
+    const hasFollowingMessage = Boolean(
+      followingMessageId &&
+        episode.messages.some((message) => message.id === followingMessageId),
+    );
     syncReplayThinkingPresentations({
       sourceId: captureSourceId,
       presentations: livePresentedThinkingBot
@@ -11821,14 +11862,14 @@ export function BotcastExperience({
             },
           ]
         : [],
-      followingMessageId: liveSpeech?.messageId ?? speakingMessageId ?? null,
-      endReason: cuttingShow
-        ? "interrupted"
-        : error
-          ? "failed"
-          : episode.status === "live"
-            ? "completed"
-            : "cancelled",
+      followingMessageId,
+      endingSegment: episode.segment,
+      endReason: signalThinkingPresentationEndReason({
+        cuttingShow,
+        hasError: Boolean(error),
+        hasFollowingMessage,
+        episodeLive: episode.status === "live",
+      }),
     });
   }, [
     busy,
@@ -12646,7 +12687,9 @@ export function BotcastExperience({
                   data-live={episode.status === "live" ? "true" : undefined}
                 >
                   {episode.status === "live"
-                    ? "● ON AIR"
+                    ? episode.playbackMode === "watch"
+                      ? "● WATCHING"
+                      : "● ON AIR"
                     : episodeOutcomeLabel(episode)}
               </span>
               <span
@@ -12680,31 +12723,46 @@ export function BotcastExperience({
                 </span>
               )}
                 <span>
-                  {episode.guestKind === "producer"
+                  {episode.playbackMode === "watch"
+                    ? "Prism directing"
+                    : episode.guestKind === "producer"
                     ? "Producer on mic"
                     : episode.tensionStage === "calm"
                     ? "Guest settled"
                     : `Guest: ${episode.tensionStage}`}
               </span>
-              <button
-                type="button"
-                onClick={() => {
-                  if (!autoRun) onPrepareUtterance?.();
-                  setAutoRun((value) => !value);
-                }}
-                disabled={episode.status === "completed"}
-              >
-                {autoRun ? "Pause rundown" : "Resume rundown"}
-              </button>
-              <button
-                type="button"
-                className={styles.cutShowButton}
-                onClick={() => void cutShow()}
-                disabled={episode.status !== "live"}
-                aria-label="Cut the live show"
-              >
-                {cuttingShow ? "■ Cut now" : "■ Cut show"}
-              </button>
+              {episode.playbackMode === "watch" ? (
+                <button
+                  type="button"
+                  className={styles.cutShowButton}
+                  onClick={cancelWatchBake}
+                  disabled={episode.status !== "live"}
+                >
+                  ■ Stop watching
+                </button>
+              ) : (
+                <>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      if (!autoRun) onPrepareUtterance?.();
+                      setAutoRun((value) => !value);
+                    }}
+                    disabled={episode.status === "completed"}
+                  >
+                    {autoRun ? "Pause rundown" : "Resume rundown"}
+                  </button>
+                  <button
+                    type="button"
+                    className={styles.cutShowButton}
+                    onClick={() => void cutShow()}
+                    disabled={episode.status !== "live"}
+                    aria-label="Cut the live show"
+                  >
+                    {cuttingShow ? "■ Cut now" : "■ Cut show"}
+                  </button>
+                </>
+              )}
               <button
                 type="button"
                 className={styles.dangerButton}
@@ -12727,7 +12785,8 @@ export function BotcastExperience({
               activeMessage: liveActiveMessage,
               replay: false,
             })}
-            {episode.status === "live" ? (
+            {episode.status === "live" &&
+            episode.playbackMode !== "watch" ? (
               <div
                 className={styles.liveCameraControls}
                 aria-label="Signal live cameras"
@@ -12766,7 +12825,8 @@ export function BotcastExperience({
                 </button>
               </div>
             ) : null}
-            {episode.guestKind !== "producer" ? (
+            {episode.playbackMode !== "watch" &&
+            episode.guestKind !== "producer" ? (
               <div className={styles.controlRoom}>
               <aside
                 className={styles.producerControls}
@@ -12909,7 +12969,9 @@ export function BotcastExperience({
               </aside>
               </div>
             ) : null}
-              {episode.guestKind === "producer" && episode.status === "live" ? (
+              {episode.playbackMode !== "watch" &&
+              episode.guestKind === "producer" &&
+              episode.status === "live" ? (
               <div
                 className={styles.producerGuestComposerDock}
                 data-tutorial-target="botcast-cues"
@@ -14423,7 +14485,7 @@ export function BotcastExperience({
       }
       detail={
         blockingOperation?.detail ??
-        "Prism is preparing the opening stretch so watching can begin once enough of the broadcast is ready. You can leave anytime — progress is saved."
+        "Prism is preparing the opening stretch so watching can begin once enough of the broadcast is ready. You can stop anytime — the booking stays available to reuse."
       }
       stepLabel={
         blockingOperation?.stepLabel ??
@@ -14460,7 +14522,7 @@ export function BotcastExperience({
       }
       cancelConfirmDetail={
         watchBakeLabel !== null
-          ? "Your progress stays saved. You can reopen later and Prism will continue from where it left off."
+          ? "This Watch attempt will stop and return to the show. Its booking stays available in Latest episodes."
           : "This request will stop. You can try again whenever you are ready."
       }
     />

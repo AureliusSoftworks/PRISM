@@ -703,6 +703,7 @@ export function syncReplayThinkingPresentations(args: {
   }[];
   followingMessageId?: string | null;
   endReason?: ReplayThinkingDirectionPayloadV2["endReason"];
+  endingSegment?: string | null;
 }): void {
   const capture = activeCapture;
   if (!capture || capture.sourceId !== args.sourceId) return;
@@ -717,6 +718,9 @@ export function syncReplayThinkingPresentations(args: {
   for (const [participantId, active] of capture.thinkingByParticipant) {
     const next = nextByParticipant.get(participantId);
     if (!next) {
+      if (args.endingSegment !== undefined) {
+        active.segment = args.endingSegment;
+      }
       endReplayThinkingPresentation({
         sourceId: args.sourceId,
         participantId,

@@ -90,6 +90,28 @@ describe("Premium voice default initialization", () => {
     assert.equal(result.prismDefaultBotAudioVoiceProfile, null);
   });
 
+  it("preserves explicit local-only identities from serialized database rows", () => {
+    const generatedLocalOnly = {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      baseVoiceId: "voice-5",
+      accentLocale: "en-GB",
+      elevenLabsVoiceInitialized: true,
+    };
+    const result = initializePremiumVoiceDefaults({
+      userId: "user-serialized",
+      voices,
+      bots: [{
+        id: "generated-local-only",
+        authoredAudioVoiceProfile: JSON.stringify(generatedLocalOnly),
+        audioVoiceProfileOverride: null,
+      }],
+      prismDefaultBotAudioVoiceProfile: JSON.stringify(generatedLocalOnly),
+    });
+
+    assert.deepEqual(result.botUpdates, []);
+    assert.equal(result.prismDefaultBotAudioVoiceProfile, null);
+  });
+
   it("does not mutate profiles when a catalog is empty", () => {
     assert.deepEqual(
       initializePremiumVoiceDefaults({

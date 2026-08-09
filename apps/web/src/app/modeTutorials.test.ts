@@ -90,6 +90,10 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /generated drafts/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /perimeter dock/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /light online/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /display stays fixed/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /Five floating orbs/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /nearby-choice buttons/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /audition dock/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /Wield Prism/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /randomizer buttons/u);
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Save or Create bot/u);
@@ -111,6 +115,7 @@ describe("mode tutorials", () => {
     assert.match(step.body, /does not move the bot across regions/u);
     assert.match(step.body, /without exposing engine regions/u);
     assert.match(step.body, /All accents/u);
+    assert.match(step.body, /Nearby choices/u);
     assert.match(step.body, /Original and With accent/u);
   });
 
@@ -1826,6 +1831,14 @@ describe("mode tutorials", () => {
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
       /Watch prepares ahead with a progressive bake/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /shorter opening runway/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
+      /keeps its booking in Latest episodes for a clean retry/u,
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",

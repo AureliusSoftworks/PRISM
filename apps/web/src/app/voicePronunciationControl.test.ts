@@ -19,9 +19,9 @@ const atlasMap = new URL(
 
 describe("cross-accent local voice pronunciation controls", () => {
   it("uses the Foundry adjustment console for bots and Default PRISM", () => {
-    assert.match(pageSource, /value: "pronunciation", label: "Accent"/u);
-    assert.match(pageSource, /value: "feel", label: "Feel"/u);
-    assert.match(pageSource, /value: "voice", label: "Voice"/u);
+    assert.match(pageSource, /value: "pronunciation", label: "1 Accent"/u);
+    assert.match(pageSource, /value: "feel", label: "2 Feel"/u);
+    assert.match(pageSource, /value: "voice", label: "3 Voice"/u);
     assert.match(pageSource, /data-bot-voice-feel-stage="true"/u);
     assert.match(pageSource, /data-bot-voice-identity-stage=/u);
     assert.match(pageSource, /<PronunciationAtlas/u);
@@ -114,5 +114,13 @@ describe("cross-accent local voice pronunciation controls", () => {
     assert.doesNotMatch(atlasSource, /const snapped/u);
     assert.match(atlasSource, /pronunciationAtlasPointForSelection/u);
     assert.match(pageSource, /pronunciationMapPoint: selection\.point/u);
+  });
+
+  it("offers nearby accent choices and a single stage-level audition dock", () => {
+    assert.match(atlasSource, /Nearby choices/u);
+    assert.match(atlasSource, /pronunciationAtlasNearbyCandidates/u);
+    assert.match(pageSource, /className=\{styles\.botAvatarVoiceTestDock\}/u);
+    assert.match(pageSource, /English[\s\S]*Premium[\s\S]*Babble[\s\S]*Bottish/u);
+    assert.match(pageSource, /Nothing is added to chat\./u);
   });
 });

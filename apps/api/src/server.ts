@@ -18051,6 +18051,12 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
       const frozenEpisode = getBotcastEpisode(db, userId, ctx.params.id);
+      if (frozenEpisode.playbackMode === "watch") {
+        throw new HttpError(
+          409,
+          "Watch a show advances through its background bake, not producer controls.",
+        );
+      }
       const runtime = await contextualSignalRuntimeForEpisode({
         userId,
         user,
@@ -18187,7 +18193,12 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
       liveBakeJobs.cancelSignalBake(userId, ctx.params.id);
-      const latest = getBotcastEpisode(db, userId, ctx.params.id);
+      const latest =
+        episode.status === "completed"
+          ? episode
+          : cancelBotcastEpisode(db, userId, ctx.params.id, {
+              reason: "watch_preparation_stopped",
+            });
       json(ctx.res, 200, {
         ok: true,
         episode: latest,
@@ -18195,13 +18206,11 @@ function buildRoutes(): RouteDefinition[] {
           status:
             latest.status === "completed"
               ? "ready"
-              : liveBakeJobs.isSignalRunning(userId, ctx.params.id)
-                ? "baking"
-                : "cancelled",
+              : "cancelled",
           error:
             latest.status === "completed" ? null : "Bake cancelled.",
         }),
-        baking: liveBakeJobs.isSignalRunning(userId, ctx.params.id),
+        baking: false,
       });
     }),
     // Coffee mode (timed live sessions for 3-5 reactive bots). Lives on its own

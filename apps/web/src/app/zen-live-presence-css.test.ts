@@ -2295,6 +2295,51 @@ describe("Zen live presence CSS", () => {
     );
   });
 
+  it("anchors eyes independently from changing talking visemes", () => {
+    const faceTrackRule = ruleForSelectorNeedlesWithBody(
+      [
+        ".coffeeSeatPlateEmoji",
+        ".messageMoodCoffeeFace",
+        ".zenLiveBotPresenceFaceGlyph",
+      ],
+      'grid-template-areas: "eyes mouth"',
+    );
+    assert.match(faceTrackRule, /grid-template-areas:\s*"eyes mouth"\s*;/);
+    assert.match(faceTrackRule, /grid-template-rows:\s*1em\s*;/);
+
+    const featureLayoutRule = ruleForSelectorNeedlesWithBody(
+      [".coffeeSeatPlateEmoji [data-coffee-plate-emoji-part]"],
+      "position: relative",
+    );
+    assert.match(featureLayoutRule, /position:\s*relative\s*;/);
+    assert.match(featureLayoutRule, /justify-self:\s*center\s*;/);
+    assert.match(featureLayoutRule, /align-self:\s*center\s*;/);
+
+    const eyesTrackRule = ruleForSelectorNeedlesWithBody(
+      ['[data-coffee-plate-emoji-part="eyes"]'],
+      "grid-area: eyes",
+    );
+    const mouthTrackRule = ruleForSelectorNeedlesWithBody(
+      ['[data-coffee-plate-emoji-part="mouth"]'],
+      "grid-area: mouth",
+    );
+    assert.match(eyesTrackRule, /grid-area:\s*eyes\s*;/);
+    assert.match(eyesTrackRule, /position:\s*absolute\s*;/);
+    assert.match(mouthTrackRule, /grid-area:\s*mouth\s*;/);
+    assert.doesNotMatch(mouthTrackRule, /position:\s*absolute\s*;/);
+
+    const roundedVisemeRule = ruleForSelectorNeedlesWithBody(
+      [
+        '[data-coffee-plate-emoji-part="mouth"]',
+        '[data-coffee-plate-emoji-glyph="0"]',
+      ],
+      "inline-size: 1.12em",
+    );
+    assert.match(roundedVisemeRule, /inline-size:\s*1\.12em\s*;/);
+    assert.match(roundedVisemeRule, /justify-self:\s*center\s*;/);
+    assert.match(roundedVisemeRule, /align-self:\s*center\s*;/);
+  });
+
   it("keeps speaking face phosphor as broad as idle", () => {
     const zenTalkingGlyphPartRule = ruleForNormalizedSelector(
       '.zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"]) .zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part]',

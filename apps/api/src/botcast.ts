@@ -108,6 +108,7 @@ import {
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
   BOTCAST_DEFAULT_STUDIO_ATMOSPHERE_MIX,
   BOTCAST_FALLBACK_STUDIO_ACCENT_VARIANTS,
+  DIRECTIONAL_IRRITATION_MAX,
   SIGNAL_PICKLES_SLOW_SIP_DURATION_MS,
   BOT_POWER_CANONICAL_SILENCE_V1,
   applyDirectionalIrritationCleanTurnDecay,
@@ -8068,6 +8069,7 @@ export interface BotcastPromptBuildArgs {
   cueDelivery?: BotcastProducerCueDelivery;
   interruptionBridgeLine?: string;
   departureRequired?: boolean;
+  departureReason?: "producer_pressure" | "repeated_power_interruptions";
   /** The Producer requested an expedited close after the current line finishes. */
   producerCut?: boolean;
   /** Active Library/Marketplace form for the speaking holder (sticky or freshly reshuffled). */
@@ -9331,7 +9333,9 @@ export function buildBotcastSpeakerPrompt(
           wrappingUp
             ? "The host has opened the closing exchange and offered you the floor. If this guest genuinely wants the moment, use it for one brief final comment—a closing thought, direct response, correction, or thanks in your own voice. If not, answer tersely and leave the space alone. Do not introduce a new topic, ask a return question, or turn this into the host's sign-off."
             : args.departureRequired
-            ? "Your firm boundary was ignored. Leave now with one in-character final line. Do not ask permission, explain that this was inevitable, or continue the interview."
+            ? args.departureReason === "repeated_power_interruptions"
+              ? "Repeated interruptions have exhausted your patience. Leave now with one in-character final line. Do not ask permission, forecast the exit, or continue the interview."
+              : "Your firm boundary was ignored. Leave now with one in-character final line. Do not ask permission, explain that this was inevitable, or continue the interview."
             : firstGuestAfterMutedHostOpening
               ? `This is the episode's first audible line because ${guestNamesHost} cannot speak. Carry the opening naturally: say the exact show name "${args.show.name}", identify yourself as the guest "${args.guest.name}" and ${guestNamesHost} as the host, name the subject, then offer your first substantive thought. Do not claim the host spoke or asked a question.`
               : firstGuestOpeningReply
@@ -11194,6 +11198,9 @@ export function cancelBotcastEpisode(
   db: DatabaseSync,
   userId: string,
   episodeId: string,
+  options: {
+    reason?: "producer_ended_early" | "watch_preparation_stopped";
+  } = {},
 ): BotcastEpisode {
   const episode = getBotcastEpisode(db, userId, episodeId);
   if (episode.status === "cancelled") return episode;
@@ -11214,7 +11221,7 @@ export function cancelBotcastEpisode(
     userId,
     episode.id,
     "episode_cancelled",
-    { reason: "producer_ended_early" },
+    { reason: options.reason ?? "producer_ended_early" },
     now,
   );
   return getBotcastEpisode(db, userId, episode.id);
@@ -12295,10 +12302,24 @@ export async function advanceBotcastEpisode(
   const speakerEchoesForTurn =
     speakerEchoesAddressedSpeech &&
     (addressedSpeechForEcho !== null || speakerHasSpoken);
-  const departureRequired =
+  const irritationEdgesAtTurnStart =
+    botcastDirectionalIrritationEdgesFromEvents(episode.events);
+  const tensionDepartureRequired =
     !speakerEternallyIntroduces &&
     speakerRole === "guest" &&
     botcastGuestDepartureEligible(tension);
+  const directionalIrritationDepartureRequired =
+    !speakerEternallyIntroduces &&
+    speakerRole === "guest" &&
+    episode.guestKind === "bot" &&
+    episode.guestPresenceMode === "present" &&
+    readDirectionalIrritationIntensity({
+      edges: irritationEdgesAtTurnStart,
+      subjectBotId: speaker.id,
+      targetBotId: peer.id,
+    }) >= DIRECTIONAL_IRRITATION_MAX;
+  const departureRequired =
+    tensionDepartureRequired || directionalIrritationDepartureRequired;
   const picklesSipAlreadyScheduled = episode.events.some((event) =>
     Boolean(signalPicklesSipCueFromEvent(event)),
   );
@@ -12549,6 +12570,13 @@ export async function advanceBotcastEpisode(
       ? { interruptionBridgeLine: guestInterruption.bridgeLine }
       : {}),
     departureRequired,
+    ...(departureRequired
+      ? {
+          departureReason: directionalIrritationDepartureRequired
+            ? "repeated_power_interruptions" as const
+            : "producer_pressure" as const,
+        }
+      : {}),
     ...(producerCut ? { producerCut: true } : {}),
     activeIdentityShapeshiftState,
     identityShapeshiftJustChanged,
@@ -13087,6 +13115,9 @@ export async function advanceBotcastEpisode(
     }
   }
   const latestEpisode = getBotcastEpisode(db, userId, episode.id);
+  if (generation.signal?.aborted || latestEpisode.status === "cancelled") {
+    throw new DOMException("Signal generation was cancelled.", "AbortError");
+  }
   const producerCutStartedDuringTurn =
     !producerCut &&
     latestEpisode.events.some(
@@ -13708,9 +13739,7 @@ export async function advanceBotcastEpisode(
       : tensionMoodKey;
   // Episode-scoped directed irritation: bias reclaim and plan transitions before
   // the utterance event so delivery metadata can ride on that payload.
-  let irritationEdges = botcastDirectionalIrritationEdgesFromEvents(
-    episode.events,
-  );
+  let irritationEdges = irritationEdgesAtTurnStart;
   const appliedIrritationTransitionIds =
     botcastDirectionalIrritationAppliedTransitionIdsFromEvents(episode.events);
   const irritationTowardInterrupter = readDirectionalIrritationIntensity({
@@ -13782,7 +13811,8 @@ export async function advanceBotcastEpisode(
         (directionalIrritationDelivery.snarkCue as BotCrosstalkInterruptedSpeakerCue))
       : undefined;
   const utteranceMoodKey =
-    directionalIrritationDelivery?.moodKey ?? messageMoodKey;
+    directionalIrritationDelivery?.moodKey ??
+    (directionalIrritationDepartureRequired ? "strained" : messageMoodKey);
   if (hostSignsOffThisTurn) {
     transitionEpisodeSegment(db, userId, episode, "closing", now);
     episode = getBotcastEpisode(db, userId, episode.id);
@@ -14329,6 +14359,7 @@ export async function advanceBotcastEpisode(
     !producerCut &&
     !powerInterruptionPlan &&
     !powerInterruptedContent &&
+    !participantDepartsThisTurn &&
     !socialSilenceMarker &&
     !speakerIsMutedForTurn
   ) {
@@ -14366,7 +14397,7 @@ export async function advanceBotcastEpisode(
     const departureOutcome: BotcastEpisodeOutcome = hostRageQuitsThisTurn
       ? "host_departed"
       : "guest_departed";
-    if (departureRequired) {
+    if (tensionDepartureRequired) {
       db.prepare(
         `UPDATE botcast_episodes
             SET tension_level = 3, outcome = 'guest_departed', updated_at = ?
@@ -14398,9 +14429,11 @@ export async function advanceBotcastEpisode(
         speakerRole: departingRole,
         cause: hostRageQuitsThisTurn
           ? "host_rage_quit"
-          : departureRequired
-            ? requestedCue?.kind ?? "continued_boundary_pressure"
-            : "voluntary_exit",
+          : directionalIrritationDepartureRequired
+            ? "repeated_power_interruptions"
+            : tensionDepartureRequired
+              ? requestedCue?.kind ?? "continued_boundary_pressure"
+              : "voluntary_exit",
         emptyChair: true,
         microphoneRemains: true,
         mugRemains: true,

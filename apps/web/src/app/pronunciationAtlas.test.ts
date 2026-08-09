@@ -9,6 +9,7 @@ import {
   pronunciationAtlasAnchorForSelection,
   pronunciationAtlasPointForCoordinates,
   pronunciationAtlasNaturalSelection,
+  pronunciationAtlasNearbyCandidates,
   pronunciationAtlasPointForSelection,
   pronunciationAtlasSelectionAtPoint,
   pronunciationAtlasLocationText,
@@ -205,6 +206,40 @@ describe("Pronunciation Atlas", () => {
         influence: "latin-american-spanish-influenced-english",
       }),
       "Latin American Spanish · Balanced",
+    );
+  });
+
+  it("offers explicit nearby choices in dense map regions", () => {
+    const ireland = PRONUNCIATION_ATLAS_ANCHORS.find(
+      (anchor) => anchor.influence === "irish-english",
+    );
+    assert.ok(ireland);
+    const candidates = pronunciationAtlasNearbyCandidates(
+      { ...britishFrench, point: ireland.point },
+      6,
+    );
+    assert.equal(candidates[0]?.label, "Irish");
+    assert.ok(candidates.some(({ label }) => label === "Scottish"));
+    assert.ok(candidates.some(({ label }) => label === "British"));
+  });
+
+  it("commits a nearby choice to its authored anchor", () => {
+    const france = PRONUNCIATION_ATLAS_ANCHORS.find(
+      (anchor) => anchor.influence === "french-influenced-english",
+    );
+    assert.ok(france);
+    const candidates = pronunciationAtlasNearbyCandidates(
+      { ...britishFrench, point: france.point },
+      6,
+    );
+    const german = candidates.find(({ label }) => label === "German");
+    assert.ok(german);
+    assert.equal(german.selection.influence, "german-influenced-english");
+    assert.deepEqual(
+      german.selection.point,
+      PRONUNCIATION_ATLAS_ANCHORS.find(
+        (anchor) => anchor.influence === "german-influenced-english",
+      )?.point,
     );
   });
 });

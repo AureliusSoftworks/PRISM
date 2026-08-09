@@ -214,6 +214,12 @@ describe("PRISM bot generator", () => {
     assert.equal(parsed.face.mouthCoffeePucker, false);
     assert.deepEqual(parsed.avatarDetails?.screen.stamps, []);
     assert.ok(parsed.avatarDetails?.screen.paintColorMapBase64);
+    assert.equal(parsed.face.eyeOffsetX, 0);
+    assert.equal(parsed.face.eyeOffsetY, 0.18);
+    assert.equal(parsed.face.blinkOffsetX, 0);
+    assert.equal(parsed.face.blinkOffsetY, 0.18);
+    assert.equal(parsed.face.mouthOffsetX, 0);
+    assert.equal(parsed.face.mouthOffsetY, 0.08);
   });
 
   it("keeps LOCAL generation on the supplied local provider and requests structured output", async () => {
@@ -245,6 +251,7 @@ describe("PRISM bot generator", () => {
     assert.doesNotMatch(JSON.stringify(capturedOptions?.jsonSchema), /"stamps"/u);
     assert.doesNotMatch(JSON.stringify(capturedOptions?.jsonSchema), /elevenLabsVoiceId/u);
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /"points"/u);
+    assert.match(JSON.stringify(capturedOptions?.jsonSchema), /"enum":\["effect"\]/u);
     assert.deepEqual(result.draft.avatarDetails?.screen.stamps, []);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /named local PRISM Voice Pack timbre/u);
     assert.match(
@@ -254,7 +261,13 @@ describe("PRISM bot generator", () => {
     assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not select or link an ElevenLabs voice/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not create memories/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not create stamps or raw image\/accessory data/u);
-    assert.match(provider.calls[0]?.[0]?.content ?? "", /safe pixel-portrait layer/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /safe static pixel-portrait layer/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /calibrated portrait landmarks/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /eye window x 42-86 and y 50-70/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /do not use blink or talking paths/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /subtle three-quarter view/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /player explicitly requests a straight-on portrait/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /keep the live eye and mouth landmarks fixed, level, unobstructed/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /hair, headwear, brows, facial hair/u);
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",

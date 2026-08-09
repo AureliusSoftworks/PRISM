@@ -20,6 +20,7 @@ import {
   nudgePronunciationAtlasSelection,
   normalizePronunciationAtlasSelection,
   pronunciationAtlasNaturalSelection,
+  pronunciationAtlasNearbyCandidates,
   pronunciationAtlasLocationText,
   pronunciationAtlasPointForSelection,
   pronunciationAtlasSelectionAtPoint,
@@ -116,6 +117,9 @@ export function PronunciationAtlas({
     pronunciationAtlasNaturalSelection(normalizedSelection.sourceLocale),
   );
   const summary = pronunciationAtlasLocationText(padValue.selection);
+  const nearbyCandidates = pronunciationAtlasNearbyCandidates(
+    padValue.selection,
+  );
   const fallbackId = useId();
 
   const commitSelection = (next: PronunciationAtlasSelection): void => {
@@ -168,6 +172,30 @@ export function PronunciationAtlas({
         }}
         renderOverlay={() => <PronunciationAtlasMap />}
       />
+      <div className={styles.nearby}>
+        <span>Nearby choices</span>
+        <div role="group" aria-label="Nearby accent choices">
+          {nearbyCandidates.map((candidate) => {
+            const active =
+              candidate.selection.influence === padValue.selection.influence &&
+              (candidate.selection.influence !== "none" ||
+                candidate.selection.pronunciationBase ===
+                  padValue.selection.pronunciationBase);
+            return (
+              <button
+                key={candidate.id}
+                type="button"
+                data-active={active ? "true" : undefined}
+                aria-pressed={active}
+                disabled={disabled}
+                onClick={() => commitSelection(candidate.selection)}
+              >
+                {candidate.label}
+              </button>
+            );
+          })}
+        </div>
+      </div>
       <div className={styles.controls}>
         {padValue.selection.influence !== "none" ? (
           <div

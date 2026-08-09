@@ -7,7 +7,9 @@ import {
   isLiveBakeArtifactV1,
   LIVE_BAKE_PREMIUM_UPGRADE_SEAM,
   LIVE_BAKE_UNLOCK_BUFFER_MS,
+  LIVE_BAKE_UNLOCK_BUFFER_MS_SIGNAL,
   LIVE_BAKE_UNLOCK_MIN_STEPS_DEBATE,
+  LIVE_BAKE_UNLOCK_MIN_STEPS_SIGNAL,
   liveBakeArtifactIsPlayable,
   liveBakeBufferedPlaybackMs,
   liveBakeMayStartWatch,
@@ -96,6 +98,32 @@ describe("liveBake", () => {
     assert.ok(liveBakeBufferedPlaybackMs(artifact) >= LIVE_BAKE_UNLOCK_BUFFER_MS);
     assert.equal(liveBakeMayStartWatch(artifact, 0), true);
     assert.equal(liveBakeArtifactIsPlayable(artifact), true);
+  });
+
+  it("unlocks linear Signal watches with one substantive opening line", () => {
+    const artifact = createEmptyLiveBakeArtifact({
+      surface: "signal",
+      sourceId: "episode-1",
+      title: "Watch",
+    });
+    artifact.status = "baking";
+    for (let index = 0; index < LIVE_BAKE_UNLOCK_MIN_STEPS_SIGNAL; index += 1) {
+      artifact.utterances.push(
+        makeUtterance({
+          id: `signal-u${index}`,
+          text: "A settled Signal opening line.",
+          durationMs: 1_000 + index,
+        }),
+      );
+    }
+    artifact.progress.completedSteps = LIVE_BAKE_UNLOCK_MIN_STEPS_SIGNAL;
+
+    assert.ok(
+      liveBakeBufferedPlaybackMs(artifact) >=
+        LIVE_BAKE_UNLOCK_BUFFER_MS_SIGNAL,
+    );
+    assert.ok(LIVE_BAKE_UNLOCK_BUFFER_MS_SIGNAL < LIVE_BAKE_UNLOCK_BUFFER_MS);
+    assert.equal(liveBakeMayStartWatch(artifact, 0), true);
   });
 
   it("resumes cancelled or stale baking jobs on open", () => {

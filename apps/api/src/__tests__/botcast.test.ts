@@ -1241,6 +1241,14 @@ describe("Botcast persistence and isolation", () => {
       createBlock,
       /createBotcastEpisode\([\s\S]{0,2000}?playbackMode: input\.playbackMode === "watch" \? "watch" : "live"/u,
     );
+    assert.match(
+      serverSource,
+      /frozenEpisode\.playbackMode === "watch"[\s\S]{0,220}?advances through its background bake, not producer controls/u,
+    );
+    assert.match(
+      serverSource,
+      /\/bake\/cancel[\s\S]{0,700}?cancelBotcastEpisode\(db, userId, ctx\.params\.id, \{[\s\S]{0,120}?watch_preparation_stopped/u,
+    );
   });
 
   it("resolves topic and producer-brief wildcards before Signal episode create", () => {
@@ -14311,6 +14319,93 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
+  it("records Watch preparation cancellation without turning it into a producer cut", () => {
+    const db = fixture();
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A stopped Watch attempt",
+        playbackMode: "watch",
+      });
+
+      const cancelled = cancelBotcastEpisode(db, "user-1", episode.id, {
+        reason: "watch_preparation_stopped",
+      });
+
+      assert.equal(cancelled.status, "cancelled");
+      assert.equal(cancelled.playbackMode, "watch");
+      assert.equal(
+        cancelled.events.findLast(
+          (event) => event.kind === "episode_cancelled",
+        )?.payload.reason,
+        "watch_preparation_stopped",
+      );
+      assert.equal(
+        cancelled.events.some((event) => event.kind === "cut_away"),
+        false,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not commit a Watch line that finishes after cancellation", async () => {
+    const db = fixture();
+    let signalProviderStarted!: () => void;
+    const providerStarted = new Promise<void>((resolve) => {
+      signalProviderStarted = resolve;
+    });
+    let releaseProvider!: (value: string) => void;
+    const providerResult = new Promise<string>((resolve) => {
+      releaseProvider = resolve;
+    });
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        signalProviderStarted();
+        return providerResult;
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const episode = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A cancelled in-flight Watch turn",
+        playbackMode: "watch",
+      });
+      const controller = new AbortController();
+      const advancing = advanceBotcastEpisode(
+        db,
+        "user-1",
+        episode.id,
+        {},
+        {
+          ...generation(provider),
+          signal: controller.signal,
+        },
+      );
+      await providerStarted;
+      controller.abort();
+      cancelBotcastEpisode(db, "user-1", episode.id, {
+        reason: "watch_preparation_stopped",
+      });
+      releaseProvider(
+        "Welcome to Mara Vale in the Margins. I'm Mara Vale, joined by Ivo Stone.",
+      );
+
+      await assert.rejects(advancing);
+      const cancelled = getBotcastEpisode(db, "user-1", episode.id);
+      assert.equal(cancelled.status, "cancelled");
+      assert.equal(cancelled.messages.length, 0);
+    } finally {
+      db.close();
+    }
+  });
+
   it("deletes an explicitly discarded live episode so it cannot resume", () => {
     const db = fixture();
     try {
@@ -16729,6 +16824,195 @@ describe("Botcast persistence and isolation", () => {
       const followUpPrompt = captures[2]!.map((message) => message.content).join("\n");
       assert.match(followUpPrompt, /exact audience-heard prefix/u);
       assert.match(followUpPrompt, /Do not invent, complete, paraphrase/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("lets a repeatedly interrupted echo-bound guest walk out before Auto closes", async () => {
+    const db = fixture();
+    const captures: ProviderMessage[][] = [];
+    const hostPowerName = "Interrupting";
+    const hostPowerIntent =
+      "Cuts into every eligible bot turn before the speaker can finish.";
+    const guestPowerName = "Copycat";
+    const guestPowerIntent =
+      "Can only repeat the latest speech addressed to them, verbatim.";
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'host-1'").run(
+      JSON.stringify([{
+        version: 1,
+        id: "power-interrupting",
+        name: hostPowerName,
+        intent: hostPowerIntent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(hostPowerName, hostPowerIntent),
+          selfCue: "Cut into every eligible bot speaker's live turn.",
+          observerCue: "The host interrupts every eligible guest turn.",
+          effects: [
+            {
+              type: "interruption",
+              frequency: "frequent",
+              strength: "large",
+              certainty: "always",
+              targets: [{ kind: "all" }],
+            },
+            { type: "turn_gravity", direction: "more", strength: "large" },
+            {
+              type: "response_bond",
+              direction: "toward",
+              strength: "large",
+              targets: [{ kind: "all" }],
+            },
+          ],
+          ruleLabels: ["Always interrupts eligible bot turns"],
+        },
+      }]),
+    );
+    db.prepare("UPDATE bots SET powers_json = ? WHERE id = 'guest-1'").run(
+      JSON.stringify([{
+        version: 1,
+        id: "power-copycat",
+        name: guestPowerName,
+        intent: guestPowerIntent,
+        enabled: true,
+        compileStatus: "ready",
+        compiled: {
+          version: 1,
+          sourceHash: botPowerSourceHashV1(guestPowerName, guestPowerIntent),
+          selfCue:
+            "Repeat the latest speech addressed to you verbatim. Say nothing else.",
+          observerCue:
+            "The guest can only copy the latest speech addressed to them.",
+          effects: [{ type: "speech_copy", trigger: "direct_address" }],
+          ruleLabels: ["Copies addressed speech"],
+        },
+      }]),
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const hostLines = Array.from({ length: 10 }, (_, index) =>
+        index === 0
+          ? `Welcome to ${show.name}. I'm Mara Vale, joined by Ivo Stone to examine whether repetition can become an original voice. Ivo, what would you say if nobody supplied the words?`
+          : `Attempt ${index}: Ivo Stone, choose one thought that belongs only to you, explain why it matters, and finish the answer in your own words without borrowing this sentence.`,
+      );
+      const created = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Breaking the silence",
+        producerBrief:
+          "Keep trying until the guest says something original or leaves.",
+      });
+      const provider = recordingProvider(hostLines, captures);
+      await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+
+      const insertIrritation = db.prepare(
+        `INSERT INTO botcast_events
+          (id, user_id, episode_id, sequence, kind, payload_json, occurred_at)
+         VALUES (?, 'user-1', ?,
+                 (SELECT COALESCE(MAX(sequence), 0) + 1
+                    FROM botcast_events
+                   WHERE user_id = 'user-1' AND episode_id = ?),
+                 'irritation', ?, ?)`,
+      );
+      let irritationEdges = botcastDirectionalIrritationEdgesFromEvents([]);
+      const appliedTransitionIds = new Set<string>();
+      for (let cutoff = 0; cutoff < 6; cutoff += 1) {
+        const occurredAt = `2026-08-08T12:00:0${cutoff}.000Z`;
+        const planned = botcastPlanDirectionalIrritationForMeaningfulCutoffV1({
+          edges: irritationEdges,
+          appliedTransitionIds,
+          episodeId: created.id,
+          interruptedBotId: "guest-1",
+          interrupterBotId: "host-1",
+          messageId: `prior-interrupted-echo-${cutoff}`,
+          heardRatio: 0.4,
+          floorOutcome: "yield",
+          occurredAt,
+        });
+        irritationEdges = planned.edges;
+        for (const transition of planned.transitions) {
+          appliedTransitionIds.add(transition.transitionId);
+          insertIrritation.run(
+            `prior-irritation-${cutoff}`,
+            created.id,
+            created.id,
+            JSON.stringify({ transition }),
+            occurredAt,
+          );
+        }
+        if (
+          irritationEdges[
+            directionalIrritationEdgeKey("guest-1", "host-1")
+          ]?.intensity === 1
+        ) {
+          break;
+        }
+      }
+
+      assert.equal(
+        irritationEdges[directionalIrritationEdgeKey("guest-1", "host-1")]
+          ?.intensity,
+        1,
+      );
+      const reviewed = (
+        await advanceBotcastEpisode(
+          db,
+          "user-1",
+          created.id,
+          {},
+          generation(provider),
+        )
+      ).episode;
+
+      assert.equal(reviewed.outcome, "guest_departed");
+      assert.equal(reviewed.status, "live");
+      assert.equal(reviewed.segment, "closing");
+      assert.equal(reviewed.tensionStage, "calm");
+      assert.equal(reviewed.warningCount, 0);
+      const departure = reviewed.events.findLast(
+        (event) => event.kind === "departure",
+      );
+      assert.equal(departure?.payload.speakerRole, "guest");
+      assert.equal(departure?.payload.cause, "repeated_power_interruptions");
+      assert.ok(
+        reviewed.events.some(
+          (event) =>
+            event.kind === "camera_suggestion" &&
+            event.payload.reason === "departure",
+        ),
+      );
+      const irritation = botcastDirectionalIrritationEdgesFromEvents(
+        reviewed.events,
+      );
+      assert.equal(
+        irritation[directionalIrritationEdgeKey("guest-1", "host-1")]
+          ?.intensity,
+        1,
+      );
+      const departureMessage = reviewed.messages.at(-1);
+      assert.equal(departureMessage?.speakerRole, "guest");
+      assert.equal(departureMessage?.moodKey, "strained");
+      assert.doesNotMatch(departureMessage?.content ?? "", /—$/u);
+      const departureUtterance = reviewed.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === departureMessage?.id,
+      );
+      assert.equal(departureUtterance?.payload.provider, "deterministic");
+      assert.equal(departureUtterance?.payload.model, "speech-copy-power");
+      assert.equal(departureUtterance?.payload.powerOutcome, undefined);
+      assert.equal(
+        reviewed.events.some((event) => event.kind === "producer_cue"),
+        false,
+      );
     } finally {
       db.close();
     }

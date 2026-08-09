@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { signalGenerationThinkingRole } from "./signalThinkingPresentation.ts";
+import {
+  signalGenerationThinkingRole,
+  signalThinkingPresentationEndReason,
+} from "./signalThinkingPresentation.ts";
 
 describe("Signal thinking presentation", () => {
   it("attributes an interrupting producer cue to the host", () => {
@@ -41,6 +44,27 @@ describe("Signal thinking presentation", () => {
         hasProducerCue: false,
       }),
       "host",
+    );
+  });
+
+  it("marks a delivered final line completed after the episode closes", () => {
+    assert.equal(
+      signalThinkingPresentationEndReason({
+        cuttingShow: false,
+        hasError: false,
+        hasFollowingMessage: true,
+        episodeLive: false,
+      }),
+      "completed",
+    );
+    assert.equal(
+      signalThinkingPresentationEndReason({
+        cuttingShow: false,
+        hasError: false,
+        hasFollowingMessage: false,
+        episodeLive: false,
+      }),
+      "cancelled",
     );
   });
 });

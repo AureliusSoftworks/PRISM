@@ -136,9 +136,21 @@ export class LiveBakeJobManager {
     liveBake: LiveBakeArtifactV1;
   }> {
     const key = signalKey(args.userId, args.episodeId);
+    const episode = getBotcastEpisode(args.db, args.userId, args.episodeId);
+    if (episode.playbackMode !== "watch") {
+      throw new HttpError(409, "Full bake is only available for Watch a show episodes.");
+    }
+    if (episode.status === "cancelled") {
+      return {
+        episode,
+        liveBake: buildSignalLiveBakeArtifactFromEpisode(episode, {
+          status: "cancelled",
+          error: "Bake cancelled.",
+        }),
+      };
+    }
     const existing = this.jobs.get(key);
     if (existing?.surface === "signal") {
-      const episode = getBotcastEpisode(args.db, args.userId, args.episodeId);
       return {
         episode,
         liveBake: buildSignalLiveBakeArtifactFromEpisode(episode, {
@@ -147,10 +159,6 @@ export class LiveBakeJobManager {
       };
     }
 
-    const episode = getBotcastEpisode(args.db, args.userId, args.episodeId);
-    if (episode.playbackMode !== "watch") {
-      throw new HttpError(409, "Full bake is only available for Watch a show episodes.");
-    }
     if (episode.status === "completed") {
       return {
         episode,

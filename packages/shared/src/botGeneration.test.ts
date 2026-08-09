@@ -101,7 +101,7 @@ function completeDraft(): Record<string, unknown> {
         { id: "circuit-mark", offsetX: 0, offsetY: 0, scalePct: 100 },
       ],
       ink: [
-        { role: "effect", shape: "circle", x1: 64, y1: 56, x2: 72, y2: 56, size: 1 },
+        { role: "effect", shape: "line", x1: 30, y1: 30, x2: 50, y2: 30, size: 1 },
         { role: "talking", shape: "line", x1: 56, y1: 76, x2: 72, y2: 76, size: 2 },
       ],
     },
@@ -147,6 +147,12 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.face.eyeCharacter, "*");
     assert.equal(draft.face.eyeCount, 2);
     assert.equal(draft.face.eyeRotationDeg, 0);
+    assert.equal(draft.face.eyeOffsetX, 0);
+    assert.equal(draft.face.eyeOffsetY, 0.18);
+    assert.equal(draft.face.blinkOffsetX, 0);
+    assert.equal(draft.face.blinkOffsetY, 0.18);
+    assert.equal(draft.face.mouthOffsetX, 0);
+    assert.equal(draft.face.mouthOffsetY, 0.08);
     assert.deepEqual(draft.avatarDetails?.screen.stamps, []);
     assert.ok(draft.avatarDetails?.screen.paintColorMapBase64);
     assert.equal(draft.audioVoiceProfile.baseVoiceId, "voice-8");
@@ -237,21 +243,86 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.ok(paintedPixelCount(bytes) > 500);
   });
 
+  it("reserves calibrated live eye and mouth windows in generated portraits", () => {
+    const input = completeDraft();
+    input.avatarDetails = {
+      ink: [
+        {
+          role: "effect",
+          points: [
+            { x: 20, y: 20 },
+            { x: 108, y: 20 },
+            { x: 108, y: 100 },
+            { x: 20, y: 100 },
+          ],
+          closed: true,
+          fill: true,
+          size: 2,
+        },
+        {
+          role: "talking",
+          points: [
+            { x: 48, y: 80 },
+            { x: 80, y: 80 },
+          ],
+          closed: false,
+          fill: false,
+          size: 3,
+        },
+      ],
+    };
+    input.face = {
+      ...(input.face as Record<string, unknown>),
+      faceEyeOffsetX: -0.3,
+      faceEyeOffsetY: -0.3,
+      faceBlinkOffsetX: 0.3,
+      faceBlinkOffsetY: -0.3,
+      faceMouthOffsetX: 0.3,
+      faceMouthOffsetY: 0.3,
+    };
+
+    const draft = normalizeBotGeneratedDraftV1(input);
+    assert.ok(draft?.avatarDetails?.screen.paintColorMapBase64);
+    assert.deepEqual(
+      {
+        eyeX: draft.face.eyeOffsetX,
+        eyeY: draft.face.eyeOffsetY,
+        blinkX: draft.face.blinkOffsetX,
+        blinkY: draft.face.blinkOffsetY,
+        mouthX: draft.face.mouthOffsetX,
+        mouthY: draft.face.mouthOffsetY,
+      },
+      { eyeX: 0, eyeY: 0.18, blinkX: 0, blinkY: 0.18, mouthX: 0, mouthY: 0.08 },
+    );
+    const bytes = decodeBotAvatarDetailsPaintColorMap(
+      draft.avatarDetails.screen.paintColorMapBase64,
+    );
+    const roleAt = (x: number, y: number): number => {
+      const pixelIndex = y * 128 + x;
+      return ((bytes[pixelIndex >>> 2] ?? 0) >>> (6 - (pixelIndex & 3) * 2)) & 0x03;
+    };
+    assert.equal(roleAt(64, 60), 0);
+    assert.equal(roleAt(64, 81), 0);
+    assert.equal(Array.from(bytes).some((byte) =>
+      [6, 4, 2, 0].some((shift) => ((byte >>> shift) & 0x03) === 2)
+    ), false);
+  });
+
   it("caps filled portrait paths at the existing semantic ink density limit", () => {
     const input = completeDraft();
     input.avatarDetails = {
-      ink: [{
+      ink: [
+        [[20, 12], [64, 12], [64, 64], [20, 64]],
+        [[64, 12], [108, 12], [108, 64], [64, 64]],
+        [[20, 64], [64, 64], [64, 108], [20, 108]],
+        [[64, 64], [108, 64], [108, 108], [64, 108]],
+      ].map((points) => ({
         role: "effect",
-        points: [
-          { x: 24, y: 20 },
-          { x: 104, y: 20 },
-          { x: 104, y: 96 },
-          { x: 24, y: 96 },
-        ],
+        points: points.map(([x, y]) => ({ x, y })),
         closed: true,
         fill: true,
         size: 4,
-      }],
+      })),
     };
 
     const draft = normalizeBotGeneratedDraftV1(input);
@@ -294,13 +365,13 @@ describe("normalizeBotGeneratedDraftV1", () => {
       ink: [
         { role: "effect", shape: "circle", x1: 64, y1: 58, x2: 112, y2: 58, size: 2 },
         { role: "effect", shape: "line", x1: 18, y1: 40, x2: 110, y2: 96, size: 2 },
-        { role: "effect", shape: "line", x1: 48, y1: 54, x2: 56, y2: 58, size: 1 },
+        { role: "effect", shape: "line", x1: 24, y1: 54, x2: 32, y2: 58, size: 1 },
       ],
     };
     const compactOnly = completeDraft();
     compactOnly.avatarDetails = {
       ink: [
-        { role: "effect", shape: "line", x1: 48, y1: 54, x2: 56, y2: 58, size: 1 },
+        { role: "effect", shape: "line", x1: 24, y1: 54, x2: 32, y2: 58, size: 1 },
       ],
     };
 

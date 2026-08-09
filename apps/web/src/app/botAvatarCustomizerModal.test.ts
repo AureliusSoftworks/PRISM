@@ -1899,7 +1899,7 @@ test("avatar customizer preview uses full-stage foundry framing", () => {
   );
 });
 
-test("avatar foundry uses bottom-bar navigation and view-only camera navigation", () => {
+test("avatar foundry locks the product preview and reserves camera navigation for Ink", () => {
   assert.doesNotMatch(pageSource, /data-avatar-upgrade-node=\{node\.id\}/);
   assert.doesNotMatch(pageSource, /BOT_AVATAR_FOUNDRY_UPGRADE_NODES\.filter/);
   assert.doesNotMatch(pageSource, /"--foundry-module-color": node\.color/);
@@ -1911,7 +1911,11 @@ test("avatar foundry uses bottom-bar navigation and view-only camera navigation"
   assert.match(pageSource, /className=\{styles\.botAvatarFoundryBotAssembly\}/);
   assert.match(pageSource, /data-avatar-foundry-platform="true"/);
   assert.match(pageSource, /data-avatar-foundry-bot-assembly="true"/);
-  assert.match(pageSource, /Drag to pan · Scroll to zoom/);
+  assert.match(pageSource, /Drag to align · Scroll to resize/);
+  assert.match(
+    pageSource,
+    /const foundryCameraEditable =\s*spatialControls && foundryCameraMode === "ink";/,
+  );
   assert.match(pageSource, /onWheel=\{\(event\) =>/);
   assert.match(pageSource, /requestAnimationFrame\(\(\) =>/);
   assert.match(pageSource, /stage\.style\.setProperty\("--foundry-pan-x"/);
@@ -1926,8 +1930,9 @@ test("avatar foundry uses bottom-bar navigation and view-only camera navigation"
   assert.doesNotMatch(pageSource, /data-avatar-hotspot/);
   assert.match(
     cssSource,
-    /\.botAvatarCustomizer\[data-foundry="true"\] \.botAvatarPreviewToolbar\s*\{[\s\S]*bottom:\s*78px;/,
+    /\.botAvatarCustomizer\[data-foundry="true"\] \.botAvatarPreviewToolbar\s*\{[\s\S]*aspect-ratio:\s*1;[\s\S]*pointer-events:\s*none;/,
   );
+  assert.match(cssSource, /button\[data-preview-orb-index="4"\]/);
   assert.match(cssSource, /\.botAvatarIdentitySurfaceToggle\s*\{/);
   assert.match(
     cssSource,
@@ -2063,18 +2068,16 @@ test("avatar customizer preview has explicit expression states", () => {
     pageSource,
     /const \[previewMode, setPreviewMode\] = useState<BotAvatarPreviewMode>\("idle"\)/,
   );
-  assert.match(
-    pageSource,
-    /const \[previewMoodIndex, setPreviewMoodIndex\] = useState\(0\);/,
-  );
+  assert.match(pageSource, /const previewMood: BotMoodKey = "warm";/);
   assert.match(
     pageSource,
     /type BotAvatarPreviewMode = "idle" \| "blink" \| "talking" \| "thinking" \| "sip";/,
   );
-  assert.match(pageSource, /const BOT_AVATAR_PREVIEW_MODES = \[/);
-  assert.match(pageSource, /\{ value: "talking", label: "Talk" \}/);
-  assert.match(pageSource, /\{ value: "sip", label: "Sip" \}/);
-  assert.match(pageSource, /const BOT_AVATAR_PREVIEW_MOODS = \[/);
+  assert.match(pageSource, /const BOT_AVATAR_PREVIEW_ACTIONS = \[/);
+  assert.doesNotMatch(pageSource, /\{ value: "talking", label: "Talk" \}/);
+  assert.match(pageSource, /value: "sip",[\s\S]*?label: "Sip"/);
+  assert.match(pageSource, /value: "fart",[\s\S]*?label: "Fart"/);
+  assert.doesNotMatch(pageSource, /const BOT_AVATAR_PREVIEW_MOODS = \[/);
   assert.doesNotMatch(
     pageSource,
     /mode\.value === "talking"[\s\S]*?voiceModeDisplayName\(voiceChoice\)/,
@@ -2126,7 +2129,7 @@ test("avatar customizer preview has explicit expression states", () => {
   assert.match(pageSource, /onPreviewModeChange=\{setPreviewMode\}/);
   assert.match(
     pageSource,
-    /onClick=\{\(\) => onPreviewModeChange\(mode\.value\)\}/,
+    /if \(action\.value === "fart"\) \{[\s\S]*onPreviewFart\?\.\(\);[\s\S]*onPreviewModeChange\(action\.value\);/,
   );
   assert.doesNotMatch(
     pageSource,
@@ -2142,12 +2145,10 @@ test("avatar customizer preview has explicit expression states", () => {
     /onPreviewVoice=\{\(\) => void previewAvatarGlobalVoice\(\)\}/,
   );
   assert.match(pageSource, /onPreview=\{playAvatarVoicePreview\}/);
-  assert.match(pageSource, /onPreviewMoodCycle=\{\(\) =>/);
-  assert.match(
-    pageSource,
-    /setPreviewMoodIndex\(\s*\(current\) => \(current \+ 1\) % BOT_AVATAR_PREVIEW_MOODS\.length\s*,?\s*\)/,
-  );
-  assert.match(pageSource, /className=\{styles\.botAvatarMoodPreviewButton\}/);
+  assert.doesNotMatch(pageSource, /onPreviewMoodCycle=/);
+  assert.doesNotMatch(pageSource, /botAvatarMoodPreviewButton/);
+  assert.match(pageSource, /className=\{styles\.botAvatarVoiceTestDock\}/);
+  assert.match(pageSource, /Nothing is added to chat\./);
   assert.match(pageSource, /isTalking=\{previewTalking\}/);
   assert.match(
     pageSource,

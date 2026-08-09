@@ -130,6 +130,71 @@
   gap: 9px;
 }
 
+.nearby {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: center;
+  gap: 8px;
+}
+
+.nearby > span {
+  color: var(--fg-muted, #8e9bab);
+  font-size: 8px;
+  font-weight: 790;
+  letter-spacing: 0.11em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.nearby > div {
+  min-width: 0;
+  display: flex;
+  gap: 5px;
+  overflow-x: auto;
+  scrollbar-width: thin;
+}
+
+.nearby button {
+  min-height: 29px;
+  flex: 0 0 auto;
+  padding: 4px 9px;
+  border: 1px solid
+    color-mix(
+      in srgb,
+      var(--pronunciation-atlas-color) 22%,
+      var(--line, #303846)
+    );
+  border-radius: 999px;
+  color: var(--fg-muted, #8e9bab);
+  background: rgba(255, 255, 255, 0.022);
+  font: inherit;
+  font-size: 9px;
+  font-weight: 740;
+  cursor: pointer;
+}
+
+.nearby button:is(:hover, :focus-visible),
+.nearby button[data-active="true"] {
+  outline: none;
+  color: var(--fg, #f5f7fb);
+  border-color: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 58%,
+    #ffffff 12%
+  );
+  background: color-mix(
+    in srgb,
+    var(--pronunciation-atlas-color) 16%,
+    rgba(255, 255, 255, 0.035)
+  );
+}
+
+.nearby button:disabled {
+  cursor: not-allowed;
+  opacity: 0.44;
+}
+
 .strength,
 .previewBar {
   min-width: 0;

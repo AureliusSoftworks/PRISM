@@ -73,9 +73,10 @@ export function initializePremiumVoiceDefaults(args: {
   }
 
   const botUpdates = args.bots.flatMap((bot): PremiumVoiceBotUpdate[] => {
-    const authored = normalizeBotAudioVoiceProfileV1(
-      bot.authoredAudioVoiceProfile,
-    );
+    const authored =
+      normalizeOptionalBotAudioVoiceProfileV1(
+        bot.authoredAudioVoiceProfile,
+      ) ?? normalizeBotAudioVoiceProfileV1(undefined);
     const override = normalizeOptionalBotAudioVoiceProfileV1(
       bot.audioVoiceProfileOverride,
     );
@@ -98,9 +99,10 @@ export function initializePremiumVoiceDefaults(args: {
     }];
   });
 
-  const prismProfile = normalizeBotAudioVoiceProfileV1(
-    args.prismDefaultBotAudioVoiceProfile,
-  );
+  const prismProfile =
+    normalizeOptionalBotAudioVoiceProfileV1(
+      args.prismDefaultBotAudioVoiceProfile,
+    ) ?? normalizeBotAudioVoiceProfileV1(undefined);
   const hasSelectedPremium = Boolean(selectedPremiumVoiceId(prismProfile));
   const hasInitializedFlag = prismProfile.elevenLabsVoiceInitialized === true;
   const prismDefaultBotAudioVoiceProfile =

@@ -2296,6 +2296,25 @@ describe("Signal experience shell", () => {
     assert.match(source, /cancelWatchBake/u);
     assert.match(
       source,
+      /const cancelWatchBake[\s\S]{0,1200}?assignQueuedProducerCue\(null\)[\s\S]{0,1200}?setEpisode\(null\)/u,
+    );
+    assert.match(
+      source,
+      /episode\.playbackMode === "watch"[\s\S]{0,120}?advanceInFlightRef\.current/u,
+    );
+    assert.match(source, /const presentedWatchMessageIds = new Set<string>\(\)/u);
+    assert.match(
+      source,
+      /presentationEpisode\.messages\.filter\([\s\S]{0,900}?playPreparedEpisodeMessage\([\s\S]{0,1200}?Preparing the next stretch/u,
+    );
+    assert.match(
+      source,
+      /episode\.playbackMode !== "watch" &&[\s\S]{0,100}?episode\.guestKind !== "producer"/u,
+    );
+    assert.match(source, /episode\.playbackMode === "watch"[\s\S]{0,80}?● WATCHING/u);
+    assert.match(source, /episode\.playbackMode === "watch"[\s\S]{0,80}?Prism directing/u);
+    assert.match(
+      source,
       /cancelLabel=\{\s*watchBakeLabel !== null \? "Stop preparing" : "Cancel synthesis"\s*\}/u,
     );
     assert.match(pageSource, /<SignalArtworkJobActivity/u);

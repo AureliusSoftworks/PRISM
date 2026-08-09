@@ -30,6 +30,12 @@ export interface PronunciationAtlasAnchor {
   influence?: Exclude<LocalVoiceSpeechprintInfluence, "none">;
 }
 
+export interface PronunciationAtlasCandidate {
+  id: string;
+  label: string;
+  selection: PronunciationAtlasSelection;
+}
+
 /**
  * Projects geographic coordinates into the same full-frame equirectangular
  * space used by the Accent Map artwork and pointer pad.
@@ -281,6 +287,58 @@ export function pronunciationAtlasPointForSelection(
   return (
     normalized.point ?? pronunciationAtlasAnchorForSelection(normalized).point
   );
+}
+
+function pronunciationAtlasAnchorLabel(
+  anchor: PronunciationAtlasAnchor,
+): string {
+  if (anchor.base === "en-GB") return "British";
+  if (anchor.base === "en-US") return "American";
+  const capability = LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.find(
+    (candidate) => candidate.id === anchor.influence,
+  );
+  return (capability?.label ?? anchor.influence ?? anchor.id)
+    .replace(/-influenced English$/u, "")
+    .replace(/ English$/u, "");
+}
+
+/**
+ * Gives a freely dropped pin an explicit shortlist. Dense map regions remain
+ * easy to choose without making the geographic hit targets artificially large.
+ */
+export function pronunciationAtlasNearbyCandidates(
+  selection: PronunciationAtlasSelection,
+  limit = 5,
+): readonly PronunciationAtlasCandidate[] {
+  const normalized = normalizePronunciationAtlasSelection(selection);
+  const point = pronunciationAtlasPointForSelection(normalized);
+  return [...PRONUNCIATION_ATLAS_ANCHORS]
+    .sort(
+      (left, right) =>
+        squaredDistance(point, left.point) -
+        squaredDistance(point, right.point),
+    )
+    .slice(0, Math.max(1, Math.floor(limit)))
+    .map((anchor) => ({
+      id: anchor.id,
+      label: pronunciationAtlasAnchorLabel(anchor),
+      selection: anchor.base
+        ? {
+            ...normalized,
+            pronunciationBase: anchor.base,
+            influence: "none",
+            point: anchor.point,
+          }
+        : {
+            ...normalized,
+            pronunciationBase:
+              normalized.pronunciationBase === "follow-voice"
+                ? pronunciationAtlasResolvedBase(normalized)
+                : normalized.pronunciationBase,
+            influence: anchor.influence ?? "none",
+            point: anchor.point,
+          },
+    }));
 }
 
 export function pronunciationAtlasSelectionAtPoint(

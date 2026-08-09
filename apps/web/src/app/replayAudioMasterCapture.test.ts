@@ -650,9 +650,22 @@ test("camera flicker during thinking updates in place without thrashing the reco
         },
       ],
     });
+    syncReplayThinkingPresentations({
+      sourceId: "signal-camera",
+      presentations: [],
+      followingMessageId: "closing-line",
+      endReason: "completed",
+      endingSegment: "closing",
+    });
     assert.equal(FakeMediaRecorder.paused, 1);
     assert.equal(FakeMediaRecorder.resumed, 0);
-    await stopReplayAudioMasterCapture("signal-camera");
+    const result = await stopReplayAudioMasterCapture("signal-camera");
+    const thinking = result?.direction.find(
+      (event) => event.kind === "thinking",
+    );
+    assert.equal(thinking?.sourceMessageId, "closing-line");
+    assert.equal(thinking?.payload.endReason, "completed");
+    assert.equal(thinking?.payload.segment, "closing");
   } finally {
     Object.defineProperty(globalThis, "window", {
       configurable: true,

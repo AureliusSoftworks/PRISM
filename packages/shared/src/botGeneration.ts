@@ -35,6 +35,22 @@ const BOT_GENERATED_INK_MAX_CIRCLE_RADIUS = 16;
 const BOT_GENERATED_INK_MAX_PATHS = 36;
 const BOT_GENERATED_INK_MAX_PATH_POINTS = 18;
 const BOT_GENERATED_INK_MAX_PATH_SEGMENT_LENGTH = 96;
+const BOT_GENERATED_PORTRAIT_EYE_OFFSET_X = 0;
+const BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y = 0.18;
+const BOT_GENERATED_PORTRAIT_MOUTH_OFFSET_X = 0;
+const BOT_GENERATED_PORTRAIT_MOUTH_OFFSET_Y = 0.08;
+const BOT_GENERATED_PORTRAIT_EYE_WINDOW = {
+  minX: 42,
+  maxX: 86,
+  minY: 50,
+  maxY: 70,
+} as const;
+const BOT_GENERATED_PORTRAIT_MOUTH_WINDOW = {
+  minX: 46,
+  maxX: 82,
+  minY: 72,
+  maxY: 89,
+} as const;
 
 /** A compact, stable subset of the bot icon library that models can choose reliably. */
 export const BOT_GENERATION_GLYPH_IDS = [
@@ -212,9 +228,7 @@ function normalizeGeneratedProfile(value: unknown, botName: string): BotProfileF
 
 function normalizeInkStroke(value: unknown): BotGeneratedInkStrokeV1 | null {
   if (!isRecord(value)) return null;
-  const role = value.role === "blink" || value.role === "talking" || value.role === "effect"
-    ? value.role
-    : null;
+  const role = value.role === "effect" ? value.role : null;
   const shape = value.shape === "line" || value.shape === "circle"
     ? value.shape
     : null;
@@ -251,9 +265,7 @@ function normalizeInkPoint(value: unknown): BotGeneratedInkPointV1 | null {
 
 function normalizeInkPath(value: unknown): BotGeneratedInkPathV1 | null {
   if (!isRecord(value) || !Array.isArray(value.points)) return null;
-  const role = value.role === "blink" || value.role === "talking" || value.role === "effect"
-    ? value.role
-    : null;
+  const role = value.role === "effect" ? value.role : null;
   if (!role) return null;
   const points = value.points
     .map(normalizeInkPoint)
@@ -281,6 +293,16 @@ function normalizeInkPath(value: unknown): BotGeneratedInkPathV1 | null {
   };
 }
 
+function generatedPortraitPixelIsReserved(x: number, y: number): boolean {
+  return [
+    BOT_GENERATED_PORTRAIT_EYE_WINDOW,
+    BOT_GENERATED_PORTRAIT_MOUTH_WINDOW,
+  ].some((window) =>
+    x >= window.minX && x <= window.maxX &&
+    y >= window.minY && y <= window.maxY
+  );
+}
+
 function setInkPixel(
   bytes: Uint8Array,
   x: number,
@@ -290,6 +312,7 @@ function setInkPixel(
 ): void {
   if (
     state.painted >= BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS ||
+    generatedPortraitPixelIsReserved(x, y) ||
     !isBotAvatarDetailsWritablePixel(x, y)
   ) return;
   const pixelIndex = y * BOT_AVATAR_DETAILS_CANVAS_SIZE + x;
@@ -526,7 +549,18 @@ export function normalizeBotGeneratedDraftV1(
     recordAt(value, "face"),
     profile.core.communicationStyle,
   );
-  const face = resolvedFace;
+  const avatarDetails = normalizeGeneratedAvatarDetails(value.avatarDetails);
+  const face: BotFaceStyle = avatarDetails
+    ? {
+        ...resolvedFace,
+        eyeOffsetX: BOT_GENERATED_PORTRAIT_EYE_OFFSET_X,
+        eyeOffsetY: BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y,
+        mouthOffsetX: BOT_GENERATED_PORTRAIT_MOUTH_OFFSET_X,
+        mouthOffsetY: BOT_GENERATED_PORTRAIT_MOUTH_OFFSET_Y,
+        blinkOffsetX: BOT_GENERATED_PORTRAIT_EYE_OFFSET_X,
+        blinkOffsetY: BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y,
+      }
+    : resolvedFace;
   const voicePreviewLine = compactText(
     value.voicePreviewLine,
     BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH,
@@ -572,7 +606,7 @@ export function normalizeBotGeneratedDraftV1(
     color: normalizeGeneratedHexColor(value.color),
     glyph: normalizeGeneratedGlyph(value.glyph),
     face,
-    avatarDetails: normalizeGeneratedAvatarDetails(value.avatarDetails),
+    avatarDetails,
     audioVoiceProfile: normalizeGeneratedVoice(
       value.voice,
       personaSeedText,

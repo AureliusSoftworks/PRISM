@@ -424,6 +424,13 @@ export async function bakeBotcastWatchEpisode(args: {
   if (episode.guestKind === "producer") {
     throw new HttpError(409, "Watch a show requires a bot guest.");
   }
+  if (episode.status === "cancelled") {
+    const artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
+      status: "cancelled",
+      error: "Bake cancelled.",
+    });
+    return { episode, artifact };
+  }
   if (episode.status === "completed") {
     const artifact = buildSignalLiveBakeArtifactFromEpisode(episode, {
       status: "ready",

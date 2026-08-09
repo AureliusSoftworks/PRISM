@@ -38149,6 +38149,7 @@ const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
 ] as const satisfies readonly ZenLiveBotMouthShape[];
 
 type BotAvatarPreviewMode = "idle" | "blink" | "talking" | "thinking" | "sip";
+type BotAvatarPreviewAction = Exclude<BotAvatarPreviewMode, "talking"> | "fart";
 type BotAvatarCustomizerTab =
   | "face"
   | "profile"
@@ -38182,35 +38183,37 @@ function botAvatarAdjustmentTargetForControl(
   return null;
 }
 
-const BOT_AVATAR_PREVIEW_MODES = [
-  { value: "idle", label: "Idle" },
-  { value: "blink", label: "Blink" },
-  { value: "talking", label: "Talk" },
-  { value: "thinking", label: "Thinking" },
-  { value: "sip", label: "Sip" },
+const BOT_AVATAR_PREVIEW_ACTIONS = [
+  {
+    value: "idle",
+    label: "Idle",
+    tooltip: "Return to the resting expression",
+  },
+  {
+    value: "blink",
+    label: "Blink",
+    tooltip: "Preview the authored blink",
+  },
+  {
+    value: "thinking",
+    label: "Thinking",
+    tooltip: "Preview the thinking animation",
+  },
+  {
+    value: "sip",
+    label: "Sip",
+    tooltip: "Preview the Coffee sip expression",
+  },
+  {
+    value: "fart",
+    label: "Fart",
+    tooltip: "Hear this bot's corporality",
+  },
 ] as const satisfies readonly {
-  value: BotAvatarPreviewMode;
+  value: BotAvatarPreviewAction;
   label: string;
+  tooltip: string;
 }[];
-
-const BOT_AVATAR_PREVIEW_MOODS = [
-  "warm",
-  "joyful",
-  "neutral",
-  "guarded",
-  "strained",
-] as const satisfies readonly BotMoodKey[];
-
-const BOT_AVATAR_PREVIEW_MOOD_LABELS: Record<
-  (typeof BOT_AVATAR_PREVIEW_MOODS)[number],
-  string
-> = {
-  warm: "Warm",
-  joyful: "Joyful",
-  neutral: "Neutral",
-  guarded: "Guarded",
-  strained: "Strained",
-};
 
 const BOT_AVATAR_CUSTOMIZER_TABS = [
   { value: "face", label: "Identity" },
@@ -38434,17 +38437,166 @@ const BOT_AVATAR_FACE_PRESETS = [
 function BotAvatarPreviewModeIcon({
   mode,
 }: {
-  mode: BotAvatarPreviewMode;
+  mode: BotAvatarPreviewAction;
 }): React.JSX.Element {
   if (mode === "blink")
     return <ScanLine size={13} strokeWidth={2.3} aria-hidden="true" />;
-  if (mode === "talking")
-    return <Play size={13} strokeWidth={2.3} aria-hidden="true" />;
   if (mode === "thinking")
     return <Timer size={13} strokeWidth={2.3} aria-hidden="true" />;
   if (mode === "sip")
     return <Coffee size={13} strokeWidth={2.3} aria-hidden="true" />;
+  if (mode === "fart")
+    return <Waves size={13} strokeWidth={2.3} aria-hidden="true" />;
   return <Pause size={13} strokeWidth={2.3} aria-hidden="true" />;
+}
+
+type BotAvatarVoiceTestChoice =
+  | "english"
+  | "premium"
+  | "babble"
+  | "bottish";
+
+function botAvatarVoiceTestChoiceLabel(
+  choice: BotAvatarVoiceTestChoice,
+): string {
+  return choice === "premium" ? "Premium" : voiceModeDisplayName(choice);
+}
+
+function BotAvatarVoiceTestDock({
+  profile,
+  previewLine,
+  currentMode,
+  onPreviewLineChange,
+  resolvePreviewText,
+  onPreview,
+}: {
+  profile: BotAudioVoiceProfileV1;
+  previewLine: string;
+  currentMode: VoiceMode;
+  onPreviewLineChange: (value: string) => void;
+  resolvePreviewText: () => Promise<string>;
+  onPreview: (
+    profile: BotAudioVoiceProfileV1,
+    forcedMode?: Exclude<VoiceMode, "mute">,
+    previewText?: string,
+    options?: VoicePreviewPlaybackOptions,
+  ) => Promise<void>;
+}): React.JSX.Element {
+  const normalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
+  const [activeChoice, setActiveChoice] =
+    useState<BotAvatarVoiceTestChoice | "current" | null>(null);
+  const [feedback, setFeedback] = useState("");
+  const premiumReady = Boolean(
+    normalizedProfile.elevenLabsVoiceIdOverride ||
+    normalizedProfile.elevenLabsVoiceId,
+  );
+
+  const playChoice = async (
+    requestedChoice: BotAvatarVoiceTestChoice | "current",
+  ): Promise<void> => {
+    const resolvedChoice =
+      requestedChoice === "current" ? currentMode : requestedChoice;
+    if (resolvedChoice === "mute") return;
+    const previewText = previewLine.trim() || (await resolvePreviewText());
+    if (!previewText.trim()) return;
+    const forcedMode =
+      resolvedChoice === "premium" ? "english" : resolvedChoice;
+    const options: VoicePreviewPlaybackOptions | undefined =
+      forcedMode === "english"
+        ? {
+            englishVoiceEngine:
+              resolvedChoice === "premium" ? "elevenlabs" : "builtin",
+            cacheKey: [
+              "avatar-studio-voice-dock",
+              resolvedChoice,
+              previewText,
+              avatarVoicePlaybackCacheProfile(normalizedProfile),
+            ].join(":"),
+          }
+        : undefined;
+    primeVoiceModePlaybackFromUserGesture(forcedMode);
+    setActiveChoice(requestedChoice);
+    setFeedback(
+      resolvedChoice === "premium"
+        ? "Preparing Premium…"
+        : `Preparing ${botAvatarVoiceTestChoiceLabel(resolvedChoice)}…`,
+    );
+    try {
+      await onPreview(normalizedProfile, forcedMode, previewText, options);
+      setFeedback(`Played ${botAvatarVoiceTestChoiceLabel(resolvedChoice)}.`);
+    } catch (error) {
+      setFeedback(
+        error instanceof Error ? error.message : "Voice preview unavailable.",
+      );
+    } finally {
+      setActiveChoice(null);
+    }
+  };
+
+  const choices = ["english", "premium", "babble", "bottish"] as const;
+
+  return (
+    <form
+      className={styles.botAvatarVoiceTestDock}
+      aria-label="Test this bot's voice"
+      onSubmit={(event) => {
+        event.preventDefault();
+        void playChoice("current");
+      }}
+    >
+      <div
+        className={styles.botAvatarVoiceTestModes}
+        role="group"
+        aria-label="Voice preview mode"
+      >
+        {choices.map((choice) => (
+          <button
+            key={choice}
+            type="button"
+            data-active={activeChoice === choice ? "true" : undefined}
+            disabled={
+              activeChoice !== null || (choice === "premium" && !premiumReady)
+            }
+            title={
+              choice === "premium" && !premiumReady
+                ? "Choose a Premium voice in the Voice stage first"
+                : `Preview ${botAvatarVoiceTestChoiceLabel(choice)}`
+            }
+            onClick={() => void playChoice(choice)}
+          >
+            {botAvatarVoiceTestChoiceLabel(choice)}
+          </button>
+        ))}
+      </div>
+      <div className={styles.botAvatarVoiceTestComposer}>
+        <input
+          type="text"
+          value={previewLine}
+          maxLength={240}
+          aria-label="Voice preview line"
+          placeholder="Type exactly what this bot should say…"
+          onChange={(event) => onPreviewLineChange(event.currentTarget.value)}
+        />
+        <button
+          type="submit"
+          disabled={currentMode === "mute" || activeChoice !== null}
+          title={
+            currentMode === "mute"
+              ? "Choose a voice mode in the top bar first"
+              : `Speak with Voice · ${voiceModeDisplayName(currentMode)}`
+          }
+        >
+          {activeChoice === "current" ? "Speaking…" : "Speak"}
+        </button>
+      </div>
+      <small role="status" aria-live="polite">
+        {feedback ||
+          (currentMode === "mute"
+            ? "Voice is muted. Choose a voice mode above Prism first."
+            : `Edit the sample or Speak with Voice · ${voiceModeDisplayName(currentMode)}. Nothing is added to chat.`)}
+      </small>
+    </form>
+  );
 }
 
 function botAvatarFaceIsDefault(args: {
@@ -38673,7 +38825,8 @@ function BotAvatarPreviewPanel({
   avatarDetailsColor,
   onPreviewThemeChange,
   onPreviewModeChange,
-  onPreviewMoodCycle,
+  onPreviewFart,
+  voiceTestDock,
   screenMode = "live",
   screenOverlay,
   foundryRitual = false,
@@ -38690,7 +38843,7 @@ function BotAvatarPreviewPanel({
   isDefaultPrismBot: boolean;
   previewTheme: "light" | "dark";
   previewMode: BotAvatarPreviewMode;
-  previewMood: (typeof BOT_AVATAR_PREVIEW_MOODS)[number];
+  previewMood: BotMoodKey;
   previewTalking: boolean;
   voicePreset: BotVoicePreset;
   avatarSfx: BotAvatarSfxPlayback | null;
@@ -38701,7 +38854,8 @@ function BotAvatarPreviewPanel({
   avatarDetailsColor: string;
   onPreviewThemeChange: (theme: "light" | "dark") => void;
   onPreviewModeChange: (mode: BotAvatarPreviewMode) => void;
-  onPreviewMoodCycle: () => void;
+  onPreviewFart?: () => void;
+  voiceTestDock?: ReactNode;
   screenMode?: "off" | "live" | "editing";
   screenOverlay?: ReactNode;
   foundryRitual?: boolean;
@@ -38736,6 +38890,8 @@ function BotAvatarPreviewPanel({
   const previewBlink = previewMode === "blink";
   const previewSipping = previewMode === "sip";
   const previewMoodHint = coffeeSeatZenMoodHintFromPrism(previewMood);
+  const foundryCameraEditable =
+    spatialControls && foundryCameraMode === "ink";
   const previewAvatarSfxState: BotAvatarSfxState =
     previewMode === "sip" ? "idle" : previewMode;
   const previewFaceStyle = previewSipping
@@ -38748,7 +38904,7 @@ function BotAvatarPreviewPanel({
         }),
       }
     : faceStyle;
-  const foundryViewportStyle = spatialControls
+  const foundryViewportStyle = foundryCameraEditable
     ? ({
         "--foundry-pan-x": `${foundryViewport.x}px`,
         "--foundry-pan-y": `${foundryViewport.y}px`,
@@ -38833,8 +38989,7 @@ function BotAvatarPreviewPanel({
   const beginFoundryPan = (event: ReactPointerEvent<HTMLDivElement>): void => {
     const target = event.target as HTMLElement;
     if (
-      !spatialControls ||
-      foundryCameraMode === "ink" ||
+      !foundryCameraEditable ||
       event.button !== 0 ||
       target.closest(
         "button, input, select, textarea, canvas, [data-avatar-foundry-screen-overlay]",
@@ -38936,14 +39091,16 @@ function BotAvatarPreviewPanel({
         className={styles.botAvatarMannequinStage}
         data-app-cursor-theme={previewTheme}
         data-preview-theme={previewTheme}
-        data-foundry-camera-surface={spatialControls ? "true" : undefined}
+        data-foundry-camera-surface={
+          foundryCameraEditable ? "true" : undefined
+        }
         style={foundryViewportStyle}
         tabIndex={
-          spatialControls && foundryCameraMode !== "ink" ? 0 : undefined
+          foundryCameraEditable ? 0 : undefined
         }
         aria-label={
-          spatialControls && foundryCameraMode !== "ink"
-            ? "Live bot preview. Drag to pan, scroll to zoom, or use arrow and plus or minus keys."
+          foundryCameraEditable
+            ? "Ink camera. Drag to pan, scroll to resize, or use arrow and plus or minus keys."
             : undefined
         }
         onPointerDown={beginFoundryPan}
@@ -38951,7 +39108,7 @@ function BotAvatarPreviewPanel({
         onPointerUp={endFoundryPan}
         onPointerCancel={cancelFoundryPan}
         onWheel={(event) => {
-          if (!spatialControls || foundryCameraMode === "ink") return;
+          if (!foundryCameraEditable) return;
           event.preventDefault();
           setFoundryCameraActive(true);
           queueFoundryViewport(
@@ -38969,7 +39126,7 @@ function BotAvatarPreviewPanel({
           }, 120);
         }}
         onKeyDown={(event) => {
-          if (!spatialControls || foundryCameraMode === "ink") return;
+          if (!foundryCameraEditable) return;
           const panStep = event.shiftKey ? 48 : 20;
           if (event.key === "ArrowLeft") {
             commitFoundryViewport(
@@ -39109,16 +39266,16 @@ function BotAvatarPreviewPanel({
             </div>
           </div>
         </div>
-        {spatialControls && foundryCameraMode !== "ink" ? (
+        {foundryCameraEditable ? (
           <div className={styles.botAvatarFoundryCameraHud}>
-            <span>Live camera</span>
+            <span>Ink camera</span>
             <strong ref={foundryZoomReadoutRef}>
               {Math.round(foundryViewport.zoom * 100)}%
             </strong>
             <button type="button" onClick={resetFoundryViewport}>
               Reset view
             </button>
-            <small>Drag to pan · Scroll to zoom</small>
+            <small>Drag to align · Scroll to resize</small>
           </div>
         ) : null}
       </div>
@@ -39127,32 +39284,41 @@ function BotAvatarPreviewPanel({
           <div
             className={styles.botAvatarPreviewModeToggle}
             role="group"
-            aria-label="Preview expression"
+            aria-label="Avatar previews"
           >
-            {BOT_AVATAR_PREVIEW_MODES.map((mode) => (
+            {BOT_AVATAR_PREVIEW_ACTIONS.map((action, index) => (
               <button
-                key={mode.value}
+                key={action.value}
                 type="button"
-                data-active={previewMode === mode.value ? "true" : undefined}
-                aria-pressed={previewMode === mode.value}
-                onClick={() => onPreviewModeChange(mode.value)}
+                data-preview-orb-index={index}
+                data-tooltip={action.tooltip}
+                data-active={
+                  action.value !== "fart" && previewMode === action.value
+                    ? "true"
+                    : undefined
+                }
+                aria-label={action.label}
+                aria-pressed={
+                  action.value === "fart"
+                    ? undefined
+                    : previewMode === action.value
+                }
+                title={action.tooltip}
+                onClick={() => {
+                  if (action.value === "fart") {
+                    onPreviewFart?.();
+                    return;
+                  }
+                  onPreviewModeChange(action.value);
+                }}
               >
-                <BotAvatarPreviewModeIcon mode={mode.value} />
-                {mode.label}
+                <BotAvatarPreviewModeIcon mode={action.value} />
               </button>
             ))}
           </div>
-          <button
-            type="button"
-            className={styles.botAvatarMoodPreviewButton}
-            onClick={onPreviewMoodCycle}
-            aria-label={`Preview mood: ${BOT_AVATAR_PREVIEW_MOOD_LABELS[previewMood]}`}
-          >
-            <Drama size={13} strokeWidth={2.3} aria-hidden="true" />
-            Mood: {BOT_AVATAR_PREVIEW_MOOD_LABELS[previewMood]}
-          </button>
         </div>
       ) : null}
+      {voiceTestDock}
     </section>
   );
 }
@@ -42662,7 +42828,6 @@ function BotAvatarCustomizerModal({
     resolvedTheme,
   );
   const [previewMode, setPreviewMode] = useState<BotAvatarPreviewMode>("idle");
-  const [previewMoodIndex, setPreviewMoodIndex] = useState(0);
   const [activeControlTab, setActiveControlTab] =
     useState<BotAvatarCustomizerTab>(initialTab);
   const [activeAdjustmentTarget, setActiveAdjustmentTarget] =
@@ -42681,10 +42846,7 @@ function BotAvatarCustomizerModal({
   const [detailsEditorDirty, setDetailsEditorDirty] = useState(false);
   const [avatarDetailsPreview, setAvatarDetailsPreview] =
     useState<BotAvatarDetailsV1>(() => normalizeAvatarDetails(avatarDetails));
-  const previewMood =
-    BOT_AVATAR_PREVIEW_MOODS[
-      previewMoodIndex % BOT_AVATAR_PREVIEW_MOODS.length
-    ] ?? "warm";
+  const previewMood: BotMoodKey = "warm";
   const previewAvatarSfx = useMemo(
     () => botAvatarSfxForProfile(audioVoiceProfile, scheduleKey),
     [audioVoiceProfile, scheduleKey],
@@ -42742,7 +42904,6 @@ function BotAvatarCustomizerModal({
     avatarVoicePreviewRunRef.current += 1;
     setPreviewTheme(resolvedTheme);
     setPreviewMode("idle");
-    setPreviewMoodIndex(0);
     setActiveControlTab(initialTab);
     setActiveUpgradeNode(
       initialTab === "eyes"
@@ -43703,10 +43864,28 @@ function BotAvatarCustomizerModal({
             }
             onPreviewThemeChange={setPreviewTheme}
             onPreviewModeChange={setPreviewMode}
-            onPreviewMoodCycle={() =>
-              setPreviewMoodIndex(
-                (current) => (current + 1) % BOT_AVATAR_PREVIEW_MOODS.length,
-              )
+            onPreviewFart={() => {
+              void playPreparedCoffeeActionSfx({
+                kind: "fart",
+                voiceVolume: 1,
+                corporality: normalizeCorporality(
+                  normalizeBotAudioVoiceProfileV1(audioVoiceProfile)
+                    .corporality,
+                ),
+                voiceEffectsEnabled: false,
+              });
+            }}
+            voiceTestDock={
+              activeControlTab === "voice" ? (
+                <BotAvatarVoiceTestDock
+                  profile={audioVoiceProfile}
+                  previewLine={voicePreviewLine}
+                  currentMode={voiceMode}
+                  onPreviewLineChange={onVoicePreviewLineChange}
+                  resolvePreviewText={resolveVoicePreviewText}
+                  onPreview={playAvatarVoicePreview}
+                />
+              ) : null
             }
           />
           <section
@@ -120426,7 +120605,6 @@ function HomeContent(): React.JSX.Element {
                             foundryRitual
                             onPreviewThemeChange={(): void => undefined}
                             onPreviewModeChange={(): void => undefined}
-                            onPreviewMoodCycle={(): void => undefined}
                           />
                         }
                       />
