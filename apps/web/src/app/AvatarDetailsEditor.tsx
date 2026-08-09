@@ -9,10 +9,15 @@ import {
   useRef,
   useState,
   type CSSProperties,
+  type KeyboardEvent,
   type PointerEvent,
 } from "react";
 import { createPortal } from "react-dom";
-import type { BotFaceStyle } from "@localai/shared";
+import {
+  BOT_AVATAR_DETAILS_SPEECH_INK_ANIMATIONS,
+  type BotAvatarDetailsSpeechInkAnimation,
+  type BotFaceStyle,
+} from "@localai/shared";
 import {
   BookmarkPlus,
   Brush,
@@ -25,6 +30,7 @@ import {
   Minus,
   Move,
   PaintBucket,
+  Play,
   Redo2,
   Trash2,
   Undo2,
@@ -37,6 +43,9 @@ import {
   AVATAR_DETAILS_INK_ROLES,
   AVATAR_DETAILS_INK_ROLE_COLORS,
   AVATAR_DETAILS_MAX_PAINT_PIXELS,
+  AVATAR_DETAILS_SYMMETRY_AXIS_X_DEFAULT,
+  AVATAR_DETAILS_SYMMETRY_AXIS_X_MAX,
+  AVATAR_DETAILS_SYMMETRY_AXIS_X_MIN,
   avatarDetailsCirclePoints,
   avatarDetailsGridPointFromClient,
   avatarDetailsEqual,
@@ -44,6 +53,7 @@ import {
   avatarDetailsPaintColorCoveragePercent,
   avatarDetailsPaintColorPixelCount,
   avatarDetailsWithPaintColorMap,
+  avatarDetailsWithSpeechInkAnimation,
   avatarDetailsWritablePixel,
   cloneAvatarDetails,
   decodeAvatarDetailsPaintColorMap,
@@ -52,6 +62,7 @@ import {
   moveAvatarDetailsPaintColorMap,
   normalizeAvatarDetails,
   normalizeAvatarDetailsColor,
+  normalizeAvatarDetailsSymmetryAxisX,
   paintAvatarDetailsColorMap,
   recolorAvatarDetailsPaintColorRegion,
   rasterizeAvatarDetailsSemanticRgba,
@@ -109,7 +120,7 @@ const AVATAR_DETAILS_INK_OPTIONS: ReadonlyArray<{
     role: "talking",
     label: "Speech ink",
     description:
-      "Follows Mouth animation; Default hides while talking or sipping.",
+      "Uses its own animation below; Default hides while talking or sipping.",
   },
   {
     role: "effect",
@@ -122,6 +133,17 @@ const AVATAR_DETAILS_INK_OPTIONS: ReadonlyArray<{
     description: "Removes ink with any drawing tool.",
   },
 ];
+
+const AVATAR_DETAILS_SPEECH_INK_ANIMATION_LABELS: Record<
+  BotAvatarDetailsSpeechInkAnimation,
+  string
+> = {
+  none: "Default",
+  pulsate: "Pulse",
+  spin: "Spin",
+  flicker: "Flicker",
+  wobble: "Wobble",
+};
 
 export interface AvatarDetailsEditorHandle {
   apply(): Promise<boolean>;
@@ -141,6 +163,7 @@ export interface AvatarDetailsEditorProps {
   onCancel?: () => void;
   onDirtyChange?: (dirty: boolean) => void;
   onPreviewChange?: (details: AvatarDetailsV1) => void;
+  onLivePreview?: () => void;
   onEditStart?: () => void;
   layout?: "panel" | "foundry";
   canvasPortalTarget?: HTMLElement | null;
@@ -212,6 +235,7 @@ const AvatarDetailsEditorSession = forwardRef<
     onCancel,
     onDirtyChange,
     onPreviewChange,
+    onLivePreview,
     onEditStart,
     layout = "panel",
     canvasPortalTarget = null,
@@ -238,6 +262,9 @@ const AvatarDetailsEditorSession = forwardRef<
     useState<AvatarDetailsInkSelection>("effect");
   const [brushSize, setBrushSize] = useState<AvatarDetailsBrushSize>(3);
   const [symmetryEnabled, setSymmetryEnabled] = useState(false);
+  const [symmetryAxisX, setSymmetryAxisX] = useState(
+    AVATAR_DETAILS_SYMMETRY_AXIS_X_DEFAULT,
+  );
   const [pointerActive, setPointerActive] = useState(false);
   const [faceGuideVisible, setFaceGuideVisible] = useState(true);
   const [limitReached, setLimitReached] = useState(false);
@@ -258,6 +285,7 @@ const AvatarDetailsEditorSession = forwardRef<
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const screenGuideRef = useRef<HTMLCanvasElement | null>(null);
   const pointerStrokeRef = useRef<AvatarDetailsPointerStroke | null>(null);
+  const symmetryAxisPointerRef = useRef<number | null>(null);
   const previewFrameRef = useRef<number | null>(null);
   const pendingPreviewRef = useRef<AvatarDetailsV1 | null>(null);
   const onPreviewChangeRef = useRef(onPreviewChange);
@@ -287,6 +315,11 @@ const AvatarDetailsEditorSession = forwardRef<
   const inkApertureStyle = {
     "--avatar-details-ink-aperture-scale":
       BOT_AVATAR_DETAILS_INK_APERTURE_SCALE,
+  } as CSSProperties;
+  const symmetryGuideStyle = {
+    "--avatar-details-symmetry-axis-left": `${
+      ((symmetryAxisX + 0.5) / AVATAR_DETAILS_CANVAS_SIZE) * 100
+    }%`,
   } as CSSProperties;
   const runtimeColorPreviewStyle = {
     backgroundColor: normalizedAccentColor,
@@ -719,7 +752,7 @@ const AvatarDetailsEditorSession = forwardRef<
       const result = paintAvatarDetailsColorMap(
         currentColorMap,
         symmetryEnabled
-          ? symmetrizeAvatarDetailsGridPoints(points)
+          ? symmetrizeAvatarDetailsGridPoints(points, symmetryAxisX)
           : points,
         brushSize,
         inkRole,
@@ -732,7 +765,14 @@ const AvatarDetailsEditorSession = forwardRef<
       );
       return true;
     },
-    [brushSize, inkRole, paintMode, symmetryEnabled, updateWorking],
+    [
+      brushSize,
+      inkRole,
+      paintMode,
+      symmetryAxisX,
+      symmetryEnabled,
+      updateWorking,
+    ],
   );
 
   const previewCircleStroke = useCallback(
@@ -745,6 +785,7 @@ const AvatarDetailsEditorSession = forwardRef<
         symmetryEnabled
           ? symmetrizeAvatarDetailsGridPoints(
               avatarDetailsCirclePoints(stroke.startPoint, edge),
+              symmetryAxisX,
             )
           : avatarDetailsCirclePoints(stroke.startPoint, edge),
         brushSize,
@@ -757,7 +798,7 @@ const AvatarDetailsEditorSession = forwardRef<
       );
       return result.changed;
     },
-    [brushSize, inkRole, symmetryEnabled, updateWorking],
+    [brushSize, inkRole, symmetryAxisX, symmetryEnabled, updateWorking],
   );
 
   const previewLineStroke = useCallback(
@@ -770,6 +811,7 @@ const AvatarDetailsEditorSession = forwardRef<
         symmetryEnabled
           ? symmetrizeAvatarDetailsGridPoints(
               interpolateAvatarDetailsGridLine(stroke.startPoint, edge),
+              symmetryAxisX,
             )
           : interpolateAvatarDetailsGridLine(stroke.startPoint, edge),
         brushSize,
@@ -782,7 +824,7 @@ const AvatarDetailsEditorSession = forwardRef<
       );
       return result.changed;
     },
-    [brushSize, inkRole, symmetryEnabled, updateWorking],
+    [brushSize, inkRole, symmetryAxisX, symmetryEnabled, updateWorking],
   );
 
   const previewMoveStroke = useCallback(
@@ -810,7 +852,7 @@ const AvatarDetailsEditorSession = forwardRef<
       point: AvatarDetailsGridPoint,
     ): boolean => {
       const targets = symmetryEnabled
-        ? symmetrizeAvatarDetailsGridPoints([point])
+        ? symmetrizeAvatarDetailsGridPoints([point], symmetryAxisX)
         : [point];
       let colorMap = stroke.beforeColorMap;
       let changed = false;
@@ -831,7 +873,7 @@ const AvatarDetailsEditorSession = forwardRef<
       );
       return true;
     },
-    [inkRole, symmetryEnabled, updateWorking],
+    [inkRole, symmetryAxisX, symmetryEnabled, updateWorking],
   );
 
   const handlePointerDown = (event: PointerEvent<HTMLDivElement>): void => {
@@ -949,6 +991,84 @@ const AvatarDetailsEditorSession = forwardRef<
     event.preventDefault();
   };
 
+  const moveSymmetryAxisToClientX = useCallback((clientX: number): void => {
+    const bounds = canvasRef.current?.getBoundingClientRect();
+    if (!bounds) return;
+    const seamX = Math.round(
+      ((clientX - bounds.left) / Math.max(1, bounds.width)) *
+        AVATAR_DETAILS_CANVAS_SIZE,
+    );
+    setSymmetryAxisX(normalizeAvatarDetailsSymmetryAxisX(seamX - 0.5));
+  }, []);
+
+  const beginSymmetryAxisDrag = (
+    event: PointerEvent<HTMLDivElement>,
+  ): void => {
+    if (
+      !symmetryEnabled ||
+      (event.button !== 0 && (event.buttons & 1) === 0) ||
+      event.isPrimary === false
+    ) {
+      return;
+    }
+    symmetryAxisPointerRef.current = event.pointerId;
+    try {
+      event.currentTarget.setPointerCapture?.(event.pointerId);
+    } catch {
+      // The axis remains usable without capture in older webviews.
+    }
+    moveSymmetryAxisToClientX(event.clientX);
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const moveSymmetryAxisDrag = (
+    event: PointerEvent<HTMLDivElement>,
+  ): void => {
+    if (symmetryAxisPointerRef.current !== event.pointerId) return;
+    moveSymmetryAxisToClientX(event.clientX);
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const finishSymmetryAxisDrag = (
+    event: PointerEvent<HTMLDivElement>,
+  ): void => {
+    if (symmetryAxisPointerRef.current !== event.pointerId) return;
+    symmetryAxisPointerRef.current = null;
+    moveSymmetryAxisToClientX(event.clientX);
+    try {
+      event.currentTarget.releasePointerCapture?.(event.pointerId);
+    } catch {
+      // Pointer capture is optional in test and older browser environments.
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleSymmetryAxisKeyDown = (
+    event: KeyboardEvent<HTMLDivElement>,
+  ): void => {
+    const step = event.shiftKey ? 8 : 1;
+    if (event.key === "ArrowLeft") {
+      setSymmetryAxisX((axisX) =>
+        normalizeAvatarDetailsSymmetryAxisX(axisX - step),
+      );
+    } else if (event.key === "ArrowRight") {
+      setSymmetryAxisX((axisX) =>
+        normalizeAvatarDetailsSymmetryAxisX(axisX + step),
+      );
+    } else if (event.key === "Home") {
+      setSymmetryAxisX(AVATAR_DETAILS_SYMMETRY_AXIS_X_MIN);
+    } else if (event.key === "End") {
+      setSymmetryAxisX(AVATAR_DETAILS_SYMMETRY_AXIS_X_MAX);
+    } else {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
   const clearPaint = (): void => {
     if (!workingRef.current.screen.paintColorMapBase64) return;
     onEditStart?.();
@@ -1009,7 +1129,11 @@ const AvatarDetailsEditorSession = forwardRef<
         : paintMode === "circle"
           ? "Drag from the center to draw a circle."
           : "Drag to paint on the screen."
-  }${symmetryEnabled ? " Vertical symmetry is on." : ""}`;
+  }${
+    symmetryEnabled
+      ? ` Vertical symmetry is on at column ${Math.round(symmetryAxisX + 0.5)}.`
+      : ""
+  }`;
 
   const canvasEditor = (
     <div className={styles.canvasFrame} data-foundry-canvas={layout === "foundry" ? "true" : undefined}>
@@ -1072,11 +1196,34 @@ const AvatarDetailsEditorSession = forwardRef<
           data-avatar-details-editor-core="true"
           aria-hidden="true"
         />
-        <span
+        <div
           className={styles.symmetryGuide}
+          style={symmetryGuideStyle}
           data-visible={symmetryEnabled ? "true" : "false"}
-          aria-hidden="true"
-        />
+          role="slider"
+          tabIndex={symmetryEnabled ? 0 : -1}
+          aria-label="Vertical symmetry axis"
+          aria-orientation="horizontal"
+          aria-valuemin={Math.round(AVATAR_DETAILS_SYMMETRY_AXIS_X_MIN + 0.5)}
+          aria-valuemax={Math.round(AVATAR_DETAILS_SYMMETRY_AXIS_X_MAX + 0.5)}
+          aria-valuenow={Math.round(symmetryAxisX + 0.5)}
+          aria-valuetext={`${Math.round(symmetryAxisX + 0.5)} pixels from the left`}
+          title="Drag either handle to move the symmetry axis"
+          onPointerDown={beginSymmetryAxisDrag}
+          onPointerMove={moveSymmetryAxisDrag}
+          onPointerUp={finishSymmetryAxisDrag}
+          onPointerCancel={finishSymmetryAxisDrag}
+          onKeyDown={handleSymmetryAxisKeyDown}
+        >
+          <span
+            className={`${styles.symmetryHandle} ${styles.symmetryHandleTop}`}
+            aria-hidden="true"
+          />
+          <span
+            className={`${styles.symmetryHandle} ${styles.symmetryHandleBottom}`}
+            aria-hidden="true"
+          />
+        </div>
         <div
           className={styles.inputSurface}
           data-tool={paintMode}
@@ -1111,6 +1258,19 @@ const AvatarDetailsEditorSession = forwardRef<
             <small>128 × 128 · Shell-scaled preview</small>
           </div>
           <div className={styles.paintHeaderActions}>
+            {onLivePreview ? (
+              <button
+                type="button"
+                className={styles.guideToggleButton}
+                onClick={onLivePreview}
+                aria-label="Preview animated avatar"
+                title="Bring the avatar to life briefly without leaving Ink"
+                data-avatar-details-live-preview="true"
+              >
+                <Play size={13} aria-hidden="true" />
+                Preview live
+              </button>
+            ) : null}
             <button
               type="button"
               className={styles.guideToggleButton}
@@ -1309,6 +1469,33 @@ const AvatarDetailsEditorSession = forwardRef<
               );
             })}
           </div>
+          <label className={styles.speechInkAnimationControl}>
+            <span>
+              <strong>Speech ink animation</strong>
+              <small>Independent from Mouth animation.</small>
+            </span>
+            <select
+              value={working.screen.speechInkAnimation ?? "none"}
+              aria-label="Speech ink animation"
+              data-avatar-details-speech-ink-animation="true"
+              onChange={(event) => {
+                onEditStart?.();
+                commitMutation(
+                  avatarDetailsWithSpeechInkAnimation(
+                    workingRef.current,
+                    event.currentTarget
+                      .value as BotAvatarDetailsSpeechInkAnimation,
+                  ),
+                );
+              }}
+            >
+              {BOT_AVATAR_DETAILS_SPEECH_INK_ANIMATIONS.map((animation) => (
+                <option key={animation} value={animation}>
+                  {AVATAR_DETAILS_SPEECH_INK_ANIMATION_LABELS[animation]}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className={styles.runtimeColorNote}>
             <span style={runtimeColorPreviewStyle} aria-hidden="true" />
             <small>

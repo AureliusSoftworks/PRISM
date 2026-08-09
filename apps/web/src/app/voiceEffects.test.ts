@@ -11,6 +11,7 @@ import {
   resolveElevenLabsVoiceEffectPlan,
   resolveVoiceEffectPlan,
   resolveVoiceTexture,
+  voicePlaybackPresentationDurationMs,
   voiceReleaseGainAt,
   voiceLiltDetuneCents,
 } from "./voiceEffects.ts";
@@ -253,6 +254,12 @@ describe("engine-agnostic voice effects", () => {
 });
 
 describe("voice performance", () => {
+  it("keeps the mouth clock on the slower side of the rendered voice tail", () => {
+    assert.equal(voicePlaybackPresentationDurationMs(1_000, 120), 1_120);
+    assert.equal(voicePlaybackPresentationDurationMs(1_000, 0), 1_000);
+    assert.ok(voicePlaybackPresentationDurationMs(1_000, 120) > 1_000);
+  });
+
   it("holds visible lifecycle start until the compensated audio clock", () => {
     const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
     let timeoutCallback: (() => void) | null = null;
@@ -310,6 +317,61 @@ describe("voice performance", () => {
 
       controller.finish();
       assert.equal(progress.at(-1), 1_000);
+    } finally {
+      if (originalWindow) {
+        Object.defineProperty(globalThis, "window", originalWindow);
+      } else {
+        Reflect.deleteProperty(globalThis, "window");
+      }
+    }
+  });
+
+  it("keeps the final mouth pose stable until graph drain", () => {
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    let animationFrameCallback: FrameRequestCallback | null = null;
+    let elapsedMs = 1_120;
+    const progress: Array<{ durationMs: number; elapsedMs: number }> = [];
+
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      value: {
+        requestAnimationFrame: (callback: FrameRequestCallback) => {
+          animationFrameCallback = callback;
+          return 1;
+        },
+        cancelAnimationFrame: () => {
+          animationFrameCallback = null;
+        },
+      },
+    });
+
+    try {
+      const controller = beginVoicePlaybackProgress(
+        {
+          onProgress: (elapsed, duration) =>
+            progress.push({ durationMs: duration, elapsedMs: elapsed }),
+        },
+        1_000,
+        () => elapsedMs,
+        null,
+        { holdAtEndUntilFinish: true },
+      );
+      assert.deepEqual(progress, [{ durationMs: 1_000, elapsedMs: 0 }]);
+
+      const runFrame = animationFrameCallback as FrameRequestCallback | null;
+      assert.ok(runFrame);
+      runFrame(0);
+      assert.deepEqual(progress.at(-1), {
+        durationMs: 1_000,
+        elapsedMs: 999,
+      });
+
+      elapsedMs = 1_240;
+      controller.finish();
+      assert.deepEqual(progress.at(-1), {
+        durationMs: 1_000,
+        elapsedMs: 1_000,
+      });
     } finally {
       if (originalWindow) {
         Object.defineProperty(globalThis, "window", originalWindow);
@@ -392,6 +454,15 @@ describe("voice performance", () => {
     assert.ok(
       playbackClockAt > workletReadyAt,
       "source scheduling must read the live audio clock after asynchronous worklet setup",
+    );
+    assert.match(source, /const articulationDurationMs = Math\.min\(/u);
+    assert.match(
+      source,
+      /voicePlaybackPresentationDurationMs\(\s*articulationDurationMs,\s*tailFlushMs,?\s*\)/u,
+    );
+    assert.match(
+      source,
+      /beginVoicePlaybackProgress\([\s\S]{0,160}presentationDurationMs[\s\S]{0,300}holdAtEndUntilFinish: true/u,
     );
   });
 

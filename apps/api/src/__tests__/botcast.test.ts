@@ -862,6 +862,18 @@ describe("Botcast persistence and isolation", () => {
     );
     assert.equal(floorOutcomes.includes("yield"), true);
     assert.equal(floorOutcomes.includes("reclaim"), true);
+    assert.equal(floorOutcomes.includes("hold"), true);
+    assert.equal(
+      botcastCrosstalkFloorOutcomeV1({
+        seed: "irritated-copycat-holds-floor",
+        speaker: { id: "guest-1", systemPrompt: "Repeat exactly." },
+        tension: { level: 1 },
+        canReclaim: false,
+        canHold: true,
+        irritationTowardInterrupter: 0.95,
+      }),
+      "hold",
+    );
     assert.equal(
       botcastCrosstalkFloorOutcomeV1({
         seed: "blocked-reclaim",
@@ -16745,7 +16757,24 @@ describe("Botcast persistence and isolation", () => {
           strength: "large",
           targetTurnsSinceLastInterruption: null,
         });
-        if (plan) break;
+        const floorOutcome = botcastCrosstalkFloorOutcomeV1({
+          seed: [
+            "signal-power-crosstalk-floor-v1",
+            created.id,
+            "guest",
+            1,
+            "host-1",
+          ].join(":"),
+          speaker: {
+            id: "guest-1",
+            systemPrompt:
+              "A guarded inventor who resists personal speculation and warns people before walking away.",
+          },
+          tension: { level: 0 },
+          canReclaim: false,
+          canHold: true,
+        });
+        if (plan && floorOutcome === "yield") break;
         created = createBotcastEpisode(db, "user-1", show.id, {
           guestBotId: "guest-1",
           topic: `The cost of copied invention ${attempt + 1}`,
@@ -16760,6 +16789,26 @@ describe("Botcast persistence and isolation", () => {
         strength: "large",
         targetTurnsSinceLastInterruption: null,
       }));
+      assert.equal(
+        botcastCrosstalkFloorOutcomeV1({
+          seed: [
+            "signal-power-crosstalk-floor-v1",
+            created.id,
+            "guest",
+            1,
+            "host-1",
+          ].join(":"),
+          speaker: {
+            id: "guest-1",
+            systemPrompt:
+              "A guarded inventor who resists personal speculation and warns people before walking away.",
+          },
+          tension: { level: 0 },
+          canReclaim: false,
+          canHold: true,
+        }),
+        "yield",
+      );
 
       await advanceBotcastEpisode(
         db, "user-1", created.id, {}, generation(provider),
@@ -16905,7 +16954,7 @@ describe("Botcast persistence and isolation", () => {
           "Keep trying until the guest says something original or leaves.",
       });
       const provider = recordingProvider(hostLines, captures);
-      await advanceBotcastEpisode(
+      const opened = await advanceBotcastEpisode(
         db,
         "user-1",
         created.id,
@@ -16922,46 +16971,93 @@ describe("Botcast persistence and isolation", () => {
                    WHERE user_id = 'user-1' AND episode_id = ?),
                  'irritation', ?, ?)`,
       );
-      let irritationEdges = botcastDirectionalIrritationEdgesFromEvents([]);
-      const appliedTransitionIds = new Set<string>();
-      for (let cutoff = 0; cutoff < 6; cutoff += 1) {
-        const occurredAt = `2026-08-08T12:00:0${cutoff}.000Z`;
-        const planned = botcastPlanDirectionalIrritationForMeaningfulCutoffV1({
-          edges: irritationEdges,
-          appliedTransitionIds,
-          episodeId: created.id,
-          interruptedBotId: "guest-1",
-          interrupterBotId: "host-1",
-          messageId: `prior-interrupted-echo-${cutoff}`,
-          heardRatio: 0.4,
-          floorOutcome: "yield",
-          occurredAt,
-        });
-        irritationEdges = planned.edges;
-        for (const transition of planned.transitions) {
-          appliedTransitionIds.add(transition.transitionId);
-          insertIrritation.run(
-            `prior-irritation-${cutoff}`,
-            created.id,
-            created.id,
-            JSON.stringify({ transition }),
+      const occurredAt = "2026-08-08T12:00:00.000Z";
+      insertIrritation.run(
+        "prior-irritation-high",
+        created.id,
+        created.id,
+        JSON.stringify({
+          transition: {
+            v: 1,
+            name: "directionalIrritation",
+            transitionId: `prior-irritation-high:${created.id}`,
+            reason: "meaningful_cutoff",
+            subjectBotId: "guest-1",
+            targetBotId: "host-1",
+            before: 0,
+            after: 0.95,
+            delta: 0.95,
+            tier: "high",
             occurredAt,
-          );
-        }
-        if (
-          irritationEdges[
-            directionalIrritationEdgeKey("guest-1", "host-1")
-          ]?.intensity === 1
-        ) {
-          break;
-        }
-      }
+          },
+        }),
+        occurredAt,
+      );
 
       assert.equal(
-        irritationEdges[directionalIrritationEdgeKey("guest-1", "host-1")]
-          ?.intensity,
+        botcastDirectionalIrritationEdgesFromEvents(
+          getBotcastEpisode(db, "user-1", created.id).events,
+        )[directionalIrritationEdgeKey("guest-1", "host-1")]?.intensity,
+        0.95,
+      );
+      const held = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(held.message?.speakerRole, "guest");
+      assert.equal(held.message?.content, opened.message?.content);
+      assert.doesNotMatch(held.message?.content ?? "", /—$/u);
+      assert.equal(held.episode.outcome, null);
+      const heldUtterance = held.episode.events.find(
+        (event) =>
+          event.kind === "utterance" &&
+          event.payload.messageId === held.message?.id,
+      );
+      const heldPowerOutcome = heldUtterance?.payload.powerOutcome as
+        | Record<string, unknown>
+        | undefined;
+      assert.equal(heldPowerOutcome?.effect, "interruption");
+      assert.equal(heldPowerOutcome?.outcome, "held_floor");
+      assert.equal(heldPowerOutcome?.floorOutcome, "hold");
+      assert.equal(
+        heldPowerOutcome?.heardWordCount,
+        heldPowerOutcome?.originalWordCount,
+      );
+      assert.ok(
+        Number(heldPowerOutcome?.attemptedHeardWordCount) <
+          Number(heldPowerOutcome?.originalWordCount),
+      );
+      const heldReaction = held.episode.events.find(
+        (event) =>
+          event.kind === "listener_reaction" &&
+          (event.payload.plan as Record<string, unknown> | undefined)
+              ?.messageId === held.message?.id,
+      );
+      const heldReactionPlan = heldReaction?.payload.plan as
+        | Record<string, unknown>
+        | undefined;
+      assert.equal(heldReactionPlan?.interjectionAttempt, true);
+      assert.equal(heldReactionPlan?.floorOutcome, "hold");
+      assert.equal(heldReactionPlan?.interruptedSpeakerCue, undefined);
+      assert.equal(botcastPendingCrosstalkReclaimV1(held.episode.messages), null);
+      assert.equal(
+        botcastDirectionalIrritationEdgesFromEvents(held.episode.events)[
+          directionalIrritationEdgeKey("guest-1", "host-1")
+        ]?.intensity,
         1,
       );
+
+      const hostContinues = await advanceBotcastEpisode(
+        db,
+        "user-1",
+        created.id,
+        {},
+        generation(provider),
+      );
+      assert.equal(hostContinues.message?.speakerRole, "host");
       const reviewed = (
         await advanceBotcastEpisode(
           db,

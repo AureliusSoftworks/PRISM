@@ -483,7 +483,7 @@ export function applyDirectionalIrritationCutoff(args: {
 }
 
 /**
- * Apply the smaller rebuff delta when an interrupter is rejected via reclaim.
+ * Apply the smaller rebuff delta when an interrupter is rejected by resistance.
  * Returns null when the transition id was already applied.
  */
 export function applyDirectionalIrritationRebuff(args: {

@@ -84,6 +84,10 @@ import {
   subscribePrismCompanionSuppression,
 } from "./prismCompanionPresence";
 import {
+  PRISM_ORB_HANDOFF_DURATION_MS,
+  queryPrismChatHomeOrbSlot,
+} from "./prismOrbHandoff";
+import {
   togglePrismSoftSynthesisExpanded,
   usePrismSoftSynthesisUi,
 } from "./prismSoftSynthesisUi.ts";
@@ -170,6 +174,8 @@ interface PrismCompanionProps {
   accountKey: string;
   keyboardShortcut: string | null;
   surface: PrismCompanionSurfaceReference;
+  chatHomeHeroDocked?: boolean;
+  onChatHomeHeroActivate?: () => void;
   onAction: (action: PrismCompanionActionIntent) => void | Promise<void>;
   onSpeak?: (
     text: string,
@@ -320,6 +326,8 @@ export default function PrismCompanion({
   accountKey,
   keyboardShortcut,
   surface,
+  chatHomeHeroDocked = false,
+  onChatHomeHeroActivate,
   onAction,
   onSpeak,
   onStopSpeaking,
@@ -369,6 +377,9 @@ export default function PrismCompanion({
   const [position, setPosition] = useState<PrismCompanionPosition>(() =>
     readPosition(accountKey),
   );
+  const [chatHomeDockPosition, setChatHomeDockPosition] =
+    useState<PrismCompanionPosition | null>(null);
+  const [chatHomeDockReturning, setChatHomeDockReturning] = useState(false);
   const [refractSession, setRefractSession] =
     useState<PrismRefractSession | null>(null);
   const [refractPrompt, setRefractPrompt] = useState("");
@@ -410,6 +421,8 @@ export default function PrismCompanion({
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const refractPromptRef = useRef<HTMLInputElement | null>(null);
   const positionRef = useRef(position);
+  const chatHomeDockPositionRef = useRef<PrismCompanionPosition | null>(null);
+  const chatHomeDockReturnTimerRef = useRef<number | null>(null);
   const refractSessionRef = useRef<PrismRefractSession | null>(null);
   const refractReturnPositionRef = useRef<PrismCompanionPosition | null>(null);
   const refractTimerRef = useRef<number | null>(null);
@@ -477,11 +490,15 @@ export default function PrismCompanion({
   const dismissOnExternalInteraction =
     prismCompanionDismissesOnExternalInteraction(surface);
   const surfaceGlare = resolvePrismCompanionSurfaceGlare(position);
+  const visiblePosition = chatHomeDockPosition ?? position;
+  const visibleSurfaceGlare = chatHomeDockPosition
+    ? resolvePrismCompanionSurfaceGlare(chatHomeDockPosition)
+    : surfaceGlare;
   const anchorStyle = {
-    left: `${position.x * 100}%`,
-    top: `${position.y * 100}%`,
-    "--prism-orb-glare-x": `${surfaceGlare.xPct.toFixed(2)}%`,
-    "--prism-orb-glare-y": `${surfaceGlare.yPct.toFixed(2)}%`,
+    left: `${visiblePosition.x * 100}%`,
+    top: `${visiblePosition.y * 100}%`,
+    "--prism-orb-glare-x": `${visibleSurfaceGlare.xPct.toFixed(2)}%`,
+    "--prism-orb-glare-y": `${visibleSurfaceGlare.yPct.toFixed(2)}%`,
     "--prism-refract-target-half-width": `${Math.max(
       0,
       (refractSession?.targetWidth ?? 0) / 2,
@@ -515,6 +532,68 @@ export default function PrismCompanion({
   useEffect(() => {
     positionRef.current = position;
   }, [position]);
+
+  useEffect(() => {
+    // View switches and full-screen work temporarily suppress the portal.
+    // Resume from the normal snapshot after that boundary lifts, then dock.
+    if (companionSuppressed) {
+      chatHomeDockPositionRef.current = null;
+      setChatHomeDockPosition(null);
+      setChatHomeDockReturning(false);
+      return;
+    }
+    if (!chatHomeHeroDocked) {
+      if (chatHomeDockPositionRef.current === null) return;
+      chatHomeDockPositionRef.current = null;
+      setChatHomeDockPosition(null);
+      setChatHomeDockReturning(true);
+      if (chatHomeDockReturnTimerRef.current !== null) {
+        window.clearTimeout(chatHomeDockReturnTimerRef.current);
+      }
+      chatHomeDockReturnTimerRef.current = window.setTimeout(() => {
+        chatHomeDockReturnTimerRef.current = null;
+        setChatHomeDockReturning(false);
+      }, PRISM_ORB_HANDOFF_DURATION_MS);
+      return;
+    }
+
+    setChatHomeDockReturning(false);
+    let frame = 0;
+    const syncChatHomeDock = (): void => {
+      const slot = queryPrismChatHomeOrbSlot();
+      if (!slot || window.innerWidth < 1 || window.innerHeight < 1) return;
+      const rect = slot.getBoundingClientRect();
+      if (rect.width < 1 || rect.height < 1) return;
+      const next = {
+        x: (rect.left + rect.width / 2) / window.innerWidth,
+        y: (rect.top + rect.height / 2) / window.innerHeight,
+      };
+      chatHomeDockPositionRef.current = next;
+      setChatHomeDockPosition(next);
+    };
+    const scheduleSync = (): void => {
+      if (frame !== 0) return;
+      frame = window.requestAnimationFrame(() => {
+        frame = 0;
+        syncChatHomeDock();
+      });
+    };
+
+    // Let the existing floating presentation paint once before moving it into
+    // the Home slot. The companion's saved position is never overwritten.
+    scheduleSync();
+    const slot = queryPrismChatHomeOrbSlot();
+    const observer = slot ? new ResizeObserver(scheduleSync) : null;
+    if (slot && observer) observer.observe(slot);
+    window.addEventListener("resize", scheduleSync);
+    window.addEventListener("scroll", scheduleSync, true);
+    return () => {
+      if (frame !== 0) window.cancelAnimationFrame(frame);
+      observer?.disconnect();
+      window.removeEventListener("resize", scheduleSync);
+      window.removeEventListener("scroll", scheduleSync, true);
+    };
+  }, [chatHomeHeroDocked, companionSuppressed]);
 
   useLayoutEffect(() => {
     publishPrismCompanionVisualSnapshot({
@@ -610,9 +689,10 @@ export default function PrismCompanion({
       wieldStateRef.current.phase !== "idle" ||
       wieldTutorialVisibleRef.current ||
       refractTutorialVisibleRef.current ||
-      softSynthesisActive
+      softSynthesisActive ||
+      chatHomeHeroDocked
     );
-  }, [softSynthesisActive]);
+  }, [chatHomeHeroDocked, softSynthesisActive]);
 
   const scheduleIdleVanish = useCallback((): void => {
     if (idleVanishTimerRef.current !== null) {
@@ -667,6 +747,11 @@ export default function PrismCompanion({
     if (open) clearIdleDim();
     else scheduleIdleDim();
   }, [clearIdleDim, open, scheduleIdleDim]);
+
+  useEffect(() => {
+    if (chatHomeHeroDocked) clearIdleDim();
+    else if (!openRef.current) scheduleIdleDim();
+  }, [chatHomeHeroDocked, clearIdleDim, scheduleIdleDim]);
 
   useEffect(() => {
     draggingRef.current = dragging;
@@ -1060,6 +1145,9 @@ export default function PrismCompanion({
       if (idleVanishTimerRef.current !== null) {
         window.clearTimeout(idleVanishTimerRef.current);
         idleVanishTimerRef.current = null;
+      }
+      if (chatHomeDockReturnTimerRef.current !== null) {
+        window.clearTimeout(chatHomeDockReturnTimerRef.current);
       }
       stopPrismCompanionGlassTapAudio();
       speechRunRef.current += 1;
@@ -2869,8 +2957,18 @@ export default function PrismCompanion({
         data-open={open ? "true" : undefined}
         data-dragging={dragging ? "true" : undefined}
         data-inertial={inertial ? "true" : undefined}
-        data-idle-dimmed={idleDimmed ? "true" : undefined}
-        data-idle-hidden={idleHidden ? "true" : undefined}
+        data-idle-dimmed={
+          idleDimmed && !chatHomeHeroDocked ? "true" : undefined
+        }
+        data-idle-hidden={
+          idleHidden && !chatHomeHeroDocked ? "true" : undefined
+        }
+        data-chat-home-orb-docked={
+          chatHomeDockPosition ? "true" : undefined
+        }
+        data-chat-home-orb-returning={
+          chatHomeDockReturning ? "true" : undefined
+        }
         data-soft-synthesis={softSynthesisActive ? "true" : undefined}
         data-soft-lodged={softSynthesisUi.lodged ? "true" : undefined}
         data-refracting={refractSession?.phase}
@@ -3454,7 +3552,9 @@ export default function PrismCompanion({
           data-tutorial-target="prism-companion"
           data-prism-companion-avatar="true"
           aria-label={
-            softSynthesisActive
+            chatHomeHeroDocked
+              ? "Start chat with PRISM"
+              : softSynthesisActive
               ? softSynthesisUi.expanded
                 ? "Minimize soft synthesis"
                 : `Show soft synthesis · ${softSynthesisUi.jobCount} job${softSynthesisUi.jobCount === 1 ? "" : "s"}`
@@ -3464,19 +3564,34 @@ export default function PrismCompanion({
                   ? "Move or minimize Prism"
                   : "Move or talk with Prism"
           }
-          aria-expanded={softSynthesisActive ? softSynthesisUi.expanded : open}
+          aria-expanded={
+            chatHomeHeroDocked
+              ? undefined
+              : softSynthesisActive
+                ? softSynthesisUi.expanded
+                : open
+          }
           aria-controls={
-            softSynthesisActive ? undefined : "global-prism-companion"
+            chatHomeHeroDocked || softSynthesisActive
+              ? undefined
+              : "global-prism-companion"
           }
           aria-keyshortcuts={
-            softSynthesisLocked ? undefined : shortcutPresentation.aria
+            chatHomeHeroDocked || softSynthesisLocked
+              ? undefined
+              : shortcutPresentation.aria
           }
-          onPointerDown={beginDrag}
-          onPointerMove={moveDrag}
-          onPointerUp={endDrag}
-          onPointerCancel={cancelDrag}
+          onPointerDown={chatHomeHeroDocked ? undefined : beginDrag}
+          onPointerMove={chatHomeHeroDocked ? undefined : moveDrag}
+          onPointerUp={chatHomeHeroDocked ? undefined : endDrag}
+          onPointerCancel={chatHomeHeroDocked ? undefined : cancelDrag}
           disabled={Boolean(refractSession) || softSynthesisUi.lodged}
           onClick={(event) => {
+            if (chatHomeHeroDocked) {
+              playPrismCompanionGlassTap();
+              onChatHomeHeroActivate?.();
+              return;
+            }
             if (event.detail === 0) {
               playPrismCompanionGlassTap();
               if (softSynthesisActive) {
@@ -3498,7 +3613,7 @@ export default function PrismCompanion({
               {softSynthesisUi.jobCount > 99 ? "99+" : softSynthesisUi.jobCount}
             </span>
           ) : null}
-          {keyboardShortcut && !softSynthesisLocked ? (
+          {keyboardShortcut && !softSynthesisLocked && !chatHomeHeroDocked ? (
             <span className={styles.shortcut} aria-hidden="true">
               {shortcutPresentation.label}
             </span>

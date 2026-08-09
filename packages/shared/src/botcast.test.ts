@@ -25,6 +25,7 @@ import {
   botcastCameraOffsetXPercent,
   botcastCameraOffsetYPercent,
   botcastDirectorSuggestion,
+  botcastDepartureMessageIdForRole,
   botcastEchoHostInterruptPhrase,
   botcastEpisodeDepartureOutcome,
   botcastGuestDepartureEligible,
@@ -1519,12 +1520,21 @@ describe("Botcast replay director", () => {
         episodeId: "episode",
         sequence: 2,
         kind: "camera_suggestion",
-        payload: { shot: "wide", reason: "departure", atMs: 9_000 },
+        payload: {
+          shot: "wide",
+          reason: "departure",
+          atMs: 9_000,
+          messageId: "guest-final-line",
+        },
         occurredAt: "2026-01-01T00:00:00.000Z",
       },
     ];
     assert.equal(botcastGuestHasDepartedAt(events, 8_999), false);
     assert.equal(botcastGuestHasDepartedAt(events, 9_000), true);
+    assert.equal(
+      botcastDepartureMessageIdForRole(events, "guest"),
+      "guest-final-line",
+    );
     assert.equal(botcastHostHasDepartedAt(events, 9_000), false);
     assert.equal(botcastEpisodeDepartureOutcome(events), "guest_departed");
     const timeline = botcastReplayTimeline(

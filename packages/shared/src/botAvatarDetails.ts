@@ -1,4 +1,13 @@
 export const BOT_AVATAR_DETAILS_VERSION = 1 as const;
+export const BOT_AVATAR_DETAILS_SPEECH_INK_ANIMATIONS = [
+  "none",
+  "pulsate",
+  "spin",
+  "flicker",
+  "wobble",
+] as const;
+export type BotAvatarDetailsSpeechInkAnimation =
+  (typeof BOT_AVATAR_DETAILS_SPEECH_INK_ANIMATIONS)[number];
 export const BOT_AVATAR_DETAILS_CANVAS_SIZE = 128;
 export const BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH =
   (BOT_AVATAR_DETAILS_CANVAS_SIZE * BOT_AVATAR_DETAILS_CANVAS_SIZE) / 8;
@@ -161,6 +170,8 @@ export interface BotAvatarDetailsV1 {
      * 2 talking, and 3 effect, encoded as canonical standard padded Base64.
      */
     paintColorMapBase64?: string;
+    /** Speech-ink motion, authored independently from the mouth glyph. */
+    speechInkAnimation?: BotAvatarDetailsSpeechInkAnimation;
     /** @deprecated Legacy all-ink visibility preference. */
     hideInkDuringBlink?: true;
     /** @deprecated Legacy all-ink visibility preference. */
@@ -184,6 +195,7 @@ const SCREEN_REQUIRED_KEYS = ["paintMaskBase64", "stamps"] as const;
 const SCREEN_ALLOWED_KEYS = new Set([
   ...SCREEN_REQUIRED_KEYS,
   "paintColorMapBase64",
+  "speechInkAnimation",
   "hideInkDuringBlink",
   "hideInkDuringTalking",
 ]);
@@ -617,6 +629,26 @@ export function parseBotAvatarDetailsV1(value: unknown): BotAvatarDetailsV1 {
   ) {
     fail("screen.hideInkDuringTalking must be a boolean when provided.");
   }
+  if (
+    "speechInkAnimation" in value.screen &&
+    (typeof value.screen.speechInkAnimation !== "string" ||
+      !BOT_AVATAR_DETAILS_SPEECH_INK_ANIMATIONS.includes(
+        value.screen
+          .speechInkAnimation as BotAvatarDetailsSpeechInkAnimation
+      ))
+  ) {
+    fail(
+      `screen.speechInkAnimation must be one of ${BOT_AVATAR_DETAILS_SPEECH_INK_ANIMATIONS.join(
+        ", "
+      )}.`
+    );
+  }
+  const speechInkAnimation =
+    value.screen.speechInkAnimation &&
+    value.screen.speechInkAnimation !== "none"
+      ? (value.screen
+          .speechInkAnimation as BotAvatarDetailsSpeechInkAnimation)
+      : undefined;
   const stamps = value.screen.stamps.map(readStamp);
   const ids = new Set<BotAvatarDetailStampId>();
   const categoryCounts: Record<BotAvatarDetailStampCategory, number> = {
@@ -678,6 +710,7 @@ export function parseBotAvatarDetailsV1(value: unknown): BotAvatarDetailsV1 {
       stamps,
       paintMaskBase64,
       ...(paintColorMapBase64 ? { paintColorMapBase64 } : {}),
+      ...(speechInkAnimation ? { speechInkAnimation } : {}),
       ...(value.screen.hideInkDuringBlink === true
         ? { hideInkDuringBlink: true as const }
         : {}),

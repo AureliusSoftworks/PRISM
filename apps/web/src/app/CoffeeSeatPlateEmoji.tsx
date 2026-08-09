@@ -199,21 +199,43 @@ function updateCustomMouthMotionOrigins(
     : fontSize;
   const paddingInlineStart =
     Number.parseFloat(computed.paddingInlineStart) || 0;
+  const paddingInlineEnd = Number.parseFloat(computed.paddingInlineEnd) || 0;
   const paddingBlockStart = Number.parseFloat(computed.paddingBlockStart) || 0;
+  const paddingBlockEnd = Number.parseFloat(computed.paddingBlockEnd) || 0;
   const fontAscent =
     metrics.fontBoundingBoxAscent || metrics.actualBoundingBoxAscent;
   const fontDescent =
     metrics.fontBoundingBoxDescent || metrics.actualBoundingBoxDescent;
+  const contentWidth = Math.max(
+    0,
+    element.clientWidth - paddingInlineStart - paddingInlineEnd,
+  );
+  const contentHeight = Math.max(
+    0,
+    element.clientHeight - paddingBlockStart - paddingBlockEnd,
+  );
+  const textStartX =
+    paddingInlineStart + Math.max(0, (contentWidth - metrics.width) / 2);
+  const lineBoxTop =
+    paddingBlockStart + Math.max(0, (contentHeight - resolvedLineHeight) / 2);
   const baselineY =
-    paddingBlockStart +
+    lineBoxTop +
     (resolvedLineHeight - fontAscent - fontDescent) / 2 +
     fontAscent;
   const inkCenterX =
-    paddingInlineStart +
+    textStartX +
     (-metrics.actualBoundingBoxLeft + metrics.actualBoundingBoxRight) / 2;
   const inkCenterY =
     baselineY +
     (metrics.actualBoundingBoxDescent - metrics.actualBoundingBoxAscent) / 2;
+  element.style.setProperty(
+    "--bot-face-mouth-origin-x",
+    `${inkCenterX}px`,
+  );
+  element.style.setProperty(
+    "--bot-face-mouth-origin-y",
+    `${inkCenterY}px`,
+  );
   element.style.setProperty(
     "--bot-face-mouth-wobble-origin-x",
     `${inkCenterX}px`,
@@ -421,6 +443,18 @@ export function CoffeeSeatPlateEmoji({
     baseText,
     normalizedFaceEyeCharacter,
   );
+  const baseTextGlyphs = Array.from(baseText);
+  const renderedMouthGlyphForMotion =
+    renderedFaceMouthCharacter ??
+    Array.from(faceText).find(
+      (_glyph, index) =>
+        coffeeSeatEmojiPartForGlyph({
+          baseText,
+          baseGlyph: baseTextGlyphs[index],
+          index,
+        }) === "mouth",
+    ) ??
+    null;
   const faceBlinkDisabled = normalizedFaceBlinkBar === "none";
   const talkingPausesBlink = isTalking && !blinkWhileTalking;
   const blinkKey = `${enabled ? "enabled" : "disabled"}:${talkingPausesBlink ? "talking" : "idle"}:${faceMode}:${normalizedFaceBlinkBar}:${faceText}:${scheduleKey}`;
@@ -482,16 +516,16 @@ export function CoffeeSeatPlateEmoji({
     const element = customMouthGlyphRef.current;
     if (
       !element ||
-      !renderedFaceMouthCharacter ||
-      (normalizedFaceMouthAnimation !== "spin" &&
-        normalizedFaceMouthAnimation !== "wobble")
+      !renderedMouthGlyphForMotion ||
+      thinkingSpinnerActive ||
+      questionGlyphActive
     ) {
       return;
     }
     let cancelled = false;
     const measure = () => {
       if (cancelled) return;
-      updateCustomMouthMotionOrigins(element, renderedFaceMouthCharacter);
+      updateCustomMouthMotionOrigins(element, renderedMouthGlyphForMotion);
     };
     const frameId = window.requestAnimationFrame(measure);
     void document.fonts?.ready.then(measure);
@@ -502,8 +536,9 @@ export function CoffeeSeatPlateEmoji({
   }, [
     faceFontWeight,
     faceMouthFont,
-    normalizedFaceMouthAnimation,
-    renderedFaceMouthCharacter,
+    questionGlyphActive,
+    renderedMouthGlyphForMotion,
+    thinkingSpinnerActive,
   ]);
 
   useEffect(() => {
@@ -994,11 +1029,7 @@ export function CoffeeSeatPlateEmoji({
                   </span>
                 ) : (
                   <CrtPixelTextGlyph
-                    ref={
-                      part === "mouth" && renderedFaceMouthCharacter
-                        ? customMouthGlyphRef
-                        : undefined
-                    }
+                    ref={part === "mouth" ? customMouthGlyphRef : undefined}
                     content={renderedGlyph}
                     enabled={pixelated}
                   />

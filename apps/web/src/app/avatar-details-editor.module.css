@@ -76,7 +76,8 @@
 .editor button:focus-visible,
 .canvas:focus-visible,
 .inputSurface:focus-visible,
-.editor input:focus-visible {
+.editor input:focus-visible,
+.editor select:focus-visible {
   outline: 2px solid var(--editor-bot-color, var(--accent));
   outline-offset: 2px;
 }
@@ -438,6 +439,46 @@
   line-height: 1.35;
 }
 
+.speechInkAnimationControl {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(92px, 0.72fr);
+  align-items: center;
+  gap: 8px;
+  padding-top: 6px;
+  border-top: 1px solid color-mix(in srgb, var(--line) 70%, transparent);
+}
+
+.speechInkAnimationControl > span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.speechInkAnimationControl strong {
+  color: var(--fg);
+  font-size: 10px;
+  line-height: 1.25;
+}
+
+.speechInkAnimationControl small {
+  color: var(--fg-muted);
+  font-size: 9px;
+  line-height: 1.35;
+}
+
+.speechInkAnimationControl select {
+  min-width: 0;
+  height: 30px;
+  padding: 0 26px 0 8px;
+  border: 1px solid color-mix(in srgb, var(--line) 84%, transparent);
+  border-radius: 7px;
+  background: color-mix(in srgb, var(--bg-surface) 86%, transparent);
+  color: var(--fg);
+  font: inherit;
+  font-size: 10px;
+  font-weight: 700;
+}
+
 .inkRoleSwatch {
   width: 15px;
   height: 15px;
@@ -599,8 +640,8 @@
   position: absolute;
   top: 0;
   bottom: 0;
-  left: 50%;
-  z-index: 4;
+  left: var(--avatar-details-symmetry-axis-left, 50%);
+  z-index: 5;
   width: 0;
   border-left: 1px dashed
     color-mix(in srgb, var(--editor-bot-color, var(--accent)) 72%, #ffffff);
@@ -610,10 +651,55 @@
     0 0 3px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 46%, transparent)
   );
   transition: opacity 120ms ease;
+  outline: none;
 }
 
 .symmetryGuide[data-visible="true"] {
   opacity: 0.72;
+}
+
+.symmetryHandle {
+  position: absolute;
+  left: 0;
+  width: 18px;
+  height: 9px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 76%, #ffffff);
+  border-radius: 999px;
+  background:
+    linear-gradient(
+      90deg,
+      transparent 24%,
+      color-mix(in srgb, var(--editor-bot-color, var(--accent)) 82%, #ffffff) 24% 76%,
+      transparent 76%
+    ),
+    #08100d;
+  box-shadow:
+    0 0 0 2px color-mix(in srgb, #050608 78%, transparent),
+    0 0 8px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 62%, transparent);
+  transform: translateX(-50%);
+  pointer-events: auto;
+  touch-action: none;
+  cursor: ew-resize;
+}
+
+.symmetryHandleTop {
+  top: 7px;
+}
+
+.symmetryHandleBottom {
+  bottom: 7px;
+}
+
+.symmetryGuide:not([data-visible="true"]) .symmetryHandle {
+  pointer-events: none;
+}
+
+.symmetryGuide:focus-visible .symmetryHandle {
+  box-shadow:
+    0 0 0 2px #ffffff,
+    0 0 0 4px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 72%, transparent),
+    0 0 10px color-mix(in srgb, var(--editor-bot-color, var(--accent)) 72%, transparent);
 }
 
 .inputSurface {

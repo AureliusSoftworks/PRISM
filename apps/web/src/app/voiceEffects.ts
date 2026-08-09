@@ -281,6 +281,8 @@ export interface VoicePlaybackProgressController {
 export interface VoicePlaybackProgressOptions {
   /** Delay the visible lifecycle until rendered audio is expected to reach the device. */
   startDelayMs?: number;
+  /** Keep the last active frame until the audio graph confirms its drain completed. */
+  holdAtEndUntilFinish?: boolean;
 }
 
 const VOICE_OUTPUT_LATENCY_MAX_MS = 500;
@@ -345,6 +347,28 @@ export function estimateVoiceOutputLatencyMs(
   );
 }
 
+/**
+ * Keep visible speech on the complete rendered-output clock. The output graph
+ * can retain the final phoneme after source articulation ends, so subtracting
+ * that tail makes mouth motion run ahead of the voice.
+ */
+export function voicePlaybackPresentationDurationMs(
+  articulationDurationMs: number,
+  outputTailMs: number,
+): number {
+  const articulation = Math.max(
+    1,
+    Math.round(
+      Number.isFinite(articulationDurationMs) ? articulationDurationMs : 0,
+    ),
+  );
+  const outputTail = Math.max(
+    0,
+    Math.round(Number.isFinite(outputTailMs) ? outputTailMs : 0),
+  );
+  return articulation + outputTail;
+}
+
 export function beginVoicePlaybackProgress(
   lifecycle: VoicePlaybackLifecycle | undefined,
   durationMs: number,
@@ -358,9 +382,13 @@ export function beginVoicePlaybackProgress(
   let startTimer: number | null = null;
   let active = true;
   let started = false;
-  const report = (elapsedMs: number) => {
+  const report = (elapsedMs: number, finished = false) => {
+    const maximumElapsedMs =
+      options.holdAtEndUntilFinish && !finished
+        ? Math.max(0, normalizedDurationMs - 1)
+        : normalizedDurationMs;
     lifecycle?.onProgress?.(
-      Math.min(normalizedDurationMs, Math.max(0, elapsedMs)),
+      Math.min(maximumElapsedMs, Math.max(0, elapsedMs)),
       normalizedDurationMs
     );
   };
@@ -394,7 +422,7 @@ export function beginVoicePlaybackProgress(
     cancel,
     finish: () => {
       if (!active) return;
-      if (started) report(normalizedDurationMs);
+      if (started) report(normalizedDurationMs, true);
       cancel();
     },
   };
@@ -1163,13 +1191,19 @@ export async function playRealtimeVoiceBytes(args: {
   const tailFlushMs = FormantCorrectionNode
     ? VOICE_PLAYBACK_TAIL_FLUSH_MS
     : Math.min(40, VOICE_PLAYBACK_TAIL_FLUSH_MS);
-  const playbackDurationMs =
-    Math.min(
-      expectedVoicePlaybackDurationMs(decoded.duration * 1000, profile),
-      args.maxDurationMs && args.maxDurationMs > 0
-        ? args.maxDurationMs
-        : Number.POSITIVE_INFINITY,
-    ) + tailFlushMs;
+  const articulationDurationMs = Math.min(
+    expectedVoicePlaybackDurationMs(decoded.duration * 1000, profile),
+    args.maxDurationMs && args.maxDurationMs > 0
+      ? args.maxDurationMs
+      : Number.POSITIVE_INFINITY,
+  );
+  // The mouth follows rendered output, including the bounded worklet/device
+  // tail. The previous adjustment removed this tail and accelerated visemes in
+  // the wrong direction, leaving the mouth ahead of the audible voice.
+  const presentationDurationMs = voicePlaybackPresentationDurationMs(
+    articulationDurationMs,
+    tailFlushMs,
+  );
   const createPitchTransform = (
     startAt: number,
     effectDetuneCents = 0,
@@ -1324,7 +1358,7 @@ export async function playRealtimeVoiceBytes(args: {
     stereoPan: args.stereoPan,
   });
 
-  for (const event of buildVoiceDamageSchedule(args.seed, playbackDurationMs, texture.damage)) {
+  for (const event of buildVoiceDamageSchedule(args.seed, articulationDurationMs, texture.damage)) {
     const at = now + event.atMs / 1000;
     const end = at + event.durationMs / 1000;
     speechGain.gain.setValueAtTime(1, at);
@@ -1599,10 +1633,13 @@ export async function playRealtimeVoiceBytes(args: {
     }
     progress = beginVoicePlaybackProgress(
       args.lifecycle,
-      playbackDurationMs,
+      presentationDurationMs,
       () => (context.currentTime - playbackClockStartedAt) * 1000,
       args.alignment,
-      { startDelayMs: scheduledStartDelayMs + lifecycleOutputLatencyMs },
+      {
+        startDelayMs: scheduledStartDelayMs + lifecycleOutputLatencyMs,
+        holdAtEndUntilFinish: true,
+      },
     );
     active.progress = progress;
   });

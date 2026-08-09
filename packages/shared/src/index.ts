@@ -800,6 +800,7 @@ export {
   BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH,
   BOT_AVATAR_DETAILS_PAINT_MASK_BASE64_LENGTH,
   BOT_AVATAR_DETAILS_PAINT_MASK_BYTE_LENGTH,
+  BOT_AVATAR_DETAILS_SPEECH_INK_ANIMATIONS,
   BOT_AVATAR_DETAILS_VERSION,
   BOT_AVATAR_DETAILS_WRITABLE_PIXEL_COUNT,
   BOT_AVATAR_DETAIL_OFFSET_MAX,
@@ -827,6 +828,7 @@ export {
   type BotAvatarDetailStampTransform,
   type BotAvatarDetailStampV1,
   type BotAvatarDetailsV1,
+  type BotAvatarDetailsSpeechInkAnimation,
 } from "./botAvatarDetails.js";
 
 export {

@@ -5,6 +5,8 @@ export const PRISM_COMPANION_AVATAR_SELECTOR =
   '[data-prism-companion-avatar="true"]';
 export const PRISM_LOADER_ORB_SLOT_SELECTOR =
   '[data-prism-blocking-orb-slot="true"]';
+export const PRISM_CHAT_HOME_ORB_SLOT_SELECTOR =
+  '[data-prism-chat-home-orb-slot="true"]';
 
 export type PrismOrbHandoffRect = {
   left: number;
@@ -158,5 +160,14 @@ export function queryPrismLoaderOrbSlot(
   if (typeof document === "undefined") return null;
   const scope = root ?? document;
   const node = scope.querySelector(PRISM_LOADER_ORB_SLOT_SELECTOR);
+  return node instanceof HTMLElement ? node : null;
+}
+
+export function queryPrismChatHomeOrbSlot(
+  root?: ParentNode | null,
+): HTMLElement | null {
+  if (typeof document === "undefined") return null;
+  const scope = root ?? document;
+  const node = scope.querySelector(PRISM_CHAT_HOME_ORB_SLOT_SELECTOR);
   return node instanceof HTMLElement ? node : null;
 }

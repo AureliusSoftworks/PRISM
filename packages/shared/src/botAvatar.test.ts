@@ -69,14 +69,13 @@ import {
 } from "./botAvatar.ts";
 
 describe("bot avatar face style", () => {
-  it("offers an empty-space default blink and keeps the broken bar as a built-in", () => {
-    assert.equal(DEFAULT_BOT_FACE_BLINK_BAR, " ");
-    assert.equal(resolveBotFaceStyle({}, null).blinkBar, " ");
+  it("uses the broken bar as the default blink", () => {
+    assert.equal(DEFAULT_BOT_FACE_BLINK_BAR, "¦");
+    assert.equal(resolveBotFaceStyle({}, null).blinkBar, "¦");
     assert.deepEqual(Array.from(BOT_FACE_BLINK_BAR_VALUES), [
       "none",
       DEFAULT_BOT_FACE_BLINK_BAR,
       "❘",
-      "¦",
     ]);
   });
 
@@ -356,20 +355,20 @@ describe("bot avatar face style", () => {
     assert.equal(normalizeBotFaceMouthScale(2), 1.5);
     assert.equal(normalizeBotFaceMouthScale("1"), null);
     assert.equal(normalizeBotFaceEyeOffsetX(0.071), 0.08);
-    assert.equal(normalizeBotFaceEyeOffsetX(-2), -0.36);
-    assert.equal(normalizeBotFaceEyeOffsetX(2), 0.36);
+    assert.equal(normalizeBotFaceEyeOffsetX(-2), -1.2);
+    assert.equal(normalizeBotFaceEyeOffsetX(2), 1.2);
     assert.equal(normalizeBotFaceEyeOffsetX("0"), null);
     assert.equal(normalizeBotFaceEyeOffsetY(0.071), 0.08);
-    assert.equal(normalizeBotFaceEyeOffsetY(-2), -0.36);
-    assert.equal(normalizeBotFaceEyeOffsetY(2), 0.36);
+    assert.equal(normalizeBotFaceEyeOffsetY(-2), -1.2);
+    assert.equal(normalizeBotFaceEyeOffsetY(2), 1.2);
     assert.equal(normalizeBotFaceEyeOffsetY("0"), null);
     assert.equal(normalizeBotFaceMouthOffsetX(0.071), 0.08);
-    assert.equal(normalizeBotFaceMouthOffsetX(-2), -0.36);
-    assert.equal(normalizeBotFaceMouthOffsetX(2), 0.36);
+    assert.equal(normalizeBotFaceMouthOffsetX(-2), -1.2);
+    assert.equal(normalizeBotFaceMouthOffsetX(2), 1.2);
     assert.equal(normalizeBotFaceMouthOffsetX("0"), null);
     assert.equal(normalizeBotFaceMouthOffsetY(0.071), 0.08);
-    assert.equal(normalizeBotFaceMouthOffsetY(-2), -0.36);
-    assert.equal(normalizeBotFaceMouthOffsetY(2), 0.36);
+    assert.equal(normalizeBotFaceMouthOffsetY(-2), -1.2);
+    assert.equal(normalizeBotFaceMouthOffsetY(2), 1.2);
     assert.equal(normalizeBotFaceMouthOffsetY("0"), null);
     assert.equal(normalizeBotFaceMouthRotationDeg(47), 45);
     assert.equal(normalizeBotFaceMouthRotationDeg(-999), -180);
@@ -398,8 +397,8 @@ describe("bot avatar face style", () => {
     assert.equal(normalizeBotFaceBlinkScale(2), 1.3);
     assert.equal(normalizeBotFaceBlinkOffsetX(-0.071), -0.08);
     assert.equal(normalizeBotFaceBlinkOffsetY(0.071), 0.08);
-    assert.equal(normalizeBotFaceBlinkOffsetX(-2), -0.18);
-    assert.equal(normalizeBotFaceBlinkOffsetY(2), 0.18);
+    assert.equal(normalizeBotFaceBlinkOffsetX(-2), -1.2);
+    assert.equal(normalizeBotFaceBlinkOffsetY(2), 1.2);
   });
 
   it("clamps and steps blink rotation", () => {

@@ -21,6 +21,15 @@
     top 420ms cubic-bezier(.2, .82, .2, 1);
 }
 
+/* Home borrows the companion itself rather than painting a second emblem.
+   Its regular saved dock remains intact behind this presentation-only move. */
+.anchor[data-chat-home-orb-docked="true"],
+.anchor[data-chat-home-orb-returning="true"] {
+  transition:
+    left 380ms cubic-bezier(.2, .82, .2, 1),
+    top 380ms cubic-bezier(.2, .82, .2, 1);
+}
+
 .anchor[data-wielding="true"] {
   left: 0 !important;
   top: 0 !important;
@@ -744,6 +753,10 @@
   .bubble:not([data-recent="true"]) { animation-name: bubbleReducedLife; }
   .anchor, .backdrop, .light, .orb { transition-duration: 1ms; }
   .anchor[data-refracting] .avatar { transition-duration: 1ms; }
+  .anchor[data-chat-home-orb-docked="true"],
+  .anchor[data-chat-home-orb-returning="true"] {
+    transition: opacity 1ms linear, left 1ms linear, top 1ms linear;
+  }
   .anchor[data-wielding="true"],
   .anchor[data-wielding="true"] .avatar {
     transition: none;

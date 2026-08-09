@@ -151,6 +151,13 @@
   background: #020406;
 }
 
+.zenLiveBotPresencePlate
+  .botAvatarFoundryScreenOverlay:not([data-screen-overlay-visible="true"]) {
+  visibility: hidden;
+  opacity: 0;
+  pointer-events: none;
+}
+
 .zenLiveBotPresencePlate .botAvatarFoundryInkMount {
   position: absolute;
   inset: 0;
@@ -466,7 +473,10 @@
 }
 
 .botAvatarCustomizer[data-foundry="true"]
-  .botAvatarMannequinStage[data-foundry-camera-surface="true"]::after {
+  .botAvatarMannequinStage:is(
+    [data-foundry-camera-surface="true"],
+    [data-foundry-platform-present="true"]
+  )::after {
   display: none;
 }
 
@@ -19035,6 +19045,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     box-shadow 0.18s ease;
 }
 
+/* The live default Chat Home hero reserves the decorative mark's geometry
+   for the single global companion orb. The slot itself has no paint or input. */
+.chatHomeCompanionOrbSlot {
+  display: block;
+  width: 56px;
+  height: 56px;
+  flex: 0 0 auto;
+  pointer-events: none;
+}
+
 .emptyStateIconButton:hover,
 .emptyStateIconButton:focus-visible {
   outline: none;
@@ -19343,7 +19363,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .emptyStateHeroMiniArt {
   --avatar-details-ink-aperture-scale: 1.5;
-  --avatar-details-offset-y: 8px;
+  --avatar-details-offset-x: 1px;
+  --avatar-details-offset-y: 7px;
   position: absolute;
   inset: 0;
   display: grid;
@@ -29324,6 +29345,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-glyph-ink: #ffffff;
 }
 
+.debateBotPresencePlate:not([data-talking="true"]) .botFaceFrameLedAura,
+.debateBotPresencePlate:not([data-talking="true"]) .botFaceFrameLedCore,
 .debateBotPresencePlate:not([data-talking="true"]) .botFaceFrameLedGlow {
   opacity: 0;
 }
@@ -29728,6 +29751,28 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-phosphor-red-rgb: var(--crt-accent-rgb);
   --crt-phosphor-green-rgb: var(--crt-accent-rgb);
   --crt-phosphor-blue-rgb: var(--crt-accent-rgb);
+}
+
+.zenLiveBotPresenceFaceEmissionMask [data-avatar-details-emission] {
+  /* Avatar Details uses only the largest (face-screen) component of the
+     128px glass mask, whose final writable row ends at 99 / 128. The shared
+     CRT root also includes the lower glyph glass, so clip Ink to that authored
+     boundary after compensating for runtime registration nudges. This keeps
+     Zen's 2.4% face correction without letting Ink glow cross the seam. */
+  --avatar-details-runtime-clip-offset-y: calc(
+    var(--avatar-details-offset-y, 0px) +
+      var(--zen-live-bot-ink-offset-y, 0%) +
+      var(--avatar-details-facing-offset-y, 0%) +
+      var(--zen-live-bot-face-thumbnail-offset-y, 0%)
+  );
+  -webkit-clip-path: inset(
+    calc(0px - var(--avatar-details-runtime-clip-offset-y)) 0
+      calc(22.65625% + var(--avatar-details-runtime-clip-offset-y)) 0
+  );
+  clip-path: inset(
+    calc(0px - var(--avatar-details-runtime-clip-offset-y)) 0
+      calc(22.65625% + var(--avatar-details-runtime-clip-offset-y)) 0
+  );
 }
 
 .zenLiveBotPresencePlate[data-theme="light"]
@@ -30671,7 +30716,15 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   mix-blend-mode: normal;
 }
 
+.zenLiveBotPresencePlate:not([data-talking="true"]) .botFaceFrameLedAura,
+.zenLiveBotPresencePlate:not([data-talking="true"]) .botFaceFrameLedCore,
 .zenLiveBotPresencePlate:not([data-talking="true"]) .botFaceFrameLedGlow,
+.coffeeSeat:not([data-table-speaking="true"])
+  .coffeeSeatPlate[data-live-body-style="zen"]
+  .botFaceFrameLedAura,
+.coffeeSeat:not([data-table-speaking="true"])
+  .coffeeSeatPlate[data-live-body-style="zen"]
+  .botFaceFrameLedCore,
 .coffeeSeat:not([data-table-speaking="true"])
   .coffeeSeatPlate[data-live-body-style="zen"]
   .botFaceFrameLedGlow {
@@ -31052,6 +31105,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --bot-face-frame-led-filter: saturate(1.24) contrast(1.04)
     drop-shadow(0 0 5px rgba(255, 255, 255, 0.42));
   --bot-face-frame-tint-opacity: 0;
+  --bot-face-frame-tint-talking-opacity-high: 0;
+  --bot-face-frame-tint-talking-opacity-mid: 0;
+  --bot-face-frame-tint-talking-opacity-low: 0;
   --bot-face-metal-light-opacity: 0.3;
   --bot-face-frame-led-talking-opacity-high: 1;
   --bot-face-frame-led-talking-opacity-mid: 0.84;
@@ -31509,28 +31565,60 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not(
     [data-private-mode="true"]
   )
+  .botFaceFrameTint {
+  opacity: 0;
+  filter: none;
+  animation: none;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not(
+    [data-private-mode="true"]
+  )
   .botFaceFrameLed {
   mix-blend-mode: normal;
   animation: zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
 }
 
-/* Prism's identity LED is a pre-colored RGBA raster with no CSS mask. Never
-   repaint that layer with a gradient: doing so fills its whole circular box
-   and flashes the chassis white. The glow pass retains the authored LED mask,
-   so it alone owns the animated spectrum and its phosphor falloff. */
+/* Prism follows the standard bot LED material stack. The aura, colored
+   emitter, and white core all use the same authored bulb mask; the metal and
+   frame-tint rasters stay neutral. */
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not(
+    [data-private-mode="true"]
+  )
+  .botFaceFrameLedAura {
+  display: block;
+  --zen-live-bot-talking-light-opacity-high: 0.86;
+  --zen-live-bot-talking-light-opacity-mid: 0.72;
+  --zen-live-bot-talking-light-opacity-low: 0.56;
+  background-image: var(--bot-face-frame-led-spectrum);
+  animation:
+    zenLivePrismLedAuraHueRotate 1.7s linear infinite,
+    zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
+}
+
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not(
     [data-private-mode="true"]
   )
   .botFaceFrameLedGlow {
   --bot-face-frame-led-filter: saturate(1.3) contrast(1.04)
-    drop-shadow(0 0 1px rgba(255, 255, 255, 0.46))
-    drop-shadow(0 0 5px rgba(255, 255, 255, 0.34));
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.46));
   background: var(--bot-face-frame-led-spectrum);
   mix-blend-mode: normal;
   opacity: 1;
   animation:
     zenLivePrismEmitterHueRotate 1.7s linear infinite,
     zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not(
+    [data-private-mode="true"]
+  )
+  .botFaceFrameLedCore {
+  display: block;
+  background: #fff;
+  mix-blend-mode: screen;
+  opacity: var(--bot-face-frame-led-glow-opacity, 0.9);
+  animation: zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
@@ -31842,6 +31930,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
   to {
     filter: var(--bot-face-frame-led-filter, saturate(1.24) contrast(1.04))
+      hue-rotate(360deg);
+  }
+}
+
+@keyframes zenLivePrismLedAuraHueRotate {
+  from {
+    filter: blur(var(--bot-face-frame-led-aura-radius, 7px)) saturate(1.42)
+      hue-rotate(0deg);
+  }
+
+  to {
+    filter: blur(var(--bot-face-frame-led-aura-radius, 7px)) saturate(1.42)
       hue-rotate(360deg);
   }
 }
@@ -71228,14 +71328,68 @@ a.settingsCreditItem:focus-visible {
   transition: opacity 280ms ease;
 }
 
-/* A clean white pass restores the hot center of the LED after the persona
-   tint is applied. The soft screen-blended edge makes the mask read as light
-   coming through the frame instead of a flat graphic laid over it. */
+/* A masked, softened copy of the live LEDs casts their color onto the nearby
+   chassis. It is opt-in because ordinary single-color bots already receive
+   that spill from their standard LED raster. */
+.botFaceFrameLedAura {
+  position: absolute;
+  inset: var(--bot-face-frame-inset, -7%);
+  z-index: calc(var(--bot-face-frame-led-z, 10) - 1);
+  display: none;
+  overflow: hidden;
+  border-radius: 50%;
+  clip-path: circle(50% at 50% 50%);
+  pointer-events: none;
+  background-image: var(--bot-face-frame-led-background-image, none);
+  background-position: center;
+  background-size: contain;
+  background-repeat: no-repeat;
+  -webkit-mask-image: url("/bot-frame/bot-frame-led.png?v=1000");
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: url("/bot-frame/bot-frame-led.png?v=1000");
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  opacity: var(--bot-face-frame-led-glow-opacity, 0.9);
+  mix-blend-mode: screen;
+  transition: opacity 280ms ease;
+}
+
+/* The standard glow layer remains unchanged for ordinary bots. Prism reuses
+   it as the colored emitter, then mounts the white core below as a separate
+   final pass. */
 .botFaceFrameLedGlow {
   position: absolute;
   inset: var(--bot-face-frame-inset, -7%);
   z-index: calc(var(--bot-face-frame-led-z, 10) + 1);
   display: block;
+  overflow: hidden;
+  border-radius: 50%;
+  clip-path: circle(50% at 50% 50%);
+  pointer-events: none;
+  background: #fff;
+  -webkit-mask-image: url("/bot-frame/bot-frame-led.png?v=1000");
+  -webkit-mask-position: center;
+  -webkit-mask-size: contain;
+  -webkit-mask-repeat: no-repeat;
+  mask-image: url("/bot-frame/bot-frame-led.png?v=1000");
+  mask-position: center;
+  mask-size: contain;
+  mask-repeat: no-repeat;
+  mix-blend-mode: screen;
+  opacity: var(--bot-face-frame-led-glow-opacity, 0.9);
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.98))
+    drop-shadow(0 0 4px rgba(255, 255, 255, 0.58));
+  transition: opacity 280ms ease;
+}
+
+.botFaceFrameLedCore {
+  position: absolute;
+  inset: var(--bot-face-frame-inset, -7%);
+  z-index: calc(var(--bot-face-frame-led-z, 10) + 2);
+  display: none;
   overflow: hidden;
   border-radius: 50%;
   clip-path: circle(50% at 50% 50%);
@@ -71993,7 +72147,8 @@ a.settingsCreditItem:focus-visible {
   --bot-face-custom-glyph-base-rotation: var(--bot-face-mouth-rotation, 0deg);
   transform: rotate(var(--bot-face-mouth-rotation, 0deg));
   transform-box: border-box;
-  transform-origin: center center;
+  transform-origin: var(--bot-face-mouth-origin-x, 50%)
+    var(--bot-face-mouth-origin-y, 50%);
 }
 
 :is(.coffeeSeatPlateEmoji, .messageMoodCoffeeFace, .zenLiveBotPresenceFaceGlyph)
@@ -72234,14 +72389,17 @@ a.settingsCreditItem:focus-visible {
   ):is([data-face-mouth-animation="wobble"], [data-face-mouth-animation="spin"])
   [data-coffee-plate-emoji-part="mouth"]
   > [data-crt-glyph-layer="true"] {
-  display: inline-block;
+  display: inline-grid;
   inline-size: max-content;
-  min-inline-size: 0;
+  min-inline-size: 100%;
   block-size: calc(
     1em + var(--crt-glyph-paint-bleed) + var(--crt-glyph-paint-bleed)
   );
-  padding-inline: 0;
-  margin-inline: 0;
+  padding-inline: var(--crt-glyph-paint-bleed);
+  padding-block: var(--crt-glyph-paint-bleed);
+  margin-inline: calc(var(--crt-glyph-paint-bleed) * -1);
+  margin-block: calc(var(--crt-glyph-paint-bleed) * -1);
+  place-items: center;
   justify-self: center;
   line-height: 1;
   text-align: left;
@@ -72255,8 +72413,14 @@ a.settingsCreditItem:focus-visible {
   )[data-face-mouth-animation="wobble"]
   [data-coffee-plate-emoji-part="mouth"]
   > [data-crt-glyph-layer="true"] {
-  transform-origin: var(--bot-face-mouth-wobble-origin-x, 50%)
-    var(--bot-face-mouth-wobble-origin-y, 50%);
+  transform-origin: var(
+      --bot-face-mouth-wobble-origin-x,
+      var(--bot-face-mouth-origin-x, 50%)
+    )
+    var(
+      --bot-face-mouth-wobble-origin-y,
+      var(--bot-face-mouth-origin-y, 50%)
+    );
 }
 
 :is(
@@ -72266,8 +72430,14 @@ a.settingsCreditItem:focus-visible {
   )[data-face-mouth-animation="spin"]
   [data-coffee-plate-emoji-part="mouth"]
   > [data-crt-glyph-layer="true"] {
-  transform-origin: var(--bot-face-mouth-spin-origin-x, 50%)
-    var(--bot-face-mouth-spin-origin-y, 50%);
+  transform-origin: var(
+      --bot-face-mouth-spin-origin-x,
+      var(--bot-face-mouth-origin-x, 50%)
+    )
+    var(
+      --bot-face-mouth-spin-origin-y,
+      var(--bot-face-mouth-origin-y, 50%)
+    );
 }
 
 :is(

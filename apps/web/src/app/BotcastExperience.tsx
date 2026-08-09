@@ -245,6 +245,7 @@ import {
   type SignalDirectedCameraShot,
 } from "./signalCameraTransition";
 import { signalEpisodeRetryDraft } from "./signalEpisodeRetry";
+import { signalDepartureRoleAfterPresentedMessage } from "./signalDeparturePresentation";
 import {
   signalGenerationThinkingRole,
   signalThinkingPresentationEndReason,
@@ -2090,6 +2091,11 @@ export function BotcastExperience({
   const [speakingMessageId, setSpeakingMessageId] = useState<string | null>(
     null,
   );
+  const [signalPresentedDepartures, setSignalPresentedDepartures] = useState<{
+    episodeId: string | null;
+    host: boolean;
+    guest: boolean;
+  }>({ episodeId: null, host: false, guest: false });
   const [liveSpeech, setLiveSpeech] = useState<BotcastLiveSpeech | null>(null);
   const [
     signalPreSpeechPresenceMessageId,
@@ -2199,6 +2205,7 @@ export function BotcastExperience({
     shot: SignalDirectedCameraShot;
     transitionMode: SignalCameraTransitionMode;
   } | null>(null);
+  const signalCapturedDepartureKeysRef = useRef(new Set<string>());
   const liveCameraShiftAloneRef = useRef(false);
   const producerGuestSipTimeoutRef = useRef<number | null>(null);
   const producerCueInputRef = useRef<HTMLInputElement | null>(null);
@@ -2584,6 +2591,12 @@ export function BotcastExperience({
 
   useEffect(() => {
     clearLiveCameraPostSpeechHold();
+    signalCapturedDepartureKeysRef.current.clear();
+    setSignalPresentedDepartures({
+      episodeId: activeEpisodeId,
+      host: false,
+      guest: false,
+    });
     if (producerGuestSipTimeoutRef.current !== null) {
       window.clearTimeout(producerGuestSipTimeoutRef.current);
       producerGuestSipTimeoutRef.current = null;
@@ -6749,6 +6762,44 @@ export function BotcastExperience({
       }
       if (activeSpeechMessageIdRef.current === message.id) {
         prepareNextTurn();
+        const departureRole = signalDepartureRoleAfterPresentedMessage({
+          episode: currentEpisode,
+          message,
+        });
+        if (departureRole) {
+          const captureKey = `${currentEpisode.id}:${departureRole}:${message.id}`;
+          const sourceId = signalCaptureSourceIdRef.current;
+          if (
+            sourceId === currentEpisode.id &&
+            !signalCapturedDepartureKeysRef.current.has(captureKey)
+          ) {
+            signalCapturedDepartureKeysRef.current.add(captureKey);
+            const departureEvent = currentEpisode.events.find(
+              (event) =>
+                event.kind === "departure" &&
+                botcastDepartureSpeakerRole(event) === departureRole,
+            );
+            markReplayDirectionEvent({
+              sourceId,
+              kind: "departure",
+              sourceMessageId: message.id,
+              payload: {
+                ...(departureEvent?.payload ?? {}),
+                botId: message.botId,
+                speakerRole: departureRole,
+              },
+            });
+          }
+          setSignalPresentedDepartures((current) => ({
+            episodeId: currentEpisode.id,
+            host:
+              departureRole === "host" ||
+              (current.episodeId === currentEpisode.id && current.host),
+            guest:
+              departureRole === "guest" ||
+              (current.episodeId === currentEpisode.id && current.guest),
+          }));
+        }
         if (
           !socialSilenceMessageIsMarkedV1({
             content: message.content,
@@ -12784,6 +12835,16 @@ export function BotcastExperience({
               shot: liveShot,
               activeMessage: liveActiveMessage,
               replay: false,
+              ...(episode.playbackMode === "watch"
+                ? {
+                    guestDeparted:
+                      signalPresentedDepartures.episodeId === episode.id &&
+                      signalPresentedDepartures.guest,
+                    hostDeparted:
+                      signalPresentedDepartures.episodeId === episode.id &&
+                      signalPresentedDepartures.host,
+                  }
+                : {}),
             })}
             {episode.status === "live" &&
             episode.playbackMode !== "watch" ? (

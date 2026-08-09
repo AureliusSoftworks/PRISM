@@ -2810,20 +2810,45 @@ function botcastParticipantHasDepartedAt(
   elapsedMs: number,
   role: BotcastSpeakerRole,
 ): boolean {
+  const departureAtMs = botcastDepartureAtMsForRole(events, role);
+  return departureAtMs !== null && elapsedMs >= departureAtMs;
+}
+
+function botcastDepartureCameraEventForRole(
+  events: readonly BotcastReplayEvent[],
+  role: BotcastSpeakerRole,
+): BotcastReplayEvent | null {
   const departure = events.find(
     (event) => botcastDepartureSpeakerRole(event) === role,
   );
-  if (!departure) return false;
-  const departureShot = events.find(
+  if (!departure) return null;
+  return events.find(
     (event) =>
       event.sequence > departure.sequence &&
       event.kind === "camera_suggestion" &&
       event.payload.reason === "departure" &&
       (event.payload.speakerRole === role ||
         (role === "guest" && event.payload.speakerRole === undefined)),
+  ) ?? null;
+}
+
+export function botcastDepartureAtMsForRole(
+  events: readonly BotcastReplayEvent[],
+  role: BotcastSpeakerRole,
+): number | null {
+  const departureAtMs = Number(
+    botcastDepartureCameraEventForRole(events, role)?.payload.atMs,
   );
-  const departureAtMs = Number(departureShot?.payload.atMs);
-  return Number.isFinite(departureAtMs) && elapsedMs >= departureAtMs;
+  return Number.isFinite(departureAtMs) ? departureAtMs : null;
+}
+
+export function botcastDepartureMessageIdForRole(
+  events: readonly BotcastReplayEvent[],
+  role: BotcastSpeakerRole,
+): string | null {
+  const value = botcastDepartureCameraEventForRole(events, role)?.payload
+    .messageId;
+  return typeof value === "string" && value.trim() ? value.trim() : null;
 }
 
 export function botcastGuestHasDepartedAt(

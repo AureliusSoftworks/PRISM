@@ -20,7 +20,7 @@ export const SOCIAL_SILENCE_DEFAULT_HOLD_MS = 1_800 as const;
 /** At or beyond this heard ratio, a cut-in no longer warrants a retort/reclaim. */
 export const CROSSTALK_MEANINGFUL_CUTOFF_HEARD_RATIO = 0.85;
 
-export type CrosstalkFloorOutcome = "yield" | "reclaim";
+export type CrosstalkFloorOutcome = "yield" | "reclaim" | "hold";
 export interface CrosstalkReclaimPlanV1 {
   v: typeof CROSSTALK_RECLAIM_PLAN_VERSION;
   name: "crosstalkReclaim";
@@ -295,6 +295,7 @@ export function normalizeCrosstalkFloorOutcome(
   value: unknown,
 ): CrosstalkFloorOutcome | null {
   if (value === "yield") return "yield";
+  if (value === "hold") return "hold";
   // `resume` was the pre-contract Coffee spelling. Accept it at storage seams
   // while emitting only the canonical `reclaim` value.
   if (value === "reclaim" || value === "resume") return "reclaim";
@@ -505,7 +506,7 @@ export function normalizeListenerReactionPlanV1(
     ...(!spokenCue && vocalFoley ? { vocalFoley } : {}),
     ...(interjectionAttempt ? { interjectionAttempt: true as const } : {}),
     ...(interjectionAttempt && floorOutcome ? { floorOutcome } : {}),
-    ...(interjectionAttempt && floorOutcome !== "reclaim" && interruptedSpeakerCue
+    ...(interjectionAttempt && floorOutcome === "yield" && interruptedSpeakerCue
       ? {
           interruptedSpeakerCue,
           interruptedSpeakerCuePlayback:

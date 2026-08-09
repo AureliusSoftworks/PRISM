@@ -7,10 +7,7 @@ import {
   useState,
   type CSSProperties,
 } from "react";
-import {
-  normalizeBotFaceGlyphAnimation,
-  type BotFaceGlyphAnimation,
-} from "@localai/shared";
+import type { BotAvatarDetailsSpeechInkAnimation } from "@localai/shared";
 
 import {
   AVATAR_DETAILS_CANVAS_SIZE,
@@ -42,14 +39,16 @@ export interface AvatarDetailsMaskProps {
   blinkPhase?: "open" | "closed";
   talking?: boolean;
   speechMotionActive?: boolean;
-  mouthAnimation?: BotFaceGlyphAnimation | null;
   mouthShape?: ZenLiveBotMouthShape | null;
   depth?: Exclude<AvatarDetailsFaceDepth, "all">;
   staticRaster?: boolean;
   coreColor?: "phosphor" | "ink";
 }
 
-type AvatarDetailsSpeechMotion = Exclude<BotFaceGlyphAnimation, "none">;
+type AvatarDetailsSpeechMotion = Exclude<
+  BotAvatarDetailsSpeechInkAnimation,
+  "none"
+>;
 
 interface AvatarDetailsEmissionPlanesProps {
   pixels: Uint8ClampedArray;
@@ -227,8 +226,9 @@ function AvatarDetailsEmissionPlanes({
 /**
  * Shared persistent semantic ink for Studio, Zen, Coffee, and Signal. Each
  * face-depth band flattens the RGB editor roles into one normalized phosphor
- * silhouette while idle. During non-default speech motion, speech ink gets a
- * temporary emission plane so it can move without pulling blink/effect ink.
+ * silhouette while idle. During authored Speech ink motion, speech ink gets a
+ * temporary emission plane so it can move without pulling blink/effect ink or
+ * inheriting the separate mouth glyph animation.
  */
 export function AvatarDetailsMask({
   details,
@@ -238,7 +238,6 @@ export function AvatarDetailsMask({
   blinkPhase = "open",
   talking = false,
   speechMotionActive = talking,
-  mouthAnimation = "none",
   mouthShape = null,
   depth = "above-face",
   staticRaster = false,
@@ -256,14 +255,14 @@ export function AvatarDetailsMask({
     () => normalizeAvatarDetailsColor(color),
     [color],
   );
-  const normalizedMouthAnimation =
-    normalizeBotFaceGlyphAnimation(mouthAnimation) ?? "none";
+  const speechInkAnimation =
+    normalizedDetails.screen.speechInkAnimation ?? "none";
   const speechMotion: AvatarDetailsSpeechMotion | null =
     detailLevel === "full" &&
     talking &&
     speechMotionActive &&
-    normalizedMouthAnimation !== "none"
-      ? normalizedMouthAnimation
+    speechInkAnimation !== "none"
+      ? speechInkAnimation
       : null;
   const visiblePixels = useMemo(
     () =>

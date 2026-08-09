@@ -653,6 +653,7 @@ function buildReplayDirectionV2(
     // listener-action, and bookend clocks can include model latency and must not
     // be replayed beside their captured equivalents.
     if (kind === "camera" && capturedKinds.has("camera")) return [];
+    if (kind === "departure" && capturedKinds.has("departure")) return [];
     if (
       (kind === "intro" || kind === "outro") &&
       capturedKinds.has(kind)

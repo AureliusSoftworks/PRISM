@@ -1020,6 +1020,8 @@ export function botcastEpisodeCanPrepareAdvance(
 const SIGNAL_CROSSTALK_RECLAIM_BASE_CHANCE = 0.34;
 const SIGNAL_CROSSTALK_RECLAIM_MIN_CHANCE = 0.12;
 const SIGNAL_CROSSTALK_RECLAIM_MAX_CHANCE = 0.78;
+const SIGNAL_CROSSTALK_HOLD_CHANCE_WITHIN_RESISTANCE = 0.4;
+const SIGNAL_CROSSTALK_FORCED_HOLD_IRRITATION = 0.9;
 const SIGNAL_SOCIAL_SILENCE_BASE_CHANCE = 0.12;
 const SIGNAL_SOCIAL_SILENCE_MIN_CHANCE = 0.04;
 const SIGNAL_SOCIAL_SILENCE_MAX_CHANCE = 0.3;
@@ -1038,10 +1040,20 @@ export function botcastCrosstalkFloorOutcomeV1(args: {
   speaker: Pick<BotcastBotProfile, "id" | "systemPrompt">;
   tension: Pick<BotcastTensionState, "level">;
   canReclaim: boolean;
+  /** The current line can continue under the interjection without generation. */
+  canHold?: boolean;
   /** Interrupted bot's directed irritation toward the interrupter (0…1). */
   irritationTowardInterrupter?: number;
 }): CrosstalkFloorOutcome {
-  if (!args.canReclaim) return "yield";
+  const canHold = args.canHold ?? args.canReclaim;
+  if (!args.canReclaim && !canHold) return "yield";
+  const irritationTowardInterrupter = args.irritationTowardInterrupter ?? 0;
+  if (
+    canHold &&
+    irritationTowardInterrupter >= SIGNAL_CROSSTALK_FORCED_HOLD_IRRITATION
+  ) {
+    return "hold";
+  }
   const personaDisposition =
     (stableUnitValue(
       `signal-reclaim-persona:${args.speaker.id}:${args.speaker.systemPrompt}`,
@@ -1060,16 +1072,22 @@ export function botcastCrosstalkFloorOutcomeV1(args: {
   );
   const chance = biasReclaimChanceWithDirectionalIrritation({
     baseChance,
-    intensity: args.irritationTowardInterrupter ?? 0,
+    intensity: irritationTowardInterrupter,
   });
-  return stableUnitValue(`${args.seed}:floor-outcome`) < chance
-    ? "reclaim"
-    : "yield";
+  if (stableUnitValue(`${args.seed}:floor-outcome`) >= chance) return "yield";
+  if (
+    canHold &&
+    stableUnitValue(`${args.seed}:resistance-style`) <
+      SIGNAL_CROSSTALK_HOLD_CHANCE_WITHIN_RESISTANCE
+  ) {
+    return "hold";
+  }
+  return args.canReclaim ? "reclaim" : "hold";
 }
 
 /**
  * Plan episode-scoped directed irritation transitions for a meaningful Signal
- * power cutoff (and optional reclaim rebuff). Producer cuts / late overlaps
+ * power cutoff (and optional floor-resistance rebuff). Producer cuts / late overlaps
  * must not call this path.
  */
 export function botcastPlanDirectionalIrritationForMeaningfulCutoffV1(args: {
@@ -1105,7 +1123,7 @@ export function botcastPlanDirectionalIrritationForMeaningfulCutoffV1(args: {
     transitions.push(cutoff.transition);
     applied.add(cutoff.transition.transitionId);
   }
-  if (args.floorOutcome === "reclaim") {
+  if (args.floorOutcome === "reclaim" || args.floorOutcome === "hold") {
     const rebuff = applyDirectionalIrritationRebuff({
       edges,
       appliedTransitionIds: applied,
@@ -13631,8 +13649,43 @@ export async function advanceBotcastEpisode(
   const powerInterruptionIsMeaningful = powerInterruptedContent
     ? crosstalkInterruptionIsMeaningfulV1(powerInterruptedContent)
     : false;
-  const intendedContent = powerInterruptionIsMeaningful && powerInterruptedContent
-    ? powerInterruptedContent.content
+  const irritationTowardInterrupter = readDirectionalIrritationIntensity({
+    edges: irritationEdgesAtTurnStart,
+    subjectBotId: speaker.id,
+    targetBotId: peer.id,
+  });
+  const crosstalkFloorSeed = [
+    "signal-power-crosstalk-floor-v1",
+    episode.id,
+    speakerRole,
+    episode.messages.filter((message) => message.speakerRole === speakerRole)
+      .length,
+    peer.id,
+  ].join(":");
+  const crosstalkFloorOutcome =
+    !producerCut &&
+    powerInterruptionIsMeaningful &&
+    powerInterruptionPlan
+      ? botcastCrosstalkFloorOutcomeV1({
+          seed: crosstalkFloorSeed,
+          speaker,
+          tension,
+          canReclaim:
+            !speakerEchoesAddressedSpeech &&
+            !botPowerIntermittentMuteTurnIsIgnoredV1(
+              speaker.powers,
+              `${episode.id}:${speaker.id}:${episode.messages.length + 1}`,
+            ),
+          // Holding the current line requires no new model speech, so even an
+          // echo-bound bot can simply keep talking under another bot's cut-in.
+          canHold: true,
+          irritationTowardInterrupter,
+        })
+      : null;
+  const powerCutoffApplied =
+    crosstalkFloorOutcome === "hold" ? null : powerInterruptedContent;
+  const intendedContent = powerInterruptionIsMeaningful && powerCutoffApplied
+    ? powerCutoffApplied.content
     : namingAdjustedContent;
   const content =
     !picklesBeatKind &&
@@ -13677,7 +13730,7 @@ export async function advanceBotcastEpisode(
     !speakerIsMutedForTurn &&
     !speakerRepeatsForHearingPower &&
     !speakerEchoesForTurn &&
-    !powerInterruptedContent &&
+    !powerCutoffApplied &&
     content === namingAdjustedGeneratedContent
       ? (performance.voicePerformanceText
           ? applyBotPowerBotNamesV1(
@@ -13692,7 +13745,7 @@ export async function advanceBotcastEpisode(
               )}]`
             : null)
     : !socialSilenceMarker &&
-        !powerInterruptedContent &&
+        !powerCutoffApplied &&
         responseBudgetAdjusted &&
         immersiveVoiceEffectRequired
       ? `${content} [${botcastFallbackImmersiveVoiceTag(
@@ -13742,36 +13795,6 @@ export async function advanceBotcastEpisode(
   let irritationEdges = irritationEdgesAtTurnStart;
   const appliedIrritationTransitionIds =
     botcastDirectionalIrritationAppliedTransitionIdsFromEvents(episode.events);
-  const irritationTowardInterrupter = readDirectionalIrritationIntensity({
-    edges: irritationEdges,
-    subjectBotId: speaker.id,
-    targetBotId: peer.id,
-  });
-  const crosstalkFloorSeed = [
-    "signal-power-crosstalk-floor-v1",
-    episode.id,
-    speakerRole,
-    episode.messages.filter((message) => message.speakerRole === speakerRole)
-      .length,
-    peer.id,
-  ].join(":");
-  const crosstalkFloorOutcome =
-    !producerCut &&
-    powerInterruptionIsMeaningful &&
-    powerInterruptionPlan
-      ? botcastCrosstalkFloorOutcomeV1({
-          seed: crosstalkFloorSeed,
-          speaker,
-          tension,
-          canReclaim:
-            !speakerEchoesAddressedSpeech &&
-            !botPowerIntermittentMuteTurnIsIgnoredV1(
-              speaker.powers,
-              `${episode.id}:${speaker.id}:${episode.messages.length + 1}`,
-            ),
-          irritationTowardInterrupter,
-        })
-      : null;
   const powerCutoffHeardRatio =
     powerInterruptedContent && powerInterruptedContent.originalWordCount > 0
       ? powerInterruptedContent.heardWordCount /
@@ -13901,6 +13924,11 @@ export async function advanceBotcastEpisode(
         ? {
             powerOutcome: {
               effect: "interruption",
+              outcome:
+                crosstalkFloorOutcome === "hold"
+                  ? "held_floor"
+                  : "cut_off",
+              floorOutcome: crosstalkFloorOutcome ?? "yield",
               powerId: powerInterruptionPlan.powerId,
               powerName: powerInterruptionPlan.powerName,
               interruptingBotId: peer.id,
@@ -13910,7 +13938,16 @@ export async function advanceBotcastEpisode(
               certainty: powerInterruptionPlan.certainty,
               targetProgress: powerInterruptionPlan.targetProgress,
               originalWordCount: powerInterruptedContent.originalWordCount,
-              heardWordCount: powerInterruptedContent.heardWordCount,
+              heardWordCount:
+                crosstalkFloorOutcome === "hold"
+                  ? powerInterruptedContent.originalWordCount
+                  : powerInterruptedContent.heardWordCount,
+              ...(crosstalkFloorOutcome === "hold"
+                ? {
+                    attemptedHeardWordCount:
+                      powerInterruptedContent.heardWordCount,
+                  }
+                : {}),
             },
           }
       : addressedInsultEligible
@@ -14283,6 +14320,20 @@ export async function advanceBotcastEpisode(
       );
     if (!cutoff) {
       listenerReactionCandidate = null;
+    } else if (listenerReactionCandidate.floorOutcome === "hold") {
+      // The interrupter still gets the audible overlap, but the current bot
+      // ignores it: primary speech and the canonical transcript continue.
+      listenerReactionCandidate = {
+        ...listenerReactionCandidate,
+        interruptedSpeakerCue: undefined,
+        interruptedSpeakerCuePlayback: undefined,
+        targetProgress: Number(
+          Math.max(
+            0.3,
+            Math.min(0.9, listenerReactionCandidate.targetProgress),
+          ).toFixed(3),
+        ),
+      };
     } else if (!crosstalkInterruptionIsMeaningfulV1(cutoff)) {
       listenerReactionCandidate = {
         ...listenerReactionCandidate,

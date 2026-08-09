@@ -104,7 +104,7 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(
       pageCssSource,
-      /\.emptyStateHeroMiniArt\s*\{[^}]*--avatar-details-offset-y:\s*8px/,
+      /\.emptyStateHeroMiniArt\s*\{[^}]*--avatar-details-offset-x:\s*1px[^}]*--avatar-details-offset-y:\s*7px/,
     );
     assert.match(
       pageCssSource,

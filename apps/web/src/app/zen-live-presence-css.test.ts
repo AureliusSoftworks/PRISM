@@ -625,6 +625,24 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(emissionMaskRule, /pointer-events:\s*none\s*;/);
 
+    const detailsInkClipRule = ruleForExactSelector(
+      ".zenLiveBotPresenceFaceEmissionMask [data-avatar-details-emission]",
+    );
+    assert.match(
+      detailsInkClipRule,
+      /--avatar-details-runtime-clip-offset-y:\s*calc\(/,
+    );
+    assert.match(detailsInkClipRule, /--avatar-details-offset-y/);
+    assert.match(detailsInkClipRule, /--zen-live-bot-ink-offset-y/);
+    assert.match(detailsInkClipRule, /--avatar-details-facing-offset-y/);
+    assert.match(
+      detailsInkClipRule,
+      /--zen-live-bot-face-thumbnail-offset-y/,
+    );
+    assert.match(detailsInkClipRule, /-webkit-clip-path:\s*inset\(/);
+    assert.match(detailsInkClipRule, /clip-path:\s*inset\(/);
+    assert.match(detailsInkClipRule, /22\.65625%/);
+
     const cleanProfileRule = ruleForExactSelector(
       '.zenLiveBotPresenceFaceEmissionMask[data-crt-profile="clean"]',
     );
@@ -1466,9 +1484,25 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(alloyRule, /mix-blend-mode:\s*color\s*;/);
 
+    const ledAuraRule = ruleForSelectorNeedlesWithBody(
+      [".botFaceFrameLedAura"],
+      "z-index",
+    );
+    assert.match(
+      ledAuraRule,
+      /mask-image:\s*url\("\/bot-frame\/bot-frame-led\.png\?v=1000"\)/,
+      "the chassis aura must use the same authored LED mask as the emitters",
+    );
+    assert.match(
+      ledAuraRule,
+      /display:\s*none\s*;/,
+      "the Prism aura must not change existing bot lighting",
+    );
+    assert.match(ledAuraRule, /mix-blend-mode:\s*screen\s*;/);
+
     const ledGlowRule = ruleForSelectorNeedlesWithBody(
       [".botFaceFrameLedGlow"],
-      "background: #fff",
+      "drop-shadow(0 0 4px",
     );
     assert.match(ledGlowRule, /background:\s*#fff\s*;/);
     assert.match(
@@ -1484,7 +1518,19 @@ describe("Zen live presence CSS", () => {
       ledGlowRule,
       /drop-shadow\(0 0 4px rgba\(255, 255, 255, 0\.58\)\)/,
     );
+    const ledCoreRule = ruleForSelectorNeedlesWithBody(
+      [".botFaceFrameLedCore"],
+      "z-index",
+    );
+    assert.match(ledCoreRule, /background:\s*#fff\s*;/);
+    assert.match(
+      ledCoreRule,
+      /mask-image:\s*url\("\/bot-frame\/bot-frame-led\.png\?v=1000"\)/,
+    );
+    assert.match(ledCoreRule, /display:\s*none\s*;/);
+    assert.match(pageSource, /data-frame-material-layer="led-aura"/);
     assert.match(pageSource, /data-frame-material-layer="led-glow"/);
+    assert.match(pageSource, /data-frame-material-layer="led-core"/);
 
     const lightFaceRule = ruleForExactSelector(
       '.zenLiveBotPresencePlate[data-theme="light"] .zenLiveBotPresenceFace',
@@ -2122,9 +2168,19 @@ describe("Zen live presence CSS", () => {
       "shared and optimized frames both use the pre-colored LED raster",
     );
     assert.equal(
+      pageSource.match(/data-frame-material-layer="led-aura"/g)?.length,
+      2,
+      "shared and optimized frames both render the masked LED aura",
+    );
+    assert.equal(
       pageSource.match(/data-frame-material-layer="led-glow"/g)?.length,
       2,
-      "shared and optimized frames both render the white LED glow layer",
+      "shared and optimized frames both render the colored LED emission layer",
+    );
+    assert.equal(
+      pageSource.match(/data-frame-material-layer="led-core"/g)?.length,
+      2,
+      "shared and optimized frames both render the white LED core layer",
     );
     assert.match(
       pageSource,
@@ -2495,6 +2551,10 @@ describe("Zen live presence CSS", () => {
       ['data-talking="true"', 'data-face-mouth-animation="spin"'],
       "botFaceCustomMouthSpin",
     );
+    const sharedMouthGeometryRule = ruleForSelectorNeedlesWithBody(
+      ['data-coffee-plate-emoji-part="mouth"'],
+      "--bot-face-mouth-origin-x",
+    );
     assert.match(pulsateRule, /--bot-face-mouth-pulse-scale-x/);
     assert.match(flickerRule, /--bot-face-mouth-speech-opacity/);
     assert.doesNotMatch(flickerRule, /scale[XY]\(/);
@@ -2502,7 +2562,7 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(wobbleRule, /scale[XY]\(/);
     assert.match(
       wobbleOriginRule,
-      /transform-origin:\s*var\(--bot-face-mouth-wobble-origin-x,\s*50%\)\s*var\(--bot-face-mouth-wobble-origin-y,\s*50%\)\s*;/,
+      /transform-origin:\s*var\(\s*--bot-face-mouth-wobble-origin-x,\s*var\(--bot-face-mouth-origin-x,\s*50%\)\s*\)\s*var\(\s*--bot-face-mouth-wobble-origin-y,\s*var\(--bot-face-mouth-origin-y,\s*50%\)\s*\)\s*;/,
     );
     assert.match(spinTalkingRule, /botFaceCustomMouthSpin/);
     assert.match(
@@ -2510,18 +2570,29 @@ describe("Zen live presence CSS", () => {
       /--bot-face-mouth-spin-turn-duration,\s*480ms/,
     );
     assert.doesNotMatch(spinTalkingRule, /scale[XY]\(/);
-    assert.match(spinGeometryRule, /display:\s*inline-block\s*;/);
+    assert.match(spinGeometryRule, /display:\s*inline-grid\s*;/);
     assert.match(spinGeometryRule, /inline-size:\s*max-content\s*;/);
-    assert.match(spinGeometryRule, /min-inline-size:\s*0\s*;/);
+    assert.match(spinGeometryRule, /min-inline-size:\s*100%\s*;/);
     assert.match(
       spinGeometryRule,
       /block-size:\s*calc\(\s*1em\s*\+\s*var\(--crt-glyph-paint-bleed\)\s*\+\s*var\(--crt-glyph-paint-bleed\)\s*\)\s*;/,
     );
-    assert.match(spinGeometryRule, /padding-inline:\s*0\s*;/);
-    assert.match(spinGeometryRule, /margin-inline:\s*0\s*;/);
+    assert.match(
+      spinGeometryRule,
+      /padding-inline:\s*var\(--crt-glyph-paint-bleed\)\s*;/,
+    );
+    assert.match(
+      spinGeometryRule,
+      /margin-inline:\s*calc\(var\(--crt-glyph-paint-bleed\) \* -1\)\s*;/,
+    );
+    assert.match(spinGeometryRule, /place-items:\s*center\s*;/);
     assert.match(
       spinOriginRule,
-      /transform-origin:\s*var\(--bot-face-mouth-spin-origin-x,\s*50%\)\s*var\(--bot-face-mouth-spin-origin-y,\s*50%\)\s*;/,
+      /transform-origin:\s*var\(\s*--bot-face-mouth-spin-origin-x,\s*var\(--bot-face-mouth-origin-x,\s*50%\)\s*\)\s*var\(\s*--bot-face-mouth-spin-origin-y,\s*var\(--bot-face-mouth-origin-y,\s*50%\)\s*\)\s*;/,
+    );
+    assert.match(
+      sharedMouthGeometryRule,
+      /transform-origin:\s*var\(--bot-face-mouth-origin-x,\s*50%\)\s*var\(--bot-face-mouth-origin-y,\s*50%\)\s*;/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
@@ -2534,6 +2605,13 @@ describe("Zen live presence CSS", () => {
       /metrics\.actualBoundingBoxAscent/,
     );
     assert.match(coffeeSeatPlateEmojiSource, /computed\.paddingBlockStart/);
+    assert.match(coffeeSeatPlateEmojiSource, /element\.clientWidth/);
+    assert.match(coffeeSeatPlateEmojiSource, /metrics\.width/);
+    assert.match(coffeeSeatPlateEmojiSource, /const textStartX/);
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /"--bot-face-mouth-origin-x",\s*`\$\{inkCenterX\}px`/,
+    );
     assert.match(
       coffeeSeatPlateEmojiSource,
       /--bot-face-mouth-wobble-origin-y/,
@@ -2546,9 +2624,13 @@ describe("Zen live presence CSS", () => {
       coffeeSeatPlateEmojiSource,
       /"--bot-face-mouth-wobble-origin-y",\s*`\$\{inkCenterY\}px`/,
     );
-    assert.match(
+    assert.doesNotMatch(
       coffeeSeatPlateEmojiSource,
       /normalizedFaceMouthAnimation !== "spin"[\s\S]*normalizedFaceMouthAnimation !== "wobble"/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /const renderedMouthGlyphForMotion =/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
@@ -2724,6 +2806,18 @@ describe("Zen live presence CSS", () => {
       /--bot-face-frame-tint-opacity:\s*0\s*;/,
       "Prism must not colorize the chassis tint mask",
     );
+    assert.match(
+      prismRule,
+      /--bot-face-frame-tint-talking-opacity-high:\s*0\s*;/,
+    );
+    assert.match(
+      prismRule,
+      /--bot-face-frame-tint-talking-opacity-mid:\s*0\s*;/,
+    );
+    assert.match(
+      prismRule,
+      /--bot-face-frame-tint-talking-opacity-low:\s*0\s*;/,
+    );
 
     const prismFrameTintRule = ruleForNormalizedSelector(
       '.zenLiveBotPresencePlate[data-prism-persona="true"] .botFaceFrameTint',
@@ -2731,20 +2825,45 @@ describe("Zen live presence CSS", () => {
     assert.match(prismFrameTintRule, /opacity:\s*0\s*;/);
     assert.match(prismFrameTintRule, /animation:\s*none\s*;/);
 
+    const prismTalkingFrameTintRule = ruleForNormalizedSelector(
+      '.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not([data-private-mode="true"]) .botFaceFrameTint',
+    );
+    assert.match(prismTalkingFrameTintRule, /opacity:\s*0\s*;/);
+    assert.match(prismTalkingFrameTintRule, /filter:\s*none\s*;/);
+    assert.match(prismTalkingFrameTintRule, /animation:\s*none\s*;/);
+
     const talkingLedRule = ruleForNormalizedSelector(
       '.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not([data-private-mode="true"]) .botFaceFrameLed',
     );
     assert.doesNotMatch(
       talkingLedRule,
       /background(?:-color|-image)?\s*:/,
-      "the unmasked RGBA identity layer must never be repainted as a full circle",
+      "the pre-colored inline LED raster must never be repainted",
     );
     assert.match(talkingLedRule, /mix-blend-mode:\s*normal\s*;/);
     assert.match(
       talkingLedRule,
       /animation:\s*zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite\s*;/,
     );
-    assert.doesNotMatch(talkingLedRule, /zenLivePrismEmitterHueRotate/);
+
+    const talkingLedAuraRule = ruleForSelectorNeedlesWithBody(
+      [
+        '.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]',
+        '[data-private-mode="true"]',
+        ".botFaceFrameLedAura",
+      ],
+      "--zen-live-bot-talking-light-opacity-high",
+    );
+    assert.match(
+      talkingLedAuraRule,
+      /background-image:\s*var\(--bot-face-frame-led-spectrum\)\s*;/,
+      "the masked Prism aura carries the rainbow LED spectrum",
+    );
+    assert.match(talkingLedAuraRule, /display:\s*block\s*;/);
+    assert.match(
+      talkingLedAuraRule,
+      /animation:\s*zenLivePrismLedAuraHueRotate 1\.7s linear infinite,\s*zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite\s*;/,
+    );
 
     const talkingLedGlowRule = ruleForSelectorNeedlesWithBody(
       [
@@ -2757,30 +2876,53 @@ describe("Zen live presence CSS", () => {
     assert.match(
       talkingLedGlowRule,
       /background:\s*var\(--bot-face-frame-led-spectrum\)\s*;/,
-      "the hot-core pass must retain the LED spectrum instead of bleaching it white",
+      "the authored LED mask carries Prism's rainbow emission",
     );
     assert.match(
       talkingLedGlowRule,
       /mix-blend-mode:\s*normal\s*;/,
-      "the masked colored pass covers the white LED core without tinting the chassis",
     );
-    assert.match(talkingLedGlowRule, /opacity:\s*1\s*;/);
     assert.match(
       talkingLedGlowRule,
       /animation:\s*zenLivePrismEmitterHueRotate 1\.7s linear infinite,\s*zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite\s*;/,
     );
+    const talkingLedCoreRule = ruleForSelectorNeedlesWithBody(
+      [
+        '.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]',
+        '[data-private-mode="true"]',
+        ".botFaceFrameLedCore",
+      ],
+      "background: #fff",
+    );
+    assert.match(talkingLedCoreRule, /display:\s*block\s*;/);
+    assert.match(talkingLedCoreRule, /background:\s*#fff\s*;/);
+    assert.match(talkingLedCoreRule, /mix-blend-mode:\s*screen\s*;/);
+    assert.match(
+      talkingLedCoreRule,
+      /animation:\s*zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite\s*;/,
+    );
+    const genericLedRule = ruleForExactSelector(".botFaceFrameLed");
+    assert.match(
+      genericLedRule,
+      /mask-image:\s*url\("\/bot-frame\/bot-frame-led\.png\?v=1000"\)\s*;/,
+      "Prism's spectrum stays clipped to the authored LED emitter raster",
+    );
     const genericLedGlowRule = ruleForSelectorNeedlesWithBody(
       [".botFaceFrameLedGlow"],
-      "mask-image",
+      "drop-shadow(0 0 4px",
     );
     assert.match(
       genericLedGlowRule,
       /mask-image:\s*url\("\/bot-frame\/bot-frame-led\.png\?v=1000"\)\s*;/,
-      "Prism's colored glow stays clipped to the authored LED emitter raster",
+      "the white overlay stays clipped to the same authored LED emitter raster",
     );
     assert.match(
       css,
       /@keyframes zenLivePrismEmitterHueRotate\s*\{[\s\S]*?--bot-face-frame-led-filter[\s\S]*?hue-rotate\(360deg\)/,
+    );
+    assert.match(
+      css,
+      /@keyframes zenLivePrismLedAuraHueRotate\s*\{[\s\S]*?blur\(var\(--bot-face-frame-led-aura-radius,\s*7px\)\)[\s\S]*?hue-rotate\(360deg\)/,
     );
 
     const talkingFaceRule = ruleForNormalizedSelector(

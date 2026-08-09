@@ -19024,11 +19024,23 @@ function BotFaceFrame({
         identityColor={ledIdentityColor}
       />
       {ledActive ? (
-        <span
-          className={styles.botFaceFrameLedGlow}
-          data-frame-material-layer="led-glow"
-          aria-hidden="true"
-        />
+        <>
+          <span
+            className={styles.botFaceFrameLedAura}
+            data-frame-material-layer="led-aura"
+            aria-hidden="true"
+          />
+          <span
+            className={styles.botFaceFrameLedGlow}
+            data-frame-material-layer="led-glow"
+            aria-hidden="true"
+          />
+          <span
+            className={styles.botFaceFrameLedCore}
+            data-frame-material-layer="led-core"
+            aria-hidden="true"
+          />
+        </>
       ) : null}
     </>
   );
@@ -22383,7 +22395,6 @@ function EmptyStateHeroMiniBot({
           faceGeometry={faceStyle}
           talking={isTalking}
           speechMotionActive={false}
-          mouthAnimation={faceStyle.mouthAnimation}
           mouthShape="closed"
           depth={depth}
           staticRaster
@@ -31377,11 +31388,23 @@ function ZenLiveBotMannequin({
             identityColor={resolvedLedIdentityColor}
           />
           {isTalking ? (
-            <span
-              className={styles.botFaceFrameLedGlow}
-              data-frame-material-layer="led-glow"
-              aria-hidden="true"
-            />
+            <>
+              <span
+                className={styles.botFaceFrameLedAura}
+                data-frame-material-layer="led-aura"
+                aria-hidden="true"
+              />
+              <span
+                className={styles.botFaceFrameLedGlow}
+                data-frame-material-layer="led-glow"
+                aria-hidden="true"
+              />
+              <span
+                className={styles.botFaceFrameLedCore}
+                data-frame-material-layer="led-core"
+                aria-hidden="true"
+              />
+            </>
           ) : null}
         </span>
         <span
@@ -31403,7 +31426,6 @@ function ZenLiveBotMannequin({
               blinkPhase={avatarDetailsBlinkPhase}
               talking={inkTalking ?? isTalking}
               speechMotionActive={false}
-              mouthAnimation={faceStyle.mouthAnimation}
               mouthShape={displayedMouthShape}
               depth="behind-face"
               staticRaster={detailLevel === "audience"}
@@ -31476,7 +31498,6 @@ function ZenLiveBotMannequin({
               blinkPhase={avatarDetailsBlinkPhase}
               talking={inkTalking ?? isTalking}
               speechMotionActive={false}
-              mouthAnimation={faceStyle.mouthAnimation}
               mouthShape={displayedMouthShape}
               depth="above-face"
               staticRaster={detailLevel === "audience"}
@@ -31576,7 +31597,6 @@ function ZenLiveBotMannequin({
                 blinkPhase={avatarDetailsBlinkPhase}
                 talking={inkTalking ?? isTalking}
                 speechMotionActive={isTalking}
-                mouthAnimation={faceStyle.mouthAnimation}
                 mouthShape={displayedMouthShape}
                 depth="behind-face"
               />
@@ -31706,17 +31726,20 @@ function ZenLiveBotMannequin({
                 blinkPhase={avatarDetailsBlinkPhase}
                 talking={inkTalking ?? isTalking}
                 speechMotionActive={isTalking}
-                mouthAnimation={faceStyle.mouthAnimation}
                 mouthShape={displayedMouthShape}
                 depth="above-face"
               />
             ) : null}
           </>
         ) : null}
-        {screenMode === "editing" && screenOverlay ? (
+        {screenOverlay ? (
           <span
             className={styles.botAvatarFoundryScreenOverlay}
             data-avatar-foundry-screen-overlay="true"
+            data-screen-overlay-visible={
+              screenMode === "editing" ? "true" : undefined
+            }
+            aria-hidden={screenMode === "editing" ? undefined : "true"}
           >
             {screenOverlay}
           </span>
@@ -38149,7 +38172,7 @@ const BOT_AVATAR_PREVIEW_MOUTH_SHAPES = [
 ] as const satisfies readonly ZenLiveBotMouthShape[];
 
 type BotAvatarPreviewMode = "idle" | "blink" | "talking" | "thinking" | "sip";
-type BotAvatarPreviewAction = Exclude<BotAvatarPreviewMode, "talking"> | "fart";
+type BotAvatarPreviewAction = BotAvatarPreviewMode;
 type BotAvatarCustomizerTab =
   | "face"
   | "profile"
@@ -38205,9 +38228,9 @@ const BOT_AVATAR_PREVIEW_ACTIONS = [
     tooltip: "Preview the Coffee sip expression",
   },
   {
-    value: "fart",
-    label: "Fart",
-    tooltip: "Hear this bot's corporality",
+    value: "talking",
+    label: "Talking",
+    tooltip: "Preview the talking animation",
   },
 ] as const satisfies readonly {
   value: BotAvatarPreviewAction;
@@ -38445,8 +38468,8 @@ function BotAvatarPreviewModeIcon({
     return <Timer size={13} strokeWidth={2.3} aria-hidden="true" />;
   if (mode === "sip")
     return <Coffee size={13} strokeWidth={2.3} aria-hidden="true" />;
-  if (mode === "fart")
-    return <Waves size={13} strokeWidth={2.3} aria-hidden="true" />;
+  if (mode === "talking")
+    return <Volume2 size={13} strokeWidth={2.3} aria-hidden="true" />;
   return <Pause size={13} strokeWidth={2.3} aria-hidden="true" />;
 }
 
@@ -38660,6 +38683,24 @@ function botAvatarFaceIsDefault(args: {
   );
 }
 
+function botAvatarBlinkGeometryTracksEyes(args: {
+  eyeScale: number;
+  eyeOffsetX: number;
+  eyeOffsetY: number;
+  eyeRotationDeg: number;
+  blinkScale: number;
+  blinkOffsetX: number;
+  blinkOffsetY: number;
+  blinkRotationDeg: number;
+}): boolean {
+  return (
+    Math.abs(args.blinkScale - args.eyeScale) < 0.0001 &&
+    Math.abs(args.blinkOffsetX - args.eyeOffsetX) < 0.0001 &&
+    Math.abs(args.blinkOffsetY - args.eyeOffsetY) < 0.0001 &&
+    Math.abs(args.blinkRotationDeg - args.eyeRotationDeg) < 0.0001
+  );
+}
+
 function botAvatarPresetSelected(
   preset: BotAvatarFacePreset,
   args: {
@@ -38825,12 +38866,12 @@ function BotAvatarPreviewPanel({
   avatarDetailsColor,
   onPreviewThemeChange,
   onPreviewModeChange,
-  onPreviewFart,
   voiceTestDock,
   screenMode = "live",
   screenOverlay,
   foundryRitual = false,
   spatialControls = false,
+  previewControlsVisible = true,
   modulePopulation = BOT_AVATAR_FOUNDRY_ALL_MODULES_POPULATED,
   foundryCameraMode = "overview",
   onStageBackgroundSelect,
@@ -38854,12 +38895,12 @@ function BotAvatarPreviewPanel({
   avatarDetailsColor: string;
   onPreviewThemeChange: (theme: "light" | "dark") => void;
   onPreviewModeChange: (mode: BotAvatarPreviewMode) => void;
-  onPreviewFart?: () => void;
   voiceTestDock?: ReactNode;
   screenMode?: "off" | "live" | "editing";
   screenOverlay?: ReactNode;
   foundryRitual?: boolean;
   spatialControls?: boolean;
+  previewControlsVisible?: boolean;
   modulePopulation?: BotAvatarFoundryModulePopulation;
   foundryCameraMode?: BotAvatarFoundryCameraMode;
   onStageBackgroundSelect?: () => void;
@@ -39094,6 +39135,7 @@ function BotAvatarPreviewPanel({
         data-foundry-camera-surface={
           foundryCameraEditable ? "true" : undefined
         }
+        data-foundry-platform-present={spatialControls ? "true" : undefined}
         style={foundryViewportStyle}
         tabIndex={
           foundryCameraEditable ? 0 : undefined
@@ -39279,7 +39321,7 @@ function BotAvatarPreviewPanel({
           </div>
         ) : null}
       </div>
-      {!foundryRitual ? (
+      {!foundryRitual && previewControlsVisible ? (
         <div className={styles.botAvatarPreviewToolbar}>
           <div
             className={styles.botAvatarPreviewModeToggle}
@@ -39293,24 +39335,12 @@ function BotAvatarPreviewPanel({
                 data-preview-orb-index={index}
                 data-tooltip={action.tooltip}
                 data-active={
-                  action.value !== "fart" && previewMode === action.value
-                    ? "true"
-                    : undefined
+                  previewMode === action.value ? "true" : undefined
                 }
                 aria-label={action.label}
-                aria-pressed={
-                  action.value === "fart"
-                    ? undefined
-                    : previewMode === action.value
-                }
+                aria-pressed={previewMode === action.value}
                 title={action.tooltip}
-                onClick={() => {
-                  if (action.value === "fart") {
-                    onPreviewFart?.();
-                    return;
-                  }
-                  onPreviewModeChange(action.value);
-                }}
+                onClick={() => onPreviewModeChange(action.value)}
               >
                 <BotAvatarPreviewModeIcon mode={action.value} />
               </button>
@@ -42828,6 +42858,22 @@ function BotAvatarCustomizerModal({
     resolvedTheme,
   );
   const [previewMode, setPreviewMode] = useState<BotAvatarPreviewMode>("idle");
+  const [inkLivePreview, setInkLivePreview] = useState(false);
+  const blinkGeometryLinkOverrideRef = useRef<
+    "linked" | "independent" | null
+  >(null);
+  const [blinkGeometryLinked, setBlinkGeometryLinked] = useState(() =>
+    botAvatarBlinkGeometryTracksEyes({
+      eyeScale: faceEyeScale,
+      eyeOffsetX: faceEyeOffsetX,
+      eyeOffsetY: faceEyeOffsetY,
+      eyeRotationDeg: faceEyeRotationDeg,
+      blinkScale: faceBlinkScale,
+      blinkOffsetX: faceBlinkOffsetX,
+      blinkOffsetY: faceBlinkOffsetY,
+      blinkRotationDeg: faceBlinkRotationDeg,
+    }),
+  );
   const [activeControlTab, setActiveControlTab] =
     useState<BotAvatarCustomizerTab>(initialTab);
   const [activeAdjustmentTarget, setActiveAdjustmentTarget] =
@@ -42904,6 +42950,7 @@ function BotAvatarCustomizerModal({
     avatarVoicePreviewRunRef.current += 1;
     setPreviewTheme(resolvedTheme);
     setPreviewMode("idle");
+    setInkLivePreview(false);
     setActiveControlTab(initialTab);
     setActiveUpgradeNode(
       initialTab === "eyes"
@@ -42920,6 +42967,47 @@ function BotAvatarCustomizerModal({
     setNameSampleState("idle");
     setDetailsEditorDirty(false);
   }, [identityControlsVisible, initialTab, open, resolvedTheme]);
+
+  useEffect(() => {
+    if (!open) blinkGeometryLinkOverrideRef.current = null;
+  }, [open]);
+
+  useEffect(() => {
+    if (!open || blinkGeometryLinkOverrideRef.current) return;
+    setBlinkGeometryLinked(
+      botAvatarBlinkGeometryTracksEyes({
+        eyeScale: faceEyeScale,
+        eyeOffsetX: faceEyeOffsetX,
+        eyeOffsetY: faceEyeOffsetY,
+        eyeRotationDeg: faceEyeRotationDeg,
+        blinkScale: faceBlinkScale,
+        blinkOffsetX: faceBlinkOffsetX,
+        blinkOffsetY: faceBlinkOffsetY,
+        blinkRotationDeg: faceBlinkRotationDeg,
+      }),
+    );
+  }, [
+    faceBlinkOffsetX,
+    faceBlinkOffsetY,
+    faceBlinkRotationDeg,
+    faceBlinkScale,
+    faceEyeOffsetX,
+    faceEyeOffsetY,
+    faceEyeRotationDeg,
+    faceEyeScale,
+    open,
+  ]);
+
+  useEffect(() => {
+    if (!open || !inkLivePreview || activeControlTab !== "details") return;
+    const timer = window.setTimeout(() => {
+      setInkLivePreview(false);
+      setPreviewMode((current) => (current === "talking" ? "idle" : current));
+      setPreviewSpeechMouthShape(null);
+      setPreviewSpeechPaused(false);
+    }, 2800);
+    return () => window.clearTimeout(timer);
+  }, [activeControlTab, inkLivePreview, open]);
 
   // One-shot Sip preview: hold Coffee's sip face, then return to Idle.
   useEffect(() => {
@@ -43177,6 +43265,12 @@ function BotAvatarCustomizerModal({
   if (!open) return null;
 
   const requestControlTab = (tab: BotAvatarCustomizerTab): void => {
+    if (tab !== "details" && inkLivePreview) {
+      setInkLivePreview(false);
+      setPreviewMode("idle");
+      setPreviewSpeechMouthShape(null);
+      setPreviewSpeechPaused(false);
+    }
     setActiveControlTab(tab);
     const nextAdjustmentTarget = botAvatarAdjustmentTargetForControl(tab);
     if (nextAdjustmentTarget) setActiveAdjustmentTarget(nextAdjustmentTarget);
@@ -43325,6 +43419,51 @@ function BotAvatarCustomizerModal({
         avatarVoicePlaybackCacheProfile(previewProfile),
       ].join(":"),
     });
+  };
+  const changeEyeScale = (next: number): void => {
+    onEyeScaleChange(next);
+    if (blinkGeometryLinked) onBlinkScaleChange(next);
+  };
+  const changeEyeOffset = (next: { x: number; y: number }): void => {
+    onEyeOffsetXChange(next.x);
+    onEyeOffsetYChange(next.y);
+    if (blinkGeometryLinked) {
+      onBlinkOffsetXChange(next.x);
+      onBlinkOffsetYChange(next.y);
+    }
+  };
+  const changeEyeRotation = (next: number): void => {
+    onEyeRotationDegChange(next);
+    if (blinkGeometryLinked) onBlinkRotationDegChange(next);
+  };
+  const changeBlinkScale = (next: number): void => {
+    blinkGeometryLinkOverrideRef.current = "independent";
+    setBlinkGeometryLinked(false);
+    onBlinkScaleChange(next);
+  };
+  const changeBlinkOffset = (next: { x: number; y: number }): void => {
+    blinkGeometryLinkOverrideRef.current = "independent";
+    setBlinkGeometryLinked(false);
+    onBlinkOffsetXChange(next.x);
+    onBlinkOffsetYChange(next.y);
+  };
+  const changeBlinkRotation = (next: number): void => {
+    blinkGeometryLinkOverrideRef.current = "independent";
+    setBlinkGeometryLinked(false);
+    onBlinkRotationDegChange(next);
+  };
+  const toggleBlinkGeometryLink = (): void => {
+    if (blinkGeometryLinked) {
+      blinkGeometryLinkOverrideRef.current = "independent";
+      setBlinkGeometryLinked(false);
+      return;
+    }
+    blinkGeometryLinkOverrideRef.current = "linked";
+    setBlinkGeometryLinked(true);
+    onBlinkScaleChange(faceEyeScale);
+    onBlinkOffsetXChange(faceEyeOffsetX);
+    onBlinkOffsetYChange(faceEyeOffsetY);
+    onBlinkRotationDegChange(faceEyeRotationDeg);
   };
   const activeAdjustmentOptions: readonly {
     value: BotAvatarAdjustmentTarget;
@@ -43475,12 +43614,13 @@ function BotAvatarCustomizerModal({
           restoreX={DEFAULT_BOT_FACE_STYLE.eyeOffsetX}
           restoreY={DEFAULT_BOT_FACE_STYLE.eyeOffsetY}
           onChange={(next) => {
-            onEyeOffsetXChange(next.x);
-            onEyeOffsetYChange(next.y);
+            changeEyeOffset(next);
           }}
           onReset={() => {
-            onEyeOffsetXChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetX);
-            onEyeOffsetYChange(DEFAULT_BOT_FACE_STYLE.eyeOffsetY);
+            changeEyeOffset({
+              x: DEFAULT_BOT_FACE_STYLE.eyeOffsetX,
+              y: DEFAULT_BOT_FACE_STYLE.eyeOffsetY,
+            });
           }}
         />
       );
@@ -43500,12 +43640,13 @@ function BotAvatarCustomizerModal({
           restoreX={DEFAULT_BOT_FACE_BLINK_OFFSET_X}
           restoreY={DEFAULT_BOT_FACE_BLINK_OFFSET_Y}
           onChange={(next) => {
-            onBlinkOffsetXChange(next.x);
-            onBlinkOffsetYChange(next.y);
+            changeBlinkOffset(next);
           }}
           onReset={() => {
-            onBlinkOffsetXChange(DEFAULT_BOT_FACE_BLINK_OFFSET_X);
-            onBlinkOffsetYChange(DEFAULT_BOT_FACE_BLINK_OFFSET_Y);
+            changeBlinkOffset({
+              x: DEFAULT_BOT_FACE_BLINK_OFFSET_X,
+              y: DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
+            });
           }}
         />
       );
@@ -43640,6 +43781,8 @@ function BotAvatarCustomizerModal({
   const activeFoundryModulePopulated =
     foundryModulePopulation[activeFoundryModule.id];
   const applyFacePreset = (preset: BotAvatarFacePreset) => {
+    blinkGeometryLinkOverrideRef.current = "linked";
+    setBlinkGeometryLinked(true);
     onEyesFontChange(preset.eyesFont);
     onEyeCharacterChange(preset.eyeCharacter);
     onEyeAnimationChange(DEFAULT_BOT_FACE_STYLE.eyeAnimation);
@@ -43658,13 +43801,15 @@ function BotAvatarCustomizerModal({
     onMouthOffsetYChange(preset.mouthOffsetY);
     onMouthRotationDegChange(preset.mouthRotationDeg);
     onBlinkBarChange(preset.blinkBar);
-    onBlinkScaleChange(DEFAULT_BOT_FACE_STYLE.blinkScale);
-    onBlinkOffsetXChange(DEFAULT_BOT_FACE_STYLE.blinkOffsetX);
-    onBlinkOffsetYChange(DEFAULT_BOT_FACE_STYLE.blinkOffsetY);
-    onBlinkRotationDegChange(DEFAULT_BOT_FACE_STYLE.blinkRotationDeg);
+    onBlinkScaleChange(preset.eyeScale);
+    onBlinkOffsetXChange(preset.eyeOffsetX);
+    onBlinkOffsetYChange(preset.eyeOffsetY);
+    onBlinkRotationDegChange(DEFAULT_BOT_FACE_STYLE.eyeRotationDeg);
     onThinkingFramesChange(preset.thinkingFrames);
   };
   const resetFace = () => {
+    blinkGeometryLinkOverrideRef.current = "linked";
+    setBlinkGeometryLinked(true);
     onEyesFontChange(DEFAULT_BOT_FACE_STYLE.eyesFont);
     onEyeCharacterChange(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
     onEyeAnimationChange(DEFAULT_BOT_FACE_STYLE.eyeAnimation);
@@ -43850,10 +43995,15 @@ function BotAvatarCustomizerModal({
             avatarDetails={avatarDetailsPreview}
             avatarDetailsColor={color}
             spatialControls
+            previewControlsVisible={activeControlTab !== "details"}
             modulePopulation={foundryModulePopulation}
             foundryCameraMode={foundryCameraMode}
             onStageBackgroundSelect={returnFoundryCameraToOverview}
-            screenMode={activeControlTab === "details" ? "editing" : "live"}
+            screenMode={
+              activeControlTab === "details" && !inkLivePreview
+                ? "editing"
+                : "live"
+            }
             screenOverlay={
               activeControlTab === "details" ? (
                 <span
@@ -43864,28 +44014,15 @@ function BotAvatarCustomizerModal({
             }
             onPreviewThemeChange={setPreviewTheme}
             onPreviewModeChange={setPreviewMode}
-            onPreviewFart={() => {
-              void playPreparedCoffeeActionSfx({
-                kind: "fart",
-                voiceVolume: 1,
-                corporality: normalizeCorporality(
-                  normalizeBotAudioVoiceProfileV1(audioVoiceProfile)
-                    .corporality,
-                ),
-                voiceEffectsEnabled: false,
-              });
-            }}
             voiceTestDock={
-              activeControlTab === "voice" ? (
-                <BotAvatarVoiceTestDock
-                  profile={audioVoiceProfile}
-                  previewLine={voicePreviewLine}
-                  currentMode={voiceMode}
-                  onPreviewLineChange={onVoicePreviewLineChange}
-                  resolvePreviewText={resolveVoicePreviewText}
-                  onPreview={playAvatarVoicePreview}
-                />
-              ) : null
+              <BotAvatarVoiceTestDock
+                profile={audioVoiceProfile}
+                previewLine={voicePreviewLine}
+                currentMode={voiceMode}
+                onPreviewLineChange={onVoicePreviewLineChange}
+                resolvePreviewText={resolveVoicePreviewText}
+                onPreview={playAvatarVoicePreview}
+              />
             }
           />
           <section
@@ -44017,6 +44154,27 @@ function BotAvatarCustomizerModal({
                           {option.label}
                         </button>
                       ))}
+                      {activeControlTab === "eyes" &&
+                      faceBlinkBar !== "none" ? (
+                        <button
+                          type="button"
+                          role="switch"
+                          aria-label="Link blink geometry to eyes"
+                          aria-checked={blinkGeometryLinked}
+                          data-blink-eye-link="true"
+                          data-active={
+                            blinkGeometryLinked ? "true" : undefined
+                          }
+                          title={
+                            blinkGeometryLinked
+                              ? "Blink follows eye size, position, and rotation"
+                              : "Blink can be adjusted independently"
+                          }
+                          onClick={toggleBlinkGeometryLink}
+                        >
+                          {blinkGeometryLinked ? "Linked" : "Independent"}
+                        </button>
+                      ) : null}
                     </span>
                   ) : activeFoundryIdentitySurface === "shell" ? (
                     <small>Surface controls</small>
@@ -44260,6 +44418,13 @@ function BotAvatarCustomizerModal({
                   }}
                   onDirtyChange={setDetailsEditorDirty}
                   onPreviewChange={setAvatarDetailsPreview}
+                  onLivePreview={() => {
+                    setMouthPhase(0);
+                    setPreviewSpeechMouthShape(null);
+                    setPreviewSpeechPaused(false);
+                    setInkLivePreview(true);
+                    setPreviewMode("talking");
+                  }}
                 />
               ) : null}
               {activeControlTab === "powers" && identityControlsVisible
@@ -44380,20 +44545,28 @@ function BotAvatarCustomizerModal({
                   onMouthAnimationChange={onMouthAnimationChange}
                   onMouthCoffeePuckerChange={onMouthCoffeePuckerChange}
                   onWeightChange={onWeightChange}
-                  onEyeScaleChange={onEyeScaleChange}
-                  onEyeOffsetXChange={onEyeOffsetXChange}
-                  onEyeOffsetYChange={onEyeOffsetYChange}
-                  onEyeRotationDegChange={onEyeRotationDegChange}
+                  onEyeScaleChange={changeEyeScale}
+                  onEyeOffsetXChange={(next) =>
+                    changeEyeOffset({ x: next, y: faceEyeOffsetY })
+                  }
+                  onEyeOffsetYChange={(next) =>
+                    changeEyeOffset({ x: faceEyeOffsetX, y: next })
+                  }
+                  onEyeRotationDegChange={changeEyeRotation}
                   onEyeCountChange={onEyeCountChange}
                   onMouthScaleChange={onMouthScaleChange}
                   onMouthOffsetXChange={onMouthOffsetXChange}
                   onMouthOffsetYChange={onMouthOffsetYChange}
                   onMouthRotationDegChange={onMouthRotationDegChange}
                   onBlinkBarChange={onBlinkBarChange}
-                  onBlinkScaleChange={onBlinkScaleChange}
-                  onBlinkOffsetXChange={onBlinkOffsetXChange}
-                  onBlinkOffsetYChange={onBlinkOffsetYChange}
-                  onBlinkRotationDegChange={onBlinkRotationDegChange}
+                  onBlinkScaleChange={changeBlinkScale}
+                  onBlinkOffsetXChange={(next) =>
+                    changeBlinkOffset({ x: next, y: faceBlinkOffsetY })
+                  }
+                  onBlinkOffsetYChange={(next) =>
+                    changeBlinkOffset({ x: faceBlinkOffsetX, y: next })
+                  }
+                  onBlinkRotationDegChange={changeBlinkRotation}
                   onThinkingFramesChange={onThinkingFramesChange}
                   onThinkingScaleChange={onThinkingScaleChange}
                   onThinkingOffsetXChange={onThinkingOffsetXChange}
@@ -71344,6 +71517,11 @@ function HomeContent(): React.JSX.Element {
     !pendingReplyVisible &&
     !zenEphemeralUserActionMessage &&
     !emptyStateSearchActive;
+  const prismHomeEmptyHeroVisible =
+    view === "chat" &&
+    zenEmptyHeroVisible &&
+    zenPersonaBot === null &&
+    activeBotLibraryGroupFilter === null;
   useEffect(() => {
     const requestId = zenRememberedWallpaperRequestRef.current + 1;
     zenRememberedWallpaperRequestRef.current = requestId;
@@ -85010,10 +85188,7 @@ function HomeContent(): React.JSX.Element {
   /** Click-to-start: dispatches a starter prompt request as if the user typed
    *  nothing and submitted. The bot (or default Prism) opens the conversation
    *  with its own first message. */
-  function handleHeroStartConversation(
-    event: React.MouseEvent<HTMLButtonElement>,
-  ): void {
-    event.stopPropagation();
+  function startHeroConversation(): void {
     if (replayCachedZenInitialStarterReply()) return;
     if (armCanceledZenInitialStarterReplay()) return;
     if (pendingReply) return;
@@ -85023,6 +85198,13 @@ function HomeContent(): React.JSX.Element {
       { preventDefault: () => {} } as React.FormEvent<HTMLFormElement>,
       { starterPrompt: true, starterPromptWarrantsIntro: true },
     );
+  }
+
+  function handleHeroStartConversation(
+    event: React.MouseEvent<HTMLButtonElement>,
+  ): void {
+    event.stopPropagation();
+    startHeroConversation();
   }
 
   function resetChatHeaderToSpotlight() {
@@ -104479,6 +104661,8 @@ function HomeContent(): React.JSX.Element {
           accountKey={user.id}
           keyboardShortcut={keyboardShortcuts.prism}
           surface={prismCompanionSurfaceReference()}
+          chatHomeHeroDocked={prismHomeEmptyHeroVisible}
+          onChatHomeHeroActivate={startHeroConversation}
           wieldTutorialActive={prismTutorialShouldRun(
             tutorialProgress.prismWield,
           )}
@@ -139390,26 +139574,34 @@ function HomeContent(): React.JSX.Element {
                       <span className={styles.emptyStateTitlePhrase}>
                         <span className={styles.emptyStateTitleLead}>Chat</span>
                         {options.inlineHero && !suppressHeroCopy ? (
-                          <button
-                            type="button"
-                            className={[
-                              styles.emptyStateIconButton,
-                              styles.zenInlineHeroGlyph,
-                            ]
-                              .filter(Boolean)
-                              .join(" ")}
-                            data-bot-talk-hero="true"
-                            data-relationship-depth-anchor="home"
-                            data-relationship-depth-identity={relationshipDepthIdentity(
-                              heroBot?.id ?? null,
-                            )}
-                            onClick={handleHeroStartConversation}
-                            disabled={heroStartDisabled}
-                            title={heroStartTitle}
-                            aria-label={heroStartAriaLabel}
-                          >
-                            {renderHero()}
-                          </button>
+                          prismHomeEmptyHeroVisible ? (
+                            <span
+                              className={`${styles.chatHomeCompanionOrbSlot} ${styles.zenInlineHeroGlyph}`}
+                              data-prism-chat-home-orb-slot="true"
+                              aria-hidden="true"
+                            />
+                          ) : (
+                            <button
+                              type="button"
+                              className={[
+                                styles.emptyStateIconButton,
+                                styles.zenInlineHeroGlyph,
+                              ]
+                                .filter(Boolean)
+                                .join(" ")}
+                              data-bot-talk-hero="true"
+                              data-relationship-depth-anchor="home"
+                              data-relationship-depth-identity={relationshipDepthIdentity(
+                                heroBot?.id ?? null,
+                              )}
+                              onClick={handleHeroStartConversation}
+                              disabled={heroStartDisabled}
+                              title={heroStartTitle}
+                              aria-label={heroStartAriaLabel}
+                            >
+                              {renderHero()}
+                            </button>
+                          )
                         ) : null}
                         <span className={styles.emptyStateTitleLead}>with</span>
                       </span>

@@ -44,10 +44,82 @@ test("mounts the global companion on every authenticated product shell", () => {
   assert.match(page, /surfaceId: "settings"/u);
 });
 
+test("docks only in the live default Chat Home empty hero", () => {
+  assert.match(
+    page,
+    /const prismHomeEmptyHeroVisible =\s*view === "chat" &&\s*zenEmptyHeroVisible &&\s*zenPersonaBot === null &&\s*activeBotLibraryGroupFilter === null;/u,
+  );
+  assert.match(
+    page,
+    /chatHomeHeroDocked=\{prismHomeEmptyHeroVisible\}/u,
+  );
+  assert.match(page, /data-prism-chat-home-orb-slot="true"/u);
+  assert.match(
+    page,
+    /prismHomeEmptyHeroVisible \? \(\s*<span[\s\S]*?data-prism-chat-home-orb-slot="true"/u,
+  );
+  const deprecatedHubBranch =
+    page.match(/if \(view === "hub"\)[\s\S]*?\/\/ ── Chat mode ──/u)?.[0] ?? "";
+  assert.match(
+    deprecatedHubBranch,
+    /<PrismRefractionEmblem className=\{styles\.brandEmblem\}/u,
+  );
+  assert.doesNotMatch(deprecatedHubBranch, /CompanionOrbSlot|orb-slot/u);
+  assert.doesNotMatch(page, /homeDocked=\{view === "hub"\}/u);
+});
+
+test("moves the existing companion without overwriting its saved dock and restores it", () => {
+  assert.match(component, /chatHomeHeroDocked\?: boolean/u);
+  assert.match(component, /queryPrismChatHomeOrbSlot/u);
+  assert.match(component, /chatHomeDockPosition \?\? position/u);
+  assert.match(component, /positionRef\.current = position/u);
+  assert.match(
+    component,
+    /if \(!chatHomeHeroDocked\) \{[\s\S]*setChatHomeDockPosition\(null\)[\s\S]*setChatHomeDockReturning\(true\)/u,
+  );
+  assert.match(
+    component,
+    /chatHomeHeroDocked \? undefined : beginDrag/u,
+  );
+  assert.match(companionCss, /data-chat-home-orb-docked="true"/u);
+  assert.match(companionCss, /data-chat-home-orb-returning="true"/u);
+});
+
+test("keeps the docked orb continuously visible and preserves hero activation", () => {
+  assert.match(
+    component,
+    /idleDimmed && !chatHomeHeroDocked \? "true" : undefined/u,
+  );
+  assert.match(
+    component,
+    /idleHidden && !chatHomeHeroDocked \? "true" : undefined/u,
+  );
+  assert.match(
+    component,
+    /softSynthesisActive \|\|\s*chatHomeHeroDocked/u,
+  );
+  assert.match(
+    component,
+    /if \(chatHomeHeroDocked\) \{\s*playPrismCompanionGlassTap\(\);\s*onChatHomeHeroActivate\?\.\(\);\s*return;/u,
+  );
+  assert.match(page, /onChatHomeHeroActivate=\{startHeroConversation\}/u);
+  assert.match(
+    page,
+    /function handleHeroStartConversation[\s\S]*?startHeroConversation\(\);/u,
+  );
+});
+
+test("settles Chat Home docking safely under Reduced Motion", () => {
+  assert.match(
+    companionCss,
+    /prefers-reduced-motion: reduce[\s\S]*data-chat-home-orb-docked="true"[\s\S]*left 1ms linear[\s\S]*top 1ms linear/u,
+  );
+});
+
 test("keeps the companion explicit, keyboard accessible, and capability-driven", () => {
   assert.match(
     component,
-    /aria-keyshortcuts=\{shortcutPresentation\.aria\}/u,
+    /aria-keyshortcuts=\{[\s\S]*?shortcutPresentation\.aria/u,
   );
   assert.match(component, /\{shortcutPresentation\.label\}/u);
   assert.match(component, /keyboardShortcutMatchesEvent/u);
@@ -282,10 +354,13 @@ test("dims the idle orb after settle, then vanishes after the same delay", () =>
     component,
     /PRISM_COMPANION_IDLE_VANISH_MS = PRISM_COMPANION_IDLE_DIM_MS/u,
   );
-  assert.match(component, /data-idle-dimmed=\{idleDimmed \? "true" : undefined\}/u);
   assert.match(
     component,
-    /data-idle-hidden=\{idleHidden \? "true" : undefined\}/u,
+    /data-idle-dimmed=\{\s*idleDimmed && !chatHomeHeroDocked \? "true" : undefined/u,
+  );
+  assert.match(
+    component,
+    /data-idle-hidden=\{\s*idleHidden && !chatHomeHeroDocked \? "true" : undefined/u,
   );
   assert.match(component, /const scheduleIdleDim = useCallback/u);
   assert.match(component, /const scheduleIdleVanish = useCallback/u);

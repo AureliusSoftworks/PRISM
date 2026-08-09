@@ -22,11 +22,12 @@ import {
   encodeBotAvatarDetailsPaintMask,
   isBotAvatarDetailsWritablePixel,
   parseBotAvatarDetailsV1,
-  type BotFaceStyle,
   type BotAvatarDetailStampCategory,
   type BotAvatarDetailStampId,
   type BotAvatarDetailStampV1,
   type BotAvatarDetailsV1,
+  type BotAvatarDetailsSpeechInkAnimation,
+  type BotFaceStyle,
 } from "@localai/shared";
 
 export const AVATAR_DETAILS_CANVAS_SIZE = BOT_AVATAR_DETAILS_CANVAS_SIZE;
@@ -171,6 +172,9 @@ export function normalizeAvatarDetails(value: unknown): AvatarDetailsV1 {
         stamps: parsed.screen.stamps,
         paintMaskBase64: null,
         ...(paintColorMapBase64 ? { paintColorMapBase64 } : {}),
+        ...(parsed.screen.speechInkAnimation
+          ? { speechInkAnimation: parsed.screen.speechInkAnimation }
+          : {}),
       },
     };
   } catch {
@@ -189,6 +193,9 @@ export function cloneAvatarDetails(details: AvatarDetailsV1): AvatarDetailsV1 {
       paintMaskBase64: null,
       ...(details.screen.paintColorMapBase64
         ? { paintColorMapBase64: details.screen.paintColorMapBase64 }
+        : {}),
+      ...(details.screen.speechInkAnimation
+        ? { speechInkAnimation: details.screen.speechInkAnimation }
         : {}),
     },
   };
@@ -345,6 +352,22 @@ export function avatarDetailsWithPaintColorMap(
       stamps: details.screen.stamps,
       paintMaskBase64: null,
       ...(paintColorMapBase64 ? { paintColorMapBase64 } : {}),
+      ...(details.screen.speechInkAnimation
+        ? { speechInkAnimation: details.screen.speechInkAnimation }
+        : {}),
+    },
+  });
+}
+
+export function avatarDetailsWithSpeechInkAnimation(
+  details: AvatarDetailsV1,
+  speechInkAnimation: BotAvatarDetailsSpeechInkAnimation,
+): AvatarDetailsV1 {
+  return normalizeAvatarDetails({
+    ...details,
+    screen: {
+      ...details.screen,
+      speechInkAnimation,
     },
   });
 }
@@ -441,12 +464,29 @@ export function avatarDetailsGridPointFromClient(
   };
 }
 
-/** Mirrors authored ink across the seam between canvas columns 63 and 64. */
+export const AVATAR_DETAILS_SYMMETRY_AXIS_X_DEFAULT =
+  (AVATAR_DETAILS_CANVAS_SIZE - 1) / 2;
+export const AVATAR_DETAILS_SYMMETRY_AXIS_X_MIN = 0.5;
+export const AVATAR_DETAILS_SYMMETRY_AXIS_X_MAX =
+  AVATAR_DETAILS_CANVAS_SIZE - 1.5;
+
+export function normalizeAvatarDetailsSymmetryAxisX(value: number): number {
+  if (!Number.isFinite(value)) return AVATAR_DETAILS_SYMMETRY_AXIS_X_DEFAULT;
+  const snapped = Math.round(value - 0.5) + 0.5;
+  return Math.max(
+    AVATAR_DETAILS_SYMMETRY_AXIS_X_MIN,
+    Math.min(AVATAR_DETAILS_SYMMETRY_AXIS_X_MAX, snapped),
+  );
+}
+
+/** Mirrors authored ink across an adjustable vertical half-pixel seam. */
 export function mirrorAvatarDetailsGridPointVertically(
   point: AvatarDetailsGridPoint,
+  axisX = AVATAR_DETAILS_SYMMETRY_AXIS_X_DEFAULT,
 ): AvatarDetailsGridPoint {
+  const normalizedAxisX = normalizeAvatarDetailsSymmetryAxisX(axisX);
   return {
-    x: AVATAR_DETAILS_CANVAS_SIZE - 1 - Math.round(point.x),
+    x: Math.round(normalizedAxisX * 2 - Math.round(point.x)),
     y: Math.round(point.y),
   };
 }
@@ -454,6 +494,7 @@ export function mirrorAvatarDetailsGridPointVertically(
 /** Adds each point's vertical mirror while removing overlapping pixels. */
 export function symmetrizeAvatarDetailsGridPoints(
   points: readonly AvatarDetailsGridPoint[],
+  axisX = AVATAR_DETAILS_SYMMETRY_AXIS_X_DEFAULT,
 ): AvatarDetailsGridPoint[] {
   const symmetricPoints: AvatarDetailsGridPoint[] = [];
   const seen = new Set<string>();
@@ -464,8 +505,16 @@ export function symmetrizeAvatarDetailsGridPoints(
     };
     for (const candidate of [
       normalizedPoint,
-      mirrorAvatarDetailsGridPointVertically(normalizedPoint),
+      mirrorAvatarDetailsGridPointVertically(normalizedPoint, axisX),
     ]) {
+      if (
+        candidate.x < 0 ||
+        candidate.x >= AVATAR_DETAILS_CANVAS_SIZE ||
+        candidate.y < 0 ||
+        candidate.y >= AVATAR_DETAILS_CANVAS_SIZE
+      ) {
+        continue;
+      }
       const key = `${candidate.x}:${candidate.y}`;
       if (seen.has(key)) continue;
       seen.add(key);

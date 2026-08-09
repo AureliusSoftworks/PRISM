@@ -1926,6 +1926,14 @@ test("avatar foundry locks the product preview and reserves camera navigation fo
   assert.match(pageSource, /setFoundryViewport\(viewport\);/);
   assert.match(pageSource, /data-tutorial-target="avatar-foundry-controls"/);
   assert.match(pageSource, /"avatar-foundry-eyes-tab"/);
+  assert.match(
+    pageSource,
+    /previewControlsVisible=\{activeControlTab !== "details"\}/,
+  );
+  assert.match(
+    pageSource,
+    /!foundryRitual && previewControlsVisible \? \(/,
+  );
   assert.doesNotMatch(pageSource, /BotAvatarFoundryFeatureHandle/);
   assert.doesNotMatch(pageSource, /data-avatar-hotspot/);
   assert.match(
@@ -2074,9 +2082,9 @@ test("avatar customizer preview has explicit expression states", () => {
     /type BotAvatarPreviewMode = "idle" \| "blink" \| "talking" \| "thinking" \| "sip";/,
   );
   assert.match(pageSource, /const BOT_AVATAR_PREVIEW_ACTIONS = \[/);
-  assert.doesNotMatch(pageSource, /\{ value: "talking", label: "Talk" \}/);
   assert.match(pageSource, /value: "sip",[\s\S]*?label: "Sip"/);
-  assert.match(pageSource, /value: "fart",[\s\S]*?label: "Fart"/);
+  assert.match(pageSource, /value: "talking",[\s\S]*?label: "Talking"/);
+  assert.doesNotMatch(pageSource, /value: "fart",[\s\S]*?label: "Fart"/);
   assert.doesNotMatch(pageSource, /const BOT_AVATAR_PREVIEW_MOODS = \[/);
   assert.doesNotMatch(
     pageSource,
@@ -2129,8 +2137,9 @@ test("avatar customizer preview has explicit expression states", () => {
   assert.match(pageSource, /onPreviewModeChange=\{setPreviewMode\}/);
   assert.match(
     pageSource,
-    /if \(action\.value === "fart"\) \{[\s\S]*onPreviewFart\?\.\(\);[\s\S]*onPreviewModeChange\(action\.value\);/,
+    /onClick=\{\(\) => onPreviewModeChange\(action\.value\)\}/,
   );
+  assert.doesNotMatch(pageSource, /onPreviewFart/);
   assert.doesNotMatch(
     pageSource,
     /mode\.value === "talking"\s*\? onPreviewVoice\(\)/,

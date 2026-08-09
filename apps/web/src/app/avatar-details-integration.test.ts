@@ -124,11 +124,28 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /aria-label="Vertical symmetry tool"/);
     assert.match(editorSource, /aria-pressed=\{symmetryEnabled\}/);
     assert.match(editorSource, /setSymmetryEnabled\(\(enabled\) => !enabled\)/);
-    assert.match(editorSource, /symmetrizeAvatarDetailsGridPoints\(points\)/);
-    assert.match(editorSource, /symmetrizeAvatarDetailsGridPoints\(\[point\]\)/);
+    assert.match(
+      editorSource,
+      /symmetrizeAvatarDetailsGridPoints\(points, symmetryAxisX\)/,
+    );
+    assert.match(
+      editorSource,
+      /symmetrizeAvatarDetailsGridPoints\(\[point\], symmetryAxisX\)/,
+    );
     assert.match(editorSource, /data-visible=\{symmetryEnabled \? "true" : "false"\}/);
-    assert.match(editorSource, /Vertical symmetry is on\./);
-    assert.match(editorCss, /\.symmetryGuide\s*\{[\s\S]*left:\s*50%/);
+    assert.match(editorSource, /Vertical symmetry is on at column/);
+    assert.match(editorSource, /role="slider"/);
+    assert.match(editorSource, /aria-label="Vertical symmetry axis"/);
+    assert.match(editorSource, /onPointerDown=\{beginSymmetryAxisDrag\}/);
+    assert.match(editorSource, /onKeyDown=\{handleSymmetryAxisKeyDown\}/);
+    assert.match(editorSource, /styles\.symmetryHandleTop/);
+    assert.match(editorSource, /styles\.symmetryHandleBottom/);
+    assert.match(
+      editorCss,
+      /\.symmetryGuide\s*\{[\s\S]*left:\s*var\(--avatar-details-symmetry-axis-left, 50%\)/,
+    );
+    assert.match(editorCss, /\.symmetryHandleTop\s*\{[^}]*top:\s*7px/);
+    assert.match(editorCss, /\.symmetryHandleBottom\s*\{[^}]*bottom:\s*7px/);
     assert.match(
       editorCss,
       /\.symmetryGuide\[data-visible="true"\]\s*\{[^}]*opacity:\s*0\.72/,
@@ -146,7 +163,7 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /Removes ink with any drawing tool\./);
     assert.match(
       editorSource,
-      /Follows Mouth animation; Default hides while talking or sipping\./,
+      /Uses its own animation below; Default hides while talking or sipping\./,
     );
     assert.match(editorSource, /role="radiogroup"/);
     assert.match(editorSource, /role="radio"/);
@@ -285,7 +302,7 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.doesNotMatch(
       pageCss,
-      /\.botAvatarCustomizerBody[^{]*data-active-control-tab[^}]*\.botAvatarControlStack\s*\{[\s\S]*overflow-y:\s*hidden/,
+      /\.botAvatarCustomizerBody[^{]*data-active-control-tab[^}]*\.botAvatarControlStack\s*\{[^}]*overflow-y:\s*hidden/,
     );
     assert.match(
       editorSource,
@@ -332,7 +349,7 @@ describe("Avatar Details Studio integration", () => {
   it("mounts the lightweight canvas directly inside the canonical CRT", () => {
     assert.match(
       pageSource,
-      /screenMode=\{\s*activeControlTab === "details" \? "editing" : "live"\s*\}/,
+      /screenMode=\{\s*activeControlTab === "details" && !inkLivePreview\s*\? "editing"\s*: "live"\s*\}/,
     );
     assert.match(
       pageSource,
@@ -347,7 +364,7 @@ describe("Avatar Details Studio integration", () => {
     assert.match(pageSource, /runtimeEffectsEnabled=\{screenMode === "live"\}/);
     assert.match(
       pageCss,
-      /\.botAvatarCustomizerBody\[data-camera-mode="ink"\][\s\S]*?\.botAvatarFoundryCameraRig\[data-spatial-camera-rig="true"\]\s*\{[\s\S]*?transform:\s*translateX\(-11vw\) translateY\(10dvh\) scale\(1\.78\)/,
+      /\.botAvatarCustomizerBody\[data-camera-mode="ink"\][\s\S]*?\.botAvatarFoundryCameraRig\[data-spatial-camera-rig="true"\]\s*\{[\s\S]*?transform:\s*translate3d\([\s\S]*?calc\(-11vw \+ var\(--foundry-pan-x, 0px\)\),[\s\S]*?calc\(10dvh \+ var\(--foundry-pan-y, 0px\)\),[\s\S]*?0[\s\S]*?\)\s*scale\(1\.78\) scale\(var\(--foundry-user-zoom, 1\)\)/,
     );
     assert.doesNotMatch(pageSource, /Render current avatar/);
   });
@@ -681,12 +698,21 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.match(pageSource, /avatarDetailsColor=\{normalizeAccentForTheme\(/);
   });
 
-  it("keeps Default speech ink hidden and otherwise follows the selected mouth motion", () => {
+  it("keeps Default Speech ink hidden and animates it independently from Mouth", () => {
     assert.match(pageSource, /blinkPhase=\{avatarDetailsBlinkPhase\}/);
     assert.match(pageSource, /talking=\{inkTalking \?\? isTalking\}/);
     assert.match(pageSource, /speechMotionActive=\{isTalking\}/);
-    assert.match(pageSource, /mouthAnimation=\{faceStyle\.mouthAnimation\}/);
     assert.match(pageSource, /mouthShape=\{displayedMouthShape\}/);
+    assert.doesNotMatch(maskSource, /mouthAnimation/);
+    assert.match(
+      editorSource,
+      /<strong>Speech ink animation<\/strong>[\s\S]*Independent from Mouth animation\./,
+    );
+    assert.match(
+      editorSource,
+      /value=\{working\.screen\.speechInkAnimation \?\? "none"\}/,
+    );
+    assert.match(editorSource, /avatarDetailsWithSpeechInkAnimation\(/);
     assert.match(
       pageSource,
       /onBlinkPhaseChange=\{handleAvatarDetailsBlinkPhaseChange\}/,
@@ -703,7 +729,11 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.doesNotMatch(maskSource, /AvatarDetailsRoleLayer/);
     assert.match(
       maskSource,
-      /detailLevel === "full" &&[\s\S]*talking &&[\s\S]*speechMotionActive &&[\s\S]*normalizedMouthAnimation !== "none"/,
+      /normalizedDetails\.screen\.speechInkAnimation \?\? "none"/,
+    );
+    assert.match(
+      maskSource,
+      /detailLevel === "full" &&[\s\S]*talking &&[\s\S]*speechMotionActive &&[\s\S]*speechInkAnimation !== "none"/,
     );
     assert.match(
       maskSource,

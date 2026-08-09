@@ -280,9 +280,10 @@ describe("listener reaction planning", () => {
     assert.equal(latePlan.interruptedSpeakerCuePlayback, undefined);
   });
 
-  it("normalizes reclaim while keeping yielding retorts out of reclaim speech", () => {
+  it("normalizes floor resistance while keeping yielding retorts out of held speech", () => {
     assert.equal(normalizeCrosstalkFloorOutcome("resume"), "reclaim");
     assert.equal(normalizeCrosstalkFloorOutcome("reclaim"), "reclaim");
+    assert.equal(normalizeCrosstalkFloorOutcome("hold"), "hold");
     assert.equal(normalizeCrosstalkFloorOutcome("yield"), "yield");
     assert.equal(normalizeCrosstalkFloorOutcome("react"), null);
 
@@ -305,6 +306,26 @@ describe("listener reaction planning", () => {
     });
     assert.equal(plan?.floorOutcome, "reclaim");
     assert.equal(plan?.interruptedSpeakerCue, undefined);
+
+    const held = normalizeListenerReactionPlanV1({
+      v: 1,
+      name: "listenerReaction",
+      speakerBotId: "speaker",
+      listenerBotId: "interrupter",
+      messageId: "message-held",
+      targetSource: "role",
+      visualAction: "lean_in",
+      spokenCue: "Wait a second.",
+      interjectionAttempt: true,
+      floorOutcome: "hold",
+      interruptedSpeakerCue: "Don't cut me off.",
+      interruptedSpeakerCuePlayback: "crosstalk",
+      targetProgress: 0.5,
+      seed: "hold",
+      cameraCutEligible: true,
+    });
+    assert.equal(held?.floorOutcome, "hold");
+    assert.equal(held?.interruptedSpeakerCue, undefined);
   });
 
   it("accepts directional irritation snark cues in the interrupted-speaker bank", () => {

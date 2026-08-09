@@ -20,6 +20,7 @@ import {
   avatarDetailsPaintPixelCount,
   avatarDetailsPaintColorPixelCount,
   avatarDetailsWithPaintColorMap,
+  avatarDetailsWithSpeechInkAnimation,
   avatarDetailsWritablePixel,
   cloneAvatarDetails,
   decodeAvatarDetailsPaintMask,
@@ -86,6 +87,28 @@ describe("avatar details semantic ink", () => {
     assert.deepEqual(cloneAvatarDetails(details), details);
     assert.notEqual(avatarDetailsKey(emptyDetails()), avatarDetailsKey(details));
     assert.equal(avatarDetailsEqual(emptyDetails(), details), false);
+  });
+
+  it("keeps Speech ink animation independent through ink edits and cloning", () => {
+    const animated = avatarDetailsWithSpeechInkAnimation(
+      emptyDetails(),
+      "wobble",
+    );
+    const colorMap = paintAvatarDetailsColorMap(
+      new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH),
+      [{ x: 64, y: 70 }],
+      1,
+      "talking",
+    ).colorMap;
+    const painted = avatarDetailsWithPaintColorMap(animated, colorMap);
+
+    assert.equal(painted.screen.speechInkAnimation, "wobble");
+    assert.equal(cloneAvatarDetails(painted).screen.speechInkAnimation, "wobble");
+    assert.equal(
+      avatarDetailsWithSpeechInkAnimation(painted, "none").screen
+        .speechInkAnimation,
+      undefined,
+    );
   });
 
   it("migrates the old blink toggle into red semantic ink", () => {
@@ -603,6 +626,20 @@ describe("avatar details input geometry", () => {
         { x: 63, y: 20 },
         { x: 64, y: 20 },
       ],
+    );
+  });
+
+  it("moves the vertical symmetry seam in half-pixel steps", () => {
+    assert.deepEqual(
+      symmetrizeAvatarDetailsGridPoints([{ x: 20, y: 34 }], 30.5),
+      [
+        { x: 20, y: 34 },
+        { x: 41, y: 34 },
+      ],
+    );
+    assert.deepEqual(
+      symmetrizeAvatarDetailsGridPoints([{ x: 100, y: 34 }], 10.5),
+      [{ x: 100, y: 34 }],
     );
   });
 

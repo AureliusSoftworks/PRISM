@@ -572,9 +572,31 @@ describe("replay manifests", () => {
           occurredAt: "2026-07-27T00:05:25.000Z",
         },
         {
-          id: "completed-server",
+          id: "departure-server",
           episodeId: "signal-faithful-clock",
           sequence: 8,
+          kind: "departure",
+          payload: { botId: "guest-1", speakerRole: "guest" },
+          occurredAt: "2026-07-27T00:05:20.000Z",
+        },
+        {
+          id: "departure-camera-server",
+          episodeId: "signal-faithful-clock",
+          sequence: 9,
+          kind: "camera_suggestion",
+          payload: {
+            atMs: 320_000,
+            messageId: "message-2",
+            reason: "departure",
+            shot: "wide",
+            speakerRole: "guest",
+          },
+          occurredAt: "2026-07-27T00:05:20.000Z",
+        },
+        {
+          id: "completed-server",
+          episodeId: "signal-faithful-clock",
+          sequence: 10,
           kind: "episode_completed",
           payload: { outcome: "completed", runtimeMs: 320_000 },
           occurredAt: "2026-07-27T00:05:30.000Z",
@@ -664,6 +686,13 @@ describe("replay manifests", () => {
         },
         {
           sequence: 6,
+          atMs: 4_000,
+          kind: "departure",
+          sourceMessageId: "message-2",
+          payload: { botId: "guest-1", speakerRole: "guest" },
+        },
+        {
+          sequence: 7,
           atMs: 4_500,
           kind: "outro",
           sourceMessageId: null,
@@ -698,6 +727,12 @@ describe("replay manifests", () => {
         .filter((event) => event.kind === "outro")
         .map((event) => event.atMs),
       [4_500],
+    );
+    assert.deepEqual(
+      manifest.direction
+        .filter((event) => event.kind === "departure")
+        .map((event) => [event.sourceMessageId, event.atMs]),
+      [["message-2", 4_000]],
     );
     assert.equal(
       Math.max(

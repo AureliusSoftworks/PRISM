@@ -4,6 +4,12 @@ import { describe, it } from "node:test";
 import { MODE_TUTORIALS, modeTutorialStep } from "./modeTutorials.ts";
 
 describe("mode tutorials", () => {
+  it("explains that Speech ink animation is independent from Mouth", () => {
+    const step = MODE_TUTORIALS.avatar.steps[1];
+    assert.match(step?.body ?? "", /Speech ink has its own animation selector/u);
+    assert.match(step?.body ?? "", /motion can differ from the mouth/u);
+  });
+
   it("explains bot hub editor shortcuts and exact voice testing", () => {
     const step = MODE_TUTORIALS.zen.steps[0];
     assert.match(step?.body ?? "", /jump straight to any Avatar Studio section/u);
@@ -91,9 +97,27 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /perimeter dock/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /light online/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /display stays fixed/u);
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[1]!.body,
+      /default broken-bar blink follows Eyes/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[1]!.body,
+      /drag either the top or bottom handle to place that seam/u,
+    );
+    assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /Preview live/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /Five floating orbs/u);
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[1]!.body,
+      /Idle, Blink, Thinking, Sip, and Talking/u,
+    );
+    assert.match(
+      MODE_TUTORIALS.avatar.steps[1]!.body,
+      /hidden in Ink Display to keep the drawing workspace clear/u,
+    );
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /nearby-choice buttons/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /audition dock/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /remains beneath the bot/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /Wield Prism/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /randomizer buttons/u);
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Save or Create bot/u);

@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
-import { DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1 } from "@localai/shared";
+import {
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  serializeBotAudioVoiceProfileV1,
+} from "@localai/shared";
 import { initializePremiumVoiceDefaults } from "../premium-voice-defaults.ts";
 
 const voices = [
@@ -19,7 +22,7 @@ describe("Premium voice default initialization", () => {
         authoredAudioVoiceProfile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
         audioVoiceProfileOverride: null,
       }],
-      prismDefaultBotAudioVoiceProfile: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      prismDefaultBotAudioVoiceProfile: null,
     });
     assert.equal(first.botUpdates.length, 1);
     assert.equal(first.botUpdates[0].audioVoiceProfileOverride.elevenLabsVoiceInitialized, true);
@@ -109,6 +112,23 @@ describe("Premium voice default initialization", () => {
     });
 
     assert.deepEqual(result.botUpdates, []);
+    assert.equal(result.prismDefaultBotAudioVoiceProfile, null);
+  });
+
+  it("never replaces a persisted Default Prism voice with Heart", () => {
+    const selectedVoice = {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      baseVoiceId: "voice-21" as const,
+      elevenLabsVoiceId: "player-selected-premium",
+    };
+    const serialized = serializeBotAudioVoiceProfileV1(selectedVoice);
+    const result = initializePremiumVoiceDefaults({
+      userId: "user-persisted-prism",
+      voices,
+      bots: [],
+      prismDefaultBotAudioVoiceProfile: serialized,
+    });
+
     assert.equal(result.prismDefaultBotAudioVoiceProfile, null);
   });
 
