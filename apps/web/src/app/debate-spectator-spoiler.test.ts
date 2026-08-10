@@ -212,4 +212,17 @@ describe("debate spectator bake spoiler chrome", () => {
       "Verdict",
     );
   });
+
+  it("explains the sealed Jury camera to Participants", () => {
+    const session = bakedSpectatorSession();
+    assert.match(
+      debateJuryRosterFooterCopy({
+        participantView: true,
+        jury: session.jury,
+        juryOutcomeRevealed: false,
+        juryChamberOpened: true,
+      }),
+      /enters their sealed chamber during deliberation/iu,
+    );
+  });
 });

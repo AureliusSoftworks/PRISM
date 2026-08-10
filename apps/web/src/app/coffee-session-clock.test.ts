@@ -113,6 +113,19 @@ describe("coffee session clock", () => {
     assert.equal(result.shouldFinish, true);
   });
 
+  it("lets an in-progress table line finish without extending the deadline", () => {
+    const result = reconcileCoffeeSessionClock({
+      previousTickAtMs: 19_000,
+      nowMs: 21_000,
+      endsAtMs: 20_000,
+      countdownPaused: false,
+      finishBlocked: true,
+    });
+
+    assert.equal(result.nextEndsAtMs, 20_000);
+    assert.equal(result.shouldFinish, false);
+  });
+
   it("coalesces duplicate focus and visibility restoration events", () => {
     const result = reconcileCoffeeSessionClock({
       previousTickAtMs: 10_000,

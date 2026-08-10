@@ -20,6 +20,7 @@ import {
   type ReplayManifestV1,
   type ReplayManifestV2,
   type ReplayMouthTrackV2,
+  type ReplayVoiceLightTrackV1,
   type ReplayParticipantSnapshotV1,
   type ReplayUtteranceV1,
   type ReplayVoiceSelectionSnapshotV2,
@@ -33,7 +34,7 @@ import {
 const SIGNAL_REPLAY_PRE_ROLL_MIN_MS = 3_000;
 
 export const COFFEE_REPLAY_RENDER_CONTRACT =
-  "coffee-table-playwright-v1" as const;
+  "coffee-table-playwright-v2" as const;
 
 export interface ReplayBotVisualSnapshotV1 {
   v: 1;
@@ -267,7 +268,7 @@ export function buildSignalReplayManifestV1(args: {
         musicSeed,
         studioLighting: args.show.studioLighting,
         fallbackStudioAccentVariant: args.show.fallbackStudioAccentVariant,
-        renderContract: "signal-studio-playwright-v1",
+        renderContract: "signal-studio-playwright-v2",
       },
     },
   };
@@ -723,6 +724,7 @@ function replayManifestV2FromV1(
   manifest: ReplayManifestV1,
   capturedDirection: readonly ReplayDirectionEventV2[] = [],
   capturedMouthTracks: readonly ReplayMouthTrackV2[] = [],
+  capturedVoiceLightTracks: readonly ReplayVoiceLightTrackV1[] = [],
   voiceSelection?: ReplayVoiceSelectionSnapshotV2,
 ): ReplayManifestV2 {
   const direction = buildReplayDirectionV2(manifest, capturedDirection);
@@ -774,13 +776,23 @@ function replayManifestV2FromV1(
     utterances: manifest.utterances,
     initialScene,
     direction: directedWithSnapshot,
-    ...((capturedMouthTracks.length > 0 || voiceSelection)
+    ...((capturedMouthTracks.length > 0 ||
+      capturedVoiceLightTracks.length > 0 ||
+      voiceSelection)
       ? {
           presentation: {
             mouthTracks: capturedMouthTracks.map((track) => ({
               participantId: track.participantId,
               cues: track.cues.map((cue) => ({ ...cue })),
             })),
+            ...(capturedVoiceLightTracks.length > 0
+              ? {
+                  voiceLightTracks: capturedVoiceLightTracks.map((track) => ({
+                    participantId: track.participantId,
+                    cues: track.cues.map((cue) => ({ ...cue })),
+                  })),
+                }
+              : {}),
             ...(voiceSelection
               ? { voiceSelection: { ...voiceSelection } }
               : {}),
@@ -795,12 +807,14 @@ export function buildSignalReplayManifestV2(
   args: Parameters<typeof buildSignalReplayManifestV1>[0] & {
     capturedDirection?: readonly ReplayDirectionEventV2[];
     capturedMouthTracks?: readonly ReplayMouthTrackV2[];
+    capturedVoiceLightTracks?: readonly ReplayVoiceLightTrackV1[];
     voiceSelection?: ReplayVoiceSelectionSnapshotV2;
   },
 ): ReplayManifestV2 {
   const {
     capturedDirection = [],
     capturedMouthTracks = [],
+    capturedVoiceLightTracks = [],
     voiceSelection,
     ...legacyArgs
   } = args;
@@ -808,6 +822,7 @@ export function buildSignalReplayManifestV2(
     buildSignalReplayManifestV1(legacyArgs),
     capturedDirection,
     capturedMouthTracks,
+    capturedVoiceLightTracks,
     voiceSelection,
   );
 }
@@ -816,12 +831,14 @@ export function buildCoffeeReplayManifestV2(
   args: Parameters<typeof buildCoffeeReplayManifestV1>[0] & {
     capturedDirection?: readonly ReplayDirectionEventV2[];
     capturedMouthTracks?: readonly ReplayMouthTrackV2[];
+    capturedVoiceLightTracks?: readonly ReplayVoiceLightTrackV1[];
     voiceSelection?: ReplayVoiceSelectionSnapshotV2;
   },
 ): ReplayManifestV2 {
   const {
     capturedDirection = [],
     capturedMouthTracks = [],
+    capturedVoiceLightTracks = [],
     voiceSelection,
     ...legacyArgs
   } = args;
@@ -829,6 +846,7 @@ export function buildCoffeeReplayManifestV2(
     buildCoffeeReplayManifestV1(legacyArgs),
     capturedDirection,
     capturedMouthTracks,
+    capturedVoiceLightTracks,
     voiceSelection,
   );
 }

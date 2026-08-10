@@ -93,7 +93,7 @@ export function effectiveVoicePlaybackChoice(
     : configuredChoice;
 }
 
-/** Generated speech owns text timing; procedural Bottish is already immediate. */
+/** Every audible speech mode owns its reveal clock; Mute alone is visual. */
 export function voiceModeDrivesCanvasReveal(mode: VoiceMode): boolean {
-  return mode === "english" || mode === "babble";
+  return mode !== "mute";
 }

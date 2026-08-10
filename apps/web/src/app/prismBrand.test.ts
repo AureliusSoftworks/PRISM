@@ -89,6 +89,49 @@ describe("PRISM brand system", () => {
     }
   });
 
+  it("keeps Default Prism identity monochrome while spectrum emitters stay rainbow", () => {
+    assert.match(
+      pageSource,
+      /const PRISM_DEFAULT_IDENTITY_INK = \{\s*dark: "#f7fbff",\s*light: "#242a33",\s*\} as const;/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(options\.prismPersona\) return prismDefaultAccentStyle\(resolvedTheme\);/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /const PRISM_DEFAULT_ACCENT = PRISM_COLORS\.s/u,
+    );
+    assert.match(
+      pageSource,
+      /memoryPanelScope === "bot"[\s\S]{0,180}: prismDefaultAccentForTheme\(resolvedTheme\)/u,
+    );
+    assert.match(
+      pageSource,
+      /label: "Switch Prism app"[\s\S]{0,260}accent: prismDefaultAccentForTheme\(resolvedTheme\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const debateAvatarAccentColor = playerJudgePrism\s*\? prismDefaultAccentForTheme\(resolvedTheme\)[\s\S]{0,180}: botOrPrismAccentForTheme/u,
+    );
+    assert.match(
+      pageSource,
+      /playerJudgePrism\s*\? prismDefaultAccentStyle\(resolvedTheme\)\s*:\s*botAccentStyle\(botSnapshot\.color, resolvedTheme\)/u,
+    );
+    assert.match(
+      pageSource,
+      /data-signal-role=\{avatarState\.role\}[\s\S]{0,700}\.\.\.prismDefaultAccentStyle\(renderTheme\)/u,
+    );
+    assert.match(
+      pageCss,
+      /\.zenLiveBotPresencePlate\[data-prism-persona="true"\][\s\S]{0,180}--coffee-bot-color:\s*#f7fbff/u,
+    );
+    assert.match(
+      pageCss,
+      /--bot-face-frame-led-spectrum:\s*conic-gradient\([\s\S]{0,220}#ff3f6f[\s\S]{0,120}#31d7ff[\s\S]{0,80}#8b7cff/u,
+    );
+  });
+
   it("treats the refraction emblem, wordmark, and triangle as distinct roles", () => {
     assert.deepEqual(PRISM_BRAND_MARKS, {
       primary: "refraction-emblem",

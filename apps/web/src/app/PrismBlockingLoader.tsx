@@ -6,12 +6,13 @@ import {
   useLayoutEffect,
   useRef,
   useState,
+  useSyncExternalStore,
   type CSSProperties,
-  type PointerEvent as ReactPointerEvent,
   type ReactNode,
 } from "react";
 import { createPortal } from "react-dom";
 import { PrismOrb } from "./PrismOrb";
+import { PrismCompanionViewTabs } from "./PrismCompanionViewTabs";
 import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
 import styles from "./prism-blocking-loader.module.css";
 import { formatBlockingLoaderElapsed } from "./prismBlockingLoaderFormat";
@@ -24,15 +25,17 @@ import {
 } from "./prismOrbHandoff.ts";
 import {
   setPrismSoftSynthesisExpanded,
-  setPrismSoftSynthesisHandoffBusy,
-  setPrismSoftSynthesisLodged,
-  setPrismSoftSynthesisPosition,
   usePrismSoftSynthesisUi,
 } from "./prismSoftSynthesisUi.ts";
 import {
   clampPrismCompanionPosition,
   type PrismCompanionPosition,
 } from "./prismCompanionPhysics.ts";
+import {
+  getPrismCompanionVisualServerSnapshot,
+  getPrismCompanionVisualSnapshot,
+  subscribePrismCompanionVisualSnapshot,
+} from "./prismCompanionVisualSnapshot.ts";
 
 export { formatBlockingLoaderElapsed } from "./prismBlockingLoaderFormat";
 
@@ -49,7 +52,7 @@ export interface PrismBlockingLoaderProps {
   theme?: "light" | "dark";
   /**
    * `fullscreen` hard-blocks the app (invent / head-start bake).
-   * `docked` is the soft-wait shell — relocatable card; starts minimized via soft UI store.
+   * `docked` is the soft-wait shell — anchored around Prism; starts minimized via soft UI store.
    */
   placement?: PrismBlockingLoaderPlacement;
   /** Overrides the default “PRISM is working” eyebrow. */
@@ -82,7 +85,6 @@ function softDockPositionStyle(position: PrismCompanionPosition): CSSProperties 
     top: `${position.y * 100}%`,
     right: "auto",
     bottom: "auto",
-    transform: "translate(-50%, -50%)",
   };
 }
 
@@ -115,22 +117,16 @@ export function PrismBlockingLoader({
   const confirmTitleId = useId();
   const confirmDetailId = useId();
   const softUi = usePrismSoftSynthesisUi();
+  const companionVisual = useSyncExternalStore(
+    subscribePrismCompanionVisualSnapshot,
+    getPrismCompanionVisualSnapshot,
+    getPrismCompanionVisualServerSnapshot,
+  );
   const [confirming, setConfirming] = useState(false);
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [hardCompanionSuppressed, setHardCompanionSuppressed] = useState(false);
   const [loaderOrbVisible, setLoaderOrbVisible] = useState(false);
-  const [draggingCard, setDraggingCard] = useState(false);
-  const dragRef = useRef<{
-    pointerId: number;
-    startX: number;
-    startY: number;
-    origin: PrismCompanionPosition;
-    moved: boolean;
-  } | null>(null);
   const hardRestorePositionRef = useRef<PrismCompanionPosition | null>(null);
-  const softExpandGenerationRef = useRef(0);
-  const softPositionRef = useRef(softUi.position);
-  softPositionRef.current = softUi.position;
   const normalized = normalizedProgress(progress);
   const progressPercent = normalized === null ? null : Math.round(normalized * 100);
   const elapsedLabel =
@@ -199,7 +195,6 @@ export function PrismBlockingLoader({
     let cancelled = false;
     setHardCompanionSuppressed(false);
     setLoaderOrbVisible(false);
-    setPrismSoftSynthesisHandoffBusy(true);
 
     const run = async (): Promise<void> => {
       const companion = queryPrismCompanionAvatar();
@@ -225,13 +220,11 @@ export function PrismBlockingLoader({
       if (cancelled) return;
       setLoaderOrbVisible(true);
       setHardCompanionSuppressed(true);
-      setPrismSoftSynthesisHandoffBusy(false);
     };
     void run();
 
     return () => {
       cancelled = true;
-      setPrismSoftSynthesisHandoffBusy(false);
       const restore = hardRestorePositionRef.current;
       const slot =
         orbSlotRef.current ??
@@ -247,52 +240,6 @@ export function PrismBlockingLoader({
       setLoaderOrbVisible(false);
     };
   }, [docked, open, showPortal]);
-
-  // Soft expand: fly companion into the soft card orb slot and lodge.
-  useLayoutEffect(() => {
-    if (!open || !docked || !softUi.expanded) return;
-    const generation = ++softExpandGenerationRef.current;
-    setLoaderOrbVisible(false);
-    setPrismSoftSynthesisHandoffBusy(true);
-    setPrismSoftSynthesisLodged(false);
-
-    const run = async (): Promise<void> => {
-      const companion = queryPrismCompanionAvatar();
-      await new Promise<void>((resolve) => {
-        window.requestAnimationFrame(() => resolve());
-      });
-      if (generation !== softExpandGenerationRef.current) return;
-      const slot =
-        orbSlotRef.current ??
-        queryPrismLoaderOrbSlot(rootRef.current) ??
-        queryPrismLoaderOrbSlot();
-      await animatePrismOrbHandoff({ from: companion, to: slot });
-      if (generation !== softExpandGenerationRef.current) return;
-      setLoaderOrbVisible(true);
-      setPrismSoftSynthesisLodged(true);
-      setPrismSoftSynthesisHandoffBusy(false);
-    };
-    void run();
-
-    return () => {
-      softExpandGenerationRef.current += 1;
-      setPrismSoftSynthesisHandoffBusy(false);
-      const companion = queryPrismCompanionAvatar();
-      const slot =
-        orbSlotRef.current ??
-        queryPrismLoaderOrbSlot(rootRef.current) ??
-        queryPrismLoaderOrbSlot();
-      void animatePrismOrbHandoff({
-        from: slot,
-        to:
-          companion ??
-          companionDockRectFromNormalizedPosition(softPositionRef.current),
-      }).finally(() => {
-        setPrismSoftSynthesisLodged(false);
-      });
-      setLoaderOrbVisible(false);
-    };
-  }, [docked, open, softUi.expanded]);
 
   if (!open || typeof document === "undefined") return null;
   if (docked && !softUi.expanded) return null;
@@ -314,56 +261,6 @@ export function PrismBlockingLoader({
   const minimizeSoft = (): void => {
     if (!docked || confirming) return;
     setPrismSoftSynthesisExpanded(false);
-  };
-
-  const beginCardDrag = (event: ReactPointerEvent<HTMLElement>): void => {
-    if (!docked || event.button !== 0 || event.isPrimary === false) return;
-    const target = event.target;
-    if (
-      target instanceof Element &&
-      target.closest(
-        "button, a, input, textarea, select, [data-soft-job-action]",
-      )
-    ) {
-      return;
-    }
-    event.currentTarget.setPointerCapture(event.pointerId);
-    dragRef.current = {
-      pointerId: event.pointerId,
-      startX: event.clientX,
-      startY: event.clientY,
-      origin: softUi.position,
-      moved: false,
-    };
-    setDraggingCard(false);
-  };
-
-  const moveCardDrag = (event: ReactPointerEvent<HTMLElement>): void => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    const dx = event.clientX - drag.startX;
-    const dy = event.clientY - drag.startY;
-    if (!drag.moved && dx * dx + dy * dy < 36) return;
-    drag.moved = true;
-    setDraggingCard(true);
-    setPrismSoftSynthesisPosition(
-      clampPrismCompanionPosition({
-        x: drag.origin.x + dx / window.innerWidth,
-        y: drag.origin.y + dy / window.innerHeight,
-      }),
-    );
-  };
-
-  const endCardDrag = (event: ReactPointerEvent<HTMLElement>): void => {
-    const drag = dragRef.current;
-    if (!drag || drag.pointerId !== event.pointerId) return;
-    dragRef.current = null;
-    setDraggingCard(false);
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture may already have ended.
-    }
   };
 
   const jobSections =
@@ -393,12 +290,13 @@ export function PrismBlockingLoader({
       aria-live="polite"
       aria-labelledby={titleId}
       aria-describedby={detailId}
-      data-dragging={draggingCard ? "true" : undefined}
-      onPointerDown={docked ? beginCardDrag : undefined}
-      onPointerMove={docked ? moveCardDrag : undefined}
-      onPointerUp={docked ? endCardDrag : undefined}
-      onPointerCancel={docked ? endCardDrag : undefined}
     >
+      {docked ? (
+        <PrismCompanionViewTabs
+          activeView="synthesis"
+          synthesisJobCount={softUi.jobCount}
+        />
+      ) : null}
       {onCancel ? (
         <button
           ref={cancelButtonRef}
@@ -415,9 +313,11 @@ export function PrismBlockingLoader({
         ref={orbSlotRef}
         className={styles.prismOrbSlot}
         data-prism-blocking-orb-slot="true"
-        data-orb-visible={loaderOrbVisible ? "true" : undefined}
+        data-orb-visible={!docked && loaderOrbVisible ? "true" : undefined}
       >
-        {loaderOrbVisible ? <PrismOrb className={styles.prismOrb} /> : null}
+        {!docked && loaderOrbVisible ? (
+          <PrismOrb className={styles.prismOrb} />
+        ) : null}
       </span>
       <span className={styles.eyebrow}>{eyebrow}</span>
       <h2 id={titleId}>{title}</h2>
@@ -503,11 +403,22 @@ export function PrismBlockingLoader({
               className={styles.docked}
               data-prism-blocking-loader="true"
               data-prism-blocking-placement="docked"
+              data-prism-soft-orb-anchored="true"
               data-theme={theme}
+              data-dock={
+                companionVisual.position.x < 0.34
+                  ? "left"
+                  : companionVisual.position.x > 0.66
+                    ? "right"
+                    : "center"
+              }
+              data-vertical={
+                companionVisual.position.y < 0.5 ? "below" : "above"
+              }
               data-confirming={confirming ? "true" : undefined}
               data-dev-panel-safe-area="bottom"
               aria-busy="true"
-              style={softDockPositionStyle(softUi.position)}
+              style={softDockPositionStyle(companionVisual.position)}
               onKeyDown={(event) => {
                 if (event.key === "Escape") {
                   event.preventDefault();

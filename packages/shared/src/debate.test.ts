@@ -997,6 +997,7 @@ test("normalizeDebateSetupSuggestionV1 accepts a complete New Duel draft", () =>
   assert.equal(suggestion?.moderatorBotId, null);
   assert.equal(suggestion?.moderatorTitle, "Moderator");
   assert.equal(suggestion?.juryEnabled, false);
+  assert.equal(suggestion?.rhetoricalGambitsEnabled, true);
 });
 
 test("normalizeDebateSetupSuggestionV1 syncs Spectator Jury presets and keeps moderator", () => {

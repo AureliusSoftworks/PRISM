@@ -1,8 +1,6 @@
 export const ZEN_LIVE_MOUTH_PHASE_MS = 120;
 export const ZEN_LIVE_CUSTOM_MOUTH_SPIN_TURN_MS =
   ZEN_LIVE_MOUTH_PHASE_MS * 4;
-/** Bottish notes can arrive much faster than a readable CRT mouth pose. */
-export const BOTTISH_MOUTH_PHASE_MS = 240;
 
 export type ZenLiveBotMouthShape =
   | "open-wide"
@@ -1402,15 +1400,17 @@ export function crtSpeechMouthShapeAtAlignedElapsedMs({
 }
 
 /**
- * Keeps Bottish on the audio clock without changing pose on every synthesized
- * note. Provider alignment still closes the mouth for real phrase gaps.
+ * Bottish synthesis emits one timed note for every speakable character. Its
+ * generated alignment is therefore the audible note schedule, not an estimate
+ * that should be stretched across the rendered clip. Follow those absolute
+ * windows exactly so every oscillator onset, gap, and final tail has the same
+ * mouth state the listener hears.
  */
 export function bottishMouthShapeAtAlignedElapsedMs({
   text,
   elapsedMs,
   durationMs,
   alignment,
-  phaseMs = BOTTISH_MOUTH_PHASE_MS,
 }: {
   text: string;
   elapsedMs: number;
@@ -1420,21 +1420,70 @@ export function bottishMouthShapeAtAlignedElapsedMs({
     characterStartTimesSeconds: readonly number[];
     characterEndTimesSeconds: readonly number[];
   } | null;
-  phaseMs?: number;
 }): ZenLiveBotMouthShape {
-  const activityShape = crtSpeechMouthShapeAtAlignedElapsedMs({
-    text,
-    elapsedMs,
-    durationMs,
-    alignment,
-  });
-  if (activityShape === "closed") return "closed";
-  return zenLiveBotMouthShapeFromSpeechPhase({
-    speechSeedText: text,
-    phaseIndex: Math.floor(
-      Math.max(0, Number.isFinite(elapsedMs) ? elapsedMs : 0) /
-        Math.max(1, phaseMs),
-    ),
+  const characters = alignment?.characters ?? [];
+  const starts = alignment?.characterStartTimesSeconds ?? [];
+  const ends = alignment?.characterEndTimesSeconds ?? [];
+  const hasGeneratedNoteSchedule =
+    characters.length > 0 &&
+    characters.length === starts.length &&
+    starts.length === ends.length &&
+    starts.every((start) => Number.isFinite(start) && start >= 0) &&
+    ends.every(
+      (end, index) =>
+        Number.isFinite(end) && end >= (starts[index] ?? Number.POSITIVE_INFINITY),
+    );
+  if (!hasGeneratedNoteSchedule) {
+    return crtSpeechMouthShapeAtAlignedElapsedMs({
+      text,
+      elapsedMs,
+      durationMs,
+      alignment,
+    });
+  }
+
+  const safeElapsedMs = Math.max(
+    0,
+    Number.isFinite(elapsedMs) ? elapsedMs : 0,
+  );
+  if (safeElapsedMs >= Math.max(0, durationMs)) return "closed";
+  const elapsedSeconds = safeElapsedMs / 1_000;
+  let low = 0;
+  let high = starts.length;
+  while (low < high) {
+    const middle = Math.floor((low + high) / 2);
+    if ((starts[middle] ?? Number.POSITIVE_INFINITY) <= elapsedSeconds) {
+      low = middle + 1;
+    } else {
+      high = middle;
+    }
+  }
+  const cursorIndex = low - 1;
+  if (cursorIndex < 0) return "closed";
+  const characterStartSeconds = starts[cursorIndex] ?? elapsedSeconds;
+  const characterEndSeconds = ends[cursorIndex] ?? characterStartSeconds;
+  if (
+    elapsedSeconds < characterStartSeconds ||
+    elapsedSeconds >= characterEndSeconds ||
+    !/[\p{L}\p{N}]/u.test(characters[cursorIndex] ?? "")
+  ) {
+    return "closed";
+  }
+  const cursorProgress =
+    characterEndSeconds > characterStartSeconds
+      ? Math.min(
+          1,
+          Math.max(
+            0,
+            (elapsedSeconds - characterStartSeconds) /
+              (characterEndSeconds - characterStartSeconds),
+          ),
+        )
+      : 0;
+  return crtSpeechMouthShapeAtTextCursor({
+    text: characters.join(""),
+    cursorIndex,
+    cursorProgress,
   });
 }
 

@@ -377,9 +377,6 @@ export function deriveDeterministicBotSemanticFacets(options: {
   if (facets.starterSeeds.length === 0) {
     for (const tension of facets.tensions) addFacetValue(facets, "starterSeeds", tension);
   }
-  if (facets.starterSeeds.length === 0 && facets.domains.length > 0) {
-    addFacetValue(facets, "starterSeeds", `A harder question about ${facets.domains[0]}`);
-  }
   if (facets.namingTokens.length === 0 && name) addFacetValue(facets, "namingTokens", name);
   return facets;
 }

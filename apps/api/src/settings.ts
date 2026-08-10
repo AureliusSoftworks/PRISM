@@ -6,6 +6,7 @@ import type {
 } from "@localai/shared";
 import {
   DEFAULT_PRISM_MOOD_SENSITIVITY,
+  isDisabledModelChoice,
   isComfyUiRemoteWorkflowModelId,
   isComfyUiWorkflowModelId,
   MAX_PRISM_MOOD_SENSITIVITY,
@@ -22,12 +23,14 @@ import {
   serializeAutoFallbackChain,
   clampOnlineAutoProviderBias,
   type GraphicsQuality,
+  type PrismTypographyScale,
   type HubAtmosphereStyle,
   type ImageProviderName,
   type EphemeralChatProviderPreferences,
   isImageProviderName,
   normalizeEphemeralChatProviderPreferences,
   normalizeGraphicsQuality,
+  normalizePrismTypographyScale,
   normalizeHubAtmosphereStyle,
   normalizePrismStartupPreference,
   type PrismStartupPreference,
@@ -170,6 +173,7 @@ export interface CurrentSettings {
   displayName: string;
   theme: Theme;
   graphicsQuality: GraphicsQuality | string | null;
+  typographyScale: PrismTypographyScale | string | null;
   atmosphereStyle: string | null;
   hubAtmosphereEnabled: number | null;
   startupPreference: string | null;
@@ -249,6 +253,7 @@ export interface NextSettings {
   displayName: string;
   theme: Theme;
   graphicsQuality: GraphicsQuality;
+  typographyScale: PrismTypographyScale;
   atmosphereStyle: HubAtmosphereStyle;
   hubAtmosphereEnabled: number;
   startupPreference: PrismStartupPreference;
@@ -561,6 +566,14 @@ function readPreferredModel(value: unknown, fallback: string | null): string | n
   if (typeof value !== "string") return fallback;
   const trimmed = value.trim();
   return trimmed.length > 0 ? trimmed : null;
+}
+
+function readPreferredTextModel(
+  value: unknown,
+  fallback: string | null,
+): string | null {
+  const model = readPreferredModel(value, fallback);
+  return isDisabledModelChoice(model) ? null : model;
 }
 
 export function normalizeZenWallpaperOpacity(
@@ -888,6 +901,10 @@ export function resolveNextSettings(
     body.graphicsQuality,
     normalizeGraphicsQuality(current.graphicsQuality),
   );
+  const typographyScale = normalizePrismTypographyScale(
+    body.typographyScale,
+    normalizePrismTypographyScale(current.typographyScale),
+  );
   const atmosphereStyle = normalizeHubAtmosphereStyle(
     body.atmosphereStyle,
     normalizeHubAtmosphereStyle(current.atmosphereStyle),
@@ -975,8 +992,14 @@ export function resolveNextSettings(
     body.hiddenComfyUiWorkflowIds,
     current.hiddenComfyUiWorkflowIds
   );
-  const preferredLocalModel = current.preferredLocalModel;
-  const preferredOnlineModel = current.preferredOnlineModel;
+  const preferredLocalModel = readPreferredTextModel(
+    body.preferredLocalModel,
+    current.preferredLocalModel
+  );
+  const preferredOnlineModel = readPreferredTextModel(
+    body.preferredOnlineModel,
+    current.preferredOnlineModel
+  );
   const lenientLocalImageFallbackModel = readPreferredModel(
     body.lenientLocalImageFallbackModel,
     current.lenientLocalImageFallbackModel
@@ -1310,6 +1333,7 @@ export function resolveNextSettings(
     displayName,
     theme,
     graphicsQuality,
+    typographyScale,
     atmosphereStyle,
     hubAtmosphereEnabled,
     startupPreference,

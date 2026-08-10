@@ -1407,6 +1407,35 @@ describe("OpenAiProvider request shape", () => {
     assert.equal(body.reasoning_effort, "high");
   });
 
+  it("sends Priority processing only when Turbo is enabled on a supported model", async () => {
+    const bodies: Array<Record<string, unknown>> = [];
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      bodies.push(JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>);
+      return new Response(
+        JSON.stringify({ choices: [{ message: { content: "ok" } }] }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const provider = new OpenAiProvider({ apiKey: "sk-test" });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.6-sol",
+      turbo: true,
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.6-sol",
+      turbo: false,
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.5-pro",
+      turbo: true,
+    });
+
+    assert.equal(bodies[0]?.service_tier, "priority");
+    assert.equal("service_tier" in (bodies[1] ?? {}), false);
+    assert.equal("service_tier" in (bodies[2] ?? {}), false);
+  });
+
   it("omits reasoning_effort for auto and unsupported models", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
@@ -1426,9 +1455,19 @@ describe("OpenAiProvider request shape", () => {
       model: "gpt-4o-mini",
       reasoningEffort: "high",
     });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.6-sol",
+      reasoningEffort: "minimal",
+    });
+    await provider.generateResponse([{ role: "user", content: "hi" }], {
+      model: "gpt-5.6-sol",
+      reasoningEffort: "low",
+    });
 
     assert.equal("reasoning_effort" in (bodies[0] ?? {}), false);
     assert.equal("reasoning_effort" in (bodies[1] ?? {}), false);
+    assert.equal("reasoning_effort" in (bodies[2] ?? {}), false);
+    assert.equal(bodies[3]?.reasoning_effort, "low");
   });
 
   it("surfaces an unsupported reasoning effort without silently retrying", async () => {

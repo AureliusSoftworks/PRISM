@@ -52,14 +52,20 @@ export {
   PRISM_REFRACT_DEBATE_EXHIBIT_REJECTED_CANDIDATE_LIMIT,
   PRISM_REFRACT_DIRECTION_MAX_LENGTH,
   PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS,
+  PRISM_REFRACT_INPUT_CONTEXT_MAX_LENGTH,
+  PRISM_REFRACT_INPUT_LABEL_MAX_LENGTH,
+  PRISM_REFRACT_INPUT_TEXT_TARGET_KIND,
+  PRISM_REFRACT_INPUT_VALUE_MAX_LENGTH,
   PRISM_REFRACT_REFERENCE_ID_MAX_LENGTH,
   PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT,
   PRISM_REFRACT_SIGNAL_TEXT_TARGET_KINDS,
   isPrismRefractDebateTextTarget,
+  isPrismRefractInputTextTarget,
   normalizePrismRefractDirection,
   normalizePrismRefractRequest,
   type PrismRefractDebateTextTarget,
   type PrismRefractDebateTextTargetKind,
+  type PrismRefractInputTextTarget,
   type PrismRefractRequest,
   type PrismRefractResponse,
   type PrismRefractSignalTextTarget,
@@ -686,6 +692,8 @@ export {
   BOT_FACE_BLINK_SCALE_MAX,
   BOT_FACE_BLINK_SCALE_MIN,
   BOT_FACE_BLINK_SCALE_STEP,
+  botFaceBlinkGeometryFollowsEyesByDefault,
+  botFaceBlinkScaleForEyeScale,
   BOT_FACE_EYE_OFFSET_X_MAX,
   BOT_FACE_EYE_OFFSET_X_MIN,
   BOT_FACE_EYE_OFFSET_X_STEP,
@@ -1054,6 +1062,7 @@ export {
   effectiveModelReasoningEffort,
   modelReasoningEffortPreferenceKey,
   modelSupportsNativeReasoningEffort,
+  modelSupportsTurboMode,
   normalizeModelReasoningEffortPreference,
   normalizeReasoningEffort,
   openAiModelSupportsReasoningEffort,
@@ -1082,6 +1091,7 @@ export {
   type ModelReasoningEffortCapabilityV1,
   type ModelReasoningEffortPreference,
   type ModelReasoningEffortPreferenceV1,
+  type ModelTurboPreferenceV1,
   type NativeReasoningEffortProvider,
   type ReasoningEffort,
   type RequestReasoningEffort,
@@ -1365,6 +1375,7 @@ export type UsagePurpose =
   | "slate_project_chat"
   | "slate_revision"
   | "slate_shape"
+  | "slate_transcript_story"
   | "slate_title_suggestion"
   | "story_generation"
   | "voice_preview"
@@ -1471,6 +1482,8 @@ export interface ChatMessage {
   model?: string;
   /** Contextual Auto route used for this assistant message. */
   autoRoute?: AutoRouteDecisionV1;
+  /** True when the concrete model used Turbo for this assistant reply. */
+  turbo?: boolean;
   /** Bot/persona id attributed to this message. Null/undefined = default PRISM. */
   botId?: string | null;
   /** Bot that generated the message (assistant only). Resolved from bots.name at read time. */
@@ -1483,6 +1496,8 @@ export interface ChatMessage {
   moodKey?: BotMoodKey;
   /** Optional confidence (0-1) for tuning and diagnostics. */
   moodConfidence?: number;
+  /** Internal receipt that makes a private Shh follow-up replay-safe. */
+  assistantInterruptionReaction?: AssistantInterruptionReactionInput;
   /** Display-only Zen layout hint; ignored outside Zen surfaces. */
   zenDisplay?: ZenDisplayMetadata;
   /** When this assistant row used AskQuestion (`tool_payload` on the server). */
@@ -2896,6 +2911,8 @@ export interface ChatRequestPayload {
   zenAutonomy?: ZenAutonomyInput;
   /** Zen-only assistant follow-up when an AskQuestion patience timer expires. */
   zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
+  /** Chat/Zen assistant-only reaction after the player presses Shh. */
+  assistantInterruptionReaction?: AssistantInterruptionReactionInput;
   /**
    * Client-held prior messages for an incognito chat. The server uses this as
    * prompt context only; private turns are never read from or written to
@@ -2938,6 +2955,19 @@ export interface ZenAskQuestionPatienceInput {
   timeoutMs?: number;
   activeElapsedMs?: number;
   penaltyLevel?: PrismMoodIgnoredQuestionPenaltyLevel;
+  clientTurnId: string;
+}
+
+/**
+ * A canonical assistant-only turn created after Shh truncates the latest
+ * audible assistant message. It never represents user-authored transcript
+ * text; the interrupted fragment is repeated here only as a stale-run guard.
+ */
+export interface AssistantInterruptionReactionInput {
+  source: "shh";
+  activeBotId: string | null;
+  assistantMessageId: string;
+  interruptedContent: string;
   clientTurnId: string;
 }
 
@@ -3326,6 +3356,7 @@ export * from "./signalFancyAction.js";
 export * from "./signalPickles.js";
 export * from "./signalMusicProfile.js";
 export * from "./voiceSpokenText.js";
+export * from "./voiceAlignmentTrace.js";
 export * from "./voicePerformance.js";
 export * from "./localVoice.js";
 export * from "./voiceSpeechprint.js";
@@ -3337,6 +3368,7 @@ export * from "./stageActionDirector.js";
 export * from "./continuityVersion.js";
 export * from "./modelReadiness.js";
 export * from "./graphicsQuality.js";
+export * from "./typographyScale.js";
 export * from "./review.js";
 export * from "./ephemeralChat.js";
 export * from "./replay.js";
@@ -3344,7 +3376,9 @@ export * from "./liveBake.js";
 export * from "./livingShell.js";
 export * from "./livingShellProgress.js";
 export * from "./imageAssets.js";
+export * from "./softAssetJobs.js";
 export * from "./slateHandoff.js";
 export * from "./debate.js";
+export * from "./debateParticipation.js";
 export * from "./coffeeGroupSetup.js";
 export * from "./debateAudiencePressure.js";

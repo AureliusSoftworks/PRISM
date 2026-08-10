@@ -42,7 +42,80 @@ describe("Psychic message presentation", () => {
         { role: "assistant", model: "qwen3.5:9b" },
         { role: "user", psychicThought },
       ),
-      { model: "qwen3.5:9b", effort: "high" },
+      {
+        model: "qwen3.5:9b",
+        effort: "high",
+        automatic: false,
+        turbo: false,
+      },
     );
+  });
+
+  it("always supplies an effort glyph contract and marks Auto plus Turbo", () => {
+    assert.deepEqual(
+      assistantGenerationMetadata(
+        {
+          role: "assistant",
+          model: "gpt-5.6-sol",
+          autoRoute: {
+            v: 1,
+            lane: "online",
+            provider: "openai",
+            model: "gpt-5.6-sol",
+            reasoningEffort: "medium",
+            reasonCodes: ["standard_request"],
+          },
+          turbo: true,
+        },
+        null,
+      ),
+      {
+        model: "gpt-5.6-sol [auto]",
+        effort: "medium",
+        automatic: true,
+        turbo: true,
+      },
+    );
+
+    assert.deepEqual(
+      assistantGenerationMetadata(
+        { role: "assistant", model: "claude-fable-5" },
+        null,
+      ),
+      {
+        model: "claude-fable-5",
+        effort: "auto",
+        automatic: false,
+        turbo: false,
+      },
+    );
+  });
+
+  it("uses the hollow None glyph contract after an Auto recovery", () => {
+    const metadata = assistantGenerationMetadata(
+      {
+        role: "assistant",
+        model: "gpt-5-mini",
+        autoRoute: {
+          v: 1,
+          lane: "online",
+          provider: "openai",
+          model: "gpt-5.6-sol",
+          reasoningEffort: "high",
+          reasonCodes: ["deep_request"],
+        },
+        autoRecovery: {
+          v: 1,
+          attempts: [],
+          finalProvider: "openai",
+          finalModel: "gpt-5-mini",
+          crossedOnline: false,
+        },
+      },
+      null,
+    );
+
+    assert.equal(metadata?.model, "gpt-5-mini [auto]");
+    assert.equal(metadata?.effort, "none");
   });
 });

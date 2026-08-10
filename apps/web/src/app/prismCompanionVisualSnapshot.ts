@@ -7,6 +7,10 @@ let visualSnapshot: PrismCompanionVisualSnapshot = {
   position: { x: 0.92, y: 0.84 },
   available: false,
 };
+const serverVisualSnapshot: PrismCompanionVisualSnapshot = {
+  position: { x: 0.92, y: 0.84 },
+  available: false,
+};
 const visualListeners = new Set<() => void>();
 
 export function publishPrismCompanionVisualSnapshot(
@@ -32,6 +36,10 @@ export function publishPrismCompanionVisualSnapshot(
 
 export function getPrismCompanionVisualSnapshot(): PrismCompanionVisualSnapshot {
   return visualSnapshot;
+}
+
+export function getPrismCompanionVisualServerSnapshot(): PrismCompanionVisualSnapshot {
+  return serverVisualSnapshot;
 }
 
 export function subscribePrismCompanionVisualSnapshot(

@@ -9,6 +9,8 @@ This app is the unified desktop shell scaffold for Prism.
 - Starts bundled Qdrant sidecar (`runtime/qdrant/qdrant`) for memory engine
 - Waits until web port `18788` is reachable
 - Opens a desktop window pointed at `http://127.0.0.1:18788`
+- Allows only one PRISM desktop instance; a repeat launch restores and focuses
+  the existing window instead of starting another local runtime
 
 ## Window lifecycle
 

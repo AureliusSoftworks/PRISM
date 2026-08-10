@@ -8,6 +8,7 @@ import {
   buildBabbleRoboticPlan,
   encodeBottishPlanWave,
   enqueueBabbleVoice,
+  enqueueChunkedBabbleVoice,
   FIXED_BOTTISH_TONE,
   fitBottishPlanToDuration,
   pcmWaveDurationMs,
@@ -590,6 +591,143 @@ describe("Bottish speech plan", () => {
       assert.equal(typeof frameCallback, "function");
       (frameCallback as unknown as () => void)();
       assert.ok(Math.abs((progress.at(-1) ?? 0) - 500) < 0.001);
+      media.listeners.get("ended")?.();
+      await playback;
+    } finally {
+      stopBottishVoice();
+      for (const [target, key, descriptor] of [
+        [globalThis, "Audio", originalAudio],
+        [globalThis, "window", originalWindow],
+        [URL, "createObjectURL", originalCreateObjectUrl],
+        [URL, "revokeObjectURL", originalRevokeObjectUrl],
+      ] as const) {
+        if (descriptor) Object.defineProperty(target, key, descriptor);
+        else Reflect.deleteProperty(target, key);
+      }
+    }
+  });
+
+  it("reports the exact generated Babble transcript without inventing alignment", async () => {
+    const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+    const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
+    const originalCreateObjectUrl = Object.getOwnPropertyDescriptor(URL, "createObjectURL");
+    const originalRevokeObjectUrl = Object.getOwnPropertyDescriptor(URL, "revokeObjectURL");
+    const mediaInstances: FakeAudio[] = [];
+    class FakeAudio {
+      duration = 0.4;
+      currentTime = 0;
+      playbackRate = 1;
+      preservesPitch = true;
+      preload = "";
+      src = "";
+      volume = 1;
+      readonly listeners = new Map<string, () => void>();
+
+      constructor() {
+        mediaInstances.push(this);
+      }
+
+      addEventListener(name: string, listener: () => void): void {
+        this.listeners.set(name, listener);
+      }
+      pause(): void {}
+      removeAttribute(name: string): void {
+        if (name === "src") this.src = "";
+      }
+      load(): void {}
+      play(): Promise<void> {
+        return Promise.resolve();
+      }
+    }
+    Object.defineProperty(globalThis, "Audio", {
+      configurable: true,
+      writable: true,
+      value: FakeAudio,
+    });
+    Object.defineProperty(globalThis, "window", {
+      configurable: true,
+      writable: true,
+      value: {
+        AudioContext: undefined,
+        setTimeout: globalThis.setTimeout.bind(globalThis),
+        clearTimeout: globalThis.clearTimeout.bind(globalThis),
+        requestAnimationFrame: () => 1,
+        cancelAnimationFrame: () => undefined,
+      },
+    });
+    Object.defineProperty(URL, "createObjectURL", {
+      configurable: true,
+      writable: true,
+      value: () => "blob:babble-transcript",
+    });
+    Object.defineProperty(URL, "revokeObjectURL", {
+      configurable: true,
+      writable: true,
+      value: () => undefined,
+    });
+    stopBottishVoice();
+    try {
+      const wave = encodeBottishPlanWave({
+        notes: [],
+        durationMs: 400,
+        alignment: {
+          characters: [],
+          characterStartTimesSeconds: [],
+          characterEndTimesSeconds: [],
+        },
+      });
+      const generatedText = "Zhae-pruk noi.";
+      const response = new Response(
+        `${JSON.stringify({
+          index: 0,
+          characterCount: 12,
+          text: generatedText,
+          sourceStart: 4,
+          sourceEnd: 16,
+          audioBase64: Buffer.from(wave).toString("base64"),
+        })}\n`,
+        {
+          headers: {
+            "content-type": "application/x-ndjson; charset=utf-8",
+            "x-prism-voice-stream": "wav-chunks-v1",
+            "x-prism-voice-characters": "12",
+          },
+        },
+      );
+      const synthesizedSegments: Array<{
+        text: string;
+        sourceStart: number | null;
+        sourceEnd: number | null;
+        startMs: number;
+        endMs: number;
+        alignment: unknown;
+      }> = [];
+      const playback = enqueueChunkedBabbleVoice(
+        response,
+        "Original English.",
+        neutral,
+        "babble-transcript",
+        false,
+        1,
+        {
+          onSynthesizedSpeechSegment: (segment) =>
+            synthesizedSegments.push(segment),
+        },
+      );
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      const media = mediaInstances[0];
+      assert.ok(media);
+      media.listeners.get("playing")?.();
+      assert.deepEqual(synthesizedSegments, [
+        {
+          text: generatedText,
+          sourceStart: 4,
+          sourceEnd: 16,
+          startMs: 0,
+          endMs: 400,
+          alignment: null,
+        },
+      ]);
       media.listeners.get("ended")?.();
       await playback;
     } finally {

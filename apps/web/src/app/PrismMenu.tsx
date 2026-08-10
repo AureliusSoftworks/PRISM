@@ -276,6 +276,8 @@ interface PrismMenuSurfaceProps {
   surfaceRef?: RefObject<HTMLDivElement | null>;
   ownerId?: string;
   onBack?: () => void;
+  /** Gives top-navbar dropdowns the shared high-contrast ambient shadow. */
+  navbarPicker?: boolean;
 }
 
 export function PrismMenuSurface({
@@ -285,6 +287,7 @@ export function PrismMenuSurface({
   surfaceRef,
   ownerId,
   onBack,
+  navbarPicker = false,
 }: PrismMenuSurfaceProps): React.JSX.Element {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -506,6 +509,7 @@ export function PrismMenuSurface({
         aria-label={request.label}
         data-theme={request.theme ?? "dark"}
         data-prism-menu-owner={rootOwnerId}
+        data-navbar-picker-surface={navbarPicker ? "true" : undefined}
         data-placement={position.placement}
         style={style}
         onKeyDown={handleKeyDown}
@@ -611,6 +615,7 @@ export function PrismMenuSurface({
                 focusRestoreTarget: openSubmenuAnchor,
               }}
               ownerId={rootOwnerId}
+              navbarPicker={navbarPicker}
               onBack={() => {
                 setOpenSubmenuId(null);
                 setOpenSubmenuAnchor(null);

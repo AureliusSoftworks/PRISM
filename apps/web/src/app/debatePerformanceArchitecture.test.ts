@@ -121,3 +121,102 @@ test("audience materials throttle without removing semantic reactions", () => {
     /setInterval\(\(\) => \{\s*const now = Date\.now\(\);\s*setJudgeGavelNowMs/u,
   );
 });
+
+test("talking gallery seats animate compact mouths without waking the full portrait", () => {
+  assert.match(
+    debateSource,
+    /const galleryTalking = ambientTalking;/u,
+  );
+  assert.match(
+    debateSource,
+    /if \(!props\.audienceTalkingAudioAudible \|\| !props\.audienceChattering\)[\s\S]{0,300}window\.setInterval\([\s\S]{0,300}setMouthPhase/u,
+  );
+  assert.match(
+    debateSource,
+    /\(index \+ mouthPhase\) % DEBATE_AUDIENCE_MOUTH_SHAPES\.length/u,
+  );
+  assert.match(
+    debateSource,
+    /const DEBATE_AUDIENCE_MOUTH_SHAPES = \[\s*"speech-closed",\s*"open-wide",\s*\]/u,
+  );
+  assert.match(
+    debateSource,
+    /talking: false,[\s\S]{0,140}foleyMouthShape/u,
+  );
+  assert.match(
+    debateSource,
+    /props\.audienceTalkingAudioAudible &&[\s\S]{0,100}props\.audienceChattering &&[\s\S]{0,180}props\.audiencePressureTalkerIndices\.has\(index\)/u,
+  );
+  assert.match(
+    debateSource,
+    /const galleryTalkingAudioAudible = Boolean\([\s\S]{0,180}liveGalleryUsesCrosstalk &&[\s\S]{0,100}galleryMixWithVolume\.grain > 0\.001/u,
+  );
+  assert.match(
+    debateSource,
+    /debateAudienceTalkerIndices\(\{[\s\S]{0,180}formality: session\.formality/u,
+  );
+  assert.match(
+    pageSource,
+    /staticAudiencePortrait[\s\S]{0,6500}<ChatMiniBotAvatar/u,
+  );
+  assert.match(
+    pageSource,
+    /galleryTalking && faceStyle\.mouthAnimation === "none"/u,
+  );
+  assert.match(
+    pageSource,
+    /debateAudienceRandom\([\s\S]{0,120}`mood:\$\{debateLiveSessionId \?\? "setup"\}:\$\{botSnapshot\.id\}`[\s\S]{0,40}\)\(\)/u,
+  );
+  assert.match(pageSource, /color=\{debateAvatarAccentColor\}/u);
+  assert.match(
+    debateCss,
+    /\.debateAudienceBotPortrait > \[data-chat-mini-bot-avatar="true"\]\s*\{[^}]*width:\s*132%[^}]*height:\s*auto[^}]*aspect-ratio:\s*1/u,
+  );
+});
+
+test("the Moderator uses the mini chassis unless its camera is active", () => {
+  assert.match(
+    debateSource,
+    /props\.renderBotAvatar\(bot, \{[\s\S]{0,260}highDefinition:[\s\S]{0,120}stageAlignmentPreviewCamera ===[\s\S]{0,180}compact:[\s\S]{0,120}stageAlignmentPreviewCamera !==/u,
+  );
+  assert.match(
+    pageSource,
+    /const moderatorMiniPortrait =[\s\S]{0,100}avatarState\.role === "moderator"[\s\S]{0,80}!avatarState\.highDefinition[\s\S]{0,80}avatarState\.compact/u,
+  );
+  assert.match(
+    pageSource,
+    /staticAudiencePortrait \|\|[\s\S]{0,60}moderatorMiniPortrait[\s\S]{0,6500}<ChatMiniBotAvatar/u,
+  );
+  assert.match(
+    pageCss,
+    /\.debateModeratorMiniAvatar\[data-size="room"\]\s*\{[^}]*width:\s*100%[^}]*height:\s*100%/u,
+  );
+  assert.doesNotMatch(pageSource, /stageAlignmentPreview/u);
+});
+
+test("Debate actors and Jury use HD avatars while the Moderator follows its camera", () => {
+  assert.match(
+    debateSource,
+    /role !== "moderator" \|\|\s*cameraView === "moderator"/u,
+    "both advocates stay HD while the live Moderator is promoted only in its own shot",
+  );
+  assert.match(
+    debateSource,
+    /role !== "moderator" \|\|\s*stageAlignmentPreviewCamera ===\s*"moderator"/u,
+    "Stage Placement should preview the same camera-owned quality boundary",
+  );
+  assert.match(
+    debateSource,
+    /renderBotAvatar\(appearanceBot, \{[\s\S]{0,520}lookAtRole: null,[\s\S]{0,80}highDefinition: true,[\s\S]{0,80}compact: true/u,
+    "every Jury seat uses the full avatar material stack",
+  );
+  assert.match(
+    pageSource,
+    /const debateAvatarDetailLevel = staticAudiencePortrait[\s\S]{0,120}avatarState\.highDefinition[\s\S]{0,80}\? "full"[\s\S]{0,40}: "debate"/u,
+  );
+  assert.match(pageSource, /detailLevel=\{debateAvatarDetailLevel\}/u);
+  assert.match(
+    pageSource,
+    /data-debate-avatar-quality=\{[\s\S]{0,100}"hd"[\s\S]{0,40}"optimized"/u,
+  );
+});

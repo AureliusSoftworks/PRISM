@@ -1,5 +1,4 @@
-import { existsSync } from "node:fs";
-import { join, resolve, sep } from "node:path";
+import { resolve, sep } from "node:path";
 import {
   applyLocalVoiceSpeechprintToIpa,
   localVoicePronunciationOverrideIsActive,
@@ -11,16 +10,15 @@ import {
   type BotAudioVoiceProfileV1,
 } from "@localai/shared";
 import { phonemize } from "phonemizer";
+import {
+  PRISM_BUILTIN_TTS_MODEL_ID,
+  prismBuiltinTtsModelRoot,
+} from "./builtin-tts-assets.ts";
 
-export const PRISM_BUILTIN_TTS_MODEL_ID =
-  "onnx-community/Kokoro-82M-v1.0-ONNX";
-
-const PRISM_BUILTIN_TTS_REQUIRED_FILES = [
-  "config.json",
-  "tokenizer.json",
-  "tokenizer_config.json",
-  "onnx/model_quantized.onnx",
-] as const;
+export {
+  PRISM_BUILTIN_TTS_MODEL_ID,
+  prismBuiltinTtsModelRoot,
+} from "./builtin-tts-assets.ts";
 
 let kokoroTtsPromise: Promise<import("kokoro-js").KokoroTTS> | null = null;
 let kokoroModelRoot: string | null = null;
@@ -28,27 +26,6 @@ let kokoroModelRoot: string | null = null;
 function normalizedModelRoot(path: string): string {
   const normalized = resolve(path);
   return normalized.endsWith(sep) ? normalized : `${normalized}${sep}`;
-}
-
-export function prismBuiltinTtsModelRoot(
-  cwd = process.cwd(),
-  configuredRoot = process.env.PRISM_BUILTIN_TTS_MODEL_DIR,
-): string | null {
-  const candidates = [
-    configuredRoot,
-    join(cwd, "models"),
-    join(cwd, "runtime", "models"),
-    join(cwd, ".cache", "prism-models"),
-    // Workspace commands run from either the repo root or apps/api.
-    join(cwd, "..", "..", ".cache", "prism-models"),
-  ].filter((value): value is string => Boolean(value?.trim()));
-  return (
-    candidates.find((root) =>
-      PRISM_BUILTIN_TTS_REQUIRED_FILES.every((file) =>
-        existsSync(join(root, PRISM_BUILTIN_TTS_MODEL_ID, file)),
-      ),
-    ) ?? null
-  );
 }
 
 async function getKokoroTts(): Promise<import("kokoro-js").KokoroTTS> {

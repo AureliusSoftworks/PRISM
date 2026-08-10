@@ -8,6 +8,16 @@ import {
 } from "./conversation-hubs.ts";
 import { buildConversationHistoryEntry } from "./conversation-history.ts";
 import {
+  buildCoffeeContinuityPromptContext,
+  loadRecentCoffeeContinuityContexts,
+  type CoffeeContinuityContext,
+} from "./coffee-continuity.ts";
+export {
+  buildCoffeeContinuityPromptContext,
+  loadRecentCoffeeContinuityContexts,
+} from "./coffee-continuity.ts";
+export type { CoffeeContinuityContext } from "./coffee-continuity.ts";
+import {
   analyzeMemoryIntent,
   extractBotJudgmentMemoryCandidates,
   demoteMemoryToShortTerm,
@@ -48,6 +58,7 @@ import {
 } from "./memory-summarizer.ts";
 import type {
   AskQuestionPayload,
+  AssistantInterruptionReactionInput,
   BotMoodKey,
   BotOpinion,
   BotOpinionBand,
@@ -217,7 +228,11 @@ import {
   formatUserNotesForModel,
   listUserNoteTitles,
 } from "./user-notes.ts";
-import { attachUsageEventsToMessage, patchUsageSession } from "./usage.ts";
+import {
+  attachUsageEventsToMessage,
+  patchUsageSession,
+  registerUsageDiagnosticRedaction,
+} from "./usage.ts";
 import { withPrismRuntimeGrounding, composeBotSystemPrompt } from "./bots.ts";
 import {
   buildIdentityShapeshiftSeedV1,
@@ -1406,7 +1421,7 @@ function simulatedEffortNoticeDetail(args: {
   if (providerModelSupportsNativeReasoningEffort(args.provider, args.botOverrides)) {
     return `native_reasoning_preserved; provider=${args.provider.name}; model=${model}; effort=${args.effort}; simulated=false`;
   }
-  return null;
+  return `simulated_effort_local_only; provider=${args.provider.name}; model=${model}; effort=${args.effort}; simulated=false`;
 }
 
 function shouldSimulateReasoningEffort(args: {
@@ -1414,8 +1429,10 @@ function shouldSimulateReasoningEffort(args: {
   botOverrides: GenerateOptions | undefined;
   effort: ReasoningEffort;
 }): boolean {
-  // Product default: thoughtless models always get Prism's simulated Effort.
   if (args.effort === "auto" || args.effort === "none") return false;
+  // Simulated thinking is a LOCAL-only quality feature. ONLINE models may use
+  // their provider-native effort, but Prism never multiplies an online turn.
+  if (args.provider.name !== "local") return false;
   return !providerModelSupportsNativeReasoningEffort(
     args.provider,
     args.botOverrides,
@@ -2922,6 +2939,8 @@ async function generateChatResponse(args: {
     provider: ProviderName,
     model: string,
   ) => Exclude<ReasoningEffort, "auto"> | undefined;
+  /** Resolves the saved Turbo preference for every concrete model attempt. */
+  resolveTurboMode?: (provider: ProviderName, model: string) => boolean;
   providerFactory?: typeof selectProvider;
   openAiApiKey?: string;
   anthropicApiKey?: string;
@@ -2960,14 +2979,17 @@ async function generateChatResponse(args: {
     const effort = normalizeReasoningEffort(
       savedEffort ?? botOverrides?.reasoningEffort,
     );
+    const turbo = args.resolveTurboMode?.(provider.name, model) === true;
     const overrides: GenerateOptions | undefined = botOverrides
       ? {
           ...botOverrides,
           model,
+          turbo,
           ...(effort === "auto" ? { reasoningEffort: undefined } : { reasoningEffort: effort }),
         }
       : {
           model,
+          turbo,
           ...(effort === "auto" ? {} : { reasoningEffort: effort }),
         };
     const simulatedEffort = shouldSimulateReasoningEffort({
@@ -3164,6 +3186,7 @@ async function generateProgressiveZenChatResponse(args: {
     provider: ProviderName,
     model: string,
   ) => Exclude<ReasoningEffort, "auto"> | undefined;
+  resolveTurboMode?: (provider: ProviderName, model: string) => boolean;
   providerFactory?: typeof selectProvider;
   openAiApiKey?: string;
   anthropicApiKey?: string;
@@ -4011,6 +4034,11 @@ export interface UserChatSettings {
   zenHomeBotId?: string | null;
   incognito?: boolean;
   /**
+   * Authorized, request-scoped surface context for the Default Prism Zen
+   * companion. Sent to the model only; never copied into transcript storage.
+   */
+  prismCompanionSurfaceContext?: string;
+  /**
    * Client-held prior messages for private chats. Used as prompt context only;
    * incognito turns never read from or write to conversation/message storage.
    */
@@ -4082,6 +4110,8 @@ export interface UserChatSettings {
     provider: ProviderName,
     model: string,
   ) => Exclude<ReasoningEffort, "auto"> | undefined;
+  /** Resolves the saved Turbo preference for every concrete model attempt. */
+  resolveTurboMode?: (provider: ProviderName, model: string) => boolean;
   /**
    * Per-account override for Prism internal local LLM calls (titles, summaries,
    * memory inference, Coffee router, image prompt hints). Empty uses the
@@ -4132,6 +4162,7 @@ export interface UserChatSettings {
   zenAutonomy?: ZenAutonomyInput;
   /** Zen-only assistant follow-up when an AskQuestion patience timer expires. */
   zenAskQuestionPatience?: ZenAskQuestionPatienceInput;
+  assistantInterruptionReaction?: AssistantInterruptionReactionInput;
   /** Zen-only ephemeral stage-direction context collected before the user sends. */
   zenLiveActionContext?: ZenLiveActionContextInput;
   /** Zen-only assistant interruption triggered by a high-confidence live action. */
@@ -4160,10 +4191,6 @@ const MEMORY_RETRIEVAL_TIMEOUT_MS = 1500;
 const ZEN_RESTORE_MESSAGE_LIMIT = 80;
 const SESSION_RESUME_SUMMARY_MAX_CHARS = 700;
 const SESSION_RESUME_GAP_MAX_MS = 1000 * 60 * 60 * 24 * 45;
-const COFFEE_CONTINUITY_DEFAULT_LIMIT = 2;
-const COFFEE_CONTINUITY_QUERY_LIMIT = 100;
-const COFFEE_CONTINUITY_SUMMARY_MAX_CHARS = 700;
-const COFFEE_SESSION_SYNOPSIS_PREFIX = "Session synopsis:";
 
 function normalizeChatMode(mode: ChatMode | undefined): ChatMode {
   if (mode === "zen" || mode === "chat") return mode;
@@ -4382,170 +4409,6 @@ function buildSessionResumePromptContext(
   return lines.join("\n");
 }
 
-export interface CoffeeContinuityContext {
-  conversationId: string;
-  title: string;
-  topic: string | null;
-  summary: string;
-  updatedAt: string;
-}
-
-function parseCoffeeContinuityBotIds(raw: string | null | undefined): string[] {
-  if (typeof raw !== "string" || raw.trim().length === 0) return [];
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter((value): value is string => typeof value === "string")
-      .map((value) => value.trim())
-      .filter((value) => value.length > 0);
-  } catch {
-    return [];
-  }
-}
-
-function coffeeContinuityMentionsInternalAccountMetadata(text: string): boolean {
-  return /\b(?:your\s+)?account\s+(?:display\s+name\s+is|has\s+not\s+provided\s+a\s+display\s+name\s+yet)\b/i.test(
-    text
-  );
-}
-
-function normalizeCoffeeContinuityText(
-  value: string | null | undefined,
-  maxChars = COFFEE_CONTINUITY_SUMMARY_MAX_CHARS
-): string | null {
-  const collapsed = typeof value === "string" ? value.replace(/\s+/g, " ").trim() : "";
-  if (!collapsed) return null;
-  const withoutSynopsisPrefix = collapsed
-    .replace(/^#{1,6}\s*session synopsis\s*[:\-]?\s*/i, "")
-    .replace(/^\*\*session synopsis\*\*\s*[:\-]?\s*/i, "")
-    .replace(/^session synopsis\s*[:\-]\s*/i, "")
-    .trim();
-  if (!withoutSynopsisPrefix) return null;
-  if (coffeeContinuityMentionsInternalAccountMetadata(withoutSynopsisPrefix)) return null;
-  if (withoutSynopsisPrefix.length <= maxChars) return withoutSynopsisPrefix;
-  return `${withoutSynopsisPrefix.slice(0, Math.max(0, maxChars - 3)).trimEnd()}...`;
-}
-
-function normalizeCoffeeContinuityTopic(value: string | null | undefined): string | null {
-  return normalizeCoffeeContinuityText(value, 140);
-}
-
-export function loadRecentCoffeeContinuityContexts(args: {
-  db: DatabaseSync;
-  userId: string;
-  botId: string | null | undefined;
-  limit?: number;
-}): CoffeeContinuityContext[] {
-  const botId = normalizeChatBotId(args.botId);
-  if (!botId) return [];
-  const limit = Math.max(0, Math.min(10, Math.floor(args.limit ?? COFFEE_CONTINUITY_DEFAULT_LIMIT)));
-  if (limit === 0) return [];
-  const rows = args.db
-    .prepare(
-      `SELECT c.id, c.title, c.bot_group_ids, c.coffee_topic, c.coffee_meeting_summary,
-              c.updated_at,
-              (SELECT m.content
-                 FROM messages m
-                WHERE m.conversation_id = c.id
-                  AND m.user_id = c.user_id
-                  AND m.role = 'system'
-                  AND m.content LIKE ?
-                ORDER BY m.created_at DESC
-                LIMIT 1) AS session_synopsis,
-              EXISTS (
-                SELECT 1
-                  FROM messages m_spoke
-                 WHERE m_spoke.conversation_id = c.id
-                   AND m_spoke.user_id = c.user_id
-                   AND m_spoke.role = 'assistant'
-                   AND m_spoke.bot_id = ?
-              ) AS bot_spoke
-         FROM conversations c
-        WHERE c.user_id = ?
-          AND c.conversation_mode = 'coffee'
-          AND COALESCE(c.incognito, 0) = 0
-          AND (
-            c.bot_group_ids LIKE ?
-            OR EXISTS (
-              SELECT 1
-                FROM messages m_filter
-               WHERE m_filter.conversation_id = c.id
-                 AND m_filter.user_id = c.user_id
-                 AND m_filter.role = 'assistant'
-                 AND m_filter.bot_id = ?
-            )
-          )
-          AND (
-            COALESCE(c.coffee_meeting_summary, '') != ''
-            OR EXISTS (
-              SELECT 1
-                FROM messages m_summary
-               WHERE m_summary.conversation_id = c.id
-                 AND m_summary.user_id = c.user_id
-                 AND m_summary.role = 'system'
-                 AND m_summary.content LIKE ?
-            )
-          )
-        ORDER BY c.updated_at DESC
-        LIMIT ?`
-    )
-    .all(
-      `${COFFEE_SESSION_SYNOPSIS_PREFIX}%`,
-      botId,
-      args.userId,
-      `%${botId}%`,
-      botId,
-      `${COFFEE_SESSION_SYNOPSIS_PREFIX}%`,
-      COFFEE_CONTINUITY_QUERY_LIMIT
-    ) as Array<{
-      id: string;
-      title: string | null;
-      bot_group_ids: string | null;
-      coffee_topic: string | null;
-      coffee_meeting_summary: string | null;
-      session_synopsis: string | null;
-      bot_spoke: number;
-      updated_at: string;
-    }>;
-
-  const contexts: CoffeeContinuityContext[] = [];
-  for (const row of rows) {
-    const groupBotIds = parseCoffeeContinuityBotIds(row.bot_group_ids);
-    const participated = groupBotIds.includes(botId) || row.bot_spoke === 1;
-    if (!participated) continue;
-    const summary =
-      normalizeCoffeeContinuityText(row.session_synopsis) ??
-      normalizeCoffeeContinuityText(row.coffee_meeting_summary);
-    if (!summary) continue;
-    contexts.push({
-      conversationId: row.id,
-      title: normalizeCoffeeContinuityText(row.title, 90) ?? "Coffee Session",
-      topic: normalizeCoffeeContinuityTopic(row.coffee_topic),
-      summary,
-      updatedAt: row.updated_at,
-    });
-    if (contexts.length >= limit) break;
-  }
-  return contexts;
-}
-
-export function buildCoffeeContinuityPromptContext(
-  contexts: readonly CoffeeContinuityContext[]
-): string | null {
-  if (contexts.length === 0) return null;
-  return [
-    "Recent Coffee session context for this bot:",
-    "These are summary-level notes from the most recent Coffee sessions this bot participated in. Use them only as lightweight continuity when the user follows up on a Coffee-session remark. Do not invent exact quotes; if the user supplies a quote, use it as their reference point.",
-    ...contexts.map((context, index) => {
-      const label = context.topic
-        ? `${context.title} - topic: ${context.topic}`
-        : context.title;
-      return `- ${index + 1}. ${label}: ${context.summary}`;
-    }),
-  ].join("\n");
-}
-
 function throwIfChatRequestCancelled(signal: AbortSignal | undefined): void {
   if (signal?.aborted) {
     throw new Error("Chat request was cancelled.");
@@ -4657,6 +4520,7 @@ function planZenStageActionForTurn(args: {
   zenAutonomyTurn: boolean;
   zenAskQuestionPatienceTurn: boolean;
   zenLiveActionInterruptTurn: boolean;
+  assistantInterruptionReactionTurn: boolean;
 }): StageActionPlanV1 {
   const exclusions: StageActionExclusionV1[] = [];
   if (args.zenLiveActionContext) exclusions.push("live_action_owned");
@@ -4665,7 +4529,8 @@ function planZenStageActionForTurn(args: {
   if (
     args.zenAutonomyTurn ||
     args.zenAskQuestionPatienceTurn ||
-    args.zenLiveActionInterruptTurn
+    args.zenLiveActionInterruptTurn ||
+    args.assistantInterruptionReactionTurn
   ) {
     exclusions.push("canonical_silence");
   }
@@ -7003,6 +6868,7 @@ function hydrateMessages(
         : {}),
       ...(assembled.autoRecovery ? { autoRecovery: assembled.autoRecovery } : {}),
       ...(assembled.autoRoute ? { autoRoute: assembled.autoRoute } : {}),
+      ...(assembled.turbo ? { turbo: true } : {}),
       ...(assembled.botPowerExactResponse
         ? { botPowerExactResponse: assembled.botPowerExactResponse }
         : {}),
@@ -7300,6 +7166,44 @@ function buildZenAskQuestionPatienceInstruction(
     "Do not guilt, pressure, scold, mention timers, mention UI controls, or say the user ignored you.",
     "Do not answer the question for the user. Do not use tools, AskQuestion JSON, image generation, or action rails.",
   ].filter(Boolean).join("\n");
+}
+
+function buildAssistantInterruptionReactionInstruction(
+  reaction: AssistantInterruptionReactionInput,
+  personaLabel: string | null | undefined,
+): string {
+  const speaker = personaLabel?.trim() || "PRISM";
+  return [
+    `The user just audibly cut off your previous reply with a quiet shush. The canonical transcript ends at: "${truncateToolCallPreview(reaction.interruptedContent, 320)}"`,
+    `Write one separate, brief, in-character follow-up as ${speaker} reacting to being cut off.`,
+    "Let the established persona, relationship, and current mood decide whether the reaction is annoyed, amused, relieved, gentle, terse, or unbothered.",
+    "Do not continue, reconstruct, quote, or summarize any unheard suffix from the interrupted reply.",
+    "No new user message was spoken or typed. Do not invent user words, answer an imaginary message, or mention a button, UI, hidden prompt, transcript machinery, or generation.",
+    "React naturally to the shush itself, then stop. Do not use tools, AskQuestion JSON, image generation, or action rails.",
+  ].join("\n");
+}
+
+function serializeAssistantInterruptionReactionReceipt(
+  toolPayload: string | null,
+  reaction: AssistantInterruptionReactionInput | null,
+): string | null {
+  if (!reaction) return toolPayload;
+  let envelope: Record<string, unknown> = { v: 1 };
+  if (toolPayload) {
+    try {
+      const parsed = JSON.parse(toolPayload) as unknown;
+      if (parsed && typeof parsed === "object" && !Array.isArray(parsed)) {
+        envelope = { ...(parsed as Record<string, unknown>), v: 1 };
+      }
+    } catch {
+      // A Shh reaction never carries legacy standalone tool payloads. Keep the
+      // receipt even if a malformed payload somehow reaches this boundary.
+    }
+  }
+  return JSON.stringify({
+    ...envelope,
+    assistantInterruptionReaction: reaction,
+  });
 }
 
 function buildZenLiveActionContextPrompt(
@@ -7763,6 +7667,8 @@ function buildPromptMessages(args: {
   imageSlotSystemHint?: string | null;
   /** Titles-only personal notes hint (Chat companion; never includes bodies). */
   userNotesTitlesHint?: string | null;
+  /** Authorized current-screen metadata for this Default Prism turn only. */
+  prismCompanionSurfaceContext?: string | null;
   /** Hard holder Power enforcement placed after the current user request. */
   finalTurnPowerCue?: string | null;
 }): ProviderMessage[] {
@@ -7780,6 +7686,14 @@ function buildPromptMessages(args: {
     promptMessages.push({
       role: "system",
       content: `The user's account display name is "${trimmedDisplayName}". Use it naturally when it helps, but do not treat it as an explicitly stated preferred name.`,
+    });
+  }
+  const prismCompanionSurfaceContext =
+    args.prismCompanionSurfaceContext?.trim();
+  if (prismCompanionSurfaceContext) {
+    promptMessages.push({
+      role: "system",
+      content: prismCompanionSurfaceContext,
     });
   }
   if (args.devMemoriesEnabled) {
@@ -8001,7 +7915,7 @@ async function retrieveMemoriesWithFallback(
   const retrieval = Promise.allSettled([
     retrieveRelevantMemories(db, userId, message, userKey, botId),
     includeThreadSummaries
-      ? retrieveMemorySummaries(userId, message)
+      ? retrieveMemorySummaries(db, userId, message)
       : Promise.resolve([]),
   ]);
 
@@ -8404,6 +8318,13 @@ export async function processChatMessage(
     typeof activeBotId === "string" && activeBotId.trim().length > 0
       ? activeBotId.trim()
       : null;
+  const prismCompanionSurfaceContext =
+    isZenMode(mode) && activeBotId == null
+      ? settings.prismCompanionSurfaceContext?.trim() ?? ""
+      : "";
+  if (prismCompanionSurfaceContext) {
+    registerUsageDiagnosticRedaction(prismCompanionSurfaceContext);
+  }
   if (mode === "chat" && !activeMemoryBotId) {
     throw new Error("Choose a bot before chatting.");
   }
@@ -8431,6 +8352,19 @@ export async function processChatMessage(
       ? settings.zenLiveActionInterrupt
       : null;
   const zenLiveActionInterruptTurn = zenLiveActionInterrupt !== null;
+  const assistantInterruptionReaction =
+    isCompanionMode(mode) &&
+    settings.assistantInterruptionReaction?.source === "shh"
+      ? settings.assistantInterruptionReaction
+      : null;
+  const assistantInterruptionReactionTurn =
+    assistantInterruptionReaction !== null;
+  const assistantOnlyCompanionTurn =
+    personaTransitionTurn ||
+    zenAutonomyTurn ||
+    zenAskQuestionPatienceTurn ||
+    zenLiveActionInterruptTurn ||
+    assistantInterruptionReactionTurn;
   const transitionSpeakerBotId = personaTransitionTurn
     ? resolveZenPersonaTransitionSpeakerBotId(personaTransition)
     : activeMemoryBotId;
@@ -8491,10 +8425,7 @@ export async function processChatMessage(
   const manualAskQuestionConstraint = readManualAskQuestionAnswerConstraint(manualTool);
   const explicitAskQuestionRequest =
     !isStarterPrompt &&
-    !personaTransitionTurn &&
-    !zenAutonomyTurn &&
-    !zenAskQuestionPatienceTurn &&
-    !zenLiveActionInterruptTurn &&
+    !assistantOnlyCompanionTurn &&
     userExplicitlyRequestedAskQuestion(modelUserMessage);
   const promptUserMessageBase = personaTransitionTurn
     ? buildZenPersonaTransitionInstruction({
@@ -8512,11 +8443,15 @@ export async function processChatMessage(
     ? buildZenAskQuestionPatienceInstruction(zenAskQuestionPatience, settings.starterPromptLabel)
     : zenLiveActionInterruptTurn
     ? buildZenLiveActionInterruptInstruction(zenLiveActionInterrupt!, settings.starterPromptLabel)
+    : assistantInterruptionReactionTurn
+    ? buildAssistantInterruptionReactionInstruction(
+        assistantInterruptionReaction!,
+        settings.starterPromptLabel,
+      )
     : isStarterPrompt
     ? buildStarterPromptInstruction(settings.starterPromptWarrantsIntro === true)
     : modelUserMessage;
-  const promptUserMessage = !isStarterPrompt && !personaTransitionTurn &&
-    !zenAutonomyTurn && !zenAskQuestionPatienceTurn && !zenLiveActionInterruptTurn
+  const promptUserMessage = !isStarterPrompt && !assistantOnlyCompanionTurn
     ? appendZenLiveActionContext(
         promptUserMessageBase,
         settings.zenLiveActionContext,
@@ -8548,7 +8483,7 @@ export async function processChatMessage(
     `mode=${mode}; incognito=${incognitoForTurn ? "yes" : "no"}; conversation=${
       conversationId ?? "new"
     }; retrieval=${retrievalMode}; memory=${
-      skipPersonalFacts || commandCenterPromptTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn ? "skipped" : "enabled"
+      skipPersonalFacts || commandCenterPromptTurn || assistantOnlyCompanionTurn ? "skipped" : "enabled"
     }; summaries=${skipSummarization ? "skipped" : "enabled"}`
   );
   const provider = (settings.providerFactory ?? selectProvider)(
@@ -8606,6 +8541,7 @@ export async function processChatMessage(
           zenAutonomyTurn,
           zenAskQuestionPatienceTurn,
           zenLiveActionInterruptTurn,
+          assistantInterruptionReactionTurn,
         })
       : null;
     const shapeshiftHolderBotId =
@@ -8688,6 +8624,7 @@ export async function processChatMessage(
       askQuestionMode: botPowerEternalIntroductionTurn ? "off" : askQuestionMode,
       interruptedContent: settings.prismInterruption?.interruptedContent,
       imageSlotSystemHint: buildImageSlotSystemHint(userId, conversationId ?? null),
+      prismCompanionSurfaceContext,
       finalTurnPowerCue: botPowerIneptitudeFinalTurnCueV1(settings.botPowers),
     });
     if (zenStageActionPlan) {
@@ -8763,6 +8700,7 @@ export async function processChatMessage(
       responseMode: isZenMode(mode) ? settings.responseMode : undefined,
       autoFallbackChain: settings.autoFallbackChain,
       resolveReasoningEffort: settings.resolveReasoningEffort,
+      resolveTurboMode: settings.resolveTurboMode,
       providerFactory: settings.providerFactory,
       openAiApiKey: settings.openAiApiKey,
       anthropicApiKey: settings.anthropicApiKey,
@@ -8783,7 +8721,8 @@ export async function processChatMessage(
     );
 	    throwIfChatRequestCancelled(settings.signal);
 	    let parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
-    let requestedWebSearchForTurn = botPowerHardResponseTurn
+    let requestedWebSearchForTurn =
+      botPowerHardResponseTurn || assistantOnlyCompanionTurn
 	      ? undefined
 	      : manualWebSearchRequested
 	      ? {
@@ -8837,6 +8776,7 @@ export async function processChatMessage(
           responseMode: isZenMode(mode) ? settings.responseMode : undefined,
           autoFallbackChain: settings.autoFallbackChain,
           resolveReasoningEffort: settings.resolveReasoningEffort,
+          resolveTurboMode: settings.resolveTurboMode,
           providerFactory: settings.providerFactory,
           openAiApiKey: settings.openAiApiKey,
           anthropicApiKey: settings.anthropicApiKey,
@@ -8848,7 +8788,8 @@ export async function processChatMessage(
         parsedAssistant = parseAssistantPrismTools(assistantReplyRaw);
       }
     }
-    const requestedUserNotesForTurn = botPowerHardResponseTurn
+    const requestedUserNotesForTurn =
+      botPowerHardResponseTurn || assistantOnlyCompanionTurn
       ? undefined
       : parsedAssistant.userNotes;
     let userNotesForTurn: UserNotesPayload | undefined;
@@ -8859,9 +8800,13 @@ export async function processChatMessage(
       userNotesStatus = "blocked";
     }
     const shouldBackfillAskQuestion =
+        !assistantOnlyCompanionTurn &&
+        (
         explicitAskQuestionRequest ||
-        assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent);
-    const askQuestionRaw = botPowerHardResponseTurn
+        assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent)
+        );
+    const askQuestionRaw =
+      botPowerHardResponseTurn || assistantOnlyCompanionTurn
       ? undefined
       : parsedAssistant.askQuestion ??
       (shouldBackfillAskQuestion
@@ -8982,10 +8927,10 @@ export async function processChatMessage(
         );
       }
     }
-    const turnEvaluation = isStarterPrompt
+    const turnEvaluation = isStarterPrompt || assistantOnlyCompanionTurn
       ? undefined
       : evaluateUserTurnOpinion(message);
-    const repairSignal = isStarterPrompt
+    const repairSignal = isStarterPrompt || assistantOnlyCompanionTurn
       ? false
       : hasRepairSignal(normalizeOpinionText(message));
     const assistantMood = evaluateAssistantMood({
@@ -9017,7 +8962,8 @@ export async function processChatMessage(
             : undefined;
         })()
       : undefined;
-    const sendImgPromptIncRaw = botPowerHardResponseTurn
+    const sendImgPromptIncRaw =
+      botPowerHardResponseTurn || assistantOnlyCompanionTurn
       ? undefined
       : manualImageGenRequested
       ? manualToolQueryOrMessage(manualTool, modelUserMessage)
@@ -9103,10 +9049,14 @@ export async function processChatMessage(
         conversationStartersIncognito = startersInferred;
       }
     }
-    const assistantAskQuestionForTurn = botPowerHardResponseTurn
+    const assistantAskQuestionForTurn =
+      botPowerHardResponseTurn || assistantOnlyCompanionTurn
       ? undefined
       : askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersIncognito);
-    const tellFictionalStoryForTurn = botPowerHardResponseTurn ? undefined : chooseTellFictionalStoryForTurn({
+    const tellFictionalStoryForTurn =
+      botPowerHardResponseTurn || assistantOnlyCompanionTurn
+        ? undefined
+        : chooseTellFictionalStoryForTurn({
       displayContent: assistantDisplay,
       parsed: parsedAssistant.tellFictionalStory,
       askQuestion: assistantAskQuestionForTurn,
@@ -9115,7 +9065,9 @@ export async function processChatMessage(
       constraint: manualAskQuestionConstraint,
       assistantDisplay,
     });
-    const incognitoToolCallEvents = buildAssistantToolCallEvents({
+	  const incognitoToolCallEvents = assistantOnlyCompanionTurn
+	    ? []
+	    : buildAssistantToolCallEvents({
 	      rawReply: assistantReplyRaw,
 	      ...(requestedWebSearchForTurn
 	        ? { parsedWebSearch: requestedWebSearchForTurn, webSearchStatus }
@@ -9144,7 +9096,7 @@ export async function processChatMessage(
         : {}),
       imageSlot: incognitoImageSlot,
       ...(incognitoImageJobId ? { imageJobId: incognitoImageJobId } : {}),
-    });
+      });
     const assistantCreatedAt = new Date().toISOString();
     const assistantMessageId = randomId(12);
     const persistedIdentityShapeshift = persistIdentityShapeshiftStateForMessageV1(
@@ -9168,15 +9120,26 @@ export async function processChatMessage(
       createdAt: assistantCreatedAt,
       provider: providerNameUsed,
       model: modelUsed,
+      ...(settings.autoRouteDecision
+        ? { autoRoute: settings.autoRouteDecision }
+        : {}),
+      ...(settings.resolveTurboMode?.(providerNameUsed, modelUsed) === true
+        ? { turbo: true }
+        : {}),
       botId: assistantBotId ?? null,
       moodKey: assistantMood.key,
       moodConfidence: assistantMood.confidence,
+      ...(assistantInterruptionReaction
+        ? { assistantInterruptionReaction }
+        : {}),
       ...(assistantBotName ? { botName: assistantBotName } : {}),
       ...(assistantAskQuestionForTurn ? { askQuestion: assistantAskQuestionForTurn } : {}),
       ...(tellFictionalStoryForTurn
         ? { tellFictionalStory: tellFictionalStoryForTurn }
         : {}),
-      ...(!botPowerHardResponseTurn && parsedAssistant.zenDisplay
+      ...(!botPowerHardResponseTurn &&
+      !assistantOnlyCompanionTurn &&
+      parsedAssistant.zenDisplay
         ? { zenDisplay: parsedAssistant.zenDisplay }
         : {}),
       ...(zenStageAction ? { zenStageAction } : {}),
@@ -9200,7 +9163,7 @@ export async function processChatMessage(
     const nextMessages: ChatMessage[] = [
       ...history,
       ...(
-        isStarterPrompt
+        isStarterPrompt || assistantOnlyCompanionTurn
           ? []
           : [{
             id: randomId(12),
@@ -9234,7 +9197,7 @@ export async function processChatMessage(
       messages: nextMessages,
     };
 
-    const incognitoOpinion = isStarterPrompt
+    const incognitoOpinion = isStarterPrompt || assistantOnlyCompanionTurn
       ? buildOpinion(
           OPINION_SCORE_BASELINE,
           "steady",
@@ -9457,7 +9420,7 @@ export async function processChatMessage(
         ? generateStarterConversationTitle(settings.starterPromptLabel)
         : personaTransitionTurn
           ? "Zen"
-        : zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+        : assistantOnlyCompanionTurn
           ? "Zen"
         : generateConversationTitle(modelUserMessage);
     const conversationTitle = baseConversationTitle;
@@ -9629,10 +9592,10 @@ export async function processChatMessage(
     opinionBotIdForTurn
   );
   const existingBotOpinion = readBotOpinion(db, userId, opinionBotIdForTurn);
-  const turnEvaluation = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || commandCenterPromptTurn
+  const turnEvaluation = isStarterPrompt || assistantOnlyCompanionTurn || commandCenterPromptTurn
     ? undefined
     : evaluateUserTurnOpinion(message);
-  const repairSignal = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || commandCenterPromptTurn
+  const repairSignal = isStarterPrompt || assistantOnlyCompanionTurn || commandCenterPromptTurn
     ? false
     : hasRepairSignal(normalizeOpinionText(message));
   const zenMoodSensitivity = normalizePrismMoodSensitivity(
@@ -9645,7 +9608,7 @@ export async function processChatMessage(
   let prismMoodCooldownExpiredThisTurn = false;
   let skipMemoryForMoodCooldownTurn = false;
   let prismMoodForgivenessSystemHint: string | null = null;
-  if (isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || commandCenterPromptTurn) {
+  if (isStarterPrompt || assistantOnlyCompanionTurn || commandCenterPromptTurn) {
     prismMood = sanitizePrismMoodState(prismMood, mode, now);
   } else if (isZenMode(mode) && isPrismMoodIgnoring(prismMood, now)) {
     skipMemoryForMoodCooldownTurn = true;
@@ -9732,10 +9695,7 @@ export async function processChatMessage(
 
   const memoryIntent =
     !isStarterPrompt &&
-    !personaTransitionTurn &&
-    !zenAutonomyTurn &&
-    !zenAskQuestionPatienceTurn &&
-    !zenLiveActionInterruptTurn &&
+    !assistantOnlyCompanionTurn &&
     !commandCenterPromptTurn &&
     !skipMemoryForMoodCooldownTurn
       ? analyzeMemoryIntent(message)
@@ -9749,10 +9709,7 @@ export async function processChatMessage(
   let coffeeContinuityContexts: CoffeeContinuityContext[] = [];
   if (
     !incognitoForTurn &&
-    !personaTransitionTurn &&
-    !zenAutonomyTurn &&
-    !zenAskQuestionPatienceTurn &&
-    !zenLiveActionInterruptTurn &&
+    !assistantOnlyCompanionTurn &&
     !skipMemoryForMoodCooldownTurn &&
     !prismMoodIgnoreTurn
   ) {
@@ -9793,10 +9750,7 @@ export async function processChatMessage(
     isCompanionMode(mode) &&
     !incognitoForTurn &&
     !isStarterPrompt &&
-    !personaTransitionTurn &&
-    !zenAutonomyTurn &&
-    !zenAskQuestionPatienceTurn &&
-    !zenLiveActionInterruptTurn &&
+    !assistantOnlyCompanionTurn &&
     !commandCenterPromptTurn &&
     !skipMemoryForMoodCooldownTurn &&
     !prismMoodIgnoreTurn &&
@@ -9826,7 +9780,7 @@ export async function processChatMessage(
       ...(manualAskQuestion ? { manualAskQuestion } : {}),
     });
   const insertUserMessageForTurn = (): void => {
-    if (isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || userMessageId !== null) return;
+    if (isStarterPrompt || assistantOnlyCompanionTurn || userMessageId !== null) return;
     userMessageId = randomId(12);
     const promptShortcutPayload = buildUserMessageToolPayload();
     db.prepare(
@@ -9882,10 +9836,7 @@ export async function processChatMessage(
   if (
     !skipPersonalFacts &&
     !isStarterPrompt &&
-    !personaTransitionTurn &&
-    !zenAutonomyTurn &&
-    !zenAskQuestionPatienceTurn &&
-    !zenLiveActionInterruptTurn &&
+    !assistantOnlyCompanionTurn &&
     !commandCenterPromptTurn &&
     memoryIntent &&
     (memoryIntent.kind === "retract" || memoryIntent.kind === "correct")
@@ -9914,10 +9865,7 @@ export async function processChatMessage(
   const zenSessionMemoryContext =
     isZenMode(mode) &&
     !isStarterPrompt &&
-    !personaTransitionTurn &&
-    !zenAutonomyTurn &&
-    !zenAskQuestionPatienceTurn &&
-    !zenLiveActionInterruptTurn &&
+    !assistantOnlyCompanionTurn &&
     !commandCenterPromptTurn &&
     userMessageRequestsZenSessionMemory(message)
       ? loadZenSessionMemoryOverview({
@@ -9956,10 +9904,7 @@ export async function processChatMessage(
 	  }
 	  const manualWebSearchEligible =
 	    manualWebSearchRequested &&
-	    !personaTransitionTurn &&
-	    !zenAutonomyTurn &&
-	    !zenAskQuestionPatienceTurn &&
-	    !zenLiveActionInterruptTurn;
+	    !assistantOnlyCompanionTurn;
 	  const manualWebSearchPayload =
 	    manualWebSearchEligible && !webSearchUnavailableReason
 	      ? await executeWebSearch(
@@ -9978,6 +9923,7 @@ export async function processChatMessage(
         zenAutonomyTurn,
         zenAskQuestionPatienceTurn,
         zenLiveActionInterruptTurn,
+        assistantInterruptionReactionTurn,
       })
     : null;
   const shapeshiftHolderBotId =
@@ -10098,6 +10044,7 @@ export async function processChatMessage(
       mode === "chat" && !botPowerEternalIntroductionTurn
         ? formatUserNoteTitlesHint(listUserNoteTitles(db, userId)) || null
         : null,
+    prismCompanionSurfaceContext,
     finalTurnPowerCue: botPowerIneptitudeFinalTurnCueV1(settings.botPowers),
   });
   if (zenStageActionPlan) {
@@ -10143,10 +10090,7 @@ export async function processChatMessage(
     typeof settings.onProgressiveZenSegment === "function" &&
     isZenMode(mode) &&
     !isStarterPrompt &&
-    !personaTransitionTurn &&
-    !zenAutonomyTurn &&
-    !zenAskQuestionPatienceTurn &&
-    !zenLiveActionInterruptTurn &&
+    !assistantOnlyCompanionTurn &&
     !commandCenterPromptTurn &&
     !manualTool &&
     !memoryClarification &&
@@ -10230,6 +10174,7 @@ export async function processChatMessage(
             responseMode: isZenMode(mode) ? settings.responseMode : undefined,
             autoFallbackChain: settings.autoFallbackChain,
             resolveReasoningEffort: settings.resolveReasoningEffort,
+            resolveTurboMode: settings.resolveTurboMode,
             providerFactory: settings.providerFactory,
             openAiApiKey: settings.openAiApiKey,
             anthropicApiKey: settings.anthropicApiKey,
@@ -10279,6 +10224,7 @@ export async function processChatMessage(
             responseMode: isZenMode(mode) ? settings.responseMode : undefined,
             autoFallbackChain: settings.autoFallbackChain,
             resolveReasoningEffort: settings.resolveReasoningEffort,
+            resolveTurboMode: settings.resolveTurboMode,
             providerFactory: settings.providerFactory,
             openAiApiKey: settings.openAiApiKey,
             anthropicApiKey: settings.anthropicApiKey,
@@ -10346,6 +10292,8 @@ export async function processChatMessage(
           name: "WebSearch",
           query: manualWebSearchQuery!,
         }
+      : assistantOnlyCompanionTurn
+        ? undefined
       : parsedAssistant.webSearch;
   let webSearchForTurn = manualWebSearchPayload;
   let webSearchStatus: "blocked" | "completed" | "none" =
@@ -10393,6 +10341,7 @@ export async function processChatMessage(
           responseMode: isZenMode(mode) ? settings.responseMode : undefined,
           autoFallbackChain: settings.autoFallbackChain,
           resolveReasoningEffort: settings.resolveReasoningEffort,
+          resolveTurboMode: settings.resolveTurboMode,
           providerFactory: settings.providerFactory,
           openAiApiKey: settings.openAiApiKey,
           anthropicApiKey: settings.anthropicApiKey,
@@ -10411,9 +10360,7 @@ export async function processChatMessage(
   }
   const requestedUserNotesForTurn =
     botPowerHardResponseTurn ||
-    zenAutonomyTurn ||
-    zenAskQuestionPatienceTurn ||
-    zenLiveActionInterruptTurn
+    assistantOnlyCompanionTurn
       ? undefined
       : parsedAssistant.userNotes;
   let userNotesForTurn: UserNotesPayload | undefined;
@@ -10477,6 +10424,7 @@ export async function processChatMessage(
             responseMode: isZenMode(mode) ? settings.responseMode : undefined,
             autoFallbackChain: settings.autoFallbackChain,
             resolveReasoningEffort: settings.resolveReasoningEffort,
+            resolveTurboMode: settings.resolveTurboMode,
             providerFactory: settings.providerFactory,
             openAiApiKey: settings.openAiApiKey,
             anthropicApiKey: settings.anthropicApiKey,
@@ -10496,13 +10444,11 @@ export async function processChatMessage(
   }
   const shouldBackfillAskQuestion =
     progressiveSegmentCount === 0 &&
-    !zenAutonomyTurn &&
-    !zenAskQuestionPatienceTurn &&
-    !zenLiveActionInterruptTurn &&
+    !assistantOnlyCompanionTurn &&
     (explicitAskQuestionRequest ||
       assistantLikelyIntendedAskQuestion(parsedAssistant.displayContent));
   const askQuestionRaw =
-    botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+    botPowerHardResponseTurn || assistantOnlyCompanionTurn
       ? undefined
       : parsedAssistant.askQuestion ??
         (shouldBackfillAskQuestion
@@ -10536,7 +10482,7 @@ export async function processChatMessage(
         )
     : botPowerEchoEnforcedTurn
       ? applyBotPowerEchoResponseV1(
-          personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || isStarterPrompt
+          assistantOnlyCompanionTurn || isStarterPrompt
             ? ""
             : message,
         )
@@ -10605,7 +10551,7 @@ export async function processChatMessage(
     webSearchStatus !== "blocked" &&
     strongestBotPowerAntiTruthEffectV1(settings.botPowers) &&
     botPowerIsAddressedQuestionV1(
-      personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || isStarterPrompt
+      assistantOnlyCompanionTurn || isStarterPrompt
         ? ""
         : message,
     )
@@ -10696,7 +10642,7 @@ export async function processChatMessage(
       userId
     );
   }
-	  const sendImgPromptPersistedRaw = progressiveSegmentCount > 0 || botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+	  const sendImgPromptPersistedRaw = progressiveSegmentCount > 0 || botPowerHardResponseTurn || assistantOnlyCompanionTurn
 	    ? undefined
 	    : manualImageGenRequested
       ? manualToolQueryOrMessage(manualTool, modelUserMessage)
@@ -10796,17 +10742,17 @@ export async function processChatMessage(
     }
   }
   throwIfCancelledBeforeAssistantReply();
-  const assistantAskQuestionForTurn = botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+  const assistantAskQuestionForTurn = botPowerHardResponseTurn || assistantOnlyCompanionTurn
     ? undefined
     : askQuestionForTurn ?? buildStarterAskQuestion(conversationStartersPersisted);
-  const tellFictionalStoryForTurn = botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+  const tellFictionalStoryForTurn = botPowerHardResponseTurn || assistantOnlyCompanionTurn
     ? undefined
     : chooseTellFictionalStoryForTurn({
         displayContent: assistantDisplay,
         parsed: parsedAssistant.tellFictionalStory,
         askQuestion: assistantAskQuestionForTurn,
       });
-	  const persistedToolCallEvents = zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn
+	  const persistedToolCallEvents = assistantOnlyCompanionTurn
 	    ? []
 	    : buildAssistantToolCallEvents({
 	        rawReply: assistantReplyRaw,
@@ -10860,30 +10806,38 @@ export async function processChatMessage(
     assistantProseMessageId,
     assistantCreatedAt,
   );
-  const toolPayloadProseOnly = serializeAssistantToolPayload({
-    askQuestion: assistantAskQuestionForTurn,
-    tellFictionalStory: tellFictionalStoryForTurn,
-	    moodKey: assistantMood.key,
-	    moodConfidence: assistantMood.confidence,
-	    zenDisplay: botPowerHardResponseTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn ? undefined : parsedAssistant.zenDisplay,
-	    zenStageAction,
-	    zenTurn: zenTurnMarker,
-	    webSearch: webSearchForTurn,
-	    userNotes: userNotesForTurn,
-	    autoRecovery,
-	    autoRoute: settings.autoRouteDecision,
-	    botPowerExactResponse: botPowerQuietIgnoredTurn
-	      ? "intermittent_mute"
-        : botPowerEchoEnforcedTurn
-          ? "speech_copy"
-        : botPowerMumblingTurn
-          ? "speech_obfuscation"
-	      : undefined,
-    ...(persistedIdentityShapeshift
-      ? { identityShapeshift: persistedIdentityShapeshift }
-      : {}),
-    ...(persistedFalseName ? { falseName: persistedFalseName } : {}),
-	  });
+  const toolPayloadProseOnly = serializeAssistantInterruptionReactionReceipt(
+    serializeAssistantToolPayload({
+      askQuestion: assistantAskQuestionForTurn,
+      tellFictionalStory: tellFictionalStoryForTurn,
+	      moodKey: assistantMood.key,
+	      moodConfidence: assistantMood.confidence,
+	      zenDisplay:
+	        botPowerHardResponseTurn || assistantOnlyCompanionTurn
+	          ? undefined
+	          : parsedAssistant.zenDisplay,
+	      zenStageAction,
+	      zenTurn: zenTurnMarker,
+	      webSearch: webSearchForTurn,
+	      userNotes: userNotesForTurn,
+	      autoRecovery,
+	      autoRoute: settings.autoRouteDecision,
+	      turbo:
+	        settings.resolveTurboMode?.(providerNameUsed, modelUsed) === true,
+	      botPowerExactResponse: botPowerQuietIgnoredTurn
+	        ? "intermittent_mute"
+          : botPowerEchoEnforcedTurn
+            ? "speech_copy"
+          : botPowerMumblingTurn
+            ? "speech_obfuscation"
+	        : undefined,
+      ...(persistedIdentityShapeshift
+        ? { identityShapeshift: persistedIdentityShapeshift }
+        : {}),
+      ...(persistedFalseName ? { falseName: persistedFalseName } : {}),
+	    }),
+    assistantInterruptionReaction,
+  );
   const toolPayloadImageOnly = sentGeneratedImagePersisted
     ? serializeAssistantToolPayload({ sentGeneratedImage: sentGeneratedImagePersisted })
     : null;
@@ -10975,7 +10929,7 @@ export async function processChatMessage(
       updatedAt: imageFollowUpCreatedAt,
     });
   }
-  const opinion = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || commandCenterPromptTurn
+  const opinion = isStarterPrompt || assistantOnlyCompanionTurn || commandCenterPromptTurn
     ? readSessionOpinion(db, userId, activeConversationId, opinionBotIdForTurn) ??
       buildOpinion(
         OPINION_SCORE_BASELINE,
@@ -10992,7 +10946,7 @@ export async function processChatMessage(
         message,
         updatedAt: assistantCreatedAt,
       });
-  const botOpinion = isStarterPrompt || personaTransitionTurn || zenAutonomyTurn || zenAskQuestionPatienceTurn || zenLiveActionInterruptTurn || commandCenterPromptTurn
+  const botOpinion = isStarterPrompt || assistantOnlyCompanionTurn || commandCenterPromptTurn
     ? readBotOpinion(db, userId, opinionBotIdForTurn)
     : upsertBotOpinionFromTurn({
         db,
@@ -11004,10 +10958,7 @@ export async function processChatMessage(
   if (
     isZenMode(mode) &&
     !isStarterPrompt &&
-    !personaTransitionTurn &&
-    !zenAutonomyTurn &&
-    !zenAskQuestionPatienceTurn &&
-    !zenLiveActionInterruptTurn &&
+    !assistantOnlyCompanionTurn &&
     !commandCenterPromptTurn &&
     userMessageId
   ) {
@@ -11094,12 +11045,17 @@ export async function processChatMessage(
           if (!chosenTitle) return;
           const sourceAssistant = db
             .prepare(
-              "SELECT id FROM messages WHERE id = ? AND conversation_id = ? AND user_id = ? AND role = 'assistant'"
+              "SELECT id, content FROM messages WHERE id = ? AND conversation_id = ? AND user_id = ? AND role = 'assistant'"
             )
             .get(titleAssistantMessageId, titleConversationId, titleUserId) as
-            | { id: string }
+            | { id: string; content: string }
             | undefined;
-          if (!sourceAssistant?.id) return;
+          if (
+            !sourceAssistant?.id ||
+            sourceAssistant.content !== titleAssistantReply
+          ) {
+            return;
+          }
           db.prepare(
             "UPDATE conversations SET title = ?, updated_at = ? WHERE id = ? AND user_id = ?"
           ).run(chosenTitle, new Date().toISOString(), titleConversationId, titleUserId);
@@ -11120,10 +11076,7 @@ export async function processChatMessage(
     !skipPersonalFacts &&
     !skipMemoryForMoodCooldownTurn &&
     !isStarterPrompt &&
-    !personaTransitionTurn &&
-    !zenAutonomyTurn &&
-    !zenAskQuestionPatienceTurn &&
-    !zenLiveActionInterruptTurn &&
+    !assistantOnlyCompanionTurn &&
     !commandCenterPromptTurn
   ) {
     const createdMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["created"] = [];

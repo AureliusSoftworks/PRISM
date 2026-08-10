@@ -532,8 +532,9 @@ test("session atmosphere buses keep their own calibrated and clamped gains", () 
   );
 });
 
-test("live mix changes retune independent loops without restarting them", () => {
+test("HTML loop fallback fades lifecycle and mix changes without restarting", async () => {
   const originalAudio = Object.getOwnPropertyDescriptor(globalThis, "Audio");
+  const originalWindow = Object.getOwnPropertyDescriptor(globalThis, "window");
   const instances: Array<{
     src: string;
     volume: number;
@@ -566,14 +567,30 @@ test("live mix changes retune independent loops without restarting them", () => 
     configurable: true,
     value: FakeAudio,
   });
+  Object.defineProperty(globalThis, "window", {
+    configurable: true,
+    value: {
+      clearInterval: globalThis.clearInterval,
+      clearTimeout: globalThis.clearTimeout,
+      setInterval: globalThis.setInterval,
+      setTimeout: globalThis.setTimeout,
+    },
+  });
   try {
     const controller = startSessionAtmosphere({
       seed: "signal-mix",
       volume: 1,
       backgroundUrl: "/room.mp3",
       grainUrl: "/grain.mp3",
+      startTransitionMs: 20,
+      ambientFoley: false,
     });
     assert.equal(instances.length, 2);
+    assert.deepEqual(
+      instances.map(({ volume }) => volume),
+      [0, 0],
+    );
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 30));
     assert.deepEqual(
       instances.map(({ src, volume }) => [src, volume]),
       [
@@ -585,20 +602,29 @@ test("live mix changes retune independent loops without restarting them", () => 
     controller.setMix({
       volume: 0.5,
       mix: { background: 0.2, grain: 0.1, foley: 0.3 },
+      transitionMs: 20,
     });
     assert.equal(instances.length, 2);
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 30));
     assert.deepEqual(
       instances.map(({ volume }) => volume),
       [0.1, 0.05],
     );
 
-    controller.stop();
+    controller.stop(20);
+    assert.ok(instances.every(({ paused }) => !paused));
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 30));
     assert.ok(instances.every(({ paused }) => paused));
   } finally {
     if (originalAudio) {
       Object.defineProperty(globalThis, "Audio", originalAudio);
     } else {
       Reflect.deleteProperty(globalThis, "Audio");
+    }
+    if (originalWindow) {
+      Object.defineProperty(globalThis, "window", originalWindow);
+    } else {
+      Reflect.deleteProperty(globalThis, "window");
     }
   }
 });
@@ -773,7 +799,11 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
   });
   Object.defineProperty(globalThis, "window", {
     configurable: true,
-    value: { AudioContext: FakeAudioContext },
+    value: {
+      AudioContext: FakeAudioContext,
+      clearTimeout: globalThis.clearTimeout,
+      setTimeout: globalThis.setTimeout,
+    },
   });
   let controller: ReturnType<typeof startSessionAtmosphere> | null = null;
   try {
@@ -782,6 +812,7 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
       volume: 1,
       backgroundUrl: "/room.mp3",
       grainUrl: "/grain.mp3",
+      startTransitionMs: 650,
       ambientFoley: false,
     });
     await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 0));
@@ -792,6 +823,14 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
     assert.ok(sources.every((source) => source.loop));
     assert.ok(sources.every((source) => source.loopStart === 0));
     assert.ok(sources.every((source) => source.loopEnd === 2.25));
+    assert.deepEqual(gainRamps, [
+      {
+        value: DEFAULT_SESSION_ATMOSPHERE_MIX.background,
+        endTime: 0.65,
+      },
+      { value: DEFAULT_SESSION_ATMOSPHERE_MIX.grain, endTime: 0.65 },
+    ]);
+    gainRamps.length = 0;
 
     controller.setMix({
       volume: 0.5,
@@ -803,7 +842,14 @@ test("supported browsers play decoded atmosphere on sample-accurate loop sources
       { value: 0.05, endTime: 0.32 },
     ]);
 
-    controller.stop();
+    gainRamps.length = 0;
+    controller.stop(10);
+    assert.ok(sources.every((source) => !source.stopped));
+    assert.deepEqual(gainRamps, [
+      { value: 0, endTime: 0.01 },
+      { value: 0, endTime: 0.01 },
+    ]);
+    await new Promise<void>((resolve) => globalThis.setTimeout(resolve, 20));
     assert.ok(sources.every((source) => source.stopped));
   } finally {
     controller?.stop();

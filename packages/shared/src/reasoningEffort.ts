@@ -62,12 +62,12 @@ export type SimulatedEffortTextPassName = Exclude<
 export type SimulatedEffortBudgetProfile = "thrifty" | "legacy";
 
 /**
- * `standard` — product default for thoughtless models (proven lean ladder).
+ * `standard` — product default for LOCAL models without native effort.
  * `deep` — experimental heavy spine (Alternatives → … → Compliance Sweep).
  */
 export type SimulatedEffortLadderProfile = "standard" | "deep";
 
-/** Lean product-default simulated ladder. */
+/** Lean product-default LOCAL simulated ladder. */
 function standardSimulatedEffortLadderPasses(
   effort: ReasoningEffort,
 ): readonly SimulatedEffortPassName[] {
@@ -423,6 +423,61 @@ export interface ModelReasoningEffortPreferenceV1 {
   updatedAt?: string;
 }
 
+export interface ModelTurboPreferenceV1 {
+  provider: NativeReasoningEffortProvider;
+  modelId: string;
+  turbo: true;
+  updatedAt?: string;
+}
+
+function openAiPriorityModelFamily(
+  modelId: string,
+  family: string,
+): boolean {
+  return (
+    modelId === family ||
+    new RegExp(`^${family.replace(/[.*+?^${}()|[\]\\]/gu, "\\$&")}-\\d{4}-\\d{2}-\\d{2}$`, "u").test(
+      modelId,
+    )
+  );
+}
+
+/**
+ * Models currently eligible for OpenAI Priority processing. Keep this list
+ * conservative: an unknown catalog entry should never receive a premium tier
+ * request merely because its name resembles a supported family.
+ */
+export function modelSupportsTurboMode(
+  provider: NativeReasoningEffortProvider,
+  rawModelId: string,
+): boolean {
+  if (provider !== "openai") return false;
+  const modelId = rawModelId.trim().toLowerCase();
+  if (!modelId) return false;
+  return [
+    "gpt-5.6",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "gpt-5.5",
+    "gpt-5.4-mini",
+    "gpt-5.4",
+    "gpt-5.2",
+    "gpt-5.1",
+    "gpt-5-mini",
+    "gpt-5",
+    "gpt-5.1-codex",
+    "gpt-5-codex",
+    "gpt-4.1-mini",
+    "gpt-4.1-nano",
+    "gpt-4.1",
+    "gpt-4o-mini",
+    "gpt-4o",
+    "o4-mini",
+    "o3",
+  ].some((family) => openAiPriorityModelFamily(modelId, family));
+}
+
 export interface ModelReasoningEffortCapabilityV1 {
   mode: "native" | "simulated" | "unavailable";
   levels: readonly ModelReasoningEffortPreference[];
@@ -439,6 +494,13 @@ const OPENAI_BASE_REASONING_LEVELS = [
 const OPENAI_MODERN_REASONING_LEVELS = [
   "none",
   "minimal",
+  "low",
+  "medium",
+  "high",
+  "xhigh",
+] as const satisfies readonly ModelReasoningEffortPreference[];
+const OPENAI_GPT_5_6_REASONING_LEVELS = [
+  "none",
   "low",
   "medium",
   "high",
@@ -530,6 +592,7 @@ export function openAiReasoningEffortLevels(
   if (openAiModelIsFixedHigh(modelId)) return [];
   const minor = openAiGpt5MinorVersion(modelId);
   if (minor === 1) return OPENAI_GPT_5_1_REASONING_LEVELS;
+  if (minor === 6) return OPENAI_GPT_5_6_REASONING_LEVELS;
   if (minor !== null && minor >= 2) return OPENAI_MODERN_REASONING_LEVELS;
   return OPENAI_BASE_REASONING_LEVELS;
 }
@@ -615,8 +678,8 @@ export function resolveModelReasoningEffortCapability(args: {
   provider: NativeReasoningEffortProvider;
   modelId: string;
   /**
-   * Simulated Effort is product-default for thoughtless models.
-   * Pass `false` only to force unavailable (tests / explicit opt-out).
+   * Simulated Effort is available only for LOCAL models without native effort.
+   * Pass `false` to force it unavailable for a local model.
    */
   simulatedEffortEnabled?: boolean;
 }): ModelReasoningEffortCapabilityV1 {
@@ -644,20 +707,14 @@ export function resolveModelReasoningEffortCapability(args: {
           levels,
           supportsNone: levels.includes("none"),
         }
-      : simulatedEnabled && !openAiModelIsFixedHigh(args.modelId)
-        ? {
-            mode: "simulated",
-            levels: LOCAL_SIMULATED_REASONING_LEVELS,
-            supportsNone: true,
-          }
-        : {
-            mode: "unavailable",
-            levels: [],
-            supportsNone: false,
-            disabledReason: openAiModelIsFixedHigh(args.modelId)
-              ? "This model uses a fixed reasoning effort."
-              : "Simulated Effort is disabled for this model.",
-          };
+      : {
+          mode: "unavailable",
+          levels: [],
+          supportsNone: false,
+          disabledReason: openAiModelIsFixedHigh(args.modelId)
+            ? "This model uses a fixed reasoning effort."
+            : "Simulated Effort is available only in LOCAL mode.",
+        };
   }
   if (anthropicModelSupportsReasoningEffort(args.modelId)) {
     const levels = anthropicModelSupportsXHighReasoningEffort(args.modelId)
@@ -669,18 +726,11 @@ export function resolveModelReasoningEffortCapability(args: {
       supportsNone: false,
     };
   }
-  if (simulatedEnabled) {
-    return {
-      mode: "simulated",
-      levels: LOCAL_SIMULATED_REASONING_LEVELS,
-      supportsNone: true,
-    };
-  }
   return {
     mode: "unavailable",
     levels: [],
     supportsNone: false,
-    disabledReason: "Simulated Effort is disabled for this model.",
+    disabledReason: "Simulated Effort is available only in LOCAL mode.",
   };
 }
 

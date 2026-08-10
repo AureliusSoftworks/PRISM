@@ -6,8 +6,45 @@ import {
   PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS,
   PRISM_REFRACT_DEBATE_EXHIBIT_REJECTED_CANDIDATE_LIMIT,
   PRISM_REFRACT_DIRECTION_MAX_LENGTH,
+  PRISM_REFRACT_INPUT_CONTEXT_MAX_LENGTH,
+  PRISM_REFRACT_INPUT_LABEL_MAX_LENGTH,
+  PRISM_REFRACT_INPUT_VALUE_MAX_LENGTH,
   PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT,
 } from "./prismRefract.ts";
+
+test("normalizes a bounded contextual Prism input target", () => {
+  const request = normalizePrismRefractRequest({
+    target: {
+      kind: "prism.input.text",
+      surface: { surfaceId: "avatar-studio", botIds: ["bot-1"] },
+      label: `  ${"Bot direction ".repeat(20)}  `,
+      context: `  ${"Profile field context ".repeat(80)}  `,
+      multiline: true,
+      maxLength: 10_000,
+      secret: "discard me",
+    },
+    currentValue: "x".repeat(5_000),
+    rejectedValues: ["y".repeat(5_000)],
+  });
+  assert.equal(request.target.kind, "prism.input.text");
+  if (request.target.kind === "prism.input.text") {
+    assert.equal(request.target.surface.surfaceId, "avatar-studio");
+    assert.deepEqual(request.target.surface.botIds, ["bot-1"]);
+    assert.equal(request.target.label.length, PRISM_REFRACT_INPUT_LABEL_MAX_LENGTH);
+    assert.equal(
+      request.target.context.length,
+      PRISM_REFRACT_INPUT_CONTEXT_MAX_LENGTH,
+    );
+    assert.equal(request.target.multiline, true);
+    assert.equal(request.target.maxLength, PRISM_REFRACT_INPUT_VALUE_MAX_LENGTH);
+    assert.equal("secret" in request.target, false);
+  }
+  assert.equal(request.currentValue.length, PRISM_REFRACT_INPUT_VALUE_MAX_LENGTH);
+  assert.equal(
+    request.rejectedValues[0]?.length,
+    PRISM_REFRACT_INPUT_VALUE_MAX_LENGTH,
+  );
+});
 
 test("registers manual Debate evidence controls as explicit Refract targets", () => {
   assert.equal(

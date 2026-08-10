@@ -9,6 +9,12 @@ import {
   setModelReasoningEffortPreference,
 } from "../model-effort-preferences.ts";
 import {
+  findModelTurboPreference,
+  listModelTurboPreferences,
+  resetModelTurboPreferences,
+  setModelTurboPreference,
+} from "../model-turbo-preferences.ts";
+import {
   allModelReasoningEffortCursorHash,
   resolveUserModelReasoningEffort,
 } from "../model-effort-runtime.ts";
@@ -55,6 +61,39 @@ function createTestDatabase(): DatabaseSync {
 }
 
 describe("model effort preferences", () => {
+  it("persists Turbo only for supported online models", () => {
+    const db = createTestDatabase();
+    setModelTurboPreference(db, {
+      userId: "user-1",
+      provider: "openai",
+      modelId: "gpt-5.6-sol",
+      turbo: true,
+      updatedAt: "2026-08-01T00:00:00.000Z",
+    });
+    assert.equal(
+      findModelTurboPreference(db, "user-1", "openai", "gpt-5.6-sol"),
+      true,
+    );
+    assert.deepEqual(
+      listModelTurboPreferences(db, "user-1").map(
+        ({ provider, modelId, turbo }) => ({ provider, modelId, turbo }),
+      ),
+      [{ provider: "openai", modelId: "gpt-5.6-sol", turbo: true }],
+    );
+    assert.throws(
+      () =>
+        setModelTurboPreference(db, {
+          userId: "user-1",
+          provider: "anthropic",
+          modelId: "claude-opus-4-8",
+          turbo: true,
+        }),
+      /Turbo is unavailable/u,
+    );
+    assert.equal(resetModelTurboPreferences(db, "user-1"), 1);
+    assert.deepEqual(listModelTurboPreferences(db, "user-1"), []);
+  });
+
   it("upserts exact provider/model preferences and deletes Default", () => {
     const db = createTestDatabase();
     setModelReasoningEffortPreference(db, {
@@ -125,7 +164,35 @@ describe("model effort preferences", () => {
     assert.equal(listModelReasoningEffortPreferences(db, "user-2").length, 1);
   });
 
-  it("gates local and online simulation and changes the prepared-turn cursor", () => {
+  it("degrades a stale unsupported GPT-5.6 Minimal preference to provider default", () => {
+    const db = createTestDatabase();
+    setModelReasoningEffortPreference(db, {
+      userId: "user-1",
+      provider: "openai",
+      modelId: "gpt-5.6-sol",
+      effort: "minimal",
+    });
+
+    assert.equal(
+      findModelReasoningEffortPreference(
+        db,
+        "user-1",
+        "openai",
+        "gpt-5.6-sol",
+      ),
+      "minimal",
+    );
+    assert.equal(
+      resolveUserModelReasoningEffort(db, {
+        userId: "user-1",
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+      }),
+      undefined,
+    );
+  });
+
+  it("keeps simulated preferences local-only and preserves native online effort", () => {
     const db = createTestDatabase();
     const before = allModelReasoningEffortCursorHash(db, "user-1");
     setModelReasoningEffortPreference(db, {
@@ -134,17 +201,6 @@ describe("model effort preferences", () => {
       modelId: "qwen3:9b",
       effort: "high",
     });
-    assert.equal(
-      resolveUserModelReasoningEffort(db, {
-        userId: "user-1",
-        provider: "local",
-        modelId: "qwen3:9b",
-      }),
-      undefined,
-    );
-    db.prepare(
-      "UPDATE users SET experimental_all_model_effort_enabled = 1 WHERE id = 'user-1'",
-    ).run();
     assert.equal(
       resolveUserModelReasoningEffort(db, {
         userId: "user-1",
@@ -165,7 +221,21 @@ describe("model effort preferences", () => {
         provider: "openai",
         modelId: "gpt-4o",
       }),
-      "medium",
+      undefined,
+    );
+    setModelReasoningEffortPreference(db, {
+      userId: "user-1",
+      provider: "openai",
+      modelId: "gpt-5.6-sol",
+      effort: "high",
+    });
+    assert.equal(
+      resolveUserModelReasoningEffort(db, {
+        userId: "user-1",
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+      }),
+      "high",
     );
     assert.notEqual(allModelReasoningEffortCursorHash(db, "user-1"), before);
   });

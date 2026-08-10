@@ -68,11 +68,16 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
       {
         id: "tauri",
         name: "Tauri",
-        description: "Native desktop shell, windows, menus, and system integration.",
+        description:
+          "Native desktop shell, single-instance lifecycle, windows, menus, and system integration.",
         href: "https://tauri.app/",
         license: "Apache-2.0 / MIT",
         packageNames: ["@tauri-apps/cli"],
-        cargoPackageNames: ["tauri", "tauri-build"],
+        cargoPackageNames: [
+          "tauri",
+          "tauri-build",
+          "tauri-plugin-single-instance",
+        ],
       },
       {
         id: "tiptap",
@@ -316,8 +321,9 @@ export const ABOUT_CREDIT_GROUPS: readonly AboutCreditGroup[] = [
       },
       {
         id: "google-fonts",
-        name: "Instrument Sans & Raleway",
-        description: "Google Fonts used by the bundled sound-design workbench.",
+        name: "Bundled Google Fonts",
+        description:
+          "Open Font License typefaces used throughout PRISM, including the Macondo avatar face.",
         href: "https://fonts.google.com/",
         license: "SIL Open Font License",
       },

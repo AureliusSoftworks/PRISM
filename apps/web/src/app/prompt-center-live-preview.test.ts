@@ -27,8 +27,36 @@ describe("Prompt Studio live preview", () => {
     assert.match(pageSource, /Untitled prompt/u);
   });
 
-  it("automatically samples built-in wildcards and rerolls stable recipe paths", () => {
-    assert.match(pageSource, /function PromptCenterWildcardSampleChip/u);
+  it("previews built-in wildcard samples on fresh hover and rerolls stable recipe paths", () => {
+    assert.match(
+      pageSource,
+      /promptCenterWildcardDockItemCount\s*=\s*BUILT_IN_WILDCARD_SLOT_PICKS\.length/u,
+    );
+    assert.match(
+      pageSource,
+      /styles\.promptCenterPromptWildcardGrid[\s\S]{0,220}BUILT_IN_WILDCARD_SLOT_PICKS\.map/u,
+    );
+    assert.match(
+      cssSource,
+      /\.promptCenterPromptWildcardGrid\s*\{[\s\S]{0,220}max-height:\s*min\(268px, 36vh\)/u,
+    );
+    assert.match(pageSource, /function PromptCenterWildcardHoverButton/u);
+    assert.match(pageSource, /onPointerEnter=\{\(event\) => \{/u);
+    assert.match(pageSource, /onPointerLeave=\{\(event\) => \{/u);
+    assert.match(pageSource, /setPreview\(\{ status: "loading" \}\)/u);
+    assert.match(pageSource, /requestGenerationRef\.current \+= 1/u);
+    assert.match(pageSource, /aria-live="polite"/u);
+    assert.match(pageSource, /\? preview\.value/u);
+    assert.doesNotMatch(pageSource, /resolves to \$\{preview\.value\}/u);
+    assert.match(
+      cssSource,
+      /\.promptCenterPromptWildcardTooltip\s*\{[\s\S]{0,320}background:\s*var\(--bg-surface\)/u,
+    );
+    assert.doesNotMatch(pageSource, /PromptCenterWildcardSampleChip/u);
+    assert.doesNotMatch(
+      cssSource,
+      /\.promptCenterPromptWildcardPreviewButton/u,
+    );
     assert.match(pageSource, /function PromptCenterWildcardAutoResolver/u);
     assert.match(
       pageSource,
@@ -54,10 +82,7 @@ describe("Prompt Studio live preview", () => {
   it("allows full multiplex authoring while rejecting imported cycles", () => {
     assert.match(pageSource, /promptPicks=\{commandCenterPromptPicks\}/u);
     assert.match(pageSource, /Insert a nested expression/u);
-    assert.match(
-      pageSource,
-      /That Command Center bundle contains a cycle:/u,
-    );
+    assert.match(pageSource, /That Command Center bundle contains a cycle:/u);
     assert.match(pageSource, /data-cycle=\{promptHasCycle/u);
     assert.match(pageSource, /data-cycle=\{deckHasCycle/u);
   });

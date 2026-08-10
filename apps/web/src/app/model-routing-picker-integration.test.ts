@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, statSync } from "node:fs";
 import { describe, it } from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
@@ -7,14 +7,39 @@ const cssSource = readFileSync(
   new URL("./page.module.css", import.meta.url),
   "utf8",
 );
+const turboFireWebp = readFileSync(
+  new URL("../../public/ui/turbo-fire-loop.webp", import.meta.url),
+);
 const tutorialSource = readFileSync(
   new URL("./modeTutorials.ts", import.meta.url),
+  "utf8",
+);
+const signalSource = readFileSync(
+  new URL("./BotcastExperience.tsx", import.meta.url),
+  "utf8",
+);
+const debateSource = readFileSync(
+  new URL("./DebateExperience.tsx", import.meta.url),
   "utf8",
 );
 const reasoningEffortSource = readFileSync(
   new URL("../../../../packages/shared/src/reasoningEffort.ts", import.meta.url),
   "utf8",
 );
+
+function animatedWebpFrameDurations(source: Buffer): number[] {
+  const durations: number[] = [];
+  let offset = 12;
+  while (offset + 8 <= source.length) {
+    const chunkType = source.toString("ascii", offset, offset + 4);
+    const chunkSize = source.readUInt32LE(offset + 4);
+    if (chunkType === "ANMF" && chunkSize >= 16) {
+      durations.push(source.readUIntLE(offset + 20, 3));
+    }
+    offset += 8 + chunkSize + (chunkSize % 2);
+  }
+  return durations;
+}
 
 function effortGlyphColors(level: string): string[] {
   const block = cssSource.match(
@@ -97,7 +122,10 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(pageSource, /Effort chosen automatically/u);
     assert.match(pageSource, /<HollowTriangleEffortIcon \/>/u);
-    assert.match(pageSource, /!autoSelected && effortControl\.capability\.mode/u);
+    assert.match(
+      pageSource,
+      /!autoSelected &&[\s\S]{0,120}effortControl\.turboSupported/u,
+    );
   });
 
   it("shares the full mode-aware catalog with Chat, Coffee, Signal, and Debate", () => {
@@ -164,20 +192,190 @@ describe("shared routing model picker integration", () => {
     );
   });
 
-  it("explains simulated Effort education and deep experimental ladder", () => {
+  it("offers deliberate temporary Turbo with an organic effort-control flame", () => {
+    assert.match(pageSource, /modelSupportsTurboMode/u);
+    assert.match(pageSource, /\/api\/model-turbo-preferences/u);
+    assert.match(pageSource, /Faster priority processing · premium rates/u);
+    assert.match(
+      pageSource,
+      /const turboVisuallyActive =\s*!autoSelected && effortControl\?\.turboEnabled === true/u,
+    );
+    assert.ok(
+      (pageSource.match(/data-turbo=\{turboVisuallyActive/gu) ?? []).length >= 3,
+      "expected Turbo state on the combined picker, effort wrapper, and effort trigger",
+    );
+    assert.match(
+      cssSource,
+      /composeModelControl\[data-turbo="true"\]::after\s*\{[^}]*pointer-events:\s*none[^}]*animation:\s*turboPickerEmberPulse 1840ms/u,
+    );
+    assert.match(cssSource, /@keyframes turboPickerEmberPulse/u);
+    assert.match(
+      cssSource,
+      /@keyframes turboPickerEmberPulse\s*\{[\s\S]*?36%\s*\{[\s\S]*?68%\s*\{/u,
+    );
+    assert.match(cssSource, /composeModelEffortTriggerWrap\[data-turbo="true"\]::before/u);
+    assert.match(cssSource, /composeModelEffortTriggerWrap\[data-turbo="true"\]::after/u);
+    assert.match(cssSource, /turbo-fire-loop\.webp/u);
+    assert.match(cssSource, /turbo-fire-loop\.gif/u);
+    assert.match(cssSource, /turbo-fire-still\.png/u);
+    assert.match(cssSource, /background-image:\s*image-set/u);
+    assert.match(
+      cssSource,
+      /composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*image-rendering:\s*auto/u,
+    );
+    assert.match(cssSource, /inset:\s*-20px -7px -5px -6px/u);
+    assert.match(cssSource, /background-size:\s*100% 89%/u);
+    assert.match(cssSource, /background-position:\s*left bottom/u);
+    assert.match(
+      cssSource,
+      /composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*transform:\s*translate3d\(0, -2px, 0\)/u,
+    );
+    assert.match(
+      cssSource,
+      /composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*z-index:\s*3/u,
+    );
+    assert.match(cssSource, /@keyframes turboSmolderGlow/u);
+    assert.match(cssSource, /@keyframes turboEffortHeatPulse/u);
+    assert.match(
+      cssSource,
+      /composeModelEffortTriggerWrap\[data-turbo="true"\][\s\S]{0,120}\.composeModelEffortTrigger\s*\{[^}]*animation:\s*turboEffortHeatPulse 1840ms/u,
+    );
+    assert.match(cssSource, /@keyframes turboSmolderGlowLight/u);
+    assert.match(cssSource, /@keyframes turboPickerEmberPulseLight/u);
+    assert.match(
+      cssSource,
+      /composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*mix-blend-mode:\s*screen/u,
+    );
+    assert.match(
+      cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*mix-blend-mode:\s*multiply[^}]*opacity:\s*0\.88/u,
+    );
+    assert.match(
+      cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelEffortTriggerWrap\[data-turbo="true"\][\s\S]{0,100}\.composeModelEffortTrigger\s*\{[^}]*background:\s*linear-gradient\(/u,
+    );
+    assert.doesNotMatch(cssSource, /background:\s*linear-gradient\(180deg, #3a2118/u);
+    assert.match(
+      cssSource,
+      /\.botGroupDashboard\s*\{[\s\S]{0,1800}transform:\s*translateZ\(0\)/u,
+    );
+    assert.match(cssSource, /@keyframes turboSmokePuff/u);
+    assert.match(pageSource, /composeModelTurboSmokeBurst/u);
+    assert.match(pageSource, /composeModelTurboBurnAtmosphere/u);
+    assert.match(cssSource, /@keyframes turboAmbientRedFlicker/u);
+    assert.match(cssSource, /@keyframes turboCinderRise/u);
+    assert.match(
+      cssSource,
+      /composeModelTurboBurnAtmosphere::before\s*\{[^}]*mix-blend-mode:\s*screen[^}]*animation:\s*turboAmbientRedFlicker 2630ms/u,
+    );
+    assert.match(
+      cssSource,
+      /composeModelTurboBurnAtmosphere > span\s*\{[^}]*z-index|composeModelTurboBurnAtmosphere\s*\{[^}]*z-index:\s*1/u,
+    );
+    assert.match(
+      pageSource,
+      /const previouslyActive = previousTurboVisuallyActiveRef\.current;[\s\S]{0,260}if \(!previouslyActive \|\| turboVisuallyActive\) return;[\s\S]{0,180}setTurboSmokeBurstId/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /const nextTurboEnabled = !effortControl\.turboEnabled;[\s\S]{0,180}setTurboSmokeBurstId/u,
+    );
+    assert.match(
+      cssSource,
+      /prefers-reduced-motion: reduce[\s\S]*?data-turbo="true"\]::before\s*\{[^}]*animation:\s*none/u,
+    );
+    assert.match(
+      cssSource,
+      /prefers-reduced-motion: reduce[\s\S]*?composeModelControl\[data-turbo="true"\]::after\s*\{[^}]*animation:\s*none/u,
+    );
+    assert.match(
+      cssSource,
+      /prefers-reduced-motion: reduce[\s\S]*?composeModelEffortTriggerWrap\[data-turbo="true"\][\s\S]{0,100}\.composeModelEffortTrigger\s*\{[^}]*animation:\s*none/u,
+    );
+    assert.match(
+      cssSource,
+      /prefers-reduced-motion: reduce[\s\S]*?composeModelTurboSmokeBurst\s*\{[^}]*display:\s*none/u,
+    );
+    assert.match(
+      cssSource,
+      /prefers-reduced-motion: reduce[\s\S]*?composeModelTurboBurnAtmosphere > span\s*\{[^}]*display:\s*none/u,
+    );
+    assert.match(
+      cssSource,
+      /prefers-reduced-motion: reduce[\s\S]*?composeModelTurboBurnAtmosphere::before\s*\{[^}]*animation:\s*none/u,
+    );
+    assert.ok(
+      statSync(
+        new URL("../../public/ui/turbo-fire-loop.webp", import.meta.url),
+      ).size > 100_000,
+    );
+    const turboFireFrameDurations = animatedWebpFrameDurations(turboFireWebp);
+    assert.equal(turboFireFrameDurations.length, 80);
+    assert.ok(
+      turboFireFrameDurations.every((duration) => duration === 16),
+      "expected the primary Turbo fire loop to run at 62.5 fps",
+    );
+    assert.ok(
+      statSync(
+        new URL("../../public/ui/turbo-fire-loop.gif", import.meta.url),
+      ).size > 100_000,
+    );
+    assert.match(cssSource, /prefers-reduced-motion: reduce/u);
+    assert.match(pageSource, /resetAllModelTurboPreferences/u);
+    assert.match(pageSource, /disableTurboForSafetyTransitionRef/u);
+    assert.match(pageSource, /turboSafetyContextRef/u);
+    assert.match(
+      signalSource,
+      /episode\?\.id \?\? \(watchBakeActive \? "baking" : null\)/u,
+    );
+    assert.match(
+      debateSource,
+      /activeSession\?\.id \?\? \(view === "baking" \? "baking" : null\)/u,
+    );
+    assert.match(
+      pageSource,
+      /"\/api\/model-turbo-preferences", \{ method: "DELETE" \}/u,
+    );
+    assert.match(
+      tutorialSource,
+      /Turbo is deliberately temporary:[\s\S]{0,180}consciously re-enabled/u,
+    );
+  });
+
+  it("keeps model and effort global across applets", () => {
+    assert.match(pageSource, /globalModelChoiceByProvider/u);
+    assert.match(pageSource, /persistGlobalModelSelection/u);
+    assert.match(pageSource, /preferredLocalModel,\s*preferredOnlineModel/u);
+    assert.match(pageSource, /modelChoice=\{[\s\S]{0,140}signalGlobalModelChoice/u);
+    assert.match(signalSource, /modelChoice\?: string/u);
+    assert.match(signalSource, /onModelChoiceChange\?: \(value: string\) => void/u);
+    assert.match(
+      signalSource,
+      /const episodeModelDraft = modelChoice \?\? internalEpisodeModelDraft/u,
+    );
+    assert.doesNotMatch(pageSource, /conversationModelScopeKey/u);
+    assert.doesNotMatch(pageSource, /coffeeModelScopeKey/u);
+    assert.match(
+      tutorialSource,
+      /Model and Effort are global across applets/u,
+    );
+  });
+
+  it("explains LOCAL-only simulated Effort and the deep experimental ladder", () => {
     assert.match(pageSource, /data-glyph-tooltip=\{effortDisabledReason\}/u);
     assert.match(
       reasoningEffortSource,
-      /Simulated Effort is product-default for thoughtless models/u,
+      /Simulated Effort is available only for LOCAL models/u,
     );
     assert.ok(
-      (pageSource.match(/Deep simulated thinking \(experimental\)/gu) ?? [])
+      (pageSource.match(/Deep LOCAL simulated thinking \(experimental\)/gu) ?? [])
         .length >= 2,
       "expected both Settings presentations to describe deep simulated thinking",
     );
     assert.match(pageSource, /heavier private workshop/u);
     assert.match(pageSource, /onSimulatedEffortEducate/u);
-    assert.match(pageSource, /Simulated thinking/u);
+    assert.match(pageSource, /LOCAL simulated thinking/u);
+    assert.match(pageSource, /configured Ollama provider/u);
   });
 
   it("uses None instead of Default for simulated non-thinking models", () => {
@@ -401,11 +599,11 @@ describe("shared routing model picker integration", () => {
     assert.match(tutorialSource, /vertical slider/u);
     assert.match(tutorialSource, /selected effort glyph rotates in place/u);
     assert.match(tutorialSource, /one through five PRISM colors/u);
-    assert.match(tutorialSource, /Deep simulated thinking/u);
+    assert.match(tutorialSource, /Deep LOCAL simulated thinking/u);
     assert.match(tutorialSource, /short toast/u);
     assert.match(
       tutorialSource,
-      /[Oo]nline simulation may add provider usage or cost/u,
+      /ONLINE models use only provider-native effort/u,
     );
     assert.match(tutorialSource, /Cmd\/Ctrl\+Shift\+E/u);
     assert.match(tutorialSource, /Shift\+Tab opens Model/u);

@@ -22,6 +22,13 @@
   object-fit: fill;
   image-rendering: pixelated;
   image-rendering: crisp-edges;
+  opacity: var(--bot-phosphor-core-opacity, 0.94);
+  /* Keep the logical cells intact and soften only their emitted beam. The
+     parent surface supplies the same multi-stop color halo as the face tube. */
+  filter: drop-shadow(
+    0 0 var(--bot-phosphor-beam-softness, 0.45px)
+      rgb(255 255 255 / 0.46)
+  );
 }
 
 .svgHost[data-phosphor-pixel-ready="true"] .svgSource {

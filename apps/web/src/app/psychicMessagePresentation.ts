@@ -1,14 +1,24 @@
-import type { PsychicThoughtPayload, ReasoningEffort } from "@localai/shared";
+import type {
+  AutoRecoveryTraceV1,
+  AutoRouteDecisionV1,
+  PsychicThoughtPayload,
+  ReasoningEffort,
+} from "@localai/shared";
 
 export interface PsychicPresentationMessageLike {
   role: string;
   model?: string;
   psychicThought?: PsychicThoughtPayload;
+  autoRecovery?: AutoRecoveryTraceV1;
+  autoRoute?: AutoRouteDecisionV1;
+  turbo?: boolean;
 }
 
 export interface AssistantGenerationMetadata {
   model: string;
-  effort: ReasoningEffort | null;
+  effort: ReasoningEffort;
+  automatic: boolean;
+  turbo: boolean;
 }
 
 export function psychicSourceForAssistantMessage<
@@ -34,11 +44,20 @@ export function assistantGenerationMetadata(
   psychicSource: PsychicPresentationMessageLike | null,
 ): AssistantGenerationMetadata | null {
   if (assistant.role !== "assistant") return null;
-  const model =
-    assistant.model?.trim() || psychicSource?.psychicThought?.model?.trim() || "";
-  if (!model && !psychicSource?.psychicThought?.effort) return null;
+  const concreteModel =
+    assistant.model?.trim() ||
+    assistant.autoRoute?.model.trim() ||
+    psychicSource?.psychicThought?.model?.trim() ||
+    "Model not recorded";
+  const automatic = assistant.autoRoute !== undefined;
   return {
-    model: model || "Model not recorded",
-    effort: psychicSource?.psychicThought?.effort ?? null,
+    model: automatic ? `${concreteModel} [auto]` : concreteModel,
+    effort: assistant.autoRecovery
+      ? "none"
+      : (assistant.autoRoute?.reasoningEffort ??
+        psychicSource?.psychicThought?.effort ??
+        "auto"),
+    automatic,
+    turbo: assistant.turbo === true,
   };
 }

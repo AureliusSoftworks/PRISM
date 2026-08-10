@@ -20,4 +20,21 @@ describe("prism settings journal allowlist", () => {
     const filtered = validatePrismSettingsPatch(patch);
     assert.equal(filtered.onlineAutoProviderBias, 0.75);
   });
+
+  it("keeps global text model selections on the journaled save path", () => {
+    const patch = {
+      preferredProvider: "openai",
+      preferredLocalModel: "qwen3:8b",
+      preferredOnlineModel: "gpt-5.6-terra",
+    };
+    assert.equal(prismSettingsPatchIsJournalable(patch), true);
+    assert.deepEqual(validatePrismSettingsPatch(patch), patch);
+  });
+
+  it("keeps typography scale on the persisted journal path", () => {
+    const patch = { typographyScale: "extra-large" };
+    assert.equal(PRISM_JOURNALED_SETTING_KEYS.has("typographyScale"), true);
+    assert.equal(prismSettingsPatchIsJournalable(patch), true);
+    assert.deepEqual(validatePrismSettingsPatch(patch), patch);
+  });
 });

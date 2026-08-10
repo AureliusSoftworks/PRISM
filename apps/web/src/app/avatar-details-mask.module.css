@@ -230,9 +230,13 @@
      makes coincident face and Ink pixels read as one stroke; halo and bloom
      remain screen-blended around that shared silhouette. */
   mix-blend-mode: normal;
-  --zen-live-bot-crt-flicker-base-filter: drop-shadow(
-    0 0 0.3px rgba(255, 255, 255, 0.46)
-  );
+  /* Authored Ink begins as a binary nearest-neighbor canvas while live glyphs
+     arrive with coverage-aware edges. Give both the same final CRT beam
+     softness without sharing masks or disturbing their independent geometry. */
+  --zen-live-bot-crt-flicker-base-filter: blur(
+      var(--crt-beam-softness, 0.45px)
+    )
+    drop-shadow(0 0 0.3px rgba(255, 255, 255, 0.46));
   filter: brightness(
       calc(
         var(--zen-live-bot-crt-flicker-base-brightness, 1.02) *

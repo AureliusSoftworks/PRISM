@@ -1,5 +1,14 @@
 :root {
   color-scheme: dark;
+  /* One account-level reading scale. Standard (16px) is deliberately today's
+     browser baseline; the other presets move in conservative one-pixel steps
+     so dense instruments reflow without scaling authored art or canvas work. */
+  --prism-type-root: 16px;
+  --prism-type-caption: 0.6875rem;
+  --prism-type-label: 0.75rem;
+  --prism-type-body: 0.8125rem;
+  --prism-type-body-large: 1rem;
+  --prism-type-title: 1.0625rem;
   /* Baseline colors so the body doesn't flash before the themed shell paints. */
   --baseline-bg: #0a0c12;
   --baseline-fg: #e8ecf5;
@@ -9,8 +18,29 @@
 
 html {
   height: 100%;
+  font-size: var(--prism-type-root);
   background: var(--baseline-bg);
   overscroll-behavior: none;
+}
+
+html[data-prism-typography-scale="compact"] {
+  --prism-type-root: 14px;
+}
+
+html[data-prism-typography-scale="small"] {
+  --prism-type-root: 15px;
+}
+
+html[data-prism-typography-scale="standard"] {
+  --prism-type-root: 16px;
+}
+
+html[data-prism-typography-scale="large"] {
+  --prism-type-root: 17px;
+}
+
+html[data-prism-typography-scale="extra-large"] {
+  --prism-type-root: 18px;
 }
 
 html,
@@ -131,6 +161,27 @@ html[data-prism-companion-open="true"] [data-app-shell-header="true"] {
   transition:
     transform 0.32s cubic-bezier(0.32, 0.72, 0, 1),
     opacity 0.22s ease;
+}
+
+/* Navbar pickers portal to document.body, so their readability lift needs a
+   shared presentation hook instead of depending on any one menu system. The
+   cool bloom separates the surface from busy applet art without recoloring it. */
+[data-navbar-picker-surface="true"] {
+  box-shadow:
+    0 1px 0 color-mix(in srgb, #ffffff 11%, transparent) inset,
+    0 12px 28px rgba(0, 0, 0, 0.52),
+    0 30px 72px rgba(0, 0, 0, 0.56),
+    0 0 34px color-mix(in srgb, #64cfff 18%, transparent),
+    0 0 82px color-mix(in srgb, #7367ff 12%, transparent) !important;
+}
+
+body[data-prism-theme="light"] [data-navbar-picker-surface="true"] {
+  box-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.96) inset,
+    0 12px 28px rgba(29, 53, 78, 0.18),
+    0 28px 64px rgba(29, 53, 78, 0.22),
+    0 0 30px color-mix(in srgb, #269bd8 15%, transparent),
+    0 0 70px color-mix(in srgb, #5856d6 9%, transparent) !important;
 }
 
 @media (prefers-reduced-motion: reduce) {

@@ -215,6 +215,14 @@ test("a targeted interruption Power does not cut off a different bot", () => {
 
 test("Coffee plays the interrupter lead before an authoritative yield tail", () => {
   const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+  const listenerPlayback = source.slice(
+    source.indexOf("const playCoffeeListenerReaction = useCallback"),
+    source.indexOf("const prepareCoffeeCrosstalk = useCallback"),
+  );
+  const continuation = source.slice(
+    source.indexOf("const continueCoffeeSession = async"),
+    source.indexOf("continueCoffeeSessionRef.current = continueCoffeeSession"),
+  );
   const start = source.indexOf("const crosstalkPlan =");
   const end = source.indexOf("// Whenever we leave Coffee view", start);
   const interruption = source.slice(start, end);
@@ -243,23 +251,50 @@ test("Coffee plays the interrupter lead before an authoritative yield tail", () 
   );
   assert.match(
     interruption,
-    /coffeeAuthoritativeYieldTailPlanV1\(leadPlan, pause\.interruption\)/u,
+    /coffeeAuthoritativeYieldTailPlanV1\(\s*leadPlan,\s*pause\.interruption,?\s*\)/u,
   );
   assert.match(
     interruption,
-    /if \(authoritativeYieldTailPlan\) \{[\s\S]{0,180}playCoffeeListenerReactionRef\.current\(\s*authoritativeYieldTailPlan/u,
+    /const leadPlayback = presentCoffeeListenerReaction/u,
+  );
+  assert.match(
+    interruption,
+    /const interruptionAudioHandoff = authoritativeYieldTailPlan[\s\S]{0,180}Promise\.resolve\(leadPlayback\)[\s\S]{0,240}playCoffeeListenerReactionRef\.current\(\s*authoritativeYieldTailPlan/u,
+  );
+  assert.match(
+    interruption,
+    /continueCoffeeSessionRef\.current\([\s\S]{0,420}interruptionAudioHandoff/u,
+  );
+  assert.match(
+    continuation,
+    /if \(presentationGate\) \{\s*await presentationGate\.catch\(\(\) => undefined\);/u,
+  );
+  assert.ok(
+    continuation.indexOf("await presentationGate.catch") <
+      continuation.indexOf("queueCoffeeReveal(revealArgs)"),
   );
   assert.match(interruption, /clearCoffeeListenerReaction\(true\)/u);
   assert.match(interruption, /COFFEE_BOT_INTERRUPTION_OVERLAP_MS/u);
+  assert.match(listenerPlayback, /lifecycle: listenerLifecycle/u);
+  assert.match(
+    interruption,
+    /onStart: \(\) => \{[\s\S]{0,180}scheduleInterruptedVoiceRelease\(\s*COFFEE_BOT_INTERRUPTION_OVERLAP_MS/u,
+  );
+  assert.match(
+    interruption,
+    /scheduleInterruptedVoiceRelease\(\s*COFFEE_BOT_INTERRUPTION_AUDIO_START_TIMEOUT_MS/u,
+  );
+  assert.match(
+    interruption,
+    /\(\) => scheduleInterruptedVoiceRelease\(0\)/u,
+  );
   assert.match(
     interruption,
     /releaseVoicePlaybackPreservingPreparedMode\([\s\S]{0,120}COFFEE_BOT_INTERRUPTION_RELEASE_MS/u,
   );
-  assert.ok(
-    interruption.indexOf("presentCoffeeListenerReaction(") <
-      interruption.indexOf(
-        "releaseVoicePlaybackPreservingPreparedMode(",
-      ),
+  assert.match(
+    interruption,
+    /presentCoffeeListenerReaction\([\s\S]{0,360}onStart:[\s\S]{0,220}COFFEE_BOT_INTERRUPTION_OVERLAP_MS/u,
   );
   assert.match(
     interruption,
@@ -268,6 +303,27 @@ test("Coffee plays the interrupter lead before an authoritative yield tail", () 
   assert.doesNotMatch(
     interruption,
     /const interruptionEvent: CoffeeInterruptionEvent = \{/u,
+  );
+});
+
+test("Copycat ellipsis follow-ons remain visible but never request reaction voice", () => {
+  const source = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+  const signalPlayback = source.slice(
+    source.indexOf("const playBotcastListenerReaction = useCallback"),
+    source.indexOf("const prefetchCoffeeListenerReaction = useCallback"),
+  );
+  const coffeePlayback = source.slice(
+    source.indexOf("const prefetchCoffeeListenerReaction = useCallback"),
+    source.indexOf("const playDeadAirAside = useCallback"),
+  );
+
+  assert.match(
+    signalPlayback,
+    /botCrosstalkInterruptedSpeakerCueHasAudio\([\s\S]*?sanitizedPlan\.interruptedSpeakerCue/u,
+  );
+  assert.match(
+    coffeePlayback,
+    /botCrosstalkInterruptedSpeakerCueHasAudio\([\s\S]*?sanitizedPlan\.interruptedSpeakerCue/u,
   );
 });
 

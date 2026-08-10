@@ -16,6 +16,7 @@ import {
 
 export const FACTORY_RESET_USER_DATA_TABLES = [
   "model_reasoning_effort_preferences",
+  "model_turbo_preferences",
   "pairing_codes",
   "prism_notifications",
   "prism_monitors",
@@ -51,6 +52,7 @@ export const FACTORY_RESET_USER_DATA_TABLES = [
   "session_opinions",
   "bot_opinions",
   "bot_relationships",
+  "applet_session_notes",
   "developer_transcript_events",
   "conversation_exports",
   "conversation_sweep_batches",
@@ -108,6 +110,7 @@ export function restoreFactoryDefaultsInDatabase(
         SET
           theme = 'system',
           graphics_quality = 'high',
+          typography_scale = 'standard',
           atmosphere_style = 'prismatic',
           hub_atmosphere_enabled = 1,
           hub_atmosphere_image_id = NULL,

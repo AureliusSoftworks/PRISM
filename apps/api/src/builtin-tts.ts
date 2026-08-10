@@ -14,13 +14,13 @@ import {
 import {
   PRISM_BUILTIN_TTS_MODEL_ID,
   prismBuiltinTtsModelRoot,
-} from "./builtin-tts-runtime.ts";
+} from "./builtin-tts-assets.ts";
 import { BuiltinTtsWorkerClient } from "./builtin-tts-worker-client.ts";
 
 export {
   PRISM_BUILTIN_TTS_MODEL_ID,
   prismBuiltinTtsModelRoot,
-} from "./builtin-tts-runtime.ts";
+} from "./builtin-tts-assets.ts";
 
 type SupportedSystemTtsPlatform = "darwin" | "win32";
 
@@ -272,10 +272,130 @@ export async function getSystemVoiceCapabilities(signal?: AbortSignal): Promise<
   };
 }
 
-function isPcmWave(buffer: Buffer): boolean {
-  return buffer.length >= 44 &&
-    buffer.subarray(0, 4).toString("ascii") === "RIFF" &&
-    buffer.subarray(8, 12).toString("ascii") === "WAVE";
+/**
+ * Validate that a RIFF/WAVE payload contains at least one non-silent frame of
+ * uncompressed PCM audio. Speech tools can exit successfully with header-only
+ * or effectively silent WAVE data, both of which browsers accept but cannot
+ * be heard.
+ */
+export function isPlayablePcmWave(buffer: Buffer): boolean {
+  if (
+    buffer.length < 12 ||
+    buffer.subarray(0, 4).toString("ascii") !== "RIFF" ||
+    buffer.subarray(8, 12).toString("ascii") !== "WAVE"
+  ) {
+    return false;
+  }
+
+  const riffEnd = buffer.readUInt32LE(4) + 8;
+  if (riffEnd < 12 || riffEnd > buffer.length) return false;
+
+  let audioFormat: number | null = null;
+  let bitsPerSample: number | null = null;
+  let blockAlign: number | null = null;
+  let dataBytes = 0;
+  const dataRanges: Array<{ start: number; end: number }> = [];
+  for (let offset = 12; offset + 8 <= riffEnd; ) {
+    const chunkId = buffer.subarray(offset, offset + 4).toString("ascii");
+    const chunkBytes = buffer.readUInt32LE(offset + 4);
+    const valueOffset = offset + 8;
+    const valueEnd = valueOffset + chunkBytes;
+    const nextOffset = valueEnd + (chunkBytes % 2);
+    if (valueEnd > riffEnd || nextOffset > riffEnd) return false;
+
+    if (chunkId === "fmt ") {
+      if (chunkBytes < 16) return false;
+      const candidateAudioFormat = buffer.readUInt16LE(valueOffset);
+      const channels = buffer.readUInt16LE(valueOffset + 2);
+      const sampleRate = buffer.readUInt32LE(valueOffset + 4);
+      const byteRate = buffer.readUInt32LE(valueOffset + 8);
+      const candidateBlockAlign = buffer.readUInt16LE(valueOffset + 12);
+      const candidateBitsPerSample = buffer.readUInt16LE(valueOffset + 14);
+      const bytesPerSample = candidateBitsPerSample / 8;
+      const supportedSampleFormat =
+        candidateAudioFormat === 1 ||
+        (candidateAudioFormat === 3 && candidateBitsPerSample === 32);
+      if (
+        !supportedSampleFormat ||
+        channels === 0 ||
+        sampleRate === 0 ||
+        !Number.isInteger(bytesPerSample) ||
+        bytesPerSample < 1 ||
+        bytesPerSample > 4 ||
+        candidateBlockAlign !== channels * bytesPerSample ||
+        byteRate !== sampleRate * candidateBlockAlign
+      ) {
+        return false;
+      }
+      audioFormat = candidateAudioFormat;
+      bitsPerSample = candidateBitsPerSample;
+      blockAlign = candidateBlockAlign;
+    } else if (chunkId === "data") {
+      dataBytes += chunkBytes;
+      dataRanges.push({ start: valueOffset, end: valueEnd });
+    }
+
+    offset = nextOffset;
+  }
+
+  if (
+    audioFormat === null ||
+    bitsPerSample === null ||
+    blockAlign === null ||
+    dataBytes < blockAlign
+  ) {
+    return false;
+  }
+
+  // A structurally valid, full-length WAVE can still be digital silence (or
+  // contain only inaudible quantization dust). Browser decode/play lifecycle
+  // succeeds for that payload, which used to reveal text and animate timing
+  // without producing speech. Scan the complete payload so leading silence
+  // remains valid while requiring meaningful peak and RMS energy overall.
+  const minimumPeak = 1e-3;
+  const minimumRms = 1e-4;
+  let peak = 0;
+  let squaredSignal = 0;
+  let sampleCount = 0;
+  let invalidSample = false;
+  const observeSample = (sample: number): void => {
+    sampleCount += 1;
+    if (!Number.isFinite(sample)) {
+      invalidSample = true;
+      return;
+    }
+    const magnitude = Math.min(1, Math.abs(sample));
+    peak = Math.max(peak, magnitude);
+    squaredSignal += magnitude * magnitude;
+  };
+
+  for (const { start, end } of dataRanges) {
+    if (audioFormat === 3) {
+      for (let offset = start; offset + 4 <= end; offset += 4) {
+        observeSample(buffer.readFloatLE(offset));
+      }
+      continue;
+    }
+    const bytesPerSample = bitsPerSample / 8;
+    for (
+      let offset = start;
+      offset + bytesPerSample <= end;
+      offset += bytesPerSample
+    ) {
+      if (bitsPerSample === 8) {
+        observeSample((buffer[offset]! - 0x80) / 0x80);
+      } else if (bitsPerSample === 16) {
+        observeSample(buffer.readInt16LE(offset) / 0x8000);
+      } else if (bitsPerSample === 24) {
+        observeSample(buffer.readIntLE(offset, 3) / 0x800000);
+      } else {
+        observeSample(buffer.readInt32LE(offset) / 0x80000000);
+      }
+    }
+  }
+
+  if (invalidSample || sampleCount === 0 || peak < minimumPeak) return false;
+  return Math.sqrt(squaredSignal / sampleCount) >= minimumRms;
 }
 
 async function generateSystemEnglishWave(args: {
@@ -365,7 +485,9 @@ async function generateSystemEnglishWave(args: {
       });
     }
     const wave = await readFile(outputPath);
-    if (!isPcmWave(wave)) throw new Error("System speech returned an unsupported audio format.");
+    if (!isPlayablePcmWave(wave)) {
+      throw new Error("System speech returned no playable PCM audio.");
+    }
     return wave;
   } finally {
     await rm(directory, { recursive: true, force: true });
@@ -381,6 +503,13 @@ async function generatePrismVoicePackWave(args: {
   if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
   const wave = await prismVoicePackWorker.generate(args);
   if (args.signal?.aborted) throw new DOMException("Aborted", "AbortError");
+  return requirePlayablePrismVoicePackWave(wave);
+}
+
+export function requirePlayablePrismVoicePackWave(wave: Buffer): Buffer {
+  if (!isPlayablePcmWave(wave)) {
+    throw new Error("PRISM Voice Pack returned no playable PCM audio.");
+  }
   return wave;
 }
 

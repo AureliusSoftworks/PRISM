@@ -199,6 +199,41 @@ describe("engine-agnostic voice effects", () => {
     assert.match(bottishSource, /onStart: lifecycle\?\.onPresenceStart/u);
   });
 
+  it("meters final voice character before room acoustics across realtime and media paths", () => {
+    const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
+    const englishSource = readFileSync(
+      new URL("./englishVoice.ts", import.meta.url),
+      "utf8",
+    );
+    const bottishSource = readFileSync(
+      new URL("./bottishVoice.ts", import.meta.url),
+      "utf8",
+    );
+    const mediaSource = readFileSync(
+      new URL("./replayAudioMasterCapture.ts", import.meta.url),
+      "utf8",
+    );
+    assert.match(source, /outputGain[\s\S]{0,180}\.connect\(limiter\)/u);
+    assert.match(source, /limiter\.connect\(lightMeter\.node\)/u);
+    assert.match(
+      source,
+      /connectRoomAcoustics\(\{[\s\S]{0,160}input: lightMeter\?\.node \?\? limiter/u,
+    );
+    assert.match(source, /active\.lightMeter\?\.stop\(\)/u);
+    for (const fallbackSource of [englishSource, bottishSource]) {
+      assert.match(fallbackSource, /lifecycle\?\.onLevel \|\| lifecycle\?\.voiceLightTarget/u);
+      assert.match(fallbackSource, /routeAudioElementToPrismOutput\(audio, \{ onLevel \}\)/u);
+      assert.match(
+        fallbackSource,
+        /audio\.addEventListener\("playing",[\s\S]{0,100}onLevel\(0\.22\)/u,
+      );
+      assert.match(fallbackSource, /mediaOutputCleanup\.set\(audio,[\s\S]{0,120}onLevel\(0\)/u);
+    }
+    assert.match(mediaSource, /createVoiceLightMeter\(context, options\.onLevel\)/u);
+    assert.match(mediaSource, /lightMeter\?\.stop\(\)/u);
+    assert.match(mediaSource, /options\.onLevel\?\.\(0\)/u);
+  });
+
   it("keeps listener reactions on an independent, quieter, time-bounded channel", () => {
     const source = readFileSync(new URL("./voiceEffects.ts", import.meta.url), "utf8");
     const reactionSource = readFileSync(
@@ -254,10 +289,10 @@ describe("engine-agnostic voice effects", () => {
 });
 
 describe("voice performance", () => {
-  it("keeps the mouth clock on the slower side of the rendered voice tail", () => {
-    assert.equal(voicePlaybackPresentationDurationMs(1_000, 120), 1_120);
+  it("does not stretch the audible articulation clock across graph drain", () => {
+    assert.equal(voicePlaybackPresentationDurationMs(1_000, 120), 1_000);
     assert.equal(voicePlaybackPresentationDurationMs(1_000, 0), 1_000);
-    assert.ok(voicePlaybackPresentationDurationMs(1_000, 120) > 1_000);
+    assert.equal(voicePlaybackPresentationDurationMs(1_000), 1_000);
   });
 
   it("holds visible lifecycle start until the compensated audio clock", () => {
@@ -267,6 +302,13 @@ describe("voice performance", () => {
     let elapsedMs = 85;
     const progress: number[] = [];
     let started = 0;
+    let startedDurationMs: number | null = null;
+    const alignment = {
+      characters: ["H", "i"],
+      characterStartTimesSeconds: [0, 0.4],
+      characterEndTimesSeconds: [0.4, 1],
+    };
+    let startedAlignment: typeof alignment | null | undefined;
 
     Object.defineProperty(globalThis, "window", {
       configurable: true,
@@ -291,14 +333,16 @@ describe("voice performance", () => {
     try {
       const controller = beginVoicePlaybackProgress(
         {
-          onStart: () => {
+          onStart: (durationMs, receivedAlignment) => {
             started += 1;
+            startedDurationMs = durationMs;
+            startedAlignment = receivedAlignment;
           },
           onProgress: (elapsed) => progress.push(elapsed),
         },
         1_000,
         () => elapsedMs,
-        null,
+        alignment,
         { startDelayMs: 85 },
       );
       assert.equal(started, 0);
@@ -307,6 +351,8 @@ describe("voice performance", () => {
       assert.ok(runStart);
       runStart();
       assert.equal(started, 1);
+      assert.equal(startedDurationMs, 1_000);
+      assert.equal(startedAlignment, alignment);
       assert.deepEqual(progress, [0]);
 
       elapsedMs = 135;
@@ -458,12 +504,13 @@ describe("voice performance", () => {
     assert.match(source, /const articulationDurationMs = Math\.min\(/u);
     assert.match(
       source,
-      /voicePlaybackPresentationDurationMs\(\s*articulationDurationMs,\s*tailFlushMs,?\s*\)/u,
+      /voicePlaybackPresentationDurationMs\(articulationDurationMs\)/u,
     );
     assert.match(
       source,
-      /beginVoicePlaybackProgress\([\s\S]{0,160}presentationDurationMs[\s\S]{0,300}holdAtEndUntilFinish: true/u,
+      /beginVoicePlaybackProgress\([\s\S]{0,160}lifecycleArticulationDurationMs[\s\S]{0,300}holdAtEndUntilFinish: true/u,
     );
+    assert.match(source, /Math\.max\(lifecycleOutputLatencyMs, tailFlushMs\)/u);
   });
 
   it("does not start media-backed voice lifecycle from an accepted play request", () => {

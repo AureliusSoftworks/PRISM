@@ -104,13 +104,17 @@ describe("Coffee voice text", () => {
   });
 
   it("rechecks reveal ownership inside voice preparation and before playback", () => {
+    const liveVoice = pageSource.slice(
+      pageSource.indexOf("const startCoffeeVoiceForReveal = async"),
+      pageSource.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+    );
     assert.match(
       pageSource,
       /const startCoffeeVoiceForReveal = async \( message: CoffeeConversationMessage, speakerBotId: string, revealDeliveryEpoch: number, \)[\s\S]*?const revealVoiceIsCurrent = \(\): boolean => coffeeRevealPreparationMayCommit\(\{ preparedEpoch: revealDeliveryEpoch, currentEpoch: coffeeRevealDeliveryEpochRef\.current,/u,
     );
     assert.match(
       pageSource,
-      /const revealVoiceToken = \{ valid: true \};[\s\S]*?const revealVoiceStillValid = \(\): boolean =>[\s\S]*?revealVoiceToken\.valid && revealVoiceIsCurrent\(\);/u,
+      /const revealVoiceStillValid = \(\): boolean => revealVoiceIsCurrent\(\);/u,
     );
     assert.match(
       pageSource,
@@ -124,10 +128,7 @@ describe("Coffee voice text", () => {
       pageSource,
       /const clip = await readEnglishVoiceSynthesisClip\(response\); if \(cancelStaleRevealVoice\(\)\) return;[\s\S]*?void enqueueEnglishVoice/u,
     );
-    assert.match(
-      pageSource,
-      /revealVoiceToken\.valid = false;[\s\S]*?settle\(null\);[\s\S]*?\}, 1800\);/u,
-    );
+    assert.doesNotMatch(liveVoice, /\}, 1800\);/u);
     assert.match(
       pageSource,
       /preSpeechBreath,[\s\S]*?0,[\s\S]*?revealVoiceStillValid,/u,

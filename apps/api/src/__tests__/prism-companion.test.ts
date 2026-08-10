@@ -2,15 +2,21 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import { DatabaseSync } from "node:sqlite";
 import {
+  authorizePrismCompanionPersistenceTarget,
   buildPrismCompanionAuthoritativeContext,
   chatWithPrismCompanion,
   parseCompanionUserNotesIntent,
   parsePrismCompanionModelOutput,
+  persistPrismCompanionOrchestrationTurn,
   prismCompanionDirectActionIntents,
+  prismCompanionSurfacePromptContext,
   prismCompanionSystemPrompt,
   resolvePrismCompanionProvider,
 } from "../prism-companion.ts";
-import { defaultEphemeralChatProviderPreferences } from "@localai/shared";
+import {
+  defaultEphemeralChatProviderPreferences,
+  normalizePrismCompanionRequest,
+} from "@localai/shared";
 import { ensureUserNotesSchema, listUserNotes } from "../user-notes.ts";
 
 function fixture(): DatabaseSync {
@@ -47,6 +53,43 @@ function fixture(): DatabaseSync {
     INSERT INTO images VALUES ('image-1', 'u1', 'A pinecone under theatrical light');
   `);
   ensureUserNotesSchema(db);
+  return db;
+}
+
+function persistenceFixture(): DatabaseSync {
+  const db = new DatabaseSync(":memory:");
+  db.exec(`
+    CREATE TABLE conversations (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      title TEXT NOT NULL,
+      conversation_mode TEXT NOT NULL,
+      bot_id TEXT,
+      archived_at TEXT,
+      incognito INTEGER NOT NULL DEFAULT 0,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL
+    );
+    CREATE TABLE messages (
+      id TEXT PRIMARY KEY,
+      conversation_id TEXT NOT NULL,
+      user_id TEXT NOT NULL,
+      role TEXT NOT NULL,
+      content TEXT NOT NULL,
+      provider TEXT,
+      model TEXT,
+      bot_id TEXT,
+      tool_payload TEXT,
+      created_at TEXT NOT NULL
+    );
+    INSERT INTO conversations VALUES
+      ('prism-zen', 'u1', 'PRISM', 'zen', NULL, NULL, 0, 'now', 'now'),
+      ('private-zen', 'u1', 'Private', 'zen', NULL, NULL, 1, 'now', 'now'),
+      ('bot-zen', 'u1', 'Lux', 'zen', 'owned', NULL, 0, 'now', 'now'),
+      ('sandbox', 'u1', 'Sandbox', 'sandbox', NULL, NULL, 0, 'now', 'now'),
+      ('archived-zen', 'u1', 'Archived', 'zen', NULL, 'now', 0, 'now', 'now'),
+      ('foreign-zen', 'u2', 'PRISM', 'zen', NULL, NULL, 0, 'now', 'now');
+  `);
   return db;
 }
 
@@ -104,7 +147,7 @@ test("explains the current screen controls without needing pixels or DOM", () =>
   assert.match(prompt, /You are not Lux/u);
   assert.match(
     prompt,
-    /floating "Ask Prism…" composer sends a private request to you/u,
+    /floating "Ask Prism…" composer addresses you/u,
   );
   assert.match(
     prompt,
@@ -116,6 +159,24 @@ test("explains the current screen controls without needing pixels or DOM", () =>
     /"Say something…" field is what the player says directly to Lux/u,
   );
   assert.match(prompt, /not a screenshot or DOM capture/u);
+});
+
+test("builds compact request-only surface context from authorized metadata", () => {
+  const db = fixture();
+  const context = buildPrismCompanionAuthoritativeContext(db, "u1", "Jared", {
+    surfaceId: "slate",
+    botIds: ["owned", "secret"],
+    slateProjectId: "p1",
+    slateSectionId: "s1",
+  });
+  const prompt = prismCompanionSurfacePromptContext(context);
+  assert.match(prompt, /Request-scoped Prism companion surface context/u);
+  assert.match(prompt, /Screen: Slate/u);
+  assert.match(prompt, /Slate project: The Glass Sea \(draft\)/u);
+  assert.match(prompt, /Selected Slate section: Chapter One/u);
+  assert.match(prompt, /Selected bots: Lux \(owned\)/u);
+  assert.doesNotMatch(prompt, /Secret|SECRET MANUSCRIPT|SECRET PROSE/u);
+  assert.doesNotMatch(prompt, /ephemeral|private request/iu);
 });
 
 test("grounds Debate setup help in a bounded unsaved draft and authorized cast", () => {
@@ -232,6 +293,144 @@ test("keeps every companion surface local when the account is in LOCAL mode", ()
       onlineProvider: "openai",
     }),
     "local",
+  );
+});
+
+test("normalizes persistence only for a non-Private orchestration preflight", () => {
+  const request = normalizePrismCompanionRequest({
+    surface: { surfaceId: "home" },
+    message: "Open Slate.",
+    requestId: "action-1",
+    orchestrationOnly: true,
+    persistConversationId: " prism-zen ",
+  });
+  assert.equal(request.persistConversationId, "prism-zen");
+  assert.throws(
+    () =>
+      normalizePrismCompanionRequest({
+        surface: { surfaceId: "home" },
+        message: "Open Slate.",
+        orchestrationOnly: true,
+        privateMode: true,
+        persistConversationId: "prism-zen",
+      }),
+    /Private Prism requests cannot persist/u,
+  );
+  assert.throws(
+    () =>
+      normalizePrismCompanionRequest({
+        surface: { surfaceId: "home" },
+        message: "Open Slate.",
+        persistConversationId: "prism-zen",
+      }),
+    /only during orchestration preflight/u,
+  );
+});
+
+test("authorizes only the caller's active non-Private Default Prism Zen chat", () => {
+  const db = persistenceFixture();
+  assert.equal(
+    authorizePrismCompanionPersistenceTarget(db, "u1", "prism-zen").id,
+    "prism-zen",
+  );
+  for (const conversationId of [
+    "private-zen",
+    "bot-zen",
+    "sandbox",
+    "archived-zen",
+    "foreign-zen",
+    "missing",
+  ]) {
+    assert.throws(
+      () =>
+        authorizePrismCompanionPersistenceTarget(
+          db,
+          "u1",
+          conversationId,
+        ),
+      /Default Prism Zen conversation not found/u,
+    );
+  }
+});
+
+test("atomically persists one exact orchestration turn and deduplicates retries", () => {
+  const db = persistenceFixture();
+  const args = {
+    db,
+    userId: "u1",
+    conversationId: "prism-zen",
+    requestId: "action-request-1",
+    userContent: "Open Slate now.",
+    assistantContent: "Slate is open.",
+    provider: "local" as const,
+    model: "llama-local",
+    now: new Date("2026-08-09T12:00:00.000Z"),
+  };
+  const first = persistPrismCompanionOrchestrationTurn(args);
+  const retry = persistPrismCompanionOrchestrationTurn({
+    ...args,
+    assistantContent: "A retry must return the canonical stored receipt.",
+    now: new Date("2026-08-09T12:05:00.000Z"),
+  });
+  assert.equal(first.inserted, true);
+  assert.equal(retry.inserted, false);
+  assert.deepEqual(retry.message, first.message);
+
+  const messages = db
+    .prepare(
+      `SELECT role, content, provider, model, bot_id, tool_payload, created_at
+         FROM messages
+        WHERE conversation_id = ? AND user_id = ?
+        ORDER BY created_at ASC`,
+    )
+    .all("prism-zen", "u1") as unknown as Array<Record<string, unknown>>;
+  assert.deepEqual(
+    messages.map(({ role, content }) => ({ role, content })),
+    [
+      { role: "user", content: "Open Slate now." },
+      { role: "assistant", content: "Slate is open." },
+    ],
+  );
+  assert.equal(messages[0]?.provider, null);
+  assert.equal(messages[1]?.provider, "local");
+  assert.equal(messages[1]?.model, "llama-local");
+  assert.equal(messages[0]?.bot_id, null);
+  assert.equal(messages[1]?.bot_id, null);
+  assert.equal(messages[0]?.tool_payload, null);
+  assert.equal(messages[1]?.tool_payload, null);
+  assert.equal(
+    (
+      db
+        .prepare("SELECT updated_at FROM conversations WHERE id = ?")
+        .get("prism-zen") as { updated_at: string }
+    ).updated_at,
+    first.message.createdAt,
+  );
+});
+
+test("never writes a partial or unauthorized companion persistence turn", () => {
+  const db = persistenceFixture();
+  assert.throws(
+    () =>
+      persistPrismCompanionOrchestrationTurn({
+        db,
+        userId: "u1",
+        conversationId: "private-zen",
+        requestId: "private-action",
+        userContent: "Keep this private.",
+        assistantContent: "Private receipt.",
+        provider: "local",
+        model: "llama-local",
+      }),
+    /Default Prism Zen conversation not found/u,
+  );
+  assert.equal(
+    (
+      db.prepare("SELECT COUNT(*) AS count FROM messages").get() as {
+        count: number;
+      }
+    ).count,
+    0,
   );
 });
 

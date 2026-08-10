@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import { getAppConfig } from "@localai/config";
 import {
   anthropicReasoningEffortForRequest,
+  modelSupportsTurboMode,
   openAiReasoningEffortForRequest,
   type ReasoningEffort,
   type UsagePurpose,
@@ -34,6 +35,8 @@ export interface GenerateOptions {
   topK?: number;
   repetitionPenalty?: number;
   reasoningEffort?: ReasoningEffort;
+  /** Requests the provider's supported premium low-latency service tier. */
+  turbo?: boolean;
   usagePurpose?: UsagePurpose;
   /** Cancels in-flight provider work when the originating chat request is stopped. */
   signal?: AbortSignal;
@@ -1659,6 +1662,9 @@ export class OpenAiProvider implements LlmProvider {
     );
     if (reasoningEffort) {
       requestBody.reasoning_effort = reasoningEffort;
+    }
+    if (options?.turbo && modelSupportsTurboMode("openai", modelId)) {
+      requestBody.service_tier = "priority";
     }
 
     const sendRequest = (body: Record<string, unknown>) =>

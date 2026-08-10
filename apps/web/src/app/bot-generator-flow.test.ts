@@ -39,6 +39,26 @@ test("new bot creation starts with a bounded, privacy-labelled prompt", () => {
   assert.match(pageSource, /\? "AUTO"/u);
 });
 
+test("only a blank new-bot draft has extinguished identity lamps", () => {
+  assert.match(
+    pageSource,
+    /const createDraftIdentityAttributed =\s*createDraftHasChanges \|\|\s*botGeneratorPrompt\.trim\(\)\.length > 0 \|\|\s*botGeneratorHasGeneratedDraft/u,
+  );
+  assert.match(
+    pageSource,
+    /const avatarStudioLightMode: "alive" \| "off" =\s*botPanelCreateMode && !editingBotId && !editingDefaultBot[\s\S]{0,180}\? "alive"\s*:\s*"off"[\s\S]{0,80}: "alive"/u,
+  );
+  assert.equal(
+    pageSource.match(/avatarLightMode=\{avatarStudioLightMode\}/gu)?.length,
+    2,
+  );
+  assert.match(cssSource, /botVoiceLightBulbIgnite 600ms ease-out/u);
+  assert.match(
+    cssSource,
+    /data-avatar-light-mode="off"[\s\S]{0,500}opacity:\s*0 !important/u,
+  );
+});
+
 test("generation hydrates the full editable Avatar Studio draft", () => {
   const applyDraft = functionSource(
     "applyGeneratedBotDraft",

@@ -162,4 +162,27 @@ describe("Debate exhibit image guardrails", () => {
       /source: "debate_exhibit"[\s\S]*?normalizeGeneratedDebateExhibitImage/u,
     );
   });
+
+  it("lets the API own soft synthesis through the durable Debate attachment", () => {
+    const start = serverSource.indexOf(
+      'route("POST", "/api/soft-asset-jobs/debate-exhibits"',
+    );
+    const end = serverSource.indexOf(
+      'route("POST", "/api/debates/exhibits/synthesize"',
+      start,
+    );
+    assert.ok(start >= 0 && end > start);
+    const routeSource = serverSource.slice(start, end);
+    assert.match(routeSource, /softAssetJobs\.start\(\{/u);
+    assert.match(routeSource, /waitForImageSlot\(\{/u);
+    assert.match(routeSource, /generateAndPersistStandaloneImageAsset\(\{/u);
+    assert.match(routeSource, /attachDebateExhibitSprite\(/u);
+    assert.match(routeSource, /onlyIfEmoji === true/u);
+    assert.match(
+      routeSource,
+      /exhibit\.visualKind !== "emoji" \|\| Boolean\(exhibit\.imageId\)/u,
+    );
+    assert.doesNotMatch(routeSource, /ctx\.req\.once\(/u);
+    assert.doesNotMatch(routeSource, /ctx\.req\.off\(/u);
+  });
 });

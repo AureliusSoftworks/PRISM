@@ -1,6 +1,7 @@
 "use client";
 
 import type { CSSProperties, JSX } from "react";
+import { MODEL_EFFORT_ICON_PATHS } from "./modelEffortControl";
 import styles from "./liveSessionChrome.module.css";
 
 export {
@@ -15,21 +16,43 @@ export type {
 export function LiveSessionModelChip(props: {
   modelLabel: string;
   effortLabel: string;
+  effortKey?: import("./liveSessionChromeLabels.ts").LiveSessionEffortKey;
+  automatic?: boolean;
+  turbo?: boolean;
   className?: string;
 }): JSX.Element {
+  const effortKey = props.effortKey ?? "auto";
   const summary = `${props.modelLabel} · ${props.effortLabel}`;
   return (
     <p
       className={`${styles.modelChip}${props.className ? ` ${props.className}` : ""}`}
       data-live-session-model-chip="true"
-      title={`Locked for this session: ${summary}`}
-      aria-label={`Locked model ${props.modelLabel}, effort ${props.effortLabel}`}
+      data-model-selection={props.automatic ? "auto" : "fixed"}
+      title={`Locked for this session: ${summary}${props.turbo ? ", Turbo" : ""}`}
+      aria-label={`Locked model ${props.modelLabel}, effort ${props.effortLabel}${props.turbo ? ", Turbo" : ""}`}
     >
       <span className={styles.modelChipLabel}>{props.modelLabel}</span>
       <span className={styles.modelChipSep} aria-hidden="true">
         ·
       </span>
-      <span className={styles.modelChipEffort}>{props.effortLabel}</span>
+      <span className={styles.modelChipEffort}>
+        <span
+          className={styles.modelChipEffortGlyph}
+          data-effort-level={effortKey}
+          style={
+            {
+              "--live-session-effort-icon": `url("${MODEL_EFFORT_ICON_PATHS[effortKey]}")`,
+            } as CSSProperties
+          }
+          aria-hidden="true"
+        />
+        {props.turbo ? (
+          <span className={styles.modelChipTurbo} aria-hidden="true">
+            🔥
+          </span>
+        ) : null}
+        <span>{props.effortLabel}</span>
+      </span>
     </p>
   );
 }

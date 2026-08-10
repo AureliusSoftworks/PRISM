@@ -1,16 +1,6 @@
 "use client";
 
-import {
-  useEffect,
-  useRef,
-  useState,
-  type ReactNode,
-} from "react";
-import {
-  PRISM_KEYBOARD_SHORTCUTS_CHANGED_EVENT,
-  activePrismKeyboardShortcut,
-  keyboardShortcutAria,
-} from "./keyboardShortcuts";
+import { useEffect, useRef, type ReactNode } from "react";
 
 export const PRISM_REFRACT_TARGET_ATTRIBUTE = "data-prism-refract-id";
 
@@ -214,7 +204,6 @@ export function nextPrismRefractChoice(
 export interface PrismRefractBinding {
   ref: (element: HTMLElement | null) => void;
   "data-prism-refract-id": string;
-  "aria-keyshortcuts": string;
 }
 
 export function PrismRefractTarget({
@@ -226,25 +215,10 @@ export function PrismRefractTarget({
 }): ReactNode {
   const targetRef = useRef(target);
   const elementRef = useRef<HTMLElement | null>(null);
-  const [ariaKeyShortcuts, setAriaKeyShortcuts] = useState(
-    keyboardShortcutAria(activePrismKeyboardShortcut("prism")) ?? "",
-  );
 
   useEffect(() => {
     targetRef.current = target;
   }, [target]);
-
-  useEffect(() => {
-    const update = (): void => {
-      setAriaKeyShortcuts(
-        keyboardShortcutAria(activePrismKeyboardShortcut("prism")) ?? "",
-      );
-    };
-    update();
-    window.addEventListener(PRISM_KEYBOARD_SHORTCUTS_CHANGED_EVENT, update);
-    return () =>
-      window.removeEventListener(PRISM_KEYBOARD_SHORTCUTS_CHANGED_EVENT, update);
-  }, []);
 
   useEffect(
     () =>
@@ -263,6 +237,5 @@ export function PrismRefractTarget({
       elementRef.current = element;
     },
     "data-prism-refract-id": target.id,
-    "aria-keyshortcuts": ariaKeyShortcuts,
   });
 }

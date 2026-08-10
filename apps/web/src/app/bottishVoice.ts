@@ -26,6 +26,7 @@ import {
   replayAudioMasterCaptureActive,
   routeAudioElementToPrismOutput,
 } from "./replayAudioMasterCapture.ts";
+import { publishBotVoiceLightLevel } from "./voiceLightEnvelope.ts";
 import {
   readEnglishVoiceWaveStream,
   readEnglishVoiceSynthesisClip,
@@ -475,13 +476,41 @@ let activeMediaUrl: string | null = null;
 let activeMediaFadeTimer: number | null = null;
 const mediaOutputCleanup = new WeakMap<HTMLMediaElement, () => void>();
 
-function routeBottishMediaOutput(audio: HTMLMediaElement): void {
+function routeBottishMediaOutput(
+  audio: HTMLMediaElement,
+  lifecycle?: VoicePlaybackLifecycle,
+): void {
   if (mediaOutputCleanup.has(audio)) return;
-  const cleanup = routeAudioElementToPrismOutput(audio);
+  const onLevel = lifecycle?.onLevel || lifecycle?.voiceLightTarget
+    ? (level: number) => {
+        if (lifecycle?.voiceLightTarget) {
+          publishBotVoiceLightLevel(lifecycle.voiceLightTarget, level);
+        }
+        lifecycle?.onLevel?.(level);
+      }
+    : undefined;
+  const cleanup = routeAudioElementToPrismOutput(audio, { onLevel });
   if (!cleanup && replayAudioMasterCaptureActive()) {
     throw new Error("Bottish voice could not enter the faithful session mix.");
   }
-  if (cleanup) mediaOutputCleanup.set(audio, cleanup);
+  if (cleanup) {
+    mediaOutputCleanup.set(audio, cleanup);
+  } else if (onLevel) {
+    let active = true;
+    audio.addEventListener("playing", () => {
+      if (active) onLevel(0.22);
+    });
+    audio.addEventListener("ended", () => {
+      if (!active) return;
+      active = false;
+      onLevel(0);
+    });
+    mediaOutputCleanup.set(audio, () => {
+      if (!active) return;
+      active = false;
+      onLevel(0);
+    });
+  }
 }
 let preparedMedia: HTMLAudioElement | null = null;
 let preparedMediaUrl: string | null = null;
@@ -660,7 +689,7 @@ async function playPlanWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
-  routeBottishMediaOutput(audio);
+  routeBottishMediaOutput(audio, lifecycle);
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -1016,7 +1045,7 @@ async function playHybridBytesWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
-  routeBottishMediaOutput(audio);
+  routeBottishMediaOutput(audio, lifecycle);
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -1209,6 +1238,19 @@ async function playChunkedBabbleResponse(
         onStart: (durationMs) => {
           actualChunkDurationMs = durationMs;
           const chunkFloor = Math.max(1, durationMs ?? segmentDurationMs);
+          if (chunk.text) {
+            lifecycle?.onSynthesizedSpeechSegment?.({
+              text: chunk.text,
+              sourceStart: chunk.sourceStart,
+              sourceEnd: chunk.sourceEnd,
+              startMs: audibleSegmentCursorMs,
+              endMs: audibleSegmentCursorMs + chunkFloor,
+              // The local/system worker currently returns audio only. Carry
+              // the authoritative Babble transcript without pretending it
+              // also supplied character or phoneme timestamps.
+              alignment: null,
+            });
+          }
           const reported = reportedChunkedVoiceDurationMs({
             estimatedDurationMs,
             audibleElapsedMs: audibleSegmentCursorMs,

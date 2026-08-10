@@ -27,6 +27,14 @@ export const BOT_AVATAR_DETAILS_FACE_PLACEMENT: BotAvatarFacePlacement = {
 export const BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO = 0.2337;
 
 /**
+ * Optical baseline used by Avatar Studio for authored faces. Presentation
+ * surfaces must not replace this with a room- or breakpoint-specific nudge,
+ * because Ink is authored against this exact glyph baseline.
+ */
+export const BOT_AVATAR_DETAILS_FACE_NUDGE_Y =
+  "clamp(-5px, -2.6%, -2px)";
+
+/**
  * The writable 128px mask is already sampled from the physical CRT aperture,
  * so it must remain at a one-to-one presentation scale. Insetting the complete
  * canvas a second time creates a visible screen perimeter that authored ink
@@ -39,6 +47,7 @@ export const BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE = {
   "--zen-live-bot-face-y": `${BOT_AVATAR_DETAILS_FACE_PLACEMENT.yPct}%`,
   "--zen-live-bot-face-scale": BOT_AVATAR_DETAILS_FACE_PLACEMENT.scale,
   "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
+  "--coffee-plate-emoji-nudge-y": BOT_AVATAR_DETAILS_FACE_NUDGE_Y,
   "--avatar-details-ink-aperture-scale":
     BOT_AVATAR_DETAILS_INK_APERTURE_SCALE,
 } as const;
@@ -82,14 +91,23 @@ export function botAvatarDetailsFacingOffsetY(
  * presentation surfaces from mirroring one layer without the other.
  */
 export function botAvatarFaceFacingStyle(faceScaleY: string | number) {
+  const screenFacingScaleX = botAvatarDetailsFacingScaleX(faceScaleY);
   return {
     "--coffee-plate-emoji-face-scale-y": String(faceScaleY),
-    "--avatar-details-facing-scale-x":
-      botAvatarDetailsFacingScaleX(faceScaleY),
+    "--zen-live-bot-screen-facing-scale-x": screenFacingScaleX,
+    "--avatar-details-facing-scale-x": screenFacingScaleX,
     "--avatar-details-facing-offset-y":
       botAvatarDetailsFacingOffsetY(faceScaleY),
   } as const;
 }
+
+/**
+ * Avatar Studio's front-facing orientation is the safe default. Presentation
+ * surfaces may turn a bot, but only by applying `botAvatarFaceFacingStyle` to
+ * the complete face-and-authored-ink coordinate space.
+ */
+export const BOT_AVATAR_CANONICAL_FACE_FACING_STYLE =
+  botAvatarFaceFacingStyle(BOT_AVATAR_CANONICAL_FACE_SCALE_Y);
 
 /**
  * Signal's scaled Align-stage preview rasterizes authored ink a touch below

@@ -9,6 +9,11 @@ import { normalizeMemoryTier } from "./memory.ts";
 import type { ProviderName } from "./providers.ts";
 import { normalizeVoicePreviewLine } from "./voice-preview-line.ts";
 import {
+  APPLET_SESSION_NOTE_MAX_CHARACTERS,
+  appletSessionBelongsToUser,
+  readAppletSessionNoteSurface,
+} from "./applet-session-notes.ts";
+import {
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_BLINK_OFFSET_X,
   DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
@@ -59,6 +64,7 @@ import {
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
   normalizeGraphicsQuality,
+  normalizePrismTypographyScale,
   normalizeHubAtmosphereStyle,
   normalizeModelReasoningEffortPreference,
   normalizePrismStartupPreference,
@@ -87,8 +93,10 @@ import {
   type EphemeralChatProviderPreferences,
   type ImageProviderName,
   type GraphicsQuality,
+  type PrismTypographyScale,
   type HubAtmosphereStyle,
   type ModelReasoningEffortPreferenceV1,
+  type ModelTurboPreferenceV1,
   type PrismStartupPreference,
   type PrismCapabilityRevelations,
   parseStoredAutoFallbackChain,
@@ -139,10 +147,15 @@ import {
   normalizeModelEffortProvider,
   setModelReasoningEffortPreference,
 } from "./model-effort-preferences.ts";
+import {
+  listModelTurboPreferences,
+  setModelTurboPreference,
+} from "./model-turbo-preferences.ts";
 
 export interface BackupUserSettings {
   theme: "light" | "dark" | "system";
   graphicsQuality?: GraphicsQuality;
+  typographyScale?: PrismTypographyScale;
   atmosphereStyle?: HubAtmosphereStyle;
   hubAtmosphereEnabled?: boolean;
   startupPreference?: PrismStartupPreference;
@@ -334,6 +347,8 @@ export interface BackupSnapshot {
   settings?: BackupUserSettings;
   /** Optional in older v1 snapshots. Default effort is represented by no row. */
   modelEffortPreferences?: ModelReasoningEffortPreferenceV1[];
+  /** Optional in older v1 snapshots. Disabled Turbo is represented by no row. */
+  modelTurboPreferences?: ModelTurboPreferenceV1[];
   bots?: BackupBotSnapshot[];
   /** Server-backed Library groups. Older browser-authored archives omit this. */
   libraryGroups?: LibraryGroupV1[];
@@ -375,6 +390,8 @@ export interface BackupSnapshot {
     id: string;
     conversationId?: string;
     botId?: string;
+    /** Optional; directed bot-to-bot memories target this bot. */
+    targetBotId?: string;
     confidence: number;
     category?: "general" | "user" | "bot_relation";
     tier?: "short_term" | "long_term";
@@ -522,7 +539,22 @@ export interface BackupSnapshot {
       eventJson: string;
       createdAt: string;
     }>;
+    /** Optional in earlier v1 snapshots. Preserves anti-force-quit floor authority. */
+    recessCheckpoints?: Array<{
+      sessionId: string;
+      sourceRevision: number;
+      snapshotJson: string;
+      createdAt: string;
+    }>;
   };
+  /** One player-authored note attached to an applet session transcript. */
+  sessionNotes?: Array<{
+    surface: "coffee" | "signal" | "debate" | "story";
+    sessionId: string;
+    body: string;
+    createdAt: string;
+    updatedAt: string;
+  }>;
   /** Presentation-only response cues, including only the playback state actually persisted. */
   presenceBeats?: Array<{
     id: string;
@@ -1643,6 +1675,7 @@ export function exportUserSnapshot(
       `SELECT
          theme,
          graphics_quality,
+         typography_scale,
          startup_preference,
          preferred_provider,
          ephemeral_chat_provider_preferences,
@@ -1709,6 +1742,7 @@ export function exportUserSnapshot(
     | {
         theme: "light" | "dark" | "system";
         graphics_quality: string | null;
+        typography_scale: string | null;
         atmosphere_style: string | null;
         hub_atmosphere_enabled: number;
         startup_preference: string | null;
@@ -1782,6 +1816,7 @@ export function exportUserSnapshot(
     ? {
         theme: user.theme,
         graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
+        typographyScale: normalizePrismTypographyScale(user.typography_scale),
         atmosphereStyle: normalizeHubAtmosphereStyle(user.atmosphere_style),
         hubAtmosphereEnabled: user.hub_atmosphere_enabled !== 0,
         startupPreference: normalizePrismStartupPreference(
@@ -2277,12 +2312,13 @@ export function exportUserSnapshot(
 
   const memories = db
     .prepare(
-      "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC",
+      "SELECT id, conversation_id, bot_id, target_bot_id, confidence, category, tier, durability, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC",
     )
     .all(userId) as Array<{
     id: string;
     conversation_id: string | null;
     bot_id: string | null;
+    target_bot_id: string | null;
     confidence: number;
     category: "general" | "user" | "bot_relation";
     tier: "short_term" | "long_term";
@@ -2343,6 +2379,14 @@ export function exportUserSnapshot(
          FROM bot_presence_beats
         WHERE user_id = ?
         ORDER BY created_at, rowid`,
+    )
+    .all(userId) as Array<Record<string, unknown>>;
+  const sessionNotes = db
+    .prepare(
+      `SELECT surface, session_id, body, created_at, updated_at
+         FROM applet_session_notes
+        WHERE user_id = ?
+        ORDER BY updated_at, rowid`,
     )
     .all(userId) as Array<Record<string, unknown>>;
   const botcastIntroAudio = db
@@ -2423,12 +2467,23 @@ export function exportUserSnapshot(
         ORDER BY event.session_id, event.sequence`,
     )
     .all(userId) as Array<Record<string, string | number | null>>;
+  const debateRecessCheckpoints = db
+    .prepare(
+      `SELECT checkpoint.session_id, checkpoint.source_revision,
+              checkpoint.snapshot_json, checkpoint.created_at
+         FROM debate_recess_checkpoints AS checkpoint
+         JOIN debate_sessions AS session ON session.id = checkpoint.session_id
+        WHERE checkpoint.user_id = ? AND session.status != 'cancelled'
+        ORDER BY checkpoint.created_at`,
+    )
+    .all(userId) as Array<Record<string, string | number | null>>;
 
   return {
     version: 1,
     exportedAt: new Date().toISOString(),
     settings,
     modelEffortPreferences: listModelReasoningEffortPreferences(db, userId),
+    modelTurboPreferences: listModelTurboPreferences(db, userId),
     bots: bots.map((bot) => ({
         id: bot.id,
         name: bot.name,
@@ -2746,7 +2801,22 @@ export function exportUserSnapshot(
         eventJson: String(row.event_json),
         createdAt: String(row.created_at),
       })),
+      recessCheckpoints: debateRecessCheckpoints.map((row) => ({
+        sessionId: String(row.session_id),
+        sourceRevision: Number(row.source_revision ?? 1),
+        snapshotJson: String(row.snapshot_json),
+        createdAt: String(row.created_at),
+      })),
     },
+    sessionNotes: sessionNotes.map((row) => ({
+      surface: String(row.surface) as NonNullable<
+        BackupSnapshot["sessionNotes"]
+      >[number]["surface"],
+      sessionId: String(row.session_id),
+      body: String(row.body),
+      createdAt: String(row.created_at),
+      updatedAt: String(row.updated_at),
+    })),
     presenceBeats: presenceBeats.map((row) => ({
       id: String(row.id),
       surface: String(row.surface) as NonNullable<
@@ -2816,6 +2886,7 @@ export function exportUserSnapshot(
       id: memory.id,
       conversationId: memory.conversation_id ?? undefined,
       botId: memory.bot_id ?? undefined,
+      targetBotId: memory.target_bot_id ?? undefined,
       confidence: memory.confidence,
       category: memory.category,
       tier: memory.tier,
@@ -2853,11 +2924,12 @@ function assertSnapshotIdsStayWithinTenant(
       | "bot_presence_beats"
       | "debate_sessions"
       | "debate_events"
+      | "debate_recess_checkpoints"
       | "replay_recordings"
       | "replay_voice_takes"
       | SlateBackupTable,
     ids: readonly string[],
-    idColumn: "id" | "project_id" = "id",
+    idColumn: "id" | "project_id" | "session_id" = "id",
   ): void => {
     const seen = new Set<string>();
     const findOwner = db.prepare(
@@ -2986,6 +3058,13 @@ function assertSnapshotIdsStayWithinTenant(
     assertIds(
       "debate_events",
       snapshot.debates.events.map((item) => item.id),
+    );
+    assertIds(
+      "debate_recess_checkpoints",
+      (snapshot.debates.recessCheckpoints ?? []).map(
+        (item) => item.sessionId,
+      ),
+      "session_id",
     );
   }
   if (snapshot.presenceBeats) {
@@ -3202,6 +3281,7 @@ function importUserSnapshotWithinTransaction(
       SET
         theme = ?,
         graphics_quality = ?,
+        typography_scale = ?,
         atmosphere_style = ?,
         hub_atmosphere_enabled = ?,
         hub_atmosphere_image_id = NULL,
@@ -3278,6 +3358,7 @@ function importUserSnapshotWithinTransaction(
         ? settings.theme
         : "system",
       normalizeGraphicsQuality(settings.graphicsQuality),
+      normalizePrismTypographyScale(settings.typographyScale),
       normalizeHubAtmosphereStyle(settings.atmosphereStyle),
       settings.hubAtmosphereEnabled === false ? 0 : 1,
       normalizePrismStartupPreference(settings.startupPreference),
@@ -3427,6 +3508,31 @@ function importUserSnapshotWithinTransaction(
             ? rawPreference.updatedAt
             : undefined,
       });
+    }
+  }
+
+  if (Array.isArray(snapshot.modelTurboPreferences)) {
+    db.prepare("DELETE FROM model_turbo_preferences WHERE user_id = ?").run(
+      userId,
+    );
+    for (const rawPreference of snapshot.modelTurboPreferences) {
+      const provider = normalizeModelEffortProvider(rawPreference?.provider);
+      const modelId = normalizeModelEffortModelId(rawPreference?.modelId);
+      if (!provider || !modelId || rawPreference?.turbo !== true) continue;
+      try {
+        setModelTurboPreference(db, {
+          userId,
+          provider,
+          modelId,
+          turbo: true,
+          updatedAt:
+            typeof rawPreference.updatedAt === "string"
+              ? rawPreference.updatedAt
+              : undefined,
+        });
+      } catch {
+        // Ignore stale preferences for models that no longer support Turbo.
+      }
     }
   }
 
@@ -3980,8 +4086,8 @@ function importUserSnapshotWithinTransaction(
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertMemory = db.prepare(`
-    INSERT OR REPLACE INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO memories (id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv, tag, confidence, category, tier, durability, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const conversation of snapshot.conversations) {
@@ -4162,6 +4268,68 @@ function importUserSnapshotWithinTransaction(
         event.createdAt,
       );
     }
+    const insertRecessCheckpoint = db.prepare(
+      `INSERT OR REPLACE INTO debate_recess_checkpoints
+         (session_id, user_id, source_revision, snapshot_json, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    );
+    for (const checkpoint of snapshot.debates.recessCheckpoints ?? []) {
+      if (
+        !checkpoint?.sessionId?.trim() ||
+        !sessionIds.has(checkpoint.sessionId) ||
+        !Number.isInteger(checkpoint.sourceRevision) ||
+        checkpoint.sourceRevision < 1 ||
+        !checkpoint.createdAt?.trim()
+      ) {
+        throw new Error(
+          "Account backup contains an invalid Debate recess checkpoint.",
+        );
+      }
+      try {
+        JSON.parse(checkpoint.snapshotJson);
+      } catch {
+        throw new Error(
+          "Account backup contains invalid Debate recess checkpoint JSON.",
+        );
+      }
+      insertRecessCheckpoint.run(
+        checkpoint.sessionId,
+        userId,
+        checkpoint.sourceRevision,
+        checkpoint.snapshotJson,
+        checkpoint.createdAt,
+      );
+    }
+  }
+
+  if (snapshot.sessionNotes) {
+    const insertSessionNote = db.prepare(
+      `INSERT OR REPLACE INTO applet_session_notes
+         (user_id, surface, session_id, body, created_at, updated_at)
+       VALUES (?, ?, ?, ?, ?, ?)`,
+    );
+    for (const note of snapshot.sessionNotes) {
+      const surface = readAppletSessionNoteSurface(note?.surface);
+      const sessionId = note?.sessionId?.trim() ?? "";
+      const body = typeof note?.body === "string" ? note.body.trim() : "";
+      if (
+        !surface ||
+        !sessionId ||
+        !body ||
+        body.length > APPLET_SESSION_NOTE_MAX_CHARACTERS ||
+        !appletSessionBelongsToUser(db, userId, surface, sessionId)
+      ) {
+        continue;
+      }
+      insertSessionNote.run(
+        userId,
+        surface,
+        sessionId,
+        body,
+        note.createdAt,
+        note.updatedAt,
+      );
+    }
   }
 
   if (snapshot.presenceBeats) {
@@ -4315,6 +4483,7 @@ function importUserSnapshotWithinTransaction(
       userId,
       memory.conversationId ?? null,
       memory.botId ?? null,
+      memory.targetBotId ?? null,
       encrypted.ciphertext,
       encrypted.iv,
       encrypted.tag,

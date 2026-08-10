@@ -6,8 +6,8 @@ import {
 } from "./coffee-shell-policy.ts";
 
 describe("Coffee shell policy", () => {
-  it("locks the full Coffee utility strip including Voice while recording", () => {
-    for (const phase of ["arriving", "live"] as const) {
+  it("locks the full Coffee utility strip once the new session opens", () => {
+    for (const phase of ["topic", "arriving", "live"] as const) {
       const policy = coffeeShellPolicy({ conversationActive: true, phase });
       assert.equal(policy.liveSessionActive, true);
       assert.equal(policy.showEndSessionInSwitcher, false);
@@ -87,7 +87,7 @@ describe("Coffee shell policy", () => {
     assert.deepEqual(policy.disabledNavbarActionTooltips, {});
   });
 
-  it("leaves setup and topic phases unlocked", () => {
+  it("leaves setup and an unowned topic phase unlocked", () => {
     for (const phase of ["selecting", "preview", "topic"] as const) {
       const policy = coffeeShellPolicy({ conversationActive: false, phase });
       assert.equal(policy.liveSessionActive, false);

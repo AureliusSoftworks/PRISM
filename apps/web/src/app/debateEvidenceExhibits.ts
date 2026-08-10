@@ -490,6 +490,19 @@ export function applyDebateEvidenceExhibitAssetReuse(
   };
 }
 
+/**
+ * Automatic synthesis is a fallback-only operation. An exhibit must still be
+ * explicitly emoji-backed and have no attached image; uploaded, reused, and
+ * previously synthesized visuals are user choices and must never be replaced.
+ */
+export function debateMissingExhibitAssets(
+  evidence: Pick<DebateEvidencePacketV1, "exhibits">,
+): DebateEvidenceExhibitV1[] {
+  return (evidence.exhibits ?? []).filter(
+    (exhibit) => exhibit.visualKind === "emoji" && !exhibit.imageId,
+  );
+}
+
 function debateEvidenceObjectDraftHasLockedVisual(
   draft: DebateEvidenceObjectDraft,
 ): boolean {

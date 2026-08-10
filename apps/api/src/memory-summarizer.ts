@@ -2,7 +2,12 @@ import type { DatabaseSync } from "node:sqlite";
 import { createHash } from "node:crypto";
 import { randomId } from "./security.ts";
 import { embedTextLocal, type LlmProvider } from "./providers.ts";
-import { upsertVector, ensureCollection, searchVectors } from "./qdrant.ts";
+import {
+  deleteVector,
+  upsertVector,
+  ensureCollection,
+  searchVectors,
+} from "./qdrant.ts";
 import { persistMemoryCandidates, retrieveRecentMemoriesForStarter } from "./memory.ts";
 import { validateMemoryCandidates } from "./memory-validation.ts";
 import type { ChatMode } from "@localai/shared";
@@ -72,6 +77,47 @@ type ThreadSummaryDebug = {
 };
 
 const threadSummaryInFlight = new Set<string>();
+
+type ConversationSourceMessage = {
+  id: string;
+  role: string;
+  content: string;
+  created_at: string;
+};
+
+function loadConversationSourceMessages(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+): ConversationSourceMessage[] {
+  return db
+    .prepare(
+      `SELECT id, role, content, created_at
+         FROM messages
+        WHERE conversation_id = ? AND user_id = ?
+        ORDER BY created_at ASC, rowid ASC`,
+    )
+    .all(conversationId, userId) as ConversationSourceMessage[];
+}
+
+function conversationSourceRevision(
+  messages: readonly ConversationSourceMessage[],
+): string {
+  return createHash("sha256")
+    .update(JSON.stringify(messages))
+    .digest("hex");
+}
+
+function conversationSourceIsCurrent(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  expectedRevision: string,
+): boolean {
+  return conversationSourceRevision(
+    loadConversationSourceMessages(db, userId, conversationId),
+  ) === expectedRevision;
+}
 
 function threadSummaryKey(userId: string, conversationId: string, mode: ChatMode): string {
   return `${userId}:${conversationId}:${mode}`;
@@ -273,9 +319,13 @@ export async function summarizeAndStoreMemories(
   options?: { mode?: "chat" | "zen" }
 ): Promise<void> {
   const laneMode = options?.mode === "chat" ? "chat" : "zen";
-  const messages = db.prepare(
-    "SELECT role, content FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC LIMIT 40"
-  ).all(conversationId, userId) as Array<{ role: string; content: string }>;
+  const sourceMessages = loadConversationSourceMessages(
+    db,
+    userId,
+    conversationId,
+  );
+  const sourceRevision = conversationSourceRevision(sourceMessages);
+  const messages = sourceMessages.slice(0, 40);
 
   if (messages.length < 2) {
     return;
@@ -296,23 +346,25 @@ export async function summarizeAndStoreMemories(
 
   const summaryId = randomId(12);
   const now = new Date().toISOString();
+  const sourceMessageIds = messages.map((message) => message.id);
+  let storedCompiledMemoryIds: string[] = [];
 
-  db.prepare(
-    "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
-  ).run(
-    summaryId,
-    userId,
-    conversationId,
-    encodeSummaryRecord({
-      v: 1,
-      kind: SUMMARY_KIND_CHAT_FACTS,
-      summary: summary.trim(),
-      mode: laneMode,
-      reason: "milestone",
-      createdAt: now,
-    }),
-    now
-  );
+  const discardDerivedWrites = async (): Promise<void> => {
+    db.prepare(
+      "DELETE FROM memory_summaries WHERE id = ? AND user_id = ? AND conversation_id = ?",
+    ).run(summaryId, userId, conversationId);
+    const deleteMemory = db.prepare(
+      "DELETE FROM memories WHERE id = ? AND user_id = ? AND COALESCE(source, 'direct') = 'compiled'",
+    );
+    for (const memoryId of storedCompiledMemoryIds) {
+      deleteMemory.run(memoryId, userId);
+    }
+    try {
+      await deleteVector(summaryId);
+    } catch {
+      // Qdrant may not be running in dev, and the SQLite source is already gone.
+    }
+  };
 
   // Optionally persist extracted bullet facts as low-certainty compiled
   // assumptions so the UI can render them alongside direct memories.
@@ -333,7 +385,17 @@ export async function summarizeAndStoreMemories(
           confidence: Math.max(0.34, 0.52 - index * 0.06),
         })),
       });
-      await persistMemoryCandidates(
+      if (
+        !conversationSourceIsCurrent(
+          db,
+          userId,
+          conversationId,
+          sourceRevision,
+        )
+      ) {
+        return;
+      }
+      const storedCompiledMemories = await persistMemoryCandidates(
         db,
         userId,
         conversationId,
@@ -343,14 +405,80 @@ export async function summarizeAndStoreMemories(
         {
           source: "compiled",
           certainty: 0.45,
+          sourceMessageIds,
         }
       );
+      storedCompiledMemoryIds = storedCompiledMemories.map(
+        (memory) => memory.id,
+      );
+      if (
+        !conversationSourceIsCurrent(
+          db,
+          userId,
+          conversationId,
+          sourceRevision,
+        )
+      ) {
+        await discardDerivedWrites();
+        return;
+      }
     }
   }
 
+  if (
+    !conversationSourceIsCurrent(
+      db,
+      userId,
+      conversationId,
+      sourceRevision,
+    )
+  ) {
+    await discardDerivedWrites();
+    return;
+  }
+
+  db.prepare(
+    "INSERT INTO memory_summaries (id, user_id, conversation_id, summary, created_at) VALUES (?, ?, ?, ?, ?)"
+  ).run(
+    summaryId,
+    userId,
+    conversationId,
+    encodeSummaryRecord({
+      v: 1,
+      kind: SUMMARY_KIND_CHAT_FACTS,
+      summary: summary.trim(),
+      mode: laneMode,
+      reason: "milestone",
+      createdAt: now,
+    }),
+    now
+  );
+
   try {
     await ensureCollection();
+    if (
+      !conversationSourceIsCurrent(
+        db,
+        userId,
+        conversationId,
+        sourceRevision,
+      )
+    ) {
+      await discardDerivedWrites();
+      return;
+    }
     const embedding = await embedTextLocal(summary);
+    if (
+      !conversationSourceIsCurrent(
+        db,
+        userId,
+        conversationId,
+        sourceRevision,
+      )
+    ) {
+      await discardDerivedWrites();
+      return;
+    }
     await upsertVector(summaryId, embedding, {
       userId,
       conversationId,
@@ -358,8 +486,29 @@ export async function summarizeAndStoreMemories(
       createdAt: now,
       lane: laneMode,
     });
+    if (
+      !conversationSourceIsCurrent(
+        db,
+        userId,
+        conversationId,
+        sourceRevision,
+      )
+    ) {
+      await discardDerivedWrites();
+    }
   } catch {
-    // Qdrant may not be running in dev; SQLite summary is still stored
+    // Qdrant may not be running in dev; keep the SQLite summary only while
+    // its exact source transcript is still canonical.
+    if (
+      !conversationSourceIsCurrent(
+        db,
+        userId,
+        conversationId,
+        sourceRevision,
+      )
+    ) {
+      await discardDerivedWrites();
+    }
   }
 }
 
@@ -368,6 +517,7 @@ export async function summarizeAndStoreMemories(
  * Sandbox never reads from this path because its memory is strictly thread-scoped.
  */
 export async function retrieveMemorySummaries(
+  db: DatabaseSync,
   userId: string,
   query: string,
   limit = 4
@@ -376,11 +526,42 @@ export async function retrieveMemorySummaries(
     await ensureCollection();
     const queryEmbedding = await embedTextLocal(query);
     const results = await searchVectors(queryEmbedding, userId, limit);
-    return results.map((r) => ({
-      id: r.id,
-      text: (r.payload.text as string) ?? "",
-      score: r.score,
-    }));
+    const resultIds = [
+      ...new Set(
+        results
+          .map((result) => result.id.trim())
+          .filter((id) => id.length > 0),
+      ),
+    ];
+    if (resultIds.length === 0) return [];
+
+    // Qdrant is an acceleration index, never the canonical source. A Shh,
+    // discard, or stale async summarizer can remove the SQLite row before a
+    // best-effort vector delete completes. Reconcile every hit against the
+    // tenant-scoped row and use its decoded text so an orphaned vector payload
+    // can never resurrect an unheard suffix.
+    const placeholders = resultIds.map(() => "?").join(", ");
+    const canonicalRows = db
+      .prepare(
+        `SELECT id, summary
+           FROM memory_summaries
+          WHERE user_id = ? AND id IN (${placeholders})`,
+      )
+      .all(userId, ...resultIds) as Array<{ id: string; summary: string }>;
+    const canonicalTextById = new Map<string, string>();
+    for (const row of canonicalRows) {
+      const decoded = decodeSummaryRecord(row.summary);
+      if (decoded?.kind === SUMMARY_KIND_CHAT_FACTS) {
+        canonicalTextById.set(row.id, decoded.summary);
+      }
+    }
+
+    return results.flatMap((result) => {
+      const canonicalText = canonicalTextById.get(result.id);
+      return canonicalText
+        ? [{ id: result.id, text: canonicalText, score: result.score }]
+        : [];
+    });
   } catch {
     return [];
   }
@@ -415,15 +596,12 @@ export async function summarizeThreadCompact(
   const reason = options?.reason ?? "milestone";
   const force = options?.force === true;
   const key = threadSummaryKey(userId, conversationId, mode);
-  const allMessages = db
-    .prepare(
-      "SELECT role, content, created_at FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at ASC"
-    )
-    .all(conversationId, userId) as Array<{
-    role: string;
-    content: string;
-    created_at: string;
-  }>;
+  const allMessages = loadConversationSourceMessages(
+    db,
+    userId,
+    conversationId,
+  );
+  const sourceRevision = conversationSourceRevision(allMessages);
 
   if (allMessages.length === 0) {
     return { triggered: false };
@@ -491,6 +669,20 @@ export async function summarizeThreadCompact(
         "I'm tracking your goal and ready to continue right where we left off."
       );
     }
+  }
+
+  // A Shh interruption can truncate or discard the source assistant while
+  // either model call is in flight. Never recreate a summary from text that
+  // is no longer part of the canonical transcript.
+  if (
+    !conversationSourceIsCurrent(
+      db,
+      userId,
+      conversationId,
+      sourceRevision,
+    )
+  ) {
+    return { triggered: false };
   }
 
   const summaryId = randomId(12);

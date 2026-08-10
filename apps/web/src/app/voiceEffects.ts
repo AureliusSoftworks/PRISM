@@ -29,6 +29,11 @@ import {
   prismAudioContext,
   prismAudioOutputNode,
 } from "./replayAudioMasterCapture.ts";
+import {
+  createVoiceLightMeter,
+  publishBotVoiceLightLevel,
+  type VoiceLightMeter,
+} from "./voiceLightEnvelope.ts";
 
 export interface VoiceEffectPlan {
   highpassHz: number;
@@ -247,9 +252,26 @@ export interface VoicePlaybackCharacterAlignment {
   characterEndTimesSeconds: number[];
 }
 
+export interface VoicePlaybackSynthesizedSpeechSegment {
+  /** The exact text passed to the synthesizer for this audible segment. */
+  text: string;
+  /** Source transcript bounds when the server can preserve that mapping. */
+  sourceStart: number | null;
+  sourceEnd: number | null;
+  /** Audible-clock bounds; rendered effects/device tails are intentionally excluded. */
+  startMs: number;
+  endMs: number;
+  /** Null is explicit: text provenance alone is not phoneme alignment. */
+  alignment: VoicePlaybackCharacterAlignment | null;
+}
+
 export interface VoicePlaybackLifecycle {
   /** Temporary per-utterance delivery changes. V1 accepts the neutral envelope only. */
   deliveryEnvelope?: CoffeeVoiceDeliveryEnvelope;
+  /** Performance-scoped full-avatar light binding for this audible voice. */
+  voiceLightTarget?: string;
+  /** Already-smoothed normalized post-effect voice energy. */
+  onLevel?: (level: number) => void;
   /** Fires immediately before audible pre-speech presence, such as breath foley. */
   onPresenceStart?: () => void;
   onStart?: (
@@ -258,6 +280,14 @@ export interface VoicePlaybackLifecycle {
   ) => void;
   /** Audio-clock progress used to keep visible speech and mouth motion aligned. */
   onProgress?: (elapsedMs: number, durationMs: number) => void;
+  /**
+   * Carries synthesizer-authored text separately from the canonical transcript.
+   * Babble uses this because the audible pseudo-language differs from the
+   * English message whose meaning remains visible to the user.
+   */
+  onSynthesizedSpeechSegment?: (
+    segment: VoicePlaybackSynthesizedSpeechSegment,
+  ) => void;
   /** Source-linked timing for structured speech/action replay provenance. */
   onSegmentTiming?: (timing: {
     kind: "speech" | "vocal-action";
@@ -348,25 +378,20 @@ export function estimateVoiceOutputLatencyMs(
 }
 
 /**
- * Keep visible speech on the complete rendered-output clock. The output graph
- * can retain the final phoneme after source articulation ends, so subtracting
- * that tail makes mouth motion run ahead of the voice.
+ * Keep visible speech on the audible articulation clock. Output latency moves
+ * the clock's start, while graph drain only holds its final frame; neither may
+ * stretch provider alignment timestamps across a longer synthetic duration.
  */
 export function voicePlaybackPresentationDurationMs(
   articulationDurationMs: number,
-  outputTailMs: number,
+  _outputTailMs?: number,
 ): number {
-  const articulation = Math.max(
+  return Math.max(
     1,
     Math.round(
       Number.isFinite(articulationDurationMs) ? articulationDurationMs : 0,
     ),
   );
-  const outputTail = Math.max(
-    0,
-    Math.round(Number.isFinite(outputTailMs) ? outputTailMs : 0),
-  );
-  return articulation + outputTail;
 }
 
 export function beginVoicePlaybackProgress(
@@ -811,6 +836,7 @@ interface ActiveVoiceChannelState {
   progress: VoicePlaybackProgressController | null;
   roomConnection: RoomAcousticsConnection | null;
   outputGain: GainNode | null;
+  lightMeter: VoiceLightMeter | null;
   releaseTimer: number | null;
 }
 
@@ -824,6 +850,7 @@ const activeVoiceChannels: Record<
     progress: null,
     roomConnection: null,
     outputGain: null,
+    lightMeter: null,
     releaseTimer: null,
   },
   presence: {
@@ -832,6 +859,7 @@ const activeVoiceChannels: Record<
     progress: null,
     roomConnection: null,
     outputGain: null,
+    lightMeter: null,
     releaseTimer: null,
   },
   reaction: {
@@ -840,6 +868,7 @@ const activeVoiceChannels: Record<
     progress: null,
     roomConnection: null,
     outputGain: null,
+    lightMeter: null,
     releaseTimer: null,
   },
   crosstalk: {
@@ -848,6 +877,7 @@ const activeVoiceChannels: Record<
     progress: null,
     roomConnection: null,
     outputGain: null,
+    lightMeter: null,
     releaseTimer: null,
   },
 };
@@ -1034,6 +1064,8 @@ export function stopRealtimeVoiceAudio(
   }
   active.nodes = [];
   active.outputGain = null;
+  active.lightMeter?.stop();
+  active.lightMeter = null;
   active.roomConnection?.disconnect();
   active.roomConnection = null;
   active.resolve?.();
@@ -1197,13 +1229,11 @@ export async function playRealtimeVoiceBytes(args: {
       ? args.maxDurationMs
       : Number.POSITIVE_INFINITY,
   );
-  // The mouth follows rendered output, including the bounded worklet/device
-  // tail. The previous adjustment removed this tail and accelerated visemes in
-  // the wrong direction, leaving the mouth ahead of the audible voice.
-  const presentationDurationMs = voicePlaybackPresentationDurationMs(
-    articulationDurationMs,
-    tailFlushMs,
-  );
+  // Provider alignment remains on the audible articulation duration. The
+  // bounded worklet/device tail below controls graph lifetime and final-pose
+  // hold only; folding it into this duration stretches every viseme.
+  const lifecycleArticulationDurationMs =
+    voicePlaybackPresentationDurationMs(articulationDurationMs);
   const createPitchTransform = (
     startAt: number,
     effectDetuneCents = 0,
@@ -1350,9 +1380,21 @@ export async function playRealtimeVoiceBytes(args: {
     .connect(chestShelf)
     .connect(nasalPeak)
     .connect(limiter);
+  const levelReporter = args.lifecycle?.onLevel || args.lifecycle?.voiceLightTarget
+    ? (level: number) => {
+        if (args.lifecycle?.voiceLightTarget) {
+          publishBotVoiceLightLevel(args.lifecycle.voiceLightTarget, level);
+        }
+        args.lifecycle?.onLevel?.(level);
+      }
+    : null;
+  const lightMeter = levelReporter
+    ? createVoiceLightMeter(context, levelReporter)
+    : null;
+  if (lightMeter) limiter.connect(lightMeter.node);
   const roomConnection = connectRoomAcoustics({
     context,
-    input: limiter,
+    input: lightMeter?.node ?? limiter,
     destination: prismAudioOutputNode(context),
     send: args.roomAcoustics,
     stereoPan: args.stereoPan,
@@ -1539,6 +1581,7 @@ export async function playRealtimeVoiceBytes(args: {
   active.nodes = scheduled;
   active.roomConnection = roomConnection;
   active.outputGain = outputGain;
+  active.lightMeter = lightMeter;
   await new Promise<void>((resolve) => {
     let progress: VoicePlaybackProgressController | null = null;
     let endTimer: number | null = null;
@@ -1585,6 +1628,8 @@ export async function playRealtimeVoiceBytes(args: {
       const ownsChannel = active.nodes === scheduled;
       if (ownsChannel) active.nodes = [];
       if (active.outputGain === outputGain) active.outputGain = null;
+      lightMeter?.stop();
+      if (active.lightMeter === lightMeter) active.lightMeter = null;
       if (active.releaseTimer !== null && ownsChannel) {
         window.clearTimeout(active.releaseTimer);
         active.releaseTimer = null;
@@ -1633,7 +1678,7 @@ export async function playRealtimeVoiceBytes(args: {
     }
     progress = beginVoicePlaybackProgress(
       args.lifecycle,
-      presentationDurationMs,
+      lifecycleArticulationDurationMs,
       () => (context.currentTime - playbackClockStartedAt) * 1000,
       args.alignment,
       {

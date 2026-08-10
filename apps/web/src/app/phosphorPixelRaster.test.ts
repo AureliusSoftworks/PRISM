@@ -3,9 +3,12 @@ import { describe, it } from "node:test";
 
 import {
   PHOSPHOR_FACE_PIXEL_CELL_SIZE_PX,
+  PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
   PHOSPHOR_FACE_PIXEL_COVERAGE_GAMMA,
   PHOSPHOR_PIXEL_ALPHA_THRESHOLD,
   PHOSPHOR_PIXEL_CELL_SIZE_PX,
+  phosphorCanonicalPresentationScale,
+  phosphorCanonicalRasterDimension,
   phosphorCanvasFontShorthand,
   phosphorTextAlphabeticBaseline,
   samplePhosphorAlphaCells,
@@ -13,7 +16,7 @@ import {
 } from "./phosphorPixelRaster.ts";
 
 describe("phosphor pixel raster", () => {
-  it("uses a fine one-pixel buckle cell and binary alpha threshold", () => {
+  it("uses one logical phosphor cell and keeps the binary ink helper", () => {
     assert.equal(PHOSPHOR_PIXEL_CELL_SIZE_PX, 1);
     assert.equal(PHOSPHOR_FACE_PIXEL_CELL_SIZE_PX, 1);
     assert.equal(PHOSPHOR_FACE_PIXEL_COVERAGE_GAMMA, 0.78);
@@ -36,6 +39,14 @@ describe("phosphor pixel raster", () => {
         255, 255, 255, 255,
       ],
     );
+  });
+
+  it("keeps the full-size face on the authored 128px screen grid", () => {
+    assert.equal(PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX, 128);
+    assert.equal(phosphorCanonicalPresentationScale(128), 1);
+    assert.equal(phosphorCanonicalPresentationScale(320), 2.5);
+    assert.equal(phosphorCanonicalRasterDimension(75, 2.5), 30);
+    assert.equal(phosphorCanonicalRasterDimension(150, 5), 30);
   });
 
   it("does not mutate the source raster", () => {

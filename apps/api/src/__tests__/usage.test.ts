@@ -11,6 +11,7 @@ import {
   recordDeveloperTranscriptEvent,
   recordImageUsage,
   recordTextUsage,
+  registerUsageDiagnosticRedaction,
   repairMisnormalizedUsagePurposes,
   runWithUsageSession,
   setUsageTripEnabled,
@@ -231,6 +232,56 @@ describe("usage accounting", () => {
         .get("late-conversation-request") as { conversation_id: string | null };
       assert.equal(usage.conversation_id, "conv-1");
       assert.equal(diagnostic.conversation_id, "conv-1");
+    });
+  });
+
+  it("omits request-scoped surface context from durable developer transcripts", () => {
+    withUsageTestDb((db) => {
+      const surfaceContext = [
+        "Request-scoped Prism companion surface context (not chat history or memory):",
+        "Slate project: Never Persist This Surface Title (draft)",
+      ].join("\n");
+      runWithUsageSession(
+        {
+          db,
+          userId: "user-1",
+          privacyScope: "normal",
+          mode: "zen",
+          surface: "zen",
+          conversationId: "conv-1",
+          requestId: "surface-context-request",
+        },
+        () => {
+          registerUsageDiagnosticRedaction(surfaceContext);
+          recordDeveloperTranscriptEvent({
+            kind: "llm",
+            purpose: "chat_reply",
+            request: {
+              messages: [
+                {
+                  role: "system",
+                  content: `Before\n${surfaceContext}\nAfter`,
+                },
+              ],
+            },
+            parsedOutput: "Visible reply",
+          });
+        },
+      );
+
+      const row = db
+        .prepare(
+          "SELECT payload_json FROM developer_transcript_events WHERE request_id = ?",
+        )
+        .get("surface-context-request") as { payload_json: string };
+      assert.match(row.payload_json, /Request-scoped Prism surface context omitted/u);
+      assert.match(row.payload_json, /Before.*After/u);
+      assert.match(row.payload_json, /Visible reply/u);
+      assert.doesNotMatch(row.payload_json, /Never Persist This Surface Title/u);
+      assert.doesNotMatch(
+        row.payload_json,
+        /Request-scoped Prism companion surface context/u,
+      );
     });
   });
 

@@ -1059,6 +1059,16 @@ describe("hydrateAssistantMessageParts", () => {
     );
   });
 
+  it("round-trips the concrete turn's Turbo provenance", () => {
+    const stored = serializeAssistantToolPayload({ turbo: true });
+    assert.equal(parseStoredAssistantToolPayload(stored).turbo, true);
+    assert.equal(
+      hydrateAssistantMessageParts({ content: "Fast.", toolPayload: stored })
+        .turbo,
+      true,
+    );
+  });
+
   it("round-trips provenance-marked social silence independently of Power silence", () => {
     const socialSilence = {
       v: 1 as const,

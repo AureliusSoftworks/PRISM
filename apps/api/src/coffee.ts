@@ -10,15 +10,15 @@
  *      so it does not consume online quota.
  *   3. The picked bot then replies through the user's selected provider
  *      using its own system prompt, identity, and generation overrides.
- *   4. Memory is thread-scoped only (no cross-thread bot memory writes
- *      in v0). The rolling history window IS the thread's memory, the
- *      same way Sandbox treats it.
+ *   4. Current-table history stays thread-scoped, while each bot receives
+ *      bounded summary-level continuity from its recent non-private Coffee
+ *      sessions. Durable relationship signals remain bot-scoped.
  *
  * Coffee deliberately does NOT go through `processChatMessage`. That
  * function carries Chat- and Sandbox-specific logic (cross-session memory
  * writes, opinion tracking, starter prompts, AskQuestion tool detection,
  * mood signaling) that doesn't apply here. Reusing it would either
- * silently leak Coffee turns into the cross-thread `memories` table or
+ * indiscriminately leak Coffee turns into the cross-thread `memories` table or
  * require many new branches inside an already-3.3k-line module. A leaner
  * sibling keeps the pipelines independent and easy to evolve separately.
  */
@@ -30,6 +30,7 @@ import { SCRIPTED_PROMPT_WILDCARD_VALUES } from "./prompt-wildcard-seeds.ts";
 import {
   allModelReasoningEffortCursorHash,
   resolveUserModelReasoningEffort,
+  resolveUserModelTurboMode,
 } from "./model-effort-runtime.ts";
 import {
   prepareMessagesWithSimulatedEffort,
@@ -60,6 +61,10 @@ import {
   retrieveRecentBotMemoriesForStarter,
   retrieveRecentMemoriesForStarter,
 } from "./memory.ts";
+import {
+  buildCoffeeContinuityPromptContext,
+  loadRecentCoffeeContinuityContexts,
+} from "./coffee-continuity.ts";
 import { validateMemoryCandidates } from "./memory-validation.ts";
 import {
   buildCloneFamilyIdentityPrompt,
@@ -198,6 +203,7 @@ import {
   COFFEE_BAR_ORDER_MAX_LENGTH,
   COFFEE_GROUP_ETHOS_MAX_LENGTH,
   COFFEE_TOPIC_MAX_LENGTH,
+  BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
   CROSSTALK_MEANINGFUL_CUTOFF_HEARD_RATIO,
   DEFAULT_COFFEE_SESSION_DURATION_MINUTES,
   COFFEE_POLL_FINALIZE_REMAINING_MS,
@@ -4898,6 +4904,11 @@ export function recordCoffeeInterruptionPause(args: {
     args.userId,
     row.id,
   );
+  const interruptedBotCopiesAddressedSpeech =
+    coffeePowerBotEchoesAddressedSpeech(
+      coffeePowerPlan,
+      interruptedBot.id,
+    );
   let irritationEdges = args.interrupterBotId
     ? loadCoffeeDirectionalIrritationEdges(args.db, args.userId, row.id)
     : {};
@@ -5063,18 +5074,20 @@ export function recordCoffeeInterruptionPause(args: {
       }
     }
   }
-  // Prefer verbal-forward snark from irritation delivery over the canned yield cue.
-  // Foley-only delivery leaves the cue unset (event cannot carry vocalFoley).
+  // Speech-copy holders cannot invent a protest after their copied line is cut.
+  // Otherwise prefer verbal-forward snark; Foley-only delivery leaves the cue unset.
   const interruptedSpeakerCue =
     args.interrupterBotId && floorOutcome !== "reclaim"
-      ? interruptedDeliverySnark
-        ? (normalizeBotCrosstalkInterruptedSpeakerCue(
-            interruptedDeliverySnark,
-          ) ??
-          (interruptedDeliverySnark as BotCrosstalkInterruptedSpeakerCue))
-        : interruptedDeliveryFoleyOnly
-          ? undefined
-          : botCrosstalkInterruptedSpeakerCueForSeed(crosstalkSeed)
+      ? interruptedBotCopiesAddressedSpeech
+        ? BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE
+        : interruptedDeliverySnark
+          ? (normalizeBotCrosstalkInterruptedSpeakerCue(
+              interruptedDeliverySnark,
+            ) ??
+            (interruptedDeliverySnark as BotCrosstalkInterruptedSpeakerCue))
+          : interruptedDeliveryFoleyOnly
+            ? undefined
+            : botCrosstalkInterruptedSpeakerCueForSeed(crosstalkSeed)
       : undefined;
   const interruptionEvent: CoffeeInterruptionEvent = {
     kind: args.interrupterBotId ? "botInterruptsBot" : "playerInterruptsBot",
@@ -5599,7 +5612,7 @@ export interface CoffeeTurnSettings {
   reasoningEffort?: ReasoningEffort;
   /** Contextual Auto decision frozen for this individual generation. */
   autoRouteDecision?: AutoRouteDecisionV1;
-  /** Experimental deep simulated-effort ladder (simulation itself is always on for thoughtless models). */
+  /** Experimental deep ladder for LOCAL simulated effort. */
   experimentalAllModelEffortEnabled?: boolean;
   /** Cancels router, private deliberation, and final speaker generation. */
   signal?: AbortSignal;
@@ -8462,8 +8475,9 @@ export function parseStoredCoffeeSessionSettings(raw: string | null | undefined)
 }
 
 const COFFEE_STARTER_TOPIC_COUNT = 4;
-const COFFEE_STARTER_TOPIC_INFER_MAX_TOKENS = 900;
+const COFFEE_STARTER_TOPIC_INFER_MAX_TOKENS = 1_200;
 const COFFEE_STARTER_TOPIC_INFER_TEMPERATURE = 0.55;
+const COFFEE_STARTER_TOPIC_REROLL_TEMPERATURE = 0.72;
 const COFFEE_GROUP_NAME_INFER_MAX_TOKENS = 140;
 const COFFEE_GROUP_NAME_INFER_TEMPERATURE = 0.7;
 const COFFEE_GROUP_NAME_INFER_ATTEMPTS = 2;
@@ -8551,6 +8565,19 @@ const COFFEE_STARTER_TOPIC_PROFILE_CARD_WORDS = new Set([
   "reflections",
   "struggle",
   "struggles",
+]);
+
+const COFFEE_STARTER_TOPIC_PROFILE_METADATA_WORDS = new Set([
+  "behavior",
+  "behaviour",
+  "corrector",
+  "habit",
+  "persona",
+  "profile",
+  "role",
+  "style",
+  "tendency",
+  "trait",
 ]);
 
 const COFFEE_STARTER_TOPIC_PASSIVE_ENDINGS = new Set([
@@ -8738,12 +8765,28 @@ function coffeeStarterTopicHasAwkwardRepeatedRoot(label: string): boolean {
   return [...counts.values()].some((count) => count > 1);
 }
 
+function coffeeStarterTopicLooksLikeMetaWrapper(label: string): boolean {
+  return /^(?:a|the)\s+(?:(?:harder|deeper|better|fresh|new|another)\s+)?(?:question|topic|prompt|angle)\s+(?:about|on)\b/iu.test(
+    label,
+  );
+}
+
+function coffeeStarterTopicLooksLikeProfileMetadataLabel(label: string): boolean {
+  const roots = coffeeStarterTopicContentRoots(label);
+  return (
+    roots.length <= 4 &&
+    roots.some((root) => COFFEE_STARTER_TOPIC_PROFILE_METADATA_WORDS.has(root))
+  );
+}
+
 function coffeeStarterTopicLooksLikeProfileCardLabel(
   label: string,
   group: readonly Pick<CoffeeBotProfile, "name">[]
 ): boolean {
   if (coffeeStarterTopicMentionsParticipantName(label, group)) return true;
   if (coffeeStarterTopicHasAwkwardRepeatedRoot(label)) return true;
+  if (coffeeStarterTopicLooksLikeMetaWrapper(label)) return true;
+  if (coffeeStarterTopicLooksLikeProfileMetadataLabel(label)) return true;
   const roots = coffeeStarterTopicContentRoots(label);
   if (roots.some((root) => COFFEE_STARTER_TOPIC_PROFILE_CARD_WORDS.has(root))) return true;
   const lastRoot = roots.at(-1);
@@ -8791,6 +8834,18 @@ function coffeeStarterTopicSimilarityKeys(label: string): string[] {
   if (uniqueRoots.length >= 3) keys.push(uniqueRoots.slice(0, 3).join(" "));
   if (uniqueRoots.length >= 4) keys.push(uniqueRoots.slice(0, 4).join(" "));
   return keys.filter((key, index, all) => key.length > 0 && all.indexOf(key) === index);
+}
+
+function coffeeStarterTopicSelectedKeys(labels: readonly string[]): Set<string> {
+  const selectedKeys = new Set<string>();
+  for (const rawLabel of labels) {
+    const label = normalizeCoffeeStarterTopicLabel(rawLabel);
+    if (!label) continue;
+    for (const key of coffeeStarterTopicSimilarityKeys(label)) {
+      selectedKeys.add(key);
+    }
+  }
+  return selectedKeys;
 }
 
 function coffeeStarterTopicMentionsMultipleBots(
@@ -9016,10 +9071,23 @@ function parseCoffeeStarterTopicCandidatesPayload(
   return [];
 }
 
-function parseCoffeeStarterTopicsPayload(raw: string, group: CoffeeBotProfile[]): string[] {
+function parseCoffeeStarterTopicsPayload(
+  raw: string,
+  group: CoffeeBotProfile[],
+  excludedTopics: readonly string[] = [],
+  personaRelevantOnly = false
+): string[] {
+  const candidates = parseCoffeeStarterTopicCandidatesPayload(raw, group).filter(
+    (candidate) =>
+      !personaRelevantOnly || !coffeeStarterTopicLabelIsCanned(candidate.label)
+  );
   return selectCoffeeStarterTopicLabels(
-    parseCoffeeStarterTopicCandidatesPayload(raw, group),
-    group
+    candidates,
+    group,
+    personaRelevantOnly
+      ? COFFEE_GROUP_STARTER_TOPIC_MAX
+      : COFFEE_STARTER_TOPIC_COUNT,
+    { selectedKeys: coffeeStarterTopicSelectedKeys(excludedTopics) }
   );
 }
 
@@ -10084,12 +10152,110 @@ function buildDeterministicCoffeeStarterTopics(
   );
 }
 
+export function coffeeStarterTopicLabelIsCanned(label: string): boolean {
+  const normalized = label.replace(/\s+/g, " ").trim();
+  const lowered = normalized.toLocaleLowerCase();
+  return (
+    COFFEE_CANNED_STARTER_TOPIC_LABELS.has(lowered) ||
+    coffeeStarterTopicLooksLikeMetaWrapper(normalized) ||
+    coffeeStarterTopicLooksLikeProfileMetadataLabel(normalized) ||
+    /\b(?:changes the plan|under pressure|worth defending)$/iu.test(normalized)
+  );
+}
+
+/**
+ * Deterministic session-start fallback derived only from the seated personas.
+ * This intentionally omits every shared safety quartet and generic fill pool.
+ */
+function buildPersonaRelevantCoffeeStarterTopicCandidates(
+  group: CoffeeBotProfile[]
+): CoffeeStarterTopicCandidate[] {
+  const conceptsByBot = group.map((bot) => collectCoffeeBotTopicConcepts(bot));
+  const pairs: Array<{
+    left: string[];
+    right: string[];
+  }> = [];
+  for (let leftIndex = 0; leftIndex < conceptsByBot.length; leftIndex += 1) {
+    for (let rightIndex = leftIndex + 1; rightIndex < conceptsByBot.length; rightIndex += 1) {
+      const left = conceptsByBot[leftIndex] ?? [];
+      const right = conceptsByBot[rightIndex] ?? [];
+      if (left.length > 0 && right.length > 0) pairs.push({ left, right });
+    }
+  }
+
+  const candidates: CoffeeStarterTopicCandidate[] = [];
+  const frames = [
+    (left: string, right: string) => `When ${left} silences ${right}`,
+    (left: string, right: string) => `Can ${left} survive ${right}?`,
+    (left: string, right: string) => `Who pays when ${left} outranks ${right}?`,
+    (left: string, right: string) => `${sentenceCaseCoffeeTopicPhrase(left)} without ${right}`,
+  ] as const;
+  for (let roundIndex = 0; roundIndex < frames.length; roundIndex += 1) {
+    for (let pairIndex = 0; pairIndex < pairs.length; pairIndex += 1) {
+      const pair = pairs[pairIndex]!;
+      const frameIndex = (roundIndex + pairIndex) % frames.length;
+      const left = pair.left[(roundIndex + pairIndex) % pair.left.length]!;
+      const right = pair.right[(roundIndex * 2 + pairIndex) % pair.right.length]!;
+      if (left === right) continue;
+      const label = frames[frameIndex]!(left, right);
+      if (!coffeeStarterTopicLabelIsCanned(label)) {
+        candidates.push({ label });
+      }
+    }
+  }
+  return candidates;
+}
+
+function selectPersonaRelevantCoffeeStarterTopics(
+  parsedTopics: readonly string[],
+  group: CoffeeBotProfile[],
+  memoryContext: readonly CoffeeStarterMemoryContextEntry[] = [],
+  excludedTopics: readonly string[] = []
+): string[] {
+  const contextTokens = coffeeStarterTopicRelevanceTokens([
+    ...group.flatMap((bot) => collectCoffeeBotTopicHints(bot)),
+    ...coffeeGroupFacetTexts(group),
+    ...memoryContext.flatMap((entry) => entry.memories),
+  ]);
+  return selectCoffeeStarterTopicLabels(
+    parsedTopics
+      .filter((label) => !coffeeStarterTopicLabelIsCanned(label))
+      .filter(
+        (label) => coffeeStarterTopicGroupRelevanceScore(label, contextTokens) > 0
+      )
+      .map((label) => ({ label })),
+    group,
+    COFFEE_STARTER_TOPIC_COUNT,
+    { selectedKeys: coffeeStarterTopicSelectedKeys(excludedTopics) }
+  ).slice(0, COFFEE_STARTER_TOPIC_COUNT);
+}
+
 function completeCoffeeStarterTopics(
   parsedTopics: readonly string[],
   group: CoffeeBotProfile[],
   sessionSettings: CoffeeSessionSettings,
-  memoryContext: readonly CoffeeStarterMemoryContextEntry[] = []
+  memoryContext: readonly CoffeeStarterMemoryContextEntry[] = [],
+  excludedTopics: readonly string[] = [],
+  personaRelevantOnly = false
 ): string[] {
+  const selectedKeys = coffeeStarterTopicSelectedKeys(excludedTopics);
+  if (personaRelevantOnly) {
+    const relevantTopics = selectPersonaRelevantCoffeeStarterTopics(
+      parsedTopics,
+      group,
+      memoryContext,
+      excludedTopics
+    );
+    return selectCoffeeStarterTopicLabels(
+      [
+        ...relevantTopics.map((label) => ({ label })),
+        ...buildPersonaRelevantCoffeeStarterTopicCandidates(group),
+      ],
+      group,
+      COFFEE_STARTER_TOPIC_COUNT,
+      { selectedKeys }
+    ).slice(0, COFFEE_STARTER_TOPIC_COUNT);
+  }
   if (coffeeGroupHasCanonFacetSignal(group)) {
     const contextTokens = coffeeStarterTopicRelevanceTokens([
       ...group.flatMap((bot) => collectCoffeeBotTopicHints(bot)),
@@ -10116,8 +10282,11 @@ function completeCoffeeStarterTopics(
         { label: "When kindness backfires" },
         { label: "A rule worth breaking" },
         { label: "A truth worth keeping" },
+        ...COFFEE_DISTINCT_FILL_TOPICS.map((label) => ({ label })),
       ],
-      group
+      group,
+      COFFEE_STARTER_TOPIC_COUNT,
+      { selectedKeys }
     ).slice(0, COFFEE_STARTER_TOPIC_COUNT);
   }
 
@@ -10129,8 +10298,11 @@ function completeCoffeeStarterTopics(
       { label: "When kindness backfires" },
       { label: "A rule worth breaking" },
       { label: "A truth worth keeping" },
+      ...COFFEE_DISTINCT_FILL_TOPICS.map((label) => ({ label })),
     ],
-    group
+    group,
+    COFFEE_STARTER_TOPIC_COUNT,
+    { selectedKeys }
   ).slice(0, COFFEE_STARTER_TOPIC_COUNT);
 }
 
@@ -10350,6 +10522,95 @@ const COFFEE_BOT_TOPIC_PHRASE_STOPWORDS = new Set([
   "who",
 ]);
 
+const COFFEE_BOT_TOPIC_CONCEPT_STOPWORDS = new Set([
+  ...COFFEE_BOT_TOPIC_PHRASE_STOPWORDS,
+  "always",
+  "are",
+  "answer",
+  "answers",
+  "assistant",
+  "been",
+  "being",
+  "be",
+  "bot",
+  "conversation",
+  "conversational",
+  "habit",
+  "persona",
+  "profile",
+  "prompt",
+  "reply",
+  "role",
+  "speaks",
+  "style",
+  "that",
+  "their",
+  "them",
+  "they",
+  "tendency",
+  "this",
+  "those",
+  "trait",
+  "user",
+  "value",
+  "values",
+  "you",
+  "your",
+]);
+
+function normalizeCoffeeBotTopicConcept(raw: string): string | null {
+  const token = raw.toLocaleLowerCase().replace(/^['-]+|['-]+$/gu, "");
+  if (!token || token.length <= 2 || COFFEE_BOT_TOPIC_CONCEPT_STOPWORDS.has(token)) {
+    return null;
+  }
+  if (/^(?:interject|interrupt)/u.test(token)) return "interruption";
+  if (/^correct/u.test(token)) return "correction";
+  if (/^navigat/u.test(token)) return "navigation";
+  if (/^precis/u.test(token)) return "precision";
+  if (/^strateg/u.test(token)) return "strategy";
+  if (/^critic/u.test(token)) return "criticism";
+  if (/^argu/u.test(token)) return "argument";
+  if (/^debate/u.test(token)) return "debate";
+  if (/^heckl/u.test(token)) return "heckling";
+  if (/^sarcas/u.test(token)) return "sarcasm";
+  if (/^communicat/u.test(token)) return "communication";
+  if (/^enforc/u.test(token)) return "enforcement";
+  if (/^social/u.test(token)) return "social grace";
+  if (token.endsWith("ies") && token.length > 5) return `${token.slice(0, -3)}y`;
+  if (token.endsWith("s") && !token.endsWith("ss") && token.length > 4) {
+    return token.slice(0, -1);
+  }
+  return token;
+}
+
+function collectCoffeeBotTopicConcepts(bot: CoffeeBotProfile): string[] {
+  const { fields } = parseStoredBotPrompt(bot.systemPrompt);
+  const facets = coffeeBotSemanticFacets(bot);
+  const texts = [
+    fields.core.interests,
+    fields.worldview.values,
+    fields.purpose.statement,
+    ...facets.values,
+    ...facets.tensions,
+    ...facets.domains,
+    summarizePersonaForRouter(bot.systemPrompt),
+  ];
+  const botNameTokens = new Set(coffeeStarterTopicTokens(bot.name));
+  const concepts: string[] = [];
+  const seen = new Set<string>();
+  for (const text of texts) {
+    for (const rawToken of coffeeStarterTopicTokens(text)) {
+      if (botNameTokens.has(rawToken)) continue;
+      const concept = normalizeCoffeeBotTopicConcept(rawToken);
+      if (!concept || seen.has(concept)) continue;
+      seen.add(concept);
+      concepts.push(concept);
+      if (concepts.length >= 3) return concepts;
+    }
+  }
+  return concepts;
+}
+
 function sentenceCaseCoffeeTopicPhrase(phrase: string): string {
   return phrase.length > 0 ? `${phrase.slice(0, 1).toUpperCase()}${phrase.slice(1)}` : phrase;
 }
@@ -10457,11 +10718,7 @@ export function coffeeGroupStarterTopicsLookCanned(
   topics: readonly string[] | null | undefined
 ): boolean {
   if (!topics || topics.length === 0) return false;
-  return topics.every((topic) =>
-    COFFEE_CANNED_STARTER_TOPIC_LABELS.has(
-      topic.replace(/\s+/g, " ").trim().toLocaleLowerCase()
-    )
-  );
+  return topics.every((topic) => coffeeStarterTopicLabelIsCanned(topic));
 }
 
 /**
@@ -10627,8 +10884,9 @@ export async function inferCoffeeGroupStarterTopics(args: {
 }
 
 /**
- * Produce four short topic labels for the Coffee topic picker. Falls back to
- * deterministic copy when the auxiliary model is unavailable or mis-parses.
+ * Produce four short topic labels for the Coffee topic picker. Session start
+ * can fall back to deterministic copy; atomic rerolls reject incomplete model
+ * output so the client can preserve its current quartet.
  */
 export async function inferCoffeeStarterTopics(args: {
   provider: LlmProvider;
@@ -10641,6 +10899,12 @@ export async function inferCoffeeStarterTopics(args: {
   attendanceContext?: CoffeeAttendanceContext | null;
   /** Stored group topics to critique, rewrite, and re-rank for this exact attendance snapshot. */
   candidatePool?: readonly string[];
+  /** Visible topic suggestions being replaced; these and close semantic matches are excluded. */
+  excludedTopics?: readonly string[];
+  /** Refresh mode: every result must be grounded in the seated personas; never use canned padding. */
+  personaRelevantOnly?: boolean;
+  /** Atomic refresh mode: reject unless the model itself supplies all four usable topics. */
+  requireCompleteGeneratedSet?: boolean;
   /** Auxiliary model selected for developer-transcript provenance. */
   model?: string | null;
 }): Promise<string[]> {
@@ -10653,6 +10917,9 @@ export async function inferCoffeeStarterTopics(args: {
     memoryContext,
     attendanceContext,
     candidatePool,
+    excludedTopics,
+    personaRelevantOnly,
+    requireCompleteGeneratedSet,
     model,
   } = args;
   const botLines = group.map((bot) => {
@@ -10687,6 +10954,26 @@ export async function inferCoffeeStarterTopics(args: {
         JSON.stringify(rankedCandidatePool),
       ]
     : ["Stored Coffee Group candidate pool: none; create fresh ideas from the participants."];
+  const visibleExcludedTopicLabels = normalizeCoffeeTopicSelectionCandidates(excludedTopics);
+  const rawPersonaSeedLabels = personaRelevantOnly
+    ? normalizeCoffeeTopicSelectionCandidates(coffeeFacetStarterTopicCandidates(group))
+    : [];
+  const excludedTopicLabels = normalizeCoffeeTopicSelectionCandidates([
+    ...visibleExcludedTopicLabels,
+    ...rawPersonaSeedLabels,
+  ]);
+  const excludedTopicLines = visibleExcludedTopicLabels.length > 0
+    ? [
+        "Current visible topic suggestions to replace (do not repeat or lightly rephrase them):",
+        JSON.stringify(visibleExcludedTopicLabels),
+      ]
+    : [];
+  const rawPersonaSeedLines = rawPersonaSeedLabels.length > 0
+    ? [
+        "Internal persona seed labels (raw source material only; transform their ideas and never repeat these labels verbatim):",
+        JSON.stringify(rawPersonaSeedLabels),
+      ]
+    : [];
   const messages: ProviderMessage[] = [
     {
       role: "system",
@@ -10712,15 +10999,19 @@ export async function inferCoffeeStarterTopics(args: {
           : []),
         ...storedCandidateLines,
         "",
+        ...excludedTopicLines,
+        ...(excludedTopicLines.length > 0 ? [""] : []),
+        ...rawPersonaSeedLines,
+        ...(rawPersonaSeedLines.length > 0 ? [""] : []),
         ...formatCoffeeStarterMemoryContext(memoryContext),
         "",
         formatCoffeeAttendancePromptSummary(attendanceContext) ??
           "Coffee Group attendance context: no current or recent absences to note.",
         "",
         'Respond with compact JSON exactly in this shape: {"candidates":[{"label":"...","kind":"reflective","rationale":"...","participantBotIds":["...","..."],"scores":{"relevance":0,"depth":0,"novelty":0,"balance":0,"fit":0}}]}',
-        "Generate exactly eight candidates internally: two reflective/shared-curiosity, two productive-tension, two concrete dilemma/scenario, and two surprising wildcard angles.",
+        "Generate exactly twelve candidates internally: three reflective/shared-curiosity, three productive-tension, three concrete dilemma/scenario, and three surprising wildcard angles.",
         "Score every candidate from 0-5 for relevance, depth, novelty, conversational balance, and fit with these exact participants. Use participantBotIds to name every seated bot who can contribute meaningfully.",
-        "PRISM will rank the eight candidates and keep the strongest balanced set; do not pre-sort weak filler ahead of stronger ideas.",
+        "PRISM will rank the twelve candidates and keep the strongest balanced set; do not pre-sort weak filler ahead of stronger ideas.",
         "Each label is a TOPIC THE GROUP EXPLORES together (not a user quick-reply, not a question directed only at the player).",
         "Each label must be 2–8 words, concrete, safe, single-line UTF-8; no numbering or prefixes inside strings.",
         "Ground every topic in the seated bots' stated interests, values, purpose, roles, memories, or productive contrasts between them.",
@@ -10729,6 +11020,9 @@ export async function inferCoffeeStarterTopics(args: {
         "Reject any candidate that only one seated participant can meaningfully address.",
         "Infer the likely reason the user assembled this group, and reward topics that surface that shared purpose or productive disagreement.",
         "Write table topics, not bot profile labels: avoid labels shaped like \"Name's trait\", \"Name's outlook\", hobby dreams, quiet reflections, or generic struggles.",
+        "Never expose profile metadata, role labels, habits, tendencies, or internal facet wording as a topic.",
+        "Do not wrap a raw trait in stock copy such as 'A harder question about X', 'X under pressure', 'X worth defending', or 'When X changes the plan'.",
+        "For a reroll, change the underlying conflict or curiosity—not merely the wording. Favor a surprising relationship between at least two different persona signals.",
         "If a label would name a participant, rewrite it as the shared situation, tension, or choice the whole table can argue about.",
         "Avoid near-duplicate concepts; change the actual angle, not just a suffix like dilemma, struggle, or chaos.",
         "Attendance can tint topic choice only when it creates a natural group dynamic; do not make all topics about who is away.",
@@ -10743,28 +11037,58 @@ export async function inferCoffeeStarterTopics(args: {
   const generationRequest = {
     participantBotIds: group.map((bot) => bot.id),
     storedCandidatePool: rankedCandidatePool,
-    requestedCandidateCount: 8,
+    excludedTopics: excludedTopicLabels,
+    requestedCandidateCount: 12,
     rankingDimensions: ["relevance", "depth", "novelty", "balance", "fit"],
   };
   const diagnosticModel =
     (typeof model === "string" && model.trim().length > 0 ? model.trim() : null) ??
     (provider.diagnosticModel?.trim() || null);
   let rawOutput: string | undefined;
+  let acceptedGeneratedTopicCount = 0;
   try {
     rawOutput = await provider.generateResponse(messages, {
-      temperature: COFFEE_STARTER_TOPIC_INFER_TEMPERATURE,
+      temperature: personaRelevantOnly
+        ? COFFEE_STARTER_TOPIC_REROLL_TEMPERATURE
+        : COFFEE_STARTER_TOPIC_INFER_TEMPERATURE,
       maxTokens: COFFEE_STARTER_TOPIC_INFER_MAX_TOKENS,
       usagePurpose: "coffee_router",
     });
-    const parsed = parseCoffeeStarterTopicsPayload(rawOutput, group);
-    const topics = completeCoffeeStarterTopics(
-      [...parsed, ...rankedCandidatePool],
+    const parsed = parseCoffeeStarterTopicsPayload(
+      rawOutput,
       group,
-      sessionSettings,
-      memoryContext
+      excludedTopicLabels,
+      personaRelevantOnly
     );
+    const acceptedGeneratedTopics = personaRelevantOnly
+      ? selectPersonaRelevantCoffeeStarterTopics(
+          parsed,
+          group,
+          memoryContext,
+          excludedTopicLabels
+        )
+      : parsed.slice(0, COFFEE_STARTER_TOPIC_COUNT);
+    acceptedGeneratedTopicCount = acceptedGeneratedTopics.length;
+    if (
+      requireCompleteGeneratedSet &&
+      acceptedGeneratedTopics.length !== COFFEE_STARTER_TOPIC_COUNT
+    ) {
+      throw new Error("The Coffee topic model did not return four usable topics.");
+    }
+    const topics = requireCompleteGeneratedSet
+      ? acceptedGeneratedTopics
+      : completeCoffeeStarterTopics(
+          [...parsed, ...rankedCandidatePool],
+          group,
+          sessionSettings,
+          memoryContext,
+          excludedTopicLabels,
+          personaRelevantOnly
+        );
     if (topics.length === COFFEE_STARTER_TOPIC_COUNT) {
-      const usedFallback = parsed.length < COFFEE_STARTER_TOPIC_COUNT;
+      const usedFallback = requireCompleteGeneratedSet
+        ? false
+        : parsed.length < COFFEE_STARTER_TOPIC_COUNT;
       recordDeveloperTranscriptEvent({
         kind: "tool",
         purpose: "coffee_topic_candidate_ranking",
@@ -10783,14 +11107,44 @@ export async function inferCoffeeStarterTopics(args: {
       return topics;
     }
   } catch (error) {
+    if (requireCompleteGeneratedSet) {
+      recordDeveloperTranscriptEvent({
+        kind: "tool",
+        purpose: "coffee_topic_candidate_ranking",
+        provider: provider.name,
+        model: diagnosticModel,
+        request: generationRequest,
+        ...(rawOutput !== undefined ? { rawOutput } : {}),
+        parsedOutput: {
+          rankedTopics: [],
+          parsedCandidateCount: acceptedGeneratedTopicCount,
+          usedFallback: false,
+        },
+        streaming: false,
+        error: error instanceof Error ? error.message : String(error),
+        fallback: false,
+      });
+      throw new Error(
+        "Could not generate four new Coffee topics. Your current topics are unchanged—try again."
+      );
+    }
     const topics = rankedCandidatePool.length > 0
       ? completeCoffeeStarterTopics(
           rankedCandidatePool,
           group,
           sessionSettings,
-          memoryContext
+          memoryContext,
+          excludedTopicLabels,
+          personaRelevantOnly
         )
-      : buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext);
+      : completeCoffeeStarterTopics(
+          [],
+          group,
+          sessionSettings,
+          memoryContext,
+          excludedTopicLabels,
+          personaRelevantOnly
+        );
     recordDeveloperTranscriptEvent({
       kind: "tool",
       purpose: "coffee_topic_candidate_ranking",
@@ -10810,9 +11164,18 @@ export async function inferCoffeeStarterTopics(args: {
         rankedCandidatePool,
         group,
         sessionSettings,
-        memoryContext
+        memoryContext,
+        excludedTopicLabels,
+        personaRelevantOnly
       )
-    : buildDeterministicCoffeeStarterTopics(group, sessionSettings, memoryContext);
+    : completeCoffeeStarterTopics(
+        [],
+        group,
+        sessionSettings,
+        memoryContext,
+        excludedTopicLabels,
+        personaRelevantOnly
+      );
   recordDeveloperTranscriptEvent({
     kind: "tool",
     purpose: "coffee_topic_candidate_ranking",
@@ -10824,6 +11187,83 @@ export async function inferCoffeeStarterTopics(args: {
     streaming: false,
     fallback: true,
   });
+  return topics;
+}
+
+/**
+ * Replace the visible starter suggestions for a Coffee session that has not
+ * begun. The replacement remains ephemeral until the player chooses a topic.
+ */
+export async function refreshCoffeeConversationStarterTopics(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  rawCurrentTopics: unknown,
+  llm?: (CoffeeAuxiliaryOptions & { userKey?: Buffer }) | null
+): Promise<string[]> {
+  const loaded = loadCoffeeConversationGroup(db, userId, conversationId);
+  if (loaded.row.coffee_topic?.trim()) {
+    throw new Error("This Coffee session already has a topic.");
+  }
+  if (parseCoffeeTeamState(loaded.row.coffee_team_mode_json)) {
+    throw new Error("Coffee Teams already set the topic for this session.");
+  }
+  if (loadActiveCoffeeSessionPoll(db, userId, conversationId)) {
+    throw new Error("A Coffee poll already set the topic for this session.");
+  }
+  if (loadMessages(db, userId, conversationId, 1).length > 0) {
+    throw new Error("Coffee topics can only be refreshed before the table starts.");
+  }
+
+  const provider = coffeeAuxiliaryProvider(llm);
+  const group = attachCoffeeBotSemanticFacets(
+    db,
+    userId,
+    loaded.group,
+    llm?.prismDefaultLlmModel,
+    provider
+  );
+  const coffeeGroup = loaded.row.coffee_group_id
+    ? getCoffeeGroup(db, userId, loaded.row.coffee_group_id)
+    : null;
+  let presetLabel: string | null = null;
+  if (loaded.row.coffee_preset_id?.trim()) {
+    try {
+      presetLabel = resolveCoffeePreset(db, userId, loaded.row.coffee_preset_id).name;
+    } catch {
+      presetLabel = null;
+    }
+  }
+
+  const topics = await inferCoffeeStarterTopics({
+    provider,
+    model: llm?.prismDefaultLlmModel ?? null,
+    group,
+    sessionSettings: parseStoredCoffeeSessionSettings(loaded.row.coffee_settings),
+    groupEthos: coffeeGroup?.ethos ?? null,
+    presetLabel,
+    memoryContext: loadCoffeeStarterMemoryContext({
+      db,
+      userId,
+      userKey: llm?.userKey,
+      group,
+    }),
+    attendanceContext: loadCoffeeAttendanceContext({
+      db,
+      userId,
+      conversationId,
+      coffeeGroupId: loaded.row.coffee_group_id,
+      group,
+      absentBotIds: parseStoredBotGroupIds(loaded.row.coffee_absent_bot_ids),
+    }),
+    candidatePool: coffeeGroup?.starterTopics ?? [],
+    excludedTopics: normalizeCoffeeTopicSelectionCandidates(rawCurrentTopics),
+    personaRelevantOnly: true,
+    requireCompleteGeneratedSet: true,
+  });
+  if (topics.length !== COFFEE_STARTER_TOPIC_COUNT) {
+    throw new Error("Could not make a complete set of Coffee topics.");
+  }
   return topics;
 }
 
@@ -12228,6 +12668,8 @@ export function buildSpeakerPrompt(args: {
   coffeeTeams?: CoffeeTeamState | null;
   /** Optional rolling background summary used to reduce local echo loops. */
   meetingSummary?: string | null;
+  /** Summary-level memories from this bot's recent Coffee sessions. */
+  crossSessionMemoryContext?: string | null;
   /** Optional Coffee Group attendance context for current/recent absences. */
   attendanceContext?: CoffeeAttendanceContext | null;
   /** Latest saved user action cue; soft context only, never main table focus. */
@@ -12291,6 +12733,7 @@ export function buildSpeakerPrompt(args: {
     activePoll,
     coffeeTeams,
     meetingSummary,
+    crossSessionMemoryContext,
     attendanceContext,
     latestUserAction,
     directorCue,
@@ -12481,6 +12924,18 @@ export function buildSpeakerPrompt(args: {
           "Use this to continue the unresolved thread naturally. React to the latest line first, then advance the summary's open point in your own words.",
         ]
       : [];
+  const crossSessionMemoryTrim =
+    typeof crossSessionMemoryContext === "string"
+      ? crossSessionMemoryContext.trim()
+      : "";
+  const crossSessionMemoryLines =
+    crossSessionMemoryTrim.length > 0
+      ? [
+          "",
+          crossSessionMemoryTrim,
+          "Treat this as your own imperfect recollection, not shared current-table knowledge. Mention it only when it naturally helps, and never claim another seated bot remembers it unless they establish that themselves.",
+        ]
+      : [];
   const attendanceSummary = formatCoffeeAttendancePromptSummary(attendanceContext);
   const attendanceLines = attendanceSummary ? ["", attendanceSummary] : [];
   const latestUserActionTrim =
@@ -12588,13 +13043,16 @@ export function buildSpeakerPrompt(args: {
   const groupContextLines = [
     "You are sitting at Coffee Mode: an ambiguous coffee shop table inside PRISM.",
     promptHistory.length < 3
-      ? "This table is still warming up. You can see the other participants' names, but do not act as if you already know them unless the transcript proves it."
+      ? crossSessionMemoryTrim
+        ? "This table is still warming up. You may recognize established participants only from the supplied Coffee memories; do not invent familiarity beyond them."
+        : "This table is still warming up. You can see the other participants' names, but do not act as if you already know them unless the transcript proves it."
       : "Use the current table transcript as your shared history with the user and the other bots.",
     ...topicLines,
     ...ethosLines,
     ...pollLines,
     ...activePollLines,
     ...speakerTeamLines,
+    ...crossSessionMemoryLines,
     ...meetingSummaryLines,
     ...attendanceLines,
     ...latestUserActionLines,
@@ -12690,7 +13148,9 @@ export function buildSpeakerPrompt(args: {
     messages.push({
       role: "system",
       content:
-        "Session opening turn: begin with a clear kickoff line that starts this new table conversation naturally. Ground it in the topic and give the group a fresh first beat. Do not imply unseen prior context with phrases like 'again', 'as usual', 'still', or 'like last time'. Keep it simple, present-moment, and immediately understandable as the first line.",
+        crossSessionMemoryTrim
+          ? "Session opening turn: begin with a clear kickoff line that starts this new table conversation naturally. Ground it in the topic and give the group a fresh first beat. You may lightly recognize supplied Coffee continuity, but do not pretend anything has already been said in this session."
+          : "Session opening turn: begin with a clear kickoff line that starts this new table conversation naturally. Ground it in the topic and give the group a fresh first beat. Do not imply unseen prior context with phrases like 'again', 'as usual', 'still', or 'like last time'. Keep it simple, present-moment, and immediately understandable as the first line.",
     });
   }
   if (promptHistory.length > 0) {
@@ -12864,7 +13324,6 @@ const BUILT_IN_COFFEE_PRESETS: readonly CoffeePreset[] = [
       breathingRoom: 72,
       stayOnThread: true,
       givePlayerLastWord: true,
-      memoryCallbacks: "this-session",
     }),
   },
   {
@@ -12879,7 +13338,6 @@ const BUILT_IN_COFFEE_PRESETS: readonly CoffeePreset[] = [
       breathingRoom: 38,
       stayOnThread: true,
       givePlayerLastWord: true,
-      memoryCallbacks: "this-session",
     }),
   },
   {
@@ -12894,7 +13352,6 @@ const BUILT_IN_COFFEE_PRESETS: readonly CoffeePreset[] = [
       breathingRoom: 24,
       stayOnThread: true,
       givePlayerLastWord: false,
-      memoryCallbacks: "this-session",
     }),
   },
   {
@@ -12909,7 +13366,6 @@ const BUILT_IN_COFFEE_PRESETS: readonly CoffeePreset[] = [
       breathingRoom: 0,
       stayOnThread: false,
       givePlayerLastWord: false,
-      memoryCallbacks: "this-session",
     }),
   },
 ] as const;
@@ -15806,9 +16262,26 @@ export async function createCoffeeConversation(
     group,
     COFFEE_GROUP_STARTER_TOPIC_MAX
   );
+  const shouldGenerateSessionTopics = Boolean(input.coffeeGroupId);
   const coffeeStarterTopics = initialTeamsConfig || initialTopic || input.initialPoll
     ? []
-    : providedStarterTopics.length > 0
+    : shouldGenerateSessionTopics
+      ? await inferCoffeeStarterTopics({
+          provider,
+          model: llm?.prismDefaultLlmModel ?? null,
+          group,
+          sessionSettings,
+          groupEthos:
+            input.coffeeGroupId
+              ? loadCoffeeGroupRow(db, userId, input.coffeeGroupId)?.ethos ?? null
+              : null,
+          presetLabel,
+          memoryContext: starterMemoryContext,
+          attendanceContext,
+          excludedTopics: providedStarterTopics,
+          personaRelevantOnly: true,
+        })
+      : providedStarterTopics.length > 0
       ? providedStarterTopics
       : await inferCoffeeStarterTopics({
           provider,
@@ -16854,6 +17327,17 @@ async function generateCoffeeBotReply(args: {
       coffeePowerBotAudibleTo(coffeePowerPlan, bot.id, speaker.id),
   );
   const speakerHasHiddenPeers = speakerPromptGroup.length !== turnGroup.length;
+  const crossSessionMemoryContext =
+    row.incognito === 1 || speakerEternallyIntroduces
+      ? null
+      : buildCoffeeContinuityPromptContext(
+          loadRecentCoffeeContinuityContexts({
+            db,
+            userId,
+            botId: speaker.id,
+            excludeConversationId: row.id,
+          })
+        );
   const learnedPeerAddressByBotId = await loadCoffeePeerAddressPreferences({
     db,
     userId,
@@ -17032,6 +17516,11 @@ async function generateCoffeeBotReply(args: {
     modelId: concreteSpeakerModel,
   });
   if (effectiveReasoningEffort) speakerOptions.reasoningEffort = effectiveReasoningEffort;
+  speakerOptions.turbo = resolveUserModelTurboMode(db, {
+    userId,
+    provider: effectiveProvider,
+    modelId: concreteSpeakerModel,
+  });
   if (settings.signal) speakerOptions.signal = settings.signal;
 	  if (typeof speaker.temperature === "number") {
 	    speakerOptions.temperature = speaker.temperature;
@@ -17305,6 +17794,7 @@ async function generateCoffeeBotReply(args: {
       speakerEternallyIntroduces || speakerHistoryWasArrivalScoped || speakerHasHiddenPeers
         ? null
         : meetingSummary,
+    crossSessionMemoryContext,
     attendanceContext:
       speakerEternallyIntroduces || speakerHasHiddenPeers ? null : attendanceContext,
     latestUserAction: latestUserAction?.action ?? null,
@@ -17549,6 +18039,11 @@ async function generateCoffeeBotReply(args: {
               ...speakerOptions,
               model: attempt.model,
               reasoningEffort: attemptEffort,
+              turbo: resolveUserModelTurboMode(db, {
+                userId,
+                provider: attempt.provider,
+                modelId: attempt.model,
+              }),
               usagePurpose: "coffee_turn",
               signal,
             };

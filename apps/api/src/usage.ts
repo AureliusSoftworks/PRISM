@@ -29,6 +29,8 @@ interface UsageSession {
   messageId?: string | null;
   botId?: string | null;
   developerSequence: number;
+  /** Exact request-only prompt blocks omitted from durable developer traces. */
+  diagnosticRedactions: string[];
 }
 
 export interface UsageSessionInput {
@@ -468,6 +470,7 @@ function normalizeUsagePurpose(value: string | null | undefined): UsagePurpose {
     case "slate_project_chat":
     case "slate_revision":
     case "slate_shape":
+    case "slate_transcript_story":
     case "slate_title_suggestion":
     case "story_generation":
     case "voice_preview":
@@ -511,6 +514,7 @@ const USAGE_PURPOSE_LABELS: Record<UsagePurpose, string> = {
   slate_project_chat: "Slate Project Chat",
   slate_revision: "Slate Revision",
   slate_shape: "Slate Shape",
+  slate_transcript_story: "Slate Transcript Story",
   slate_title_suggestion: "Slate Title Suggestion",
   story_generation: "Story Generation",
   voice_preview: "Voice Preview",
@@ -719,11 +723,29 @@ function currentSession(): UsageSession | undefined {
   return usageStorage.getStore();
 }
 
-function safeDiagnosticJson(value: unknown): string {
+const REQUEST_SCOPED_CONTEXT_REDACTION =
+  "[Request-scoped Prism surface context omitted]";
+
+function safeDiagnosticJson(
+  value: unknown,
+  diagnosticRedactions: readonly string[] = [],
+): string {
   const seen = new WeakSet<object>();
   try {
     return JSON.stringify(value, (_key, item: unknown) => {
       if (typeof item === "bigint") return item.toString();
+      if (typeof item === "string") {
+        return diagnosticRedactions.reduce(
+          (redacted, requestOnlyText) =>
+            requestOnlyText.length > 0
+              ? redacted.replaceAll(
+                  requestOnlyText,
+                  REQUEST_SCOPED_CONTEXT_REDACTION,
+                )
+              : redacted,
+          item,
+        );
+      }
       if (typeof item !== "object" || item === null) return item;
       if (seen.has(item)) return "[Circular]";
       seen.add(item);
@@ -775,7 +797,7 @@ export function recordDeveloperTranscriptEvent(args: DeveloperTranscriptEventInp
         args.purpose.trim() || "system_unlabeled",
         args.provider?.trim() || null,
         args.model?.trim() || null,
-        safeDiagnosticJson(payload),
+        safeDiagnosticJson(payload, session.diagnosticRedactions),
         args.createdAt ?? new Date().toISOString()
       );
   } catch (error) {
@@ -892,12 +914,26 @@ function createUsageSession(input: UsageSessionInput): UsageSession {
     privacyScope: input.privacyScope ?? "normal",
     surface: input.surface,
     developerSequence: 0,
+    diagnosticRedactions: [],
     ...(input.mode !== undefined ? { mode: input.mode } : {}),
     ...(input.conversationId !== undefined ? { conversationId: input.conversationId } : {}),
     ...(input.messageId !== undefined ? { messageId: input.messageId } : {}),
     ...(input.botId !== undefined ? { botId: input.botId } : {}),
   };
   return session;
+}
+
+/**
+ * Keep a prompt-only context block available to the provider while omitting
+ * it from durable developer transcript events and their exports.
+ */
+export function registerUsageDiagnosticRedaction(value: string): void {
+  const session = currentSession();
+  const normalized = value.trim();
+  if (!session || !normalized || session.diagnosticRedactions.includes(value)) {
+    return;
+  }
+  session.diagnosticRedactions.push(value);
 }
 
 export function patchUsageSession(

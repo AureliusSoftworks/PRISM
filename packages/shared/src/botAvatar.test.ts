@@ -11,6 +11,8 @@ import {
   BOT_FACE_MOUTH_SCALE_MIN,
   BOT_FACE_THINKING_OFFSET_Y_MAX,
   BOT_FACE_THINKING_SCALE_MIN,
+  botFaceBlinkGeometryFollowsEyesByDefault,
+  botFaceBlinkScaleForEyeScale,
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_BLINK_OFFSET_X,
   DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
@@ -69,18 +71,22 @@ import {
 } from "./botAvatar.ts";
 
 describe("bot avatar face style", () => {
-  it("uses the broken bar as the default blink", () => {
-    assert.equal(DEFAULT_BOT_FACE_BLINK_BAR, "¦");
-    assert.equal(resolveBotFaceStyle({}, null).blinkBar, "¦");
+  it("uses empty space as the default blink and keeps both bars opt-in", () => {
+    assert.equal(DEFAULT_BOT_FACE_BLINK_BAR, " ");
+    assert.equal(DEFAULT_BOT_FACE_BLINK_SCALE, 0.75);
+    assert.equal(resolveBotFaceStyle({}, null).blinkBar, " ");
+    assert.equal(resolveBotFaceStyle({}, null).blinkScale, 0.75);
     assert.deepEqual(Array.from(BOT_FACE_BLINK_BAR_VALUES), [
       "none",
       DEFAULT_BOT_FACE_BLINK_BAR,
-      "❘",
+      "|",
+      "¦",
     ]);
   });
 
-  it("labels the concise face font as the technical Mono style", () => {
-    assert.equal(BOT_FACE_FONT_LABELS.concise, "Mono");
+  it("labels the concise face font as the single-weight Macondo style", () => {
+    assert.equal(BOT_FACE_FONT_LABELS.concise, "Macondo");
+    assert.equal(BOT_FACE_FONT_LABELS.formal, "Serif");
   });
 
   it("normalizes known face font ids only", () => {
@@ -379,6 +385,7 @@ describe("bot avatar face style", () => {
   it("normalizes blink bars to one visible custom character", () => {
     assert.equal(normalizeBotFaceBlinkBar("|"), "|");
     assert.equal(normalizeBotFaceBlinkBar(" "), DEFAULT_BOT_FACE_BLINK_BAR);
+    assert.equal(normalizeBotFaceBlinkBar("¦"), "¦");
     assert.equal(normalizeBotFaceBlinkBar("  ❘  "), "❘");
     assert.equal(normalizeBotFaceBlinkBar("::"), ":");
     assert.equal(normalizeBotFaceBlinkBar("😂"), null);
@@ -399,6 +406,71 @@ describe("bot avatar face style", () => {
     assert.equal(normalizeBotFaceBlinkOffsetY(0.071), 0.08);
     assert.equal(normalizeBotFaceBlinkOffsetX(-2), -1.2);
     assert.equal(normalizeBotFaceBlinkOffsetY(2), 1.2);
+  });
+
+  it("links default blink geometry to the eyes at a 25% smaller scale", () => {
+    assert.equal(botFaceBlinkScaleForEyeScale(1), 0.75);
+    assert.equal(botFaceBlinkScaleForEyeScale(1.2), 0.9);
+    assert.equal(
+      botFaceBlinkGeometryFollowsEyesByDefault({
+        eyeScale: 1.2,
+        eyeOffsetX: 0.12,
+        eyeOffsetY: -0.14,
+        eyeRotationDeg: 15,
+        blinkScale: 1,
+        blinkOffsetX: 0,
+        blinkOffsetY: 0,
+        blinkRotationDeg: 0,
+      }),
+      true,
+    );
+
+    assert.deepEqual(
+      resolveBotFaceStyle(
+        {
+          faceEyeScale: 1.2,
+          faceEyeOffsetX: 0.12,
+          faceEyeOffsetY: -0.14,
+          faceEyeRotationDeg: 15,
+          faceBlinkScale: 1,
+          faceBlinkOffsetX: 0,
+          faceBlinkOffsetY: 0,
+          faceBlinkRotationDeg: 0,
+        },
+        null,
+      ),
+      {
+        ...resolveBotFaceStyle({}, null),
+        eyeScale: 1.2,
+        eyeOffsetX: 0.12,
+        eyeOffsetY: -0.14,
+        eyeRotationDeg: 15,
+        blinkScale: 0.9,
+        blinkOffsetX: 0.12,
+        blinkOffsetY: -0.14,
+        blinkRotationDeg: 15,
+      },
+    );
+  });
+
+  it("preserves explicitly independent blink geometry", () => {
+    const style = resolveBotFaceStyle(
+      {
+        faceEyeScale: 1.2,
+        faceEyeOffsetX: 0.12,
+        faceEyeOffsetY: -0.14,
+        faceEyeRotationDeg: 15,
+        faceBlinkScale: 0.85,
+        faceBlinkOffsetX: -0.2,
+        faceBlinkOffsetY: 0.22,
+        faceBlinkRotationDeg: -30,
+      },
+      null,
+    );
+    assert.equal(style.blinkScale, 0.85);
+    assert.equal(style.blinkOffsetX, -0.2);
+    assert.equal(style.blinkOffsetY, 0.22);
+    assert.equal(style.blinkRotationDeg, -30);
   });
 
   it("clamps and steps blink rotation", () => {
@@ -491,7 +563,7 @@ describe("bot avatar face style", () => {
   });
 
   it("randomizes face style within allowed bounds", () => {
-    const values = [0, 0, 0.99, 0.2, 0.8, 0.25, 0.75];
+    const values = [0, 0.99, 0.2, 0.8, 0.25, 0.75];
     const style = randomBotFaceStyle(() => values.shift() ?? 0);
     assert.equal(style.eyesFont, "neutral");
     assert.equal(style.eyeCharacter, null);
@@ -511,6 +583,10 @@ describe("bot avatar face style", () => {
     assert.equal(style.mouthOffsetY, DEFAULT_BOT_FACE_MOUTH_OFFSET_Y);
     assert.equal(style.mouthRotationDeg, DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG);
     assert.equal(style.blinkBar, DEFAULT_BOT_FACE_BLINK_BAR);
+    assert.equal(
+      style.blinkScale,
+      botFaceBlinkScaleForEyeScale(style.eyeScale),
+    );
     assert.equal(
       style.blinkRotationDeg,
       DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,

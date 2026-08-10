@@ -12,6 +12,10 @@ const coffeeSeatPlateEmojiPath = join(
   dirname(fileURLToPath(import.meta.url)),
   "CoffeeSeatPlateEmoji.tsx",
 );
+const phosphorPixelGlyphPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "PhosphorPixelGlyph.tsx",
+);
 const pagePath = join(dirname(fileURLToPath(import.meta.url)), "page.tsx");
 const layoutPath = join(dirname(fileURLToPath(import.meta.url)), "layout.tsx");
 const settingsPanelPath = join(
@@ -26,6 +30,7 @@ const coffeeSeatPlateEmojiSource = readFileSync(
   coffeeSeatPlateEmojiPath,
   "utf8",
 );
+const phosphorPixelGlyphSource = readFileSync(phosphorPixelGlyphPath, "utf8");
 const pageSource = readFileSync(pagePath, "utf8").replace(/\s+/gu, " ");
 const layoutSource = readFileSync(layoutPath, "utf8").replace(/\s+/gu, " ");
 const settingsPanelSource = readFileSync(settingsPanelPath, "utf8");
@@ -277,12 +282,19 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("uses Noto Sans Mono with native IPA mouth glyph coverage for the concise face slot", () => {
+  it("uses single-weight Macondo with Noto Sans Mono fallback coverage for the concise face slot", () => {
+    assert.match(
+      layoutSource,
+      /Macondo\(\{[^}]*weight:\s*"400"[^}]*\}\)/,
+    );
     assert.match(
       layoutSource,
       /Noto_Sans_Mono\(\{[^}]*subsets:\s*\["latin",\s*"latin-ext"\][^}]*\}\)/,
     );
-    assert.match(css, /--prism-mono-face-font:\s*var\(--font-technical-mono\)/);
+    assert.match(
+      css,
+      /--prism-mono-face-font:\s*var\(--font-macondo-face\),\s*var\(--font-technical-mono\)/,
+    );
 
     const conciseVoiceRule = ruleForSelectorNeedles(
       ".coffeeSeatPlateEmoji",
@@ -728,44 +740,75 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("maps bot face inflation to weight and stroke while face glow stays live through talking", () => {
-    assert.match(
+  it("keeps portable face weight data while disabling its render adjustment", () => {
+    assert.match(coffeeSeatPlateEmojiSource, /faceFontWeight\?: number \| null/);
+    assert.doesNotMatch(
       coffeeSeatPlateEmojiSource,
-      /function normalizeFaceFontWeight/,
+      /MAXIMUM_BOT_FACE_CRT|function normalizeFaceFontWeight|function faceWeight[^\s(]*ForWeight/,
+    );
+    assert.doesNotMatch(
+      coffeeSeatPlateEmojiSource,
+      /\["--bot-face-(?:font-weight|weight-(?:stroke|glow-radius-scale|glow-strength-scale|glow-stroke))" as string\]/,
+    );
+  });
+
+  it("uses one fixed optical recipe for each original face font", () => {
+    assert.doesNotMatch(
+      layoutSource,
+      /Noto_Sans_Symbols_2|DotGothic16|Noto_Sans_Math|--font-bot-face-/,
     );
     assert.match(
-      coffeeSeatPlateEmojiSource,
-      /function faceWeightStrokeForWeight/,
+      css,
+      /\.botAvatarFontOptionSample\[data-face-font="warm"\][\s\S]*?font-family:[\s\S]*?var\(--font-concise-rounded\)[\s\S]*?font-weight:\s*700\s*;/,
     );
     assert.match(
-      coffeeSeatPlateEmojiSource,
-      /function faceWeightGlowRadiusScaleForWeight/,
+      css,
+      /\.botAvatarFontOptionSample\[data-face-font="concise"\][\s\S]*?font-family:\s*var\(--prism-mono-face-font\)[\s\S]*?font-weight:\s*var\(--prism-mono-face-weight\)\s*;/,
     );
     assert.match(
-      coffeeSeatPlateEmojiSource,
-      /function faceWeightGlowStrengthScaleForWeight/,
+      css,
+      /\.botAvatarFontOptionSample\[data-face-font="playful"\][\s\S]*?font-weight:\s*400\s*;/,
     );
     assert.match(
-      coffeeSeatPlateEmojiSource,
-      /function faceWeightGlowStrokeForWeight/,
-    );
-    assert.match(coffeeSeatPlateEmojiSource, /t \* 0\.032/);
-    assert.match(coffeeSeatPlateEmojiSource, /0\.56 \+ t \* 0\.44/);
-    assert.match(coffeeSeatPlateEmojiSource, /1 \+ t \* 0\.36/);
-    assert.match(coffeeSeatPlateEmojiSource, /0\.36 \+ t \* 0\.64/);
-    assert.match(coffeeSeatPlateEmojiSource, /1 \+ t \* 0\.34/);
-    assert.match(coffeeSeatPlateEmojiSource, /0\.004 \+ t \* 0\.026/);
-    assert.match(coffeeSeatPlateEmojiSource, /"--bot-face-font-weight"/);
-    assert.match(coffeeSeatPlateEmojiSource, /"--bot-face-weight-stroke"/);
-    assert.match(
-      coffeeSeatPlateEmojiSource,
-      /"--bot-face-weight-glow-radius-scale"/,
+      css,
+      /\.botAvatarFontOptionSample\[data-face-font="formal"\][\s\S]*?font-family:[\s\S]*?var\(--font-formal-serif\)[\s\S]*?font-weight:\s*600\s*;/,
     );
     assert.match(
-      coffeeSeatPlateEmojiSource,
-      /"--bot-face-weight-glow-strength-scale"/,
+      css,
+      /\.botAvatarFontOptionSample\[data-face-font="neutral"\][\s\S]*?font-weight:\s*700\s*;[\s\S]*?font-variation-settings:\s*normal\s*;[\s\S]*?font-synthesis:\s*none\s*;/,
     );
-    assert.match(coffeeSeatPlateEmojiSource, /"--bot-face-weight-glow-stroke"/);
+    assert.doesNotMatch(css, /--bot-face-font-weight/);
+  });
+
+  it("rerasterizes authored face glyphs when their font identity or loaded font changes", () => {
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /<CrtPixelTextGlyph[\s\S]{0,260}rasterKey=\{partFaceFont \?\? "default"\}/,
+    );
+    assert.match(phosphorPixelGlyphSource, /rasterKey\?: string \| number \| null/);
+    assert.match(
+      phosphorPixelGlyphSource,
+      /rasterizeTextMask\([\s\S]{0,180}`\$\{rasterKey \?\? ""\}:\$\{fontRevision\}`/,
+    );
+    assert.match(
+      phosphorPixelGlyphSource,
+      /document\.fonts\?\.ready\.then\(handleFontsLoaded\)/,
+    );
+    assert.match(
+      phosphorPixelGlyphSource,
+      /document\.fonts[\s\S]{0,80}\.load\(authoredFont, content\)[\s\S]{0,80}\.then\(handleFontsLoaded/,
+    );
+    assert.match(
+      phosphorPixelGlyphSource,
+      /document\.fonts\?\.addEventListener\("loadingdone", handleFontsLoaded\)/,
+    );
+    assert.match(
+      phosphorPixelGlyphSource,
+      /\[content, enabled, rasterKey\]/,
+    );
+  });
+
+  it("keeps the authored CRT face glow live through talking", () => {
     assert.match(coffeeSeatPlateEmojiSource, /data-crt-glyph-layer="true"/);
     assert.match(
       coffeeSeatPlateEmojiSource,
@@ -1198,17 +1241,7 @@ describe("Coffee seat arrival CSS", () => {
     assert.match(partRule, /--crt-weighted-bloom-radius:\s*calc\(/);
     assert.match(partRule, /paint-order:\s*stroke fill\s*;/);
 
-    const customFaceRule = ruleForExactSelector(
-      '.coffeeSeatPlateEmoji[data-face-custom="true"]',
-    );
-    assert.match(
-      customFaceRule,
-      /font-weight:\s*var\(--bot-face-font-weight,\s*var\(--prism-face-weight\)\)\s*;/,
-    );
-    assert.match(
-      customFaceRule,
-      /font-variation-settings:\s*"wght"\s*var\(--bot-face-font-weight,\s*var\(--prism-face-weight\)\)\s*;/,
-    );
+    assert.doesNotMatch(css, /--bot-face-font-weight/);
   });
 
   it("renders live Coffee avatars at Zen scale without overlay layers", () => {

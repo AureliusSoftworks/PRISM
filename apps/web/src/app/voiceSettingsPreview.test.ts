@@ -50,7 +50,7 @@ describe("voice settings preview", () => {
     assert.match(pageSource, /await enqueueEnglishVoice\(/);
     assert.match(
       pageSource,
-      /onStart: \(durationMs\) =>\s*options\.onPlaybackStart\?\.\(\s*durationMs,\s*previewClip\.alignment,/,
+      /onStart: \(durationMs\) =>\s*options\.onPlaybackStart\?\.\(durationMs, previewClip\.alignment\),/,
     );
   });
 
@@ -621,11 +621,11 @@ describe("voice settings preview", () => {
   it("uses phoneme-aware visemes for English while robot modes keep their rhythm", () => {
     assert.match(
       pageSource,
-      /phonemeAware: settings\?\.voiceMode === "english"/,
+      /activeChatVoiceMode === "bottish"[\s\S]*?bottishMouthShapeAtAlignedElapsedMs[\s\S]*?: crtSpeechMouthShapeAtAlignedElapsedMs/,
     );
     assert.match(
       pageSource,
-      /coffeeSeatMouthShapeFromVisibleLength\([\s\S]*?settings\?\.voiceMode === "english"/,
+      /const liveSeatAlignedMouthShape = liveSeatSpeech[\s\S]*?voicePlaybackSelectionRef\.current\.voiceMode === "bottish"[\s\S]*?crtSpeechMouthShapeAtAlignedElapsedMs/,
     );
     assert.match(
       pageSource,

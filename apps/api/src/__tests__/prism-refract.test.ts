@@ -32,6 +32,11 @@ describe("Prism Refract API contract", () => {
     assert.doesNotMatch(route, /getOpenAiApiKeyForUser/u);
     assert.doesNotMatch(route, /getAnthropicApiKeyForUser/u);
     assert.match(route, /isPrismRefractDebateTextTarget\(request\.target\)/u);
+    assert.match(route, /isPrismRefractInputTextTarget\(request\.target\)/u);
+    assert.match(route, /generatePrismInputRefractDraft/u);
+    assert.match(route, /buildPrismCompanionAuthoritativeContext/u);
+    assert.match(route, /surface: "prism-refract"/u);
+    assert.match(route, /auxiliaryProviderFactoryOverride/u);
     assert.match(route, /generateDebateRefractDraft/u);
     assert.match(route, /generateBotcastRefractDraft/u);
   });

@@ -73,9 +73,10 @@
   --prism-warm-face-weight: 700;
   --prism-warm-face-letter-spacing: -0.012em;
   --prism-mono-face-font:
-    var(--font-technical-mono), var(--font-geist-mono), monospace;
-  --prism-mono-face-weight: 700;
-  --prism-mono-face-letter-spacing: 0.015em;
+    var(--font-macondo-face), var(--font-technical-mono),
+    var(--font-geist-mono), monospace;
+  --prism-mono-face-weight: 400;
+  --prism-mono-face-letter-spacing: 0.01em;
 
   --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.35);
   --shadow-md: 0 6px 24px rgba(0, 0, 0, 0.4);
@@ -666,30 +667,6 @@
   box-shadow: inset 0 0 1px rgba(255, 255, 255, 0.16);
 }
 
-.botAvatarFoundryFrameModuleLights[data-talking="true"]
-  .botAvatarFoundryFrameModuleLamp[data-populated="true"] {
-  background: radial-gradient(
-    circle at 42% 38%,
-    #ffffff 0 21%,
-    color-mix(in srgb, var(--foundry-module-color) 62%, #ffffff) 34%,
-    var(--foundry-module-color) 72%,
-    color-mix(in srgb, var(--foundry-module-color) 72%, transparent) 100%
-  );
-  opacity: 1;
-  filter: brightness(1);
-  box-shadow:
-    0 0 2px rgba(255, 255, 255, 0.94),
-    0 0 9px var(--foundry-module-color),
-    0 0 18px color-mix(in srgb, var(--foundry-module-color) 68%, transparent);
-}
-
-.botAvatarCustomizer[data-draft-mode="true"]
-  .botAvatarFoundryFrameModuleLights[data-talking="true"]
-  .botAvatarFoundryFrameModuleLamp[data-populated="true"] {
-  animation: botAvatarFoundryModuleEnergize 640ms
-    cubic-bezier(0.16, 0.84, 0.24, 1) both;
-}
-
 .botAvatarFoundryFrameModuleLamp[data-foundry-lamp="eyes"] {
   left: 7.65%;
   top: 58.65%;
@@ -956,7 +933,7 @@
 .botAvatarFoundryCameraHud {
   position: absolute;
   left: 22px;
-  top: 82px;
+  top: 154px;
   z-index: 22;
   display: grid;
   grid-template-columns: auto auto;
@@ -971,6 +948,38 @@
   backdrop-filter: blur(12px);
   -webkit-backdrop-filter: blur(12px);
 }
+
+.botAvatarCustomizer[data-foundry="true"] .botAvatarStudioMiniPreview {
+  position: absolute;
+  left: 22px;
+  top: 20px;
+  z-index: 22;
+  display: grid;
+  justify-items: center;
+  gap: 2px;
+  padding: 7px 8px 5px;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  border-radius: 12px;
+  background: rgba(5, 8, 13, 0.7);
+  box-shadow: 0 15px 34px rgba(0, 0, 0, 0.26);
+  pointer-events: none;
+  backdrop-filter: blur(12px);
+  -webkit-backdrop-filter: blur(12px);
+}
+
+.botAvatarStudioMiniPreviewLabel {
+  color: rgba(239, 243, 249, 0.68);
+  font-size: 7px;
+  font-weight: 780;
+  letter-spacing: 0.12em;
+  line-height: 1;
+  text-transform: uppercase;
+}
+
+.botAvatarStudioMiniAvatar {
+  display: inline-grid;
+}
+
 .botAvatarFoundryCameraHud > span {
   font-size: 7px;
   font-weight: 760;
@@ -1108,7 +1117,7 @@
   border: 1px solid rgba(255, 255, 255, 0.1);
   border-radius: 7px;
   color: var(--fg);
-  background: rgba(5, 8, 13, 0.94);
+  background: #05080d;
   box-shadow: 0 10px 24px rgba(0, 0, 0, 0.34);
   font-size: 9px;
   font-weight: 720;
@@ -1997,13 +2006,6 @@
 
   .botAvatarCustomizer[data-foundry="true"]
     .botAvatarCustomControls
-    > .botAvatarSliderStack {
-    grid-column: 1;
-    grid-row: 2;
-  }
-
-  .botAvatarCustomizer[data-foundry="true"]
-    .botAvatarCustomControls
     > .botAvatarOverrideGrid {
     grid-column: 2;
     grid-row: 1 / span 2;
@@ -2069,14 +2071,6 @@
     > .botAvatarExpressionRow {
     grid-column: 1;
     grid-row: 1;
-  }
-
-  .botAvatarCustomizer[data-foundry="true"]
-    .botAvatarControlGroup[data-avatar-control-tab="eyes"]
-    .botAvatarCustomControls
-    > .botAvatarSliderStack {
-    grid-column: 1;
-    grid-row: 2;
   }
 
   .botAvatarCustomizer[data-foundry="true"]
@@ -2229,6 +2223,18 @@
 
   .botAvatarCustomizer[data-foundry="true"] .botAvatarPreviewToolbar {
     display: none;
+  }
+
+  .botAvatarCustomizer[data-foundry="true"] .botAvatarStudioMiniPreview {
+    left: 12px;
+    top: 12px;
+    transform: scale(0.9);
+    transform-origin: top left;
+  }
+
+  .botAvatarFoundryCameraHud {
+    left: 12px;
+    top: 132px;
   }
 
   .botAvatarCustomizer[data-foundry="true"] .botAvatarVoiceTestDock {
@@ -3243,8 +3249,22 @@
   transform-origin: 50% 78%;
   transition:
     scale 180ms ease,
+    transform 180ms ease,
     translate 180ms ease,
     opacity 180ms ease;
+}
+
+/* Zen size gestures magnify one canonical authored raster. Keeping the inner
+   canvas fixed prevents container queries and phosphor geometry from laying
+   the face out differently at each outer size. */
+.zenLiveBotPresencePlate[data-user-avatar-scale="true"]
+  > .botAmbientPresenceRig {
+  --zen-live-bot-avatar-size: var(--zen-live-bot-avatar-render-size, 190px);
+  --zen-live-bot-avatar-body-size: var(
+    --zen-live-bot-avatar-render-size,
+    190px
+  );
+  transform: scale(var(--zen-live-bot-user-scale, 1));
 }
 
 /* Color Powers animate the holder's rendered accent; inline authored color stays underneath. */
@@ -3947,9 +3967,10 @@
   --prism-warm-face-weight: 700;
   --prism-warm-face-letter-spacing: -0.012em;
   --prism-mono-face-font:
-    var(--font-technical-mono), var(--font-geist-mono), monospace;
-  --prism-mono-face-weight: 700;
-  --prism-mono-face-letter-spacing: 0.015em;
+    var(--font-macondo-face), var(--font-technical-mono),
+    var(--font-geist-mono), monospace;
+  --prism-mono-face-weight: 400;
+  --prism-mono-face-letter-spacing: 0.01em;
 
   --shadow-sm: 0 1px 2px rgba(23, 38, 56, 0.08);
   --shadow-md: 0 10px 30px rgba(31, 74, 112, 0.1);
@@ -6281,12 +6302,12 @@
 }
 
 .settingsTutorialCard strong {
-  font-size: 14px;
+  font-size: 0.875rem;
 }
 
 .settingsTutorialCard > span {
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--prism-type-body);
 }
 
 .settingsTutorialActions {
@@ -6298,7 +6319,7 @@
 .settingsHostsLead {
   margin: 0;
   color: var(--fg-muted);
-  font-size: 13px;
+  font-size: var(--prism-type-body);
 }
 
 .settingsWorkspace {
@@ -6337,7 +6358,7 @@
   display: block;
   margin: 0 0 6px;
   color: var(--fg-muted);
-  font-size: 10.5px;
+  font-size: var(--prism-type-caption);
   font-weight: 760;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -6363,7 +6384,7 @@
   gap: 8px;
   padding: 7px 9px;
   text-align: left;
-  font-size: 13px;
+  font-size: var(--prism-type-body);
   font-weight: 680;
   line-height: 1.2;
   transition:
@@ -6418,7 +6439,7 @@
 .settingsOverview h4,
 .settingsSectionHeader h4 {
   margin: 2px 0 0;
-  font-size: 17px;
+  font-size: var(--prism-type-title);
   line-height: 1.15;
 }
 
@@ -6434,7 +6455,7 @@
 .settingsCompactCopy {
   margin: 6px 0 0;
   color: var(--fg-muted);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   line-height: 1.45;
 }
 
@@ -6443,7 +6464,7 @@
     --settings-section-color,
     color-mix(in srgb, #ffbd3a 44%, var(--fg-muted))
   );
-  font-size: 10.5px;
+  font-size: var(--prism-type-caption);
   font-weight: 760;
   letter-spacing: 0;
   text-transform: uppercase;
@@ -6463,7 +6484,7 @@
   background: var(--bg-deep);
   color: var(--fg-muted);
   padding: 5px 8px;
-  font-size: 10.5px;
+  font-size: var(--prism-type-caption);
   font-weight: 720;
   line-height: 1;
   white-space: nowrap;
@@ -6667,7 +6688,7 @@
 .settingsHubCardCopy strong {
   min-width: 0;
   color: var(--fg);
-  font-size: 15px;
+  font-size: 0.9375rem;
   font-weight: 760;
   line-height: 1.12;
   overflow-wrap: anywhere;
@@ -6676,7 +6697,7 @@
 .settingsHubCardCopy small {
   min-width: 0;
   color: color-mix(in srgb, var(--fg) 62%, var(--fg-muted) 38%);
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   line-height: 1.35;
 }
 
@@ -6700,13 +6721,13 @@
 }
 
 .settingsScopeButton strong {
-  font-size: 16px;
+  font-size: var(--prism-type-body-large);
   line-height: 1.2;
 }
 
 .settingsScopeButton span {
   color: var(--fg-muted);
-  font-size: 12.5px;
+  font-size: 0.78125rem;
   line-height: 1.45;
 }
 
@@ -6895,7 +6916,7 @@
 .settingsHemisphereHeader strong,
 .settingsHemisphereField > span {
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   font-weight: 700;
 }
 
@@ -6903,7 +6924,7 @@
   display: block;
   margin-top: 2px;
   color: var(--fg-muted);
-  font-size: 10px;
+  font-size: var(--prism-type-caption);
   line-height: 1.35;
 }
 
@@ -6911,7 +6932,7 @@
 .settingsHemisphereField textarea {
   border-color: color-mix(in srgb, var(--hemisphere-color) 18%, var(--line));
   background: color-mix(in srgb, var(--bg) 94%, var(--hemisphere-color) 6%);
-  font-size: 12px;
+  font-size: var(--prism-type-label);
 }
 
 .settingsHemisphereField textarea {
@@ -6928,7 +6949,7 @@
 
 .settingsHemisphereActions span {
   color: var(--fg-muted);
-  font-size: 11px;
+  font-size: var(--prism-type-caption);
   line-height: 1.4;
 }
 
@@ -6979,7 +7000,7 @@
 .keyboardShortcutIntro {
   margin: 0;
   color: var(--settings-section-quiet);
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   line-height: 1.5;
 }
 
@@ -7019,13 +7040,13 @@
 
 .keyboardShortcutCopy strong {
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--prism-type-body);
 }
 
 .keyboardShortcutCopy small,
 .keyboardShortcutFooter small {
   color: var(--settings-section-quiet);
-  font-size: 11px;
+  font-size: var(--prism-type-caption);
   line-height: 1.35;
 }
 
@@ -7044,7 +7065,7 @@
 .keyboardShortcutRecorder kbd {
   color: color-mix(in srgb, var(--settings-section-color) 42%, var(--fg));
   font:
-    650 12px/1.2 var(--font-geist-mono),
+    650 var(--prism-type-label) / 1.2 var(--font-geist-mono),
     ui-monospace,
     monospace;
   letter-spacing: 0.02em;
@@ -7054,7 +7075,7 @@
 .keyboardShortcutError {
   margin: 0;
   color: var(--danger);
-  font-size: 12px;
+  font-size: var(--prism-type-label);
 }
 
 .keyboardShortcutFooter {
@@ -7097,7 +7118,7 @@
 
 .settingsSectionHeader small {
   color: var(--settings-section-quiet);
-  font-size: 11px;
+  font-size: var(--prism-type-caption);
   line-height: 1.3;
   text-align: right;
 }
@@ -7163,11 +7184,11 @@
   padding: 8px 10px;
   border: 1px solid color-mix(in srgb, var(--line-strong) 54%, var(--line));
   border-radius: 8px;
-  background: color-mix(in srgb, var(--bg-surface) 96%, var(--bg));
+  background: var(--bg-surface);
   color: var(--fg);
   box-shadow: var(--shadow-lg);
   font-family: var(--font-geist-sans), ui-sans-serif, system-ui, sans-serif;
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   font-weight: 500;
   letter-spacing: 0;
   line-height: 1.35;
@@ -7214,7 +7235,7 @@
   display: grid;
   gap: 6px;
   color: var(--settings-section-quiet);
-  font-size: 13px;
+  font-size: var(--prism-type-body);
   font-weight: 640;
   min-width: 0;
 }
@@ -7237,13 +7258,56 @@
 
 .settingsSubsectionHeading small {
   color: var(--settings-section-quiet);
-  font-size: 11px;
+  font-size: var(--prism-type-caption);
   font-weight: 520;
   text-align: right;
 }
 
 .settingsAtmosphereStyleGrid {
   grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.settingsTypographyScaleGrid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(9.5rem, 1fr));
+  gap: 10px;
+}
+
+.settingsTypographyScaleOption {
+  min-width: 0;
+  min-height: 5.25rem;
+  display: grid;
+  grid-template-columns: auto auto minmax(0, 1fr);
+  align-items: center;
+  gap: 0.625rem;
+}
+
+.settingsTypographyScaleOption > span:last-child {
+  min-width: 0;
+  display: grid;
+  gap: 0.125rem;
+}
+
+.settingsTypographyScaleOption small {
+  color: var(--settings-section-quiet);
+  font-size: var(--prism-type-caption);
+  font-weight: 520;
+  line-height: 1.35;
+  overflow-wrap: anywhere;
+}
+
+.settingsTypographyScaleSample {
+  width: 2.5rem;
+  height: 2.5rem;
+  border-radius: 0.75rem;
+  display: grid;
+  place-items: center;
+  color: color-mix(in srgb, var(--settings-section-color) 48%, var(--fg));
+  background: color-mix(in srgb, var(--settings-section-color) 9%, var(--bg));
+  font-family: var(--font-ui-sans), system-ui, sans-serif;
+  font-weight: 760;
+  line-height: 1;
+  flex: 0 0 auto;
 }
 
 .settingsAtmosphereControl {
@@ -7310,12 +7374,12 @@
 
 .settingsAtmosphereStyleOption strong {
   color: var(--fg);
-  font-size: 12px;
+  font-size: var(--prism-type-label);
 }
 
 .settingsAtmosphereStyleOption small {
   color: var(--settings-section-quiet);
-  font-size: 10px;
+  font-size: var(--prism-type-caption);
   font-weight: 520;
   line-height: 1.35;
 }
@@ -7356,7 +7420,7 @@
 
 .settingsRangeValue {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   font-variant-numeric: tabular-nums;
   white-space: nowrap;
 }
@@ -7482,7 +7546,7 @@
   align-items: center;
   gap: 6px;
   color: var(--settings-section-quiet);
-  font-size: 13px;
+  font-size: var(--prism-type-body);
   font-weight: 640;
 }
 
@@ -7497,7 +7561,7 @@
   background: color-mix(in srgb, var(--bg-surface) 88%, transparent);
   color: var(--fg);
   font: inherit;
-  font-size: 13px;
+  font-size: var(--prism-type-body);
   font-weight: 560;
   line-height: 1.4;
 }
@@ -7685,7 +7749,7 @@
 .zenWallpaperStyleOptionLabel {
   max-width: 100%;
   color: inherit;
-  font-size: 11px;
+  font-size: var(--prism-type-caption);
   font-weight: 760;
   line-height: 1.1;
   overflow-wrap: anywhere;
@@ -7902,7 +7966,7 @@
 [data-startup-preference-selector="true"] .settingsInlineToggle small {
   display: block;
   color: var(--settings-section-quiet);
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   font-weight: 520;
   line-height: 1.45;
 }
@@ -7912,7 +7976,7 @@
 [data-startup-preference-selector="true"] .settingsInlineToggle small,
 .settingsSectionHint {
   color: var(--settings-section-quiet);
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   font-weight: 520;
   line-height: 1.45;
 }
@@ -7993,7 +8057,7 @@
 
 .settingsDockRow span {
   color: var(--fg-muted);
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   line-height: 1.35;
 }
 
@@ -9655,9 +9719,9 @@
   min-width: 1280px;
   /* Instrument Sans keeps body/supporting text flexible and readable while
      Raleway carries the thin Prism-line title treatment. */
-  --font-size-conversation-title: 14px;
-  --font-size-message: 16px;
-  --font-size-compose: 16px;
+  --font-size-conversation-title: 0.875rem;
+  --font-size-message: 1rem;
+  --font-size-compose: 1rem;
   --font-title:
     var(--font-title-sans), var(--font-ui-sans), system-ui, sans-serif;
   --font-weight-title: 300;
@@ -12537,6 +12601,26 @@
   background: color-mix(in srgb, #f3c55f 18%, var(--bg) 82%);
 }
 
+.devToolsLabLink {
+  color: var(--fg);
+  cursor: pointer;
+  text-decoration: none;
+  transition:
+    background 120ms ease-out,
+    border-color 120ms ease-out,
+    color 120ms ease-out,
+    transform 120ms ease-out;
+}
+
+.devToolsLabLink:hover,
+.devToolsLabLink:focus-visible {
+  border-color: color-mix(in srgb, var(--dev-tools-accent) 72%, var(--line) 28%);
+  background: color-mix(in srgb, var(--dev-tools-accent) 24%, var(--bg) 76%);
+  color: var(--fg);
+  outline: none;
+  transform: translateY(-1px);
+}
+
 .devToolsIconButton {
   appearance: none;
   display: inline-grid;
@@ -14423,7 +14507,7 @@
 
 .chatHeader h2 {
   font-family: var(--font-title, var(--font-ui-sans), system-ui, sans-serif);
-  font-size: 16px;
+  font-size: var(--prism-type-body-large);
   font-weight: 500;
   letter-spacing: 0.02em;
   flex: 1;
@@ -14808,7 +14892,7 @@
   color: var(--bot-library-group-trigger-text);
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   overflow: hidden;
   text-shadow: var(--bot-library-group-trigger-shadow);
 }
@@ -14924,7 +15008,7 @@
   color: var(--bot-library-group-trigger-muted);
   font-family:
     var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
-  font-size: 9.5px;
+  font-size: var(--prism-type-caption);
   letter-spacing: 0.04em;
   white-space: nowrap;
   text-transform: uppercase;
@@ -15031,13 +15115,13 @@
   text-overflow: ellipsis;
   white-space: nowrap;
   color: var(--fg);
-  font-size: 13px;
+  font-size: var(--prism-type-body);
   font-weight: 700;
 }
 
 .botLibraryGroupOptionCount {
   color: var(--fg-muted);
-  font-size: 10.5px;
+  font-size: var(--prism-type-caption);
   line-height: 1.2;
 }
 
@@ -15073,7 +15157,7 @@
   padding: 0 12px;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   font-weight: 500;
   display: inline-flex;
   align-items: center;
@@ -15241,7 +15325,7 @@
   padding: 0 12px;
   cursor: pointer;
   font: inherit;
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   font-weight: 500;
   display: inline-flex;
   align-items: center;
@@ -15330,7 +15414,7 @@
   justify-content: center;
   gap: 5px;
   line-height: 1;
-  font-size: 10px;
+  font-size: var(--prism-type-caption);
   font-weight: 700;
   text-transform: uppercase;
   letter-spacing: 0.08em;
@@ -16278,7 +16362,7 @@
 
 .messagesFrameBotSwitchLoading p {
   margin: 0;
-  font-size: 12px;
+  font-size: var(--prism-type-label);
   font-weight: 600;
   letter-spacing: 0.08em;
   text-transform: uppercase;
@@ -17318,8 +17402,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   order: 3;
   flex: 0 0 auto;
   width: min(1120px, calc(100% - 20px));
-  height: clamp(280px, calc(100dvh - 400px), 520px);
-  min-height: 280px;
+  height: clamp(360px, calc(100dvh - 360px), 600px);
+  min-height: 360px;
   margin: 0 auto;
   border: 1px solid color-mix(in srgb, var(--fg-muted) 18%, transparent);
   border-radius: clamp(22px, 2.2vw, 32px);
@@ -17356,6 +17440,23 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     transparent 70%
   );
   filter: blur(24px);
+  pointer-events: none;
+}
+
+.botGroupWaitingRoomWindowLabel {
+  position: absolute;
+  top: 12px;
+  right: 14px;
+  z-index: 30;
+  padding: 4px 8px;
+  border: 1px solid color-mix(in srgb, var(--fg-muted) 22%, transparent);
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--bg-deep) 72%, transparent);
+  color: color-mix(in srgb, var(--fg-muted) 86%, var(--fg));
+  font-size: 9px;
+  font-weight: 720;
+  letter-spacing: 0.05em;
+  text-transform: uppercase;
   pointer-events: none;
 }
 
@@ -17794,16 +17895,22 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .botGroupWaitingRoomPresence {
-  --bot-group-room-anchor-size: clamp(112px, 9.8vw, 152px);
-  --bot-group-room-roamer-size: clamp(76px, 6.8vw, 104px);
+  --bot-group-room-anchor-size: clamp(76px, 6.7vw, 94px);
+  --bot-group-room-roamer-size: var(--bot-group-room-anchor-size);
   --bot-group-room-avatar-size: var(--bot-group-room-anchor-size);
+  --bot-group-room-drag-x: 0px;
+  --bot-group-room-drag-y: 0px;
   --coffee-bot-color: var(--bot-color, var(--accent));
   position: absolute;
   left: var(--bot-group-room-x);
   top: var(--bot-group-room-y);
   z-index: var(--bot-group-room-depth);
   width: var(--bot-group-room-avatar-size);
-  transform: translate(-50%, -50%) scale(var(--bot-group-room-scale, 1));
+  transform: translate(
+      calc(-50% + var(--bot-group-room-drag-x)),
+      calc(-50% + var(--bot-group-room-drag-y))
+    )
+    scale(var(--bot-group-room-scale, 1));
   transform-origin: 50% 68%;
   transition:
     left 420ms cubic-bezier(0.22, 0.72, 0.24, 1),
@@ -17889,7 +17996,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   aspect-ratio: 1;
   pointer-events: none;
   transform-origin: 50% 58%;
+  animation: botGroupAquariumDrift
+    var(--bot-group-room-drift-duration, 12000ms) ease-in-out
+    var(--bot-group-room-drift-delay, 0ms) infinite alternate;
   transition: transform 420ms cubic-bezier(0.22, 0.72, 0.24, 1);
+}
+
+.botGroupWaitingRoom[data-room-rotation-paused="true"]
+  .botGroupWaitingRoomPresenceBody,
+.botGroupWaitingRoomPresence[data-room-presence-dragging="true"]
+  .botGroupWaitingRoomPresenceBody {
+  animation-play-state: paused;
+}
+
+@keyframes botGroupAquariumDrift {
+  0% {
+    translate: calc(0px - var(--bot-group-room-drift-x, 16px))
+      var(--bot-group-room-drift-y, 10px);
+    rotate: -0.7deg;
+  }
+  42% {
+    translate: 0 calc(0px - var(--bot-group-room-drift-y, 10px));
+    rotate: 0.45deg;
+  }
+  100% {
+    translate: var(--bot-group-room-drift-x, 16px) 0;
+    rotate: 0.85deg;
+  }
 }
 
 .botGroupWaitingRoomPresenceBody .zenLiveBotPresenceFace {
@@ -17978,10 +18111,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   top: 7%;
   z-index: 3;
   display: grid;
-  min-width: max-content;
-  max-width: 18ch;
-  gap: 1px;
-  padding: 6px 8px;
+  min-width: 28px;
+  height: 20px;
+  place-items: center;
+  padding: 0 7px 4px;
   border: 1px solid
     color-mix(in srgb, var(--bot-color, var(--accent)) 38%, var(--line));
   border-radius: 12px 12px 12px 4px;
@@ -18011,9 +18144,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .botGroupWaitingRoomAmbientBark {
   color: color-mix(in srgb, var(--fg) 88%, var(--bot-color));
-  font-size: 11px;
+  font-size: 15px;
   font-weight: 780;
-  line-height: 1.1;
+  line-height: 1;
 }
 
 @keyframes botGroupWaitingRoomAmbientCueIn {
@@ -18096,8 +18229,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .botGroupWaitingRoomPresenceName {
   display: block;
   max-width: min(15ch, calc(var(--bot-group-room-avatar-size) + 24px));
-  margin-top: -7px;
-  padding: 4px 9px 3px;
+  margin-top: -9px;
+  padding: 3px 7px 2px;
   overflow: hidden;
   border: 1px solid
     color-mix(in srgb, var(--bot-color, var(--accent)) 48%, var(--line));
@@ -18109,7 +18242,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 0 22px
       color-mix(in srgb, var(--bot-color, var(--accent)) 18%, transparent);
   color: color-mix(in srgb, var(--fg) 90%, #fff 10%);
-  font-size: 12px;
+  font-size: 10px;
   font-weight: 760;
   line-height: 1.1;
   text-overflow: ellipsis;
@@ -18136,8 +18269,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .botGroupWaitingRoomPresence[data-room-presence-role="roamer"]
   .botGroupWaitingRoomPresenceName {
-  margin-top: -5px;
-  font-size: 11px;
+  margin-top: -9px;
+  font-size: 10px;
 }
 
 .botGroupWaitingRoomPresence[data-room-presence-state="arriving"]
@@ -19361,10 +19494,17 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translateY(3px);
 }
 
+.debateGalleryMiniAvatar {
+  display: inline-grid;
+}
+
+.debateModeratorMiniAvatar[data-size="room"] {
+  display: inline-grid;
+  width: 100%;
+  height: 100%;
+}
+
 .emptyStateHeroMiniArt {
-  --avatar-details-ink-aperture-scale: 1.5;
-  --avatar-details-offset-x: 1px;
-  --avatar-details-offset-y: 7px;
   position: absolute;
   inset: 0;
   display: grid;
@@ -19407,7 +19547,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --crt-scanline-opacity: 0;
   display: inline-grid;
   font-family: var(--prism-face-font);
-  font-size: var(--chat-mini-bot-face-size, clamp(19px, 1.8vw, 22px));
+  font-size: var(--zen-live-bot-avatar-face-glyph-size, 21.7cqw);
   line-height: 1;
   font-weight: var(--prism-face-weight);
   letter-spacing: var(--prism-face-letter-spacing);
@@ -23605,7 +23745,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   z-index: 6;
   border-radius: 999px;
   border: 1px solid color-mix(in srgb, var(--accent) 36%, var(--line));
-  background: color-mix(in srgb, var(--bg-surface) 94%, transparent);
+  background: var(--bg-surface);
   color: color-mix(in srgb, var(--fg) 92%, transparent);
   font-size: 10px;
   letter-spacing: 0.06em;
@@ -29183,9 +29323,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .debateBotPresencePlate {
-  /* Debate's optimized avatar pass registers authored face ink two screen
-     pixels high without shifting live eyes or mouths. */
-  --avatar-details-offset-y: -2px;
   --zen-live-bot-avatar-size: 100%;
   --zen-live-bot-avatar-body-size: 92%;
   --zen-live-bot-body-x: 50%;
@@ -29586,6 +29723,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-body-glyph-min-size: 18px;
   --zen-live-bot-body-glyph-ratio: 0.145;
   --zen-live-bot-body-glyph-max-size: 48px;
+  /* One physical phosphor recipe serves the upper face tube and lower badge.
+     Individual screens may drive it at different strengths, but their beam
+     width and halo falloff must describe the same display technology. */
+  --bot-phosphor-core-opacity: 0.94;
+  --bot-phosphor-beam-softness: 0.45px;
+  --bot-phosphor-bloom-narrow-radius: 1.25px;
+  --bot-phosphor-bloom-wide-radius: 6px;
+  --bot-phosphor-halo-contact-radius: 0.72px;
+  --bot-phosphor-halo-tight-radius: 1.5px;
+  --bot-phosphor-halo-near-radius: 3px;
+  --bot-phosphor-halo-mid-radius: 6px;
+  --bot-phosphor-halo-far-radius: 12px;
+  --bot-phosphor-halo-ambient-radius: 21px;
   position: relative;
   z-index: 8;
   width: var(--zen-live-bot-avatar-size, clamp(156px, 14.8vw, 196px));
@@ -29622,10 +29772,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   );
   --crt-strength: 1;
   --crt-core-opacity: 0.82;
-  --crt-beam-softness: 0.45px;
-  --crt-bloom-narrow-radius: 1.25px;
+  --crt-beam-softness: var(--bot-phosphor-beam-softness, 0.45px);
+  --crt-bloom-narrow-radius: var(
+    --bot-phosphor-bloom-narrow-radius,
+    1.25px
+  );
   --crt-bloom-narrow-strength: 0.28;
-  --crt-bloom-wide-radius: 6px;
+  --crt-bloom-wide-radius: var(--bot-phosphor-bloom-wide-radius, 6px);
   --crt-bloom-wide-strength: 0.08;
   --crt-phosphor-opacity: 0.16;
   --crt-phosphor-midtone-strength: 0.38;
@@ -29836,6 +29989,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .botFaceCrtGrimeLayer,
 .zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="fresnel"]
   .botFaceCrtGrimeLayer,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="wide-halo"]
+  > .zenLiveBotPresenceScreenContentRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="narrow-bloom"]
+  > .zenLiveBotPresenceScreenContentRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="lit-phosphor-emission"]
+  > .zenLiveBotPresenceScreenContentRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="sharp-core"]
+  > .zenLiveBotPresenceScreenContentRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="red-convergence"]
+  > .zenLiveBotPresenceScreenContentRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="blue-convergence"]
+  > .zenLiveBotPresenceScreenContentRig,
+.zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="source-glyph"]
+  > .zenLiveBotPresenceScreenContentRig,
 .zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="wide-halo"]
   .zenLiveBotPresenceFaceRig,
 .zenLiveBotPresenceFaceEmissionMask[data-crt-debug-layer="narrow-bloom"]
@@ -30167,11 +30334,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .botFaceCrtPixelGridLayer {
-  /* A single screen-space cell grid sits above the live face but below the
-     foreground Ink. It textures the display without resampling glyph geometry. */
+  /* One screen-space cell grid sits above both the live face and foreground
+     Ink. Sharing the same front lattice makes their touching silhouettes read
+     as one phosphor image without resampling either geometry layer. */
   position: absolute;
   inset: 0;
-  z-index: 6;
+  z-index: 7;
   display: block;
   pointer-events: none;
   background:
@@ -30394,6 +30562,33 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   pointer-events: none;
 }
 
+/* The editor authors one complete 128px screen. Keep authored Ink and the
+   live glyph in that same coordinate space, then turn the complete screen as
+   one unit. Mirroring the two layers independently gives them different
+   origins and lets eyes drift into glasses on side-facing Zen avatars. */
+.zenLiveBotPresenceScreenContentRig {
+  /* The Avatar Editor owns the internal 128px screen. Room wrappers may move,
+     scale, or turn this complete rig, but may not nudge its face and Ink as
+     separate layers. */
+  --avatar-details-offset-x: 0px;
+  --avatar-details-offset-y: 0px;
+  --avatar-details-facing-scale-x: 1;
+  /* The complete screen rig owns horizontal mirroring, so prevent a second
+     Ink flip here. Keep the inherited facing offset, though: left-facing Ink
+     needs its authored three-pixel optical lift to stay registered to the
+     live eyes and mouth after the turn. */
+  --zen-live-bot-ink-offset-y: 0%;
+  --zen-live-bot-face-thumbnail-offset-y: 0%;
+  --zen-live-bot-face-thumbnail-scale: 1;
+  --zen-live-bot-face-layer-scale-x: 1;
+  position: absolute;
+  inset: 0;
+  z-index: 6;
+  transform: scaleX(var(--zen-live-bot-screen-facing-scale-x, 1));
+  transform-origin: 50% 50%;
+  pointer-events: none;
+}
+
 .zenLiveBotPresenceScreenGlassOverlay {
   position: absolute;
   left: 50%;
@@ -30533,7 +30728,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     --bot-face-frame-tint-talking-opacity-low,
     0.54
   );
-  animation: zenLiveBotTalkingLightFlicker 840ms ease-in-out infinite;
+  animation: none;
 }
 
 .zenLiveBotPresencePlate[data-talking="true"]:not([data-private-mode="true"])
@@ -30553,7 +30748,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     --bot-face-frame-led-talking-opacity-low,
     0.64
   );
-  animation: zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
+  animation: none;
 }
 
 .zenLiveBotPresencePlate[data-talking="true"]:not(
@@ -30792,30 +30987,6 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     --zen-live-bot-crt-shared-flicker-opacity: 0.9;
     --zen-live-bot-crt-shared-flicker-brightness-scale: 0.8879;
     --zen-live-bot-crt-shared-flicker-contrast-scale: 1.0294;
-  }
-}
-
-@keyframes zenLiveBotTalkingLightFlicker {
-  0%,
-  8%,
-  24%,
-  47%,
-  71%,
-  100% {
-    opacity: var(--zen-live-bot-talking-light-opacity-high, 1);
-  }
-
-  12%,
-  37%,
-  60%,
-  82% {
-    opacity: var(--zen-live-bot-talking-light-opacity-mid, 0.82);
-  }
-
-  15%,
-  55%,
-  87% {
-    opacity: var(--zen-live-bot-talking-light-opacity-low, 0.64);
   }
 }
 
@@ -31144,7 +31315,20 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
   .zenLiveBotPresenceFace {
-  --bot-face-ambient-glow-opacity: 0.74;
+  --bot-face-ambient-glow-opacity: 0.88;
+  --bot-face-ambient-glow-size: 92%;
+}
+
+/* Prism keeps the authored chassis neutral, then lights it from behind with
+   the same rotating spectrum as its LED mask. This is the broad ambient stage
+   visible around the body; the LED glow and white core below remain local to
+   the authored bulbs. */
+.zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not(
+    [data-private-mode="true"]
+  )
+  .zenLiveBotPresenceFace::before {
+  content: none;
+  animation: none;
 }
 
 .themeLight .zenLiveBotPresencePlate[data-prism-persona="true"],
@@ -31230,6 +31414,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph {
+  /* Tune the large face features into slightly finer focus without changing
+     the authored ink siblings or the smaller buckle screen's CRT softness. */
+  --crt-beam-softness: 0.32px;
   --crt-glyph-core-paint-bleed: 0.14em;
   font-size: var(--zen-live-bot-avatar-face-glyph-size, 21.7cqw);
 }
@@ -31514,14 +31701,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .zenLiveBotPresenceThinkingGlyph[data-coffee-plate-thinking-spinner="true"] {
   --zen-live-bot-spinner-glow-color: var(--coffee-bot-color);
   --crt-face-edge-color: var(--zen-live-bot-spinner-glow-color);
-  --crt-bloom-narrow-radius: 1.1px;
-  --crt-bloom-wide-radius: 4px;
+  --crt-bloom-narrow-radius: var(
+    --bot-phosphor-bloom-narrow-radius,
+    1.25px
+  );
+  --crt-bloom-wide-radius: var(--bot-phosphor-bloom-wide-radius, 6px);
   --crt-face-glow-filter: drop-shadow(
-      0 0 0.72px var(--zen-live-bot-spinner-glow-color)
+      0 0 var(--bot-phosphor-halo-contact-radius, 0.72px)
+        var(--zen-live-bot-spinner-glow-color)
     )
-    drop-shadow(0 0 1.5px var(--zen-live-bot-spinner-glow-color))
     drop-shadow(
-      0 0 3px
+      0 0 var(--bot-phosphor-halo-tight-radius, 1.5px)
+        var(--zen-live-bot-spinner-glow-color)
+    )
+    drop-shadow(
+      0 0 var(--bot-phosphor-halo-near-radius, 3px)
         color-mix(
           in srgb,
           var(--zen-live-bot-spinner-glow-color) 64%,
@@ -31529,7 +31723,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
         )
     )
     drop-shadow(
-      0 0 6px
+      0 0 var(--bot-phosphor-halo-mid-radius, 6px)
         color-mix(
           in srgb,
           var(--zen-live-bot-spinner-glow-color) 34%,
@@ -31537,10 +31731,18 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
         )
     )
     drop-shadow(
-      0 0 9px
+      0 0 var(--bot-phosphor-halo-far-radius, 12px)
         color-mix(
           in srgb,
           var(--zen-live-bot-spinner-glow-color) 14%,
+          transparent
+        )
+    )
+    drop-shadow(
+      0 0 var(--bot-phosphor-halo-ambient-radius, 21px)
+        color-mix(
+          in srgb,
+          var(--zen-live-bot-spinner-glow-color) 4%,
           transparent
         )
     );
@@ -31576,12 +31778,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   )
   .botFaceFrameLed {
   mix-blend-mode: normal;
-  animation: zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
+  animation: none;
 }
 
-/* Prism follows the standard bot LED material stack. The aura, colored
-   emitter, and white core all use the same authored bulb mask; the metal and
-   frame-tint rasters stay neutral. */
+/* Prism follows the established LED material stack. The aura, colored
+   emitter, and white-hot core all use the same authored bulb mask; the metal
+   and frame-tint rasters stay neutral. */
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not(
     [data-private-mode="true"]
   )
@@ -31591,9 +31793,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --zen-live-bot-talking-light-opacity-mid: 0.72;
   --zen-live-bot-talking-light-opacity-low: 0.56;
   background-image: var(--bot-face-frame-led-spectrum);
-  animation:
-    zenLivePrismLedAuraHueRotate 1.7s linear infinite,
-    zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
+  mix-blend-mode: screen;
+  animation: zenLivePrismLedAuraHueRotate 1.7s linear infinite;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not(
@@ -31605,9 +31806,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: var(--bot-face-frame-led-spectrum);
   mix-blend-mode: normal;
   opacity: 1;
-  animation:
-    zenLivePrismEmitterHueRotate 1.7s linear infinite,
-    zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
+  animation: zenLivePrismEmitterHueRotate 1.7s linear infinite;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]:not(
@@ -31618,7 +31817,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: #fff;
   mix-blend-mode: screen;
   opacity: var(--bot-face-frame-led-glow-opacity, 0.9);
-  animation: zenLiveBotTalkingLightFlicker 780ms ease-in-out infinite;
+  animation: none;
 }
 
 .zenLiveBotPresencePlate[data-prism-persona="true"][data-talking="true"]
@@ -31936,13 +32135,11 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 @keyframes zenLivePrismLedAuraHueRotate {
   from {
-    filter: blur(var(--bot-face-frame-led-aura-radius, 7px)) saturate(1.42)
-      hue-rotate(0deg);
+    filter: saturate(1.12) brightness(0.98) hue-rotate(0deg);
   }
 
   to {
-    filter: blur(var(--bot-face-frame-led-aura-radius, 7px)) saturate(1.42)
-      hue-rotate(360deg);
+    filter: saturate(1.12) brightness(0.98) hue-rotate(360deg);
   }
 }
 
@@ -32297,10 +32494,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   /* White-hot phosphor core; the bot's normalized color belongs to the edge
      and bloom so the mark stays crisp without losing identity. */
   color: #ffffff;
-  filter: drop-shadow(0 0 0.72px var(--zen-live-bot-glyph-crt-border-color))
-    drop-shadow(0 0 1.5px var(--zen-live-bot-glyph-crt-border-color))
+  filter: drop-shadow(
+      0 0 var(--bot-phosphor-halo-contact-radius, 0.72px)
+        var(--zen-live-bot-glyph-crt-border-color)
+    )
     drop-shadow(
-      0 0 3px
+      0 0 var(--bot-phosphor-halo-tight-radius, 1.5px)
+        var(--zen-live-bot-glyph-crt-border-color)
+    )
+    drop-shadow(
+      0 0 var(--bot-phosphor-halo-near-radius, 3px)
         color-mix(
           in srgb,
           var(--zen-live-bot-glyph-crt-border-color) 82%,
@@ -32308,7 +32511,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
         )
     )
     drop-shadow(
-      0 0 6px
+      0 0 var(--bot-phosphor-halo-mid-radius, 6px)
         color-mix(
           in srgb,
           var(--zen-live-bot-glyph-crt-border-color) 58%,
@@ -32316,7 +32519,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
         )
     )
     drop-shadow(
-      0 0 12px
+      0 0 var(--bot-phosphor-halo-far-radius, 12px)
         color-mix(
           in srgb,
           var(--zen-live-bot-glyph-crt-border-color) 36%,
@@ -32324,7 +32527,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
         )
     )
     drop-shadow(
-      0 0 21px
+      0 0 var(--bot-phosphor-halo-ambient-radius, 21px)
         color-mix(
           in srgb,
           var(--zen-live-bot-glyph-crt-border-color) 22%,
@@ -35362,6 +35565,71 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-color: var(--line-strong);
 }
 
+.composeModelControl[data-turbo="true"]::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  inset: -1px;
+  z-index: 4;
+  border: 1px solid color-mix(in srgb, #ffad42 66%, transparent);
+  border-radius: inherit;
+  box-shadow:
+    inset 0 0 3px color-mix(in srgb, #ffd28c 25%, transparent),
+    inset 0 0 9px color-mix(in srgb, #ff7800 12%, transparent),
+    0 0 5px color-mix(in srgb, #ff8a1f 30%, transparent),
+    0 0 13px color-mix(in srgb, #ff4d00 13%, transparent);
+  opacity: 0.48;
+  filter: saturate(0.94) brightness(0.96);
+  animation: turboPickerEmberPulse 1840ms ease-in-out infinite;
+}
+
+@keyframes turboPickerEmberPulse {
+  0%,
+  100% {
+    opacity: 0.48;
+    filter: saturate(0.94) brightness(0.96);
+  }
+
+  36% {
+    opacity: 0.82;
+    filter: saturate(1.12) brightness(1.08);
+  }
+
+  68% {
+    opacity: 0.58;
+    filter: saturate(1.02) brightness(1);
+  }
+}
+
+@keyframes turboPickerEmberPulseLight {
+  0%,
+  100% {
+    opacity: 0.5;
+    filter: saturate(0.96) brightness(0.98);
+  }
+
+  36% {
+    opacity: 0.7;
+    filter: saturate(1.08) brightness(1.03);
+  }
+
+  68% {
+    opacity: 0.56;
+    filter: saturate(1.01) brightness(1);
+  }
+}
+
+:global(body[data-prism-theme="light"])
+  .composeModelControl[data-turbo="true"]::after {
+  border-color: color-mix(in srgb, #ff6a2a 64%, transparent);
+  box-shadow:
+    inset 0 0 2px color-mix(in srgb, #ffcf88 24%, transparent),
+    inset 0 0 6px color-mix(in srgb, #ff5a00 8%, transparent),
+    0 0 3px color-mix(in srgb, #ff6b20 24%, transparent),
+    0 0 8px color-mix(in srgb, #ff3b00 8%, transparent);
+  animation-name: turboPickerEmberPulseLight;
+}
+
 .composeModelControl[data-provider="local"] {
   background: color-mix(in srgb, var(--bg-deep) 88%, var(--provider-accent-local) 12%);
 }
@@ -35464,9 +35732,529 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .composeModelEffortTriggerWrap {
+  position: relative;
   display: inline-flex;
   align-self: stretch;
   border-radius: 0 999px 999px 0;
+  isolation: isolate;
+}
+
+.composeModelTurboBurnAtmosphere {
+  --turbo-red-flicker-low: 0.2;
+  --turbo-red-flicker-mid: 0.34;
+  --turbo-red-flicker-high: 0.48;
+  position: absolute;
+  pointer-events: none;
+  inset: -38px -22px -16px -20px;
+  z-index: 1;
+  overflow: visible;
+  border-radius: 999px;
+}
+
+.composeModelTurboBurnAtmosphere::before {
+  content: "";
+  position: absolute;
+  inset: 19px 3px 7px 6px;
+  border-radius: inherit;
+  background:
+    radial-gradient(
+      ellipse at 68% 58%,
+      color-mix(in srgb, #ff2100 42%, transparent) 0%,
+      color-mix(in srgb, #a60900 24%, transparent) 46%,
+      transparent 76%
+    ),
+    radial-gradient(
+      ellipse at 38% 65%,
+      color-mix(in srgb, #750000 22%, transparent) 0%,
+      transparent 70%
+    );
+  filter: blur(14px);
+  mix-blend-mode: screen;
+  opacity: var(--turbo-red-flicker-low);
+  transform: translate3d(1px, 2px, 0) scale(0.92, 0.78);
+  transform-origin: 66% 62%;
+  animation: turboAmbientRedFlicker 2630ms ease-in-out infinite;
+}
+
+.composeModelTurboBurnAtmosphere > span {
+  --turbo-cinder-drift-x: -7px;
+  --turbo-cinder-rise: -44px;
+  --turbo-cinder-rotate: 82deg;
+  position: absolute;
+  left: 57%;
+  bottom: 12px;
+  width: 2px;
+  height: 3px;
+  border-radius: 62% 38% 58% 42%;
+  background: linear-gradient(180deg, #ffe19a 0%, #ff6a20 46%, #971000 100%);
+  box-shadow:
+    0 0 3px color-mix(in srgb, #ff7a22 84%, transparent),
+    0 0 7px color-mix(in srgb, #c71b00 56%, transparent);
+  opacity: 0;
+  transform-origin: center;
+  animation: turboCinderRise 2780ms cubic-bezier(0.2, 0.52, 0.34, 1) infinite;
+  animation-delay: -620ms;
+}
+
+.composeModelTurboBurnAtmosphere > span:nth-child(2) {
+  --turbo-cinder-drift-x: 9px;
+  --turbo-cinder-rise: -37px;
+  --turbo-cinder-rotate: -106deg;
+  left: 73%;
+  bottom: 10px;
+  width: 1.5px;
+  height: 2.5px;
+  animation-duration: 3260ms;
+  animation-delay: -2140ms;
+}
+
+.composeModelTurboBurnAtmosphere > span:nth-child(3) {
+  --turbo-cinder-drift-x: -11px;
+  --turbo-cinder-rise: -53px;
+  --turbo-cinder-rotate: 132deg;
+  left: 84%;
+  bottom: 13px;
+  width: 2px;
+  height: 2px;
+  animation-duration: 3640ms;
+  animation-delay: -1280ms;
+}
+
+.composeModelTurboBurnAtmosphere > span:nth-child(4) {
+  --turbo-cinder-drift-x: 5px;
+  --turbo-cinder-rise: -46px;
+  --turbo-cinder-rotate: -74deg;
+  left: 44%;
+  bottom: 9px;
+  width: 1.5px;
+  height: 3px;
+  animation-duration: 3050ms;
+  animation-delay: -2670ms;
+}
+
+.composeModelTurboBurnAtmosphere > span:nth-child(5) {
+  --turbo-cinder-drift-x: 13px;
+  --turbo-cinder-rise: -56px;
+  --turbo-cinder-rotate: 118deg;
+  left: 65%;
+  bottom: 8px;
+  width: 2.5px;
+  height: 2.5px;
+  animation-duration: 4010ms;
+  animation-delay: -3460ms;
+}
+
+.composeModelTurboBurnAtmosphere > span:nth-child(6) {
+  --turbo-cinder-drift-x: -5px;
+  --turbo-cinder-rise: -34px;
+  --turbo-cinder-rotate: -91deg;
+  left: 91%;
+  bottom: 11px;
+  width: 1.5px;
+  height: 2px;
+  animation-duration: 2890ms;
+  animation-delay: -1780ms;
+}
+
+.composeModelTurboBurnAtmosphere > span:nth-child(7) {
+  --turbo-cinder-drift-x: -14px;
+  --turbo-cinder-rise: -48px;
+  --turbo-cinder-rotate: 146deg;
+  left: 51%;
+  bottom: 14px;
+  width: 2px;
+  height: 2.5px;
+  animation-duration: 3790ms;
+  animation-delay: -80ms;
+}
+
+@keyframes turboAmbientRedFlicker {
+  0%,
+  100% {
+    opacity: var(--turbo-red-flicker-low);
+    transform: translate3d(1px, 2px, 0) scale(0.92, 0.78);
+  }
+
+  18% {
+    opacity: var(--turbo-red-flicker-high);
+    transform: translate3d(0, 0, 0) scale(1.02, 0.88);
+  }
+
+  43% {
+    opacity: var(--turbo-red-flicker-mid);
+    transform: translate3d(-1px, 1px, 0) scale(0.96, 0.82);
+  }
+
+  61% {
+    opacity: var(--turbo-red-flicker-high);
+    transform: translate3d(1px, 0, 0) scale(1, 0.86);
+  }
+
+  78% {
+    opacity: var(--turbo-red-flicker-low);
+    transform: translate3d(0, 2px, 0) scale(0.94, 0.8);
+  }
+}
+
+@keyframes turboCinderRise {
+  0% {
+    opacity: 0;
+    filter: brightness(0.72) saturate(0.86);
+    transform: translate3d(0, 7px, 0) scale(0.32) rotate(0deg);
+  }
+
+  12% {
+    opacity: 0.38;
+  }
+
+  28% {
+    opacity: 0.92;
+    filter: brightness(1.45) saturate(1.18);
+  }
+
+  58% {
+    opacity: 0.58;
+  }
+
+  76% {
+    opacity: 0.26;
+    filter: brightness(0.76) saturate(0.82);
+  }
+
+  100% {
+    opacity: 0;
+    filter: brightness(0.42) saturate(0.62);
+    transform: translate3d(
+        var(--turbo-cinder-drift-x),
+        var(--turbo-cinder-rise),
+        0
+      )
+      scale(0.16) rotate(var(--turbo-cinder-rotate));
+  }
+}
+
+.composeModelEffortTriggerWrap[data-turbo="true"]::before {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  inset: -15px -18px -13px -13px;
+  z-index: 0;
+  border-radius: 999px;
+  background:
+    radial-gradient(
+      ellipse at 76% 42%,
+      color-mix(in srgb, #ffb23f 64%, transparent) 0%,
+      color-mix(in srgb, #ff7a00 36%, transparent) 42%,
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse at 58% 76%,
+      color-mix(in srgb, #ff4d00 42%, transparent) 0%,
+      transparent 74%
+    );
+  filter: blur(10px);
+  opacity: 0.58;
+  transform: translate3d(1px, 1px, 0) scale(0.94, 0.84);
+  transform-origin: center;
+  animation: turboSmolderGlow 1840ms ease-in-out infinite;
+}
+
+.composeModelEffortTriggerWrap[data-turbo="true"]::after {
+  content: "";
+  position: absolute;
+  pointer-events: none;
+  inset: -20px -7px -5px -6px;
+  z-index: 3;
+  background-image: url("/ui/turbo-fire-loop.gif");
+  background-image: image-set(
+    url("/ui/turbo-fire-loop.webp") type("image/webp"),
+    url("/ui/turbo-fire-loop.gif") type("image/gif")
+  );
+  background-position: left bottom;
+  background-repeat: no-repeat;
+  background-size: 100% 89%;
+  image-rendering: auto;
+  filter: drop-shadow(
+    0 1px 5px color-mix(in srgb, #ff6200 30%, transparent)
+  );
+  mix-blend-mode: screen;
+  transform: translate3d(0, -2px, 0);
+}
+
+.composeModelEffortTriggerWrap[data-turbo="true"]
+  .composeModelEffortTrigger {
+  position: relative;
+  z-index: 2;
+  border-left-color: color-mix(in srgb, #ff9b42 72%, var(--line-strong));
+  background: color-mix(in srgb, #ff6500 11%, var(--bg-elevated));
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #ff4a1f 84%, transparent),
+    inset 0 0 0 2px color-mix(in srgb, #ffd166 24%, transparent),
+    inset 0 0 8px color-mix(in srgb, #ff2400 24%, transparent),
+    0 0 4px color-mix(in srgb, #ff2d00 56%, transparent),
+    0 0 10px color-mix(in srgb, #ff6500 28%, transparent);
+  animation: turboEffortHeatPulse 1840ms ease-in-out infinite;
+}
+
+@keyframes turboEffortHeatPulse {
+  0%,
+  100% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, #ff3d1f 76%, transparent),
+      inset 0 0 0 2px color-mix(in srgb, #ffd166 18%, transparent),
+      inset 0 0 7px color-mix(in srgb, #ff2400 20%, transparent),
+      0 0 3px color-mix(in srgb, #ff2d00 46%, transparent),
+      0 0 8px color-mix(in srgb, #ff6500 22%, transparent);
+  }
+
+  36% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, #ff6a2a 96%, transparent),
+      inset 0 0 0 2px color-mix(in srgb, #ffe099 34%, transparent),
+      inset 0 0 10px color-mix(in srgb, #ff2400 34%, transparent),
+      0 0 5px color-mix(in srgb, #ff2d00 72%, transparent),
+      0 0 13px color-mix(in srgb, #ff6500 38%, transparent);
+  }
+
+  68% {
+    box-shadow:
+      inset 0 0 0 1px color-mix(in srgb, #ff5224 84%, transparent),
+      inset 0 0 0 2px color-mix(in srgb, #ffd166 24%, transparent),
+      inset 0 0 8px color-mix(in srgb, #ff2400 27%, transparent),
+      0 0 4px color-mix(in srgb, #ff2d00 58%, transparent),
+      0 0 10px color-mix(in srgb, #ff6500 29%, transparent);
+  }
+}
+
+@keyframes turboSmolderGlowLight {
+  0%,
+  100% {
+    opacity: 0.28;
+    transform: translate3d(1px, 1px, 0) scale(0.88, 0.78);
+  }
+
+  36% {
+    opacity: 0.43;
+    transform: translate3d(0, 0, 0) scale(0.94, 0.85);
+  }
+
+  68% {
+    opacity: 0.33;
+    transform: translate3d(0, 1px, 0) scale(0.91, 0.81);
+  }
+}
+
+:global(body[data-prism-theme="light"])
+  .composeModelEffortTriggerWrap[data-turbo="true"]::before {
+  inset: -10px -12px -9px -9px;
+  background:
+    radial-gradient(
+      ellipse at 74% 45%,
+      color-mix(in srgb, #ff8a2b 50%, transparent) 0%,
+      color-mix(in srgb, #ff3d00 26%, transparent) 44%,
+      transparent 72%
+    ),
+    radial-gradient(
+      ellipse at 60% 76%,
+      color-mix(in srgb, #d92700 25%, transparent) 0%,
+      transparent 72%
+    );
+  filter: blur(7px);
+  animation-name: turboSmolderGlowLight;
+}
+
+:global(body[data-prism-theme="light"])
+  .composeModelTurboBurnAtmosphere {
+  --turbo-red-flicker-low: 0.1;
+  --turbo-red-flicker-mid: 0.16;
+  --turbo-red-flicker-high: 0.23;
+}
+
+:global(body[data-prism-theme="light"])
+  .composeModelTurboBurnAtmosphere::before {
+  filter: blur(10px);
+  mix-blend-mode: multiply;
+}
+
+:global(body[data-prism-theme="light"])
+  .composeModelTurboBurnAtmosphere > span {
+  filter: saturate(1.08) contrast(1.08);
+  mix-blend-mode: multiply;
+}
+
+:global(body[data-prism-theme="light"])
+  .composeModelEffortTriggerWrap[data-turbo="true"]::after {
+  filter:
+    saturate(1.12)
+    brightness(1.08)
+    contrast(0.96)
+    drop-shadow(0 1px 3px color-mix(in srgb, #b92f00 18%, transparent));
+  mix-blend-mode: multiply;
+  opacity: 0.88;
+}
+
+:global(body[data-prism-theme="light"])
+  .composeModelEffortTriggerWrap[data-turbo="true"]
+  .composeModelEffortTrigger {
+  border-left-color: color-mix(in srgb, #ff7a32 82%, #5a2418);
+  color: var(--fg-muted);
+  background: linear-gradient(
+    180deg,
+    color-mix(in srgb, #ffffff 44%, var(--bg-elevated)),
+    color-mix(in srgb, #ff6a2a 8%, var(--bg-elevated))
+  );
+}
+
+:global(body[data-prism-theme="light"])
+  .composeModelEffortTriggerWrap[data-turbo="true"]
+  .composeModelEffortTriggerChevron {
+  color: color-mix(in srgb, #9a5d3d 42%, var(--fg-subtle));
+}
+
+:global(body[data-prism-theme="light"])
+  .composeModelEffortTriggerWrap[data-turbo="true"]
+  .modelEffortIcon[data-effort-level="auto"],
+:global(body[data-prism-theme="light"])
+  .composeModelEffortTriggerWrap[data-turbo="true"]
+  .modelEffortIcon[data-effort-level="none"] {
+  background: #42576b;
+  filter: drop-shadow(0 0 2px color-mix(in srgb, #ff7a32 20%, transparent));
+}
+
+@keyframes turboSmolderGlow {
+  0%,
+  100% {
+    opacity: 0.48;
+    transform: translate3d(1px, 1px, 0) scale(0.91, 0.8);
+  }
+
+  36% {
+    opacity: 0.72;
+    transform: translate3d(0, 0, 0) scale(1, 0.9);
+  }
+
+  68% {
+    opacity: 0.56;
+    transform: translate3d(-0.5px, 1px, 0) scale(0.96, 0.86);
+  }
+}
+
+.composeModelTurboSmokeBurst {
+  position: absolute;
+  pointer-events: none;
+  inset: -16px -18px -12px -12px;
+  z-index: 4;
+  overflow: visible;
+}
+
+.composeModelTurboSmokeBurst > span {
+  --turbo-smoke-drift-x: -5px;
+  --turbo-smoke-drift-y: -20px;
+  position: absolute;
+  left: 56%;
+  bottom: 34%;
+  width: 21px;
+  height: 14px;
+  border-radius: 50%;
+  background: radial-gradient(
+    ellipse at 48% 55%,
+    color-mix(in srgb, #d8d2c8 62%, transparent) 0%,
+    color-mix(in srgb, #8f8a82 36%, transparent) 44%,
+    transparent 74%
+  );
+  filter: blur(1.3px);
+  opacity: 0;
+  transform-origin: center;
+  animation: turboSmokePuff 760ms cubic-bezier(0.18, 0.7, 0.22, 1)
+    forwards;
+}
+
+.composeModelTurboSmokeBurst > span:nth-child(2) {
+  --turbo-smoke-drift-x: 7px;
+  --turbo-smoke-drift-y: -14px;
+  left: 67%;
+  bottom: 31%;
+  width: 16px;
+  height: 12px;
+  animation-delay: 45ms;
+}
+
+.composeModelTurboSmokeBurst > span:nth-child(3) {
+  --turbo-smoke-drift-x: -11px;
+  --turbo-smoke-drift-y: -13px;
+  left: 46%;
+  bottom: 27%;
+  width: 15px;
+  height: 11px;
+  animation-delay: 85ms;
+}
+
+@keyframes turboSmokePuff {
+  0% {
+    opacity: 0;
+    transform: translate3d(0, 4px, 0) scale(0.35);
+  }
+
+  20% {
+    opacity: 0.5;
+  }
+
+  56% {
+    opacity: 0.3;
+  }
+
+  100% {
+    opacity: 0;
+    transform: translate3d(
+        var(--turbo-smoke-drift-x),
+        var(--turbo-smoke-drift-y),
+        0
+      )
+      scale(1.5);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composeModelTurboSmokeBurst {
+    display: none;
+  }
+
+  .composeModelTurboBurnAtmosphere > span {
+    display: none;
+  }
+
+  .composeModelTurboBurnAtmosphere::before {
+    animation: none;
+    opacity: var(--turbo-red-flicker-mid);
+    transform: translate3d(0, 1px, 0) scale(0.96, 0.82);
+  }
+
+  .composeModelControl[data-turbo="true"]::after {
+    animation: none;
+    opacity: 0.58;
+    filter: none;
+  }
+
+  .composeModelEffortTriggerWrap[data-turbo="true"]
+    .composeModelEffortTrigger {
+    animation: none;
+  }
+
+  .composeModelEffortTriggerWrap[data-turbo="true"]::before {
+    animation: none;
+    opacity: 0.58;
+    transform: translate3d(1px, 1px, 0) scale(0.94, 0.84);
+  }
+
+  .composeModelEffortTriggerWrap[data-turbo="true"]::after {
+    background-image: url("/ui/turbo-fire-still.png");
+  }
+
+  :global(body[data-prism-theme="light"])
+    .composeModelEffortTriggerWrap[data-turbo="true"]::before {
+    opacity: 0.34;
+    transform: translate3d(0, 1px, 0) scale(0.91, 0.81);
+  }
 }
 
 .composeModelEffortTriggerWrap:focus-visible {
@@ -36262,6 +37050,112 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: color-mix(in srgb, var(--accent) 16%, var(--bg-hover));
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 52%, transparent);
   color: var(--fg);
+}
+
+.composeModelTurboToggle {
+  appearance: none;
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 10px;
+  width: 100%;
+  margin-top: 12px;
+  padding: 10px 9px;
+  border: 1px solid color-mix(in srgb, #ff8a00 28%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, #ff6500 6%, var(--bg-deep));
+  color: var(--fg);
+  text-align: left;
+  cursor: pointer;
+}
+
+.composeModelTurboToggle:hover,
+.composeModelTurboToggle:focus-visible {
+  outline: none;
+  border-color: color-mix(in srgb, #ff9b42 70%, var(--line-strong));
+  background: color-mix(in srgb, #ff6500 12%, var(--bg-hover));
+}
+
+.composeModelTurboToggle[data-active="true"] {
+  border-color: color-mix(in srgb, #ffb14e 82%, var(--line-strong));
+  background: linear-gradient(
+    105deg,
+    color-mix(in srgb, #ff3d00 16%, var(--bg-deep)),
+    color-mix(in srgb, #ffb000 10%, var(--bg-elevated))
+  );
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #ffd166 24%, transparent),
+    0 0 14px color-mix(in srgb, #ff5a00 22%, transparent);
+}
+
+.composeModelTurboFlame {
+  font-size: 18px;
+  line-height: 1;
+  filter: drop-shadow(0 0 5px color-mix(in srgb, #ff5a00 62%, transparent));
+}
+
+.composeModelTurboCopy {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  font-family:
+    var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.composeModelTurboCopy strong {
+  font-size: 10px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+.composeModelTurboCopy small {
+  color: var(--fg-subtle);
+  font-size: 8px;
+  line-height: 1.25;
+}
+
+.composeModelTurboSwitch {
+  display: flex;
+  align-items: center;
+  width: 30px;
+  height: 17px;
+  padding: 2px;
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--fg) 18%, transparent);
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--fg) 18%, transparent);
+  transition:
+    background 160ms ease,
+    box-shadow 160ms ease;
+}
+
+.composeModelTurboSwitch > span {
+  width: 13px;
+  height: 13px;
+  border-radius: 50%;
+  background: var(--fg-muted);
+  box-shadow: 0 1px 3px color-mix(in srgb, #000000 55%, transparent);
+  transition:
+    transform 180ms cubic-bezier(0.2, 0.8, 0.2, 1),
+    background 160ms ease;
+}
+
+.composeModelTurboToggle[data-active="true"] .composeModelTurboSwitch {
+  background: linear-gradient(90deg, #ff4d00, #ffb000);
+  box-shadow: 0 0 8px color-mix(in srgb, #ff6500 62%, transparent);
+}
+
+.composeModelTurboToggle[data-active="true"]
+  .composeModelTurboSwitch
+  > span {
+  transform: translateX(13px);
+  background: #fff4d1;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .composeModelTurboSwitch,
+  .composeModelTurboSwitch > span {
+    transition: none;
+  }
 }
 
 .modelEffortHud {
@@ -40383,8 +41277,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 }
 
 .promptCenterPreviewActions button,
-.promptCenterPreviewPending button,
-.promptCenterPromptWildcardPreviewButton {
+.promptCenterPreviewPending button {
   border: 1px solid var(--line);
   border-radius: 999px;
   background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
@@ -40398,9 +41291,7 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
 .promptCenterPreviewActions button:hover,
 .promptCenterPreviewActions button:focus-visible,
 .promptCenterPreviewPending button:hover,
-.promptCenterPreviewPending button:focus-visible,
-.promptCenterPromptWildcardPreviewButton:hover,
-.promptCenterPromptWildcardPreviewButton:focus-visible {
+.promptCenterPreviewPending button:focus-visible {
   outline: none;
   border-color: color-mix(
     in srgb,
@@ -40826,36 +41717,19 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   display: grid;
   grid-template-columns: repeat(auto-fit, minmax(116px, 1fr));
   gap: 6px;
-  max-height: min(176px, 26vh);
+  max-height: min(268px, 36vh);
   overflow-y: auto;
   overscroll-behavior: contain;
   padding-right: 2px;
 }
 
 .promptCenterPromptWildcardTile {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 5px;
   min-width: 0;
-}
-
-.promptCenterPromptWildcardPreviewButton {
-  align-self: stretch;
-  min-width: 66px;
-  max-width: 118px;
-  border-radius: 9px;
-  padding-inline: 7px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-}
-
-.promptCenterPromptWildcardPreviewButton[data-busy="true"] {
-  opacity: 0.68;
 }
 
 .promptCenterPromptWildcardButton {
   --prompt-command-color: var(--accent-ink);
+  width: 100%;
   min-width: 0;
   border: 1px solid
     color-mix(in srgb, var(--prompt-command-color) 30%, var(--line));
@@ -40875,6 +41749,67 @@ button.composeCommandRailButton[data-command-kind="command"][aria-selected="true
   cursor: pointer;
   box-shadow: inset 3px 0 0
     color-mix(in srgb, var(--prompt-command-color) 72%, transparent);
+}
+
+.promptCenterPromptWildcardTooltip {
+  position: fixed;
+  z-index: 4000;
+  pointer-events: none;
+  max-width: min(260px, calc(100vw - 16px));
+  min-height: 30px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: 9px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-lg);
+  color: var(--fg);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 11.5px;
+  line-height: 1.35;
+  text-align: center;
+  white-space: normal;
+}
+
+.promptCenterPromptWildcardTooltip[data-side="top"] {
+  transform-origin: center bottom;
+  animation: promptCenterWildcardTooltipInTop 120ms ease-out;
+}
+
+.promptCenterPromptWildcardTooltip[data-side="bottom"] {
+  transform-origin: center top;
+  animation: promptCenterWildcardTooltipInBottom 120ms ease-out;
+}
+
+@keyframes promptCenterWildcardTooltipInTop {
+  from {
+    opacity: 0;
+    transform: translateY(4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes promptCenterWildcardTooltipInBottom {
+  from {
+    opacity: 0;
+    transform: translateY(-4px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .promptCenterPromptWildcardTooltip {
+    animation: none;
+  }
 }
 
 .promptCenterPromptWildcardButton:hover,
@@ -51404,8 +52339,7 @@ a.settingsCreditItem:focus-visible {
 
 .botAvatarPreviewCopy span,
 .botAvatarFontControl legend,
-.botAvatarEyeCharacterControl > span,
-.botAvatarWeightControl > span {
+.botAvatarEyeCharacterControl > span {
   color: var(--fg);
   font-size: 12px;
   font-weight: 720;
@@ -51578,79 +52512,87 @@ a.settingsCreditItem:focus-visible {
   color: var(--fg);
   font-size: 21px;
   line-height: 1;
-  transform-origin: center center;
 }
 
-.botAvatarFontOptionSample[data-face-font="neutral"] {
+.botAvatarFontOptionSample[data-face-font="neutral"],
+.coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="neutral"],
+.coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="neutral"],
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="neutral"],
+.messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="neutral"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="neutral"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="neutral"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="neutral"] {
   font-family: var(--font-ui-sans), system-ui, sans-serif;
-  font-weight: 820;
-  letter-spacing: 0.03em;
+  font-weight: 700;
+  font-variation-settings: normal;
+  font-synthesis: none;
+  letter-spacing: 0.016em;
 }
 
-.botAvatarFontOptionSample[data-face-font="warm"] {
+.botAvatarFontOptionSample[data-face-font="warm"],
+.coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="warm"],
+.coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="warm"],
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="warm"],
+.messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="warm"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="warm"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="warm"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="warm"] {
   font-family:
     var(--font-concise-rounded), var(--font-ui-sans), system-ui, sans-serif;
   font-weight: 700;
-  letter-spacing: -0.07em;
-  transform: scaleX(1.22) scaleY(0.92);
+  font-variation-settings: normal;
+  font-synthesis: none;
+  letter-spacing: -0.04em;
 }
 
-.botAvatarFontOptionSample[data-face-font="concise"] {
+.botAvatarFontOptionSample[data-face-font="concise"],
+.coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="concise"],
+.coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="concise"],
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="concise"],
+.messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="concise"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="concise"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="concise"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="concise"] {
   font-family: var(--prism-mono-face-font);
-  font-weight: 780;
+  font-weight: var(--prism-mono-face-weight);
+  font-variation-settings: normal;
+  font-synthesis: none;
   letter-spacing: var(--prism-mono-face-letter-spacing);
-  transform: scale(1.08);
 }
 
-.botAvatarFontOptionSample[data-face-font="playful"] {
+.botAvatarFontOptionSample[data-face-font="playful"],
+.coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="playful"],
+.coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="playful"],
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="playful"],
+.messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="playful"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="playful"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="playful"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="playful"] {
   font-family:
     var(--font-playful-display), var(--font-ui-sans), system-ui, sans-serif;
-  font-weight: 500;
+  font-weight: 400;
+  font-variation-settings: normal;
+  font-synthesis: none;
   letter-spacing: 0.02em;
-  transform: rotate(-3deg) scale(1.08);
 }
 
-.botAvatarFontOptionSample[data-face-font="formal"] {
+.botAvatarFontOptionSample[data-face-font="formal"],
+.coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="formal"],
+.coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="formal"],
+.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="formal"],
+.messageMoodCoffeeFace [data-coffee-plate-question-frame][data-face-font="formal"],
+.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="formal"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-question-frame][data-face-font="formal"],
+.zenLiveBotPresenceFaceGlyph [data-coffee-plate-emoji-part][data-face-font="formal"] {
   font-family:
     var(--font-formal-serif), var(--font-chat-serif), Georgia,
     "Times New Roman", serif;
-  font-weight: 650;
-  letter-spacing: 0.02em;
+  font-weight: 600;
+  font-variation-settings: normal;
+  font-synthesis: none;
+  letter-spacing: 0.015em;
   font-style: normal;
-}
-
-.botAvatarWeightControl {
-  display: grid;
-  gap: 8px;
-  padding: 10px;
-  border: 1px solid
-    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 13%, #303846);
-  border-radius: 12px;
-  background: rgba(255, 255, 255, 0.025);
-}
-
-.botAvatarWeightControl > span {
-  display: flex;
-  justify-content: space-between;
-  gap: 8px;
-}
-
-.botAvatarWeightControl strong {
-  color: var(--fg-muted);
-  font-size: 11px;
-  font-weight: 750;
-}
-
-.botAvatarWeightControl input[type="range"] {
-  width: 100%;
-  accent-color: var(--editor-bot-color, var(--accent));
-}
-
-.botAvatarWeightEnds {
-  display: flex;
-  justify-content: space-between;
-  color: var(--fg-muted);
-  font-size: 10px;
+  font-variant-numeric: lining-nums;
 }
 
 .botAvatarCustomizerBody {
@@ -53810,12 +54752,6 @@ a.settingsCreditItem:focus-visible {
   opacity: 0.42;
 }
 
-.botAvatarSliderStack {
-  min-width: 0;
-  display: grid;
-  gap: 12px;
-}
-
 .botAvatarCustomGeometry {
   min-width: 0;
   display: grid;
@@ -55333,7 +56269,6 @@ a.settingsCreditItem:focus-visible {
     .botAvatarProfilePanel,
     .botPowerCard,
     .botAvatarEyeCharacterControl,
-    .botAvatarWeightControl,
     .botAvatarEyeScalePresetControl,
     .botAvatarOverrideControl,
     .botAvatarMouthCustomRow .botAvatarGlyphInputField,
@@ -55683,7 +56618,7 @@ a.settingsCreditItem:focus-visible {
   width: 240px;
   padding: 12px 14px;
   border-radius: 12px;
-  background: color-mix(in srgb, var(--bg-surface) 92%, transparent);
+  background: var(--bg-surface);
   border: 1px solid var(--line);
   box-shadow: var(--shadow-lg);
   font-size: 12px;
@@ -55992,6 +56927,37 @@ a.settingsCreditItem:focus-visible {
   margin-right: auto;
 }
 
+.botGroupRoomAtmosphereGenerate {
+  min-height: 38px;
+  border: 1px solid
+    color-mix(in srgb, var(--accent) 66%, var(--line-strong));
+  border-radius: 9px;
+  padding: 8px 14px;
+  color: var(--fg);
+  background: color-mix(in srgb, var(--accent) 16%, var(--bg));
+  font: inherit;
+  font-size: 12.5px;
+  font-weight: 700;
+  cursor: pointer;
+  transition:
+    border-color 140ms ease,
+    background 140ms ease,
+    transform 120ms ease;
+}
+
+.botGroupRoomAtmosphereGenerate:hover:not(:disabled),
+.botGroupRoomAtmosphereGenerate:focus-visible {
+  border-color: var(--accent);
+  background: color-mix(in srgb, var(--accent) 24%, var(--bg-hover));
+  outline: none;
+  transform: translateY(-1px);
+}
+
+.botGroupRoomAtmosphereGenerate:disabled {
+  cursor: wait;
+  opacity: 0.62;
+}
+
 .botGroupRoomAtmosphereHint {
   margin: -2px 2px 0;
   color: var(--fg-muted);
@@ -56002,6 +56968,17 @@ a.settingsCreditItem:focus-visible {
 @media (max-width: 520px) {
   .botGroupRoomAtmosphereActions {
     flex-wrap: wrap;
+  }
+
+  .botGroupRoomAtmosphereGenerate {
+    flex: 1 1 100%;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .botGroupRoomAtmosphereGenerate:hover:not(:disabled),
+  .botGroupRoomAtmosphereGenerate:focus-visible {
+    transform: none;
   }
 }
 
@@ -70699,22 +71676,18 @@ a.settingsCreditItem:focus-visible {
   --coffee-speaker-gaze-body-shift-x: 0px;
   --coffee-speaker-gaze-body-shift-y: 0px;
   --coffee-speaker-gaze-body-rotation: 0deg;
-  --coffee-speaker-gaze-face-shift-x: 0px;
-  --avatar-details-offset-x: var(--coffee-speaker-gaze-face-shift-x);
 }
 
 .coffeeSeat[data-gaze-direction="left"],
 .coffeeReplayPlayerAvatar[data-gaze-direction="left"] {
   --coffee-speaker-gaze-body-shift-x: -3px;
   --coffee-speaker-gaze-body-rotation: -1.4deg;
-  --coffee-speaker-gaze-face-shift-x: -2px;
 }
 
 .coffeeSeat[data-gaze-direction="right"],
 .coffeeReplayPlayerAvatar[data-gaze-direction="right"] {
   --coffee-speaker-gaze-body-shift-x: 3px;
   --coffee-speaker-gaze-body-rotation: 1.4deg;
-  --coffee-speaker-gaze-face-shift-x: 2px;
 }
 
 .coffeeSeat[data-gaze-direction="center"],
@@ -70733,22 +71706,9 @@ a.settingsCreditItem:focus-visible {
   transition: transform 380ms cubic-bezier(0.22, 0.72, 0.24, 1);
 }
 
-.coffeeSeat .zenLiveBotPresenceFaceRig,
-.coffeeReplayPlayerAvatar .zenLiveBotPresenceFaceRig {
-  transform: translate(
-      calc(-50% + var(--coffee-speaker-gaze-face-shift-x)),
-      -50%
-    )
-    scale(var(--zen-live-bot-face-scale, 1))
-    scaleX(var(--zen-live-bot-face-layer-scale-x, 1));
-  transition: transform 380ms cubic-bezier(0.22, 0.72, 0.24, 1);
-}
-
 @media (prefers-reduced-motion: reduce) {
   .coffeeSeat .zenLiveBotPresenceBody,
-  .coffeeReplayPlayerAvatar .zenLiveBotPresenceBody,
-  .coffeeSeat .zenLiveBotPresenceFaceRig,
-  .coffeeReplayPlayerAvatar .zenLiveBotPresenceFaceRig {
+  .coffeeReplayPlayerAvatar .zenLiveBotPresenceBody {
     transition: none;
   }
 }
@@ -71328,9 +72288,8 @@ a.settingsCreditItem:focus-visible {
   transition: opacity 280ms ease;
 }
 
-/* A masked, softened copy of the live LEDs casts their color onto the nearby
-   chassis. It is opt-in because ordinary single-color bots already receive
-   that spill from their standard LED raster. */
+/* Prism's spectrum spill uses the authored broad light texture. Ordinary bots
+   already render this texture through botFaceFrameTint's pre-colored raster. */
 .botFaceFrameLedAura {
   position: absolute;
   inset: var(--bot-face-frame-inset, -7%);
@@ -71344,11 +72303,11 @@ a.settingsCreditItem:focus-visible {
   background-position: center;
   background-size: contain;
   background-repeat: no-repeat;
-  -webkit-mask-image: url("/bot-frame/bot-frame-led.png?v=1000");
+  -webkit-mask-image: url("/bot-frame/bot-frame-tint-mask.png?v=1000");
   -webkit-mask-position: center;
   -webkit-mask-size: contain;
   -webkit-mask-repeat: no-repeat;
-  mask-image: url("/bot-frame/bot-frame-led.png?v=1000");
+  mask-image: url("/bot-frame/bot-frame-tint-mask.png?v=1000");
   mask-position: center;
   mask-size: contain;
   mask-repeat: no-repeat;
@@ -71358,8 +72317,8 @@ a.settingsCreditItem:focus-visible {
 }
 
 /* The standard glow layer remains unchanged for ordinary bots. Prism reuses
-   it as the colored emitter, then mounts the white core below as a separate
-   final pass. */
+   it as the colored emitter, then mounts the white core as a separate final
+   pass. */
 .botFaceFrameLedGlow {
   position: absolute;
   inset: var(--bot-face-frame-inset, -7%);
@@ -71380,8 +72339,7 @@ a.settingsCreditItem:focus-visible {
   mask-repeat: no-repeat;
   mix-blend-mode: screen;
   opacity: var(--bot-face-frame-led-glow-opacity, 0.9);
-  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.98))
-    drop-shadow(0 0 4px rgba(255, 255, 255, 0.58));
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.92));
   transition: opacity 280ms ease;
 }
 
@@ -71405,8 +72363,7 @@ a.settingsCreditItem:focus-visible {
   mask-repeat: no-repeat;
   mix-blend-mode: screen;
   opacity: var(--bot-face-frame-led-glow-opacity, 0.9);
-  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.98))
-    drop-shadow(0 0 4px rgba(255, 255, 255, 0.58));
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.92));
   transition: opacity 280ms ease;
 }
 
@@ -72055,10 +73012,22 @@ a.settingsCreditItem:focus-visible {
   filter: brightness(1.04) contrast(1.02);
 }
 
-/* Full avatars keep the native face metrics, then snap only the finished
-   alpha silhouette to the phosphor cell grid. Overscan prevents edge pixels
-   from clipping without changing the feature's layout box or transforms. */
+/* Full avatars keep the native face/thinking metrics, then snap only the
+   finished alpha silhouette to the shared phosphor cell grid. Overscan
+   prevents edge pixels from clipping without changing layout or transforms. */
 .zenLiveBotPresenceFaceGlyph
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"],
+.zenLiveBotPresenceThinkingGlyph
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"] {
+  /* Never expose a single raw-font frame while a thinking glyph swaps masks.
+     The layout-phase raster normally makes this state unpainted; this guard
+     keeps slow font loads from flashing at a different apparent resolution. */
+  visibility: hidden;
+}
+
+.zenLiveBotPresenceFaceGlyph
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"],
+.zenLiveBotPresenceThinkingGlyph
   [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"] {
   background: none;
   -webkit-text-fill-color: transparent;
@@ -72086,6 +73055,10 @@ a.settingsCreditItem:focus-visible {
 .zenLiveBotPresenceFaceGlyph
   [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::before,
 .zenLiveBotPresenceFaceGlyph
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::after,
+.zenLiveBotPresenceThinkingGlyph
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::before,
+.zenLiveBotPresenceThinkingGlyph
   [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::after {
   content: "";
   inset: calc(0px - var(--crt-phosphor-pixel-overscan, 0px));
@@ -72109,6 +73082,8 @@ a.settingsCreditItem:focus-visible {
 }
 
 .zenLiveBotPresenceFaceGlyph
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::before,
+.zenLiveBotPresenceThinkingGlyph
   [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::before {
   background: var(--crt-face-edge-color, currentColor);
   filter: blur(var(--crt-glyph-beam-softness));
@@ -72672,107 +73647,6 @@ a.settingsCreditItem:focus-visible {
     "Times New Roman", serif;
   font-weight: 600;
   letter-spacing: 0.015em;
-  font-variant-numeric: lining-nums;
-}
-
-.coffeeSeatPlateEmoji[data-face-custom="true"],
-.messageMoodCoffeeFace[data-face-custom="true"],
-.zenLiveBotPresenceFaceGlyph[data-face-custom="true"] {
-  font-weight: var(--bot-face-font-weight, var(--prism-face-weight));
-  font-variation-settings: "wght"
-    var(--bot-face-font-weight, var(--prism-face-weight));
-}
-
-.coffeeSeatPlateEmoji
-  [data-coffee-plate-thinking-frame][data-face-font="neutral"],
-.coffeeSeatPlateEmoji
-  [data-coffee-plate-question-frame][data-face-font="neutral"],
-.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="neutral"],
-.messageMoodCoffeeFace
-  [data-coffee-plate-question-frame][data-face-font="neutral"],
-.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="neutral"],
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-question-frame][data-face-font="neutral"],
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part][data-face-font="neutral"] {
-  font-family: var(--font-ui-sans), system-ui, sans-serif;
-  font-weight: inherit;
-  font-variation-settings: inherit;
-  letter-spacing: 0.016em;
-}
-
-.coffeeSeatPlateEmoji [data-coffee-plate-thinking-frame][data-face-font="warm"],
-.coffeeSeatPlateEmoji [data-coffee-plate-question-frame][data-face-font="warm"],
-.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="warm"],
-.messageMoodCoffeeFace
-  [data-coffee-plate-question-frame][data-face-font="warm"],
-.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="warm"],
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-question-frame][data-face-font="warm"],
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part][data-face-font="warm"] {
-  font-family:
-    var(--font-concise-rounded), var(--font-ui-sans), system-ui, sans-serif;
-  font-weight: inherit;
-  font-variation-settings: inherit;
-  letter-spacing: -0.04em;
-}
-
-.coffeeSeatPlateEmoji
-  [data-coffee-plate-thinking-frame][data-face-font="concise"],
-.coffeeSeatPlateEmoji
-  [data-coffee-plate-question-frame][data-face-font="concise"],
-.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="concise"],
-.messageMoodCoffeeFace
-  [data-coffee-plate-question-frame][data-face-font="concise"],
-.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="concise"],
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-question-frame][data-face-font="concise"],
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part][data-face-font="concise"] {
-  font-family: var(--prism-mono-face-font);
-  font-weight: inherit;
-  letter-spacing: var(--prism-mono-face-letter-spacing);
-}
-
-.coffeeSeatPlateEmoji
-  [data-coffee-plate-thinking-frame][data-face-font="playful"],
-.coffeeSeatPlateEmoji
-  [data-coffee-plate-question-frame][data-face-font="playful"],
-.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="playful"],
-.messageMoodCoffeeFace
-  [data-coffee-plate-question-frame][data-face-font="playful"],
-.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="playful"],
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-question-frame][data-face-font="playful"],
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part][data-face-font="playful"] {
-  font-family:
-    var(--font-playful-display), var(--font-ui-sans), system-ui, sans-serif;
-  font-weight: var(--bot-face-font-weight, 520);
-  font-variation-settings: "wght" var(--bot-face-font-weight, 520);
-  letter-spacing: 0.02em;
-}
-
-.coffeeSeatPlateEmoji
-  [data-coffee-plate-thinking-frame][data-face-font="formal"],
-.coffeeSeatPlateEmoji
-  [data-coffee-plate-question-frame][data-face-font="formal"],
-.coffeeSeatPlateEmoji [data-coffee-plate-emoji-part][data-face-font="formal"],
-.messageMoodCoffeeFace
-  [data-coffee-plate-question-frame][data-face-font="formal"],
-.messageMoodCoffeeFace [data-coffee-plate-emoji-part][data-face-font="formal"],
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-question-frame][data-face-font="formal"],
-.zenLiveBotPresenceFaceGlyph
-  [data-coffee-plate-emoji-part][data-face-font="formal"] {
-  font-family:
-    var(--font-formal-serif), var(--font-chat-serif), Georgia,
-    "Times New Roman", serif;
-  font-weight: var(--bot-face-font-weight, 640);
-  font-variation-settings: "wght" var(--bot-face-font-weight, 640);
-  letter-spacing: 0.015em;
-  font-style: normal;
   font-variant-numeric: lining-nums;
 }
 
@@ -75712,6 +76586,78 @@ a.settingsCreditItem:focus-visible {
   overflow: visible;
 }
 
+.coffeeTopicPickerHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  width: 100%;
+  max-width: min(520px, 100%);
+  padding: 0 4px;
+  box-sizing: border-box;
+}
+
+.coffeeTopicRefreshButton {
+  flex: 0 0 auto;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  min-height: 34px;
+  padding: 7px 10px;
+  border: 1px solid rgba(255, 255, 255, 0.16);
+  border-radius: 999px;
+  background: rgba(8, 10, 14, 0.58);
+  color: rgba(255, 255, 255, 0.76);
+  font: inherit;
+  font-size: 0.7rem;
+  font-weight: 720;
+  line-height: 1;
+  white-space: nowrap;
+  cursor: pointer;
+  transition:
+    border-color 0.15s ease,
+    background 0.15s ease,
+    color 0.15s ease,
+    transform 0.05s ease;
+}
+
+.coffeeTopicRefreshButton svg {
+  width: 14px;
+  height: 14px;
+  stroke-width: 1.8;
+}
+
+.coffeeTopicRefreshButton:hover:not(:disabled) {
+  border-color: rgba(255, 200, 120, 0.46);
+  background: rgba(28, 24, 20, 0.82);
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.coffeeTopicRefreshButton:focus-visible {
+  outline: 2px solid rgba(255, 200, 120, 0.65);
+  outline-offset: 2px;
+}
+
+.coffeeTopicRefreshButton:active:not(:disabled) {
+  transform: translateY(1px);
+}
+
+.coffeeTopicRefreshButton:disabled {
+  cursor: not-allowed;
+  opacity: 0.58;
+}
+
+.coffeeTopicRefreshButton[data-busy="true"] svg {
+  animation: coffeeTopicRefreshSpin 0.9s linear infinite;
+}
+
+@keyframes coffeeTopicRefreshSpin {
+  to {
+    transform: rotate(1turn);
+  }
+}
+
 .coffeeTopicPickerHint,
 .coffeeTopicPickerSubhint {
   margin: 0;
@@ -75720,6 +76666,23 @@ a.settingsCreditItem:focus-visible {
   font-size: 0.88rem;
   line-height: 1.35;
   max-width: 100%;
+}
+
+@media (max-width: 520px) {
+  .coffeeTopicPickerHeader {
+    flex-wrap: wrap;
+    justify-content: center;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .coffeeTopicRefreshButton {
+    transition: none;
+  }
+
+  .coffeeTopicRefreshButton[data-busy="true"] svg {
+    animation: none;
+  }
 }
 
 .coffeeTopicPickerSubhint {
@@ -78665,6 +79628,85 @@ a.settingsCreditItem:focus-visible {
   line-height: 1.35;
 }
 
+.coffeeGroupRosterEditor {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+  border-radius: 15px;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.coffeeGroupRosterHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.coffeeGroupRosterHeader h3 {
+  margin: 0;
+  font-size: 0.9rem;
+}
+
+.coffeeGroupRosterHeader span {
+  color: var(--coffee-muted);
+  font-size: 0.72rem;
+  font-weight: 700;
+  letter-spacing: 0.04em;
+}
+
+.coffeeGroupRosterMembers {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.coffeeGroupRosterMembers li {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  padding: 7px 9px;
+  border-radius: 10px;
+  background: color-mix(
+    in srgb,
+    var(--coffee-bot-color) 10%,
+    rgba(255, 255, 255, 0.035)
+  );
+  color: rgba(255, 255, 255, 0.9);
+  font-size: 0.78rem;
+  font-weight: 680;
+}
+
+.coffeeGroupRosterRemove {
+  border: 0;
+  background: transparent;
+  color: rgba(255, 255, 255, 0.62);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.coffeeGroupRosterRemove:hover:not(:disabled) {
+  color: rgba(255, 255, 255, 0.96);
+}
+
+.coffeeGroupRosterRemove:disabled {
+  opacity: 0.35;
+  cursor: not-allowed;
+}
+
+.coffeeGroupRosterAdd {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
 .coffeeSettingsIntroRow {
   display: grid;
   grid-template-columns: minmax(0, 1fr) auto;
@@ -79659,6 +80701,7 @@ a.settingsCreditItem:focus-visible {
     .coffeeBotPill,
     .coffeeOfflineProtectionNotice,
     .coffeeAutoTopicToggle,
+    .coffeeTopicRefreshButton,
     .coffeeOpeningPollPanel,
     .coffeeOpeningPollFields input,
     .coffeeTopicChip,
@@ -79727,6 +80770,8 @@ a.settingsCreditItem:focus-visible {
     .coffeeReplayIconButton:focus-visible,
     .coffeeGroupSessionButton:hover,
     .coffeeGroupSessionButton[data-current="true"],
+    .coffeeTopicRefreshButton:hover:not(:disabled),
+    .coffeeTopicRefreshButton:focus-visible,
     .coffeeTopicChip:hover:not(:disabled),
     .coffeePollPlayerOption:hover:not(:disabled),
     .coffeeTeamsPlayerControl button:hover:not(:disabled),
@@ -84211,4 +85256,241 @@ a.settingsCreditItem:focus-visible {
   border-radius: 0 8px 8px 0;
   padding: 9px 8px 9px 9px;
   font-size: 11px;
+}
+
+/* Voice-conducted full-avatar lamps. Audio energy arrives imperatively through
+   --bot-voice-light-level; React never rerenders at microphone cadence. */
+.zenLiveBotPresenceBody[data-avatar-light-mode="alive"] {
+  --bot-voice-light-level: 0;
+  --bot-voice-light-glow-lift: 0.72;
+  --bot-voice-light-emitter-lift: 0.34;
+  --bot-voice-light-core-lift: 0.34;
+}
+
+/* Photoshop-equivalent Screen pass: the pre-colored tint raster is not paint;
+   bot-frame-tint-mask.png is the authored spill/reflection texture around the
+   lamp apertures. Its alpha and the voice envelope do all of the shaping. */
+.zenLiveBotPresenceBody[data-avatar-light-mode="alive"] .botFaceFrameTint {
+  display: block;
+  opacity: calc(0.22 + var(--bot-voice-light-level) * var(--bot-voice-light-glow-lift));
+  filter: saturate(1.12) brightness(0.98);
+  mix-blend-mode: screen;
+  animation:
+    botVoiceLightAuraIgnite 600ms ease-out,
+    botVoiceLightAuraBreath 6.4s ease-in-out 600ms infinite !important;
+  transition: opacity 90ms ease-out;
+}
+
+/* The identity-colored aperture sits under a white-hot Screen pass. This keeps
+   the visible LED white while its edge and authored chassis spill retain the
+   bot's color. */
+.zenLiveBotPresenceBody[data-avatar-light-mode="alive"] .botFaceFrameLed {
+  opacity: calc(0.52 + var(--bot-voice-light-level) * var(--bot-voice-light-emitter-lift));
+  filter: none;
+  mix-blend-mode: screen;
+  animation:
+    botVoiceLightBulbIgnite 600ms ease-out,
+    botVoiceLightBulbBreath 6.4s ease-in-out 600ms infinite !important;
+  transition: opacity 90ms ease-out;
+}
+
+.zenLiveBotPresenceBody[data-avatar-light-mode="alive"] .botFaceFrameLedGlow {
+  display: block;
+  background: #fff;
+  mix-blend-mode: screen;
+  opacity: calc(0.58 + var(--bot-voice-light-level) * var(--bot-voice-light-core-lift));
+  animation:
+    botVoiceLightCoreIgnite 600ms ease-out,
+    botVoiceLightCoreBreath 6.4s ease-in-out 600ms infinite !important;
+  transition: opacity 90ms ease-out;
+}
+
+.zenLiveBotPresenceBody[data-avatar-light-mode="alive"]
+  .botAvatarFoundryFrameModuleLamp[data-populated="true"] {
+  background: radial-gradient(
+    circle at 42% 38%,
+    #ffffff 0 18%,
+    color-mix(in srgb, var(--foundry-module-color) 68%, #ffffff) 32%,
+    var(--foundry-module-color) 70%,
+    color-mix(in srgb, var(--foundry-module-color) 68%, transparent) 100%
+  );
+  opacity: calc(0.52 + var(--bot-voice-light-level) * var(--bot-voice-light-emitter-lift));
+  filter: brightness(0.88);
+  box-shadow:
+    0 0 2px color-mix(in srgb, var(--foundry-module-color) 44%, transparent),
+    0 0 7px color-mix(in srgb, var(--foundry-module-color) 24%, transparent);
+  animation:
+    botVoiceLightBulbIgnite 600ms ease-out,
+    botVoiceLightBulbBreath 6.4s ease-in-out 600ms infinite !important;
+  transition: opacity 90ms ease-out;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"]:not(
+    [data-private-mode="true"]
+  )
+  .zenLiveBotPresenceBody[data-avatar-light-mode="alive"]
+  .botFaceFrameTint {
+  opacity: 0;
+  animation: none !important;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"]:not(
+    [data-private-mode="true"]
+  )
+  .zenLiveBotPresenceBody[data-avatar-light-mode="alive"]
+  .botFaceFrameLedAura {
+  display: block;
+  background-image: var(--bot-face-frame-led-spectrum);
+  opacity: calc(0.22 + var(--bot-voice-light-level) * var(--bot-voice-light-glow-lift));
+  filter: saturate(1.12) brightness(0.98);
+  mix-blend-mode: screen;
+  animation:
+    zenLivePrismLedAuraHueRotate 1.7s linear infinite,
+    botVoiceLightAuraIgnite 600ms ease-out,
+    botVoiceLightAuraBreath 6.4s ease-in-out 600ms infinite !important;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"]:not(
+    [data-private-mode="true"]
+  )
+  .zenLiveBotPresenceBody[data-avatar-light-mode="alive"]
+  .botFaceFrameLedGlow {
+  --bot-face-frame-led-filter: saturate(1.3) contrast(1.04)
+    drop-shadow(0 0 1px rgba(255, 255, 255, 0.46));
+  background: var(--bot-face-frame-led-spectrum);
+  mix-blend-mode: screen;
+  opacity: calc(0.52 + var(--bot-voice-light-level) * var(--bot-voice-light-emitter-lift));
+  animation:
+    zenLivePrismEmitterHueRotate 1.7s linear infinite,
+    botVoiceLightEmitterIgnite 600ms ease-out,
+    botVoiceLightEmitterBreath 6.4s ease-in-out 600ms infinite !important;
+}
+
+.zenLiveBotPresencePlate[data-prism-persona="true"]
+  .zenLiveBotPresenceBody[data-avatar-light-mode="alive"]
+  .botFaceFrameLedCore {
+  display: block;
+  opacity: calc(0.58 + var(--bot-voice-light-level) * var(--bot-voice-light-core-lift));
+  animation:
+    botVoiceLightCoreIgnite 600ms ease-out,
+    botVoiceLightCoreBreath 6.4s ease-in-out 600ms infinite !important;
+}
+
+.zenLiveBotPresenceBody[data-avatar-light-mode="off"] .botFaceFrameTint,
+.zenLiveBotPresenceBody[data-avatar-light-mode="off"] .botFaceFrameLed,
+.zenLiveBotPresenceBody[data-avatar-light-mode="off"] .botFaceFrameLedAura,
+.zenLiveBotPresenceBody[data-avatar-light-mode="off"] .botFaceFrameLedGlow,
+.zenLiveBotPresenceBody[data-avatar-light-mode="off"] .botFaceFrameLedCore,
+.zenLiveBotPresenceBody[data-avatar-light-mode="off"]
+  .botAvatarFoundryFrameModuleLamp {
+  opacity: 0 !important;
+  filter: none !important;
+  box-shadow: none !important;
+  animation: none !important;
+  transition: opacity 600ms ease;
+}
+
+@keyframes botVoiceLightBulbIgnite {
+  from { opacity: 0; }
+  to { opacity: calc(0.52 + var(--bot-voice-light-level) * var(--bot-voice-light-emitter-lift)); }
+}
+
+@keyframes botVoiceLightBulbBreath {
+  0%, 100% {
+    opacity: calc(0.52 + var(--bot-voice-light-level) * var(--bot-voice-light-emitter-lift));
+  }
+  50% {
+    opacity: calc(0.58 + var(--bot-voice-light-level) * var(--bot-voice-light-emitter-lift));
+  }
+}
+
+@keyframes botVoiceLightAuraIgnite {
+  from { opacity: 0; }
+  to { opacity: calc(0.22 + var(--bot-voice-light-level) * var(--bot-voice-light-glow-lift)); }
+}
+
+@keyframes botVoiceLightAuraBreath {
+  0%, 100% {
+    opacity: calc(0.22 + var(--bot-voice-light-level) * var(--bot-voice-light-glow-lift));
+  }
+  50% {
+    opacity: calc(0.28 + var(--bot-voice-light-level) * var(--bot-voice-light-glow-lift));
+  }
+}
+
+@keyframes botVoiceLightEmitterIgnite {
+  from { opacity: 0; }
+  to { opacity: calc(0.52 + var(--bot-voice-light-level) * var(--bot-voice-light-emitter-lift)); }
+}
+
+@keyframes botVoiceLightEmitterBreath {
+  0%, 100% {
+    opacity: calc(0.52 + var(--bot-voice-light-level) * var(--bot-voice-light-emitter-lift));
+  }
+  50% {
+    opacity: calc(0.58 + var(--bot-voice-light-level) * var(--bot-voice-light-emitter-lift));
+  }
+}
+
+@keyframes botVoiceLightCoreIgnite {
+  from { opacity: 0; }
+  to { opacity: calc(0.58 + var(--bot-voice-light-level) * var(--bot-voice-light-core-lift)); }
+}
+
+@keyframes botVoiceLightCoreBreath {
+  0%, 100% { opacity: calc(0.58 + var(--bot-voice-light-level) * var(--bot-voice-light-core-lift)); }
+  50% { opacity: calc(0.64 + var(--bot-voice-light-level) * var(--bot-voice-light-core-lift)); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zenLiveBotPresenceBody[data-avatar-light-mode="alive"] {
+    --bot-voice-light-glow-lift: 0.58;
+    --bot-voice-light-emitter-lift: 0.28;
+    --bot-voice-light-core-lift: 0.28;
+  }
+
+  .zenLiveBotPresenceBody[data-avatar-light-mode="alive"] .botFaceFrameTint {
+    opacity: calc(0.24 + var(--bot-voice-light-level) * var(--bot-voice-light-glow-lift));
+    animation: none !important;
+    transition: opacity 190ms ease-out;
+  }
+
+  .zenLiveBotPresenceBody[data-avatar-light-mode="alive"] .botFaceFrameLed,
+  .zenLiveBotPresenceBody[data-avatar-light-mode="alive"]
+    .botAvatarFoundryFrameModuleLamp[data-populated="true"] {
+    opacity: calc(0.55 + var(--bot-voice-light-level) * var(--bot-voice-light-emitter-lift));
+    animation: none !important;
+    transition: opacity 190ms ease-out;
+  }
+
+  .zenLiveBotPresenceBody[data-avatar-light-mode="alive"] .botFaceFrameLedGlow {
+    opacity: calc(0.62 + var(--bot-voice-light-level) * var(--bot-voice-light-core-lift));
+    animation: none !important;
+    transition: opacity 190ms ease-out;
+  }
+
+  .zenLiveBotPresencePlate[data-prism-persona="true"]:not(
+      [data-private-mode="true"]
+    )
+    .zenLiveBotPresenceBody[data-avatar-light-mode="alive"]
+    .botFaceFrameLedAura {
+    opacity: calc(0.24 + var(--bot-voice-light-level) * var(--bot-voice-light-glow-lift));
+    animation: none !important;
+  }
+
+  .zenLiveBotPresencePlate[data-prism-persona="true"]:not(
+      [data-private-mode="true"]
+    )
+    .zenLiveBotPresenceBody[data-avatar-light-mode="alive"]
+    .botFaceFrameLedGlow {
+    opacity: calc(0.55 + var(--bot-voice-light-level) * var(--bot-voice-light-emitter-lift));
+    animation: none !important;
+  }
+
+  .zenLiveBotPresencePlate[data-prism-persona="true"]
+    .zenLiveBotPresenceBody[data-avatar-light-mode="alive"]
+    .botFaceFrameLedCore {
+    opacity: calc(0.62 + var(--bot-voice-light-level) * var(--bot-voice-light-core-lift));
+    animation: none !important;
+  }
 }

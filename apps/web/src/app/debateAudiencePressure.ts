@@ -221,22 +221,49 @@ export const DEBATE_AUDIENCE_ORDER_RETURN_MS = 2_800;
 
 /** Continuous pressure-band mix transitions (not the order-call special case). */
 export const DEBATE_AUDIENCE_PRESSURE_MIX_TRANSITION_MS = 1_400;
+export const DEBATE_AUDIENCE_LAYER_CROSSFADE_MS = 650;
+
+/**
+ * Frozen Rowdiness sets the largest believable conversational cluster. Live
+ * pressure decides how much of that allowance is currently active.
+ */
+export function debateAudienceTalkerCount(args: {
+  band: DebateAudiencePressureBand;
+  count: number;
+  formality?: DebateFormalityId;
+}): number {
+  const count = Math.max(0, Math.floor(args.count));
+  if (count === 0 || args.band === "settled") return 0;
+  const formality = args.formality ?? "plainspoken";
+  const rowdinessCap =
+    formality === "parliamentary"
+      ? Math.min(1, count)
+      : formality === "structured"
+        ? Math.min(count, Math.max(1, Math.ceil(count * 0.16)))
+        : formality === "plainspoken"
+          ? Math.min(count, Math.max(1, Math.ceil(count / 3)))
+          : formality === "heated"
+            ? Math.min(count, Math.max(1, Math.ceil(count * 0.6)))
+            : count === 1
+              ? 1
+              : count - 1;
+  const pressureShare =
+    args.band === "murmuring" ? 0.4 : args.band === "restless" ? 0.72 : 1;
+  return Math.min(count, Math.max(1, Math.round(rowdinessCap * pressureShare)));
+}
 
 export function debateAudienceTalkerIndices(args: {
   band: DebateAudiencePressureBand;
   count: number;
   seed: string;
+  formality?: DebateFormalityId;
 }): number[] {
   const count = Math.max(0, Math.floor(args.count));
-  const talkerCount =
-    args.band === "settled"
-      ? 0
-      : args.band === "murmuring"
-        ? Math.min(2, count)
-        : args.band === "restless"
-          ? // Sparse uneasy stir — not half the house (that read as Disruptive).
-            Math.min(count, Math.max(2, Math.ceil(count / 3)))
-          : Math.max(0, count - 1);
+  const talkerCount = debateAudienceTalkerCount({
+    band: args.band,
+    count,
+    formality: args.formality,
+  });
   return Array.from({ length: count }, (_, index) => index)
     .sort(
       (left, right) =>

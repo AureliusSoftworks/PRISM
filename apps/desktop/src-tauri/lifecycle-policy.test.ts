@@ -8,6 +8,25 @@ const source = readFileSync(
 );
 
 describe("desktop lifecycle policy", () => {
+  it("registers the single-instance guard before runtime startup", () => {
+    const guardRegistration = source.indexOf(
+      ".plugin(tauri_plugin_single_instance::init",
+    );
+    const runtimeStateRegistration = source.indexOf(
+      ".manage(RuntimeState::new())",
+    );
+
+    assert.ok(guardRegistration >= 0, "single-instance plugin must be registered");
+    assert.ok(
+      guardRegistration < runtimeStateRegistration,
+      "single-instance plugin must run before managed runtime services",
+    );
+    assert.match(
+      source,
+      /tauri_plugin_single_instance::init\(\|app, _args, _cwd\| \{\s*show_main_window\(app\);\s*\}\)/u,
+    );
+  });
+
   it("treats a macOS window close as a real app shutdown", () => {
     assert.match(
       source,

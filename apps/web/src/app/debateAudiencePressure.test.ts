@@ -12,6 +12,7 @@ import {
   debateAudiencePressureMix,
   debateAudiencePressureMixForScore,
   debateAudiencePressureScore,
+  debateAudienceTalkerCount,
   debateAudienceTalkerIndices,
   debateAudienceVisualPressureBand,
   scaleDebateAudienceMixByGalleryVolume,
@@ -240,7 +241,7 @@ describe("Debate audience pressure", () => {
     );
   });
 
-  it("keeps non-Judge galleries alive and selects stable band-sized talkers", () => {
+  it("keeps non-Judge galleries alive and scales stable talkers with Rowdiness", () => {
     assert.ok(
       debateAudiencePressureScore({
         events: [event("spectator", 1)],
@@ -252,37 +253,52 @@ describe("Debate audience pressure", () => {
       band: "restless",
       count: 15,
       seed: "session-1",
+      formality: "heated",
     });
     const second = debateAudienceTalkerIndices({
       band: "restless",
       count: 15,
       seed: "session-1",
+      formality: "heated",
     });
     assert.deepEqual(first, second);
-    assert.equal(first.length, 5);
+    assert.equal(first.length, 6);
     assert.equal(
       debateAudienceTalkerIndices({
         band: "settled",
         count: 15,
         seed: "session-1",
+        formality: "free_for_all",
       }).length,
       0,
     );
-    assert.equal(
-      debateAudienceTalkerIndices({
-        band: "murmuring",
-        count: 15,
-        seed: "session-1",
-      }).length,
-      2,
+    assert.deepEqual(
+      (
+        [
+          "parliamentary",
+          "structured",
+          "plainspoken",
+          "heated",
+          "free_for_all",
+        ] as const
+      ).map((formality) =>
+        debateAudienceTalkerCount({
+          band: "disruptive",
+          count: 15,
+          formality,
+        }),
+      ),
+      [1, 3, 5, 9, 14],
     );
-    assert.equal(
-      debateAudienceTalkerIndices({
-        band: "disruptive",
-        count: 15,
-        seed: "session-1",
-      }).length,
-      14,
+    assert.deepEqual(
+      (["murmuring", "restless", "disruptive"] as const).map((band) =>
+        debateAudienceTalkerCount({
+          band,
+          count: 15,
+          formality: "free_for_all",
+        }),
+      ),
+      [6, 10, 14],
     );
   });
 

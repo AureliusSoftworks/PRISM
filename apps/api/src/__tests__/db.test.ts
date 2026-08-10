@@ -290,6 +290,7 @@ describe("createDatabase bot export hash migration", () => {
       );
       db.exec("ALTER TABLE users DROP COLUMN preferred_image_provider;");
       db.exec("ALTER TABLE users DROP COLUMN graphics_quality;");
+      db.exec("ALTER TABLE users DROP COLUMN typography_scale;");
       db.exec("ALTER TABLE users DROP COLUMN atmosphere_style;");
       db.exec("ALTER TABLE users DROP COLUMN hub_atmosphere_enabled;");
       db.exec("ALTER TABLE users DROP COLUMN hub_atmosphere_image_id;");
@@ -347,6 +348,17 @@ describe("createDatabase bot export hash migration", () => {
           .prepare("SELECT graphics_quality FROM users WHERE id = ?")
           .get("user-1") as { graphics_quality: string }).graphics_quality,
         "high",
+      );
+      assert.equal(
+        userColumns.find((column) => column.name === "typography_scale")
+          ?.dflt_value,
+        "'standard'",
+      );
+      assert.equal(
+        (reopened
+          .prepare("SELECT typography_scale FROM users WHERE id = ?")
+          .get("user-1") as { typography_scale: string }).typography_scale,
+        "standard",
       );
       assert.equal(
         userColumns.find((column) => column.name === "atmosphere_style")
@@ -576,6 +588,18 @@ describe("createDatabase bot export hash migration", () => {
       assert.ok(botRelationshipColumns.some((column) => column.name === "source_bot_id"));
       assert.ok(botRelationshipColumns.some((column) => column.name === "target_bot_id"));
       assert.ok(botRelationshipColumns.some((column) => column.name === "mood_key"));
+      const memoryColumns = reopened
+        .prepare("PRAGMA table_info(memories)")
+        .all() as Array<{ name: string }>;
+      assert.ok(memoryColumns.some((column) => column.name === "target_bot_id"));
+      const botcastEpisodeColumns = reopened
+        .prepare("PRAGMA table_info(botcast_episodes)")
+        .all() as Array<{ name: string }>;
+      assert.ok(
+        botcastEpisodeColumns.some(
+          (column) => column.name === "pair_history_persisted_at",
+        ),
+      );
       const row = reopened
         .prepare("SELECT export_hash FROM bots WHERE id = ?")
         .get("bot-1") as { export_hash: string | null } | undefined;

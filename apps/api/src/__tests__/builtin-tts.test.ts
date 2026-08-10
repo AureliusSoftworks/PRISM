@@ -6,12 +6,43 @@ import {
 import {
   builtinEnglishAvailable,
   generateBuiltinEnglishWave,
+  isPlayablePcmWave,
   parseMacSystemVoiceList,
   parseMacSystemVoiceOptions,
+  requirePlayablePrismVoicePackWave,
   selectSystemVoice,
   systemEnglishGenerationSettings,
 } from "../builtin-tts.ts";
 import { protectedSpeechRanges } from "../builtin-tts-runtime.ts";
+
+function pcmWave(
+  dataBytes: number,
+  audioFormat = 1,
+  options: { silent?: boolean } = {},
+): Buffer {
+  const sampleRate = 24_000;
+  const bitsPerSample = audioFormat === 3 ? 32 : 16;
+  const blockAlign = bitsPerSample / 8;
+  const wave = Buffer.alloc(44 + dataBytes);
+  wave.write("RIFF", 0, "ascii");
+  wave.writeUInt32LE(36 + dataBytes, 4);
+  wave.write("WAVE", 8, "ascii");
+  wave.write("fmt ", 12, "ascii");
+  wave.writeUInt32LE(16, 16);
+  wave.writeUInt16LE(audioFormat, 20);
+  wave.writeUInt16LE(1, 22);
+  wave.writeUInt32LE(sampleRate, 24);
+  wave.writeUInt32LE(sampleRate * blockAlign, 28);
+  wave.writeUInt16LE(blockAlign, 32);
+  wave.writeUInt16LE(bitsPerSample, 34);
+  wave.write("data", 36, "ascii");
+  wave.writeUInt32LE(dataBytes, 40);
+  if (!options.silent && dataBytes >= blockAlign) {
+    if (audioFormat === 3) wave.writeFloatLE(0.25, 44);
+    else wave.writeInt16LE(4_096, 44);
+  }
+  return wave;
+}
 
 describe("built-in English audio", () => {
   it("ships 28 stable, distinct PRISM voice identities", () => {
@@ -63,6 +94,39 @@ describe("built-in English audio", () => {
       parseMacSystemVoiceList(output),
       ["Fred", "Bad News"]
     );
+  });
+
+  it("accepts playable PCM and rejects header-only native speech output", () => {
+    assert.equal(isPlayablePcmWave(pcmWave(2)), true);
+    assert.equal(isPlayablePcmWave(pcmWave(4, 3)), true);
+    assert.equal(isPlayablePcmWave(pcmWave(0)), false);
+    assert.equal(isPlayablePcmWave(pcmWave(2, 6)), false);
+
+    const truncated = pcmWave(2).subarray(0, 44);
+    assert.equal(isPlayablePcmWave(truncated), false);
+    assert.equal(
+      isPlayablePcmWave(pcmWave(4_800, 1, { silent: true })),
+      false,
+    );
+    assert.equal(
+      isPlayablePcmWave(pcmWave(4_800, 3, { silent: true })),
+      false,
+    );
+    const quantizationDust = pcmWave(4_800, 1, { silent: true });
+    quantizationDust.writeInt16LE(1, 44);
+    assert.equal(isPlayablePcmWave(quantizationDust), false);
+    const nearSilentFloat = pcmWave(4_800, 3, { silent: true });
+    nearSilentFloat.writeFloatLE(1e-8, 44);
+    assert.equal(isPlayablePcmWave(nearSilentFloat), false);
+  });
+
+  it("rejects header-only portable voice output before it reaches playback", () => {
+    assert.throws(
+      () => requirePlayablePrismVoicePackWave(pcmWave(0)),
+      /PRISM Voice Pack returned no playable PCM audio/,
+    );
+    const playable = pcmWave(2);
+    assert.equal(requirePlayablePrismVoicePackWave(playable), playable);
   });
 
   it("uses an explicitly selected installed voice and otherwise keeps the OS default", () => {
@@ -143,6 +207,25 @@ describe("built-in English audio", () => {
     assert.equal(wave.subarray(0, 4).toString("ascii"), "RIFF");
     assert.equal(wave.subarray(8, 12).toString("ascii"), "WAVE");
     assert.ok(wave.length > 44);
+  });
+
+  it("falls back to playable portable audio when a system voice is unusable", {
+    skip: !builtinEnglishAvailable(),
+  }, async () => {
+    const wave = await generateBuiltinEnglishWave({
+      text: "A broken device voice must not silence Prism.",
+      profile: {
+        v: 1,
+        baseVoiceId: "voice-1",
+        pitch: 0,
+        warmth: 0,
+        pace: 0,
+        lilt: 0,
+        systemVoiceName: "PRISM missing system voice fixture",
+      },
+      allowOperatingSystemVoices: true,
+    });
+    assert.equal(isPlayablePcmWave(wave), true);
   });
 
   it("renders a Speechprint through the pinned phoneme token interface", {

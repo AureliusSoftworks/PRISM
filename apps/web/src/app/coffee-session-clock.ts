@@ -61,6 +61,8 @@ export function reconcileCoffeeSessionClock(args: {
   nowMs: number;
   endsAtMs: number | null | undefined;
   countdownPaused: boolean;
+  /** Let an audible/visible line finish without adding that time to the clock. */
+  finishBlocked?: boolean;
   minimumElapsedMs?: number;
 }): CoffeeSessionClockReconciliation {
   const nowMs = Number.isFinite(args.nowMs) ? args.nowMs : 0;
@@ -93,6 +95,7 @@ export function reconcileCoffeeSessionClock(args: {
     nextEndsAtMs,
     shouldFinish:
       !args.countdownPaused &&
+      !args.finishBlocked &&
       nextEndsAtMs !== null &&
       nowMs >= nextEndsAtMs,
     shouldUpdate: true,

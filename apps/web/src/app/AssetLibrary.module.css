@@ -163,6 +163,27 @@
   z-index: 900;
 }
 
+.modalBackdrop[data-theme="light"] {
+  --bg: #f2f1f5;
+  --bg-surface: #faf9fc;
+  --bg-elevated: #ffffff;
+  --bg-hover: #ebe8f1;
+  --fg: #25212b;
+  --fg-muted: #736c7b;
+  --fg-subtle: #8d8694;
+  --line: rgba(53, 44, 68, 0.13);
+  --line-strong: rgba(77, 63, 105, 0.24);
+  --accent: #705bc4;
+  --accent-hover: #5e49b4;
+  --accent-soft: rgba(112, 91, 196, 0.1);
+  --accent-glow: rgba(112, 91, 196, 0.18);
+  --accent-text: #ffffff;
+  --accent-ink: #5e49b4;
+  --danger: #a43f58;
+  --danger-soft: rgba(164, 63, 88, 0.1);
+  --shadow-lg: 0 26px 58px rgba(52, 43, 64, 0.2);
+}
+
 .modal {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
@@ -217,6 +238,17 @@
   background:
     radial-gradient(circle at 50% 44%, color-mix(in srgb, var(--accent, #8b5cf6) 10%, transparent), transparent 58%),
     color-mix(in srgb, var(--bg-surface) 78%, black);
+}
+.modalBackdrop[data-theme="light"]
+  .assetCard
+  > img[data-asset-preview-kind="debate_exhibit"] {
+  background:
+    radial-gradient(
+      circle at 50% 44%,
+      color-mix(in srgb, var(--accent) 10%, transparent),
+      transparent 58%
+    ),
+    color-mix(in srgb, var(--bg-surface) 94%, var(--accent) 6%);
 }
 .assetCard > span:not(.studioPreview) { display: grid; gap: 0.2rem; padding: 0.65rem; }
 .assetCard strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }

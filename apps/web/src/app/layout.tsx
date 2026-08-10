@@ -6,6 +6,7 @@ import {
   Geist_Mono,
   Instrument_Sans,
   Lora,
+  Macondo,
   Noto_Sans_Mono,
   Raleway,
 } from "next/font/google";
@@ -56,6 +57,13 @@ const conciseRounded = Fredoka({
   weight: ["600", "700"],
 });
 
+const macondoFace = Macondo({
+  variable: "--font-macondo-face",
+  subsets: ["latin"],
+  weight: "400",
+  display: "swap",
+});
+
 const technicalMono = Noto_Sans_Mono({
   variable: "--font-technical-mono",
   // The animated face vocabulary requires native ɵ and ʘ glyphs.
@@ -102,7 +110,7 @@ export default function RootLayout({
   return (
     <html
       lang="en"
-      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${technicalMono.variable} ${geistMono.variable}`}
+      className={`${uiSans.variable} ${titleSans.variable} ${chatSerif.variable} ${formalSerif.variable} ${playfulDisplay.variable} ${conciseRounded.variable} ${macondoFace.variable} ${technicalMono.variable} ${geistMono.variable}`}
       suppressHydrationWarning
     >
       <body>

@@ -3,8 +3,16 @@ import { readFileSync } from "node:fs";
 import test from "node:test";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const prismMenuSource = readFileSync(
+  new URL("./PrismMenu.tsx", import.meta.url),
+  "utf8",
+);
 const prismMenuCss = readFileSync(
   new URL("./PrismMenu.module.css", import.meta.url),
+  "utf8",
+);
+const globalsCss = readFileSync(
+  new URL("./globals.css", import.meta.url),
   "utf8",
 );
 
@@ -71,6 +79,69 @@ test("portaled picker layers stay above the shared navbar", () => {
     prismMenuCss,
     /\.menu\s*\{[\s\S]*position:\s*fixed;[\s\S]*z-index:\s*2147483000;/u,
   );
+});
+
+test("navbar picker surfaces share the cool ambient readability shadow", () => {
+  const modelPicker = sourceBetween(
+    "function ComposerModelPicker",
+    "// ── Hue lens",
+  );
+  const botPicker = sourceBetween(
+    "function ComposerBotPicker",
+    "function ComposerModelPicker",
+  );
+  const voiceSelector = sourceBetween(
+    "const renderVoiceModeSelector",
+    "const renderHeaderModelPicker",
+  );
+  const headerPicker = sourceBetween(
+    "const renderHeaderModelPicker",
+    "const renderImagesPanelModelPicker",
+  );
+  const appSwitcher = sourceBetween(
+    "const renderAppSwitcher",
+    "const renderUniversalNavbarButtons",
+  );
+  const headerTools = sourceBetween(
+    "const renderChatOverflowGear",
+    "function renderZenLiveBotContextMenu",
+  );
+
+  assert.match(
+    globalsCss,
+    /\[data-navbar-picker-surface="true"\]\s*\{[^}]*box-shadow:[^}]*#64cfff[^}]*#7367ff/iu,
+  );
+  assert.match(
+    globalsCss,
+    /body\[data-prism-theme="light"\]\s+\[data-navbar-picker-surface="true"\]\s*\{[^}]*box-shadow:[^}]*#269bd8[^}]*#5856d6/iu,
+  );
+  assert.match(
+    modelPicker,
+    /data-compose-model-menu="true"[\s\S]{0,120}data-navbar-picker-surface=/u,
+  );
+  assert.match(
+    modelPicker,
+    /data-compose-model-effort-menu="true"[\s\S]{0,120}data-navbar-picker-surface=/u,
+  );
+  assert.match(botPicker, /data-navbar-picker-surface=/u);
+  assert.match(prismMenuSource, /navbarPicker = false/u);
+  assert.match(
+    prismMenuSource,
+    /data-navbar-picker-surface=\{navbarPicker \? "true" : undefined\}/u,
+  );
+  assert.match(
+    prismMenuSource,
+    /ownerId=\{rootOwnerId\}[\s\S]{0,80}navbarPicker=\{navbarPicker\}/u,
+  );
+
+  for (const navbarCaller of [
+    voiceSelector,
+    headerPicker,
+    appSwitcher,
+    headerTools,
+  ]) {
+    assert.match(navbarCaller, /navbarPicker/u);
+  }
 });
 
 test("navbar and compose pickers hold Zen auto-hide while menus are open", () => {

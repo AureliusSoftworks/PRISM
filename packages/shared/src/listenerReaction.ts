@@ -127,8 +127,11 @@ export const BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES = [
   "... okay. I'll leave it.",
   ...DIRECTIONAL_IRRITATION_SNARK_CUES,
 ] as const;
+/** Exact non-response used when an interrupted speech-copy holder cannot add words. */
+export const BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE = "..." as const;
 export type BotCrosstalkInterruptedSpeakerCue =
-  (typeof BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES)[number];
+  | (typeof BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES)[number]
+  | typeof BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE;
 export type BotCrosstalkInterruptedSpeakerPlayback = "primary" | "crosstalk";
 export const LISTENER_REACTION_VOCAL_FOLEYS = [
   "clears throat",
@@ -216,7 +219,10 @@ const SPOKEN_CUES = new Set<ListenerReactionSpokenCue>([
   "What the fuck?",
 ]);
 const INTERRUPTED_SPEAKER_CUES = new Set<BotCrosstalkInterruptedSpeakerCue>(
-  BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES,
+  [
+    ...BOT_CROSSTALK_INTERRUPTED_SPEAKER_CUES,
+    BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
+  ],
 );
 const VOCAL_FOLEYS = new Set<ListenerReactionVocalFoley>(
   LISTENER_REACTION_VOCAL_FOLEYS,
@@ -255,6 +261,12 @@ export function listenerReactionHasAudio(
   return Boolean(plan.spokenCue || plan.vocalFoley);
 }
 
+export function botCrosstalkInterruptedSpeakerCueHasAudio(
+  cue: BotCrosstalkInterruptedSpeakerCue | null | undefined,
+): boolean {
+  return Boolean(cue && cue !== BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE);
+}
+
 export function listenerReactionHasCrosstalkAudio(
   plan: Pick<
     ListenerReactionPlanV1,
@@ -262,7 +274,9 @@ export function listenerReactionHasCrosstalkAudio(
   >,
 ): boolean {
   return Boolean(
-    plan.spokenCue || plan.vocalFoley || plan.interruptedSpeakerCue,
+    plan.spokenCue ||
+      plan.vocalFoley ||
+      botCrosstalkInterruptedSpeakerCueHasAudio(plan.interruptedSpeakerCue),
   );
 }
 

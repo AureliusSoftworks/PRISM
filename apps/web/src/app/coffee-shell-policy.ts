@@ -81,7 +81,11 @@ export function coffeeShellPolicy(args: {
   conversationActive: boolean;
   phase: CoffeeShellSessionPhase;
 }): CoffeeShellPolicy {
-  const liveSessionActive = args.phase === "arriving" || args.phase === "live";
+  const liveSessionActive =
+    args.conversationActive &&
+    (args.phase === "topic" ||
+      args.phase === "arriving" ||
+      args.phase === "live");
   const reviewActive = args.conversationActive && args.phase === "finished";
   const liveChromePolicy = liveSessionActive
     ? liveSessionChromePolicy("Coffee")

@@ -16,14 +16,14 @@ describe("universal voice selector", () => {
     assert.match(pageSource, /className=\{styles\.voiceModeSelector\}/);
     assert.match(
       pageSource,
-      /<span>Voice<\/span> <span aria-hidden="true">·<\/span> <strong>\{currentDisplayName\}<\/strong>/,
+      /<span>Speech Type<\/span> <span aria-hidden="true">·<\/span> <strong>\{currentDisplayName\}<\/strong>/,
     );
     assert.match(
       pageSource,
       /VOICE_PLAYBACK_CHOICES\.map\( \(choice\): PrismMenuEntry =>/,
     );
     assert.match(pageSource, /kind: "radio", group: "voice-mode"/);
-    assert.match(pageSource, /label: "Voice mode"/);
+    assert.match(pageSource, /`Speech Type: \$\{currentDisplayName\}`/);
     assert.doesNotMatch(pageSource, /styles\.voiceHeaderButton/);
   });
 
@@ -90,10 +90,11 @@ describe("universal voice selector", () => {
   });
 
   it("keeps the selector in the header without repeating it in the Zen hero", () => {
-    assert.match(
-      pageSource,
-      /const renderZenSplashControls[\s\S]*?showVoiceSelector: false/,
+    const zenSplashControls = pageSource.slice(
+      pageSource.indexOf("const renderZenSplashControls ="),
+      pageSource.indexOf("return (", pageSource.indexOf("const renderZenSplashControls =")),
     );
+    assert.doesNotMatch(zenSplashControls, /renderVoiceModeSelector/);
 
     const zenHeader = pageSource.slice(
       pageSource.indexOf('renderSharedAppletNavbar("Chat tools"'),
@@ -109,6 +110,50 @@ describe("universal voice selector", () => {
       /const showVoiceSelector = options\.showVoiceSelector \?\? true/,
     );
     assert.match(headerModelPicker, /renderVoiceModeSelector\(/);
+  });
+
+  it("locks every Speech Type mutation path for the active Chat or Zen turn", () => {
+    const selectionHandler = pageSource.slice(
+      pageSource.indexOf("async function selectGlobalVoiceChoice"),
+      pageSource.indexOf("async function saveVoiceSettings"),
+    );
+    assert.match(
+      selectionHandler,
+      /if \(chatTurnVoiceSelectionRef\.current\)/,
+    );
+    assert.match(
+      selectionHandler,
+      /showLocalCommandToast\( "Speech Type is locked", "Wait for the current reply to finish before changing how Prism speaks\."/,
+    );
+    assert.match(
+      pageSource,
+      /chatTurnVoiceSelection !== null \|\| !settings/,
+    );
+    assert.match(pageSource, /data-chat-turn-voice-locked=/);
+    assert.match(
+      pageSource,
+      /Speech Type is locked until this reply has been fully received and presented\./,
+    );
+
+    const editStart = pageSource.indexOf("async function performMessageEdit");
+    const editEnd = pageSource.indexOf("function requestMessageEdit");
+    const editSource = pageSource.slice(editStart, editEnd);
+    const editFreezeIndex = editSource.indexOf(
+      "freezeChatTurnVoiceSelection()",
+    );
+    assert.ok(editStart >= 0 && editEnd > editStart);
+    assert.ok(editFreezeIndex >= 0);
+    assert.ok(editFreezeIndex < editSource.indexOf("setPendingReply(true)"));
+    assert.ok(editFreezeIndex < editSource.indexOf("buildChatRequestBody"));
+
+    assert.doesNotMatch(
+      pageSource,
+      /if \(!chatEphemeralMode \|\| !detail\?\.id\) \{ chatMessageFirstSeenAtRef\.current\.clear\(\)/,
+    );
+    assert.match(
+      pageSource,
+      /if \(!chatAssistantTypingMechanicsActive \|\| !detail\?\.id\) \{ chatMessageFirstSeenAtRef\.current\.clear\(\)/,
+    );
   });
 
   it("snapshots the five-choice selection when each spoken surface starts an utterance", () => {

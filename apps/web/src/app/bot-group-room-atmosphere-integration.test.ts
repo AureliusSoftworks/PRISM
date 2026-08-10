@@ -91,6 +91,14 @@ describe("saved group room atmosphere integration", () => {
     assert.match(pageSource, /kind="group_room_atmosphere"/u);
     assert.match(
       pageSource,
+      /"Synthesizing softly…"[\s\S]{0,120}: "Generate atmosphere"/u,
+    );
+    assert.match(
+      pageSource,
+      /onClick=\{\(\) =>[\s\S]{0,100}generateBotGroupRoomAtmosphere\(group\.id\)/u,
+    );
+    assert.match(
+      pageSource,
       /onSynthesize=\{\(direction\) =>[\s\S]*?generateBotGroupRoomAtmosphere\(group\.id, direction\)/u,
     );
     assert.match(pageSource, /onSelect=\{\(asset\) =>[\s\S]*?applyBotGroupRoomAtmosphereAsset/u);
@@ -106,6 +114,37 @@ describe("saved group room atmosphere integration", () => {
     assert.match(
       pageSource,
       /LOCAL stays on[\s\S]*?your network; ONLINE sends member cues/u,
+    );
+  });
+
+  it("hands generation to the shared soft-synthesis card and real Prism assistant", () => {
+    assert.match(
+      pageSource,
+      /import \{ registerPrismSoftSynthesisJobs \} from "\.\/prismSoftSynthesisUi\.ts"/u,
+    );
+    assert.match(
+      pageSource,
+      /registerPrismSoftSynthesisJobs\(\s*"bot-group-room-atmosphere",\s*botGroupRoomAtmosphereSynthesisJobs\.length/u,
+    );
+    assert.match(
+      pageSource,
+      /setBotGroupRoomAtmosphereSynthesisJobs\([\s\S]{0,520}closeBotGroupRoomAtmosphereDialog\(\)[\s\S]{0,1800}signal: controller\.signal/u,
+    );
+    assert.match(
+      pageSource,
+      /<PrismBlockingLoader[\s\S]{0,220}open=\{botGroupRoomAtmosphereSynthesisJobs\.length > 0\}[\s\S]{0,120}placement="docked"[\s\S]{0,200}eyebrow="Zen · Group Atmosphere"/u,
+    );
+    assert.match(
+      pageSource,
+      /footer="Soft synthesis — keep using PRISM while the room takes shape\."/u,
+    );
+    assert.match(
+      pageSource,
+      /onCancel=\{cancelBotGroupRoomAtmosphereSynthesis\}/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /BotGroupRoomAtmosphereDialogState[\s\S]{0,140}busy: "generate"/u,
     );
   });
 
@@ -238,7 +277,11 @@ describe("saved group room atmosphere integration", () => {
     );
     assert.match(tutorialSource, /Shape a saved group's room/u);
     assert.match(tutorialSource, /chat-group-atmosphere/u);
+    assert.match(tutorialSource, /familiar hero and standard bot grid/u);
+    assert.match(
+      tutorialSource,
+      /Generate atmosphere hands the job to Prism as soft synthesis/u,
+    );
     assert.match(tutorialSource, /leading \+ uploads/u);
-    assert.match(tutorialSource, /wield Prism onto that same tile to synthesize/u);
   });
 });

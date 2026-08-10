@@ -13,7 +13,7 @@ export type BotFaceFontId = (typeof BOT_FACE_FONT_IDS)[number];
 export const BOT_FACE_FONT_LABELS: Record<BotFaceFontId, string> = {
   neutral: "Core",
   warm: "Soft",
-  concise: "Mono",
+  concise: "Macondo",
   playful: "Bounce",
   formal: "Serif",
 };
@@ -92,13 +92,17 @@ export const BOT_FACE_MOUTH_ROTATION_DEG_MIN = -180;
 export const BOT_FACE_MOUTH_ROTATION_DEG_MAX = 180;
 export const BOT_FACE_MOUTH_ROTATION_DEG_STEP = 5;
 export type BotFaceBlinkBar = string;
-export const DEFAULT_BOT_FACE_BLINK_BAR: BotFaceBlinkBar = "¦";
+/** A blank blink keeps the default face still; visible bars are opt-in styles. */
+export const DEFAULT_BOT_FACE_BLINK_BAR: BotFaceBlinkBar = " ";
 export const BOT_FACE_BLINK_BAR_VALUES = [
   "none",
   DEFAULT_BOT_FACE_BLINK_BAR,
-  "❘",
+  "|",
+  "¦",
 ] as const;
-export const DEFAULT_BOT_FACE_BLINK_SCALE = 1;
+/** Visible blink glyphs start at three quarters of the default eye size. */
+export const DEFAULT_BOT_FACE_BLINK_SCALE = 0.75;
+const LEGACY_DEFAULT_BOT_FACE_BLINK_SCALE = 1;
 export const BOT_FACE_BLINK_SCALE_MIN = 0.7;
 export const BOT_FACE_BLINK_SCALE_MAX = 1.3;
 export const BOT_FACE_BLINK_SCALE_STEP = 0.05;
@@ -417,6 +421,43 @@ export function normalizeBotFaceBlinkRotationDeg(value: unknown): number | null 
   );
 }
 
+export function botFaceBlinkScaleForEyeScale(eyeScale: number): number {
+  const normalizedEyeScale =
+    normalizeBotFaceEyeScale(eyeScale) ?? DEFAULT_BOT_FACE_EYE_SCALE;
+  return (
+    normalizeBotFaceBlinkScale(
+      normalizedEyeScale * DEFAULT_BOT_FACE_BLINK_SCALE
+    ) ?? DEFAULT_BOT_FACE_BLINK_SCALE
+  );
+}
+
+export function botFaceBlinkGeometryFollowsEyesByDefault(args: {
+  eyeScale: number;
+  eyeOffsetX: number;
+  eyeOffsetY: number;
+  eyeRotationDeg: number;
+  blinkScale: number;
+  blinkOffsetX: number;
+  blinkOffsetY: number;
+  blinkRotationDeg: number;
+}): boolean {
+  const close = (left: number, right: number): boolean =>
+    Math.abs(left - right) < 0.0001;
+  const blinkUsesDefaultGeometry =
+    (close(args.blinkScale, DEFAULT_BOT_FACE_BLINK_SCALE) ||
+      close(args.blinkScale, LEGACY_DEFAULT_BOT_FACE_BLINK_SCALE)) &&
+    close(args.blinkOffsetX, DEFAULT_BOT_FACE_BLINK_OFFSET_X) &&
+    close(args.blinkOffsetY, DEFAULT_BOT_FACE_BLINK_OFFSET_Y) &&
+    close(args.blinkRotationDeg, DEFAULT_BOT_FACE_BLINK_ROTATION_DEG);
+  const blinkTracksEyeGeometry =
+    (close(args.blinkScale, args.eyeScale) ||
+      close(args.blinkScale, botFaceBlinkScaleForEyeScale(args.eyeScale))) &&
+    close(args.blinkOffsetX, args.eyeOffsetX) &&
+    close(args.blinkOffsetY, args.eyeOffsetY) &&
+    close(args.blinkRotationDeg, args.eyeRotationDeg);
+  return blinkUsesDefaultGeometry || blinkTracksEyeGeometry;
+}
+
 export function normalizeBotFaceThinkingScale(value: unknown): number | null {
   return normalizeSteppedBotFaceFloat(
     value,
@@ -554,6 +595,40 @@ export function resolveBotFaceStyle(
   const mouthCharacter =
     normalizeBotFaceMouthCharacter(input.faceMouthCharacter) ??
     DEFAULT_BOT_FACE_MOUTH_CHARACTER;
+  const eyeScale =
+    normalizeBotFaceEyeScale(input.faceEyeScale) ??
+    DEFAULT_BOT_FACE_EYE_SCALE;
+  const eyeOffsetX =
+    normalizeBotFaceEyeOffsetX(input.faceEyeOffsetX) ??
+    DEFAULT_BOT_FACE_EYE_OFFSET_X;
+  const eyeOffsetY =
+    normalizeBotFaceEyeOffsetY(input.faceEyeOffsetY) ??
+    DEFAULT_BOT_FACE_EYE_OFFSET_Y;
+  const eyeRotationDeg =
+    normalizeBotFaceEyeRotationDeg(input.faceEyeRotationDeg) ??
+    DEFAULT_BOT_FACE_EYE_ROTATION_DEG;
+  const storedBlinkScale =
+    normalizeBotFaceBlinkScale(input.faceBlinkScale) ??
+    DEFAULT_BOT_FACE_BLINK_SCALE;
+  const storedBlinkOffsetX =
+    normalizeBotFaceBlinkOffsetX(input.faceBlinkOffsetX) ??
+    DEFAULT_BOT_FACE_BLINK_OFFSET_X;
+  const storedBlinkOffsetY =
+    normalizeBotFaceBlinkOffsetY(input.faceBlinkOffsetY) ??
+    DEFAULT_BOT_FACE_BLINK_OFFSET_Y;
+  const storedBlinkRotationDeg =
+    normalizeBotFaceBlinkRotationDeg(input.faceBlinkRotationDeg) ??
+    DEFAULT_BOT_FACE_BLINK_ROTATION_DEG;
+  const blinkFollowsEyes = botFaceBlinkGeometryFollowsEyesByDefault({
+    eyeScale,
+    eyeOffsetX,
+    eyeOffsetY,
+    eyeRotationDeg,
+    blinkScale: storedBlinkScale,
+    blinkOffsetX: storedBlinkOffsetX,
+    blinkOffsetY: storedBlinkOffsetY,
+    blinkRotationDeg: storedBlinkRotationDeg,
+  });
   return {
     eyesFont: normalizeBotFaceFontId(input.faceEyesFont) ?? fallbackFont,
     eyeCharacter,
@@ -576,18 +651,10 @@ export function resolveBotFaceStyle(
     weight:
       normalizeBotFaceFontWeight(input.faceFontWeight) ??
       DEFAULT_BOT_FACE_FONT_WEIGHT,
-    eyeScale:
-      normalizeBotFaceEyeScale(input.faceEyeScale) ??
-      DEFAULT_BOT_FACE_EYE_SCALE,
-    eyeOffsetX:
-      normalizeBotFaceEyeOffsetX(input.faceEyeOffsetX) ??
-      DEFAULT_BOT_FACE_EYE_OFFSET_X,
-    eyeOffsetY:
-      normalizeBotFaceEyeOffsetY(input.faceEyeOffsetY) ??
-      DEFAULT_BOT_FACE_EYE_OFFSET_Y,
-    eyeRotationDeg:
-      normalizeBotFaceEyeRotationDeg(input.faceEyeRotationDeg) ??
-      DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
+    eyeScale,
+    eyeOffsetX,
+    eyeOffsetY,
+    eyeRotationDeg,
     mouthScale:
       normalizeBotFaceMouthScale(input.faceMouthScale) ??
       DEFAULT_BOT_FACE_MOUTH_SCALE,
@@ -603,18 +670,14 @@ export function resolveBotFaceStyle(
     blinkBar:
       normalizeBotFaceBlinkBar(input.faceBlinkBar) ??
       DEFAULT_BOT_FACE_BLINK_BAR,
-    blinkScale:
-      normalizeBotFaceBlinkScale(input.faceBlinkScale) ??
-      DEFAULT_BOT_FACE_BLINK_SCALE,
-    blinkOffsetX:
-      normalizeBotFaceBlinkOffsetX(input.faceBlinkOffsetX) ??
-      DEFAULT_BOT_FACE_BLINK_OFFSET_X,
-    blinkOffsetY:
-      normalizeBotFaceBlinkOffsetY(input.faceBlinkOffsetY) ??
-      DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
-    blinkRotationDeg:
-      normalizeBotFaceBlinkRotationDeg(input.faceBlinkRotationDeg) ??
-      DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
+    blinkScale: blinkFollowsEyes
+      ? botFaceBlinkScaleForEyeScale(eyeScale)
+      : storedBlinkScale,
+    blinkOffsetX: blinkFollowsEyes ? eyeOffsetX : storedBlinkOffsetX,
+    blinkOffsetY: blinkFollowsEyes ? eyeOffsetY : storedBlinkOffsetY,
+    blinkRotationDeg: blinkFollowsEyes
+      ? eyeRotationDeg
+      : storedBlinkRotationDeg,
     thinkingFrames:
       normalizeBotFaceThinkingFrames(input.faceThinkingFrames) ??
       DEFAULT_BOT_FACE_THINKING_FRAMES,
@@ -646,45 +709,49 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     const index = Math.floor(random() * BOT_FACE_FONT_IDS.length);
     return BOT_FACE_FONT_IDS[index] ?? DEFAULT_BOT_FACE_FONT_ID;
   };
+  const eyesFont = pickFont();
+  const mouthFont = pickFont();
   const weightSteps =
     (BOT_FACE_FONT_WEIGHT_MAX - BOT_FACE_FONT_WEIGHT_MIN) /
     BOT_FACE_FONT_WEIGHT_STEP;
   const weight =
     BOT_FACE_FONT_WEIGHT_MIN +
     Math.round(random() * weightSteps) * BOT_FACE_FONT_WEIGHT_STEP;
+  const eyeScale = randomSteppedBotFaceScale(
+    random,
+    BOT_FACE_EYE_SCALE_MIN,
+    BOT_FACE_EYE_SCALE_MAX,
+    BOT_FACE_EYE_SCALE_STEP
+  );
+  const mouthScale = randomSteppedBotFaceScale(
+    random,
+    BOT_FACE_MOUTH_SCALE_MIN,
+    BOT_FACE_MOUTH_SCALE_MAX,
+    BOT_FACE_MOUTH_SCALE_STEP
+  );
   return {
-    eyesFont: pickFont(),
+    eyesFont,
     eyeCharacter: DEFAULT_BOT_FACE_EYE_CHARACTER,
     eyeCount: DEFAULT_BOT_FACE_EYE_COUNT,
     eyeAnimation: DEFAULT_BOT_FACE_EYE_MOVEMENT,
-    mouthFont: pickFont(),
+    mouthFont,
     mouthCharacter: DEFAULT_BOT_FACE_MOUTH_CHARACTER,
     mouthAnimation: DEFAULT_BOT_FACE_GLYPH_ANIMATION,
     mouthCoffeePucker: DEFAULT_BOT_FACE_MOUTH_COFFEE_PUCKER,
     weight,
-    eyeScale: randomSteppedBotFaceScale(
-      random,
-      BOT_FACE_EYE_SCALE_MIN,
-      BOT_FACE_EYE_SCALE_MAX,
-      BOT_FACE_EYE_SCALE_STEP
-    ),
+    eyeScale,
     eyeOffsetX: DEFAULT_BOT_FACE_EYE_OFFSET_X,
     eyeOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,
     eyeRotationDeg: DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
-    mouthScale: randomSteppedBotFaceScale(
-      random,
-      BOT_FACE_MOUTH_SCALE_MIN,
-      BOT_FACE_MOUTH_SCALE_MAX,
-      BOT_FACE_MOUTH_SCALE_STEP
-    ),
+    mouthScale,
     mouthOffsetX: DEFAULT_BOT_FACE_MOUTH_OFFSET_X,
     mouthOffsetY: DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
     mouthRotationDeg: DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
     blinkBar: DEFAULT_BOT_FACE_BLINK_BAR,
-    blinkScale: DEFAULT_BOT_FACE_BLINK_SCALE,
-    blinkOffsetX: DEFAULT_BOT_FACE_BLINK_OFFSET_X,
-    blinkOffsetY: DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
-    blinkRotationDeg: DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
+    blinkScale: botFaceBlinkScaleForEyeScale(eyeScale),
+    blinkOffsetX: DEFAULT_BOT_FACE_EYE_OFFSET_X,
+    blinkOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,
+    blinkRotationDeg: DEFAULT_BOT_FACE_EYE_ROTATION_DEG,
     thinkingFrames: DEFAULT_BOT_FACE_THINKING_FRAMES,
     thinkingScale: DEFAULT_BOT_FACE_THINKING_SCALE,
     thinkingOffsetX: DEFAULT_BOT_FACE_THINKING_OFFSET_X,

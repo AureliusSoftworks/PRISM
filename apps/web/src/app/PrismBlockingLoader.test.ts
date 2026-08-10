@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import { formatBlockingLoaderElapsed } from "./prismBlockingLoaderFormat.ts";
 import {
+  getPrismSoftSynthesisUiServerSnapshot,
   getPrismSoftSynthesisUiSnapshot,
   registerPrismSoftSynthesisJobs,
   resetPrismSoftSynthesisUiForTests,
@@ -47,12 +48,19 @@ describe("PrismBlockingLoader confirm-before-cancel contract", () => {
     assert.match(source, /elapsedLabel/u);
   });
 
-  it("supports a docked soft-wait placement with minimize and delayed hard companion suppression", () => {
+  it("anchors docked soft waits to the live companion while hard waits retain handoff", () => {
     assert.match(source, /placement\?: PrismBlockingLoaderPlacement/u);
     assert.match(source, /placement === "docked"/u);
     assert.match(source, /data-prism-blocking-placement="docked"/u);
+    assert.match(source, /useSyncExternalStore\(/u);
+    assert.match(source, /companionVisual\.position/u);
+    assert.match(source, /data-prism-soft-orb-anchored="true"/u);
+    assert.match(source, /<PrismCompanionViewTabs/u);
+    assert.match(source, /activeView="synthesis"/u);
     assert.match(source, /hardCompanionSuppressed/u);
     assert.match(source, /animatePrismOrbHandoff/u);
+    assert.doesNotMatch(source, /setPrismSoftSynthesisLodged/u);
+    assert.doesNotMatch(source, /setPrismSoftSynthesisPosition/u);
     assert.match(source, /setPrismSoftSynthesisExpanded\(false\)/u);
     assert.match(source, /activeChildren/u);
     assert.match(source, /queuedChildren/u);
@@ -66,21 +74,32 @@ describe("PrismBlockingLoader docked styles", () => {
     "utf8",
   );
 
-  it("supports relocatable soft cards and outside-click minimize", () => {
+  it("wraps soft cards around Prism and keeps outside-click minimize", () => {
     assert.match(css, /\.docked\s*\{/u);
     assert.match(css, /\.softDismiss\s*\{/u);
     assert.match(css, /z-index:\s*760/u);
+    assert.match(css, /--soft-orb-anchor/u);
+    assert.match(css, /data-dock="left"/u);
+    assert.match(css, /data-vertical="above"/u);
     assert.match(css, /\.jobSectionLabel/u);
   });
 });
 
 describe("prism soft synthesis UI store", () => {
+  it("caches the server snapshot React reads during hydration", () => {
+    assert.strictEqual(
+      getPrismSoftSynthesisUiServerSnapshot(),
+      getPrismSoftSynthesisUiServerSnapshot(),
+    );
+  });
+
   it("starts minimized when soft jobs appear and tracks chip counts", () => {
     resetPrismSoftSynthesisUiForTests();
     registerPrismSoftSynthesisJobs("debate", 2);
     const snap = getPrismSoftSynthesisUiSnapshot();
     assert.equal(snap.jobCount, 2);
     assert.equal(snap.expanded, false);
+    assert.deepEqual(Object.keys(snap).sort(), ["expanded", "jobCount"]);
     setPrismSoftSynthesisExpanded(true);
     assert.equal(getPrismSoftSynthesisUiSnapshot().expanded, true);
     registerPrismSoftSynthesisJobs("debate", 0);

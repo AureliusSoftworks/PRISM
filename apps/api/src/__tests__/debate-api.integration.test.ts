@@ -266,6 +266,7 @@ describe("Debate API", () => {
     assert.equal(blockedScholarResearch.status, 409);
     assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
 
+    const generationCallsBeforeLocalInspection = provider.generationCalls.length;
     const localUrlDraft = await owner.request(
       "/api/debates/sources/inspect",
       jsonInit({
@@ -283,9 +284,16 @@ describe("Debate API", () => {
         url: "https://www.example.com/report",
         snippet: "",
         publishedAt: null,
+        excerptSource: "player",
+        excerptSelection: "player",
+        excerptModel: null,
       },
     });
     assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
+    assert.equal(
+      provider.generationCalls.length,
+      generationCallsBeforeLocalInspection,
+    );
 
     db.prepare(
       `UPDATE users
@@ -1107,6 +1115,70 @@ describe("Debate API", () => {
       { provider: "local", model: "debate-auto-primary" },
       { provider: "openai", model: "debate-online-fallback" },
     ]);
+
+    const deferredResponse = await owner.request(
+      "/api/debates",
+      jsonInit({
+        motion,
+        evidence: {
+          version: DEBATE_SCHEMA_VERSION,
+          notes: "Saved setup model override check.",
+          sources: [],
+          frozenAt: null,
+        },
+        moderatorBotId: "moderator",
+        forAdvocateBotId: "for",
+        againstAdvocateBotId: "against",
+        playerRole: "spectator",
+        advocacyConsent: checks,
+        preferredProvider: "local",
+        modelOverride: "debate-saved-setup-model",
+        responseMode: "local",
+        theme: "dark",
+        deferStart: true,
+        idempotencyKey: "api:deferred-model:create:0001",
+      }),
+    );
+    assert.equal(deferredResponse.status, 201);
+    const deferred = (await payload(deferredResponse)).session as DebateSessionV1;
+    assert.equal(deferred.status, "paused");
+    assert.equal(deferred.model, "debate-saved-setup-model");
+
+    const deferredStartedResponse = await owner.request(
+      `/api/debates/${deferred.id}/resume`,
+      jsonInit({
+        expectedRevision: deferred.revision,
+        idempotencyKey: "api:deferred-model:start:0001",
+        quietSave: true,
+        exitRecovery: true,
+        startPreferredProvider: "local",
+        startModelOverride: "debate-current-at-start",
+        startResponseMode: "local",
+      }),
+    );
+    assert.equal(deferredStartedResponse.status, 200);
+    let deferredStarted = (await payload(deferredStartedResponse))
+      .session as DebateSessionV1;
+    assert.equal(deferredStarted.status, "live");
+    assert.equal(deferredStarted.model, "debate-current-at-start");
+    assert.equal(deferredStarted.modelSelectionKind, "fixed");
+    assert.equal(deferredStarted.moderator.model, "debate-current-at-start");
+
+    const deferredAdvancedResponse = await owner.request(
+      `/api/debates/${deferred.id}/advance`,
+      jsonInit({
+        expectedRevision: deferredStarted.revision,
+        idempotencyKey: "api:deferred-model:advance:0001",
+      }),
+    );
+    assert.equal(deferredAdvancedResponse.status, 200);
+    deferredStarted = (await payload(deferredAdvancedResponse))
+      .session as DebateSessionV1;
+    assert.equal(deferredStarted.events.at(-1)?.model, "debate-current-at-start");
+    assert.equal(
+      provider.generationCalls.filter((call) => !call.auxiliary).at(-1)?.model,
+      "debate-current-at-start",
+    );
 
     assert.equal(fetchRecorder.calls.length, callsBeforeResearch);
 

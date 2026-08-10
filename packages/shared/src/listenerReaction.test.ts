@@ -1,7 +1,9 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
   appendBotCrosstalkInterruptedSpeakerCue,
+  botCrosstalkInterruptedSpeakerCueHasAudio,
   botCrosstalkPrimarySpeakerContent,
   buildBotCrosstalkListenerReactionPlanV1,
   buildCoffeeListenerReactionPlanV1,
@@ -15,6 +17,7 @@ import {
   normalizeSocialSilenceMarkerV1,
   planSocialSilenceV1,
   resolveListenerReactionAtMs,
+  listenerReactionHasCrosstalkAudio,
   socialSilenceMessageIsMarkedV1,
 } from "./listenerReaction.ts";
 import { DIRECTIONAL_IRRITATION_SNARK_CUES } from "./directionalIrritation.ts";
@@ -249,6 +252,37 @@ describe("listener reaction planning", () => {
       ),
       "That's why the lemons are never ripe enou—",
     );
+  });
+
+  it("accepts the exact speech-copy follow-on without adding it to random retorts", () => {
+    assert.equal(
+      normalizeBotCrosstalkInterruptedSpeakerCue(
+        BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
+      ),
+      "...",
+    );
+    assert.equal(
+      botCrosstalkInterruptedSpeakerCueHasAudio(
+        BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
+      ),
+      false,
+    );
+    assert.equal(
+      listenerReactionHasCrosstalkAudio({
+        interruptedSpeakerCue: BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
+      }),
+      false,
+    );
+    const generated = Array.from({ length: 100 }, (_, index) =>
+      buildBotCrosstalkListenerReactionPlanV1({
+        seed: `ordinary-crosstalk-${index}`,
+        messageId: `message-${index}`,
+        speakerBotId: "speaker",
+        interrupterBotId: "interrupter",
+        targetProgress: 0.5,
+      }).interruptedSpeakerCue,
+    );
+    assert.equal(generated.includes(BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE), false);
   });
 
   it("keeps late cut-ins but suppresses offended follow-up behavior", () => {

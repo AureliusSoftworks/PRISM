@@ -90,6 +90,47 @@ test("avatar customization is a floating modal that reuses the Zen mannequin", (
   assert.match(cssSource, /\.botProfileBuilder\.botAvatarCustomizer/);
 });
 
+test("Avatar Studio keeps a draft-driven mini preview visible with authored eye states", () => {
+  const miniPreview = pageSource.match(
+    /data-avatar-studio-mini-preview="true"([\s\S]*?)\{foundryCameraEditable \? \(/,
+  );
+  assert.ok(miniPreview, "Expected the Avatar Studio mini preview block");
+  const miniSource = miniPreview[0];
+
+  assert.match(
+    pageSource,
+    /!foundryRitual \? \( <div className=\{styles\.botAvatarStudioMiniPreview\}/,
+  );
+  assert.match(miniSource, /data-avatar-studio-mini-eye-state=/);
+  assert.match(miniSource, /<ChatMiniBotAvatar size="room"/);
+  assert.match(miniSource, /color=\{miniAccentColor\}/);
+  assert.match(miniSource, /botFrameMetalAlloyColor\(voicePreset\)/);
+  assert.match(
+    miniSource,
+    /forceBlinkPhase=\{previewBlink \? "closed" : "open"\}/,
+  );
+  assert.match(
+    miniSource,
+    /faceEyeRotationDeg=\{previewFaceStyle\.eyeRotationDeg\}/,
+  );
+  assert.match(
+    miniSource,
+    /faceBlinkRotationDeg=\{previewFaceStyle\.blinkRotationDeg\}/,
+  );
+  assert.match(pageSource, /details=\{miniAvatarDetails\}/);
+  assert.match(miniSource, /name=\{glyph\}/);
+  assert.doesNotMatch(miniSource, /\bpixelated\b/);
+
+  const previewRule = cssRuleBody(
+    '.botAvatarCustomizer[data-foundry="true"] .botAvatarStudioMiniPreview',
+  );
+  assert.match(previewRule, /position: absolute;/);
+  assert.match(previewRule, /left: 22px;/);
+  assert.match(previewRule, /top: 20px;/);
+  assert.match(previewRule, /z-index: 22;/);
+  assert.match(previewRule, /pointer-events: none;/);
+});
+
 test("Avatar Studio requires an Accent pin before named voice casting", () => {
   assert.match(pageSource, /const avatarVoiceAccentReady = Boolean/);
   assert.match(pageSource, /label: "1 Accent"/);
@@ -382,8 +423,8 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /normalizeBotFaceEyeRotationDeg/);
   assert.equal(
     pageSource.match(/label="Stroke weight"/gu)?.length,
-    2,
-    "Eyes and Mouth should each expose the shared stroke-weight slider",
+    undefined,
+    "Avatar Studio should not expose the retired face-weight control",
   );
   assert.match(adjustmentPadCssSource, /\.pad\s*\{[\s\S]*cursor:\s*grab;/);
   assert.match(adjustmentPadCssSource, /\.pad::before/);
@@ -447,9 +488,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   );
   assert.doesNotMatch(faceTabSource, /label="Stroke weight"/);
   assert.match(eyesTabSource, /ariaLabel="Custom eye glyph"/);
-  assert.match(eyesTabSource, /label="Stroke weight"/);
-  assert.match(eyesTabSource, /value=\{faceFontWeight\}/);
-  assert.match(eyesTabSource, /onChange=\{onWeightChange\}/);
+  assert.doesNotMatch(eyesTabSource, /label="Stroke weight"/);
   assert.match(eyesTabSource, /<BotAvatarCustomGlyphCapture/);
   assert.match(eyesTabSource, /handleEyeCharacterChange/);
   assert.match(eyesTabSource, /selected=\{faceEyesFont === fontId\}/);
@@ -502,9 +541,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     "Custom glyph capture should sit left of the eye rotation wheel",
   );
   assert.match(mouthTabSource, /ariaLabel="Custom mouth glyph"/);
-  assert.match(mouthTabSource, /label="Stroke weight"/);
-  assert.match(mouthTabSource, /value=\{faceFontWeight\}/);
-  assert.match(mouthTabSource, /onChange=\{onWeightChange\}/);
+  assert.doesNotMatch(mouthTabSource, /label="Stroke weight"/);
   assert.match(mouthTabSource, /<BotAvatarCustomGlyphCapture/);
   assert.match(mouthTabSource, /handleMouthCharacterChange/);
   assert.match(mouthTabSource, /selected=\{faceMouthFont === fontId\}/);
@@ -532,7 +569,7 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
   assert.match(pageSource, /Coffee \*/);
   assert.match(
     pageSource,
-    /Swap the custom mouth to \* while sipping in Coffee mode\./,
+    /Swap the custom mouth to \* and toggle Speech ink while sipping in Coffee mode\./,
   );
   assert.match(pageSource, /role="switch"/);
   assert.match(pageSource, /aria-checked=\{faceMouthCoffeePucker\}/);
@@ -689,7 +726,7 @@ test("avatar edits stay local until Save and support multi-step undo", () => {
     pageSource,
     /pushBotAvatarUndoSnapshot\(\);[\s\S]*handleNewBotFaceEyesFontChange\(next\);/,
   );
-  assert.match(pageSource, /pushBotAvatarUndoSnapshot\("face-weight"\);/);
+  assert.doesNotMatch(pageSource, /pushBotAvatarUndoSnapshot\("face-weight"\);/);
   assert.match(pageSource, /pushBotAvatarUndoSnapshot\("eye-position"\);/);
   assert.match(pageSource, /pushBotAvatarUndoSnapshot\("mouth-position"\);/);
   assert.match(
@@ -1247,7 +1284,11 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
     pageSource,
     /className=\{`\$\{styles\.botAvatarCustomMotionRow\} \$\{styles\.botAvatarCustomMotionRowSingle\}`\}/,
   );
-  assert.match(pageSource, /className=\{styles\.botAvatarSliderStack\}/);
+  assert.doesNotMatch(pageSource, /className=\{styles\.botAvatarSliderStack\}/);
+  assert.doesNotMatch(
+    cssSource,
+    /\.botAvatarSliderStack|\.botAvatarWeightControl|\.botAvatarWeightEnds/,
+  );
   assert.doesNotMatch(
     pageSource,
     /className=\{styles\.botAvatarEyeScalePresetStrip\}/,
@@ -1390,8 +1431,8 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /Presets and thinking/);
   assert.match(pageSource, /Name, presets, and thinking/);
   assert.match(pageSource, /Color and identity badge/);
-  assert.match(pageSource, /Built-in style and stroke weight/);
-  assert.match(pageSource, /Custom glyph and stroke weight/);
+  assert.doesNotMatch(pageSource, /Built-in style and stroke weight/);
+  assert.doesNotMatch(pageSource, /Custom glyph and stroke weight/);
   assert.doesNotMatch(pageSource, /Blink, mouth, and thinking animation/);
   assert.match(pageSource, /type BotAvatarCustomizerTab =/);
   assert.match(pageSource, /\| "profile"/);
@@ -1408,13 +1449,15 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   assert.match(pageSource, /aria-label=\{controlLabel\}/);
   assert.match(pageSource, /<Sparkles size=\{16\}/);
   assert.doesNotMatch(pageSource, /<Timer size=\{16\}/);
-  assert.match(pageSource, /const previewWeightSummary =/);
+  assert.doesNotMatch(pageSource, /const previewWeightSummary =/);
   assert.doesNotMatch(pageSource, /const previewFaceSummary =/);
   assert.doesNotMatch(pageSource, /botAvatarFeaturePositionSummary/);
   assert.match(pageSource, /const BOT_AVATAR_FACE_PRESETS = \[/);
   assert.match(pageSource, /Classic/);
-  assert.match(pageSource, /Mono/);
+  assert.match(pageSource, /Macondo/);
   assert.match(pageSource, /Bouncy/);
+  assert.match(pageSource, /label: "Serif"/);
+  assert.doesNotMatch(pageSource, /label: "Math"/);
   assert.match(pageSource, /Reset face/);
   assert.doesNotMatch(pageSource, /BOT_AVATAR_SCREEN_MASK_BLEND_MODES/);
   assert.doesNotMatch(pageSource, /Screen mask blend mode/);
@@ -1955,7 +1998,7 @@ test("avatar foundry locks the product preview and reserves camera navigation fo
   assert.doesNotMatch(cssSource, /transition:\s*transform 80ms linear;/);
 });
 
-test("avatar foundry marks populated modules but energizes lamps only during speech", () => {
+test("avatar foundry marks populated modules and shares the breathing voice meter", () => {
   assert.match(pageSource, /botAvatarFoundryModulePopulation\(\{/);
   assert.match(
     pageSource,
@@ -1969,10 +2012,9 @@ test("avatar foundry marks populated modules but energizes lamps only during spe
     /"--bot-face-frame-led-glow-opacity" as string\]: 0/,
   );
   assert.match(pageSource, /data-populated=\{/);
-  assert.match(pageSource, /data-talking=\{isTalking \? "true" : undefined\}/);
   assert.match(
     pageSource,
-    /<BotAvatarFoundryFrameModuleLights\s+population=\{frameModulePopulation\}\s+isTalking=\{isTalking\}\s+\/>/,
+    /<BotAvatarFoundryFrameModuleLights\s+population=\{frameModulePopulation\}\s+\/>/,
   );
   assert.match(
     pageSource,
@@ -1982,14 +2024,14 @@ test("avatar foundry marks populated modules but energizes lamps only during spe
     pageSource,
     /activeFoundryModulePopulated \? "Ready" : "Unconfigured"/,
   );
-  assert.match(cssSource, /@keyframes botAvatarFoundryModuleEnergize/);
+  assert.match(cssSource, /@keyframes botVoiceLightBulbBreath/);
   assert.match(
     cssSource,
-    /\.botAvatarFoundryFrameModuleLamp\[data-populated="true"\]\s*\{[\s\S]*?filter:\s*brightness\(0\.62\)[\s\S]*?box-shadow:\s*inset/,
+    /\.zenLiveBotPresenceBody\[data-avatar-light-mode="alive"\][\s\S]*?\.botAvatarFoundryFrameModuleLamp\[data-populated="true"\]\s*\{[\s\S]*?opacity:\s*calc\(0\.34 \+ var\(--bot-voice-light-level\)/,
   );
   assert.match(
     cssSource,
-    /\.botAvatarFoundryFrameModuleLights\[data-talking="true"\][\s\S]*?\.botAvatarFoundryFrameModuleLamp\[data-populated="true"\]\s*\{[\s\S]*?0 0 18px/,
+    /data-avatar-light-mode="off"[\s\S]*?\.botAvatarFoundryFrameModuleLamp[\s\S]*?opacity:\s*0 !important/,
   );
   assert.match(
     cssSource,
@@ -2101,7 +2143,19 @@ test("avatar customizer preview has explicit expression states", () => {
   assert.match(pageSource, /const previewSipping = previewMode === "sip";/);
   assert.match(
     pageSource,
-    /plateFace=\{\s*previewSipping \? COFFEE_SEAT_SIP_PLATE_GLYPH : undefined\s*\}/,
+    /const previewSipMouthTreatmentActive = coffeeSeatSipMouthTreatmentActive\(\{\s*sipActive: previewSipping,\s*coffeePuckerEnabled: faceStyle\.mouthCoffeePucker,\s*\}\);/,
+  );
+  assert.match(
+    pageSource,
+    /inkTalking=\{previewTalking \|\| previewSipMouthTreatmentActive\}/,
+  );
+  assert.match(
+    pageSource,
+    /Swap the custom mouth to \* and toggle Speech ink while sipping in Coffee mode\./,
+  );
+  assert.match(
+    pageSource,
+    /plateFace=\{\s*previewSipMouthTreatmentActive\s*\? COFFEE_SEAT_SIP_PLATE_GLYPH\s*: undefined\s*\}/,
   );
   assert.match(
     pageSource,

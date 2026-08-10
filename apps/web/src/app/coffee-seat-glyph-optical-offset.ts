@@ -1,10 +1,18 @@
 import type { BotVoicePreset } from "@localai/shared";
 
 export type CoffeeSeatGlyphOpticalOffset = {
-  id: "warm-bracket" | "warm-broken-bar" | "paired-eye";
+  id: "idle-mood-mouth-slot" | "warm-broken-bar" | "paired-eye";
   x: number;
   y: number;
 };
+
+const COFFEE_SEAT_IDLE_MOOD_MOUTH_GLYPHS = new Set([
+  ")",
+  "]",
+  "|",
+  "[",
+  "(",
+]);
 
 export function coffeeSeatGlyphOpticalOffset(args: {
   part: "eyes" | "mouth";
@@ -12,6 +20,7 @@ export function coffeeSeatGlyphOpticalOffset(args: {
   voicePreset: BotVoicePreset;
   rotateDeg: number;
   pairedEye?: boolean;
+  customGlyph?: boolean;
 }): CoffeeSeatGlyphOpticalOffset | null {
   let correction: {
     id: CoffeeSeatGlyphOpticalOffset["id"];
@@ -27,11 +36,14 @@ export function coffeeSeatGlyphOpticalOffset(args: {
 
   if (
     correction === null &&
-    args.voicePreset === "warm" &&
+    args.customGlyph !== true &&
     args.part === "mouth" &&
-    args.glyph === "]"
+    COFFEE_SEAT_IDLE_MOOD_MOUTH_GLYPHS.has(args.glyph)
   ) {
-    correction = { id: "warm-bracket", screenX: 0.055 };
+    // Avatar Details authors Speech ink against the neutral | mouth. Keep all
+    // five resting mood silhouettes in that exact optical slot so changing
+    // mood never moves the mouth underneath persistent ink.
+    correction = { id: "idle-mood-mouth-slot", screenX: -0.055 };
   } else if (
     correction === null &&
     args.voicePreset === "warm" &&

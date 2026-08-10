@@ -42,6 +42,7 @@ import {
   SignalLocalTurnTimeoutError,
   SignalOnlineTurnError,
   advanceBotcastEpisode,
+  backfillMissingCompletedBotcastPairHistory,
   buildBotcastAudienceReviewArtifactV1,
   buildBotcastSpeakerPrompt,
   botcastIdentityMirrorCanTriggerV1,
@@ -54,6 +55,7 @@ import {
   botcastHostCallsAfterDepartingGuest,
   botcastCrosstalkFloorOutcomeV1,
   botcastPlanDirectionalIrritationForMeaningfulCutoffV1,
+  botcastPreparedTurnCursor,
   botcastPowerInterruptionPlanV1,
   botcastPowerInterruptedContentV1,
   botcastSocialSilenceChanceV1,
@@ -83,8 +85,10 @@ import {
   getBotcastShow,
   listBotcastShows,
   listBotcastEpisodes,
+  loadBotcastPairHistoryContext,
   nextBotcastFallbackStudioAccentVariant,
   parseBotcastPersonaReviewResponse,
+  persistCompletedBotcastPairHistory,
   projectBotcastEpisodeForAudienceV1,
   projectBotcastEpisodeForObserverV2,
   readBotcastShowAtmosphereAudio,
@@ -108,8 +112,11 @@ import {
   updateBotcastShow,
 } from "../botcast.ts";
 import { exportUserSnapshot, importUserSnapshot } from "../backup.ts";
-import { initializeDatabase } from "../db.ts";
-import { restoreMemory } from "../memory.ts";
+import { initializeDatabase, readBotRelationship } from "../db.ts";
+import {
+  restoreMemory,
+  retrieveBotPairNarrativeMemories,
+} from "../memory.ts";
 import {
   selectProvider,
   type GenerateOptions,
@@ -184,6 +191,117 @@ function generation(provider: LlmProvider) {
     providerFactory: (() => provider) as typeof selectProvider,
     signalSocialSilenceChanceOverride: 0,
   };
+}
+
+function insertBotcastTestEvent(
+  db: DatabaseSync,
+  episodeId: string,
+  kind: string,
+  payload: Record<string, unknown>,
+): void {
+  const sequence = (
+    db.prepare(
+      "SELECT COALESCE(MAX(sequence), 0) + 1 AS next FROM botcast_events WHERE episode_id = ?",
+    ).get(episodeId) as { next: number }
+  ).next;
+  db.prepare(
+    `INSERT INTO botcast_events
+      (id, user_id, episode_id, sequence, kind, payload_json, occurred_at)
+     VALUES (?, 'user-1', ?, ?, ?, ?, ?)`,
+  ).run(
+    `event-${episodeId}-${sequence}`,
+    episodeId,
+    sequence,
+    kind,
+    JSON.stringify(payload),
+    "2026-08-09T17:44:24.499Z",
+  );
+}
+
+function completeBotcastTestEpisodeWithWalkout(
+  db: DatabaseSync,
+  episodeId: string,
+): void {
+  const messages = [
+    {
+      id: `host-message-${episodeId}`,
+      role: "host",
+      botId: "host-1",
+      content: "I keep cutting in because the premise still has a hole.",
+    },
+    {
+      id: `guest-message-${episodeId}`,
+      role: "guest",
+      botId: "guest-1",
+      content: "I warned you. We are done here.",
+    },
+  ] as const;
+  for (const message of messages) {
+    db.prepare(
+      `INSERT INTO botcast_messages
+        (id, user_id, episode_id, speaker_role, bot_id, content, created_at)
+       VALUES (?, 'user-1', ?, ?, ?, ?, ?)`,
+    ).run(
+      message.id,
+      episodeId,
+      message.role,
+      message.botId,
+      message.content,
+      "2026-08-09T17:44:24.499Z",
+    );
+    insertBotcastTestEvent(db, episodeId, "utterance", {
+      messageId: message.id,
+      speakerRole: message.role,
+      botId: message.botId,
+      segment: "interview",
+      ...(message.role === "guest"
+        ? {
+            powerOutcome: {
+              effect: "interruption",
+              interruptedBotId: "guest-1",
+              interruptingBotId: "host-1",
+            },
+          }
+        : {}),
+    });
+  }
+  insertBotcastTestEvent(db, episodeId, "irritation", {
+    transition: {
+      v: 1,
+      name: "directionalIrritation",
+      transitionId: `max-irritation-${episodeId}`,
+      reason: "meaningful_cutoff",
+      subjectBotId: "guest-1",
+      targetBotId: "host-1",
+      before: 0.7941,
+      after: 1,
+      delta: 0.2059,
+      tier: "high",
+      occurredAt: "2026-08-09T17:44:24.499Z",
+    },
+  });
+  insertBotcastTestEvent(db, episodeId, "departure", {
+    botId: "guest-1",
+    speakerRole: "guest",
+    cause: "repeated_power_interruptions",
+    emptyChair: true,
+    microphoneRemains: true,
+    mugRemains: true,
+  });
+  db.prepare(
+    `UPDATE botcast_episodes
+        SET status = 'completed', outcome = 'guest_departed',
+            completed_at = ?, updated_at = ?
+      WHERE id = ?`,
+  ).run(
+    "2026-08-09T17:44:24.499Z",
+    "2026-08-09T17:44:24.499Z",
+    episodeId,
+  );
+  insertBotcastTestEvent(db, episodeId, "episode_completed", {
+    outcome: "guest_departed",
+    runtimeMs: 90_000,
+  });
 }
 
 it("requires the final Signal beat to thank both guest and audience", () => {
@@ -12314,7 +12432,314 @@ describe("Botcast persistence and isolation", () => {
     }
   });
 
-  it("never includes a previous same-pair episode in a new episode prompt", async () => {
+  it("persists encrypted directed Signal history once and recalls only the same pair", async () => {
+    const db = fixture();
+    const userKey = Buffer.alloc(32, 41);
+    const captures: ProviderMessage[][] = [];
+    const provider = recordingProvider(
+      [
+        "Welcome back to the question, Ivo. Last time, the interruptions drove you out; I will hold the floor differently today.",
+        "Fresh unrelated opening",
+      ],
+      captures,
+    );
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const first = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "The Cost of Cutting In",
+      });
+      completeBotcastTestEpisodeWithWalkout(db, first.id);
+      const second = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "A Better Second Exchange",
+      });
+      const cursorBeforeHistory = botcastPreparedTurnCursor(
+        db,
+        "user-1",
+        second.id,
+      );
+
+      assert.equal(
+        backfillMissingCompletedBotcastPairHistory({
+          db,
+          userId: "user-1",
+          userKey,
+          pairBotIds: ["host-1", "guest-1"],
+        }),
+        1,
+      );
+      assert.notEqual(
+        botcastPreparedTurnCursor(db, "user-1", second.id).promptStateHash,
+        cursorBeforeHistory.promptStateHash,
+      );
+      const rows = db.prepare(
+        `SELECT bot_id, target_bot_id, ciphertext
+           FROM memories
+          WHERE user_id = 'user-1'
+          ORDER BY bot_id`,
+      ).all() as Array<{
+        bot_id: string;
+        target_bot_id: string;
+        ciphertext: string;
+      }>;
+      assert.deepEqual(
+        rows.map((row) => [row.bot_id, row.target_bot_id]),
+        [
+          ["guest-1", "host-1"],
+          ["host-1", "guest-1"],
+        ],
+      );
+      assert.ok(
+        rows.every((row) => !row.ciphertext.includes("repeated interruptions")),
+      );
+      const guestMemories = retrieveBotPairNarrativeMemories({
+        db,
+        userId: "user-1",
+        sourceBotId: "guest-1",
+        targetBotId: "host-1",
+        userKey,
+      });
+      assert.match(
+        guestMemories[0]?.text ?? "",
+        /Ivo Stone left.*repeated interruptions by Mara Vale/iu,
+      );
+      const guestToHost = readBotRelationship(
+        db,
+        "user-1",
+        "guest-1",
+        "host-1",
+      );
+      const hostToGuest = readBotRelationship(
+        db,
+        "user-1",
+        "host-1",
+        "guest-1",
+      );
+      assert.ok((guestToHost?.score ?? 100) <= 18);
+      assert.ok((hostToGuest?.score ?? 0) > (guestToHost?.score ?? 100));
+
+      assert.equal(
+        persistCompletedBotcastPairHistory({
+          db,
+          userId: "user-1",
+          episodeId: first.id,
+          userKey,
+        }),
+        false,
+      );
+      assert.equal(
+        backfillMissingCompletedBotcastPairHistory({
+          db,
+          userId: "user-1",
+          userKey,
+        }),
+        0,
+      );
+      assert.equal(
+        (db.prepare("SELECT COUNT(*) AS count FROM memories").get() as { count: number }).count,
+        2,
+      );
+      assert.equal(
+        readBotRelationship(db, "user-1", "guest-1", "host-1")?.score,
+        guestToHost?.score,
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.deepEqual(
+        snapshot.memories
+          .map((memory) => [memory.botId, memory.targetBotId])
+          .sort(),
+        [
+          ["guest-1", "host-1"],
+          ["host-1", "guest-1"],
+        ],
+      );
+      const restored = fixture();
+      try {
+        importUserSnapshot(restored, "user-1", snapshot, userKey);
+        assert.equal(
+          retrieveBotPairNarrativeMemories({
+            db: restored,
+            userId: "user-1",
+            sourceBotId: "guest-1",
+            targetBotId: "host-1",
+            userKey,
+          }).length,
+          1,
+        );
+      } finally {
+        restored.close();
+      }
+
+      await advanceBotcastEpisode(db, "user-1", second.id, {}, {
+        ...generation(provider),
+        userKey,
+      });
+      const returningPrompt = captures[0]!
+        .map((message) => message.content)
+        .join("\n");
+      assert.match(returningPrompt, /Grounded prior Signal history with Ivo Stone/iu);
+      assert.match(returningPrompt, /repeated interruptions/iu);
+      assert.doesNotMatch(returningPrompt, /relationship score|target_bot_id/iu);
+
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, system_prompt, color, glyph, chat_enabled, created_at, updated_at)
+         VALUES ('guest-2', 'user-1', 'Una New', 'A precise first-time guest.', '#334455', 'star', 1, ?, ?)`,
+      ).run("2026-01-01T00:00:00.000Z", "2026-01-01T00:00:00.000Z");
+      const unrelated = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-2",
+        topic: "Unrelated Pair",
+      });
+      await advanceBotcastEpisode(db, "user-1", unrelated.id, {}, {
+        ...generation(provider),
+        userKey,
+      });
+      const unrelatedPrompt = captures[1]!
+        .map((message) => message.content)
+        .join("\n");
+      assert.match(unrelatedPrompt, /meeting for the first time/iu);
+      assert.doesNotMatch(unrelatedPrompt, /repeated interruptions/iu);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("does not persist Signal pair history for live, cancelled, Producer-cut, or Producer-guest episodes", () => {
+    const db = fixture();
+    const userKey = Buffer.alloc(32, 42);
+    try {
+      const show = createBotcastShow(db, "user-1", { hostBotId: "host-1" });
+      const live = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Still Live",
+      });
+      assert.equal(
+        persistCompletedBotcastPairHistory({
+          db,
+          userId: "user-1",
+          episodeId: live.id,
+          userKey,
+        }),
+        false,
+      );
+      const cancelled = cancelBotcastEpisode(db, "user-1", live.id);
+      assert.equal(cancelled.status, "cancelled");
+      assert.equal(
+        persistCompletedBotcastPairHistory({
+          db,
+          userId: "user-1",
+          episodeId: live.id,
+          userKey,
+        }),
+        false,
+      );
+      const producer = createBotcastEpisode(db, "user-1", show.id, {
+        guestKind: "producer",
+        guestName: "Producer",
+        topic: "Human Guest",
+      });
+      db.prepare(
+        "UPDATE botcast_episodes SET status = 'completed', completed_at = ? WHERE id = ?",
+      ).run("2026-08-09T17:44:24.499Z", producer.id);
+      insertBotcastTestEvent(db, producer.id, "episode_completed", {
+        outcome: "completed",
+        runtimeMs: 10_000,
+      });
+      assert.equal(
+        persistCompletedBotcastPairHistory({
+          db,
+          userId: "user-1",
+          episodeId: producer.id,
+          userKey,
+        }),
+        false,
+      );
+      const producerCut = createBotcastEpisode(db, "user-1", show.id, {
+        guestBotId: "guest-1",
+        topic: "Discarded Cut",
+      });
+      db.prepare(
+        "UPDATE botcast_episodes SET status = 'completed', completed_at = ? WHERE id = ?",
+      ).run("2026-08-09T17:44:24.499Z", producerCut.id);
+      insertBotcastTestEvent(db, producerCut.id, "cut_away", {
+        reason: "producer_cut",
+      });
+      insertBotcastTestEvent(db, producerCut.id, "episode_completed", {
+        outcome: "completed",
+        runtimeMs: 10_000,
+      });
+      assert.equal(
+        persistCompletedBotcastPairHistory({
+          db,
+          userId: "user-1",
+          episodeId: producerCut.id,
+          userKey,
+        }),
+        false,
+      );
+      assert.equal(
+        backfillMissingCompletedBotcastPairHistory({
+          db,
+          userId: "user-1",
+          userKey,
+        }),
+        0,
+      );
+      assert.equal(
+        (db.prepare("SELECT COUNT(*) AS count FROM memories").get() as { count: number }).count,
+        0,
+      );
+      assert.equal(
+        (db.prepare("SELECT COUNT(*) AS count FROM bot_relationships").get() as { count: number }).count,
+        0,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps anthology validation protective without history and accepts supplied history", () => {
+    const db = fixture();
+    const historicalLine =
+      "As we discussed last time, you left after I kept interrupting you.";
+    try {
+      assert.equal(botcastUtteranceClaimsSignalHistory(historicalLine), true);
+      assert.equal(
+        botcastUtteranceClaimsSignalHistory(historicalLine, true),
+        false,
+      );
+      assert.equal(
+        botcastUtteranceClaimsSignalHistory(
+          "Welcome to our third Signal episode together.",
+          true,
+        ),
+        true,
+      );
+      assert.equal(
+        botcastUtteranceClaimsSignalHistory(
+          "The Signal archive proves what happened.",
+          true,
+        ),
+        true,
+      );
+      assert.equal(
+        loadBotcastPairHistoryContext({
+          db,
+          userId: "user-1",
+          userKey: Buffer.alloc(32, 43),
+          sourceBotId: "host-1",
+          targetBotId: "guest-1",
+        }),
+        null,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps a same pair on first-meeting rules when no grounded history exists", async () => {
     const db = fixture();
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
@@ -16862,6 +17287,11 @@ describe("Botcast persistence and isolation", () => {
           ?.interruptedSpeakerCuePlayback,
         "crosstalk",
       );
+      assert.equal(
+        (echoCrosstalk?.payload.plan as Record<string, unknown> | undefined)
+          ?.interruptedSpeakerCue,
+        "...",
+      );
       assert.doesNotMatch(
         guest.message?.content ?? "",
         /judgment has already disappeared from view/iu,
@@ -18434,6 +18864,7 @@ describe("Botcast persistence and isolation", () => {
 
   it("completes a normal episode after the closing host line", async () => {
     const db = fixture();
+    const userKey = Buffer.alloc(32, 44);
     const captures: ProviderMessage[][] = [];
     const provider = recordingProvider(
       Array.from({ length: 19 }, (_, index) => `Episode line ${index + 1}.`),
@@ -18452,7 +18883,7 @@ describe("Botcast persistence and isolation", () => {
           "user-1",
           created.id,
           {},
-          generation(provider),
+          { ...generation(provider), userKey },
         );
       }
       const episode = getBotcastEpisode(db, "user-1", created.id);
@@ -18478,6 +18909,21 @@ describe("Botcast persistence and isolation", () => {
       assert.ok(shots.includes("right:speaker"));
       assert.ok(!shots.includes("wide:transition"));
       assert.equal(shots.at(-1), "wide:closing");
+      assert.equal(
+        (
+          db.prepare(
+            "SELECT COUNT(*) AS count FROM memories WHERE user_id = ? AND target_bot_id IS NOT NULL",
+          ).get("user-1") as { count: number }
+        ).count,
+        2,
+      );
+      assert.ok(
+        (
+          db.prepare(
+            "SELECT pair_history_persisted_at AS persistedAt FROM botcast_episodes WHERE id = ?",
+          ).get(created.id) as { persistedAt: string | null }
+        ).persistedAt,
+      );
     } finally {
       db.close();
     }

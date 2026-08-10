@@ -134,6 +134,10 @@ import {
   type SignalArtworkGeneratedAsset,
 } from "./signal-artwork-jobs.ts";
 import {
+  SoftAssetJobConflictError,
+  SoftAssetJobManager,
+} from "./soft-asset-jobs.ts";
+import {
   collectCoffeePollVotes,
   buildCoffeePollExportLines,
   coffeeMessagesVisibleInExport,
@@ -170,6 +174,7 @@ import {
   recordCoffeeUserAction,
   recordCoffeeReplayEvents,
   recordCoffeeInterruptionPause,
+  refreshCoffeeConversationStarterTopics,
   restartCoffeeConversationFromSession,
   resolveCoffeeTeamTiebreaker,
   setCoffeeConversationTopic,
@@ -197,27 +202,44 @@ import {
   startCoffeeTurnJob,
 } from "./coffee-turn-jobs.ts";
 import {
+  activateDebateParticipantFloorBreak,
   advanceDebateSession,
   checkDebateAdvocacyRoles,
+  clarifyDebateParticipantFloorBreak,
   commitDebateAdvancePreparation,
+  commitDebateParticipantFloorBreakPreparation,
+  cancelDebateParticipantFloorBreakPreparation,
   createDebateSession,
+  createDebateSessionWithParticipantPredispositions,
   debatePreparedTurnCursor,
   debateSessionCanPrepareAdvance,
   debateSessionForPlayer,
   endDebateSessionEarly,
+  expireDebateParticipantWindow,
+  forfeitParticipantDebateSession,
+  generateDebateEvidenceExcerpt,
   generateDebateRefractDraft,
   getDebateSession,
   listDebateSessions,
   listDebateSessionExhibitAssets,
   attachDebateExhibitSprite,
+  updateDebateExhibitEmoji,
   orderDebateAudience,
   pauseDebateSession,
   pauseDebateSessionWithPersona,
   announceDebatePauseCeremony,
   announceDebateResumeCeremony,
   prepareDebateAdvance,
+  prepareDebateParticipantFloorBreak,
+  previewDebateParticipantPredispositions,
+  raiseDebateParticipantFloorBreak,
+  raiseDebateParticipantFloorBreakWithRuntime,
   raiseDebateParticipantObjection,
+  resolveDebateParticipantFloorBreak,
   resolveDebateParticipantObjection,
+  retryDebateParticipantChoices,
+  recoverParticipantDebateFromFinalRecess,
+  restartParticipantDebateAsDraft,
   resumeDebateSession,
   resumeDebateSessionWithPersona,
   sealDebateSessionPresentation,
@@ -239,6 +261,7 @@ import {
 import {
   buildSignalLiveBakeArtifactFromEpisode,
 } from "./live-bake.ts";
+import { generatePrismInputRefractDraft } from "./prism-input-refract.ts";
 import { liveBakeJobs } from "./live-bake-jobs.ts";
 import {
   TurnPreparationError,
@@ -258,12 +281,20 @@ import {
   updateBotPresenceBeat,
 } from "./presence-beats.ts";
 import {
+  appendAppletSessionNote,
+  appletSessionBelongsToUser,
+  getAppletSessionNote,
+  readAppletSessionNoteSurface,
+  saveAppletSessionNote,
+} from "./applet-session-notes.ts";
+import {
   DebateSourceInspectionError,
   inspectDebateSourceUrl,
 } from "./debate-source-inspection.ts";
 import {
   SignalOnlineTurnError,
   advanceBotcastEpisode,
+  backfillMissingCompletedBotcastPairHistory,
   botcastEpisodeCanPrepareAdvance,
   botcastEpisodePowerSnapshotForRole,
   botcastPreparedTurnCursor,
@@ -411,6 +442,7 @@ import {
 import {
   createDevSeedMemories,
   demoteMemoryToShortTerm,
+  deleteMemoriesLinkedToMessages,
   deleteMemoriesForBotScope,
   deleteOrphanedBotMemories,
   filterConflictingMemories,
@@ -478,6 +510,7 @@ import {
   listSlateProjectHandoffs,
   prepareSlateHandoff,
 } from "./slate-handoffs.ts";
+import { createSlateTranscriptStory } from "./slate-transcript-story.ts";
 import {
   advanceSlateDeliberation,
   generateSlateProjectTitle,
@@ -487,10 +520,22 @@ import {
   suggestSlateProjectTitle,
 } from "./slate-project-companion.ts";
 import {
+  authorizePrismCompanionPersistenceTarget,
   buildPrismCompanionAuthoritativeContext,
   chatWithPrismCompanion,
+  persistPrismCompanionOrchestrationTurn,
   prismCompanionEphemeralMode,
+  prismCompanionSurfacePromptContext,
+  PrismCompanionPersistenceError,
 } from "./prism-companion.ts";
+import {
+  deleteUserNote,
+  listUserNotes,
+  saveUserNote,
+  UserNoteNotFoundError,
+  UserNoteValidationError,
+  type UserNoteRecord,
+} from "./user-notes.ts";
 import {
   importLegacyLibraryGroupsOnce,
   listLibraryGroups,
@@ -672,6 +717,7 @@ import { resolveCoffeePowersForSession } from "./coffee-powers.ts";
 import { searchWebWithBrave } from "./web-search.ts";
 import {
   debateEvidenceSourcesFromWebResults,
+  enrichDebateEvidenceSourceExcerpt,
   searchScholarWithCrossref,
 } from "./debate-research.ts";
 import {
@@ -765,8 +811,14 @@ import {
   setModelReasoningEffortPreference,
 } from "./model-effort-preferences.ts";
 import {
+  listModelTurboPreferences,
+  resetModelTurboPreferences,
+  setModelTurboPreference,
+} from "./model-turbo-preferences.ts";
+import {
   allModelReasoningEffortCursorHash,
   resolveUserModelReasoningEffort,
+  resolveUserModelTurboMode,
 } from "./model-effort-runtime.ts";
 import {
   ACCOUNT_BACKUP_ARCHIVE_CONTENT_TYPE,
@@ -874,10 +926,13 @@ import {
   normalizePrismCompanionRequest,
   normalizePrismCompanionSurfaceReference,
   isPrismRefractDebateTextTarget,
+  isPrismRefractInputTextTarget,
+  debateSessionAwaitingDeferredStart,
   debateSpokenText,
   normalizePrismExecuteProposalRequestV1,
   normalizePrismUndoRequestV1,
   normalizeGraphicsQuality,
+  normalizePrismTypographyScale,
   normalizeListenerReactionVocalFoley,
   normalizeBotCrosstalkInterruptedSpeakerCue,
   coffeeInterruptionTranscriptSegments,
@@ -910,6 +965,7 @@ import {
   normalizePromptShortcutMetadata,
   normalizePromptWildcardRunMetadata,
   normalizeModelReasoningEffortPreference,
+  modelSupportsTurboMode,
   resolveModelReasoningEffortCapability,
   parseBuiltInPromptWildcardReference,
   parseStoredManualAskQuestionPayload,
@@ -937,6 +993,7 @@ import {
   type PrismMoodInterruptionInput,
   type PrismMoodMode,
   type BotOpinion,
+  type AssistantInterruptionReactionInput,
   type BotOpinionBoundaryLevel,
   type ChatMessage,
   type BotFaceBlinkBar,
@@ -967,7 +1024,9 @@ import {
   type ZenAutonomyInput,
   type ZenPersonaTransitionInput,
   type GraphicsQuality,
+  type PrismTypographyScale,
   type ImageProviderName,
+  softAssetJobIsActive,
   type PrismStartupPreference,
   type PrismJsonObject,
   type PrismCompanionCardV1,
@@ -1142,6 +1201,7 @@ import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
 let config: AppConfig = getAppConfig();
 let db: DatabaseSync = createDatabase();
 const signalArtworkJobs = new SignalArtworkJobManager();
+const softAssetJobs = new SoftAssetJobManager();
 const replayStudioCutJobs = new Map<string, Promise<void>>();
 
 async function rebuildSignalStudioLighting(
@@ -1497,6 +1557,11 @@ async function startPrismStorySession(
               ),
               providerName: attempt.provider,
               model: attempt.model,
+              turbo: resolveUserModelTurboMode(db, {
+                userId: context.userId,
+                provider: attempt.provider,
+                modelId: attempt.model,
+              }),
               bots: storyBots,
               premise,
               ...(powerTheme ? { theme: powerTheme } : {}),
@@ -2564,6 +2629,7 @@ interface UserDbRow {
   wrapped_user_key_tag: string;
   theme: "light" | "dark" | "system";
   graphics_quality: GraphicsQuality | string | null;
+  typography_scale: PrismTypographyScale | string | null;
   atmosphere_style: string | null;
   hub_atmosphere_enabled: number;
   hub_atmosphere_image_id: string | null;
@@ -2747,12 +2813,15 @@ function invalidateTurnPreparation(
 
 const SIGNAL_PREPARATION_TABLES = [
   "model_reasoning_effort_preferences",
+  "model_turbo_preferences",
   "bots",
   "botcast_shows",
   "botcast_episodes",
   "botcast_episode_segments",
   "botcast_messages",
   "botcast_events",
+  "memories",
+  "bot_relationships",
 ] as const;
 
 interface PreparedSignalTurnPayload extends PreparedDatabaseChangeset {
@@ -2761,6 +2830,7 @@ interface PreparedSignalTurnPayload extends PreparedDatabaseChangeset {
 
 const COFFEE_PREPARATION_TABLES = [
   "model_reasoning_effort_preferences",
+  "model_turbo_preferences",
   "bots",
   "coffee_groups",
   "coffee_group_seats",
@@ -3019,6 +3089,12 @@ function getUserRow(userId: string): UserDbRow {
     .get(userId) as { graphics_quality: string | null } | undefined;
   row.graphics_quality = normalizeGraphicsQuality(
     graphicsQuality?.graphics_quality,
+  );
+  const typographyScale = db
+    .prepare("SELECT typography_scale FROM users WHERE id = ?")
+    .get(userId) as { typography_scale: string | null } | undefined;
+  row.typography_scale = normalizePrismTypographyScale(
+    typographyScale?.typography_scale,
   );
   const faceRotation = db
     .prepare(
@@ -3626,6 +3702,26 @@ function decryptUserKey(userId: string): Buffer {
   return Buffer.from(userKeyBase64, "base64");
 }
 
+function userNoteForClient(note: UserNoteRecord): Omit<UserNoteRecord, "userId"> {
+  return {
+    id: note.id,
+    title: note.title,
+    body: note.body,
+    createdAt: note.createdAt,
+    updatedAt: note.updatedAt,
+  };
+}
+
+function throwUserNoteHttpError(error: unknown): never {
+  if (error instanceof UserNoteNotFoundError) {
+    throw new HttpError(404, error.message);
+  }
+  if (error instanceof UserNoteValidationError) {
+    throw new HttpError(400, error.message);
+  }
+  throw error;
+}
+
 function getOpenAiApiKeyForUser(
   userId: string,
   userKey: Buffer,
@@ -3674,6 +3770,7 @@ async function slateAiForUser(
   userId: string,
   projectId?: string,
   deliberationSpeaker?: SlateDeliberationSpeaker,
+  routingInputText = "",
 ) {
   const user = getUserRow(userId);
   const projectSettings = projectId
@@ -3765,6 +3862,7 @@ async function slateAiForUser(
         projectSettings?.title ?? "",
         projectSettings?.direction ?? "",
         projectSettings?.manuscript ?? "",
+        routingInputText,
       ].join("\n").slice(-120_000),
       outputTokens: 5_000,
       highStakes: true,
@@ -3780,6 +3878,7 @@ async function slateAiForUser(
     providerName: runtime.provider,
     model: runtime.model,
     reasoningEffort: runtime.reasoningEffort,
+    turbo: runtime.turbo,
   };
 }
 
@@ -5497,8 +5596,10 @@ function readProvider(value: unknown): ProviderName | undefined {
 function frozenDebateModelOverride(session: {
   model: string;
   modelSelectionKind?: "auto" | "fixed";
-}): string | null {
-  return session.modelSelectionKind === "auto" ? null : session.model;
+}): string {
+  // Auto chooses once when the Debate is created. Every later generation,
+  // including Spectator bake, keeps that concrete primary model.
+  return session.model;
 }
 
 function debateAutoRoutingContext(
@@ -5650,6 +5751,7 @@ async function debateAiRuntimeForUser(
     ),
     providerName: "local",
     model: localModel,
+    turbo: false,
     deepSimulatedEffort,
     reasoningEffort:
       resolvedPrimary.provider === "local"
@@ -5680,6 +5782,11 @@ async function debateAiRuntimeForUser(
       ),
       providerName,
       model,
+      turbo: resolveUserModelTurboMode(db, {
+        userId,
+        provider: providerName,
+        modelId: model,
+      }),
       deepSimulatedEffort,
       reasoningEffort:
         reasoningEffort ??
@@ -6061,6 +6168,11 @@ async function contextualTextRuntimeForUser(args: {
     provider: resolved.provider,
     model: resolved.model,
     reasoningEffort,
+    turbo: resolveUserModelTurboMode(db, {
+      userId: args.userId,
+      provider: resolved.provider,
+      modelId: resolved.model,
+    }),
     autoRoute: resolved.autoRoute,
     candidateAllowlist,
     openAiApiKey,
@@ -6171,6 +6283,179 @@ function readPrismInterruption(
       ? { interruptedContent: record.interruptedContent.trim() }
       : {}),
   };
+}
+
+function readAssistantInterruptionReaction(
+  value: unknown,
+): AssistantInterruptionReactionInput | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    return undefined;
+  }
+  const record = value as Record<string, unknown>;
+  if (record.source !== "shh") return undefined;
+  const assistantMessageId =
+    typeof record.assistantMessageId === "string"
+      ? record.assistantMessageId.trim().slice(0, 120)
+      : "";
+  const interruptedContent =
+    typeof record.interruptedContent === "string"
+      ? record.interruptedContent.trim().slice(0, 12_000)
+      : "";
+  const clientTurnId =
+    typeof record.clientTurnId === "string"
+      ? record.clientTurnId.trim().slice(0, 120)
+      : "";
+  if (!assistantMessageId || !interruptedContent || !clientTurnId) {
+    return undefined;
+  }
+  const activeBotId =
+    typeof record.activeBotId === "string" && record.activeBotId.trim()
+      ? record.activeBotId.trim()
+      : null;
+  return {
+    source: "shh",
+    activeBotId,
+    assistantMessageId,
+    interruptedContent,
+    clientTurnId,
+  };
+}
+
+type StoredAssistantInterruptionState = {
+  v: 1;
+  source: "shh";
+  interruptedContent: string;
+  status:
+    | "cutoff"
+    | "reaction_pending"
+    | "reaction_failed"
+    | "reaction_complete";
+  updatedAt: string;
+  clientTurnId?: string;
+  claimId?: string;
+  reactionMessageId?: string;
+};
+
+function readToolPayloadRecord(value: string | null | undefined): Record<string, unknown> | null {
+  if (!value) return null;
+  try {
+    const parsed = JSON.parse(value) as unknown;
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed)
+      ? (parsed as Record<string, unknown>)
+      : null;
+  } catch {
+    return null;
+  }
+}
+
+function readStoredAssistantInterruptionState(
+  toolPayload: string | null | undefined,
+): StoredAssistantInterruptionState | null {
+  const root = readToolPayloadRecord(toolPayload);
+  const value = root?.assistantInterruption;
+  if (!value || typeof value !== "object" || Array.isArray(value)) return null;
+  const record = value as Record<string, unknown>;
+  if (record.v !== 1 || record.source !== "shh") return null;
+  const interruptedContent =
+    typeof record.interruptedContent === "string"
+      ? record.interruptedContent.trim()
+      : "";
+  const status =
+    record.status === "cutoff" ||
+    record.status === "reaction_pending" ||
+    record.status === "reaction_failed" ||
+    record.status === "reaction_complete"
+      ? record.status
+      : null;
+  const updatedAt =
+    typeof record.updatedAt === "string" ? record.updatedAt : "";
+  if (!interruptedContent || !status || !updatedAt) return null;
+  return {
+    v: 1,
+    source: "shh",
+    interruptedContent,
+    status,
+    updatedAt,
+    ...(typeof record.clientTurnId === "string" && record.clientTurnId
+      ? { clientTurnId: record.clientTurnId }
+      : {}),
+    ...(typeof record.claimId === "string" && record.claimId
+      ? { claimId: record.claimId }
+      : {}),
+    ...(typeof record.reactionMessageId === "string" &&
+    record.reactionMessageId
+      ? { reactionMessageId: record.reactionMessageId }
+      : {}),
+  };
+}
+
+function serializeStoredAssistantInterruptionState(
+  state: StoredAssistantInterruptionState,
+): string {
+  return JSON.stringify({ v: 1, assistantInterruption: state });
+}
+
+function readStoredAssistantInterruptionReaction(
+  toolPayload: string | null | undefined,
+): AssistantInterruptionReactionInput | null {
+  const root = readToolPayloadRecord(toolPayload);
+  return readAssistantInterruptionReaction(
+    root?.assistantInterruptionReaction,
+  ) ?? null;
+}
+
+function findPersistedAssistantInterruptionReaction(args: {
+  db: DatabaseSync;
+  userId: string;
+  conversationId: string;
+  sourceMessageId: string;
+}): {
+  id: string;
+  receipt: AssistantInterruptionReactionInput;
+} | null {
+  const rows = args.db
+    .prepare(
+      `SELECT id, tool_payload
+         FROM messages
+        WHERE user_id = ?
+          AND conversation_id = ?
+          AND role = 'assistant'
+          AND tool_payload IS NOT NULL
+        ORDER BY created_at DESC, rowid DESC`,
+    )
+    .all(args.userId, args.conversationId) as Array<{
+    id: string;
+    tool_payload: string | null;
+  }>;
+  for (const row of rows) {
+    const receipt = readStoredAssistantInterruptionReaction(row.tool_payload);
+    if (receipt?.assistantMessageId === args.sourceMessageId) {
+      return { id: row.id, receipt };
+    }
+  }
+  return null;
+}
+
+function updateAssistantInterruptionClaim(args: {
+  db: DatabaseSync;
+  userId: string;
+  messageId: string;
+  expectedToolPayload: string;
+  state: StoredAssistantInterruptionState;
+}): boolean {
+  const result = args.db
+    .prepare(
+      `UPDATE messages
+          SET tool_payload = ?
+        WHERE id = ? AND user_id = ? AND tool_payload = ?`,
+    )
+    .run(
+      serializeStoredAssistantInterruptionState(args.state),
+      args.messageId,
+      args.userId,
+      args.expectedToolPayload,
+    );
+  return result.changes === 1;
 }
 
 function readZenPersonaTransition(
@@ -9300,6 +9585,38 @@ function buildRoutes(): RouteDefinition[] {
       );
       json(ctx.res, 200, { ok: true, ...suggestion });
     }),
+    route("POST", "/api/slate/transcript-stories", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const routingInputText =
+        typeof body.transcript === "string" ? body.transcript : "";
+      const ai = await slateAiForUser(
+        userId,
+        undefined,
+        undefined,
+        routingInputText,
+      );
+      const project = await runWithUsageSession(
+        { db, userId, privacyScope: "normal", mode: "slate", surface: "slate" },
+        () =>
+          createSlateTranscriptStory(
+            db,
+            userId,
+            body as unknown as Parameters<typeof createSlateTranscriptStory>[2],
+            ai,
+          ),
+      );
+      json(ctx.res, 201, {
+        ok: true,
+        project: protectSlateMutation(
+          project,
+          userId,
+          project.id,
+          "Transcript story created",
+          true,
+        ),
+      });
+    }),
     route("POST", "/api/slate/projects", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -12264,6 +12581,12 @@ function buildRoutes(): RouteDefinition[] {
       if (!botBelongsToUser(db, userId, botId)) {
         throw new HttpError(404, "Bot not found.");
       }
+      backfillMissingCompletedBotcastPairHistory({
+        db,
+        userId,
+        userKey,
+        participantBotId: botId,
+      });
       deleteOrphanedBotMemories(db, userId);
       await inferBotMemoriesIfNeeded(userId, botId, userKey);
       const panel = loadBotMemoryPanelPayload({
@@ -13014,6 +13337,139 @@ function buildRoutes(): RouteDefinition[] {
         replacements: resolution.replacements,
       });
     }),
+    route("POST", "/api/composer/finalize", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const prompt = readString(body.prompt, "prompt").slice(0, 20_000);
+      if (!prompt.trim()) {
+        throw new HttpError(400, "Composer prompt is empty.");
+      }
+      const mode =
+        body.mode === "zen" || body.mode === "chat" ? body.mode : "sandbox";
+      const incognito =
+        (mode === "zen" || mode === "chat") && body.incognito === true;
+      const user = getUserRow(userId);
+      const abort = new AbortController();
+      const onClientClose = () => {
+        if (!ctx.res.writableEnded) abort.abort();
+      };
+      ctx.req.once("aborted", onClientClose);
+      ctx.res.once("close", onClientClose);
+      try {
+        const normalizedExisting = normalizePromptWildcardRunMetadata({
+          v: 1,
+          template: prompt,
+          resolvedPrompt: prompt,
+          wildcardReplacements: body.existingReplacements,
+        });
+        let finalizedPrompt = prompt;
+        let replacements = normalizedExisting?.wildcardReplacements ?? [];
+        const receiverBotId =
+          typeof body.receiverBotId === "string"
+            ? body.receiverBotId.trim() || null
+            : null;
+        const botResolution = resolvePromptBotWildcards({
+          prompt: finalizedPrompt,
+          candidates: promptBotWildcardCandidates(db, userId),
+          receiverBotId,
+          existingReplacements: replacements,
+        });
+        finalizedPrompt = botResolution.prompt;
+        replacements = botResolution.replacements;
+
+        await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: incognito ? "private" : "normal",
+            mode,
+            surface: mode,
+            botId: receiverBotId,
+          },
+          async () => {
+            if (promptWildcardNames(finalizedPrompt).length > 0) {
+              const runtime = await contextualTextRuntimeForUser({
+                userId,
+                user,
+                requestedProvider: body.preferredProvider,
+                requestedResponseMode: body.responseMode,
+                modelOverride: body.modelOverride,
+                routingContext: {
+                  surface: mode,
+                  inputText: finalizedPrompt,
+                  outputTokens: 500,
+                  structuredOutput: true,
+                },
+              });
+              const provider = selectProvider(
+                runtime.provider,
+                runtime.openAiApiKey,
+                user.secondary_ollama_host,
+                runtime.anthropicApiKey,
+              );
+              const resolution = await resolvePromptWildcardsWithModel({
+                prompt: finalizedPrompt,
+                provider,
+                generationOverrides: {
+                  model: runtime.model,
+                  reasoningEffort: runtime.reasoningEffort,
+                  turbo: runtime.turbo,
+                  temperature: 0.72,
+                  maxTokens: 500,
+                  usagePurpose: "prompt_wildcard",
+                },
+                existingReplacements: replacements,
+                signal: abort.signal,
+              });
+              finalizedPrompt = resolution.prompt;
+              replacements = resolution.replacements;
+            }
+
+            if (
+              body.writingAssistEnabled !== false &&
+              replacements.length > 0 &&
+              finalizedPrompt.trim().length > 0
+            ) {
+              const cleanupProvider = getAuxiliaryProvider(
+                user.prism_default_llm_model,
+                dualOllamaWorkloadOptions(user),
+              );
+              try {
+                const cleanup = await cleanupResolvedPromptWithModel({
+                  prompt: finalizedPrompt,
+                  replacements,
+                  provider: cleanupProvider,
+                  signal: abort.signal,
+                });
+                finalizedPrompt = cleanup.prompt;
+                replacements = cleanup.replacements;
+              } catch (error) {
+                if (abort.signal.aborted) throw error;
+                console.warn(
+                  "[composer-finalize] leaving resolved prompt uncorrected:",
+                  error instanceof Error ? error.message : error,
+                );
+              }
+            }
+          },
+        );
+
+        if (promptWildcardNames(finalizedPrompt).length > 0) {
+          throw new HttpError(
+            502,
+            "Composer wildcards could not be fully resolved.",
+          );
+        }
+        json(ctx.res, 200, {
+          ok: true,
+          prompt: finalizedPrompt,
+          replacements,
+        });
+      } finally {
+        ctx.req.off("aborted", onClientClose);
+        ctx.res.off("close", onClientClose);
+      }
+    }),
     route("POST", "/api/prompt-center/preview/resolve", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -13044,6 +13500,7 @@ function buildRoutes(): RouteDefinition[] {
       const generationOverrides: GenerateOptions = {
         model: runtime.model,
         reasoningEffort: runtime.reasoningEffort,
+        turbo: runtime.turbo,
         temperature: 0.72,
         maxTokens: 500,
         usagePurpose: "prompt_wildcard",
@@ -13298,6 +13755,7 @@ function buildRoutes(): RouteDefinition[] {
             ...generationOverrides,
             model: runtime.model,
             reasoningEffort: runtime.reasoningEffort,
+            turbo: runtime.turbo,
             temperature: Math.max(
               0.72,
               generationOverrides.temperature ?? 0.78,
@@ -13421,12 +13879,19 @@ function buildRoutes(): RouteDefinition[] {
         mode === "zen"
           ? normalizeZenLiveActionInterruptInput(body.zenLiveActionInterrupt)
           : undefined;
+      const requestedAssistantInterruptionReaction =
+        mode === "zen" || mode === "chat"
+          ? readAssistantInterruptionReaction(
+              body.assistantInterruptionReaction,
+            )
+          : undefined;
       const message =
         starterPrompt ||
         requestedPersonaTransition ||
         requestedZenAutonomy ||
         requestedAskQuestionPatience ||
-        requestedZenLiveActionInterrupt
+        requestedZenLiveActionInterrupt ||
+        requestedAssistantInterruptionReaction
           ? ""
           : readString(body.message, "message");
       const promptShortcut = normalizePromptShortcutMetadata(
@@ -13437,6 +13902,13 @@ function buildRoutes(): RouteDefinition[] {
       );
       const commandCenterPrompt =
         body.commandCenterPrompt === true || Boolean(promptShortcut);
+      const composerFinalized = body.composerFinalized === true;
+      if (composerFinalized && !commandCenterPrompt && !promptWildcards) {
+        throw new HttpError(
+          400,
+          "Finalized composer input requires prompt metadata.",
+        );
+      }
       const resolvedCommandCenterPrompt =
         !starterPrompt && commandCenterPrompt
           ? readOptionalString(body.resolvedCommandCenterPrompt)
@@ -13503,6 +13975,29 @@ function buildRoutes(): RouteDefinition[] {
       const providerOverride = readProvider(body.preferredProvider);
       const requestedProvider = providerOverride ?? undefined;
       const user = getUserRow(userId);
+      let prismCompanionSurface:
+        | PrismCompanionSurfaceReference
+        | undefined;
+      if (body.prismCompanionSurface !== undefined) {
+        if (body.prismCompanionRequest !== true) {
+          throw new HttpError(
+            400,
+            "Prism companion surface context requires a companion request.",
+          );
+        }
+        try {
+          prismCompanionSurface = normalizePrismCompanionSurfaceReference(
+            body.prismCompanionSurface,
+          );
+        } catch (error) {
+          throw new HttpError(
+            400,
+            error instanceof Error
+              ? error.message
+              : "A valid Prism companion surface is required.",
+          );
+        }
+      }
       const progressiveZenVoiceRequested =
         mode === "zen" &&
         !incognito &&
@@ -13539,6 +14034,23 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       let effectiveProvider = requestedProvider ?? user.preferred_provider;
       let effectiveBotId = requestedBotId;
+      let assistantInterruptionModelOverride: string | undefined;
+      let assistantInterruptionClaimPlan:
+        | {
+            messageId: string;
+            expectedToolPayload: string;
+            state: StoredAssistantInterruptionState;
+          }
+        | undefined;
+      let assistantInterruptionClaim:
+        | {
+            messageId: string;
+            claimId: string;
+            clientTurnId: string;
+            interruptedContent: string;
+            pendingToolPayload: string;
+          }
+        | undefined;
       enterUsageSession({
         db,
         userId,
@@ -13573,11 +14085,208 @@ function buildRoutes(): RouteDefinition[] {
         mode === "zen" ? requestedAskQuestionPatience : undefined;
       const zenLiveActionInterrupt =
         mode === "zen" ? requestedZenLiveActionInterrupt : undefined;
+      const assistantInterruptionReaction =
+        mode === "zen" || mode === "chat"
+          ? requestedAssistantInterruptionReaction
+          : undefined;
       if (zenAskQuestionPatience && requestedBotId === undefined) {
         effectiveBotId = zenAskQuestionPatience.activeBotId;
       }
       if (zenLiveActionInterrupt && requestedBotId === undefined) {
         effectiveBotId = zenLiveActionInterrupt.activeBotId;
+      }
+      if (assistantInterruptionReaction && requestedBotId === undefined) {
+        effectiveBotId = assistantInterruptionReaction.activeBotId;
+      }
+      if (assistantInterruptionReaction) {
+        if (!conversationId) {
+          throw new HttpError(
+            400,
+            "A Shh reaction requires an active conversation.",
+          );
+        }
+        if (!/—\s*$/u.test(assistantInterruptionReaction.interruptedContent)) {
+          throw new HttpError(
+            400,
+            "A Shh reaction requires a canonical interrupted fragment.",
+          );
+        }
+        const privateReactionMessage = incognito
+          ? (ephemeralMessages ?? []).find(
+              (candidate) =>
+                candidate.role === "assistant" &&
+                candidate.assistantInterruptionReaction
+                  ?.assistantMessageId ===
+                  assistantInterruptionReaction.assistantMessageId,
+            )
+          : undefined;
+        if (privateReactionMessage) {
+          const receipt = privateReactionMessage.assistantInterruptionReaction!;
+          if (
+            receipt.interruptedContent !==
+              assistantInterruptionReaction.interruptedContent ||
+            (receipt.activeBotId ?? null) !==
+              (assistantInterruptionReaction.activeBotId ?? null)
+          ) {
+            throw new HttpError(
+              409,
+              "The Shh reaction key belongs to a different interruption.",
+            );
+          }
+          const privateMessages = ephemeralMessages ?? [];
+          const createdAt =
+            privateMessages[0]?.createdAt ?? new Date().toISOString();
+          const updatedAt =
+            privateMessages.at(-1)?.createdAt ?? createdAt;
+          json(ctx.res, 200, {
+            ok: true,
+            assistantInterruptionReplay: true,
+            conversation: {
+              id: conversationId,
+              userId,
+              title: "Private chat",
+              mode,
+              botId: assistantInterruptionReaction.activeBotId,
+              incognito: true,
+              lastBotId: assistantInterruptionReaction.activeBotId,
+              lastBotColor: null,
+              hasAssistantReply: true,
+              createdAt,
+              updatedAt,
+              messages: privateMessages,
+            },
+          });
+          return;
+        }
+        const persistedReaction = !incognito
+          ? findPersistedAssistantInterruptionReaction({
+              db,
+              userId,
+              conversationId,
+              sourceMessageId:
+                assistantInterruptionReaction.assistantMessageId,
+            })
+          : null;
+        if (persistedReaction) {
+          if (
+            persistedReaction.receipt.interruptedContent !==
+              assistantInterruptionReaction.interruptedContent ||
+            (persistedReaction.receipt.activeBotId ?? null) !==
+              (assistantInterruptionReaction.activeBotId ?? null)
+          ) {
+            throw new HttpError(
+              409,
+              "The Shh reaction key belongs to a different interruption.",
+            );
+          }
+          const replayMood =
+            loadPrismMoodState(db, userId, conversationId, mode) ??
+            createDefaultPrismMoodState(mode, new Date().toISOString());
+          const replayConversation = loadPersistedConversationForChatResponse({
+            db,
+            userId,
+            activeConversationId: conversationId,
+            prismMood: replayMood,
+          });
+          json(ctx.res, 200, {
+            ok: true,
+            assistantInterruptionReplay: true,
+            conversation: replayConversation,
+            prismMood: replayMood,
+          });
+          return;
+        }
+        const latestMessage = incognito
+          ? (ephemeralMessages ?? []).at(-1)
+          : (db
+              .prepare(
+                `SELECT id, role, content, provider, model, bot_id AS botId,
+                        tool_payload AS toolPayload
+                   FROM messages
+                  WHERE conversation_id = ? AND user_id = ?
+                  ORDER BY created_at DESC, rowid DESC
+                  LIMIT 1`,
+              )
+              .get(conversationId, userId) as
+              | {
+                  id: string;
+                  role: string;
+                  content: string;
+                  provider: string | null;
+                  model: string | null;
+                  botId: string | null;
+                  toolPayload: string | null;
+                }
+              | undefined);
+        if (
+          !latestMessage ||
+          latestMessage.role !== "assistant" ||
+          latestMessage.id !==
+            assistantInterruptionReaction.assistantMessageId ||
+          latestMessage.content.trim() !==
+            assistantInterruptionReaction.interruptedContent
+        ) {
+          throw new HttpError(
+            409,
+            "The interrupted reply is still settling or is no longer current.",
+          );
+        }
+        const canonicalBotId = latestMessage.botId ?? null;
+        if (
+          canonicalBotId !==
+          (assistantInterruptionReaction.activeBotId ?? null)
+        ) {
+          throw new HttpError(
+            409,
+            "The interrupted reply no longer belongs to the active bot.",
+          );
+        }
+        effectiveBotId = canonicalBotId;
+        if (
+          latestMessage.provider === "local" ||
+          latestMessage.provider === "openai" ||
+          latestMessage.provider === "anthropic"
+        ) {
+          effectiveProvider = latestMessage.provider;
+        }
+        if (typeof latestMessage.model === "string" && latestMessage.model) {
+          assistantInterruptionModelOverride = latestMessage.model;
+        }
+        if (!incognito) {
+          const toolPayload = (
+            latestMessage as { toolPayload: string | null }
+          ).toolPayload ?? null;
+          const interruptionState = readStoredAssistantInterruptionState(
+            toolPayload,
+          );
+          if (
+            !interruptionState ||
+            interruptionState.interruptedContent !==
+              assistantInterruptionReaction.interruptedContent
+          ) {
+            throw new HttpError(
+              409,
+              "The audible cutoff has not been persisted yet.",
+            );
+          }
+          if (interruptionState.status === "reaction_pending") {
+            throw new HttpError(
+              409,
+              "The Shh reaction is still generating; retry this same turn.",
+            );
+          }
+          if (interruptionState.status === "reaction_complete") {
+            throw new HttpError(
+              409,
+              "The completed Shh reaction is still settling; retry this same turn.",
+            );
+          }
+          assistantInterruptionClaimPlan = {
+            messageId: latestMessage.id,
+            expectedToolPayload: toolPayload!,
+            state: interruptionState,
+          };
+        }
       }
       if (zenAutonomy) {
         if (!normalizeZenAutonomyEnabled(user.zen_autonomy_enabled)) {
@@ -13633,9 +14342,25 @@ function buildRoutes(): RouteDefinition[] {
             : personaTransition.toBotId
           : effectiveBotId;
       const prismHomeTurn = mode === "zen" && runtimeBotId == null;
+      if (prismCompanionSurface && !prismHomeTurn) {
+        throw new HttpError(
+          400,
+          "Prism companion surface context is available only to Default Prism in Zen chat.",
+        );
+      }
       if (prismHomeTurn) {
         effectiveProvider = "local";
       }
+      const prismCompanionSurfaceContext = prismCompanionSurface
+        ? prismCompanionSurfacePromptContext(
+            buildPrismCompanionAuthoritativeContext(
+              db,
+              userId,
+              user.display_name,
+              prismCompanionSurface,
+            ),
+          )
+        : undefined;
       patchUsageSession({ botId: runtimeBotId ?? null });
 
       let botSystemPrompt: string | undefined;
@@ -13773,7 +14498,8 @@ function buildRoutes(): RouteDefinition[] {
             lane: responseLane,
             explicitModelOverride: botForcesLocalProvider
               ? null
-              : explicitModelOverride,
+              : (assistantInterruptionModelOverride ??
+                explicitModelOverride),
             hiddenModelIds: parseHiddenBotModelIds(user.hidden_bot_model_ids),
             catalog: await buildModelCatalog(
               responseLane === "online" ? openAiApiKey : undefined,
@@ -13826,7 +14552,14 @@ function buildRoutes(): RouteDefinition[] {
         promptWildcards?.wildcardReplacements ??
         [];
       const initialWildcardNames = promptWildcardNames(messageForChat);
+      if (composerFinalized && initialWildcardNames.length > 0) {
+        throw new HttpError(
+          400,
+          "Finalized composer input still contains unresolved wildcards.",
+        );
+      }
       if (
+        !composerFinalized &&
         !starterPrompt &&
         (commandCenterPrompt || promptWildcards) &&
         initialWildcardNames.includes("BOT")
@@ -13844,6 +14577,7 @@ function buildRoutes(): RouteDefinition[] {
       const hasTrueWildcardSlots =
         promptWildcardNames(messageForChat).length > 0;
       if (
+        !composerFinalized &&
         !starterPrompt &&
         (commandCenterPrompt || promptWildcards) &&
         hasTrueWildcardSlots
@@ -13867,6 +14601,7 @@ function buildRoutes(): RouteDefinition[] {
         resolvedWildcardReplacements = wildcardResolution.replacements;
       }
       if (
+        !composerFinalized &&
         !starterPrompt &&
         user.composer_writing_assist !== 0 &&
         resolvedWildcardReplacements.length > 0 &&
@@ -13920,6 +14655,43 @@ function buildRoutes(): RouteDefinition[] {
       );
       let result: Awaited<ReturnType<typeof processChatMessage>>;
       try {
+      if (assistantInterruptionReaction && assistantInterruptionClaimPlan) {
+        const claimId = randomId(12);
+        const pendingState: StoredAssistantInterruptionState = {
+          v: 1,
+          source: "shh",
+          interruptedContent:
+            assistantInterruptionClaimPlan.state.interruptedContent,
+          status: "reaction_pending",
+          updatedAt: new Date().toISOString(),
+          clientTurnId: assistantInterruptionReaction.clientTurnId,
+          claimId,
+        };
+        if (
+          !updateAssistantInterruptionClaim({
+            db,
+            userId,
+            messageId: assistantInterruptionClaimPlan.messageId,
+            expectedToolPayload:
+              assistantInterruptionClaimPlan.expectedToolPayload,
+            state: pendingState,
+          })
+        ) {
+          throw new HttpError(
+            409,
+            "The Shh reaction is already being handled; retry this same turn.",
+          );
+        }
+        assistantInterruptionClaim = {
+          messageId: assistantInterruptionClaimPlan.messageId,
+          claimId,
+          clientTurnId: assistantInterruptionReaction.clientTurnId,
+          interruptedContent:
+            assistantInterruptionReaction.interruptedContent,
+          pendingToolPayload:
+            serializeStoredAssistantInterruptionState(pendingState),
+        };
+      }
         result = await processChatMessage(
           db,
           userId,
@@ -13955,6 +14727,12 @@ function buildRoutes(): RouteDefinition[] {
                     provider,
                     modelId: model,
                   }),
+            resolveTurboMode: (provider, model) =>
+              resolveUserModelTurboMode(db, {
+                userId,
+                provider,
+                modelId: model,
+              }),
             autoRouteDecision: resolvedAuto.autoRoute,
             prismDefaultLlmModel: user.prism_default_llm_model,
             // Image-intent orchestration is Prism-owned implementation work;
@@ -14006,7 +14784,13 @@ function buildRoutes(): RouteDefinition[] {
             ...(zenAskQuestionPatience ? { zenAskQuestionPatience } : {}),
             ...(zenLiveActionContext ? { zenLiveActionContext } : {}),
             ...(zenLiveActionInterrupt ? { zenLiveActionInterrupt } : {}),
+            ...(assistantInterruptionReaction
+              ? { assistantInterruptionReaction }
+              : {}),
             incognito,
+            ...(prismCompanionSurfaceContext
+              ? { prismCompanionSurfaceContext }
+              : {}),
             ephemeralMessages,
             botSystemPrompt,
             botPowers: runtimeBotPowers,
@@ -14062,6 +14846,46 @@ function buildRoutes(): RouteDefinition[] {
           conversationId,
         );
       } catch (error) {
+        if (assistantInterruptionClaim && conversationId) {
+          const persistedReaction = findPersistedAssistantInterruptionReaction({
+            db,
+            userId,
+            conversationId,
+            sourceMessageId: assistantInterruptionClaim.messageId,
+          });
+          updateAssistantInterruptionClaim({
+            db,
+            userId,
+            messageId: assistantInterruptionClaim.messageId,
+            expectedToolPayload:
+              assistantInterruptionClaim.pendingToolPayload,
+            state: {
+              v: 1,
+              source: "shh",
+              interruptedContent:
+                assistantInterruptionClaim.interruptedContent,
+              status: persistedReaction
+                ? "reaction_complete"
+                : "reaction_failed",
+              updatedAt: new Date().toISOString(),
+              clientTurnId: assistantInterruptionClaim.clientTurnId,
+              ...(persistedReaction
+                ? { reactionMessageId: persistedReaction.id }
+                : {}),
+            },
+          });
+        }
+        if (
+          assistantInterruptionClaim &&
+          !chatAbort.signal.aborted &&
+          !ctx.res.writableEnded
+        ) {
+          json(ctx.res, 503, {
+            ok: false,
+            error: "The Shh reaction is temporarily unavailable; retry this same turn.",
+          });
+          return;
+        }
         if (progressiveZenStreamStarted) {
           writeProgressiveZenEvent({
             type: "error",
@@ -14094,6 +14918,48 @@ function buildRoutes(): RouteDefinition[] {
         ctx.req.off("close", onChatClientClose);
         ctx.req.off("aborted", onChatClientClose);
         ctx.res.off("close", onChatClientClose);
+      }
+      if (assistantInterruptionClaim && conversationId) {
+        const persistedReaction = findPersistedAssistantInterruptionReaction({
+          db,
+          userId,
+          conversationId,
+          sourceMessageId: assistantInterruptionClaim.messageId,
+        });
+        if (!persistedReaction) {
+          updateAssistantInterruptionClaim({
+            db,
+            userId,
+            messageId: assistantInterruptionClaim.messageId,
+            expectedToolPayload:
+              assistantInterruptionClaim.pendingToolPayload,
+            state: {
+              v: 1,
+              source: "shh",
+              interruptedContent:
+                assistantInterruptionClaim.interruptedContent,
+              status: "reaction_failed",
+              updatedAt: new Date().toISOString(),
+              clientTurnId: assistantInterruptionClaim.clientTurnId,
+            },
+          });
+          throw new Error("The Shh reaction was not persisted.");
+        }
+        updateAssistantInterruptionClaim({
+          db,
+          userId,
+          messageId: assistantInterruptionClaim.messageId,
+          expectedToolPayload: assistantInterruptionClaim.pendingToolPayload,
+          state: {
+            v: 1,
+            source: "shh",
+            interruptedContent: assistantInterruptionClaim.interruptedContent,
+            status: "reaction_complete",
+            updatedAt: new Date().toISOString(),
+            clientTurnId: assistantInterruptionClaim.clientTurnId,
+            reactionMessageId: persistedReaction.id,
+          },
+        });
       }
       const {
         conversation,
@@ -14199,13 +15065,43 @@ function buildRoutes(): RouteDefinition[] {
         user.prism_default_llm_model,
       );
       const effectiveResponseMode = "local" as const;
-      const debateTarget = isPrismRefractDebateTextTarget(request.target)
+      const inputTarget = isPrismRefractInputTextTarget(request.target)
         ? request.target
         : null;
-      const signalTarget = debateTarget
+      const debateTarget = !inputTarget && isPrismRefractDebateTextTarget(request.target)
+        ? request.target
+        : null;
+      const signalTarget = inputTarget || debateTarget
         ? null
         : (request.target as PrismRefractSignalTextTarget);
-      const result = debateTarget
+      const result = inputTarget
+        ? await runWithUsageSession(
+            {
+              db,
+              userId,
+              privacyScope: "normal",
+              mode: inputTarget.surface.surfaceId,
+              surface: "prism-refract",
+            },
+            () =>
+              generatePrismInputRefractDraft({
+                target: inputTarget,
+                currentValue: request.currentValue,
+                rejectedValues: request.rejectedValues,
+                authoritativeContext: buildPrismCompanionAuthoritativeContext(
+                  db,
+                  userId,
+                  user.display_name,
+                  inputTarget.surface,
+                ),
+                provider: auxiliaryProviderFactoryOverride(
+                  user.prism_default_llm_model ?? undefined,
+                  dualOllamaWorkloadOptions(user),
+                ),
+                model: modelOverride,
+              }),
+          )
+        : debateTarget
         ? await runWithUsageSession(
             {
               db,
@@ -14232,7 +15128,7 @@ function buildRoutes(): RouteDefinition[] {
         : await generateBotcastRefractDraft(
             db,
             userId,
-            signalTarget!,
+              signalTarget!,
             request.currentValue,
             request.rejectedValues,
             modelOverride,
@@ -14366,6 +15262,35 @@ function buildRoutes(): RouteDefinition[] {
         model: invent.model,
       });
     }),
+    route("POST", "/api/debates/participant-predisposition-preview", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        body.preferredProvider,
+        body.modelOverride,
+        body.responseMode,
+      );
+      const preview = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          previewDebateParticipantPredispositions(
+            db,
+            userId,
+            body as unknown as Parameters<
+              typeof previewDebateParticipantPredispositions
+            >[2],
+            runtime,
+          ),
+      );
+      json(ctx.res, 200, { ok: true, ...preview });
+    }),
     route("POST", "/api/debates/title", async (ctx) => {
       const userId = requireAuth(ctx);
       const body = ctx.body as Record<string, unknown>;
@@ -14407,6 +15332,19 @@ function buildRoutes(): RouteDefinition[] {
       const query =
         typeof body.query === "string" ? body.query.trim().slice(0, 500) : "";
       if (!query) throw new HttpError(400, "Enter an evidence search query.");
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        body.preferredProvider,
+        body.modelOverride,
+        body.responseMode,
+      );
+      const motion =
+        typeof body.motion === "string"
+          ? body.motion.trim().slice(0, 1_000)
+          : body.motion && typeof body.motion === "object" &&
+              typeof (body.motion as Record<string, unknown>).motion === "string"
+            ? String((body.motion as Record<string, unknown>).motion).trim().slice(0, 1_000)
+            : query;
       const sources = await runWithUsageSession(
         {
           db,
@@ -14416,17 +15354,77 @@ function buildRoutes(): RouteDefinition[] {
           surface: "debate",
         },
         async () => {
-          if (sourceType === "scholar") {
-            return searchScholarWithCrossref({ query });
-          }
-          const userKey = decryptUserKey(userId);
-          const payload = await searchWebWithBrave({
-            query,
-            apiKey:
-              getBraveSearchApiKeyForUser(userId, userKey) ??
-              config.braveSearchApiKey,
-          });
-          return debateEvidenceSourcesFromWebResults(payload.results);
+          const found = sourceType === "scholar"
+            ? await searchScholarWithCrossref({ query })
+            : await (async () => {
+                const userKey = decryptUserKey(userId);
+                const payload = await searchWebWithBrave({
+                  query,
+                  apiKey:
+                    getBraveSearchApiKeyForUser(userId, userKey) ??
+                    config.braveSearchApiKey,
+                });
+                return debateEvidenceSourcesFromWebResults(payload.results);
+              })();
+          return Promise.all(
+            found.map(async (source) => {
+              try {
+                const inspected = await inspectDebateSourceUrl(source.url, {
+                  allowNetwork: true,
+                  motion,
+                  generateExcerpt: (request) =>
+                    generateDebateEvidenceExcerpt(runtime, request),
+                });
+                const inspectedSource = {
+                  ...source,
+                  title: inspected.source.title || source.title,
+                  snippet: inspected.source.snippet || source.snippet,
+                  publishedAt:
+                    inspected.source.publishedAt ?? source.publishedAt,
+                  excerptSource: inspected.source.excerptSource,
+                  excerptSelection: inspected.source.excerptSelection,
+                  excerptMaterialHash: inspected.source.excerptMaterialHash,
+                  excerptModel: inspected.source.excerptModel,
+                };
+                return enrichDebateEvidenceSourceExcerpt({
+                  source: inspectedSource,
+                  motion,
+                  materials: [
+                    {
+                      id: `${source.id}:page`,
+                      kind: "page",
+                      text: inspected.source.snippet,
+                    },
+                    {
+                      id: `${source.id}:search`,
+                      kind:
+                        sourceType === "scholar" ? "crossref" : "provider",
+                      text: source.snippet,
+                    },
+                  ],
+                  generate: (request) =>
+                    generateDebateEvidenceExcerpt(runtime, request),
+                });
+              } catch {
+                if (
+                  source.excerptSource === "metadata" ||
+                  source.excerptSelection === "metadata-only"
+                ) {
+                  return source;
+                }
+                return enrichDebateEvidenceSourceExcerpt({
+                  source,
+                  motion,
+                  materials: [{
+                    id: source.id,
+                    kind: sourceType === "scholar" ? "crossref" : "provider",
+                    text: source.snippet,
+                  }],
+                  generate: (request) => generateDebateEvidenceExcerpt(runtime, request),
+                });
+              }
+            }),
+          );
         },
       );
       json(ctx.res, 200, {
@@ -14446,9 +15444,33 @@ function buildRoutes(): RouteDefinition[] {
         requestedResponseMode !== "local" &&
         !userBlocksOnlineCapabilities(user);
       try {
+        const runtime = allowNetwork
+          ? await debateAiRuntimeForUser(
+              userId,
+              body.preferredProvider,
+              body.modelOverride,
+              body.responseMode,
+            )
+          : null;
+        const motion =
+          typeof body.motion === "string"
+            ? body.motion.trim().slice(0, 1_000)
+            : body.motion && typeof body.motion === "object" &&
+                typeof (body.motion as Record<string, unknown>).motion === "string"
+              ? String((body.motion as Record<string, unknown>).motion).trim().slice(0, 1_000)
+              : "";
         const result = await inspectDebateSourceUrl(
           typeof body.url === "string" ? body.url : "",
-          { allowNetwork },
+          {
+            allowNetwork,
+            motion,
+            ...(runtime
+              ? {
+                  generateExcerpt: (request) =>
+                    generateDebateEvidenceExcerpt(runtime, request),
+                }
+              : {}),
+          },
         );
         json(ctx.res, 200, { ok: true, ...result });
       } catch (error) {
@@ -14482,6 +15504,191 @@ function buildRoutes(): RouteDefinition[] {
           purpose: DEBATE_EXHIBIT_IMAGE_PURPOSE,
         },
       });
+    }),
+    route("GET", "/api/soft-asset-jobs", async (ctx) => {
+      const userId = requireAuth(ctx);
+      json(ctx.res, 200, { ok: true, jobs: softAssetJobs.list(userId) });
+    }),
+    route("GET", "/api/soft-asset-jobs/:jobId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const job = softAssetJobs.get(userId, ctx.params.jobId);
+      if (!job) throw new HttpError(404, "Soft asset job not found.");
+      json(ctx.res, 200, { ok: true, job });
+    }),
+    route("POST", "/api/soft-asset-jobs/:jobId/cancel", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const job = softAssetJobs.cancel(userId, ctx.params.jobId);
+      if (!job) throw new HttpError(404, "Soft asset job not found.");
+      json(ctx.res, 200, { ok: true, job });
+    }),
+    route("DELETE", "/api/soft-asset-jobs/:jobId", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const job = softAssetJobs.get(userId, ctx.params.jobId);
+      if (!job) throw new HttpError(404, "Soft asset job not found.");
+      if (softAssetJobIsActive(job)) {
+        throw new HttpError(409, "Cancel this soft asset job before dismissing it.");
+      }
+      softAssetJobs.dismiss(userId, job.id);
+      json(ctx.res, 200, { ok: true });
+    }),
+    route("POST", "/api/soft-asset-jobs/debate-exhibits", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const sessionId =
+        typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+      const exhibitId =
+        typeof body.exhibitId === "string" ? body.exhibitId.trim() : "";
+      const requestId =
+        typeof body.requestId === "string" ? body.requestId.trim() : "";
+      if (!sessionId || !exhibitId || !requestId) {
+        throw new HttpError(
+          400,
+          "sessionId, exhibitId, and requestId are required for soft synthesis.",
+        );
+      }
+
+      // Network retries must recover the first server-owned job even after its
+      // durable attachment has changed this exhibit from emoji to synthesized.
+      const existing = softAssetJobs
+        .list(userId)
+        .find((job) => job.requestId === requestId);
+      if (existing) {
+        json(ctx.res, 200, { ok: true, job: existing });
+        return;
+      }
+
+      const session = getDebateSession(db, userId, sessionId);
+      const exhibit = (session.evidence.exhibits ?? []).find(
+        (candidate) => candidate.id === exhibitId,
+      );
+      if (!exhibit) {
+        throw new HttpError(404, "That exhibit is not in this Debate.");
+      }
+      if (
+        body.onlyIfEmoji === true &&
+        (exhibit.visualKind !== "emoji" || Boolean(exhibit.imageId))
+      ) {
+        throw new HttpError(
+          409,
+          "This exhibit already has a custom or synthesized asset.",
+        );
+      }
+
+      const descriptor = normalizeDebateExhibitDescriptor(exhibit);
+      const canonicalPrompt = buildDebateExhibitSpritePrompt(descriptor);
+      const direction = normalizePrismRefractDirection(body.direction);
+      const prompt = direction
+        ? `${canonicalPrompt}\nCreative direction for this pass: ${direction}`
+        : canonicalPrompt;
+      const user = getUserRow(userId);
+      const requestedImageProvider: ImageProviderName =
+        body.preferredProvider === "openai"
+          ? "openai"
+          : body.preferredProvider === "local"
+            ? "local"
+            : user.preferred_image_provider === "openai"
+              ? "openai"
+              : "local";
+      const offlineOnly =
+        normalizeResponseMode(
+          body.responseMode,
+          requestedImageProvider === "local" ? "local" : "online",
+        ) === "local" || userBlocksOnlineCapabilities(user);
+      const imageAbort = new AbortController();
+      let ownedImageSlotJobId: string | null = null;
+      let generationSignal: AbortSignal = imageAbort.signal;
+
+      try {
+        const job = softAssetJobs.start({
+          userId,
+          requestId,
+          applet: "debate",
+          title: descriptor.title,
+          destinationLabel: `Debate exhibit · ${descriptor.title}`,
+          destination: {
+            kind: "debate_exhibit_sprite",
+            sessionId,
+            exhibitId,
+          },
+          controller: imageAbort,
+          acquire: async (signal) => {
+            const acquired = await waitForImageSlot({
+              userId,
+              conversationId: null,
+              botId: null,
+              mode: "sandbox",
+              incognito: false,
+              captionPrompt: descriptor.title,
+              userMessage: `[Debate exhibit] ${descriptor.title}`,
+              source: "debate_exhibit",
+              requestedSize: "1024x1024",
+              clientRequestId: requestId,
+              abortController: imageAbort,
+              signal,
+            });
+            ownedImageSlotJobId = acquired.id;
+            generationSignal = acquired.abortController.signal;
+          },
+          generate: async () => {
+            const asset = await generateAndPersistStandaloneImageAsset({
+              userId,
+              prompt,
+              ...(direction ? { persistencePrompt: canonicalPrompt } : {}),
+              preferredProvider: requestedImageProvider,
+              offlineOnly,
+              signal: generationSignal,
+              size: "1024x1024",
+              origin: "debate",
+              purpose: DEBATE_EXHIBIT_IMAGE_PURPOSE,
+              featureLabel: "an evidence exhibit",
+              normalizeImageBytes: async (imageBytes) =>
+                (await normalizeGeneratedDebateExhibitImage(imageBytes)).pngBytes,
+            });
+            return { imageId: asset.imageId };
+          },
+          attach: async (_image, signal) => {
+            let lastError: unknown = null;
+            for (let attempt = 0; attempt < 3; attempt += 1) {
+              if (signal.aborted) {
+                throw Object.assign(new Error("Image generation was cancelled."), {
+                  name: "AbortError",
+                });
+              }
+              try {
+                attachDebateExhibitSprite(
+                  db,
+                  userId,
+                  sessionId,
+                  exhibitId,
+                  _image.imageId,
+                );
+                return;
+              } catch (error) {
+                lastError = error;
+                const canRetry =
+                  attempt < 2 &&
+                  error instanceof Error &&
+                  /changed|revision|stale/i.test(error.message);
+                if (!canRetry) throw error;
+                await new Promise((resolve) => setTimeout(resolve, 120));
+              }
+            }
+            throw lastError;
+          },
+          release: async () => {
+            if (ownedImageSlotJobId) {
+              await releaseImageSlotIfOwned(userId, ownedImageSlotJobId);
+            }
+          },
+        });
+        json(ctx.res, 202, { ok: true, job });
+      } catch (error) {
+        if (error instanceof SoftAssetJobConflictError) {
+          json(ctx.res, 200, { ok: true, job: error.job });
+          return;
+        }
+        throw error;
+      }
     }),
     route("POST", "/api/debates/exhibits/synthesize", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -14632,7 +15839,7 @@ function buildRoutes(): RouteDefinition[] {
         body.modelOverride,
         body.responseMode,
       );
-      const session = createDebateSession(
+      const session = await createDebateSessionWithParticipantPredispositions(
         db,
         userId,
         body as unknown as Parameters<typeof createDebateSession>[2],
@@ -14681,6 +15888,22 @@ function buildRoutes(): RouteDefinition[] {
         ctx.params.id,
         ctx.params.exhibitId,
         imageId,
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session, "live"),
+        exhibits: listDebateSessionExhibitAssets(db, userId, ctx.params.id),
+      });
+    }),
+    route("PATCH", "/api/debates/:id/exhibits/:exhibitId/emoji", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const session = updateDebateExhibitEmoji(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.params.exhibitId,
+        body.emoji,
       );
       json(ctx.res, 200, {
         ok: true,
@@ -14782,6 +16005,87 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         beats: listBotPresenceBeats(db, userId, surface, sessionId),
       });
+    }),
+    route("GET", "/api/session-notes", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const surface = readAppletSessionNoteSurface(ctx.query.get("surface"));
+      const sessionId = ctx.query.get("sessionId")?.trim() ?? "";
+      if (!surface || !sessionId) {
+        throw new HttpError(400, "surface and sessionId are required.");
+      }
+      if (!appletSessionBelongsToUser(db, userId, surface, sessionId)) {
+        throw new HttpError(404, "Applet session not found.");
+      }
+      json(ctx.res, 200, {
+        ok: true,
+        note: getAppletSessionNote(db, userId, surface, sessionId),
+      });
+    }),
+    route("PUT", "/api/session-notes", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const surface = readAppletSessionNoteSurface(body.surface);
+      const sessionId =
+        typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+      if (!surface || !sessionId || typeof body.body !== "string") {
+        throw new HttpError(
+          400,
+          "surface, sessionId, and note body are required.",
+        );
+      }
+      if (!appletSessionBelongsToUser(db, userId, surface, sessionId)) {
+        throw new HttpError(404, "Applet session not found.");
+      }
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          note: saveAppletSessionNote(
+            db,
+            userId,
+            surface,
+            sessionId,
+            body.body,
+          ),
+        });
+      } catch (error) {
+        throw new HttpError(
+          400,
+          error instanceof Error ? error.message : "Invalid session note.",
+        );
+      }
+    }),
+    route("POST", "/api/session-notes", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = (ctx.body ?? {}) as Record<string, unknown>;
+      const surface = readAppletSessionNoteSurface(body.surface);
+      const sessionId =
+        typeof body.sessionId === "string" ? body.sessionId.trim() : "";
+      if (!surface || !sessionId || typeof body.entry !== "string") {
+        throw new HttpError(
+          400,
+          "surface, sessionId, and note entry are required.",
+        );
+      }
+      if (!appletSessionBelongsToUser(db, userId, surface, sessionId)) {
+        throw new HttpError(404, "Applet session not found.");
+      }
+      try {
+        json(ctx.res, 200, {
+          ok: true,
+          note: appendAppletSessionNote(
+            db,
+            userId,
+            surface,
+            sessionId,
+            body.entry,
+          ),
+        });
+      } catch (error) {
+        throw new HttpError(
+          400,
+          error instanceof Error ? error.message : "Invalid session note.",
+        );
+      }
     }),
     route("POST", "/api/presence-beats", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -15131,17 +16435,323 @@ function buildRoutes(): RouteDefinition[] {
     route("POST", "/api/debates/:id/participant-objection", async (ctx) => {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "Participant objection interrupted the prepared turn.");
-      const session = raiseDebateParticipantObjection(
-        db,
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = await debateAiRuntimeForUser(
         userId,
-        ctx.params.id,
-        ctx.body as Parameters<typeof raiseDebateParticipantObjection>[3],
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          raiseDebateParticipantFloorBreakWithRuntime(
+            db,
+            userId,
+            ctx.params.id,
+            {
+              ...(ctx.body as Parameters<
+                typeof raiseDebateParticipantObjection
+              >[3]),
+              kind: "objection",
+              legacyStepKey: true,
+            },
+            runtime,
+          ),
       );
       json(ctx.res, 200, {
         ok: true,
         session: debateSessionForPlayer(session),
       });
     }),
+    route("POST", "/api/debates/:id/participant-floor-break", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "debate",
+        ctx.params.id,
+        "Participant floor break interrupted the prepared turn.",
+      );
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const runtime = await debateAiRuntimeForUser(
+        userId,
+        frozen.provider,
+        frozenDebateModelOverride(frozen),
+        frozen.responseMode,
+        frozen.generationChain,
+        frozen.autoCandidateAllowlist,
+        debateAutoRoutingContext(frozen),
+      );
+      const session = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "debate",
+          surface: "debate",
+        },
+        () =>
+          raiseDebateParticipantFloorBreakWithRuntime(
+            db,
+            userId,
+            ctx.params.id,
+            ctx.body as Parameters<typeof raiseDebateParticipantFloorBreak>[3],
+            runtime,
+          ),
+      );
+      json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+    }),
+    route(
+      "POST",
+      "/api/debates/:id/participant-floor-break/prepare",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const frozen = getDebateSession(db, userId, ctx.params.id);
+        const runtime = await debateAiRuntimeForUser(
+          userId,
+          frozen.provider,
+          frozenDebateModelOverride(frozen),
+          frozen.responseMode,
+          frozen.generationChain,
+          frozen.autoCandidateAllowlist,
+          debateAutoRoutingContext(frozen),
+        );
+        const session = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "debate",
+            surface: "debate",
+          },
+          () =>
+            prepareDebateParticipantFloorBreak(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.body as Parameters<
+                typeof prepareDebateParticipantFloorBreak
+              >[3],
+              runtime,
+            ),
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          session: debateSessionForPlayer(session),
+        });
+      },
+    ),
+    route(
+      "POST",
+      "/api/debates/:id/participant-floor-break/commit",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        invalidateTurnPreparation(
+          userId,
+          "debate",
+          ctx.params.id,
+          "Participant floor break committed the heard opponent prefix.",
+        );
+        const session = commitDebateParticipantFloorBreakPreparation(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.body as Parameters<
+            typeof commitDebateParticipantFloorBreakPreparation
+          >[3],
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          session: debateSessionForPlayer(session),
+        });
+      },
+    ),
+    route(
+      "POST",
+      "/api/debates/:id/participant-floor-break/cancel",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const session = cancelDebateParticipantFloorBreakPreparation(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.body as Parameters<
+            typeof cancelDebateParticipantFloorBreakPreparation
+          >[3],
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          session: debateSessionForPlayer(session),
+        });
+      },
+    ),
+    route(
+      "POST",
+      "/api/debates/:id/participant-floor-break/activate",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const session = activateDebateParticipantFloorBreak(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.body as Parameters<typeof activateDebateParticipantFloorBreak>[3],
+        );
+        json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+      },
+    ),
+    route(
+      "POST",
+      "/api/debates/:id/participant-floor-break/resolve",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        invalidateTurnPreparation(
+          userId,
+          "debate",
+          ctx.params.id,
+          "Participant floor-break response changed the floor.",
+        );
+        const frozen = getDebateSession(db, userId, ctx.params.id);
+        const runtime = await debateAiRuntimeForUser(
+          userId,
+          frozen.provider,
+          frozenDebateModelOverride(frozen),
+          frozen.responseMode,
+          frozen.generationChain,
+          frozen.autoCandidateAllowlist,
+          debateAutoRoutingContext(frozen),
+        );
+        const session = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "debate",
+            surface: "debate",
+          },
+          () =>
+            resolveDebateParticipantFloorBreak(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.body as Parameters<
+                typeof resolveDebateParticipantFloorBreak
+              >[3],
+              runtime,
+            ),
+        );
+        json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+      },
+    ),
+    route(
+      "POST",
+      "/api/debates/:id/participant-floor-break/clarify",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        const session = clarifyDebateParticipantFloorBreak(
+          db,
+          userId,
+          ctx.params.id,
+          ctx.body as Parameters<
+            typeof clarifyDebateParticipantFloorBreak
+          >[3],
+        );
+        json(ctx.res, 200, {
+          ok: true,
+          session: debateSessionForPlayer(session),
+        });
+      },
+    ),
+    route(
+      "POST",
+      "/api/debates/:id/participant-window/expire",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        invalidateTurnPreparation(
+          userId,
+          "debate",
+          ctx.params.id,
+          "The Participant input window expired.",
+        );
+        const frozen = getDebateSession(db, userId, ctx.params.id);
+        const runtime = await debateAiRuntimeForUser(
+          userId,
+          frozen.provider,
+          frozenDebateModelOverride(frozen),
+          frozen.responseMode,
+          frozen.generationChain,
+          frozen.autoCandidateAllowlist,
+          debateAutoRoutingContext(frozen),
+        );
+        const session = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "debate",
+            surface: "debate",
+          },
+          () =>
+            expireDebateParticipantWindow(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.body as Parameters<typeof expireDebateParticipantWindow>[3],
+              runtime,
+            ),
+        );
+        json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+      },
+    ),
+    route(
+      "POST",
+      "/api/debates/:id/participant-choices/retry",
+      async (ctx) => {
+        const userId = requireAuth(ctx);
+        invalidateTurnPreparation(
+          userId,
+          "debate",
+          ctx.params.id,
+          "The Participant guided answers were retried.",
+        );
+        const frozen = getDebateSession(db, userId, ctx.params.id);
+        const runtime = await debateAiRuntimeForUser(
+          userId,
+          frozen.provider,
+          frozenDebateModelOverride(frozen),
+          frozen.responseMode,
+          frozen.generationChain,
+          frozen.autoCandidateAllowlist,
+          debateAutoRoutingContext(frozen),
+        );
+        const session = await runWithUsageSession(
+          {
+            db,
+            userId,
+            privacyScope: "normal",
+            mode: "debate",
+            surface: "debate",
+          },
+          () =>
+            retryDebateParticipantChoices(
+              db,
+              userId,
+              ctx.params.id,
+              ctx.body as Parameters<typeof retryDebateParticipantChoices>[3],
+              runtime,
+            ),
+        );
+        json(ctx.res, 200, { ok: true, session: debateSessionForPlayer(session) });
+      },
+    ),
     route(
       "POST",
       "/api/debates/:id/participant-objection/resolve",
@@ -15335,6 +16945,7 @@ function buildRoutes(): RouteDefinition[] {
             ctx.params.id,
             ctx.body as Parameters<typeof submitDebatePlayerTurn>[3],
             runtime.auxiliary,
+            runtime,
           ),
       );
       json(ctx.res, 200, {
@@ -15435,6 +17046,64 @@ function buildRoutes(): RouteDefinition[] {
         session: debateSessionForPlayer(session),
       });
     }),
+    route("POST", "/api/debates/:id/recover-final-recess", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "debate",
+        ctx.params.id,
+        "The exhausted Participant Debate returned to its final recess checkpoint.",
+      );
+      const session = recoverParticipantDebateFromFinalRecess(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof recoverParticipantDebateFromFinalRecess>[3],
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
+    route("POST", "/api/debates/:id/restart-as-draft", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "debate",
+        ctx.params.id,
+        "The exhausted Participant Debate was replaced by a saved setup draft.",
+      );
+      const result = restartParticipantDebateAsDraft(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof restartParticipantDebateAsDraft>[3],
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(result.session),
+        draftSession: debateSessionForPlayer(result.draftSession),
+      });
+    }),
+    route("POST", "/api/debates/:id/forfeit", async (ctx) => {
+      const userId = requireAuth(ctx);
+      invalidateTurnPreparation(
+        userId,
+        "debate",
+        ctx.params.id,
+        "The Participant forfeited the Debate.",
+      );
+      const session = forfeitParticipantDebateSession(
+        db,
+        userId,
+        ctx.params.id,
+        ctx.body as Parameters<typeof forfeitParticipantDebateSession>[3],
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        session: debateSessionForPlayer(session),
+      });
+    }),
     route("POST", "/api/debates/:id/seal-presentation", async (ctx) => {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(
@@ -15458,30 +17127,50 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       invalidateTurnPreparation(userId, "debate", ctx.params.id, "The Debate resumed from a new floor state.");
       const body = ctx.body as Parameters<typeof resumeDebateSession>[3];
+      const frozen = getDebateSession(db, userId, ctx.params.id);
+      const startModelOverride = readModelOverride(body?.startModelOverride);
+      const startRuntime =
+        startModelOverride && debateSessionAwaitingDeferredStart(frozen)
+          ? await debateAiRuntimeForUser(
+              userId,
+              body.startPreferredProvider,
+              startModelOverride,
+              body.startResponseMode,
+            )
+          : undefined;
       if (body?.quietSave === true || body?.exitRecovery === true) {
-        const session = resumeDebateSession(db, userId, ctx.params.id, body);
+        const session = resumeDebateSession(
+          db,
+          userId,
+          ctx.params.id,
+          body,
+          undefined,
+          startRuntime,
+        );
         json(ctx.res, 200, {
           ok: true,
           session: debateSessionForPlayer(session),
         });
         return;
       }
-      const frozen = getDebateSession(db, userId, ctx.params.id);
-      const runtime = await debateAiRuntimeForUser(
-        userId,
-        frozen.provider,
-        frozenDebateModelOverride(frozen),
-        frozen.responseMode,
-        frozen.generationChain,
-        frozen.autoCandidateAllowlist,
-        debateAutoRoutingContext(frozen),
-      );
+      const runtime =
+        startRuntime ??
+        (await debateAiRuntimeForUser(
+          userId,
+          frozen.provider,
+          frozenDebateModelOverride(frozen),
+          frozen.responseMode,
+          frozen.generationChain,
+          frozen.autoCandidateAllowlist,
+          debateAutoRoutingContext(frozen),
+        ));
       const session = await resumeDebateSessionWithPersona(
         db,
         userId,
         ctx.params.id,
         body,
         runtime,
+        startRuntime,
       );
       json(ctx.res, 200, {
         ok: true,
@@ -17836,6 +19525,7 @@ function buildRoutes(): RouteDefinition[] {
           user,
           episode: frozen,
         });
+        const signalUserKey = decryptUserKey(userId);
         const powerTheme = readResolvedPowerTheme(body.theme);
         const stateCursor = botcastPreparedTurnCursor(
           db,
@@ -17874,6 +19564,7 @@ function buildRoutes(): RouteDefinition[] {
                       responseMode: runtime.responseMode,
                       openAiApiKey: runtime.openAiApiKey,
                       anthropicApiKey: runtime.anthropicApiKey,
+                      userKey: signalUserKey,
                       secondaryOllamaHost: user.secondary_ollama_host,
                       contextualModel: runtime.model,
                       contextualReasoningEffort: runtime.reasoningEffort,
@@ -18062,6 +19753,7 @@ function buildRoutes(): RouteDefinition[] {
         user,
         episode: frozenEpisode,
       });
+      const signalUserKey = decryptUserKey(userId);
       const signalAdvanceAbort = new AbortController();
       const onSignalAdvanceClientClose = () => {
         if (!ctx.res.writableEnded) signalAdvanceAbort.abort();
@@ -18095,6 +19787,7 @@ function buildRoutes(): RouteDefinition[] {
             responseMode: runtime.responseMode,
             openAiApiKey: runtime.openAiApiKey,
             anthropicApiKey: runtime.anthropicApiKey,
+            userKey: signalUserKey,
             secondaryOllamaHost: user.secondary_ollama_host,
             contextualModel: runtime.model,
             contextualReasoningEffort: runtime.reasoningEffort,
@@ -18159,6 +19852,7 @@ function buildRoutes(): RouteDefinition[] {
               responseMode: runtime.responseMode,
               openAiApiKey: runtime.openAiApiKey,
               anthropicApiKey: runtime.anthropicApiKey,
+              userKey: decryptUserKey(userId),
               secondaryOllamaHost: user.secondary_ollama_host,
               contextualModel: runtime.model,
               contextualReasoningEffort: runtime.reasoningEffort,
@@ -18753,8 +20447,9 @@ function buildRoutes(): RouteDefinition[] {
         departure.recorded &&
         departure.completedTurns < departure.targetTurns &&
         !activeCoffeeDepartureEpilogues.has(jobKey);
+      let epilogueJob = activeCoffeeDepartureEpilogues.get(jobKey) ?? null;
       if (shouldStart) {
-        const epilogueJob = (async () => {
+        epilogueJob = (async () => {
           try {
             for (
               let turnIndex = departure.completedTurns;
@@ -18839,13 +20534,22 @@ function buildRoutes(): RouteDefinition[] {
         });
         activeCoffeeDepartureEpilogues.set(jobKey, epilogueJob);
       }
+      const awaitEpilogue = body.awaitEpilogue === true;
+      if (awaitEpilogue && epilogueJob) {
+        await epilogueJob;
+      }
+      const completedDeparture = awaitEpilogue
+        ? recordCoffeePlayerDeparture(db, userId, conversationId)
+        : departure;
       json(ctx.res, 202, {
         ok: true,
         departureRecorded: departure.recorded,
         epilogueStarted: shouldStart,
-        epilogueTurnTarget: departure.targetTurns,
-        epilogueTurnsCompleted: departure.completedTurns,
-        conversation: departure.conversation,
+        epilogueComplete:
+          awaitEpilogue && !activeCoffeeDepartureEpilogues.has(jobKey),
+        epilogueTurnTarget: completedDeparture.targetTurns,
+        epilogueTurnsCompleted: completedDeparture.completedTurns,
+        conversation: completedDeparture.conversation,
       });
     }),
     route("POST", "/api/coffee/sessions/:id/topic", async (ctx) => {
@@ -18871,6 +20575,42 @@ function buildRoutes(): RouteDefinition[] {
       json(ctx.res, 200, {
         ok: true,
         conversation,
+      });
+    }),
+    route("POST", "/api/coffee/sessions/:id/topics/refresh", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const user = getUserRow(userId);
+      const userKey = decryptUserKey(userId);
+      const body = ctx.body as Record<string, unknown>;
+      const conversationId = ctx.params.id;
+      const coffeeStarterTopics = await runWithUsageSession(
+        {
+          db,
+          userId,
+          privacyScope: "normal",
+          mode: "coffee",
+          surface: "coffee_topic",
+          conversationId,
+        },
+        () =>
+          refreshCoffeeConversationStarterTopics(
+            db,
+            userId,
+            conversationId,
+            body.currentTopics,
+            {
+              prismDefaultLlmModel: user.prism_default_llm_model,
+              secondaryOllamaHost: user.secondary_ollama_host,
+              experimentalDualOllamaEnabled:
+                user.experimental_dual_ollama_enabled === 1,
+              auxiliaryProviderFactory: auxiliaryProviderFactoryOverride,
+              userKey,
+            },
+          ),
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        coffeeStarterTopics,
       });
     }),
     route("POST", "/api/coffee/sessions/:id/teams", async (ctx) => {
@@ -19779,6 +21519,12 @@ function buildRoutes(): RouteDefinition[] {
       const userKey = decryptUserKey(userId);
       const { conversationId, botId, scope, inferBotMemories, limit } =
         parseMemoryListQueryOptions(ctx.query);
+      backfillMissingCompletedBotcastPairHistory({
+        db,
+        userId,
+        userKey,
+        ...(botId ? { participantBotId: botId } : {}),
+      });
       deleteOrphanedBotMemories(db, userId);
       if (botId && inferBotMemories) {
         await runWithUsageSession(
@@ -20377,7 +22123,8 @@ function buildRoutes(): RouteDefinition[] {
       const message = db
         .prepare(
           `
-        SELECT m.id, m.conversation_id, m.role, m.created_at,
+        SELECT m.id, m.conversation_id, m.role, m.content, m.tool_payload,
+               m.created_at,
                c.conversation_mode
         FROM messages m
         JOIN conversations c ON c.id = m.conversation_id AND c.user_id = m.user_id
@@ -20389,6 +22136,8 @@ function buildRoutes(): RouteDefinition[] {
             id: string;
             conversation_id: string;
             role: string;
+            content: string;
+            tool_payload: string | null;
             created_at: string;
             conversation_mode: string | null;
           }
@@ -20400,23 +22149,49 @@ function buildRoutes(): RouteDefinition[] {
       if (message.role !== "assistant") {
         throw new Error("Only assistant messages can be interrupted.");
       }
-      if (message.conversation_mode !== "zen") {
-        throw new Error("Only Zen assistant messages can be interrupted.");
+      if (
+        message.conversation_mode !== "zen" &&
+        message.conversation_mode !== "chat"
+      ) {
+        throw new Error("Only Chat or Zen assistant messages can be interrupted.");
       }
-      const laterMessage = db
+      const mode = readPrismMoodMode(message.conversation_mode);
+      const now = new Date().toISOString();
+      const currentMood =
+        loadPrismMoodState(db, userId, message.conversation_id, mode) ??
+        createDefaultPrismMoodState(mode, now);
+      const storedInterruption = readStoredAssistantInterruptionState(
+        message.tool_payload,
+      );
+      if (storedInterruption) {
+        if (
+          storedInterruption.interruptedContent !== content ||
+          message.content.trim() !== content
+        ) {
+          throw new HttpError(
+            409,
+            "This assistant reply was already interrupted at a different audible cutoff.",
+          );
+        }
+        json(ctx.res, 200, {
+          ok: true,
+          idempotentReplay: true,
+          prismMood: currentMood,
+        });
+        return;
+      }
+      const latestMessage = db
         .prepare(
-          "SELECT id FROM messages WHERE conversation_id = ? AND user_id = ? AND created_at > ? ORDER BY created_at ASC LIMIT 1",
+          "SELECT id FROM messages WHERE conversation_id = ? AND user_id = ? ORDER BY created_at DESC, rowid DESC LIMIT 1",
         )
-        .get(message.conversation_id, userId, message.created_at) as
+        .get(message.conversation_id, userId) as
         { id: string } | undefined;
-      if (laterMessage) {
+      if (latestMessage?.id !== message.id) {
         throw new Error(
-          "Only the latest Zen assistant message can be interrupted.",
+          "Only the latest Chat or Zen assistant message can be interrupted.",
         );
       }
 
-      const mode = readPrismMoodMode(message.conversation_mode);
-      const now = new Date().toISOString();
       const parsedPrismInterruption = readPrismInterruption(
         body.prismInterruption ?? {
           kind: "assistant_reveal",
@@ -20439,16 +22214,40 @@ function buildRoutes(): RouteDefinition[] {
           ? { interruptedContent: parsedPrismInterruption.interruptedContent }
           : {}),
       };
-      const currentMood =
-        loadPrismMoodState(db, userId, message.conversation_id, mode) ??
-        createDefaultPrismMoodState(mode, now);
       const user = getUserRow(userId);
       let persistedMood: ReturnType<typeof upsertPrismMoodState> | undefined;
+      let deletedSummaryIds: string[] = [];
       db.exec("BEGIN IMMEDIATE TRANSACTION");
       try {
-        db.prepare(
-          "UPDATE messages SET content = ?, tool_payload = NULL WHERE id = ? AND user_id = ?",
-        ).run(content, messageId, userId);
+        deletedSummaryIds = (
+          db.prepare(
+            "SELECT id FROM memory_summaries WHERE user_id = ? AND conversation_id = ?",
+          ).all(userId, message.conversation_id) as Array<{ id: string }>
+        ).map((row) => row.id);
+        deleteMemoriesLinkedToMessages(db, userId, [messageId]);
+        const cutoffWrite = db.prepare(
+          `UPDATE messages
+              SET content = ?, tool_payload = ?
+            WHERE id = ? AND user_id = ? AND tool_payload IS ?`,
+        ).run(
+          content,
+          serializeStoredAssistantInterruptionState({
+            v: 1,
+            source: "shh",
+            interruptedContent: content,
+            status: "cutoff",
+            updatedAt: now,
+          }),
+          messageId,
+          userId,
+          message.tool_payload,
+        );
+        if (cutoffWrite.changes !== 1) {
+          throw new HttpError(
+            409,
+            "This assistant reply was already interrupted; retry the same cutoff.",
+          );
+        }
         db.prepare(
           "DELETE FROM memory_summaries WHERE user_id = ? AND conversation_id = ?",
         ).run(userId, message.conversation_id);
@@ -20472,6 +22271,12 @@ function buildRoutes(): RouteDefinition[] {
         throw error;
       }
 
+      if (deletedSummaryIds.length > 0) {
+        await Promise.allSettled(
+          deletedSummaryIds.map((summaryId) => deleteVector(summaryId)),
+        );
+      }
+
       json(ctx.res, 200, {
         ok: true,
         prismMood: persistedMood,
@@ -20487,6 +22292,13 @@ function buildRoutes(): RouteDefinition[] {
           userId,
           ctx.params.id,
         );
+        if (result.deletedSummaryIds.length > 0) {
+          await Promise.allSettled(
+            result.deletedSummaryIds.map((summaryId) =>
+              deleteVector(summaryId),
+            ),
+          );
+        }
         const mode = readPrismMoodMode(result.conversationMode);
         const prismMood =
           loadPrismMoodState(db, userId, result.conversationId, mode) ??
@@ -22541,7 +24353,8 @@ function buildRoutes(): RouteDefinition[] {
       if (boundary.kind === "builtin-babble") {
         const controller = new AbortController();
         const onClose = () => controller.abort();
-        ctx.req.once("close", onClose);
+        ctx.req.once("aborted", onClose);
+        ctx.res.once("close", onClose);
         const babbleText = buildBabbleSpeechText({
           text: boundary.text,
           seed: request.seed ?? request.messageId ?? boundary.text,
@@ -22613,7 +24426,8 @@ function buildRoutes(): RouteDefinition[] {
                 : "System Babble voice is unavailable.",
           });
         } finally {
-          ctx.req.off("close", onClose);
+          ctx.req.off("aborted", onClose);
+          ctx.res.off("close", onClose);
         }
         return;
       }
@@ -22621,7 +24435,8 @@ function buildRoutes(): RouteDefinition[] {
       if (boundary.kind === "builtin-english") {
         const controller = new AbortController();
         const onClose = () => controller.abort();
-        ctx.req.once("close", onClose);
+        ctx.req.once("aborted", onClose);
+        ctx.res.once("close", onClose);
         const localDelivery = resolveLocalVoiceDelivery(
           boundary.profile,
           allowOperatingSystemVoices,
@@ -22673,7 +24488,8 @@ function buildRoutes(): RouteDefinition[] {
               : "Built-in English voice is unavailable.",
           );
         } finally {
-          ctx.req.off("close", onClose);
+          ctx.req.off("aborted", onClose);
+          ctx.res.off("close", onClose);
         }
         return;
       }
@@ -22708,7 +24524,8 @@ function buildRoutes(): RouteDefinition[] {
         }
         const controller = new AbortController();
         const onClose = () => controller.abort();
-        ctx.req.once("close", onClose);
+        ctx.req.once("aborted", onClose);
+        ctx.res.once("close", onClose);
         const localDelivery = resolveLocalVoiceDelivery(
           boundary.profile,
           allowOperatingSystemVoices,
@@ -22756,14 +24573,16 @@ function buildRoutes(): RouteDefinition[] {
               : "The local fallback voice is unavailable.",
           );
         } finally {
-          ctx.req.off("close", onClose);
+          ctx.req.off("aborted", onClose);
+          ctx.res.off("close", onClose);
         }
         return;
       }
 
       const controller = new AbortController();
       const onClose = () => controller.abort();
-      ctx.req.once("close", onClose);
+      ctx.req.once("aborted", onClose);
+      ctx.res.once("close", onClose);
       const providerVoiceSeed = elevenLabsVoiceIsolationSeed(
         sourceBotId ?? request.seed ?? request.messageId ?? voiceId,
       );
@@ -22945,7 +24764,8 @@ function buildRoutes(): RouteDefinition[] {
         }
         throw error;
       } finally {
-        ctx.req.off("close", onClose);
+        ctx.req.off("aborted", onClose);
+        ctx.res.off("close", onClose);
       }
     }),
     route("POST", "/api/prism-companion", async (ctx) => {
@@ -22965,6 +24785,20 @@ function buildRoutes(): RouteDefinition[] {
       const ephemeralMode = prismCompanionEphemeralMode(
         request.surface.surfaceId,
       );
+      if (request.persistConversationId) {
+        try {
+          authorizePrismCompanionPersistenceTarget(
+            db,
+            userId,
+            request.persistConversationId,
+          );
+        } catch (error) {
+          if (error instanceof PrismCompanionPersistenceError) {
+            throw new HttpError(error.statusCode, error.message);
+          }
+          throw error;
+        }
+      }
       // The floating companion and full Prism share one local identity/model.
       // Applet and account response pickers never redirect this request online.
       const providerName = "local" as const;
@@ -22984,10 +24818,13 @@ function buildRoutes(): RouteDefinition[] {
           {
             db,
             userId,
-            privacyScope: "private",
+            privacyScope: request.persistConversationId ? "normal" : "private",
             mode: ephemeralMode,
             surface: "prism-orchestration",
-            conversationId: request.surface.conversationId ?? null,
+            conversationId:
+              request.persistConversationId ??
+              request.surface.conversationId ??
+              null,
           },
           () =>
             orchestratePrismCompanionRequest({
@@ -22998,14 +24835,26 @@ function buildRoutes(): RouteDefinition[] {
             }),
         );
         if (orchestration) {
+          const message = request.persistConversationId
+            ? persistPrismCompanionOrchestrationTurn({
+                db,
+                userId,
+                conversationId: request.persistConversationId,
+                requestId: request.requestId,
+                userContent: request.message,
+                assistantContent: orchestration.content,
+                provider: orchestration.provider,
+                model: orchestration.model,
+              }).message
+            : {
+                id: randomId(),
+                role: "assistant" as const,
+                content: orchestration.content,
+                createdAt: new Date().toISOString(),
+              };
           json(ctx.res, 200, {
             ok: true,
-            message: {
-              id: randomId(),
-              role: "assistant",
-              content: orchestration.content,
-              createdAt: new Date().toISOString(),
-            },
+            message,
             actions: [],
             cards: orchestration.cards,
             provider: orchestration.provider,
@@ -23058,6 +24907,9 @@ function buildRoutes(): RouteDefinition[] {
         });
       } catch (error) {
         if (controller.signal.aborted) throw error;
+        if (error instanceof PrismCompanionPersistenceError) {
+          throw new HttpError(error.statusCode, error.message);
+        }
         throw new HttpError(
           502,
           error instanceof Error
@@ -23066,6 +24918,62 @@ function buildRoutes(): RouteDefinition[] {
         );
       } finally {
         ctx.req.off("close", onClose);
+      }
+    }),
+    route("GET", "/api/prism/notes", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const notes = listUserNotes(db, userId, decryptUserKey(userId), 100);
+      json(ctx.res, 200, {
+        ok: true,
+        notes: notes.map(userNoteForClient),
+      });
+    }),
+    route("POST", "/api/prism/notes", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body =
+        ctx.body && typeof ctx.body === "object" && !Array.isArray(ctx.body)
+          ? (ctx.body as Record<string, unknown>)
+          : {};
+      try {
+        const saved = saveUserNote(db, userId, decryptUserKey(userId), {
+          title: typeof body.title === "string" ? body.title : undefined,
+          body: typeof body.body === "string" ? body.body : undefined,
+        });
+        json(ctx.res, 201, {
+          ok: true,
+          note: userNoteForClient(saved.note),
+        });
+      } catch (error) {
+        throwUserNoteHttpError(error);
+      }
+    }),
+    route("PUT", "/api/prism/notes/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body =
+        ctx.body && typeof ctx.body === "object" && !Array.isArray(ctx.body)
+          ? (ctx.body as Record<string, unknown>)
+          : {};
+      try {
+        const saved = saveUserNote(db, userId, decryptUserKey(userId), {
+          id: ctx.params.id,
+          title: typeof body.title === "string" ? body.title : undefined,
+          body: typeof body.body === "string" ? body.body : undefined,
+        });
+        json(ctx.res, 200, {
+          ok: true,
+          note: userNoteForClient(saved.note),
+        });
+      } catch (error) {
+        throwUserNoteHttpError(error);
+      }
+    }),
+    route("DELETE", "/api/prism/notes/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      try {
+        const deleted = deleteUserNote(db, userId, { id: ctx.params.id });
+        json(ctx.res, 200, { ok: true, deleted });
+      } catch (error) {
+        throwUserNoteHttpError(error);
       }
     }),
     route("GET", "/api/library/groups", async (ctx) => {
@@ -23285,6 +25193,9 @@ function buildRoutes(): RouteDefinition[] {
           displayName: user.display_name,
           theme: user.theme,
           graphicsQuality: normalizeGraphicsQuality(user.graphics_quality),
+          typographyScale: normalizePrismTypographyScale(
+            user.typography_scale,
+          ),
           atmosphereStyle: normalizeHubAtmosphereStyle(user.atmosphere_style),
           hubAtmosphereEnabled: user.hub_atmosphere_enabled !== 0,
           hubAtmosphereImageId: hubAtmosphereCache.imageId,
@@ -23311,6 +25222,7 @@ function buildRoutes(): RouteDefinition[] {
             db,
             userId,
           ),
+          modelTurboPreferences: listModelTurboPreferences(db, userId),
           coffeeExperimentalTableAngleEnabled:
             user.coffee_experimental_table_angle_enabled === 1,
           psychicModeEnabled: user.psychic_mode_enabled === 1,
@@ -23520,6 +25432,47 @@ function buildRoutes(): RouteDefinition[] {
         ok: true,
         resetCount,
         modelEffortPreferences: [],
+      });
+    }),
+    route("PUT", "/api/model-turbo-preferences", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const provider = normalizeModelEffortProvider(body.provider);
+      const modelId = normalizeModelEffortModelId(body.modelId);
+      if (!provider || !modelId) {
+        throw new HttpError(400, "A valid provider and model are required.");
+      }
+      const turbo = body.turbo === true;
+      if (turbo && !modelSupportsTurboMode(provider, modelId)) {
+        throw new HttpError(400, "Turbo is unavailable for this model.");
+      }
+      const preference = setModelTurboPreference(db, {
+        userId,
+        provider,
+        modelId,
+        turbo,
+      });
+      turnPreparationRegistry.discardUser(
+        userId,
+        "Turbo changed before the prepared turn could commit.",
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        preference,
+        modelTurboPreferences: listModelTurboPreferences(db, userId),
+      });
+    }),
+    route("DELETE", "/api/model-turbo-preferences", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const resetCount = resetModelTurboPreferences(db, userId);
+      turnPreparationRegistry.discardUser(
+        userId,
+        "Turbo reset before the prepared turn could commit.",
+      );
+      json(ctx.res, 200, {
+        ok: true,
+        resetCount,
+        modelTurboPreferences: [],
       });
     }),
     route("PATCH", "/api/living-shell/progress", async (ctx) => {
@@ -23844,11 +25797,14 @@ function buildRoutes(): RouteDefinition[] {
         const committedUser = getUserRow(userId);
         if (
           committedUser.experimental_all_model_effort_enabled !==
-          user.experimental_all_model_effort_enabled
+            user.experimental_all_model_effort_enabled ||
+          committedUser.preferred_provider !== user.preferred_provider ||
+          committedUser.preferred_local_model !== user.preferred_local_model ||
+          committedUser.preferred_online_model !== user.preferred_online_model
         ) {
           turnPreparationRegistry.discardUser(
             userId,
-            "Local effort settings changed before the prepared turn could commit.",
+            "Global model routing changed before the prepared turn could commit.",
           );
         }
         const result =
@@ -23917,6 +25873,7 @@ function buildRoutes(): RouteDefinition[] {
         displayName: user.display_name,
         theme: user.theme,
         graphicsQuality: user.graphics_quality,
+        typographyScale: user.typography_scale,
         atmosphereStyle: user.atmosphere_style,
         hubAtmosphereEnabled: user.hub_atmosphere_enabled,
         startupPreference: user.startup_preference,
@@ -24059,7 +26016,7 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(
         `
         UPDATE users
-        SET display_name = ?, theme = ?, graphics_quality = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
+        SET display_name = ?, theme = ?, graphics_quality = ?, typography_scale = ?, atmosphere_style = ?, hub_atmosphere_enabled = ?, startup_preference = ?, preferred_provider = ?, ephemeral_chat_provider_preferences = ?, preferred_image_provider = ?, provider_locked = ?, auto_memory = ?, composer_writing_assist = ?, hidden_bot_model_ids = ?, hidden_comfyui_workflow_ids = ?, model_visibility_defaults_version = ?,
             experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, preferred_home_atmosphere_image_model = ?, preferred_home_atmosphere_image_provider = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
@@ -24076,6 +26033,7 @@ function buildRoutes(): RouteDefinition[] {
         next.displayName,
         next.theme,
         next.graphicsQuality,
+        next.typographyScale,
         next.atmosphereStyle,
         next.hubAtmosphereEnabled,
         next.startupPreference,
@@ -24168,6 +26126,7 @@ function buildRoutes(): RouteDefinition[] {
         settings: {
           displayName: next.displayName,
           graphicsQuality: next.graphicsQuality,
+          typographyScale: next.typographyScale,
           atmosphereStyle: next.atmosphereStyle,
           hubAtmosphereEnabled: next.hubAtmosphereEnabled !== 0,
           startupPreference: next.startupPreference,

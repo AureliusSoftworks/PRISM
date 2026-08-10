@@ -31,7 +31,7 @@
   cursor: wait;
 }
 
-/* Soft waits: relocatable refract card (session position via inline left/top). */
+/* Soft waits: the real companion orb occupies this card's empty orb slot. */
 .softDismiss {
   position: fixed;
   inset: 0;
@@ -44,10 +44,36 @@
 }
 
 .docked {
+  --soft-orb-anchor: 44px;
   position: fixed;
   z-index: 760;
   width: min(390px, calc(100vw - 28px));
   pointer-events: none;
+  will-change: left, top;
+}
+
+.docked[data-dock="center"][data-vertical="below"] {
+  transform: translate(-50%, calc(-1 * var(--soft-orb-anchor)));
+}
+
+.docked[data-dock="left"][data-vertical="below"] {
+  transform: translate(calc(-1 * var(--soft-orb-anchor)), calc(-1 * var(--soft-orb-anchor)));
+}
+
+.docked[data-dock="right"][data-vertical="below"] {
+  transform: translate(calc(-100% + var(--soft-orb-anchor)), calc(-1 * var(--soft-orb-anchor)));
+}
+
+.docked[data-dock="center"][data-vertical="above"] {
+  transform: translate(-50%, calc(-100% + var(--soft-orb-anchor)));
+}
+
+.docked[data-dock="left"][data-vertical="above"] {
+  transform: translate(calc(-1 * var(--soft-orb-anchor)), calc(-100% + var(--soft-orb-anchor)));
+}
+
+.docked[data-dock="right"][data-vertical="above"] {
+  transform: translate(calc(-100% + var(--soft-orb-anchor)), calc(-100% + var(--soft-orb-anchor)));
 }
 
 .docked > .card {
@@ -58,12 +84,10 @@
   border-radius: 18px;
   padding: 18px;
   text-align: left;
-  cursor: grab;
-  touch-action: none;
 }
 
-.docked > .card[data-dragging="true"] {
-  cursor: grabbing;
+.docked[data-vertical="above"] .prismOrbSlot {
+  order: 2;
 }
 
 .docked .prismOrbSlot,
@@ -71,6 +95,14 @@
   --prism-orb-size: 52px;
   justify-self: center;
   margin-bottom: 0;
+}
+
+.docked[data-dock="left"] .prismOrbSlot {
+  justify-self: start;
+}
+
+.docked[data-dock="right"] .prismOrbSlot {
+  justify-self: end;
 }
 
 .prismOrbSlot {
@@ -404,6 +436,7 @@
     border-radius: 16px;
     padding: 16px;
   }
+  .docked { --soft-orb-anchor: 39px; }
   .docked .prismOrbSlot,
   .docked .prismOrb { --prism-orb-size: 46px; margin-block: 0; }
 }

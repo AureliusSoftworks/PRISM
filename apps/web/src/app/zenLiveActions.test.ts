@@ -3,9 +3,11 @@ import assert from "node:assert/strict";
 import {
   isZenLiveBotPresenceActionVerbose,
   resolveZenLiveBotPresenceActionText,
+  resizeZenLiveBotAvatarFromWheel,
   sanitizeZenLiveBotActionText,
   zenLiveBotCanvasSideFromCenterX,
   zenLiveBotFaceScaleYForCanvasSide,
+  zenLiveBotResizeLaneAtClientX,
   zenLiveActionPlateFace,
 } from "./zenLiveActions.ts";
 
@@ -205,6 +207,82 @@ describe("zenLiveBotCanvasSideFromCenterX", () => {
   it("falls back to left when geometry is unavailable", () => {
     assert.equal(zenLiveBotCanvasSideFromCenterX(Number.NaN, 1000), "left");
     assert.equal(zenLiveBotCanvasSideFromCenterX(240, 0), "left");
+  });
+});
+
+describe("zenLiveBotResizeLaneAtClientX", () => {
+  it("reserves only the empty columns beside centered Zen prose", () => {
+    const geometry = {
+      surfaceLeft: 100,
+      surfaceWidth: 1200,
+      proseWidth: 800,
+    };
+    assert.equal(
+      zenLiveBotResizeLaneAtClientX({ ...geometry, clientX: 180 }),
+      "left",
+    );
+    assert.equal(
+      zenLiveBotResizeLaneAtClientX({ ...geometry, clientX: 1220 }),
+      "right",
+    );
+    assert.equal(
+      zenLiveBotResizeLaneAtClientX({ ...geometry, clientX: 700 }),
+      null,
+    );
+  });
+
+  it("keeps the full surface as prose when no side column exists", () => {
+    assert.equal(
+      zenLiveBotResizeLaneAtClientX({
+        clientX: 10,
+        surfaceLeft: 0,
+        surfaceWidth: 1000,
+        proseWidth: 1200,
+      }),
+      null,
+    );
+  });
+});
+
+describe("resizeZenLiveBotAvatarFromWheel", () => {
+  it("grows upward scrolls and shrinks downward scrolls smoothly", () => {
+    assert.ok(
+      resizeZenLiveBotAvatarFromWheel({
+        currentSizePx: 190,
+        wheelDeltaY: -80,
+        minSizePx: 118,
+        maxSizePx: 300,
+      }) > 190,
+    );
+    assert.ok(
+      resizeZenLiveBotAvatarFromWheel({
+        currentSizePx: 190,
+        wheelDeltaY: 80,
+        minSizePx: 118,
+        maxSizePx: 300,
+      }) < 190,
+    );
+  });
+
+  it("clamps inertial wheel motion to the authored size range", () => {
+    assert.equal(
+      resizeZenLiveBotAvatarFromWheel({
+        currentSizePx: 299,
+        wheelDeltaY: -10_000,
+        minSizePx: 118,
+        maxSizePx: 300,
+      }),
+      300,
+    );
+    assert.equal(
+      resizeZenLiveBotAvatarFromWheel({
+        currentSizePx: 119,
+        wheelDeltaY: 10_000,
+        minSizePx: 118,
+        maxSizePx: 300,
+      }),
+      118,
+    );
   });
 });
 

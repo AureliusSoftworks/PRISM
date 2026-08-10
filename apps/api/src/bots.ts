@@ -301,8 +301,8 @@ export function deleteBot(
       "UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id = ?"
     ).run(userId, botId);
     db.prepare(
-      "DELETE FROM memories WHERE user_id = ? AND bot_id = ? AND COALESCE(source, 'direct') != 'about_you'"
-    ).run(userId, botId);
+      "DELETE FROM memories WHERE user_id = ? AND (bot_id = ? OR target_bot_id = ?) AND COALESCE(source, 'direct') != 'about_you'"
+    ).run(userId, botId, botId);
     db.prepare(
       "DELETE FROM bot_relationships WHERE user_id = ? AND (source_bot_id = ? OR target_bot_id = ?)"
     ).run(userId, botId, botId);
@@ -357,9 +357,9 @@ export function deleteBots(
     db.prepare(
       `DELETE FROM memories
        WHERE user_id = ?
-         AND bot_id IN (${placeholders})
+         AND (bot_id IN (${placeholders}) OR target_bot_id IN (${placeholders}))
          AND COALESCE(source, 'direct') != 'about_you'`
-    ).run(userId, ...ids);
+    ).run(userId, ...ids, ...ids);
     db.prepare(
       `DELETE FROM bot_relationships
        WHERE user_id = ?
@@ -430,9 +430,9 @@ export function deleteAllBots(
     db.prepare(
       `DELETE FROM memories
        WHERE user_id = ?
-         AND bot_id IN (${placeholders})
+         AND (bot_id IN (${placeholders}) OR target_bot_id IN (${placeholders}))
          AND COALESCE(source, 'direct') != 'about_you'`
-    ).run(userId, ...ids);
+    ).run(userId, ...ids, ...ids);
     db.prepare(
       `DELETE FROM bot_relationships
        WHERE user_id = ?
@@ -592,9 +592,14 @@ export function deleteSelectedBots(
     db.prepare(
       `DELETE FROM memories
        WHERE user_id = ?
-         AND bot_id IN (${deletablePlaceholders})
+         AND (bot_id IN (${deletablePlaceholders}) OR target_bot_id IN (${deletablePlaceholders}))
          AND COALESCE(source, 'direct') != 'about_you'`
-    ).run(userId, ...deletableIds);
+    ).run(userId, ...deletableIds, ...deletableIds);
+    db.prepare(
+      `DELETE FROM bot_relationships
+       WHERE user_id = ?
+         AND (source_bot_id IN (${deletablePlaceholders}) OR target_bot_id IN (${deletablePlaceholders}))`
+    ).run(userId, ...deletableIds, ...deletableIds);
     db.prepare(
       `DELETE FROM bots WHERE user_id = ? AND id IN (${deletablePlaceholders})`
     ).run(userId, ...deletableIds);

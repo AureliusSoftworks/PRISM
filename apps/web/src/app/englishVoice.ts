@@ -38,6 +38,7 @@ import {
   replayAudioMasterCaptureActive,
   routeAudioElementToPrismOutput,
 } from "./replayAudioMasterCapture.ts";
+import { publishBotVoiceLightLevel } from "./voiceLightEnvelope.ts";
 import { localVocalActionWave } from "./localVocalActions.ts";
 
 export interface EnglishVoicePostProcessing {
@@ -387,13 +388,41 @@ let activeMediaFadeTimer: number | null = null;
 let activeMediaResolve: (() => void) | null = null;
 const mediaOutputCleanup = new WeakMap<HTMLMediaElement, () => void>();
 
-function routeEnglishMediaOutput(audio: HTMLMediaElement): void {
+function routeEnglishMediaOutput(
+  audio: HTMLMediaElement,
+  lifecycle?: VoicePlaybackLifecycle,
+): void {
   if (mediaOutputCleanup.has(audio)) return;
-  const cleanup = routeAudioElementToPrismOutput(audio);
+  const onLevel = lifecycle?.onLevel || lifecycle?.voiceLightTarget
+    ? (level: number) => {
+        if (lifecycle?.voiceLightTarget) {
+          publishBotVoiceLightLevel(lifecycle.voiceLightTarget, level);
+        }
+        lifecycle?.onLevel?.(level);
+      }
+    : undefined;
+  const cleanup = routeAudioElementToPrismOutput(audio, { onLevel });
   if (!cleanup && replayAudioMasterCaptureActive()) {
     throw new Error("English voice could not enter the faithful session mix.");
   }
-  if (cleanup) mediaOutputCleanup.set(audio, cleanup);
+  if (cleanup) {
+    mediaOutputCleanup.set(audio, cleanup);
+  } else if (onLevel) {
+    let active = true;
+    audio.addEventListener("playing", () => {
+      if (active) onLevel(0.22);
+    });
+    audio.addEventListener("ended", () => {
+      if (!active) return;
+      active = false;
+      onLevel(0);
+    });
+    mediaOutputCleanup.set(audio, () => {
+      if (!active) return;
+      active = false;
+      onLevel(0);
+    });
+  }
 }
 
 function englishMediaOutputLatencyMs(): number {
@@ -589,7 +618,7 @@ async function playBytesWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
-  routeEnglishMediaOutput(audio);
+  routeEnglishMediaOutput(audio, lifecycle);
 
   await new Promise<void>((resolve, reject) => {
     let settled = false;
@@ -790,7 +819,7 @@ async function playStreamingResponseWithMedia(
   audio.preservesPitch = true;
   activeMedia = audio;
   activeMediaUrl = url;
-  routeEnglishMediaOutput(audio);
+  routeEnglishMediaOutput(audio, lifecycle);
 
   const reader = body.getReader();
   await new Promise<void>((resolve, reject) => {

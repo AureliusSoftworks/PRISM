@@ -7,6 +7,7 @@ import {
   debateActiveDurationLabel,
   debateAudioEnabled,
   debateEvidenceFromMarkdownHref,
+  debateEventCanOwnIdleCamera,
   debateEvidenceUrlTransform,
   debateEventSpokenLineDurationMs,
   debateGavelAudioEnabled,
@@ -14,6 +15,7 @@ import {
   debateInitialProceedingsCursor,
   debateAdoptProceedingsCursor,
   debateInterruptedSpeechCaption,
+  debateRecessGalleryPhase,
   debateResumeFloorReplayEvents,
   debateWatchElapsedMs,
   debateMarkdownSource,
@@ -142,7 +144,7 @@ describe("Debate live presentation", () => {
     assert.equal(debateInterruptedSpeechCaption("   "), "—");
   });
 
-  it("keeps a setting-independent duration for every spoken line", () => {
+  it("keeps a setting-independent duration for spoken and held-silence lines", () => {
     const event = {
       version: 1 as const,
       id: "spoken-line",
@@ -168,7 +170,7 @@ describe("Debate live presentation", () => {
     );
     assert.equal(
       debateEventSpokenLineDurationMs({ ...event, kind: "silence" }),
-      null,
+      900,
     );
   });
 
@@ -439,15 +441,109 @@ describe("Debate live presentation", () => {
       event("intro", 0, "intro"),
       event("held", 1, "opening_for"),
       event("prior-resume", 2, "resume", "judge_gavel"),
-      event("unheard-floor", 3, "opening_against"),
-      event("return-pause", 4, "pause"),
-      event("current-resume", 5, "resume", "judge_gavel"),
-      event("audience-order", 6, "audience_order", "judge_gavel"),
+      event("heard-recess-request", 3, "participant_recess_request"),
+      event("unheard-floor", 4, "opening_against"),
+      event("return-pause", 5, "pause"),
+      event("current-resume", 6, "resume", "judge_gavel"),
+      event("audience-order", 7, "audience_order", "judge_gavel"),
     ];
 
     assert.deepEqual(
       debateResumeFloorReplayEvents(events, 1).map(({ id }) => id),
       ["intro", "held", "unheard-floor", "audience-order"],
+    );
+  });
+
+  it("keeps repeated recess audio causal through one resume ceremony", () => {
+    const phase = (
+      overrides: Partial<Parameters<typeof debateRecessGalleryPhase>[0]>,
+    ) =>
+      debateRecessGalleryPhase({
+        sessionId: "debate-resume",
+        status: "paused",
+        presenting: false,
+        resumeCeremonySessionId: null,
+        gavelArmed: false,
+        audienceOrderActive: false,
+        audienceOrderReturning: false,
+        juryCameraVisible: false,
+        ...overrides,
+      });
+
+    for (let cycle = 0; cycle < 3; cycle += 1) {
+      assert.deepEqual(
+        [
+          phase({}),
+          phase({
+            resumeCeremonySessionId: "debate-resume",
+            audienceOrderActive: true,
+          }),
+          phase({
+            resumeCeremonySessionId: "debate-resume",
+            audienceOrderActive: true,
+            audienceOrderReturning: true,
+          }),
+          phase({
+            status: "live",
+            presenting: true,
+          }),
+        ],
+        ["murmur", "order", "hush", null],
+      );
+    }
+  });
+
+  it("does not hush a recess announcement before its gavel", () => {
+    const phase = (gavelArmed: boolean) =>
+      debateRecessGalleryPhase({
+        sessionId: "debate-pause",
+        status: "paused",
+        presenting: true,
+        resumeCeremonySessionId: null,
+        gavelArmed,
+        audienceOrderActive: false,
+        audienceOrderReturning: false,
+        juryCameraVisible: false,
+      });
+
+    assert.equal(phase(false), "murmur");
+    assert.equal(phase(true), "hush");
+  });
+
+  it("does not let completed recess housekeeping reclaim the idle camera", () => {
+    const event = (
+      kind: "speech" | "judge_gavel" | "ballot",
+      stepKey: string,
+      speakerKind: "advocate" | "moderator" | "juror",
+    ) => ({ kind, stepKey, speakerKind });
+
+    assert.equal(
+      debateEventCanOwnIdleCamera(
+        event("judge_gavel", "resume", "moderator"),
+        false,
+      ),
+      false,
+    );
+    assert.equal(
+      debateEventCanOwnIdleCamera(
+        event("speech", "rebuttal_against", "advocate"),
+        false,
+      ),
+      true,
+    );
+    assert.equal(
+      debateEventCanOwnIdleCamera(
+        event("ballot", "jury_ballot_1", "juror"),
+        false,
+      ),
+      false,
+    );
+    assert.equal(
+      debateEventCanOwnIdleCamera(
+        event("ballot", "jury_ballot_1", "juror"),
+        true,
+      ),
+      true,
     );
   });
 

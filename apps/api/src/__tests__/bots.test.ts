@@ -404,6 +404,7 @@ function createTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       conversation_id TEXT,
       bot_id TEXT,
+      target_bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -551,6 +552,35 @@ describe("deleteBot", () => {
       rows.map((row) => row.id),
       ["memory-global", "memory-other-bot", "memory-other-user"]
     );
+  });
+
+  it("deletes directed pair memories when the deleted bot is either participant", () => {
+    const db = createTestDb();
+    seedBot(db, "user-1", "bot-1");
+    seedBot(db, "user-1", "bot-2");
+    seedBot(db, "user-1", "bot-3");
+    seedMemory(db, "user-1", "bot-1", "pair-source");
+    seedMemory(db, "user-1", "bot-2", "pair-target");
+    seedMemory(db, "user-1", "bot-2", "pair-unrelated");
+    db.prepare("UPDATE memories SET target_bot_id = ? WHERE id = ?").run(
+      "bot-2",
+      "pair-source",
+    );
+    db.prepare("UPDATE memories SET target_bot_id = ? WHERE id = ?").run(
+      "bot-1",
+      "pair-target",
+    );
+    db.prepare("UPDATE memories SET target_bot_id = ? WHERE id = ?").run(
+      "bot-3",
+      "pair-unrelated",
+    );
+
+    deleteBot(db, "user-1", "bot-1");
+
+    const rows = db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{
+      id: string;
+    }>;
+    assert.deepEqual(rows.map((row) => row.id), ["pair-unrelated"]);
   });
 
   it("deletes directed relationship rows involving the deleted bot", () => {

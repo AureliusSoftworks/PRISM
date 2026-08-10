@@ -79,6 +79,18 @@ test("face placement is wide and blink geometry links to eyes by default", () =>
     assert.ok(sharedAvatarSource.includes(constant), `missing ${constant}`);
   }
   assert.match(pageSource, /function botAvatarBlinkGeometryTracksEyes/);
+  assert.match(
+    pageSource,
+    /return botFaceBlinkGeometryFollowsEyesByDefault\(args\);/,
+  );
+  assert.match(
+    sharedAvatarSource,
+    /DEFAULT_BOT_FACE_BLINK_SCALE = 0\.75/,
+  );
+  assert.match(
+    pageSource,
+    /onBlinkScaleChange\(botFaceBlinkScaleForEyeScale\(next\)\)/,
+  );
   assert.match(pageSource, /data-blink-eye-link="true"/);
   assert.match(pageSource, /aria-label="Link blink geometry to eyes"/);
   assert.match(

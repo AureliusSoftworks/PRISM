@@ -32,6 +32,11 @@ describe("bot group canvas filtering", () => {
       /if \(activeBotLibraryGroupFilter\) \{[\s\S]*?openBotLibraryGroupBotContextMenu/,
     );
     assert.equal(pageSource.match(/openCanvasBotContextMenu\(/g)?.length, 2);
+    assert.match(
+      pageSource,
+      /const focusedBotLibraryGroup = activeBotLibraryGroupFilter/,
+    );
+    assert.doesNotMatch(pageSource, /activeBotGroupRoomFilter/);
   });
 
   it("clears a selected Chat persona when switching groups so the group hero can render", () => {

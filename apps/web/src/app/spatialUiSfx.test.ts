@@ -3,6 +3,7 @@ import { readFileSync, statSync } from "node:fs";
 import test from "node:test";
 
 import {
+  SPATIAL_UI_SFX_CONFIG,
   SPATIAL_UI_SFX_SOURCES,
   connectSpatialUiSfxAudio,
   spatialUiSfxCueForControl,
@@ -12,10 +13,22 @@ import {
 
 test("ships a varied tactile UI library with real local assets", () => {
   const sources = Object.values(SPATIAL_UI_SFX_SOURCES).flat();
-  assert.equal(sources.length, 20);
-  assert.equal(new Set(sources).size, 20);
+  assert.equal(sources.length, 22);
+  assert.equal(new Set(sources).size, 22);
   assert.equal(SPATIAL_UI_SFX_SOURCES["bot-hover"].length, 4);
   assert.equal(SPATIAL_UI_SFX_SOURCES["bot-select"].length, 3);
+  assert.deepEqual(SPATIAL_UI_SFX_SOURCES["turbo-on"], [
+    "/audio/ui-asmr/turbo-flame-ignition-01.mp3",
+  ]);
+  assert.deepEqual(SPATIAL_UI_SFX_SOURCES["turbo-off"], [
+    "/audio/ui-asmr/turbo-steam-extinguish-01.mp3",
+  ]);
+  assert.equal(SPATIAL_UI_SFX_CONFIG["turbo-on"].volume, 0.08);
+  assert.equal(SPATIAL_UI_SFX_CONFIG["turbo-off"].volume, 0.02);
+  assert.ok(
+    SPATIAL_UI_SFX_CONFIG["turbo-off"].volume <
+      SPATIAL_UI_SFX_CONFIG["turbo-on"].volume,
+  );
 
   for (const source of sources) {
     const asset = statSync(new URL(`../../public${source}`, import.meta.url));
@@ -31,7 +44,7 @@ test("registers the spatial UI layer and identifies every bot-card surface", () 
   );
   assert.match(
     pageSource,
-    /import \{ registerSpatialUiSfx \} from "\.\/spatialUiSfx";/u,
+    /import \{ playSpatialUiSfx, registerSpatialUiSfx \} from "\.\/spatialUiSfx";/u,
   );
   assert.match(
     pageSource,
@@ -41,6 +54,10 @@ test("registers the spatial UI layer and identifies every bot-card surface", () 
   assert.match(pageSource, /data-marketplace-bot-card="true"/u);
   assert.match(pageSource, /data-bot-id=\{b\.id\}/u);
   assert.match(pageSource, /data-bot-id=\{bot\.id\}/u);
+  assert.match(
+    pageSource,
+    /playSpatialUiSfx\(\s*nextTurboEnabled \? "turbo-on" : "turbo-off",\s*\{ anchor: event\.currentTarget \},\s*\)/u,
+  );
 });
 
 test("maps screen position to a restrained but clearly directional stereo pan", () => {
@@ -92,6 +109,14 @@ test("classifies high-value controls into restrained semantic cue families", () 
   assert.equal(
     spatialUiSfxCueForControl({ inputType: "checkbox" }),
     "toggle",
+  );
+  assert.equal(
+    spatialUiSfxCueForControl({ explicitCue: "turbo-on" }),
+    "turbo-on",
+  );
+  assert.equal(
+    spatialUiSfxCueForControl({ explicitCue: "turbo-off" }),
+    "turbo-off",
   );
   assert.equal(
     spatialUiSfxCueForControl({ label: "Save bot" }),

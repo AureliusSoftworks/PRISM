@@ -7,6 +7,7 @@ import {
   getThreadCompactionDebug,
   getLatestThreadDisplaySummary,
   getLatestThreadSummary,
+  summarizeAndStoreMemories,
   summarizeSandboxBotStatus,
   summarizeThreadCompact,
 } from "../memory-summarizer.ts";
@@ -73,6 +74,7 @@ function createTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       conversation_id TEXT,
       bot_id TEXT,
+      target_bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -375,6 +377,85 @@ describe("summarizeThreadCompact", () => {
     );
     const displaySummary = getLatestThreadDisplaySummary(db, "user-1", "conv-1", "chat");
     assert.equal(displaySummary, "chat-mode-summary");
+  });
+
+  it("drops a compaction whose assistant source was interrupted in flight", async () => {
+    const db = createTestDb();
+    seedMessages(db, "user-1", "conv-1", RECENT_WINDOW_SIZE + 2, Date.now());
+    let resolveSummary: ((value: string) => void) | null = null;
+    const provider: LlmProvider = {
+      name: "local",
+      generateResponse: async () =>
+        new Promise<string>((resolve) => {
+          resolveSummary = resolve;
+        }),
+      async embedText(): Promise<number[]> {
+        throw new Error("stale compaction must never embed");
+      },
+    };
+
+    const pending = summarizeThreadCompact(
+      db,
+      provider,
+      "user-1",
+      "conv-1",
+    );
+    assert.ok(resolveSummary, "the compaction provider should be in flight");
+    db.prepare(
+      "UPDATE messages SET content = ? WHERE id = ? AND user_id = ?",
+    ).run("The quick brow—", "msg-conv-1-1", "user-1");
+    resolveSummary("This summary still contains the unheard suffix.");
+
+    const result = await pending;
+    assert.equal(result.triggered, false);
+    assert.equal(
+      (
+        db.prepare("SELECT COUNT(*) AS n FROM memory_summaries").get() as {
+          n: number;
+        }
+      ).n,
+      0,
+    );
+  });
+});
+
+describe("summarizeAndStoreMemories", () => {
+  it("drops cross-thread facts when their source transcript changes in flight", async () => {
+    const db = createTestDb();
+    seedMessages(db, "user-1", "conv-1", 2, Date.now());
+    let resolveSummary: ((value: string) => void) | null = null;
+    const provider: LlmProvider = {
+      name: "local",
+      generateResponse: async () =>
+        new Promise<string>((resolve) => {
+          resolveSummary = resolve;
+        }),
+      async embedText(): Promise<number[]> {
+        throw new Error("stale facts must never embed");
+      },
+    };
+
+    const pending = summarizeAndStoreMemories(
+      db,
+      provider,
+      "user-1",
+      "conv-1",
+    );
+    assert.ok(resolveSummary, "the fact summarizer should be in flight");
+    db.prepare(
+      "UPDATE messages SET content = ? WHERE id = ? AND user_id = ?",
+    ).run("The quick brow—", "msg-conv-1-1", "user-1");
+    resolveSummary("- The unheard suffix contained a supposed preference.");
+
+    await pending;
+    assert.equal(
+      (
+        db.prepare("SELECT COUNT(*) AS n FROM memory_summaries").get() as {
+          n: number;
+        }
+      ).n,
+      0,
+    );
   });
 });
 

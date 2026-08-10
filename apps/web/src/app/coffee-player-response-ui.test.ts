@@ -140,20 +140,25 @@ describe("Coffee player response UI wiring", () => {
   });
 
   it("starts the speaking reveal only from real voice playback start", () => {
+    const botVoice = pageSource.slice(
+      pageSource.indexOf("const startCoffeeVoiceForReveal = async"),
+      pageSource.indexOf("const startCoffeePlayerVoiceForReveal = async"),
+    );
     assert.match(
-      pageSource,
+      botVoice,
       /const resolvedDurationMs =\s*coffeeVoiceStartedDurationMs\(durationMs, fallbackDuration\) \?\?\s*Math\.max\(1, fallbackDuration\);/,
     );
     assert.match(
-      pageSource,
+      botVoice,
       /setCoffeeLiveAvatarSpeech\(\{[\s\S]*?durationMs: resolvedDurationMs,[\s\S]*?\}\);[\s\S]*?settle\(resolvedDurationMs\)/,
     );
-    assert.match(
-      pageSource,
-      /window\.setTimeout\(\(\) => \{[\s\S]*?if \(settled\) return;[\s\S]*?controller\.abort\(\);[\s\S]*?releaseCoffeeVoicePlayback\(\);[\s\S]*?settle\(null\);/,
+    assert.doesNotMatch(
+      botVoice,
+      /revealVoiceToken\.valid = false|\}, 1800\);/,
+      "slow valid synthesis must stay eligible to become the audible reveal",
     );
     assert.doesNotMatch(
-      pageSource,
+      botVoice,
       /resolve\(durationMs && durationMs > 0 \? durationMs : fallbackDuration\)/,
     );
   });

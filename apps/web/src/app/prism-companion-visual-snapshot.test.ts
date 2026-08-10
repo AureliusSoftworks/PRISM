@@ -2,12 +2,20 @@ import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 
 import {
+  getPrismCompanionVisualServerSnapshot,
   getPrismCompanionVisualSnapshot,
   publishPrismCompanionVisualSnapshot,
   subscribePrismCompanionVisualSnapshot,
 } from "./prismCompanionVisualSnapshot.ts";
 
 describe("Prism companion visual handoff snapshot", () => {
+  it("keeps a stable server snapshot for hydration", () => {
+    assert.strictEqual(
+      getPrismCompanionVisualServerSnapshot(),
+      getPrismCompanionVisualServerSnapshot(),
+    );
+  });
+
   it("publishes a clamped presentation-only position", () => {
     let publications = 0;
     const unsubscribe = subscribePrismCompanionVisualSnapshot(() => {

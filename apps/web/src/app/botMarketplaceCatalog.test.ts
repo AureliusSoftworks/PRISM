@@ -832,6 +832,19 @@ describe("bot marketplace static catalog", () => {
     }
   });
 
+  it("uses the blank default blink except for Darth Vader", () => {
+    const manifest = normalizeBotMarketplaceManifest(
+      readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))
+    );
+
+    assert.equal(DEFAULT_BOT_FACE_BLINK_BAR, " ");
+    for (const entry of manifest.bots) {
+      const bundle = readBotBundle(path.join(publicRoot, entry.bundlePath));
+      const expectedBlink = entry.name === "Darth Vader" ? "none" : " ";
+      assert.equal(bundle.botJson.bot.faceBlinkBar, expectedBlink, entry.name);
+    }
+  });
+
   it("includes expanded first-party marketplace bot packs", () => {
     const manifest = normalizeBotMarketplaceManifest(
       readJsonFile(path.join(publicRoot, "bot-marketplace/manifest.json"))

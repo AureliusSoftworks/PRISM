@@ -28,7 +28,7 @@ import { rewindConversation } from "../conversations.ts";
 import { persistMemoryCandidates, restoreMemory } from "../memory.ts";
 import { RECENT_WINDOW_SIZE, summarizeThreadCompact } from "../memory-summarizer.ts";
 import { fallbackEmbedding, LocalOllamaProvider, selectProvider, type LlmProvider } from "../providers.ts";
-import { botPowerSourceHashV1, buildBotFalseNameSeedV1, parseStoredAssistantToolPayload, pickBotFalseNameFromPoolV1 } from "@localai/shared";
+import { botPowerSourceHashV1, buildBotFalseNameSeedV1, parseStoredAssistantToolPayload, pickBotFalseNameFromPoolV1, type AssistantInterruptionReactionInput } from "@localai/shared";
 import {
   createZenSessionMemoryCheckpoint,
   listZenSessionMemories,
@@ -99,6 +99,7 @@ function createChatTestDb(): DatabaseSync {
       model TEXT,
       bot_id TEXT,
       tool_payload TEXT,
+      coffee_audience_bot_ids TEXT,
       created_at TEXT NOT NULL
     );
     CREATE TABLE bots (
@@ -159,6 +160,7 @@ function createChatTestDb(): DatabaseSync {
       user_id TEXT NOT NULL,
       conversation_id TEXT,
       bot_id TEXT,
+      target_bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -450,6 +452,26 @@ describe("Coffee continuity context for private chats", () => {
         "Session synopsis: The table ended and the system noted your account display name is admin.",
       updatedAt: "2026-01-07T00:00:00.000Z",
     });
+    seedCoffeeContinuityConversation(db, {
+      id: "coffee-inaudible",
+      botIds: ["bot-1", "bot-2"],
+      meetingSummary: "A line bot-1 could not hear changed the whole table.",
+      updatedAt: "2026-01-08T00:00:00.000Z",
+    });
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, bot_id,
+          coffee_audience_bot_ids, created_at)
+       VALUES (?, ?, ?, 'assistant', ?, ?, ?, ?)`
+    ).run(
+      "coffee-inaudible-line",
+      "coffee-inaudible",
+      "user-1",
+      "Private words.",
+      "bot-2",
+      JSON.stringify(["bot-2"]),
+      "2026-01-08T00:00:00.000Z"
+    );
 
     const contexts = loadRecentCoffeeContinuityContexts({
       db,
@@ -464,6 +486,17 @@ describe("Coffee continuity context for private chats", () => {
     assert.match(contexts[0]?.summary ?? "", /crab meat poll needed better evidence/);
     assert.doesNotMatch(contexts[0]?.summary ?? "", /^Session synopsis:/);
     assert.match(contexts[1]?.summary ?? "", /lighting made everyone suspicious/);
+
+    const withoutCurrentSession = loadRecentCoffeeContinuityContexts({
+      db,
+      userId: "user-1",
+      botId: "bot-1",
+      excludeConversationId: "coffee-new",
+    });
+    assert.deepEqual(
+      withoutCurrentSession.map((context) => context.conversationId),
+      ["coffee-mid", "coffee-old"]
+    );
   });
 
   it("injects recent Coffee summaries into private bot chat prompts", async () => {
@@ -1110,6 +1143,22 @@ describe("Chat Qdrant memory summaries", () => {
 
   it("injects Qdrant summary hits into Chat prompts and Psychic continuity", async () => {
     const db = createChatTestDb();
+    db.prepare(
+      `INSERT INTO memory_summaries
+         (id, user_id, conversation_id, summary, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(
+      "qdrant-chat-fact-1",
+      "user-1",
+      "canonical-memory-conversation",
+      JSON.stringify({
+        v: 1,
+        kind: "chat_facts",
+        mode: "chat",
+        summary: "QDRANT_CHAT_FACT: user collects vintage radios.",
+      }),
+      "2026-08-09T00:00:00.000Z",
+    );
     const qdrantSearches: string[] = [];
     const chatBodies: Array<{
       messages?: Array<{ role?: string; content: string }>;
@@ -2684,7 +2733,7 @@ describe("processChatMessage Psychic planning", () => {
     await flushBackgroundTitleJobs();
   });
 
-  it("simulates effort with the selected online non-reasoning model", async () => {
+  it("does not simulate effort with an online non-reasoning model", async () => {
     const db = createChatTestDb();
     const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -2726,28 +2775,30 @@ describe("processChatMessage Psychic planning", () => {
       }
     );
 
-    assert.equal(requests.length, 4);
+    assert.equal(requests.length, 1);
     assert.equal(
       requests.filter(({ body }) =>
         /Prism's (?:user-readable Psychic planning pass|private)/u.test(
           JSON.stringify(body)
         )
       ).length,
-      3,
+      0,
     );
     assert.ok(
       requests.every(({ body }) => body.model === "gpt-4o"),
-      "every simulated and visible pass should use the selected model",
+      "the visible turn should use the selected model",
     );
     assert.equal(
       result.conversation.messages.find((message) => message.role === "assistant")?.content,
       "Online answer."
     );
-    assert.equal(result.psychicDebug?.simulated, true);
-    assert.equal(result.psychicDebug?.passCount, 3);
+    assert.equal(result.psychicDebug, undefined);
     assert.ok(
-      !result.backendEvents?.some(
-        (event) => event.message === "Simulated effort skipped",
+      result.backendEvents?.some(
+        (event) =>
+          event.message === "Simulated effort skipped" &&
+          event.detail?.includes("simulated_effort_local_only") &&
+          event.detail?.includes("provider=openai"),
       ),
     );
   });
@@ -2798,7 +2849,46 @@ describe("processChatMessage Psychic planning", () => {
     );
   });
 
-  it("keeps online Chat Psychic summary-only while simulated effort stays private", async () => {
+  it("applies the saved Turbo preference to the concrete online chat request", async () => {
+    const db = createChatTestDb();
+    let body: Record<string, unknown> = {};
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body ?? "{}")) as Record<string, unknown>;
+      return new Response(
+        JSON.stringify({
+          choices: [{ message: { content: "Turbo answer." }, finish_reason: "stop" }],
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Answer quickly.",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "openai",
+        openAiApiKey: "sk-test",
+        autoMemory: false,
+        incognito: true,
+        mode: "zen",
+        botOverrides: { model: "gpt-5.6-sol", reasoningEffort: "low" },
+        resolveTurboMode: (provider, model) =>
+          provider === "openai" && model === "gpt-5.6-sol",
+      },
+    );
+
+    assert.equal(body.model, "gpt-5.6-sol");
+    assert.equal(body.service_tier, "priority");
+    assert.equal(
+      result.conversation.messages.find((message) => message.role === "assistant")
+        ?.turbo,
+      true,
+    );
+  });
+
+  it("keeps online Chat Psychic to one public pass without simulated refinements", async () => {
     const db = createChatTestDb();
     const requests: Array<{ body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -2843,9 +2933,9 @@ describe("processChatMessage Psychic planning", () => {
       }
     );
 
-    assert.equal(requests.length, 4);
-    assert.equal(result.psychicDebug?.simulated, true);
-    assert.equal(result.psychicDebug?.passCount, 3);
+    assert.equal(requests.length, 2);
+    assert.equal(result.psychicDebug?.simulated, false);
+    assert.equal(result.psychicDebug?.passCount, 1);
     assert.match(result.psychicDebug?.scratchpad ?? "", /private online Chat plan/u);
     const userMessage = result.conversation.messages.find(
       (message) => message.role === "user"
@@ -2856,18 +2946,18 @@ describe("processChatMessage Psychic planning", () => {
     );
     assert.deepEqual(
       userMessage?.psychicThought?.passes?.map((pass) => pass.stage),
-      ["plan", "draft", "audit"],
+      ["plan"],
     );
     assert.equal(
       new Set(
         userMessage?.psychicThought?.passes?.map((pass) => pass.summary) ?? [],
       ).size,
-      3,
+      1,
     );
     assert.doesNotMatch(JSON.stringify(userMessage), /private online Chat plan/u);
   });
 
-  it("uses the deep simulated ladder when the experimental setting is on", async () => {
+  it("does not apply the deep simulated ladder to an online model", async () => {
     const db = createChatTestDb();
     const requests: Array<{ body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -2912,19 +3002,19 @@ describe("processChatMessage Psychic planning", () => {
       },
     );
 
-    assert.equal(result.psychicDebug?.simulated, true);
-    assert.equal(result.psychicDebug?.passCount, 3);
+    assert.equal(result.psychicDebug?.simulated, false);
+    assert.equal(result.psychicDebug?.passCount, 1);
     assert.deepEqual(
       result.psychicDebug?.passes?.map((pass) => pass.name),
-      ["plan", "alternatives", "draft"],
+      ["plan"],
     );
-    assert.equal(requests.length, 4);
+    assert.equal(requests.length, 2);
     const userMessage = result.conversation.messages.find(
       (message) => message.role === "user",
     );
     assert.deepEqual(
       userMessage?.psychicThought?.passes?.map((pass) => pass.stage),
-      ["plan", "alternatives", "draft"],
+      ["plan"],
     );
   });
 
@@ -7696,6 +7786,68 @@ describe("processChatMessage auto-generated titles", () => {
     assert.equal(titleCalls, 1);
   });
 
+  it("does not apply an in-flight title inferred from an interrupted suffix", async () => {
+    const db = createChatTestDb();
+    let titleRequestStarted = false;
+    let resolveTitleRequest: ((response: Response) => void) | null = null;
+    globalThis.fetch = (async (_input: string | URL | Request, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body ?? "{}")) as {
+        messages?: Array<{ content: string }>;
+      };
+      const prompt = body.messages?.at(-1)?.content ?? "";
+      if (prompt.includes('"title"')) {
+        titleRequestStarted = true;
+        return new Promise<Response>((resolve) => {
+          resolveTitleRequest = resolve;
+        });
+      }
+      return new Response(
+        JSON.stringify({
+          message: {
+            content:
+              "The quick brown fox continues into an unheard title-worthy suffix.",
+          },
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      );
+    }) as typeof fetch;
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Tell me a pangram story.",
+      Buffer.alloc(32, 7),
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        incognito: false,
+        mode: "sandbox",
+      },
+    );
+    await waitUntil("background title request", () => titleRequestStarted);
+    const sourceAssistant = db
+      .prepare(
+        "SELECT id FROM messages WHERE conversation_id = ? AND user_id = ? AND role = 'assistant'",
+      )
+      .get(result.conversation.id, "user-1") as { id: string };
+    db.prepare(
+      "UPDATE messages SET content = ? WHERE id = ? AND user_id = ?",
+    ).run("The quick brow—", sourceAssistant.id, "user-1");
+    assert.ok(resolveTitleRequest);
+    resolveTitleRequest(
+      new Response(
+        JSON.stringify({ message: { content: '{"title":"Unheard Fox Ending"}' } }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+    await flushBackgroundTitleJobs();
+
+    const row = db
+      .prepare("SELECT title FROM conversations WHERE id = ?")
+      .get(result.conversation.id) as { title: string };
+    assert.equal(row.title, "Tell me a pangram story.");
+  });
+
   it("does not re-title an existing conversation on later replies", async () => {
     const db = createChatTestDb();
     let titleCalls = 0;
@@ -10134,6 +10286,186 @@ describe("buildAskQuestionFallback", () => {
         "As we begin, would you prefer rumor or history?"
       )?.options.map((option) => option.label),
       ["Rumor", "History"]
+    );
+  });
+});
+
+describe("processChatMessage Shh reactions", () => {
+  it("persists exactly one assistant-only in-character reaction after the canonical cutoff", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)",
+    ).run("bot-shh", "user-1", "Testy", "#b11f2b", "spark");
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at) VALUES (?, ?, ?, 'zen', ?, 0, ?, ?)",
+    ).run(
+      "conversation-shh",
+      "user-1",
+      "Cutoff",
+      "bot-shh",
+      "2026-08-09T12:00:00.000Z",
+      "2026-08-09T12:00:01.000Z",
+    );
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at) VALUES (?, ?, ?, ?, ?, 'local', 'test-model', ?, ?)",
+    ).run(
+      "user-before-shh",
+      "conversation-shh",
+      "user-1",
+      "user",
+      "Tell me the sentence.",
+      "bot-shh",
+      "2026-08-09T12:00:00.000Z",
+    );
+    db.prepare(
+      "INSERT INTO messages (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at) VALUES (?, ?, ?, 'assistant', ?, 'local', 'test-model', ?, ?)",
+    ).run(
+      "assistant-cutoff",
+      "conversation-shh",
+      "user-1",
+      "The quick brow—",
+      "bot-shh",
+      "2026-08-09T12:00:01.000Z",
+    );
+    const calls = installChatFetchStub(
+      [
+        "Oh, all right. I'll stop.",
+        '{"askQuestion":{"prompt":"Continue?","choices":["Yes","No"]}}',
+        '{"sendGeneratedImage":{"prompt":"the hidden suffix"}}',
+        '{"webSearch":{"query":"the hidden suffix"}}',
+      ].join("\n"),
+    );
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: "bot-shh",
+        incognito: false,
+        mode: "zen",
+        botSystemPrompt: "You are Testy.",
+        starterPromptLabel: "Testy",
+        assistantInterruptionReaction: {
+          source: "shh",
+          activeBotId: "bot-shh",
+          assistantMessageId: "assistant-cutoff",
+          interruptedContent: "The quick brow—",
+          clientTurnId: "shh:assistant-cutoff:1",
+        },
+      },
+      "conversation-shh",
+    );
+
+    assert.deepEqual(
+      result.conversation.messages.map((message) => message.role),
+      ["user", "assistant", "assistant"],
+    );
+    assert.equal(result.conversation.messages.at(-1)?.botId, "bot-shh");
+    const reactionToolPayload = JSON.parse(
+      String(
+        (
+          db.prepare(
+            "SELECT tool_payload FROM messages WHERE conversation_id = ? AND role = 'assistant' ORDER BY created_at DESC, rowid DESC LIMIT 1",
+          ).get("conversation-shh") as { tool_payload: string }
+        ).tool_payload,
+      ),
+    ) as {
+      assistantInterruptionReaction?: AssistantInterruptionReactionInput;
+    };
+    assert.equal(
+      reactionToolPayload.assistantInterruptionReaction?.clientTurnId,
+      "shh:assistant-cutoff:1",
+    );
+    assert.equal(result.toolCalls, undefined);
+    assert.equal(result.pendingImageJob, undefined);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages WHERE role = 'user'").get() as { n: number }).n,
+      1,
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memories").get() as { n: number }).n,
+      0,
+    );
+    const reactionPrompt = calls
+      .flat()
+      .map((message) => message.content)
+      .join("\n");
+    assert.match(reactionPrompt, /canonical transcript ends at: "The quick brow—"/u);
+    assert.match(reactionPrompt, /No new user message was spoken or typed/u);
+    assert.match(reactionPrompt, /Do not continue, reconstruct, quote, or summarize any unheard suffix/u);
+  });
+
+  it("keeps private Shh reactions client-held with no user or memory writes", async () => {
+    const db = createChatTestDb();
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, glyph) VALUES (?, ?, ?, ?, ?)",
+    ).run("bot-private-shh", "user-1", "Quiet", "#5577aa", "moon");
+    installChatFetchStub("Mm. Message received.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "",
+      CHAT_TEST_USER_KEY,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: "bot-private-shh",
+        incognito: true,
+        mode: "chat",
+        botSystemPrompt: "You are Quiet.",
+        starterPromptLabel: "Quiet",
+        ephemeralMessages: [
+          {
+            id: "private-user",
+            role: "user",
+            content: "Keep talking.",
+            createdAt: "2026-08-09T12:00:00.000Z",
+            botId: "bot-private-shh",
+          },
+          {
+            id: "private-cutoff",
+            role: "assistant",
+            content: "I was just say—",
+            createdAt: "2026-08-09T12:00:01.000Z",
+            provider: "local",
+            model: "private-model",
+            botId: "bot-private-shh",
+          },
+        ],
+        assistantInterruptionReaction: {
+          source: "shh",
+          activeBotId: "bot-private-shh",
+          assistantMessageId: "private-cutoff",
+          interruptedContent: "I was just say—",
+          clientTurnId: "shh:private-cutoff:1",
+        },
+      },
+      "private-conversation-shh",
+    );
+
+    assert.equal(result.conversation.incognito, true);
+    assert.deepEqual(
+      result.conversation.messages.map((message) => message.role),
+      ["user", "assistant", "assistant"],
+    );
+    assert.equal(
+      result.conversation.messages.at(-1)?.assistantInterruptionReaction
+        ?.clientTurnId,
+      "shh:private-cutoff:1",
+    );
+    assert.equal(result.toolCalls, undefined);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM messages").get() as { n: number }).n,
+      0,
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS n FROM memories").get() as { n: number }).n,
+      0,
     );
   });
 });

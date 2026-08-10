@@ -6,8 +6,9 @@
   --companion-s: #2fd3e3;
   --companion-m: #7b5cff;
   position: fixed;
-  /* Above ordinary drawers, below modal/tutorial safety layers. */
-  z-index: 855;
+  /* Above ordinary drawers and Avatar Studio, below modal/tutorial safety
+     layers (which begin at 4000). */
+  z-index: 3055;
   width: 68px;
   height: 68px;
   transform: translate(-50%, -50%);
@@ -22,8 +23,8 @@
 }
 
 /* Home borrows the companion itself rather than painting a second emblem.
-   Its regular saved dock remains intact behind this presentation-only move. */
-.anchor[data-chat-home-orb-docked="true"],
+   Live dock coordinates must remain welded to the slot; only the release back
+   to the remembered floating position receives a handoff transition. */
 .anchor[data-chat-home-orb-returning="true"] {
   transition:
     left 380ms cubic-bezier(.2, .82, .2, 1),
@@ -35,7 +36,7 @@
   top: 0 !important;
   width: 28px;
   height: 28px;
-  z-index: 857;
+  z-index: 3057;
   pointer-events: none;
   transform: translate3d(0, 0, 0) translate(-50%, -50%);
   will-change: transform;
@@ -49,8 +50,9 @@
 }
 
 .anchor[data-wielding="true"] .conversation,
-.anchor[data-wielding="true"] .light,
+.anchor[data-wielding="true"] .focusOrb,
 .anchor[data-wielding="true"] .shortcut,
+.anchor[data-wielding="true"] .softJobChip,
 .anchor[data-wielding="true"] .refractGlyph {
   opacity: 0;
   pointer-events: none;
@@ -111,44 +113,55 @@
   position: fixed;
   inset: 0;
   z-index: 854;
-  background: rgba(3, 4, 8, 0);
+  background: transparent;
   opacity: 0;
   pointer-events: none;
-  backdrop-filter: blur(0) saturate(1) brightness(1);
-  -webkit-backdrop-filter: blur(0) saturate(1) brightness(1);
-  transition:
-    opacity 220ms ease,
-    background 260ms ease,
-    backdrop-filter 280ms ease,
-    -webkit-backdrop-filter 280ms ease;
-  will-change: opacity, backdrop-filter;
+  transition: opacity 180ms ease;
+  will-change: opacity;
 }
 
 .backdrop[data-open="true"] {
-  background: rgba(3, 4, 8, 0.24);
+  background: transparent;
   opacity: 1;
   pointer-events: auto;
-  backdrop-filter: blur(14px) saturate(0) brightness(0.78);
-  -webkit-backdrop-filter: blur(14px) saturate(0) brightness(0.78);
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
-.light {
-  position: fixed;
+.focusOrb {
+  --focus-orb-x: 34px;
+  --focus-orb-y: 34px;
+  position: absolute;
   z-index: -2;
-  width: min(68vw, 720px);
+  width: min(74vw, 760px);
   aspect-ratio: 1;
-  left: 34px;
-  top: 34px;
+  left: var(--focus-orb-x);
+  top: var(--focus-orb-y);
   border-radius: 50%;
-  opacity: 0.18;
-  transform: translate(-50%, -50%) scale(0.35);
-  background: radial-gradient(circle, #ffffff28 0 4%, #85ddff18 24%, #c47dff0c 45%, transparent 70%);
-  filter: blur(22px);
-  transition: opacity 420ms ease, transform 620ms cubic-bezier(.2,.8,.2,1);
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(.78);
+  background: radial-gradient(
+    circle,
+    #020307e8 0 24%,
+    #020307c7 38%,
+    #0203077a 55%,
+    #0203072e 68%,
+    transparent 79%
+  );
+  filter: blur(26px);
+  pointer-events: none;
+  transition:
+    opacity 260ms ease,
+    transform 360ms cubic-bezier(.2, .8, .2, 1);
 }
 
-.anchor[data-open="true"] .light {
-  opacity: 0.72;
+.anchor[data-dock="right"] .focusOrb { --focus-orb-x: -136px; }
+.anchor[data-dock="left"] .focusOrb { --focus-orb-x: 204px; }
+.anchor[data-vertical="above"] .focusOrb { --focus-orb-y: -104px; }
+.anchor[data-vertical="below"] .focusOrb { --focus-orb-y: 172px; }
+
+.anchor[data-open="true"] .focusOrb {
+  opacity: .96;
   transform: translate(-50%, -50%) scale(1);
 }
 
@@ -196,6 +209,79 @@
 
 .avatar:active { cursor: grabbing; }
 
+.anchor[data-session-note="true"] .avatar {
+  cursor: pointer;
+  filter: drop-shadow(0 12px 22px #0009);
+}
+
+.anchor[data-session-note="true"] .avatar::before {
+  inset: 5px;
+  opacity: .5;
+  filter: blur(7px);
+  animation-duration: 12s;
+}
+
+.sessionNotePlus {
+  position: relative;
+  z-index: 2;
+  width: 46px;
+  height: 46px;
+  display: grid;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, #fff 42%, transparent);
+  border-radius: 50%;
+  color: #fff;
+  background:
+    radial-gradient(circle at 34% 28%, #ffffff36, transparent 42%),
+    color-mix(in srgb, var(--bg-surface, #151311) 88%, transparent);
+  box-shadow:
+    inset 0 1px 0 #ffffff42,
+    inset 0 -8px 18px #0005,
+    0 0 20px color-mix(in srgb, var(--companion-s) 23%, transparent);
+  backdrop-filter: blur(15px) saturate(1.15);
+  -webkit-backdrop-filter: blur(15px) saturate(1.15);
+  transition:
+    transform 180ms cubic-bezier(.2, .82, .2, 1),
+    border-color 180ms ease,
+    box-shadow 180ms ease;
+}
+
+.sessionNotePlus svg {
+  width: 24px;
+  height: 24px;
+}
+
+.anchor[data-session-note="true"] .avatar:hover .sessionNotePlus,
+.anchor[data-session-note="true"] .avatar:focus-visible .sessionNotePlus,
+.anchor[data-session-note="true"][data-open="true"] .sessionNotePlus {
+  border-color: color-mix(in srgb, var(--companion-s) 56%, #fff);
+  box-shadow:
+    inset 0 1px 0 #ffffff52,
+    inset 0 -8px 18px #0005,
+    0 0 26px color-mix(in srgb, var(--companion-s) 42%, transparent);
+  transform: scale(1.06);
+}
+
+.anchor[data-session-note="true"][data-wielding="true"] .avatar::after {
+  display: none;
+}
+
+.anchor[data-session-note="true"][data-wielding="true"] .sessionNotePlus {
+  width: 30px;
+  height: 30px;
+  border-color: color-mix(in srgb, var(--companion-s) 64%, #fff);
+  box-shadow:
+    inset 0 1px 0 #ffffff52,
+    inset 0 -6px 12px #0006,
+    0 0 16px color-mix(in srgb, var(--companion-s) 52%, transparent);
+  transform: none;
+}
+
+.anchor[data-session-note="true"][data-wielding="true"] .sessionNotePlus svg {
+  width: 18px;
+  height: 18px;
+}
+
 .anchor[data-idle-dimmed="true"]:not([data-wielding="true"]):not([data-inertial="true"]):not([data-open="true"]) .avatar,
 .anchor[data-idle-dimmed="true"]:not([data-wielding="true"]):not([data-inertial="true"]):not([data-open="true"]) .orb {
   opacity: 0.5;
@@ -224,7 +310,7 @@
 
 .anchor[data-idle-hidden="true"]:not([data-wielding="true"]):not([data-open="true"]) .avatar,
 .anchor[data-idle-hidden="true"]:not([data-wielding="true"]):not([data-open="true"]) .orb,
-.anchor[data-idle-hidden="true"]:not([data-wielding="true"]):not([data-open="true"]) .light,
+.anchor[data-idle-hidden="true"]:not([data-wielding="true"]):not([data-open="true"]) .focusOrb,
 .anchor[data-idle-hidden="true"]:not([data-wielding="true"]):not([data-open="true"]) .shortcut,
 .anchor[data-idle-hidden="true"]:not([data-wielding="true"]):not([data-open="true"]) .refractGlyph {
   opacity: 0;
@@ -259,18 +345,8 @@
   pointer-events: none;
 }
 
-.anchor[data-soft-synthesis="true"]:not([data-soft-lodged="true"]) .avatar {
+.anchor[data-soft-synthesis="true"] .avatar {
   filter: drop-shadow(0 14px 24px #0008) drop-shadow(0 0 12px #9a6cff66);
-}
-
-.anchor[data-soft-lodged="true"] {
-  opacity: 0;
-  pointer-events: none;
-}
-
-.anchor[data-soft-lodged="true"] .avatar {
-  opacity: 0;
-  pointer-events: none;
 }
 
 .anchor[data-open="true"] .orb {
@@ -369,6 +445,21 @@
 .anchor[data-vertical="below"] .conversation { top: 80px; flex-direction: column-reverse; }
 .anchor[data-dock="right"] .conversation { right: 0; }
 .anchor[data-dock="left"] .conversation { left: 0; }
+
+/* A magic-direction prompt belongs to the captured control. Pull it halfway
+   across that control instead of floating above or below it like chat. */
+.anchor[data-refracting="prompting"][data-vertical="above"] .conversation {
+  bottom: 34px;
+}
+.anchor[data-refracting="prompting"][data-vertical="below"] .conversation {
+  top: 34px;
+}
+.anchor[data-refracting="prompting"][data-dock="right"] .conversation {
+  right: calc(34px - var(--prism-refract-target-half-width, 0px));
+}
+.anchor[data-refracting="prompting"][data-dock="left"] .conversation {
+  left: calc(34px - var(--prism-refract-target-half-width, 0px));
+}
 
 .bubbleCloud { width: 100%; display: grid; gap: 9px; pointer-events: none; }
 
@@ -612,6 +703,170 @@
   animation: bubbleArrive 240ms ease-out both;
 }
 
+.sessionNoteComposer {
+  width: min(390px, calc(100vw - 24px));
+  gap: 10px;
+}
+
+.sessionNoteHeading {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.sessionNoteHeading > span {
+  color: #bcefff;
+  font: 780 .58rem/1.2 system-ui, sans-serif;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+}
+
+.sessionNoteHeading > small,
+.sessionNoteComposer footer > small {
+  color: var(--fg-muted, #aaa4a0);
+  font: .56rem/1.3 system-ui, sans-serif;
+}
+
+.sessionNoteComposer footer {
+  align-items: center;
+}
+
+.synthesisComposer {
+  min-height: 270px;
+}
+
+.synthesisEmptyOrb {
+  width: 72px;
+  height: 72px;
+  display: grid;
+  place-items: center;
+  justify-self: center;
+  padding: 0 !important;
+  border: 1px solid color-mix(in srgb, var(--companion-s) 52%, #fff) !important;
+  border-radius: 50% !important;
+  color: #f5fbff !important;
+  background:
+    radial-gradient(circle at 42% 34%, #ffffff24, transparent 35%),
+    color-mix(in srgb, var(--bg-surface, #151311) 86%, transparent) !important;
+  box-shadow:
+    inset 0 1px 0 #ffffff52,
+    inset 0 -12px 24px #0005,
+    0 0 32px color-mix(in srgb, var(--companion-s) 28%, transparent);
+  transition: transform 170ms ease, box-shadow 170ms ease;
+}
+
+.synthesisEmptyOrb:hover,
+.synthesisEmptyOrb:focus-visible {
+  outline: none;
+  transform: scale(1.06);
+  box-shadow:
+    inset 0 1px 0 #ffffff62,
+    inset 0 -12px 24px #0005,
+    0 0 42px color-mix(in srgb, var(--companion-s) 42%, transparent);
+}
+
+.synthesisEmptyOrb svg {
+  width: 26px;
+  height: 26px;
+}
+
+.personalNotesComposer {
+  max-height: min(610px, calc(100vh - 28px));
+}
+
+.personalNotesRail {
+  display: flex;
+  gap: 7px;
+  overflow-x: auto;
+  padding: 1px 1px 5px;
+  scrollbar-width: thin;
+}
+
+.personalNoteChoice {
+  min-width: 138px;
+  max-width: 188px;
+  display: grid;
+  gap: 4px;
+  padding: 9px 10px !important;
+  border: 1px solid #ffffff16 !important;
+  border-radius: 12px !important;
+  color: var(--fg-muted, #aaa4a0) !important;
+  background: #ffffff07 !important;
+  text-align: left;
+}
+
+.personalNoteChoice[data-selected="true"] {
+  border-color: #8bdfff66 !important;
+  color: var(--fg, #edf3f8) !important;
+  background: color-mix(in srgb, var(--companion-i) 9%, transparent) !important;
+}
+
+.personalNoteChoice span {
+  overflow: hidden;
+  font: 720 .64rem/1.25 system-ui, sans-serif;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.personalNoteChoice small {
+  color: var(--fg-subtle, #77716d);
+  font-size: .52rem;
+}
+
+.personalNoteTitle {
+  width: 100%;
+  padding: 8px 9px;
+  border: 0;
+  border-bottom: 1px solid #ffffff18;
+  outline: 0;
+  color: var(--fg, #edf3f8);
+  background: transparent;
+  font: 720 .78rem/1.35 system-ui, sans-serif;
+}
+
+.personalNoteTitle::placeholder {
+  color: var(--fg-muted, #aaa4a0);
+}
+
+.personalNoteTitle:focus {
+  border-bottom-color: #8bdfff73;
+}
+
+.personalNoteBlocked,
+.personalNoteEmpty {
+  padding: 18px 12px;
+  border: 1px dashed #ffffff1c;
+  border-radius: 13px;
+  color: var(--fg-muted, #aaa4a0);
+  background: #ffffff05;
+  font: .64rem/1.45 system-ui, sans-serif;
+  text-align: center;
+}
+
+.composer .noteSecondaryButton {
+  padding: 5px 8px;
+  border: 1px solid #ffffff1c;
+  color: #bcefff;
+  background: #ffffff08;
+  font-size: .56rem;
+}
+
+.composer .noteDeleteButton {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border: 1px solid #ff818133;
+  color: #ffb4b4;
+  background: #ff64640a;
+  font-size: .56rem;
+}
+
+.composer .noteDeleteButton[data-confirm="true"] {
+  border-color: #ff818177;
+  color: #fff0f0;
+  background: #ff646424;
+}
+
 .refractPrompt {
   width: min(390px, calc(100vw - 24px));
   display: grid;
@@ -692,10 +947,34 @@
 .anchor[data-dock="left"] .composer { align-self: flex-start; }
 .composer textarea { width: 100%; resize: none; padding: 8px 9px; border: 0; outline: 0; color: var(--fg, #edf3f8); background: transparent; font: .76rem/1.45 system-ui, sans-serif; }
 .composer textarea::placeholder { color: var(--fg-muted, #aaa4a0); }
-.composer footer { display: flex; align-items: center; justify-content: space-between; gap: 10px; }
+.composerStatus,
+.composer footer { display: flex; align-items: center; gap: 8px; }
+.composer footer { justify-content: flex-end; }
 .composer small { flex: 1 1 auto; color: var(--fg-subtle, #77716d); font: .56rem/1.3 system-ui, sans-serif; }
 .composer button { padding: 7px 12px; border: 0; border-radius: 999px; color: #071013; background: #9ceaff; font: 780 .65rem/1 system-ui, sans-serif; cursor: pointer; }
 .composer button:disabled { cursor: default; opacity: .42; }
+.composer .privacyToggle,
+.composer .continueButton {
+  flex: 0 0 auto;
+  padding: 6px 8px;
+  border: 1px solid #ffffff1c;
+  color: var(--fg-muted, #aaa4a0);
+  background: #ffffff09;
+  font-size: .57rem;
+}
+.composer .privacyToggle[data-enabled="true"] {
+  border-color: color-mix(in srgb, var(--companion-m) 48%, transparent);
+  color: #e4dcff;
+  background: color-mix(in srgb, var(--companion-m) 11%, transparent);
+}
+.composer .continueButton {
+  margin-left: auto;
+  border-color: #8bdfff42;
+  color: #bcefff;
+  background: color-mix(in srgb, var(--companion-i) 6%, transparent);
+}
+.composer .privacyToggle:hover,
+.composer .continueButton:hover { border-color: #8bdfff72; color: var(--fg, #edf3f8); }
 .composer .voiceToggle {
   display: inline-flex;
   flex: 0 0 auto;
@@ -727,6 +1006,8 @@
 }
 .composer .voiceToggle:focus-visible,
 .composer .historyToggle:focus-visible,
+.composer .privacyToggle:focus-visible,
+.composer .continueButton:focus-visible,
 .composer .sendButton:focus-visible {
   outline: 2px solid #ffffff;
   outline-offset: 2px;
@@ -751,9 +1032,8 @@
   .bubble[data-speech-preparing="true"] .markdown::after,
   .bubble[data-speaking="true"] .markdown::after { animation: none; }
   .bubble:not([data-recent="true"]) { animation-name: bubbleReducedLife; }
-  .anchor, .backdrop, .light, .orb { transition-duration: 1ms; }
+  .anchor, .backdrop, .focusOrb, .orb { transition-duration: 1ms; }
   .anchor[data-refracting] .avatar { transition-duration: 1ms; }
-  .anchor[data-chat-home-orb-docked="true"],
   .anchor[data-chat-home-orb-returning="true"] {
     transition: opacity 1ms linear, left 1ms linear, top 1ms linear;
   }

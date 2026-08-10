@@ -559,6 +559,8 @@ export interface StoredAssistantToolEnvelope {
   autoRecovery?: AutoRecoveryTraceV1;
   /** Privacy-safe record of contextual model and effort selection. */
   autoRoute?: AutoRouteDecisionV1;
+  /** True when the concrete model used Turbo for this turn. */
+  turbo?: boolean;
   /** Internal marker for deterministic Power output that must not be sanitized on reload. */
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
   /** Chat/Zen sticky Library/Marketplace shapeshift form for the speaking holder. */
@@ -612,6 +614,7 @@ export interface ParsedStoredAssistantToolPayload {
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
   autoRoute?: AutoRouteDecisionV1;
+  turbo?: boolean;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
   identityShapeshift?: BotIdentityShapeshiftStateV1;
   falseName?: BotFalseNameStateV1;
@@ -2370,6 +2373,7 @@ export function parseStoredAssistantToolPayload(
       const autoRoute = root
         ? normalizeAutoRouteDecisionV1(root.autoRoute)
         : undefined;
+      const turbo = root?.turbo === true;
       const botPowerExactResponse =
       root?.botPowerExactResponse === "speech_copy" ||
         root?.botPowerExactResponse === "hearing_repeat" ||
@@ -2403,6 +2407,7 @@ export function parseStoredAssistantToolPayload(
         ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
         ...(autoRecovery ? { autoRecovery } : {}),
         ...(autoRoute ? { autoRoute } : {}),
+        ...(turbo ? { turbo: true } : {}),
         ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
         ...(identityShapeshift ? { identityShapeshift } : {}),
         ...(falseName ? { falseName } : {}),
@@ -2429,6 +2434,7 @@ export function parseStoredAssistantToolPayload(
     const coffeeReplayEvents = normalizeCoffeeReplayEventPayloads(row.coffeeReplayEvents);
     const autoRecovery = normalizeStoredAutoRecoveryTrace(row.autoRecovery);
     const autoRoute = normalizeAutoRouteDecisionV1(row.autoRoute);
+    const turbo = row.turbo === true;
     const botPowerExactResponse =
       row.botPowerExactResponse === "speech_copy" ||
       row.botPowerExactResponse === "hearing_repeat" ||
@@ -2481,6 +2487,7 @@ export function parseStoredAssistantToolPayload(
       ...(coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
       ...(autoRecovery ? { autoRecovery } : {}),
       ...(autoRoute ? { autoRoute } : {}),
+      ...(turbo ? { turbo: true } : {}),
       ...(botPowerExactResponse ? { botPowerExactResponse } : {}),
       ...(identityShapeshift ? { identityShapeshift } : {}),
       ...(falseName ? { falseName } : {}),
@@ -2513,6 +2520,7 @@ export function hydrateAssistantMessageParts(args: {
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
   autoRoute?: AutoRouteDecisionV1;
+  turbo?: boolean;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
   identityShapeshift?: BotIdentityShapeshiftStateV1;
   falseName?: BotFalseNameStateV1;
@@ -2552,6 +2560,7 @@ export function hydrateAssistantMessageParts(args: {
       : {}),
     ...(stored.autoRecovery ? { autoRecovery: stored.autoRecovery } : {}),
     ...(stored.autoRoute ? { autoRoute: stored.autoRoute } : {}),
+    ...(stored.turbo ? { turbo: true } : {}),
     ...(stored.botPowerExactResponse
       ? { botPowerExactResponse: stored.botPowerExactResponse }
       : {}),
@@ -2589,6 +2598,7 @@ export function serializeAssistantToolPayload(args: {
   coffeeReplayEvents?: CoffeeReplayEventPayload[];
   autoRecovery?: AutoRecoveryTraceV1;
   autoRoute?: AutoRouteDecisionV1;
+  turbo?: boolean;
   botPowerExactResponse?: "speech_copy" | "hearing_repeat" | "intermittent_mute" | "speech_obfuscation";
   identityShapeshift?: BotIdentityShapeshiftStateV1;
   falseName?: BotFalseNameStateV1;
@@ -2621,6 +2631,7 @@ export function serializeAssistantToolPayload(args: {
   const hasAutoRecovery = autoRecovery !== undefined;
   const autoRoute = normalizeAutoRouteDecisionV1(args.autoRoute);
   const hasAutoRoute = autoRoute !== undefined;
+  const hasTurbo = args.turbo === true;
   const botPowerExactResponse =
     args.botPowerExactResponse === "speech_copy" ||
     args.botPowerExactResponse === "hearing_repeat" ||
@@ -2656,6 +2667,7 @@ export function serializeAssistantToolPayload(args: {
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
     !hasAutoRoute &&
+    !hasTurbo &&
     !hasBotPowerExactResponse &&
     !hasIdentityShapeshift &&
     !hasFalseName &&
@@ -2680,6 +2692,7 @@ export function serializeAssistantToolPayload(args: {
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
     !hasAutoRoute &&
+    !hasTurbo &&
     !hasBotPowerExactResponse &&
     !hasIdentityShapeshift &&
     !hasFalseName &&
@@ -2705,6 +2718,7 @@ export function serializeAssistantToolPayload(args: {
     !hasCoffeeReplayEvents &&
     !hasAutoRecovery &&
     !hasAutoRoute &&
+    !hasTurbo &&
     !hasBotPowerExactResponse &&
     !hasIdentityShapeshift &&
     !hasFalseName &&
@@ -2741,6 +2755,7 @@ export function serializeAssistantToolPayload(args: {
     ...(hasCoffeeReplayEvents ? { coffeeReplayEvents } : {}),
     ...(hasAutoRecovery ? { autoRecovery } : {}),
     ...(hasAutoRoute ? { autoRoute } : {}),
+    ...(hasTurbo ? { turbo: true } : {}),
     ...(hasBotPowerExactResponse ? { botPowerExactResponse } : {}),
     ...(hasIdentityShapeshift ? { identityShapeshift } : {}),
     ...(hasFalseName ? { falseName } : {}),

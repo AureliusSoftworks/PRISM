@@ -106,8 +106,8 @@ describe("global voice selector", () => {
     assert.equal(effectiveVoicePlaybackChoice("babble", true), "babble");
   });
 
-  it("lets generated voices own reveal timing while Bottish stays immediate", () => {
-    assert.equal(voiceModeDrivesCanvasReveal("bottish"), false);
+  it("lets every audible Speech Type own reveal timing", () => {
+    assert.equal(voiceModeDrivesCanvasReveal("bottish"), true);
     assert.equal(voiceModeDrivesCanvasReveal("mute"), false);
     assert.equal(voiceModeDrivesCanvasReveal("babble"), true);
     assert.equal(voiceModeDrivesCanvasReveal("english"), true);

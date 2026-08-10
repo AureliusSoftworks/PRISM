@@ -19,6 +19,8 @@ import {
   PHOSPHOR_FACE_SUPERSAMPLE_MAX,
   PHOSPHOR_FACE_SUPERSAMPLE_MIN,
   PHOSPHOR_PIXEL_CELL_SIZE_PX,
+  phosphorCanonicalPresentationScale,
+  phosphorCanonicalRasterDimension,
   phosphorCanvasFontShorthand,
   phosphorTextAlphabeticBaseline,
   samplePhosphorAlphaCells,
@@ -40,17 +42,20 @@ function upscalePhosphorPixelCanvas(
   source: HTMLCanvasElement,
   width: number,
   height: number,
+  binaryAlpha = true,
 ): string | null {
   const sourceContext = source.getContext("2d", { alpha: true });
   if (!sourceContext) return null;
-  const sourceImage = sourceContext.getImageData(
-    0,
-    0,
-    source.width,
-    source.height,
-  );
-  sourceImage.data.set(thresholdPhosphorPixelAlpha(sourceImage.data));
-  sourceContext.putImageData(sourceImage, 0, 0);
+  if (binaryAlpha) {
+    const sourceImage = sourceContext.getImageData(
+      0,
+      0,
+      source.width,
+      source.height,
+    );
+    sourceImage.data.set(thresholdPhosphorPixelAlpha(sourceImage.data));
+    sourceContext.putImageData(sourceImage, 0, 0);
+  }
 
   const output = document.createElement("canvas");
   output.width = width;
@@ -73,26 +78,111 @@ function upscalePhosphorPixelCanvas(
   return output.toDataURL("image/png");
 }
 
+function computedBorderBoxDimension(
+  computed: CSSStyleDeclaration,
+  axis: "width" | "height",
+  fallback: number,
+): number {
+  const contentDimension = Number.parseFloat(computed[axis]);
+  if (!Number.isFinite(contentDimension)) return fallback;
+  if (computed.boxSizing === "border-box") return contentDimension;
+  const edges =
+    axis === "width"
+      ? [
+          computed.paddingLeft,
+          computed.paddingRight,
+          computed.borderLeftWidth,
+          computed.borderRightWidth,
+        ]
+      : [
+          computed.paddingTop,
+          computed.paddingBottom,
+          computed.borderTopWidth,
+          computed.borderBottomWidth,
+        ];
+  return edges.reduce(
+    (total, edge) => total + (Number.parseFloat(edge) || 0),
+    contentDimension,
+  );
+}
+
+function canonicalPhosphorSurfaceForNode(
+  node: HTMLElement,
+): HTMLElement | null {
+  const directSurface = node.closest<HTMLElement>(
+    "[data-avatar-canonical-screen-size]",
+  );
+  if (directSurface) return directSurface;
+
+  // The lower buckle is a sibling of the face screen rather than its child.
+  // Resolve both against the same physical chassis surface so a 1px logical
+  // phosphor cell has the same apparent pitch on both displays.
+  const avatarBody = node.closest<HTMLElement>(
+    '[data-zen-live-bot-body-layer="true"]',
+  );
+  return (
+    avatarBody?.querySelector<HTMLElement>(
+      "[data-avatar-canonical-screen-size]",
+    ) ?? null
+  );
+}
+
+function canonicalPhosphorPresentationScaleForNode(
+  node: HTMLElement,
+): number {
+  const canonicalSurface = canonicalPhosphorSurfaceForNode(node);
+  if (!canonicalSurface) return 1;
+  const logicalScreenSize = Number.parseFloat(
+    canonicalSurface.dataset.avatarCanonicalScreenSize ?? "",
+  );
+  const renderedScreenSize = Number.parseFloat(
+    window.getComputedStyle(canonicalSurface).width,
+  );
+  return phosphorCanonicalPresentationScale(
+    renderedScreenSize,
+    logicalScreenSize,
+  );
+}
+
 function rasterizeTextMask(
   node: HTMLSpanElement,
   content: string,
+  cacheVariant = "",
 ): { dataUrl: string; overscanPx: number } | null {
-  const width = Math.max(1, Math.ceil(node.offsetWidth));
-  const height = Math.max(1, Math.ceil(node.offsetHeight));
+  const computed = window.getComputedStyle(node);
+  const presentationScale = canonicalPhosphorPresentationScaleForNode(node);
+  const renderedWidth = computedBorderBoxDimension(
+    computed,
+    "width",
+    node.offsetWidth,
+  );
+  const renderedHeight = computedBorderBoxDimension(
+    computed,
+    "height",
+    node.offsetHeight,
+  );
+  const width = phosphorCanonicalRasterDimension(
+    renderedWidth,
+    presentationScale,
+  );
+  const height = phosphorCanonicalRasterDimension(
+    renderedHeight,
+    presentationScale,
+  );
   if (!content || !content.trim() || width <= 1 || height <= 1) return null;
 
-  const computed = window.getComputedStyle(node);
   const configuredCellSize = Number.parseFloat(
     computed.getPropertyValue("--crt-phosphor-pixel-cell-size"),
   );
   const cellSize = Number.isFinite(configuredCellSize)
-    ? Math.max(1, configuredCellSize)
+    ? Math.max(1, configuredCellSize / presentationScale)
     : PHOSPHOR_FACE_PIXEL_CELL_SIZE_PX;
-  const overscanPx = Math.ceil(
+  const canonicalOverscanPx = Math.ceil(
     cellSize * PHOSPHOR_FACE_PIXEL_OVERSCAN_CELLS,
   );
-  const canvasWidth = width + overscanPx * 2;
-  const canvasHeight = height + overscanPx * 2;
+  const overscanPx = canonicalOverscanPx * presentationScale;
+  const canvasWidth = width + canonicalOverscanPx * 2;
+  const canvasHeight = height + canonicalOverscanPx * 2;
   const supersampleScale = Math.max(
     PHOSPHOR_FACE_SUPERSAMPLE_MIN,
     Math.min(
@@ -102,10 +192,13 @@ function rasterizeTextMask(
   );
   const sourceWidth = canvasWidth * supersampleScale;
   const sourceHeight = canvasHeight * supersampleScale;
-  const font = phosphorCanvasFontShorthand(computed, supersampleScale);
+  const font = phosphorCanvasFontShorthand(
+    computed,
+    supersampleScale / presentationScale,
+  );
   const letterSpacing = Number.parseFloat(computed.letterSpacing);
   const scaledLetterSpacing = Number.isFinite(letterSpacing)
-    ? `${letterSpacing * supersampleScale}px`
+    ? `${(letterSpacing * supersampleScale) / presentationScale}px`
     : "0px";
   const strokeWidth = Math.max(
     0,
@@ -113,6 +206,7 @@ function rasterizeTextMask(
       computed.getPropertyValue("-webkit-text-stroke-width"),
     ) || 0,
   );
+  const canonicalStrokeWidth = strokeWidth / presentationScale;
   const cacheKey = [
     "text-full-alpha",
     content,
@@ -124,7 +218,8 @@ function rasterizeTextMask(
     cellSize,
     font,
     scaledLetterSpacing,
-    strokeWidth,
+    canonicalStrokeWidth,
+    cacheVariant,
     PHOSPHOR_FACE_PIXEL_COVERAGE_GAMMA,
   ].join(":");
   const cached = phosphorPixelMaskCache.get(cacheKey);
@@ -147,11 +242,11 @@ function rasterizeTextMask(
   const metrics = context.measureText(content);
   const scaledHeight = height * supersampleScale;
   const baseline =
-    overscanPx * supersampleScale +
+    canonicalOverscanPx * supersampleScale +
     phosphorTextAlphabeticBaseline(scaledHeight, metrics);
   if (strokeWidth > 0) {
     context.lineJoin = "round";
-    context.lineWidth = strokeWidth * supersampleScale;
+    context.lineWidth = canonicalStrokeWidth * supersampleScale;
     context.strokeStyle = "#ffffff";
     context.strokeText(content, sourceWidth / 2, baseline);
   }
@@ -193,12 +288,18 @@ export const CrtPixelTextGlyph = forwardRef<
   {
     content: string;
     enabled?: boolean;
+    /**
+     * Authored font identity (or another style revision) that changes the
+     * glyph silhouette without necessarily resizing its DOM box.
+     */
+    rasterKey?: string | number | null;
     "data-custom-eye-pair-side"?: "left" | "right";
   }
 >(function CrtPixelTextGlyph(
   {
     content,
     enabled = false,
+    rasterKey,
     "data-custom-eye-pair-side": customEyePairSide,
   },
   forwardedRef,
@@ -225,36 +326,126 @@ export const CrtPixelTextGlyph = forwardRef<
     }
     let cancelled = false;
     let frameId: number | null = null;
+    let fontRevision = 0;
     const render = (): void => {
       if (frameId !== null) cancelAnimationFrame(frameId);
       frameId = requestAnimationFrame(() => {
         frameId = null;
-        const nextMask = rasterizeTextMask(node, content);
-        if (!cancelled && nextMask) {
-          setRenderedMask((current) =>
-            current?.content === content &&
-            current.url === nextMask.dataUrl &&
-            current.overscanPx === nextMask.overscanPx
-              ? current
-              : {
-                  content,
-                  url: nextMask.dataUrl,
-                  overscanPx: nextMask.overscanPx,
-                },
-          );
-        }
+        renderMask();
       });
     };
-    render();
-    void document.fonts?.ready.then(render);
+    const renderMask = (): void => {
+      const nextMask = rasterizeTextMask(
+        node,
+        content,
+        `${rasterKey ?? ""}:${fontRevision}`,
+      );
+      // #region agent log
+      {
+        const miniRoot = node.closest<HTMLElement>(
+          "[data-chat-mini-bot-avatar='true']",
+        );
+        const inDebateGallery =
+          miniRoot?.className.includes("debateGalleryMiniAvatar") === true ||
+          node
+            .closest("[data-debate-audience-portrait='true']")
+            ?.getAttribute("data-debate-audience-portrait") === "true" ||
+          Boolean(
+            node.closest(
+              ".debateAudienceBotPortrait, [class*='debateAudienceBotPortrait']",
+            ),
+          );
+        if (inDebateGallery || miniRoot) {
+          const computed = window.getComputedStyle(node);
+          const after = window.getComputedStyle(node, "::after");
+          const before = window.getComputedStyle(node, "::before");
+          const width = Number.parseFloat(computed.width) || node.offsetWidth;
+          const height =
+            Number.parseFloat(computed.height) || node.offsetHeight;
+          fetch(
+            "http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2",
+            {
+              method: "POST",
+              headers: {
+                "Content-Type": "application/json",
+                "X-Debug-Session-Id": "518322",
+              },
+              body: JSON.stringify({
+                sessionId: "518322",
+                runId: "pre-fix",
+                hypothesisId: nextMask ? "B" : "A",
+                location: "PhosphorPixelGlyph.tsx:renderMask",
+                message: "mini/gallery CRT glyph mask raster",
+                data: {
+                  content,
+                  enabled,
+                  inDebateGallery,
+                  miniSize: miniRoot?.dataset.size ?? null,
+                  maskOk: Boolean(nextMask),
+                  width,
+                  height,
+                  visibility: computed.visibility,
+                  color: computed.color,
+                  textFill: computed.webkitTextFillColor,
+                  afterDisplay: after.display,
+                  afterContent: after.content,
+                  afterBackground: after.backgroundImage || after.background,
+                  afterVisibility: after.visibility,
+                  beforeDisplay: before.display,
+                  beforeContent: before.content,
+                  pendingAttr: enabled && !nextMask,
+                  readyAttr: Boolean(nextMask),
+                  faceClass: node
+                    .closest("[data-coffee-plate-emoji-glyphs]")
+                    ?.className?.slice(0, 180),
+                },
+                timestamp: Date.now(),
+              }),
+            },
+          ).catch(() => {});
+        }
+      }
+      // #endregion
+      if (!cancelled && nextMask) {
+        setRenderedMask((current) =>
+          current?.content === content &&
+          current.url === nextMask.dataUrl &&
+          current.overscanPx === nextMask.overscanPx
+            ? current
+            : {
+                content,
+                url: nextMask.dataUrl,
+                overscanPx: nextMask.overscanPx,
+              },
+        );
+      }
+    };
+    // Rasterize the newly selected thinking frame in the layout phase. Waiting
+    // for the next animation frame briefly exposes the browser's raw font and
+    // makes every spinner step appear to change resolution.
+    renderMask();
+    const handleFontsLoaded = (): void => {
+      if (cancelled) return;
+      fontRevision += 1;
+      render();
+    };
+    void document.fonts?.ready.then(handleFontsLoaded);
+    const authoredFont = window.getComputedStyle(node).font;
+    if (authoredFont) {
+      void document.fonts
+        ?.load(authoredFont, content)
+        .then(handleFontsLoaded, () => undefined);
+    }
+    document.fonts?.addEventListener("loadingdone", handleFontsLoaded);
     const observer = new ResizeObserver(render);
     observer.observe(node);
     return () => {
       cancelled = true;
       observer.disconnect();
+      document.fonts?.removeEventListener("loadingdone", handleFontsLoaded);
       if (frameId !== null) cancelAnimationFrame(frameId);
     };
-  }, [content, enabled]);
+  }, [content, enabled, rasterKey]);
 
   const maskUrl =
     renderedMask?.content === content ? renderedMask.url : null;
@@ -265,12 +456,73 @@ export const CrtPixelTextGlyph = forwardRef<
           `${renderedMask?.overscanPx ?? 0}px`,
       } as CSSProperties)
     : undefined;
+
+  // #region agent log
+  useLayoutEffect(() => {
+    const node = localRef.current;
+    if (!node || !enabled) return;
+    const inDebateGallery = Boolean(
+      node.closest(
+        ".debateAudienceBotPortrait, [class*='debateAudienceBotPortrait'], [class*='debateGalleryMiniAvatar']",
+      ),
+    );
+    if (!inDebateGallery) return;
+    const computed = window.getComputedStyle(node);
+    const after = window.getComputedStyle(node, "::after");
+    const before = window.getComputedStyle(node, "::before");
+    fetch("http://127.0.0.1:7914/ingest/796e4cfe-51fc-4e0c-8265-ef32bc063af2", {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/json",
+        "X-Debug-Session-Id": "518322",
+      },
+      body: JSON.stringify({
+        sessionId: "518322",
+        runId: "pre-fix",
+        hypothesisId: maskUrl ? "B" : "A",
+        location: "PhosphorPixelGlyph.tsx:postPaint",
+        message: "gallery glyph post-paint computed style",
+        data: {
+          content,
+          maskReadyAttr: node.dataset.crtPixelMaskReady ?? null,
+          maskPendingAttr: node.dataset.crtPixelMaskPending ?? null,
+          hasMaskUrl: Boolean(maskUrl),
+          visibility: computed.visibility,
+          opacity: computed.opacity,
+          color: computed.color,
+          fontSize: computed.fontSize,
+          width: computed.width,
+          height: computed.height,
+          afterDisplay: after.display,
+          afterContent: after.content,
+          afterBackground: (after.backgroundImage || after.background || "").slice(
+            0,
+            120,
+          ),
+          afterOpacity: after.opacity,
+          afterMaskImage: (after.maskImage || after.webkitMaskImage || "").slice(
+            0,
+            80,
+          ),
+          beforeDisplay: before.display,
+          beforeBackground: (before.backgroundImage || before.background || "").slice(
+            0,
+            80,
+          ),
+        },
+        timestamp: Date.now(),
+      }),
+    }).catch(() => {});
+  }, [content, enabled, maskUrl]);
+  // #endregion
+
   return (
     <span
       ref={setRefs}
       data-crt-glyph-layer="true"
       data-crt-glyph-content={content}
       data-crt-pixel-mask-ready={maskUrl ? "true" : undefined}
+      data-crt-pixel-mask-pending={enabled && !maskUrl ? "true" : undefined}
       data-custom-eye-pair-side={customEyePairSide}
       style={style}
     >
@@ -283,18 +535,38 @@ async function rasterizeSvgMask(
   svg: SVGSVGElement,
   width: number,
   height: number,
+  presentationScale: number,
 ): Promise<string | null> {
   const cellSize = PHOSPHOR_PIXEL_CELL_SIZE_PX;
-  const lowWidth = Math.max(1, Math.ceil(width / cellSize));
-  const lowHeight = Math.max(1, Math.ceil(height / cellSize));
+  const logicalWidth = phosphorCanonicalRasterDimension(
+    width,
+    presentationScale,
+  );
+  const logicalHeight = phosphorCanonicalRasterDimension(
+    height,
+    presentationScale,
+  );
+  const supersampleScale = PHOSPHOR_FACE_SUPERSAMPLE_MAX;
+  const sourceWidth = logicalWidth * supersampleScale;
+  const sourceHeight = logicalHeight * supersampleScale;
   const clone = svg.cloneNode(true) as SVGSVGElement;
   clone.setAttribute("xmlns", "http://www.w3.org/2000/svg");
-  clone.setAttribute("width", String(lowWidth));
-  clone.setAttribute("height", String(lowHeight));
+  clone.setAttribute("width", String(sourceWidth));
+  clone.setAttribute("height", String(sourceHeight));
   clone.setAttribute("color", "#ffffff");
   clone.style.color = "#ffffff";
   const markup = new XMLSerializer().serializeToString(clone);
-  const cacheKey = ["svg", width, height, lowWidth, lowHeight, markup].join(":");
+  const cacheKey = [
+    "svg-canonical-alpha",
+    width,
+    height,
+    logicalWidth,
+    logicalHeight,
+    supersampleScale,
+    cellSize,
+    PHOSPHOR_FACE_PIXEL_COVERAGE_GAMMA,
+    markup,
+  ].join(":");
   const cached = phosphorPixelMaskCache.get(cacheKey);
   if (cached) return cached;
 
@@ -309,14 +581,45 @@ async function rasterizeSvgMask(
       image.onerror = () => reject(new Error("Unable to rasterize bot glyph"));
       image.src = sourceUrl;
     });
-    const canvas = document.createElement("canvas");
-    canvas.width = lowWidth;
-    canvas.height = lowHeight;
-    const context = canvas.getContext("2d", { alpha: true });
-    if (!context) return null;
-    context.imageSmoothingEnabled = true;
-    context.drawImage(image, 0, 0, lowWidth, lowHeight);
-    const dataUrl = upscalePhosphorPixelCanvas(canvas, width, height);
+    const sourceCanvas = document.createElement("canvas");
+    sourceCanvas.width = sourceWidth;
+    sourceCanvas.height = sourceHeight;
+    const sourceContext = sourceCanvas.getContext("2d", { alpha: true });
+    if (!sourceContext) return null;
+    sourceContext.imageSmoothingEnabled = true;
+    sourceContext.drawImage(image, 0, 0, sourceWidth, sourceHeight);
+    const sourceImage = sourceContext.getImageData(
+      0,
+      0,
+      sourceWidth,
+      sourceHeight,
+    );
+    const sampledAlpha = samplePhosphorAlphaCells(
+      sourceImage.data,
+      sourceWidth,
+      sourceHeight,
+      logicalWidth,
+      logicalHeight,
+      cellSize,
+      PHOSPHOR_FACE_PIXEL_COVERAGE_GAMMA,
+    );
+    const logicalCanvas = document.createElement("canvas");
+    logicalCanvas.width = logicalWidth;
+    logicalCanvas.height = logicalHeight;
+    const logicalContext = logicalCanvas.getContext("2d", { alpha: true });
+    if (!logicalContext) return null;
+    const logicalImage = logicalContext.createImageData(
+      logicalWidth,
+      logicalHeight,
+    );
+    logicalImage.data.set(sampledAlpha);
+    logicalContext.putImageData(logicalImage, 0, 0);
+    const dataUrl = upscalePhosphorPixelCanvas(
+      logicalCanvas,
+      width,
+      height,
+      false,
+    );
     if (dataUrl) cachePhosphorPixelMask(cacheKey, dataUrl);
     return dataUrl;
   } finally {
@@ -343,9 +646,20 @@ export function PhosphorPixelSvgGlyph({
       if (frameId !== null) cancelAnimationFrame(frameId);
       frameId = requestAnimationFrame(() => {
         frameId = null;
-        const width = Math.max(1, Math.ceil(host.offsetWidth));
-        const height = Math.max(1, Math.ceil(host.offsetHeight));
-        void rasterizeSvgMask(svg, width, height)
+        const computed = window.getComputedStyle(host);
+        const width = Math.max(
+          1,
+          Math.ceil(computedBorderBoxDimension(computed, "width", host.offsetWidth)),
+        );
+        const height = Math.max(
+          1,
+          Math.ceil(
+            computedBorderBoxDimension(computed, "height", host.offsetHeight),
+          ),
+        );
+        const presentationScale =
+          canonicalPhosphorPresentationScaleForNode(host);
+        void rasterizeSvgMask(svg, width, height, presentationScale)
           .then((nextRaster) => {
             if (!cancelled) {
               setRasterUrl((current) =>

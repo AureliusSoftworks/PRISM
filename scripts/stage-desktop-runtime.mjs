@@ -57,6 +57,26 @@ const includedPrismVoiceFiles = new Set([
   "bm_lewis.bin"
 ]);
 
+/**
+ * Prefer PRISM's pinned, relocatable macOS Node build over the developer's
+ * host executable. Homebrew Node 26 may be only a small launcher whose
+ * @rpath libnode dependency is absent after copying it into the app bundle.
+ */
+export function nodeRuntimeSourceCandidates({
+  platform = process.platform,
+  executablePath = process.execPath,
+  repositoryRoot = repoRoot,
+  configuredPath = process.env.PRISM_NODE_RUNTIME_PATH ?? ""
+} = {}) {
+  return [...new Set([
+    configuredPath.trim(),
+    platform === "darwin"
+      ? path.join(repositoryRoot, "apps", "server-mac", "Resources", "node", "bin", "node")
+      : "",
+    executablePath
+  ].filter(Boolean))];
+}
+
 function parseArgs(argv) {
   const args = {
     outputDir: "",
@@ -381,12 +401,36 @@ async function main() {
   );
 
   console.log("Staging Node runtime...");
+  const nodeSourceCandidates = nodeRuntimeSourceCandidates();
+  let nodeSource = "";
+  for (const candidate of nodeSourceCandidates) {
+    if (await fileExists(candidate)) {
+      nodeSource = candidate;
+      break;
+    }
+  }
+  if (!nodeSource) {
+    throw new Error(
+      `Missing Node runtime. Checked: ${nodeSourceCandidates.join(", ")}`
+    );
+  }
+  let stagedNode;
   if (process.platform === "win32") {
-    await copyFile(process.execPath, path.join(resolvedOutputDir, "node", "node.exe"));
+    stagedNode = path.join(resolvedOutputDir, "node", "node.exe");
+    await copyFile(nodeSource, stagedNode);
   } else {
-    const targetNode = path.join(resolvedOutputDir, "node", "bin", "node");
-    await copyFile(process.execPath, targetNode);
-    await fs.chmod(targetNode, 0o755);
+    stagedNode = path.join(resolvedOutputDir, "node", "bin", "node");
+    await copyFile(nodeSource, stagedNode);
+    await fs.chmod(stagedNode, 0o755);
+  }
+  try {
+    await runCommand(stagedNode, ["--version"], repoRoot);
+  } catch {
+    throw new Error(
+      "The staged Node runtime is not relocatable. On macOS, run " +
+      "apps/server-mac/scripts/vendor-node.sh or set PRISM_NODE_RUNTIME_PATH " +
+      "to a self-contained Node executable."
+    );
   }
 
   console.log("Staging Qdrant runtime...");
@@ -525,7 +569,9 @@ async function main() {
   console.log(`Runtime staged at ${resolvedOutputDir}`);
 }
 
-main().catch((error) => {
-  console.error(error.message);
-  process.exit(1);
-});
+if (process.argv[1] && path.resolve(process.argv[1]) === __filename) {
+  main().catch((error) => {
+    console.error(error.message);
+    process.exit(1);
+  });
+}

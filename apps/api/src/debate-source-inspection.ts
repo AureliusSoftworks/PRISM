@@ -2,12 +2,20 @@ import { lookup as dnsLookup } from "node:dns/promises";
 import { request as httpRequest } from "node:http";
 import { request as httpsRequest } from "node:https";
 import { isIP } from "node:net";
+import {
+  completeSentenceDebateEvidenceExcerpt,
+  enrichDebateEvidenceSourceExcerpt,
+  type DebateEvidenceExcerptGenerator,
+  type DebateEvidenceExcerptSelectionKind,
+  type DebateEvidenceExcerptSourceKind,
+} from "./debate-research.ts";
 
 const SOURCE_FETCH_TIMEOUT_MS = 8_000;
 const SOURCE_FETCH_MAX_BYTES = 1_048_576;
 const SOURCE_REDIRECT_MAX = 3;
 const SOURCE_TITLE_MAX_LENGTH = 240;
 const SOURCE_SNIPPET_MAX_LENGTH = 800;
+const SOURCE_EXCERPT_MATERIAL_MAX_LENGTH = 20_000;
 const SOURCE_PUBLISHED_AT_MAX_LENGTH = 64;
 
 const TEXT_CONTENT_TYPES = new Set([
@@ -21,6 +29,10 @@ export interface DebateSourceInspectionDraft {
   url: string;
   snippet: string;
   publishedAt: string | null;
+  excerptSource?: DebateEvidenceExcerptSourceKind;
+  excerptSelection?: DebateEvidenceExcerptSelectionKind;
+  excerptMaterialHash?: string;
+  excerptModel?: { provider: string; model: string } | null;
 }
 
 export interface DebateSourceInspectionResult {
@@ -50,6 +62,13 @@ export interface DebateSourceInspectionDependencies {
   timeoutMs?: number;
 }
 
+export interface DebateSourceInspectionOptions {
+  allowNetwork: boolean;
+  motion?: string;
+  generateExcerpt?: DebateEvidenceExcerptGenerator;
+  dependencies?: DebateSourceInspectionDependencies;
+}
+
 export class DebateSourceInspectionError extends Error {
   public readonly statusCode: number;
 
@@ -65,6 +84,15 @@ function compactText(value: string, maxLength: number): string {
   return compacted.length > maxLength
     ? compacted.slice(0, maxLength).trimEnd()
     : compacted;
+}
+
+function wordSafeCompactText(value: string, maxLength: number): string {
+  const compacted = value.replace(/\s+/gu, " ").trim();
+  if (compacted.length <= maxLength) return compacted;
+  const bounded = compacted.slice(0, maxLength + 1);
+  const boundary = bounded.lastIndexOf(" ", maxLength);
+  return (boundary > 0 ? bounded.slice(0, boundary) : bounded.slice(0, maxLength))
+    .trimEnd();
 }
 
 function parsedSourceUrl(value: string): URL {
@@ -187,6 +215,9 @@ function manualSourceDraft(url: URL): DebateSourceInspectionResult {
       url: url.toString(),
       snippet: "",
       publishedAt: null,
+      excerptSource: "player",
+      excerptSelection: "player",
+      excerptModel: null,
     },
     fetched: false,
   };
@@ -344,6 +375,17 @@ export function debateSourceDraftFromDocument(args: {
   contentType: string;
   body: Uint8Array;
 }): DebateSourceInspectionDraft {
+  return debateSourceDraftAndMaterialFromDocument(args).source;
+}
+
+function debateSourceDraftAndMaterialFromDocument(args: {
+  url: URL;
+  contentType: string;
+  body: Uint8Array;
+}): {
+  source: DebateSourceInspectionDraft;
+  material: string;
+} {
   const mediaType = args.contentType.split(";", 1)[0]!.trim().toLowerCase();
   if (!TEXT_CONTENT_TYPES.has(mediaType)) {
     throw new DebateSourceInspectionError(
@@ -378,8 +420,13 @@ export function debateSourceDraftFromDocument(args: {
         "twitter:description",
       ])
     : "";
-  const snippet = compactText(
-    description || (isHtml ? visibleHtmlText(document) : document),
+  const visibleText = isHtml ? visibleHtmlText(document) : document;
+  const material = wordSafeCompactText(
+    [description, visibleText].filter(Boolean).join(" "),
+    SOURCE_EXCERPT_MATERIAL_MAX_LENGTH,
+  );
+  const snippet = completeSentenceDebateEvidenceExcerpt(
+    description || visibleText,
     SOURCE_SNIPPET_MAX_LENGTH,
   );
   const publishedAt = isHtml
@@ -394,10 +441,13 @@ export function debateSourceDraftFromDocument(args: {
       ) || null
     : null;
   return {
-    title,
-    url: args.url.toString(),
-    snippet,
-    publishedAt,
+    source: {
+      title,
+      url: args.url.toString(),
+      snippet,
+      publishedAt,
+    },
+    material,
   };
 }
 
@@ -436,10 +486,7 @@ async function withAbort<T>(
 
 export async function inspectDebateSourceUrl(
   rawUrl: string,
-  options: {
-    allowNetwork: boolean;
-    dependencies?: DebateSourceInspectionDependencies;
-  },
+  options: DebateSourceInspectionOptions,
 ): Promise<DebateSourceInspectionResult> {
   let current = parsedSourceUrl(rawUrl);
   if (!options.allowNetwork) return manualSourceDraft(current);
@@ -506,12 +553,37 @@ export async function inspectDebateSourceUrl(
           422,
         );
       }
-      return {
-        source: debateSourceDraftFromDocument({
+      const inspected = debateSourceDraftAndMaterialFromDocument({
           url: current,
           contentType: response.contentType,
           body: response.body,
-        }),
+        });
+      const source = await enrichDebateEvidenceSourceExcerpt({
+        source: {
+          id: "inspected-source",
+          ...inspected.source,
+        },
+        motion: options.motion ?? "",
+        materials: [
+          {
+            id: "inspected-page",
+            kind: "page",
+            text: inspected.material,
+          },
+        ],
+        generate: options.generateExcerpt,
+      });
+      return {
+        source: {
+          title: source.title,
+          url: source.url,
+          snippet: source.snippet,
+          publishedAt: source.publishedAt,
+          excerptSource: source.excerptSource,
+          excerptSelection: source.excerptSelection,
+          excerptMaterialHash: source.excerptMaterialHash,
+          excerptModel: source.excerptModel,
+        },
         fetched: true,
       };
     }

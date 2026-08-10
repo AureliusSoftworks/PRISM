@@ -9,6 +9,8 @@ import {
   DEBATE_PLAYER_PARTICIPANT_BOT_ID,
   DEBATE_SCHEMA_VERSION,
   applyBotPowerMumbledResponseV1,
+  debateParticipantGambitGradesV1,
+  debateParticipantGambitOfferV1,
   botPowerSourceHashV1,
   serializeBotAudioVoiceProfileV1,
   serializeBotPowersV1,
@@ -23,27 +25,41 @@ import { initializeDatabase } from "../db.ts";
 import { exportUserSnapshot, importUserSnapshot } from "../backup.ts";
 import { restoreFactoryDefaultsInDatabase } from "../account-reset.ts";
 import {
+  activateDebateParticipantFloorBreak,
   advanceDebateSession,
   checkDebateAdvocacyRoles,
+  cancelDebateParticipantFloorBreakPreparation,
+  commitDebateParticipantFloorBreakPreparation,
   createDebateSession,
+  debateParticipantExpiryOutcomeKind,
   debateMotionHash,
   debateSessionForPlayer,
   endDebateSessionEarly,
+  expireDebateParticipantWindow,
+  forfeitParticipantDebateSession,
   generateDebateRefractDraft,
   getDebateSession,
   listDebateSessions,
   listDebateSessionExhibitAssets,
   attachDebateExhibitSprite,
+  updateDebateExhibitEmoji,
   orderDebateAudience,
   pauseDebateSession,
   pauseDebateSessionWithPersona,
+  previewDebateParticipantPredispositions,
+  prepareDebateParticipantFloorBreak,
   announceDebatePauseCeremony,
   announceDebateResumeCeremony,
   raiseDebateParticipantObjection,
+  raiseDebateParticipantFloorBreak,
+  raiseDebateParticipantFloorBreakWithRuntime,
+  recoverParticipantDebateFromFinalRecess,
   refineDebateCaseBoard,
   resolveDebateParticipantObjection,
+  resolveDebateParticipantFloorBreak,
   resumeDebateSession,
   resumeDebateSessionWithPersona,
+  restartParticipantDebateAsDraft,
   sealDebateSessionPresentation,
   submitDebateJudgeGavelMessage,
   submitDebateInterjection,
@@ -159,6 +175,104 @@ class GalleryDirectorProvider extends DebateProviderStub {
     if (text.includes("silent live gallery director")) {
       this.prompt = text;
       return JSON.stringify({ kind: "impressed", intensity: 2 });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class GuidedChoiceProvider extends DebateProviderStub {
+  private readonly unsafeBad: boolean;
+
+  public constructor(unsafeBad = false) {
+    super();
+    this.unsafeBad = unsafeBad;
+  }
+
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("three private-quality guided answers")) {
+      return JSON.stringify({
+        choices: [
+          {
+            tier: "great",
+            content: "The blanket rule answers scarcity while keeping rail access central.",
+            evidenceIntegrated: false,
+          },
+          {
+            tier: "okay",
+            content: "Local planning can still work within a clearer citywide standard.",
+            evidenceIntegrated: false,
+          },
+          {
+            tier: "bad",
+            content: this.unsafeBad
+              ? "You are a worthless idiot; go die."
+              : "I just think our side sounds a little better.",
+            evidenceIntegrated: false,
+          },
+        ],
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class ParticipantAssessmentProvider extends DebateProviderStub {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("private Participant performance assessor")) {
+      const cited = !text.includes("Validated cited ids: none");
+      return JSON.stringify({
+        facets: {
+          argumentStrength: 0.8,
+          humor: 0,
+          confidence: 0.7,
+          opponentPressure: 0.6,
+          subjectKnowledge: 0.8,
+        },
+        cutoffReason: null,
+        cutoffConfidence: 0,
+        heardCharacterCount: 10_000,
+        evidenceIntegrated: cited,
+      });
+    }
+    return super.generateResponse(messages, options);
+  }
+}
+
+class ParticipantGambitProvider extends ParticipantAssessmentProvider {
+  public override async generateResponse(
+    messages: ProviderMessage[],
+    options?: GenerateOptions,
+  ): Promise<string> {
+    const text = messages.map((message) => message.content).join("\n");
+    if (text.includes("Write a brief theatrical rhetorical gambit")) {
+      return JSON.stringify({
+        performedText:
+          "You ask this chamber to trust a standard your own case does not meet.",
+        evidenceIntegrated: false,
+        evidenceMisused: false,
+      });
+    }
+    if (text.includes("transform a private Producer cue")) {
+      return JSON.stringify({
+        fidelity: "steered",
+        performedText: "Ask why their premise deserves the room's trust.",
+        evidenceIntegrated: false,
+        evidenceMisused: false,
+      });
+    }
+    if (text.includes("Participant objection adjudication")) {
+      return JSON.stringify({
+        ruling: "overruled",
+        reason: "The heard fragment presents disagreement rather than a procedural defect.",
+      });
     }
     return super.generateResponse(messages, options);
   }
@@ -613,7 +727,9 @@ class PersonaVoicePromptProvider extends DebateProviderStub {
     if (text.includes("Vote independently")) this.ballotPrompt = text;
     else if (
       !text.includes("private advocacy consent check") &&
-      !text.includes("The gavel has already struck")
+      !text.includes("The gavel has already struck") &&
+      !text.includes("private-quality guided answers") &&
+      !text.includes("private Participant performance assessor")
     ) {
       this.speechPrompt = text;
     }
@@ -1400,6 +1516,7 @@ async function createDebateForRole(
     forPowers?: BotPowerV1[];
     forSystemPrompt?: string;
     evidence?: DebateEvidencePacketV1;
+    participantDifficulty?: "coach" | "standard" | "immersive";
   } = {},
 ) {
   const debateRuntime = options.debateRuntime ?? runtime();
@@ -1449,6 +1566,7 @@ async function createDebateForRole(
       againstAdvocateBotId: "against",
       playerRole: role,
       playerSideId: role === "participant" ? "against" : null,
+      participationDifficulty: options.participantDifficulty,
       advocacyConsent: checks,
       preferredProvider: "local",
       theme: "light",
@@ -1654,6 +1772,80 @@ describe("Debate engine", () => {
     }
   });
 
+  it("applies the current explicit model only when a saved Debate starts", async () => {
+    const db = createTestDb();
+    try {
+      const savedRuntime = runtime();
+      savedRuntime.modelSelectionKind = "auto";
+      savedRuntime.autoRoute = {
+        v: 1,
+        lane: "local",
+        provider: "local",
+        model: "debate-test",
+        reasoningEffort: "low",
+        reasonCodes: ["surface_complexity"],
+      };
+      const saved = await createJudgeDebate(db, savedRuntime, {
+        deferStart: true,
+        idempotencyKey: "create:judge:deferred-model",
+      });
+      const currentRuntime = runtime();
+      currentRuntime.local = {
+        ...currentRuntime.local,
+        model: "current-explicit-model",
+        reasoningEffort: "high",
+        turbo: true,
+      };
+      currentRuntime.lanes = [currentRuntime.local];
+      currentRuntime.responseMode = "local";
+      currentRuntime.modelSelectionKind = "fixed";
+
+      const started = resumeDebateSession(
+        db,
+        "user-1",
+        saved.id,
+        {
+          expectedRevision: saved.revision,
+          idempotencyKey: "start:current-explicit-model",
+          quietSave: true,
+          exitRecovery: true,
+          startPreferredProvider: "local",
+          startModelOverride: "current-explicit-model",
+          startResponseMode: "local",
+        },
+        undefined,
+        currentRuntime,
+      );
+
+      assert.equal(started.status, "live");
+      assert.equal(started.provider, "local");
+      assert.equal(started.model, "current-explicit-model");
+      assert.equal(started.modelSelectionKind, "fixed");
+      assert.equal(started.responseMode, "local");
+      assert.deepEqual(started.generationChain, [
+        { provider: "local", model: "current-explicit-model" },
+      ]);
+      assert.equal(started.latestAutoRoute, undefined);
+      assert.equal(started.lastReasoningEffort, "high");
+      assert.equal(started.lastTurbo, true);
+      assert.equal(started.moderator.model, "current-explicit-model");
+      assert.equal(started.forAdvocate.model, "current-explicit-model");
+      assert.equal(started.againstAdvocate.model, "current-explicit-model");
+
+      const frozenOverrideSource = serverSource.slice(
+        serverSource.indexOf("function frozenDebateModelOverride"),
+        serverSource.indexOf("function debateAutoRoutingContext"),
+      );
+      assert.match(frozenOverrideSource, /return session\.model/u);
+      assert.doesNotMatch(
+        frozenOverrideSource,
+        /modelSelectionKind === "auto"/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("lists exhibit counts and soft-attaches Archive exhibit sprites", async () => {
     const db = createTestDb();
     try {
@@ -1713,12 +1905,34 @@ describe("Debate engine", () => {
       assert.equal(attached.evidence.exhibits?.[0]?.emoji, "🥄");
       assert.equal(attached.evidence.exhibits?.[0]?.observation, "The handle is bent.");
 
+      const fallbackUpdated = updateDebateExhibitEmoji(
+        db,
+        "user-1",
+        session.id,
+        "exhibit-1",
+        "🍴",
+      );
+      assert.equal(fallbackUpdated.evidence.exhibits?.[0]?.emoji, "🍴");
+      assert.equal(
+        fallbackUpdated.evidence.exhibits?.[0]?.imageId,
+        "exhibit-sprite-1",
+      );
+      assert.equal(
+        fallbackUpdated.evidence.exhibits?.[0]?.visualKind,
+        "synthesized",
+      );
+
       const after = listDebateSessionExhibitAssets(db, "user-1", session.id);
       assert.equal(after[0]?.exhibit.imageId, "exhibit-sprite-1");
+      assert.equal(after[0]?.exhibit.emoji, "🍴");
       assert.match(serverSource, /\/api\/debates\/:id\/exhibits/u);
       assert.match(
         serverSource,
         /\/api\/debates\/:id\/exhibits\/:exhibitId\/sprite/u,
+      );
+      assert.match(
+        serverSource,
+        /\/api\/debates\/:id\/exhibits\/:exhibitId\/emoji/u,
       );
       assert.match(serverSource, /\/api\/assets\/for-image\/:imageId/u);
     } finally {
@@ -1743,10 +1957,12 @@ describe("Debate engine", () => {
         reasoningEffort: "low",
         reasonCodes: ["surface_complexity"],
       };
+      debateRuntime.local.turbo = true;
       let session = await createDebateForRole(db, "spectator", {
         debateRuntime,
       });
       assert.equal(session.modelSelectionKind, "auto");
+      assert.equal(session.lastTurbo, true);
       assert.deepEqual(
         session.autoCandidateAllowlist,
         debateRuntime.autoCandidateAllowlist,
@@ -1755,7 +1971,31 @@ describe("Debate engine", () => {
       assert.equal(listed[0]?.modelSelectionKind, "auto");
       assert.equal(listed[0]?.model, "debate-test");
       assert.equal(listed[0]?.reasoningEffort, "low");
+      assert.equal(listed[0]?.turbo, true);
       assert.ok((listed[0]?.castColors?.length ?? 0) > 0);
+      assert.deepEqual(listed[0]?.advocateVisuals, [
+        {
+          sideId: "for",
+          name: "Avery",
+          color: "#59d7ff",
+          glyph: "◆",
+        },
+        {
+          sideId: "against",
+          name: "Basil",
+          color: "#ff6d9c",
+          glyph: "◆",
+        },
+      ]);
+      debateRuntime.local.model = "debate-routed-next";
+      debateRuntime.autoRoute = {
+        v: 1,
+        lane: "local",
+        provider: "local",
+        model: "debate-routed-next",
+        reasoningEffort: "high",
+        reasonCodes: ["surface_complexity"],
+      };
       for (let turn = 0; turn < 2; turn += 1) {
         session = await advanceDebateSession(
           db,
@@ -1772,6 +2012,11 @@ describe("Debate engine", () => {
         (event) => event.provider && event.model,
       );
       assert.deepEqual(generatedEvent?.autoRoute, debateRuntime.autoRoute);
+      assert.equal(generatedEvent?.turbo, true);
+      const resolvedList = listDebateSessions(db, "user-1");
+      assert.equal(resolvedList[0]?.model, "debate-routed-next");
+      assert.equal(resolvedList[0]?.reasoningEffort, "high");
+      assert.equal(resolvedList[0]?.turbo, true);
     } finally {
       db.close();
     }
@@ -3184,6 +3429,19 @@ describe("Debate engine", () => {
       );
       assert.equal(visible.events.at(-1)?.speakerKind, "moderator");
       assert.equal(visible.events.at(-1)?.kind, "phase");
+      assert.equal(visible.jury.finalBallots.length, 0);
+      assert.equal(
+        visible.participation?.finalJuryBallotInfluences?.length,
+        5,
+      );
+      assert.ok(
+        visible.participation?.finalJuryBallotInfluences?.every(
+          (ballot) =>
+            ballot.participantInfluence !== null &&
+            !("jurorBotId" in ballot) &&
+            !("reason" in ballot),
+        ),
+      );
     } finally {
       db.close();
     }
@@ -3859,13 +4117,25 @@ describe("Debate engine", () => {
     }
   });
 
-  it("does not announce a false countdown for a participant input window", async () => {
+  it("announces the Participant floor limit without exposing the slowed wall clock", async () => {
     const db = createTestDb();
     const provider = new PersonaVoicePromptProvider();
     const debateRuntime = runtimeWith(provider);
     try {
       let session = await createDebateForRole(db, "participant", {
         debateRuntime,
+        evidence: {
+          version: DEBATE_SCHEMA_VERSION,
+          notes: "Rail-adjacent land is scarce.",
+          sources: [{
+            id: "housing-1",
+            title: "Housing report",
+            url: "https://example.com/housing",
+            snippet: "A frozen housing source.",
+            publishedAt: "2026-01-01",
+          }],
+          frozenAt: null,
+        },
       });
       for (const key of ["intro", "opening-for"]) {
         session = await advanceDebateSession(
@@ -3898,9 +4168,9 @@ describe("Debate engine", () => {
       assert.equal(session.stepKey, "challenge_participant_turn");
       assert.match(
         provider.speechPrompt,
-        /Do not announce a countdown for the participant's own input window/u,
+        /tell the Participant they have 12 seconds to answer the challenge/u,
       );
-      assert.doesNotMatch(provider.speechPrompt, /12 seconds/u);
+      assert.doesNotMatch(provider.speechPrompt, /96 seconds/u);
 
       session = await submitDebatePlayerTurn(db, "user-1", session.id, {
         expectedRevision: session.revision,
@@ -3927,12 +4197,9 @@ describe("Debate engine", () => {
       }
       assert.match(
         provider.speechPrompt,
-        /tell the room that Avery and Prism each have 15 seconds whenever they personally take a rebuttal floor/u,
+        /tell the room that Avery and Debater each have 15 seconds whenever they personally take a rebuttal floor/u,
       );
-      assert.match(
-        provider.speechPrompt,
-        /Do not assign a countdown to the participant's own input window/u,
-      );
+      assert.doesNotMatch(provider.speechPrompt, /120 seconds/u);
     } finally {
       db.close();
     }
@@ -5729,6 +5996,55 @@ describe("Debate engine", () => {
       debateSource,
       /shuffledRoster[\s\S]{0,200}randomInt\(index \+ 1\)/u,
     );
+  });
+
+  it("repairs a locally composed New Duel when only cast ids or props are malformed", async () => {
+    const provider: LlmProvider = {
+      name: "local",
+      async generateResponse() {
+        return JSON.stringify({
+          topic: "Night markets",
+          motion: {
+            title: "After-Hours Market",
+            motion: "Cities should permit overnight neighborhood markets.",
+            forSide: {
+              label: "Open Late",
+              brief: "Night markets create room for local commerce and culture.",
+            },
+            againstSide: {
+              label: "Keep Hours",
+              brief: "Residents need predictable quiet and public services need limits.",
+            },
+          },
+          // A common local-model lapse: it invents a cast instead of choosing
+          // the supplied Library ids and omits the required prop pack.
+          forAdvocateBotId: "invented-for",
+          againstAdvocateBotId: "invented-against",
+          exhibits: [],
+        });
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const invent = await suggestDebateSetup({
+      direction: "",
+      roster: [
+        { id: "bot-a", name: "Ada", personaSnippet: "night librarian" },
+        { id: "bot-b", name: "Bea", personaSnippet: "market organizer" },
+      ],
+      runtime: runtimeWith(provider),
+      research: {
+        allowOnlineResearch: false,
+        searchWeb: async () => [],
+        searchScholar: async () => [],
+      },
+    });
+    assert.notEqual(invent.suggestion.forAdvocateBotId, invent.suggestion.againstAdvocateBotId);
+    assert.ok(["bot-a", "bot-b"].includes(invent.suggestion.forAdvocateBotId));
+    assert.ok(["bot-a", "bot-b"].includes(invent.suggestion.againstAdvocateBotId));
+    assert.equal(invent.suggestion.exhibits.length, 2);
+    assert.equal(invent.suggestion.researchMeta.sourcesSkippedReason, "local");
   });
 
   it("attaches Brave and Crossref sources when online research is allowed", async () => {
@@ -7757,6 +8073,14 @@ describe("Debate engine", () => {
           session.ballots.map((ballot) => ballot.voterBotId),
           [session.moderator.id],
         );
+        assert.equal(
+          session.ballots[0]?.participantInfluence?.recordSideId,
+          "for",
+        );
+        assert.equal(
+          typeof session.ballots[0]?.participantInfluence?.adjustedScore,
+          "number",
+        );
         assert.deepEqual(
           session.events
             .filter(
@@ -7770,6 +8094,1379 @@ describe("Debate engine", () => {
       } finally {
         db.close();
       }
+    }
+  });
+
+  it("redacts guided tiers live and gives an activated floor break one stable 30-second window", async () => {
+    const db = createTestDb();
+    const assessmentProvider = new ParticipantAssessmentProvider();
+    const debateRuntime = {
+      ...runtimeWith(assessmentProvider),
+      auxiliary: assessmentProvider,
+    };
+    try {
+      let session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+        evidence: {
+          version: DEBATE_SCHEMA_VERSION,
+          notes: "Rail-adjacent land is scarce.",
+          sources: [{
+            id: "housing-1",
+            title: "Housing report",
+            url: "https://example.com/housing",
+            snippet: "A frozen housing source.",
+            publishedAt: "2026-01-01",
+          }],
+          frozenAt: null,
+        },
+      });
+      assert.equal(session.participation?.difficulty, "standard");
+      assert.equal(
+        session.participation?.rowdiness.moderatorDisposition.temperament,
+        "balanced",
+      );
+      for (const key of ["intro", "opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `participant-activation:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      const target = session.events.find(
+        (event) => event.kind === "speech" && event.sideId === "for",
+      );
+      assert.ok(target);
+      assert.equal(
+        session.participation?.favorability.entries.find(
+          (entry) => entry.eventId === target.id,
+        )?.evidenceMultiplier,
+        2,
+      );
+      const raised = await raiseDebateParticipantFloorBreakWithRuntime(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "participant-activation:raise",
+          eventId: target.id,
+          heardCharacterCount: Math.max(24, Math.floor(target.content.length * 0.58)),
+          kind: "interjection",
+        },
+        debateRuntime,
+      );
+      assert.equal(raised.participantFloorBreak?.fixedCall, "Hold on—");
+      assert.equal(raised.participantFloorBreak?.activatedAt, undefined);
+      assert.equal(
+        raised.participation?.favorability.entries.find(
+          (entry) => entry.eventId === target.id,
+        )?.evidenceMultiplier,
+        1,
+      );
+      await assert.rejects(
+        resolveDebateParticipantFloorBreak(
+          db,
+          "user-1",
+          raised.id,
+          {
+            expectedRevision: raised.revision,
+            idempotencyKey: "participant-activation:too-soon",
+            content: "The heard prefix does not support the conclusion.",
+          },
+          debateRuntime,
+        ),
+        /Wait until the interruption call has finished/u,
+      );
+      const activated = activateDebateParticipantFloorBreak(
+        db,
+        "user-1",
+        raised.id,
+        {
+          expectedRevision: raised.revision,
+          idempotencyKey: "participant-activation:activate",
+          callEventId: raised.participantFloorBreak!.callEventId,
+        },
+      );
+      assert.ok(activated.participantFloorBreak?.activatedAt);
+      assert.equal(
+        Date.parse(activated.participantFloorBreak!.deadlineAt) -
+          Date.parse(activated.participantFloorBreak!.activatedAt!),
+        30_000,
+      );
+      const repeated = activateDebateParticipantFloorBreak(
+        db,
+        "user-1",
+        activated.id,
+        {
+          expectedRevision: activated.revision,
+          idempotencyKey: "participant-activation:activate-again",
+          callEventId: activated.participantFloorBreak!.callEventId,
+        },
+      );
+      assert.equal(repeated.revision, activated.revision);
+      assert.equal(
+        repeated.participantFloorBreak?.deadlineAt,
+        activated.participantFloorBreak?.deadlineAt,
+      );
+
+      const privateProjection = debateSessionForPlayer({
+        ...activated,
+        participation: activated.participation
+          ? {
+              ...activated.participation,
+              turns: [{
+                eventId: target.id,
+                phase: "opening",
+                opportunityIndex: 0,
+                authoredMode: "guided",
+                choiceId: "choice-a",
+                choiceTier: "great",
+                announcedLimitMs: 20_000,
+                wallLimitMs: 160_000,
+                elapsedWallMs: 3_000,
+                overtimeMs: 0,
+                authoredCharacterCount: 20,
+                heardCharacterCount: 20,
+                cutoffReason: null,
+                facets: {},
+                baseImpact: 12,
+                phaseWeight: 1,
+                evidenceMultiplier: 1,
+                favorabilityDelta: 12,
+                createdAt: NOW,
+              }],
+            }
+          : null,
+      });
+      assert.equal(privateProjection.participation?.turns[0]?.choiceTier, undefined);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("prepares rhetorical gambits before committing the latest heard prefix", async () => {
+    const db = createTestDb();
+    const provider = new ParticipantGambitProvider();
+    const debateRuntime = {
+      ...runtimeWith(provider),
+      auxiliary: provider,
+    };
+    try {
+      let session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+        evidence: {
+          version: DEBATE_SCHEMA_VERSION,
+          notes: "Rail-adjacent land is scarce.",
+          sources: [{
+            id: "housing-1",
+            title: "Housing report",
+            url: "https://example.com/housing",
+            snippet: "A frozen housing source.",
+            publishedAt: "2026-01-01",
+          }],
+          frozenAt: null,
+        },
+      });
+      assert.equal(session.participation?.rhetoricalGambitsEnabled, true);
+      assert.equal(
+        listDebateSessions(db, "user-1")[0]?.rhetoricalGambitsEnabled,
+        true,
+      );
+      for (const key of ["intro", "opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `participant-gambit:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      const target = session.events.find(
+        (event) => event.kind === "speech" && event.sideId === "for",
+      );
+      assert.ok(target);
+      const firstHeard = Math.max(24, Math.floor(target.content.length * 0.45));
+      const offer = debateParticipantGambitOfferV1({
+        sessionId: session.id,
+        eventId: target.id,
+        kind: "objection",
+      });
+      const exposedChoiceId = debateParticipantGambitGradesV1({
+        sessionId: session.id,
+        offer,
+      }).find((grade) => grade.tier === "exposed")!.choiceId;
+
+      const drafting = await prepareDebateParticipantFloorBreak(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "participant-gambit:draft",
+          eventId: target.id,
+          heardCharacterCount: firstHeard,
+          kind: "objection",
+        },
+        debateRuntime,
+      );
+      assert.equal(drafting.participantFloorBreakPreparation?.status, "drafting");
+      assert.equal(
+        drafting.events.find((event) => event.id === target.id)?.interrupted,
+        undefined,
+      );
+      const canceled = cancelDebateParticipantFloorBreakPreparation(
+        db,
+        "user-1",
+        drafting.id,
+        {
+          expectedRevision: drafting.revision,
+          idempotencyKey: "participant-gambit:cancel",
+          preparationId: drafting.participantFloorBreakPreparation!.id,
+        },
+      );
+      assert.equal(canceled.participantFloorBreakPreparation, null);
+
+      await assert.rejects(
+        prepareDebateParticipantFloorBreak(
+          db,
+          "user-1",
+          canceled.id,
+          {
+            expectedRevision: canceled.revision,
+            idempotencyKey: "participant-gambit:unknown-evidence",
+            eventId: target.id,
+            heardCharacterCount: firstHeard,
+            kind: "objection",
+            gambitId: exposedChoiceId,
+            evidenceSourceIds: ["not-in-the-envelope"],
+          },
+          debateRuntime,
+        ),
+        (error: unknown) =>
+          error instanceof HttpError &&
+          error.statusCode === 409 &&
+          /sealed packet/u.test(error.message),
+      );
+
+      const confused = await prepareDebateParticipantFloorBreak(
+        db,
+        "user-1",
+        canceled.id,
+        {
+          expectedRevision: canceled.revision,
+          idempotencyKey: "participant-gambit:gibberish",
+          eventId: target.id,
+          heardCharacterCount: firstHeard,
+          kind: "interjection",
+          producerCue: "asga;lskdjfasgh",
+        },
+        debateRuntime,
+      );
+      assert.equal(
+        confused.participantFloorBreakPreparation?.steeringFidelity,
+        "confused",
+      );
+      assert.equal(
+        confused.participantFloorBreakPreparation?.performedText,
+        "I… uh…",
+      );
+      const afterConfused = cancelDebateParticipantFloorBreakPreparation(
+        db,
+        "user-1",
+        confused.id,
+        {
+          expectedRevision: confused.revision,
+          idempotencyKey: "participant-gambit:cancel-confused",
+          preparationId: confused.participantFloorBreakPreparation!.id,
+        },
+      );
+
+      const prepared = await prepareDebateParticipantFloorBreak(
+        db,
+        "user-1",
+        afterConfused.id,
+        {
+          expectedRevision: afterConfused.revision,
+          idempotencyKey: "participant-gambit:prepare",
+          eventId: target.id,
+          heardCharacterCount: firstHeard,
+          kind: "objection",
+          gambitId: exposedChoiceId,
+          evidenceSourceIds: ["housing-1"],
+        },
+        debateRuntime,
+      );
+      const preparation = prepared.participantFloorBreakPreparation;
+      assert.equal(preparation?.status, "ready");
+      assert.ok(preparation?.performedText);
+      assert.equal(preparation?.evidenceIntegrated, true);
+      assert.equal(preparation?.evidenceMisused, false);
+      assert.match(preparation?.counterText ?? "", /^Objection/iu);
+      assert.ok(preparation?.continuationText);
+      assert.equal(
+        prepared.events.find((event) => event.id === target.id)?.interrupted,
+        undefined,
+      );
+      const liveProjection = debateSessionForPlayer(prepared);
+      assert.equal(liveProjection.participation?.gambitGrades, undefined);
+      assert.equal(liveProjection.participation?.gambitRecords.length, 0);
+      assert.equal(
+        liveProjection.participantFloorBreakPreparation?.producerCue,
+        undefined,
+      );
+      assert.equal(
+        liveProjection.participantFloorBreakPreparation?.gambitTier,
+        undefined,
+      );
+
+      const finalHeard = Math.min(
+        target.content.length - 1,
+        firstHeard + 12,
+      );
+      const committed = commitDebateParticipantFloorBreakPreparation(
+        db,
+        "user-1",
+        prepared.id,
+        {
+          expectedRevision: prepared.revision,
+          idempotencyKey: "participant-gambit:commit",
+          preparationId: preparation!.id,
+          heardCharacterCount: finalHeard,
+        },
+      );
+      assert.equal(committed.participantFloorBreakPreparation, null);
+      assert.equal(
+        committed.events.find((event) => event.id === target.id)?.interrupted,
+        true,
+      );
+      assert.ok(
+        committed.events.find((event) => event.id === target.id)!.content.length <=
+          finalHeard + 2,
+      );
+      assert.equal(
+        committed.events.find((event) => event.id === preparation!.callEventId)
+          ?.stepKey,
+        "participant_floor_break_call",
+      );
+      assert.equal(
+        committed.events.find((event) => event.id === preparation!.responseEventId)
+          ?.content,
+        preparation!.performedText,
+      );
+      assert.equal(
+        committed.events.find((event) => event.id === preparation!.counterEventId)
+          ?.stepKey,
+        "participant_floor_break_counter_objection",
+      );
+      assert.equal(
+        committed.events.find(
+          (event) => event.id === preparation!.continuationEventId,
+        )?.stepKey,
+        "participant_objection_opponent_continuation",
+      );
+      assert.equal(
+        committed.participation?.gambitRecords.at(-1)
+          ?.finalHeardCharacterCount,
+        finalHeard,
+      );
+      assert.equal(
+        committed.participation?.favorability.entries.at(-1)
+          ?.evidenceMultiplier,
+        2,
+      );
+      const replay = commitDebateParticipantFloorBreakPreparation(
+        db,
+        "user-1",
+        prepared.id,
+        {
+          expectedRevision: prepared.revision,
+          idempotencyKey: "participant-gambit:commit",
+          preparationId: preparation!.id,
+          heardCharacterCount: finalHeard,
+        },
+      );
+      assert.equal(replay.revision, committed.revision);
+      assert.equal(
+        replay.events.filter((event) => event.id === preparation!.callEventId)
+          .length,
+        1,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("returns an interrupted opponent's floor after a Participant interjection", async () => {
+    const db = createTestDb();
+    const provider = new ParticipantGambitProvider();
+    const debateRuntime = {
+      ...runtimeWith(provider),
+      auxiliary: provider,
+    };
+    try {
+      let session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+      });
+      for (const key of ["intro", "opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `participant-interjection-continuation:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      const target = session.events.find(
+        (event) => event.kind === "speech" && event.sideId === "for",
+      );
+      assert.ok(target);
+      const firstHeard = Math.max(
+        24,
+        Math.floor(target.content.length * 0.55),
+      );
+      const prepared = await prepareDebateParticipantFloorBreak(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "participant-interjection-continuation:prepare",
+          eventId: target.id,
+          heardCharacterCount: firstHeard,
+          kind: "interjection",
+          producerCue: "Point out that their premise does not prove the conclusion.",
+        },
+        debateRuntime,
+      );
+      const preparation = prepared.participantFloorBreakPreparation;
+      assert.equal(preparation?.status, "ready");
+      assert.equal(preparation?.clarificationRequired, false);
+      assert.ok(preparation?.continuationText);
+
+      const committed = commitDebateParticipantFloorBreakPreparation(
+        db,
+        "user-1",
+        prepared.id,
+        {
+          expectedRevision: prepared.revision,
+          idempotencyKey: "participant-interjection-continuation:commit",
+          preparationId: preparation!.id,
+          heardCharacterCount: Math.min(
+            target.content.length - 1,
+            firstHeard + 12,
+          ),
+        },
+      );
+      const rulingIndex = committed.events.findIndex(
+        (event) => event.id === preparation!.rulingEventId,
+      );
+      const continuationIndex = committed.events.findIndex(
+        (event) => event.id === preparation!.continuationEventId,
+      );
+      assert.ok(rulingIndex >= 0);
+      assert.ok(continuationIndex > rulingIndex);
+      assert.equal(
+        committed.events[continuationIndex]?.stepKey,
+        "participant_interjection_opponent_continuation",
+      );
+      assert.equal(
+        committed.events[continuationIndex]?.speakerBotId,
+        target.speakerBotId,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("prepares the same three safe guided choices at every difficulty and falls back on unsafe output", async () => {
+    for (const participantDifficulty of ["coach", "standard", "immersive"] as const) {
+      const db = createTestDb();
+      const debateRuntime = runtimeWith(new GuidedChoiceProvider());
+      try {
+        let session = await createDebateForRole(db, "participant", {
+          debateRuntime,
+          participantDifficulty,
+        });
+        for (const key of ["intro", "opening"]) {
+          session = await advanceDebateSession(
+            db,
+            "user-1",
+            session.id,
+            {
+              expectedRevision: session.revision,
+              idempotencyKey: `participant-choices:${participantDifficulty}:${key}`,
+            },
+            debateRuntime,
+          );
+        }
+        assert.equal(session.participation?.difficulty, participantDifficulty);
+        assert.equal(
+          listDebateSessions(db, "user-1")[0]?.participationDifficulty,
+          participantDifficulty,
+        );
+        assert.equal(session.participation?.choiceSet?.choices.length, 3);
+        assert.equal(
+          session.participation?.choiceSet?.choices.every(
+            (choice) =>
+              choice.content.length <= 180 &&
+              choice.content.trim().split(/\s+/u).length <= 28,
+          ),
+          true,
+        );
+        assert.equal(session.participation?.choiceError, undefined);
+        assert.equal(
+          debateSessionForPlayer(session).participation?.choiceGrades,
+          undefined,
+        );
+        const selectedChoice = session.participation?.choiceSet?.choices[0];
+        assert.ok(selectedChoice);
+        const committed = await submitDebatePlayerTurn(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `participant-choices:${participantDifficulty}:commit`,
+            choiceId: selectedChoice.id,
+          },
+          debateRuntime.auxiliary,
+          debateRuntime,
+        );
+        assert.equal(
+          committed.events.findLast((event) => event.kind === "player_turn")
+            ?.participantChoiceId,
+          selectedChoice.id,
+        );
+        assert.equal(committed.participation?.choiceSet, null);
+      } finally {
+        db.close();
+      }
+    }
+
+    const db = createTestDb();
+    const unsafeRuntime = runtimeWith(new GuidedChoiceProvider(true));
+    try {
+      let session = await createDebateForRole(db, "participant", {
+        debateRuntime: unsafeRuntime,
+      });
+      for (const key of ["intro", "opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `participant-choices:unsafe:${key}`,
+          },
+          unsafeRuntime,
+        );
+      }
+      assert.equal(session.participation?.choiceSet, null);
+      assert.match(session.participation?.choiceError ?? "", /type your own answer or retry/u);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("counts only deliberate Participant recesses and denies the fourth with a favorability penalty", async () => {
+    const db = createTestDb();
+    try {
+      let session = await createDebateForRole(db, "participant");
+      for (let index = 1; index <= 3; index += 1) {
+        session = pauseDebateSession(db, "user-1", session.id, {
+          expectedRevision: session.revision,
+          idempotencyKey: `participant-recess:pause:${index}`,
+          quietSave: true,
+          recessIntent: "deliberate",
+        });
+        assert.equal(session.participation?.recess.used, index);
+        session = resumeDebateSession(db, "user-1", session.id, {
+          expectedRevision: session.revision,
+          idempotencyKey: `participant-recess:resume:${index}`,
+          quietSave: true,
+          recessIntent: "recovery",
+        });
+      }
+      const denied = pauseDebateSession(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "participant-recess:pause:4",
+        quietSave: true,
+        recessIntent: "deliberate",
+      });
+      assert.notEqual(denied.status, "paused");
+      assert.equal(denied.participation?.recess.used, 3);
+      assert.equal(denied.participation?.recess.denials, 1);
+      assert.equal(denied.participation?.favorability.entries.at(-1)?.delta, -6);
+      assert.equal(denied.events.at(-1)?.stepKey, "participant_recess_denied");
+      assert.equal(
+        denied.participation?.rowdiness.outcomes.at(-1)?.kind,
+        "recess_denial",
+      );
+      assert.ok(
+        (denied.participation?.rowdiness.patienceRemaining ?? Infinity) <
+          (denied.participation?.rowdiness.patienceBudget ?? 0),
+      );
+      const decisionHold = pauseDebateSession(db, "user-1", denied.id, {
+        expectedRevision: denied.revision,
+        idempotencyKey: "participant-recess:decision-hold",
+        quietSave: true,
+        exitRecovery: true,
+        recessIntent: "decision_hold",
+      });
+      assert.equal(decisionHold.status, "paused");
+      assert.equal(decisionHold.participation?.recess.used, 3);
+      assert.equal(decisionHold.participation?.recess.denials, 1);
+      const continued = resumeDebateSession(db, "user-1", denied.id, {
+        expectedRevision: decisionHold.revision,
+        idempotencyKey: "participant-recess:decision-continue",
+        quietSave: true,
+      });
+      assert.notEqual(continued.status, "paused");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("freezes active Participant time for recovery pauses and refreshes it for a spent recess", async () => {
+    const db = createTestDb();
+    const debateRuntime = runtime();
+    try {
+      let session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+      });
+      for (const key of ["intro", "opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `participant-recess-clock:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      const window = session.participation?.participantWindow;
+      assert.ok(window);
+      const openedAtMs = Date.now() - 30_000;
+      const clocked = {
+        ...session,
+        participation: {
+          ...session.participation!,
+          participantWindow: {
+            ...window,
+            openedAt: new Date(openedAtMs).toISOString(),
+            deadlineAt: new Date(openedAtMs + window.wallLimitMs).toISOString(),
+          },
+        },
+      };
+      db.prepare(
+        "UPDATE debate_sessions SET session_json = ? WHERE id = ? AND user_id = ?",
+      ).run(JSON.stringify({ ...clocked, events: [] }), session.id, "user-1");
+      session = getDebateSession(db, "user-1", session.id);
+
+      const recoveredPause = pauseDebateSession(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "participant-recess-clock:recovery-pause",
+        quietSave: true,
+        recessIntent: "recovery",
+      });
+      const recoveredWindow = recoveredPause.participation?.participantWindow;
+      assert.equal(recoveredWindow?.status, "paused");
+      assert.ok((recoveredWindow?.elapsedWallMs ?? 0) >= 29_000);
+      assert.ok((recoveredWindow?.remainingMs ?? Infinity) < window.wallLimitMs);
+      assert.equal(recoveredPause.participation?.recess.used, 0);
+
+      const recoveredResume = resumeDebateSession(
+        db,
+        "user-1",
+        recoveredPause.id,
+        {
+          expectedRevision: recoveredPause.revision,
+          idempotencyKey: "participant-recess-clock:recovery-resume",
+          quietSave: true,
+        },
+      );
+      const resumedWindow = recoveredResume.participation?.participantWindow;
+      assert.equal(resumedWindow?.status, "open");
+      assert.ok(Date.parse(resumedWindow!.openedAt) >= Date.now() - 1_000);
+      assert.ok(
+        Math.abs(
+          Date.parse(resumedWindow!.deadlineAt) -
+            Date.parse(resumedWindow!.openedAt) -
+            recoveredWindow!.remainingMs!,
+        ) < 20,
+      );
+      assert.equal(
+        resumedWindow?.elapsedWallMs,
+        recoveredWindow?.elapsedWallMs,
+      );
+
+      const deliberatePause = pauseDebateSession(
+        db,
+        "user-1",
+        recoveredResume.id,
+        {
+          expectedRevision: recoveredResume.revision,
+          idempotencyKey: "participant-recess-clock:deliberate-pause",
+          quietSave: true,
+          recessIntent: "deliberate",
+        },
+      );
+      assert.equal(deliberatePause.participation?.recess.used, 1);
+      assert.equal(
+        deliberatePause.participation?.participantWindow?.remainingMs,
+        window.wallLimitMs,
+      );
+      assert.equal(
+        deliberatePause.participation?.participantWindow?.elapsedWallMs,
+        0,
+      );
+      const deliberateResume = resumeDebateSession(
+        db,
+        "user-1",
+        deliberatePause.id,
+        {
+          expectedRevision: deliberatePause.revision,
+          idempotencyKey: "participant-recess-clock:deliberate-resume",
+          quietSave: true,
+        },
+      );
+      const freshWindow = deliberateResume.participation?.participantWindow;
+      assert.equal(
+        Date.parse(freshWindow!.deadlineAt) - Date.parse(freshWindow!.openedAt),
+        window.wallLimitMs,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rage-rushes an exhausted Participant to the ballot when denied recesses consume all patience", async () => {
+    const db = createTestDb();
+    const debateRuntime = runtime();
+    try {
+      let session = await createDebateForRole(db, "participant", {
+        formality: "parliamentary",
+        debateRuntime,
+      });
+      for (let index = 1; index <= 3; index += 1) {
+        session = pauseDebateSession(db, "user-1", session.id, {
+          expectedRevision: session.revision,
+          idempotencyKey: `participant-rage:pause:${index}`,
+          quietSave: true,
+          recessIntent: "deliberate",
+        });
+        session = resumeDebateSession(db, "user-1", session.id, {
+          expectedRevision: session.revision,
+          idempotencyKey: `participant-rage:resume:${index}`,
+          quietSave: true,
+          recessIntent: "recovery",
+        });
+      }
+
+      const firstDenied = pauseDebateSession(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "participant-rage:denied:1",
+        quietSave: true,
+        recessIntent: "deliberate",
+      });
+      assert.ok(
+        (firstDenied.participation?.rowdiness.patienceRemaining ?? 0) > 0,
+      );
+      assert.ok(
+        (firstDenied.participation?.rowdiness.patienceRemaining ?? Infinity) <
+          15,
+      );
+      assert.equal(firstDenied.participation?.recess.rageRush, undefined);
+
+      const expectedRevision = firstDenied.revision;
+      const rushed = pauseDebateSession(db, "user-1", session.id, {
+        expectedRevision,
+        idempotencyKey: "participant-rage:denied:2",
+        quietSave: true,
+        recessIntent: "deliberate",
+      });
+      assert.equal(rushed.phase, "verdict");
+      assert.equal(rushed.stepKey, "ballot_moderator");
+      assert.equal(rushed.status, "live");
+      assert.ok(rushed.endedEarlyAt);
+      assert.equal(rushed.participation?.rowdiness.patienceRemaining, 0);
+      assert.equal(rushed.participation?.participantWindow, null);
+      assert.equal(rushed.participation?.recess.denials, 2);
+      assert.equal(rushed.participation?.recess.rageRush?.ballotInfluence, -80);
+      assert.equal(
+        rushed.events.at(-1)?.stepKey,
+        "participant_recess_rage_rush",
+      );
+      assert.equal(rushed.events.at(-1)?.gavelDemeanor, "aggravated");
+      assert.deepEqual(
+        rushed.participation?.favorability.entries.at(-1)?.reasons,
+        ["rage_rush"],
+      );
+
+      const replay = pauseDebateSession(db, "user-1", session.id, {
+        expectedRevision,
+        idempotencyKey: "participant-rage:denied:2",
+        quietSave: true,
+        recessIntent: "deliberate",
+      });
+      assert.equal(replay.revision, rushed.revision);
+      assert.equal(
+        replay.events.filter(
+          (event) => event.stepKey === "participant_recess_rage_rush",
+        ).length,
+        1,
+      );
+      assert.throws(
+        () =>
+          recoverParticipantDebateFromFinalRecess(
+            db,
+            "user-1",
+            rushed.id,
+            {
+              expectedRevision: rushed.revision,
+              idempotencyKey: "participant-rage:rewind",
+            },
+          ),
+        /already closed arguments/u,
+      );
+
+      const ballot = await advanceDebateSession(
+        db,
+        "user-1",
+        rushed.id,
+        {
+          expectedRevision: rushed.revision,
+          idempotencyKey: "participant-rage:ballot",
+        },
+        debateRuntime,
+      );
+      assert.equal(ballot.ballots.at(-1)?.sideId, "for");
+      assert.equal(
+        ballot.ballots.at(-1)?.participantInfluence?.rageRushInfluence,
+        -80,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("rage-rushes an exhausted Participant directly into Jury deliberation", async () => {
+    const db = createTestDb();
+    try {
+      const created = await createJuryDebateForRole(
+        db,
+        "participant",
+        0,
+        "forum",
+        new JuryProvider(),
+        "parliamentary",
+      );
+      let session = created.session;
+      for (let index = 1; index <= 3; index += 1) {
+        session = pauseDebateSession(db, "user-1", session.id, {
+          expectedRevision: session.revision,
+          idempotencyKey: `participant-jury-rage:pause:${index}`,
+          quietSave: true,
+          recessIntent: "deliberate",
+        });
+        session = resumeDebateSession(db, "user-1", session.id, {
+          expectedRevision: session.revision,
+          idempotencyKey: `participant-jury-rage:resume:${index}`,
+          quietSave: true,
+          recessIntent: "recovery",
+        });
+      }
+      for (let index = 1; index <= 2; index += 1) {
+        session = pauseDebateSession(db, "user-1", session.id, {
+          expectedRevision: session.revision,
+          idempotencyKey: `participant-jury-rage:denied:${index}`,
+          quietSave: true,
+          recessIntent: "deliberate",
+        });
+      }
+      assert.equal(session.phase, "verdict");
+      assert.equal(session.stepKey, "jury_initial_0");
+      assert.equal(session.jury.phase, "initial_ballots");
+      assert.equal(session.jury.discussionTurnTarget, 3);
+      assert.equal(session.participation?.recess.rageRush?.ballotInfluence, -80);
+      assert.match(
+        session.events.at(-1)?.content ?? "",
+        /Jury will decide this now/u,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("checkpoints the final Participant recess, rewinds forced recovery, and makes exit terminal", async () => {
+    const db = createTestDb();
+    try {
+      const exhaustRecesses = async (
+        database: DatabaseSync,
+        label: string,
+      ) => {
+        let session = await createDebateForRole(database, "participant");
+        for (let index = 1; index <= 3; index += 1) {
+          session = pauseDebateSession(database, "user-1", session.id, {
+            expectedRevision: session.revision,
+            idempotencyKey: `${label}:pause:${index}`,
+            quietSave: true,
+            recessIntent: "deliberate",
+          });
+          if (index < 3) {
+            session = resumeDebateSession(database, "user-1", session.id, {
+              expectedRevision: session.revision,
+              idempotencyKey: `${label}:resume:${index}`,
+              quietSave: true,
+            });
+          }
+        }
+        return session;
+      };
+
+      let recoverable = await exhaustRecesses(
+        db,
+        "final-checkpoint:recover",
+      );
+      const checkpoint = recoverable.participation?.recess.checkpoint;
+      assert.ok(checkpoint);
+      assert.equal(checkpoint.revision, recoverable.revision);
+      assert.equal(
+        db
+          .prepare(
+            "SELECT source_revision FROM debate_recess_checkpoints WHERE session_id = ? AND user_id = ?",
+          )
+          .get(recoverable.id, "user-1")?.source_revision,
+        recoverable.revision,
+      );
+      const checkpointEventCount = recoverable.events.length;
+      recoverable = resumeDebateSession(db, "user-1", recoverable.id, {
+        expectedRevision: recoverable.revision,
+        idempotencyKey: "final-checkpoint:resume-live",
+        quietSave: true,
+      });
+      recoverable = await advanceDebateSession(
+        db,
+        "user-1",
+        recoverable.id,
+        {
+          expectedRevision: recoverable.revision,
+          idempotencyKey: "final-checkpoint:progress-after",
+        },
+        runtime(),
+      );
+      assert.ok(recoverable.events.length > checkpointEventCount);
+      const restored = pauseDebateSession(db, "user-1", recoverable.id, {
+        expectedRevision: recoverable.revision,
+        idempotencyKey: "final-checkpoint:forced-recovery",
+        quietSave: true,
+        exitRecovery: true,
+        recessIntent: "recovery",
+      });
+      assert.equal(restored.status, "paused");
+      assert.equal(restored.phase, checkpoint.phase);
+      assert.equal(restored.stepKey, checkpoint.stepKey);
+      assert.equal(restored.events.length, checkpointEventCount);
+      assert.equal(restored.participation?.recess.used, 3);
+
+      let replayed = resumeDebateSession(db, "user-1", restored.id, {
+        expectedRevision: restored.revision,
+        idempotencyKey: "final-checkpoint:resume-again",
+        quietSave: true,
+      });
+      replayed = await advanceDebateSession(
+        db,
+        "user-1",
+        replayed.id,
+        {
+          expectedRevision: replayed.revision,
+          idempotencyKey: "final-checkpoint:progress-again",
+        },
+        runtime(),
+      );
+      replayed = recoverParticipantDebateFromFinalRecess(
+        db,
+        "user-1",
+        replayed.id,
+        {
+          expectedRevision: replayed.revision,
+          idempotencyKey: "final-checkpoint:explicit-recovery",
+        },
+      );
+      assert.equal(replayed.status, "paused");
+      assert.equal(replayed.events.length, checkpointEventCount);
+
+      const forfeited = forfeitParticipantDebateSession(
+        db,
+        "user-1",
+        replayed.id,
+        {
+          expectedRevision: replayed.revision,
+          idempotencyKey: "final-checkpoint:forfeit",
+        },
+      );
+      assert.equal(forfeited.status, "completed");
+      assert.notEqual(forfeited.winnerSideId, forfeited.playerSideId);
+      assert.equal(forfeited.events.at(-1)?.stepKey, "participant_forfeit");
+
+      const draftDb = createTestDb();
+      try {
+        const restartable = await exhaustRecesses(
+          draftDb,
+          "final-checkpoint:draft",
+        );
+        const restarted = restartParticipantDebateAsDraft(
+          draftDb,
+          "user-1",
+          restartable.id,
+          {
+            expectedRevision: restartable.revision,
+            idempotencyKey: "final-checkpoint:restart-draft",
+          },
+        );
+        assert.equal(restarted.session.status, "cancelled");
+        assert.equal(restarted.draftSession.status, "paused");
+        assert.equal(restarted.draftSession.events.length, 0);
+        assert.equal(restarted.draftSession.participation?.recess.used, 0);
+        assert.equal(
+          listDebateSessions(draftDb, "user-1").find(
+            (entry) => entry.id === restarted.draftSession.id,
+          )?.awaitingDeferredStart,
+          true,
+        );
+      } finally {
+        draftDb.close();
+      }
+    } finally {
+      db.close();
+    }
+  });
+
+  it("projects pre-start predispositions by difficulty without revealing Surprise jurors", async () => {
+    const db = createTestDb();
+    try {
+      seedBot(db, "moderator", "Mira");
+      seedBot(db, "opponent", "Basil");
+      const standard = await previewDebateParticipantPredispositions(
+        db,
+        "user-1",
+        {
+          motion: MOTION,
+          playerSideId: "against",
+          participationDifficulty: "standard",
+          moderatorBotId: "moderator",
+          opponentBotId: "opponent",
+          jurorBotIds: [null],
+        },
+        runtime(),
+      );
+      assert.equal(standard.predispositions[0]?.status, "known");
+      assert.equal(typeof standard.predispositions[0]?.direction, "string");
+      assert.equal(standard.predispositions[0]?.strength, undefined);
+      assert.deepEqual(standard.predispositions[2], {
+        seat: "juror",
+        seatIndex: 0,
+        status: "surprise",
+      });
+      const immersive = await previewDebateParticipantPredispositions(
+        db,
+        "user-1",
+        {
+          motion: MOTION,
+          playerSideId: "against",
+          participationDifficulty: "immersive",
+          moderatorBotId: "moderator",
+          opponentBotId: "opponent",
+        },
+        runtime(),
+      );
+      assert.deepEqual(immersive.predispositions[0], {
+        seat: "moderator",
+        status: "known",
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("charges wall-clock overtime and patience when a late Participant answer still lands", async () => {
+    const db = createTestDb();
+    const debateRuntime = runtime();
+    try {
+      let session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+      });
+      for (const key of ["intro", "opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `participant-late:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      const window = session.participation?.participantWindow;
+      assert.ok(window);
+      const openedAt = new Date(Date.now() - window.wallLimitMs - 11_000).toISOString();
+      const late = {
+        ...session,
+        participation: {
+          ...session.participation!,
+          participantWindow: {
+            ...window,
+            openedAt,
+            deadlineAt: new Date(Date.parse(openedAt) + window.wallLimitMs).toISOString(),
+          },
+        },
+      };
+      db.prepare(
+        "UPDATE debate_sessions SET session_json = ? WHERE id = ? AND user_id = ?",
+      ).run(JSON.stringify({ ...late, events: [] }), session.id, "user-1");
+      session = getDebateSession(db, "user-1", session.id);
+      const patienceBefore = session.participation!.rowdiness.patienceRemaining;
+      const submitted = await submitDebatePlayerTurn(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "participant-late:submit",
+          pass: true,
+        },
+      );
+      assert.equal(
+        submitted.participation?.favorability.entries.some(
+          (entry) => entry.reasons.includes("overtime") && entry.delta <= -2,
+        ),
+        true,
+      );
+      assert.ok(
+        (submitted.participation?.rowdiness.patienceRemaining ?? patienceBefore) <
+          patienceBefore,
+      );
+      assert.ok((submitted.participation?.turns.at(-1)?.overtimeMs ?? 0) >= 10_000);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("grades the authored draft when the Participant expiry timer fires", async () => {
+    const db = createTestDb();
+    const debateRuntime = runtime();
+    try {
+      let session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+      });
+      for (const key of ["intro", "opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `participant-authored-expiry:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      const window = session.participation?.participantWindow;
+      assert.ok(window);
+      const nowMs = Date.now();
+      const openedAt = new Date(
+        nowMs - window.wallLimitMs - 45_000,
+      ).toISOString();
+      const expiredState = {
+        ...session,
+        participation: {
+          ...session.participation!,
+          rowdiness: {
+            ...session.participation!.rowdiness,
+            patienceRemaining: 0,
+          },
+          participantWindow: {
+            ...window,
+            openedAt,
+            deadlineAt: new Date(nowMs - 1_000).toISOString(),
+          },
+        },
+      };
+      db.prepare(
+        "UPDATE debate_sessions SET session_json = ? WHERE id = ? AND user_id = ?",
+      ).run(
+        JSON.stringify({ ...expiredState, events: [] }),
+        session.id,
+        "user-1",
+      );
+      session = getDebateSession(db, "user-1", session.id);
+      const playerTurnCount = session.events.filter(
+        (event) => event.kind === "player_turn",
+      ).length;
+      const graded = await expireDebateParticipantWindow(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "participant-authored-expiry:grade",
+          windowOpenedAt: openedAt,
+          authoredContent: "Rail access matters because this rule protects scarce public land.",
+        },
+        debateRuntime,
+        nowMs,
+      );
+      assert.equal(
+        graded.events.filter((event) => event.kind === "player_turn").length,
+        playerTurnCount + 1,
+      );
+      assert.ok((graded.participation?.turns.at(-1)?.authoredCharacterCount ?? 0) > 0);
+      assert.ok(graded.participation?.favorability.entries.length);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("persists a replay-stable zero-patience outcome and forces a taunt grace to end by gavel", async () => {
+    const observed = new Set<string>();
+    for (let index = 0; index < 200 && observed.size < 3; index += 1) {
+      observed.add(
+        debateParticipantExpiryOutcomeKind(
+          `session-${index}`,
+          "2026-08-09T12:00:00.000Z",
+        ),
+      );
+    }
+    assert.deepEqual(
+      [...observed].sort(),
+      ["awkward_silence", "gavel", "opponent_taunt"],
+    );
+    assert.equal(
+      debateParticipantExpiryOutcomeKind(
+        "session",
+        "2026-08-09T12:00:00.000Z",
+        "taunt_grace",
+      ),
+      "gavel",
+    );
+
+    const db = createTestDb();
+    const debateRuntime = runtime();
+    try {
+      let session = await createDebateForRole(db, "participant", {
+        debateRuntime,
+      });
+      for (const key of ["intro", "opening"]) {
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `participant-expiry:${key}`,
+          },
+          debateRuntime,
+        );
+      }
+      const window = session.participation?.participantWindow;
+      assert.ok(window);
+      const nowMs = Date.now();
+      const deadlineAt = new Date(nowMs - 2_000).toISOString();
+      const openedAt = new Date(Date.parse(deadlineAt) - window.wallLimitMs).toISOString();
+      const expiredState = {
+        ...session,
+        participation: {
+          ...session.participation!,
+          rowdiness: {
+            ...session.participation!.rowdiness,
+            patienceRemaining: 0,
+          },
+          participantWindow: {
+            ...window,
+            openedAt,
+            deadlineAt,
+          },
+        },
+      };
+      db.prepare(
+        "UPDATE debate_sessions SET session_json = ? WHERE id = ? AND user_id = ?",
+      ).run(JSON.stringify({ ...expiredState, events: [] }), session.id, "user-1");
+      session = getDebateSession(db, "user-1", session.id);
+      const playerTurnCount = session.events.filter(
+        (event) => event.kind === "player_turn",
+      ).length;
+      let expired = await expireDebateParticipantWindow(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "participant-expiry:deadline",
+          windowOpenedAt: openedAt,
+          stage: "deadline",
+        },
+        debateRuntime,
+        nowMs,
+      );
+      assert.equal(
+        expired.events.filter((event) => event.kind === "player_turn").length,
+        playerTurnCount,
+      );
+      const outcome = expired.participation?.rowdiness.outcomes.at(-1);
+      assert.ok(outcome);
+      assert.equal(outcome.action, "interrupted");
+      assert.ok(outcome.eventId);
+      if (outcome.kind === "awkward_silence") {
+        const beats = expired.events.filter(
+          (event) =>
+            event.stepKey === "participant_patience_awkward_silence" ||
+            event.stepKey === "participant_patience_awkward_prompt",
+        );
+        assert.deepEqual(beats.map((event) => event.speakerKind), ["player", "player"]);
+      } else if (outcome.kind === "opponent_taunt") {
+        assert.equal(expired.status, "waiting_for_player");
+        const graceOpenedAt =
+          expired.participation!.participantWindow!.openedAt;
+        const graceDeadline = Date.parse(
+          expired.participation!.participantWindow!.deadlineAt,
+        );
+        expired = await expireDebateParticipantWindow(
+          db,
+          "user-1",
+          expired.id,
+          {
+            expectedRevision: expired.revision,
+            idempotencyKey: "participant-expiry:grace",
+            windowOpenedAt: graceOpenedAt,
+            stage: "taunt_grace",
+          },
+          debateRuntime,
+          graceDeadline,
+        );
+        assert.equal(
+          expired.participation?.rowdiness.outcomes.at(-1)?.kind,
+          "gavel",
+        );
+        assert.equal(expired.participation?.participantWindow, null);
+      } else {
+        assert.equal(expired.events.at(-1)?.kind, "judge_gavel");
+      }
+    } finally {
+      db.close();
     }
   });
 
@@ -8507,8 +10204,18 @@ describe("Debate engine", () => {
           /Debate changed from revision/u,
         );
 
+        const activated = activateDebateParticipantFloorBreak(
+          db,
+          "user-1",
+          raised.id,
+          {
+            expectedRevision: raised.revision,
+            idempotencyKey: `participant-objection:${ruling}:activate`,
+            callEventId: raised.participantFloorBreak!.callEventId,
+          },
+        );
         const resolveRequest = {
-          expectedRevision: raised.revision,
+          expectedRevision: activated.revision,
           idempotencyKey: `participant-objection:${ruling}:resolve`,
           content:
             "That conclusion misstates our position and is not supported by the heard premise.",
@@ -8516,7 +10223,7 @@ describe("Debate engine", () => {
         const resolved = await resolveDebateParticipantObjection(
           db,
           "user-1",
-          raised.id,
+          activated.id,
           resolveRequest,
           debateRuntime,
         );
@@ -8772,12 +10479,22 @@ describe("Debate engine", () => {
             ),
           },
         );
-        const resolved = await resolveDebateParticipantObjection(
+        const activated = activateDebateParticipantFloorBreak(
           db,
           "user-1",
           raised.id,
           {
             expectedRevision: raised.revision,
+            idempotencyKey: `participant-objection:${testCase.label}:activate`,
+            callEventId: raised.participantFloorBreak!.callEventId,
+          },
+        );
+        const resolved = await resolveDebateParticipantObjection(
+          db,
+          "user-1",
+          activated.id,
+          {
+            expectedRevision: activated.revision,
             idempotencyKey: `participant-objection:${testCase.label}:resolve`,
             content:
               "The heard conclusion does not follow from the stated premise.",
@@ -9248,8 +10965,15 @@ describe("Debate engine", () => {
       const replayOpening = debateSessionForPlayer(session, "replay").events.at(
         -1,
       );
-      assert.equal(replayOpening?.speakerKind, "moderator");
-      assert.match(replayOpening?.content ?? "", /MODERATOR OPENING SENTINEL/u);
+      assert.equal(replayOpening?.speakerKind, "system");
+      assert.match(
+        replayOpening?.content ?? "",
+        /podium remains empty and silent/u,
+      );
+      assert.doesNotMatch(
+        replayOpening?.content ?? "",
+        /MODERATOR OPENING SENTINEL/u,
+      );
       const withModeratorBallot = {
         ...session,
         ballots: [
@@ -9271,6 +10995,10 @@ describe("Debate engine", () => {
       assert.equal(
         debateSessionForPlayer(withModeratorBallot, "replay").ballots[0]
           ?.reason,
+        null,
+      );
+      assert.equal(
+        withModeratorBallot.ballots[0]?.reason,
         "MODERATOR BALLOT REASON SENTINEL",
       );
 
@@ -10769,7 +12497,7 @@ describe("Debate engine", () => {
     const db = createTestDb();
     try {
       const created = await createDebateForRole(db, "participant");
-      const advanced = await advanceDebateSession(
+      let advanced = await advanceDebateSession(
         db,
         "user-1",
         created.id,
@@ -10779,10 +12507,26 @@ describe("Debate engine", () => {
         },
         runtime(),
       );
+      for (let index = 1; index <= 3; index += 1) {
+        advanced = pauseDebateSession(db, "user-1", advanced.id, {
+          expectedRevision: advanced.revision,
+          idempotencyKey: `backup:recess:${index}`,
+          quietSave: true,
+          recessIntent: "deliberate",
+        });
+        if (index < 3) {
+          advanced = resumeDebateSession(db, "user-1", advanced.id, {
+            expectedRevision: advanced.revision,
+            idempotencyKey: `backup:resume:${index}`,
+            quietSave: true,
+          });
+        }
+      }
       const key = Buffer.alloc(32, 7);
       const snapshot = exportUserSnapshot(db, "user-1", key);
       assert.equal(snapshot.debates?.sessions.length, 1);
-      assert.equal(snapshot.debates?.events.length, 1);
+      assert.equal(snapshot.debates?.events.length, advanced.events.length);
+      assert.equal(snapshot.debates?.recessCheckpoints?.length, 1);
 
       db.prepare("DELETE FROM users WHERE id = ?").run("user-1");
       importUserSnapshot(db, "user-2", snapshot, key);
@@ -10799,6 +12543,17 @@ describe("Debate engine", () => {
         advanced.againstAdvocate.revision,
       );
       assert.deepEqual(restored.advocacyConsent, advanced.advocacyConsent);
+      assert.equal(restored.participation?.recess.checkpoint?.revision, advanced.revision);
+      assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM debate_recess_checkpoints WHERE user_id = ?",
+            )
+            .get("user-2") as { count: number }
+        ).count,
+        1,
+      );
 
       restoreFactoryDefaultsInDatabase(db, "user-2");
       assert.equal(listDebateSessions(db, "user-2").length, 0);
@@ -10807,6 +12562,16 @@ describe("Debate engine", () => {
           db
             .prepare(
               "SELECT COUNT(*) AS count FROM debate_events WHERE user_id = ?",
+            )
+            .get("user-2") as { count: number }
+        ).count,
+        0,
+      );
+      assert.equal(
+        (
+          db
+            .prepare(
+              "SELECT COUNT(*) AS count FROM debate_recess_checkpoints WHERE user_id = ?",
             )
             .get("user-2") as { count: number }
         ).count,

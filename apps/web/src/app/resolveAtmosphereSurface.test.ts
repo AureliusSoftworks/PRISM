@@ -16,7 +16,7 @@ describe("resolveAtmosphereSurface", () => {
     );
   });
 
-  it("keeps collapsed Chat focused-bot home on the gradient for every bot", () => {
+  it("uses the conversation Atmosphere in transcript Chat", () => {
     assert.equal(
       resolveAtmosphereSurface({
         presentation: "chat",
@@ -25,11 +25,11 @@ describe("resolveAtmosphereSurface", () => {
         prismAtmosphereEnabled: true,
         prismAtmosphereImageId: "prism-1",
       }),
-      "none",
+      "zenConversation",
     );
   });
 
-  it("never mounts Home wallpaper during expanded Zen", () => {
+  it("uses the same conversation Atmosphere in immersive Zen", () => {
     assert.equal(
       resolveAtmosphereSurface({
         presentation: "zen",
@@ -55,7 +55,7 @@ describe("resolveAtmosphereSurface", () => {
     );
   });
 
-  it("returns none when Home atmosphere is disabled or missing", () => {
+  it("keeps conversation Atmosphere routing independent from Home wallpaper state", () => {
     assert.equal(
       resolveAtmosphereSurface({
         presentation: "chat",
@@ -64,7 +64,7 @@ describe("resolveAtmosphereSurface", () => {
         prismAtmosphereEnabled: false,
         prismAtmosphereImageId: "prism-1",
       }),
-      "none",
+      "zenConversation",
     );
     assert.equal(
       resolveAtmosphereSurface({

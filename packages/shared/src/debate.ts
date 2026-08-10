@@ -49,6 +49,10 @@ export const DEBATE_SETUP_SUGGESTION_EXHIBIT_MAX = 4;
 export const DEBATE_SETUP_SUGGESTION_WEB_SOURCE_MAX = 2;
 export const DEBATE_SETUP_SUGGESTION_SCHOLAR_SOURCE_MAX = 2;
 export const DEBATE_PLAYER_TURN_MAX_LENGTH = 4_000;
+export const DEBATE_PARTICIPATION_SCHEMA_VERSION = 1 as const;
+export const DEBATE_PARTICIPANT_TIME_SCALE = 8 as const;
+export const DEBATE_PARTICIPANT_FLOOR_BREAK_DEADLINE_MS = 30_000;
+export const DEBATE_PARTICIPANT_RECESS_MAX_USES = 3 as const;
 export const DEBATE_CASE_CARDS_PER_SIDE = 4;
 export const DEBATE_TURNABOUT_STATEMENTS_PER_SIDE = 2;
 export const DEBATE_JURY_SIZE = 5;
@@ -60,6 +64,65 @@ export const DEBATE_FORUM_MAX_REBUTTAL_ROUNDS = 3;
 export type DebateFormatId = "forum" | "turnabout";
 export type DebateFormatCatalogId = DebateFormatId | "flyting" | "cypher";
 export type DebatePlayerRole = "judge" | "participant" | "spectator";
+/** Versioned now so future assisted-play levels can migrate without ambiguity. */
+export type DebateParticipantDifficulty = "coach" | "standard" | "immersive";
+export type DebateParticipantWindowKind =
+  | "opening"
+  | "challenge"
+  | "rebuttal"
+  | "closing"
+  | "objection"
+  | "interjection";
+export type DebateParticipantFloorBreakKind = "objection" | "interjection";
+export type DebateParticipantChoiceTier = "great" | "okay" | "bad";
+export type DebateParticipantGambitKind =
+  | "ad_hominem"
+  | "non_sequitur"
+  | "straw_man"
+  | "false_dilemma"
+  | "bandwagon"
+  | "appeal_to_authority"
+  | "slippery_slope"
+  | "red_herring"
+  | "tu_quoque"
+  | "appeal_to_emotion";
+/** Private execution quality. It is never a claim that the argument is true. */
+export type DebateParticipantGambitTier =
+  | "well_executed"
+  | "shaky"
+  | "exposed";
+export type DebateParticipantSteeringFidelity =
+  | "verbatim"
+  | "near_verbatim"
+  | "steered"
+  | "confused";
+export type DebateParticipantSocialReception =
+  | "receptive"
+  | "uncertain"
+  | "hostile";
+export type DebateParticipantFavorabilityReason =
+  | "argument_strength"
+  | "humor"
+  | "confidence"
+  | "opponent_pressure"
+  | "subject_knowledge"
+  | "evidence_use"
+  | "irrelevant"
+  | "absurd"
+  | "unsupported_evidence"
+  | "overtime"
+  | "floor_break_timeout"
+  | "rhetorical_gambit"
+  | "moderator_bias_callout"
+  | "clarification_failure"
+  | "recess_denied"
+  | "rage_rush";
+export type DebateParticipantFavorabilityFacet =
+  | "argumentStrength"
+  | "humor"
+  | "confidence"
+  | "opponentPressure"
+  | "subjectKnowledge";
 export type DebateForumRoundMode = "auto" | "fixed";
 export type DebateSideId = "for" | "against";
 /** Frozen social register for one Debate proceeding, from chaotic to formal. */
@@ -408,6 +471,15 @@ export interface DebateEvidenceSourceV1 {
   url: string;
   snippet: string;
   publishedAt: string | null;
+  /** Frozen provenance for the concise quick-reference excerpt. */
+  excerptSource?: "provider" | "crossref" | "page" | "player" | "metadata";
+  excerptSelection?:
+    | "model"
+    | "sentence-fallback"
+    | "metadata-only"
+    | "player";
+  excerptMaterialHash?: string;
+  excerptModel?: { provider: string; model: string } | null;
 }
 
 export type DebateEvidenceExhibitVisualKind =
@@ -469,6 +541,9 @@ export interface DebateSetupSuggestionV1 {
   juryEnabled: boolean;
   setupPresetId: DebateSetupPresetId | null;
   playerRole: DebatePlayerRole;
+  participantDifficulty?: DebateParticipantDifficulty;
+  /** Defaults on for new Participant sessions; ignored for other roles. */
+  rhetoricalGambitsEnabled?: boolean;
   /** Required when playerRole is participant; otherwise null. */
   playerSideId: DebateSideId | null;
   /** Empty when the player occupies the Judge seat (Prism). */
@@ -663,6 +738,10 @@ export interface DebateEventV1 {
   interruptedBy?: "player" | "bot" | null;
   provider?: LlmProviderName;
   model?: string;
+  /** Resolved contextual route when this event came from Auto. */
+  autoRoute?: AutoRouteDecisionV1;
+  /** Whether this event's resolved generation lane used Turbo. */
+  turbo?: boolean;
   autoRecovery?: AutoRecoveryTraceV1;
   voicePerformanceCue?: DebateVoicePerformanceCue;
   audienceReaction?: DebateAudienceReactionV1;
@@ -675,6 +754,8 @@ export interface DebateEventV1 {
   /** Public-content offset for a non-interrupting saved audience-order cue. */
   gavelHeardCharacterCount?: number;
   timing?: DebateTurnTimingV1;
+  participantResponseKind?: "guided" | "custom" | "pass";
+  participantChoiceId?: string | null;
   createdAt: string;
 }
 
@@ -684,7 +765,10 @@ export function debateEventIsTranscriptHousekeeping(
   return (
     event.stepKey === "audience_order" ||
     event.stepKey === "pause" ||
-    event.stepKey === "resume"
+    event.stepKey === "resume" ||
+    event.stepKey === "participant_recess_request" ||
+    event.stepKey === "participant_recess_denied" ||
+    event.stepKey === "participant_interjection_withdrawal"
   );
 }
 
@@ -734,10 +818,329 @@ export interface DebateParticipantObjectionStateV1 {
   resumeStepKey: string;
 }
 
+export interface DebateParticipantWindowV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  kind: DebateParticipantWindowKind;
+  status: "open" | "paused";
+  /** Spoken floor allowance; the Moderator announces this value. */
+  announcedLimitMs: number;
+  /** Wall allowance. Ordinary turns are announcedLimitMs * 8. */
+  wallLimitMs: number;
+  timeScale: typeof DEBATE_PARTICIPANT_TIME_SCALE;
+  openedAt: string;
+  deadlineAt: string;
+  elapsedWallMs: number;
+  overtimeMs: number;
+  /** Present only while a recess has frozen the wall deadline. */
+  remainingMs?: number;
+}
+
+/** Public choice text. The quality tier is intentionally not exposed here. */
+export interface DebateParticipantChoiceV1 {
+  id: string;
+  label: string;
+  content: string;
+  evidenceSourceIds: string[];
+}
+
+export interface DebateParticipantChoiceSetV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  phase: Exclude<DebatePhase, "verdict">;
+  promptEventId: string | null;
+  choices: DebateParticipantChoiceV1[];
+  createdAt: string;
+}
+
+export interface DebateParticipantGambitChoiceV1 {
+  id: string;
+  kind: DebateParticipantGambitKind;
+  label: string;
+  intent: string;
+}
+
+/** Public, replay-stable offer. Private grades live beside it server-side. */
+export interface DebateParticipantGambitOfferV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  eventId: string;
+  kind: DebateParticipantFloorBreakKind;
+  choices: DebateParticipantGambitChoiceV1[];
+  createdAt: string;
+}
+
+/** Server-private. Player projections must remove this while the Debate is live. */
+export interface DebateParticipantGambitGradeV1 {
+  choiceId: string;
+  tier: DebateParticipantGambitTier;
+}
+
+export interface DebateParticipantGambitImpressionV1 {
+  botId: string;
+  role: "moderator" | "opponent" | "juror";
+  socialScore: number;
+  reception: DebateParticipantSocialReception;
+  /** Bounded vote adjustment; opponent impressions always use zero. */
+  ballotAdjustment: number;
+}
+
+export interface DebateParticipantProceduralMeritV1 {
+  ruling: "sustained" | "overruled" | "not_applicable";
+  confidence: number;
+  rationale: string;
+}
+
+export interface DebateParticipantModeratorBiasOverrideV1 {
+  applied: boolean;
+  direction: "participant" | "opponent" | "none";
+  chance: number;
+  roll: number;
+  justification: string | null;
+}
+
+/**
+ * Server-owned line preparation. Stable event ids let the client prepare voice
+ * before the audience-heard opponent cutoff is committed.
+ */
+export interface DebateParticipantFloorBreakPreparationV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  id: string;
+  status: "drafting" | "ready";
+  kind: DebateParticipantFloorBreakKind;
+  interruptedEventId: string;
+  initialHeardCharacterCount: number;
+  selectionMode: "gambit" | "steering";
+  selectedGambitId: string | null;
+  selectedEvidenceSourceIds: string[];
+  fixedCall: "Objection!" | "Hold on—";
+  callEventId: string;
+  responseEventId: string;
+  reactionEventId: string;
+  counterEventId: string | null;
+  rulingEventId: string | null;
+  continuationEventId: string | null;
+  performedText: string | null;
+  counterText: string | null;
+  rulingText: string | null;
+  continuationText: string | null;
+  roomReaction: DebateAudienceReactionV1;
+  createdAt: string;
+  expiresAt: string;
+  /** Private until completed review. */
+  producerCue?: string;
+  steeringFidelity?: DebateParticipantSteeringFidelity;
+  gambitTier?: DebateParticipantGambitTier;
+  evidenceIntegrated?: boolean;
+  evidenceMisused?: boolean;
+  impressions?: DebateParticipantGambitImpressionV1[];
+  roomReception?: DebateParticipantSocialReception;
+  favorabilityDelta?: number;
+  proceduralMerit?: DebateParticipantProceduralMeritV1;
+  moderatorBiasOverride?: DebateParticipantModeratorBiasOverrideV1;
+  clarificationRequired?: boolean;
+}
+
+export interface DebateParticipantGambitRecordV1
+  extends Omit<DebateParticipantFloorBreakPreparationV1, "status"> {
+  finalHeardCharacterCount: number;
+  committedAt: string;
+}
+
+/** Server-private grading metadata. Player projections must always remove it. */
+export interface DebateParticipantChoiceGradeV1 {
+  choiceId: string;
+  tier: DebateParticipantChoiceTier;
+  baseImpact: number;
+  /** Private authoring assessment; only substantive integration doubles impact. */
+  evidenceIntegrated: boolean;
+}
+
+export interface DebateParticipantFavorabilityEntryV1 {
+  id: string;
+  eventId: string | null;
+  phase: Exclude<DebatePhase, "verdict"> | "procedural";
+  /** Each assessed facet is -1..1. Missing facets are neutral. */
+  facets: Partial<Record<DebateParticipantFavorabilityFacet, number>>;
+  baseImpact: number;
+  phaseWeight: number;
+  delta: number;
+  reasons: DebateParticipantFavorabilityReason[];
+  evidenceMultiplier: 1 | 2;
+  createdAt: string;
+}
+
+export interface DebateParticipantFavorabilityLedgerV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  /** Signed Participant advantage, clamped to -100..100. */
+  total: number;
+  entries: DebateParticipantFavorabilityEntryV1[];
+}
+
+export interface DebateParticipantRowdinessV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  patienceBudget: number;
+  patienceRemaining: number;
+  /** Persona bias modifier applied to future drain. */
+  drainModifier: number;
+  moderatorDisposition: {
+    temperament: "strict" | "balanced" | "patient";
+    /** 0.75 patient, 1 balanced, 1.25 strict. */
+    drainModifier: number;
+    confidence: number;
+    rationale: string;
+  };
+  outcomes: Array<{
+    eventId: string | null;
+    baseDrain: number;
+    appliedDrain: number;
+    patienceRemaining: number;
+    kind:
+      | "gavel"
+      | "opponent_taunt"
+      | "awkward_silence"
+      | "recess_denial";
+    action: "tolerated" | "warned" | "interrupted";
+    /** Opponent taunts grant this wall-time grace before a harsher outcome. */
+    tauntGraceDeadlineAt?: string;
+    createdAt: string;
+  }>;
+}
+
+export interface DebateParticipantRecessV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  used: number;
+  max: typeof DEBATE_PARTICIPANT_RECESS_MAX_USES;
+  denials: number;
+  /**
+   * Durable recovery bookmark captured when the final available recess is
+   * accepted. The canonical snapshot itself stays server-private.
+   */
+  checkpoint?: DebateParticipantRecessCheckpointV1;
+  /** Set once when repeated denied requests consume the Moderator's reserve. */
+  rageRush?: DebateParticipantRageRushV1;
+}
+
+export interface DebateParticipantRageRushV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  eventId: string;
+  triggeredAt: string;
+  denialCount: number;
+  /** Severe conduct penalty applied identically to each authoritative ballot. */
+  ballotInfluence: number;
+}
+
+export interface DebateParticipantRecessCheckpointV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  createdAt: string;
+  revision: number;
+  phase: DebatePhase;
+  stepKey: string;
+  pausedPresentationEventId: string | null;
+}
+
+export interface DebateParticipationStateV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  difficulty: DebateParticipantDifficulty;
+  participantWindow: DebateParticipantWindowV1 | null;
+  choiceSet: DebateParticipantChoiceSetV1 | null;
+  /** Absent/false on legacy sessions; new Participant sessions default true. */
+  rhetoricalGambitsEnabled: boolean;
+  gambitOffer: DebateParticipantGambitOfferV1 | null;
+  /** Never present in live player projections. */
+  gambitGrades?: DebateParticipantGambitGradeV1[];
+  gambitRecords: DebateParticipantGambitRecordV1[];
+  /** Persona-shaped response to credible accusations of Moderator partiality. */
+  moderatorConductAdjustment: number;
+  /** Public custom-input fallback status; private quality tiers remain sealed. */
+  choiceError?: string;
+  /** Never present in debateSessionForPlayer output. */
+  choiceGrades?: DebateParticipantChoiceGradeV1[];
+  favorability: DebateParticipantFavorabilityLedgerV1;
+  rowdiness: DebateParticipantRowdinessV1;
+  recess: DebateParticipantRecessV1;
+  turns: DebateParticipantTurnRecordV1[];
+  /** Coach-only anonymous live Jury lean; never carries juror identity/reason. */
+  juryLeaningPips?: Array<"participant" | "opponent" | "neutral">;
+  /**
+   * Post-verdict Jury math projected without voter ids, Persona rationales, or
+   * sealed deliberation. This is presentation-only and is never persisted.
+   */
+  finalJuryBallotInfluences?: Array<{
+    sideId: DebateSideId;
+    participantInfluence: DebateParticipantBallotInfluenceV1 | null;
+  }>;
+}
+
+export interface DebateParticipantTurnRecordV1 {
+  eventId: string;
+  phase: Exclude<DebatePhase, "verdict">;
+  opportunityIndex: number;
+  authoredMode: "guided" | "custom" | "pass";
+  choiceId: string | null;
+  /** Private during live play; available to post-Debate review. */
+  choiceTier?: DebateParticipantChoiceTier;
+  announcedLimitMs: number;
+  wallLimitMs: number;
+  elapsedWallMs: number;
+  overtimeMs: number;
+  authoredCharacterCount: number;
+  heardCharacterCount: number;
+  cutoffReason: "length" | "irrelevant" | "absurd" | "unsupported_evidence" | null;
+  facets: Partial<Record<DebateParticipantFavorabilityFacet, number>>;
+  baseImpact: number;
+  phaseWeight: number;
+  evidenceMultiplier: 1 | 2;
+  favorabilityDelta: number;
+  createdAt: string;
+}
+
+export interface DebateParticipantFloorBreakStateV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  kind: DebateParticipantFloorBreakKind;
+  status: "awaiting_response";
+  interruptedEventId: string;
+  heardCharacterCount: number;
+  callEventId: string;
+  fixedCall: "Objection!" | "Hold on—";
+  interruptedBotId: string;
+  resumeStatus: DebateStatus;
+  resumePhase: DebatePhase;
+  resumeStepKey: string;
+  openedAt: string;
+  deadlineAt: string;
+  /** Set once when the fixed call finishes; repeat activation never extends it. */
+  activatedAt?: string;
+}
+
+export interface DebateVoterPredispositionV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  voterBotId: string;
+  direction: "participant" | "opponent" | "neutral";
+  strength?: number;
+  confidence?: number;
+  rationale?: string;
+  /** -1 favors the Participant's opponent; +1 favors the Participant. */
+  participantBias?: number;
+}
+
+export interface DebateParticipantBallotInfluenceV1 {
+  version: typeof DEBATE_PARTICIPATION_SCHEMA_VERSION;
+  /** Model's record-only vote before Participant influence. */
+  recordSideId: DebateSideId;
+  recordScore: number;
+  participantBias: number;
+  predispositionInfluence: number;
+  favorabilityInfluence: number;
+  /** Sum of this juror's sealed gambit impressions, capped across the Debate. */
+  gambitInfluence?: number;
+  /** Severe conduct penalty after the Moderator rage-rushes the proceeding. */
+  rageRushInfluence?: number;
+  adjustedScore: number;
+}
+
 export interface DebateBallotV1 {
   version: typeof DEBATE_SCHEMA_VERSION;
   voterBotId: string;
   sideId: DebateSideId;
+  participantInfluence?: DebateParticipantBallotInfluenceV1;
   reason: string | null;
   privateReason: boolean;
   provider?: LlmProviderName;
@@ -752,6 +1155,7 @@ export interface DebateJuryBallotV1 {
   jurorBotId: string;
   stage: "initial" | "final";
   sideId: DebateSideId;
+  participantInfluence?: DebateParticipantBallotInfluenceV1;
   confidence: number;
   personaInstinct: string;
   reason: string;
@@ -796,13 +1200,13 @@ export interface DebateSessionV1 {
   provider: LlmProviderName;
   model: string;
   responseMode: ResponseMode;
-  /** Auto re-routes each generation; fixed preserves the chosen model. */
+  /** Auto chose the start model; fixed was selected explicitly. Both stay pinned. */
   modelSelectionKind?: "auto" | "fixed";
   /** Visible, runnable same-lane candidates frozen when the session starts. */
   autoCandidateAllowlist?: AutoFallbackModelRef[];
   /** Deterministic routing policy frozen when the session starts. */
   routingPolicyVersion?: number;
-  /** Most recent contextual route; generated events carry their own copy. */
+  /** Auto route that selected the Debate's pinned start model. */
   latestAutoRoute?: AutoRouteDecisionV1;
   /**
    * Last applied effort for archive chrome. Auto updates this alongside
@@ -810,6 +1214,8 @@ export interface DebateSessionV1 {
    * generation time.
    */
   lastReasoningEffort?: ModelReasoningEffortPreference | null;
+  /** Whether the most recently resolved generation lane used Turbo. */
+  lastTurbo?: boolean;
   /** Ordered primary + fallback lanes. One entry for LOCAL/ONLINE. */
   generationChain: AutoFallbackModelRef[];
   format: DebateFormatId;
@@ -841,6 +1247,14 @@ export interface DebateSessionV1 {
   objectionRuling?: DebateObjectionRulingStateV1 | null;
   /** Active after a Participant shouts Objection and before they state why. */
   participantObjection?: DebateParticipantObjectionStateV1 | null;
+  /** Versioned assisted-play state. Present on new Participant sessions. */
+  participation?: DebateParticipationStateV1 | null;
+  /** Unified objection/interjection wait state; legacy objection remains readable. */
+  participantFloorBreak?: DebateParticipantFloorBreakStateV1 | null;
+  /** Ready line awaiting audio preparation and the final heard-prefix commit. */
+  participantFloorBreakPreparation?: DebateParticipantFloorBreakPreparationV1 | null;
+  /** Private persona predispositions used as a bounded ballot input. */
+  voterPredispositions?: DebateVoterPredispositionV1[];
   /**
    * Public event whose playback was interrupted by an explicit pause. The
    * presentation client replays this exact saved line from its beginning after
@@ -1039,6 +1453,12 @@ export interface DebateSessionCreateRequest {
   againstAdvocateBotId?: string;
   playerRole: DebatePlayerRole;
   playerSideId?: DebateSideId | null;
+  /** Defaults to Standard for Participant sessions and is ignored otherwise. */
+  participationDifficulty?: DebateParticipantDifficulty;
+  /** @deprecated Compatibility alias for pre-v1 setup clients. */
+  participantDifficulty?: DebateParticipantDifficulty;
+  /** Defaults on for newly created Participant sessions. */
+  rhetoricalGambitsEnabled?: boolean;
   advocacyConsent: DebateAdvocacyConsent[];
   preferredProvider?: LlmProviderName;
   modelOverride?: string | null;
@@ -1063,6 +1483,8 @@ export interface DebateAdvanceRequest extends DebateMutationRequest {
 
 export interface DebatePlayerTurnRequest extends DebateMutationRequest {
   content?: string;
+  /** Selects one public guided answer; content remains the open-ended path. */
+  choiceId?: string;
   pass?: boolean;
   targetSideId?: DebateSideId;
 }
@@ -1086,6 +1508,97 @@ export interface DebateParticipantObjectionRaiseRequest extends DebateMutationRe
 export interface DebateParticipantObjectionResolveRequest extends DebateMutationRequest {
   content?: string;
   withdraw?: boolean;
+}
+
+export interface DebateParticipantFloorBreakRaiseRequest
+  extends DebateMutationRequest {
+  eventId: string;
+  heardCharacterCount: number;
+  kind: DebateParticipantFloorBreakKind;
+}
+
+export interface DebateParticipantFloorBreakResolveRequest
+  extends DebateMutationRequest {
+  content?: string;
+  choiceId?: string;
+  withdraw?: boolean;
+}
+
+export interface DebateParticipantFloorBreakActivateRequest
+  extends DebateMutationRequest {
+  callEventId: string;
+}
+
+export interface DebateParticipantFloorBreakPrepareRequest
+  extends DebateMutationRequest {
+  /** Continues a server-owned Steer my debater draft without changing event ids. */
+  preparationId?: string;
+  eventId: string;
+  heardCharacterCount: number;
+  kind: DebateParticipantFloorBreakKind;
+  gambitId?: string;
+  producerCue?: string;
+  evidenceSourceIds?: string[];
+}
+
+export interface DebateParticipantFloorBreakCommitRequest
+  extends DebateMutationRequest {
+  preparationId: string;
+  heardCharacterCount: number;
+}
+
+export interface DebateParticipantFloorBreakCancelRequest
+  extends DebateMutationRequest {
+  preparationId: string;
+}
+
+export interface DebateParticipantFloorBreakClarifyRequest
+  extends DebateMutationRequest {
+  content?: string;
+  evidenceSourceIds?: string[];
+  timedOut?: boolean;
+}
+
+export interface DebateParticipantWindowExpireRequest
+  extends DebateMutationRequest {
+  /** Identifies the exact server window so stale timers cannot end a new turn. */
+  windowOpenedAt: string;
+  stage?: "deadline" | "taunt_grace";
+  /** Preserve and assess a draft that was present when the clock called time. */
+  authoredContent?: string;
+}
+
+export interface DebateParticipantChoicesRetryRequest
+  extends DebateMutationRequest {
+  windowOpenedAt: string;
+}
+
+export interface DebateParticipantPredispositionPreviewRequest {
+  motion: DebateMotionSlateV1;
+  playerSideId: DebateSideId;
+  participationDifficulty?: DebateParticipantDifficulty;
+  /** @deprecated Compatibility alias for pre-v1 setup clients. */
+  participantDifficulty?: DebateParticipantDifficulty;
+  moderatorBotId?: string | null;
+  opponentBotId?: string | null;
+  jurorBotIds?: Array<string | null>;
+  preferredProvider?: LlmProviderName;
+  modelOverride?: string | null;
+  responseMode?: ResponseMode;
+}
+
+export interface DebateParticipantPredispositionPreviewSeatV1 {
+  seat: "moderator" | "opponent" | "juror";
+  seatIndex?: number;
+  status: "known" | "surprise";
+  direction?: "participant" | "opponent" | "neutral";
+  strength?: number;
+  confidence?: number;
+  rationale?: string;
+}
+
+export interface DebateParticipantPredispositionPreviewV1 {
+  predispositions: DebateParticipantPredispositionPreviewSeatV1[];
 }
 
 export interface DebateJudgeGavelRequest extends DebateMutationRequest {
@@ -1118,6 +1631,13 @@ export interface DebateTurnaboutActionRequest extends DebateMutationRequest {
   evidenceSourceId?: string | null;
 }
 
+export interface DebateSessionAdvocateVisualV1 {
+  sideId: DebateSideId;
+  name: string;
+  color: string | null;
+  glyph: string | null;
+}
+
 export interface DebateSessionListItemV1 {
   id: string;
   format: DebateFormatId;
@@ -1130,6 +1650,11 @@ export interface DebateSessionListItemV1 {
   formality: DebateFormalityId;
   juryEnabled: boolean;
   playerRole: DebatePlayerRole;
+  /** Present on new Participant records; legacy archives remain unspecified. */
+  participationDifficulty?: DebateParticipantDifficulty;
+  /** @deprecated Compatibility alias for pre-v1 archive consumers. */
+  participantDifficulty?: DebateParticipantDifficulty;
+  rhetoricalGambitsEnabled?: boolean;
   winnerSideId: DebateSideId | null;
   updatedAt: string;
   completedAt: string | null;
@@ -1144,8 +1669,12 @@ export interface DebateSessionListItemV1 {
   modelSelectionKind?: "auto" | "fixed";
   /** Last applied effort (Auto route or frozen fixed preference). */
   reasoningEffort?: ModelReasoningEffortPreference | null;
+  /** Resolved Turbo state for the model shown on this archive row. */
+  turbo?: boolean;
   /** Moderator + advocate cast colors for Coffee-style archive chips. */
   castColors?: string[];
+  /** Frozen advocate identities for the Archive card matchup crest. */
+  advocateVisuals?: DebateSessionAdvocateVisualV1[];
   /** Frozen object exhibits available for Archive Assets polish. */
   exhibitCount: number;
 }
@@ -1388,7 +1917,7 @@ export function debateEvidenceExhibitTitle(args: {
   return `${adjective[0]!.toLocaleUpperCase()}${adjective.slice(1)} ${object}`;
 }
 
-function normalizeDebateEvidenceEmoji(value: unknown): string {
+export function normalizeDebateEvidenceEmoji(value: unknown): string {
   const emoji = normalizedText(value, 16);
   return emoji || "📦";
 }
@@ -1420,6 +1949,32 @@ export function normalizeDebateEvidencePacketV1(
             return null;
           }
           seen.add(id);
+          const excerptSource =
+            row.excerptSource === "provider" ||
+            row.excerptSource === "crossref" ||
+            row.excerptSource === "page" ||
+            row.excerptSource === "player" ||
+            row.excerptSource === "metadata"
+              ? row.excerptSource
+              : undefined;
+          const excerptSelection =
+            row.excerptSelection === "model" ||
+            row.excerptSelection === "sentence-fallback" ||
+            row.excerptSelection === "metadata-only" ||
+            row.excerptSelection === "player"
+              ? row.excerptSelection
+              : undefined;
+          const excerptModelRow =
+            row.excerptModel &&
+            typeof row.excerptModel === "object" &&
+            !Array.isArray(row.excerptModel)
+              ? (row.excerptModel as Record<string, unknown>)
+              : null;
+          const excerptProvider = normalizedText(
+            excerptModelRow?.provider,
+            80,
+          );
+          const excerptModel = normalizedText(excerptModelRow?.model, 200);
           return {
             id,
             title: normalizedText(row.title, 240) || parsedHost(url),
@@ -1429,6 +1984,17 @@ export function normalizeDebateEvidencePacketV1(
               typeof row.publishedAt === "string" && row.publishedAt.trim()
                 ? row.publishedAt.trim().slice(0, 64)
                 : null,
+            ...(excerptSource ? { excerptSource } : {}),
+            ...(excerptSelection ? { excerptSelection } : {}),
+            ...(typeof row.excerptMaterialHash === "string" &&
+            /^[a-f0-9]{16,128}$/iu.test(row.excerptMaterialHash.trim())
+              ? { excerptMaterialHash: row.excerptMaterialHash.trim().toLowerCase() }
+              : {}),
+            ...(row.excerptModel === null
+              ? { excerptModel: null }
+              : excerptProvider && excerptModel
+                ? { excerptModel: { provider: excerptProvider, model: excerptModel } }
+                : {}),
           };
         })
         .filter((item): item is DebateEvidenceSourceV1 => item !== null)
@@ -1703,6 +2269,13 @@ export function normalizeDebateSetupSuggestionV1(
     juryEnabled,
     setupPresetId,
     playerRole,
+    participantDifficulty:
+      source.participantDifficulty === "coach" ||
+      source.participantDifficulty === "immersive"
+        ? source.participantDifficulty
+        : "standard",
+    rhetoricalGambitsEnabled:
+      source.rhetoricalGambitsEnabled !== false,
     playerSideId,
     moderatorBotId,
     moderatorTitle,

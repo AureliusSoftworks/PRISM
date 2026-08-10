@@ -72,6 +72,7 @@ test("keeps only the latest three valid recovery messages", () => {
     requestId: " request-1 ",
     contextTokenIds: [" token-1 ", "token-1", "token-2"],
     orchestrationOnly: true,
+    persistConversationId: " prism-chat-1 ",
     recoveryMessages: [
       { id: "1", role: "user", content: "one", createdAt: "a" },
       { id: "2", role: "assistant", content: "two", createdAt: "b" },
@@ -84,6 +85,7 @@ test("keeps only the latest three valid recovery messages", () => {
   assert.equal(request.requestId, "request-1");
   assert.deepEqual(request.contextTokenIds, ["token-1", "token-2"]);
   assert.equal(request.orchestrationOnly, true);
+  assert.equal(request.persistConversationId, "prism-chat-1");
   assert.equal(request.recoveryMessages.length, PRISM_COMPANION_RECOVERY_LIMIT);
   assert.deepEqual(
     request.recoveryMessages.map((message) => message.content),
@@ -124,5 +126,56 @@ test("rejects an unknown surface and oversized messages", () => {
         message: "x".repeat(4_001),
       }),
     /4,000 characters/u,
+  );
+});
+
+test("allows persistence only for non-Private orchestration preflight", () => {
+  assert.deepEqual(
+    normalizePrismCompanionRequest({
+      surface: { surfaceId: "home" },
+      message: "Open Slate.",
+      requestId: "action-1",
+      orchestrationOnly: true,
+      persistConversationId: " prism-chat-1 ",
+    }),
+    {
+      surface: { surfaceId: "home" },
+      message: "Open Slate.",
+      recoveryMessages: [],
+      requestId: "action-1",
+      contextTokenIds: [],
+      orchestrationOnly: true,
+      persistConversationId: "prism-chat-1",
+    },
+  );
+  assert.throws(
+    () =>
+      normalizePrismCompanionRequest({
+        surface: { surfaceId: "home" },
+        message: "Open Slate.",
+        orchestrationOnly: true,
+        privateMode: true,
+        persistConversationId: "prism-chat-1",
+      }),
+    /Private Prism requests cannot persist/u,
+  );
+  assert.throws(
+    () =>
+      normalizePrismCompanionRequest({
+        surface: { surfaceId: "home" },
+        message: "Open Slate.",
+        persistConversationId: "prism-chat-1",
+      }),
+    /only during orchestration preflight/u,
+  );
+  assert.throws(
+    () =>
+      normalizePrismCompanionRequest({
+        surface: { surfaceId: "home" },
+        message: "Open Slate.",
+        orchestrationOnly: true,
+        persistConversationId: " ",
+      }),
+    /valid Prism conversation/u,
   );
 });

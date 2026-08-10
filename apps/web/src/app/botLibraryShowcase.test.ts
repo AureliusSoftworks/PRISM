@@ -280,7 +280,10 @@ describe("selected bot library showcase", () => {
     assert.match(pageSource, /showThinkingSpinner=\{previewStatus === "generating"\}/);
     assert.match(pageSource, /Generating audio sample…/);
     assert.match(pageSource, /voiceModeDisplayName\(previewMode\)[\s\S]*?preview played\./);
-    assert.match(pageSource, /data-talking=\{previewTalking \? "true"/);
+    assert.match(
+      pageSource,
+      /data-talking=\{previewPlaybackActive \? "true"/,
+    );
   });
 
   it("awaits persona copy and plays the first English sample", () => {
@@ -397,7 +400,13 @@ describe("selected bot library showcase", () => {
     );
     assert.match(
       pageSource,
-      /const previewTalking =\s*previewStatus === "playing" && botHubPreviewVoicing/,
+      /const previewPlaybackActive = previewStatus === "playing";\s*const previewTalking = previewPlaybackActive && botHubPreviewVoicing/,
+    );
+    assert.match(pageSource, /isTalking=\{previewTalking\}/);
+    assert.match(
+      pageSource,
+      /voiceLightTarget=\{botVoiceLightTarget\([\s\S]{0,100}"bot-preview"[\s\S]{0,100}"hub"/,
+      "provider-timed mouth pauses keep the always-alive frame bound to voice energy",
     );
   });
 

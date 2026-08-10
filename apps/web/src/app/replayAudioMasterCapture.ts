@@ -6,9 +6,11 @@ import type {
   ReplayEventV1,
   ReplayMouthShapeV2,
   ReplayMouthTrackV2,
+  ReplayVoiceLightTrackV1,
   ReplayThinkingDirectionPayloadV2,
   ReplayVoiceSelectionSnapshotV2,
 } from "@localai/shared";
+import { createVoiceLightMeter } from "./voiceLightEnvelope.ts";
 
 export type ReplayAudioMasterCaptureResult = {
   sourceId: string;
@@ -19,6 +21,7 @@ export type ReplayAudioMasterCaptureResult = {
   events: ReplayEventV1[];
   direction: ReplayDirectionEventV2[];
   mouthTracks: ReplayMouthTrackV2[];
+  voiceLightTracks: ReplayVoiceLightTrackV1[];
   voiceSelection?: ReplayVoiceSelectionSnapshotV2;
 };
 
@@ -50,6 +53,10 @@ type ReplayAudioMasterCaptureSession = {
   mouthCuesByParticipant: Map<
     string,
     ReplayMouthTrackV2["cues"]
+  >;
+  voiceLightCuesByParticipant: Map<
+    string,
+    ReplayVoiceLightTrackV1["cues"]
   >;
   voiceSelection?: ReplayVoiceSelectionSnapshotV2;
   thinkingByParticipant: Map<string, ReplayThinkingPresentation>;
@@ -166,24 +173,35 @@ export function prismLocalOnlyAudioOutputNode(context: AudioContext): AudioNode 
  */
 export function routeAudioElementToPrismOutput(
   audio: HTMLMediaElement,
+  options: { onLevel?: (level: number) => void } = {},
 ): (() => void) | null {
   const context = prismAudioContext();
   const output = worldOutputForSharedContext();
-  if (!context || !output) return null;
+  if (!context || !output) {
+    options.onLevel?.(0);
+    return null;
+  }
   try {
     if (context.state === "suspended") {
       void context.resume().catch(() => undefined);
     }
     const source = context.createMediaElementSource(audio);
-    source.connect(output);
+    const lightMeter = options.onLevel
+      ? createVoiceLightMeter(context, options.onLevel)
+      : null;
+    if (lightMeter) source.connect(lightMeter.node).connect(output);
+    else source.connect(output);
     return () => {
+      lightMeter?.stop();
       try {
         source.disconnect();
+        lightMeter?.node.disconnect();
       } catch {
         // The media element or shared context is already released.
       }
     };
   } catch {
+    options.onLevel?.(0);
     return null;
   }
 }
@@ -341,6 +359,7 @@ export async function startReplayAudioMasterCapture(
       events: [],
       direction: [],
       mouthCuesByParticipant: new Map(),
+      voiceLightCuesByParticipant: new Map(),
       ...(options.voiceSelection
         ? { voiceSelection: { ...options.voiceSelection } }
         : {}),
@@ -466,6 +485,61 @@ export function replayAudioMasterCaptureMouthTracks(
 ): ReplayMouthTrackV2[] {
   if (activeCapture?.sourceId !== sourceId) return [];
   return captureMouthTracks(activeCapture);
+}
+
+export function markReplayVoiceLightLevel(args: {
+  sourceId: string;
+  participantId: string;
+  level: number;
+  atMs?: number;
+}): void {
+  const capture = activeCapture;
+  const participantId = args.participantId.trim();
+  if (!capture || capture.sourceId !== args.sourceId || !participantId) return;
+  const atMs = Math.max(
+    0,
+    Math.round(
+      typeof args.atMs === "number" && Number.isFinite(args.atMs)
+        ? args.atMs
+        : replayAudioMasterCaptureElapsedMs(args.sourceId) ?? 0,
+    ),
+  );
+  const level = Math.round(
+    Math.max(0, Math.min(1, Number.isFinite(args.level) ? args.level : 0)) * 100,
+  ) / 100;
+  const cues = capture.voiceLightCuesByParticipant.get(participantId) ?? [];
+  const previous = cues[cues.length - 1];
+  if (previous) {
+    const elapsedMs = atMs - previous.atMs;
+    if (elapsedMs < 50 && level !== 0) return;
+    if (previous.level === level && elapsedMs < 250) return;
+    if (Math.abs(previous.level - level) < 0.03 && elapsedMs < 250) return;
+  }
+  cues.push({ atMs, level });
+  capture.voiceLightCuesByParticipant.set(participantId, cues);
+}
+
+function captureVoiceLightTracks(
+  capture: ReplayAudioMasterCaptureSession,
+  endMs?: number,
+): ReplayVoiceLightTrackV1[] {
+  return [...capture.voiceLightCuesByParticipant.entries()]
+    .map(([participantId, capturedCues]) => {
+      const cues = capturedCues.map((cue) => ({ ...cue }));
+      const finalCue = cues[cues.length - 1];
+      if (endMs !== undefined && finalCue && finalCue.level !== 0) {
+        cues.push({ atMs: Math.max(finalCue.atMs, Math.round(endMs)), level: 0 });
+      }
+      return { participantId, cues };
+    })
+    .sort((left, right) => left.participantId.localeCompare(right.participantId));
+}
+
+export function replayAudioMasterCaptureVoiceLightTracks(
+  sourceId: string,
+): ReplayVoiceLightTrackV1[] {
+  if (activeCapture?.sourceId !== sourceId) return [];
+  return captureVoiceLightTracks(activeCapture);
 }
 
 /** True while a Signal session is compacting thinking/interruption gaps. */
@@ -882,6 +956,7 @@ export function stopReplayAudioMasterCapture(
                 payload: { ...event.payload },
               })),
               mouthTracks: captureMouthTracks(capture, durationMs),
+              voiceLightTracks: captureVoiceLightTracks(capture, durationMs),
               ...(capture.voiceSelection
                 ? { voiceSelection: { ...capture.voiceSelection } }
                 : {}),

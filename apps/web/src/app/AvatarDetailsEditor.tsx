@@ -1137,7 +1137,11 @@ const AvatarDetailsEditorSession = forwardRef<
 
   const canvasEditor = (
     <div className={styles.canvasFrame} data-foundry-canvas={layout === "foundry" ? "true" : undefined}>
-      <div className={styles.canvasViewport} style={inkApertureStyle}>
+      <div
+        className={styles.canvasViewport}
+        style={inkApertureStyle}
+        data-avatar-canonical-screen-size={AVATAR_DETAILS_CANVAS_SIZE}
+      >
         <span
           className={`${pageStyles.zenLiveBotPresenceFaceRig} ${styles.faceGuide}`}
           style={faceGuideStyle}
@@ -1147,6 +1151,7 @@ const AvatarDetailsEditorSession = forwardRef<
         >
           <CoffeeSeatPlateEmoji
             enabled={false}
+            pixelated
             isTalking={false}
             scheduleKey="avatar-details-neutral-guide"
             baseText={AVATAR_DETAILS_NEUTRAL_FACE.text}

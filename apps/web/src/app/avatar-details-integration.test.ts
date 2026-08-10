@@ -275,6 +275,19 @@ describe("Avatar Details Studio integration", () => {
     );
   });
 
+  it("uses Preview's exact quantized glyph silhouette in the face guide", () => {
+    assert.match(
+      editorSource,
+      /<CoffeeSeatPlateEmoji[\s\S]*?enabled=\{false\}[\s\S]*?pixelated/,
+    );
+    assert.match(editorCss, /data-crt-pixel-mask-ready="true"/);
+    assert.match(
+      editorCss,
+      /-webkit-mask-image:\s*var\(--crt-phosphor-pixel-mask\)/,
+    );
+    assert.match(editorCss, /filter:\s*none\s*!important/);
+  });
+
   it("gives Details a larger canvas and a dedicated wide Studio layout", () => {
     assert.match(editorCss, /--avatar-details-editor-canvas-size:\s*640px/);
     assert.match(
@@ -596,6 +609,10 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       maskCss,
+      /\.core\s*\{[\s\S]*--zen-live-bot-crt-flicker-base-filter:\s*blur\(\s*var\(--crt-beam-softness,\s*0\.45px\)\s*\)[\s\S]*drop-shadow/,
+    );
+    assert.match(
+      maskCss,
       /\.halo[\s\S]*--zen-live-bot-crt-flicker-base-filter:[\s\S]*--zen-live-bot-crt-shared-flicker-brightness-scale[\s\S]*var\(--zen-live-bot-crt-flicker-base-filter\)/,
     );
     assert.match(
@@ -624,7 +641,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
   });
 
-  it("mirrors authored screen ink and yields to full-screen face effects", () => {
+  it("keeps authored screen coordinates canonical and yields to full-screen face effects", () => {
     assert.match(pageSource, /avatarDetails=\{avatarDetailsPreview\}/);
     assert.match(
       pageSource,
@@ -642,34 +659,79 @@ describe("Avatar Details shared mannequin rendering", () => {
       editorCss,
       /\.screenBoundary,\s*\.canvas,\s*\.pixelGrid,\s*\.symmetryGuide,\s*\.inputSurface\s*\{[\s\S]*transform:\s*scale\(var\(--avatar-details-ink-aperture-scale, 1\)\);[\s\S]*transform-origin:\s*center;/,
     );
-    assert.match(
+    assert.doesNotMatch(pageCss, /--coffee-speaker-gaze-face-shift-x/);
+    assert.doesNotMatch(
       pageCss,
-      /--coffee-speaker-gaze-face-shift-x:\s*0px;[\s\S]*--avatar-details-offset-x:\s*var\(--coffee-speaker-gaze-face-shift-x\)/,
+      /\.coffeeSeat \.zenLiveBotPresenceFaceRig/,
     );
     assert.match(
       pageCss,
-      /\.coffeeSeat \.zenLiveBotPresenceFaceRig,[\s\S]*?\.coffeeReplayPlayerAvatar \.zenLiveBotPresenceFaceRig\s*\{[^}]*scaleX\(var\(--zen-live-bot-face-layer-scale-x, 1\)\)/,
+      /\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*--avatar-details-offset-x:\s*0px;[^}]*--avatar-details-offset-y:\s*0px;[^}]*--avatar-details-facing-scale-x:\s*1;[^}]*--zen-live-bot-ink-offset-y:\s*0%;[^}]*--zen-live-bot-face-layer-scale-x:\s*1;[^}]*transform:\s*scaleX\(var\(--zen-live-bot-screen-facing-scale-x, 1\)\)/,
     );
-    assert.match(
-      pageCss,
-      /\.zenLiveBotPresenceFaceRig[\s\S]*scaleX\(var\(--zen-live-bot-face-layer-scale-x, 1\)\)/,
+    const screenContentRigRule = pageCss.match(
+      /\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*\}/,
+    )?.[0];
+    assert.ok(screenContentRigRule);
+    assert.doesNotMatch(
+      screenContentRigRule,
+      /--avatar-details-facing-offset-y\s*:/,
+      "the shared rig must inherit flipped Ink's optical registration offset",
     );
     assert.match(
       pageSource,
-      /\["--coffee-plate-emoji-face-scale-y" as string\]:\s*BOT_AVATAR_CANONICAL_FACE_SCALE_Y[\s\S]*\["--zen-live-bot-face-layer-scale-x" as string\]:\s*showQuestionMark\s*\? "1"\s*:\s*"var\(--avatar-details-facing-scale-x, 1\)"/,
+      /const screenFacingScaleX = showQuestionMark\s*\? "1"\s*:\s*botAvatarDetailsFacingScaleX\(faceScaleY\)/,
     );
-    assert.match(pageSource, /faceScaleY:\s*string \| number/);
+    assert.equal(
+      [
+        ...pageSource.matchAll(
+          /className=\{styles\.zenLiveBotPresenceScreenContentRig\}[\s\S]{0,280}\["--zen-live-bot-screen-facing-scale-x" as string\]:\s*screenFacingScaleX/g,
+        ),
+      ].length,
+      2,
+      "both full and optimized screens must resolve facing on the shared face-and-ink rig",
+    );
     assert.match(
       pageSource,
-      /const presenceBodyStyle = \{[\s\S]{0,160}\.\.\.botAvatarFaceFacingStyle\(faceScaleY\)/,
+      /data-zen-live-bot-screen-content-rig="true"[\s\S]{0,900}depth="behind-face"[\s\S]*data-zen-live-bot-face-rig="true"[\s\S]*depth="above-face"/,
+    );
+    assert.match(pageSource, /faceScaleY\?:\s*string \| number/);
+    assert.match(
+      pageSource,
+      /faceScaleY = BOT_AVATAR_CANONICAL_FACE_SCALE_Y[\s\S]*const presenceBodyStyle = \{[\s\S]{0,180}\.\.\.botAvatarFaceFacingStyle\(faceScaleY\)/,
     );
     const mannequinCalls = [
       ...pageSource.matchAll(/<ZenLiveBotMannequin\b[\s\S]*?\/>/gu),
     ];
     assert.ok(mannequinCalls.length > 0);
     for (const [mannequinCall] of mannequinCalls) {
-      assert.match(mannequinCall, /\bfaceScaleY=\{/);
+      assert.match(
+        mannequinCall,
+        /\bfaceScaleY=\{/,
+        "every full-avatar surface must pass its orientation into the shared face-and-ink rig",
+      );
     }
+    assert.equal(
+      [...pageSource.matchAll(/data-avatar-face-coordinate-source="studio"/g)]
+        .length,
+      2,
+    );
+    assert.match(
+      pageSource,
+      /data-avatar-face-coordinate-source="studio"[\s\S]*?<CoffeeSeatPlateEmoji[\s\S]{0,220}\bpixelated\b/,
+    );
+    assert.equal(
+      [
+        ...pageSource.matchAll(
+          /data-avatar-canonical-screen-size=\{AVATAR_DETAILS_CANVAS_SIZE\}/g,
+        ),
+      ].length,
+      2,
+      "both full-size mannequin branches must rasterize on the authored 128px screen",
+    );
+    assert.match(
+      editorSource,
+      /className=\{styles\.canvasViewport\}[\s\S]{0,160}data-avatar-canonical-screen-size=\{AVATAR_DETAILS_CANVAS_SIZE\}/,
+    );
     assert.doesNotMatch(maskCss, /--coffee-plate-emoji-face-scale-y/);
     assert.match(
       pageSource,
@@ -694,7 +756,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /className=\{styles\.zenLiveBotPresenceBody\}[\s\S]{0,220}style=\{presenceBodyStyle\}/,
+      /className=\{styles\.zenLiveBotPresenceBody\}[\s\S]{0,320}data-avatar-face-coordinate-source="studio"[\s\S]{0,80}style=\{presenceBodyStyle\}/,
     );
     assert.match(
       pageSource,
@@ -704,13 +766,14 @@ describe("Avatar Details shared mannequin rendering", () => {
       pageSource,
       /<AvatarDetailsMask[\s\S]{0,180}detailLevel=\{avatarDetailsDetailLevel\}/,
     );
-    assert.match(
+    assert.doesNotMatch(
       pageSource,
-      /inkOffsetY=\{ZEN_LIVE_BOT_FACE_INK_OFFSET_Y\}/,
+      /ZEN_LIVE_BOT_FACE_INK_OFFSET_Y|\binkOffsetY=/,
+      "live Zen must not nudge the Studio-authored face and ink coordinate space",
     );
     assert.match(
       pageSource,
-      /!thinkingSpinnerActive && !showQuestionMark \? \([\s\S]*?<AvatarDetailsMask[\s\S]*?\) : null/,
+      /\{directionIndependentThinkingScreen \?\? \([\s\S]*?data-zen-live-bot-screen-content-rig="true"/,
     );
     assert.match(pageSource, /avatarDetailsColor=\{normalizeAccentForTheme\(/);
   });
@@ -791,7 +854,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /inkTalking=\{[\s\S]*?seatMouthActive \|\|[\s\S]*?seatSipPresentation\.active \|\|[\s\S]*?emptyCupAttemptFrowning[\s\S]*?\}/,
+      /inkTalking=\{[\s\S]*?seatMouthActive \|\|[\s\S]*?seatSipMouthTreatmentActive \|\|[\s\S]*?emptyCupAttemptFrowning[\s\S]*?\}/,
     );
     assert.match(
       pageSource,

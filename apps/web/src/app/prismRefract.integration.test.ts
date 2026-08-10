@@ -10,6 +10,10 @@ const refractSource = readFileSync(
   new URL("./prismRefract.ts", import.meta.url),
   "utf8",
 );
+const universalInputSource = readFileSync(
+  new URL("./prismUniversalInputRefract.ts", import.meta.url),
+  "utf8",
+);
 const companionStyles = readFileSync(
   new URL("./prismCompanion.module.css", import.meta.url),
   "utf8",
@@ -37,11 +41,22 @@ const tutorialSource = readFileSync(
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
 describe("Prism Refract integration", () => {
-  it("gives registered focused controls shortcut precedence and preserves companion fallback", () => {
+  it("reserves the Prism shortcut for the assistant menu and keeps contextual inputs Wieldable", () => {
     assert.match(
       companionSource,
-      /focusedPrismRefractTargetId\(document\.activeElement\)[\s\S]*requestPrismRefract\(targetId, "focused-shortcut"\)[\s\S]*openAndFocus/u,
+      /keyboardShortcutMatchesEvent\(keyboardShortcut, event\)[\s\S]*releasePrismRefract\(true\)[\s\S]*activatePrismConversation\(\)[\s\S]*const refracting = refractSessionRef\.current/u,
     );
+    assert.doesNotMatch(companionSource, /focusedPrismRefractTargetId/u);
+    assert.match(companionSource, /installPrismUniversalInputTargets/u);
+    assert.match(universalInputSource, /input\[type="text"\]/u);
+    assert.match(universalInputSource, /input\[type="search"\]/u);
+    assert.match(universalInputSource, /textarea/u);
+    assert.match(universalInputSource, /contenteditable/u);
+    assert.match(universalInputSource, /registerPrismRefractTarget/u);
+    assert.doesNotMatch(universalInputSource, /aria-keyshortcuts/u);
+    assert.match(universalInputSource, /MutationObserver/u);
+    assert.match(universalInputSource, /PRIVATE_INPUT_PATTERN/u);
+    assert.match(universalInputSource, /DESTRUCTIVE_INPUT_PATTERN/u);
     assert.match(
       signalSource,
       /id: "signal-create-host"[\s\S]*kind: "choice"/u,
@@ -149,6 +164,33 @@ describe("Prism Refract integration", () => {
     assert.doesNotMatch(
       nextInputAcceptance,
       /acceptPrismRefract\(\);[\s\S]*event\.preventDefault\(\)/u,
+    );
+  });
+
+  it("keeps an engaged magic prompt present and overlapping its captured control", () => {
+    assert.match(
+      companionSource,
+      /isIdlePresenceBlocked[\s\S]*refractSessionRef\.current !== null/u,
+    );
+    assert.match(
+      companionSource,
+      /releasePrismRefract\(true\);[\s\S]*clearIdleDim\(\);[\s\S]*invocation === "wield-click"/u,
+    );
+    assert.match(
+      companionSource,
+      /refractPromptRef\.current\?\.form\?\.contains\(eventTarget\)[\s\S]*return/u,
+    );
+    assert.match(
+      companionStyles,
+      /data-refracting="prompting"\]\[data-vertical="above"\][\s\S]*bottom: 34px/u,
+    );
+    assert.match(
+      companionStyles,
+      /data-refracting="prompting"\]\[data-vertical="below"\][\s\S]*top: 34px/u,
+    );
+    assert.match(
+      companionStyles,
+      /data-refracting="prompting"\]\[data-dock="right"\][\s\S]*--prism-refract-target-half-width/u,
     );
   });
 

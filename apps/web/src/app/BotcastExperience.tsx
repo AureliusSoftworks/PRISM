@@ -103,6 +103,7 @@ import {
   socialSilenceMessageIsMarkedV1,
   replayCameraTransitionModeV2,
   replayMouthShapeAtV2,
+  replayVoiceLightLevelAtV2,
   replaySceneAtV2,
   type BotcastCameraShot,
   type BotcastEpisode,
@@ -190,8 +191,16 @@ import {
   liveBakeProgressRatio,
 } from "./liveBakeClient";
 import { AssetRail } from "./AssetLibrary";
-import { PrismCompanionPresenceBoundary } from "./prismCompanionPresence";
+import {
+  PrismCompanionPresenceBoundary,
+  PrismCompanionSessionNoteBoundary,
+} from "./prismCompanionPresence";
 import { PrismRefractTarget } from "./prismRefract";
+import {
+  appendAppletSessionNoteToTranscript,
+  appletSessionNoteRequestPath,
+  type AppletSessionNoteResponse,
+} from "./appletSessionNotes";
 import { SessionAtmosphereLayer } from "./SessionAtmosphereLayer";
 import { acquirePrismLivingSession } from "./prismPresentationSuspend";
 import { SIGNAL_STUDIO_FOLEY_ROOM_SEND } from "./roomAcoustics";
@@ -257,6 +266,7 @@ import {
 import {
   LiveSessionModelChip,
   LiveSessionPrismWatermark,
+  type LiveSessionRoutingChipLabels,
 } from "./liveSessionChrome";
 import { waitForModelPreparation } from "./modelPreparation";
 import {
@@ -299,6 +309,7 @@ import {
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth";
 import { sentenceCaseActionText } from "./zenActions";
+import { botVoiceLightTarget } from "./voiceLightEnvelope";
 import { buildSignalReplayManifestV2 } from "./replayManifest";
 import {
   replayRecordingDetail,
@@ -319,6 +330,7 @@ import {
   primeReplayAudioMasterCapture,
   replayAudioMasterCaptureDirection,
   replayAudioMasterCaptureMouthTracks,
+  replayAudioMasterCaptureVoiceLightTracks,
   setReplayAudioMasterCompactHold,
   startReplayAudioMasterCapture,
   stopReplayAudioMasterCapture,
@@ -617,6 +629,9 @@ export interface BotcastExperienceProps {
   hostChatProvider: "local" | "openai" | "anthropic";
   preferredImageProvider: "local" | "openai";
   modelOptions: BotcastModelOption[];
+  /** Account-global draft selection; empty means Auto. */
+  modelChoice?: string;
+  onModelChoiceChange?: (value: string) => void;
   responseMode: BotcastEpisodeResponseMode;
   theme?: "light" | "dark";
   liveConversationPanelExpanded?: boolean;
@@ -644,6 +659,8 @@ export interface BotcastExperienceProps {
       facing?: "left" | "right";
       theme?: "light" | "dark";
       mouthShape: ZenLiveBotMouthShape;
+      voiceLightTarget?: string;
+      voiceLightLevel?: number;
       eyeTimelineMs?: number;
       eyeStateStartedAtMs?: number;
     },
@@ -705,12 +722,12 @@ export interface BotcastExperienceProps {
   recordingVoiceSelection: ReplayVoiceSelectionSnapshotV2;
   onRecordingStateChange?: (active: boolean) => void;
   /** Notify the app shell when Signal locks live chrome (navbar collapse). */
-  onLiveSessionActiveChange?: (active: boolean) => void;
+  onLiveSessionActiveChange?: (
+    active: boolean,
+    sessionId: string | null,
+  ) => void;
   /** Quiet locked routing summary while the episode is live. */
-  lockedRoutingChip?: {
-    modelLabel: string;
-    effortLabel: string;
-  } | null;
+  lockedRoutingChip?: LiveSessionRoutingChipLabels | null;
   /**
    * Resolve the live header chip from Signal's locked picker value.
    * Preferred over a static chip so Auto vs concrete labels stay in sync.
@@ -718,10 +735,7 @@ export interface BotcastExperienceProps {
   resolveLockedRoutingChip?: (args: {
     modelChoice: string;
     modelProvider: "local" | "openai" | "anthropic";
-  }) => {
-    modelLabel: string;
-    effortLabel: string;
-  } | null;
+  }) => LiveSessionRoutingChipLabels | null;
   navigationHeader:
     | ReactNode
     | ((state: {
@@ -737,6 +751,11 @@ export interface BotcastExperienceProps {
           disabledReason?: string;
         };
       }) => ReactNode);
+  onCreateSlateStory?: (source: {
+    episodeId: string;
+    title: string;
+    transcript: string;
+  }) => Promise<void>;
   producerName?: string;
   renderProducerGuestComposer?: (
     state: BotcastProducerGuestComposerState,
@@ -1887,6 +1906,8 @@ export function BotcastExperience({
   hostChatProvider,
   preferredImageProvider,
   modelOptions,
+  modelChoice,
+  onModelChoiceChange,
   responseMode,
   theme = "dark",
   liveConversationPanelExpanded = false,
@@ -1921,6 +1942,7 @@ export function BotcastExperience({
   lockedRoutingChip = null,
   resolveLockedRoutingChip,
   navigationHeader,
+  onCreateSlateStory,
   producerName = "You",
   renderProducerGuestComposer,
   renderPickAwareComposer,
@@ -2033,7 +2055,19 @@ export function BotcastExperience({
   const [producerGuestAnswerDraft, setProducerGuestAnswerDraft] = useState("");
   const [bookingSuggestionBusy, setBookingSuggestionBusy] =
     useState<SignalBookingSuggestionOperation | null>(null);
-  const [episodeModelDraft, setEpisodeModelDraft] = useState("");
+  const [internalEpisodeModelDraft, setInternalEpisodeModelDraft] =
+    useState("");
+  const episodeModelDraft = modelChoice ?? internalEpisodeModelDraft;
+  const setEpisodeModelDraft = useCallback(
+    (value: string): void => {
+      if (modelChoice !== undefined) {
+        onModelChoiceChange?.(value);
+        return;
+      }
+      setInternalEpisodeModelDraft(value);
+    },
+    [modelChoice, onModelChoiceChange],
+  );
   const [episodeDurationDraft, setEpisodeDurationDraft] =
     useState<BotcastSessionDurationMinutes | null>(null);
   /** live = Produce/Interview; watch = full-bake spectator show. */
@@ -2696,6 +2730,9 @@ export function BotcastExperience({
       const capturedMouthTracks = replayAudioMasterCaptureMouthTracks(
         completedEpisode.id,
       );
+      const capturedVoiceLightTracks = replayAudioMasterCaptureVoiceLightTracks(
+        completedEpisode.id,
+      );
       const capture = await stopReplayAudioMasterCapture(completedEpisode.id);
       if (signalCaptureSourceIdRef.current === completedEpisode.id) {
         signalCaptureSourceIdRef.current = null;
@@ -2710,6 +2747,8 @@ export function BotcastExperience({
         audioVolume: introAudioVolume,
         capturedDirection: capture?.direction ?? capturedDirection,
         capturedMouthTracks: capture?.mouthTracks ?? capturedMouthTracks,
+        capturedVoiceLightTracks:
+          capture?.voiceLightTracks ?? capturedVoiceLightTracks,
         voiceSelection: capture?.voiceSelection ?? recordingVoiceSelection,
       });
       try {
@@ -3599,42 +3638,69 @@ export function BotcastExperience({
             : bot;
         })()
     : null;
+  const [slateStoryEpisodeId, setSlateStoryEpisodeId] = useState<string | null>(
+    null,
+  );
+  const reviewTranscriptForEpisode = async (
+    targetEpisode: BotcastEpisode,
+  ): Promise<{ title: string; transcript: string } | null> => {
+    const targetShow =
+      shows.find((show) => show.id === targetEpisode.showId) ?? selectedShow;
+    if (!targetShow) return null;
+    const [recordingEvidence, presenceBeats, sessionNote] = await Promise.all([
+      loadSessionReviewRecordingEvidence(
+        "signal",
+        targetEpisode.id,
+      ),
+      request<{ beats: BotPresenceBeatV1[] }>(
+        `/api/presence-beats?surface=signal&sessionId=${encodeURIComponent(targetEpisode.id)}`,
+      )
+        .then((response) => response.beats)
+        .catch(() => []),
+      request<AppletSessionNoteResponse>(
+        appletSessionNoteRequestPath({
+          surface: "signal",
+          sessionId: targetEpisode.id,
+        }),
+      )
+        .then((response) => response.note)
+        .catch(() => null),
+    ]);
+    return {
+      title: `${targetShow.name} — ${targetEpisode.title}`,
+      transcript: appendAppletSessionNoteToTranscript(
+        buildSignalReviewTranscript({
+          episode: targetEpisode,
+          show: targetShow,
+          host: {
+            id: targetEpisode.hostBotId,
+            name: botsById.get(targetEpisode.hostBotId)?.name ?? "Host",
+          },
+          guest: {
+            id: targetEpisode.guestBotId,
+            name:
+              targetEpisode.guestKind === "producer"
+                ? (targetEpisode.guestName ?? producerName)
+                : (botsById.get(targetEpisode.guestBotId)?.name ?? "Guest"),
+          },
+          modelLabel: targetEpisode.model
+            ? (modelLabels.get(targetEpisode.model) ?? targetEpisode.model)
+            : null,
+          recordingEvidence,
+          presenceBeats,
+        }),
+        sessionNote,
+      ),
+    };
+  };
   const copyEpisodeForReview = async (
     targetEpisode: BotcastEpisode,
   ): Promise<void> => {
-    const targetShow =
-      shows.find((show) => show.id === targetEpisode.showId) ?? selectedShow;
-    if (!targetShow) return;
     setReviewCopyState({ episodeId: targetEpisode.id, phase: "copying" });
     try {
-      const [recordingEvidence, presenceBeats] = await Promise.all([
-        loadSessionReviewRecordingEvidence("signal", targetEpisode.id),
-        request<{ beats: BotPresenceBeatV1[] }>(
-          `/api/presence-beats?surface=signal&sessionId=${encodeURIComponent(targetEpisode.id)}`,
-        )
-          .then((response) => response.beats)
-          .catch(() => []),
-      ]);
-      const transcript = buildSignalReviewTranscript({
-        episode: targetEpisode,
-        show: targetShow,
-        host: {
-          id: targetEpisode.hostBotId,
-          name: botsById.get(targetEpisode.hostBotId)?.name ?? "Host",
-        },
-        guest: {
-          id: targetEpisode.guestBotId,
-          name:
-            targetEpisode.guestKind === "producer"
-              ? (targetEpisode.guestName ?? producerName)
-              : (botsById.get(targetEpisode.guestBotId)?.name ?? "Guest"),
-        },
-        modelLabel: targetEpisode.model
-          ? (modelLabels.get(targetEpisode.model) ?? targetEpisode.model)
-          : null,
-        recordingEvidence,
-        presenceBeats,
-      });
+      const review = await reviewTranscriptForEpisode(targetEpisode);
+      if (!review) throw new Error("Signal show unavailable.");
+      const transcript = review.transcript;
       await writeSignalReviewClipboard(transcript);
       setReviewCopyState({ episodeId: targetEpisode.id, phase: "copied" });
     } catch {
@@ -3645,6 +3711,23 @@ export function BotcastExperience({
         current?.episodeId === targetEpisode.id ? null : current,
       );
     }, 2_400);
+  };
+  const createEpisodeStoryInSlate = async (
+    targetEpisode: BotcastEpisode,
+  ): Promise<void> => {
+    if (!onCreateSlateStory || slateStoryEpisodeId) return;
+    setSlateStoryEpisodeId(targetEpisode.id);
+    try {
+      const review = await reviewTranscriptForEpisode(targetEpisode);
+      if (!review) throw new Error("Signal show unavailable.");
+      await onCreateSlateStory({
+        episodeId: targetEpisode.id,
+        title: review.title,
+        transcript: review.transcript,
+      });
+    } finally {
+      setSlateStoryEpisodeId(null);
+    }
   };
   const showCardQuips = selectedShow
     ? signalShowCardBlurbs(
@@ -5709,7 +5792,7 @@ export function BotcastExperience({
         setTopicDraft("");
         setProducerBriefDraft("");
         setProducerGuestContextDraft("");
-        setEpisodeModelDraft("");
+        setInternalEpisodeModelDraft("");
         setAskAboutDraft("");
         void loadEpisodes(selectedShow.id).catch(() => undefined);
         // Hold the completed-status outro fallback until Watch presents lines.
@@ -5842,7 +5925,7 @@ export function BotcastExperience({
       setTopicDraft("");
       setProducerBriefDraft("");
       setProducerGuestContextDraft("");
-      setEpisodeModelDraft("");
+      setInternalEpisodeModelDraft("");
       setAskAboutDraft("");
       void loadEpisodes(selectedShow.id).catch(() => undefined);
       setEpisode(opening.episode);
@@ -9395,6 +9478,21 @@ export function BotcastExperience({
           botcastSpeechRevealIsVoicing(speechReveal) === false)
           ? "closed"
           : rawMouthShape;
+      const capturedVoiceLightLevel =
+        args.replay && replayFaithful && replayPresentationManifestV2
+          ? replayVoiceLightLevelAtV2(
+              replayPresentationManifestV2,
+              participantId,
+              replayInterviewFootageElapsedMs,
+            )
+          : null;
+      const replayVoiceLightLevel = args.replay && replayFaithful
+        ? (capturedVoiceLightLevel ??
+          (mouthShape !== "closed" ||
+          replayDirectedScene?.participants[participantId]?.speaking
+            ? 0.22
+            : 0))
+        : undefined;
       const mouthCapture = (
         <ReplayMouthPresentationCapture
           sourceId={args.replay ? null : signalCaptureSourceIdRef.current}
@@ -9425,6 +9523,15 @@ export function BotcastExperience({
         facing: signalStudioFacingForRole(studioLayout, role),
         theme: stageTheme,
         mouthShape,
+        voiceLightTarget:
+          args.replay && replayFaithful
+            ? undefined
+            : botVoiceLightTarget(
+                "signal",
+                args.currentEpisode.id,
+                participantId,
+              ),
+        voiceLightLevel: replayVoiceLightLevel,
         eyeTimelineMs: args.replay
           ? replayInterviewFootageElapsedMs
           : undefined,
@@ -10894,14 +11001,16 @@ export function BotcastExperience({
           setProducerGuestContextDraft(detail.guestContext ?? "");
           setTopicDraft("");
           setProducerBriefDraft("");
-          setEpisodeModelDraft(
-            botcastEpisodeModelSelectionKind(detail) === "auto"
-              ? ""
-              : detail.model &&
-                  modelOptions.some((option) => option.id === detail.model)
-                ? detail.model
-                : "",
-          );
+          if (modelChoice === undefined) {
+            setEpisodeModelDraft(
+              botcastEpisodeModelSelectionKind(detail) === "auto"
+                ? ""
+                : detail.model &&
+                    modelOptions.some((option) => option.id === detail.model)
+                  ? detail.model
+                  : "",
+            );
+          }
           setEpisodeDurationDraft(detail.durationMinutes);
           setNotice(
             `Loaded “${detail.title}” as a fresh Producer-guest setup. Signal will resynthesize the interview from the saved context before you go live.`,
@@ -10917,7 +11026,9 @@ export function BotcastExperience({
         setGuestDraftId(retry.guestId);
         setTopicDraft(retry.topic);
         setProducerBriefDraft(retry.producerBrief);
-        setEpisodeModelDraft(retry.modelId);
+        if (modelChoice === undefined) {
+          setEpisodeModelDraft(retry.modelId);
+        }
         setEpisodeDurationDraft(retry.durationMinutes);
 
         const caveats: string[] = [];
@@ -12191,10 +12302,13 @@ export function BotcastExperience({
     episode?.status === "completed" ||
     episode?.status === "cancelled";
   useEffect(() => {
-    onLiveSessionActiveChange?.(liveSessionActive);
-  }, [liveSessionActive, onLiveSessionActiveChange]);
+    onLiveSessionActiveChange?.(
+      liveSessionActive,
+      episode?.id ?? (watchBakeActive ? "baking" : null),
+    );
+  }, [episode?.id, liveSessionActive, onLiveSessionActiveChange, watchBakeActive]);
   useEffect(
-    () => () => onLiveSessionActiveChange?.(false),
+    () => () => onLiveSessionActiveChange?.(false, null),
     [onLiveSessionActiveChange],
   );
   const episodeModelControlDisabled = liveSessionActive;
@@ -12266,7 +12380,15 @@ export function BotcastExperience({
   return (
     <>
       {liveSessionActive ? (
-        <PrismCompanionPresenceBoundary reason="signal-live-session" />
+        episode?.id ? (
+          <PrismCompanionSessionNoteBoundary
+            reason="signal-live-session"
+            surface="signal"
+            sessionId={episode.id}
+          />
+        ) : (
+          <PrismCompanionPresenceBoundary reason="signal-live-session" />
+        )
       ) : null}
       <SessionAtmosphereLayer
         active={signalSessionAtmosphereActive({
@@ -12615,18 +12737,33 @@ export function BotcastExperience({
             {!episodeOutro.discarded &&
             episode?.id === episodeOutro.episodeId &&
             episode.status === "completed" ? (
-              <button
-                type="button"
-                className={styles.episodeReviewCopyButton}
-                onClick={() => void copyEpisodeForReview(episode)}
-                disabled={
-                  reviewCopyState?.episodeId === episode.id &&
-                  reviewCopyState.phase === "copying"
-                }
-                aria-live="polite"
-              >
-                {signalReviewCopyLabel(reviewCopyState, episode.id)}
-              </button>
+              <>
+                {onCreateSlateStory ? (
+                  <button
+                    type="button"
+                    className={styles.episodeReviewCopyButton}
+                    onClick={() => void createEpisodeStoryInSlate(episode)}
+                    disabled={slateStoryEpisodeId !== null}
+                    data-tutorial-target="botcast-create-slate-story"
+                  >
+                    {slateStoryEpisodeId === episode.id
+                      ? "Creating in Slate…"
+                      : "Create in Slate"}
+                  </button>
+                ) : null}
+                <button
+                  type="button"
+                  className={styles.episodeReviewCopyButton}
+                  onClick={() => void copyEpisodeForReview(episode)}
+                  disabled={
+                    reviewCopyState?.episodeId === episode.id &&
+                    reviewCopyState.phase === "copying"
+                  }
+                  aria-live="polite"
+                >
+                  {signalReviewCopyLabel(reviewCopyState, episode.id)}
+                </button>
+              </>
             ) : null}
             <button
               type="button"
@@ -12761,17 +12898,21 @@ export function BotcastExperience({
                 </strong>
               {resolvedLockedRoutingChip ? (
                 <LiveSessionModelChip
-                  modelLabel={resolvedLockedRoutingChip.modelLabel}
-                  effortLabel={resolvedLockedRoutingChip.effortLabel}
+                  {...resolvedLockedRoutingChip}
                   className={styles.liveRoutingChip}
                 />
               ) : (
-                <span className={styles.modelProvenance}>
-                  {episodeModeLabel(episode)} ·{" "}
-                  {episode.model
-                    ? (modelLabels.get(episode.model) ?? episode.model)
-                    : "Auto"}
-                </span>
+                <LiveSessionModelChip
+                  modelLabel={`${episode.model ? (modelLabels.get(episode.model) ?? episode.model) : "Model"}${botcastEpisodeModelSelectionKind(episode) === "auto" || episode.responseMode === "auto" ? " [auto]" : ""}`}
+                  effortLabel="Default"
+                  effortKey="auto"
+                  automatic={
+                    botcastEpisodeModelSelectionKind(episode) === "auto" ||
+                    episode.responseMode === "auto"
+                  }
+                  turbo={false}
+                  className={styles.liveRoutingChip}
+                />
               )}
                 <span>
                   {episode.playbackMode === "watch"
@@ -13180,6 +13321,18 @@ export function BotcastExperience({
                   </p>
               </div>
               <div className={styles.replayHeaderActions}>
+                {onCreateSlateStory ? (
+                  <button
+                    type="button"
+                    onClick={() => void createEpisodeStoryInSlate(replayEpisode)}
+                    disabled={slateStoryEpisodeId !== null}
+                    data-tutorial-target="botcast-create-slate-story"
+                  >
+                    {slateStoryEpisodeId === replayEpisode.id
+                      ? "Creating in Slate…"
+                      : "Create in Slate"}
+                  </button>
+                ) : null}
                   <button
                     type="button"
                     onClick={() => void copyEpisodeForReview(replayEpisode)}

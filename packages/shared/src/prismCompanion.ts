@@ -109,11 +109,21 @@ export interface PrismCompanionRequest {
   requestId: string;
   contextTokenIds: string[];
   /**
+   * The floating companion's explicit Private state. Private transcripts stay
+   * client-held and may never nominate a persisted conversation.
+   */
+  privateMode?: boolean;
+  /**
    * Full-size Prism Home uses the same endpoint as the floating companion to
    * probe product commands without replacing an ordinary conversational turn.
    * A non-command returns 204 and never reaches the fallback chat model.
    */
   orchestrationOnly?: boolean;
+  /**
+   * Persistent Default Prism Zen conversation that should receive a handled
+   * orchestration turn. Valid only for non-Private orchestration preflight.
+   */
+  persistConversationId?: string;
 }
 
 export interface PrismCompanionResponse {
@@ -295,6 +305,23 @@ export function normalizePrismCompanionRequest(
       `Messages for Prism must be ${PRISM_COMPANION_MESSAGE_MAX_LENGTH.toLocaleString()} characters or fewer.`,
     );
   }
+  const privateMode = value.privateMode === true;
+  const orchestrationOnly = value.orchestrationOnly === true;
+  const persistConversationId = boundedId(value.persistConversationId);
+  if (
+    value.persistConversationId !== undefined &&
+    !persistConversationId
+  ) {
+    throw new Error("A valid Prism conversation is required for persistence.");
+  }
+  if (persistConversationId && privateMode) {
+    throw new Error("Private Prism requests cannot persist chat history.");
+  }
+  if (persistConversationId && !orchestrationOnly) {
+    throw new Error(
+      "Prism conversation persistence is available only during orchestration preflight.",
+    );
+  }
   return {
     surface: normalizePrismCompanionSurfaceReference(value.surface),
     message,
@@ -309,7 +336,9 @@ export function normalizePrismCompanionRequest(
           ),
         ).slice(0, 8)
       : [],
-    ...(value.orchestrationOnly === true ? { orchestrationOnly: true } : {}),
+    ...(privateMode ? { privateMode: true } : {}),
+    ...(orchestrationOnly ? { orchestrationOnly: true } : {}),
+    ...(persistConversationId ? { persistConversationId } : {}),
   };
 }
 

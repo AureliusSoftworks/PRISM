@@ -8,6 +8,7 @@ import {
   markReplayAudioMasterCapture,
   markReplayDirectionEvent,
   markReplayMouthShape,
+  markReplayVoiceLightLevel,
   prismAudioContext,
   prismAudioOutputNode,
   replayAudioMasterCaptureCompactsThinkingGaps,
@@ -340,6 +341,36 @@ test("mouth capture coalesces rendered shapes and snapshots the recording Voice 
       shape: "closed",
       atMs: 300,
     });
+    markReplayVoiceLightLevel({
+      sourceId: "baked-presentation",
+      participantId: "host",
+      level: 0.126,
+      atMs: 100,
+    });
+    markReplayVoiceLightLevel({
+      sourceId: "baked-presentation",
+      participantId: "host",
+      level: 0.9,
+      atMs: 120,
+    });
+    markReplayVoiceLightLevel({
+      sourceId: "baked-presentation",
+      participantId: "host",
+      level: 0.14,
+      atMs: 170,
+    });
+    markReplayVoiceLightLevel({
+      sourceId: "baked-presentation",
+      participantId: "host",
+      level: 0.14,
+      atMs: 360,
+    });
+    markReplayVoiceLightLevel({
+      sourceId: "baked-presentation",
+      participantId: "host",
+      level: 0,
+      atMs: 400,
+    });
 
     const result = await stopReplayAudioMasterCapture("baked-presentation");
     assert.deepEqual(result?.voiceSelection, {
@@ -353,6 +384,16 @@ test("mouth capture coalesces rendered shapes and snapshots the recording Voice 
           { atMs: 100, shape: "closed" },
           { atMs: 200, shape: "open-wide" },
           { atMs: 300, shape: "closed" },
+        ],
+      },
+    ]);
+    assert.deepEqual(result?.voiceLightTracks, [
+      {
+        participantId: "host",
+        cues: [
+          { atMs: 100, level: 0.13 },
+          { atMs: 360, level: 0.14 },
+          { atMs: 400, level: 0 },
         ],
       },
     ]);

@@ -4,13 +4,15 @@ import { PrismWieldFixture } from "./PrismWieldFixture";
 export default async function PrismWieldFixturesPage({
   searchParams,
 }: {
-  searchParams: Promise<{ theme?: string }>;
+  searchParams: Promise<{ home?: string; soft?: string; theme?: string }>;
 }): Promise<React.JSX.Element> {
   if (process.env.NODE_ENV === "production") notFound();
-  const requestedTheme = (await searchParams).theme;
+  const requested = await searchParams;
   return (
     <PrismWieldFixture
-      theme={requestedTheme === "light" ? "light" : "dark"}
+      theme={requested.theme === "light" ? "light" : "dark"}
+      softSynthesis={requested.soft === "1"}
+      homeDocked={requested.home === "1"}
     />
   );
 }

@@ -19,6 +19,7 @@ import {
   createTestDatabase,
   withTestRegistrationAcceptance,
 } from "../test-support.ts";
+import { recordTextUsage } from "../usage.ts";
 import { elevenLabsVoiceIsolationSeed } from "../voices.ts";
 
 const tempDir = mkdtempSync(join(tmpdir(), "prism-api-integration-"));
@@ -581,7 +582,7 @@ describe("API request integration", () => {
     assert.equal(generationEvent.provider, "local");
     assert.equal(generationEvent.model, "deterministic-test-model");
     assert.deepEqual(generationPayload.request.participantBotIds, botIds);
-    assert.equal(generationPayload.request.requestedCandidateCount, 8);
+    assert.equal(generationPayload.request.requestedCandidateCount, 12);
     assert.deepEqual(generationPayload.request.rankingDimensions, [
       "relevance",
       "depth",
@@ -1332,6 +1333,81 @@ describe("API request integration", () => {
     assert.equal(reset.status, 200);
   });
 
+  it("persists Turbo per supported online model through Settings", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "model-turbo-settings@example.com",
+        password: "model-turbo-settings-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+
+    const enabled = await client.request("/api/model-turbo-preferences", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+        turbo: true,
+      }),
+    });
+    assert.equal(enabled.status, 200, await enabled.clone().text());
+    const enabledPayload = await json(enabled);
+    assert.equal(enabledPayload.modelTurboPreferences.length, 1);
+    assert.equal(enabledPayload.modelTurboPreferences[0]?.provider, "openai");
+    assert.equal(enabledPayload.modelTurboPreferences[0]?.modelId, "gpt-5.6-sol");
+    assert.equal(enabledPayload.modelTurboPreferences[0]?.turbo, true);
+    assert.equal(
+      typeof enabledPayload.modelTurboPreferences[0]?.updatedAt,
+      "string",
+    );
+
+    const loaded = await json(await client.request("/api/settings"));
+    assert.equal(loaded.settings.modelTurboPreferences[0]?.turbo, true);
+
+    const rejected = await client.request("/api/model-turbo-preferences", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "anthropic",
+        modelId: "claude-opus-4-8",
+        turbo: true,
+      }),
+    });
+    assert.equal(rejected.status, 400);
+
+    const disabled = await client.request("/api/model-turbo-preferences", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+        turbo: false,
+      }),
+    });
+    assert.equal(disabled.status, 200);
+    assert.deepEqual((await json(disabled)).modelTurboPreferences, []);
+
+    await client.request("/api/model-turbo-preferences", {
+      method: "PUT",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        provider: "openai",
+        modelId: "gpt-5.6-sol",
+        turbo: true,
+      }),
+    });
+    const reset = await client.request("/api/model-turbo-preferences", {
+      method: "DELETE",
+    });
+    assert.equal(reset.status, 200);
+    const resetPayload = await json(reset);
+    assert.equal(resetPayload.resetCount, 1);
+    assert.deepEqual(resetPayload.modelTurboPreferences, []);
+  });
+
   it("persists the account-level Home atmosphere style", async () => {
     const client = createClient();
     const register = await client.request(
@@ -1367,6 +1443,69 @@ describe("API request integration", () => {
     assert.equal(loadedSettings.atmosphereStyle, "sanctuary");
     assert.equal(loadedSettings.hubAtmosphereEnabled, false);
     assert.equal(loadedSettings.hubAtmosphereImageId, null);
+  });
+
+  it("persists the account-level typography preset with Standard as the default", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "typography-scale@example.com",
+        password: "typography-scale-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+
+    const initial = await json(await client.request("/api/settings"));
+    assert.equal(initial.settings.typographyScale, "standard");
+
+    const saved = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ typographyScale: "extra-large" }),
+    });
+    assert.equal(saved.status, 200, await saved.clone().text());
+    assert.equal((await json(saved)).settings.typographyScale, "extra-large");
+
+    const loaded = await json(await client.request("/api/settings"));
+    assert.equal(loaded.settings.typographyScale, "extra-large");
+  });
+
+  it("persists one global text model selection across applets", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "global-model-selection@example.com",
+        password: "global-model-selection-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+
+    const saved = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        preferredProvider: "openai",
+        preferredLocalModel: "qwen3:8b",
+        preferredOnlineModel: "gpt-5.6-terra",
+      }),
+    });
+    assert.equal(saved.status, 200, await saved.clone().text());
+
+    const loaded = await json(await client.request("/api/settings"));
+    assert.equal(loaded.settings.preferredProvider, "openai");
+    assert.equal(loaded.settings.preferredLocalModel, "qwen3:8b");
+    assert.equal(loaded.settings.preferredOnlineModel, "gpt-5.6-terra");
+
+    const resetToAuto = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ preferredOnlineModel: "" }),
+    });
+    assert.equal(resetToAuto.status, 200);
+    const resetSettings = await json(await client.request("/api/settings"));
+    assert.equal(resetSettings.settings.preferredOnlineModel, "");
   });
 
   it("shows ElevenLabs credits only for the signed-in user's saved key while online", async () => {
@@ -1850,13 +1989,20 @@ describe("API request integration", () => {
 
     const duplicate = await client.request(
       `/api/coffee/sessions/${encodeURIComponent(sessionId)}/depart`,
-      jsonInit({ preferredProvider: "openai" })
+      jsonInit({ preferredProvider: "openai", awaitEpilogue: true })
     );
     assert.equal(duplicate.status, 202);
     const duplicatePayload = await json(duplicate);
     assert.equal(duplicatePayload.departureRecorded, false);
     assert.equal(duplicatePayload.epilogueStarted, false);
+    assert.equal(duplicatePayload.epilogueComplete, true);
     assert.equal(duplicatePayload.epilogueTurnTarget, firstPayload.epilogueTurnTarget);
+    assert.equal(
+      duplicatePayload.conversation.messages.filter(
+        (message: { role?: unknown }) => message.role === "assistant"
+      ).length,
+      firstPayload.epilogueTurnTarget
+    );
 
     const resumeAttempt = await client.request(
       `/api/coffee/sessions/${encodeURIComponent(sessionId)}/continue`,
@@ -2770,6 +2916,559 @@ describe("API request integration", () => {
           !/api\.openai\.com|api\.anthropic\.com|api\.elevenlabs\.io|qdrant/i.test(input)
       )
     );
+  });
+
+  it("turns a Chat Shh cutoff into one assistant-only reaction in the same provider lane", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "chat-shh@example.com",
+        password: "chat-shh-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    const now = "2026-08-09T12:00:00.000Z";
+    db.prepare(
+      `INSERT INTO bots
+         (id, user_id, name, system_prompt, online_enabled, created_at, updated_at)
+       VALUES (?, ?, ?, ?, 1, ?, ?)`,
+    ).run(
+      "chat-shh-bot",
+      userId,
+      "Testy",
+      "React in character and keep it brief.",
+      now,
+      now,
+    );
+    db.prepare(
+      `INSERT INTO conversations
+         (id, user_id, title, conversation_mode, bot_id, incognito, created_at, updated_at)
+       VALUES (?, ?, ?, 'chat', ?, 0, ?, ?)`,
+    ).run(
+      "chat-shh-conversation",
+      userId,
+      "Shh",
+      "chat-shh-bot",
+      now,
+      now,
+    );
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at)
+       VALUES (?, ?, ?, 'user', ?, NULL, NULL, ?, ?)`,
+    ).run(
+      "chat-shh-user",
+      "chat-shh-conversation",
+      userId,
+      "Say the pangram.",
+      "chat-shh-bot",
+      "2026-08-09T12:00:00.000Z",
+    );
+    db.prepare(
+      `INSERT INTO messages
+         (id, conversation_id, user_id, role, content, provider, model, bot_id, created_at)
+       VALUES (?, ?, ?, 'assistant', ?, 'local', NULL, ?, ?)`,
+    ).run(
+      "chat-shh-assistant",
+      "chat-shh-conversation",
+      userId,
+      "The quick brown fox jumps over the lazy dog.",
+      "chat-shh-bot",
+      "2026-08-09T12:00:01.000Z",
+    );
+    db.prepare(
+      `INSERT INTO memory_summaries
+         (id, user_id, conversation_id, summary, created_at)
+       VALUES (?, ?, ?, ?, ?)`,
+    ).run(
+      "chat-shh-summary",
+      userId,
+      "chat-shh-conversation",
+      "Summary derived from the full unheard reply.",
+      "2026-08-09T12:00:02.000Z",
+    );
+    db.prepare(
+      `INSERT INTO memories
+         (id, user_id, conversation_id, bot_id, ciphertext, iv, tag,
+          confidence, category, tier, durability, source, certainty,
+          source_message_ids, created_at)
+       VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+    ).run(
+      "chat-shh-inferred-memory",
+      userId,
+      "chat-shh-conversation",
+      "chat-shh-bot",
+      "ciphertext",
+      "iv",
+      "tag",
+      0.5,
+      "general",
+      "short_term",
+      0.5,
+      "inferred",
+      0.5,
+      JSON.stringify(["chat-shh-assistant"]),
+      "2026-08-09T12:00:02.000Z",
+    );
+
+    const interrupted = await client.request(
+      "/api/messages/chat-shh-assistant/interrupt",
+      jsonInit({
+        content: "The quick brow—",
+        prismInterruption: {
+          kind: "assistant_reveal",
+          assistantMessageId: "chat-shh-assistant",
+          visibleTokenCount: 4,
+          totalTokenCount: 9,
+          interruptedContent: "The quick brow—",
+        },
+      }),
+    );
+    const interruptedPayload = await json(interrupted);
+    assert.equal(interrupted.status, 200, JSON.stringify(interruptedPayload));
+    const repeatedInterrupt = await client.request(
+      "/api/messages/chat-shh-assistant/interrupt",
+      jsonInit({
+        content: "The quick brow—",
+        prismInterruption: {
+          kind: "assistant_reveal",
+          assistantMessageId: "chat-shh-assistant",
+          visibleTokenCount: 4,
+          totalTokenCount: 9,
+          interruptedContent: "The quick brow—",
+        },
+      }),
+    );
+    const repeatedInterruptPayload = await json(repeatedInterrupt);
+    assert.equal(repeatedInterrupt.status, 200);
+    assert.equal(repeatedInterruptPayload.idempotentReplay, true);
+    assert.deepEqual(
+      repeatedInterruptPayload.prismMood,
+      interruptedPayload.prismMood,
+    );
+    assert.equal(
+      (
+        db.prepare(
+          "SELECT COUNT(*) AS n FROM memory_summaries WHERE id = ? AND user_id = ?",
+        ).get("chat-shh-summary", userId) as { n: number }
+      ).n,
+      0,
+    );
+    assert.equal(
+      (
+        db.prepare(
+          "SELECT COUNT(*) AS n FROM memories WHERE id = ? AND user_id = ?",
+        ).get("chat-shh-inferred-memory", userId) as { n: number }
+      ).n,
+      0,
+    );
+
+    const providerCallStart = providerFactoryCalls.length;
+    const reactionBody = {
+      conversationId: "chat-shh-conversation",
+      message: "",
+      mode: "chat",
+      botId: "chat-shh-bot",
+      preferredProvider: "openai",
+      assistantInterruptionReaction: {
+        source: "shh",
+        activeBotId: "chat-shh-bot",
+        assistantMessageId: "chat-shh-assistant",
+        interruptedContent: "The quick brow—",
+        clientTurnId: "chat-shh-run-1",
+      },
+    };
+    const originalGenerateResponse =
+      deterministicProvider.generateResponse.bind(deterministicProvider);
+    let rejectNextReaction = true;
+    deterministicProvider.generateResponse = async (messages, options) => {
+      if (rejectNextReaction) {
+        rejectNextReaction = false;
+        throw new Error("Transient reaction provider failure.");
+      }
+      return originalGenerateResponse(messages, options);
+    };
+    let failedReaction: Response;
+    try {
+      failedReaction = await client.request(
+        "/api/chat",
+        jsonInit(reactionBody),
+      );
+    } finally {
+      deterministicProvider.generateResponse = originalGenerateResponse;
+    }
+    const failedReactionPayload = await json(failedReaction!);
+    assert.equal(
+      failedReaction!.status,
+      503,
+      JSON.stringify(failedReactionPayload),
+    );
+
+    const reaction = await client.request("/api/chat", jsonInit(reactionBody));
+    const reactionPayload = await json(reaction);
+    assert.equal(reaction.status, 200, JSON.stringify(reactionPayload));
+    assert.deepEqual(
+      reactionPayload.conversation.messages.map(
+        (message: { role: string }) => message.role,
+      ),
+      ["user", "assistant", "assistant"],
+    );
+    assert.equal(
+      reactionPayload.conversation.messages.at(-1)?.botId,
+      "chat-shh-bot",
+    );
+    assert.ok(
+      providerFactoryCalls
+        .slice(providerCallStart)
+        .every((provider) => provider === "local"),
+    );
+    assert.equal(
+      (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND role = 'user'",
+          )
+          .get("chat-shh-conversation") as { n: number }
+      ).n,
+      1,
+    );
+
+    const providerCallCountAfterReaction = providerFactoryCalls.length;
+    const duplicate = await client.request("/api/chat", jsonInit(reactionBody));
+    const duplicatePayload = await json(duplicate);
+    assert.equal(duplicate.status, 200, JSON.stringify(duplicatePayload));
+    assert.equal(duplicatePayload.assistantInterruptionReplay, true);
+    assert.deepEqual(
+      duplicatePayload.conversation.messages.map(
+        (message: { id: string }) => message.id,
+      ),
+      reactionPayload.conversation.messages.map(
+        (message: { id: string }) => message.id,
+      ),
+    );
+    assert.equal(providerFactoryCalls.length, providerCallCountAfterReaction);
+    assert.equal(
+      (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS n FROM messages WHERE conversation_id = ? AND role = 'assistant'",
+          )
+          .get("chat-shh-conversation") as { n: number }
+      ).n,
+      2,
+    );
+  });
+
+  it("persists handled Prism orchestration once only in the authorized Default Prism Zen chat", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "persistent-prism-action@example.com",
+        password: "persistent-prism-action-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    const opened = await client.request(
+      "/api/conversations/zen/open",
+      jsonInit({ botId: null, newSession: true }),
+    );
+    assert.equal(opened.status, 200);
+    const conversationId = String((await json(opened)).conversationId);
+
+    const otherClient = createClient();
+    const otherRegister = await otherClient.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "foreign-prism-action@example.com",
+        password: "foreign-prism-action-password",
+      }),
+    );
+    assert.equal(otherRegister.status, 201);
+    const otherOpened = await otherClient.request(
+      "/api/conversations/zen/open",
+      jsonInit({ botId: null, newSession: true }),
+    );
+    assert.equal(otherOpened.status, 200);
+    const foreignConversationId = String(
+      (await json(otherOpened)).conversationId,
+    );
+
+    const requestBody = {
+      surface: { surfaceId: "home" },
+      message: "Which five bots have replied to me the most?",
+      recoveryMessages: [],
+      requestId: "persist-prism-action-1",
+      contextTokenIds: [],
+      orchestrationOnly: true,
+      privateMode: false,
+      persistConversationId: conversationId,
+    };
+    const foreign = await client.request(
+      "/api/prism-companion",
+      jsonInit({
+        ...requestBody,
+        requestId: "foreign-prism-action",
+        persistConversationId: foreignConversationId,
+      }),
+    );
+    assert.equal(foreign.status, 404);
+
+    const rejectedPrivate = await client.request(
+      "/api/prism-companion",
+      jsonInit({ ...requestBody, privateMode: true }),
+    );
+    assert.equal(rejectedPrivate.status, 400);
+
+    const { persistConversationId: _persistConversationId, ...privateBody } =
+      requestBody;
+    const privateResponse = await client.request(
+      "/api/prism-companion",
+      jsonInit({
+        ...privateBody,
+        requestId: "private-prism-action",
+        privateMode: true,
+      }),
+    );
+    assert.equal(privateResponse.status, 200);
+    assert.equal(
+      (
+        db
+          .prepare(
+            "SELECT COUNT(*) AS count FROM messages WHERE conversation_id = ? AND user_id = ?",
+          )
+          .get(conversationId, userId) as { count: number }
+      ).count,
+      0,
+    );
+
+    const first = await client.request(
+      "/api/prism-companion",
+      jsonInit(requestBody),
+    );
+    assert.equal(first.status, 200);
+    const firstPayload = await json(first);
+    const retry = await client.request(
+      "/api/prism-companion",
+      jsonInit(requestBody),
+    );
+    assert.equal(retry.status, 200);
+    const retryPayload = await json(retry);
+    assert.equal(retryPayload.message.id, firstPayload.message.id);
+    assert.equal(retryPayload.message.content, firstPayload.message.content);
+
+    const messages = db
+      .prepare(
+        `SELECT role, content, provider, model, bot_id, tool_payload
+           FROM messages
+          WHERE conversation_id = ? AND user_id = ?
+          ORDER BY created_at ASC`,
+      )
+      .all(conversationId, userId) as unknown as Array<{
+      role: string;
+      content: string;
+      provider: string | null;
+      model: string | null;
+      bot_id: string | null;
+      tool_payload: string | null;
+    }>;
+    assert.deepEqual(
+      messages.map(({ role, content }) => ({ role, content })),
+      [
+        { role: "user", content: requestBody.message },
+        { role: "assistant", content: firstPayload.message.content },
+      ],
+    );
+    assert.equal(messages[0]?.provider, null);
+    assert.equal(messages[1]?.provider, "local");
+    assert.equal(messages[0]?.bot_id, null);
+    assert.equal(messages[1]?.bot_id, null);
+    assert.equal(messages[0]?.tool_payload, null);
+    assert.equal(messages[1]?.tool_payload, null);
+  });
+
+  it("keeps authorized Prism surface context request-scoped in persistent Zen chat", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "persistent-prism-surface@example.com",
+        password: "persistent-prism-surface-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+    const userId = String((await json(register)).user.id);
+    const surfaceTitle = "Transient Surface Observatory";
+    const now = "2026-08-09T12:00:00.000Z";
+    db.prepare(
+      `INSERT INTO slate_projects (
+        id, user_id, title, spark, phase, created_at, updated_at
+      ) VALUES (?, ?, ?, ?, 'draft', ?, ?)`,
+    ).run(
+      "persistent-prism-surface-project",
+      userId,
+      surfaceTitle,
+      "Private manuscript material is not prompt context.",
+      now,
+      now,
+    );
+
+    const invalid = await client.request(
+      "/api/chat",
+      jsonInit({
+        message: "This should not run.",
+        mode: "zen",
+        facetBotId: null,
+        prismCompanionRequest: true,
+        prismCompanionSurface: { surfaceId: "not-a-prism-surface" },
+      }),
+    );
+    assert.equal(invalid.status, 400);
+
+    const unmarkedCompanionRequest = await client.request(
+      "/api/chat",
+      jsonInit({
+        message: "This should not receive surface context.",
+        mode: "zen",
+        facetBotId: null,
+        prismCompanionSurface: { surfaceId: "slate" },
+      }),
+    );
+    assert.equal(unmarkedCompanionRequest.status, 400);
+
+    const originalGenerateResponse = deterministicProvider.generateResponse;
+    deterministicProvider.generateResponse = async (messages, options) => {
+      const reply = await originalGenerateResponse.call(
+        deterministicProvider,
+        messages,
+        options,
+      );
+      recordTextUsage({
+        provider: "local",
+        model: options?.model ?? "deterministic-test-model",
+        purpose: "chat_reply",
+        inputTokens: null,
+        outputTokens: null,
+        totalTokens: null,
+        tokenCountSource: "unavailable",
+        developer: {
+          request: { messages },
+          parsedOutput: reply,
+          streaming: false,
+        },
+      });
+      return reply;
+    };
+
+    try {
+      const providerCallStart = deterministicProvider.calls.length;
+      const providerFactoryStart = providerFactoryCalls.length;
+      const response = await client.request(
+        "/api/chat",
+        jsonInit({
+          message: "What should I focus on right now?",
+          mode: "zen",
+          facetBotId: null,
+          preferredProvider: "openai",
+          incognito: false,
+          prismCompanionRequest: true,
+          prismCompanionSurface: {
+            surfaceId: "slate",
+            slateProjectId: "persistent-prism-surface-project",
+          },
+        }),
+      );
+      assert.equal(response.status, 200);
+      const payload = await json(response);
+      const conversationId = String(payload.conversation.id);
+      assert.equal(payload.conversation.incognito, false);
+      assert.equal(
+        providerFactoryCalls
+          .slice(providerFactoryStart)
+          .some((provider) => provider !== "local"),
+        false,
+      );
+
+      const promptCall = deterministicProvider.calls
+        .slice(providerCallStart)
+        .find((messages) =>
+          messages.some((message) =>
+            message.content.includes(
+              "Request-scoped Prism companion surface context",
+            ),
+          ),
+        );
+      assert.ok(promptCall);
+      const providerPrompt = JSON.stringify(promptCall);
+      assert.match(providerPrompt, new RegExp(surfaceTitle, "u"));
+      assert.doesNotMatch(providerPrompt, /Private manuscript material/u);
+
+      const persistedMessages = db
+        .prepare(
+          `SELECT role, content, tool_payload
+             FROM messages
+            WHERE conversation_id = ? AND user_id = ?
+            ORDER BY created_at ASC, rowid ASC`,
+        )
+        .all(conversationId, userId);
+      const persistedMessageJson = JSON.stringify(persistedMessages);
+      assert.doesNotMatch(persistedMessageJson, new RegExp(surfaceTitle, "u"));
+      assert.doesNotMatch(
+        persistedMessageJson,
+        /Request-scoped Prism companion surface context/u,
+      );
+      assert.doesNotMatch(
+        JSON.stringify(payload.conversation),
+        new RegExp(surfaceTitle, "u"),
+      );
+
+      const durableMemoryJson = JSON.stringify({
+        memories: db
+          .prepare("SELECT * FROM memories WHERE user_id = ?")
+          .all(userId),
+        summaries: db
+          .prepare("SELECT * FROM memory_summaries WHERE user_id = ?")
+          .all(userId),
+      });
+      assert.doesNotMatch(durableMemoryJson, new RegExp(surfaceTitle, "u"));
+
+      const diagnosticJson = JSON.stringify(
+        db
+          .prepare(
+            "SELECT payload_json FROM developer_transcript_events WHERE conversation_id = ? AND user_id = ?",
+          )
+          .all(conversationId, userId),
+      );
+      assert.match(
+        diagnosticJson,
+        /Request-scoped Prism surface context omitted/u,
+      );
+      assert.doesNotMatch(diagnosticJson, new RegExp(surfaceTitle, "u"));
+
+      const exported = await client.request(
+        `/api/conversations/${conversationId}/export`,
+        jsonInit({ format: "developer" }),
+      );
+      assert.equal(exported.status, 200);
+      const exportPayload = await json(exported);
+      assert.doesNotMatch(
+        String(exportPayload.markdown ?? ""),
+        new RegExp(surfaceTitle, "u"),
+      );
+      const storedExports = JSON.stringify(
+        db
+          .prepare(
+            "SELECT markdown FROM conversation_exports WHERE conversation_id = ? AND user_id = ?",
+          )
+          .all(conversationId, userId),
+      );
+      assert.doesNotMatch(storedExports, new RegExp(surfaceTitle, "u"));
+    } finally {
+      deterministicProvider.generateResponse = originalGenerateResponse;
+    }
   });
 
   it("streams Psychic planning before the final Chat envelope", async () => {

@@ -1,9 +1,11 @@
-// Temporarily keep saved bot groups on the standard grid while the immersive
-// full-avatar waiting-room view is being repaired.
+/** Experimental living-presence room. Disabled so saved groups use the
+ * original hero + filtered bot-card grid. */
 export const BOT_GROUP_WAITING_ROOM_ENABLED: boolean = false;
-export const BOT_GROUP_WAITING_ROOM_MIN_BOTS = 6;
+export const BOT_GROUP_WAITING_ROOM_MIN_BOTS = 2;
+export const BOT_GROUP_WAITING_ROOM_MAX_VISIBLE_BOTS = 24;
 export const BOT_GROUP_WAITING_ROOM_ANCHOR_COUNT = 5;
-export const BOT_GROUP_WAITING_ROOM_MAX_ROAMERS = 3;
+export const BOT_GROUP_WAITING_ROOM_MAX_ROAMERS =
+  BOT_GROUP_WAITING_ROOM_MAX_VISIBLE_BOTS - BOT_GROUP_WAITING_ROOM_ANCHOR_COUNT;
 export const BOT_GROUP_WAITING_ROOM_ROTATION_MIN_MS = 2 * 60 * 1_000;
 export const BOT_GROUP_WAITING_ROOM_ROTATION_MAX_MS = 4 * 60 * 1_000;
 
@@ -31,6 +33,10 @@ export interface BotGroupWaitingRoomPlacement {
   yPercent: number;
   scale: number;
   depth: number;
+  driftX: number;
+  driftY: number;
+  driftDurationMs: number;
+  driftDelayMs: number;
 }
 
 export interface BotGroupWaitingRoomReturnCheckpoint {
@@ -80,20 +86,6 @@ export interface BotGroupWaitingRoomRotationResult {
   slot: string | null;
 }
 
-const ANCHOR_GEOMETRY = [
-  { xPercent: 50, yPercent: 30, scale: 1.04, depth: 4 },
-  { xPercent: 18, yPercent: 45, scale: 0.9, depth: 2 },
-  { xPercent: 82, yPercent: 45, scale: 0.9, depth: 2 },
-  { xPercent: 34, yPercent: 70, scale: 0.96, depth: 3 },
-  { xPercent: 66, yPercent: 70, scale: 0.96, depth: 3 },
-] as const;
-
-const ROAMER_GEOMETRY = [
-  { xPercent: 7, yPercent: 78, scale: 0.7, depth: 2 },
-  { xPercent: 50, yPercent: 82, scale: 0.72, depth: 2 },
-  { xPercent: 93, yPercent: 78, scale: 0.7, depth: 2 },
-] as const;
-
 function uniqueBotIds(botIds: readonly string[]): string[] {
   return Array.from(
     new Set(
@@ -133,19 +125,49 @@ function buildPlacements(
   anchorBotIds: readonly string[],
   roamerBotIds: readonly string[],
 ): BotGroupWaitingRoomPlacement[] {
-  const anchors = anchorBotIds.map((botId, index) => ({
-    slot: `anchor-${index + 1}`,
-    role: "anchor" as const,
-    botId,
-    ...ANCHOR_GEOMETRY[index]!,
-  }));
-  const roamers = roamerBotIds.map((botId, index) => ({
-    slot: `roamer-${index + 1}`,
-    role: "roamer" as const,
-    botId,
-    ...ROAMER_GEOMETRY[index]!,
-  }));
-  return [...anchors, ...roamers];
+  const cast = [
+    ...anchorBotIds.map((botId, index) => ({
+      botId,
+      role: "anchor" as const,
+      slot: `anchor-${index + 1}`,
+    })),
+    ...roamerBotIds.map((botId, index) => ({
+      botId,
+      role: "roamer" as const,
+      slot: `roamer-${index + 1}`,
+    })),
+  ].slice(0, BOT_GROUP_WAITING_ROOM_MAX_VISIBLE_BOTS);
+  const count = cast.length;
+  const columns = count <= 6 ? count : count <= 15 ? 5 : 6;
+  const rows = Math.max(1, Math.ceil(count / columns));
+
+  return cast.map(({ botId, role, slot }, index) => {
+    const row = Math.floor(index / columns);
+    const rowStart = row * columns;
+    const rowCount = Math.min(columns, count - rowStart);
+    const column = index - rowStart;
+    const rowInset = columns > 1 && row % 2 === 1 ? 2.4 : 0;
+    const xStep = rowCount > 1 ? 82 / (rowCount - 1) : 0;
+    const xBase = rowCount === 1 ? 50 : 9 + column * xStep;
+    const yBase = rows === 1 ? 51 : 17 + row * (68 / (rows - 1));
+    const jitterX = (stableUnitValue(`${botId}:${slot}:x`) - 0.5) * 4.2;
+    const jitterY = (stableUnitValue(`${botId}:${slot}:y`) - 0.5) * 4.8;
+    const depthUnit = stableUnitValue(`${botId}:${slot}:depth`);
+    return {
+      slot,
+      role,
+      botId,
+      xPercent: Math.max(6, Math.min(94, xBase + rowInset + jitterX)),
+      yPercent: Math.max(12, Math.min(88, yBase + jitterY)),
+      scale: 0.86 + depthUnit * 0.22,
+      depth: 2 + Math.round(depthUnit * 4),
+      driftX: 10 + Math.round(stableUnitValue(`${botId}:drift-x`) * 16),
+      driftY: 7 + Math.round(stableUnitValue(`${botId}:drift-y`) * 13),
+      driftDurationMs:
+        8_400 + Math.round(stableUnitValue(`${botId}:drift-duration`) * 7_200),
+      driftDelayMs: -Math.round(stableUnitValue(`${botId}:drift-delay`) * 8_000),
+    };
+  });
 }
 
 function nextRotationDelayMs(visitSeed: string, rotationCount: number): number {
@@ -192,13 +214,7 @@ export function botGroupWaitingRoomPresenceCount(
   ) {
     return 0;
   }
-  const target =
-    viewport.width >= 1600 && viewport.height >= 900
-      ? 8
-      : viewport.width >= 1280 && viewport.height >= 760
-        ? 7
-        : 6;
-  return Math.min(target, eligibleBotCount);
+  return Math.min(BOT_GROUP_WAITING_ROOM_MAX_VISIBLE_BOTS, eligibleBotCount);
 }
 
 export function botGroupWaitingRoomIsEligible(
@@ -207,7 +223,9 @@ export function botGroupWaitingRoomIsEligible(
 ): boolean {
   return Boolean(
     group &&
-      (!group.builtIn || group.id === "builtin:favorites") &&
+      (!group.builtIn ||
+        group.id === "builtin:favorites" ||
+        group.id === "ungrouped") &&
       !group.special &&
       uniqueBotIds(validBotIds).length >= BOT_GROUP_WAITING_ROOM_MIN_BOTS,
   );
@@ -272,15 +290,7 @@ export function botGroupWaitingRoomVisiblePlacements(
     state.eligibleBotIds.length,
   );
   if (count === 0) return [];
-  const visibleRoamerCount = Math.max(
-    0,
-    count - BOT_GROUP_WAITING_ROOM_ANCHOR_COUNT,
-  );
-  return state.placements.filter(
-    (placement) =>
-      placement.role === "anchor" ||
-      Number(placement.slot.replace("roamer-", "")) <= visibleRoamerCount,
-  );
+  return state.placements.slice(0, count);
 }
 
 export function engageBotGroupWaitingRoomAnchor(
@@ -446,6 +456,16 @@ export function reconcileBotGroupWaitingRoomVisit(
   const retainedRoamers = state.roamerBotIds.filter(
     (botId) => validSet.has(botId) && !retainedAnchors.includes(botId),
   );
+  const targetAnchorCount = Math.min(
+    BOT_GROUP_WAITING_ROOM_ANCHOR_COUNT,
+    eligibleBotIds.length,
+  );
+  while (
+    retainedAnchors.length < targetAnchorCount &&
+    retainedRoamers.length > 0
+  ) {
+    retainedAnchors.push(retainedRoamers.shift()!);
+  }
   const retained = new Set([...retainedAnchors, ...retainedRoamers]);
   const survivingDeck = state.rotationDeck.filter(
     (botId) => validSet.has(botId) && !retained.has(botId),
@@ -472,7 +492,7 @@ export function reconcileBotGroupWaitingRoomVisit(
     ...fallbackCandidates,
   ];
   while (
-    retainedAnchors.length < BOT_GROUP_WAITING_ROOM_ANCHOR_COUNT &&
+    retainedAnchors.length < targetAnchorCount &&
     replacements.length > 0
   ) {
     retainedAnchors.push(replacements.shift()!);

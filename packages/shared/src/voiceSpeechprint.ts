@@ -8,9 +8,10 @@ import {
   type LocalVoiceSpeechprintV1,
 } from "./audioVoice.js";
 
-export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.5";
+export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.6";
+/** SHA-256 of the qualified Instant IPA matrix (see speechprint-runtime.test.ts). */
 export const LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256 =
-  "97019091d6176b3fb2329ca9618fea1be6994b100efc81084a08f5801977bc55";
+  "bb90f63171cdf98c2da635f40375f484f42da5a4be1debe4d938630211da13ce";
 
 export interface LocalVoiceSpeechprintCapabilityV1 {
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -31,22 +32,26 @@ const LOCAL_VOICE_SPEECHPRINT_DESCRIPTORS = [
   {
     id: "spanish-influenced-english",
     label: "Spanish-influenced English",
-    description: "A restrained Spanish-language pronunciation influence.",
+    description:
+      "A restrained Spanish-language pronunciation and early-stress rhythm influence.",
   },
   {
     id: "latin-american-spanish-influenced-english",
     label: "Latin American Spanish-influenced English",
-    description: "A restrained Latin American Spanish pronunciation influence.",
+    description:
+      "A restrained Latin American Spanish pronunciation and early-stress rhythm influence.",
   },
   {
     id: "brazilian-portuguese-influenced-english",
     label: "Brazilian Portuguese-influenced English",
-    description: "A restrained Brazilian Portuguese pronunciation influence.",
+    description:
+      "A restrained Brazilian Portuguese pronunciation and penultimate-rhythm influence.",
   },
   {
     id: "european-portuguese-influenced-english",
     label: "European Portuguese-influenced English",
-    description: "A restrained European Portuguese pronunciation influence.",
+    description:
+      "A restrained European Portuguese pronunciation and penultimate-rhythm influence.",
   },
   {
     id: "mandarin-influenced-english",
@@ -91,7 +96,8 @@ const LOCAL_VOICE_SPEECHPRINT_DESCRIPTORS = [
   {
     id: "french-influenced-english",
     label: "French-influenced English",
-    description: "A restrained French-language pronunciation influence.",
+    description:
+      "A restrained French-language pronunciation and final-stress rhythm influence.",
   },
   {
     id: "german-influenced-english",
@@ -126,7 +132,8 @@ const LOCAL_VOICE_SPEECHPRINT_DESCRIPTORS = [
   {
     id: "italian-influenced-english",
     label: "Italian-influenced English",
-    description: "A restrained Italian-language pronunciation influence.",
+    description:
+      "A restrained Italian-language pronunciation and penultimate-rhythm influence.",
   },
   {
     id: "irish-english",
@@ -1165,6 +1172,69 @@ const TIER_WEIGHT: Record<SpeechprintRuleTier, number> = {
   strong: 2,
 };
 
+/** Diphthongs first so stress/rhythm nuclei stay syllable-shaped. */
+const IPA_VOWEL_NUCLEUS_PATTERN =
+  /(?:aɪ|aʊ|eɪ|oʊ|əʊ|ɔɪ|ɑɪ|æɪ|əʉ|ʌɪ|ɑe|ɔʊ|[iɪeɛæaɑɒɔouʊʌəɚɝɐɜɞœøyɨʉᵻᵿei])ː?/gu;
+
+type StressRhythmBias =
+  | "penultimate"
+  | "early"
+  | "final"
+  | "penultimate-open";
+
+interface StressRhythmProfile {
+  bias: StressRhythmBias;
+  /** Unstressed schwa-family restoration target. */
+  schwaRestore: string;
+  /** Trailing rhotic schwa restoration (ɚ/ɝ). */
+  rhoticRestore: string;
+}
+
+/**
+ * Phase 1 Romance stress/rhythm profiles. Non-listed influences keep sound
+ * swaps only until a later ruleset bump.
+ */
+const STRESS_RHYTHM_PROFILES: Partial<
+  Record<Exclude<LocalVoiceSpeechprintInfluence, "none">, StressRhythmProfile>
+> = {
+  "italian-influenced-english": {
+    bias: "penultimate",
+    schwaRestore: "a",
+    rhoticRestore: "a",
+  },
+  "spanish-influenced-english": {
+    bias: "early",
+    schwaRestore: "e",
+    rhoticRestore: "e",
+  },
+  "latin-american-spanish-influenced-english": {
+    bias: "early",
+    schwaRestore: "e",
+    rhoticRestore: "e",
+  },
+  "brazilian-portuguese-influenced-english": {
+    bias: "penultimate-open",
+    schwaRestore: "u",
+    rhoticRestore: "u",
+  },
+  "european-portuguese-influenced-english": {
+    bias: "penultimate-open",
+    schwaRestore: "ɨ",
+    rhoticRestore: "ɨ",
+  },
+  "french-influenced-english": {
+    bias: "final",
+    schwaRestore: "ə",
+    rhoticRestore: "œ",
+  },
+};
+
+interface IpaNucleus {
+  start: number;
+  end: number;
+  text: string;
+}
+
 function stableUnitInterval(value: string): number {
   let hash = 2166136261;
   for (let index = 0; index < value.length; index += 1) {
@@ -1180,10 +1250,245 @@ function optionalRuleThreshold(
   return strength === "light" ? 0.34 : strength === "balanced" ? 0.67 : 0.92;
 }
 
+function listIpaNuclei(word: string): IpaNucleus[] {
+  const nuclei: IpaNucleus[] = [];
+  IPA_VOWEL_NUCLEUS_PATTERN.lastIndex = 0;
+  let match: RegExpExecArray | null;
+  while ((match = IPA_VOWEL_NUCLEUS_PATTERN.exec(word)) !== null) {
+    nuclei.push({
+      start: match.index,
+      end: match.index + match[0].length,
+      text: match[0],
+    });
+  }
+  return nuclei;
+}
+
+function stripStressMarks(word: string): string {
+  return word.replace(/[ˈˌ]/gu, "");
+}
+
+function primaryStressNucleusIndex(word: string, nuclei: IpaNucleus[]): number {
+  for (let index = 0; index < nuclei.length; index += 1) {
+    const nucleus = nuclei[index]!;
+    if (nucleus.start > 0 && word[nucleus.start - 1] === "ˈ") return index;
+  }
+  return -1;
+}
+
+function targetStressIndex(
+  bias: StressRhythmBias,
+  nucleusCount: number,
+): number {
+  if (nucleusCount <= 0) return -1;
+  if (nucleusCount === 1) return 0;
+  switch (bias) {
+    case "early":
+      return 0;
+    case "final":
+      return nucleusCount - 1;
+    case "penultimate":
+    case "penultimate-open":
+      return Math.max(0, nucleusCount - 2);
+    default: {
+      const _exhaustive: never = bias;
+      return _exhaustive;
+    }
+  }
+}
+
+function placePrimaryStress(word: string, nucleusIndex: number): string {
+  const stripped = stripStressMarks(word);
+  const nuclei = listIpaNuclei(stripped);
+  if (nucleusIndex < 0 || nucleusIndex >= nuclei.length) return stripped;
+  const target = nuclei[nucleusIndex]!;
+  return `${stripped.slice(0, target.start)}ˈ${stripped.slice(target.start)}`;
+}
+
+function demoteSecondaryStress(
+  word: string,
+  profile: StressRhythmProfile,
+): {
+  word: string;
+  changed: boolean;
+} {
+  if (!/ˌ/u.test(word)) return { word, changed: false };
+  let next = word.replace(/ˌ/gu, "");
+  const nuclei = listIpaNuclei(next);
+  // If the word only had secondary stress, promote a clear primary so Instant
+  // still has a stress anchor after demotion.
+  if (nuclei.length > 0 && primaryStressNucleusIndex(next, nuclei) < 0) {
+    const target = targetStressIndex(profile.bias, nuclei.length);
+    next = placePrimaryStress(next, target < 0 ? 0 : target);
+  }
+  return { word: next, changed: next !== word };
+}
+
+function restoreUnstressedSchwas(
+  word: string,
+  profile: StressRhythmProfile,
+): { word: string; changed: boolean } {
+  const nuclei = listIpaNuclei(word);
+  if (nuclei.length === 0) return { word, changed: false };
+  const stressed = primaryStressNucleusIndex(word, nuclei);
+  let changed = false;
+  let result = word;
+  // Walk right-to-left so index math stays valid after replacements.
+  for (let index = nuclei.length - 1; index >= 0; index -= 1) {
+    if (index === stressed) continue;
+    const nucleus = listIpaNuclei(result)[index];
+    if (!nucleus) continue;
+    const base = nucleus.text.replace(/ː$/u, "");
+    let replacement: string | null = null;
+    if (base === "ə" || base === "ᵻ" || base === "ɨ") {
+      replacement = profile.schwaRestore;
+    } else if (base === "ɚ" || base === "ɝ") {
+      replacement = profile.rhoticRestore;
+    }
+    if (!replacement || replacement === base) continue;
+    result = `${result.slice(0, nucleus.start)}${replacement}${result.slice(nucleus.end)}`;
+    changed = true;
+  }
+  return { word: result, changed };
+}
+
+function applyStressRhythmBias(
+  word: string,
+  profile: StressRhythmProfile,
+): { word: string; changed: boolean } {
+  const nuclei = listIpaNuclei(word);
+  if (nuclei.length < 2) return { word, changed: false };
+  const current = primaryStressNucleusIndex(word, nuclei);
+  const target = targetStressIndex(profile.bias, nuclei.length);
+  if (target < 0 || target === current) return { word, changed: false };
+  // Spanish/early: only pull stress forward when English parked it later.
+  if (profile.bias === "early" && current >= 0 && current <= target) {
+    return { word, changed: false };
+  }
+  // Italian/penultimate: only retarget 3+ syllable content words.
+  if (
+    (profile.bias === "penultimate" || profile.bias === "penultimate-open") &&
+    nuclei.length < 3
+  ) {
+    return { word, changed: false };
+  }
+  // French/final: only push stress later when it is not already final.
+  if (profile.bias === "final" && current === nuclei.length - 1) {
+    return { word, changed: false };
+  }
+  const next = placePrimaryStress(word, target);
+  return { word: next, changed: next !== word };
+}
+
+function openPenultimateNucleus(word: string): {
+  word: string;
+  changed: boolean;
+} {
+  const strippedPreview = stripStressMarks(word);
+  const nuclei = listIpaNuclei(word);
+  // Only reshape true multi-syllable content; two-nucleus words stay untouched.
+  if (nuclei.length < 3) return { word, changed: false };
+  const targetIndex = nuclei.length - 2;
+  const stressed = primaryStressNucleusIndex(word, nuclei);
+  if (stressed !== targetIndex) return { word, changed: false };
+  const nucleus = nuclei[targetIndex]!;
+  if (nucleus.text.endsWith("ː")) return { word, changed: false };
+  // Prefer a slightly more open/held stressed vowel for PT-influenced rhythm.
+  const next = `${word.slice(0, nucleus.end)}ː${word.slice(nucleus.end)}`;
+  // Guard: only lengthen if the stripped form still parses cleanly.
+  if (
+    listIpaNuclei(stripStressMarks(next)).length !==
+    listIpaNuclei(strippedPreview).length
+  ) {
+    return { word, changed: false };
+  }
+  return { word: next, changed: next !== word };
+}
+
+function shouldSkipStressRhythmWord(word: string): boolean {
+  // Belt-and-suspenders for digits / code-like tokens that slip past segment guards.
+  if (/\d/u.test(word)) return true;
+  if (/[A-Z]{2,}/u.test(word)) return true;
+  if (/[_/\\@#]/u.test(word)) return true;
+  return false;
+}
+
+function applyStressRhythmToWord(args: {
+  word: string;
+  profile: StressRhythmProfile;
+  strength: LocalVoiceSpeechprintStrength;
+  seed: string;
+}): { word: string; appliedRuleIds: string[] } {
+  if (shouldSkipStressRhythmWord(args.word)) {
+    return { word: args.word, appliedRuleIds: [] };
+  }
+  const maximumTier = TIER_WEIGHT[args.strength];
+  const appliedRuleIds: string[] = [];
+  let result = args.word;
+
+  if (maximumTier >= TIER_WEIGHT.light) {
+    const demoted = demoteSecondaryStress(result, args.profile);
+    if (demoted.changed) {
+      result = demoted.word;
+      appliedRuleIds.push("rhythm-demote-secondary");
+    }
+  }
+
+  if (maximumTier >= TIER_WEIGHT.balanced) {
+    const optionalSkip =
+      stableUnitInterval(
+        `${args.seed}:rhythm-stress-bias:${args.word}`,
+      ) >= optionalRuleThreshold(args.strength);
+    if (!optionalSkip) {
+      const biased = applyStressRhythmBias(result, args.profile);
+      if (biased.changed) {
+        result = biased.word;
+        appliedRuleIds.push(`rhythm-stress-${args.profile.bias}`);
+      }
+    }
+  }
+
+  if (maximumTier >= TIER_WEIGHT.strong) {
+    const optionalSkip =
+      stableUnitInterval(
+        `${args.seed}:rhythm-schwa-restore:${args.word}`,
+      ) >= optionalRuleThreshold(args.strength);
+    if (!optionalSkip) {
+      const restored = restoreUnstressedSchwas(result, args.profile);
+      if (restored.changed) {
+        result = restored.word;
+        appliedRuleIds.push("rhythm-schwa-restore");
+      }
+    }
+    if (args.profile.bias === "penultimate-open") {
+      const opened = openPenultimateNucleus(result);
+      if (opened.changed) {
+        result = opened.word;
+        appliedRuleIds.push("rhythm-open-penultimate");
+      }
+    }
+  }
+
+  return { word: result, appliedRuleIds };
+}
+
 export function localVoiceSpeechprintIsActive(
   value: LocalVoiceSpeechprintV1 | null | undefined,
 ): boolean {
   return normalizeLocalVoiceSpeechprintInfluence(value?.influence) !== "none";
+}
+
+/**
+ * Phase 2 (deferred): approximate phrase melody via IPA stress/pacing.
+ * Identity until the melody milestone ships — do not double-stack with
+ * Feel-stage Pitch/Lilt or client clause-breath pauses.
+ */
+export function applyLocalVoiceSpeechprintMelodyToIpa(args: {
+  ipa: string;
+  speechprint: LocalVoiceSpeechprintV1;
+}): { ipa: string; appliedRuleIds: string[] } {
+  void args.speechprint;
+  return { ipa: args.ipa, appliedRuleIds: [] };
 }
 
 export function applyLocalVoiceSpeechprintToIpa(args: {
@@ -1203,7 +1508,7 @@ export function applyLocalVoiceSpeechprintToIpa(args: {
   );
   const maximumTier = TIER_WEIGHT[strength];
   const appliedRuleIds = new Set<string>();
-  const transformed = args.ipa
+  const afterSwaps = args.ipa
     .split(/(\s+)/gu)
     .map((word) => {
       if (!word || /^\s+$/u.test(word)) return word;
@@ -1224,5 +1529,31 @@ export function applyLocalVoiceSpeechprintToIpa(args: {
       return result;
     })
     .join("");
-  return { ipa: transformed, appliedRuleIds: [...appliedRuleIds].sort() };
+
+  const rhythmProfile = STRESS_RHYTHM_PROFILES[influence];
+  const afterRhythm = rhythmProfile
+    ? afterSwaps
+        .split(/(\s+)/gu)
+        .map((word) => {
+          if (!word || /^\s+$/u.test(word)) return word;
+          const rhythm = applyStressRhythmToWord({
+            word,
+            profile: rhythmProfile,
+            strength,
+            seed,
+          });
+          for (const ruleId of rhythm.appliedRuleIds) {
+            appliedRuleIds.add(ruleId);
+          }
+          return rhythm.word;
+        })
+        .join("")
+    : afterSwaps;
+
+  const melody = applyLocalVoiceSpeechprintMelodyToIpa({
+    ipa: afterRhythm,
+    speechprint: args.speechprint,
+  });
+  for (const ruleId of melody.appliedRuleIds) appliedRuleIds.add(ruleId);
+  return { ipa: melody.ipa, appliedRuleIds: [...appliedRuleIds].sort() };
 }

@@ -81,6 +81,64 @@ export type ZenLiveActionMouthShape = ZenLiveBotMouthShape;
 
 export type ZenLiveBotCanvasSide = "left" | "right";
 
+export type ZenLiveBotResizeLane = ZenLiveBotCanvasSide;
+
+export function zenLiveBotResizeLaneAtClientX({
+  clientX,
+  surfaceLeft,
+  surfaceWidth,
+  proseWidth,
+}: {
+  clientX: number;
+  surfaceLeft: number;
+  surfaceWidth: number;
+  proseWidth: number;
+}): ZenLiveBotResizeLane | null {
+  if (
+    !Number.isFinite(clientX) ||
+    !Number.isFinite(surfaceLeft) ||
+    !Number.isFinite(surfaceWidth) ||
+    !Number.isFinite(proseWidth) ||
+    surfaceWidth <= 0
+  ) {
+    return null;
+  }
+  const boundedProseWidth = Math.max(0, Math.min(surfaceWidth, proseWidth));
+  const proseLeft = surfaceLeft + (surfaceWidth - boundedProseWidth) / 2;
+  const proseRight = proseLeft + boundedProseWidth;
+  if (clientX < proseLeft) return "left";
+  if (clientX > proseRight) return "right";
+  return null;
+}
+
+export function resizeZenLiveBotAvatarFromWheel({
+  currentSizePx,
+  wheelDeltaY,
+  minSizePx,
+  maxSizePx,
+}: {
+  currentSizePx: number;
+  wheelDeltaY: number;
+  minSizePx: number;
+  maxSizePx: number;
+}): number {
+  const boundedMin = Number.isFinite(minSizePx) ? minSizePx : 0;
+  const boundedMax = Number.isFinite(maxSizePx)
+    ? Math.max(boundedMin, maxSizePx)
+    : boundedMin;
+  const current = Number.isFinite(currentSizePx)
+    ? Math.max(boundedMin, Math.min(boundedMax, currentSizePx))
+    : boundedMin;
+  if (!Number.isFinite(wheelDeltaY) || wheelDeltaY === 0) return current;
+  const boundedDelta = Math.max(-240, Math.min(240, wheelDeltaY));
+  const scaleFactor = Math.exp(-boundedDelta * 0.0015);
+  const next = Math.max(
+    boundedMin,
+    Math.min(boundedMax, current * scaleFactor),
+  );
+  return Math.round(next * 10) / 10;
+}
+
 export function zenLiveBotCanvasSideFromCenterX(
   centerX: number,
   viewportWidth: number

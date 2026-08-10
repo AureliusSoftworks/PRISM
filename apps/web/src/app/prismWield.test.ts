@@ -2,8 +2,44 @@ import assert from "node:assert/strict";
 import test from "node:test";
 import {
   createPrismWieldState,
+  prismWieldCanArm,
   transitionPrismWield,
 } from "./prismWield.ts";
+
+test("keeps Prism anchored while any assistant menu is open", () => {
+  assert.equal(
+    prismWieldCanArm({
+      companionMenuOpen: false,
+      softSynthesisMenuOpen: false,
+      homeDocked: false,
+    }),
+    true,
+  );
+  assert.equal(
+    prismWieldCanArm({
+      companionMenuOpen: true,
+      softSynthesisMenuOpen: false,
+      homeDocked: false,
+    }),
+    false,
+  );
+  assert.equal(
+    prismWieldCanArm({
+      companionMenuOpen: false,
+      softSynthesisMenuOpen: true,
+      homeDocked: false,
+    }),
+    false,
+  );
+  assert.equal(
+    prismWieldCanArm({
+      companionMenuOpen: false,
+      softSynthesisMenuOpen: false,
+      homeDocked: true,
+    }),
+    false,
+  );
+});
 
 test("arms from a modifier-only timeout without changing state on stale timers", () => {
   const pending = transitionPrismWield(createPrismWieldState(), {

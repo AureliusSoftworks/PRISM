@@ -258,10 +258,12 @@ describe("English voice post processing", () => {
       volume = 1;
       preservesPitch = true;
       src = "";
-      private listeners = new Map<string, () => void>();
+      private listeners = new Map<string, Array<() => void>>();
 
       addEventListener(name: string, listener: () => void): void {
-        this.listeners.set(name, listener);
+        const listeners = this.listeners.get(name) ?? [];
+        listeners.push(listener);
+        this.listeners.set(name, listeners);
       }
       pause(): void {}
       removeAttribute(): void {}
@@ -269,8 +271,8 @@ describe("English voice post processing", () => {
       play(): Promise<void> {
         playCount += 1;
         setTimeout(() => {
-          this.listeners.get("playing")?.();
-          this.listeners.get("ended")?.();
+          for (const listener of this.listeners.get("playing") ?? []) listener();
+          for (const listener of this.listeners.get("ended") ?? []) listener();
         }, 0);
         return Promise.resolve();
       }
@@ -291,6 +293,7 @@ describe("English voice post processing", () => {
     });
     let started = false;
     let ended = false;
+    const levels: number[] = [];
     try {
       await enqueueEnglishVoice(
         Uint8Array.from([0x49, 0x44, 0x33]).buffer,
@@ -305,12 +308,15 @@ describe("English voice post processing", () => {
           onEnd: () => {
             ended = true;
           },
+          onLevel: (level) => levels.push(level),
         },
         "elevenlabs",
       );
       assert.equal(playCount, 1);
       assert.equal(started, true);
       assert.equal(ended, true);
+      assert.ok(levels.includes(0.22));
+      assert.equal(levels.at(-1), 0);
     } finally {
       stopEnglishVoice();
       if (originalAudio) {

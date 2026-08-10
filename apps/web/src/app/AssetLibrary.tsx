@@ -460,6 +460,7 @@ export function AssetRail({
 
 export interface AssetLibraryModalProps {
   kind: ImageAssetKind;
+  theme?: "light" | "dark";
   context?: string | null;
   currentImageIds?: readonly string[];
   includeIncomplete?: boolean;
@@ -470,6 +471,7 @@ export interface AssetLibraryModalProps {
 
 export function AssetLibraryModal({
   kind,
+  theme = "dark",
   context,
   currentImageIds = [],
   includeIncomplete = false,
@@ -947,6 +949,7 @@ export function AssetLibraryModal({
     <div
       ref={modalRootRef}
       className={`${styles.modalBackdrop} ${sharedStyles.imageLightboxBackdrop}`}
+      data-theme={theme}
       role="presentation"
       tabIndex={-1}
       onClick={onClose}

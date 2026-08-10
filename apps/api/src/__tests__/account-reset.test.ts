@@ -50,7 +50,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
         .prepare(
           `
           SELECT
-            email, display_name, theme, graphics_quality, hub_atmosphere_enabled, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked,
+            email, display_name, theme, graphics_quality, typography_scale, hub_atmosphere_enabled, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked,
             auto_memory, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids,
             hidden_comfyui_workflow_ids, model_visibility_defaults_version,
             preferred_local_model, preferred_online_model,
@@ -109,6 +109,7 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.display_name, "User One");
       assert.equal(user.theme, "system");
       assert.equal(user.graphics_quality, "high");
+      assert.equal(user.typography_scale, "standard");
       assert.equal(user.hub_atmosphere_enabled, 1);
       assert.equal(user.startup_preference, "home");
       assert.equal(user.preferred_provider, "local");
@@ -243,6 +244,7 @@ function seedResetFixture(db: DatabaseSync): void {
     SET
       theme = 'dark',
       graphics_quality = 'low',
+      typography_scale = 'extra-large',
       hub_atmosphere_enabled = 0,
       startup_preference = 'slate',
       preferred_provider = 'openai',
@@ -386,6 +388,18 @@ function seedResetFixture(db: DatabaseSync): void {
     "coffee",
     "bot-1",
     "coffee-group-1",
+    "2026-01-01T00:00:00.000Z",
+    "2026-01-01T00:00:00.000Z"
+  );
+  db.prepare(
+    `INSERT INTO applet_session_notes
+       (user_id, surface, session_id, body, created_at, updated_at)
+     VALUES (?, ?, ?, ?, ?, ?)`
+  ).run(
+    "user-1",
+    "coffee",
+    "conversation-1",
+    "Remember this exchange.",
     "2026-01-01T00:00:00.000Z",
     "2026-01-01T00:00:00.000Z"
   );

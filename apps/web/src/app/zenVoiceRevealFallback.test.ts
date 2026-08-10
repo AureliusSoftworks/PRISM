@@ -43,25 +43,26 @@ describe("Zen voice reveal fallback", () => {
     );
   });
 
-  it("cancels late speech before releasing visual text", () => {
+  it("keeps cold or queued local speech waiting on audio until the bounded worker settles", () => {
     assert.match(
       pageSource,
-      /const ZEN_VOICE_REVEAL_PREPARATION_TIMEOUT_MS = 12000;/
+      /const ZEN_VOICE_REVEAL_PREPARATION_NOTICE_MS = 12000;/
     );
     assert.match(
       pageSource,
-      /speechRevealTimelineWaitingForAudio\([\s\S]*?chatSpeechRevealVisualFallbackKeysRef\.current\.add\(revealKey\);[\s\S]*?voiceSynthesisAbortRef\.current\?\.abort\(\);[\s\S]*?stopBottishVoice\(\);[\s\S]*?stopEnglishVoice\(\);[\s\S]*?handoffChatSpeechRevealToCanvasClock\(revealKey\);/
+      /speechRevealTimelineWaitingForAudio\([\s\S]*?setVoicePlaybackNotice\(ZEN_VOICE_REVEAL_PREPARING_NOTICE\);/
     );
     const timeoutStart = pageSource.indexOf(
       "const revealKey = activeAssistantRevealKey",
     );
     const timeoutEnd = pageSource.indexOf(
-      "const zenLiveBotMouthPhaseMs",
+      "const activeChatVoiceMode",
       timeoutStart,
     );
     const timeoutSource = pageSource.slice(timeoutStart, timeoutEnd);
-    assert.match(timeoutSource, /voiceSynthesisAbortRef\.current\?\.abort/);
-    assert.match(timeoutSource, /stopEnglishVoice\(\)/);
+    assert.doesNotMatch(timeoutSource, /voiceSynthesisAbortRef\.current\?\.abort/);
+    assert.doesNotMatch(timeoutSource, /handoffChatSpeechRevealToCanvasClock/);
+    assert.match(pageSource, /Voice is still preparing\. Use Shh if you want to stop it\./);
   });
 
   it("starts stream-safe Zen Premium speech before the full clip is buffered", () => {
@@ -115,7 +116,7 @@ describe("Zen voice reveal fallback", () => {
     );
   });
 
-  it("keeps Bottish immediate while generated Babble owns reveal timing", () => {
+  it("keeps both robot Speech Types on their audible reveal timing", () => {
     const eligibilityStart = pageSource.indexOf(
       "const markLatestAssistantRevealEligible",
     );
@@ -129,7 +130,7 @@ describe("Zen voice reveal fallback", () => {
     );
     assert.match(
       eligibilitySource,
-      /voiceModeDrivesCanvasReveal\(settings\.voiceMode\)/,
+      /voiceModeDrivesCanvasReveal\([\s\S]*?chatTurnVoiceSelectionRef\.current\?\.voiceMode \?\? settings\.voiceMode/,
     );
 
     const effectStart = pageSource.indexOf(
@@ -161,7 +162,7 @@ describe("Zen voice reveal fallback", () => {
     assert.doesNotMatch(pageSource, /text:\s*"Ready\."/);
     assert.match(
       pageSource,
-      /const outgoingVoiceMode = settings\?\.voiceMode;[\s\S]*?primeVoiceModePlaybackFromUserGesture\(outgoingVoiceMode\);/,
+      /const outgoingVoiceMode = outgoingVoiceSelection\.voiceMode;[\s\S]*?primeVoiceModePlaybackFromUserGesture\(outgoingVoiceMode\);/,
     );
   });
 
@@ -256,22 +257,29 @@ describe("Zen voice reveal fallback", () => {
     );
   });
 
-  it("makes Shh non-destructive before audio playback begins", () => {
+  it("discards a hidden reply when Shh lands before audio begins", () => {
     const handlerStart = pageSource.indexOf("const handleTypingIndicatorPress");
     const handlerEnd = pageSource.indexOf(
       "function finishActiveAssistantRevealForCompaction",
       handlerStart
     );
     const handlerSource = pageSource.slice(handlerStart, handlerEnd);
-    assert.match(handlerSource, /speechRevealTimelineWaitingForAudio/);
-    assert.match(handlerSource, /finishActiveAssistantRevealForCompaction\(\)/);
-    assert.ok(
-      handlerSource.indexOf("finishActiveAssistantRevealForCompaction()") <
-        handlerSource.indexOf("prepareActiveAssistantRevealInterruption()")
+    assert.doesNotMatch(handlerSource, /speechRevealTimelineWaitingForAudio/);
+    assert.doesNotMatch(
+      handlerSource,
+      /finishActiveAssistantRevealForCompaction\(\)/,
+    );
+    assert.match(
+      handlerSource,
+      /interruption\.interruptionContent\s*\?\s*applyActiveAssistantRevealInterruption\(interruption\)\s*:\s*discardActiveAssistantRevealForGrace\(interruption\)/,
+    );
+    assert.match(
+      handlerSource,
+      /if \(!interruption\.interruptionContent\) return;/,
     );
   });
 
-  it("stops progressive Zen at a completed beat without racing message truncation", () => {
+  it("routes progressive Shh through the audible cutoff and reaction transaction", () => {
     const interruptionStart = pageSource.indexOf(
       "function prepareActiveAssistantRevealInterruption",
     );
@@ -285,7 +293,7 @@ describe("Zen voice reveal fallback", () => {
     );
     assert.match(
       interruptionSource,
-      /latestAssistant\.zenProgressive\?\.inProgress === true\) return null/,
+      /!chatAssistantRevealInProgress &&[\s\S]*?latestAssistant\.zenProgressive\?\.inProgress !== true/,
     );
 
     const handlerStart = pageSource.indexOf("const handleTypingIndicatorPress");
@@ -294,14 +302,77 @@ describe("Zen voice reveal fallback", () => {
       handlerStart,
     );
     const handlerSource = pageSource.slice(handlerStart, handlerEnd);
-    // Shh must freeze progressive even when pendingReplyVisible is already false.
-    assert.match(
-      handlerSource,
-      /if \(latestAssistant\?\.zenProgressive\?\.inProgress === true\) \{[\s\S]*?stopPendingReply\(\)/,
-    );
     assert.doesNotMatch(
       handlerSource,
-      /pendingReplyVisible &&\s*latestAssistant\?\.zenProgressive\?\.inProgress === true/,
+      /latestAssistant\?\.zenProgressive\?\.inProgress === true/,
+    );
+    assert.match(
+      handlerSource,
+      /await persistence;[\s\S]*?assistantInterruptionReaction:/,
+    );
+    assert.match(
+      handlerSource,
+      /shhReactionStartedMessageIdsRef\.current\.has[\s\S]*?shhReactionStartedMessageIdsRef\.current\.add/,
+    );
+    assert.match(
+      handlerSource,
+      /setShhReactionPending\(true\)[\s\S]*?await sendMessage[\s\S]*?setShhReactionPending\(false\)/,
+    );
+    assert.match(
+      handlerSource,
+      /clientTurnId: `shh:\$\{interruption\.assistantMessageId\}`/,
+    );
+    assert.match(
+      handlerSource,
+      /for \(const delayMs of \[0, 250, 750, 1_500, 2_500\]\)[\s\S]*?isRetryableAssistantInterruptionError/,
+    );
+    assert.match(
+      pageSource,
+      /if \(isAssistantInterruptionReaction\) \{\s*throw err;\s*\}/,
+    );
+    assert.match(
+      pageSource,
+      /!promptFinalizationActive &&[\s\S]*?!shhReactionPending &&[\s\S]*?releaseChatTurnVoiceSelection/,
+    );
+  });
+
+  it("rejects a raced original envelope before it can restore the hidden suffix", () => {
+    const responseStart = pageSource.indexOf(
+      "const d =\n        chatBody.progressiveZenVoice",
+    );
+    const responseEnd = pageSource.indexOf(
+      "showZenAutoRecovery(d.autoRecovery)",
+      responseStart,
+    );
+    assert.notEqual(responseStart, -1);
+    assert.notEqual(responseEnd, -1);
+    const responseWindow = pageSource.slice(responseStart, responseEnd);
+    assert.match(
+      responseWindow,
+      /if \(chatRequestController\.signal\.aborted\) \{[\s\S]*?throw new DOMException\("Aborted", "AbortError"\)/,
+    );
+    assert.ok(
+      responseWindow.lastIndexOf("chatRequestController.signal.aborted") >
+        responseWindow.indexOf("await progressivePlaybackChain"),
+    );
+    const progressiveStart = pageSource.indexOf(
+      "const scheduleProgressiveZenSegment",
+    );
+    const progressiveEnd = pageSource.indexOf(
+      "const finishProgressiveZenStream",
+      progressiveStart,
+    );
+    const progressiveWindow = pageSource.slice(
+      progressiveStart,
+      progressiveEnd,
+    );
+    assert.match(
+      progressiveWindow,
+      /const startDisplay = \([\s\S]*?chatRequestController\.signal\.aborted\) return;/,
+    );
+    assert.match(
+      progressiveWindow,
+      /onStart: \(durationMs\) => \{[\s\S]*?chatRequestController\.signal\.aborted\) return;/,
     );
   });
 
@@ -322,6 +393,50 @@ describe("Zen voice reveal fallback", () => {
     assert.match(
       catchWindow,
       /voiceSeenAssistantMessageIdsRef\.current\.delete/,
+    );
+  });
+
+  it("retries a completed-message voice once before terminal text fallback", () => {
+    assert.match(
+      pageSource,
+      /const COMPLETED_MESSAGE_VOICE_PRESTART_RETRY_LIMIT = 1;/,
+    );
+    const effectStart = pageSource.indexOf(
+      "const voiceSelection = voicePlaybackSelectionRef.current;",
+    );
+    const catchStart = pageSource.indexOf(
+      "const aborted =",
+      effectStart,
+    );
+    const catchEnd = pageSource.indexOf(
+      "} finally {",
+      catchStart,
+    );
+    const catchSource = pageSource.slice(catchStart, catchEnd);
+    assert.match(
+      catchSource,
+      /controller\.signal\.aborted \|\| isAbortLikeError\(err\)/,
+    );
+    assert.match(
+      catchSource,
+      /!aborted &&[\s\S]*?!activeSpeechStarted &&[\s\S]*?retryAttempt < COMPLETED_MESSAGE_VOICE_PRESTART_RETRY_LIMIT/,
+    );
+    assert.match(
+      catchSource,
+      /voiceSeenAssistantMessageIdsRef\.current\.delete\([\s\S]*?setCompletedVoiceRetryVersion/,
+    );
+    assert.ok(
+      catchSource.indexOf("setCompletedVoiceRetryVersion") <
+        catchSource.indexOf("handoffChatSpeechRevealToCanvasClock"),
+      "terminal canvas fallback must happen only after the bounded retry path",
+    );
+    assert.match(
+      pageSource,
+      /onStart: \(durationMs\) => \{[\s\S]*?activeSpeechStarted = true;[\s\S]*?startChatSpeechReveal/,
+    );
+    assert.match(
+      pageSource,
+      /\}, \[[\s\S]*?completedVoiceRetryVersion,[\s\S]*?detail,/,
     );
   });
 });

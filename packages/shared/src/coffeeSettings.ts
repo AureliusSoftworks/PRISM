@@ -9,7 +9,7 @@ export type CoffeeTableEnergy = "still" | "relaxed" | "buzzy" | "theatre" | "aft
 
 export type CoffeeCrossTalkLevel = "rare" | "normal" | "chatty" | "pileup";
 
-/** How much transcript the models may lean on. `recent` is alias for this-session until cross-thread recall exists. */
+/** Legacy wire values retained for old groups and exports. Coffee now always normalizes to `recent`. */
 export type CoffeeMemoryCallbacks = "now" | "this-session" | "recent";
 
 export type CoffeeBarRole = "cup" | "pot";
@@ -165,7 +165,7 @@ export const DEFAULT_COFFEE_SESSION_SETTINGS: CoffeeSessionSettings = {
   humanPacing: 50,
   stayOnThread: true,
   givePlayerLastWord: false,
-  memoryCallbacks: "this-session",
+  memoryCallbacks: "recent",
 };
 
 /** Absolute ceiling for tabletop reply length (layout + latency guardrail). */
@@ -193,8 +193,6 @@ const TABLE_ENERGY_SET = new Set<CoffeeTableEnergy>([
 ]);
 
 const CROSS_TALK_SET = new Set<CoffeeCrossTalkLevel>(["rare", "normal", "chatty", "pileup"]);
-
-const MEMORY_SET = new Set<CoffeeMemoryCallbacks>(["now", "this-session", "recent"]);
 
 export const COFFEE_AUTO_HARD_CAP_MS = 30 * 60 * 1000;
 export const COFFEE_BAR_ORDER_MAX_LENGTH = 240;
@@ -481,10 +479,10 @@ export function normalizeCoffeeSessionSettings(raw: unknown): CoffeeSessionSetti
   const givePlayerLastWord =
     typeof o.givePlayerLastWord === "boolean" ? o.givePlayerLastWord : base.givePlayerLastWord;
 
-  let memoryCallbacks = base.memoryCallbacks;
-  if (typeof o.memoryCallbacks === "string" && MEMORY_SET.has(o.memoryCallbacks as CoffeeMemoryCallbacks)) {
-    memoryCallbacks = o.memoryCallbacks as CoffeeMemoryCallbacks;
-  }
+  // Cross-session continuity is a Coffee invariant. Keep the stored field for
+  // backward-compatible imports/exports, but do not let legacy group values
+  // silently disable the core experience.
+  const memoryCallbacks: CoffeeMemoryCallbacks = "recent";
 
   const experienceMode = isCoffeeExperienceMode(o.experienceMode)
     ? o.experienceMode
@@ -549,10 +547,11 @@ export function normalizeCoffeeSessionSettings(raw: unknown): CoffeeSessionSetti
   };
 }
 
-/** Effective memory mode: `recent` behaves like `this-session` until cross-thread recall ships. */
-export function coffeeEffectiveMemoryCallbacks(settings: CoffeeSessionSettings): "now" | "this-session" {
-  if (settings.memoryCallbacks === "now") return "now";
-  return "this-session";
+/** Coffee always keeps current-table history plus summary-level continuity across sessions. */
+export function coffeeEffectiveMemoryCallbacks(
+  _settings: CoffeeSessionSettings
+): "recent" {
+  return "recent";
 }
 
 /**
@@ -596,16 +595,12 @@ export function coffeeReplyLengthCaps(settings: CoffeeSessionSettings): {
 }
 
 /** Messages loaded from DB for router + speaker (capped). */
-export function coffeeEffectiveHistoryLimit(settings: CoffeeSessionSettings): number {
-  const mem = coffeeEffectiveMemoryCallbacks(settings);
-  if (mem === "now") return Math.min(COFFEE_HISTORY_WINDOW_HARD_CAP, 6);
+export function coffeeEffectiveHistoryLimit(_settings: CoffeeSessionSettings): number {
   return Math.min(COFFEE_HISTORY_WINDOW_HARD_CAP, 24);
 }
 
 /** How many recent transcript lines the router sees (subset of loaded history). */
 export function coffeeRouterTailMessageCount(settings: CoffeeSessionSettings): number {
-  const mem = coffeeEffectiveMemoryCallbacks(settings);
-  if (mem === "now") return 3;
   const cross = settings.crossTalk;
   if (cross === "pileup") return Math.min(12, coffeeEffectiveHistoryLimit(settings));
   if (cross === "chatty") return Math.min(10, coffeeEffectiveHistoryLimit(settings));

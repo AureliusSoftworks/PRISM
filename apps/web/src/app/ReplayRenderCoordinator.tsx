@@ -13,6 +13,9 @@ import {
   replayFetch,
   resumeReplayStudioCut,
 } from "./replayClient";
+import {
+  replayCoordinatorSessionState,
+} from "./replayRenderCoordinatorSession.ts";
 import { encodeReplayAudioWindows } from "./replayRenderAudio";
 import { prepareSignalStudioCut } from "./signalStudioCutAudio";
 
@@ -28,17 +31,21 @@ export interface ReplayFrameRenderer {
   finish?: () => void;
 }
 
-async function pendingSignalStudioCuts(): Promise<ReplayRecordingV1[]> {
+const REPLAY_COORDINATOR_POLL_MS = 3_000;
+const REPLAY_COORDINATOR_AUTH_RETRY_MS = 30_000;
+const REPLAY_COORDINATOR_ERROR_RETRY_MS = 15_000;
+
+async function signalReplayRecordings(): Promise<{
+  response: Response;
+  recordings: ReplayRecordingV1[];
+}> {
   const response = await replayFetch("/api/replays?surface=signal");
-  if (!response.ok) return [];
-  const payload = (await response.json().catch(() => null)) as
-    | { recordings?: ReplayRecordingV1[] }
-    | null;
-  return (payload?.recordings ?? []).filter(
-    (recording) =>
-      recording.studioCutProduction?.phase === "mixing_episode" &&
-      recording.studioCutProduction.masterReady,
-  );
+  const payload = response.ok
+    ? ((await response.json().catch(() => null)) as
+        | { recordings?: ReplayRecordingV1[] }
+        | null)
+    : null;
+  return { response, recordings: payload?.recordings ?? [] };
 }
 
 async function mixStudioCut(recordingId: string): Promise<void> {
@@ -93,25 +100,66 @@ export function ReplayRenderCoordinator(
     if (props.surface && props.surface !== "signal") return;
     let cancelled = false;
     let timer = 0;
+    let sessionReady = false;
     const poll = async (): Promise<void> => {
-      const pending = await pendingSignalStudioCuts().catch(() => []);
-      const response = await replayFetch("/api/replays?surface=signal").catch(() => null);
-      const payload = response?.ok
-        ? await response.json().catch(() => null) as { recordings?: ReplayRecordingV1[] } | null
-        : null;
-      for (const recording of payload?.recordings ?? []) {
+      if (!sessionReady) {
+        const sessionState = await replayCoordinatorSessionState();
+        if (cancelled) return;
+        if (sessionState !== "authenticated") {
+          timer = window.setTimeout(
+            () => void poll(),
+            sessionState === "signed-out"
+              ? REPLAY_COORDINATOR_AUTH_RETRY_MS
+              : REPLAY_COORDINATOR_ERROR_RETRY_MS,
+          );
+          return;
+        }
+        sessionReady = true;
+      }
+
+      const result = await signalReplayRecordings().catch(() => null);
+      if (cancelled) return;
+      if (!result?.response.ok) {
+        if (
+          result?.response.status === 400 ||
+          result?.response.status === 401 ||
+          result?.response.status === 403
+        ) {
+          sessionReady = false;
+        }
+        timer = window.setTimeout(
+          () => void poll(),
+          sessionReady
+            ? REPLAY_COORDINATOR_ERROR_RETRY_MS
+            : REPLAY_COORDINATOR_AUTH_RETRY_MS,
+        );
+        return;
+      }
+
+      for (const recording of result.recordings) {
         if (recording.studioCutProduction?.phase === "mastering_voices") {
           void resumeReplayStudioCut(recording.id).catch(() => undefined);
         }
       }
-      for (const recording of pending) {
+      for (const recording of result.recordings) {
+        if (
+          recording.studioCutProduction?.phase !== "mixing_episode" ||
+          !recording.studioCutProduction.masterReady
+        ) {
+          continue;
+        }
         if (cancelled || activeRef.current.has(recording.id)) continue;
         activeRef.current.add(recording.id);
         void mixStudioCut(recording.id).finally(() => {
           activeRef.current.delete(recording.id);
         });
       }
-      if (!cancelled) timer = window.setTimeout(() => void poll(), 3_000);
+      if (!cancelled) {
+        timer = window.setTimeout(
+          () => void poll(),
+          REPLAY_COORDINATOR_POLL_MS,
+        );
+      }
     };
     void poll();
     return () => {

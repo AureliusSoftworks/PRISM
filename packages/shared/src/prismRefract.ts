@@ -1,7 +1,9 @@
 import type { ResponseMode } from "./autoFallback.js";
 import type { EphemeralChatResolvedProvider } from "./ephemeralChat.js";
 import {
+  normalizePrismCompanionSurfaceReference,
   normalizePrismCompanionDebateDraft,
+  type PrismCompanionSurfaceReference,
   type PrismCompanionDebateDraft,
 } from "./prismCompanion.ts";
 
@@ -9,6 +11,10 @@ export const PRISM_REFRACT_REJECTED_CANDIDATE_LIMIT = 8;
 export const PRISM_REFRACT_DEBATE_EXHIBIT_REJECTED_CANDIDATE_LIMIT = 12;
 export const PRISM_REFRACT_DIRECTION_MAX_LENGTH = 500;
 export const PRISM_REFRACT_REFERENCE_ID_MAX_LENGTH = 160;
+export const PRISM_REFRACT_INPUT_CONTEXT_MAX_LENGTH = 800;
+export const PRISM_REFRACT_INPUT_LABEL_MAX_LENGTH = 120;
+export const PRISM_REFRACT_INPUT_VALUE_MAX_LENGTH = 4_000;
+export const PRISM_REFRACT_INPUT_TEXT_TARGET_KIND = "prism.input.text" as const;
 
 export const PRISM_REFRACT_SIGNAL_TEXT_TARGET_KINDS = [
   "signal.create.premise",
@@ -68,9 +74,19 @@ export interface PrismRefractDebateTextTarget {
   botIds: string[];
 }
 
+export interface PrismRefractInputTextTarget {
+  kind: typeof PRISM_REFRACT_INPUT_TEXT_TARGET_KIND;
+  surface: PrismCompanionSurfaceReference;
+  label: string;
+  context: string;
+  multiline: boolean;
+  maxLength: number;
+}
+
 export type PrismRefractTextTarget =
   | PrismRefractSignalTextTarget
-  | PrismRefractDebateTextTarget;
+  | PrismRefractDebateTextTarget
+  | PrismRefractInputTextTarget;
 
 export interface PrismRefractRequest {
   target: PrismRefractTextTarget;
@@ -113,7 +129,11 @@ function boundedId(value: unknown, label: string): string {
   return normalized;
 }
 
-function valueLimitForTarget(kind: PrismRefractTextTarget["kind"]): number {
+function valueLimitForTarget(target: PrismRefractTextTarget): number {
+  const kind = target.kind;
+  if (kind === PRISM_REFRACT_INPUT_TEXT_TARGET_KIND) {
+    return target.maxLength;
+  }
   if (kind === "signal.show.name") return 120;
   if (kind === "signal.booking.topic") return 60;
   if (kind === "signal.create.premise") return 360;
@@ -149,7 +169,40 @@ export function isPrismRefractDebateTextTarget(
   );
 }
 
+export function isPrismRefractInputTextTarget(
+  target: PrismRefractTextTarget,
+): target is PrismRefractInputTextTarget {
+  return target.kind === PRISM_REFRACT_INPUT_TEXT_TARGET_KIND;
+}
+
+function boundedText(value: unknown, limit: number): string {
+  if (typeof value !== "string") return "";
+  return value.replace(/\s+/gu, " ").trim().slice(0, limit).trim();
+}
+
 function normalizeTarget(value: unknown): PrismRefractTextTarget {
+  if (
+    isRecord(value) &&
+    value.kind === PRISM_REFRACT_INPUT_TEXT_TARGET_KIND
+  ) {
+    const requestedMaxLength =
+      typeof value.maxLength === "number" && Number.isFinite(value.maxLength)
+        ? Math.trunc(value.maxLength)
+        : PRISM_REFRACT_INPUT_VALUE_MAX_LENGTH;
+    return {
+      kind: PRISM_REFRACT_INPUT_TEXT_TARGET_KIND,
+      surface: normalizePrismCompanionSurfaceReference(value.surface),
+      label:
+        boundedText(value.label, PRISM_REFRACT_INPUT_LABEL_MAX_LENGTH) ||
+        "field",
+      context: boundedText(value.context, PRISM_REFRACT_INPUT_CONTEXT_MAX_LENGTH),
+      multiline: value.multiline === true,
+      maxLength: Math.max(
+        1,
+        Math.min(PRISM_REFRACT_INPUT_VALUE_MAX_LENGTH, requestedMaxLength),
+      ),
+    };
+  }
   if (
     isRecord(value) &&
     PRISM_REFRACT_DEBATE_TEXT_TARGET_KINDS.some(
@@ -214,7 +267,7 @@ export function normalizePrismRefractRequest(
     throw new Error("A Prism Refract request is required.");
   }
   const target = normalizeTarget(value.target);
-  const limit = valueLimitForTarget(target.kind);
+  const limit = valueLimitForTarget(target);
   const rejectedCandidateLimit =
     target.kind === "debate.setup.exhibitDraft" ||
     target.kind === "debate.setup.exhibitPair"

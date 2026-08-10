@@ -29,7 +29,7 @@ const api = readFileSync(
   "utf8",
 );
 
-test("mounts the global companion on every authenticated product shell", () => {
+test("mounts the global companion on product shells but not top-bar main panels", () => {
   assert.ok((page.match(/renderGlobalPrismCompanion\(\)/gu)?.length ?? 0) >= 7);
   assert.match(page, /surfaceId: "home"/u);
   assert.match(page, /surfaceId: "group-home"/u);
@@ -38,10 +38,14 @@ test("mounts the global companion on every authenticated product shell", () => {
   assert.match(page, /surfaceId: "coffee"/u);
   assert.match(page, /surfaceId: "signal"/u);
   assert.match(page, /surfaceId: "slate"/u);
-  assert.match(page, /surfaceId: "marketplace"/u);
-  assert.match(page, /surfaceId: "avatar-studio"/u);
-  assert.match(page, /surfaceId: "images"/u);
-  assert.match(page, /surfaceId: "settings"/u);
+  assert.doesNotMatch(page, /surfaceId: "marketplace"/u);
+  assert.doesNotMatch(page, /surfaceId: "avatar-studio"/u);
+  assert.doesNotMatch(page, /surfaceId: "images"/u);
+  assert.doesNotMatch(page, /surfaceId: "settings"/u);
+  assert.match(
+    page,
+    /prismCompanionDisabledByMainPanel\(panel, botAvatarCustomizerOpen\)[\s\S]*reason="main-menu-panel"/u,
+  );
 });
 
 test("docks only in the live default Chat Home empty hero", () => {
@@ -51,7 +55,7 @@ test("docks only in the live default Chat Home empty hero", () => {
   );
   assert.match(
     page,
-    /chatHomeHeroDocked=\{prismHomeEmptyHeroVisible\}/u,
+    /chatHomeHeroDocked=\{\s*prismHomeEmptyHeroVisible &&\s*panel === null &&\s*!botAvatarCustomizerOpen\s*\}/u,
   );
   assert.match(page, /data-prism-chat-home-orb-slot="true"/u);
   assert.match(
@@ -71,48 +75,61 @@ test("docks only in the live default Chat Home empty hero", () => {
 test("moves the existing companion without overwriting its saved dock and restores it", () => {
   assert.match(component, /chatHomeHeroDocked\?: boolean/u);
   assert.match(component, /queryPrismChatHomeOrbSlot/u);
-  assert.match(component, /chatHomeDockPosition \?\? position/u);
+  assert.match(component, /normalizedPrismOrbPositionForRect/u);
+  assert.match(component, /window\.requestAnimationFrame\(syncEveryFrame\)/u);
+  assert.match(component, /chatHomeOrbDocked && chatHomeDockPosition/u);
   assert.match(component, /positionRef\.current = position/u);
   assert.match(
     component,
-    /if \(!chatHomeHeroDocked\) \{[\s\S]*setChatHomeDockPosition\(null\)[\s\S]*setChatHomeDockReturning\(true\)/u,
+    /if \(!chatHomeOrbDocked\) \{[\s\S]*setChatHomeDockPosition\(null\)[\s\S]*setChatHomeDockReturning\(true\)/u,
   );
   assert.match(
     component,
-    /chatHomeHeroDocked \? undefined : beginDrag/u,
+    /chatHomeOrbDocked \? undefined : beginDrag/u,
   );
-  assert.match(companionCss, /data-chat-home-orb-docked="true"/u);
-  assert.match(companionCss, /data-chat-home-orb-returning="true"/u);
+  assert.match(component, /data-chat-home-orb-docked/u);
+  assert.match(component, /data-chat-home-orb-returning/u);
 });
 
 test("keeps the docked orb continuously visible and preserves hero activation", () => {
   assert.match(
     component,
-    /idleDimmed && !chatHomeHeroDocked \? "true" : undefined/u,
+    /idleDimmed && !chatHomeOrbDocked \? "true" : undefined/u,
   );
   assert.match(
     component,
-    /idleHidden && !chatHomeHeroDocked \? "true" : undefined/u,
+    /idleHidden && !chatHomeOrbDocked \? "true" : undefined/u,
   );
   assert.match(
     component,
-    /softSynthesisActive \|\|\s*chatHomeHeroDocked/u,
+    /softSynthesisActive \|\|\s*chatHomeOrbDocked/u,
   );
   assert.match(
     component,
-    /if \(chatHomeHeroDocked\) \{\s*playPrismCompanionGlassTap\(\);\s*onChatHomeHeroActivate\?\.\(\);\s*return;/u,
+    /if \(chatHomeOrbDocked\) \{\s*playPrismCompanionGlassTap\(\);\s*activatePrismConversation\(true\);\s*return;/u,
   );
-  assert.match(page, /onChatHomeHeroActivate=\{startHeroConversation\}/u);
   assert.match(
     page,
-    /function handleHeroStartConversation[\s\S]*?startHeroConversation\(\);/u,
+    /onChatHomeHeroActivate=\{\(\) => void summonPrismIntoFreshChat\(\)\}/u,
+  );
+  assert.match(
+    page,
+    /async function summonPrismIntoFreshChat[\s\S]*?newSession: true/u,
   );
 });
 
-test("settles Chat Home docking safely under Reduced Motion", () => {
+test("welds live Home docking without lag and settles its return safely", () => {
+  assert.doesNotMatch(
+    companionCss,
+    /\.anchor\[data-chat-home-orb-docked="true"\]\s*\{\s*transition:/u,
+  );
   assert.match(
     companionCss,
-    /prefers-reduced-motion: reduce[\s\S]*data-chat-home-orb-docked="true"[\s\S]*left 1ms linear[\s\S]*top 1ms linear/u,
+    /data-chat-home-orb-returning="true"\] \{[\s\S]*left 380ms[\s\S]*top 380ms/u,
+  );
+  assert.match(
+    companionCss,
+    /prefers-reduced-motion: reduce[\s\S]*data-chat-home-orb-returning="true"[\s\S]*left 1ms linear[\s\S]*top 1ms linear/u,
   );
 });
 
@@ -140,6 +157,106 @@ test("keeps the companion explicit, keyboard accessible, and capability-driven",
   assert.doesNotMatch(component, /delete_bot|delete_project|delete_conversation/u);
   assert.match(handoffCanvas, /Exact source preview/u);
   assert.match(handoffCanvas, /Only this selection will cross surfaces/u);
+});
+
+test("opens the assistant menu from the live orb while preserving Home hero Chat", () => {
+  assert.match(component, /presentation\?: PrismCompanionPresentation/u);
+  assert.doesNotMatch(component, /onZenSummon/u);
+  assert.match(
+    component,
+    /keyboardShortcutMatchesEvent\(keyboardShortcut, event\)[\s\S]*?activatePrismConversation\(\)/u,
+  );
+  assert.doesNotMatch(component, /focusedPrismRefractTargetId/u);
+  assert.match(component, /inheritChatHomeDockPosition\(\);[\s\S]*?setOpen\(true\)/u);
+  assert.ok(
+    (component.match(/activatePrismConversation\((?:true)?\)/gu)?.length ?? 0) >=
+      4,
+  );
+  assert.match(page, /presentation=\{view === "chat" \? chatPresentation : null\}/u);
+  assert.doesNotMatch(page, /onZenSummon=/u);
+  assert.match(
+    page,
+    /const summonRunId = zenOpenRunRef\.current \+ 1;\s*zenOpenRunRef\.current = summonRunId;/u,
+  );
+  assert.ok(
+    (page.match(/zenOpenRunRef\.current !== summonRunId/gu)?.length ?? 0) >= 3,
+  );
+});
+
+test("keeps ordinary assistant talk in one account-scoped saved Prism chat", () => {
+  assert.match(component, /prismCompanionSessionStorageKey\(accountKey\)/u);
+  assert.match(component, /prismCompanionSessionIsReusable\(/u);
+  assert.match(component, /zenSessionIdleGapMs/u);
+  assert.match(component, /fetch\("\/api\/conversations\/zen\/open"/u);
+  assert.match(component, /JSON\.stringify\(\{ botId: null, newSession: true \}\)/u);
+  assert.match(component, /orchestrationOnly: true/u);
+  assert.match(
+    component,
+    /const persistentConversation = privateMode\s*\? null\s*: await ensurePersistentConversation\(\);[\s\S]*?fetch\("\/api\/prism-companion"/u,
+  );
+  assert.match(
+    component,
+    /\.\.\.\(persistentConversation[\s\S]*?persistConversationId: persistentConversation\.id/u,
+  );
+  assert.match(component, /orchestrationResponse\.status !== 204/u);
+  assert.match(
+    component,
+    /const persistedReceipt = await loadPersistentConversation\([\s\S]*?applySavedConversation\(persistedReceipt\)/u,
+  );
+  assert.match(component, /fetch\("\/api\/chat"/u);
+  assert.match(component, /prismCompanionRequest: true/u);
+  assert.match(component, /prismCompanionSurface: surface/u);
+  assert.match(
+    page,
+    /onPersistentConversationChange=\{async \(conversationId\) => \{[\s\S]*?refreshConversations\(\)/u,
+  );
+});
+
+test("isolates Private talk and hands either lane to focused chat", () => {
+  assert.match(component, /prismCompanionPrivateRecoveryStorageKey\(accountKey\)/u);
+  assert.match(component, /aria-pressed=\{privateMode\}/u);
+  assert.match(component, /Not in history or memory/u);
+  assert.match(component, /incognito: true/u);
+  assert.match(component, /ephemeralMessages: privateTranscript/u);
+  assert.match(
+    component,
+    /const persistentConversation = privateMode\s*\? null/u,
+  );
+  assert.match(component, /onContinueFocusedChat\?:/u);
+  assert.match(component, /Continue in focused chat/u);
+  assert.match(
+    component,
+    /await onContinueFocusedChat\(\{\s*privateMode,\s*conversationId: conversation\.id,\s*conversation,/u,
+  );
+  assert.doesNotMatch(component, /Ephemeral · latest 3 recover on this surface/u);
+  assert.match(
+    page,
+    /onContinueFocusedChat=\{continuePrismAssistantInFocusedChat\}/u,
+  );
+  assert.match(
+    page,
+    /if \(!handoff\.privateMode\)[\s\S]*?refreshConversation\(handoff\.conversationId\)[\s\S]*?const privateConversation: ConversationDetail/u,
+  );
+  assert.match(
+    page,
+    /if \(view !== "chat"\) \{\s*pendingPrismFocusedChatHandoffRef\.current = handoff;\s*setSidebarOpen\(false\);\s*navigateToView\("chat"\);/u,
+  );
+  assert.match(
+    page,
+    /pendingPrismFocusedChatHandoffRef\.current \|\|\s*chatAutoRestoreSuppressed/u,
+  );
+  assert.match(
+    page,
+    /const handoff = pendingPrismFocusedChatHandoffRef\.current;[\s\S]*?pendingPrismFocusedChatHandoffRef\.current = null;[\s\S]*?continuePrismAssistantInFocusedChat\(handoff\)/u,
+  );
+  assert.match(
+    page,
+    /selectedIdRef\.current = handoff\.conversationId;\s*detailIdRef\.current = null;\s*await refreshConversation\(handoff\.conversationId\)/u,
+  );
+  assert.match(
+    page,
+    /selectedIdRef\.current = privateConversation\.id;\s*detailIdRef\.current = privateConversation\.id;\s*setSelectedId\(privateConversation\.id\);\s*setDetail\(privateConversation\)/u,
+  );
 });
 
 test("gives full-size Prism Home the same orchestration, activity, and undo APIs", () => {
@@ -192,7 +309,10 @@ test("hands synthesized Signal bookings to the normal warmup and playback path",
 
 test("hands Story, Slate, and Image actions back to their normal product surfaces", () => {
   assert.match(page, /storySessionId: storySession\.id/u);
-  assert.match(page, /imageId: imageLightbox\.id/u);
+  assert.match(
+    page,
+    /onOpenImagePrompt=\{async \(prompt\) => \{[\s\S]*await openAllImagesPanel\(\)/u,
+  );
   assert.match(page, /run\.capabilityId\.startsWith\("story\.session\."\)/u);
   assert.match(page, /await openStorySession\(resultSessionId\)/u);
   assert.match(page, /run\.capabilityId === "slate\.project\.create"/u);
@@ -215,7 +335,7 @@ test("keeps the newest two replies readable while older messages recede", () => 
   assert.match(companionCss, /filter: blur\(3px\)/u);
 });
 
-test("copies a full ephemeral bubble without hijacking links or text selection", () => {
+test("copies a full companion bubble without hijacking links or text selection", () => {
   assert.match(
     component,
     /writePrismCompanionClipboard\(message\.content\)/u,
@@ -261,7 +381,7 @@ test("reveals spoken Prism replies from the Zen audio clock", () => {
   );
 });
 
-test("desaturates and pauses every app shell behind the open companion", () => {
+test("keeps the app shell crisp behind a local focus orb while pausing motion", () => {
   assert.match(component, /className=\{styles\.backdrop\}/u);
   assert.match(component, /data-open=\{open \? "true" : undefined\}/u);
   assert.match(
@@ -283,9 +403,13 @@ test("desaturates and pauses every app shell behind the open companion", () => {
   assert.match(companionCss, /\.backdrop \{[\s\S]*z-index: 854/u);
   assert.match(
     companionCss,
-    /\.backdrop\[data-open="true"\] \{[\s\S]*pointer-events: auto[\s\S]*backdrop-filter: blur\(14px\) saturate\(0\)/u,
+    /\.backdrop\[data-open="true"\] \{[\s\S]*background: transparent[\s\S]*pointer-events: auto[\s\S]*backdrop-filter: none/u,
   );
-  assert.match(companionCss, /\.anchor \{[\s\S]*z-index: 855/u);
+  assert.match(
+    companionCss,
+    /\.focusOrb \{[\s\S]*width: min\(74vw, 760px\)[\s\S]*radial-gradient[\s\S]*filter: blur\(26px\)/u,
+  );
+  assert.match(companionCss, /\.anchor \{[\s\S]*z-index: 3055/u);
   assert.match(
     globalCss,
     /html\[data-prism-system-paused="true"\][\s\S]*data-prism-system-pause-exempt[\s\S]*animation-play-state: paused !important/u,
@@ -356,18 +480,18 @@ test("dims the idle orb after settle, then vanishes after the same delay", () =>
   );
   assert.match(
     component,
-    /data-idle-dimmed=\{\s*idleDimmed && !chatHomeHeroDocked \? "true" : undefined/u,
+    /data-idle-dimmed=\{\s*idleDimmed && !chatHomeOrbDocked \? "true" : undefined/u,
   );
   assert.match(
     component,
-    /data-idle-hidden=\{\s*idleHidden && !chatHomeHeroDocked \? "true" : undefined/u,
+    /data-idle-hidden=\{\s*idleHidden && !chatHomeOrbDocked \? "true" : undefined/u,
   );
   assert.match(component, /const scheduleIdleDim = useCallback/u);
   assert.match(component, /const scheduleIdleVanish = useCallback/u);
   assert.match(component, /const clearIdleDim = useCallback/u);
   assert.match(
     component,
-    /if \(softSynthesisLocked\) return;[\s\S]{0,80}clearIdleDim\(\);\s*setOpen\(true\)/u,
+    /inheritChatHomeDockPosition\(\);[\s\S]{0,140}clearIdleDim\(\);[\s\S]{0,180}setOpen\(true\)/u,
   );
   assert.match(component, /clearIdleDim\(\);\s*stopInertia\(false\)/u);
   assert.match(
@@ -448,13 +572,67 @@ test("retires the full-manuscript Slate chat route in favor of global metadata",
   assert.match(api, /route\("POST", "\/api\/prism-companion"/u);
 });
 
-test("soft synthesis borrows the companion orb with a job chip and assistant lock", () => {
+test("soft synthesis keeps the real companion wieldable, draggable, and inertial", () => {
   assert.match(component, /usePrismSoftSynthesisUi/u);
   assert.match(component, /togglePrismSoftSynthesisExpanded/u);
+  assert.match(component, /setPrismSoftSynthesisExpanded\(false\)/u);
   assert.match(component, /data-prism-companion-avatar="true"/u);
   assert.match(component, /styles\.softJobChip/u);
   assert.match(component, /softSynthesisActive/u);
+  assert.doesNotMatch(component, /if \(softSynthesisLocked\) return;/u);
+  assert.doesNotMatch(component, /softSynthesisUi\.lodged/u);
+  assert.match(
+    component,
+    /if \(drag\.moved\) \{[\s\S]{0,260}startInertia\(\{ x: drag\.velocityX, y: drag\.velocityY \}\)/u,
+  );
   assert.match(companionCss, /\.softJobChip\s*\{/u);
-  assert.match(companionCss, /\[data-soft-lodged="true"\]/u);
+  assert.doesNotMatch(companionCss, /data-soft-lodged/u);
+  assert.match(
+    companionCss,
+    /data-wielding="true"\] \.softJobChip/u,
+  );
   assert.match(tutorials, /data-tutorial-target="prism-companion"/u);
+});
+
+test("keeps Prism anchored while an assistant menu is open", () => {
+  assert.match(component, /prismWieldCanArm/u);
+  assert.match(component, /prismWieldAvailabilityRef/u);
+  assert.match(
+    component,
+    /companionMenuOpen: open,[\s\S]{0,120}softSynthesisMenuOpen:[\s\S]{0,120}softSynthesisUi\.expanded,[\s\S]{0,80}homeDocked: chatHomeOrbDocked/u,
+  );
+  assert.match(
+    component,
+    /if \(!prismWieldCanArm\(prismWieldAvailabilityRef\.current\)\) return;/u,
+  );
+  assert.match(
+    component,
+    /\(!menuOpen && !chatHomeOrbDocked\)[\s\S]*wieldStateRef\.current\.phase === "idle"[\s\S]*resetPrismWield\(false, false, \{ skipCursorDock: true \}\)/u,
+  );
+  assert.doesNotMatch(
+    component,
+    /if \(softSynthesisActive && softSynthesisUi\.expanded\) \{\s*setPrismSoftSynthesisExpanded\(false\)/u,
+  );
+  assert.match(
+    tutorials,
+    /menu is open, the Wield modifier leaves the assistant anchored/u,
+  );
+});
+
+test("switches the floating Prism panel among Synthesis, Chat, and Notes", () => {
+  assert.match(component, /PrismCompanionViewTabs/u);
+  assert.match(component, /activeView="synthesis"/u);
+  assert.match(component, /activeView="chat"/u);
+  assert.match(component, /activeView="notes"/u);
+  assert.match(component, /id="global-prism-synthesis"/u);
+  assert.match(component, /Describe what you want to synthesize/u);
+  assert.match(component, /await onOpenImagePrompt\(prompt\)/u);
+  assert.match(page, /onOpenImagePrompt=\{async \(prompt\) =>/u);
+  assert.match(page, /setImagePrompt\(prompt\)/u);
+  assert.match(page, /await openAllImagesPanel\(\)/u);
+  assert.match(component, /id="global-prism-notes"/u);
+  assert.match(component, /fetch\("\/api\/prism\/notes"/u);
+  assert.match(component, /method: personalNoteId \? "PUT" : "POST"/u);
+  assert.match(component, /method: "DELETE"/u);
+  assert.match(component, /Press Delete again to confirm/u);
 });

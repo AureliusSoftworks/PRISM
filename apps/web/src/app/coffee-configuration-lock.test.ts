@@ -92,6 +92,34 @@ test("Coffee's PRISM wordmark returns to All Bots Home", () => {
   assert.doesNotMatch(pageSource, /returnToCoffeeStart/u);
 });
 
+test("leaving the Coffee topic picker discards its placeholder session", () => {
+  const discardPolicyStart = pageSource.indexOf(
+    "const coffeeSessionShouldDiscardOnExit =",
+  );
+  const departureStart = pageSource.indexOf(
+    "const recordCoffeePlayerDepartureOnExit =",
+    discardPolicyStart,
+  );
+  const discardPolicy = pageSource.slice(discardPolicyStart, departureStart);
+  assert.ok(discardPolicyStart >= 0 && departureStart > discardPolicyStart);
+  assert.match(discardPolicy, /if \(phase === "topic"\) return true/u);
+
+  const selectedExitStart = pageSource.indexOf(
+    "const exitCoffeeSessionToSelectedView = async () => {",
+  );
+  const selectedExitEnd = pageSource.indexOf(
+    "const deleteCoffeeSession = async",
+    selectedExitStart,
+  );
+  const selectedExit = pageSource.slice(selectedExitStart, selectedExitEnd);
+  assert.ok(selectedExitStart >= 0 && selectedExitEnd > selectedExitStart);
+  assert.match(selectedExit, /coffeeSessionShouldDiscardOnExit\(/u);
+  assert.match(
+    selectedExit,
+    /if \(shouldDiscard\) \{\s*await discardCoffeeConversation\(sessionId\);\s*\}/u,
+  );
+});
+
 test("Coffee records and restores baked mouth puppeteering independently of current Voice", () => {
   assert.match(pageSource, /startCoffeeAudioMasterCapture/u);
   assert.match(

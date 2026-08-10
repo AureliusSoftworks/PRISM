@@ -6,6 +6,7 @@ import {
   effectiveModelReasoningEffort,
   modelReasoningEffortPreferenceKey,
   modelSupportsNativeReasoningEffort,
+  modelSupportsTurboMode,
   normalizeModelReasoningEffortPreference,
   normalizeReasoningEffort,
   openAiModelSupportsReasoningEffort,
@@ -28,6 +29,33 @@ import {
 } from "./reasoningEffort.ts";
 
 describe("reasoning effort helpers", () => {
+  it("gates Turbo to online models with OpenAI Priority processing", () => {
+    for (const modelId of [
+      "gpt-5.6",
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+      "gpt-5.4-mini",
+      "gpt-5.2-2025-12-11",
+      "gpt-4.1-mini",
+      "gpt-4o-2024-11-20",
+      "o3",
+      "o4-mini",
+    ]) {
+      assert.equal(modelSupportsTurboMode("openai", modelId), true, modelId);
+    }
+    for (const modelId of [
+      "gpt-5.5-pro",
+      "gpt-5-search-api",
+      "gpt-4o-audio-preview",
+      "text-embedding-3-large",
+    ]) {
+      assert.equal(modelSupportsTurboMode("openai", modelId), false, modelId);
+    }
+    assert.equal(modelSupportsTurboMode("anthropic", "claude-opus-4-8"), false);
+    assert.equal(modelSupportsTurboMode("local", "gpt-5.6-sol"), false);
+  });
+
   it("normalizes supported effort values", () => {
     assert.equal(normalizeReasoningEffort(undefined), "auto");
     assert.equal(normalizeReasoningEffort("HIGH"), "high");
@@ -261,20 +289,35 @@ describe("reasoning effort helpers", () => {
       "medium",
       "high",
     ]);
-    assert.deepEqual(openAiReasoningEffortLevels("gpt-5.6-sol"), [
-      "none",
-      "minimal",
-      "low",
-      "medium",
-      "high",
-      "xhigh",
-    ]);
+    for (const modelId of [
+      "gpt-5.6-sol",
+      "gpt-5.6-terra",
+      "gpt-5.6-luna",
+    ]) {
+      assert.deepEqual(openAiReasoningEffortLevels(modelId), [
+        "none",
+        "low",
+        "medium",
+        "high",
+        "xhigh",
+      ]);
+      assert.equal(openAiReasoningEffortForRequest(modelId, "minimal"), null);
+      assert.equal(openAiReasoningEffortForRequest(modelId, "low"), "low");
+      assert.equal(
+        effectiveModelReasoningEffort({
+          provider: "openai",
+          modelId,
+          preference: "minimal",
+        }),
+        null,
+      );
+    }
     assert.deepEqual(openAiReasoningEffortLevels("gpt-5.5-pro"), []);
     assert.equal(openAiReasoningEffortForRequest("gpt-5", "none"), null);
     assert.equal(openAiReasoningEffortForRequest("gpt-5.6-sol", "none"), "none");
   });
 
-  it("enables simulated effort by default for local and non-native online models", () => {
+  it("keeps simulated effort local-only while preserving native online effort", () => {
     const localSimulated = resolveModelReasoningEffortCapability({
       provider: "local",
       modelId: "qwen3:14b",
@@ -302,22 +345,24 @@ describe("reasoning effort helpers", () => {
         provider: "openai",
         modelId: "gpt-4o",
       }).mode,
-      "simulated",
+      "unavailable",
     );
     assert.equal(
       resolveModelReasoningEffortCapability({
         provider: "anthropic",
         modelId: "claude-haiku-4-5",
+        simulatedEffortEnabled: true,
       }).mode,
-      "simulated",
+      "unavailable",
     );
     assert.equal(
       effectiveModelReasoningEffort({
         provider: "anthropic",
         modelId: "claude-haiku-4-5",
         preference: "minimal",
+        simulatedEffortEnabled: true,
       }),
-      "minimal",
+      null,
     );
     assert.equal(
       effectiveModelReasoningEffort({
@@ -325,7 +370,7 @@ describe("reasoning effort helpers", () => {
         modelId: "claude-haiku-4-5",
         preference: "none",
       }),
-      "none",
+      null,
     );
   });
 

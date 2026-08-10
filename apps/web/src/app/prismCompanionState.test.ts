@@ -1,15 +1,21 @@
 import assert from "node:assert/strict";
 import test from "node:test";
 import {
+  DEFAULT_PRISM_COMPANION_SESSION_IDLE_GAP_MS,
   isPrismCompanionModifierKey,
   isPrismCompanionShortcut,
   parsePrismCompanionRecovery,
+  parsePrismCompanionSessionRecord,
   parsePrismCompanionSpeechEnabled,
   prismCompanionDismissesOnExternalInteraction,
   prismCompanionModifierPresentation,
+  prismCompanionPrivateRecoveryStorageKey,
   prismCompanionRecoveryStorageKey,
+  prismCompanionSessionIsReusable,
+  prismCompanionSessionStorageKey,
   prismCompanionSpeechStorageKey,
   retainPrismCompanionRecovery,
+  touchPrismCompanionSessionRecord,
 } from "./prismCompanionState.ts";
 
 test("scopes companion recovery to account and exact surface", () => {
@@ -31,7 +37,67 @@ test("scopes companion recovery to account and exact surface", () => {
   );
 });
 
-test("collapses the ephemeral panel when focus returns to a Zen bot", () => {
+test("scopes the saved assistant session and Private recovery to the account", () => {
+  assert.notEqual(
+    prismCompanionSessionStorageKey("u1"),
+    prismCompanionSessionStorageKey("u2"),
+  );
+  assert.notEqual(
+    prismCompanionPrivateRecoveryStorageKey("u1"),
+    prismCompanionPrivateRecoveryStorageKey("u2"),
+  );
+  assert.equal(
+    prismCompanionSessionStorageKey("u1"),
+    prismCompanionSessionStorageKey("u1"),
+  );
+});
+
+test("reuses a valid assistant session only inside the configured idle gap", () => {
+  const now = Date.parse("2026-08-09T20:00:00.000Z");
+  const record = touchPrismCompanionSessionRecord(
+    "conversation-1",
+    now - 60_000,
+  );
+  assert.deepEqual(
+    parsePrismCompanionSessionRecord(JSON.stringify(record)),
+    record,
+  );
+  assert.equal(
+    prismCompanionSessionIsReusable(record, now, 2 * 60_000),
+    true,
+  );
+  assert.equal(
+    prismCompanionSessionIsReusable(record, now, 60_000),
+    false,
+  );
+  assert.equal(
+    prismCompanionSessionIsReusable(
+      touchPrismCompanionSessionRecord("conversation-1", now + 1),
+      now,
+      DEFAULT_PRISM_COMPANION_SESSION_IDLE_GAP_MS,
+    ),
+    false,
+  );
+});
+
+test("rejects malformed assistant session records", () => {
+  assert.equal(parsePrismCompanionSessionRecord(null), null);
+  assert.equal(parsePrismCompanionSessionRecord("not-json"), null);
+  assert.equal(
+    parsePrismCompanionSessionRecord(
+      JSON.stringify({ conversationId: "", lastUsedAt: new Date().toISOString() }),
+    ),
+    null,
+  );
+  assert.equal(
+    parsePrismCompanionSessionRecord(
+      JSON.stringify({ conversationId: "conversation-1", lastUsedAt: "later" }),
+    ),
+    null,
+  );
+});
+
+test("collapses the companion panel when focus returns to a Zen bot", () => {
   assert.equal(
     prismCompanionDismissesOnExternalInteraction({ surfaceId: "zen" }),
     true,

@@ -9,6 +9,7 @@ import {
   debateEvidenceObjectDraftFromPrismCandidate,
   debateEvidenceObjectFromPrismCandidate,
   debateEvidenceEmojiForObject,
+  debateMissingExhibitAssets,
   normalizeDebateEvidenceEmojiChoice,
   randomDebateEvidenceObject,
   applyDebateEvidenceExhibitSynthesizedImage,
@@ -322,5 +323,56 @@ describe("Debate evidence object generator", () => {
     assert.equal(next.exhibits?.[0]?.imageId, "img-soft-1");
     assert.equal(next.exhibits?.[0]?.observation, exhibit.observation);
     assert.equal(next.exhibits?.[0]?.emoji, exhibit.emoji);
+  });
+
+  it("automatically synthesizes only exhibits with an emoji and no asset", () => {
+    const exhibit = {
+      id: "emoji-only",
+      adjective: "Brass",
+      object: "compass",
+      title: "Brass compass",
+      observation: "Its needle points west.",
+      emoji: "🧭",
+      visualKind: "emoji" as const,
+      imageId: null,
+      createdBy: "player" as const,
+    };
+    const packet = {
+      version: 1 as const,
+      notes: "",
+      sources: [],
+      exhibits: [
+        exhibit,
+        {
+          ...exhibit,
+          id: "uploaded",
+          visualKind: "upload" as const,
+          imageId: "image-uploaded",
+        },
+        {
+          ...exhibit,
+          id: "reused",
+          visualKind: "synthesized" as const,
+          imageId: "image-reused",
+        },
+        {
+          ...exhibit,
+          id: "custom-kind-without-image",
+          visualKind: "upload" as const,
+          imageId: null,
+        },
+        {
+          ...exhibit,
+          id: "emoji-with-associated-image",
+          imageId: "image-associated",
+        },
+      ],
+      frozenAt: null,
+    };
+
+    assert.deepEqual(
+      debateMissingExhibitAssets(packet).map((candidate) => candidate.id),
+      ["emoji-only"],
+    );
   });
 });

@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 import {
   LOCAL_VOICE_SPEECHPRINT_CAPABILITIES,
   LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256,
+  applyLocalVoiceSpeechprintMelodyToIpa,
   applyLocalVoiceSpeechprintToIpa,
 } from "@localai/shared";
 
@@ -216,5 +217,61 @@ describe("local voice Speechprints", () => {
     });
     assert.notEqual(light.ipa, SAMPLE_IPA);
     assert.ok(strong.appliedRuleIds.length >= light.appliedRuleIds.length);
+  });
+
+  it("differentiates Italian vs Spanish stress and rhythm on multi-syllable English", () => {
+    const phrase = "ðə sˈʌn ɹˈaɪzᵻz ˌoʊvɚ ðə kɹiːˈeɪɾɪv pˈiːpəl";
+    const italian = applyLocalVoiceSpeechprintToIpa({
+      ipa: phrase,
+      speechprint: {
+        influence: "italian-influenced-english",
+        strength: "balanced",
+        variationSeed: "inflection-bench",
+      },
+    });
+    const spanish = applyLocalVoiceSpeechprintToIpa({
+      ipa: phrase,
+      speechprint: {
+        influence: "spanish-influenced-english",
+        strength: "balanced",
+        variationSeed: "inflection-bench",
+      },
+    });
+
+    assert.notEqual(italian.ipa, spanish.ipa);
+    assert.match(italian.ipa, /k[ɾɹ]iːˈeɪɾɪv/u);
+    assert.match(spanish.ipa, /k[ɾɹ]ˈiːeɪɾɪv/u);
+    assert.ok(italian.appliedRuleIds.includes("rhythm-demote-secondary"));
+    assert.ok(spanish.appliedRuleIds.includes("rhythm-stress-early"));
+    assert.equal(italian.appliedRuleIds.includes("rhythm-stress-early"), false);
+  });
+
+  it("skips stress-rhythm reshaping for digit and code-like tokens", () => {
+    const spanish = applyLocalVoiceSpeechprintToIpa({
+      ipa: "PRISM_42 kɹiːˈeɪɾɪv",
+      speechprint: {
+        influence: "spanish-influenced-english",
+        strength: "strong",
+        variationSeed: "protected-bench",
+      },
+    });
+    assert.match(spanish.ipa, /^PRISM_42 /u);
+    assert.equal(spanish.ipa.startsWith("PRISM_42 "), true);
+    assert.match(spanish.ipa, /k[ɾɹ]ˈiːe[iɪ]ɾ[iɪ]v/u);
+  });
+
+  it("keeps Phase 2 melody as an identity pass until that milestone ships", () => {
+    const phrase = "ðə sˈʌn ɹˈaɪzᵻz";
+    assert.deepEqual(
+      applyLocalVoiceSpeechprintMelodyToIpa({
+        ipa: phrase,
+        speechprint: {
+          influence: "italian-influenced-english",
+          strength: "strong",
+          variationSeed: "melody-deferred",
+        },
+      }),
+      { ipa: phrase, appliedRuleIds: [] },
+    );
   });
 });

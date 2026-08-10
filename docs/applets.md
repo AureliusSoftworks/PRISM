@@ -123,6 +123,14 @@ stages do not block the standalone preview.
 
 ## Changelog
 
+### 2026-08-09
+
+- Bumped `Coffee` to `v2.50` and `Signal` to `v1.60` so an interrupted
+  Copycat preserves the audience-heard copied fragment but can only follow it
+  with `...`; canned protests and irritation Foley never give the mimic new
+  words. Chat and Zen have no bot-to-bot follow-on interruption lane, while
+  planned applets inherit the same exact-response boundary when implemented.
+
 ### 2026-08-01
 
 - Added the continuous `Inept` Power across Chat, Zen, Coffee, Signal, Debate,

@@ -76,6 +76,30 @@
   user-select: none;
 }
 
+.homeControls {
+  position: relative;
+  z-index: 2;
+  min-height: 104px;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 24px;
+}
+
+.homeSlot {
+  width: 68px;
+  height: 68px;
+  flex: 0 0 auto;
+  border-radius: 50%;
+  border: 1px dashed color-mix(in srgb, #72d9ee 42%, transparent);
+  transform: translateX(0);
+  transition: transform 520ms cubic-bezier(.2, .82, .2, 1);
+}
+
+.homeSlot[data-shifted="true"] {
+  transform: translateX(-280px);
+}
+
 .target {
   position: relative;
   z-index: 1;
@@ -97,6 +121,23 @@
   font-size: 18px;
   line-height: 1.45;
   outline: none;
+}
+
+.target input {
+  width: 100%;
+  border: 1px solid var(--qa-line);
+  border-radius: 18px;
+  padding: 14px 18px;
+  color: var(--qa-ink);
+  background: color-mix(in srgb, var(--qa-panel) 82%, transparent);
+  font: inherit;
+  font-size: 16px;
+  outline: none;
+}
+
+.target input:focus-visible {
+  border-color: #72d9ee88;
+  box-shadow: 0 0 0 3px #72d9ee24;
 }
 
 .target textarea:focus-visible {

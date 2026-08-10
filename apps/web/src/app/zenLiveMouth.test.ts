@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
-  BOTTISH_MOUTH_PHASE_MS,
   bottishMouthShapeAtAlignedElapsedMs,
   coffeeLiveAvatarSpeechProgressShouldCommit,
   crtSpeechMouthShapeAtAlignedElapsedMs,
@@ -396,7 +395,7 @@ test("unaligned preview visemes close when playback reaches its end", () => {
   );
 });
 
-test("Bottish holds readable poses across rapid synthesized notes", () => {
+test("Bottish follows every generated note window and its audible gaps", () => {
   const alignment = {
     characters: ["b", "o", "t", "t", "i"],
     characterStartTimesSeconds: [0, 0.08, 0.16, 0.24, 0.32],
@@ -406,15 +405,19 @@ test("Bottish holds readable poses across rapid synthesized notes", () => {
     bottishMouthShapeAtAlignedElapsedMs({
       text: "botti",
       elapsedMs,
-      durationMs: 390,
+      durationMs: 440,
       alignment,
     });
 
-  assert.equal(BOTTISH_MOUTH_PHASE_MS, 240);
-  assert.equal(at(20), at(140));
-  assert.notEqual(at(140), at(260));
-  assert.equal(at(75), "closed");
-  assert.equal(at(390), "closed");
+  for (const noteElapsedMs of [20, 100, 180, 260, 340]) {
+    assert.notEqual(at(noteElapsedMs), "closed");
+  }
+  assert.notEqual(at(20), at(100));
+  assert.notEqual(at(100), at(340));
+  for (const gapElapsedMs of [75, 155, 235, 315, 410]) {
+    assert.equal(at(gapElapsedMs), "closed");
+  }
+  assert.equal(at(440), "closed");
 });
 
 test("English viseme timelines give vowels more time than closures", () => {

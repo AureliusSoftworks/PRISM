@@ -165,6 +165,16 @@ export interface ReplayMouthTrackV2 {
   cues: ReplayMouthCueV2[];
 }
 
+export interface ReplayVoiceLightCueV1 {
+  atMs: number;
+  level: number;
+}
+
+export interface ReplayVoiceLightTrackV1 {
+  participantId: string;
+  cues: ReplayVoiceLightCueV1[];
+}
+
 export type ReplayCameraTransitionModeV2 = "animated" | "instant";
 export type ReplayCameraTransitionPresetV2 = "signal-camera-v1";
 
@@ -188,6 +198,7 @@ export interface ReplayVoiceSelectionSnapshotV2 {
 
 export interface ReplayPresentationV2 {
   mouthTracks: ReplayMouthTrackV2[];
+  voiceLightTracks?: ReplayVoiceLightTrackV1[];
   voiceSelection?: ReplayVoiceSelectionSnapshotV2;
 }
 
@@ -1085,6 +1096,45 @@ export function replayMouthShapeAtV2(
   return resolved;
 }
 
+export function replayVoiceLightLevelAtV2(
+  manifest: ReplayManifestV2,
+  participantId: string,
+  atMs: number,
+): number | null {
+  const track = manifest.presentation?.voiceLightTracks?.find(
+    (candidate) => candidate.participantId === participantId,
+  );
+  if (!track || track.cues.length === 0) return null;
+  const targetMs = Math.max(0, Number.isFinite(atMs) ? atMs : 0);
+  let low = 0;
+  let high = track.cues.length - 1;
+  let previousIndex = -1;
+  while (low <= high) {
+    const middle = Math.floor((low + high) / 2);
+    if (track.cues[middle]!.atMs <= targetMs) {
+      previousIndex = middle;
+      low = middle + 1;
+    } else {
+      high = middle - 1;
+    }
+  }
+  if (previousIndex < 0) return 0;
+  const previous = track.cues[previousIndex]!;
+  const next = track.cues[previousIndex + 1];
+  if (!next || next.atMs <= previous.atMs) return previous.level;
+  // A large gap means the meter was silent/not publishing; hold the last
+  // keyframe instead of anticipating the next utterance across the gap.
+  if (next.atMs - previous.atMs > 300) return previous.level;
+  const progress = Math.max(
+    0,
+    Math.min(1, (targetMs - previous.atMs) / (next.atMs - previous.atMs)),
+  );
+  return Math.max(
+    0,
+    Math.min(1, previous.level + (next.level - previous.level) * progress),
+  );
+}
+
 export function replayCameraTransitionModeV2(
   scene: ReplaySceneSnapshotV2 | null | undefined,
 ): ReplayCameraTransitionModeV2 {
@@ -1315,6 +1365,44 @@ export function replayManifestV2IsValid(
         }
         priorCueAtMs = atMs;
         priorShape = cue.shape as ReplayMouthShapeV2;
+      }
+    }
+    if (presentation.voiceLightTracks !== undefined) {
+      if (!Array.isArray(presentation.voiceLightTracks)) return false;
+      const lightParticipantIds = new Set<string>();
+      for (const rawTrack of presentation.voiceLightTracks) {
+        if (!rawTrack || typeof rawTrack !== "object" || Array.isArray(rawTrack)) {
+          return false;
+        }
+        const track = rawTrack as Record<string, unknown>;
+        const participantId = boundedId(track.participantId);
+        if (
+          !participantId ||
+          lightParticipantIds.has(participantId) ||
+          !Array.isArray(track.cues)
+        ) {
+          return false;
+        }
+        lightParticipantIds.add(participantId);
+        let priorCueAtMs = -1;
+        for (const rawCue of track.cues) {
+          if (!rawCue || typeof rawCue !== "object" || Array.isArray(rawCue)) {
+            return false;
+          }
+          const cue = rawCue as Record<string, unknown>;
+          const atMs = finiteNonNegativeNumber(cue.atMs);
+          const level = Number(cue.level);
+          if (
+            atMs === null ||
+            atMs < priorCueAtMs ||
+            !Number.isFinite(level) ||
+            level < 0 ||
+            level > 1
+          ) {
+            return false;
+          }
+          priorCueAtMs = atMs;
+        }
       }
     }
     if (presentation.voiceSelection !== undefined) {

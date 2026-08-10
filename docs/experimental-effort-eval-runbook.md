@@ -2,9 +2,9 @@
 
 Use this runbook when changing or validating:
 
-- the Experimental Features setting that exposes effort for more models
-- simulated effort for non-reasoning models
-- tiered private-pass effort simulation for non-reasoning models
+- the Experimental Features setting that deepens LOCAL simulated effort
+- simulated effort for LOCAL non-reasoning models
+- tiered private-pass effort simulation for LOCAL non-reasoning models
 - Psychic planning summaries and live-only debug diagnostics
 - local-vs-online privacy guarantees for extra model calls
 
@@ -15,12 +15,12 @@ For iterative diagnosis of a run (collapse, leakage, native-vs-simulated mismatc
 
 ## Product Boundary
 
-Simulated effort is the product-default quality booster for models without adjustable native effort (lean standard ladder + thrifty budgets). It is not a claim that those models become true reasoning models. The heavier Deep workshop remains Settings → Experimental.
+Simulated effort is the product-default quality booster for LOCAL models without adjustable native effort (lean standard ladder + thrifty budgets). It is not a claim that those models become true reasoning models. The heavier Deep LOCAL workshop remains Settings → Experimental.
 
-- Prism simulated planning/draft/audit/(synthesis) passes run on the selected provider/model, whether local or online.
-- OpenAI and Anthropic models without adjustable native effort receive the same private multi-call ladder by default; Deep experimental adds Alternatives / Red-team / Constraint Lock / Revise Draft / Compliance Sweep.
+- Prism simulated planning/draft/audit/(synthesis) passes run only on the selected LOCAL Ollama model.
+- OpenAI and Anthropic models never receive Prism's simulated multi-call ladder. ONLINE Effort is available only when the selected model exposes provider-native effort.
+- Deep experimental adds Alternatives / Red-team / Constraint Lock / Revise Draft / Compliance Sweep to LOCAL simulation only.
 - Models with native effort keep provider-native effort; fixed-effort models remain fixed.
-- Online simulation makes multiple paid/provider calls and may increase usage, cost, and latency. Settings must say so plainly.
 - Psychic disclosure is transcript-Chat only; private plans, drafts, audits, and revisions remain ephemeral.
 - LOCAL mode always uses the selected local provider for every private and visible pass; it must never call an online provider.
 
@@ -32,7 +32,7 @@ Simulated effort is the product-default quality booster for models without adjus
   - `ANTHROPIC_API_KEY` for Opus
   - `OPENAI_API_KEY` for Sol / OpenAI judge
 - Do not use online keys for LOCAL-mode assertions. LOCAL simulated effort must stay on Ollama.
-- Use provider stubs for routine online multi-call tests. Run live paid-provider checks only when explicitly evaluating quality or cost.
+- Use provider stubs to verify that ONLINE non-native models stay single-call. Run live paid-provider checks only when explicitly evaluating quality or provider-native effort.
 
 Prefer the direct Node commands below when passing flags. The npm scripts are convenient for defaults, but direct commands avoid shell-specific argument forwarding surprises.
 
@@ -193,7 +193,7 @@ node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/eff
 node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --budget-profile legacy
 ```
 
-To A/B the product-default lean ladder against Deep simulated thinking (experimental):
+To A/B the product-default lean ladder against Deep LOCAL simulated thinking (experimental):
 
 ```powershell
 node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/effort-ladder.ts --model llama3.2 --quick --repeats 2 --ladder-profile standard
@@ -201,7 +201,7 @@ node --env-file-if-exists=.env --experimental-strip-types apps/api/src/evals/eff
 ```
 
 `--budget-profile` is eval-only. Product runtime always uses thrifty unless an eval selects legacy.
-`--ladder-profile standard` is the product default; `deep` maps to Settings → Deep simulated thinking (`experimental_all_model_effort_enabled`).
+`--ladder-profile standard` is the product default; `deep` maps to Settings → Deep LOCAL simulated thinking (`experimental_all_model_effort_enabled`).
 
 Artifacts are written to:
 

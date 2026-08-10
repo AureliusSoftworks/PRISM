@@ -74,9 +74,12 @@ Local identity has four independent layers:
   PRISM-authored Speechprint: Spanish-influenced English, Brazilian
   Portuguese-influenced English, Mandarin-influenced English,
   Japanese-influenced English, Korean-influenced English, Indian English,
-  French-influenced English, German-influenced English, or Russian-influenced
-  English.
-  Each supports Light, Balanced, and Strong.
+  French-influenced English, German-influenced English, Italian-influenced
+  English, or Russian-influenced English.
+  Each supports Light, Balanced, and Strong. Romance influences also reshape
+  private stress and rhythm (for example early Spanish stress vs Italian
+  penultimate bias) after the sound swaps; phrase melody remains a later
+  approximate Instant pass and is not Feel-stage Pitch or Lilt.
 
 Cross-accent pronunciation and Speechprints run only through Instant. Auto
 selects Instant when either is active; a forced Voice+ or installed
@@ -87,7 +90,8 @@ actions do not apply either control. Voice Source and Current previews compare
 the same line.
 
 Instant phonemizes each speech segment locally from its genuine American or
-British base, applies deterministic word-boundary-aware rules, then uses
+British base, applies deterministic word-boundary-aware sound rules, then a
+second private stress/rhythm pass for qualified influences, then uses
 Kokoro's pinned token-ID interface. A private per-profile variation seed keeps
 optional details stable for that character and travels with bot exports.
 Explicit name pronunciations, initialisms, numbers, and code-like tokens are
@@ -205,6 +209,37 @@ drives text reveal and mouth motion. A completed final phoneme may overlap the
 next natural handoff; only an explicit interruption truncates active speech.
 Sending another message, navigating away, changing modes, or choosing Mute
 stops the relevant active voice and queued accents.
+
+## Voice Sync Lab
+
+Development builds expose **Voice sync** in Developer Tools and at
+`/qa-voice-sync`. The lab runs authenticated synthesis through the shipping
+voice queue and effects graph, taps the final software output bus, records the
+rendered mouth transitions on the same AudioContext clock, and supports
+scrubbing, slow playback, looping, Shh cutoffs, stress phrases, and JSON/WAV
+exports. The lab retains no test state beyond browser memory unless an export
+is explicitly downloaded, and it never creates a canonical conversation or
+memory. ElevenLabs test phrases still cross the configured external provider
+boundary, while Local, System, Babble, and Bottish stay on the device.
+
+Alignment labels describe provenance, not confidence theater:
+
+- **Aligned** requires authoritative phoneme and viseme timing from the engine
+  or the exact generator that produced the audio.
+- **Partial** includes authoritative character timing without authoritative
+  phoneme and viseme timing, such as current ElevenLabs alignment.
+- **Unaligned** means timing is missing or derived only from heuristics or a
+  post-hoc aligner.
+
+The first-open and last-open deltas are audibility-gate diagnostics, not
+phoneme-match scores. A correctly closed `/p/`, `/b/`, or `/m/` can begin after
+audible speech starts without representing lag; phoneme and viseme agreement
+must be read from the engine and rendered-mouth lanes on the shared frame ruler.
+
+The captured WAV and exported trace retain the exact software-bus frame clock.
+Browser-reported device latency is displayed as a separate estimate and is
+never baked into those frames. Physical speaker, display, and microphone
+loopback remain unmeasured until a hardware calibration path is added.
 
 ## Privacy boundary
 

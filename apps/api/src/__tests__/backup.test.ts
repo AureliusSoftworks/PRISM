@@ -13,6 +13,7 @@ import {
   createPendingLivingShellAccountProgress,
 } from "../living-shell-progress.ts";
 import { listModelReasoningEffortPreferences } from "../model-effort-preferences.ts";
+import { listModelTurboPreferences } from "../model-turbo-preferences.ts";
 import {
   DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
   DEFAULT_ZEN_MESSAGE_FONT_MIN_PX,
@@ -64,6 +65,49 @@ describe("backup response cues", () => {
   });
 });
 
+describe("backup applet session notes", () => {
+  it("round-trips a note with its Coffee transcript", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `INSERT INTO conversations
+          (id, user_id, title, conversation_mode, created_at, updated_at)
+         VALUES ('coffee-note-session', 'user-1', 'Quiet table', 'coffee', ?, ?)`,
+      ).run("2026-08-09T20:00:00.000Z", "2026-08-09T20:00:00.000Z");
+      db.prepare(
+        `INSERT INTO applet_session_notes
+          (user_id, surface, session_id, body, created_at, updated_at)
+         VALUES ('user-1', 'coffee', 'coffee-note-session', ?, ?, ?)`,
+      ).run(
+        "- Remember the pause.\n- Revisit the ending.",
+        "2026-08-09T20:01:00.000Z",
+        "2026-08-09T20:01:00.000Z",
+      );
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(
+        snapshot.sessionNotes?.[0]?.body,
+        "- Remember the pause.\n- Revisit the ending.",
+      );
+
+      db.prepare(
+        "DELETE FROM applet_session_notes WHERE user_id = 'user-1'",
+      ).run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db
+        .prepare(
+          `SELECT body FROM applet_session_notes
+            WHERE user_id = 'user-1' AND surface = 'coffee'
+              AND session_id = 'coffee-note-session'`,
+        )
+        .get() as { body: string };
+      assert.equal(
+        restored.body,
+        "- Remember the pause.\n- Revisit the ending.",
+      );
+    });
+  });
+});
+
 describe("backup model effort profiles", () => {
   it("round-trips saved provider/model effort and accepts legacy snapshots", () => {
     withBackupDatabase((db, userKey) => {
@@ -72,6 +116,12 @@ describe("backup model effort profiles", () => {
            (user_id, provider, model_id, effort, updated_at)
          VALUES ('user-1', 'openai', 'gpt-5.6-sol', 'high',
                  '2026-08-01T20:00:00.000Z')`,
+      ).run();
+      db.prepare(
+        `INSERT INTO model_turbo_preferences
+           (user_id, provider, model_id, updated_at)
+         VALUES ('user-1', 'openai', 'gpt-5.6-sol',
+                 '2026-08-01T20:00:01.000Z')`,
       ).run();
       const snapshot = exportUserSnapshot(db, "user-1", userKey);
       assert.deepEqual(snapshot.modelEffortPreferences, [
@@ -82,18 +132,31 @@ describe("backup model effort profiles", () => {
           updatedAt: "2026-08-01T20:00:00.000Z",
         },
       ]);
+      assert.deepEqual(snapshot.modelTurboPreferences, [
+        {
+          provider: "openai",
+          modelId: "gpt-5.6-sol",
+          turbo: true,
+          updatedAt: "2026-08-01T20:00:01.000Z",
+        },
+      ]);
 
       db.prepare(
         "DELETE FROM model_reasoning_effort_preferences WHERE user_id = 'user-1'",
+      ).run();
+      db.prepare(
+        "DELETE FROM model_turbo_preferences WHERE user_id = 'user-1'",
       ).run();
       importUserSnapshot(db, "user-1", snapshot, userKey);
       assert.equal(
         listModelReasoningEffortPreferences(db, "user-1")[0]?.effort,
         "high",
       );
+      assert.equal(listModelTurboPreferences(db, "user-1")[0]?.turbo, true);
 
       const legacySnapshot = structuredClone(snapshot);
       delete legacySnapshot.modelEffortPreferences;
+      delete legacySnapshot.modelTurboPreferences;
       importUserSnapshot(db, "user-1", legacySnapshot, userKey);
       assert.equal(
         listModelReasoningEffortPreferences(db, "user-1")[0]?.effort,
@@ -573,6 +636,44 @@ describe("backup graphics quality", () => {
           "user-1",
         ) as { graphics_quality: string }).graphics_quality,
         "high",
+      );
+    });
+  });
+});
+
+describe("backup typography scale", () => {
+  it("round-trips the selected preset and defaults legacy snapshots to Standard", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare("UPDATE users SET typography_scale = 'large' WHERE id = ?").run(
+        "user-1",
+      );
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.settings?.typographyScale, "large");
+
+      db.prepare(
+        "UPDATE users SET typography_scale = 'compact' WHERE id = ?",
+      ).run("user-1");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      assert.equal(
+        (db.prepare("SELECT typography_scale FROM users WHERE id = ?").get(
+          "user-1",
+        ) as { typography_scale: string }).typography_scale,
+        "large",
+      );
+
+      const legacySettings = { ...snapshot.settings! };
+      delete legacySettings.typographyScale;
+      importUserSnapshot(
+        db,
+        "user-1",
+        { ...snapshot, settings: legacySettings },
+        userKey,
+      );
+      assert.equal(
+        (db.prepare("SELECT typography_scale FROM users WHERE id = ?").get(
+          "user-1",
+        ) as { typography_scale: string }).typography_scale,
+        "standard",
       );
     });
   });

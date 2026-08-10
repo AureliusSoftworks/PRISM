@@ -45,6 +45,7 @@ type MemoryRow = {
   user_id: string;
   conversation_id: string | null;
   bot_id: string | null;
+  target_bot_id?: string | null;
   ciphertext: string;
   iv: string;
   tag: string;
@@ -481,12 +482,25 @@ export function deleteOrphanedBotMemories(
   const result = db.prepare(`
     DELETE FROM memories
     WHERE user_id = ?
-      AND bot_id IS NOT NULL
-      AND NOT EXISTS (
-        SELECT 1
-        FROM bots
-        WHERE bots.id = memories.bot_id
-          AND bots.user_id = memories.user_id
+      AND (
+        (
+          bot_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM bots
+            WHERE bots.id = memories.bot_id
+              AND bots.user_id = memories.user_id
+          )
+        )
+        OR (
+          target_bot_id IS NOT NULL
+          AND NOT EXISTS (
+            SELECT 1
+            FROM bots
+            WHERE bots.id = memories.target_bot_id
+              AND bots.user_id = memories.user_id
+          )
+        )
       )
       AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
   `).run(userId);
@@ -747,6 +761,101 @@ function decryptMemoryRow(row: MemoryRow, userKey: Buffer): StoredMemoryWithEmbe
   };
 }
 
+/**
+ * Stores one deterministic, encrypted narrative memory owned by one bot and
+ * explicitly scoped to one peer. Pair memories never enter ordinary Chat/Zen
+ * recall; callers must request the exact source -> target edge.
+ */
+export function persistBotPairNarrativeMemory(args: {
+  db: DatabaseSync;
+  userId: string;
+  sourceBotId: string;
+  targetBotId: string;
+  text: string;
+  sourceMessageIds?: readonly string[];
+  userKey: Buffer;
+  createdAt?: string;
+}): UserMemory | null {
+  const sourceBotId = args.sourceBotId.trim();
+  const targetBotId = args.targetBotId.trim();
+  const text = args.text.replace(/\s+/gu, " ").trim().slice(0, 2_000);
+  if (!sourceBotId || !targetBotId || sourceBotId === targetBotId || !text) {
+    return null;
+  }
+  const id = randomId(12);
+  const createdAt = args.createdAt ?? new Date().toISOString();
+  const sourceMessageIds = normalizeSourceMessageIds([
+    ...(args.sourceMessageIds ?? []),
+  ]);
+  const encrypted = encryptJson(
+    { text, embedding: fallbackEmbedding(text) } as unknown as Record<string, unknown>,
+    args.userKey,
+  );
+  args.db.prepare(
+    `INSERT INTO memories
+      (id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv, tag,
+       confidence, category, tier, durability, source, certainty,
+       source_message_ids, created_at)
+     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 0.98, 'bot_relation', 'long_term',
+             0.95, 'direct', 0.98, ?, ?)`,
+  ).run(
+    id,
+    args.userId,
+    sourceBotId,
+    targetBotId,
+    encrypted.ciphertext,
+    encrypted.iv,
+    encrypted.tag,
+    sourceMessageIdsJson(sourceMessageIds),
+    createdAt,
+  );
+  return {
+    id,
+    userId: args.userId,
+    botId: sourceBotId,
+    confidence: 0.98,
+    category: "bot_relation",
+    tier: "long_term",
+    durability: 0.95,
+    source: "direct",
+    certainty: 0.98,
+    sourceMessageIds,
+    createdAt,
+    text,
+  };
+}
+
+/** Decrypt only memories on the requested directed bot pair. */
+export function retrieveBotPairNarrativeMemories(args: {
+  db: DatabaseSync;
+  userId: string;
+  sourceBotId: string;
+  targetBotId: string;
+  userKey: Buffer;
+  limit?: number;
+}): UserMemory[] {
+  const sourceBotId = args.sourceBotId.trim();
+  const targetBotId = args.targetBotId.trim();
+  if (!sourceBotId || !targetBotId || sourceBotId === targetBotId) return [];
+  const limit = Math.max(1, Math.min(20, Math.floor(args.limit ?? 4)));
+  const rows = args.db.prepare(
+    `SELECT id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv,
+            tag, confidence, category, tier, durability, source, certainty,
+            source_message_ids, created_at
+       FROM memories
+      WHERE user_id = ? AND bot_id = ? AND target_bot_id = ?
+      ORDER BY created_at DESC, rowid DESC
+      LIMIT ?`,
+  ).all(args.userId, sourceBotId, targetBotId, limit) as MemoryRow[];
+  return rows.map((row) => {
+    const { embedding: _embedding, ...memory } = decryptMemoryRow(
+      row,
+      args.userKey,
+    );
+    return memory;
+  });
+}
+
 function loadSameScopeDirectMemories(
   db: DatabaseSync,
   userId: string,
@@ -757,7 +866,7 @@ function loadSameScopeDirectMemories(
     ? db.prepare(`
         SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
         FROM memories
-        WHERE user_id = ? AND bot_id = ? AND source = 'direct' AND COALESCE(tier, 'short_term') != 'long_term'
+        WHERE user_id = ? AND bot_id = ? AND target_bot_id IS NULL AND source = 'direct' AND COALESCE(tier, 'short_term') != 'long_term'
         ORDER BY created_at DESC
         LIMIT ?
       `).all(userId, botId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[]
@@ -931,6 +1040,7 @@ function loadScopeMemoriesForReinforcement(
         FROM memories
         WHERE user_id = ?
           AND bot_id = ?
+          AND target_bot_id IS NULL
         ORDER BY created_at DESC
         LIMIT ?
       `).all(userId, botId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[]
@@ -1294,7 +1404,7 @@ export async function findMemoryByCue(
     ? db.prepare(`
         SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
         FROM memories
-        WHERE user_id = ? AND (bot_id IS NULL OR bot_id = ?)
+        WHERE user_id = ? AND target_bot_id IS NULL AND (bot_id IS NULL OR bot_id = ?)
         ORDER BY created_at DESC
         LIMIT ?
       `).all(userId, normalizedBotId, MEMORY_TARGET_LOOKBACK_LIMIT) as MemoryRow[]
@@ -1349,7 +1459,7 @@ export async function retrieveRelevantMemories(
   const rows: MemoryRow[] = normalizedBotId
     ? db
         .prepare(
-          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR bot_id = ?) ORDER BY created_at DESC LIMIT 100"
+          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND target_bot_id IS NULL AND (bot_id IS NULL OR bot_id = ?) ORDER BY created_at DESC LIMIT 100"
         )
         .all(userId, normalizedBotId) as MemoryRow[]
     : db
@@ -1385,7 +1495,7 @@ export function retrieveRecentMemoriesForStarter(
   const rows: MemoryRow[] = normalizedBotId
     ? db
         .prepare(
-          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND (bot_id IS NULL OR bot_id = ?) ORDER BY created_at DESC LIMIT 100"
+          "SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at FROM memories WHERE user_id = ? AND target_bot_id IS NULL AND (bot_id IS NULL OR bot_id = ?) ORDER BY created_at DESC LIMIT 100"
         )
         .all(userId, normalizedBotId) as MemoryRow[]
     : db
@@ -1419,6 +1529,7 @@ export function retrieveRecentBotMemoriesForStarter(
        FROM memories
        WHERE user_id = ?
          AND bot_id = ?
+         AND target_bot_id IS NULL
          AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'
        ORDER BY created_at DESC
        LIMIT 100`

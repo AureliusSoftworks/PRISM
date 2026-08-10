@@ -173,6 +173,16 @@ describe("replay manifests", () => {
           ],
         },
       ],
+      capturedVoiceLightTracks: [
+        {
+          participantId: "bot-1",
+          cues: [
+            { atMs: 900, level: 0.18 },
+            { atMs: 1_000, level: 0.63 },
+            { atMs: 2_100, level: 0 },
+          ],
+        },
+      ],
       voiceSelection: {
         voiceMode: "english",
         englishVoiceEngine: "builtin",
@@ -190,6 +200,16 @@ describe("replay manifests", () => {
             { atMs: 0, shape: "closed" },
             { atMs: 900, shape: "open-wide" },
             { atMs: 2_100, shape: "closed" },
+          ],
+        },
+      ],
+      voiceLightTracks: [
+        {
+          participantId: "bot-1",
+          cues: [
+            { atMs: 900, level: 0.18 },
+            { atMs: 1_000, level: 0.63 },
+            { atMs: 2_100, level: 0 },
           ],
         },
       ],
@@ -428,7 +448,7 @@ describe("replay manifests", () => {
     );
     assert.equal(
       manifest.visual.metadata?.renderContract,
-      "signal-studio-playwright-v1",
+      "signal-studio-playwright-v2",
     );
     assert.equal(
       manifest.visual.metadata?.microphoneTintMaskUrl,

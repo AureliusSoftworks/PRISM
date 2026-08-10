@@ -50,15 +50,24 @@ describe("Debate source URL inspection", () => {
       },
     );
 
-    assert.deepEqual(result, {
-      fetched: true,
-      source: {
+    assert.equal(result.fetched, true);
+    assert.deepEqual(
+      {
+        title: result.source.title,
+        url: result.source.url,
+        snippet: result.source.snippet,
+        publishedAt: result.source.publishedAt,
+      },
+      {
         title: "A & B",
         url: "https://example.com/story",
         snippet: "A concise public finding.",
         publishedAt: "2026-07-30",
       },
-    });
+    );
+    assert.equal(result.source.excerptSource, "page");
+    assert.equal(result.source.excerptSelection, "sentence-fallback");
+    assert.match(result.source.excerptMaterialHash ?? "", /^[a-f0-9]{64}$/u);
   });
 
   it("uses visible bounded text when metadata is absent", () => {
@@ -101,6 +110,9 @@ describe("Debate source URL inspection", () => {
         url: "https://www.example.com/article",
         snippet: "",
         publishedAt: null,
+        excerptSource: "player",
+        excerptSelection: "player",
+        excerptModel: null,
       },
     });
   });
@@ -251,5 +263,80 @@ describe("Debate source URL inspection", () => {
       }),
       /redirected too many times/u,
     );
+  });
+
+  it("lets the selected Debate lane choose only an exact page sentence", async () => {
+    let generationCalls = 0;
+    const result = await inspectDebateSourceUrl(
+      "https://example.com/afternoon-study",
+      {
+        allowNetwork: true,
+        motion: "Workplaces should provide paid naps to reduce afternoon errors.",
+        generateExcerpt: async (request) => {
+          generationCalls += 1;
+          assert.match(request.instruction, /copied exactly/iu);
+          assert.match(request.materials[0]?.text ?? "", /fewer afternoon errors/u);
+          return {
+            excerpt: "The controlled trial found fewer afternoon errors.",
+            provider: "openai",
+            model: "gpt-test",
+          };
+        },
+        dependencies: {
+          resolve: async () => PUBLIC_ADDRESS,
+          transport: async () =>
+            htmlResponse(`
+              <title>Afternoon study</title>
+              <main>
+                The office changed its lunch menu.
+                The controlled trial found fewer afternoon errors.
+                Participants reported higher alertness.
+              </main>
+            `),
+        },
+      },
+    );
+
+    assert.equal(generationCalls, 1);
+    assert.equal(
+      result.source.snippet,
+      "The controlled trial found fewer afternoon errors.",
+    );
+    assert.equal(result.source.excerptSelection, "model");
+    assert.deepEqual(result.source.excerptModel, {
+      provider: "openai",
+      model: "gpt-test",
+    });
+  });
+
+  it("never fetches or invokes an online excerpt generator in LOCAL", async () => {
+    let networkCalls = 0;
+    let generationCalls = 0;
+    const result = await inspectDebateSourceUrl(
+      "https://example.com/local-source",
+      {
+        allowNetwork: false,
+        motion: "A local-only motion",
+        generateExcerpt: async () => {
+          generationCalls += 1;
+          return null;
+        },
+        dependencies: {
+          resolve: async () => {
+            networkCalls += 1;
+            return PUBLIC_ADDRESS;
+          },
+          transport: async () => {
+            networkCalls += 1;
+            return htmlResponse("unreachable");
+          },
+        },
+      },
+    );
+
+    assert.equal(networkCalls, 0);
+    assert.equal(generationCalls, 0);
+    assert.equal(result.fetched, false);
+    assert.equal(result.source.excerptSelection, "player");
   });
 });

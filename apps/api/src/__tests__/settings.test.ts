@@ -54,6 +54,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     displayName: "Alex",
     theme: "dark",
     graphicsQuality: "high",
+    typographyScale: "standard",
     atmosphereStyle: DEFAULT_HUB_ATMOSPHERE_STYLE,
     hubAtmosphereEnabled: 1,
     startupPreference: "home",
@@ -418,6 +419,38 @@ describe("resolveNextSettings — graphics quality", () => {
         baseline({ graphicsQuality: "medium" }),
       ).graphicsQuality,
       "medium",
+    );
+  });
+});
+
+describe("resolveNextSettings — typography scale", () => {
+  it("accepts all five presets and keeps a valid stored preset on invalid input", () => {
+    for (const typographyScale of [
+      "compact",
+      "small",
+      "standard",
+      "large",
+      "extra-large",
+    ] as const) {
+      assert.equal(
+        resolveNextSettings({ typographyScale }, baseline()).typographyScale,
+        typographyScale,
+      );
+    }
+    assert.equal(
+      resolveNextSettings(
+        { typographyScale: "giant" },
+        baseline({ typographyScale: "large" }),
+      ).typographyScale,
+      "large",
+    );
+  });
+
+  it("defaults legacy accounts without a stored preset to Standard", () => {
+    assert.equal(
+      resolveNextSettings({}, baseline({ typographyScale: null }))
+        .typographyScale,
+      "standard",
     );
   });
 });
@@ -903,17 +936,17 @@ describe("resolveNextSettings — prismImageToolLlmModel", () => {
   });
 });
 
-describe("resolveNextSettings — retired account text models", () => {
-  it("ignores new local and online account-model writes", () => {
+describe("resolveNextSettings — global account text models", () => {
+  it("stores global local and online model selections", () => {
     const next = resolveNextSettings(
       { preferredLocalModel: " llama3.2 ", preferredOnlineModel: " gpt-4o-mini " },
       baseline()
     );
-    assert.equal(next.preferredLocalModel, null);
-    assert.equal(next.preferredOnlineModel, null);
+    assert.equal(next.preferredLocalModel, "llama3.2");
+    assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
   });
 
-  it("does not revive disabled through retired account fields", () => {
+  it("never stores Disabled as a global model selection", () => {
     const next = resolveNextSettings(
       {
         preferredLocalModel: DISABLED_MODEL_CHOICE,
@@ -925,7 +958,7 @@ describe("resolveNextSettings — retired account text models", () => {
     assert.equal(next.preferredOnlineModel, null);
   });
 
-  it("preserves imported compatibility values until backup or account reset", () => {
+  it("clears global selections back to Auto", () => {
     const current = baseline({
       preferredLocalModel: "llama3.2",
       preferredOnlineModel: "gpt-4o-mini",
@@ -934,8 +967,8 @@ describe("resolveNextSettings — retired account text models", () => {
       { preferredLocalModel: "", preferredOnlineModel: " " },
       current
     );
-    assert.equal(next.preferredLocalModel, "llama3.2");
-    assert.equal(next.preferredOnlineModel, "gpt-4o-mini");
+    assert.equal(next.preferredLocalModel, null);
+    assert.equal(next.preferredOnlineModel, null);
   });
 
   it("keeps existing values when invalid types are sent", () => {

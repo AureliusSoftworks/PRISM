@@ -14,6 +14,7 @@ const ritual = source("./BotCreationRitual.tsx");
 const warmup = source("./ModelWarmupIntermission.tsx");
 const blocking = source("./PrismBlockingLoader.tsx");
 const signal = source("./BotcastExperience.tsx");
+const debate = source("./DebateExperience.tsx");
 const slate = source("./SlateWorkspace.tsx");
 
 test("uses one reference-counted focus boundary for overlapping surfaces", () => {
@@ -45,14 +46,30 @@ test("suppresses the floating assistant throughout bot creation and full-screen 
   assert.match(slate, /reason="slate-loading"/u);
 });
 
-test("suppresses the floating assistant only during live Signal, Coffee, and Debate sessions", () => {
+test("removes the assistant while any top-bar main panel is open", () => {
+  assert.match(
+    presence,
+    /function prismCompanionDisabledByMainPanel\([\s\S]*return panel !== null \|\| avatarStudioOpen;/u,
+  );
+  assert.match(
+    page,
+    /if \(prismCompanionDisabledByMainPanel\(panel, botAvatarCustomizerOpen\)\) \{\s*return <PrismCompanionPresenceBoundary reason="main-menu-panel" \/>;\s*\}/u,
+  );
+  assert.match(companion, /if \(companionSuppressed\) return;/u);
+  assert.match(
+    companion,
+    /if \(companionSuppressed \|\| sessionNoteContext\) return;\s*return installPrismUniversalInputTargets/u,
+  );
+});
+
+test("turns the floating assistant into a session-note plus during live Signal, Coffee, and Debate sessions", () => {
   assert.match(
     signal,
     /const liveSessionActive =\s*showLiveExit \|\|[\s\S]{0,160}episode\?\.status === "cancelled"/u,
   );
   assert.match(
     signal,
-    /liveSessionActive \? \(\s*<PrismCompanionPresenceBoundary reason="signal-live-session" \/>/u,
+    /liveSessionActive \? \([\s\S]{0,220}<PrismCompanionSessionNoteBoundary[\s\S]{0,180}surface="signal"/u,
   );
   assert.match(
     page,
@@ -60,32 +77,22 @@ test("suppresses the floating assistant only during live Signal, Coffee, and Deb
   );
   assert.match(
     page,
-    /coffeeLiveSessionActive \? \(\s*<PrismCompanionPresenceBoundary reason="coffee-live-session" \/>/u,
+    /coffeeLiveSessionActive \? \([\s\S]{0,220}<PrismCompanionSessionNoteBoundary[\s\S]{0,180}surface="coffee"/u,
   );
   assert.match(
-    page,
-    /debateLiveSessionActive \|\| debateCompanionContext === null \? \(\s*<PrismCompanionPresenceBoundary reason="debate-live-session" \/>[\s\S]*?\{renderGlobalPrismCompanion\(\)\}/u,
+    debate,
+    /liveSessionActive && activeSession \? \([\s\S]{0,220}<PrismCompanionSessionNoteBoundary[\s\S]{0,180}surface="debate"/u,
   );
-  // Debate must mount Ask Prism once — a second call paints a duplicate orb.
-  {
-    const debateCompanionTail =
-      page.match(
-        /reason="debate-live-session"[\s\S]*?<GlyphTooltipLayer \/>/u,
-      )?.[0] ?? "";
-    assert.equal(
-      (
-        debateCompanionTail.match(/\{renderGlobalPrismCompanion\(\)\}/gu) ?? []
-      ).length,
-      1,
-    );
-  }
+  assert.match(presence, /PrismCompanionSessionNoteBoundary/u);
+  assert.match(companion, /getPrismCompanionSessionNoteSnapshot/u);
+  assert.match(companion, /data-session-note="true"/u);
   assert.match(
     companion,
     /const onKeyDown = \(event: KeyboardEvent\): void => \{\s*if \(companionSuppressed\) return;/u,
   );
   assert.match(
     companion,
-    /\[[\s\S]{0,180}companionSuppressed,[\s\S]{0,180}openAndFocus,[\s\S]{0,180}\]/u,
+    /\[\s*acceptPrismRefract,\s*companionSuppressed,\s*keyboardShortcut,\s*activatePrismConversation,/u,
   );
   assert.match(
     companion,

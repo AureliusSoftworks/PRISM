@@ -3,14 +3,15 @@
 import { type CSSProperties, type ReactNode } from "react";
 import styles from "./chatMiniBotAvatar.module.css";
 
+export const CHAT_MINI_BOT_AVATAR_CANONICAL_SCREEN_SIZE = 128;
 export const CHAT_MINI_BOT_AVATAR_DARK_BASE_SRC =
-  "/bot-frame/bot-frame-base.png?v=1001";
+  "/bot-frame/bot-frame-mini-dark.png?v=2";
 export const CHAT_MINI_BOT_AVATAR_LIGHT_BASE_SRC =
-  "/bot-frame/bot-frame-light-base.png?v=1001";
+  "/bot-frame/bot-frame-mini-light.png?v=2";
 
 /**
- * Compact bot avatar for Chat/Zen empty-hero previews. Mini avatars are static
- * identity portraits, so they deliberately omit the full avatar's talking LEDs.
+ * Compact bot chassis for identity portraits. It omits the full avatar's
+ * talking LEDs, while callers may still supply a lightweight animated face.
  */
 export function ChatMiniBotAvatar(props: {
   color?: string | null;
@@ -19,8 +20,8 @@ export function ChatMiniBotAvatar(props: {
   face: ReactNode;
   glyph: ReactNode;
   className?: string;
-  /** `badge` is message-chip sized; `hero` is the empty-state preview. */
-  size?: "badge" | "hero";
+  /** `badge` is message-chip sized; `room` is aquarium sized; `hero` is the empty-state preview. */
+  size?: "badge" | "room" | "hero";
 }): React.JSX.Element {
   const color = props.color?.trim() || null;
   const size = props.size ?? "badge";
@@ -38,7 +39,11 @@ export function ChatMiniBotAvatar(props: {
 
   const rootClassName = [
     styles.root,
-    size === "hero" ? styles.sizeHero : styles.sizeBadge,
+    size === "hero"
+      ? styles.sizeHero
+      : size === "room"
+        ? styles.sizeRoom
+        : styles.sizeBadge,
     props.className,
   ]
     .filter(Boolean)
@@ -53,8 +58,8 @@ export function ChatMiniBotAvatar(props: {
       style={rootStyle}
       aria-hidden="true"
     >
-      {/* The canonical chassis is deliberately raw so its material mask and
-          measured mini-screen registration share one coordinate system. */}
+      {/* The pixel chassis is a mini-only derivative of the canonical body, so
+          its material mask and measured screen registration stay aligned. */}
       {/* eslint-disable-next-line @next/next/no-img-element */}
       <img
         className={`${styles.frame} ${styles.frameBase}`}
@@ -63,7 +68,15 @@ export function ChatMiniBotAvatar(props: {
         draggable={false}
       />
       <span className={styles.frameAlloy} aria-hidden="true" />
-      <span className={styles.upperScreen}>{props.face}</span>
+      <span
+        className={styles.upperScreen}
+        data-avatar-canonical-screen-size={
+          CHAT_MINI_BOT_AVATAR_CANONICAL_SCREEN_SIZE
+        }
+        data-avatar-face-coordinate-source="studio"
+      >
+        {props.face}
+      </span>
       <span className={styles.lowerScreen}>{props.glyph}</span>
     </span>
   );

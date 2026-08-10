@@ -625,6 +625,32 @@
   display: none !important;
 }
 
+/* Use Preview's quantized alpha mask without its bloom. The editor remains
+   visually quiet while showing the exact silhouette that ships. */
+.faceGuideGlyph
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"] {
+  -webkit-text-fill-color: transparent !important;
+}
+
+.faceGuideGlyph
+  [data-crt-glyph-layer="true"][data-crt-pixel-mask-ready="true"]::before {
+  content: "" !important;
+  display: block !important;
+  inset: calc(0px - var(--crt-phosphor-pixel-overscan, 0px));
+  background: currentColor !important;
+  -webkit-mask-image: var(--crt-phosphor-pixel-mask);
+  mask-image: var(--crt-phosphor-pixel-mask);
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: 100% 100%;
+  mask-size: 100% 100%;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+  filter: none !important;
+}
+
 .canvas {
   position: absolute;
   inset: 0;

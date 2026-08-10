@@ -169,6 +169,7 @@ export function shouldPrepareMessagesWithSimulatedEffort(args: {
   if (!args.effort || args.effort === "auto" || args.effort === "none") {
     return false;
   }
+  if (args.provider !== "local") return false;
   return !modelSupportsNativeReasoningEffort(args.provider, args.model);
 }
 
@@ -185,6 +186,9 @@ export async function prepareMessagesWithSimulatedEffort(args: {
   if (!args.effort || args.effort === "auto" || args.effort === "none") {
     return args.messages;
   }
+  // Defense in depth: callers normally use the capability helper above, but
+  // no direct invocation may turn an ONLINE request into multiple passes.
+  if (args.provider.name !== "local") return args.messages;
   const ladderProfile = normalizeSimulatedEffortLadderProfile(
     args.ladderProfile,
   );

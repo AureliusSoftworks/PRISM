@@ -31,6 +31,8 @@ export interface SessionAtmosphereLayerProps {
   backgroundRoomAcoustics?: RoomAcousticsSend;
   allowMixBoost?: boolean;
   mixTransitionMs?: number;
+  /** Crossfade loop beds when this layer mounts, changes, or unmounts. */
+  lifecycleTransitionMs?: number;
   ambientFoley?: boolean;
   deferFoley?: boolean;
   deferBotVocalization?: boolean;
@@ -63,6 +65,7 @@ export function SessionAtmosphereLayer({
   backgroundRoomAcoustics,
   allowMixBoost = false,
   mixTransitionMs = 0,
+  lifecycleTransitionMs = 0,
   ambientFoley = true,
   deferFoley = false,
   deferBotVocalization = deferFoley,
@@ -123,6 +126,7 @@ export function SessionAtmosphereLayer({
       backgroundUrl,
       grainUrl,
       mix: mixRef.current,
+      startTransitionMs: lifecycleTransitionMs,
       backgroundTone,
       backgroundRecordable,
       foleyRoomAcoustics,
@@ -152,7 +156,7 @@ export function SessionAtmosphereLayer({
       : null;
     return () => {
       detachCupFoley?.();
-      controller.stop();
+      controller.stop(lifecycleTransitionMs);
       if (controllerRef.current === controller) controllerRef.current = null;
       if (controllerHandleRef?.current === controller) {
         controllerHandleRef.current = null;
@@ -174,6 +178,7 @@ export function SessionAtmosphereLayer({
     controllerHandleRef,
     foleyRoomAcoustics,
     grainUrl,
+    lifecycleTransitionMs,
     preloadFoleyUrls,
     sessionKey,
   ]);

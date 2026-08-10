@@ -674,7 +674,17 @@ fn open_emoji_picker(app: AppHandle) -> Result<bool, String> {
 }
 
 fn main() {
-    let app = match tauri::Builder::default()
+    let builder = tauri::Builder::default();
+
+    // Register this before every other plugin or managed service. A repeat
+    // launch is redirected to the existing window and exits before setup can
+    // spawn a second Qdrant/API/web runtime tree.
+    #[cfg(any(target_os = "macos", target_os = "windows", target_os = "linux"))]
+    let builder = builder.plugin(tauri_plugin_single_instance::init(|app, _args, _cwd| {
+        show_main_window(app);
+    }));
+
+    let app = match builder
         .manage(RuntimeState::new())
         .manage(AppLifecycleState::new())
         .invoke_handler(tauri::generate_handler![

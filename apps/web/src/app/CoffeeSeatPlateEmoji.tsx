@@ -80,53 +80,6 @@ function scheduleKeyDigest(key: string): number {
   return n;
 }
 
-function normalizeFaceFontWeight(
-  weight: number | null | undefined,
-): number | undefined {
-  if (typeof weight !== "number" || !Number.isFinite(weight)) return undefined;
-  return Math.max(300, Math.min(800, weight));
-}
-
-function faceWeightStrokeForWeight(
-  weight: number | undefined,
-): string | undefined {
-  if (weight === undefined) return undefined;
-  const t = Math.max(0, Math.min(1, (weight - 300) / 500));
-  return `${(t * 0.032).toFixed(3)}em`;
-}
-
-function faceWeightGlowRadiusScaleForWeight(
-  weight: number | undefined,
-): string | undefined {
-  if (weight === undefined) return undefined;
-  if (weight <= 500) {
-    const t = Math.max(0, Math.min(1, (weight - 300) / 200));
-    return (0.56 + t * 0.44).toFixed(3);
-  }
-  const t = Math.max(0, Math.min(1, (weight - 500) / 300));
-  return (1 + t * 0.36).toFixed(3);
-}
-
-function faceWeightGlowStrengthScaleForWeight(
-  weight: number | undefined,
-): string | undefined {
-  if (weight === undefined) return undefined;
-  if (weight <= 500) {
-    const t = Math.max(0, Math.min(1, (weight - 300) / 200));
-    return (0.36 + t * 0.64).toFixed(3);
-  }
-  const t = Math.max(0, Math.min(1, (weight - 500) / 300));
-  return (1 + t * 0.34).toFixed(3);
-}
-
-function faceWeightGlowStrokeForWeight(
-  weight: number | undefined,
-): string | undefined {
-  if (weight === undefined) return undefined;
-  const t = Math.max(0, Math.min(1, (weight - 300) / 500));
-  return `${(0.004 + t * 0.026).toFixed(3)}em`;
-}
-
 function rotatedFaceOffset(
   x: number | undefined,
   y: number | undefined,
@@ -284,6 +237,7 @@ export type CoffeeSeatPlateEmojiProps = {
   faceMouthFont?: BotFaceFontId | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: BotFaceGlyphAnimation | null;
+  /** Retained for portable bot data; face weight adjustment is disabled. */
   faceFontWeight?: number | null;
   faceEyeScale?: number | null;
   faceEyeOffsetX?: number | null;
@@ -370,7 +324,6 @@ export function CoffeeSeatPlateEmoji({
   faceMouthFont,
   faceMouthCharacter,
   faceMouthAnimation,
-  faceFontWeight,
   faceEyeScale,
   faceEyeOffsetX,
   faceEyeOffsetY,
@@ -534,7 +487,6 @@ export function CoffeeSeatPlateEmoji({
       window.cancelAnimationFrame(frameId);
     };
   }, [
-    faceFontWeight,
     faceMouthFont,
     questionGlyphActive,
     renderedMouthGlyphForMotion,
@@ -715,9 +667,6 @@ export function CoffeeSeatPlateEmoji({
             }).length + 1,
           )
         : glyphParts.length;
-  const normalizedFaceWeight = thinkingSpinnerActive
-    ? undefined
-    : normalizeFaceFontWeight(faceFontWeight);
   const normalizedFaceEyeScale =
     thinkingSpinnerActive || questionGlyphActive
       ? undefined
@@ -827,7 +776,6 @@ export function CoffeeSeatPlateEmoji({
     normalizedThinkingFrames[
       thinkingSpinnerFrameIndex % normalizedThinkingFrames.length
     ];
-
   return (
     <span
       className={className}
@@ -852,7 +800,6 @@ export function CoffeeSeatPlateEmoji({
         normalizedFaceEyeCharacter ||
         faceMouthFont ||
         normalizedFaceMouthCharacter ||
-        faceFontWeight ||
         normalizedFaceEyeScale ||
         normalizedFaceEyeOffsetX ||
         normalizedFaceEyeOffsetY ||
@@ -888,15 +835,6 @@ export function CoffeeSeatPlateEmoji({
       data-coffee-plate-mouth-shape={isTalking ? streamedMouthShape : undefined}
       style={
         {
-          ["--bot-face-font-weight" as string]: normalizedFaceWeight,
-          ["--bot-face-weight-stroke" as string]:
-            faceWeightStrokeForWeight(normalizedFaceWeight),
-          ["--bot-face-weight-glow-radius-scale" as string]:
-            faceWeightGlowRadiusScaleForWeight(normalizedFaceWeight),
-          ["--bot-face-weight-glow-strength-scale" as string]:
-            faceWeightGlowStrengthScaleForWeight(normalizedFaceWeight),
-          ["--bot-face-weight-glow-stroke" as string]:
-            faceWeightGlowStrokeForWeight(normalizedFaceWeight),
           ["--bot-face-eye-scale" as string]: normalizedFaceEyeScale,
           ["--bot-face-gaze-x" as string]: `${displayGaze.xPx}px`,
           ["--bot-face-gaze-y" as string]: `${displayGaze.yPx}px`,
@@ -953,6 +891,7 @@ export function CoffeeSeatPlateEmoji({
           <CrtPixelTextGlyph
             content={thinkingSpinnerGlyph}
             enabled={pixelated}
+            rasterKey={faceMouthFont ?? "default"}
           />
         </span>
       ) : questionGlyphActive ? (
@@ -961,7 +900,11 @@ export function CoffeeSeatPlateEmoji({
           data-coffee-plate-question-glyph="?"
           data-face-font={faceMouthFont ?? faceEyesFont ?? undefined}
         >
-          <CrtPixelTextGlyph content="?" enabled={pixelated} />
+          <CrtPixelTextGlyph
+            content="?"
+            enabled={pixelated}
+            rasterKey={faceMouthFont ?? faceEyesFont ?? "default"}
+          />
         </span>
       ) : (
         (() => {
@@ -992,6 +935,8 @@ export function CoffeeSeatPlateEmoji({
               voicePreset,
               rotateDeg,
               pairedEye: renderCustomEyePair,
+              customGlyph:
+                part === "mouth" && renderedFaceMouthCharacter !== null,
             });
             return (
               <span
@@ -1020,11 +965,13 @@ export function CoffeeSeatPlateEmoji({
                       data-custom-eye-pair-side="left"
                       content={renderedGlyph}
                       enabled={pixelated}
+                      rasterKey={partFaceFont ?? "default"}
                     />
                     <CrtPixelTextGlyph
                       data-custom-eye-pair-side="right"
                       content={renderedGlyph}
                       enabled={pixelated}
+                      rasterKey={partFaceFont ?? "default"}
                     />
                   </span>
                 ) : (
@@ -1032,6 +979,7 @@ export function CoffeeSeatPlateEmoji({
                     ref={part === "mouth" ? customMouthGlyphRef : undefined}
                     content={renderedGlyph}
                     enabled={pixelated}
+                    rasterKey={partFaceFont ?? "default"}
                   />
                 )}
               </span>

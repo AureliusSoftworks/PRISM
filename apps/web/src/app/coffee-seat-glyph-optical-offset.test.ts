@@ -3,16 +3,44 @@ import { describe, it } from "node:test";
 import { coffeeSeatGlyphOpticalOffset } from "./coffee-seat-glyph-optical-offset.ts";
 
 describe("Coffee face glyph optical offsets", () => {
-  it("corrects only the warm bracket mouth and broken-bar blink", () => {
-    assert.equal(
-      coffeeSeatGlyphOpticalOffset({
-        part: "mouth",
-        glyph: "]",
-        voicePreset: "warm",
-        rotateDeg: 0,
-      })?.id,
-      "warm-bracket",
-    );
+  it("puts every stock idle mood mouth in the neutral ink-authoring slot", () => {
+    for (const glyph of [")", "]", "|", "[", "("]) {
+      for (const voicePreset of [
+        "warm",
+        "playful",
+        "neutral",
+        "concise",
+        "formal",
+      ] as const) {
+        assert.deepEqual(
+          coffeeSeatGlyphOpticalOffset({
+            part: "mouth",
+            glyph,
+            voicePreset,
+            rotateDeg: 90,
+          }),
+          { id: "idle-mood-mouth-slot", x: 0, y: 0.055 },
+        );
+      }
+    }
+  });
+
+  it("does not move a custom mouth into the stock idle slot", () => {
+    for (const glyph of [")", "]", "|", "[", "("]) {
+      assert.equal(
+        coffeeSeatGlyphOpticalOffset({
+          part: "mouth",
+          glyph,
+          voicePreset: "warm",
+          rotateDeg: 90,
+          customGlyph: true,
+        }),
+        null,
+      );
+    }
+  });
+
+  it("keeps the warm broken-bar blink correction", () => {
     assert.equal(
       coffeeSeatGlyphOpticalOffset({
         part: "eyes",
@@ -21,15 +49,6 @@ describe("Coffee face glyph optical offsets", () => {
         rotateDeg: 0,
       })?.id,
       "warm-broken-bar",
-    );
-    assert.equal(
-      coffeeSeatGlyphOpticalOffset({
-        part: "mouth",
-        glyph: "]",
-        voicePreset: "neutral",
-        rotateDeg: 0,
-      }),
-      null,
     );
     assert.equal(
       coffeeSeatGlyphOpticalOffset({
@@ -46,10 +65,14 @@ describe("Coffee face glyph optical offsets", () => {
     const offset = coffeeSeatGlyphOpticalOffset({
       part: "mouth",
       glyph: "]",
-      voicePreset: "warm",
+      voicePreset: "neutral",
       rotateDeg: 90,
     });
-    assert.deepEqual(offset, { id: "warm-bracket", x: 0, y: -0.055 });
+    assert.deepEqual(offset, {
+      id: "idle-mood-mouth-slot",
+      x: 0,
+      y: 0.055,
+    });
   });
 
   it("gives every cloned two-eye glyph the same screen-right baseline", () => {

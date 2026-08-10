@@ -44,7 +44,7 @@ describe("simulated model effort runner", () => {
     });
   });
 
-  it("selects local and unsupported online models while preserving native effort", () => {
+  it("selects only local models for simulated effort", () => {
     assert.equal(
       shouldPrepareMessagesWithSimulatedEffort({
         provider: "local",
@@ -59,7 +59,7 @@ describe("simulated model effort runner", () => {
         model: "gpt-4o",
         effort: "medium",
       }),
-      true,
+      false,
     );
     assert.equal(
       shouldPrepareMessagesWithSimulatedEffort({
@@ -67,7 +67,7 @@ describe("simulated model effort runner", () => {
         model: "claude-haiku-4-5",
         effort: "high",
       }),
-      true,
+      false,
     );
     assert.equal(
       shouldPrepareMessagesWithSimulatedEffort({
@@ -95,15 +95,45 @@ describe("simulated model effort runner", () => {
     );
   });
 
+  it("defensively skips direct preparation on an ONLINE provider", async () => {
+    let calls = 0;
+    const provider: LlmProvider = {
+      name: "openai",
+      async generateResponse() {
+        calls += 1;
+        return "unused";
+      },
+      async embedText() {
+        return [];
+      },
+    };
+    const messages: ProviderMessage[] = [{ role: "user", content: "Hello" }];
+    assert.equal(
+      await prepareMessagesWithSimulatedEffort({
+        provider,
+        messages,
+        options: { model: "gpt-4o" },
+        effort: "high",
+        surface: "signal",
+      }),
+      messages,
+    );
+    assert.equal(calls, 0);
+  });
+
   it("scales thrifty simulated preparation budgets by effort", async () => {
     const calls: Array<{
       messages: ProviderMessage[];
       options?: GenerateOptions;
     }> = [];
     const provider: LlmProvider = {
+      name: "local",
       async generateResponse(messages, options) {
         calls.push({ messages, options });
         return `private note ${calls.length} `.repeat(80);
+      },
+      async embedText() {
+        return [];
       },
     };
     await prepareMessagesWithSimulatedEffort({
@@ -148,9 +178,13 @@ describe("simulated model effort runner", () => {
       options?: GenerateOptions;
     }> = [];
     const provider: LlmProvider = {
+      name: "local",
       async generateResponse(messages, options) {
         calls.push({ messages, options });
         return `private note ${calls.length}`;
+      },
+      async embedText() {
+        return [];
       },
     };
     const canonical: ProviderMessage[] = [{ role: "user", content: "Argue it." }];
@@ -172,9 +206,13 @@ describe("simulated model effort runner", () => {
   it("does no private work for Default or None", async () => {
     let calls = 0;
     const provider: LlmProvider = {
+      name: "local",
       async generateResponse() {
         calls += 1;
         return "unused";
+      },
+      async embedText() {
+        return [];
       },
     };
     const messages: ProviderMessage[] = [{ role: "user", content: "Hello" }];
@@ -204,10 +242,14 @@ describe("simulated model effort runner", () => {
   it("falls back to the latest safe notes when a later private pass fails", async () => {
     let calls = 0;
     const provider: LlmProvider = {
+      name: "local",
       async generateResponse() {
         calls += 1;
         if (calls === 3) throw new Error("private pass unavailable");
         return `safe note ${calls}`;
+      },
+      async embedText() {
+        return [];
       },
     };
     const prepared = await prepareMessagesWithSimulatedEffort({

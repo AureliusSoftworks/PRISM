@@ -9,6 +9,7 @@ import type {
 import {
   debateEstimatedSpeechDurationMs,
   debateEventIsCanonicalSilence,
+  debateEventIsTranscriptHousekeeping,
   debateEvidenceItemById,
   debateEvidenceTitleCasedForProse,
   debateSilenceHoldDurationMs,
@@ -69,8 +70,9 @@ export function debateInterruptedSpeechCaption(visibleContent: string): string {
 /**
  * Build the temporary event list used to replay a held floor after Resume.
  * Pause/resume announcements after the bookmark were already presented as
- * lifecycle ceremony; replaying them with the held floor repeats every prior
- * call to order when a player leaves and returns more than once.
+ * lifecycle ceremony. The Participant's recess request was also heard on the
+ * way out; replaying any of them with the held floor repeats prior ceremony
+ * when a player leaves and returns more than once.
  */
 export function debateResumeFloorReplayEvents(
   events: readonly DebateEventV1[],
@@ -79,7 +81,89 @@ export function debateResumeFloorReplayEvents(
   return events.filter(
     (event) =>
       event.sequence <= heldSequence ||
-      (event.stepKey !== "pause" && event.stepKey !== "resume"),
+      (event.stepKey !== "pause" &&
+        event.stepKey !== "resume" &&
+        event.stepKey !== "participant_recess_request"),
+  );
+}
+
+export type DebateRecessGalleryPhase = "murmur" | "order" | "hush" | null;
+
+/**
+ * Keep recess audio causal: the gallery murmurs until a visible gavel strike,
+ * peaks into the call to order, then stays hushed until the Moderator has
+ * finished the resume ceremony. The session-scoped lock also prevents stale
+ * async work from a prior Debate from changing the current room.
+ */
+export function debateRecessGalleryPhase(args: {
+  sessionId: string;
+  status: "paused" | string;
+  presenting: boolean;
+  resumeCeremonySessionId: string | null;
+  gavelArmed: boolean;
+  audienceOrderActive: boolean;
+  audienceOrderReturning: boolean;
+  juryCameraVisible: boolean;
+}): DebateRecessGalleryPhase {
+  if (args.juryCameraVisible) return null;
+
+  const resumeCeremonyActive =
+    args.resumeCeremonySessionId === args.sessionId;
+  if (resumeCeremonyActive) {
+    return args.audienceOrderActive && !args.audienceOrderReturning
+      ? "order"
+      : "hush";
+  }
+
+  if (args.status !== "paused") {
+    return args.audienceOrderActive && !args.audienceOrderReturning
+      ? "order"
+      : null;
+  }
+  if (!args.presenting) return "murmur";
+  return args.gavelArmed ? "hush" : "murmur";
+}
+
+const DEBATE_IDLE_CAMERA_EVENT_KINDS = new Set<DebateEventV1["kind"]>([
+  "intro",
+  "phase",
+  "speech",
+  "silence",
+  "testimony",
+  "press",
+  "objection",
+  "evidence",
+  "revelation",
+  "player_turn",
+  "reaction",
+  "interjection",
+  "judge_gavel",
+  "moderator_ruling",
+  "ballot",
+  "jury_deliberation",
+  "jury_verdict",
+]);
+
+/**
+ * A completed ceremony is presentation history, not the next camera owner.
+ * Filtering lifecycle housekeeping here prevents a restored Resume event from
+ * pulling Auto back to Moderator after the held speaker finishes.
+ */
+export function debateEventCanOwnIdleCamera(
+  event: Pick<DebateEventV1, "kind" | "speakerKind" | "stepKey">,
+  juryCameraVisible: boolean,
+): boolean {
+  if (debateEventIsTranscriptHousekeeping(event)) return false;
+  if (
+    !juryCameraVisible &&
+    (event.kind === "jury_deliberation" ||
+      (event.kind === "ballot" && event.speakerKind === "juror"))
+  ) {
+    return false;
+  }
+  return (
+    DEBATE_IDLE_CAMERA_EVENT_KINDS.has(event.kind) ||
+    (event.kind === "verdict" && event.speakerKind === "player")
   );
 }
 
@@ -850,7 +934,7 @@ export function debateJuryRosterFooterCopy(args: {
   juryChamberOpened: boolean;
 }): string {
   if (args.participantView) {
-    return "Five anonymous seats follow the public floor. Their chamber remains sealed until the aggregate verdict.";
+    return "Five anonymous seats follow the public floor. PRISM enters their sealed chamber during deliberation, while identities, discussion, reasons, and ballots remain private until the aggregate verdict.";
   }
   if (args.juryOutcomeRevealed && args.jury.phase === "complete") {
     return `The Jury has returned ${args.jury.forVotes}–${args.jury.againstVotes}.`;

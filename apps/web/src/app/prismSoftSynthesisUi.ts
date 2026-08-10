@@ -1,35 +1,16 @@
 "use client";
 
 import { useSyncExternalStore } from "react";
-import {
-  clampPrismCompanionPosition,
-  type PrismCompanionPosition,
-} from "./prismCompanionPhysics.ts";
-
-/** Session-only default for the relocatable soft synthesis card. */
-export const PRISM_SOFT_SYNTHESIS_DEFAULT_POSITION: PrismCompanionPosition = {
-  x: 0.82,
-  y: 0.78,
-};
 
 export type PrismSoftSynthesisUiSnapshot = {
   jobCount: number;
   expanded: boolean;
-  position: PrismCompanionPosition;
-  /** Companion orb is visually lodged in the soft/hard loader slot. */
-  lodged: boolean;
-  handoffBusy: boolean;
 };
 
 const sourceCounts = new Map<string, number>();
 const listeners = new Set<() => void>();
 
 let expanded = false;
-let position: PrismCompanionPosition = {
-  ...PRISM_SOFT_SYNTHESIS_DEFAULT_POSITION,
-};
-let lodged = false;
-let handoffBusy = false;
 
 function totalJobCount(): number {
   let total = 0;
@@ -41,13 +22,18 @@ function snapshot(): PrismSoftSynthesisUiSnapshot {
   return {
     jobCount: totalJobCount(),
     expanded,
-    position,
-    lodged,
-    handoffBusy,
   };
 }
 
 let cachedSnapshot = snapshot();
+
+// React requires getServerSnapshot to return the same object until the store
+// actually changes. Constructing this value inside the getter triggers an
+// infinite-cache warning during hydration, even though its fields are equal.
+const cachedServerSnapshot: PrismSoftSynthesisUiSnapshot = {
+  jobCount: 0,
+  expanded: false,
+};
 
 function publish(): void {
   cachedSnapshot = snapshot();
@@ -66,13 +52,7 @@ export function getPrismSoftSynthesisUiSnapshot(): PrismSoftSynthesisUiSnapshot 
 }
 
 export function getPrismSoftSynthesisUiServerSnapshot(): PrismSoftSynthesisUiSnapshot {
-  return {
-    jobCount: 0,
-    expanded: false,
-    position: { ...PRISM_SOFT_SYNTHESIS_DEFAULT_POSITION },
-    lodged: false,
-    handoffBusy: false,
-  };
+  return cachedServerSnapshot;
 }
 
 /**
@@ -93,53 +73,28 @@ export function registerPrismSoftSynthesisJobs(
   const nextTotal = totalJobCount();
   if (previousTotal === 0 && nextTotal > 0) {
     expanded = false;
-    lodged = false;
   }
   if (nextTotal === 0) {
     expanded = false;
-    lodged = false;
-    handoffBusy = false;
   }
   publish();
 }
 
 export function setPrismSoftSynthesisExpanded(next: boolean): void {
   if (totalJobCount() <= 0) {
-    if (expanded || lodged) {
+    if (expanded) {
       expanded = false;
-      lodged = false;
-      handoffBusy = false;
       publish();
     }
     return;
   }
   if (expanded === next) return;
   expanded = next;
-  if (!next) lodged = false;
   publish();
 }
 
 export function togglePrismSoftSynthesisExpanded(): void {
   setPrismSoftSynthesisExpanded(!expanded);
-}
-
-export function setPrismSoftSynthesisPosition(
-  next: PrismCompanionPosition,
-): void {
-  position = clampPrismCompanionPosition(next);
-  publish();
-}
-
-export function setPrismSoftSynthesisLodged(next: boolean): void {
-  if (lodged === next) return;
-  lodged = next;
-  publish();
-}
-
-export function setPrismSoftSynthesisHandoffBusy(next: boolean): void {
-  if (handoffBusy === next) return;
-  handoffBusy = next;
-  publish();
 }
 
 export function usePrismSoftSynthesisUi(): PrismSoftSynthesisUiSnapshot {
@@ -154,8 +109,5 @@ export function usePrismSoftSynthesisUi(): PrismSoftSynthesisUiSnapshot {
 export function resetPrismSoftSynthesisUiForTests(): void {
   sourceCounts.clear();
   expanded = false;
-  position = { ...PRISM_SOFT_SYNTHESIS_DEFAULT_POSITION };
-  lodged = false;
-  handoffBusy = false;
   publish();
 }

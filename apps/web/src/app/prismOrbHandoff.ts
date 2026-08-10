@@ -15,6 +15,24 @@ export type PrismOrbHandoffRect = {
   height: number;
 };
 
+export function normalizedPrismOrbPositionForRect(
+  rect: PrismOrbHandoffRect,
+  viewport: { width: number; height: number },
+): { x: number; y: number } | null {
+  if (
+    rect.width < 1 ||
+    rect.height < 1 ||
+    viewport.width < 1 ||
+    viewport.height < 1
+  ) {
+    return null;
+  }
+  return {
+    x: (rect.left + rect.width / 2) / viewport.width,
+    y: (rect.top + rect.height / 2) / viewport.height,
+  };
+}
+
 function prefersReducedMotion(): boolean {
   if (typeof window === "undefined" || !window.matchMedia) return false;
   return window.matchMedia("(prefers-reduced-motion: reduce)").matches;

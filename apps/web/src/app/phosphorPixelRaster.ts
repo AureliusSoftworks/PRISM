@@ -1,5 +1,5 @@
-// The full-avatar buckle uses half the original 2px cell size so its vector
-// identity stays crisp while retaining the same fine phosphor grid as the face.
+// Every full-avatar emitter occupies the same one-pixel logical phosphor grid.
+// The completed raster is scaled to the chassis only after its alpha is fixed.
 export const PHOSPHOR_PIXEL_CELL_SIZE_PX = 1;
 export const PHOSPHOR_PIXEL_ALPHA_THRESHOLD = 92;
 export const PHOSPHOR_FACE_PIXEL_CELL_SIZE_PX = 1;
@@ -8,6 +8,40 @@ export const PHOSPHOR_FACE_PIXEL_MIN_COVERAGE = 0.006;
 export const PHOSPHOR_FACE_PIXEL_OVERSCAN_CELLS = 2;
 export const PHOSPHOR_FACE_SUPERSAMPLE_MIN = 2;
 export const PHOSPHOR_FACE_SUPERSAMPLE_MAX = 4;
+
+/**
+ * Face glyphs, thinking frames, authored Ink, and the lower buckle share this
+ * logical CRT grid. Presentation surfaces may scale the completed screen, but
+ * they must never rasterize a glyph again at the room's display size or its
+ * silhouette and apparent phosphor pitch will change.
+ */
+export const PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX = 128;
+
+export function phosphorCanonicalPresentationScale(
+  renderedScreenSize: number,
+  logicalScreenSize = PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
+): number {
+  if (
+    !Number.isFinite(renderedScreenSize) ||
+    renderedScreenSize <= 0 ||
+    !Number.isFinite(logicalScreenSize) ||
+    logicalScreenSize <= 0
+  ) {
+    return 1;
+  }
+  return renderedScreenSize / logicalScreenSize;
+}
+
+export function phosphorCanonicalRasterDimension(
+  renderedDimension: number,
+  presentationScale: number,
+): number {
+  const safeScale =
+    Number.isFinite(presentationScale) && presentationScale > 0
+      ? presentationScale
+      : 1;
+  return Math.max(1, Math.ceil(renderedDimension / safeScale));
+}
 
 type PhosphorTextBaselineMetrics = {
   fontBoundingBoxAscent?: number;

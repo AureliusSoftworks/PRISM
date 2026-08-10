@@ -199,6 +199,7 @@ export interface SlateAiOperationInput {
   providerName: ProviderName;
   model: string;
   reasoningEffort?: ModelReasoningEffortPreference;
+  turbo?: boolean;
 }
 
 export type SlateShapeWriteConflictReason =
@@ -1009,6 +1010,7 @@ export async function resolveSlateProjectSparkWildcards(
       ...(ai.reasoningEffort
         ? { reasoningEffort: ai.reasoningEffort }
         : {}),
+      ...(ai.turbo ? { turbo: true } : {}),
       temperature: 0.72,
       maxTokens: 900,
       usagePurpose: "prompt_wildcard",
@@ -1186,6 +1188,7 @@ export async function generateSlateShape(
       ...(ai.reasoningEffort
         ? { reasoningEffort: ai.reasoningEffort }
         : {}),
+      ...(ai.turbo ? { turbo: true } : {}),
       temperature: 0.7,
       maxTokens: 3_000,
       jsonMode: true,
@@ -1395,6 +1398,7 @@ export async function generateSlateStructureItemProposal(
       ...(ai.reasoningEffort
         ? { reasoningEffort: ai.reasoningEffort }
         : {}),
+      ...(ai.turbo ? { turbo: true } : {}),
       temperature: 0.82,
       maxTokens: 4_000,
       usagePurpose: "slate_draft",
@@ -1580,6 +1584,7 @@ export async function proposeSlateRevision(
       ...(ai.reasoningEffort
         ? { reasoningEffort: ai.reasoningEffort }
         : {}),
+      ...(ai.turbo ? { turbo: true } : {}),
       temperature: 0.65,
       maxTokens: 5_000,
       usagePurpose: "slate_revision",

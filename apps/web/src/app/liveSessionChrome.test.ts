@@ -6,14 +6,21 @@ import {
   LIVE_SESSION_EFFORT_LABELS,
 } from "./liveSessionChromeLabels.ts";
 
-test("live session routing chip keeps Auto effort when model is Auto", () => {
+test("live session routing chip resolves Auto while preserving provenance", () => {
   assert.deepEqual(
     liveSessionRoutingChipLabels({
       modelIsAuto: true,
       modelLabel: "gpt-4o",
       effort: "high",
+      turbo: true,
     }),
-    { modelLabel: "Auto", effortLabel: "Auto" },
+    {
+      modelLabel: "gpt-4o [auto]",
+      effortLabel: "High",
+      effortKey: "high",
+      automatic: true,
+      turbo: true,
+    },
   );
 });
 
@@ -27,7 +34,35 @@ test("live session routing chip shows concrete model and effort", () => {
     {
       modelLabel: "Claude Sonnet",
       effortLabel: LIVE_SESSION_EFFORT_LABELS.medium,
+      effortKey: "medium",
+      automatic: false,
+      turbo: false,
     },
+  );
+});
+
+test("live session routing chip always resolves a visible effort glyph", () => {
+  assert.deepEqual(
+    liveSessionRoutingChipLabels({
+      modelIsAuto: false,
+      modelLabel: "Default model",
+      effort: undefined,
+    }),
+    {
+      modelLabel: "Default model",
+      effortLabel: "Default",
+      effortKey: "auto",
+      automatic: false,
+      turbo: false,
+    },
+  );
+  assert.equal(
+    liveSessionRoutingChipLabels({
+      modelIsAuto: false,
+      modelLabel: "No reasoning",
+      effort: "none",
+    }).effortKey,
+    "none",
   );
 });
 
@@ -50,6 +85,8 @@ test("live session chrome mounts model chip and theme-aware watermark", () => {
     "utf8",
   );
   assert.match(source, /data-live-session-model-chip="true"/u);
+  assert.match(source, /MODEL_EFFORT_ICON_PATHS\[effortKey\]/u);
+  assert.match(source, /modelChipTurbo/u);
   assert.match(source, /data-live-session-watermark="true"/u);
   assert.match(source, /theme === "light" \? "#000000" : "#ffffff"/u);
   assert.match(css, /opacity:\s*0\.5/u);

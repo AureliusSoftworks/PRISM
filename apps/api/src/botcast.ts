@@ -3,6 +3,7 @@ import type { DatabaseSync } from "node:sqlite";
 import {
   allModelReasoningEffortCursorHash,
   resolveUserModelReasoningEffort,
+  resolveUserModelTurboMode,
 } from "./model-effort-runtime.ts";
 import {
   prepareMessagesWithSimulatedEffort,
@@ -103,6 +104,7 @@ import {
   BOTCAST_IMMERSIVE_VOICE_TAGS,
   BOTCAST_SESSION_DURATION_MINUTES_MAX,
   BOTCAST_SESSION_DURATION_MINUTES_MIN,
+  BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
   BOTCAST_DEFAULT_STUDIO_LAYOUT,
   BOTCAST_DEFAULT_CAMERA_FRAMING,
   BOTCAST_DEFAULT_STUDIO_GLOW_TUNING,
@@ -286,9 +288,16 @@ import {
 } from "./bot-identity-shapeshift.ts";
 import { resolveBotFalseNameStateV1 } from "./bot-false-name.ts";
 import {
+  persistBotPairNarrativeMemory,
+  retrieveBotPairNarrativeMemories,
   retrieveRecentBotMemoriesForStarter,
   retrieveRecentMemoriesForStarter,
 } from "./memory.ts";
+import {
+  readBotRelationship,
+  upsertBotRelationship,
+  type BotRelationshipSnapshot,
+} from "./db.ts";
 import {
   defaultModelIdForProvider,
   getAuxiliaryProvider,
@@ -834,6 +843,8 @@ export interface BotcastGenerationOptions {
   responseMode?: BotcastEpisodeResponseMode;
   openAiApiKey?: string;
   anthropicApiKey?: string;
+  /** Decrypted only in-process; enables encrypted pair recall/persistence. */
+  userKey?: Buffer;
   secondaryOllamaHost?: string | null;
   prismDefaultLlmModel?: string | null;
   preferredLocalModel?: string | null;
@@ -979,6 +990,39 @@ export function botcastPreparedTurnCursor(
     episode.guestKind === "bot"
       ? loadBotProfile(db, userId, episode.guestBotId)
       : null;
+  const pairHistoryState = guest
+    ? {
+        memories: db.prepare(
+          `SELECT id, bot_id, target_bot_id, created_at
+             FROM memories
+            WHERE user_id = ?
+              AND ((bot_id = ? AND target_bot_id = ?)
+                OR (bot_id = ? AND target_bot_id = ?))
+            ORDER BY created_at, id`,
+        ).all(
+          userId,
+          episode.hostBotId,
+          episode.guestBotId,
+          episode.guestBotId,
+          episode.hostBotId,
+        ),
+        relationships: db.prepare(
+          `SELECT source_bot_id, target_bot_id, score, band, mood_key, trend,
+                  last_reason, recent_reasons, updated_at
+             FROM bot_relationships
+            WHERE user_id = ?
+              AND ((source_bot_id = ? AND target_bot_id = ?)
+                OR (source_bot_id = ? AND target_bot_id = ?))
+            ORDER BY source_bot_id, target_bot_id`,
+        ).all(
+          userId,
+          episode.hostBotId,
+          episode.guestBotId,
+          episode.guestBotId,
+          episode.hostBotId,
+        ),
+      }
+    : null;
   const nextRole = botcastNextSpeakerRole({
     messages: episode.messages,
     segment: episode.segment,
@@ -1006,6 +1050,7 @@ export function botcastPreparedTurnCursor(
     promptStateHash: preparedTurnHash({
       episode,
       show,
+      pairHistoryState,
       effortStateHash: allModelReasoningEffortCursorHash(db, userId),
     }),
   };
@@ -8096,6 +8141,332 @@ export interface BotcastPromptBuildArgs {
   /** Active believed-name alias for the speaking holder (sticky or freshly reshuffled). */
   activeFalseNameState?: BotFalseNameStateV1 | null;
   falseNameJustChanged?: boolean;
+  /** Exact directed, audience-grounded history for this speaker and peer. */
+  priorPairHistory?: BotcastPairHistoryContext | null;
+}
+
+export interface BotcastPairHistoryContext {
+  sourceBotId: string;
+  targetBotId: string;
+  narrativeMemories: string[];
+  relationshipTone: "strained" | "guarded" | "neutral" | "warm";
+  relationshipReason: string | null;
+}
+
+function botcastRelationshipTone(
+  relationship: BotRelationshipSnapshot | null,
+): BotcastPairHistoryContext["relationshipTone"] {
+  if (!relationship) return "neutral";
+  if (relationship.moodKey === "strained" || relationship.score <= 24) {
+    return "strained";
+  }
+  if (relationship.moodKey === "guarded" || relationship.score <= 40) {
+    return "guarded";
+  }
+  if (relationship.band === "warm") return "warm";
+  return "neutral";
+}
+
+/** Loads only the requested source -> target edge; unrelated pairs cannot leak. */
+export function loadBotcastPairHistoryContext(args: {
+  db: DatabaseSync;
+  userId: string;
+  userKey: Buffer;
+  sourceBotId: string;
+  targetBotId: string;
+  limit?: number;
+}): BotcastPairHistoryContext | null {
+  const narrativeMemories = retrieveBotPairNarrativeMemories({
+    ...args,
+    limit: args.limit ?? 4,
+  }).map((memory) => memory.text);
+  const relationship = readBotRelationship(
+    args.db,
+    args.userId,
+    args.sourceBotId,
+    args.targetBotId,
+  );
+  if (narrativeMemories.length === 0 && !relationship) return null;
+  return {
+    sourceBotId: args.sourceBotId,
+    targetBotId: args.targetBotId,
+    narrativeMemories,
+    relationshipTone: botcastRelationshipTone(relationship),
+    relationshipReason: relationship?.lastReason ?? null,
+  };
+}
+
+function botcastPairInterruptionCount(args: {
+  episode: Pick<BotcastEpisode, "events">;
+  interruptedBotId: string;
+  interrupterBotId: string;
+}): number {
+  return args.episode.events.filter((event) => {
+    if (event.kind !== "utterance") return false;
+    const outcome = event.payload.powerOutcome;
+    if (!outcome || typeof outcome !== "object" || Array.isArray(outcome)) {
+      return false;
+    }
+    const row = outcome as Record<string, unknown>;
+    return (
+      row.effect === "interruption" &&
+      row.interruptingBotId === args.interrupterBotId &&
+      (row.interruptedBotId === undefined ||
+        row.interruptedBotId === args.interruptedBotId)
+    );
+  }).length;
+}
+
+function botcastPairNarrative(args: {
+  episode: Pick<BotcastEpisode, "topic" | "events">;
+  sourceBotId: string;
+  sourceName: string;
+  targetBotId: string;
+  targetName: string;
+}): string {
+  const departure = args.episode.events.find(
+    (event) =>
+      event.kind === "departure" &&
+      event.payload.botId === args.sourceBotId,
+  );
+  if (departure?.payload.cause === "repeated_power_interruptions") {
+    return `On Signal, ${args.sourceName} left a completed episode with ${args.targetName} about "${args.episode.topic}" after repeated interruptions by ${args.targetName}.`;
+  }
+  const targetDeparture = args.episode.events.find(
+    (event) =>
+      event.kind === "departure" &&
+      event.payload.botId === args.targetBotId,
+  );
+  if (targetDeparture?.payload.cause === "repeated_power_interruptions") {
+    return `On Signal, ${args.sourceName} completed an episode with ${args.targetName} about "${args.episode.topic}"; ${args.targetName} left after repeated interruptions from ${args.sourceName}.`;
+  }
+  const interruptionCount = botcastPairInterruptionCount({
+    episode: args.episode,
+    interruptedBotId: args.sourceBotId,
+    interrupterBotId: args.targetBotId,
+  });
+  return interruptionCount >= 2
+    ? `On Signal, ${args.sourceName} completed an episode with ${args.targetName} about "${args.episode.topic}" after ${args.targetName} repeatedly interrupted ${args.sourceName}.`
+    : `${args.sourceName} and ${args.targetName} completed a Signal episode together about "${args.episode.topic}".`;
+}
+
+function botcastPairRelationshipUpdate(args: {
+  db: DatabaseSync;
+  userId: string;
+  episode: Pick<BotcastEpisode, "events" | "topic">;
+  sourceBotId: string;
+  sourceName: string;
+  targetBotId: string;
+  targetName: string;
+  updatedAt: string;
+}): void {
+  const existing = readBotRelationship(
+    args.db,
+    args.userId,
+    args.sourceBotId,
+    args.targetBotId,
+  );
+  const previousScore = existing?.score ?? 50;
+  const irritation = readDirectionalIrritationIntensity({
+    edges: botcastDirectionalIrritationEdgesFromEvents(args.episode.events),
+    subjectBotId: args.sourceBotId,
+    targetBotId: args.targetBotId,
+  });
+  const departure = args.episode.events.find(
+    (event) =>
+      event.kind === "departure" && event.payload.botId === args.sourceBotId,
+  );
+  const targetDeparture = args.episode.events.find(
+    (event) =>
+      event.kind === "departure" && event.payload.botId === args.targetBotId,
+  );
+  const sourceWalkedAfterInterruptions =
+    departure?.payload.cause === "repeated_power_interruptions";
+  const targetWalkedAfterInterruptions =
+    targetDeparture?.payload.cause === "repeated_power_interruptions";
+  let nextScore = previousScore;
+  if (sourceWalkedAfterInterruptions && irritation >= DIRECTIONAL_IRRITATION_MAX) {
+    nextScore = Math.min(previousScore - 30, 18);
+  } else if (irritation >= DIRECTIONAL_IRRITATION_MAX) {
+    nextScore = previousScore - 24;
+  } else if (irritation >= 0.75) {
+    nextScore = previousScore - 16;
+  } else if (irritation >= 0.4) {
+    nextScore = previousScore - 8;
+  } else if (targetWalkedAfterInterruptions) {
+    // The interrupter's perspective can stay milder than the bot who left.
+    nextScore = previousScore - 4;
+  }
+  const reason = sourceWalkedAfterInterruptions
+    ? `${args.sourceName} left a completed Signal episode after repeated interruptions by ${args.targetName}.`
+    : targetWalkedAfterInterruptions
+      ? `${args.targetName} left the completed Signal episode after repeated interruptions from ${args.sourceName}.`
+      : `${args.sourceName} and ${args.targetName} completed a Signal episode about "${args.episode.topic}".`;
+  upsertBotRelationship({
+    db: args.db,
+    userId: args.userId,
+    sourceBotId: args.sourceBotId,
+    targetBotId: args.targetBotId,
+    score: nextScore,
+    trend: nextScore < previousScore ? "down" : "steady",
+    lastReason: reason,
+    recentReasons: [reason, ...(existing?.recentReasons ?? [])],
+    updatedAt: args.updatedAt,
+  });
+}
+
+/**
+ * Commits both encrypted memories and both directed relationship edges once.
+ * The fallback narrative is entirely deterministic and uses only the saved,
+ * audience-visible episode transcript/events; no provider or embedding call runs.
+ */
+export function persistCompletedBotcastPairHistory(args: {
+  db: DatabaseSync;
+  userId: string;
+  episodeId: string;
+  userKey: Buffer;
+}): boolean {
+  const episode = getBotcastEpisode(args.db, args.userId, args.episodeId);
+  if (
+    episode.status !== "completed" ||
+    episode.guestKind !== "bot" ||
+    episode.hostBotId === episode.guestBotId ||
+    !episode.events.some((event) => event.kind === "episode_completed") ||
+    episode.events.some(
+      (event) =>
+        event.kind === "cut_away" && event.payload.reason === "producer_cut",
+    )
+  ) {
+    return false;
+  }
+  const snapshot = botcastEpisodePowerSnapshot(episode);
+  const hostName =
+    snapshot?.hostIdentity?.name ??
+    loadBotProfile(args.db, args.userId, episode.hostBotId).name;
+  const guestName =
+    snapshot?.guestIdentity?.name ??
+    loadBotProfile(args.db, args.userId, episode.guestBotId).name;
+  const audienceMessageIds = episode.messages
+    .filter(botcastMessageIsAudibleToAudienceV1)
+    .map((message) => message.id);
+  const persistedAt = episode.completedAt ?? new Date().toISOString();
+
+  args.db.exec("BEGIN IMMEDIATE");
+  try {
+    const claimed = args.db.prepare(
+      `UPDATE botcast_episodes
+          SET pair_history_persisted_at = ?
+        WHERE id = ? AND user_id = ? AND status = 'completed'
+          AND pair_history_persisted_at IS NULL`,
+    ).run(persistedAt, episode.id, args.userId);
+    if (Number(claimed.changes ?? 0) === 0) {
+      args.db.exec("ROLLBACK");
+      return false;
+    }
+    for (const pair of [
+      {
+        sourceBotId: episode.hostBotId,
+        sourceName: hostName,
+        targetBotId: episode.guestBotId,
+        targetName: guestName,
+      },
+      {
+        sourceBotId: episode.guestBotId,
+        sourceName: guestName,
+        targetBotId: episode.hostBotId,
+        targetName: hostName,
+      },
+    ]) {
+      persistBotPairNarrativeMemory({
+        db: args.db,
+        userId: args.userId,
+        userKey: args.userKey,
+        ...pair,
+        text: botcastPairNarrative({ episode, ...pair }),
+        sourceMessageIds: audienceMessageIds,
+        createdAt: persistedAt,
+      });
+      botcastPairRelationshipUpdate({
+        db: args.db,
+        userId: args.userId,
+        episode,
+        ...pair,
+        updatedAt: persistedAt,
+      });
+    }
+    args.db.exec("COMMIT");
+    return true;
+  } catch (error) {
+    args.db.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+/**
+ * Lazily upgrades completed archives created before pair persistence existed.
+ * A decrypted user key is required, so this runs only inside authenticated
+ * memory reads or Signal turns rather than during the schema migration.
+ */
+export function backfillMissingCompletedBotcastPairHistory(args: {
+  db: DatabaseSync;
+  userId: string;
+  userKey: Buffer;
+  participantBotId?: string;
+  pairBotIds?: readonly [string, string];
+  limit?: number;
+}): number {
+  const participantBotId = args.participantBotId?.trim() || null;
+  const pairBotIds = args.pairBotIds
+    ?.map((botId) => botId.trim())
+    .filter(Boolean) as [string, string] | undefined;
+  const filters = [
+    "episode.user_id = ?",
+    "episode.status = 'completed'",
+    "episode.guest_kind = 'bot'",
+    "episode.host_bot_id != episode.guest_bot_id",
+    "episode.pair_history_persisted_at IS NULL",
+    "EXISTS (SELECT 1 FROM bots AS host WHERE host.user_id = episode.user_id AND host.id = episode.host_bot_id)",
+    "EXISTS (SELECT 1 FROM bots AS guest WHERE guest.user_id = episode.user_id AND guest.id = episode.guest_bot_id)",
+    "EXISTS (SELECT 1 FROM botcast_events AS completed WHERE completed.user_id = episode.user_id AND completed.episode_id = episode.id AND completed.kind = 'episode_completed')",
+    "NOT EXISTS (SELECT 1 FROM botcast_events AS cut WHERE cut.user_id = episode.user_id AND cut.episode_id = episode.id AND cut.kind = 'cut_away' AND json_extract(cut.payload_json, '$.reason') = 'producer_cut')",
+  ];
+  const values: Array<string | number> = [args.userId];
+  if (pairBotIds?.length === 2) {
+    filters.push(
+      "((episode.host_bot_id = ? AND episode.guest_bot_id = ?) OR (episode.host_bot_id = ? AND episode.guest_bot_id = ?))",
+    );
+    values.push(
+      pairBotIds[0],
+      pairBotIds[1],
+      pairBotIds[1],
+      pairBotIds[0],
+    );
+  } else if (participantBotId) {
+    filters.push("(episode.host_bot_id = ? OR episode.guest_bot_id = ?)");
+    values.push(participantBotId, participantBotId);
+  }
+  const limit = Math.max(1, Math.min(500, Math.floor(args.limit ?? 100)));
+  const rows = args.db.prepare(
+    `SELECT episode.id
+       FROM botcast_episodes AS episode
+      WHERE ${filters.join(" AND ")}
+      ORDER BY COALESCE(episode.completed_at, episode.updated_at), episode.id
+      LIMIT ?`,
+  ).all(...values, limit) as Array<{ id: string }>;
+  let persisted = 0;
+  for (const row of rows) {
+    if (
+      persistCompletedBotcastPairHistory({
+        db: args.db,
+        userId: args.userId,
+        episodeId: row.id,
+        userKey: args.userKey,
+      })
+    ) {
+      persisted += 1;
+    }
+  }
+  return persisted;
 }
 
 /** Latest persisted mirror target per holder, including explicit closing resets. */
@@ -8805,8 +9176,9 @@ function botcastStripPrematureHostSignoff(
 }
 
 /**
- * Builds a prompt from persistent show configuration plus the current episode only.
- * Deliberately accepts no archive, relationship, memory, synopsis, or prior-episode input.
+ * Builds a prompt from persistent show configuration, the current episode, and
+ * an explicitly pair-scoped Signal history when supplied. Broad archives,
+ * global memories, and unrelated relationship state remain excluded.
  */
 export function buildBotcastSpeakerPrompt(
   args: BotcastPromptBuildArgs,
@@ -8840,6 +9212,29 @@ export function buildBotcastSpeakerPrompt(
   const speakerEternallyIntroduces = botPowerEternallyIntroducesV1(
     speaker.powers,
   );
+  const priorPairHistory =
+    !speakerEternallyIntroduces &&
+    args.priorPairHistory?.sourceBotId === speaker.id &&
+    args.priorPairHistory.targetBotId === peer.id &&
+    args.priorPairHistory.narrativeMemories.length > 0
+      ? args.priorPairHistory
+      : null;
+  const anthologyRule = priorPairHistory
+    ? `This remains a fictional anthology, but the supplied prior Signal history is grounded audience-visible continuity for these exact participants. You may recognize ${peer.name} and refer naturally to only those supplied facts. Never invent another meeting, episode count, archive detail, or shared event.`
+    : "This is an anthology. Treat the host and guest as meeting for the first time. Never mention prior appearances, episode numbers, archives, memories, relationship history, or earlier Signal events.";
+  const personaHistoryRule = priorPairHistory
+    ? "Persona lore may shape beliefs, knowledge, and voice, but it is not additional shared participant history. Treat only the supplied prior Signal facts as shared history."
+    : "Persona lore may shape beliefs, knowledge, and voice, but it is not shared participant history. Do not imply that you two previously met, investigated, hunted, tested, confronted, or already learned secrets about each other before this episode.";
+  const priorPairHistoryRule = priorPairHistory
+    ? [
+        `Grounded prior Signal history with ${peer.name}:`,
+        ...priorPairHistory.narrativeMemories.map((memory) => `- ${memory}`),
+        ...(priorPairHistory.relationshipReason
+          ? [`Carried interpersonal stance: ${priorPairHistory.relationshipTone}. Public basis: ${priorPairHistory.relationshipReason}`]
+          : []),
+        "Use this as quiet continuity, not a required callback. Never mention databases, stored memories, relationship machinery, scores, prompts, or hidden state.",
+      ].join("\n")
+    : null;
   const silentPeerTurnCount = !speakerEternallyIntroduces && botPowerIsMutedV1(peer.powers)
     ? botcastTrailingSilentPeerTurnCount({
         messages: args.episode.messages,
@@ -9416,8 +9811,8 @@ export function buildBotcastSpeakerPrompt(
       role: "system",
       content: withPrismRuntimeGrounding([
         `You are ${effectivePersonaName} in a fictional, non-canonical Signal episode.`,
-        "This is an anthology. Treat the host and guest as meeting for the first time. Never mention prior appearances, episode numbers, archives, memories, relationship history, or earlier Signal events.",
-        "Persona lore may shape beliefs, knowledge, and voice, but it is not shared participant history. Do not imply that you two previously met, investigated, hunted, tested, confronted, or already learned secrets about each other before this episode.",
+        anthologyRule,
+        personaHistoryRule,
         "A persona may draw on a real person, but this is a clearly fictional portrayal inside Signal. Do not issue a provider-style refusal merely because a named real person is booked. Do not claim to be the real person or make deceptive real-world claims; stay in the fictional episode and answer the stated subject with ordinary in-character substance.",
         args.speakerRole === "host" && privateProducerBrief
           ? args.episode.guestKind === "producer"
@@ -9436,6 +9831,7 @@ export function buildBotcastSpeakerPrompt(
               : "Keep this turn conversational and brisk: one to three concise sentences, usually 12 to 45 spoken words.",
         immersiveVoiceRule,
         `Persona:\n${effectivePersonaPrompt}`,
+        ...(priorPairHistoryRule ? [priorPairHistoryRule] : []),
         ...(identityMirrorPrompt ? [identityMirrorPrompt] : []),
         ...(identityShapeshiftPrompt ? [identityShapeshiftPrompt] : []),
         ...(falseNamePrompt ? [falseNamePrompt] : []),
@@ -10013,6 +10409,7 @@ function sanitizeUtteranceWithRepair(
   speakerRole: BotcastSpeakerRole,
   allowLeadingStageAction = false,
   rejectPeerIdentityClaim = false,
+  allowGroundedPriorHistory = false,
 ): { content: string; repairReason: BotcastUtteranceRepairReason | null } {
   const repaired = (repairReason: BotcastUtteranceRepairReason) => ({
     content: fallback,
@@ -10206,6 +10603,7 @@ function sanitizeUtterance(
   speakerRole: BotcastSpeakerRole,
   allowLeadingStageAction = false,
   rejectPeerIdentityClaim = false,
+  allowGroundedPriorHistory = false,
 ): string {
   return sanitizeUtteranceWithRepair(
     raw,
@@ -10215,6 +10613,7 @@ function sanitizeUtterance(
     speakerRole,
     allowLeadingStageAction,
     rejectPeerIdentityClaim,
+    allowGroundedPriorHistory,
   ).content;
 }
 
@@ -10226,8 +10625,23 @@ const BOTCAST_SIGNAL_HISTORY_CLAIM_PATTERNS = [
   /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+parts?\s+in\b[^.!?]{0,80}\b(?:show|episode|lesson)\b/iu,
 ] as const;
 
+const BOTCAST_UNGROUNDED_SIGNAL_HISTORY_DETAIL_PATTERNS = [
+  /\b(?:our|this|the)\s+(?:second|third|fourth|fifth|sixth|seventh|eighth|ninth|tenth|\d+(?:st|nd|rd|th))\s+(?:signal\s+)?(?:episode|appearance|interview)\b/iu,
+  /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+(?:episodes?|installments?)\s+(?:in|ago|later)\b/iu,
+  /\b(?:one|two|three|four|five|six|seven|eight|nine|ten|\d+)\s+parts?\s+in\b[^.!?]{0,80}\b(?:show|episode|lesson)\b/iu,
+  /\b(?:the|our)\s+(?:signal\s+)?archives?\b|\barchived\s+(?:episode|interview|recording)\b/iu,
+] as const;
+
 /** Detects invented continuity with Signal episodes outside the current anthology meeting. */
-export function botcastUtteranceClaimsSignalHistory(content: string): boolean {
+export function botcastUtteranceClaimsSignalHistory(
+  content: string,
+  groundedPriorHistory = false,
+): boolean {
+  if (groundedPriorHistory) {
+    return BOTCAST_UNGROUNDED_SIGNAL_HISTORY_DETAIL_PATTERNS.some((pattern) =>
+      pattern.test(content),
+    );
+  }
   return BOTCAST_SIGNAL_HISTORY_CLAIM_PATTERNS.some((pattern) =>
     pattern.test(content),
   );
@@ -10244,6 +10658,7 @@ function validateBotcastAutoSpeakerUtterance(input: {
   requireFreshContact?: boolean;
   requireAddressedInsult?: boolean;
   rejectGibberishDraft?: boolean;
+  groundedPriorHistory?: boolean;
 }):
   | { ok: true; value: string }
   | { ok: false; reason: "empty" | "refusal" | "invalid_output" } {
@@ -10257,11 +10672,15 @@ function validateBotcastAutoSpeakerUtterance(input: {
     input.speakerRole,
     false,
     input.rejectPeerIdentityClaim,
+    input.groundedPriorHistory,
   );
   const spokenContent = extractBotcastVoicePerformance(sanitized, false).content;
   if (
     !spokenContent ||
-    botcastUtteranceClaimsSignalHistory(spokenContent) ||
+    botcastUtteranceClaimsSignalHistory(
+      spokenContent,
+      input.groundedPriorHistory,
+    ) ||
     (input.rejectGibberishDraft &&
       botPowerIntendedSpeechLooksGibberishV1(spokenContent)) ||
     (input.hostClosing &&
@@ -11003,7 +11422,7 @@ function completeEpisode(
   episode: BotcastEpisode,
   outcome: BotcastEpisodeOutcome,
   now: string,
-  options: { forceFinalHostBeat?: boolean } = {},
+  options: { forceFinalHostBeat?: boolean; userKey?: Buffer } = {},
 ): void {
   episode = ensureBotcastFinalHostBeat(
     db,
@@ -11034,6 +11453,14 @@ function completeEpisode(
     { outcome, runtimeMs },
     now,
   );
+  if (options.userKey) {
+    persistCompletedBotcastPairHistory({
+      db,
+      userId,
+      episodeId: episode.id,
+      userKey: options.userKey,
+    });
+  }
 }
 
 function closeActiveBotcastModelWarmupHold(
@@ -11191,10 +11618,21 @@ export function forceEndBotcastEpisode(
   db: DatabaseSync,
   userId: string,
   episodeId: string,
-  options: { forceFinalHostBeat?: boolean } = {},
+  options: { forceFinalHostBeat?: boolean; userKey?: Buffer } = {},
 ): BotcastEpisode {
   let episode = getBotcastEpisode(db, userId, episodeId);
-  if (episode.status !== "live") return episode;
+  if (episode.status !== "live") {
+    if (episode.status === "completed" && options.userKey) {
+      persistCompletedBotcastPairHistory({
+        db,
+        userId,
+        episodeId,
+        userKey: options.userKey,
+      });
+      episode = getBotcastEpisode(db, userId, episodeId);
+    }
+    return episode;
+  }
   episode = beginBotcastProducerCut(db, userId, episodeId).episode;
   const now = new Date().toISOString();
   completeEpisode(
@@ -11357,10 +11795,20 @@ function applyBotcastProducerCutInterruption(
       "A producer cut must preserve an audience-heard prefix of the current line.",
     );
   }
+  const interruptedSpeakerPowers =
+    latest.speakerRole === "host"
+      ? botcastEpisodePowerSnapshotForRole(episode, "host") ??
+        loadBotProfile(db, userId, episode.hostBotId).powers
+      : episode.guestKind === "bot"
+        ? botcastEpisodePowerSnapshotForRole(episode, "guest") ??
+          loadBotProfile(db, userId, episode.guestBotId).powers
+        : [];
   const interruptedSpeakerCue = interruption.interruptedSpeakerCue
-    ? normalizeBotCrosstalkInterruptedSpeakerCue(
-        interruption.interruptedSpeakerCue,
-      )
+    ? botPowerEchoesAddressedSpeechV1(interruptedSpeakerPowers)
+      ? BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE
+      : normalizeBotCrosstalkInterruptedSpeakerCue(
+          interruption.interruptedSpeakerCue,
+        )
     : undefined;
   if (interruption.interruptedSpeakerCue && !interruptedSpeakerCue) {
     throw new Error("Signal producer cut interrupted-speaker cue is invalid.");
@@ -11493,6 +11941,7 @@ export async function endBotcastEpisodeOnProducerCut(
   if (options.deterministic) {
     const completedEpisode = forceEndBotcastEpisode(db, userId, episodeId, {
       forceFinalHostBeat: true,
+      ...(generation.userKey ? { userKey: generation.userKey } : {}),
     });
     const emergencyHostMessageId = completedEpisode.events
       .slice()
@@ -11543,6 +11992,7 @@ export async function endBotcastEpisodeOnProducerCut(
         episode,
         botcastEpisodeDepartureOutcome(episode.events) ?? "completed",
         now,
+        generation.userKey ? { userKey: generation.userKey } : {},
       );
     }
     const completedEpisode = getBotcastEpisode(db, userId, episodeId);
@@ -11726,11 +12176,27 @@ export async function advanceBotcastEpisode(
     throw new Error("A cancelled Signal episode cannot be continued.");
   }
   if (episode.status === "completed") {
+    if (generation.userKey) {
+      persistCompletedBotcastPairHistory({
+        db,
+        userId,
+        episodeId: episode.id,
+        userKey: generation.userKey,
+      });
+    }
     await ensureBotcastEpisodePersonaReview(db, userId, episode.id, generation);
     return {
       episode: getBotcastEpisode(db, userId, episode.id),
       message: null,
     };
+  }
+  if (generation.userKey && episode.guestKind === "bot") {
+    backfillMissingCompletedBotcastPairHistory({
+      db,
+      userId,
+      userKey: generation.userKey,
+      pairBotIds: [episode.hostBotId, episode.guestBotId],
+    });
   }
   if (
     input.guestThinkingMs !== undefined &&
@@ -12222,6 +12688,7 @@ export async function advanceBotcastEpisode(
       episode,
       guestAlreadyDeparted ? "guest_departed" : "completed",
       now,
+      generation.userKey ? { userKey: generation.userKey } : {},
     );
     await ensureBotcastEpisodePersonaReview(db, userId, episodeId, generation);
     return { episode: getBotcastEpisode(db, userId, episodeId), message: null };
@@ -12570,6 +13037,16 @@ export async function advanceBotcastEpisode(
   const activeFalseNameState = falseNameResolution.activeState;
   const falseNameJustChanged = falseNameResolution.justChanged;
   const pendingFalseNameState = falseNameResolution.pendingState;
+  const priorPairHistory =
+    generation.userKey && episode.guestKind === "bot"
+      ? loadBotcastPairHistoryContext({
+          db,
+          userId,
+          userKey: generation.userKey,
+          sourceBotId: speaker.id,
+          targetBotId: peer.id,
+        })
+      : null;
   const promptArgs: BotcastPromptBuildArgs = {
     show,
     episode,
@@ -12600,6 +13077,7 @@ export async function advanceBotcastEpisode(
     identityShapeshiftJustChanged,
     activeFalseNameState,
     falseNameJustChanged,
+    priorPairHistory,
   };
   const basePrompt = firstHostOpening
     ? buildBotcastOpeningIntroPrompt(promptArgs)
@@ -12670,7 +13148,9 @@ export async function advanceBotcastEpisode(
       ? `Write a completely new final sign-off in ${speaker.name}'s established persona. Use two or three short sentences, 16 to 48 words: one sharp topic-specific observation, then a distinct closing beat. ${episode.guestPresenceMode === "audience_only" ? "Thank the audience for watching or listening." : `Thank ${peerAddressName} by name for joining and thank the audience for watching or listening. Both thanks are mandatory.`} It must sound like this host, not a canned suffix. Do not explain a lesson, address "listeners at home," prescribe reflection, use ceremonial farewell language, or explain or reinterpret persona lore or catchphrases.`
       : `Write a completely new ${speakerRole} line in ${speaker.name}'s persona and answer the latest other-speaker line directly.`,
     "Finish every sentence and keep the host as interviewer and the guest as interviewee.",
-    "This is one anthology meeting. Ignore sequel numbering in the topic and do not claim earlier episodes, appearances, shared lessons, or prior Signal history.",
+    priorPairHistory
+      ? "Use only the supplied grounded prior Signal history. Do not invent another appearance, shared lesson, episode count, or archive detail."
+      : "This is one anthology meeting. Ignore sequel numbering in the topic and do not claim earlier episodes, appearances, shared lessons, or prior Signal history.",
     ...(speakerMumblesSpeech
       ? [
           botPowerSpeechObfuscationAuthoringCueV1(),
@@ -12715,6 +13195,11 @@ export async function advanceBotcastEpisode(
     });
   const generationOptions = {
     temperature: Math.min(1.15, Math.max(0.2, speaker.temperature)),
+    turbo: resolveUserModelTurboMode(db, {
+      userId,
+      provider: selected.providerName,
+      modelId: selectedModelId,
+    }),
     ...(primaryReasoningEffort
       ? { reasoningEffort: primaryReasoningEffort }
       : {}),
@@ -12818,6 +13303,11 @@ export async function advanceBotcastEpisode(
               ...generationOptions,
               model: attempt.model,
               reasoningEffort: attemptReasoningEffort,
+              turbo: resolveUserModelTurboMode(db, {
+                userId,
+                provider: attempt.provider,
+                modelId: attempt.model,
+              }),
               maxTokens: botcastSpeakerMaxTokensForModel(
                 speaker.maxTokens,
                 attempt.provider,
@@ -12885,6 +13375,7 @@ export async function advanceBotcastEpisode(
                   requireFreshContact: speakerEternallyIntroduces,
                   requireAddressedInsult: speakerRequiresAddressedInsult,
                   rejectGibberishDraft: speakerMumblesSpeech,
+                  groundedPriorHistory: Boolean(priorPairHistory),
                 }),
             }),
       });
@@ -12965,6 +13456,7 @@ export async function advanceBotcastEpisode(
                 requireFreshContact: speakerEternallyIntroduces,
                 requireAddressedInsult: speakerRequiresAddressedInsult,
                 rejectGibberishDraft: speakerMumblesSpeech,
+                groundedPriorHistory: Boolean(priorPairHistory),
               }),
             validationRetryInstruction,
           });
@@ -13096,6 +13588,7 @@ export async function advanceBotcastEpisode(
               rejectPeerIdentityClaim: speakerEternallyIntroduces,
               requireFreshContact: speakerEternallyIntroduces,
               rejectGibberishDraft: speakerMumblesSpeech,
+              groundedPriorHistory: Boolean(priorPairHistory),
             }).ok
           ) {
             const retry = await runSignalLocalTurn({
@@ -13356,6 +13849,7 @@ export async function advanceBotcastEpisode(
     speakerRole,
     true,
     speakerEternallyIntroduces,
+    Boolean(priorPairHistory),
   );
   const generatedHostClosingRepairReason =
     hostClosingTurn && !sanitizedGeneratedUtterance.repairReason
@@ -14309,6 +14803,17 @@ export async function advanceBotcastEpisode(
         })
       : null;
   if (
+    speakerEchoesAddressedSpeech &&
+    listenerReactionCandidate?.interjectionAttempt &&
+    listenerReactionCandidate.floorOutcome === "yield" &&
+    listenerReactionCandidate.interruptedSpeakerCue
+  ) {
+    listenerReactionCandidate = {
+      ...listenerReactionCandidate,
+      interruptedSpeakerCue: BOT_CROSSTALK_SPEECH_COPY_FOLLOW_ON_CUE,
+    };
+  }
+  if (
     listenerReactionCandidate?.interjectionAttempt &&
     !botPowerIsMutedV1(listener.powers) &&
     !powerInterruptionAttemptProtected
@@ -14785,6 +15290,7 @@ export async function advanceBotcastEpisode(
       episode,
       botcastEpisodeDepartureOutcome(episode.events) ?? "completed",
       now,
+      generation.userKey ? { userKey: generation.userKey } : {},
     );
     await ensureBotcastEpisodePersonaReview(db, userId, episode.id, generation);
     episode = getBotcastEpisode(db, userId, episode.id);

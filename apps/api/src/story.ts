@@ -117,6 +117,7 @@ export interface StoryGenerationInput {
   /** Resolved theme captured when this generated episode is authored. */
   theme?: BotPowerResolvedThemeV1;
   reasoningEffort?: ReasoningEffort;
+  turbo?: boolean;
 }
 
 interface StorySessionRow {
@@ -1604,6 +1605,7 @@ export async function repairStoryQuietContextDependencies(args: {
   provider: LlmProvider;
   model: string;
   reasoningEffort?: ReasoningEffort;
+  turbo?: boolean;
   signal?: AbortSignal;
 }): Promise<StoryEpisodeManifest> {
   const botsById = new Map(args.bots.map((bot) => [bot.id, bot] as const));
@@ -1649,6 +1651,7 @@ export async function repairStoryQuietContextDependencies(args: {
       maxTokens: Math.min(900, Math.max(220, affected.length * 180)),
       temperature: 0.2,
       ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}),
+      ...(args.turbo ? { turbo: true } : {}),
       ...(args.signal ? { signal: args.signal } : {}),
     },
   );
@@ -2212,6 +2215,7 @@ function storyGenerationOptions(args: StoryGenerationInput): GenerateOptions {
     return {
       model: args.model,
       ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}),
+      ...(args.turbo ? { turbo: true } : {}),
       temperature: Math.max(0.25, Math.min(0.55, avgTemperature)),
       maxTokens: 2800,
       jsonMode: true,
@@ -2223,6 +2227,7 @@ function storyGenerationOptions(args: StoryGenerationInput): GenerateOptions {
   return {
     model: args.model,
     ...(args.reasoningEffort ? { reasoningEffort: args.reasoningEffort } : {}),
+    ...(args.turbo ? { turbo: true } : {}),
     temperature: Math.max(0.35, Math.min(0.85, avgTemperature)),
     maxTokens: 5000,
     jsonMode: true,
@@ -2358,6 +2363,7 @@ export async function generateStorySessionEpisode(
             ...(args.reasoningEffort
               ? { reasoningEffort: args.reasoningEffort }
               : {}),
+            ...(args.turbo ? { turbo: true } : {}),
             signal,
           });
         } catch (error) {

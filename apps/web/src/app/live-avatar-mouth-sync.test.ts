@@ -130,14 +130,14 @@ describe("live avatar mouth synchronization", () => {
       pageSource.indexOf("const zenLiveBotRevealMouthShape ="),
       pageSource.indexOf("const zenLiveBotUtteranceActive"),
     );
-    assert.match(zenMouth, /speechTimeline\?\.phase === "playing"/u);
+    assert.match(zenMouth, /speechTimeline\?\.phase !== "playing"/u);
     assert.match(zenMouth, /elapsedMs: speechTimeline\.elapsedMs/u);
     assert.match(zenMouth, /alignment: speechTimeline\.alignment/u);
-    assert.match(zenMouth, /settings\?\.voiceMode === "bottish"/u);
+    assert.match(zenMouth, /activeChatVoiceMode === "bottish"/u);
     assert.match(zenMouth, /bottishMouthShapeAtAlignedElapsedMs\(\{/u);
     assert.match(
       zenMouth,
-      /playingMouthShape === "closed"[\s\S]{0,40}return null/u,
+      /playingMouthShape === "closed" \? null : playingMouthShape/u,
       "Zen must idle the face on true closed pause shapes",
     );
     const zenTalking = pageSource.slice(
@@ -146,8 +146,8 @@ describe("live avatar mouth synchronization", () => {
     );
     assert.match(
       zenTalking,
-      /chatAssistantRevealInProgress/u,
-      "Replying status must follow the whole utterance, not mouth open/close",
+      /speechTimeline\?\.phase !== "playing"/u,
+      "Talking status must begin only when audible playback begins",
     );
     assert.doesNotMatch(
       zenTalking,
@@ -201,7 +201,7 @@ describe("live avatar mouth synchronization", () => {
     assert.match(seatMouth, /bottishMouthShapeAtAlignedElapsedMs\(\{/u);
     assert.match(
       seatMouth,
-      /liveSeatLipsVoicing/u,
+      /liveSeatSpeechIsVoicing/u,
       "Coffee live seats must idle lips through closed pause shapes",
     );
     assert.match(

@@ -40,7 +40,7 @@ describe("Chat / Prism atmosphere integration", () => {
     );
   });
 
-  it("prepares one shared Home wallpaper without mounting it on collapsed Chat home", () => {
+  it("keeps Home wallpaper separate while sharing conversation Atmosphere", () => {
     assert.match(pageSource, /purpose: HUB_ATMOSPHERE_IMAGE_PURPOSE/u);
     assert.match(pageSource, /resolveAtmosphereSurface/u);
     assert.match(pageSource, /data-bot-home-tint/u);
@@ -66,8 +66,9 @@ describe("Chat / Prism atmosphere integration", () => {
     assert.match(surfaceRouterSource, /homeBot/u);
     assert.match(
       surfaceRouterSource,
-      /presentation === "chat"[\s\S]{0,80}return "none"/u,
+      /return args\.prismSession \? "none" : "zenConversation"/u,
     );
+    assert.doesNotMatch(surfaceRouterSource, /presentation === "chat"/u);
     assert.doesNotMatch(surfaceRouterSource, /chatBot/u);
   });
 

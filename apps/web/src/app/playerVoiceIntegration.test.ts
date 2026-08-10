@@ -30,7 +30,7 @@ test("Zen player voice toggle captures the checked value before updating state",
   );
 });
 
-test("Chat and Zen reveal player text through one shared presentation path", () => {
+test("immersive Zen reveals player text through the player-voice presentation path", () => {
   const start = source.indexOf("const presentChatPlayerMessage =");
   const end = source.indexOf("const playSignalProducerGuestActionSfx", start);
   const playerPlayback = source.slice(start, end);
@@ -64,15 +64,15 @@ test("Chat and Zen reveal player text through one shared presentation path", () 
 
   assert.match(
     source,
-    /presentChatPlayerMessage\(optimisticMessageId, optimisticUserContent\)/,
+    /if \(chatImmersivePresentation\) \{[\s\S]*?presentChatPlayerMessage\([\s\S]*?optimisticMessageId/u,
   );
   assert.match(
     source,
-    /zenPlayerRevealTimeline[\s\S]*?speechRevealVisibleTokenCount/,
+    /chatImmersivePresentation &&[\s\S]*?zenPlayerRevealTimeline[\s\S]*?speechRevealVisibleTokenCount/,
   );
 });
 
-test("Zen uses one audio-owned reveal while muted Chat uses one fast reveal", () => {
+test("immersive Zen uses audio-owned player reveal while transcript Chat stays immediate", () => {
   const start = source.indexOf("const presentChatPlayerMessage =");
   const end = source.indexOf("const playSignalProducerGuestActionSfx", start);
   const playerPlayback = source.slice(start, end);
@@ -88,11 +88,11 @@ test("Zen uses one audio-owned reveal while muted Chat uses one fast reveal", ()
   assert.doesNotMatch(playerPlayback, /waitForPlayerTextPaint/u);
   assert.match(
     playerPlayback,
-    /const silentRevealDurationMs = chatVoiceForcedMuted[\s\S]*?ZEN_MUTED_REVEAL_TIMING_MULTIPLIER/u,
+    /const silentRevealDurationMs = fallbackDurationMs;/u,
   );
   assert.match(
     playerPlayback,
-    /chatVoiceForcedMuted \|\|[\s\S]*?!settings\.zenPlayerVoiceEnabled[\s\S]*?runSilentFallback\(\)/u,
+    /!settings\.zenPlayerVoiceEnabled \|\|[\s\S]*?settings\.voiceVolume <= 0[\s\S]*?runSilentFallback\(\)/u,
   );
   assert.equal(
     source.match(/presentChatPlayerMessage\([^)]*optimistic[^)]*\)/gu)?.length,
@@ -100,7 +100,7 @@ test("Zen uses one audio-owned reveal while muted Chat uses one fast reveal", ()
   );
   assert.equal(
     source.match(
-      /const zenPlayerRevealMatches = Boolean\(\s*view === "chat" &&\s*msg\.role === "user"/gu,
+      /const zenPlayerRevealMatches = Boolean\(\s*chatImmersivePresentation &&\s*msg\.role === "user"/gu,
     )?.length,
     1,
   );

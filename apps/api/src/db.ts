@@ -185,6 +185,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       wrapped_user_key_tag TEXT NOT NULL,
       theme TEXT NOT NULL DEFAULT 'system',
       graphics_quality TEXT NOT NULL DEFAULT 'high',
+      typography_scale TEXT NOT NULL DEFAULT 'standard',
       atmosphere_style TEXT NOT NULL DEFAULT 'prismatic',
       hub_atmosphere_enabled INTEGER NOT NULL DEFAULT 1,
       hub_atmosphere_image_id TEXT,
@@ -314,6 +315,17 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     );
     CREATE INDEX IF NOT EXISTS idx_model_effort_preferences_user_updated
       ON model_reasoning_effort_preferences(user_id, updated_at DESC);
+    CREATE TABLE IF NOT EXISTS model_turbo_preferences (
+      user_id TEXT NOT NULL,
+      provider TEXT NOT NULL
+        CHECK(provider IN ('local', 'openai', 'anthropic')),
+      model_id TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, provider, model_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_model_turbo_preferences_user_updated
+      ON model_turbo_preferences(user_id, updated_at DESC);
     CREATE TABLE IF NOT EXISTS legal_acceptances (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -646,6 +658,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       user_id TEXT NOT NULL,
       conversation_id TEXT,
       bot_id TEXT,
+      target_bot_id TEXT,
       ciphertext TEXT NOT NULL,
       iv TEXT NOT NULL,
       tag TEXT NOT NULL,
@@ -670,6 +683,19 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       updated_at TEXT NOT NULL,
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS applet_session_notes (
+      user_id TEXT NOT NULL,
+      surface TEXT NOT NULL
+        CHECK(surface IN ('coffee', 'signal', 'debate', 'story')),
+      session_id TEXT NOT NULL,
+      body TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, surface, session_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_applet_session_notes_user_updated
+      ON applet_session_notes(user_id, updated_at DESC);
     CREATE TABLE IF NOT EXISTS images (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -1922,6 +1948,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       warning_count INTEGER NOT NULL DEFAULT 0,
       started_at TEXT NOT NULL,
       completed_at TEXT,
+      pair_history_persisted_at TEXT,
       runtime_ms INTEGER,
       model_warmup_hold_duration_ms INTEGER NOT NULL DEFAULT 0,
       model_warmup_hold_started_at TEXT,
@@ -2054,6 +2081,17 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
       FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
     );
+    CREATE TABLE IF NOT EXISTS debate_recess_checkpoints (
+      session_id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      source_revision INTEGER NOT NULL CHECK(source_revision >= 1),
+      snapshot_json TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(session_id) REFERENCES debate_sessions(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_debate_recess_checkpoints_user
+      ON debate_recess_checkpoints(user_id, created_at DESC);
     CREATE TABLE IF NOT EXISTS replay_recordings (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -2508,6 +2546,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasGraphicsQuality) {
     db.exec(
       "ALTER TABLE users ADD COLUMN graphics_quality TEXT NOT NULL DEFAULT 'high';",
+    );
+  }
+  const hasTypographyScale = userColumns.some(
+    (column) => column.name === "typography_scale",
+  );
+  if (!hasTypographyScale) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN typography_scale TEXT NOT NULL DEFAULT 'standard';",
     );
   }
   const hasAtmosphereStyle = userColumns.some(
@@ -3504,6 +3550,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   if (!hasMemoryBotIdColumn) {
     db.exec("ALTER TABLE memories ADD COLUMN bot_id TEXT;");
   }
+  const hasMemoryTargetBotIdColumn = memoryColumns.some(
+    (column) => column.name === "target_bot_id",
+  );
+  if (!hasMemoryTargetBotIdColumn) {
+    db.exec("ALTER TABLE memories ADD COLUMN target_bot_id TEXT;");
+  }
   const hasMemorySourceColumn = memoryColumns.some(
     (column) => column.name === "source",
   );
@@ -4189,6 +4241,15 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE botcast_episodes ADD COLUMN playback_mode TEXT NOT NULL DEFAULT 'live' CHECK (playback_mode IN ('live', 'watch'));",
     );
   }
+  if (
+    !botcastEpisodeColumns.some(
+      (column) => column.name === "pair_history_persisted_at",
+    )
+  ) {
+    db.exec(
+      "ALTER TABLE botcast_episodes ADD COLUMN pair_history_persisted_at TEXT;",
+    );
+  }
   const personaReviewColumns = [
     ["persona_reviewer_bot_id", "TEXT"],
     ["persona_reviewer_name", "TEXT"],
@@ -4577,6 +4638,9 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_memories_user_created ON memories (user_id, created_at DESC);",
+  );
+  db.exec(
+    "CREATE INDEX IF NOT EXISTS idx_memories_user_pair_created ON memories (user_id, bot_id, target_bot_id, created_at DESC);",
   );
   db.exec(
     "CREATE INDEX IF NOT EXISTS idx_user_notes_user_updated ON user_notes (user_id, updated_at DESC);",

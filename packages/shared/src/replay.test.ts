@@ -11,6 +11,7 @@ import {
   replayManifestV2IsValid,
   replayMouthShapeAtV2,
   replaySceneAtV2,
+  replayVoiceLightLevelAtV2,
   replayTimelineToWebVttV1,
   type ReplayManifestV1,
   type ReplayManifestV2,
@@ -453,6 +454,17 @@ const manifestV2: ReplayManifestV2 = {
         ],
       },
     ],
+    voiceLightTracks: [
+      {
+        participantId: "host",
+        cues: [
+          { atMs: 0, level: 0 },
+          { atMs: 1_000, level: 0.2 },
+          { atMs: 1_100, level: 0.8 },
+          { atMs: 1_500, level: 0 },
+        ],
+      },
+    ],
   },
   visual: manifest.visual,
 };
@@ -526,6 +538,22 @@ test("V2 seeks exact baked mouths and mode-only camera transitions", () => {
   });
 });
 
+test("V2 interpolates compact voice-light cues without anticipating across gaps", () => {
+  assert.equal(replayVoiceLightLevelAtV2(manifestV2, "host", 999), 0);
+  assert.equal(replayVoiceLightLevelAtV2(manifestV2, "host", 1_050), 0.5);
+  assert.equal(replayVoiceLightLevelAtV2(manifestV2, "host", 1_300), 0.8);
+  assert.equal(replayVoiceLightLevelAtV2(manifestV2, "host", 1_500), 0);
+  assert.equal(replayVoiceLightLevelAtV2(manifestV2, "guest", 1_050), null);
+  assert.equal(
+    replayVoiceLightLevelAtV2(
+      { ...manifestV2, presentation: undefined },
+      "host",
+      1_050,
+    ),
+    null,
+  );
+});
+
 test("V2 presentation validation requires coalesced mouth shapes", () => {
   const duplicatedShapeManifest: ReplayManifestV2 = {
     ...manifestV2,
@@ -543,6 +571,22 @@ test("V2 presentation validation requires coalesced mouth shapes", () => {
     },
   };
   assert.equal(replayManifestV2IsValid(duplicatedShapeManifest), false);
+});
+
+test("V2 presentation validation rejects invalid voice-light levels", () => {
+  const invalidLightManifest: ReplayManifestV2 = {
+    ...manifestV2,
+    presentation: {
+      ...manifestV2.presentation!,
+      voiceLightTracks: [
+        {
+          participantId: "host",
+          cues: [{ atMs: 100, level: 1.01 }],
+        },
+      ],
+    },
+  };
+  assert.equal(replayManifestV2IsValid(invalidLightManifest), false);
 });
 
 test("legacy V2 manifests default to CRT reconstruction and Animated cameras", () => {

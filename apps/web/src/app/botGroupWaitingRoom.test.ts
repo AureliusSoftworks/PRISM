@@ -3,6 +3,7 @@ import { describe, it } from "node:test";
 
 import {
   BOT_GROUP_WAITING_ROOM_ANCHOR_COUNT,
+  BOT_GROUP_WAITING_ROOM_MAX_VISIBLE_BOTS,
   BOT_GROUP_WAITING_ROOM_ROTATION_MAX_MS,
   BOT_GROUP_WAITING_ROOM_ROTATION_MIN_MS,
   botGroupWaitingRoomHandoffOrder,
@@ -37,24 +38,31 @@ function visit(count = 12): BotGroupWaitingRoomVisitState {
 }
 
 describe("bot group waiting-room eligibility", () => {
-  it("requires an ordinary custom group with six unique valid bots", () => {
+  it("requires two unique valid bots", () => {
     assert.equal(
       botGroupWaitingRoomIsEligible(
         { id: "group:friends", builtIn: false },
-        botIds(6),
+        botIds(2),
       ),
       true,
     );
     assert.equal(
       botGroupWaitingRoomIsEligible(
         { id: "group:friends", builtIn: false },
-        ["a", "b", "c", "d", "e", "e", ""],
+        ["a", "a", ""],
       ),
       false,
     );
   });
 
-  it("excludes other built-in and special groups, but allows Favorites", () => {
+  it("excludes other built-in and special groups, but allows Favorites and Ungrouped", () => {
+    assert.equal(
+      botGroupWaitingRoomIsEligible(
+        { id: "ungrouped", builtIn: true },
+        botIds(60),
+      ),
+      true,
+    );
     assert.equal(
       botGroupWaitingRoomIsEligible(
         { id: "builtin:favorites", builtIn: true },
@@ -79,26 +87,23 @@ describe("bot group waiting-room responsive cast", () => {
     assert.equal(botGroupWaitingRoomUsesCompactFallback({ width: 900, height: 560 }), false);
 
     const cases = [
-      [{ width: 900, height: 560 }, 6],
-      [{ width: 1280, height: 720 }, 6],
-      [{ width: 1280, height: 759 }, 6],
-      [{ width: 1280, height: 760 }, 7],
-      [{ width: 1599, height: 900 }, 7],
-      [{ width: 1600, height: 899 }, 7],
-      [{ width: 1600, height: 900 }, 8],
-      [{ width: 1920, height: 1080 }, 8],
+      [{ width: 900, height: 560 }, 12],
+      [{ width: 1280, height: 720 }, 12],
+      [{ width: 1280, height: 760 }, 12],
+      [{ width: 1600, height: 900 }, 12],
+      [{ width: 1920, height: 1080 }, 12],
     ] as const;
     for (const [viewport, expected] of cases) {
       assert.equal(botGroupWaitingRoomPresenceCount(viewport, 12), expected);
     }
   });
 
-  it("always exposes five anchors and one to three responsive roamers", () => {
+  it("keeps the whole cast visible on supported desktop viewports", () => {
     const state = visit();
-    for (const [viewport, expectedRoamers] of [
-      [{ width: 1280, height: 720 }, 1],
-      [{ width: 1280, height: 760 }, 2],
-      [{ width: 1600, height: 900 }, 3],
+    for (const viewport of [
+      { width: 1280, height: 720 },
+      { width: 1280, height: 760 },
+      { width: 1600, height: 900 },
     ] as const) {
       const placements = botGroupWaitingRoomVisiblePlacements(state, viewport);
       assert.equal(
@@ -107,18 +112,26 @@ describe("bot group waiting-room responsive cast", () => {
       );
       assert.equal(
         placements.filter(({ role }) => role === "roamer").length,
-        expectedRoamers,
+        7,
       );
     }
   });
 
-  it("caps the target by valid membership", () => {
+  it("caps every room, including a large Ungrouped roster, at 24", () => {
     assert.equal(
       botGroupWaitingRoomPresenceCount({ width: 1920, height: 1080 }, 6),
       6,
     );
     assert.equal(
       botGroupWaitingRoomPresenceCount({ width: 1920, height: 1080 }, 5),
+      5,
+    );
+    assert.equal(
+      botGroupWaitingRoomPresenceCount({ width: 1920, height: 1080 }, 60),
+      BOT_GROUP_WAITING_ROOM_MAX_VISIBLE_BOTS,
+    );
+    assert.equal(
+      botGroupWaitingRoomPresenceCount({ width: 1920, height: 1080 }, 1),
       0,
     );
   });
@@ -138,7 +151,19 @@ describe("bot group waiting-room visit state", () => {
     });
     assert.deepEqual(first, repeated);
     assert.equal(first?.anchorBotIds.length, 5);
-    assert.equal(first?.roamerBotIds.length, 3);
+    assert.equal(first?.roamerBotIds.length, 7);
+    assert.equal(first?.placements.length, 12);
+    assert.equal(
+      first?.placements.every(
+        (placement) =>
+          placement.xPercent >= 6 &&
+          placement.xPercent <= 94 &&
+          placement.yPercent >= 12 &&
+          placement.yPercent <= 88 &&
+          placement.driftDurationMs >= 8_400,
+      ),
+      true,
+    );
     assert.ok(
       (first?.nextRotationDelayMs ?? 0) >=
         BOT_GROUP_WAITING_ROOM_ROTATION_MIN_MS,
@@ -181,7 +206,7 @@ describe("bot group waiting-room visit state", () => {
     const roamer = state.roamerBotIds[0]!;
     const promoted = promoteBotGroupWaitingRoomRoamer(engaged, roamer);
     assert.equal(promoted.anchorBotIds.length, 5);
-    assert.equal(promoted.roamerBotIds.length, 3);
+    assert.equal(promoted.roamerBotIds.length, 7);
     assert.ok(promoted.anchorBotIds.includes(roamer));
     assert.ok(promoted.roamerBotIds.includes(oldestAnchor));
     assert.equal(promoted.engagementOrder.at(-1), roamer);
@@ -207,14 +232,14 @@ describe("bot group waiting-room rotation", () => {
   });
 
   it("rotates one visible roamer without changing the five anchors", () => {
-    const state = visit(12);
+    const state = visit(30);
     const result = rotateBotGroupWaitingRoomRoamer(state, {
       width: 1280,
       height: 720,
     });
     assert.equal(result.changed, true);
     assert.deepEqual(result.state.anchorBotIds, state.anchorBotIds);
-    assert.equal(result.handoffOrder, "arrival-before-departure");
+    assert.equal(result.handoffOrder, "departure-before-arrival");
     assert.ok(result.arrivingBotId);
     assert.ok(result.departingBotId);
     assert.notEqual(result.arrivingBotId, result.departingBotId);
@@ -223,12 +248,12 @@ describe("bot group waiting-room rotation", () => {
         width: 1280,
         height: 720,
       }).length,
-      6,
+      BOT_GROUP_WAITING_ROOM_MAX_VISIBLE_BOTS,
     );
   });
 
   it("does not repeat arrivals until the seeded deck is exhausted", () => {
-    let state = visit(12);
+    let state = visit(30);
     const initialDeckLength = state.rotationDeck.length;
     const arrivals: string[] = [];
     for (let index = 0; index < initialDeckLength; index += 1) {
@@ -280,7 +305,7 @@ describe("bot group waiting-room lifecycle safety", () => {
   });
 
   it("reconciles deleted anchors, roamers, and deck entries safely", () => {
-    const state = visit(12);
+    const state = visit(30);
     const deleted = new Set([
       state.anchorBotIds[0]!,
       state.roamerBotIds[0]!,
@@ -290,7 +315,7 @@ describe("bot group waiting-room lifecycle safety", () => {
     const reconciled = reconcileBotGroupWaitingRoomVisit(state, valid);
     assert.ok(reconciled);
     assert.equal(reconciled.anchorBotIds.length, 5);
-    assert.equal(reconciled.roamerBotIds.length, 3);
+    assert.equal(reconciled.roamerBotIds.length, 19);
     assert.equal(
       reconciled.placements.every(({ botId }) => valid.includes(botId)),
       true,
@@ -298,7 +323,7 @@ describe("bot group waiting-room lifecycle safety", () => {
   });
 
   it("does not reintroduce consumed arrivals when membership changes", () => {
-    const initial = visit(12);
+    const initial = visit(30);
     const first = rotateBotGroupWaitingRoomRoamer(initial, {
       width: 1280,
       height: 720,
@@ -307,14 +332,15 @@ describe("bot group waiting-room lifecycle safety", () => {
     const consumedArrival = first.arrivingBotId!;
     const withNewMember = reconcileBotGroupWaitingRoomVisit(first.state, [
       ...first.state.eligibleBotIds,
-      "bot-13",
+      "bot-31",
     ]);
     assert.ok(withNewMember);
     assert.equal(withNewMember.rotationDeck.includes(consumedArrival), false);
-    assert.equal(withNewMember.rotationDeck.includes("bot-13"), true);
+    assert.equal(withNewMember.rotationDeck.includes("bot-31"), true);
   });
 
-  it("falls back when deletions leave fewer than six valid members", () => {
-    assert.equal(reconcileBotGroupWaitingRoomVisit(visit(), botIds(5)), null);
+  it("falls back only when deletions leave fewer than two valid members", () => {
+    assert.equal(reconcileBotGroupWaitingRoomVisit(visit(), botIds(1)), null);
+    assert.ok(reconcileBotGroupWaitingRoomVisit(visit(), botIds(2)));
   });
 });
