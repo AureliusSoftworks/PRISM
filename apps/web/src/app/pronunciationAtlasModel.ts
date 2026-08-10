@@ -57,6 +57,9 @@ const INFLUENCE_ANCHOR_DATA = {
   "latin-american-spanish-influenced-english": {
     point: pronunciationAtlasPointForCoordinates(-74.07, 4.71),
   },
+  "mexican-spanish-influenced-english": {
+    point: pronunciationAtlasPointForCoordinates(-99.13, 19.43),
+  },
   "brazilian-portuguese-influenced-english": {
     point: pronunciationAtlasPointForCoordinates(-47.9, -15.8),
   },

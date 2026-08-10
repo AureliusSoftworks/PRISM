@@ -8,10 +8,10 @@ import {
   type LocalVoiceSpeechprintV1,
 } from "./audioVoice.js";
 
-export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.6";
+export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.8";
 /** SHA-256 of the qualified Instant IPA matrix (see speechprint-runtime.test.ts). */
 export const LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256 =
-  "bb90f63171cdf98c2da635f40375f484f42da5a4be1debe4d938630211da13ce";
+  "5d2203640d06eaebd5ab321f18468e63c11abc7df531b6b037dccf8f0523bccf";
 
 export interface LocalVoiceSpeechprintCapabilityV1 {
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -40,6 +40,12 @@ const LOCAL_VOICE_SPEECHPRINT_DESCRIPTORS = [
     label: "Latin American Spanish-influenced English",
     description:
       "A restrained Latin American Spanish pronunciation and early-stress rhythm influence.",
+  },
+  {
+    id: "mexican-spanish-influenced-english",
+    label: "Mexican Spanish-influenced English",
+    description:
+      "A restrained Mexican Spanish pronunciation and early-stress rhythm influence.",
   },
   {
     id: "brazilian-portuguese-influenced-english",
@@ -274,6 +280,8 @@ const SPEECHPRINT_RULES: Record<
   "spanish-influenced-english": [
     { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
     { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    // English STRUT (sun) → Spanish /a/; the realist L1 substitution.
+    { id: "strut-open-a", tier: "balanced", pattern: /ʌ/gu, replacement: "a" },
     {
       id: "r-tap",
       tier: "balanced",
@@ -292,6 +300,7 @@ const SPEECHPRINT_RULES: Record<
   "brazilian-portuguese-influenced-english": [
     { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
     { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    { id: "strut-open-a", tier: "balanced", pattern: /ʌ/gu, replacement: "a" },
     {
       id: "r-tap",
       tier: "balanced",
@@ -430,6 +439,7 @@ const SPEECHPRINT_RULES: Record<
   "french-influenced-english": [
     { id: "theta-s", tier: "light", pattern: /θ/gu, replacement: "s" },
     { id: "eth-z", tier: "balanced", pattern: /ð/gu, replacement: "z" },
+    { id: "strut-open-a", tier: "balanced", pattern: /ʌ/gu, replacement: "a" },
     {
       id: "r-uvular",
       tier: "balanced",
@@ -549,6 +559,8 @@ const SPEECHPRINT_RULES: Record<
       replacement: "d",
       optional: true,
     },
+    // English STRUT (sun) → Italian /a/.
+    { id: "strut-open-a", tier: "balanced", pattern: /ʌ/gu, replacement: "a" },
     {
       id: "open-a",
       tier: "strong",
@@ -686,6 +698,7 @@ const SPEECHPRINT_RULES: Record<
   "latin-american-spanish-influenced-english": [
     { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
     { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    { id: "strut-open-a", tier: "balanced", pattern: /ʌ/gu, replacement: "a" },
     {
       id: "r-tap",
       tier: "balanced",
@@ -701,6 +714,41 @@ const SPEECHPRINT_RULES: Record<
       optional: true,
     },
   ],
+  "mexican-spanish-influenced-english": [
+    { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
+    { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    // Mexican Spanish L2 English: STRUT toward open /a/, like other Spanish.
+    { id: "strut-open-a", tier: "balanced", pattern: /ʌ/gu, replacement: "a" },
+    {
+      id: "r-tap",
+      tier: "balanced",
+      pattern: /ɹ/gu,
+      replacement: "ɾ",
+      optional: true,
+    },
+    {
+      id: "near-close-i",
+      tier: "balanced",
+      pattern: /ɪ/gu,
+      replacement: "i",
+      optional: true,
+    },
+    {
+      id: "v-b",
+      tier: "strong",
+      pattern: /v/gu,
+      replacement: "b",
+      optional: true,
+    },
+    {
+      // Soft jota spillover on English /h/.
+      id: "h-velar",
+      tier: "strong",
+      pattern: /h/gu,
+      replacement: "x",
+      optional: true,
+    },
+  ],
   "european-portuguese-influenced-english": [
     { id: "theta-t", tier: "light", pattern: /θ/gu, replacement: "t" },
     {
@@ -711,6 +759,13 @@ const SPEECHPRINT_RULES: Record<
       optional: true,
     },
     { id: "eth-d", tier: "balanced", pattern: /ð/gu, replacement: "d" },
+    // European Portuguese often centralizes STRUT toward /ɐ/.
+    {
+      id: "strut-central-a",
+      tier: "balanced",
+      pattern: /ʌ/gu,
+      replacement: "ɐ",
+    },
     {
       id: "near-close-i",
       tier: "strong",
@@ -1208,6 +1263,11 @@ const STRESS_RHYTHM_PROFILES: Partial<
     rhoticRestore: "e",
   },
   "latin-american-spanish-influenced-english": {
+    bias: "early",
+    schwaRestore: "e",
+    rhoticRestore: "e",
+  },
+  "mexican-spanish-influenced-english": {
     bias: "early",
     schwaRestore: "e",
     rhoticRestore: "e",

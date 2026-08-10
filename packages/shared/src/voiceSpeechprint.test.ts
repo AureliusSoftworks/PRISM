@@ -11,7 +11,7 @@ const SAMPLE_IPA = "θɪs ɹɪvɚ wɪl ðɹaɪv vɛɹi faɹ";
 
 describe("local voice Speechprints", () => {
   it("publishes broad versioned Instant-compatible profiles for both bases", () => {
-    assert.equal(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length, 41);
+    assert.equal(LOCAL_VOICE_SPEECHPRINT_CAPABILITIES.length, 42);
     assert.match(LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256, /^[a-f0-9]{64}$/u);
     for (const capability of LOCAL_VOICE_SPEECHPRINT_CAPABILITIES) {
       assert.deepEqual(capability.supportedBaseLocales, ["en-US", "en-GB"]);
@@ -24,6 +24,7 @@ describe("local voice Speechprints", () => {
   it("covers additional regions without collapsing them into distant profiles", () => {
     for (const id of [
       "latin-american-spanish-influenced-english",
+      "mexican-spanish-influenced-english",
       "north-african-arabic-influenced-english",
       "nigerian-english",
       "south-african-english",
@@ -187,6 +188,34 @@ describe("local voice Speechprints", () => {
     }
   });
 
+  it("adds a distinct Mexican Spanish signature beside Latin American Spanish", () => {
+    const phrase = "ðə sˈʌn hɪɹ vɛɹi faɹ";
+    const mexican = applyLocalVoiceSpeechprintToIpa({
+      ipa: phrase,
+      speechprint: {
+        influence: "mexican-spanish-influenced-english",
+        strength: "strong",
+        variationSeed: "mexican-character",
+      },
+    });
+    const latinAmerican = applyLocalVoiceSpeechprintToIpa({
+      ipa: phrase,
+      speechprint: {
+        influence: "latin-american-spanish-influenced-english",
+        strength: "strong",
+        variationSeed: "mexican-character",
+      },
+    });
+    assert.notEqual(mexican.ipa, latinAmerican.ipa);
+    assert.ok(
+      mexican.appliedRuleIds.includes("near-close-i") ||
+        mexican.appliedRuleIds.includes("h-velar") ||
+        mexican.ipa.includes("x") ||
+        /[^ʌ]/.test(mexican.ipa),
+    );
+    assert.match(mexican.ipa, /sˈa[nɴ]?|sa[nɴ]/u);
+  });
+
   it("keeps Natural byte-for-byte and applies only rules allowed by strength", () => {
     assert.deepEqual(
       applyLocalVoiceSpeechprintToIpa({
@@ -219,6 +248,39 @@ describe("local voice Speechprints", () => {
     assert.ok(strong.appliedRuleIds.length >= light.appliedRuleIds.length);
   });
 
+  it("maps English STRUT (sun) to open/central a for realist Romance Speechprints", () => {
+    const sun = "sˈʌn";
+    const spanish = applyLocalVoiceSpeechprintToIpa({
+      ipa: sun,
+      speechprint: {
+        influence: "spanish-influenced-english",
+        strength: "balanced",
+        variationSeed: "sun-realism",
+      },
+    });
+    const italian = applyLocalVoiceSpeechprintToIpa({
+      ipa: sun,
+      speechprint: {
+        influence: "italian-influenced-english",
+        strength: "balanced",
+        variationSeed: "sun-realism",
+      },
+    });
+    const europeanPortuguese = applyLocalVoiceSpeechprintToIpa({
+      ipa: sun,
+      speechprint: {
+        influence: "european-portuguese-influenced-english",
+        strength: "balanced",
+        variationSeed: "sun-realism",
+      },
+    });
+    assert.equal(spanish.ipa, "sˈan");
+    assert.equal(italian.ipa, "sˈan");
+    assert.equal(europeanPortuguese.ipa, "sˈɐn");
+    assert.ok(spanish.appliedRuleIds.includes("strut-open-a"));
+    assert.ok(europeanPortuguese.appliedRuleIds.includes("strut-central-a"));
+  });
+
   it("differentiates Italian vs Spanish stress and rhythm on multi-syllable English", () => {
     const phrase = "ðə sˈʌn ɹˈaɪzᵻz ˌoʊvɚ ðə kɹiːˈeɪɾɪv pˈiːpəl";
     const italian = applyLocalVoiceSpeechprintToIpa({
@@ -239,6 +301,8 @@ describe("local voice Speechprints", () => {
     });
 
     assert.notEqual(italian.ipa, spanish.ipa);
+    assert.match(italian.ipa, /sˈan/u);
+    assert.match(spanish.ipa, /sˈan/u);
     assert.match(italian.ipa, /k[ɾɹ]iːˈeɪɾɪv/u);
     assert.match(spanish.ipa, /k[ɾɹ]ˈiːeɪɾɪv/u);
     assert.ok(italian.appliedRuleIds.includes("rhythm-demote-secondary"));

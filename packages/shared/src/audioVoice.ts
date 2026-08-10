@@ -486,6 +486,7 @@ export const LOCAL_VOICE_SPEECHPRINT_INFLUENCES = [
   "none",
   "spanish-influenced-english",
   "latin-american-spanish-influenced-english",
+  "mexican-spanish-influenced-english",
   "brazilian-portuguese-influenced-english",
   "european-portuguese-influenced-english",
   "mandarin-influenced-english",

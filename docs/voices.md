@@ -71,14 +71,17 @@ Local identity has four independent layers:
   voice. An American archetype can therefore keep its timbre while speaking
   British phonemes, and vice versa.
 - **Pronunciation influence · Approximate** optionally applies one restrained,
-  PRISM-authored Speechprint: Spanish-influenced English, Brazilian
+  PRISM-authored Speechprint: Spanish-influenced English, Latin American
+  Spanish-influenced English, Mexican Spanish-influenced English, Brazilian
   Portuguese-influenced English, Mandarin-influenced English,
   Japanese-influenced English, Korean-influenced English, Indian English,
   French-influenced English, German-influenced English, Italian-influenced
   English, or Russian-influenced English.
   Each supports Light, Balanced, and Strong. Romance influences also reshape
   private stress and rhythm (for example early Spanish stress vs Italian
-  penultimate bias) after the sound swaps; phrase melody remains a later
+  penultimate bias) after the sound swaps, and map English STRUT vowels such as
+  the vowel in "sun" toward open/central /a/ (European Portuguese toward /ɐ/)
+  for a more realist L1 substitution. Phrase melody remains a later
   approximate Instant pass and is not Feel-stage Pitch or Lilt.
 
 Cross-accent pronunciation and Speechprints run only through Instant. Auto

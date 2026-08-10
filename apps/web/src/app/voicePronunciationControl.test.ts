@@ -75,6 +75,7 @@ describe("cross-accent local voice pronunciation controls", () => {
   it("offers broadly local coverage across every inhabited continent", () => {
     for (const id of [
       "latin-american-spanish-influenced-english",
+      "mexican-spanish-influenced-english",
       "north-african-arabic-influenced-english",
       "nigerian-english",
       "east-african-english",

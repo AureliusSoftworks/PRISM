@@ -126,6 +126,7 @@ describe("Pronunciation Atlas", () => {
 
   it("resolves representative world regions to broadly local accents", () => {
     const expectations = [
+      [{ x: 0.225, y: 0.392 }, "mexican-spanish-influenced-english"],
       [{ x: 0.294, y: 0.474 }, "latin-american-spanish-influenced-english"],
       [{ x: 0.528, y: 0.296 }, "north-african-arabic-influenced-english"],
       [{ x: 0.509, y: 0.464 }, "nigerian-english"],
