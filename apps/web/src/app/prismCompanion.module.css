@@ -37,6 +37,203 @@
   z-index: var(--prism-companion-open-z-index);
 }
 
+.anchor[data-home-base-radial-phase] {
+  z-index: 859;
+}
+
+.anchor[data-home-base-radial-phase="igniting"] .avatar {
+  opacity: .16;
+  transform: scale(.82);
+}
+
+.homeBaseRadialBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 856;
+  background: #02040b8f;
+  backdrop-filter: blur(12px) brightness(.58) saturate(.72);
+  -webkit-backdrop-filter: blur(12px) brightness(.58) saturate(.72);
+  animation: homeBaseRadialBackdropIn 180ms ease-out both;
+}
+
+.homeBaseRadialField {
+  --companion-p: #ff756c;
+  --companion-r: #ffba5c;
+  --companion-i: #b7e63a;
+  --companion-s: #2fd3e3;
+  --companion-m: #7b5cff;
+  position: fixed;
+  inset: 0;
+  z-index: 860;
+  overflow: hidden;
+  pointer-events: none;
+  isolation: isolate;
+}
+
+.homeBaseRadialRay {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  pointer-events: none;
+  filter: drop-shadow(0 0 8px #7ddcf891);
+}
+
+.homeBaseRadialTarget {
+  position: fixed;
+  z-index: 1;
+  display: grid;
+  justify-items: center;
+  gap: 12px;
+  width: 182px;
+  min-height: 198px;
+  padding: 0;
+  border: 0;
+  color: #f7fbff;
+  background: transparent;
+  opacity: .84;
+  transform: translate(-50%, -50%) scale(.9);
+  transform-origin: center 38px;
+  cursor: pointer;
+  pointer-events: auto;
+  touch-action: none;
+  transition:
+    left 420ms cubic-bezier(.2, .82, .2, 1),
+    top 420ms cubic-bezier(.2, .82, .2, 1),
+    opacity 180ms ease,
+    transform 220ms cubic-bezier(.2, .82, .2, 1),
+    filter 180ms ease;
+  animation: homeBaseRadialTargetIn 240ms cubic-bezier(.2, .82, .2, 1) both;
+}
+
+.homeBaseRadialTargetGlass {
+  position: relative;
+  display: grid;
+  place-items: center;
+  width: 152px;
+  height: 152px;
+  overflow: hidden;
+  border: 1px solid color-mix(in hsl, hsl(var(--home-radial-hue) 92% 72%) 72%, white);
+  border-radius: 50%;
+  background:
+    radial-gradient(circle at 34% 27%, #ffffff42 0 5%, transparent 18%),
+    radial-gradient(circle, transparent 0 47%, hsl(var(--home-radial-hue) 90% 62% / .09) 68%, #ffffff12 100%);
+  box-shadow:
+    inset 2px 3px 8px #ffffff1f,
+    inset -3px -4px 10px #02071380,
+    0 8px 24px #0008,
+    0 0 18px hsl(var(--home-radial-hue) 92% 65% / .18);
+  backdrop-filter: blur(8px) saturate(1.25);
+  -webkit-backdrop-filter: blur(8px) saturate(1.25);
+}
+
+.homeBaseRadialTargetGlass::after {
+  position: absolute;
+  inset: 8px;
+  border: 1px solid #ffffff1f;
+  border-radius: inherit;
+  content: "";
+  pointer-events: none;
+}
+
+.homeBaseRadialTargetGlyph {
+  display: grid;
+  place-items: center;
+  width: 78px;
+  height: 78px;
+  filter: drop-shadow(0 0 5px #fff3);
+}
+
+.homeBaseRadialTargetGlyph > svg {
+  width: 70px;
+  height: 70px;
+}
+
+.homeBaseRadialTargetLabel {
+  max-width: 182px;
+  overflow: hidden;
+  font-size: 15px;
+  font-weight: 720;
+  line-height: 1.1;
+  letter-spacing: .05em;
+  text-overflow: ellipsis;
+  text-shadow: 0 2px 8px #000;
+  white-space: nowrap;
+}
+
+.homeBaseRadialHandoffLabel {
+  position: fixed;
+  left: 50%;
+  top: calc(50% + 72px);
+  z-index: 4;
+  padding: 7px 12px;
+  border: 1px solid #ffffff26;
+  border-radius: 999px;
+  color: #f7fbff;
+  background: #07101cc2;
+  box-shadow: 0 12px 28px #0008;
+  font-size: 12px;
+  font-weight: 700;
+  letter-spacing: .04em;
+  transform: translateX(-50%);
+  backdrop-filter: blur(10px);
+  -webkit-backdrop-filter: blur(10px);
+  animation: homeBaseRadialBackdropIn 160ms ease-out both;
+}
+
+.homeBaseRadialTarget[data-highlighted="true"] {
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.1);
+  filter: brightness(1.16);
+}
+
+.homeBaseRadialTarget[data-highlighted="true"] .homeBaseRadialTargetGlass {
+  border-color: #fff;
+  box-shadow:
+    inset 2px 3px 9px #ffffff52,
+    inset -3px -4px 10px #02071370,
+    0 10px 28px #0009,
+    0 0 12px #fff8,
+    0 0 30px hsl(var(--home-radial-hue) 95% 68% / .72);
+}
+
+.homeBaseRadialField[data-phase="igniting"] .homeBaseRadialTarget:not([data-selected="true"]) {
+  opacity: 0;
+  transform: translate(-50%, -50%) scale(.62);
+  pointer-events: none;
+}
+
+.homeBaseRadialTarget[data-selected="true"] {
+  left: 50% !important;
+  top: 50% !important;
+  z-index: 3;
+  opacity: 1;
+  transform: translate(-50%, -50%) scale(1.25);
+  pointer-events: none;
+}
+
+.homeBaseRadialTarget[data-selected="true"] .homeBaseRadialTargetGlass {
+  border-color: #fff;
+  animation: homeBaseRadialIgnite 420ms cubic-bezier(.18, .8, .2, 1) both;
+}
+
+@keyframes homeBaseRadialBackdropIn {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+
+@keyframes homeBaseRadialTargetIn {
+  from { opacity: 0; transform: translate(-50%, -50%) scale(.62); }
+}
+
+@keyframes homeBaseRadialIgnite {
+  0% { box-shadow: 0 0 10px #fff4; filter: brightness(1); }
+  55% { box-shadow: 0 0 24px #fff, 0 0 58px hsl(var(--home-radial-hue) 96% 72% / .9); filter: brightness(1.7); }
+  100% { box-shadow: 0 0 16px #fffb, 0 0 38px hsl(var(--home-radial-hue) 96% 72% / .72); filter: brightness(1.28); }
+}
+
 .anchor[data-wielding="true"] {
   left: 0 !important;
   top: 0 !important;
@@ -1049,6 +1246,13 @@
     animation: none;
   }
   .refractGlyph { transition-duration: 1ms; }
+  .homeBaseRadialBackdrop,
+  .homeBaseRadialHandoffLabel,
+  .homeBaseRadialTarget,
+  .homeBaseRadialTarget[data-selected="true"] .homeBaseRadialTargetGlass {
+    animation: none;
+    transition-duration: 1ms;
+  }
 }
 
 @media (max-width: 720px) {
@@ -1069,6 +1273,44 @@
     transparent 74%
   );
   filter: blur(30px);
+}
+
+.homeBaseRadialBackdrop[data-theme="light"],
+:global([data-theme="light"]) .homeBaseRadialBackdrop,
+:global(html[data-theme="light"]) .homeBaseRadialBackdrop {
+  background: #eef7ff80;
+  backdrop-filter: blur(12px) brightness(.93) saturate(.78);
+  -webkit-backdrop-filter: blur(12px) brightness(.93) saturate(.78);
+}
+
+:global([data-theme="light"]) .homeBaseRadialTarget,
+:global(html[data-theme="light"]) .homeBaseRadialTarget {
+  color: #18324c;
+}
+
+:global([data-theme="light"]) .homeBaseRadialTargetGlass,
+:global(html[data-theme="light"]) .homeBaseRadialTargetGlass {
+  background:
+    radial-gradient(circle at 34% 27%, #fff 0 5%, transparent 18%),
+    radial-gradient(circle, transparent 0 47%, hsl(var(--home-radial-hue) 88% 55% / .08) 68%, #ffffff99 100%);
+  box-shadow:
+    inset 2px 3px 8px #fff,
+    inset -3px -4px 10px #7897b229,
+    0 8px 24px #43617b2e,
+    0 0 18px hsl(var(--home-radial-hue) 92% 52% / .18);
+}
+
+:global([data-theme="light"]) .homeBaseRadialTargetLabel,
+:global(html[data-theme="light"]) .homeBaseRadialTargetLabel {
+  text-shadow: 0 1px 8px #fff, 0 1px 2px #fff;
+}
+
+:global([data-theme="light"]) .homeBaseRadialHandoffLabel,
+:global(html[data-theme="light"]) .homeBaseRadialHandoffLabel {
+  border-color: #5f789133;
+  color: #18324c;
+  background: #f8fcffe6;
+  box-shadow: 0 12px 28px #43617b30;
 }
 
 :global([data-theme="light"]) .anchor[data-open="true"] .focusOrb {

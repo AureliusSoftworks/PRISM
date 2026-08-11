@@ -9,7 +9,9 @@ import {
   useState,
   useSyncExternalStore,
   type CSSProperties,
+  type KeyboardEvent as ReactKeyboardEvent,
   type PointerEvent as ReactPointerEvent,
+  type ReactNode,
 } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -121,6 +123,20 @@ import {
   setAppNavbarWielding,
 } from "./appNavbarChrome";
 import {
+  HOME_BASE_RADIAL_HANDOFF_MS,
+  HOME_BASE_RADIAL_HOLD_MS,
+  HOME_BASE_RADIAL_TARGET_RADIUS_PX,
+  homeBaseRadialRayGeometry,
+  homeBaseRadialTargetAtPoint,
+  homeBaseRadialTargetLayout,
+  resolveHomeBaseRadialTargetRadius,
+  nextHomeBaseRadialTargetIndex,
+  transitionHomeBaseRadialGesture,
+  type HomeBaseRadialGestureState,
+  type HomeBaseRadialPoint,
+  type HomeBaseRadialTargetPosition,
+} from "./homeBaseRadialLauncher";
+import {
   PRISM_REFRACT_TARGET_ATTRIBUTE,
   nextPrismRefractChoice,
   prismRefractModifierClickDecision,
@@ -228,6 +244,8 @@ export interface PrismCompanionFocusedChatHandoff {
 
 export interface PrismCompanionProps {
   accountKey: string;
+  /** Resolved app theme. Portal-rendered companion chrome cannot inherit the page shell class. */
+  theme?: "light" | "dark";
   keyboardShortcut: string | null;
   surface: PrismCompanionSurfaceReference;
   /** Chat and Zen share one route; this is the authoritative view boundary. */
@@ -235,6 +253,9 @@ export interface PrismCompanionProps {
   /** The account's existing "Same session after idle" duration. */
   zenSessionIdleGapMs?: number;
   chatHomeHeroDocked?: boolean;
+  /** Home Base-only applet registry entries rendered around the held orb. */
+  homeBaseAppletTargets?: readonly PrismCompanionHomeAppletTarget[];
+  onHomeBaseAppletSelect?: (appletId: string) => void;
   /** Legacy non-Zen hero action, retained while the parent migrates. */
   onChatHomeHeroActivate?: () => void;
   onContinueFocusedChat?: (
@@ -269,6 +290,12 @@ export interface PrismCompanionProps {
   onRefractTutorialComplete?: () => void;
   onRefractTutorialSkip?: () => void;
   onRefractTutorialRemind?: () => void;
+}
+
+export interface PrismCompanionHomeAppletTarget {
+  id: string;
+  label: string;
+  glyph: ReactNode;
 }
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -492,11 +519,14 @@ function companionUserNotesHeadline(userNotes: UserNotesPayload): string {
 
 export default function PrismCompanion({
   accountKey,
+  theme = "dark",
   keyboardShortcut,
   surface,
   presentation = null,
   zenSessionIdleGapMs = DEFAULT_PRISM_COMPANION_SESSION_IDLE_GAP_MS,
   chatHomeHeroDocked = false,
+  homeBaseAppletTargets = [],
+  onHomeBaseAppletSelect,
   onChatHomeHeroActivate,
   onContinueFocusedChat,
   onPersistentConversationChange,
@@ -585,6 +615,18 @@ export default function PrismCompanion({
   const [chatHomeDockPosition, setChatHomeDockPosition] =
     useState<PrismCompanionPosition | null>(null);
   const [chatHomeDockReturning, setChatHomeDockReturning] = useState(false);
+  const [homeBaseRadialGesture, setHomeBaseRadialGesture] = useState<
+    HomeBaseRadialGestureState<string>
+  >({ phase: "idle" });
+  const [homeBaseRadialSource, setHomeBaseRadialSource] =
+    useState<HomeBaseRadialPoint | null>(null);
+  const [homeBaseRadialPointer, setHomeBaseRadialPointer] =
+    useState<HomeBaseRadialPoint | null>(null);
+  const [homeBaseRadialLayout, setHomeBaseRadialLayout] = useState<
+    HomeBaseRadialTargetPosition<string>[]
+  >([]);
+  const [homeBaseRadialTargetRadius, setHomeBaseRadialTargetRadius] =
+    useState(HOME_BASE_RADIAL_TARGET_RADIUS_PX);
   const [refractSession, setRefractSession] =
     useState<PrismRefractSession | null>(null);
   const [refractPrompt, setRefractPrompt] = useState("");
@@ -632,6 +674,7 @@ export default function PrismCompanion({
     refractSession === null;
   const anchorRef = useRef<HTMLDivElement | null>(null);
   const backdropRef = useRef<HTMLDivElement | null>(null);
+  const avatarRef = useRef<HTMLButtonElement | null>(null);
   const composerRef = useRef<HTMLTextAreaElement | null>(null);
   const personalNoteTitleRef = useRef<HTMLInputElement | null>(null);
   const refractPromptRef = useRef<HTMLInputElement | null>(null);
@@ -640,6 +683,13 @@ export default function PrismCompanion({
   const positionRef = useRef(position);
   const chatHomeDockPositionRef = useRef<PrismCompanionPosition | null>(null);
   const chatHomeDockReturnTimerRef = useRef<number | null>(null);
+  const homeBaseRadialGestureRef =
+    useRef<HomeBaseRadialGestureState<string>>(homeBaseRadialGesture);
+  const homeBaseRadialHoldTimerRef = useRef<number | null>(null);
+  const homeBaseRadialHandoffTimerRef = useRef<number | null>(null);
+  const homeBaseRadialRunRef = useRef(0);
+  const homeBaseRadialSuppressClickRef = useRef(false);
+  const homeBaseRadialTargetRefs = useRef(new Map<string, HTMLButtonElement>());
   const refractSessionRef = useRef<PrismRefractSession | null>(null);
   const refractMagicHandoffFrameRef = useRef<number | null>(null);
   const refractAbortRef = useRef<AbortController | null>(null);
@@ -1926,6 +1976,15 @@ export default function PrismCompanion({
       sessionNoteContext,
     ],
   );
+
+  const activateChatHomeHero = useCallback((): void => {
+    playPrismCompanionGlassTap();
+    if (onChatHomeHeroActivate) {
+      onChatHomeHeroActivate();
+      return;
+    }
+    activatePrismConversation(true);
+  }, [activatePrismConversation, onChatHomeHeroActivate]);
 
   const resetPersonalNoteEditor = useCallback((): void => {
     setPersonalNoteId(null);
@@ -3832,6 +3891,333 @@ export default function PrismCompanion({
     if (softSynthesisActive) clearIdleDim();
   }, [clearIdleDim, softSynthesisActive]);
 
+  const publishHomeBaseRadialState = useCallback(
+    (next: HomeBaseRadialGestureState<string>): void => {
+      homeBaseRadialGestureRef.current = next;
+      setHomeBaseRadialGesture(next);
+    },
+    [],
+  );
+
+  const clearHomeBaseRadialTimers = useCallback((): void => {
+    if (homeBaseRadialHoldTimerRef.current !== null) {
+      window.clearTimeout(homeBaseRadialHoldTimerRef.current);
+      homeBaseRadialHoldTimerRef.current = null;
+    }
+    if (homeBaseRadialHandoffTimerRef.current !== null) {
+      window.clearTimeout(homeBaseRadialHandoffTimerRef.current);
+      homeBaseRadialHandoffTimerRef.current = null;
+    }
+  }, []);
+
+  const cancelHomeBaseRadial = useCallback(
+    (restoreFocus = true): void => {
+      clearHomeBaseRadialTimers();
+      homeBaseRadialRunRef.current += 1;
+      const result = transitionHomeBaseRadialGesture(
+        homeBaseRadialGestureRef.current,
+        { type: "cancel" },
+      );
+      publishHomeBaseRadialState(result.state);
+      setHomeBaseRadialPointer(null);
+      setHomeBaseRadialLayout([]);
+      setHomeBaseRadialTargetRadius(HOME_BASE_RADIAL_TARGET_RADIUS_PX);
+      if (restoreFocus) {
+        window.requestAnimationFrame(() => avatarRef.current?.focus());
+      }
+    },
+    [clearHomeBaseRadialTimers, publishHomeBaseRadialState],
+  );
+
+  const measureHomeBaseRadial = useCallback((): {
+    source: HomeBaseRadialPoint;
+    layout: HomeBaseRadialTargetPosition<string>[];
+    targetRadius: number;
+  } | null => {
+    const rect = avatarRef.current?.getBoundingClientRect();
+    if (!rect || homeBaseAppletTargets.length === 0) return null;
+    const source = {
+      x: rect.left + rect.width / 2,
+      y: rect.top + rect.height / 2,
+    };
+    const targetRadius = resolveHomeBaseRadialTargetRadius(
+      window.innerWidth,
+      window.innerHeight,
+      source,
+    );
+    if (targetRadius <= 0) return null;
+    return {
+      source,
+      layout: homeBaseRadialTargetLayout(
+        homeBaseAppletTargets.map((target) => target.id),
+        source,
+        { width: window.innerWidth, height: window.innerHeight },
+      ),
+      targetRadius,
+    };
+  }, [homeBaseAppletTargets]);
+
+  const beginHomeBaseRadialHandoff = useCallback(
+    (targetId: string, nextState: HomeBaseRadialGestureState<string>): void => {
+      publishHomeBaseRadialState(nextState);
+      playPrismCompanionGlassTap();
+      const run = homeBaseRadialRunRef.current + 1;
+      homeBaseRadialRunRef.current = run;
+      const reducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
+      homeBaseRadialHandoffTimerRef.current = window.setTimeout(
+        () => {
+          homeBaseRadialHandoffTimerRef.current = null;
+          if (homeBaseRadialRunRef.current !== run) return;
+          onHomeBaseAppletSelect?.(targetId);
+          const finished = transitionHomeBaseRadialGesture(
+            homeBaseRadialGestureRef.current,
+            { type: "finish" },
+          );
+          publishHomeBaseRadialState(finished.state);
+          setHomeBaseRadialPointer(null);
+          setHomeBaseRadialLayout([]);
+          setHomeBaseRadialTargetRadius(HOME_BASE_RADIAL_TARGET_RADIUS_PX);
+        },
+        reducedMotion ? 40 : HOME_BASE_RADIAL_HANDOFF_MS,
+      );
+    },
+    [onHomeBaseAppletSelect, publishHomeBaseRadialState],
+  );
+
+  const selectHomeBaseRadialTarget = useCallback(
+    (targetId: string): void => {
+      const result = transitionHomeBaseRadialGesture(
+        homeBaseRadialGestureRef.current,
+        { type: "select", targetId },
+      );
+      if (result.effect !== "select-target") return;
+      beginHomeBaseRadialHandoff(targetId, result.state);
+    },
+    [beginHomeBaseRadialHandoff],
+  );
+
+  const openHomeBaseRadialFromKeyboard = useCallback((): void => {
+    const measurement = measureHomeBaseRadial();
+    if (!measurement) return;
+    const initialId = homeBaseAppletTargets[0]?.id ?? null;
+    const result = transitionHomeBaseRadialGesture(
+      homeBaseRadialGestureRef.current,
+      { type: "open-keyboard", initialId },
+    );
+    if (result.state.phase !== "open") return;
+    setHomeBaseRadialSource(measurement.source);
+    setHomeBaseRadialPointer(null);
+    setHomeBaseRadialLayout(measurement.layout);
+    setHomeBaseRadialTargetRadius(measurement.targetRadius);
+    publishHomeBaseRadialState(result.state);
+    window.requestAnimationFrame(() => {
+      if (initialId) homeBaseRadialTargetRefs.current.get(initialId)?.focus();
+    });
+  }, [homeBaseAppletTargets, measureHomeBaseRadial, publishHomeBaseRadialState]);
+
+  const beginHomeBaseRadialPointer = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void => {
+    if (
+      event.button !== 0 ||
+      event.isPrimary === false ||
+      homeBaseAppletTargets.length === 0 ||
+      homeBaseRadialGestureRef.current.phase !== "idle"
+    ) {
+      return;
+    }
+    clearHomeBaseRadialTimers();
+    homeBaseRadialSuppressClickRef.current = false;
+    const measurement = measureHomeBaseRadial();
+    if (!measurement) return;
+    setHomeBaseRadialSource(measurement.source);
+    setHomeBaseRadialPointer({ x: event.clientX, y: event.clientY });
+    setHomeBaseRadialTargetRadius(measurement.targetRadius);
+    const pressed = transitionHomeBaseRadialGesture(
+      homeBaseRadialGestureRef.current,
+      { type: "press", pointerId: event.pointerId },
+    );
+    publishHomeBaseRadialState(pressed.state);
+    event.currentTarget.setPointerCapture(event.pointerId);
+    homeBaseRadialHoldTimerRef.current = window.setTimeout(() => {
+      homeBaseRadialHoldTimerRef.current = null;
+      const opened = transitionHomeBaseRadialGesture(
+        homeBaseRadialGestureRef.current,
+        { type: "hold", pointerId: event.pointerId },
+      );
+      if (opened.state.phase !== "open") return;
+      setHomeBaseRadialLayout(measurement.layout);
+      publishHomeBaseRadialState(opened.state);
+    }, HOME_BASE_RADIAL_HOLD_MS);
+  };
+
+  const moveHomeBaseRadialPointer = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void => {
+    const state = homeBaseRadialGestureRef.current;
+    if (
+      (state.phase !== "pressing" && state.phase !== "open") ||
+      state.pointerId !== event.pointerId
+    ) {
+      return;
+    }
+    const pointer = { x: event.clientX, y: event.clientY };
+    setHomeBaseRadialPointer(pointer);
+    if (state.phase === "open") {
+      const targetId = homeBaseRadialTargetAtPoint(
+        homeBaseRadialLayout,
+        pointer,
+        homeBaseRadialTargetRadius,
+      );
+      const aimed = transitionHomeBaseRadialGesture(state, {
+        type: "aim",
+        targetId,
+      });
+      publishHomeBaseRadialState(aimed.state);
+    }
+  };
+
+  const endHomeBaseRadialPointer = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void => {
+    clearHomeBaseRadialTimers();
+    const state = homeBaseRadialGestureRef.current;
+    if (
+      (state.phase !== "pressing" && state.phase !== "open") ||
+      state.pointerId !== event.pointerId
+    ) {
+      return;
+    }
+    const pointer = { x: event.clientX, y: event.clientY };
+    const rect = event.currentTarget.getBoundingClientRect();
+    const sourceInside =
+      pointer.x >= rect.left &&
+      pointer.x <= rect.right &&
+      pointer.y >= rect.top &&
+      pointer.y <= rect.bottom;
+    const targetId =
+      state.phase === "open"
+        ? homeBaseRadialTargetAtPoint(
+            homeBaseRadialLayout,
+            pointer,
+            homeBaseRadialTargetRadius,
+          )
+        : null;
+    const released = transitionHomeBaseRadialGesture(state, {
+      type: "release",
+      targetId,
+      sourceInside,
+    });
+    if (
+      state.phase === "open" ||
+      !sourceInside ||
+      released.effect === "activate-source"
+    ) {
+      homeBaseRadialSuppressClickRef.current = true;
+      window.setTimeout(() => {
+        homeBaseRadialSuppressClickRef.current = false;
+      }, 0);
+    }
+    if (released.effect === "select-target" && targetId) {
+      beginHomeBaseRadialHandoff(targetId, released.state);
+    } else {
+      publishHomeBaseRadialState(released.state);
+      setHomeBaseRadialPointer(null);
+      setHomeBaseRadialLayout([]);
+      if (released.effect === "activate-source") {
+        activateChatHomeHero();
+      }
+    }
+    try {
+      event.currentTarget.releasePointerCapture(event.pointerId);
+    } catch {
+      // Capture may already have ended at the browser boundary.
+    }
+  };
+
+  const cancelHomeBaseRadialPointer = (
+    event: ReactPointerEvent<HTMLButtonElement>,
+  ): void => {
+    const state = homeBaseRadialGestureRef.current;
+    if (
+      (state.phase === "pressing" || state.phase === "open") &&
+      state.pointerId === event.pointerId
+    ) {
+      cancelHomeBaseRadial();
+    }
+  };
+
+  const handleHomeBaseRadialKeyboard = (
+    event: ReactKeyboardEvent<HTMLElement>,
+  ): void => {
+    const state = homeBaseRadialGestureRef.current;
+    if (state.phase !== "open") return;
+    if (event.key === "Escape") {
+      event.preventDefault();
+      event.stopPropagation();
+      cancelHomeBaseRadial();
+      return;
+    }
+    const targetIds = homeBaseAppletTargets.map((target) => target.id);
+    const currentIndex = state.highlightedId
+      ? targetIds.indexOf(state.highlightedId)
+      : -1;
+    let nextIndex: number | null = null;
+    if (event.key === "ArrowRight" || event.key === "ArrowDown") {
+      nextIndex = nextHomeBaseRadialTargetIndex(currentIndex, targetIds.length, 1);
+    } else if (event.key === "ArrowLeft" || event.key === "ArrowUp") {
+      nextIndex = nextHomeBaseRadialTargetIndex(currentIndex, targetIds.length, -1);
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = targetIds.length - 1;
+    } else if (
+      (event.key === "Enter" || event.key === " ") &&
+      state.highlightedId
+    ) {
+      event.preventDefault();
+      selectHomeBaseRadialTarget(state.highlightedId);
+      return;
+    }
+    if (nextIndex === null || nextIndex < 0) return;
+    event.preventDefault();
+    const targetId = targetIds[nextIndex]!;
+    const aimed = transitionHomeBaseRadialGesture(state, {
+      type: "aim",
+      targetId,
+    });
+    publishHomeBaseRadialState(aimed.state);
+    homeBaseRadialTargetRefs.current.get(targetId)?.focus();
+  };
+
+  useEffect(() => {
+    if (chatHomeOrbDocked) return;
+    if (homeBaseRadialGestureRef.current.phase !== "idle") {
+      cancelHomeBaseRadial(false);
+    }
+  }, [cancelHomeBaseRadial, chatHomeOrbDocked]);
+
+  useEffect(() => {
+    if (homeBaseRadialGesture.phase === "idle") return;
+    const onKeyDown = (event: KeyboardEvent): void => {
+      if (event.key !== "Escape") return;
+      event.preventDefault();
+      cancelHomeBaseRadial();
+    };
+    window.addEventListener("keydown", onKeyDown);
+    return () => window.removeEventListener("keydown", onKeyDown);
+  }, [cancelHomeBaseRadial, homeBaseRadialGesture.phase]);
+
+  useEffect(
+    () => () => {
+      clearHomeBaseRadialTimers();
+      homeBaseRadialRunRef.current += 1;
+    },
+    [clearHomeBaseRadialTimers],
+  );
+
   const beginDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
     if (
       event.button !== 0 ||
@@ -3968,6 +4354,39 @@ export default function PrismCompanion({
     stopInertia,
   ]);
 
+  const homeBaseRadialVisible =
+    homeBaseRadialGesture.phase === "open" ||
+    homeBaseRadialGesture.phase === "igniting";
+  const homeBaseRadialHighlightedId =
+    homeBaseRadialGesture.phase === "open"
+      ? homeBaseRadialGesture.highlightedId
+      : null;
+  const homeBaseRadialHighlightedPosition = homeBaseRadialHighlightedId
+    ? homeBaseRadialLayout.find(
+        (target) => target.id === homeBaseRadialHighlightedId,
+      ) ?? null
+    : null;
+  const homeBaseRadialRay =
+    homeBaseRadialGesture.phase === "open" &&
+    homeBaseRadialGesture.pointerId !== null &&
+    homeBaseRadialSource &&
+    homeBaseRadialPointer
+      ? homeBaseRadialRayGeometry(
+          homeBaseRadialSource,
+          homeBaseRadialHighlightedPosition ?? homeBaseRadialPointer,
+          homeBaseRadialHighlightedPosition
+            ? HOME_BASE_RADIAL_TARGET_RADIUS_PX
+            : 0,
+        )
+      : null;
+  const homeBaseRadialSelectedId =
+    homeBaseRadialGesture.phase === "igniting"
+      ? homeBaseRadialGesture.selectedId
+      : null;
+  const homeBaseRadialSelectedTarget = homeBaseAppletTargets.find(
+    (target) => target.id === homeBaseRadialSelectedId,
+  );
+
   if (typeof document === "undefined" || companionSuppressed) return null;
   if (sessionNoteContext) {
     return createPortal(
@@ -4087,6 +4506,150 @@ export default function PrismCompanion({
   }
   return createPortal(
     <>
+      {homeBaseRadialVisible && homeBaseRadialSource ? (
+        <>
+          <div
+            className={styles.homeBaseRadialBackdrop}
+            data-theme={theme}
+            data-prism-system-pause-exempt="true"
+            data-phase={homeBaseRadialGesture.phase}
+            aria-hidden="true"
+            onPointerDown={() => cancelHomeBaseRadial()}
+          />
+          <div
+            id="prism-home-base-radial-launcher"
+            className={styles.homeBaseRadialField}
+            data-theme={theme}
+            data-prism-system-pause-exempt="true"
+            data-home-base-radial-launcher="true"
+            data-phase={homeBaseRadialGesture.phase}
+            role="dialog"
+            aria-modal="true"
+            aria-label="Choose a PRISM applet"
+            aria-describedby="prism-home-base-radial-instructions"
+            onKeyDown={handleHomeBaseRadialKeyboard}
+          >
+            {homeBaseRadialRay?.points ? (
+              <svg
+                className={styles.homeBaseRadialRay}
+                viewBox={`0 0 ${window.innerWidth} ${window.innerHeight}`}
+                preserveAspectRatio="none"
+                aria-hidden="true"
+              >
+                <defs>
+                  <linearGradient
+                    id="home-base-radial-ray-gradient"
+                    gradientUnits="userSpaceOnUse"
+                    x1={homeBaseRadialSource.x}
+                    y1={homeBaseRadialSource.y}
+                    x2={homeBaseRadialPointer?.x ?? homeBaseRadialSource.x}
+                    y2={homeBaseRadialPointer?.y ?? homeBaseRadialSource.y}
+                  >
+                    <stop offset="0" stopColor="#fff" stopOpacity="0.9" />
+                    <stop offset="0.24" stopColor="var(--companion-s)" stopOpacity="0.74" />
+                    <stop offset="0.68" stopColor="var(--companion-m)" stopOpacity="0.58" />
+                    <stop offset="1" stopColor="#fff" stopOpacity="0.28" />
+                  </linearGradient>
+                </defs>
+                <polygon
+                  points={homeBaseRadialRay.points}
+                  fill="url(#home-base-radial-ray-gradient)"
+                  data-source-width={homeBaseRadialRay.sourceWidth.toFixed(2)}
+                  data-target-width={homeBaseRadialRay.targetWidth.toFixed(2)}
+                />
+              </svg>
+            ) : null}
+            {homeBaseRadialLayout.map((position, index) => {
+              const target = homeBaseAppletTargets.find(
+                (candidate) => candidate.id === position.id,
+              );
+              if (!target) return null;
+              const highlighted =
+                homeBaseRadialHighlightedId === target.id;
+              const selected = homeBaseRadialSelectedId === target.id;
+              return (
+                <button
+                  key={target.id}
+                  ref={(element) => {
+                    if (element) {
+                      homeBaseRadialTargetRefs.current.set(target.id, element);
+                    } else {
+                      homeBaseRadialTargetRefs.current.delete(target.id);
+                    }
+                  }}
+                  id={`prism-home-applet-${target.id}`}
+                  type="button"
+                  className={styles.homeBaseRadialTarget}
+                  data-home-base-applet-target={target.id}
+                  data-highlighted={highlighted ? "true" : undefined}
+                  data-selected={selected ? "true" : undefined}
+                  aria-label={`Open ${target.label}`}
+                  aria-current={highlighted ? "true" : undefined}
+                  tabIndex={highlighted || selected ? 0 : -1}
+                  style={
+                    {
+                      left: position.x,
+                      top: position.y,
+                      ["--home-radial-hue" as string]: `${
+                        (index * 360) / Math.max(1, homeBaseRadialLayout.length)
+                      }deg`,
+                    } as CSSProperties
+                  }
+                  onPointerEnter={() => {
+                    const state = homeBaseRadialGestureRef.current;
+                    if (state.phase !== "open") return;
+                    publishHomeBaseRadialState(
+                      transitionHomeBaseRadialGesture(state, {
+                        type: "aim",
+                        targetId: target.id,
+                      }).state,
+                    );
+                  }}
+                  onFocus={() => {
+                    const state = homeBaseRadialGestureRef.current;
+                    if (state.phase !== "open") return;
+                    publishHomeBaseRadialState(
+                      transitionHomeBaseRadialGesture(state, {
+                        type: "aim",
+                        targetId: target.id,
+                      }).state,
+                    );
+                  }}
+                  onClick={() => selectHomeBaseRadialTarget(target.id)}
+                >
+                  <span className={styles.homeBaseRadialTargetGlass} aria-hidden="true">
+                    <span className={styles.homeBaseRadialTargetGlyph}>
+                      {target.glyph}
+                    </span>
+                  </span>
+                  <span className={styles.homeBaseRadialTargetLabel}>
+                    {target.label}
+                  </span>
+                </button>
+              );
+            })}
+            {homeBaseRadialSelectedTarget ? (
+              <span
+                className={styles.homeBaseRadialHandoffLabel}
+                role="status"
+                aria-live="polite"
+              >
+                Opening {homeBaseRadialSelectedTarget.label}…
+              </span>
+            ) : null}
+            <p
+              id="prism-home-base-radial-instructions"
+              className={styles.srOnly}
+              role="status"
+              aria-live="polite"
+            >
+              {homeBaseRadialSelectedTarget
+                ? `Opening ${homeBaseRadialSelectedTarget.label}`
+                : "Drag toward an applet and release, or use arrow keys and Enter. Escape cancels."}
+            </p>
+          </div>
+        </>
+      ) : null}
       <div
         ref={backdropRef}
         className={styles.backdrop}
@@ -4101,6 +4664,7 @@ export default function PrismCompanion({
       <div
         ref={anchorRef}
         className={styles.anchor}
+        data-theme={theme}
         data-prism-companion-anchor="true"
         data-prism-system-pause-exempt="true"
         data-open={open ? "true" : undefined}
@@ -4117,6 +4681,11 @@ export default function PrismCompanion({
         }
         data-chat-home-orb-returning={
           chatHomeDockReturning ? "true" : undefined
+        }
+        data-home-base-radial-phase={
+          homeBaseRadialGesture.phase !== "idle"
+            ? homeBaseRadialGesture.phase
+            : undefined
         }
         data-soft-synthesis={softSynthesisActive ? "true" : undefined}
         data-refracting={refractSession?.phase}
@@ -4976,13 +5545,14 @@ export default function PrismCompanion({
           ) : null}
         </div>
         <button
+          ref={avatarRef}
           type="button"
           className={styles.avatar}
           data-tutorial-target="prism-companion"
           data-prism-companion-avatar="true"
           aria-label={
             chatHomeOrbDocked
-              ? "Start chat with PRISM"
+              ? "Start chat with PRISM. Hold for applets."
               : softSynthesisActive
               ? softSynthesisUi.expanded
                 ? "Minimize soft synthesis"
@@ -4995,14 +5565,18 @@ export default function PrismCompanion({
           }
           aria-expanded={
             chatHomeOrbDocked
-              ? undefined
+              ? homeBaseRadialVisible
               : softSynthesisActive
                 ? softSynthesisUi.expanded
                 : open
           }
           aria-controls={
-            chatHomeOrbDocked || softSynthesisActive
-              ? undefined
+            chatHomeOrbDocked
+              ? homeBaseRadialVisible
+                ? "prism-home-base-radial-launcher"
+                : undefined
+              : softSynthesisActive
+                ? undefined
               : panelView === "synthesis"
                 ? "global-prism-synthesis"
                 : panelView === "notes"
@@ -5012,15 +5586,45 @@ export default function PrismCompanion({
           aria-keyshortcuts={
             chatHomeOrbDocked ? undefined : shortcutPresentation.aria
           }
-          onPointerDown={chatHomeOrbDocked ? undefined : beginDrag}
-          onPointerMove={chatHomeOrbDocked ? undefined : moveDrag}
-          onPointerUp={chatHomeOrbDocked ? undefined : endDrag}
-          onPointerCancel={chatHomeOrbDocked ? undefined : cancelDrag}
+          aria-haspopup={chatHomeOrbDocked ? "dialog" : undefined}
+          onPointerDown={
+            chatHomeOrbDocked ? beginHomeBaseRadialPointer : beginDrag
+          }
+          onPointerMove={
+            chatHomeOrbDocked ? moveHomeBaseRadialPointer : moveDrag
+          }
+          onPointerUp={
+            chatHomeOrbDocked ? endHomeBaseRadialPointer : endDrag
+          }
+          onPointerCancel={
+            chatHomeOrbDocked ? cancelHomeBaseRadialPointer : cancelDrag
+          }
+          onLostPointerCapture={
+            chatHomeOrbDocked ? cancelHomeBaseRadialPointer : undefined
+          }
+          onKeyDown={(event) => {
+            if (!chatHomeOrbDocked) return;
+            if (homeBaseRadialGestureRef.current.phase === "open") {
+              handleHomeBaseRadialKeyboard(event);
+              return;
+            }
+            if (
+              homeBaseRadialGestureRef.current.phase === "idle" &&
+              (event.key === "Enter" || event.key === " ")
+            ) {
+              event.preventDefault();
+              openHomeBaseRadialFromKeyboard();
+            }
+          }}
           disabled={Boolean(refractSession)}
           onClick={(event) => {
             if (chatHomeOrbDocked) {
-              playPrismCompanionGlassTap();
-              activatePrismConversation(true);
+              if (homeBaseRadialSuppressClickRef.current) {
+                homeBaseRadialSuppressClickRef.current = false;
+                event.preventDefault();
+                return;
+              }
+              activateChatHomeHero();
               return;
             }
             if (event.detail === 0) {

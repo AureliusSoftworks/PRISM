@@ -177,6 +177,7 @@ export function PrismWieldFixture({
         <>
           <PrismCompanion
             accountKey="qa-prism-wield"
+            theme={theme}
             keyboardShortcut="Control+Alt"
             surface={
               homeDocked

@@ -90,7 +90,7 @@ test("moves the existing companion without overwriting its saved dock and restor
   );
   assert.match(
     component,
-    /chatHomeOrbDocked \? undefined : beginDrag/u,
+    /chatHomeOrbDocked \? beginHomeBaseRadialPointer : beginDrag/u,
   );
   assert.match(component, /data-chat-home-orb-docked/u);
   assert.match(component, /data-chat-home-orb-returning/u);
@@ -111,7 +111,7 @@ test("keeps the docked orb continuously visible and preserves hero activation", 
   );
   assert.match(
     component,
-    /if \(chatHomeOrbDocked\) \{\s*playPrismCompanionGlassTap\(\);\s*activatePrismConversation\(true\);\s*return;/u,
+    /if \(chatHomeOrbDocked\) \{[\s\S]*homeBaseRadialSuppressClickRef\.current[\s\S]*activateChatHomeHero\(\);\s*return;/u,
   );
   assert.match(
     page,
@@ -119,7 +119,7 @@ test("keeps the docked orb continuously visible and preserves hero activation", 
   );
   assert.match(
     page,
-    /async function summonPrismIntoFreshChat[\s\S]*?newSession: true/u,
+    /async function summonPrismIntoFreshChat[\s\S]*?newSession: true[\s\S]*?starterPrompt: true[\s\S]*?queuedConversationId: opened\.conversationId[\s\S]*?conversationDetailOverride: freshConversation/u,
   );
 });
 
