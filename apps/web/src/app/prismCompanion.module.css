@@ -5,9 +5,12 @@
   --companion-i: #b7e63a;
   --companion-s: #2fd3e3;
   --companion-m: #7b5cff;
+  --prism-companion-anchor-z-index: 170;
+  --prism-companion-open-z-index: 855;
+  --prism-companion-wielding-z-index: 857;
   position: fixed;
-  /* Above ordinary drawers, below modal/tutorial safety layers. */
-  z-index: 855;
+  /* Docked/floating companion sits below shared top chrome when closed. */
+  z-index: var(--prism-companion-anchor-z-index);
   width: 68px;
   height: 68px;
   transform: translate(-50%, -50%);
@@ -30,12 +33,16 @@
     top 380ms cubic-bezier(.2, .82, .2, 1);
 }
 
+.anchor[data-open="true"] {
+  z-index: var(--prism-companion-open-z-index);
+}
+
 .anchor[data-wielding="true"] {
   left: 0 !important;
   top: 0 !important;
   width: 28px;
   height: 28px;
-  z-index: 857;
+  z-index: var(--prism-companion-wielding-z-index);
   pointer-events: none;
   transform: translate3d(0, 0, 0) translate(-50%, -50%);
   will-change: transform;

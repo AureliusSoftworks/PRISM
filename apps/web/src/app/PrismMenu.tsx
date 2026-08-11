@@ -128,6 +128,8 @@ export interface PrismMenuRequest {
   accent?: string;
   theme?: PrismMenuTheme;
   minWidth?: number;
+  /** Optional content-height cap for a compact menu; the menu scrolls past it. */
+  maxHeight?: number;
   focusRestoreTarget?: HTMLElement | RefObject<HTMLElement | null> | null;
   onClose?: () => void;
 }
@@ -371,11 +373,6 @@ export function PrismMenuSurface({
   }, [measure, request.entries]);
 
   useEffect(() => {
-    if (!navbarPicker) return;
-    announcePrismNavbarPickerOpen(request.id);
-  }, [navbarPicker, request.id]);
-
-  useEffect(() => {
     if (ownerId || coordinator?.activeMenu?.id === request.id) return;
     return coordinator?.claimSurface(request.id, onClose);
   }, [coordinator, onClose, ownerId, request.id]);
@@ -553,7 +550,7 @@ export function PrismMenuSurface({
     "--prism-menu-accent": request.accent ?? "#8fb7ff",
     left: position.left / rootZoom,
     top: position.top / rootZoom,
-    maxHeight: position.maxHeight / rootZoom,
+    maxHeight: Math.min(position.maxHeight, request.maxHeight ?? Infinity) / rootZoom,
     minWidth: Math.min(request.minWidth ?? 196, availableWidth),
     maxWidth: Math.min(320, availableWidth),
     visibility: position.left < -1000 ? "hidden" : "visible",

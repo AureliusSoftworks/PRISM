@@ -22681,6 +22681,10 @@ function ComposerBotPicker({
     COMPOSE_MENU_PORTAL_Z_INDEX_BOT,
     placement,
   );
+  const matchedMenuPortalStyle =
+    navbarPicker && menuPortalStyle
+      ? { ...menuPortalStyle, width: menuPortalStyle.minWidth }
+      : menuPortalStyle;
 
   // Portaled menus leave the navbar DOM; keep Zen auto-hide from tucking the bar.
   useEffect(() => {
@@ -22797,6 +22801,7 @@ function ComposerBotPicker({
       data-disabled={disabled ? "true" : undefined}
       data-open={menuOpen ? "true" : undefined}
       data-menu-placement={placement}
+      data-navbar-picker={navbarPicker ? "true" : undefined}
       style={controlStyle}
     >
       <button
@@ -22848,7 +22853,7 @@ function ComposerBotPicker({
         </span>
       </button>
       {menuOpen &&
-        menuPortalStyle &&
+        matchedMenuPortalStyle &&
         typeof document !== "undefined" &&
         createPortal(
           <div
@@ -22858,7 +22863,7 @@ function ComposerBotPicker({
             }`}
             data-private-tone={privateTone ? "true" : undefined}
             data-navbar-picker-surface={navbarPicker ? "true" : undefined}
-            style={menuPortalStyle}
+            style={matchedMenuPortalStyle}
           >
             {showFilterControls && (
               <div className={styles.composeBotFilters}>
@@ -23399,7 +23404,14 @@ function findVisiblePrismShortcutTrigger(
 function closeOpenPrismShortcutPicker(): boolean {
   const picker = document.querySelector<HTMLElement>("[data-picker-surface]");
   const surface = picker?.dataset.pickerSurface;
-  if (!picker || (surface !== "model" && surface !== "effort")) return false;
+  if (!picker || (surface !== "model" && surface !== "effort")) {
+    const voiceTrigger = document.querySelector<HTMLButtonElement>(
+      '[data-prism-speech-type-trigger="true"][aria-expanded="true"]',
+    );
+    if (!voiceTrigger) return false;
+    voiceTrigger.click();
+    return true;
+  }
   const trigger = picker.querySelector<HTMLButtonElement>(
     surface === "model"
       ? '[data-prism-model-picker-trigger="true"]'
@@ -56518,6 +56530,9 @@ function HomeContent(): React.JSX.Element {
                   accent: prismDefaultAccentForTheme(resolvedTheme),
                   theme: resolvedTheme,
                   minWidth: 320,
+                  // Five Speech Types stay available, but the navbar menu should
+                  // remain a compact scrollable picker rather than a tall panel.
+                  maxHeight: 224,
                   focusRestoreTarget: voiceModeSelectorButtonRef,
                   entries: voiceEntries,
                 }}

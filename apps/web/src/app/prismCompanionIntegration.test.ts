@@ -16,6 +16,11 @@ const orbCss = readFileSync(
 );
 const globalCss = readFileSync(new URL("./globals.css", import.meta.url), "utf8");
 const page = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
+const pageCss = readFileSync(new URL("./page.module.css", import.meta.url), "utf8");
+const prismMenuCss = readFileSync(
+  new URL("./PrismMenu.module.css", import.meta.url),
+  "utf8",
+);
 const tutorials = readFileSync(
   new URL("./modeTutorials.ts", import.meta.url),
   "utf8",
@@ -410,7 +415,18 @@ test("keeps the app shell crisp behind a local focus orb while pausing motion", 
     companionCss,
     /\.focusOrb \{[\s\S]*width: min\(74vw, 760px\)[\s\S]*radial-gradient[\s\S]*filter: blur\(26px\)/u,
   );
-  assert.match(companionCss, /\.anchor \{[\s\S]*z-index: 855/u);
+  assert.match(
+    companionCss,
+    /\.anchor \{[\s\S]*--prism-companion-anchor-z-index:\s*170/u,
+  );
+  assert.match(
+    companionCss,
+    /\.anchor\[data-open="true"\]\s*\{[\s\S]*z-index:\s*var\(--prism-companion-open-z-index\);/u,
+  );
+  assert.match(
+    companionCss,
+    /\.anchor\[data-wielding="true"\]\s*\{[\s\S]*z-index:\s*var\(--prism-companion-wielding-z-index\);/u,
+  );
   assert.match(
     globalCss,
     /html\[data-prism-system-paused="true"\][\s\S]*data-prism-system-pause-exempt[\s\S]*animation-play-state: paused !important/u,
@@ -440,6 +456,31 @@ test("keeps the app shell crisp behind a local focus orb while pausing motion", 
   assert.match(page, /hideAppNavbarForImmersion\(\)/u);
   assert.match(page, /zenAutoHide = chatPresentation === "zen"/u);
   assert.match(page, /setAppNavbarAutoHideEnabled\(zenAutoHide\)/u);
+
+  const navHeaderLayer = Number(
+    pageCss.match(/\.chatHeader\s*\{[\s\S]*?z-index:\s*(\d+);/u)?.[1],
+  );
+  const navbarPickerLayer = Number(
+    prismMenuCss.match(
+      /\.menu\[data-navbar-picker-surface="true"\]\s*\{[\s\S]*?z-index:\s*(\d+);/u,
+    )?.[1],
+  );
+  const companionAnchorLayer = Number(
+    companionCss.match(/--prism-companion-anchor-z-index:\s*(\d+);/u)?.[1],
+  );
+  const companionOpenLayer = Number(
+    companionCss.match(/--prism-companion-open-z-index:\s*(\d+);/u)?.[1],
+  );
+  const companionWieldLayer = Number(
+    companionCss.match(/--prism-companion-wielding-z-index:\s*(\d+);/u)?.[1],
+  );
+  assert.equal(companionAnchorLayer, 170);
+  assert.equal(companionAnchorLayer < navHeaderLayer, true);
+  assert.equal(companionAnchorLayer < navbarPickerLayer, true);
+  assert.equal(companionOpenLayer > navHeaderLayer, true);
+  assert.equal(companionOpenLayer > navbarPickerLayer, true);
+  assert.equal(companionWieldLayer > navHeaderLayer, true);
+  assert.equal(companionWieldLayer > navbarPickerLayer, true);
 });
 
 test("gives only the companion orb momentum", () => {

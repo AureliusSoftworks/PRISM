@@ -44,13 +44,29 @@ test("navbar dropdown pickers share one global open owner", () => {
     prismMenuSource,
     /window\.addEventListener\(PRISM_NAVBAR_PICKER_OPEN_EVENT, closeForNavbarPicker\)/u,
   );
-  assert.match(
+  assert.doesNotMatch(
     prismMenuSource,
-    /if \(!navbarPicker\) return;[\s\S]{0,120}announcePrismNavbarPickerOpen\(request\.id\)/u,
+    /announcePrismNavbarPickerOpen\(request\.id\)/u,
   );
   assert.match(pageSource, /announcePrismNavbarPickerOpen\(pickerId\)/u);
   assert.match(pageSource, /closeForOtherPicker/u);
   assert.match(pageSource, /voiceModeSelectorPickerId = useId\(\)/u);
+});
+
+test("Speech Type stays compact and its hotkey closes an already-open menu", () => {
+  const voiceSelector = sourceBetween(
+    "const renderVoiceModeSelector",
+    "const renderHeaderModelPicker",
+  );
+  assert.match(voiceSelector, /maxHeight:\s*224/u);
+  assert.match(
+    prismMenuSource,
+    /maxHeight: Math\.min\(position\.maxHeight, request\.maxHeight \?\? Infinity\)/u,
+  );
+  assert.match(
+    pageSource,
+    /\[data-prism-speech-type-trigger="true"\]\[aria-expanded="true"\]/u,
+  );
 });
 
 test("navbar dropdowns escape header stacking contexts through body portals", () => {
@@ -111,6 +127,25 @@ test("navbar picker layers sit exactly one level below their header controls", (
   assert.match(
     prismMenuCss,
     /\.menu\[data-navbar-picker-surface="true"\]\s*\{[\s\S]*z-index:\s*179;[\s\S]*padding-top:\s*12px;/u,
+  );
+});
+
+test("navbar bot trigger matches its responsive picker menu floor", () => {
+  assert.match(
+    pageSource,
+    /data-navbar-picker=\{navbarPicker \? "true" : undefined\}/u,
+  );
+  assert.match(
+    readFileSync(new URL("./page.module.css", import.meta.url), "utf8"),
+    /\.composeBotControl\[data-navbar-picker="true"\]\s*\{[\s\S]*?width:\s*min\(260px, calc\(100vw - 24px\)\);[\s\S]*?flex:\s*0 0 min\(260px, calc\(100vw - 24px\)\);/u,
+  );
+  assert.match(
+    pageSource,
+    /const COMPOSE_MENU_BOT_MIN_WIDTH_PX = 260;/u,
+  );
+  assert.match(
+    pageSource,
+    /navbarPicker && menuPortalStyle[\s\S]{0,120}width: menuPortalStyle\.minWidth/u,
   );
 });
 

@@ -35083,6 +35083,14 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     background 0.2s ease;
 }
 
+/* Navbar Facet controls should read as one aligned unit with their portaled
+   bot library. The menu uses the same 260px responsive floor in
+   `computeComposeMenuFixedStyle`; keep this trigger at that width too. */
+.composeBotControl[data-navbar-picker="true"] {
+  width: min(260px, calc(100vw - 24px));
+  flex: 0 0 min(260px, calc(100vw - 24px));
+}
+
 /* When a bot is selected, tint the pill with that bot's color so the
    control reads as "this bot's rail". Border gets a stronger hint, fill
    a faint wash — keeps contrast with the composer's bg-deep surround
