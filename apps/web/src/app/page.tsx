@@ -134778,7 +134778,9 @@ function HomeContent(): React.JSX.Element {
           ),
           responseMode: debateResponseMode,
           modelSelectionKind:
-            debateModelChoice === AUTO_MODEL_CHOICE ? "auto" : "fixed",
+            debateModelChoice === AUTO_MODEL_CHOICE
+              ? ("auto" as const)
+              : ("fixed" as const),
         }
       : null;
     const debateLiveChromePolicy = debateLiveSessionActive
