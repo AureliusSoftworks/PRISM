@@ -50,6 +50,7 @@ test("uses the configurable Prism and navbar Control-root shortcuts globally", (
   assert.match(pageSource, /data-prism-speech-type-trigger="true"/u);
   assert.match(pageSource, /MODEL_PICKER_QUICK_OPEN_EVENT/u);
   assert.match(pageSource, /EFFORT_PICKER_QUICK_OPEN_EVENT/u);
+  assert.match(pageSource, /SPEECH_TYPE_QUICK_OPEN_EVENT/u);
   assert.match(pageSource, /closeOpenPrismShortcutPicker\(\)/u);
   assert.match(pageSource, /playSpatialUiSfx\("turbo-denied"/u);
   assert.match(pageSource, /pickerOpenState\.surface === "model"/u);
@@ -89,10 +90,7 @@ test("lets Model, Effort, and Speech Type select values from the wheel", () => {
     /if \(!navbarPicker\) \{\s*document\.addEventListener\("keydown", handleQuickArrows/u,
   );
   assert.match(pageSource, /if \(navbarPicker\) return;/u);
-  assert.match(
-    pageSource,
-    /window\.addEventListener\("mousemove", returnToPointerBrowsing/u,
-  );
+  assert.doesNotMatch(pageSource, /returnToPointerBrowsing/u);
   assert.match(pageSource, /data-highlighted=\{/u);
   assert.doesNotMatch(
     pageSource,
@@ -117,6 +115,13 @@ test("lets Model, Effort, and Speech Type select values from the wheel", () => {
     /handleEffortKeyDown[\s\S]{0,900}event\.key !== "Tab"/u,
   );
   assert.match(pageSource, /event\.code === "Space"/u);
+  assert.match(pageSource, /event\.key === "Enter"/u);
+  assert.match(pageSource, /event\.key === "Backspace"/u);
+  assert.match(pageSource, /event\.key === "Delete"/u);
+  assert.match(pageSource, /commitHotkeyModelSelection\(\)/u);
+  assert.match(pageSource, /commitHotkeyEffortSelection\(\)/u);
+  assert.match(pageSource, /commitHotkeyVoiceSelection\(\)/u);
+  assert.match(pageSource, /cursorAgnostic=\{voiceModeSelectorInteractionMode === "keyboard"\}/u);
   assert.match(
     pageSource,
     /role="dialog"[\s\S]{0,120}onKeyDown=\{handleEffortKeyDown\}/u,
@@ -189,16 +194,10 @@ test("updates contextual guidance without adding first-run setup", () => {
     tutorialSource,
     /Hold Control for a moment to reveal a live shortcut compass[\s\S]*Wield Prism stays legend-free/u,
   );
-  assert.match(tutorialSource, /With Model open, scroll anywhere to select the next available model/u);
-  assert.match(tutorialSource, /with Effort open, scroll anywhere to select its next level/u);
-  assert.match(
-    tutorialSource,
-    /Wheel-based value selection in both Model and Effort adjusts the active picker regardless of pointer location/u,
-  );
-  assert.match(tutorialSource, /moving the mouse returns/u);
+  assert.match(tutorialSource, /scroll anywhere to move its pending value without moving the cursor/u);
+  assert.match(tutorialSource, /Enter, Space, or clicking outside commits that pending value/u);
+  assert.match(tutorialSource, /Escape, Backspace, or Delete exits without changing it/u);
   assert.match(tutorialSource, /Model and Effort never remain open together/u);
-  assert.match(tutorialSource, /Clicking anywhere outside closes the open picker/u);
-  assert.match(tutorialSource, /Space or Escape also closes it/u);
   assert.match(tutorialSource, /Settings → Shortcuts/u);
   assert.doesNotMatch(firstRunSource, /keyboard shortcuts|Shift\+Tab/u);
 });

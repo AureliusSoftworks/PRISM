@@ -10,6 +10,12 @@ const cssSource = readFileSync(
 const turboFireWebp = readFileSync(
   new URL("../../public/ui/turbo-fire-loop.webp", import.meta.url),
 );
+const turboFireGif = readFileSync(
+  new URL("../../public/ui/turbo-fire-loop.gif", import.meta.url),
+);
+const turboFireStillPng = readFileSync(
+  new URL("../../public/ui/turbo-fire-still.png", import.meta.url),
+);
 const tutorialSource = readFileSync(
   new URL("./modeTutorials.ts", import.meta.url),
   "utf8",
@@ -39,6 +45,30 @@ function animatedWebpFrameDurations(source: Buffer): number[] {
     offset += 8 + chunkSize + (chunkSize % 2);
   }
   return durations;
+}
+
+function animatedWebpCanvasSize(source: Buffer): [number, number] {
+  let offset = 12;
+  while (offset + 18 <= source.length) {
+    const chunkType = source.toString("ascii", offset, offset + 4);
+    const chunkSize = source.readUInt32LE(offset + 4);
+    if (chunkType === "VP8X" && chunkSize >= 10) {
+      return [
+        source.readUIntLE(offset + 12, 3) + 1,
+        source.readUIntLE(offset + 15, 3) + 1,
+      ];
+    }
+    offset += 8 + chunkSize + (chunkSize % 2);
+  }
+  throw new Error("Turbo fire WebP is missing its VP8X canvas metadata");
+}
+
+function gifCanvasSize(source: Buffer): [number, number] {
+  return [source.readUInt16LE(6), source.readUInt16LE(8)];
+}
+
+function pngCanvasSize(source: Buffer): [number, number] {
+  return [source.readUInt32BE(16), source.readUInt32BE(20)];
 }
 
 function effortGlyphColors(level: string): string[] {
@@ -114,17 +144,59 @@ describe("shared routing model picker integration", () => {
     assert.doesNotMatch(pageSource, /Account default/u);
   });
 
-  it("shows a noninteractive hollow Effort glyph while Auto is selected", () => {
+  it("uses the hollow Auto effort glyph for Turbo toggle and preview actions", () => {
     assert.match(pageSource, /function HollowTriangleEffortIcon/u);
     assert.match(
       pageSource,
       /const effortInteractionDisabled =[\s\S]{0,100}autoSelected/u,
     );
+    assert.match(
+      pageSource,
+      /const autoTurboButtonInteractive =[\s\S]{0,120}autoSelected[\s\S]{0,100}!interactionDisabled/u,
+    );
+    assert.match(
+      pageSource,
+      /const autoOnlineTurboToggleAvailable =[\s\S]{0,100}provider === "online"/u,
+    );
+    assert.match(
+      pageSource,
+      /const autoLocalTurboPreviewAvailable =[\s\S]{0,100}provider === "local"/u,
+    );
+    assert.match(
+      pageSource,
+      /const effortTriggerDisabled =[\s\S]{0,100}!autoTurboActionAvailable/u,
+    );
     assert.match(pageSource, /Effort chosen automatically/u);
     assert.match(pageSource, /<HollowTriangleEffortIcon \/>/u);
     assert.match(
       pageSource,
-      /!autoSelected &&[\s\S]{0,120}effortControl\.turboSupported/u,
+      /data-auto-turbo-toggle=\{[\s\S]{0,80}autoOnlineTurboToggleAvailable/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(autoLocalTurboPreviewAvailable\)[\s\S]{0,220}playSpatialUiSfx\("turbo-on"[\s\S]{0,180}setTurboSmokeBurstId/u,
+    );
+    assert.doesNotMatch(
+      pageSource.match(
+        /if \(autoLocalTurboPreviewAvailable\)[\s\S]*?\n\s*\}\n\s*if \(autoOnlineTurboToggleAvailable\)/u,
+      )?.[0] ?? "",
+      /onTurboChange|persistGlobalModelSelection|TURBO_TOGGLE_QUICK_EVENT/u,
+    );
+    assert.match(
+      pageSource,
+      /new Event\(TURBO_TOGGLE_QUICK_EVENT, \{ bubbles: true \}\)/u,
+    );
+    assert.match(
+      pageSource,
+      /aria-pressed=\{[\s\S]{0,100}effortControl\.turboEnabled/u,
+    );
+    assert.match(
+      pageSource,
+      /toggleTurboFromEffortTrigger\(effortTrigger\)/u,
+    );
+    assert.match(
+      tutorialSource,
+      /In ONLINE Auto, clicking the hollow Effort triangle invokes that same Turbo toggle/u,
     );
   });
 
@@ -198,7 +270,7 @@ describe("shared routing model picker integration", () => {
     assert.match(pageSource, /Faster priority processing · premium rates/u);
     assert.match(
       pageSource,
-      /const turboVisuallyActive =\s*!autoSelected && effortControl\?\.turboEnabled === true/u,
+      /const turboVisuallyActive =\s*effortControl\?\.turboEnabled === true &&\s*\(!autoSelected \|\| autoOnlineTurboToggleAvailable\)/u,
     );
     assert.ok(
       (pageSource.match(/data-turbo=\{turboVisuallyActive/gu) ?? []).length >= 3,
@@ -259,7 +331,24 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       cssSource,
-      /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*mix-blend-mode:\s*multiply[^}]*opacity:\s*0\.88/u,
+      /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*invert\(1\)[^}]*mix-blend-mode:\s*multiply[^}]*opacity:\s*0\.86/u,
+    );
+    assert.match(
+      cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelControl\[data-turbo="true"\]::after\s*\{[^}]*#38bdf8/u,
+    );
+    assert.match(
+      cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelTurboBurnAtmosphere::before\s*\{[^}]*hue-rotate\(180deg\)/u,
+    );
+    assert.match(
+      cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelTurboBurnAtmosphere > span\s*\{[^}]*hue-rotate\(180deg\)/u,
+    );
+    assert.match(cssSource, /@keyframes turboEffortHeatPulseLightBlue/u);
+    assert.match(
+      cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelEffortTriggerWrap\[data-turbo="true"\][\s\S]{0,100}\.composeModelEffortTrigger\s*\{[^}]*animation-name:\s*turboEffortHeatPulseLightBlue/u,
     );
     assert.match(
       cssSource,
@@ -319,11 +408,11 @@ describe("shared routing model picker integration", () => {
       cssSource,
       /prefers-reduced-motion: reduce[\s\S]*?composeModelTurboBurnAtmosphere::before\s*\{[^}]*animation:\s*none/u,
     );
-    assert.ok(
-      statSync(
-        new URL("../../public/ui/turbo-fire-loop.webp", import.meta.url),
-      ).size > 100_000,
-    );
+    const turboFireWebpSize = statSync(
+      new URL("../../public/ui/turbo-fire-loop.webp", import.meta.url),
+    ).size;
+    assert.ok(turboFireWebpSize > 100_000 && turboFireWebpSize < 650_000);
+    assert.deepEqual(animatedWebpCanvasSize(turboFireWebp), [200, 140]);
     const turboFireFrameDurations = animatedWebpFrameDurations(turboFireWebp);
     assert.equal(turboFireFrameDurations.length, 80);
     assert.ok(
@@ -333,8 +422,10 @@ describe("shared routing model picker integration", () => {
     assert.ok(
       statSync(
         new URL("../../public/ui/turbo-fire-loop.gif", import.meta.url),
-      ).size > 100_000,
+      ).size > 50_000,
     );
+    assert.deepEqual(gifCanvasSize(turboFireGif), [200, 140]);
+    assert.deepEqual(pngCanvasSize(turboFireStillPng), [200, 140]);
     assert.match(cssSource, /prefers-reduced-motion: reduce/u);
     assert.match(pageSource, /resetAllModelTurboPreferences/u);
     assert.match(pageSource, /disableTurboForSafetyTransitionRef/u);
@@ -358,6 +449,38 @@ describe("shared routing model picker integration", () => {
     );
   });
 
+  it("switches the complete Turbo burn palette with the body theme", () => {
+    assert.match(
+      pageSource,
+      /document\.body\.dataset\.prismTheme = resolvedTheme;[\s\S]{0,180}\}, \[resolvedTheme\]\);/u,
+    );
+    assert.match(
+      cssSource,
+      /composeModelEffortTriggerWrap\[data-turbo-capable="true"\]::after\s*\{[^}]*#ff6200[^}]*mix-blend-mode:\s*screen/u,
+      "dark mode should retain the original warm flame treatment",
+    );
+    assert.match(
+      cssSource,
+      /composeModelControl\[data-turbo="true"\]::after\s*\{[^}]*#ffad42/u,
+      "dark mode should retain its warm outer pulse",
+    );
+    assert.match(
+      cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*invert\(1\)[^}]*#38bdf8/u,
+      "light mode should own the white-blending blue flame override",
+    );
+    assert.match(
+      cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelControl\[data-turbo="true"\]::after\s*\{[^}]*#38bdf8/u,
+      "light mode should own the blue outer pulse override",
+    );
+    assert.match(
+      cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelEffortTriggerWrap\[data-turbo="true"\][\s\S]{0,100}\.composeModelEffortTrigger\s*\{[^}]*animation-name:\s*turboEffortHeatPulseLightBlue/u,
+      "light mode should own the blue heat animation override",
+    );
+  });
+
   it("keeps model and effort global across applets", () => {
     assert.match(pageSource, /globalModelChoiceByProvider/u);
     assert.match(pageSource, /persistGlobalModelSelection/u);
@@ -378,7 +501,7 @@ describe("shared routing model picker integration", () => {
   });
 
   it("explains LOCAL-only simulated Effort and the deep experimental ladder", () => {
-    assert.match(pageSource, /data-glyph-tooltip=\{effortDisabledReason\}/u);
+    assert.match(pageSource, /data-glyph-tooltip=\{effortTriggerTooltip\}/u);
     assert.match(
       reasoningEffortSource,
       /Simulated Effort is available only for LOCAL models/u,
@@ -418,7 +541,7 @@ describe("shared routing model picker integration", () => {
     assert.match(pageSource, /onWheel=\{handleEffortWheel\}/u);
     assert.match(
       pageSource,
-      /type="range"[\s\S]{0,400}aria-valuetext=\{effortLabel\}/u,
+      /type="range"[\s\S]{0,400}aria-valuetext=\{displayedEffortLabel\}/u,
     );
     assert.match(cssSource, /mask: var\(--model-effort-icon\)/u);
     assert.match(
@@ -497,7 +620,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       pageSource,
-      /className=\{styles\.composeModelEffortTrigger\}[\s\S]{0,700}onClick=\{\(event\) => \{[\s\S]{0,100}event\.currentTarget\.focus\(\)/u,
+      /className=\{styles\.composeModelEffortTrigger\}[\s\S]{0,1200}onClick=\{\(event\) => \{[\s\S]{0,100}event\.currentTarget\.focus\(\)/u,
     );
     assert.doesNotMatch(pageSource, /commitHighlightedModelToEffort/u);
     assert.match(
@@ -544,7 +667,7 @@ describe("shared routing model picker integration", () => {
   it("matches the slider line spectrum to the selected effort glyph", () => {
     assert.match(
       pageSource,
-      /composeModelEffortSliderFill[\s\S]{0,120}data-effort-level=\{effortControl\.value\}/u,
+      /composeModelEffortSliderFill[\s\S]{0,120}data-effort-level=\{displayedEffortValue/u,
     );
     for (const level of [
       "auto",

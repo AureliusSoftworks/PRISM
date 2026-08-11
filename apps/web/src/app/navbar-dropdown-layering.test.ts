@@ -27,12 +27,30 @@ function sourceBetween(start: string, end: string): string {
 test("navbar dropdown pickers disable arrow-key list selection", () => {
   assert.match(
     pageSource,
-    /Navbar pickers stay pointer\/wheel\/Tab driven[\s\S]{0,120}if \(navbarPicker\) return;/u,
+    /Navbar pickers stay pointer\/wheel driven[\s\S]{0,160}if \(navbarPicker\) return;/u,
   );
   assert.match(
     prismMenuSource,
     /Top-navbar menus are pointer\/wheel driven[\s\S]{0,160}if \(!navbarPicker\) \{\s*if \(event\.key === "ArrowDown"/u,
   );
+});
+
+test("navbar dropdown pickers share one global open owner", () => {
+  assert.match(
+    prismMenuSource,
+    /PRISM_NAVBAR_PICKER_OPEN_EVENT = "prism:navbar-picker-open"/u,
+  );
+  assert.match(
+    prismMenuSource,
+    /window\.addEventListener\(PRISM_NAVBAR_PICKER_OPEN_EVENT, closeForNavbarPicker\)/u,
+  );
+  assert.match(
+    prismMenuSource,
+    /if \(!navbarPicker\) return;[\s\S]{0,120}announcePrismNavbarPickerOpen\(request\.id\)/u,
+  );
+  assert.match(pageSource, /announcePrismNavbarPickerOpen\(pickerId\)/u);
+  assert.match(pageSource, /closeForOtherPicker/u);
+  assert.match(pageSource, /voiceModeSelectorPickerId = useId\(\)/u);
 });
 
 test("navbar dropdowns escape header stacking contexts through body portals", () => {
@@ -67,7 +85,7 @@ test("navbar dropdowns escape header stacking contexts through body portals", ()
   );
 });
 
-test("portaled picker layers stay above the shared navbar", () => {
+test("navbar picker layers sit exactly one level below their header controls", () => {
   const botLayer = Number(
     pageSource.match(
       /const COMPOSE_MENU_PORTAL_Z_INDEX_BOT = ([\d_]+);/u,
@@ -84,11 +102,15 @@ test("portaled picker layers stay above the shared navbar", () => {
     )?.[1],
   );
 
-  assert.ok(botLayer > navbarLayer);
-  assert.ok(modelLayer > navbarLayer);
+  assert.equal(navbarLayer - botLayer, 1);
+  assert.equal(navbarLayer - modelLayer, 1);
   assert.match(
     prismMenuCss,
     /\.menu\s*\{[\s\S]*position:\s*fixed;[\s\S]*z-index:\s*2147483000;/u,
+  );
+  assert.match(
+    prismMenuCss,
+    /\.menu\[data-navbar-picker-surface="true"\]\s*\{[\s\S]*z-index:\s*179;[\s\S]*padding-top:\s*12px;/u,
   );
 });
 
@@ -194,7 +216,7 @@ test("model effort and bot pickers dismiss on outside pointer like PrismMenu", (
   );
   assert.match(
     pageSource,
-    /function ComposerBotPicker[\s\S]{0,4500}?menuRef\.current\?\.contains\(target\)[\s\S]{0,200}window\.addEventListener\("pointerdown", handler, true\)/u,
+    /function ComposerBotPicker[\s\S]{0,6200}?menuRef\.current\?\.contains\(target\)[\s\S]{0,200}window\.addEventListener\("pointerdown", handler, true\)/u,
   );
   assert.match(
     pageSource,

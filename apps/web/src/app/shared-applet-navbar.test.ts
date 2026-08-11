@@ -289,10 +289,10 @@ test("sidebar-open Chat keeps the premium conversation chip treatment", () => {
   );
 });
 
-test("shared navbar model names stay readable beside the effort control", () => {
+test("shared navbar model picker matches its dropdown width", () => {
   assert.match(
     pageCss,
-    /\.chatHeaderModelPicker \.composeModelControl\s*\{[\s\S]*max-width:\s*min\(11rem, 32vw\);/u,
+    /\.chatHeaderModelPicker \.composeModelControl\s*\{[\s\S]*width:\s*min\(320px, 32vw\);[\s\S]*max-width:\s*min\(320px, 32vw\);/u,
   );
   assert.match(
     pageCss,

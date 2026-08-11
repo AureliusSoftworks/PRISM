@@ -23,6 +23,17 @@ import {
 } from "./prismMenuModel";
 import styles from "./PrismMenu.module.css";
 
+/** Broadcast before opening a top-navbar picker so every picker shares one owner. */
+export const PRISM_NAVBAR_PICKER_OPEN_EVENT = "prism:navbar-picker-open";
+
+export function announcePrismNavbarPickerOpen(source: string): void {
+  window.dispatchEvent(
+    new CustomEvent(PRISM_NAVBAR_PICKER_OPEN_EVENT, {
+      detail: { source },
+    }),
+  );
+}
+
 export type PrismMenuTone = "default" | "danger";
 export type PrismMenuTheme = "dark" | "light";
 export type PrismMenuIconPresentation = "default" | "identity";
@@ -245,6 +256,22 @@ export function PrismMenuProvider({ children }: { children: ReactNode }): React.
     };
   }, [closeStandaloneMenus]);
 
+  useEffect(() => {
+    const closeForNavbarPicker = () => {
+      closeStandaloneMenus();
+      setActiveMenu((current) => {
+        current?.onClose?.();
+        return null;
+      });
+    };
+    window.addEventListener(PRISM_NAVBAR_PICKER_OPEN_EVENT, closeForNavbarPicker);
+    return () =>
+      window.removeEventListener(
+        PRISM_NAVBAR_PICKER_OPEN_EVENT,
+        closeForNavbarPicker,
+      );
+  }, [closeStandaloneMenus]);
+
   const value = useMemo(
     () => ({ activeMenu, openMenu, closeMenu, claimSurface }),
     [activeMenu, claimSurface, closeMenu, openMenu],
@@ -278,6 +305,12 @@ interface PrismMenuSurfaceProps {
   onBack?: () => void;
   /** Gives top-navbar dropdowns the shared high-contrast ambient shadow. */
   navbarPicker?: boolean;
+  /** Lets a hotkey-owned picker commit its pending value on an outside press. */
+  onDismissOutside?: () => boolean | void;
+  /** Runs before PrismMenu's built-in keyboard handling. */
+  onKeyDownCapture?: (event: React.KeyboardEvent<HTMLDivElement>) => void;
+  /** Keeps pointer hover from replacing the hotkey-owned active choice. */
+  cursorAgnostic?: boolean;
 }
 
 export function PrismMenuSurface({
@@ -288,6 +321,9 @@ export function PrismMenuSurface({
   ownerId,
   onBack,
   navbarPicker = false,
+  onDismissOutside,
+  onKeyDownCapture,
+  cursorAgnostic = false,
 }: PrismMenuSurfaceProps): React.JSX.Element {
   const menuRef = useRef<HTMLDivElement | null>(null);
   const itemRefs = useRef(new Map<string, HTMLButtonElement>());
@@ -326,12 +362,18 @@ export function PrismMenuSurface({
       menuHeight: Math.ceil(rect.height),
       boundary: boundaryRect(request.anchor),
       placement: request.anchor.preferredPlacement ?? "bottom-start",
+      gap: navbarPicker ? -2 : undefined,
     }));
-  }, [request.anchor]);
+  }, [navbarPicker, request.anchor]);
 
   useLayoutEffect(() => {
     measure();
   }, [measure, request.entries]);
+
+  useEffect(() => {
+    if (!navbarPicker) return;
+    announcePrismNavbarPickerOpen(request.id);
+  }, [navbarPicker, request.id]);
 
   useEffect(() => {
     if (ownerId || coordinator?.activeMenu?.id === request.id) return;
@@ -354,6 +396,7 @@ export function PrismMenuSurface({
           ? event.target.closest<HTMLElement>("[data-prism-menu-owner]")
           : null;
       if (owner?.dataset.prismMenuOwner === rootOwnerId) return;
+      if (onDismissOutside?.() === true) return;
       onClose({ restoreFocus: false });
     };
     const dismissForViewport = () => onClose({ restoreFocus: false });
@@ -369,7 +412,7 @@ export function PrismMenuSurface({
       window.removeEventListener("resize", measure);
       window.removeEventListener("scroll", measure, true);
     };
-  }, [measure, onClose, rootOwnerId]);
+  }, [measure, onClose, onDismissOutside, rootOwnerId]);
 
   const focusIndex = useCallback((index: number) => {
     const entry = interactiveEntries[index];
@@ -532,6 +575,7 @@ export function PrismMenuSurface({
         data-navbar-picker-surface={navbarPicker ? "true" : undefined}
         data-placement={position.placement}
         style={style}
+        onKeyDownCapture={onKeyDownCapture}
         onKeyDown={handleKeyDown}
       >
         <div className={styles.filament} aria-hidden="true" />
@@ -587,7 +631,9 @@ export function PrismMenuSurface({
               title={entry.disabledReason}
               onPointerDown={(event) => event.preventDefault()}
               onFocus={() => setActiveId(entry.id)}
-              onMouseEnter={() => setActiveId(entry.id)}
+              onMouseEnter={
+                cursorAgnostic ? undefined : () => setActiveId(entry.id)
+              }
               onClick={() => void invoke(entry)}
             >
               <span

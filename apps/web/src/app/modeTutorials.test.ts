@@ -38,7 +38,9 @@ describe("mode tutorials", () => {
     );
     assert.ok(step);
     assert.match(step.body, /scroll in either empty column beside the prose/u);
-    assert.match(step.body, /resize the whole authored avatar/u);
+    assert.match(step.body, /compact sizes it becomes the crisp mini chassis/u);
+    assert.match(step.body, /full textured avatar/u);
+    assert.match(step.body, /dominant presence/u);
     assert.match(step.body, /without changing the face/u);
   });
 
@@ -73,8 +75,11 @@ describe("mode tutorials", () => {
       step?.body ?? "",
       /Plan, Draft, Audit, and more on higher Effort or Deep experimental/u,
     );
-    assert.match(step?.body ?? "", /scratchpad is never saved/u);
-    assert.match(step?.body ?? "", /hidden chain-of-thought is never exposed/u);
+    assert.match(
+      step?.body ?? "",
+      /Private planning artifacts and provider hidden reasoning are never exposed/u,
+    );
+    assert.doesNotMatch(step?.body ?? "", /Developer Mode|scratchpad/u);
   });
 
   it("distinguishes the network lane from unsaved Private chat status", () => {
@@ -516,6 +521,10 @@ describe("mode tutorials", () => {
       /Leaving mid-ceremony or returning to the Debate menu still hard-stops every voice/u,
     );
     assert.match(copy, /Leaving an unfinished Debate by any route/u);
+    assert.match(copy, /Opening that archived recess mounts the chamber immediately/u);
+    assert.match(copy, /prepares the held voice/u);
+    assert.match(copy, /Judge, Participant, and Spectator alike/u);
+    assert.match(copy, /unfinished Spectator bake also continues building its append-only runway/u);
     assert.match(copy, /Continuing always begins with the Moderator calling/u);
     assert.match(copy, /Choosing Resume strikes the visible gavel immediately for every role/u);
     assert.match(copy, /audible hit calls the camera to the Moderator/u);
@@ -593,7 +602,18 @@ describe("mode tutorials", () => {
       copy,
       /ONLINE Auto provider lean slider: middle is Balanced \(pure cost and speed\)/u,
     );
-    assert.match(copy, /hollow triangle is an accessible, noninteractive Effort state/u);
+    assert.match(
+      copy,
+      /In LOCAL Auto, clicking the hollow triangle gives a failed ignition/u,
+    );
+    assert.match(
+      copy,
+      /ignition cue sputters into smoke without switching models or enabling Turbo/u,
+    );
+    assert.match(
+      copy,
+      /In ONLINE Auto, clicking that triangle toggles Turbo through the same route as the Turbo shortcut/u,
+    );
     assert.match(copy, /every generated statement and ballot records/u);
     assert.match(copy, /short title synthesized in the selected Rowdiness/u);
     assert.match(

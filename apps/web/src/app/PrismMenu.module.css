@@ -41,6 +41,12 @@
   animation: prismMenuIn 110ms cubic-bezier(0.2, 0.8, 0.2, 1);
 }
 
+/* Navbar menus sit just under their header controls, not above the chrome. */
+.menu[data-navbar-picker-surface="true"] {
+  z-index: 179;
+  padding-top: 12px;
+}
+
 .menu::before {
   content: "";
   position: absolute;

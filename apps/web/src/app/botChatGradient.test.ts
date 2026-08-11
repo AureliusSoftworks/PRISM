@@ -187,7 +187,7 @@ describe("selected bot chat gradient", () => {
     );
   });
 
-  it("clears the focused Chat persona when open canvas returns to all bots", () => {
+  it("keeps Chat and Zen canvas clicks in the current directory", () => {
     const pageSource = readFileSync(
       new URL("./page.tsx", import.meta.url),
       "utf8",
@@ -207,8 +207,14 @@ describe("selected bot chat gradient", () => {
     );
     const jumpSource = pageSource.slice(jumpStart, jumpEnd);
 
-    assert.match(handlerSource, /zenPersonaBotId !== null/);
-    assert.match(handlerSource, /jumpCanvasToAllBotsHome\(\)/);
+    assert.match(
+      handlerSource,
+      /if \(view === "chat"\) \{[\s\S]{0,240}setCanvasSelectedBotIds[\s\S]{0,160}return;/,
+    );
+    assert.doesNotMatch(
+      handlerSource,
+      /canvasBackgroundShouldZoomOutFocusedBot|relationshipDepthReturnDepth/,
+    );
     assert.doesNotMatch(handlerSource, /returnFromRelationshipDepth\(/);
     assert.match(jumpSource, /resetEmptyStateBotSelection\(\)/);
     assert.match(jumpSource, /performShowAllBotsView\(null/);
