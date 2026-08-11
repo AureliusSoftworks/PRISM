@@ -141,6 +141,7 @@ import {
 } from "./typographyScale";
 import {
   MODEL_EFFORT_ICON_PATHS,
+  type ModelEffortCapabilityMode,
   modelEffortBaseline,
   modelEffortSliderIndex,
   modelEffortSliderLevels,
@@ -14305,15 +14306,18 @@ const REASONING_EFFORT_LABELS: Record<ReasoningEffort, string> = {
 
 function ModelEffortIcon({
   level,
+  mode = "native",
   className,
 }: {
   level: ReasoningEffort;
+  mode?: ModelEffortCapabilityMode;
   className?: string;
 }): React.JSX.Element {
   return (
     <span
       className={`${styles.modelEffortIcon}${className ? ` ${className}` : ""}`}
       data-effort-level={level}
+      data-reasoning-mode={mode}
       style={
         {
           "--model-effort-icon": `url("${MODEL_EFFORT_ICON_PATHS[level]}")`,
@@ -23549,16 +23553,9 @@ function ComposerModelPicker({
     autoTurboButtonInteractive && provider === "online";
   const autoLocalTurboPreviewAvailable =
     autoTurboButtonInteractive && provider === "local";
-  const fixedOnlineTurboToggleAvailable =
-    !autoSelected &&
-    !interactionDisabled &&
-    Boolean(effortControl) &&
-    effortControl?.disabled !== true &&
-    provider === "online" &&
-    effortControl?.capability.mode === "unavailable" &&
-    effortControl?.turboSupported === true;
-  const onlineTurboToggleAvailable =
-    autoOnlineTurboToggleAvailable || fixedOnlineTurboToggleAvailable;
+  // The glyph is a fast Turbo toggle only for Auto. Fixed models always open
+  // Effort, including non-native models whose levels are simulated by Prism.
+  const onlineTurboToggleAvailable = autoOnlineTurboToggleAvailable;
   const autoTurboActionAvailable =
     autoOnlineTurboToggleAvailable || autoLocalTurboPreviewAvailable;
   const effortDirectActionAvailable =
@@ -23659,6 +23656,12 @@ function ComposerModelPicker({
     : !effortControl || effortControl.capability.mode === "unavailable"
       ? "Not adjustable"
       : REASONING_EFFORT_LABELS[effortControl.value];
+  const effortProvenanceLabel =
+    effortControl?.capability.mode === "simulated"
+      ? "Prism simulated"
+      : effortControl?.capability.mode === "native"
+        ? "Native reasoning"
+        : "Unavailable";
   const effortLevels = effortControl
     ? modelEffortSliderLevels(effortControl.capability)
     : [];
@@ -24422,9 +24425,6 @@ function ComposerModelPicker({
             data-auto-turbo-toggle={
               autoOnlineTurboToggleAvailable ? "true" : undefined
             }
-            data-fixed-turbo-toggle={
-              fixedOnlineTurboToggleAvailable ? "true" : undefined
-            }
             data-auto-turbo-preview={
               autoLocalTurboPreviewAvailable ? "true" : undefined
             }
@@ -24491,7 +24491,7 @@ function ComposerModelPicker({
                   ? "Auto effort. Turbo requires ONLINE. Click for a failed ignition."
                   : autoSelected
                     ? "Effort chosen automatically"
-                    : `Effort: ${effortLabel}${
+                    : `Effort: ${effortLabel} · ${effortProvenanceLabel}${
                         turboVisuallyActive ? ". Turbo on" : ""
                       }`
             }
@@ -24500,7 +24500,10 @@ function ComposerModelPicker({
             {autoSelected ? (
               <HollowTriangleEffortIcon />
             ) : (
-              <ModelEffortIcon level={effortControl.value} />
+              <ModelEffortIcon
+                level={effortControl.value}
+                mode={effortControl.capability.mode}
+              />
             )}
             <span className={styles.srOnly}>{effortLabel}</span>
             {!autoSelected &&
@@ -24632,6 +24635,13 @@ function ComposerModelPicker({
                 const isSelected = normalizedValue === model.id;
                 const isUnavailable = Boolean(model.disabledReason);
                 const rowEffort = effortControl?.rowValueForModel(model);
+                const rowCapability = rowEffort
+                  ? resolveModelReasoningEffortCapability({
+                      provider: model.provider,
+                      modelId: model.id,
+                      simulatedEffortEnabled: true,
+                    })
+                  : null;
                 return (
                   <button
                     key={`${model.provider}:${model.id}`}
@@ -24679,11 +24689,14 @@ function ComposerModelPicker({
                         <span
                           className={styles.composeModelRowEffort}
                           role="img"
-                          aria-label={`Saved effort: ${REASONING_EFFORT_LABELS[rowEffort]}`}
-                          title={`Saved effort: ${REASONING_EFFORT_LABELS[rowEffort]}`}
+                          aria-label={`Saved effort: ${REASONING_EFFORT_LABELS[rowEffort]} · ${rowCapability?.mode === "simulated" ? "Prism simulated" : "Native reasoning"}`}
+                          title={`Saved effort: ${REASONING_EFFORT_LABELS[rowEffort]} · ${rowCapability?.mode === "simulated" ? "Prism simulated" : "Native reasoning"}`}
                         >
                           <ModelEffortIcon
                             level={rowEffort}
+                            mode={
+                              rowCapability?.mode ?? "unavailable"
+                            }
                             className={
                               isSelected
                                 ? undefined
@@ -24726,7 +24739,10 @@ function ComposerModelPicker({
                 </small>
               </div>
               <strong>
-                <ModelEffortIcon level={displayedEffortValue ?? effortControl.value} />
+                <ModelEffortIcon
+                  level={displayedEffortValue ?? effortControl.value}
+                  mode={effortControl.capability.mode}
+                />
                 {displayedEffortLabel}
               </strong>
             </div>
@@ -24768,6 +24784,7 @@ function ComposerModelPicker({
                     ))}
                     <ModelEffortIcon
                       level={displayedEffortValue ?? effortControl.value}
+                      mode={effortControl.capability.mode}
                       className={styles.composeModelEffortSliderThumb}
                     />
                   </div>
@@ -24801,7 +24818,10 @@ function ComposerModelPicker({
                         setEffortValue(level);
                       }}
                     >
-                      <ModelEffortIcon level={level} />
+                      <ModelEffortIcon
+                        level={level}
+                        mode={effortControl.capability.mode}
+                      />
                       <span>{REASONING_EFFORT_LABELS[level]}</span>
                     </button>
                   ))}
@@ -134746,6 +134766,21 @@ function HomeContent(): React.JSX.Element {
       options: debateModelOptions,
       simulatedEffortEnabled: true,
     });
+    const debateConsentRouting = debateEffortTarget
+      ? {
+          provider: debateEffortTarget.provider,
+          model: debateEffortTarget.modelId,
+          reasoningEffort: savedModelReasoningEffort(
+            settings,
+            debateEffortTarget.provider,
+            debateEffortTarget.modelId,
+            debateEffortTarget.capability,
+          ),
+          responseMode: debateResponseMode,
+          modelSelectionKind:
+            debateModelChoice === AUTO_MODEL_CHOICE ? "auto" : "fixed",
+        }
+      : null;
     const debateLiveChromePolicy = debateLiveSessionActive
       ? liveSessionChromePolicy("Debate")
       : null;
@@ -135103,6 +135138,7 @@ function HomeContent(): React.JSX.Element {
                       model: debateModelChoice,
                     }
               }
+              consentRouting={debateConsentRouting}
               lockedRoutingChip={
                 debateLiveSessionActive
                   ? buildLiveSessionRoutingChip({
@@ -140767,7 +140803,10 @@ function HomeContent(): React.JSX.Element {
                     );
                     return (
                       <>
-                        <ModelEffortIcon level={level} />
+                        <ModelEffortIcon
+                          level={level}
+                          mode={modelEffortHudTarget.capability.mode}
+                        />
                         {REASONING_EFFORT_LABELS[level]}
                       </>
                     );

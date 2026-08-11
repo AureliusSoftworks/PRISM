@@ -310,6 +310,10 @@ describe("mode tutorials", () => {
     assert.match(copy, /briefs you should not have to author/u);
     assert.match(copy, /Try another version/u);
     assert.match(copy, /Make sure they’re willing/u);
+    assert.match(copy, /Consent is bound to the concrete model and Effort/u);
+    assert.match(copy, /Needs reconfirmation/u);
+    assert.match(copy, /changing Turbo alone does not/u);
+    assert.match(copy, /A refusal remains respected/u);
     assert.match(
       copy,
       /every Persona gives a short in-character comment on the assigned side/u,
@@ -461,7 +465,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /never reads or writes relationship memory/u);
     assert.match(
       copy,
-      /Changing the motion, cast, format, formality, or LOCAL\/ONLINE privacy lane clears/u,
+      /Changing the motion, cast, format, formality, LOCAL\/ONLINE privacy lane, or Participant side also requires a fresh compatible check/u,
     );
     assert.match(copy, /idea dice remains available/u);
     assert.match(

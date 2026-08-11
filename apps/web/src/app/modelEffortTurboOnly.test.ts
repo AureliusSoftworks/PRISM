@@ -8,14 +8,11 @@ const tutorialSource = readFileSync(
   "utf8",
 );
 
-test("fixed online models without adjustable effort toggle Turbo directly", () => {
+test("only Auto uses the effort glyph as a direct Turbo toggle", () => {
+  assert.doesNotMatch(pageSource, /fixedOnlineTurboToggleAvailable/u);
   assert.match(
     pageSource,
-    /const fixedOnlineTurboToggleAvailable =\s*!autoSelected[\s\S]{0,260}provider === "online"[\s\S]{0,180}capability\.mode === "unavailable"[\s\S]{0,120}turboSupported === true/u,
-  );
-  assert.match(
-    pageSource,
-    /const onlineTurboToggleAvailable =\s*autoOnlineTurboToggleAvailable \|\| fixedOnlineTurboToggleAvailable/u,
+    /const onlineTurboToggleAvailable =\s*autoOnlineTurboToggleAvailable/u,
   );
   assert.match(
     pageSource,
@@ -28,10 +25,6 @@ test("fixed online models without adjustable effort toggle Turbo directly", () =
   assert.match(
     pageSource,
     /aria-pressed=\{\s*onlineTurboToggleAvailable[\s\S]{0,80}effortControl\.turboEnabled/u,
-  );
-  assert.match(
-    pageSource,
-    /data-fixed-turbo-toggle=\{\s*fixedOnlineTurboToggleAvailable/u,
   );
 });
 
@@ -46,6 +39,6 @@ test("adjustable models retain the Effort popover", () => {
   );
   assert.match(
     tutorialSource,
-    /models without an adjustable Effort dial use the Effort control itself as a direct Turbo switch, just like ONLINE Auto; adjustable models keep Turbo inside the Effort popover/u,
+    /Only Auto uses the effort glyph as a direct Turbo switch; every fixed model opens the Effort picker/u,
   );
 });

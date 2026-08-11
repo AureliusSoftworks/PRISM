@@ -33914,6 +33914,21 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     drop-shadow(0 0 7px color-mix(in srgb, #e46fc5 48%, transparent));
 }
 
+/* Filled glyphs are provider-native. Hollow glyphs mark Prism's private
+   simulated passes while preserving the same effort shape and spectrum. */
+.modelEffortIcon[data-reasoning-mode="simulated"] {
+  -webkit-mask-image: var(--model-effort-icon), var(--model-effort-icon);
+  mask-image: var(--model-effort-icon), var(--model-effort-icon);
+  -webkit-mask-size: contain, calc(100% - 4px) calc(100% - 4px);
+  mask-size: contain, calc(100% - 4px) calc(100% - 4px);
+  -webkit-mask-position: center, center;
+  mask-position: center, center;
+  -webkit-mask-repeat: no-repeat, no-repeat;
+  mask-repeat: no-repeat, no-repeat;
+  -webkit-mask-composite: xor;
+  mask-composite: exclude;
+}
+
 /* Light surfaces need the same cumulative spectrum at a lower luminance.
    Each level keeps the exact 1–5 color count from the dark palette. */
 :global(body[data-prism-theme="light"])

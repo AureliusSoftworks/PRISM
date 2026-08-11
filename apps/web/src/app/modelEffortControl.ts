@@ -3,6 +3,9 @@ import type {
   ReasoningEffort,
 } from "@localai/shared";
 
+export type ModelEffortCapabilityMode =
+  ModelReasoningEffortCapabilityV1["mode"];
+
 export const MODEL_EFFORT_ICON_PATHS: Record<ReasoningEffort, string> = {
   auto: "/reasoning-effort/default.svg",
   none: "/reasoning-effort/none.svg",

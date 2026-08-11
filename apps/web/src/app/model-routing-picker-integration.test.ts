@@ -505,21 +505,21 @@ describe("shared routing model picker integration", () => {
     );
   });
 
-  it("explains LOCAL-only simulated Effort and the deep experimental ladder", () => {
+  it("explains simulated Effort and the deep experimental ladder", () => {
     assert.match(pageSource, /data-glyph-tooltip=\{effortTriggerTooltip\}/u);
     assert.match(
       reasoningEffortSource,
-      /Simulated Effort is available only for LOCAL models/u,
+      /simulated Effort/iu,
     );
     assert.ok(
-      (pageSource.match(/Deep LOCAL simulated thinking \(experimental\)/gu) ?? [])
+      (pageSource.match(/Deep simulated thinking \(experimental\)/gu) ?? [])
         .length >= 2,
       "expected both Settings presentations to describe deep simulated thinking",
     );
     assert.match(pageSource, /heavier private workshop/u);
     assert.match(pageSource, /onSimulatedEffortEducate/u);
-    assert.match(pageSource, /LOCAL simulated thinking/u);
-    assert.match(pageSource, /configured Ollama provider/u);
+    assert.match(pageSource, /simulated thinking/u);
+    assert.match(pageSource, /selected provider/u);
   });
 
   it("uses None instead of Default for simulated non-thinking models", () => {
@@ -541,7 +541,7 @@ describe("shared routing model picker integration", () => {
     assert.match(pageSource, /MODEL_EFFORT_ICON_PATHS/u);
     assert.match(
       pageSource,
-      /<ModelEffortIcon level=\{effortControl\.value\}/u,
+      /<ModelEffortIcon[\s\S]{0,100}level=\{effortControl\.value\}/u,
     );
     assert.match(pageSource, /onWheel=\{handleEffortWheel\}/u);
     assert.match(
@@ -549,12 +549,26 @@ describe("shared routing model picker integration", () => {
       /type="range"[\s\S]{0,400}aria-valuetext=\{displayedEffortLabel\}/u,
     );
     assert.match(cssSource, /mask: var\(--model-effort-icon\)/u);
+    assert.match(cssSource, /data-reasoning-mode="simulated"/u);
+    assert.match(cssSource, /-webkit-mask-composite: xor/u);
     assert.match(
       cssSource,
       /data-effort-level="xhigh"[\s\S]{0,180}linear-gradient/u,
     );
     assert.match(cssSource, /writing-mode: vertical-lr/u);
     assert.doesNotMatch(pageSource, /composeModelEffortHint/u);
+  });
+
+  it("opens Effort for every fixed model and reserves click-to-Turbo for Auto", () => {
+    assert.doesNotMatch(pageSource, /fixedOnlineTurboToggleAvailable/u);
+    assert.match(
+      pageSource,
+      /const onlineTurboToggleAvailable = autoOnlineTurboToggleAvailable/u,
+    );
+    assert.match(
+      pageSource,
+      /effortControl\.capability\.mode === "simulated"/u,
+    );
   });
 
   it("steps available Model choices from the wheel like Effort", () => {
@@ -824,12 +838,9 @@ describe("shared routing model picker integration", () => {
     assert.match(tutorialSource, /vertical slider/u);
     assert.match(tutorialSource, /selected effort glyph rotates in place/u);
     assert.match(tutorialSource, /one through five PRISM colors/u);
-    assert.match(tutorialSource, /Deep LOCAL simulated thinking/u);
+    assert.match(tutorialSource, /Deep simulated thinking/u);
     assert.match(tutorialSource, /short toast/u);
-    assert.match(
-      tutorialSource,
-      /ONLINE models use only provider-native effort/u,
-    );
+    assert.match(tutorialSource, /additional request to the selected provider/u);
     assert.match(tutorialSource, /Cmd\/Ctrl\+Shift\+E/u);
     assert.match(tutorialSource, /Control\+Left opens Model/u);
     assert.match(tutorialSource, /Shift\+Tab flips LOCAL\/ONLINE/u);
