@@ -192,7 +192,7 @@ describe("model effort preferences", () => {
     );
   });
 
-  it("keeps simulated preferences local-only and preserves native online effort", () => {
+  it("persists simulated preferences for non-native online models and native effort", () => {
     const db = createTestDatabase();
     const before = allModelReasoningEffortCursorHash(db, "user-1");
     setModelReasoningEffortPreference(db, {
@@ -221,7 +221,7 @@ describe("model effort preferences", () => {
         provider: "openai",
         modelId: "gpt-4o",
       }),
-      undefined,
+      "medium",
     );
     setModelReasoningEffortPreference(db, {
       userId: "user-1",

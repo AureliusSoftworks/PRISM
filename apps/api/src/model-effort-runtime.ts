@@ -16,7 +16,7 @@ import {
   listModelTurboPreferences,
 } from "./model-turbo-preferences.ts";
 
-/** LOCAL simulated Effort is the product default for models without native effort. */
+/** Simulated Effort is the product default for models without native effort. */
 function userAllowsSimulatedEffort(
   _db: DatabaseSync,
   _userId: string,

@@ -2733,7 +2733,7 @@ describe("processChatMessage Psychic planning", () => {
     await flushBackgroundTitleJobs();
   });
 
-  it("does not simulate effort with an online non-reasoning model", async () => {
+  it("simulates effort with an online non-reasoning model", async () => {
     const db = createChatTestDb();
     const requests: Array<{ url: string; body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -2775,14 +2775,13 @@ describe("processChatMessage Psychic planning", () => {
       }
     );
 
-    assert.equal(requests.length, 1);
-    assert.equal(
-      requests.filter(({ body }) =>
+    assert.ok(requests.length > 1);
+    assert.ok(
+      requests.some(({ body }) =>
         /Prism's (?:user-readable Psychic planning pass|private)/u.test(
-          JSON.stringify(body)
-        )
-      ).length,
-      0,
+          JSON.stringify(body),
+        ),
+      ),
     );
     assert.ok(
       requests.every(({ body }) => body.model === "gpt-4o"),
@@ -2792,12 +2791,12 @@ describe("processChatMessage Psychic planning", () => {
       result.conversation.messages.find((message) => message.role === "assistant")?.content,
       "Online answer."
     );
-    assert.equal(result.psychicDebug, undefined);
+    assert.equal(result.psychicDebug?.simulated, true);
     assert.ok(
       result.backendEvents?.some(
         (event) =>
-          event.message === "Simulated effort skipped" &&
-          event.detail?.includes("simulated_effort_local_only") &&
+          event.message === "Simulated effort active" &&
+          event.detail?.includes("simulated_effort") &&
           event.detail?.includes("provider=openai"),
       ),
     );
@@ -2888,7 +2887,7 @@ describe("processChatMessage Psychic planning", () => {
     );
   });
 
-  it("keeps online Chat Psychic to one public pass without simulated refinements", async () => {
+  it("runs simulated Psychic refinements for online Chat models without native effort", async () => {
     const db = createChatTestDb();
     const requests: Array<{ body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -2933,9 +2932,9 @@ describe("processChatMessage Psychic planning", () => {
       }
     );
 
-    assert.equal(requests.length, 2);
-    assert.equal(result.psychicDebug?.simulated, false);
-    assert.equal(result.psychicDebug?.passCount, 1);
+    assert.equal(requests.length, 4);
+    assert.equal(result.psychicDebug?.simulated, true);
+    assert.ok((result.psychicDebug?.passCount ?? 0) > 1);
     assert.match(result.psychicDebug?.scratchpad ?? "", /private online Chat plan/u);
     const userMessage = result.conversation.messages.find(
       (message) => message.role === "user"
@@ -2944,20 +2943,18 @@ describe("processChatMessage Psychic planning", () => {
       userMessage?.psychicThought?.summary,
       "I mapped the online Chat request.",
     );
-    assert.deepEqual(
-      userMessage?.psychicThought?.passes?.map((pass) => pass.stage),
-      ["plan"],
+    assert.ok(
+      userMessage?.psychicThought?.passes?.some((pass) => pass.stage === "plan"),
     );
-    assert.equal(
+    assert.ok(
       new Set(
         userMessage?.psychicThought?.passes?.map((pass) => pass.summary) ?? [],
-      ).size,
-      1,
+      ).size >= 1,
     );
     assert.doesNotMatch(JSON.stringify(userMessage), /private online Chat plan/u);
   });
 
-  it("does not apply the deep simulated ladder to an online model", async () => {
+  it("applies the deep simulated ladder to an online model", async () => {
     const db = createChatTestDb();
     const requests: Array<{ body: Record<string, unknown> }> = [];
     globalThis.fetch = (async (input: string | URL | Request, init?: RequestInit) => {
@@ -3002,19 +2999,15 @@ describe("processChatMessage Psychic planning", () => {
       },
     );
 
-    assert.equal(result.psychicDebug?.simulated, false);
-    assert.equal(result.psychicDebug?.passCount, 1);
-    assert.deepEqual(
-      result.psychicDebug?.passes?.map((pass) => pass.name),
-      ["plan"],
-    );
-    assert.equal(requests.length, 2);
+    assert.equal(result.psychicDebug?.simulated, true);
+    assert.ok((result.psychicDebug?.passCount ?? 0) > 1);
+    assert.ok(result.psychicDebug?.passes?.some((pass) => pass.name === "plan"));
+    assert.ok(requests.length > 2);
     const userMessage = result.conversation.messages.find(
       (message) => message.role === "user",
     );
-    assert.deepEqual(
-      userMessage?.psychicThought?.passes?.map((pass) => pass.stage),
-      ["plan"],
+    assert.ok(
+      userMessage?.psychicThought?.passes?.some((pass) => pass.stage === "plan"),
     );
   });
 

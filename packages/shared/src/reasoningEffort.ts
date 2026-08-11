@@ -677,10 +677,7 @@ export function modelSupportsNativeReasoningEffort(
 export function resolveModelReasoningEffortCapability(args: {
   provider: NativeReasoningEffortProvider;
   modelId: string;
-  /**
-   * Simulated Effort is available only for LOCAL models without native effort.
-   * Pass `false` to force it unavailable for a local model.
-   */
+  /** Pass `false` to make simulated Effort unavailable for non-native models. */
   simulatedEffortEnabled?: boolean;
 }): ModelReasoningEffortCapabilityV1 {
   const simulatedEnabled = args.simulatedEffortEnabled !== false;
@@ -707,14 +704,26 @@ export function resolveModelReasoningEffortCapability(args: {
           levels,
           supportsNone: levels.includes("none"),
         }
-      : {
-          mode: "unavailable",
-          levels: [],
-          supportsNone: false,
-          disabledReason: openAiModelIsFixedHigh(args.modelId)
-            ? "This model uses a fixed reasoning effort."
-            : "Simulated Effort is available only in LOCAL mode.",
-        };
+      : openAiModelIsFixedHigh(args.modelId)
+        ? {
+            mode: "unavailable",
+            levels: [],
+            supportsNone: false,
+            disabledReason: "This model uses a fixed reasoning effort.",
+          }
+        : simulatedEnabled
+          ? {
+              mode: "simulated",
+              levels: LOCAL_SIMULATED_REASONING_LEVELS,
+              supportsNone: true,
+            }
+          : {
+              mode: "unavailable",
+              levels: [],
+              supportsNone: false,
+              disabledReason:
+                "This model has no native thinking dial and simulated Effort is disabled.",
+            };
   }
   if (anthropicModelSupportsReasoningEffort(args.modelId)) {
     const levels = anthropicModelSupportsXHighReasoningEffort(args.modelId)
@@ -726,12 +735,19 @@ export function resolveModelReasoningEffortCapability(args: {
       supportsNone: false,
     };
   }
-  return {
-    mode: "unavailable",
-    levels: [],
-    supportsNone: false,
-    disabledReason: "Simulated Effort is available only in LOCAL mode.",
-  };
+  return simulatedEnabled
+    ? {
+        mode: "simulated",
+        levels: LOCAL_SIMULATED_REASONING_LEVELS,
+        supportsNone: true,
+      }
+    : {
+        mode: "unavailable",
+        levels: [],
+        supportsNone: false,
+        disabledReason:
+          "This model has no native thinking dial and simulated Effort is disabled.",
+      };
 }
 
 export function effectiveModelReasoningEffort(args: {

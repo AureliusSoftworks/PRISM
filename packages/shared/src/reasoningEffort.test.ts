@@ -317,7 +317,7 @@ describe("reasoning effort helpers", () => {
     assert.equal(openAiReasoningEffortForRequest("gpt-5.6-sol", "none"), "none");
   });
 
-  it("keeps simulated effort local-only while preserving native online effort", () => {
+  it("simulates effort for non-native models while preserving native online effort", () => {
     const localSimulated = resolveModelReasoningEffortCapability({
       provider: "local",
       modelId: "qwen3:14b",
@@ -340,20 +340,19 @@ describe("reasoning effort helpers", () => {
       }).mode,
       "unavailable",
     );
-    assert.equal(
-      resolveModelReasoningEffortCapability({
-        provider: "openai",
-        modelId: "gpt-4o",
-      }).mode,
-      "unavailable",
-    );
+    const openAiSimulated = resolveModelReasoningEffortCapability({
+      provider: "openai",
+      modelId: "gpt-4o",
+    });
+    assert.equal(openAiSimulated.mode, "simulated");
+    assert.equal(openAiSimulated.supportsNone, true);
     assert.equal(
       resolveModelReasoningEffortCapability({
         provider: "anthropic",
         modelId: "claude-haiku-4-5",
         simulatedEffortEnabled: true,
       }).mode,
-      "unavailable",
+      "simulated",
     );
     assert.equal(
       effectiveModelReasoningEffort({
@@ -362,7 +361,7 @@ describe("reasoning effort helpers", () => {
         preference: "minimal",
         simulatedEffortEnabled: true,
       }),
-      null,
+      "minimal",
     );
     assert.equal(
       effectiveModelReasoningEffort({
@@ -370,7 +369,7 @@ describe("reasoning effort helpers", () => {
         modelId: "claude-haiku-4-5",
         preference: "none",
       }),
-      null,
+      "none",
     );
   });
 

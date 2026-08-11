@@ -1426,7 +1426,13 @@ function simulatedEffortNoticeDetail(args: {
   if (providerModelSupportsNativeReasoningEffort(args.provider, args.botOverrides)) {
     return `native_reasoning_preserved; provider=${args.provider.name}; model=${model}; effort=${args.effort}; simulated=false`;
   }
-  return `simulated_effort_local_only; provider=${args.provider.name}; model=${model}; effort=${args.effort}; simulated=false`;
+  return `simulated_effort; provider=${args.provider.name}; model=${model}; effort=${args.effort}; simulated=true`;
+}
+
+function simulatedEffortNoticeMessage(detail: string): string {
+  return detail.includes("simulated=true")
+    ? "Simulated effort active"
+    : "Simulated effort skipped";
 }
 
 function shouldSimulateReasoningEffort(args: {
@@ -1435,9 +1441,6 @@ function shouldSimulateReasoningEffort(args: {
   effort: ReasoningEffort;
 }): boolean {
   if (args.effort === "auto" || args.effort === "none") return false;
-  // Simulated thinking is a LOCAL-only quality feature. ONLINE models may use
-  // their provider-native effort, but Prism never multiplies an online turn.
-  if (args.provider.name !== "local") return false;
   return !providerModelSupportsNativeReasoningEffort(
     args.provider,
     args.botOverrides,
@@ -8716,7 +8719,7 @@ export async function processChatMessage(
         pushBackendEvent("model", "Psychic planning unavailable", detail),
       onPsychicProgress: settings.onPsychicProgress,
       onSimulatedEffortNotice: (detail) =>
-        pushBackendEvent("model", "Simulated effort skipped", detail),
+        pushBackendEvent("model", simulatedEffortNoticeMessage(detail), detail),
     });
     throwIfChatRequestCancelled(settings.signal);
     pushBackendEvent(
@@ -10223,7 +10226,7 @@ export async function processChatMessage(
               ),
             onPsychicProgress: settings.onPsychicProgress,
             onSimulatedEffortNotice: (detail) =>
-              pushBackendEvent("model", "Simulated effort skipped", detail),
+              pushBackendEvent("model", simulatedEffortNoticeMessage(detail), detail),
             onSegment: (segment) => {
               const mood = evaluateAssistantMood({
                 assistantContent: segment.beat.speech,
@@ -10273,7 +10276,7 @@ export async function processChatMessage(
               ),
             onPsychicProgress: settings.onPsychicProgress,
             onSimulatedEffortNotice: (detail) =>
-              pushBackendEvent("model", "Simulated effort skipped", detail),
+              pushBackendEvent("model", simulatedEffortNoticeMessage(detail), detail),
           });
       ({
         assistantReplyRaw,
