@@ -239,7 +239,8 @@ describe("group-room wallpaper trusted prompt context", () => {
     assert.match(prompt, /widescreen 16:9/u);
     assert.match(prompt, /Group: Night Shift/u);
     assert.match(prompt, /#abcdef, #123456/u);
-    assert.match(prompt, /Ada; accent #abcdef; atmosphere cues: Patient systems thinker/u);
+    assert.match(prompt, /Ada; primary color #abcdef; atmosphere cues: Patient systems thinker/u);
+    assert.doesNotMatch(prompt, /member accent/u);
     assert.match(prompt, /Global Zen atmosphere style preference: Soft grain/u);
     assert.match(prompt, /Variation brief for this generation \(mandatory\):/u);
     assert.match(prompt, /No readable words/u);

@@ -8,6 +8,20 @@ import {
 } from "../zen-wallpaper-prompt.ts";
 
 describe("composeZenWallpaperPrompt", () => {
+  it("uses primary-majority bot palette cues with a stable Auto accent", () => {
+    const prompt = composeZenWallpaperPrompt({
+      initialUserPrompt: "A quiet pause.",
+      recentContext: "",
+      botName: "Prism",
+      botSystemPrompt: "assistant",
+      primaryColor: "#ff0000",
+      accentColor: null,
+    });
+    assert.match(prompt, /primary #ff0000 own roughly two thirds/u);
+    assert.match(prompt, /Atmosphere accent #ffdd00/u);
+    assert.match(prompt, /not become a literal two-color gradient/u);
+  });
+
   it("distills transcript debris into compact soft symbolic motifs", () => {
     const prompt = composeZenWallpaperPrompt({
       initialUserPrompt: "/funny-story",

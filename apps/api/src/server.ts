@@ -863,6 +863,7 @@ import {
   composeChatAtmospherePrompt,
   chatAtmosphereUtcDate,
   fullySaturateBotColor,
+  normalizeBotIdentityColor,
   GROUP_ROOM_WALLPAPER_IMAGE_PURPOSE,
   PRISM_EULA_ACCEPTANCE_SNAPSHOT,
   PRISM_EULA_CONTENT_SHA256,
@@ -7132,13 +7133,19 @@ function botRowForResponse(row: Record<string, unknown>): Record<
   avatarDetails: ReturnType<typeof parseStoredBotAvatarDetailsV1>;
   powers: ReturnType<typeof parseStoredBotPowersV1>;
 } {
+  const storedAccentColor = row.accent_color;
   const {
     avatar_details_json: avatarDetailsJson,
     powers_json: powersJson,
+    accent_color: _accentColor,
     ...bot
   } = row;
   return {
     ...normalizeBotAudioVoiceProfilesForResponse(bot),
+    accentColor:
+      typeof storedAccentColor === "string"
+        ? normalizeBotIdentityColor(storedAccentColor)
+        : null,
     avatarDetails: parseStoredBotAvatarDetailsV1(avatarDetailsJson),
     powers: parseStoredBotPowersV1(powersJson),
   };
@@ -11935,7 +11942,7 @@ function buildRoutes(): RouteDefinition[] {
       const wallpaperBot = wallpaperBotId
         ? (db
             .prepare(
-              `SELECT id, name, system_prompt, online_enabled
+              `SELECT id, name, system_prompt, online_enabled, color, accent_color
                  FROM bots
                 WHERE id = ? AND user_id = ?`,
             )
@@ -11945,6 +11952,8 @@ function buildRoutes(): RouteDefinition[] {
                 name: string | null;
                 system_prompt: string | null;
                 online_enabled: number | null;
+                color: string | null;
+                accent_color: string | null;
               }
             | undefined)
         : undefined;
@@ -12041,6 +12050,8 @@ function buildRoutes(): RouteDefinition[] {
           botName: wallpaperBot?.name ?? conversation.bot_name,
           botSystemPrompt:
             wallpaperBot?.system_prompt ?? conversation.bot_system_prompt,
+          primaryColor: wallpaperBot?.color ?? null,
+          accentColor: wallpaperBot?.accent_color ?? null,
           styleNotes: user.zen_wallpaper_style_notes,
           generationIndex: existingWallpaper.history.length,
         });
@@ -26230,6 +26241,8 @@ function buildRoutes(): RouteDefinition[] {
           prompt = composeChatAtmospherePrompt({
             botName: chatBot.name,
             botSystemPrompt: chatBot.system_prompt,
+            primaryColor: chatBot.color,
+            accentColor: chatBot.accent_color,
             variationSeed: chatAtmosphereUtcDate(),
           });
         }
@@ -27942,7 +27955,7 @@ function buildRoutes(): RouteDefinition[] {
 
       const updatedBot = db
         .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, {
@@ -28472,6 +28485,17 @@ function buildRoutes(): RouteDefinition[] {
         typeof body.color === "string" && body.color.trim().length > 0
           ? fullySaturateBotColor(body.color)
           : null;
+      const accentColor =
+        body.accentColor === null || body.accentColor === undefined
+          ? null
+          : normalizeBotIdentityColor(body.accentColor);
+      if (
+        body.accentColor !== null &&
+        body.accentColor !== undefined &&
+        accentColor === null
+      ) {
+        throw new Error("Invalid Atmosphere accent color.");
+      }
       // Glyph is an opaque identifier for the icon the UI should render
       // (e.g. "bot", "sparkles"). The frontend's glyph registry resolves
       // it; unknown keys fall back to a default icon client-side.
@@ -28575,6 +28599,9 @@ function buildRoutes(): RouteDefinition[] {
       db.prepare(
         "UPDATE bots SET self_referral = ? WHERE id = ? AND user_id = ?",
       ).run(selfReferral, botId, userId);
+      db.prepare(
+        "UPDATE bots SET accent_color = ? WHERE id = ? AND user_id = ?",
+      ).run(accentColor, botId, userId);
       if (powers.length > 0) {
         db.prepare(
           "UPDATE bots SET powers_json = ? WHERE id = ? AND user_id = ?",
@@ -28613,6 +28640,7 @@ function buildRoutes(): RouteDefinition[] {
           top_k: topK,
           repetition_penalty: repetitionPenalty,
           color,
+          accentColor,
           glyph,
           avatarDetails: parseStoredBotAvatarDetailsV1(avatarDetailsJson),
           face_eyes_font: faceEyesFont,
@@ -28654,10 +28682,20 @@ function buildRoutes(): RouteDefinition[] {
       const userId = requireAuth(ctx);
       const rows = db
         .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? OR visibility = 'public' ORDER BY updated_at DESC",
         )
         .all(userId) as Record<string, unknown>[];
       json(ctx.res, 200, { ok: true, bots: botRowsForResponse(rows) });
+    }),
+    route("GET", "/api/bots/:id", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const row = db
+        .prepare(
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND (user_id = ? OR visibility = 'public')",
+        )
+        .get(ctx.params.id, userId) as Record<string, unknown> | undefined;
+      if (!row) throw new HttpError(404, "Bot not found.");
+      json(ctx.res, 200, { ok: true, bot: botRowForResponse(row) });
     }),
     route("PATCH", "/api/bots/selected/delete-protection", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -28802,7 +28840,7 @@ function buildRoutes(): RouteDefinition[] {
         result.ids.length > 0
           ? (db
               .prepare(
-                `SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`,
+                `SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE user_id = ? AND id IN (${result.ids.map(() => "?").join(", ")})`,
               )
               .all(userId, ...result.ids) as Record<string, unknown>[])
           : [];
@@ -28860,7 +28898,7 @@ function buildRoutes(): RouteDefinition[] {
         }
         const updatedBot = db
           .prepare(
-            "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
+            "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
           )
           .get(botId, userId) as Record<string, unknown>;
         json(ctx.res, 200, {
@@ -29302,6 +29340,17 @@ function buildRoutes(): RouteDefinition[] {
         fields.push("color = ?");
         values.push(null);
       }
+      // Accent update semantics are intentionally explicit: null selects Auto,
+      // a valid hue stores canonical color, and omission leaves the draft alone.
+      if (body.accentColor === null) {
+        fields.push("accent_color = ?");
+        values.push(null);
+      } else if (body.accentColor !== undefined) {
+        const accentColor = normalizeBotIdentityColor(body.accentColor);
+        if (!accentColor) throw new Error("Invalid Atmosphere accent color.");
+        fields.push("accent_color = ?");
+        values.push(accentColor);
+      }
       // Glyph update semantics mirror color: non-empty string updates,
       // explicit null clears, empty/missing leaves unchanged.
       if (typeof body.glyph === "string" && body.glyph.trim().length > 0) {
@@ -29401,7 +29450,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       const updatedBot = db
         .prepare(
-          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
+          "SELECT id, name, name_pronunciation, self_referral, system_prompt, voice_preview_line, export_hash, authored_audio_voice_profile, audio_voice_profile_override, model, local_model, online_model, local_image_model, openai_image_model, online_enabled, delete_protected, flirt_enabled, temperature, max_tokens, top_p, top_k, repetition_penalty, color, accent_color, glyph, powers_json, avatar_details_json, face_eyes_font, face_eye_character, face_eye_animation, face_mouth_font, face_mouth_character, face_mouth_animation, face_mouth_coffee_pucker, face_font_weight, face_eye_scale, face_eye_offset_x, face_eye_offset_y, face_eye_rotation_deg, face_eye_count, face_mouth_scale, face_mouth_offset_x, face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar, face_blink_scale, face_blink_offset_x, face_blink_offset_y, face_blink_rotation_deg, face_thinking_frames, face_thinking_scale, face_thinking_offset_x, face_thinking_offset_y, profile_picture_image_id, chat_enabled, visibility, created_at, updated_at FROM bots WHERE id = ? AND user_id = ?",
         )
         .get(botId, userId) as Record<string, unknown>;
       json(ctx.res, 200, { ok: true, bot: botRowForResponse(updatedBot) });

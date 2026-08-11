@@ -81,6 +81,7 @@ function rawDraft(voiceId: string | null = null): Record<string, unknown> {
       },
     },
     color: "#4F8C7A",
+    accentColor: "#7799AA",
     glyph: "telescope",
     face: {
       faceEyesFont: "concise",
@@ -204,6 +205,7 @@ describe("PRISM bot generator", () => {
     );
     assert.ok(parsed);
     assert.equal(parsed.name, "Mara Vale");
+    assert.equal(parsed.accentColor, "#22b5ff");
     assert.equal(parsed.namePronunciation, "");
     assert.equal(parsed.selfReferral, "");
     assert.equal(parsed.audioVoiceProfile.elevenLabsVoiceId, undefined);

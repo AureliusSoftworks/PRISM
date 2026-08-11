@@ -60,6 +60,7 @@ import {
   type BotFaceThinkingFrames,
   normalizeBotAudioVoiceProfileV1,
   normalizeBotNamePronunciation,
+  normalizeBotIdentityColor,
   normalizeBotSelfReferral,
   normalizeBotVoiceVolume,
   normalizeEnglishVoiceEngine,
@@ -256,6 +257,7 @@ export interface BackupBotSnapshot {
   topK?: number;
   repetitionPenalty?: number;
   color?: string | null;
+  accentColor?: string | null;
   glyph?: string | null;
   avatarDetails?: BotAvatarDetailsV1 | null;
   faceEyesFont?: BotFaceFontId | null;
@@ -2050,8 +2052,9 @@ export function exportUserSnapshot(
 	         max_tokens,
 	         top_p,
 	         top_k,
-	         repetition_penalty,
+         repetition_penalty,
          color,
+         accent_color,
          glyph,
          powers_json,
          avatar_details_json,
@@ -2114,6 +2117,7 @@ export function exportUserSnapshot(
 	    top_k: number | null;
 	    repetition_penalty: number | null;
 	    color: string | null;
+    accent_color: string | null;
     glyph: string | null;
     powers_json: string | null;
     avatar_details_json: string | null;
@@ -2622,6 +2626,7 @@ export function exportUserSnapshot(
           ? bot.repetition_penalty
           : 1.1,
         color: bot.color,
+        accentColor: normalizeBotIdentityColor(bot.accent_color),
         glyph: bot.glyph,
         ...(parseStoredBotPowersV1(bot.powers_json).length > 0
           ? { powers: parseStoredBotPowersV1(bot.powers_json) }
@@ -3722,8 +3727,9 @@ function importUserSnapshotWithinTransaction(
 	        max_tokens,
 	        top_p,
 	        top_k,
-	        repetition_penalty,
+        repetition_penalty,
         color,
+        accent_color,
         glyph,
         avatar_details_json,
         face_eyes_font,
@@ -3757,7 +3763,7 @@ function importUserSnapshotWithinTransaction(
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0)
@@ -3812,6 +3818,7 @@ function importUserSnapshotWithinTransaction(
         typeof bot.color === "string" && bot.color.trim().length > 0
           ? bot.color.trim()
           : null,
+        normalizeBotIdentityColor(bot.accentColor),
         typeof bot.glyph === "string" && bot.glyph.trim().length > 0
           ? bot.glyph.trim()
           : null,

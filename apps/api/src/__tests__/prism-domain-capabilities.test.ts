@@ -558,6 +558,7 @@ describe("Prism Bot and Avatar Studio field capability", () => {
   it("revision-checks an ordinary editor patch and restores every prior field", async () => {
     const db = fixture();
     try {
+      db.prepare("UPDATE bots SET accent_color = '#00ff00' WHERE id = 'host'").run();
       let profileRefreshes = 0;
       const registry = createPrismDomainCapabilityRegistry({
         onBotProfileChanged: () => {
@@ -576,11 +577,12 @@ describe("Prism Bot and Avatar Studio field capability", () => {
       };
       const previous = db
         .prepare(
-          "SELECT name, face_eye_offset_x, updated_at FROM bots WHERE id = 'host'",
+          "SELECT name, face_eye_offset_x, accent_color, updated_at FROM bots WHERE id = 'host'",
         )
         .get() as {
         name: string;
         face_eye_offset_x: number | null;
+        accent_color: string | null;
         updated_at: string;
       };
       const proposal = registry.createProposal({
@@ -592,6 +594,7 @@ describe("Prism Bot and Avatar Studio field capability", () => {
           patch: {
             name: "Rick One-Eye",
             faceEyeOffsetX: 0.12,
+            accentColor: "#7799aa",
           },
         },
       });
@@ -604,15 +607,17 @@ describe("Prism Bot and Avatar Studio field capability", () => {
       assert.equal(run.status, "committed", run.error ?? "");
       const saved = db
         .prepare(
-          "SELECT name, face_eye_offset_x, updated_at FROM bots WHERE id = 'host'",
+          "SELECT name, face_eye_offset_x, accent_color, updated_at FROM bots WHERE id = 'host'",
         )
         .get() as {
         name: string;
         face_eye_offset_x: number | null;
+        accent_color: string | null;
         updated_at: string;
       };
       assert.equal(saved.name, "Rick One-Eye");
       assert.equal(saved.face_eye_offset_x, 0.12);
+      assert.equal(saved.accent_color, "#22b5ff");
       assert.notEqual(saved.updated_at, previous.updated_at);
       assert.equal(profileRefreshes, 1);
 
@@ -626,12 +631,41 @@ describe("Prism Bot and Avatar Studio field capability", () => {
       assert.equal(undone.status, "undone", undone.error ?? "");
       const restored = db
         .prepare(
-          "SELECT name, face_eye_offset_x FROM bots WHERE id = 'host'",
+          "SELECT name, face_eye_offset_x, accent_color, updated_at FROM bots WHERE id = 'host'",
         )
-        .get() as { name: string; face_eye_offset_x: number | null };
+        .get() as {
+          name: string;
+          face_eye_offset_x: number | null;
+          accent_color: string | null;
+          updated_at: string;
+        };
       assert.equal(restored.name, previous.name);
       assert.equal(restored.face_eye_offset_x, previous.face_eye_offset_x);
+      assert.equal(restored.accent_color, previous.accent_color);
       assert.equal(profileRefreshes, 2);
+
+      const clearProposal = registry.createProposal({
+        context,
+        capabilityId: "bots.fields.update",
+        input: {
+          botId: "host",
+          expectedRevision: restored.updated_at,
+          patch: { accentColor: null },
+        },
+      });
+      const cleared = await registry.executeProposal({
+        context,
+        proposalId: clearProposal.id,
+        confirmation: true,
+        idempotencyKey: "bot-ui-accent-auto",
+      });
+      assert.equal(cleared.status, "committed", cleared.error ?? "");
+      assert.equal(
+        (db.prepare("SELECT accent_color FROM bots WHERE id = 'host'").get() as {
+          accent_color: string | null;
+        }).accent_color,
+        null,
+      );
     } finally {
       closeTestDatabase(db);
     }

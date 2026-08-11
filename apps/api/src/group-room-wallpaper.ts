@@ -324,7 +324,7 @@ export function composeGroupRoomWallpaperPrompt(args: {
   );
   const memberLines = args.members.map((member) => {
     const identity = normalizeSingleLine(member.name) || "Unnamed member";
-    const color = member.color ? `; accent ${member.color}` : "";
+    const color = member.color ? `; primary color ${member.color}` : "";
     const persona = normalizeSingleLine(member.personaExcerpt);
     return `- ${identity}${color}${persona ? `; atmosphere cues: ${persona}` : ""}`;
   });

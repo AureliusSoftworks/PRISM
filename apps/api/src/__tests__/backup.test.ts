@@ -1067,6 +1067,35 @@ describe("backup Zen Atmosphere style notes", () => {
   });
 });
 
+describe("backup bot Atmosphere accent identity", () => {
+  it("round-trips explicit accents and preserves legacy Auto", () => {
+    withBackupDatabase((db, userKey) => {
+      const now = "2026-08-11T00:00:00.000Z";
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, color, accent_color, created_at, updated_at)
+         VALUES (?, 'user-1', ?, ?, ?, ?, ?)`,
+      ).run("accent-bot", "Accent Bot", "#ff0000", "#7799aa", now, now);
+      db.prepare(
+        `INSERT INTO bots
+          (id, user_id, name, color, accent_color, created_at, updated_at)
+         VALUES (?, 'user-1', ?, ?, NULL, ?, ?)`,
+      ).run("auto-bot", "Auto Bot", "#00ff00", now, now);
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.equal(snapshot.bots?.find((bot) => bot.id === "accent-bot")?.accentColor, "#22b5ff");
+      assert.equal(snapshot.bots?.find((bot) => bot.id === "auto-bot")?.accentColor, null);
+
+      db.prepare("UPDATE bots SET accent_color = NULL WHERE id = ?").run("accent-bot");
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+      const restored = db.prepare(
+        "SELECT accent_color FROM bots WHERE id = ?",
+      ).get("accent-bot") as { accent_color: string | null };
+      assert.equal(restored.accent_color, "#22b5ff");
+    });
+  });
+});
+
 describe("backup bot avatar face style", () => {
   it("exports and restores saved face font settings", () => {
     withBackupDatabase((db, userKey) => {
@@ -1141,6 +1170,7 @@ describe("backup bot avatar face style", () => {
 	        topK: 40,
 	        repetitionPenalty: 1.1,
 	        color: null,
+        accentColor: null,
         glyph: null,
         avatarDetails: {
           version: 1,

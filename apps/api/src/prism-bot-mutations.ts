@@ -25,6 +25,7 @@ import {
   normalizeBotFaceMouthRotationDeg,
   normalizeBotFaceMouthScale,
   normalizeBotNamePronunciation,
+  normalizeBotIdentityColor,
   normalizeBotSelfReferral,
   normalizeOptionalBotAudioVoiceProfileV1,
   serializeBotAudioVoiceProfileV1,
@@ -84,6 +85,7 @@ export const PRISM_JOURNALED_BOT_PATCH_KEYS = new Set([
   "faceThinkingOffsetY",
   "avatarDetails",
   "color",
+  "accentColor",
   "glyph",
   "voicePreviewLine",
   "namePronunciation",
@@ -133,6 +135,7 @@ const BOT_MUTATION_COLUMNS = [
   "face_thinking_offset_y",
   "avatar_details_json",
   "color",
+  "accent_color",
   "glyph",
   "voice_preview_line",
   "name_pronunciation",
@@ -452,6 +455,17 @@ function normalizedColumns(
       next[column] = raw.trim();
     } else if (typeof raw !== "string") {
       throw new Error(`${key} must be a string or null.`);
+    }
+  }
+  if (own(patch, "accentColor")) {
+    if (patch.accentColor === null) {
+      next.accent_color = null;
+    } else {
+      const accentColor = normalizeBotIdentityColor(patch.accentColor);
+      if (!accentColor) {
+        throw new Error("accentColor must be a valid six-digit hex color or null.");
+      }
+      next.accent_color = accentColor;
     }
   }
   if (own(patch, "voicePreviewLine")) {

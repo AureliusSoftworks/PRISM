@@ -1661,6 +1661,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       top_k INTEGER DEFAULT 40,
       repetition_penalty REAL DEFAULT 1.1,
       color TEXT,
+      accent_color TEXT,
       glyph TEXT,
       avatar_details_json TEXT,
       face_eyes_font TEXT,
@@ -4018,6 +4019,13 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotColorColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN color TEXT;");
+  }
+  const hasBotAccentColorColumn = botColumns.some(
+    (column) => column.name === "accent_color",
+  );
+  if (!hasBotAccentColorColumn) {
+    // Null is Auto. Legacy rows resolve at runtime and are never backfilled.
+    db.exec("ALTER TABLE bots ADD COLUMN accent_color TEXT;");
   }
   const storedBotColors = db
     .prepare(

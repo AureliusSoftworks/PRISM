@@ -392,6 +392,10 @@ function generatedBotJsonSchema(): Record<string, unknown> {
     selfReferral: stringField(120),
     profile,
     color: { type: "string", pattern: "^#[0-9A-Fa-f]{6}$" },
+    accentColor: {
+      type: ["string", "null"],
+      pattern: "^#[0-9A-Fa-f]{6}$",
+    },
     glyph: { type: "string", enum: [...BOT_GENERATION_GLYPH_IDS] },
     face,
     avatarDetails,
@@ -435,6 +439,7 @@ function generationMessages(prompt: string): ProviderMessage[] {
         BUILTIN_VOICE_PROMPT,
         "Choose the single named local PRISM Voice Pack timbre whose presentation and character best fit the bot. Accent and map location are separate player-authored choices: do not infer, expose, or describe a region from the voice ID. This local casting is authoritative. Tune pitch, warmth, pace, lilt, EQ tilt, gain, effect, direction, and stability to reinforce it. Do not select or link an ElevenLabs voice; the player may do that later. Keep the voice preview line short, distinctive, and safe to hear aloud.",
         "Choose flirtEnabled only when romance or flirtation is clearly part of the requested character. Tune generation settings to the character without sacrificing coherent replies.",
+        "Choose accentColor only when a second environmental hue clearly reinforces the persona; otherwise return null. It colors bot-specific Chat and Zen atmosphere lighting, never the avatar or interface identity.",
         "Return only the requested JSON object.",
       ].join("\n\n"),
     },

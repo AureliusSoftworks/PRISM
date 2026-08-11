@@ -2802,6 +2802,81 @@ describe("API request integration", () => {
     assert.deepEqual(fetchRecorder.calls, []);
   });
 
+  it("creates, lists, updates, clears, and clones bot Atmosphere accents", async () => {
+    const client = createClient();
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "bot-accent@example.com",
+        password: "bot-accent-password",
+      }),
+    );
+    assert.equal(registered.status, 201);
+
+    const createdResponse = await client.request(
+      "/api/bots",
+      jsonInit({
+        name: "Aurora",
+        systemPrompt: "A careful atmospheric guide.",
+        color: "#ff0000",
+        accentColor: "#7799aa",
+      }),
+    );
+    const createdPayload = await json(createdResponse);
+    assert.equal(createdResponse.status, 201, JSON.stringify(createdPayload));
+    assert.equal(createdPayload.bot.accentColor, "#22b5ff");
+    const botId = String(createdPayload.bot.id);
+
+    const listedResponse = await client.request("/api/bots");
+    const listedPayload = await json(listedResponse);
+    assert.equal(listedResponse.status, 200, JSON.stringify(listedPayload));
+    assert.equal(
+      listedPayload.bots.find((bot: { id: string }) => bot.id === botId)?.accentColor,
+      "#22b5ff",
+    );
+
+    const detailResponse = await client.request(`/api/bots/${botId}`);
+    const detailPayload = await json(detailResponse);
+    assert.equal(detailResponse.status, 200, JSON.stringify(detailPayload));
+    assert.equal(detailPayload.bot.accentColor, "#22b5ff");
+
+    const updatedResponse = await client.request(`/api/bots/${botId}`, {
+      ...jsonInit({ accentColor: "#33aa55" }),
+      method: "PATCH",
+    });
+    const updatedPayload = await json(updatedResponse);
+    assert.equal(updatedResponse.status, 200, JSON.stringify(updatedPayload));
+    assert.equal(updatedPayload.bot.accentColor, "#00dd3f");
+
+    const cloneResponse = await client.request(
+      "/api/bots",
+      jsonInit({
+        name: "Aurora Copy",
+        systemPrompt: "A careful atmospheric guide.",
+        color: "#ff0000",
+        accentColor: updatedPayload.bot.accentColor,
+        cloneSourceBotId: botId,
+      }),
+    );
+    const clonePayload = await json(cloneResponse);
+    assert.equal(cloneResponse.status, 201, JSON.stringify(clonePayload));
+    assert.equal(clonePayload.bot.accentColor, "#00dd3f");
+
+    const clearedResponse = await client.request(`/api/bots/${botId}`, {
+      ...jsonInit({ accentColor: null }),
+      method: "PATCH",
+    });
+    const clearedPayload = await json(clearedResponse);
+    assert.equal(clearedResponse.status, 200, JSON.stringify(clearedPayload));
+    assert.equal(clearedPayload.bot.accentColor, null);
+
+    const invalidResponse = await client.request(`/api/bots/${botId}`, {
+      ...jsonInit({ accentColor: "blue" }),
+      method: "PATCH",
+    });
+    assert.equal(invalidResponse.status, 400);
+  });
+
   it("persists face motion, rotation, and blink geometry", async () => {
     const client = createClient();
     const register = await client.request(

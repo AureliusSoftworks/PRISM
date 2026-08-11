@@ -10,6 +10,8 @@ export type ChatAtmosphereBotRow = {
   id: string;
   name: string;
   system_prompt: string;
+  color: string | null;
+  accent_color: string | null;
   chat_atmosphere_image_id: string | null;
   chat_atmosphere_generated_on: string | null;
 };
@@ -53,7 +55,7 @@ export function readChatAtmosphereBot(
 ): ChatAtmosphereBotRow | null {
   const row = db
     .prepare(
-      `SELECT id, name, system_prompt,
+      `SELECT id, name, system_prompt, color, accent_color,
               chat_atmosphere_image_id, chat_atmosphere_generated_on
          FROM bots
         WHERE id = ? AND user_id = ?`,

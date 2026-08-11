@@ -56,6 +56,28 @@ describe("bot color saturation migration", () => {
   });
 });
 
+describe("bot Atmosphere accent migration", () => {
+  it("adds the nullable column without backfilling existing bots", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    db.prepare(
+      "INSERT INTO users (id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, created_at, last_active_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+    ).run("accent-user", "accent@example.com", "Accent", "hash", "salt", "cipher", "iv", "tag", "2026-08-11", "2026-08-11");
+    db.prepare(
+      "INSERT INTO bots (id, user_id, name, color, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?)",
+    ).run("legacy-bot", "accent-user", "Legacy", "#ff0000", "2026-08-11", "2026-08-11");
+    db.exec("ALTER TABLE bots DROP COLUMN accent_color;");
+
+    initializeDatabase(db);
+    const row = db.prepare(
+      "SELECT color, accent_color FROM bots WHERE id = ?",
+    ).get("legacy-bot") as { color: string; accent_color: string | null };
+    assert.equal(row.color, "#ff0000");
+    assert.equal(row.accent_color, null);
+    db.close();
+  });
+});
+
 describe("memory ecology settings migration", () => {
   it("copies legacy auto_memory into both automatic learning permissions", () => {
     const db = new DatabaseSync(":memory:");
