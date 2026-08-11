@@ -416,7 +416,7 @@ export function PrismBlockingLoader({
                 companionVisual.position.y < 0.5 ? "below" : "above"
               }
               data-confirming={confirming ? "true" : undefined}
-              data-dev-panel-safe-area="bottom"
+              data-viewport-safe-area="bottom"
               aria-busy="true"
               style={softDockPositionStyle(companionVisual.position)}
               onKeyDown={(event) => {

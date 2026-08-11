@@ -22,55 +22,63 @@ export function PrismRenderingDiagnosticsCard(): React.JSX.Element {
     snapshot.rendererStatus === "context-lost";
   return (
     <section
-      className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}
+      className={styles.helpToolGroup}
       aria-label="Rendering diagnostics"
       data-prism-rendering-diagnostics="true"
     >
-      <div className={styles.devToolsCardHeader}>
-        <span>Rendering</span>
-        <strong>{fallback ? "CSS fallback" : snapshot.rendererStatus}</strong>
-      </div>
-      <p className={styles.devToolsSectionHint}>
+      <header className={styles.helpToolGroupHeader}>
+        <div>
+          <span>Display</span>
+          <h5>Rendering health</h5>
+        </div>
+        <span
+          className={styles.helpStatusPill}
+          data-status={fallback ? "error" : "connected"}
+        >
+          {fallback ? "CSS fallback" : snapshot.rendererStatus}
+        </span>
+      </header>
+      <p>
         In-memory scene metrics from this device only. Nothing is persisted or
         transmitted.
       </p>
-      <div className={styles.devToolsStatGrid}>
-        <span className={styles.devToolsStat}>
+      <div className={styles.helpMetricGrid}>
+        <span>
           <small>Lifecycle</small>
           <strong>{snapshot.lifecycle}</strong>
         </span>
-        <span className={styles.devToolsStat}>
+        <span>
           <small>Quality</small>
           <strong>{snapshot.quality}</strong>
         </span>
-        <span className={styles.devToolsStat}>
+        <span>
           <small>FPS target / observed</small>
           <strong>
             {snapshot.targetFps} / {formatMetric(snapshot.observedFps)}
           </strong>
         </span>
-        <span className={styles.devToolsStat}>
+        <span>
           <small>Frame p50 / p95</small>
           <strong>
             {formatMetric(snapshot.p50FrameIntervalMs)} / {" "}
             {formatMetric(snapshot.p95FrameIntervalMs)} ms
           </strong>
         </span>
-        <span className={styles.devToolsStat}>
+        <span>
           <small>Missed frames</small>
           <strong>{formatMetric(snapshot.missedFramePercentage)}%</strong>
         </span>
-        <span className={styles.devToolsStat}>
+        <span>
           <small>Effective DPR</small>
           <strong>{formatMetric(snapshot.effectiveDpr, 2)}</strong>
         </span>
-        <span className={styles.devToolsStat}>
+        <span>
           <small>Particles / objects</small>
           <strong>
             {snapshot.particleCount} / {snapshot.objectCount}
           </strong>
         </span>
-        <span className={styles.devToolsStat}>
+        <span>
           <small>Context loss / ticks</small>
           <strong>
             {snapshot.contextLossCount} / {snapshot.tickCount}

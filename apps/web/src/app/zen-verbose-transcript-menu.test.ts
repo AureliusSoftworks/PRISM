@@ -8,12 +8,12 @@ const apiServerSource = readFileSync(
   "utf8",
 );
 
-describe("Zen canvas verbose transcript copy (dev tools)", () => {
-  it("exposes a digests-only Copy Verbose Transcript canvas menu action", () => {
+describe("Zen canvas diagnostic transcript copy", () => {
+  it("exposes a digests-only diagnostic transcript action", () => {
     assert.match(pageSource, /async function copyVerboseTranscriptToClipboard\(\)/u);
     assert.match(
       pageSource,
-      /\.\.\.\(DEV_TOOLS_ENABLED\s*\?[\s\S]{0,500}id: "copy-verbose-transcript"[\s\S]{0,200}label: "Copy Verbose Transcript"/u,
+      /id: "copy-verbose-transcript"[\s\S]{0,200}label: "Copy diagnostic transcript"/u,
     );
     assert.match(
       pageSource,

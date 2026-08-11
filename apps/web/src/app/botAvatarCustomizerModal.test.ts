@@ -109,6 +109,7 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
     miniSource,
     /forceBlinkPhase=\{previewBlink \? "closed" : "open"\}/,
   );
+  assert.match(miniSource, /faceEyeMovement="still"/);
   assert.match(
     miniSource,
     /faceEyeRotationDeg=\{previewFaceStyle\.eyeRotationDeg\}/,
@@ -119,7 +120,7 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   );
   assert.match(pageSource, /details=\{miniAvatarDetails\}/);
   assert.match(miniSource, /name=\{glyph\}/);
-  assert.doesNotMatch(miniSource, /\bpixelated\b/);
+  assert.match(miniSource, /\bpixelated\b/);
 
   const previewRule = cssRuleBody(
     '.botAvatarCustomizer[data-foundry="true"] .botAvatarStudioMiniPreview',
@@ -134,8 +135,8 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
 test("Avatar Studio requires an Accent pin before named voice casting", () => {
   assert.match(pageSource, /const avatarVoiceAccentReady = Boolean/);
   assert.match(pageSource, /label: "1 Accent"/);
-  assert.match(pageSource, /label: "2 Feel"/);
-  assert.match(pageSource, /label: "3 Voice"/);
+  assert.match(pageSource, /label: "2 Local"/);
+  assert.match(pageSource, /label: "3 Premium"/);
   assert.match(pageSource, /Place the accent pin first/);
   assert.match(pageSource, /aria-label="Choose a named voice"/);
   assert.match(pageSource, /PREMIUM · OPTIONAL/);
@@ -1334,8 +1335,10 @@ test("avatar customizer uses a studio preview and grouped editor controls", () =
   );
   assert.match(pageSource, /activeControlTab === "voice"/);
   assert.match(pageSource, /activeControlTab === "sfx"/);
-  assert.match(pageSource, /<BotVoiceFeelStage/);
-  assert.match(pageSource, /variant="identity"/);
+  assert.match(pageSource, /<BotVoiceLocalStage/);
+  assert.match(pageSource, /<BotVoicePremiumStage/);
+  assert.match(pageSource, /variant="local"/);
+  assert.match(pageSource, /variant="premium"/);
   assert.match(pageSource, /<BotVoiceCharacterEditor/);
   assert.doesNotMatch(
     pageSource,

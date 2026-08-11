@@ -81,7 +81,12 @@ import { decideAuthBootstrapFailure, isAbortLikeError } from "./authBootstrap";
 import {
   attachWebRequestDiagnostic,
   webRequestDiagnosticFor,
+  writeDiagnosticClipboard,
 } from "./webDiagnostics";
+import {
+  buildHelpDiagnosticReport,
+  type HelpConnectionState,
+} from "./helpDiagnostics";
 import { askQuestionOptionsArePromptFragments } from "./askQuestionDisplay";
 import {
   elevenLabsCreditCheckAvailability,
@@ -115,6 +120,8 @@ import {
 } from "./composerAction";
 import { PrismVisualLifecycleBridge } from "./PrismVisualLifecycleBridge";
 import {
+  announcePrismNavbarPickerOpen,
+  PRISM_NAVBAR_PICKER_OPEN_EVENT,
   PrismMenuSurface,
   usePrismMenu,
   type PrismMenuAnchor,
@@ -122,6 +129,7 @@ import {
 } from "./PrismMenu";
 import { usePrismIntroSequence } from "./PrismIntroSequence";
 import { PrismRenderingDiagnosticsCard } from "./PrismRenderingDiagnosticsCard";
+import { getPrismSceneDiagnosticsSnapshot } from "./prismSceneDiagnostics";
 import {
   applyGraphicsQualityToDocument,
   GRAPHICS_QUALITY_LABELS,
@@ -226,6 +234,7 @@ import {
 } from "./accountBackupArchive";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
 import { PhosphorPixelSvgGlyph } from "./PhosphorPixelGlyph";
+import { PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX } from "./phosphorPixelRaster";
 import { BotCreationRitual } from "./BotCreationRitual";
 import { AdjustmentPad } from "./AdjustmentPad";
 import { PronunciationAtlas } from "./PronunciationAtlas";
@@ -316,7 +325,6 @@ import {
   BOT_AVATAR_CANONICAL_FACE_PLACEMENT,
   BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
   BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
-  botAvatarDetailsFacingOffsetY,
   botAvatarDetailsFacingScaleX,
   botAvatarFaceFacingStyle,
 } from "./bot-avatar-render-geometry";
@@ -415,6 +423,7 @@ import {
   coffeeSeatMouthShapeFromVisibleLength,
   coffeeSeatPlateGlyph,
   coffeeSeatSipMouthTreatmentActive,
+  miniAvatarBinaryMouthShape,
   resolveCoffeeSeatSipFacePresentation,
   type CoffeeSeatEmojiMood,
 } from "./coffee-seat-plate";
@@ -475,16 +484,14 @@ import {
   type AppletSessionNoteResponse,
 } from "./appletSessionNotes";
 import {
-  DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
-  DEV_PANEL_SAFE_AREA_SIDES,
-  clampDevPanelPositionToSafeArea,
-  clampDevPanelRectToSafeArea,
-  devPanelSafeAreaInsetsEqual,
-  resolveDevPanelSafeAreaInsets,
-  type DevPanelSafeAreaBlocker,
-  type DevPanelSafeAreaInsets,
-  type DevPanelSafeAreaSide,
-} from "./devPanelSafeArea";
+  VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
+  VIEWPORT_SAFE_AREA_SIDES,
+  clampPositionToViewportSafeArea,
+  resolveViewportSafeAreaInsets,
+  type ViewportSafeAreaBlocker,
+  type ViewportSafeAreaInsets,
+  type ViewportSafeAreaSide,
+} from "./viewportSafeArea";
 import {
   resolveZenLineDisplayPlacements,
   resolveZenMessageDisplayPlacement,
@@ -546,13 +553,6 @@ import {
   NVM_SLASH_COMMAND,
   parseNvmSlashCommand,
 } from "./nvmCommand";
-import {
-  COFFEE_DEV_MOOD_PRESETS,
-  COFFEE_DEV_SOCIAL_FIELDS,
-  coffeeDevMoodPresetPayload,
-  formatCoffeeSeatDebugCoordinates,
-  type CoffeeTableCoordinateMode,
-} from "./coffee-dev-debug";
 import { shouldResetPreviousSessionContext } from "./naturalContextReset";
 import { parseUndoSlashCommand } from "./undoSlashCommand";
 import {
@@ -567,7 +567,6 @@ import {
 } from "./manualAskQuestionTool";
 import {
   psychicThoughtDisplayLineForMessage,
-  type PsychicCanvasScratchpadPayload,
 } from "./psychicThoughtDisplay";
 import { immersiveThinkingCaption } from "./immersiveThinkingCaption";
 import {
@@ -723,7 +722,6 @@ import {
 import { interruptRelationshipDepthReturn } from "./relationshipDepthReturnInterruption";
 import { resolveExistingPersonaHome } from "./personaHomeResolution";
 import {
-  canvasBackgroundShouldZoomOutFocusedBot,
   canvasBotDirectoryIsInteractive,
   focusedCanvasBotId,
   resolveCanvasBotTileActivation,
@@ -752,6 +750,7 @@ import {
   resetBotVoiceCharacterProfile,
 } from "./botVoiceCharacter";
 import {
+  Brain,
   CircleHelp,
   BarChart3,
   BookMarked,
@@ -769,6 +768,7 @@ import {
   Eye,
   GitFork,
   Globe,
+  HardDrive,
   Home as HomeIcon,
   Image as ImageGlyph,
   Info,
@@ -861,6 +861,7 @@ import {
   type SettingsScope,
 } from "./SettingsPanel";
 import { StorageSettings } from "./StorageSettings";
+import { MemorySettings } from "./MemorySettings";
 import { AssetRail } from "./AssetLibrary";
 import {
   prismActionLabel,
@@ -1488,19 +1489,7 @@ import {
   coffeeModelPickerAriaLabel,
 } from "./coffee-model-controls";
 import { shouldShowEmptyStateHueLens } from "./hue-lens-visibility";
-import {
-  normalizeComposerSlashCommandLine,
-  parsePrismDevChatCommand,
-  PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED,
-  resolvePrismDevPanelToggleAction,
-} from "./prismDevChatCommands";
-import { prismWebDevToolsEnabled } from "./prismDevGating";
-import {
-  ZEN_TOOL_LAB_TOOLS,
-  buildZenToolLabMessageSample,
-  isZenToolLabDevImageId,
-  type ZenToolLabToolId,
-} from "./zenToolLab";
+import { normalizeComposerSlashCommandLine } from "./composerCommandLine";
 import { PrismBotLink } from "./tiptapPrismBotLink";
 import {
   findLeadingDevCommandTokenRange,
@@ -1684,7 +1673,6 @@ import {
   revealPlainTextWithBotMentions,
 } from "./BotMentionRichText";
 import { syncPrismBotMentionMarksInEditorDom } from "./botMentionTipTapDom";
-import { parseCoffeeDevCommand } from "./coffeeDevCommand";
 import { shouldSubmitComposerOnEnter } from "./composerKeyPolicy";
 import { applyComposerSendAutoCorrect } from "./composerSendAutoCorrect";
 import { applyComposerSentenceCaseInsertion } from "./composerSentenceCase";
@@ -2097,13 +2085,6 @@ function normalizeAuthUsername(raw: string): string {
   return raw.trim().toLowerCase();
 }
 
-// Developer tools stay off on main/release builds. Local/dev branches remain on by default,
-// and can still be forced off with NEXT_PUBLIC_DEV_TOOLS=0.
-const DEV_TOOLS_ENABLED = prismWebDevToolsEnabled({
-  NODE_ENV: process.env.NODE_ENV,
-  NEXT_PUBLIC_DEV_TOOLS: process.env.NEXT_PUBLIC_DEV_TOOLS,
-  NEXT_PUBLIC_PRISM_BRANCH: process.env.NEXT_PUBLIC_PRISM_BRANCH,
-});
 // Floating shell applets (phone hamburger/handle/gear) are dev-only by default.
 // Release builds keep shell controls anchored in-header unless explicitly re-enabled.
 const FLOATING_SHELL_APPLETS_ENABLED =
@@ -2116,192 +2097,10 @@ const CLIENT_ACCESS_REQUIRED =
 const DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS = 5000;
 const TUTORIAL_REMIND_LATER_MS = 24 * 60 * 60 * 1000;
 
-const DEV_TOOLS_BOT_QUANTITY_MIN = 0;
-const DEV_TOOLS_BOT_QUANTITY_DEFAULT = 10;
-const DEV_TOOLS_BOT_QUANTITY_MAX = 2000;
-const DEV_TOOLS_BOT_QUANTITY_PRESETS = [
-  1, 10, 25, 50, 100, 500, 1000, 2000,
-] as const;
-const DEV_TOOLS_BOT_CREATE_CHUNK_SIZE = 100;
-const DEV_TOOLS_GHOST_COUNT_MIN = 1;
-const DEV_TOOLS_GHOST_COUNT_MAX = 99;
-const DEV_TOOLS_PANEL_DEFAULT_X = 14;
-const DEV_TOOLS_PANEL_DEFAULT_Y = 76;
-const DEV_TOOLS_PANEL_DEFAULT_WIDTH = 980;
-const DEV_TOOLS_PANEL_MIN_WIDTH = 260;
-const DEV_TOOLS_PANEL_MIN_HEIGHT = 190;
-const DEV_TOOLS_PANEL_VIEWPORT_MARGIN = 14;
-const DEV_PANEL_SAFE_AREA_ATTRIBUTE = "data-dev-panel-safe-area";
+const VIEWPORT_SAFE_AREA_ATTRIBUTE = "data-viewport-safe-area";
 const ZEN_LIVE_BOT_COMPOSER_BOUNDARY_ATTRIBUTE =
   "data-zen-live-bot-composer-boundary";
-const DEV_DEBUG_COMPOSER_VIEWPORT_MARGIN = 8;
-const DEV_DEBUG_COMPOSER_DEFAULT_HEIGHT = 142;
-const DEV_DEBUG_COMPOSER_RESTORE_WIDTH = 168;
-const DEV_DEBUG_COMPOSER_RESTORE_HEIGHT = 34;
-const DEV_TOOLS_CONSOLE_ONLY_PANEL_WIDTH = 560;
-const DEV_TOOLS_CONSOLE_ONLY_PANEL_HEIGHT = 380;
-const COMPACTED_SUMMARY_DEBUG_PANEL_FLOATING_MIN_VIEWPORT_WIDTH = 920;
-const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_X = 600;
-const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_Y = 86;
-const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_WIDTH = 360;
-const COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_HEIGHT = 380;
-const COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH = 340;
-const COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT = 320;
-const COMPACTED_SUMMARY_DEBUG_PANEL_MAX_WIDTH = 560;
-const COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN = 12;
-const DEV_TOOLS_NAV_ITEMS = [
-  {
-    id: "observe",
-    label: "Observe",
-    description: "Live traces, viewport, and surface diagnostics",
-  },
-  {
-    id: "seed",
-    label: "Seed",
-    description: "Bots, chats, and density stress states",
-  },
-  {
-    id: "conversation",
-    label: "Conversation",
-    description: "Connection, opinion, and summaries",
-  },
-  {
-    id: "memory",
-    label: "Memory",
-    description: "Seed, inspect, and clear test memories",
-  },
-  {
-    id: "system",
-    label: "System",
-    description: "Local toggles and global dev rules",
-  },
-] as const;
 const IMAGE_KEYWORD_EDITOR_SIDE_LAYOUT_MIN_VIEWPORT_PX = 1260;
-const DEV_TOOLS_CONNECTION_PRESETS = [
-  {
-    id: "careful",
-    label: "Careful",
-    score: 24,
-    trend: "down",
-    reason: "Developer Tools set a guarded connection state.",
-    recentReasons: [
-      "The tone felt abrupt, so trust pulled back.",
-      "Small negative shift from terse wording.",
-    ],
-  },
-  {
-    id: "warming",
-    label: "Warming",
-    score: 48,
-    trend: "steady",
-    reason: "Developer Tools set a neutral warming connection state.",
-    recentReasons: [
-      "No opinion shift this turn.",
-      "Small positive shift from conversational tone.",
-    ],
-  },
-  {
-    id: "settled",
-    label: "Settled",
-    score: 82,
-    trend: "up",
-    reason: "Developer Tools set a settled collaborative connection state.",
-    recentReasons: [
-      "The tone felt considerate and collaborative.",
-      "Small positive shift from conversational tone.",
-    ],
-  },
-  {
-    id: "warming-down",
-    label: "Warming · down",
-    score: 48,
-    trend: "down",
-    reason: "Small negative shift from terse wording.",
-    recentReasons: [
-      "Small negative shift from terse wording.",
-      "No opinion shift this turn.",
-    ],
-  },
-  {
-    id: "warming-up",
-    label: "Warming · up",
-    score: 56,
-    trend: "up",
-    reason: "Small positive shift from conversational tone.",
-    recentReasons: [
-      "Small positive shift from conversational tone.",
-      "No opinion shift this turn.",
-    ],
-  },
-] as const;
-const DEV_TOOLS_BOT_OPINION_PRESETS = [
-  {
-    id: "bonded",
-    label: "Bonded",
-    score: 88,
-    trend: "up",
-    repairCount: 3,
-    reason: "Developer Tools set a bonded long-term bot relationship.",
-    recentReasons: [
-      "The user treated the bot with care and collaboration.",
-      "The user offered repair, which helped rebuild trust.",
-    ],
-  },
-  {
-    id: "open",
-    label: "Open",
-    score: 64,
-    trend: "steady",
-    repairCount: 1,
-    reason: "Developer Tools set an open long-term bot relationship.",
-    recentReasons: ["No long-term relationship shift this turn."],
-  },
-  {
-    id: "careful",
-    label: "Careful",
-    score: 38,
-    trend: "down",
-    repairCount: 0,
-    reason: "Developer Tools set a careful long-term bot relationship.",
-    recentReasons: ["The interaction added friction to this bot relationship."],
-  },
-  {
-    id: "wounded",
-    label: "Wounded",
-    score: 12,
-    trend: "down",
-    repairCount: 0,
-    reason: "Developer Tools set a wounded long-term bot relationship.",
-    recentReasons: [
-      "The interaction added friction to this bot relationship.",
-      "The tone felt abrupt, so trust pulled back.",
-    ],
-  },
-  {
-    id: "repairing",
-    label: "Repairing",
-    score: 44,
-    trend: "up",
-    repairCount: 4,
-    reason: "The user offered repair, which helped rebuild trust.",
-    recentReasons: [
-      "The user offered repair, which helped rebuild trust.",
-      "The interaction added friction to this bot relationship.",
-    ],
-  },
-  {
-    id: "volatile",
-    label: "Volatile",
-    score: 50,
-    trend: "steady",
-    repairCount: 2,
-    reason: "Developer Tools set a mixed long-term bot relationship.",
-    recentReasons: [
-      "The user treated the bot with care and collaboration.",
-      "The interaction added friction to this bot relationship.",
-    ],
-  },
-] as const;
 const RANDOM_NUDGE_STOP_WORDS = new Set([
   "about",
   "there",
@@ -2317,37 +2116,12 @@ const MOBILE_SIDEBAR_SWIPE_EDGE_PX = 32;
 const MOBILE_SIDEBAR_SWIPE_OPEN_PX = 56;
 const MOBILE_SIDEBAR_SWIPE_VERTICAL_CANCEL_PX = 44;
 const MOBILE_SIDEBAR_SWIPE_DIRECTION_RATIO = 1.25;
-const DEV_TOOLS_MEMORY_CERTAINTY_DEFAULT = 0.45;
-/** Legacy dev flag; zip-only bot archives now keep file import as the supported path. */
-const PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY = "prism_dev_bot_import_paste";
-/** Local layout/state for developer-layer panels. */
-const PRISM_DEV_TOOLS_UI_STATE_STORAGE_KEY = "prism_dev_tools_ui_state_v1";
-/** Local position for the draggable Prism mood developer visual. */
-const PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY =
-  "prism_dev_mood_visual_position_v1";
-/** Dev-only Zen pause tester settings. */
-const PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY =
-  "prism_dev_zen_pause_tester_settings_v1";
-/** Dev-only Zen Facet backdrop tuning. */
-const PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY =
-  "prism_dev_zen_persona_backdrop_v2";
 const PRISM_ZEN_LIVE_BOT_AVATAR_POSITION_STORAGE_KEY =
   "prism_zen_live_bot_avatar_position_v1";
-const PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY =
+const PRISM_ZEN_LIVE_BOT_AVATAR_LEGACY_SIZE_STORAGE_KEY =
   "prism_zen_live_bot_avatar_size_v1";
-const DEV_MOOD_VISUAL_DEFAULT_X = 22;
-const DEV_MOOD_VISUAL_DEFAULT_Y = 150;
-const DEV_ZEN_PAUSE_TESTER_CONTROLS = [
-  { key: "baseWordDelayMs", label: "Word", shortLabel: "word" },
-  { key: "clausePauseMs", label: "Clause", shortLabel: "clause" },
-  { key: "sentencePauseMs", label: "Sentence", shortLabel: "sentence" },
-  { key: "ellipsisHoldMs", label: "Ellipsis hold", shortLabel: "ellipsis" },
-  { key: "ellipsisDotStepMs", label: "Dot step", shortLabel: "dot" },
-] as const satisfies ReadonlyArray<{
-  key: keyof ChatRevealTimingSettings;
-  label: string;
-  shortLabel: string;
-}>;
+const PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY =
+  "prism_zen_live_bot_avatar_size_v2";
 /** Local marker for the next/active Zen session boundary. */
 const PRISM_ZEN_SESSION_BREAK_STORAGE_KEY = "prism_zen_session_break_v1";
 /** Stores custom short-term memory bubble positions by scope and memory id. */
@@ -2365,50 +2139,6 @@ const MEMORY_RATIO_LARGE_MAX_SIZE = 184;
 // Zoomed-out PRISM directory orbs: each floating dot represents one bot (capped so
 // extreme libraries stay readable; counts remain in labels/tooltips).
 const MEMORY_FAMILY_BOT_INNER_DOT_MAX = 32;
-type DevToolsBotQuantity = number | "";
-type DevToolsMemorySeedSource = "direct" | "inferred" | "compiled";
-type DevToolsConnectionPreset = (typeof DEV_TOOLS_CONNECTION_PRESETS)[number];
-type DevToolsBotOpinionPreset = (typeof DEV_TOOLS_BOT_OPINION_PRESETS)[number];
-type DevToolsActiveSection = (typeof DEV_TOOLS_NAV_ITEMS)[number]["id"];
-type DevToolsPanelPosition = { x: number; y: number };
-type DevToolsPanelSize = { width: number; height: number };
-type DevToolsPanelDragState = {
-  pointerId: number;
-  offsetX: number;
-  offsetY: number;
-};
-type DevLayerOrbDragState = {
-  pointerId: number;
-  offsetX: number;
-  offsetY: number;
-  startClientX: number;
-  startClientY: number;
-  moved: boolean;
-};
-type CompactedSummaryDebugPanelRect = {
-  x: number;
-  y: number;
-  width: number;
-  height: number;
-};
-type CompactedSummaryDebugPanelDragState = {
-  pointerId: number;
-  offsetX: number;
-  offsetY: number;
-};
-type DevDebugComposerExpandedDragState = {
-  pointerId: number;
-  offsetY: number;
-};
-type DevMoodVisualPosition = { x: number; y: number };
-type DevMoodVisualDragState = {
-  pointerId: number;
-  offsetX: number;
-  offsetY: number;
-  startClientX: number;
-  startClientY: number;
-  moved: boolean;
-};
 type ZenLiveBotAvatarPosition = { x: number; y: number };
 type ZenLiveBotScreenGlareState = {
   xPct: number;
@@ -2491,42 +2221,10 @@ function createStableZenPersonaPresenceState(
     transition: null,
   };
 }
-type DevToolsUiStateStorage = {
-  activeSection?: DevToolsActiveSection;
-  panelPosition?: DevToolsPanelPosition;
-  panelSize?: DevToolsPanelSize;
-  mood?: {
-    open?: boolean;
-    position?: DevMoodVisualPosition;
-  };
-  pauseTester?: {
-    open?: boolean;
-    position?: DevToolsPanelPosition;
-  };
-  toolLab?: {
-    open?: boolean;
-    position?: DevToolsPanelPosition;
-  };
-  debugComposer?: {
-    minimized?: boolean;
-    y?: number;
-    restorePosition?: DevToolsPanelPosition;
-  };
-  compactedContext?: {
-    minimized?: boolean;
-    rect?: CompactedSummaryDebugPanelRect;
-  };
-};
 type CoffeeTranscriptResizeState = {
   pointerId: number;
   startClientX: number;
   startWidth: number;
-};
-type CoffeeDevPanelPosition = { x: number; y: number };
-type CoffeeDevPanelDragState = {
-  pointerId: number;
-  offsetX: number;
-  offsetY: number;
 };
 type SidebarEdgeSwipeState = {
   touchId: number;
@@ -2975,26 +2673,6 @@ const PRISM_BOT_SEED_LIGHTNESS_MAX = 68;
 const BOT_COLOR_DIVERSITY_SAMPLE_ATTEMPTS = 40;
 const BOT_COLOR_DIVERSITY_MIN_DISTANCE = 0.3;
 
-function clampDevToolsBotQuantity(value: number): number {
-  if (!Number.isFinite(value)) return DEV_TOOLS_BOT_QUANTITY_MIN;
-  return Math.max(
-    DEV_TOOLS_BOT_QUANTITY_MIN,
-    Math.min(DEV_TOOLS_BOT_QUANTITY_MAX, Math.round(value)),
-  );
-}
-
-function randomDevToolsGhostCount(): number {
-  const range = DEV_TOOLS_GHOST_COUNT_MAX - DEV_TOOLS_GHOST_COUNT_MIN + 1;
-  return DEV_TOOLS_GHOST_COUNT_MIN + Math.floor(Math.random() * range);
-}
-
-function randomDevToolsGhostMessage(): string {
-  const ghostCount = randomDevToolsGhostCount();
-  return ghostCount === 1
-    ? "1 ghost was added."
-    : `${ghostCount} ghosts were added.`;
-}
-
 function ratioBubbleSize(count: number, maxCount: number): number {
   if (count <= 0) return MEMORY_RATIO_EMPTY_SIZE;
   const safeMax = Math.max(1, maxCount);
@@ -3008,138 +2686,28 @@ function ratioBubbleSize(count: number, maxCount: number): number {
   return Math.max(MEMORY_RATIO_MIN_SIZE, Math.round(ratio * maxSize));
 }
 
-function clampDevToolsPanelPosition(
-  x: number,
-  y: number,
-  panelWidth: number,
-  panelHeight: number,
-  viewportWidth: number,
-  viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
-): DevToolsPanelPosition {
-  return clampDevPanelPositionToSafeArea({
-    x,
-    y,
-    panelWidth,
-    panelHeight,
-    viewportWidth,
-    viewportHeight,
-    margin: DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
-    safeAreaInsets,
-  });
-}
-
-function clampDevOverlayPositionToViewport(
-  x: number,
-  y: number,
-  panelWidth: number,
-  panelHeight: number,
-  viewportWidth: number,
-  viewportHeight: number,
-  margin = DEV_DEBUG_COMPOSER_VIEWPORT_MARGIN,
-): DevToolsPanelPosition {
-  const safeViewportWidth = Math.max(0, viewportWidth);
-  const safeViewportHeight = Math.max(0, viewportHeight);
-  const safePanelWidth = Math.max(1, panelWidth);
-  const safePanelHeight = Math.max(1, panelHeight);
-  const safeMargin = Math.max(
-    0,
-    Math.min(margin, safeViewportWidth / 2, safeViewportHeight / 2),
-  );
-  const minX = safeMargin;
-  const minY = safeMargin;
-  const maxX = Math.max(minX, safeViewportWidth - safePanelWidth - safeMargin);
-  const maxY = Math.max(
-    minY,
-    safeViewportHeight - safePanelHeight - safeMargin,
-  );
-  return {
-    x: Math.max(minX, Math.min(maxX, Number.isFinite(x) ? x : minX)),
-    y: Math.max(minY, Math.min(maxY, Number.isFinite(y) ? y : minY)),
-  };
-}
-
-function clampDevDebugComposerY(
-  y: number,
-  panelHeight: number,
-  viewportHeight: number,
-): number {
-  return clampDevOverlayPositionToViewport(
-    0,
-    y,
-    1,
-    panelHeight,
-    1,
-    viewportHeight,
-  ).y;
-}
-
-function initialDevDebugComposerY(): number {
-  const viewportHeight =
-    typeof window === "undefined" ? 720 : Math.max(320, window.innerHeight);
-  return clampDevDebugComposerY(
-    viewportHeight - DEV_DEBUG_COMPOSER_DEFAULT_HEIGHT - 96,
-    DEV_DEBUG_COMPOSER_DEFAULT_HEIGHT,
-    viewportHeight,
-  );
-}
-
-function initialDevDebugComposerRestorePosition(): DevToolsPanelPosition {
-  const viewportWidth =
-    typeof window === "undefined" ? 1280 : Math.max(320, window.innerWidth);
-  const viewportHeight =
-    typeof window === "undefined" ? 720 : Math.max(320, window.innerHeight);
-  return clampDevOverlayPositionToViewport(
-    18,
-    viewportHeight - DEV_DEBUG_COMPOSER_RESTORE_HEIGHT - 118,
-    DEV_DEBUG_COMPOSER_RESTORE_WIDTH,
-    DEV_DEBUG_COMPOSER_RESTORE_HEIGHT,
-    viewportWidth,
-    viewportHeight,
-  );
-}
-
-function clampDevToolsPanelRect(
-  rect: { x: number; y: number; width: number; height: number },
-  viewportWidth: number,
-  viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
-): { x: number; y: number; width: number; height: number } {
-  return clampDevPanelRectToSafeArea({
-    rect,
-    viewportWidth,
-    viewportHeight,
-    margin: DEV_TOOLS_PANEL_VIEWPORT_MARGIN,
-    minWidth: DEV_TOOLS_PANEL_MIN_WIDTH,
-    minHeight: DEV_TOOLS_PANEL_MIN_HEIGHT,
-    maxWidth: Math.max(DEV_TOOLS_PANEL_DEFAULT_WIDTH, viewportWidth),
-    maxHeight: viewportHeight,
-    safeAreaInsets,
-  });
-}
-
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parseDevPanelSafeAreaSides(
+function parseViewportSafeAreaSides(
   value: string | null | undefined,
-): DevPanelSafeAreaSide[] {
+): ViewportSafeAreaSide[] {
   if (!value) return [];
   const rawSides = value.split(/\s+/).filter(Boolean);
-  if (rawSides.includes("all")) return [...DEV_PANEL_SAFE_AREA_SIDES];
-  const sides = new Set<DevPanelSafeAreaSide>();
+  if (rawSides.includes("all")) return [...VIEWPORT_SAFE_AREA_SIDES];
+  const sides = new Set<ViewportSafeAreaSide>();
   for (const side of rawSides) {
-    if (DEV_PANEL_SAFE_AREA_SIDES.includes(side as DevPanelSafeAreaSide)) {
-      sides.add(side as DevPanelSafeAreaSide);
+    if (VIEWPORT_SAFE_AREA_SIDES.includes(side as ViewportSafeAreaSide)) {
+      sides.add(side as ViewportSafeAreaSide);
     }
   }
   return [...sides];
 }
 
-function devPanelSafeAreaRectFromDomRect(
+function viewportSafeAreaRectFromDomRect(
   rect: DOMRect,
-): DevPanelSafeAreaBlocker["rect"] {
+): ViewportSafeAreaBlocker["rect"] {
   return {
     left: rect.left,
     top: rect.top,
@@ -3148,18 +2716,18 @@ function devPanelSafeAreaRectFromDomRect(
   };
 }
 
-function collectDevPanelSafeAreaInsets(
+function collectViewportSafeAreaInsets(
   viewportWidth: number,
   viewportHeight: number,
-): DevPanelSafeAreaInsets {
+): ViewportSafeAreaInsets {
   if (typeof document === "undefined")
-    return DEV_PANEL_SAFE_AREA_DEFAULT_INSETS;
-  const blockers: DevPanelSafeAreaBlocker[] = [];
+    return VIEWPORT_SAFE_AREA_DEFAULT_INSETS;
+  const blockers: ViewportSafeAreaBlocker[] = [];
   document
-    .querySelectorAll<HTMLElement>(`[${DEV_PANEL_SAFE_AREA_ATTRIBUTE}]`)
+    .querySelectorAll<HTMLElement>(`[${VIEWPORT_SAFE_AREA_ATTRIBUTE}]`)
     .forEach((node) => {
-      const sides = parseDevPanelSafeAreaSides(
-        node.getAttribute(DEV_PANEL_SAFE_AREA_ATTRIBUTE),
+      const sides = parseViewportSafeAreaSides(
+        node.getAttribute(VIEWPORT_SAFE_AREA_ATTRIBUTE),
       );
       if (sides.length === 0) return;
       if (node.getAttribute("aria-hidden") === "true" || node.inert) return;
@@ -3176,11 +2744,11 @@ function collectDevPanelSafeAreaInsets(
       if (rect.width <= 0 && rect.height <= 0) return;
       blockers.push({
         sides,
-        rect: devPanelSafeAreaRectFromDomRect(rect),
+        rect: viewportSafeAreaRectFromDomRect(rect),
       });
     });
 
-  return resolveDevPanelSafeAreaInsets({
+  return resolveViewportSafeAreaInsets({
     blockers,
     viewportWidth,
     viewportHeight,
@@ -3204,8 +2772,8 @@ function isElementVisibleForZenLiveBotBoundary(node: HTMLElement): boolean {
 function collectZenLiveBotAvatarSafeAreaInsets(
   viewportWidth: number,
   viewportHeight: number,
-): DevPanelSafeAreaInsets {
-  const panelInsets = collectDevPanelSafeAreaInsets(
+): ViewportSafeAreaInsets {
+  const panelInsets = collectViewportSafeAreaInsets(
     viewportWidth,
     viewportHeight,
   );
@@ -3237,143 +2805,6 @@ function collectZenLiveBotAvatarSafeAreaInsets(
     ...insets,
     bottom: Math.min(insets.bottom, composerBottomInset),
   };
-}
-
-function stableMeasuredDevPanelSafeAreaInset(value: number): number {
-  if (!Number.isFinite(value) || value <= 0) return 0;
-  return Math.ceil(value);
-}
-
-function stableMeasuredDevPanelSafeAreaInsets(
-  insets: DevPanelSafeAreaInsets,
-): DevPanelSafeAreaInsets {
-  return {
-    top: stableMeasuredDevPanelSafeAreaInset(insets.top),
-    right: stableMeasuredDevPanelSafeAreaInset(insets.right),
-    bottom: stableMeasuredDevPanelSafeAreaInset(insets.bottom),
-    left: stableMeasuredDevPanelSafeAreaInset(insets.left),
-  };
-}
-
-function normalizeStoredDevToolsPosition(
-  value: unknown,
-  panelWidth: number,
-  panelHeight: number,
-  viewportWidth: number,
-  viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
-): DevToolsPanelPosition | null {
-  if (!isRecord(value)) return null;
-  const { x, y } = value;
-  if (typeof x !== "number" || typeof y !== "number") return null;
-  if (!Number.isFinite(x) || !Number.isFinite(y)) return null;
-  return clampDevToolsPanelPosition(
-    x,
-    y,
-    panelWidth,
-    panelHeight,
-    viewportWidth,
-    viewportHeight,
-    safeAreaInsets,
-  );
-}
-
-function normalizeStoredDevToolsPanelSize(
-  value: unknown,
-  viewportWidth: number,
-  viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
-): DevToolsPanelSize | null {
-  if (!isRecord(value)) return null;
-  const { width, height } = value;
-  if (typeof width !== "number" || typeof height !== "number") return null;
-  if (!Number.isFinite(width) || !Number.isFinite(height)) return null;
-  const rect = clampDevToolsPanelRect(
-    {
-      x: DEV_TOOLS_PANEL_DEFAULT_X,
-      y: DEV_TOOLS_PANEL_DEFAULT_Y,
-      width,
-      height,
-    },
-    viewportWidth,
-    viewportHeight,
-    safeAreaInsets,
-  );
-  return { width: rect.width, height: rect.height };
-}
-
-function initialDevLayerOrbPosition(
-  side: "left" | "right",
-): DevToolsPanelPosition {
-  const viewportWidth =
-    typeof window === "undefined" ? 1280 : Math.max(320, window.innerWidth);
-  const viewportHeight =
-    typeof window === "undefined" ? 720 : Math.max(320, window.innerHeight);
-  const margin = 16;
-  const orbSize = 46;
-  return {
-    x:
-      side === "left"
-        ? margin
-        : Math.max(margin, viewportWidth - margin - orbSize),
-    y: Math.max(margin, viewportHeight - 126 - orbSize),
-  };
-}
-
-function shouldShowDevToolsConsoleOnly(width: number, height: number): boolean {
-  return (
-    width < DEV_TOOLS_CONSOLE_ONLY_PANEL_WIDTH ||
-    height < DEV_TOOLS_CONSOLE_ONLY_PANEL_HEIGHT
-  );
-}
-
-function clampCompactedSummaryDebugPanelRect(
-  rect: CompactedSummaryDebugPanelRect,
-  viewportWidth: number,
-  viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
-): CompactedSummaryDebugPanelRect {
-  return clampDevPanelRectToSafeArea({
-    rect,
-    viewportWidth,
-    viewportHeight,
-    margin: COMPACTED_SUMMARY_DEBUG_PANEL_VIEWPORT_MARGIN,
-    minWidth: COMPACTED_SUMMARY_DEBUG_PANEL_MIN_WIDTH,
-    minHeight: COMPACTED_SUMMARY_DEBUG_PANEL_MIN_HEIGHT,
-    maxWidth: COMPACTED_SUMMARY_DEBUG_PANEL_MAX_WIDTH,
-    maxHeight: viewportHeight,
-    safeAreaInsets,
-  });
-}
-
-function restoreCompactedSummaryDebugPanelRect(
-  rect: CompactedSummaryDebugPanelRect,
-  viewportWidth: number,
-  viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
-): CompactedSummaryDebugPanelRect {
-  const wasOldTopLeftDefault =
-    rect.x <= 40 && rect.y <= 120 && rect.width <= 360 && rect.height <= 380;
-  const candidate = wasOldTopLeftDefault
-    ? {
-        x: COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_X,
-        y: COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_Y,
-        width: Math.max(
-          rect.width,
-          COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_WIDTH,
-        ),
-        height: Math.max(
-          rect.height,
-          COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_HEIGHT,
-        ),
-      }
-    : rect;
-  return clampCompactedSummaryDebugPanelRect(
-    candidate,
-    viewportWidth,
-    viewportHeight,
-    safeAreaInsets,
-  );
 }
 
 function readStoredMemoryBubbleLayouts(): MemoryBubbleLayoutByScope {
@@ -3431,8 +2862,14 @@ function persistMemoryBubbleLayouts(layouts: MemoryBubbleLayoutByScope): void {
 }
 
 const ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX = 14;
-const ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX = 118;
-const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 300;
+const ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX = 94;
+const ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX = 184;
+const ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX = 240;
+const ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX = 480;
+const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 840;
+const ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX = 118;
+const ZEN_LIVE_BOT_AVATAR_LEGACY_MAX_SIZE_PX = 300;
+const ZEN_LIVE_BOT_AVATAR_LEGACY_MIGRATED_MAX_SIZE_PX = 480;
 const ZEN_LIVE_BOT_PROSE_WIDTH_MIN_PX = 680;
 const ZEN_LIVE_BOT_PROSE_WIDTH_DEFAULT_PX = 860;
 const ZEN_LIVE_BOT_PROSE_WIDTH_MAX_PX = 980;
@@ -3754,30 +3191,85 @@ function normalizeZenLiveBotAvatarSizePx(value: unknown): number {
     value === undefined ||
     (typeof value === "string" && value.trim() === "")
   ) {
-    return ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX;
+    return ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX;
   }
   const numeric = typeof value === "number" ? value : Number(value);
-  if (!Number.isFinite(numeric)) return ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX;
-  return Math.max(
+  if (!Number.isFinite(numeric)) return ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX;
+  const bounded = Math.max(
     ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX,
     Math.min(
       ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX,
       Math.round(numeric * 10) / 10,
     ),
   );
+  if (
+    bounded > ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX &&
+    bounded < ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX
+  ) {
+    const gapMidpoint =
+      (ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX +
+        ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX) /
+      2;
+    return bounded < gapMidpoint
+      ? ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX
+      : ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX;
+  }
+  return bounded;
+}
+
+function migrateLegacyZenLiveBotAvatarSizePx(value: unknown): number {
+  const numeric = typeof value === "number" ? value : Number(value);
+  if (!Number.isFinite(numeric)) return ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX;
+  const legacySize = Math.max(
+    ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX,
+    Math.min(ZEN_LIVE_BOT_AVATAR_LEGACY_MAX_SIZE_PX, numeric),
+  );
+  if (legacySize <= ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX) {
+    return ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX;
+  }
+  const legacyProgress =
+    (legacySize - ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX) /
+    (ZEN_LIVE_BOT_AVATAR_LEGACY_MAX_SIZE_PX -
+      ZEN_LIVE_BOT_AVATAR_LEGACY_MIN_SIZE_PX);
+  return normalizeZenLiveBotAvatarSizePx(
+    ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX +
+      legacyProgress *
+        (ZEN_LIVE_BOT_AVATAR_LEGACY_MIGRATED_MAX_SIZE_PX -
+          ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX),
+  );
+}
+
+function zenLiveBotAvatarRenderMode(
+  avatarSizePx: number,
+): "mini" | "full" {
+  return normalizeZenLiveBotAvatarSizePx(avatarSizePx) <=
+    ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX
+    ? "mini"
+    : "full";
 }
 
 function readZenLiveBotAvatarSizePx(): number {
-  if (typeof window === "undefined") return ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX;
+  if (typeof window === "undefined") return ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX;
   try {
     const raw = window.localStorage.getItem(
       PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY,
     );
-    return normalizeZenLiveBotAvatarSizePx(raw);
+    if (raw !== null) return normalizeZenLiveBotAvatarSizePx(raw);
+    const legacyRaw = window.localStorage.getItem(
+      PRISM_ZEN_LIVE_BOT_AVATAR_LEGACY_SIZE_STORAGE_KEY,
+    );
+    if (legacyRaw !== null) {
+      const migrated = migrateLegacyZenLiveBotAvatarSizePx(legacyRaw);
+      window.localStorage.setItem(
+        PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY,
+        String(migrated),
+      );
+      return migrated;
+    }
   } catch {
     // localStorage can throw (privacy mode, quota); non-fatal.
   }
-  return ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX;
+  return ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX;
 }
 
 function persistZenLiveBotAvatarSizePx(sizePx: number): void {
@@ -3794,12 +3286,14 @@ function persistZenLiveBotAvatarSizePx(sizePx: number): void {
 
 function resolveZenLiveBotProseWidthPx(avatarSizePx: number): number {
   const normalizedSize = normalizeZenLiveBotAvatarSizePx(avatarSizePx);
-  if (normalizedSize === ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX) {
+  if (normalizedSize === ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX)
     return ZEN_LIVE_BOT_PROSE_WIDTH_DEFAULT_PX;
-  }
+  if (zenLiveBotAvatarRenderMode(normalizedSize) === "mini")
+    return ZEN_LIVE_BOT_PROSE_WIDTH_MAX_PX;
   const sizeProgress =
-    (normalizedSize - ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX) /
-    (ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX - ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX);
+    (normalizedSize - ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX) /
+    (ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX -
+      ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX);
   const width =
     ZEN_LIVE_BOT_PROSE_WIDTH_MAX_PX -
     sizeProgress *
@@ -3909,7 +3403,7 @@ function zenLiveBotRectOverlapArea(
 function collectZenLiveBotProseHillRect(
   viewportWidth: number,
   viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
 ): ZenLiveBotProseHillRect | null {
   if (typeof document === "undefined") return null;
   const safeTop = safeAreaInsets.top;
@@ -3967,7 +3461,7 @@ function zenLiveBotInflateRect(
 function collectZenLiveBotChromeAvoidanceRects(
   viewportWidth: number,
   viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
   avatarNode: HTMLElement | null = null,
 ): ZenLiveBotChromeAvoidanceRect[] {
   if (typeof document === "undefined") return [];
@@ -4343,7 +3837,7 @@ function resolveZenLiveBotActionCopyPlacement(
   node: HTMLElement,
   _viewportWidth: number,
   viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
 ): ZenLiveBotActionCopyPlacement {
   const copy = node.querySelector<HTMLElement>(
     "[data-zen-live-bot-action-copy-measure='true']",
@@ -4384,7 +3878,7 @@ function resolveZenLiveBotActionCopyOffsetX(
   node: HTMLElement,
   position: ZenLiveBotAvatarPosition,
   viewportWidth: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
 ): number {
   const copy = node.querySelector<HTMLElement>(
     "[data-zen-live-bot-action-copy-measure='true']",
@@ -4443,7 +3937,7 @@ function resolveZenLiveBotActionCopyCenterX(
   bodyRect: DOMRect,
   viewportWidth: number,
   viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
 ): number {
   const margin = ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX;
   const safeLeft = safeAreaInsets.left + margin;
@@ -4501,7 +3995,7 @@ function resolveZenLiveBotActionCopyAnchor(
   placement: ZenLiveBotActionCopyPlacement,
   viewportWidth: number,
   viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
 ): Omit<ZenLiveBotActionCopyAnchor, "key"> {
   const copy = node.querySelector<HTMLElement>(
     "[data-zen-live-bot-action-copy-measure='true']",
@@ -4558,23 +4052,23 @@ function zenLiveBotAvatarPositionLimits(
   bounds: ZenLiveBotAvatarBounds,
   viewportWidth: number,
   viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
 ): { minX: number; maxX: number; minY: number; maxY: number } {
-  const minUnionPosition = clampDevPanelPositionToSafeArea({
+  const minUnionPosition = clampPositionToViewportSafeArea({
     x: Number.NEGATIVE_INFINITY,
     y: Number.NEGATIVE_INFINITY,
-    panelWidth: bounds.width,
-    panelHeight: bounds.height,
+    width: bounds.width,
+    height: bounds.height,
     viewportWidth,
     viewportHeight,
     margin: ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX,
     safeAreaInsets,
   });
-  const maxUnionPosition = clampDevPanelPositionToSafeArea({
+  const maxUnionPosition = clampPositionToViewportSafeArea({
     x: Number.MAX_SAFE_INTEGER,
     y: Number.MAX_SAFE_INTEGER,
-    panelWidth: bounds.width,
-    panelHeight: bounds.height,
+    width: bounds.width,
+    height: bounds.height,
     viewportWidth,
     viewportHeight,
     margin: ZEN_LIVE_BOT_AVATAR_VIEWPORT_MARGIN_PX,
@@ -4592,7 +4086,7 @@ function clampZenLiveBotAvatarPosition(
   bounds: ZenLiveBotAvatarBounds,
   viewportWidth: number,
   viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
 ): ZenLiveBotAvatarPosition {
   const { minX, maxX, minY, maxY } = zenLiveBotAvatarPositionLimits(
     bounds,
@@ -4611,7 +4105,7 @@ function resolveZenLiveBotAvatarProseHillPosition(
   bounds: ZenLiveBotAvatarBounds,
   viewportWidth: number,
   viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
 ): ZenLiveBotAvatarPosition {
   const proseHillRect = collectZenLiveBotProseHillRect(
     viewportWidth,
@@ -4708,7 +4202,7 @@ function resolveZenLiveBotAvatarChromeAvoidancePosition(
   bounds: ZenLiveBotAvatarBounds,
   viewportWidth: number,
   viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
+  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
   avatarNode: HTMLElement | null = null,
 ): ZenLiveBotAvatarPosition {
   const chromeRects = collectZenLiveBotChromeAvoidanceRects(
@@ -4828,7 +4322,7 @@ function resolveDefaultZenLiveBotAvatarPosition(
   node: HTMLElement,
   viewportWidth: number,
   viewportHeight: number,
-  safeAreaInsets: DevPanelSafeAreaInsets,
+  safeAreaInsets: ViewportSafeAreaInsets,
 ): ZenLiveBotAvatarPosition {
   const bounds = measureZenLiveBotAvatarBounds(node);
   const rootRect = node.getBoundingClientRect();
@@ -7662,30 +7156,6 @@ function clampCoffeeTranscriptPanelWidth(
   );
 }
 
-function clampCoffeeDevPanelPosition(
-  x: number,
-  y: number,
-  width: number,
-  height: number,
-  containerWidth: number,
-  containerHeight: number,
-): CoffeeDevPanelPosition {
-  const margin = 12;
-  const safeWidth = Math.max(1, width);
-  const safeHeight = Math.max(1, height);
-  const safeContainerWidth = Math.max(safeWidth + margin * 2, containerWidth);
-  const safeContainerHeight = Math.max(
-    safeHeight + margin * 2,
-    containerHeight,
-  );
-  const maxX = Math.max(margin, safeContainerWidth - safeWidth - margin);
-  const maxY = Math.max(margin, safeContainerHeight - safeHeight - margin);
-  return {
-    x: Math.max(margin, Math.min(maxX, Number.isFinite(x) ? x : margin)),
-    y: Math.max(margin, Math.min(maxY, Number.isFinite(y) ? y : margin)),
-  };
-}
-
 function emptyCoffeeSeatBotIds(): Array<string | null> {
   return Array.from({ length: COFFEE_GROUP_MAX_SIZE_CLIENT }, () => null);
 }
@@ -8008,22 +7478,6 @@ interface CoffeeRestoredSessionSetup {
   topicDraft: string;
 }
 
-interface CoffeeSeatDebugDragState {
-  pointerId: number;
-  botId: string;
-  botName: string;
-  seatIndex: number;
-  layoutIndex: number;
-  seatCount: number;
-  mode: CoffeeTableCoordinateMode;
-  sceneRect: DOMRect;
-  startClientX: number;
-  startClientY: number;
-  startLeftPct: number;
-  startTopPct: number;
-  moved: boolean;
-}
-
 interface CoffeeArrivalSeatTimers {
   walkTimer: ReturnType<typeof setTimeout> | null;
   nameplateTimer: ReturnType<typeof setTimeout> | null;
@@ -8081,12 +7535,7 @@ interface CoffeeCupTopOffAnimationState {
   fromFrameIndex: number;
 }
 
-interface CoffeeDevCopiedCoordinates {
-  text: string;
-  copied: boolean;
-}
-
-interface CoffeeTopicDebugClipboardState {
+interface CoffeeTopicClipboardFallbackState {
   text: string;
   copied: boolean;
   groupId: string;
@@ -8478,8 +7927,6 @@ interface Message {
   manualAskQuestion?: ManualAskQuestionResultPayload;
   /** Concise Psychic summary associated with the assistant reply to this turn. */
   psychicThought?: PsychicThoughtPayload;
-  /** Live-only verbose Psychic scratchpad shown only in approved presentation surfaces. */
-  psychicScratchpad?: PsychicCanvasScratchpadPayload;
   /** Privacy-safe Auto attempt history for the successful reply. */
   autoRecovery?: AutoRecoveryTraceV1;
   /** Contextual Auto route used for this assistant reply. */
@@ -9348,21 +8795,6 @@ async function collectBotGroupRoomAtmosphereBackupAssets(
   return { assets, omittedCount };
 }
 
-/** Dev-only: `"live"` uses thread + social moods; otherwise every seat shows this Prism mood. */
-type CoffeeSeatMoodDevSlot = "live" | BotMoodKey;
-
-const COFFEE_SEAT_MOOD_DEV_CYCLE: readonly CoffeeSeatMoodDevSlot[] = [
-  "live",
-  "joyful",
-  "warm",
-  "neutral",
-  "guarded",
-  "strained",
-] as const;
-
-function coffeeSeatMoodDevSlotLabel(slot: CoffeeSeatMoodDevSlot): string {
-  return slot === "live" ? "Live (conversation)" : messageMoodLabel(slot);
-}
 type ChatMessageTemporalPhase = "manifest" | "visible" | "dissolving";
 
 /** Prefer server `askQuestion`; if missing, re-parse assistant `content` (fenced JSON / older rows). */
@@ -9455,7 +8887,7 @@ const ZEN_CANVAS_SPEED_NUDGE_EXCLUDED_TARGET_SELECTOR = [
   "[aria-expanded]",
   "[data-prompt-shortcut-preview]",
   "[data-bot-id]",
-  "[data-dev-panel-safe-area]",
+  "[data-viewport-safe-area]",
   "[data-zen-pending-reply-placeholder]",
 ].join(", ");
 const COFFEE_TABLE_SPEED_NUDGE_EXCLUDED_TARGET_SELECTOR = [
@@ -9470,7 +8902,7 @@ const COFFEE_TABLE_SPEED_NUDGE_EXCLUDED_TARGET_SELECTOR = [
   "[role='menu']",
   "[role='menuitem']",
   "[role='option']",
-  "[data-dev-panel-safe-area]",
+  "[data-viewport-safe-area]",
 ].join(", ");
 const CHAT_MODE_USER_QUESTION_PATTERN =
   /\?\s*$|^(?:who|what|when|where|why|how|can|could|would|should|is|are|do|does|did)\b/i;
@@ -10853,46 +10285,9 @@ interface ChatPostEnvelope {
     jobId: string;
     conversationId: string | null;
   };
-  /** Developer-only backend trace for the floating metrics terminal. */
-  backendEvents?: ChatBackendDebugEvent[];
-  /** Live-only Psychic/planning detail for the developer metrics stream. */
-  psychicDebug?: {
-    summary: string;
-    scratchpad: string;
-    effort: ReasoningEffort;
-    provider: Provider;
-    model?: string;
-    simulated: boolean;
-    passCount?: number;
-    passes?: Array<{
-      name:
-        | "plan"
-        | "alternatives"
-        | "draft"
-        | "audit"
-        | "red_team"
-        | "constraint_lock"
-        | "revise_draft"
-        | "compliance_sweep"
-        | "synthesis"
-        | "revision";
-      chars: number;
-      warning?: string;
-    }>;
-    guidanceChars?: number;
-  };
   /** Present for Zen idle-autonomy checks, including silent no-message decisions. */
   zenAutonomyDecision?: ZenAutonomyDecision;
-  /**
-   * Per-turn tool-call diagnostics for the developer metrics stream. Empty/omitted on
-   * turns where nothing tool-shaped was attempted. Used to surface what the assistant
-   * tried (e.g. `sendGeneratedImage`), whether the image slot was acquired or busy,
-   * and whether the parser silently dropped a tool-shaped reply.
-   */
-  toolCalls?: ChatToolCallEvent[];
 }
-
-type ChatPsychicDebugPayload = NonNullable<ChatPostEnvelope["psychicDebug"]>;
 
 function psychicTextEnabledForConversation(
   _conversation: Pick<ConversationDetail, "mode"> | null | undefined,
@@ -10901,65 +10296,6 @@ function psychicTextEnabledForConversation(
   return options.productChatSurface === true;
 }
 
-function livePsychicScratchpadFromDebug(
-  debug: ChatPsychicDebugPayload | undefined,
-  enabled: boolean,
-  createdAt: string,
-): PsychicCanvasScratchpadPayload | null {
-  if (!enabled || !debug) return null;
-  const scratchpad = debug.scratchpad.trim();
-  if (!scratchpad) return null;
-  return {
-    v: 1,
-    scratchpad,
-    effort: debug.effort,
-    provider: debug.provider,
-    ...(debug.model ? { model: debug.model } : {}),
-    simulated: debug.simulated,
-    ...(typeof debug.passCount === "number"
-      ? { passCount: debug.passCount }
-      : {}),
-    ...(typeof debug.guidanceChars === "number"
-      ? { guidanceChars: debug.guidanceChars }
-      : {}),
-    createdAt,
-  };
-}
-
-function attachLivePsychicScratchpadToConversation(
-  conversation: ConversationDetail,
-  debug: ChatPsychicDebugPayload | undefined,
-  enabled: boolean,
-): ConversationDetail {
-  if (!enabled || !debug?.scratchpad.trim()) return conversation;
-  const targetIndex = (() => {
-    for (let i = conversation.messages.length - 1; i >= 0; i -= 1) {
-      const message = conversation.messages[i];
-      if (message?.role === "user" && message.psychicThought) return i;
-    }
-    for (let i = conversation.messages.length - 1; i >= 0; i -= 1) {
-      if (conversation.messages[i]?.role === "user") return i;
-    }
-    return -1;
-  })();
-  if (targetIndex < 0) return conversation;
-  const target = conversation.messages[targetIndex];
-  if (!target) return conversation;
-  const scratchpad = livePsychicScratchpadFromDebug(
-    debug,
-    enabled,
-    target.psychicThought?.createdAt ?? new Date().toISOString(),
-  );
-  if (!scratchpad) return conversation;
-  return {
-    ...conversation,
-    messages: conversation.messages.map((message, index) =>
-      index === targetIndex
-        ? { ...message, psychicScratchpad: scratchpad }
-        : message,
-    ),
-  };
-}
 
 interface ZenInitialStarterCachedReply {
   savedAt: number;
@@ -10980,23 +10316,6 @@ function clearLegacyZenInitialStarterCachedReply(userId: string): void {
   }
 }
 
-interface ChatBackendDebugEvent {
-  kind: "route" | "context" | "model" | "memory" | "summary" | "tool";
-  message: string;
-  detail?: string;
-  elapsedMs: number;
-}
-type ChatToolCallEventName =
-  "sendGeneratedImage" | "askQuestion" | "webSearch" | "unknown";
-type ChatToolCallEventStatus =
-  "detected" | "acquired" | "busy" | "dropped" | "blocked" | "completed";
-interface ChatToolCallEvent {
-  name: ChatToolCallEventName;
-  status: ChatToolCallEventStatus;
-  prompt?: string;
-  jobId?: string;
-  detail?: string;
-}
 interface SessionOpinion {
   score: number;
   band: "guarded" | "warming" | "trusting";
@@ -11205,10 +10524,8 @@ interface UserSettings {
   /**
    * Legacy server field — bindings are no longer edited in the UI; disk workflows
    * come from the ComfyUI host (`comfyui-remote:` in the Images picker).
-   */
+  */
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
-  devMemoriesEnabled: boolean;
-  devMemoriesText: string;
 }
 
 function resolveVoicePreviewProfile(
@@ -11515,13 +10832,6 @@ type SavedApiKeySettingsState = Pick<
   | "braveSearchApiKeySource"
 >;
 
-interface DevChatDebugEvent {
-  id: string;
-  createdAt: string;
-  kind: "summary" | "memory" | "opinion" | "tool" | "backend";
-  text: string;
-}
-
 function PanelSectionInfo({
   id,
   label,
@@ -11553,76 +10863,6 @@ function PanelSectionInfo({
   );
 }
 
-function inferDevChatDebugKind(
-  event: DevChatDebugEvent,
-): DevChatDebugEvent["kind"] {
-  if (
-    event.kind === "summary" ||
-    event.kind === "memory" ||
-    event.kind === "opinion" ||
-    event.kind === "tool" ||
-    event.kind === "backend"
-  ) {
-    return event.kind;
-  }
-  const line = event.text.toLowerCase();
-  if (
-    line.includes("backend") ||
-    line.includes("/api/") ||
-    line.includes("route")
-  )
-    return "backend";
-  if (line.includes("tool")) return "tool";
-  if (line.includes("summary")) return "summary";
-  if (line.includes("memories") || line.includes("memory")) return "memory";
-  return "opinion";
-}
-
-function devDebugKindForBackendEvent(
-  kind: ChatBackendDebugEvent["kind"],
-): DevChatDebugEvent["kind"] {
-  if (kind === "memory") return "memory";
-  if (kind === "summary") return "summary";
-  if (kind === "tool") return "tool";
-  return "backend";
-}
-
-/// Compose a single human-readable dev-metrics line for a tool-call diagnostic event.
-function formatChatToolCallDebugLine(
-  prefix: string,
-  event: ChatToolCallEvent,
-): string {
-  const parts: string[] = [`${prefix} tool ${event.name}: ${event.status}`];
-  if (event.jobId) parts.push(`jobId=${event.jobId}`);
-  if (event.prompt && event.prompt.length > 0)
-    parts.push(`prompt="${event.prompt}"`);
-  if (event.detail && event.detail.length > 0) parts.push(event.detail);
-  return parts.join(" — ");
-}
-
-function formatBackendDebugLine(
-  prefix: string,
-  event: ChatBackendDebugEvent,
-): string {
-  const parts = [`${prefix} backend ${event.kind}: ${event.message}`];
-  if (event.detail && event.detail.length > 0) parts.push(event.detail);
-  parts.push(`${event.elapsedMs}ms`);
-  return parts.join(" — ");
-}
-
-const DEV_METRICS_INLINE_TOKEN_PATTERN =
-  /(\[[^\]\n]+\]|\/api\/[^\s;,)]+|\/[A-Za-z][\w/-]*|(?:mode|chars|bot|provider|model|incognito|jobId|prompt)=("[^"]*"|[^\s;\u2014,)]+)|\b\d+(?:\.\d+)?(?:ms|%)\b|\b(?:backend|route|context|model|tool|summary|memories?|memory|opinion|provider|incognito|started|created|retracted|rejected|triggered|requested|failed|succeeded|detected|acquired|busy|dropped|blocked|completed)\b|"[^"]*")/gi;
-
-function formatDevMetricsTimestamp(createdAt: string): string {
-  const date = new Date(createdAt);
-  if (Number.isNaN(date.getTime())) return "--:--";
-  return date.toLocaleTimeString([], {
-    hour: "2-digit",
-    minute: "2-digit",
-    hour12: false,
-  });
-}
-
 function formatMemoryDossierDate(createdAt: string): string {
   const date = new Date(createdAt);
   if (Number.isNaN(date.getTime())) return "Unknown date";
@@ -11633,86 +10873,7 @@ function formatMemoryDossierDate(createdAt: string): string {
   });
 }
 
-function renderDevMetricsToken(token: string, key: string): React.JSX.Element {
-  const keyValue = token.match(/^([A-Za-z][\w-]*)=("[^"]*"|[^\s;\u2014,)]+)$/);
-  if (keyValue) {
-    return (
-      <span key={key} className={styles.devMetricsTokenKeyValue}>
-        <span className={styles.devMetricsTokenKey}>{keyValue[1]}=</span>
-        <strong>{keyValue[2]}</strong>
-      </span>
-    );
-  }
-
-  if (token.startsWith("[")) {
-    return (
-      <span key={key} className={styles.devMetricsTokenPrefix}>
-        {token}
-      </span>
-    );
-  }
-
-  if (token.startsWith("/")) {
-    return (
-      <span key={key} className={styles.devMetricsTokenRoute}>
-        {token}
-      </span>
-    );
-  }
-
-  if (/^".*"$/.test(token)) {
-    return (
-      <span key={key} className={styles.devMetricsTokenQuote}>
-        {token}
-      </span>
-    );
-  }
-
-  if (/^\d+(?:\.\d+)?(?:ms|%)$/.test(token)) {
-    return (
-      <span key={key} className={styles.devMetricsTokenMetric}>
-        {token}
-      </span>
-    );
-  }
-
-  if (
-    /^(failed|dropped|busy|succeeded|created|retracted|rejected)$/i.test(token)
-  ) {
-    return (
-      <span key={key} className={styles.devMetricsTokenStatus}>
-        {token}
-      </span>
-    );
-  }
-
-  return (
-    <span key={key} className={styles.devMetricsTokenKeyword}>
-      {token}
-    </span>
-  );
-}
-
-function renderDevMetricsInlineText(
-  text: string,
-): Array<string | React.JSX.Element> {
-  const nodes: Array<string | React.JSX.Element> = [];
-  DEV_METRICS_INLINE_TOKEN_PATTERN.lastIndex = 0;
-
-  let cursor = 0;
-  let match: RegExpExecArray | null;
-  while ((match = DEV_METRICS_INLINE_TOKEN_PATTERN.exec(text)) !== null) {
-    const token = match[0];
-    const start = match.index;
-    if (start > cursor) nodes.push(text.slice(cursor, start));
-    nodes.push(renderDevMetricsToken(token, `token-${start}-${nodes.length}`));
-    cursor = start + token.length;
-  }
-
-  if (cursor < text.length) nodes.push(text.slice(cursor));
-  return nodes.length > 0 ? nodes : [text];
-}
-interface SummaryCompactionDebug {
+interface SummaryCompactionSnapshot {
   mode: "zen" | "chat" | "sandbox";
   conversationId: string;
   inProgress: boolean;
@@ -11751,8 +10912,14 @@ interface UserMemory {
   id: string;
   conversationId?: string;
   botId?: string;
+  targetBotId?: string;
   createdAt: string;
   confidence: number;
+  baseConfidence?: number;
+  lifecycle?: "short_term" | "long_term" | "derived";
+  lastReinforcedAt?: string;
+  expiresAt?: string;
+  evidenceMemoryIds?: string[];
   text: string;
   category?: MemoryCategory;
   tier?: MemoryTier;
@@ -11760,6 +10927,18 @@ interface UserMemory {
   certainty?: number;
   durability?: number;
   sourceMessageIds?: string[];
+}
+
+interface MemoryAcquisitionReceiptView {
+  id: string;
+  memoryId: string;
+  learnerBotId: string | null;
+  targetBotId: string | null;
+  conversationId: string | null;
+  kind: "player_memory" | "bot_relation";
+  createdAt: string;
+  readAt: string | null;
+  memory?: UserMemory;
 }
 
 type MemoryCategory = "general" | "user" | "bot_relation";
@@ -12141,8 +11320,8 @@ function BotVoiceEditor({
     current: string,
     apply: (value: string) => void,
   ) => void | Promise<void>;
-  /** identity = Avatar Studio Voice stage (no Performance block). */
-  variant?: "full" | "identity";
+  /** local/premium = Avatar Studio lane stages; full keeps both cards. */
+  variant?: "full" | "local" | "premium";
 }): React.JSX.Element {
   const normalizedProfile = {
     ...normalizeBotAudioVoiceProfileV1(profile),
@@ -12437,6 +11616,26 @@ function BotVoiceEditor({
       ),
     );
   };
+  const showLocalCard = variant === "full" || variant === "local";
+  const showPremiumCard = variant === "full" || variant === "premium";
+  const laneTitle =
+    variant === "local"
+      ? "Local voice"
+      : variant === "premium"
+        ? "Premium voice"
+        : "Voice";
+  const laneDetail =
+    variant === "local"
+      ? `${fallbackVoiceLabel} · Instant / OS`
+      : variant === "premium"
+        ? effectiveElevenLabsVoiceValue
+          ? `${premiumVoiceLabel} · ElevenLabs`
+          : "No Premium voice yet"
+        : normalizedProfile.enabled
+          ? effectiveElevenLabsVoiceValue
+            ? `${premiumVoiceLabel} · ElevenLabs`
+            : `${fallbackVoiceLabel} · Local`
+          : "Muted";
   return (
     <div
       className={styles.botVoiceEditor}
@@ -12444,7 +11643,7 @@ function BotVoiceEditor({
       data-voice-enabled={normalizedProfile.enabled ? "true" : "false"}
       data-voice-editor-variant={variant}
       data-bot-voice-identity-stage={
-        variant === "identity" ? "true" : undefined
+        variant === "local" || variant === "premium" ? "true" : undefined
       }
     >
       <header className={styles.botVoiceEditorHeader}>
@@ -12452,30 +11651,26 @@ function BotVoiceEditor({
           <Volume2 size={17} strokeWidth={2.2} />
         </span>
         <div className={styles.botVoiceEditorIntro}>
-          <span>Voice</span>
-          <strong>
-            {normalizedProfile.enabled
-              ? effectiveElevenLabsVoiceValue
-                ? `${premiumVoiceLabel} · ElevenLabs`
-                : `${fallbackVoiceLabel} · Local`
-              : "Muted"}
-          </strong>
+          <span>{laneTitle}</span>
+          <strong>{laneDetail}</strong>
         </div>
-        <button
-          type="button"
-          role="switch"
-          aria-label="Toggle bot voice"
-          aria-checked={normalizedProfile.enabled}
-          data-active={normalizedProfile.enabled ? "true" : undefined}
-          onClick={() =>
-            onChange({
-              ...normalizedProfile,
-              enabled: !normalizedProfile.enabled,
-            })
-          }
-        >
-          {normalizedProfile.enabled ? "On" : "Silent"}
-        </button>
+        {variant === "full" ? (
+          <button
+            type="button"
+            role="switch"
+            aria-label="Toggle bot voice"
+            aria-checked={normalizedProfile.enabled}
+            data-active={normalizedProfile.enabled ? "true" : undefined}
+            onClick={() =>
+              onChange({
+                ...normalizedProfile,
+                enabled: !normalizedProfile.enabled,
+              })
+            }
+          >
+            {normalizedProfile.enabled ? "On" : "Silent"}
+          </button>
+        ) : null}
       </header>
 
       <section
@@ -12484,34 +11679,45 @@ function BotVoiceEditor({
       >
         <div className={styles.botVoiceSectionHeading}>
           <div>
-            <span id="bot-voice-source-title">Choose a voice</span>
+            <span id="bot-voice-source-title">
+              {variant === "local"
+                ? "Choose a Local voice"
+                : variant === "premium"
+                  ? "Choose a Premium voice"
+                  : "Choose a voice"}
+            </span>
           </div>
           <span
             className={styles.botVoiceSourceStatus}
             data-source={
-              elevenLabsVoiceIdOverrideValue
-                ? "override"
-                : selectedElevenLabsVoiceValue
-                  ? "elevenlabs"
-                  : "system"
+              variant === "local"
+                ? "system"
+                : elevenLabsVoiceIdOverrideValue
+                  ? "override"
+                  : selectedElevenLabsVoiceValue
+                    ? "elevenlabs"
+                    : "system"
             }
           >
-            {elevenLabsVoiceIdOverrideValue
-              ? "Voice ID"
-              : selectedElevenLabsVoiceValue
-                ? "ElevenLabs"
-                : "Local"}
+            {variant === "local"
+              ? "Local"
+              : elevenLabsVoiceIdOverrideValue
+                ? "Voice ID"
+                : selectedElevenLabsVoiceValue
+                  ? "ElevenLabs"
+                  : "Optional"}
           </span>
         </div>
 
         <div className={styles.botVoiceSourceStack}>
+          {showPremiumCard ? (
           <details
             className={`${styles.botVoiceSourceCard} ${styles.botVoiceFallbackDisclosure}`}
             data-kind="online"
             data-active={effectiveElevenLabsVoiceValue ? "true" : undefined}
             aria-label="Optional Premium voice"
             data-bot-voice-source-card="online"
-            open={effectiveElevenLabsVoiceValue ? true : undefined}
+            open
           >
             <summary className={styles.botVoiceSourceCardHeader}>
               <span aria-hidden="true">
@@ -12819,7 +12025,9 @@ function BotVoiceEditor({
               ) : null}
             </div>
           </details>
+          ) : null}
 
+          {showLocalCard ? (
           <details
             className={`${styles.botVoiceSourceCard} ${styles.botVoiceFallbackDisclosure}`}
             data-kind="system"
@@ -13001,6 +12209,7 @@ function BotVoiceEditor({
               </details>
             </div>
           </details>
+          ) : null}
         </div>
       </section>
 
@@ -13018,11 +12227,13 @@ function BotVoiceEditor({
           <BotVoicePerformanceControls
             profile={normalizedProfile}
             onChange={onChange}
+            lane="local"
           />
         </div>
       </section>
       ) : null}
 
+      {variant === "full" ? (
       <label className={styles.botVoiceIdentityField}>
         <span>
           Sample line{" "}
@@ -13044,6 +12255,7 @@ function BotVoiceEditor({
           aria-label="Voice preview line"
         />
       </label>
+      ) : null}
 
       <footer className={styles.botVoiceActions}>
         <div
@@ -13066,75 +12278,42 @@ function BotVoiceEditor({
           <small>{previewFeedback.message}</small>
         </div>
         <div className={styles.botVoicePreviewActions}>
-          {variant === "identity" ? (
-            <>
-              <button
-                type="button"
-                data-primary="true"
-                title={
-                  effectiveElevenLabsVoiceValue
-                    ? `Preview Premium voice ${premiumVoiceLabel}`
-                    : `Preview English voice ${fallbackVoiceLabel}`
-                }
-                disabled={englishPreviewState !== "idle"}
-                onClick={() =>
-                  void previewVoice(
-                    effectiveElevenLabsVoiceValue ? "premium" : "english",
-                  )
-                }
-              >
-                <Play size={13} strokeWidth={2.3} aria-hidden="true" />
-                {englishPreviewState === "generating"
-                  ? effectiveElevenLabsVoiceValue
-                    ? "Contacting ElevenLabs…"
-                    : "Generating audio sample…"
-                  : englishPreviewState === "playing"
-                    ? `Playing ${
-                        effectiveElevenLabsVoiceValue
-                          ? premiumVoiceLabel
-                          : fallbackVoiceLabel
-                      }…`
-                    : effectiveElevenLabsVoiceValue
-                      ? "Preview"
-                      : "Preview local"}
-              </button>
-              <details className={styles.botVoiceSecondaryPreviewDisclosure}>
-                <summary>Other modes</summary>
-                <div className={styles.botVoiceSecondaryPreviewActions}>
-                  {effectiveElevenLabsVoiceValue ? (
-                    <button
-                      type="button"
-                      title={`Preview English voice ${fallbackVoiceLabel}`}
-                      disabled={englishPreviewState !== "idle"}
-                      onClick={() => void previewVoice("english")}
-                    >
-                      <Play size={13} strokeWidth={2.3} aria-hidden="true" />
-                      {englishPreviewState === "generating" &&
-                      previewing === "english"
-                        ? "Generating…"
-                        : englishPreviewState === "playing" &&
-                            previewing === "english"
-                          ? `Playing ${fallbackVoiceLabel}…`
-                          : "Preview local"}
-                    </button>
-                  ) : null}
-                  <button
-                    type="button"
-                    onClick={() => void previewVoice("babble")}
-                  >
-                    <Play size={13} strokeWidth={2.3} aria-hidden="true" />
-                    {previewing === "babble" ? "Restart Babble" : "Babble"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => void previewVoice("bottish")}
-                  >
-                    <Play size={13} strokeWidth={2.3} aria-hidden="true" />
-                    {previewing === "bottish" ? "Restart Bottish" : "Bottish"}
-                  </button>
-                </div>
-              </details>
-            </>
+          {variant === "local" ? (
+            <button
+              type="button"
+              data-primary="true"
+              title={`Preview Local voice ${fallbackVoiceLabel}`}
+              disabled={englishPreviewState !== "idle"}
+              onClick={() => void previewVoice("english")}
+            >
+              <Play size={13} strokeWidth={2.3} aria-hidden="true" />
+              {englishPreviewState === "generating"
+                ? "Generating…"
+                : englishPreviewState === "playing"
+                  ? `Playing ${fallbackVoiceLabel}…`
+                  : "Preview Local"}
+            </button>
+          ) : variant === "premium" ? (
+            <button
+              type="button"
+              data-primary="true"
+              title={
+                effectiveElevenLabsVoiceValue
+                  ? `Preview Premium voice ${premiumVoiceLabel}`
+                  : "Choose a Premium voice first"
+              }
+              disabled={
+                englishPreviewState !== "idle" || !effectiveElevenLabsVoiceValue
+              }
+              onClick={() => void previewVoice("premium")}
+            >
+              <Play size={13} strokeWidth={2.3} aria-hidden="true" />
+              {previewing === "premium" && englishPreviewState === "generating"
+                ? "Contacting ElevenLabs…"
+                : previewing === "premium" && englishPreviewState === "playing"
+                  ? `Playing ${premiumVoiceLabel}…`
+                  : "Preview Premium"}
+            </button>
           ) : (
             <>
           <button
@@ -13186,10 +12365,12 @@ function BotVoiceEditor({
             <RotateCcw size={12} strokeWidth={2.3} aria-hidden="true" />
             {resetLabel}
           </button>
+          {variant === "full" ? (
           <button type="button" onClick={randomizeVoice}>
             <Shuffle size={13} strokeWidth={2.3} aria-hidden="true" />
             Randomize
           </button>
+          ) : null}
         </div>
       </footer>
     </div>
@@ -15285,40 +14466,16 @@ const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED = false;
 const DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
 const MIN_ZEN_ASK_QUESTION_PATIENCE_MS = 10_000;
 const MAX_ZEN_ASK_QUESTION_PATIENCE_MS = 60_000;
-const ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS = [
-  { value: "multiply", label: "Multiply" },
-  { value: "soft-light", label: "Soft Light" },
-  { value: "color", label: "Color" },
-  { value: "overlay", label: "Overlay" },
-  { value: "normal", label: "Normal" },
-  { value: "darken", label: "Darken" },
-  { value: "lighten", label: "Lighten" },
-  { value: "screen", label: "Screen" },
-  { value: "hard-light", label: "Hard Light" },
-  { value: "luminosity", label: "Luminosity" },
-] as const;
-type ZenPersonaBackdropBlendMode =
-  (typeof ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS)[number]["value"];
-type ZenPersonaBackdropTuning = {
-  blend: number;
-  darkBlendMode: ZenPersonaBackdropBlendMode;
-  lightBlendMode: ZenPersonaBackdropBlendMode;
-  opacity: number;
-  saturation: number;
-};
-const MIN_ZEN_PERSONA_BACKDROP_BLEND = 0;
-const MAX_ZEN_PERSONA_BACKDROP_BLEND = 100;
-const MIN_ZEN_PERSONA_BACKDROP_OPACITY = 0;
-const MAX_ZEN_PERSONA_BACKDROP_OPACITY = 0.6;
-const MIN_ZEN_PERSONA_BACKDROP_SATURATION = 0;
-const MAX_ZEN_PERSONA_BACKDROP_SATURATION = 1.6;
-const DEFAULT_ZEN_PERSONA_BACKDROP_TUNING: ZenPersonaBackdropTuning = {
-  blend: MAX_ZEN_PERSONA_BACKDROP_BLEND,
-  darkBlendMode: "screen",
-  lightBlendMode: "multiply",
-  opacity: MAX_ZEN_PERSONA_BACKDROP_OPACITY,
-  saturation: MAX_ZEN_PERSONA_BACKDROP_SATURATION,
-};
+const ZEN_PERSONA_BACKDROP_STYLE_VARS = {
+  ["--zen-persona-ink-opacity" as string]: "0.6",
+  ["--zen-persona-ink-saturation" as string]: "1.6",
+  ["--zen-persona-ink-blend-mode-dark" as string]: "screen",
+  ["--zen-persona-ink-blend-mode-light" as string]: "multiply",
+  ["--zen-persona-ink-blend-strong" as string]: "100%",
+  ["--zen-persona-ink-blend-mid" as string]: "68%",
+  ["--zen-persona-ink-blend-soft" as string]: "50%",
+  ["--zen-persona-ink-blend-edge" as string]: "34%",
+} as React.CSSProperties;
 
 function createDefaultChatModelChoiceByProvider(): Record<Provider, string> {
   return {
@@ -15954,90 +15111,6 @@ function normalizeDecimalSetting(
   const normalized = Number.isFinite(parsed) ? parsed : fallback;
   const clamped = Math.min(max, Math.max(min, normalized));
   return Number(clamped.toFixed(precision));
-}
-
-function normalizeZenPersonaBackdropBlendMode(
-  value: unknown,
-  fallback: ZenPersonaBackdropBlendMode,
-): ZenPersonaBackdropBlendMode {
-  if (typeof value === "string") {
-    const normalized = value.trim().toLowerCase();
-    const option = ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS.find(
-      (candidate) => candidate.value === normalized,
-    );
-    if (option) return option.value;
-  }
-  return fallback;
-}
-
-function formatZenPersonaBackdropBlendMode(
-  value: ZenPersonaBackdropBlendMode,
-): string {
-  return (
-    ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS.find(
-      (option) => option.value === value,
-    )?.label ?? value
-  );
-}
-
-function normalizeZenPersonaBackdropTuning(
-  value: unknown,
-): ZenPersonaBackdropTuning {
-  const source =
-    value !== null && typeof value === "object"
-      ? (value as Partial<Record<keyof ZenPersonaBackdropTuning, unknown>>)
-      : {};
-  return {
-    blend: normalizeIntegerSetting(
-      source.blend,
-      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.blend,
-      MIN_ZEN_PERSONA_BACKDROP_BLEND,
-      MAX_ZEN_PERSONA_BACKDROP_BLEND,
-    ),
-    darkBlendMode: normalizeZenPersonaBackdropBlendMode(
-      source.darkBlendMode,
-      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.darkBlendMode,
-    ),
-    lightBlendMode: normalizeZenPersonaBackdropBlendMode(
-      source.lightBlendMode,
-      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.lightBlendMode,
-    ),
-    opacity: normalizeDecimalSetting(
-      source.opacity,
-      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.opacity,
-      MIN_ZEN_PERSONA_BACKDROP_OPACITY,
-      MAX_ZEN_PERSONA_BACKDROP_OPACITY,
-    ),
-    saturation: normalizeDecimalSetting(
-      source.saturation,
-      DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.saturation,
-      MIN_ZEN_PERSONA_BACKDROP_SATURATION,
-      MAX_ZEN_PERSONA_BACKDROP_SATURATION,
-    ),
-  };
-}
-
-function zenPersonaBackdropCssVars(
-  tuning: ZenPersonaBackdropTuning,
-): React.CSSProperties {
-  const normalized = normalizeZenPersonaBackdropTuning(tuning);
-  const style = {} as React.CSSProperties & Record<string, string>;
-  style["--zen-persona-ink-opacity"] = String(normalized.opacity);
-  style["--zen-persona-ink-saturation"] = String(normalized.saturation);
-  style["--zen-persona-ink-blend-mode-dark"] = normalized.darkBlendMode;
-  style["--zen-persona-ink-blend-mode-light"] = normalized.lightBlendMode;
-  style["--zen-persona-ink-blend-strong"] = `${normalized.blend}%`;
-  style["--zen-persona-ink-blend-mid"] =
-    `${Math.round(normalized.blend * 0.68)}%`;
-  style["--zen-persona-ink-blend-soft"] =
-    `${Math.round(normalized.blend * 0.5)}%`;
-  style["--zen-persona-ink-blend-edge"] =
-    `${Math.round(normalized.blend * 0.34)}%`;
-  return style;
-}
-
-function formatZenPersonaBackdropPercent(value: number): string {
-  return `${Math.round(value * 100)}%`;
 }
 
 function normalizeZenSessionIdleGapSetting(value: unknown): number {
@@ -20299,7 +19372,7 @@ async function api<T>(path: string, options?: RequestInit): Promise<T> {
   if (
     typeof path === "string" &&
     path.startsWith("/api") &&
-    path !== "/api/dev/restart"
+    path !== "/api/maintenance/restart"
   ) {
     dispatchBackendAvailableEvent();
   }
@@ -22445,31 +21518,55 @@ function EmptyStateHeroMiniBot({
   privateMode = false,
   isTalking = false,
   size = "hero",
+  lightMode,
+  mouthShape,
+  showThinkingSpinner = false,
+  showQuestionMark = false,
+  defaultPrismGlyph = DEFAULT_PRISM_BOT_GLYPH,
+  defaultPrismFaceStyle,
   scheduleKey,
   className,
 }: {
-  bot: Bot;
+  bot: Bot | null;
   resolvedTheme: "light" | "dark";
   privateMode?: boolean;
   isTalking?: boolean;
   size?: "room" | "hero";
+  lightMode?: "off" | "breathing";
+  mouthShape?: ZenLiveBotMouthShape | null;
+  showThinkingSpinner?: boolean;
+  showQuestionMark?: boolean;
+  defaultPrismGlyph?: BotGlyphName;
+  defaultPrismFaceStyle?: BotFaceStyle;
   scheduleKey?: string;
   className?: string;
 }): React.JSX.Element {
-  const faceStyle = resolveBotFaceStyleForBot(bot);
-  const avatarDetails = resolveBotAvatarDetails(bot);
+  const defaultPrismPresence = bot === null;
+  const faceStyle = bot
+    ? resolveBotFaceStyleForBot(bot)
+    : (defaultPrismFaceStyle ?? resolveBotFaceStyleForBot(null));
+  const avatarDetails = bot ? resolveBotAvatarDetails(bot) : null;
   const hasAvatarArt = avatarDetailsHasVisuals(avatarDetails);
   const voicePreset = coffeeSeatVoicePreset(bot);
-  const normalizedBotColor = botOrPrismAccentForTheme(
-    bot.color,
-    resolvedTheme,
-  );
+  const normalizedBotColor = defaultPrismPresence
+    ? prismDefaultAccentForTheme(resolvedTheme)
+    : botOrPrismAccentForTheme(bot?.color, resolvedTheme);
   const color = privateMode ? "#e8eee8" : normalizedBotColor;
-  const alloyColor = botFrameMetalAlloyColor(voicePreset, {
-    privateMode,
+  const alloyColor = defaultPrismPresence
+    ? "#aeb8c1"
+    : botFrameMetalAlloyColor(voicePreset, { privateMode });
+  const glyphName = defaultPrismPresence
+    ? defaultPrismGlyph
+    : resolveCustomBotGlyph(bot?.glyph ?? defaultPrismGlyph);
+  const miniMouthShape = miniAvatarBinaryMouthShape({
+    talking: isTalking,
+    mouthShape: mouthShape ?? (isTalking ? "open-wide" : "closed"),
+    mouthCharacter: faceStyle.mouthCharacter,
   });
-  const glyphName = resolveCustomBotGlyph(bot.glyph);
-  const seatPlateGlyph = coffeeSeatPlateGlyph("warm", "closed");
+  const seatPlateGlyph = coffeeSeatPlateGlyph(
+    "warm",
+    miniMouthShape,
+  );
   const miniFaceRegistrationStyle = {
     ...(hasAvatarArt
       ? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE
@@ -22499,7 +21596,7 @@ function EmptyStateHeroMiniBot({
           faceGeometry={faceStyle}
           talking={isTalking}
           speechMotionActive={false}
-          mouthShape="closed"
+          mouthShape={miniMouthShape}
           depth={depth}
           staticRaster
           coreColor="ink"
@@ -22510,6 +21607,7 @@ function EmptyStateHeroMiniBot({
   return (
     <ChatMiniBotAvatar
       size={size}
+      lightMode={lightMode ?? (size === "hero" ? "breathing" : "off")}
       color={color}
       alloyColor={alloyColor}
       theme={resolvedTheme}
@@ -22526,15 +21624,21 @@ function EmptyStateHeroMiniBot({
           >
             <CoffeeSeatPlateEmoji
               enabled
+              pixelated
               isTalking={isTalking}
-              mouthShape="closed"
-              scheduleKey={scheduleKey ?? `empty-hero-mini-${bot.id}`}
+              mouthShape={miniMouthShape}
+              blinkWhileTalking
+              scheduleKey={
+                scheduleKey ?? `empty-hero-mini-${bot?.id ?? "prism"}`
+              }
+              showThinkingSpinner={showThinkingSpinner}
+              showQuestionMark={showQuestionMark}
               baseText={seatPlateGlyph.text}
               rotateDeg={seatPlateGlyph.rotateDeg}
               voicePreset={voicePreset}
               faceEyesFont={faceStyle.eyesFont}
               faceEyeCharacter={faceStyle.eyeCharacter}
-              faceEyeMovement={faceStyle.eyeAnimation}
+              faceEyeMovement="still"
               faceMouthFont={faceStyle.mouthFont}
               faceMouthCharacter={faceStyle.mouthCharacter}
               faceMouthAnimation={faceStyle.mouthAnimation}
@@ -22566,7 +21670,7 @@ function EmptyStateHeroMiniBot({
       glyph={
         <BotGlyph
           name={glyphName}
-          size={14}
+          size={12}
           className={styles.emptyStateHeroMiniGlyph}
         />
       }
@@ -22748,14 +21852,16 @@ function BotGlyphPicker({
 
 const COMPOSE_MENU_VIEWPORT_PAD_PX = 12;
 const COMPOSE_MENU_MAX_WIDTH_PX = 360;
+/** Navbar pickers tuck 2px beneath their controls instead of floating apart. */
+const COMPOSE_MENU_TRIGGER_UNDERLAP_PX = 2;
 /** Minimum popover width when the trigger is very narrow (matches CSS floors). */
 const COMPOSE_MENU_BOT_MIN_WIDTH_PX = 260;
-const COMPOSE_MENU_MODEL_MIN_WIDTH_PX = 300;
+const COMPOSE_MENU_MODEL_MIN_WIDTH_PX = 320;
 const BOT_LIBRARY_GROUP_MENU_MIN_WIDTH_PX = 240;
 const COMPOSE_COMMAND_MENU_MIN_WIDTH_PX = 320;
-const COMPOSE_MENU_PORTAL_Z_INDEX_BOT = 2500;
-/** Slightly above bot menu so both open pickers stack predictably over the rail. */
-const COMPOSE_MENU_PORTAL_Z_INDEX_MODEL = 2600;
+/** One layer beneath `.chatHeader` (180), which contains every navbar trigger. */
+const COMPOSE_MENU_PORTAL_Z_INDEX_BOT = 179;
+const COMPOSE_MENU_PORTAL_Z_INDEX_MODEL = 179;
 type ComposeMenuPlacement = "up" | "down" | "right";
 const COMPOSE_MENU_SIDE_MAX_WIDTH_PX = 330;
 const COMPOSE_MENU_SIDE_HEIGHT_TARGET_PX = 380;
@@ -22804,7 +21910,7 @@ function computeComposeMenuFixedStyle(
   const vw = globalThis.window.innerWidth;
   const vh = globalThis.window.innerHeight;
   const pad = COMPOSE_MENU_VIEWPORT_PAD_PX;
-  const gap = 6;
+  const gap = -COMPOSE_MENU_TRIGGER_UNDERLAP_PX;
   const viewportMaxWidth = Math.min(COMPOSE_MENU_MAX_WIDTH_PX, vw - pad * 2);
   const preferredSideLeft = rect.right + gap;
   const sideLeft = Math.max(
@@ -23009,6 +22115,7 @@ function BotLibraryGroupPicker({
   disabled = false,
   dismissPopoversSignal,
 }: BotLibraryGroupPickerProps): React.JSX.Element | null {
+  const pickerId = useId();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -23077,6 +22184,19 @@ function BotLibraryGroupPicker({
     setOpen(false);
   }, [dismissPopoversSignal]);
 
+  useEffect(() => {
+    const closeForOtherPicker = (event: Event): void => {
+      const source = (event as CustomEvent<{ source?: string }>).detail?.source;
+      if (source !== pickerId) setOpen(false);
+    };
+    window.addEventListener(PRISM_NAVBAR_PICKER_OPEN_EVENT, closeForOtherPicker);
+    return () =>
+      window.removeEventListener(
+        PRISM_NAVBAR_PICKER_OPEN_EVENT,
+        closeForOtherPicker,
+      );
+  }, [pickerId]);
+
   if (!selectedOption) return null;
 
   const pick = (nextValue: string): void => {
@@ -23131,7 +22251,10 @@ function BotLibraryGroupPicker({
         ref={triggerRef}
         type="button"
         className={styles.botLibraryGroupTrigger}
-        onClick={() => setOpen((current) => !current)}
+        onClick={() => {
+          if (!menuOpen) announcePrismNavbarPickerOpen(pickerId);
+          setOpen((current) => !current);
+        }}
         onKeyDown={(event) => {
           if (
             event.key === "ArrowDown" ||
@@ -23140,6 +22263,7 @@ function BotLibraryGroupPicker({
             event.key === "End"
           ) {
             event.preventDefault();
+            announcePrismNavbarPickerOpen(pickerId);
             setOpen(true);
           }
         }}
@@ -23493,6 +22617,7 @@ function ComposerBotPicker({
   privateTone = false,
   navbarPicker = false,
 }: ComposerBotPickerProps): React.JSX.Element {
+  const pickerId = useId();
   const [open, setOpen] = useState(false);
   const [botNameFilter, setBotNameFilter] = useState("");
   const [hueSortEngaged, setHueSortEngaged] = useState(false);
@@ -23568,11 +22693,25 @@ function ComposerBotPicker({
     setHueSortEngaged(false);
   }, []);
 
+  useEffect(() => {
+    const closeForOtherPicker = (event: Event): void => {
+      const source = (event as CustomEvent<{ source?: string }>).detail?.source;
+      if (source !== pickerId) closeMenu();
+    };
+    window.addEventListener(PRISM_NAVBAR_PICKER_OPEN_EVENT, closeForOtherPicker);
+    return () =>
+      window.removeEventListener(
+        PRISM_NAVBAR_PICKER_OPEN_EVENT,
+        closeForOtherPicker,
+      );
+  }, [closeMenu, pickerId]);
+
   const toggleMenu = (): void => {
     if (menuOpen) {
       closeMenu();
       return;
     }
+    announcePrismNavbarPickerOpen(pickerId);
     // A parent hue value may outlive this popover. Each opening still starts
     // alphabetically until the user moves this menu's hue slider again.
     setHueSortEngaged(false);
@@ -23886,6 +23025,7 @@ function ImageBotDirectoryDropdown({
   dismissPopoversSignal,
   privateTone = false,
 }: ImageBotDirectoryDropdownProps): React.JSX.Element | null {
+  const pickerId = useId();
   const [open, setOpen] = useState(false);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -23930,7 +23070,21 @@ function ImageBotDirectoryDropdown({
     setOpen(false);
   }, [dismissPopoversSignal]);
 
+  useEffect(() => {
+    const closeForOtherPicker = (event: Event): void => {
+      const source = (event as CustomEvent<{ source?: string }>).detail?.source;
+      if (source !== pickerId) setOpen(false);
+    };
+    window.addEventListener(PRISM_NAVBAR_PICKER_OPEN_EVENT, closeForOtherPicker);
+    return () =>
+      window.removeEventListener(
+        PRISM_NAVBAR_PICKER_OPEN_EVENT,
+        closeForOtherPicker,
+      );
+  }, [pickerId]);
+
   const toggleMenu = (): void => {
+    if (!menuOpen) announcePrismNavbarPickerOpen(pickerId);
     setOpen((prev) => !prev);
   };
 
@@ -24208,6 +23362,8 @@ interface ComposerModelPickerProps {
 
 const MODEL_PICKER_QUICK_OPEN_EVENT = "prism:model-picker-quick-open";
 const EFFORT_PICKER_QUICK_OPEN_EVENT = "prism:effort-picker-quick-open";
+const TURBO_TOGGLE_QUICK_EVENT = "prism:turbo-toggle-quick";
+const SPEECH_TYPE_QUICK_OPEN_EVENT = "prism:speech-type-picker-quick-open";
 
 function findVisiblePrismShortcutTrigger(
   selector: string,
@@ -24321,12 +23477,16 @@ function ComposerModelPicker({
   statusMessage,
   dismissPopoversSignal,
 }: ComposerModelPickerProps): React.JSX.Element {
+  const pickerId = useId();
   const [pickerOpenState, setPickerOpenState] =
     useState<ComposerModelPickerOpenState>(CLOSED_COMPOSER_MODEL_PICKER_STATE);
   const open = pickerOpenState.surface === "model";
   const effortOpen = pickerOpenState.surface === "effort";
   const [highlightedModelValue, setHighlightedModelValue] = useState<
     string | null
+  >(null);
+  const [highlightedEffortValue, setHighlightedEffortValue] = useState<
+    ReasoningEffort | null
   >(null);
   const triggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
@@ -24345,8 +23505,21 @@ function ComposerModelPicker({
     ? autoOptionValue
     : value;
   const autoSelected = normalizedValue === autoOptionValue;
+  const interactionDisabled = disabled || loading;
+  const autoTurboButtonInteractive =
+    autoSelected &&
+    !interactionDisabled &&
+    Boolean(effortControl) &&
+    effortControl?.disabled !== true;
+  const autoOnlineTurboToggleAvailable =
+    autoTurboButtonInteractive && provider === "online";
+  const autoLocalTurboPreviewAvailable =
+    autoTurboButtonInteractive && provider === "local";
+  const autoTurboActionAvailable =
+    autoOnlineTurboToggleAvailable || autoLocalTurboPreviewAvailable;
   const turboVisuallyActive =
-    !autoSelected && effortControl?.turboEnabled === true;
+    effortControl?.turboEnabled === true &&
+    (!autoSelected || autoOnlineTurboToggleAvailable);
   const mixedSelected =
     mixedOptionValue !== undefined && normalizedValue === mixedOptionValue;
   const selectedModel =
@@ -24365,7 +23538,6 @@ function ComposerModelPicker({
         : (selectedModel?.label ?? normalizedValue);
   const visualProvider =
     selectedProvider ?? selectedModel?.provider ?? provider;
-  const interactionDisabled = disabled || loading;
   const menuOpen = open && !interactionDisabled;
   const menuPortalStyle = useComposeMenuPortalStyle(
     menuOpen,
@@ -24381,6 +23553,8 @@ function ComposerModelPicker({
     effortControl.disabled === true ||
     (effortControl.capability.mode === "unavailable" &&
       !effortControl.turboSupported);
+  const effortTriggerDisabled =
+    effortInteractionDisabled && !autoTurboActionAvailable;
   const effortDisabledReason = effortInteractionDisabled
     ? autoSelected
       ? "Effort is chosen automatically for each request."
@@ -24388,6 +23562,11 @@ function ComposerModelPicker({
       effortControl?.capability.disabledReason ??
       (loading ? "Models are still loading." : "Effort is unavailable."))
     : undefined;
+  const effortTriggerTooltip = autoOnlineTurboToggleAvailable
+    ? `Turbo ${effortControl?.turboEnabled ? "on" : "off"}. Click the triangle to turn it ${effortControl?.turboEnabled ? "off" : "on"}.`
+    : autoLocalTurboPreviewAvailable
+      ? "Turbo needs ONLINE. Click the triangle for a failed ignition."
+      : effortDisabledReason;
   const effortMenuOpen = effortOpen && !effortInteractionDisabled;
   const effortMenuPortalStyle = useComposeMenuPortalStyle(
     effortMenuOpen,
@@ -24438,6 +23617,26 @@ function ComposerModelPicker({
   const effortSliderProgress = effortControl
     ? modelEffortSliderProgress(effortLevels, effortControl.value)
     : 0;
+  const activeHighlightedEffortValue = effortLevels.includes(
+    highlightedEffortValue ?? "auto",
+  )
+    ? highlightedEffortValue
+    : (effortLevels.includes(effortControl?.value ?? "auto")
+      ? effortControl?.value
+      : (effortLevels[0] ?? null));
+  const displayedEffortValue =
+    pickerOpenState.interactionMode === "keyboard" && effortMenuOpen
+      ? activeHighlightedEffortValue ?? effortControl?.value
+      : effortControl?.value;
+  const displayedEffortLabel = displayedEffortValue
+    ? REASONING_EFFORT_LABELS[displayedEffortValue]
+    : effortLabel;
+  const displayedEffortSliderIndex = displayedEffortValue
+    ? modelEffortSliderIndex(effortLevels, displayedEffortValue)
+    : effortSliderIndex;
+  const displayedEffortSliderProgress = displayedEffortValue
+    ? modelEffortSliderProgress(effortLevels, displayedEffortValue)
+    : effortSliderProgress;
   const selectableModelValues = useMemo(
     () => [
       ...(showAutoOption ? [autoOptionValue] : []),
@@ -24518,9 +23717,48 @@ function ComposerModelPicker({
   }, []);
 
   useEffect(() => {
+    const closeForOtherPicker = (event: Event): void => {
+      const source = (event as CustomEvent<{ source?: string }>).detail?.source;
+      if (source === pickerId) return;
+      setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
+    };
+    window.addEventListener(PRISM_NAVBAR_PICKER_OPEN_EVENT, closeForOtherPicker);
+    return () =>
+      window.removeEventListener(
+        PRISM_NAVBAR_PICKER_OPEN_EVENT,
+        closeForOtherPicker,
+      );
+  }, [pickerId]);
+
+  const pick = useCallback(
+    (nextValue: string): void => {
+      if (isDisabledModelChoice(nextValue)) return;
+      if (formValueRef.current) {
+        formValueRef.current.value = nextValue;
+      }
+      onChange(nextValue);
+      setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
+      triggerRef.current?.focus();
+    },
+    [onChange],
+  );
+
+  const commitHotkeyModelSelection = useCallback((): void => {
+    pick(activeHighlightedModelValue ?? normalizedValue);
+  }, [activeHighlightedModelValue, normalizedValue, pick]);
+
+  const commitHotkeyEffortSelection = useCallback((): void => {
+    if (activeHighlightedEffortValue) {
+      setEffortValue(activeHighlightedEffortValue);
+    }
+    dismissPickersToComposer();
+  }, [activeHighlightedEffortValue, dismissPickersToComposer, setEffortValue]);
+
+  useEffect(() => {
     const trigger = triggerRef.current;
     if (!trigger) return;
     const openQuickPicker = (): void => {
+      announcePrismNavbarPickerOpen(pickerId);
       setHighlightedModelValue(
         selectableModelValues.includes(normalizedValue)
           ? normalizedValue
@@ -24538,14 +23776,16 @@ function ComposerModelPicker({
         MODEL_PICKER_QUICK_OPEN_EVENT,
         openQuickPicker,
       );
-  }, [normalizedValue, selectableModelValues]);
+  }, [normalizedValue, pickerId, selectableModelValues]);
 
   useEffect(() => {
     const trigger = effortTriggerRef.current;
     if (!trigger || !effortControl) return;
     const openQuickEffort = (): void => {
       if (effortInteractionDisabled) return;
+      announcePrismNavbarPickerOpen(pickerId);
       effortControl.onActivate?.();
+      setHighlightedEffortValue(effortControl.value);
       setPickerOpenState({
         surface: "effort",
         interactionMode: "keyboard",
@@ -24558,27 +23798,7 @@ function ComposerModelPicker({
         EFFORT_PICKER_QUICK_OPEN_EVENT,
         openQuickEffort,
       );
-  }, [effortControl, effortInteractionDisabled]);
-
-  useEffect(() => {
-    if (
-      pickerOpenState.interactionMode !== "keyboard" ||
-      (!menuOpen && !effortMenuOpen)
-    ) {
-      return;
-    }
-    const returnToPointerBrowsing = (): void => {
-      setPickerOpenState((current) =>
-        current.surface ? { ...current, interactionMode: "pointer" } : current,
-      );
-    };
-    window.addEventListener("mousemove", returnToPointerBrowsing, {
-      capture: true,
-      once: true,
-    });
-    return () =>
-      window.removeEventListener("mousemove", returnToPointerBrowsing, true);
-  }, [effortMenuOpen, menuOpen, pickerOpenState.interactionMode]);
+  }, [effortControl, effortInteractionDisabled, pickerId]);
 
   useEffect(() => {
     if (!menuOpen && !effortMenuOpen) {
@@ -24606,20 +23826,28 @@ function ComposerModelPicker({
         ) {
           return;
         }
+        const currentValue =
+          pickerOpenState.interactionMode === "keyboard"
+            ? activeHighlightedModelValue
+            : normalizedValue;
         const nextValue = modelPickerStepValue(
           selectableModelValues,
-          normalizedValue,
+          currentValue,
           direction,
         );
-        if (!nextValue || nextValue === normalizedValue) return;
+        if (!nextValue || nextValue === currentValue) return;
         modelWheelLockedRef.current = true;
         window.setTimeout(() => {
           modelWheelLockedRef.current = false;
         }, 90);
-        if (formValueRef.current) {
-          formValueRef.current.value = nextValue;
+        if (pickerOpenState.interactionMode === "keyboard") {
+          setHighlightedModelValue(nextValue);
+        } else {
+          if (formValueRef.current) {
+            formValueRef.current.value = nextValue;
+          }
+          onChange(nextValue);
         }
-        onChange(nextValue);
         return;
       }
 
@@ -24636,17 +23864,25 @@ function ComposerModelPicker({
       ) {
         return;
       }
+      const currentValue =
+        pickerOpenState.interactionMode === "keyboard"
+          ? activeHighlightedEffortValue ?? effortControl.value
+          : effortControl.value;
       const nextValue = modelEffortStep(
         effortLevels,
-        effortControl.value,
+        currentValue,
         direction,
       );
-      if (nextValue === effortControl.value) return;
+      if (nextValue === currentValue) return;
       effortWheelLockedRef.current = true;
       window.setTimeout(() => {
         effortWheelLockedRef.current = false;
       }, 90);
-      setEffortValue(nextValue);
+      if (pickerOpenState.interactionMode === "keyboard") {
+        setHighlightedEffortValue(nextValue);
+      } else {
+        setEffortValue(nextValue);
+      }
     };
     const handleQuickArrows = (event: KeyboardEvent): void => {
       if (pickerOpenState.interactionMode !== "keyboard") return;
@@ -24698,6 +23934,8 @@ function ComposerModelPicker({
     moveModelHighlight,
     navbarPicker,
     normalizedValue,
+    activeHighlightedEffortValue,
+    activeHighlightedModelValue,
     pickerOpenState.interactionMode,
     pickerOpenState.surface,
     onChange,
@@ -24713,6 +23951,13 @@ function ComposerModelPicker({
         : (selectableModelValues[0] ?? null),
     );
   }, [menuOpen, normalizedValue, selectableModelValues]);
+
+  useEffect(() => {
+    if (!effortMenuOpen || pickerOpenState.interactionMode === "keyboard") {
+      return;
+    }
+    setHighlightedEffortValue(effortControl?.value ?? null);
+  }, [effortControl?.value, effortMenuOpen, pickerOpenState.interactionMode]);
 
   useEffect(() => {
     if (
@@ -24755,18 +24000,33 @@ function ComposerModelPicker({
       ) {
         return;
       }
+      if (pickerOpenState.interactionMode === "keyboard") {
+        if (menuOpen) commitHotkeyModelSelection();
+        else commitHotkeyEffortSelection();
+        return;
+      }
       setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
     };
     // Match PrismMenu / applet+voice: window capture so stopPropagation on
     // lower nodes cannot leave model/effort menus open after an outside click.
     window.addEventListener("pointerdown", handler, true);
     return () => window.removeEventListener("pointerdown", handler, true);
-  }, [effortMenuOpen, menuOpen]);
+  }, [
+    commitHotkeyEffortSelection,
+    commitHotkeyModelSelection,
+    effortMenuOpen,
+    menuOpen,
+    pickerOpenState.interactionMode,
+  ]);
 
   useEffect(() => {
     if (!menuOpen) return;
     const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (
+        event.key === "Escape" ||
+        event.key === "Backspace" ||
+        event.key === "Delete"
+      ) {
         event.preventDefault();
         event.stopPropagation();
         dismissPickersToComposer();
@@ -24779,7 +24039,11 @@ function ComposerModelPicker({
   useEffect(() => {
     if (!effortMenuOpen) return;
     const handler = (event: KeyboardEvent) => {
-      if (event.key === "Escape") {
+      if (
+        event.key === "Escape" ||
+        event.key === "Backspace" ||
+        event.key === "Delete"
+      ) {
         event.preventDefault();
         event.stopPropagation();
         dismissPickersToComposer();
@@ -24815,16 +24079,6 @@ function ComposerModelPicker({
   useEffect(() => {
     effortControl?.onActivate?.();
   }, [effortControl?.targetKey, effortControl?.capability.mode]);
-
-  const pick = (nextValue: string): void => {
-    if (isDisabledModelChoice(nextValue)) return;
-    if (formValueRef.current) {
-      formValueRef.current.value = nextValue;
-    }
-    onChange(nextValue);
-    setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
-    triggerRef.current?.focus();
-  };
 
   const handleModelWheel = (event: React.WheelEvent<HTMLElement>): void => {
     if (
@@ -24864,7 +24118,11 @@ function ComposerModelPicker({
     if (event.code === "Space") {
       event.preventDefault();
       event.stopPropagation();
-      dismissPickersToComposer();
+      if (pickerOpenState.interactionMode === "keyboard") {
+        commitHotkeyModelSelection();
+      } else {
+        dismissPickersToComposer();
+      }
       return;
     }
     if (
@@ -24873,7 +24131,7 @@ function ComposerModelPicker({
     ) {
       event.preventDefault();
       event.stopPropagation();
-      pick(activeHighlightedModelValue ?? normalizedValue);
+      commitHotkeyModelSelection();
       return;
     }
   };
@@ -24884,8 +24142,21 @@ function ComposerModelPicker({
     if (effortMenuOpen && event.code === "Space") {
       event.preventDefault();
       event.stopPropagation();
-      dismissPickersToComposer();
+      if (pickerOpenState.interactionMode === "keyboard") {
+        commitHotkeyEffortSelection();
+      } else {
+        dismissPickersToComposer();
+      }
       return;
+    }
+    if (
+      effortMenuOpen &&
+      event.key === "Enter" &&
+      pickerOpenState.interactionMode === "keyboard"
+    ) {
+      event.preventDefault();
+      event.stopPropagation();
+      commitHotkeyEffortSelection();
     }
   };
 
@@ -24925,6 +24196,9 @@ function ComposerModelPicker({
         data-prism-model-picker-trigger="true"
         onClick={(event) => {
           event.currentTarget.focus();
+          if (pickerOpenState.surface !== "model") {
+            announcePrismNavbarPickerOpen(pickerId);
+          }
           setPickerOpenState((current) =>
             current.surface === "model"
               ? CLOSED_COMPOSER_MODEL_PICKER_STATE
@@ -24964,16 +24238,18 @@ function ComposerModelPicker({
           className={styles.composeModelEffortTriggerWrap}
           data-turbo={turboVisuallyActive ? "true" : undefined}
           data-turbo-capable={
-            effortControl.turboSupported ? "true" : undefined
+            effortControl.turboSupported || autoOnlineTurboToggleAvailable
+              ? "true"
+              : undefined
           }
-          data-glyph-tooltip={effortDisabledReason}
-          tabIndex={effortInteractionDisabled ? 0 : undefined}
+          data-glyph-tooltip={effortTriggerTooltip}
+          tabIndex={effortTriggerDisabled ? 0 : undefined}
           aria-label={
-            effortDisabledReason
+            effortTriggerDisabled && effortDisabledReason
               ? `Effort unavailable. ${effortDisabledReason}`
               : undefined
           }
-          aria-disabled={effortInteractionDisabled ? "true" : undefined}
+          aria-disabled={effortTriggerDisabled ? "true" : undefined}
         >
           {turboVisuallyActive ? (
             <span
@@ -25005,9 +24281,37 @@ function ComposerModelPicker({
             data-effort-level={effortControl.value}
             data-generating={generating ? "true" : undefined}
             data-turbo={turboVisuallyActive ? "true" : undefined}
+            data-auto-turbo-toggle={
+              autoOnlineTurboToggleAvailable ? "true" : undefined
+            }
+            data-auto-turbo-preview={
+              autoLocalTurboPreviewAvailable ? "true" : undefined
+            }
+            data-auto-turbo-action={
+              autoTurboActionAvailable ? "true" : undefined
+            }
             onClick={(event) => {
               event.currentTarget.focus();
               effortControl.onActivate?.();
+              if (autoLocalTurboPreviewAvailable) {
+                setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
+                void playSpatialUiSfx("turbo-on", {
+                  anchor: event.currentTarget,
+                });
+                turboSmokeBurstSequenceRef.current += 1;
+                setTurboSmokeBurstId(turboSmokeBurstSequenceRef.current);
+                return;
+              }
+              if (autoOnlineTurboToggleAvailable) {
+                setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
+                event.currentTarget.dispatchEvent(
+                  new Event(TURBO_TOGGLE_QUICK_EVENT, { bubbles: true }),
+                );
+                return;
+              }
+              if (pickerOpenState.surface !== "effort") {
+                announcePrismNavbarPickerOpen(pickerId);
+              }
               setPickerOpenState((current) =>
                 current.surface === "effort"
                   ? CLOSED_COMPOSER_MODEL_PICKER_STATE
@@ -25016,15 +24320,26 @@ function ComposerModelPicker({
             }}
             onKeyDown={handleEffortKeyDown}
             onWheel={handleEffortWheel}
-            disabled={effortInteractionDisabled}
-            aria-haspopup="dialog"
-            aria-expanded={effortMenuOpen}
+            disabled={effortTriggerDisabled}
+            aria-haspopup={autoTurboActionAvailable ? undefined : "dialog"}
+            aria-expanded={
+              autoTurboActionAvailable ? undefined : effortMenuOpen
+            }
+            aria-pressed={
+              autoOnlineTurboToggleAvailable
+                ? effortControl.turboEnabled
+                : undefined
+            }
             aria-label={
-              autoSelected
-                ? "Effort chosen automatically"
-                : `Effort: ${effortLabel}${
-                    turboVisuallyActive ? ". Turbo on" : ""
-                  }`
+              autoOnlineTurboToggleAvailable
+                ? `Auto effort. Turbo ${effortControl.turboEnabled ? "on" : "off"}. Click to turn Turbo ${effortControl.turboEnabled ? "off" : "on"}.`
+                : autoLocalTurboPreviewAvailable
+                  ? "Auto effort. Turbo requires ONLINE. Click for a failed ignition."
+                  : autoSelected
+                    ? "Effort chosen automatically"
+                    : `Effort: ${effortLabel}${
+                        turboVisuallyActive ? ". Turbo on" : ""
+                      }`
             }
             aria-busy={generating ? "true" : undefined}
           >
@@ -25259,8 +24574,8 @@ function ComposerModelPicker({
                 </small>
               </div>
               <strong>
-                <ModelEffortIcon level={effortControl.value} />
-                {effortLabel}
+                <ModelEffortIcon level={displayedEffortValue ?? effortControl.value} />
+                {displayedEffortLabel}
               </strong>
             </div>
             {effortLevels.length > 0 ? (
@@ -25268,7 +24583,7 @@ function ComposerModelPicker({
                 className={styles.composeModelEffortVerticalLayout}
                 style={
                   {
-                    "--model-effort-progress": `${effortSliderProgress}%`,
+                    "--model-effort-progress": `${displayedEffortSliderProgress}%`,
                     "--model-effort-stop-count": effortLevels.length,
                   } as CSSProperties
                 }
@@ -25277,7 +24592,7 @@ function ComposerModelPicker({
                   <div className={styles.composeModelEffortSliderRail}>
                     <span
                       className={styles.composeModelEffortSliderFill}
-                      data-effort-level={effortControl.value}
+                      data-effort-level={displayedEffortValue ?? effortControl.value}
                       aria-hidden="true"
                     />
                     {effortLevels.map((level, index) => (
@@ -25285,7 +24600,7 @@ function ComposerModelPicker({
                         key={level}
                         className={styles.composeModelEffortSliderTick}
                         data-active={
-                          index <= effortSliderIndex ? "true" : undefined
+                          index <= displayedEffortSliderIndex ? "true" : undefined
                         }
                         style={
                           {
@@ -25300,7 +24615,7 @@ function ComposerModelPicker({
                       />
                     ))}
                     <ModelEffortIcon
-                      level={effortControl.value}
+                      level={displayedEffortValue ?? effortControl.value}
                       className={styles.composeModelEffortSliderThumb}
                     />
                   </div>
@@ -25309,9 +24624,9 @@ function ComposerModelPicker({
                     min={0}
                     max={Math.max(0, effortLevels.length - 1)}
                     step={1}
-                    value={effortSliderIndex}
+                    value={displayedEffortSliderIndex}
                     aria-label="Model effort"
-                    aria-valuetext={effortLabel}
+                    aria-valuetext={displayedEffortLabel}
                     onPointerDown={() => effortControl.onActivate?.()}
                     onChange={(event) => {
                       const nextValue =
@@ -25327,9 +24642,9 @@ function ComposerModelPicker({
                       type="button"
                       className={styles.composeModelEffortOption}
                       data-active={
-                        effortControl.value === level ? "true" : undefined
+                        displayedEffortValue === level ? "true" : undefined
                       }
-                      aria-pressed={effortControl.value === level}
+                      aria-pressed={displayedEffortValue === level}
                       onClick={() => {
                         setEffortValue(level);
                       }}
@@ -31904,7 +31219,9 @@ function ZenLiveBotMannequin({
         </span>
         <span
           className={`${styles.zenLiveBotPresenceFaceEmissionMask} ${styles.debateOptimizedEmissionMask}`}
-          data-avatar-canonical-screen-size={AVATAR_DETAILS_CANVAS_SIZE}
+          data-avatar-canonical-screen-size={
+            PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX
+          }
           data-crt-profile="clean"
           data-crt-phosphor="bot"
           data-talking={isTalking ? "true" : undefined}
@@ -31929,6 +31246,7 @@ function ZenLiveBotMannequin({
                   details={avatarDetails}
                   color={avatarDetailsColor}
                   detailLevel={avatarDetailsDetailLevel}
+                  rasterSize={PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX}
                   faceGeometry={faceStyle}
                   blinkPhase={avatarDetailsBlinkPhase}
                   talking={inkTalking ?? isTalking}
@@ -31998,6 +31316,7 @@ function ZenLiveBotMannequin({
                   details={avatarDetails}
                   color={avatarDetailsColor}
                   detailLevel={avatarDetailsDetailLevel}
+                  rasterSize={PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX}
                   faceGeometry={faceStyle}
                   blinkPhase={avatarDetailsBlinkPhase}
                   talking={inkTalking ?? isTalking}
@@ -32064,7 +31383,9 @@ function ZenLiveBotMannequin({
       </span>
       <span
         className={styles.zenLiveBotPresenceFaceEmissionMask}
-        data-avatar-canonical-screen-size={AVATAR_DETAILS_CANVAS_SIZE}
+        data-avatar-canonical-screen-size={
+          PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX
+        }
         data-screen-mode={screenMode}
         data-crt-profile="clean"
         data-crt-phosphor="bot"
@@ -32114,6 +31435,7 @@ function ZenLiveBotMannequin({
                     details={avatarDetails}
                     color={avatarDetailsColor}
                     detailLevel={avatarDetailsDetailLevel}
+                    rasterSize={PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX}
                     faceGeometry={faceStyle}
                     blinkPhase={avatarDetailsBlinkPhase}
                     talking={inkTalking ?? isTalking}
@@ -32185,6 +31507,7 @@ function ZenLiveBotMannequin({
                     details={avatarDetails}
                     color={avatarDetailsColor}
                     detailLevel={avatarDetailsDetailLevel}
+                    rasterSize={PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX}
                     faceGeometry={faceStyle}
                     blinkPhase={avatarDetailsBlinkPhase}
                     talking={inkTalking ?? isTalking}
@@ -32281,7 +31604,11 @@ function ZenLiveBotPresencePlate({
     ? resolveCustomBotGlyph(bot.glyph)
     : defaultPrismGlyph;
   const bodySize = normalizeZenLiveBotAvatarSizePx(avatarSizePx);
-  const bodyScale = bodySize / ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX;
+  const avatarRenderMode = zenLiveBotAvatarRenderMode(bodySize);
+  const bodyScale =
+    avatarRenderMode === "full"
+      ? bodySize / ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX
+      : 1;
   const bodyPlacement = ZEN_LIVE_BOT_LOCKED_BODY_PLACEMENT;
   const facePlacement = ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT;
   const avatarRef = useRef<HTMLDivElement | null>(null);
@@ -32577,7 +31904,7 @@ function ZenLiveBotPresencePlate({
       document
         .querySelectorAll<HTMLElement>(
           [
-            `[${DEV_PANEL_SAFE_AREA_ATTRIBUTE}]`,
+            `[${VIEWPORT_SAFE_AREA_ATTRIBUTE}]`,
             `[${ZEN_LIVE_BOT_COMPOSER_BOUNDARY_ATTRIBUTE}]`,
             "[data-zen-live-bot-chrome-avoid='true']",
           ].join(", "),
@@ -32599,7 +31926,7 @@ function ZenLiveBotPresencePlate({
       attributeFilter: [
         "class",
         "style",
-        DEV_PANEL_SAFE_AREA_ATTRIBUTE,
+        VIEWPORT_SAFE_AREA_ATTRIBUTE,
         ZEN_LIVE_BOT_COMPOSER_BOUNDARY_ATTRIBUTE,
         "data-zen-live-bot-chrome-avoid",
         "data-chat-sidebar-hidden",
@@ -33116,14 +32443,16 @@ function ZenLiveBotPresencePlate({
     "--zen-live-bot-copy-offset-x": `${avatarCopyOffsetX}px`,
     "--coffee-plate-emoji-face-scale-y": faceScaleY,
     "--avatar-details-facing-scale-x": botAvatarDetailsFacingScaleX(faceScaleY),
-    "--avatar-details-facing-offset-y":
-      botAvatarDetailsFacingOffsetY(faceScaleY),
     "--zen-live-bot-face-x": `${facePlacement.xPct}%`,
     "--zen-live-bot-face-y": `${facePlacement.yPct}%`,
     "--zen-live-bot-face-scale": facePlacement.scale,
     "--zen-live-bot-body-x": `${bodyPlacement.xPct}%`,
     "--zen-live-bot-body-y": `${bodyPlacement.yPct}%`,
     "--zen-live-bot-avatar-size": `${bodySize}px`,
+    "--zen-live-bot-mini-size": `${Math.min(
+      bodySize,
+      ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX,
+    )}px`,
     "--zen-live-bot-avatar-render-size": `${ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX}px`,
     "--zen-live-bot-user-scale": bodyScale.toFixed(4),
     "--zen-live-bot-copy-center-anchor": `${Math.round(bodySize * 0.5)}px`,
@@ -33233,6 +32562,7 @@ function ZenLiveBotPresencePlate({
       data-dragging={avatarDragging ? "true" : undefined}
       data-body-sized="true"
       data-user-avatar-scale="true"
+      data-avatar-render-mode={avatarRenderMode}
       data-zen-live-bot-presence-plate="true"
       data-relationship-depth-anchor="home"
       data-relationship-depth-identity={relationshipDepthIdentity(
@@ -33264,48 +32594,72 @@ function ZenLiveBotPresencePlate({
           !avatarDragging
         }
       >
-        <ZenLiveBotMannequin
-          glyph={liveBotGlyphName}
-          faceStyle={faceStyle}
-          faceScaleY={faceScaleY}
-          voicePreset={voicePreset}
-          isTalking={visualEmissionActive}
-          voiceLightTarget={voiceLightTarget}
-          avatarSfx={
-            muteLiveAvatarSfx ? null : botAvatarSfxForBot(bot)
-          }
-          avatarSfxState={
-            utteranceActive
-              ? "talking"
-              : showThinkingSpinner || transitioning
-                ? "thinking"
-                : "idle"
-          }
-          blinkWhileTalking
-          mouthShape={faceMouthShape}
-          moodHint={moodHint}
-          scheduleKey={`zen-live-${bot?.id ?? "prism"}-${moodHint}`}
-          thinkingScheduleKey={`zen-thinking-${bot?.id ?? "prism"}-${moodHint}-${presencePhase}`}
-          showThinkingSpinner={faceSpinnerVisible}
-          showQuestionMark={askQuestionActive}
-          screenMaterialSeed={screenMaterialSeed}
-          frameMaterialSeed={frameMaterialSeed}
-          avatarDetails={bot ? resolveBotAvatarDetails(bot) : null}
-          frameIdentityColor={
-            bot
-              ? privateModeActive
-                ? "#e8eee8"
-                : botOrPrismAccentForTheme(bot.color, resolvedTheme)
-              : null
-          }
-          metalAlloyEnabled={!defaultPrismPresence}
-          privateMode={privateModeActive}
-          avatarDetailsColor={
-            bot
-              ? botOrPrismAccentForTheme(bot.color, resolvedTheme)
-              : null
-          }
-        />
+        {avatarRenderMode === "mini" ? (
+          <span
+            className={styles.zenLiveBotPresenceMiniMount}
+            data-zen-live-bot-body-layer="true"
+            data-zen-live-bot-body-hit-target="true"
+          >
+            <EmptyStateHeroMiniBot
+              bot={bot}
+              resolvedTheme={resolvedTheme}
+              privateMode={privateModeActive}
+              isTalking={visualEmissionActive}
+              size="room"
+              lightMode="breathing"
+              mouthShape={faceMouthShape}
+              showThinkingSpinner={faceSpinnerVisible}
+              showQuestionMark={askQuestionActive}
+              defaultPrismGlyph={defaultPrismGlyph}
+              defaultPrismFaceStyle={defaultPrismFaceStyle}
+              scheduleKey={`zen-live-mini-${bot?.id ?? "prism"}-${moodHint}-${presencePhase}`}
+              className={styles.zenLiveBotPresenceMiniAvatar}
+            />
+          </span>
+        ) : (
+          <ZenLiveBotMannequin
+            glyph={liveBotGlyphName}
+            faceStyle={faceStyle}
+            faceScaleY={faceScaleY}
+            voicePreset={voicePreset}
+            isTalking={visualEmissionActive}
+            voiceLightTarget={voiceLightTarget}
+            avatarSfx={
+              muteLiveAvatarSfx ? null : botAvatarSfxForBot(bot)
+            }
+            avatarSfxState={
+              utteranceActive
+                ? "talking"
+                : showThinkingSpinner || transitioning
+                  ? "thinking"
+                  : "idle"
+            }
+            blinkWhileTalking
+            mouthShape={faceMouthShape}
+            moodHint={moodHint}
+            scheduleKey={`zen-live-${bot?.id ?? "prism"}-${moodHint}`}
+            thinkingScheduleKey={`zen-thinking-${bot?.id ?? "prism"}-${moodHint}-${presencePhase}`}
+            showThinkingSpinner={faceSpinnerVisible}
+            showQuestionMark={askQuestionActive}
+            screenMaterialSeed={screenMaterialSeed}
+            frameMaterialSeed={frameMaterialSeed}
+            avatarDetails={bot ? resolveBotAvatarDetails(bot) : null}
+            frameIdentityColor={
+              bot
+                ? privateModeActive
+                  ? "#e8eee8"
+                  : botOrPrismAccentForTheme(bot.color, resolvedTheme)
+                : null
+            }
+            metalAlloyEnabled={!defaultPrismPresence}
+            privateMode={privateModeActive}
+            avatarDetailsColor={
+              bot
+                ? botOrPrismAccentForTheme(bot.color, resolvedTheme)
+                : null
+            }
+          />
+        )}
       </BotAmbientPresenceRig>
       {actionText ? (
         <span
@@ -38660,8 +38014,8 @@ type BotAvatarAdjustmentTarget =
   | "mouth"
   | "stamp"
   | "pronunciation"
-  | "feel"
-  | "voice";
+  | "local"
+  | "premium";
 
 function botAvatarAdjustmentTargetForControl(
   control: BotAvatarCustomizerTab,
@@ -39283,7 +38637,6 @@ function botAvatarFoundryPreviewStyle(
       voicePreset,
     }),
     "--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
-    "--avatar-details-scale-x": "1",
     "--avatar-details-facing-scale-x": "1",
     "--zen-live-bot-face-x": `${facePlacement.xPct}%`,
     "--zen-live-bot-face-y": `${facePlacement.yPct}%`,
@@ -39427,7 +38780,14 @@ function BotAvatarPreviewPanel({
     ["--coffee-plate-emoji-face-scale-y" as string]:
       BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
   } as CSSProperties;
-  const miniSeatPlateGlyph = coffeeSeatPlateGlyph("warm", "closed");
+  const miniSeatPlateGlyph = coffeeSeatPlateGlyph(
+    "warm",
+    miniAvatarBinaryMouthShape({
+      talking: previewTalking,
+      mouthShape: displayedPreviewMouthShape,
+      mouthCharacter: previewFaceStyle.mouthCharacter,
+    }),
+  );
   const renderMiniAvatarDetailsInk = (
     depth: "behind-face" | "above-face",
   ): React.JSX.Element | null =>
@@ -39878,8 +39238,13 @@ function BotAvatarPreviewPanel({
                   >
                     <CoffeeSeatPlateEmoji
                       enabled
+                      pixelated
                       isTalking={previewTalking}
-                      mouthShape={displayedPreviewMouthShape}
+                      mouthShape={miniAvatarBinaryMouthShape({
+                        talking: previewTalking,
+                        mouthShape: displayedPreviewMouthShape,
+                        mouthCharacter: previewFaceStyle.mouthCharacter,
+                      })}
                       scheduleKey={`${scheduleKey}-studio-mini-${previewMode}`}
                       baseText={
                         previewSipMouthTreatmentActive
@@ -39896,7 +39261,7 @@ function BotAvatarPreviewPanel({
                       showThinkingSpinner={previewThinkingSpinnerActive}
                       faceEyesFont={previewFaceStyle.eyesFont}
                       faceEyeCharacter={previewFaceStyle.eyeCharacter}
-                      faceEyeMovement={previewFaceStyle.eyeAnimation}
+                      faceEyeMovement="still"
                       faceMouthFont={previewFaceStyle.mouthFont}
                       faceMouthCharacter={previewFaceStyle.mouthCharacter}
                       faceMouthAnimation={previewFaceStyle.mouthAnimation}
@@ -39928,7 +39293,7 @@ function BotAvatarPreviewPanel({
               glyph={
                 <BotGlyph
                   name={glyph}
-                  size={14}
+                  size={12}
                   className={styles.emptyStateHeroMiniGlyph}
                 />
               }
@@ -40461,9 +39826,13 @@ function formatVoiceCharacterDb(value: number): string {
   return `${value > 0 ? "+" : ""}${value.toFixed(1)} dB`;
 }
 
+type BotVoiceFeelLaneControl = "local" | "premium";
+
 function BotVoicePerformanceControls({
   profile,
   onChange,
+  lane = "local",
+  showEffect = true,
   effectSelectId = "bot-voice-effect",
 }: {
   profile: BotAudioVoiceProfileV1;
@@ -40471,6 +39840,8 @@ function BotVoicePerformanceControls({
     profile: BotAudioVoiceProfileV1,
     options?: BotVoiceProfileChangeOptions,
   ) => void;
+  lane?: BotVoiceFeelLaneControl;
+  showEffect?: boolean;
   effectSelectId?: string;
 }): React.JSX.Element {
   const normalizedProfile = normalizeBotAudioVoiceProfileV1(profile);
@@ -40486,8 +39857,24 @@ function BotVoicePerformanceControls({
     const offset = 1 + Math.floor(Math.random() * (steps - 1));
     return Number((-1 + ((currentIndex + offset) % steps) * 0.05).toFixed(2));
   };
+  const controlKeys =
+    lane === "premium"
+      ? ([
+          ["premiumPitch", "Pitch"],
+          ["premiumPace", "Pace"],
+          ["premiumLilt", "Lilt"],
+        ] as const)
+      : ([
+          ["pitch", "Pitch"],
+          ["pace", "Pace"],
+          ["lilt", "Lilt"],
+        ] as const);
+  const readControl = (key: (typeof controlKeys)[number][0]): number => {
+    const value = normalizedProfile[key];
+    return typeof value === "number" ? value : 0;
+  };
   const updateControl = (
-    key: "pitch" | "pace" | "lilt",
+    key: (typeof controlKeys)[number][0],
     value: number,
     options?: BotVoiceProfileChangeOptions,
   ): void => {
@@ -40500,116 +39887,124 @@ function BotVoicePerformanceControls({
     );
   };
   return (
-    <div className={styles.botVoiceFeelPerformance} data-bot-voice-performance="true">
-      <div className={styles.botVoiceIdentityField}>
-        <label htmlFor={effectSelectId}>
-          Voice effect
-          <BotFieldRandomizerButton
-            label="voice effect"
-            onRandomize={() =>
+    <div
+      className={styles.botVoiceFeelPerformance}
+      data-bot-voice-performance="true"
+      data-bot-voice-feel-lane={lane}
+    >
+      {showEffect ? (
+        <div className={styles.botVoiceIdentityField}>
+          <label htmlFor={effectSelectId}>
+            Voice effect
+            <BotFieldRandomizerButton
+              label="voice effect"
+              onRandomize={() =>
+                onChange(
+                  {
+                    ...normalizedProfile,
+                    elevenLabsEffect: differentChoice(
+                      normalizeVoiceEffect(normalizedProfile.elevenLabsEffect),
+                      VOICE_EFFECTS,
+                    ),
+                    voiceEffectExplicit: true,
+                  },
+                  { saveImmediately: true },
+                )
+              }
+            />
+          </label>
+          <select
+            id={effectSelectId}
+            aria-label="Voice effect"
+            value={normalizeVoiceEffect(normalizedProfile.elevenLabsEffect)}
+            onChange={(event) =>
               onChange(
                 {
                   ...normalizedProfile,
-                  elevenLabsEffect: differentChoice(
-                    normalizeVoiceEffect(normalizedProfile.elevenLabsEffect),
-                    VOICE_EFFECTS,
+                  elevenLabsEffect: normalizeVoiceEffect(
+                    event.currentTarget.value,
                   ),
                   voiceEffectExplicit: true,
                 },
                 { saveImmediately: true },
               )
             }
-          />
-        </label>
-        <select
-          id={effectSelectId}
-          aria-label="Voice effect"
-          value={normalizeVoiceEffect(normalizedProfile.elevenLabsEffect)}
-          onChange={(event) =>
-            onChange(
-              {
-                ...normalizedProfile,
-                elevenLabsEffect: normalizeVoiceEffect(
-                  event.currentTarget.value,
-                ),
-                voiceEffectExplicit: true,
-              },
-              { saveImmediately: true },
-            )
-          }
-        >
-          {VOICE_EFFECTS.map((effect) => (
-            <option key={effect} value={effect}>
-              {VOICE_EFFECT_LABELS[effect]}
-            </option>
-          ))}
-        </select>
-        <small>
-          {
-            VOICE_EFFECT_DESCRIPTIONS[
-              normalizeVoiceEffect(normalizedProfile.elevenLabsEffect)
-            ]
-          }
-        </small>
-      </div>
+          >
+            {VOICE_EFFECTS.map((effect) => (
+              <option key={effect} value={effect}>
+                {VOICE_EFFECT_LABELS[effect]}
+              </option>
+            ))}
+          </select>
+          <small>
+            Shared playback color for Local and Premium.{" "}
+            {
+              VOICE_EFFECT_DESCRIPTIONS[
+                normalizeVoiceEffect(normalizedProfile.elevenLabsEffect)
+              ]
+            }
+          </small>
+        </div>
+      ) : null}
       <div className={styles.botVoiceControls}>
-        {(
-          [
-            ["pitch", "Pitch"],
-            ["pace", "Pace"],
-            ["lilt", "Lilt"],
-          ] as const
-        ).map(([key, label]) => (
-          <label key={key}>
-            <span>
-              {label}
-              <BotFieldRandomizerButton
-                label={label}
-                onRandomize={() =>
-                  updateControl(
-                    key,
-                    differentVoiceScalar(normalizedProfile[key]),
-                    { saveImmediately: true },
-                  )
+        {controlKeys.map(([key, label]) => {
+          const current = readControl(key);
+          return (
+            <label key={key}>
+              <span>
+                {label}
+                <BotFieldRandomizerButton
+                  label={`${lane} ${label}`}
+                  onRandomize={() =>
+                    updateControl(key, differentVoiceScalar(current), {
+                      saveImmediately: true,
+                    })
+                  }
+                />
+              </span>
+              <input
+                type="range"
+                min={-1}
+                max={1}
+                step={0.05}
+                value={current}
+                aria-label={`${lane === "premium" ? "Premium" : "Local"} ${label}`}
+                onChange={(event) =>
+                  updateControl(key, Number(event.currentTarget.value))
+                }
+                onPointerUp={(event) =>
+                  updateControl(key, Number(event.currentTarget.value), {
+                    saveImmediately: true,
+                  })
+                }
+                onKeyUp={(event) =>
+                  updateControl(key, Number(event.currentTarget.value), {
+                    saveImmediately: true,
+                  })
                 }
               />
-            </span>
-            <input
-              type="range"
-              min={-1}
-              max={1}
-              step={0.05}
-              value={normalizedProfile[key]}
-              aria-label={label}
-              onChange={(event) =>
-                updateControl(key, Number(event.currentTarget.value))
-              }
-              onPointerUp={(event) =>
-                updateControl(key, Number(event.currentTarget.value), {
-                  saveImmediately: true,
-                })
-              }
-              onKeyUp={(event) =>
-                updateControl(key, Number(event.currentTarget.value), {
-                  saveImmediately: true,
-                })
-              }
-            />
-            <output>
-              {Math.abs(normalizedProfile[key]) < 0.005
-                ? "Neutral"
-                : `${normalizedProfile[key] > 0 ? "+" : ""}${Math.round(normalizedProfile[key] * 100)}%`}
-            </output>
-          </label>
-        ))}
+              <output>
+                {Math.abs(current) < 0.005
+                  ? "Neutral"
+                  : `${current > 0 ? "+" : ""}${Math.round(current * 100)}%`}
+              </output>
+            </label>
+          );
+        })}
       </div>
     </div>
   );
 }
 
-function BotVoiceFeelStage({
+function BotVoiceLocalStage({
   profile,
   onChange,
+  identityCatalog,
+  previewLine,
+  onPreviewLineChange,
+  resolvePreviewText,
+  onPreview,
+  onRandomizePreviewLine,
   onContinue,
 }: {
   profile: BotAudioVoiceProfileV1;
@@ -40617,40 +40012,179 @@ function BotVoiceFeelStage({
     profile: BotAudioVoiceProfileV1,
     options?: BotVoiceProfileChangeOptions,
   ) => void;
+  identityCatalog: BotVoiceIdentityCatalog;
+  previewLine: string;
+  onPreviewLineChange: (value: string) => void;
+  resolvePreviewText: () => Promise<string>;
+  onPreview: (
+    profile: BotAudioVoiceProfileV1,
+    forcedMode?: Exclude<VoiceMode, "mute">,
+    previewText?: string,
+    options?: VoicePreviewPlaybackOptions,
+  ) => Promise<void>;
+  onRandomizePreviewLine?: (
+    current: string,
+    apply: (value: string) => void,
+  ) => void | Promise<void>;
   onContinue?: () => void;
 }): React.JSX.Element {
   return (
     <div
       className={styles.botVoiceFeelStage}
-      data-bot-voice-feel-stage="true"
-      aria-label="Voice feel"
+      data-bot-voice-local-stage="true"
+      aria-label="Local voice"
     >
-      <BotVoiceCharacterEditor profile={profile} onChange={onChange} />
+      <BotVoiceEditor
+        variant="local"
+        profile={profile}
+        previewLine={previewLine}
+        onPreviewLineChange={onPreviewLineChange}
+        onChange={onChange}
+        identityCatalog={identityCatalog}
+        resetLabel="Reset local voice"
+        onReset={() =>
+          onChange(
+            normalizeBotAudioVoiceProfileV1({
+              ...normalizeBotAudioVoiceProfileV1(profile),
+              baseVoiceId: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.baseVoiceId,
+              systemVoiceName: null,
+              localVoiceSource: "portable",
+              pitch: 0,
+              pace: 0,
+              lilt: 0,
+              openness: 0,
+              weight: 0,
+              brightness: 0,
+              resonance: 0,
+              gainDb: 0,
+              eqTilt: 0,
+            }),
+            { saveImmediately: true },
+          )
+        }
+        resolvePreviewText={resolvePreviewText}
+        onPreview={onPreview}
+        onRandomizePreviewLine={onRandomizePreviewLine}
+      />
       <section
         className={styles.botVoiceFeelSupporting}
-        aria-labelledby="bot-voice-feel-performance-title"
+        aria-labelledby="bot-voice-local-feel-title"
       >
         <div className={styles.botVoiceSectionHeading}>
           <div>
-            <span id="bot-voice-feel-performance-title">Performance</span>
-            <small>Pitch, pace, lilt, and playback effect</small>
+            <span id="bot-voice-local-feel-title">Local Feel</span>
+            <small>Pitch, pace, and lilt for Instant / OS voices</small>
           </div>
         </div>
         <BotVoicePerformanceControls
           profile={profile}
           onChange={onChange}
-          effectSelectId="bot-voice-feel-effect"
+          lane="local"
+          showEffect
+          effectSelectId="bot-voice-local-effect"
         />
       </section>
+      <BotVoiceCharacterEditor profile={profile} onChange={onChange} />
       {onContinue ? (
         <button
           className={styles.botVoiceStageContinue}
           type="button"
           onClick={onContinue}
         >
-          Continue to Voices
+          Continue to Premium
         </button>
       ) : null}
+    </div>
+  );
+}
+
+function BotVoicePremiumStage({
+  profile,
+  onChange,
+  identityCatalog,
+  previewLine,
+  onPreviewLineChange,
+  resolvePreviewText,
+  onPreview,
+  onRandomizeDirection,
+  onRandomizePreviewLine,
+}: {
+  profile: BotAudioVoiceProfileV1;
+  onChange: (
+    profile: BotAudioVoiceProfileV1,
+    options?: BotVoiceProfileChangeOptions,
+  ) => void;
+  identityCatalog: BotVoiceIdentityCatalog;
+  previewLine: string;
+  onPreviewLineChange: (value: string) => void;
+  resolvePreviewText: () => Promise<string>;
+  onPreview: (
+    profile: BotAudioVoiceProfileV1,
+    forcedMode?: Exclude<VoiceMode, "mute">,
+    previewText?: string,
+    options?: VoicePreviewPlaybackOptions,
+  ) => Promise<void>;
+  onRandomizeDirection?: (
+    current: string,
+    apply: (value: string) => void,
+  ) => void | Promise<void>;
+  onRandomizePreviewLine?: (
+    current: string,
+    apply: (value: string) => void,
+  ) => void | Promise<void>;
+}): React.JSX.Element {
+  return (
+    <div
+      className={styles.botVoiceFeelStage}
+      data-bot-voice-premium-stage="true"
+      aria-label="Premium voice"
+    >
+      <BotVoiceEditor
+        variant="premium"
+        profile={profile}
+        previewLine={previewLine}
+        onPreviewLineChange={onPreviewLineChange}
+        onChange={onChange}
+        identityCatalog={identityCatalog}
+        resetLabel="Clear Premium voice"
+        onReset={() =>
+          onChange(
+            normalizeBotAudioVoiceProfileV1({
+              ...normalizeBotAudioVoiceProfileV1(profile),
+              elevenLabsVoiceId: null,
+              elevenLabsVoiceIdOverride: null,
+              elevenLabsVoiceInitialized: true,
+              elevenLabsDirection: null,
+              premiumPitch: 0,
+              premiumPace: 0,
+              premiumLilt: 0,
+            }),
+            { saveImmediately: true },
+          )
+        }
+        resolvePreviewText={resolvePreviewText}
+        onPreview={onPreview}
+        onRandomizeDirection={onRandomizeDirection}
+        onRandomizePreviewLine={onRandomizePreviewLine}
+      />
+      <section
+        className={styles.botVoiceFeelSupporting}
+        aria-labelledby="bot-voice-premium-feel-title"
+      >
+        <div className={styles.botVoiceSectionHeading}>
+          <div>
+            <span id="bot-voice-premium-feel-title">Premium Feel</span>
+            <small>Pitch, pace, and lilt for ElevenLabs only</small>
+          </div>
+        </div>
+        <BotVoicePerformanceControls
+          profile={profile}
+          onChange={onChange}
+          lane="premium"
+          showEffect={false}
+          effectSelectId="bot-voice-premium-effect"
+        />
+      </section>
     </div>
   );
 }
@@ -44141,8 +43675,8 @@ function BotAvatarCustomizerModal({
           : activeControlTab === "voice"
             ? [
                 { value: "pronunciation", label: "1 Accent" },
-                { value: "feel", label: "2 Feel" },
-                { value: "voice", label: "3 Voice" },
+                { value: "local", label: "2 Local" },
+                { value: "premium", label: "3 Premium" },
               ]
             : [];
   const activeAdjustmentControl = (() => {
@@ -44220,7 +43754,7 @@ function BotAvatarCustomizerModal({
           onPreviewCurrent={() =>
             void playPronunciationAtlasPreview(audioVoiceProfile)
           }
-          onContinue={() => setActiveAdjustmentTarget("feel")}
+          onContinue={() => setActiveAdjustmentTarget("local")}
         />
       );
     }
@@ -44234,7 +43768,7 @@ function BotAvatarCustomizerModal({
           <strong>Place the accent pin first</strong>
           <p>
             The map location owns pronunciation. Once it is set, you can shape
-            the feel and choose any named voice without moving that accent.
+            Local and Premium voices without moving that accent.
           </p>
           <button
             type="button"
@@ -44245,28 +43779,35 @@ function BotAvatarCustomizerModal({
         </section>
       );
     }
-    if (activeControlTab === "voice" && activeAdjustmentTarget === "feel") {
+    if (activeControlTab === "voice" && activeAdjustmentTarget === "local") {
       return (
-        <BotVoiceFeelStage
+        <BotVoiceLocalStage
           profile={audioVoiceProfile}
           onChange={onAudioVoiceProfileChange}
-          onContinue={() => setActiveAdjustmentTarget("voice")}
+          identityCatalog={voiceIdentityCatalog}
+          previewLine={voicePreviewLine}
+          onPreviewLineChange={onVoicePreviewLineChange}
+          resolvePreviewText={resolveVoicePreviewText}
+          onPreview={playAvatarVoicePreview}
+          onRandomizePreviewLine={(current, apply) =>
+            onRandomizeSemanticField?.(
+              "voice.previewLine",
+              current,
+              (value) => apply(String(value)),
+            )
+          }
+          onContinue={() => setActiveAdjustmentTarget("premium")}
         />
       );
     }
-    if (activeControlTab === "voice" && activeAdjustmentTarget === "voice") {
+    if (activeControlTab === "voice" && activeAdjustmentTarget === "premium") {
       return (
-        <BotVoiceEditor
-          variant="identity"
+        <BotVoicePremiumStage
           profile={audioVoiceProfile}
-          previewLine={voicePreviewLine}
-          onPreviewLineChange={onVoicePreviewLineChange}
           onChange={onAudioVoiceProfileChange}
           identityCatalog={voiceIdentityCatalog}
-          resetLabel={
-            isDefaultPrismBot ? "Reset voice" : "Restore original voice"
-          }
-          onReset={onVoiceRestore}
+          previewLine={voicePreviewLine}
+          onPreviewLineChange={onVoicePreviewLineChange}
           resolvePreviewText={resolveVoicePreviewText}
           onPreview={playAvatarVoicePreview}
           onRandomizeDirection={(current, apply) =>
@@ -47530,8 +47071,6 @@ function HomeContent(): React.JSX.Element {
   } | null>(null);
   const pendingDraftSyncValueRef = useRef<string | null>(null);
   const pendingDraftSyncTimerRef = useRef<number | null>(null);
-  const [debugComposerDraft, setDebugComposerDraft] = useState("");
-  const debugComposerDraftRef = useRef("");
   const [composerRandomPromptBusy, setComposerRandomPromptBusy] =
     useState(false);
   const [composerHistory, setComposerHistory] = useState<string[]>([]);
@@ -47576,9 +47115,6 @@ function HomeContent(): React.JSX.Element {
   useLayoutEffect(() => {
     draftLiveRef.current = draft;
   }, [draft]);
-  useLayoutEffect(() => {
-    debugComposerDraftRef.current = debugComposerDraft;
-  }, [debugComposerDraft]);
   useLayoutEffect(() => {
     chatComposerPublishedTypedAtMsRef.current = chatComposerLastTypedAtMs;
   }, [chatComposerLastTypedAtMs]);
@@ -48070,11 +47606,30 @@ function HomeContent(): React.JSX.Element {
   const voiceModeSelectionBusyRef = useRef(false);
   const speechTypeWheelLockedRef = useRef(false);
   const voiceModeSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
+  const voiceModeSelectorPickerId = useId();
   const [voiceModeSelectorOpen, setVoiceModeSelectorOpen] = useState(false);
+  const [voiceModeSelectorInteractionMode, setVoiceModeSelectorInteractionMode] =
+    useState<"pointer" | "keyboard">("pointer");
+  const [highlightedVoicePlaybackChoice, setHighlightedVoicePlaybackChoice] =
+    useState<VoicePlaybackChoice | null>(null);
   useEffect(() => {
     if (!voiceModeSelectorOpen) return;
     return holdAppNavbarForDropdown();
   }, [voiceModeSelectorOpen]);
+  useEffect(() => {
+    const closeForOtherPicker = (event: Event): void => {
+      const source = (event as CustomEvent<{ source?: string }>).detail?.source;
+      if (source === voiceModeSelectorPickerId) return;
+      setVoiceModeSelectorOpen(false);
+      setVoiceModeSelectorInteractionMode("pointer");
+    };
+    window.addEventListener(PRISM_NAVBAR_PICKER_OPEN_EVENT, closeForOtherPicker);
+    return () =>
+      window.removeEventListener(
+        PRISM_NAVBAR_PICKER_OPEN_EVENT,
+        closeForOtherPicker,
+      );
+  }, [voiceModeSelectorPickerId]);
   const [voicePlaybackNotice, setVoicePlaybackNotice] = useState<string | null>(
     null,
   );
@@ -48314,6 +47869,113 @@ function HomeContent(): React.JSX.Element {
     settings,
   ]);
   useEffect(() => {
+    const toggleTurboFromEffortTrigger = (
+      effortTrigger: HTMLButtonElement,
+    ): void => {
+      if (!settings) {
+        void playSpatialUiSfx("turbo-denied", { anchor: effortTrigger });
+        playPrismHotkeyInaccessibleSfx();
+        return;
+      }
+      const fallbackTarget = (): ActiveModelEffortTarget | null => {
+        const primary = resolvedAutoPrimaryForComposer(
+          modelCatalog,
+          settings,
+          settings.preferredProvider,
+          AUTO_MODEL_CHOICE,
+        );
+        const provider = primary?.provider ?? settings.preferredProvider;
+        const modelId =
+          primary?.model ||
+          defaultModelChoiceForProvider(modelCatalog, settings, provider);
+        return modelEffortTargetForSelection({
+          provider,
+          modelId,
+          options: modelOptionsForResponseMode(modelCatalog, settings, "auto"),
+          simulatedEffortEnabled: true,
+        });
+      };
+      const target = activeModelEffortTargetRef.current ?? fallbackTarget();
+      if (target?.turboSupported) {
+        const nextTurboEnabled = !savedModelTurboMode(
+          settings,
+          target.provider,
+          target.modelId,
+        );
+        activeModelEffortTargetRef.current = target;
+        void playSpatialUiSfx(
+          nextTurboEnabled ? "turbo-on" : "turbo-off",
+          { anchor: effortTrigger },
+        );
+        persistModelTurboPreference(target, nextTurboEnabled);
+        return;
+      }
+
+      const onlineOptions = modelOptionsForResponseMode(
+        modelCatalog,
+        settings,
+        "online",
+      ).filter((option) => option.provider !== "local");
+      // Rank only Fast-capable ONLINE options through the existing Auto
+      // policy, so this fallback continues to respect its rate/lean rules.
+      const turboEligibleOnlineOptions = onlineOptions.filter((option) =>
+        modelSupportsTurboMode(option.provider, option.id),
+      );
+      const onlineTurboAutoPrimary = autoFallbackPrimaryForSelection({
+        provider: "openai",
+        modelChoice: AUTO_MODEL_CHOICE,
+        hiddenModelIds: settings.hiddenBotModelIds,
+        catalog: { local: [], online: turboEligibleOnlineOptions },
+        onlineAutoProviderBias: settings.onlineAutoProviderBias,
+      });
+      const sameProviderTurboAutoPrimary =
+        target?.provider && target.provider !== "local"
+          ? autoFallbackPrimaryForSelection({
+              provider: target.provider,
+              modelChoice: AUTO_MODEL_CHOICE,
+              hiddenModelIds: settings.hiddenBotModelIds,
+              catalog: {
+                local: [],
+                online: turboEligibleOnlineOptions.filter(
+                  (option) => option.provider === target.provider,
+                ),
+              },
+              onlineAutoProviderBias: settings.onlineAutoProviderBias,
+            })
+          : null;
+      const turboCandidate = turboModelShortcutCandidate(
+        onlineOptions,
+        target?.provider ?? settings.preferredProvider,
+        sameProviderTurboAutoPrimary?.model ?? onlineTurboAutoPrimary?.model,
+      );
+      if (!turboCandidate) {
+        void playSpatialUiSfx("turbo-denied", { anchor: effortTrigger });
+        playPrismHotkeyInaccessibleSfx();
+        return;
+      }
+
+      const turboTarget = modelEffortTargetForSelection({
+        provider: turboCandidate.provider,
+        modelId: turboCandidate.id,
+        options: onlineOptions,
+        simulatedEffortEnabled: true,
+      });
+      if (!turboTarget?.turboSupported) {
+        void playSpatialUiSfx("turbo-denied", { anchor: effortTrigger });
+        playPrismHotkeyInaccessibleSfx();
+        return;
+      }
+      persistGlobalModelSelection(
+        {
+          ...globalModelChoiceByProviderRef.current,
+          [turboCandidate.provider]: turboCandidate.id,
+        },
+        turboCandidate.provider,
+      );
+      activeModelEffortTargetRef.current = turboTarget;
+      void playSpatialUiSfx("turbo-on", { anchor: effortTrigger });
+      persistModelTurboPreference(turboTarget, true);
+    };
     const handler = (event: KeyboardEvent): void => {
       if (event.repeat || keyboardShortcutEventIsRecording(event)) return;
 
@@ -48403,7 +48065,7 @@ function HomeContent(): React.JSX.Element {
         event.stopPropagation();
         revealAppNavbarForShortcutAction();
         active.focus();
-        active.click();
+        active.dispatchEvent(new Event(SPEECH_TYPE_QUICK_OPEN_EVENT));
         return;
       }
 
@@ -48421,119 +48083,36 @@ function HomeContent(): React.JSX.Element {
         event.preventDefault();
         event.stopPropagation();
         revealAppNavbarForShortcutAction();
-        if (!settings) {
-          void playSpatialUiSfx("turbo-denied", { anchor: effortTrigger });
-          playPrismHotkeyInaccessibleSfx();
-          return;
-        }
-        const fallbackTarget = (): ActiveModelEffortTarget | null => {
-          if (!settings) return null;
-          const primary = resolvedAutoPrimaryForComposer(
-            modelCatalog,
-            settings,
-            settings.preferredProvider,
-            AUTO_MODEL_CHOICE,
-          );
-          const provider = primary?.provider ?? settings.preferredProvider;
-          const modelId =
-            primary?.model ||
-            defaultModelChoiceForProvider(modelCatalog, settings, provider);
-          return modelEffortTargetForSelection({
-            provider,
-            modelId,
-            options: modelOptionsForResponseMode(
-              modelCatalog,
-              settings,
-              "auto",
-            ),
-            simulatedEffortEnabled: true,
-          });
-        };
-        const target = activeModelEffortTargetRef.current ?? fallbackTarget();
-        if (target?.turboSupported) {
-          const nextTurboEnabled = !savedModelTurboMode(
-            settings,
-            target.provider,
-            target.modelId,
-          );
-          activeModelEffortTargetRef.current = target;
-          void playSpatialUiSfx(nextTurboEnabled ? "turbo-on" : "turbo-off", {
-            anchor: effortTrigger,
-          });
-          persistModelTurboPreference(target, nextTurboEnabled);
-          return;
-        }
-
-        const onlineOptions = modelOptionsForResponseMode(
-          modelCatalog,
-          settings,
-          "online",
-        ).filter((option) => option.provider !== "local");
-        // Rank only Fast-capable ONLINE options through the existing Auto
-        // policy, so this fallback continues to respect its rate/lean rules.
-        const turboEligibleOnlineOptions = onlineOptions.filter(
-          (option) => modelSupportsTurboMode(option.provider, option.id),
-        );
-        const onlineTurboAutoPrimary = autoFallbackPrimaryForSelection({
-          provider: "openai",
-          modelChoice: AUTO_MODEL_CHOICE,
-          hiddenModelIds: settings.hiddenBotModelIds,
-          catalog: { local: [], online: turboEligibleOnlineOptions },
-          onlineAutoProviderBias: settings.onlineAutoProviderBias,
-        });
-        const sameProviderTurboAutoPrimary =
-          target?.provider && target.provider !== "local"
-            ? autoFallbackPrimaryForSelection({
-                provider: target.provider,
-                modelChoice: AUTO_MODEL_CHOICE,
-                hiddenModelIds: settings.hiddenBotModelIds,
-                catalog: {
-                  local: [],
-                  online: turboEligibleOnlineOptions.filter(
-                    (option) => option.provider === target.provider,
-                  ),
-                },
-                onlineAutoProviderBias: settings.onlineAutoProviderBias,
-              })
-            : null;
-        const turboCandidate = turboModelShortcutCandidate(
-          onlineOptions,
-          target?.provider ?? settings?.preferredProvider ?? "local",
-          sameProviderTurboAutoPrimary?.model ?? onlineTurboAutoPrimary?.model,
-        );
-        if (!turboCandidate) {
-          void playSpatialUiSfx("turbo-denied", { anchor: effortTrigger });
-          playPrismHotkeyInaccessibleSfx();
-          return;
-        }
-
-        const turboTarget = modelEffortTargetForSelection({
-          provider: turboCandidate.provider,
-          modelId: turboCandidate.id,
-          options: onlineOptions,
-          simulatedEffortEnabled: true,
-        });
-        if (!turboTarget?.turboSupported) {
-          void playSpatialUiSfx("turbo-denied", { anchor: effortTrigger });
-          playPrismHotkeyInaccessibleSfx();
-          return;
-        }
-        persistGlobalModelSelection(
-          {
-            ...globalModelChoiceByProviderRef.current,
-            [turboCandidate.provider]: turboCandidate.id,
-          },
-          turboCandidate.provider,
-        );
-        activeModelEffortTargetRef.current = turboTarget;
-        void playSpatialUiSfx("turbo-on", {
-          anchor: effortTrigger,
-        });
-        persistModelTurboPreference(turboTarget, true);
+        toggleTurboFromEffortTrigger(effortTrigger);
+        return;
       }
     };
+    const handleTurboToggleQuickEvent = (event: Event): void => {
+      const source = event.target;
+      const effortTrigger =
+        source instanceof HTMLButtonElement
+          ? source
+          : source instanceof Element
+            ? source.closest<HTMLButtonElement>(
+                '[data-prism-effort-picker-trigger="true"]',
+              )
+            : null;
+      if (!effortTrigger) return;
+      revealAppNavbarForShortcutAction();
+      toggleTurboFromEffortTrigger(effortTrigger);
+    };
     document.addEventListener("keydown", handler, true);
-    return () => document.removeEventListener("keydown", handler, true);
+    document.addEventListener(
+      TURBO_TOGGLE_QUICK_EVENT,
+      handleTurboToggleQuickEvent,
+    );
+    return () => {
+      document.removeEventListener("keydown", handler, true);
+      document.removeEventListener(
+        TURBO_TOGGLE_QUICK_EVENT,
+        handleTurboToggleQuickEvent,
+      );
+    };
   }, [
     keyboardShortcuts.effortPicker,
     keyboardShortcuts.modelPicker,
@@ -48755,6 +48334,63 @@ function HomeContent(): React.JSX.Element {
     ZenSessionMemoryItem[]
   >([]);
   const [memoryToasts, setMemoryToasts] = useState<MemoryToast[]>([]);
+  const [memoryAcquisitionReceipts, setMemoryAcquisitionReceipts] = useState<
+    MemoryAcquisitionReceiptView[]
+  >([]);
+  const [selectedMemoryReceipt, setSelectedMemoryReceipt] =
+    useState<MemoryAcquisitionReceiptView | null>(null);
+  const refreshMemoryAcquisitionReceipts = useCallback(async (): Promise<void> => {
+    if (!user?.id) {
+      setMemoryAcquisitionReceipts([]);
+      return;
+    }
+    try {
+      const payload = await api<{ receipts?: MemoryAcquisitionReceiptView[] }>(
+        "/api/memory-receipts?kind=bot_relation",
+      );
+      setMemoryAcquisitionReceipts(
+        Array.isArray(payload.receipts) ? payload.receipts : [],
+      );
+    } catch {
+      // Receipts are an ambient live indicator; normal conversation should
+      // remain available if their refresh temporarily fails.
+    }
+  }, [user?.id]);
+  const openMemoryAcquisitionReceipt = useCallback(
+    async (receipt: MemoryAcquisitionReceiptView): Promise<void> => {
+      setSelectedMemoryReceipt({
+        ...receipt,
+        readAt: receipt.readAt ?? new Date().toISOString(),
+      });
+      setMemoryAcquisitionReceipts((current) =>
+        current.map((item) =>
+          item.id === receipt.id
+            ? { ...item, readAt: item.readAt ?? new Date().toISOString() }
+            : item,
+        ),
+      );
+      try {
+        await api(`/api/memory-receipts/${encodeURIComponent(receipt.id)}/read`, {
+          method: "POST",
+        });
+      } catch {
+        await refreshMemoryAcquisitionReceipts();
+      }
+    },
+    [refreshMemoryAcquisitionReceipts],
+  );
+
+  useEffect(() => {
+    if (!user?.id) return;
+    void refreshMemoryAcquisitionReceipts();
+    const refresh = () => void refreshMemoryAcquisitionReceipts();
+    const interval = window.setInterval(refresh, 8_000);
+    window.addEventListener("focus", refresh);
+    return () => {
+      window.clearInterval(interval);
+      window.removeEventListener("focus", refresh);
+    };
+  }, [refreshMemoryAcquisitionReceipts, user?.id]);
   const [localCommandToast, setLocalCommandToast] =
     useState<LocalCommandToast | null>(null);
   const [pausedMemoryToastIds, setPausedMemoryToastIds] = useState<Set<string>>(
@@ -48874,20 +48510,8 @@ function HomeContent(): React.JSX.Element {
   >(null);
   const [sandboxBotStatusSummaryBotId, setSandboxBotStatusSummaryBotId] =
     useState<string | null>(null);
-  const [summaryDebug, setSummaryDebug] =
-    useState<SummaryCompactionDebug | null>(null);
-  const [compactedSummaryDebugMinimized, setCompactedSummaryDebugMinimized] =
-    useState(false);
-  const [compactedSummaryDebugPanelRect, setCompactedSummaryDebugPanelRect] =
-    useState<CompactedSummaryDebugPanelRect>({
-      x: COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_X,
-      y: COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_Y,
-      width: COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_WIDTH,
-      height: COMPACTED_SUMMARY_DEBUG_PANEL_DEFAULT_HEIGHT,
-    });
-  const compactedSummaryDebugDockRef = useRef<HTMLDivElement | null>(null);
-  const compactedSummaryDebugPanelDragRef =
-    useRef<CompactedSummaryDebugPanelDragState | null>(null);
+  const [summarySnapshot, setSummarySnapshot] =
+    useState<SummaryCompactionSnapshot | null>(null);
   const [pendingReplyConversationId, setPendingReplyConversationId] = useState<
     string | null
   >(null);
@@ -49041,16 +48665,6 @@ function HomeContent(): React.JSX.Element {
   const copiedMessageTimerRef = useRef<ReturnType<typeof setTimeout> | null>(
     null,
   );
-  const [copiedAtmospherePromptText, setCopiedAtmospherePromptText] = useState<
-    string | null
-  >(null);
-  const [customAtmospherePromptEnabled, setCustomAtmospherePromptEnabled] =
-    useState(false);
-  const [customAtmospherePromptDraft, setCustomAtmospherePromptDraft] =
-    useState("");
-  const copiedAtmospherePromptTimerRef = useRef<ReturnType<
-    typeof setTimeout
-  > | null>(null);
   const [messageContextMenu, setMessageContextMenu] = useState<{
     message: Message;
     x: number;
@@ -49138,6 +48752,9 @@ function HomeContent(): React.JSX.Element {
   ]);
   const [settingsScope, setSettingsScope] =
     useState<SettingsScope>("connections");
+  const [helpConnectionState, setHelpConnectionState] =
+    useState<HelpConnectionState>("idle");
+  const [helpFeedback, setHelpFeedback] = useState<string | null>(null);
   const [slateHemisphereSettingsSnapshot, setSlateHemisphereSettingsSnapshot] =
     useState<SlateHemisphereSettingsSnapshot | null>(null);
   const [slateHemisphereSettingsUpdate, setSlateHemisphereSettingsUpdate] =
@@ -49503,128 +49120,6 @@ function HomeContent(): React.JSX.Element {
   // collapse so keyboard users land on the control they just opened.
   const chatOverflowGearButtonRef = useRef<HTMLButtonElement>(null);
   const chatOverflowMenuOpenPrevRef = useRef(chatOverflowMenuOpen);
-  const [devToolsUnlocked, setDevToolsUnlocked] = useState(false);
-  const [devToolsOpen, setDevToolsOpen] = useState(false);
-  const [devToolsMinimized, setDevToolsMinimized] = useState(false);
-  const [devToolsBusy, setDevToolsBusy] = useState(false);
-  const [devToolsMessage, setDevToolsMessage] = useState<string | null>(null);
-  const [devToolsConsoleOnly, setDevToolsConsoleOnly] = useState(false);
-  const [devToolsActiveSection, setDevToolsActiveSection] =
-    useState<DevToolsActiveSection>("observe");
-  const [devToolsBotQuantity, setDevToolsBotQuantity] =
-    useState<DevToolsBotQuantity>(DEV_TOOLS_BOT_QUANTITY_DEFAULT);
-  const [devToolsMemorySeedSource, setDevToolsMemorySeedSource] =
-    useState<DevToolsMemorySeedSource>("direct");
-  const [devToolsMemoryCertainty, setDevToolsMemoryCertainty] = useState(
-    DEV_TOOLS_MEMORY_CERTAINTY_DEFAULT,
-  );
-  const [devToolsPanelPosition, setDevToolsPanelPosition] =
-    useState<DevToolsPanelPosition>({
-      x: DEV_TOOLS_PANEL_DEFAULT_X,
-      y: DEV_TOOLS_PANEL_DEFAULT_Y,
-    });
-  const [devToolsPanelSize, setDevToolsPanelSize] =
-    useState<DevToolsPanelSize | null>(null);
-  const devToolsPanelPositionRef = useRef(devToolsPanelPosition);
-  const devToolsPanelSizeRef = useRef(devToolsPanelSize);
-  const devToolsPanelResizePrimedRef = useRef(false);
-  const [zenPersonaBackdropTuning, setZenPersonaBackdropTuning] =
-    useState<ZenPersonaBackdropTuning>(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING);
-  const devToolsPanelRef = useRef<HTMLDivElement | null>(null);
-  const devToolsBubbleRef = useRef<HTMLButtonElement | null>(null);
-  const devToolsPanelDragRef = useRef<DevToolsPanelDragState | null>(null);
-  const devToolsBubbleDragRef = useRef<DevLayerOrbDragState | null>(null);
-  const devToolsBubbleSuppressClickRef = useRef(false);
-  const [devMoodVisualOpen, setDevMoodVisualOpen] = useState(false);
-  const [devMoodNowMs, setDevMoodNowMs] = useState(() => Date.now());
-  const [devMoodDebugBusy, setDevMoodDebugBusy] = useState(false);
-  const [devMoodDebugSnapshot, setDevMoodDebugSnapshot] = useState<{
-    conversationId: string;
-    mood: PrismMoodSnapshot;
-  } | null>(null);
-  const [devMoodVisualPosition, setDevMoodVisualPosition] =
-    useState<DevMoodVisualPosition>({
-      x: DEV_MOOD_VISUAL_DEFAULT_X,
-      y: DEV_MOOD_VISUAL_DEFAULT_Y,
-    });
-  const devMoodVisualRef = useRef<HTMLDivElement | null>(null);
-  const devMoodVisualDragRef = useRef<DevMoodVisualDragState | null>(null);
-  const devMoodVisualSuppressClickRef = useRef(false);
-  const [devZenPauseTesterOpen, setDevZenPauseTesterOpen] = useState(false);
-  const [zenToolLabOpen, setZenToolLabOpen] = useState(false);
-  const [devZenPauseTesterPosition, setDevZenPauseTesterPosition] =
-    useState<DevToolsPanelPosition>(() => initialDevLayerOrbPosition("right"));
-  const [zenToolLabPosition, setZenToolLabPosition] =
-    useState<DevToolsPanelPosition>(() => initialDevLayerOrbPosition("left"));
-  const devZenPauseTesterRef = useRef<HTMLDivElement | null>(null);
-  const zenToolLabRef = useRef<HTMLDivElement | null>(null);
-  const devZenPauseTesterDragRef = useRef<DevLayerOrbDragState | null>(null);
-  const zenToolLabDragRef = useRef<DevLayerOrbDragState | null>(null);
-  const devZenPauseTesterSuppressClickRef = useRef(false);
-  const zenToolLabSuppressClickRef = useRef(false);
-  const [devDebugComposerMinimized, setDevDebugComposerMinimized] =
-    useState(false);
-  const [devDebugComposerY, setDevDebugComposerY] = useState(() =>
-    initialDevDebugComposerY(),
-  );
-  const [devDebugComposerRestorePosition, setDevDebugComposerRestorePosition] =
-    useState<DevToolsPanelPosition>(() =>
-      initialDevDebugComposerRestorePosition(),
-    );
-  const debugComposerRef = useRef<HTMLDivElement | null>(null);
-  const debugComposerRestoreRef = useRef<HTMLButtonElement | null>(null);
-  const debugComposerExpandedDragRef =
-    useRef<DevDebugComposerExpandedDragState | null>(null);
-  const debugComposerRestoreDragRef = useRef<DevLayerOrbDragState | null>(null);
-  const debugComposerRestoreSuppressClickRef = useRef(false);
-  const [devToolsUiStorageLoaded, setDevToolsUiStorageLoaded] =
-    useState(!DEV_TOOLS_ENABLED);
-  const [devZenPauseTiming, setDevZenPauseTiming] =
-    useState<ChatRevealTimingSettings>(DEFAULT_CHAT_REVEAL_TIMING);
-  const [devZenPauseTesterStorageLoaded, setDevZenPauseTesterStorageLoaded] =
-    useState(!DEV_TOOLS_ENABLED);
-  const resolvedDevToolsBotQuantity =
-    devToolsBotQuantity === "" ? 0 : devToolsBotQuantity;
-  const devToolsRuntimeActive = DEV_TOOLS_ENABLED && devToolsUnlocked;
-  const closeDevTools = useCallback(() => {
-    setDevToolsUnlocked(false);
-    setDevToolsOpen(false);
-    setDevToolsMinimized(true);
-    setDevToolsMessage(null);
-    setDevToolsConsoleOnly(false);
-  }, []);
-  const openDevTools = useCallback((section?: DevToolsActiveSection) => {
-    setDevToolsUnlocked(true);
-    setDevToolsOpen(true);
-    setDevToolsMinimized(false);
-    setDevToolsMessage(null);
-    setDevToolsConsoleOnly(false);
-    if (section) setDevToolsActiveSection(section);
-  }, []);
-  const toggleDevToolsPanel = useCallback(() => {
-    const action = resolvePrismDevPanelToggleAction({
-      devToolsUnlocked,
-      devToolsOpen,
-      devToolsMinimized,
-    });
-    if (action === "close-layer") {
-      closeDevTools();
-    } else {
-      openDevTools();
-    }
-  }, [
-    closeDevTools,
-    devToolsMinimized,
-    devToolsOpen,
-    devToolsUnlocked,
-    openDevTools,
-  ]);
-  const minimizeDevTools = useCallback(() => {
-    setDevToolsOpen(false);
-    setDevToolsMinimized(true);
-    setDevToolsMessage(null);
-    setDevToolsConsoleOnly(false);
-  }, []);
   const configuredVoiceMode = normalizeVoiceMode(settings?.voiceMode);
   const chatPresentation = chatPresentationForSurface(view, sidebarOpen);
   useEffect(() => {
@@ -49650,24 +49145,14 @@ function HomeContent(): React.JSX.Element {
       : 1;
   const effectiveChatRevealTiming = useMemo(
     () =>
-      devToolsRuntimeActive && view === "chat" && !chatConversationVoiceMuted
-        ? devZenPauseTiming
-        : scaleChatRevealTimingSettings(
-            DEFAULT_CHAT_REVEAL_TIMING,
-            zenCanvasTypingDelayMultiplier,
-          ),
-    [
-      devToolsRuntimeActive,
-      devZenPauseTiming,
-      view,
-      zenCanvasTypingDelayMultiplier,
-      chatConversationVoiceMuted,
-    ],
+      scaleChatRevealTimingSettings(
+        DEFAULT_CHAT_REVEAL_TIMING,
+        zenCanvasTypingDelayMultiplier,
+      ),
+    [zenCanvasTypingDelayMultiplier],
   );
   const effectiveChatRevealAnimationMultiplier =
-    devToolsRuntimeActive && view === "chat" && !chatConversationVoiceMuted
-      ? 1
-      : zenCanvasTypingDelayMultiplier;
+    zenCanvasTypingDelayMultiplier;
 
   const closeBotContextMenu = useCallback(() => {
     setBotContextMenu(null);
@@ -52793,99 +52278,12 @@ function HomeContent(): React.JSX.Element {
   const accountImportInputRef = useRef<HTMLInputElement | null>(null);
   const [accountBackupBusy, setAccountBackupBusy] = useState(false);
   const [accountRestoreBusy, setAccountRestoreBusy] = useState(false);
-  type ImportBotModalPhase = "closed" | "choose" | "paste";
-  const [importBotModalPhase, setImportBotModalPhase] =
-    useState<ImportBotModalPhase>("closed");
-  const [importBotPasteText, setImportBotPasteText] = useState("");
-  const [importBotPasteError, setImportBotPasteError] = useState<string | null>(
-    null,
-  );
-  const [importBotPasteBusy, setImportBotPasteBusy] = useState(false);
   const [botTransferOverlay, setBotTransferOverlay] =
     useState<BotTransferOverlayState | null>(null);
   const [botTransferOverlayNowMs, setBotTransferOverlayNowMs] = useState(() =>
     Date.now(),
   );
   const botTransferBusy = botTransferOverlay !== null;
-  const [devToolsBotImportPasteEnabled, setDevToolsBotImportPasteEnabledState] =
-    useState(false);
-  const [devChatDebugEvents, setDevChatDebugEvents] = useState<
-    DevChatDebugEvent[]
-  >([]);
-  const devChatMetricsTerminalActive = devToolsRuntimeActive;
-  const persistDevToolsBotImportPaste = useCallback((next: boolean) => {
-    setDevToolsBotImportPasteEnabledState(next);
-    if (typeof window === "undefined") return;
-    try {
-      if (next) {
-        window.localStorage.setItem(
-          PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY,
-          "1",
-        );
-      } else {
-        window.localStorage.removeItem(PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY);
-      }
-    } catch {
-      // private mode / quota — preference just won't survive reload
-    }
-  }, []);
-  const persistZenPersonaBackdropTuning = useCallback(
-    (patch: Partial<ZenPersonaBackdropTuning>) => {
-      setZenPersonaBackdropTuning((previous) => {
-        const next = normalizeZenPersonaBackdropTuning({
-          ...previous,
-          ...patch,
-        });
-        if (typeof window !== "undefined") {
-          try {
-            window.localStorage.setItem(
-              PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY,
-              JSON.stringify(next),
-            );
-          } catch {
-            // private mode / quota — preference just won't survive reload
-          }
-        }
-        return next;
-      });
-    },
-    [],
-  );
-  const resetZenPersonaBackdropTuning = useCallback(() => {
-    setZenPersonaBackdropTuning(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING);
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(
-        PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY,
-        JSON.stringify(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING),
-      );
-    } catch {
-      // private mode / quota — preference just won't survive reload
-    }
-  }, []);
-  useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      setDevToolsBotImportPasteEnabledState(
-        window.localStorage.getItem(PRISM_DEV_BOT_IMPORT_PASTE_STORAGE_KEY) ===
-          "1",
-      );
-      const storedPersonaBackdrop = window.localStorage.getItem(
-        PRISM_DEV_ZEN_PERSONA_BACKDROP_STORAGE_KEY,
-      );
-      if (storedPersonaBackdrop) {
-        setZenPersonaBackdropTuning(
-          normalizeZenPersonaBackdropTuning(JSON.parse(storedPersonaBackdrop)),
-        );
-      }
-    } catch {
-      setDevToolsBotImportPasteEnabledState(false);
-      setZenPersonaBackdropTuning(DEFAULT_ZEN_PERSONA_BACKDROP_TUNING);
-    }
-  }, []);
-  useEffect(() => {
-    setDevChatDebugEvents([]);
-  }, [detail?.id, view]);
   const commandCenterOperationalPicks = useMemo(
     () => commandCenterCommands.filter(isCommandCenterOperationalCommand),
     [commandCenterCommands],
@@ -52951,11 +52349,6 @@ function HomeContent(): React.JSX.Element {
   const [preAuthTheme, setPreAuthTheme] = useState<Theme>("system");
   const viewportWidth = useViewportWidth();
   const viewportHeight = useViewportHeight();
-  const [devPanelSafeAreaInsets, setDevPanelSafeAreaInsets] =
-    useState<DevPanelSafeAreaInsets>(DEV_PANEL_SAFE_AREA_DEFAULT_INSETS);
-  const devPanelSafeAreaInsetsRef = useRef<DevPanelSafeAreaInsets>(
-    DEV_PANEL_SAFE_AREA_DEFAULT_INSETS,
-  );
   const sidebarDrawerMode = viewportWidth <= SIDEBAR_DRAWER_BREAKPOINT;
   const secondaryOllamaDraftHost = settings?.secondaryOllamaHost?.trim() ?? "";
   const comfyUiDraftHost = settings?.comfyUiHost?.trim() ?? "";
@@ -53042,90 +52435,6 @@ function HomeContent(): React.JSX.Element {
       );
     };
   }, [chatHeaderToolsWrapped, sidebarOpen, view, viewportWidth]);
-  useLayoutEffect(() => {
-    if (
-      !DEV_TOOLS_ENABLED ||
-      !devToolsRuntimeActive ||
-      typeof document === "undefined"
-    ) {
-      const defaultInsets = DEV_PANEL_SAFE_AREA_DEFAULT_INSETS;
-      if (
-        !devPanelSafeAreaInsetsEqual(
-          devPanelSafeAreaInsetsRef.current,
-          defaultInsets,
-        )
-      ) {
-        devPanelSafeAreaInsetsRef.current = defaultInsets;
-        setDevPanelSafeAreaInsets(defaultInsets);
-      }
-      return;
-    }
-
-    let frame: number | null = null;
-    const resizeObserver =
-      typeof ResizeObserver === "undefined"
-        ? null
-        : new ResizeObserver(() => scheduleMeasure());
-
-    function observeSafeAreaNodes() {
-      resizeObserver?.disconnect();
-      document
-        .querySelectorAll<HTMLElement>(`[${DEV_PANEL_SAFE_AREA_ATTRIBUTE}]`)
-        .forEach((node) => resizeObserver?.observe(node));
-    }
-
-    function measure() {
-      frame = null;
-      const next = stableMeasuredDevPanelSafeAreaInsets(
-        collectDevPanelSafeAreaInsets(viewportWidth, viewportHeight),
-      );
-      if (devPanelSafeAreaInsetsEqual(devPanelSafeAreaInsetsRef.current, next))
-        return;
-      devPanelSafeAreaInsetsRef.current = next;
-      setDevPanelSafeAreaInsets(next);
-    }
-
-    function scheduleMeasure() {
-      if (frame !== null) return;
-      frame = window.requestAnimationFrame(measure);
-    }
-
-    observeSafeAreaNodes();
-    scheduleMeasure();
-
-    const mutationObserver =
-      typeof MutationObserver === "undefined"
-        ? null
-        : new MutationObserver(() => {
-            observeSafeAreaNodes();
-            scheduleMeasure();
-          });
-    mutationObserver?.observe(document.body, {
-      attributes: true,
-      childList: true,
-      subtree: true,
-      attributeFilter: [
-        "class",
-        "style",
-        DEV_PANEL_SAFE_AREA_ATTRIBUTE,
-        "data-chat-sidebar-hidden",
-        "data-chat-overflow-menu-open",
-        "data-choice-composer-hidden",
-        "data-session-active",
-        "data-transcript-open",
-      ],
-    });
-    window.addEventListener("resize", scheduleMeasure);
-    window.addEventListener("transitionend", scheduleMeasure, true);
-
-    return () => {
-      if (frame !== null) window.cancelAnimationFrame(frame);
-      resizeObserver?.disconnect();
-      mutationObserver?.disconnect();
-      window.removeEventListener("resize", scheduleMeasure);
-      window.removeEventListener("transitionend", scheduleMeasure, true);
-    };
-  }, [devToolsRuntimeActive, viewportHeight, viewportWidth]);
   useEffect(() => {
     if (sidebarOpen || panel !== null) setChatOverflowMenuOpen(false);
   }, [sidebarOpen, panel]);
@@ -53237,21 +52546,6 @@ function HomeContent(): React.JSX.Element {
     return () => window.removeEventListener("keydown", onKey);
   }, [chatOverflowMenuOpen]);
 
-  useEffect(() => {
-    if (!zenToolLabOpen) return;
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") setZenToolLabOpen(false);
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [zenToolLabOpen]);
-
-  useEffect(() => {
-    if (view !== "chat" && zenToolLabOpen) {
-      setZenToolLabOpen(false);
-    }
-  }, [view, zenToolLabOpen]);
-
   // When the chat-tools accordion collapses, hand focus back to the wrench so
   // keyboard users (Escape, outside-click, action click) don't get stranded
   // inside an inert subtree. Skip on mount + when the menu opens.
@@ -53267,355 +52561,6 @@ function HomeContent(): React.JSX.Element {
     const active = document.activeElement;
     if (accordionRoot?.contains(active)) wrench.focus();
   }, [chatOverflowMenuOpen]);
-
-  useEffect(() => {
-    if (!DEV_TOOLS_ENABLED) return;
-    try {
-      const settingsRaw = window.localStorage.getItem(
-        PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY,
-      );
-      if (settingsRaw) {
-        setDevZenPauseTiming(
-          normalizeChatRevealTimingSettings(
-            JSON.parse(settingsRaw),
-            DEFAULT_CHAT_REVEAL_TIMING,
-          ),
-        );
-      }
-    } catch {
-      // Local dev affordance only.
-    }
-    setDevZenPauseTesterStorageLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!DEV_TOOLS_ENABLED || !devZenPauseTesterStorageLoaded) return;
-    try {
-      window.localStorage.setItem(
-        PRISM_DEV_ZEN_PAUSE_TESTER_SETTINGS_STORAGE_KEY,
-        JSON.stringify(devZenPauseTiming),
-      );
-    } catch {
-      // Local dev affordance only.
-    }
-  }, [devZenPauseTesterStorageLoaded, devZenPauseTiming]);
-
-  useEffect(() => {
-    if (!DEV_TOOLS_ENABLED) return;
-    try {
-      const viewportW = Math.max(320, window.innerWidth);
-      const viewportH = Math.max(320, window.innerHeight);
-      const raw = window.localStorage.getItem(
-        PRISM_DEV_TOOLS_UI_STATE_STORAGE_KEY,
-      );
-      if (raw) {
-        const parsed = JSON.parse(raw) as unknown;
-        if (isRecord(parsed)) {
-          const activeSection = parsed.activeSection;
-          if (
-            typeof activeSection === "string" &&
-            DEV_TOOLS_NAV_ITEMS.some((item) => item.id === activeSection)
-          ) {
-            setDevToolsActiveSection(activeSection as DevToolsActiveSection);
-          }
-
-          const panelSize = normalizeStoredDevToolsPanelSize(
-            parsed.panelSize,
-            viewportW,
-            viewportH,
-          );
-          if (panelSize) setDevToolsPanelSize(panelSize);
-
-          const panelPosition = normalizeStoredDevToolsPosition(
-            parsed.panelPosition,
-            panelSize?.width ?? 46,
-            panelSize?.height ?? 42,
-            viewportW,
-            viewportH,
-          );
-          if (panelPosition) setDevToolsPanelPosition(panelPosition);
-
-          const mood = isRecord(parsed.mood) ? parsed.mood : null;
-          if (typeof mood?.open === "boolean") setDevMoodVisualOpen(mood.open);
-          const moodPosition = normalizeStoredDevToolsPosition(
-            mood?.position,
-            280,
-            220,
-            viewportW,
-            viewportH,
-          );
-          if (moodPosition) setDevMoodVisualPosition(moodPosition);
-
-          const pauseTester = isRecord(parsed.pauseTester)
-            ? parsed.pauseTester
-            : null;
-          if (typeof pauseTester?.open === "boolean") {
-            setDevZenPauseTesterOpen(pauseTester.open);
-          }
-          const pauseTesterPosition = normalizeStoredDevToolsPosition(
-            pauseTester?.position,
-            46,
-            46,
-            viewportW,
-            viewportH,
-          );
-          if (pauseTesterPosition)
-            setDevZenPauseTesterPosition(pauseTesterPosition);
-
-          const toolLab = isRecord(parsed.toolLab) ? parsed.toolLab : null;
-          if (typeof toolLab?.open === "boolean")
-            setZenToolLabOpen(toolLab.open);
-          const toolLabPosition = normalizeStoredDevToolsPosition(
-            toolLab?.position,
-            46,
-            46,
-            viewportW,
-            viewportH,
-          );
-          if (toolLabPosition) setZenToolLabPosition(toolLabPosition);
-
-          const debugComposer = isRecord(parsed.debugComposer)
-            ? parsed.debugComposer
-            : null;
-          if (typeof debugComposer?.minimized === "boolean") {
-            setDevDebugComposerMinimized(debugComposer.minimized);
-          }
-          if (
-            typeof debugComposer?.y === "number" &&
-            Number.isFinite(debugComposer.y)
-          ) {
-            setDevDebugComposerY(
-              clampDevDebugComposerY(
-                debugComposer.y,
-                DEV_DEBUG_COMPOSER_DEFAULT_HEIGHT,
-                viewportH,
-              ),
-            );
-          }
-          const debugComposerRestorePosition = isRecord(
-            debugComposer?.restorePosition,
-          )
-            ? debugComposer.restorePosition
-            : null;
-          if (
-            typeof debugComposerRestorePosition?.x === "number" &&
-            typeof debugComposerRestorePosition?.y === "number" &&
-            Number.isFinite(debugComposerRestorePosition.x) &&
-            Number.isFinite(debugComposerRestorePosition.y)
-          ) {
-            setDevDebugComposerRestorePosition(
-              clampDevOverlayPositionToViewport(
-                debugComposerRestorePosition.x,
-                debugComposerRestorePosition.y,
-                DEV_DEBUG_COMPOSER_RESTORE_WIDTH,
-                DEV_DEBUG_COMPOSER_RESTORE_HEIGHT,
-                viewportW,
-                viewportH,
-              ),
-            );
-          }
-
-          const compactedContext = isRecord(parsed.compactedContext)
-            ? parsed.compactedContext
-            : null;
-          if (typeof compactedContext?.minimized === "boolean") {
-            setCompactedSummaryDebugMinimized(compactedContext.minimized);
-          }
-          const storedRect = compactedContext?.rect;
-          if (isRecord(storedRect)) {
-            const { x, y, width, height } = storedRect;
-            if (
-              typeof x === "number" &&
-              typeof y === "number" &&
-              typeof width === "number" &&
-              typeof height === "number" &&
-              Number.isFinite(x) &&
-              Number.isFinite(y) &&
-              Number.isFinite(width) &&
-              Number.isFinite(height)
-            ) {
-              setCompactedSummaryDebugPanelRect(
-                restoreCompactedSummaryDebugPanelRect(
-                  { x, y, width, height },
-                  viewportW,
-                  viewportH,
-                ),
-              );
-            }
-          }
-        }
-      } else {
-        const legacyMoodRaw = window.localStorage.getItem(
-          PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY,
-        );
-        const legacyMoodPosition = legacyMoodRaw
-          ? normalizeStoredDevToolsPosition(
-              JSON.parse(legacyMoodRaw) as unknown,
-              280,
-              220,
-              viewportW,
-              viewportH,
-            )
-          : null;
-        if (legacyMoodPosition) setDevMoodVisualPosition(legacyMoodPosition);
-      }
-    } catch {
-      // Local dev affordance only.
-    }
-    setDevToolsUiStorageLoaded(true);
-  }, []);
-
-  useEffect(() => {
-    if (!devToolsRuntimeActive) return;
-    setDevMoodNowMs(Date.now());
-    const timer = window.setInterval(() => {
-      setDevMoodNowMs(Date.now());
-    }, 500);
-    return () => {
-      window.clearInterval(timer);
-    };
-  }, [devToolsRuntimeActive]);
-
-  useEffect(() => {
-    if (!DEV_TOOLS_ENABLED || !devToolsUiStorageLoaded) return;
-    try {
-      const snapshot: DevToolsUiStateStorage = {
-        activeSection: devToolsActiveSection,
-        panelPosition: devToolsPanelPosition,
-        panelSize: devToolsPanelSize ?? undefined,
-        mood: {
-          open: devMoodVisualOpen,
-          position: devMoodVisualPosition,
-        },
-        pauseTester: {
-          open: devZenPauseTesterOpen,
-          position: devZenPauseTesterPosition,
-        },
-        toolLab: {
-          open: zenToolLabOpen,
-          position: zenToolLabPosition,
-        },
-        debugComposer: {
-          minimized: devDebugComposerMinimized,
-          y: devDebugComposerY,
-          restorePosition: devDebugComposerRestorePosition,
-        },
-        compactedContext: {
-          minimized: compactedSummaryDebugMinimized,
-          rect: compactedSummaryDebugPanelRect,
-        },
-      };
-      window.localStorage.setItem(
-        PRISM_DEV_TOOLS_UI_STATE_STORAGE_KEY,
-        JSON.stringify(snapshot),
-      );
-      window.localStorage.setItem(
-        PRISM_DEV_MOOD_VISUAL_POSITION_STORAGE_KEY,
-        JSON.stringify(devMoodVisualPosition),
-      );
-    } catch {
-      // Local dev affordance only.
-    }
-  }, [
-    compactedSummaryDebugMinimized,
-    compactedSummaryDebugPanelRect,
-    devDebugComposerMinimized,
-    devDebugComposerRestorePosition,
-    devDebugComposerY,
-    devMoodVisualOpen,
-    devMoodVisualPosition,
-    devToolsActiveSection,
-    devToolsPanelPosition,
-    devToolsPanelSize,
-    devToolsUiStorageLoaded,
-    devZenPauseTesterOpen,
-    devZenPauseTesterPosition,
-    zenToolLabOpen,
-    zenToolLabPosition,
-  ]);
-
-  useEffect(() => {
-    devToolsPanelPositionRef.current = devToolsPanelPosition;
-  }, [devToolsPanelPosition]);
-
-  useEffect(() => {
-    devToolsPanelSizeRef.current = devToolsPanelSize;
-  }, [devToolsPanelSize]);
-
-  useEffect(() => {
-    if (!devToolsRuntimeActive) return;
-    setDevMoodVisualPosition((current) =>
-      clampDevToolsPanelPosition(
-        current.x,
-        current.y,
-        devMoodVisualRef.current?.offsetWidth ?? 280,
-        devMoodVisualRef.current?.offsetHeight ?? 220,
-        viewportWidth,
-        viewportHeight,
-        devPanelSafeAreaInsets,
-      ),
-    );
-  }, [
-    devPanelSafeAreaInsets,
-    devToolsRuntimeActive,
-    viewportHeight,
-    viewportWidth,
-  ]);
-
-  useEffect(() => {
-    if (!devToolsRuntimeActive) return;
-    setDevZenPauseTesterPosition((current) =>
-      clampDevToolsPanelPosition(
-        current.x,
-        current.y,
-        devZenPauseTesterRef.current?.offsetWidth ?? 46,
-        devZenPauseTesterRef.current?.offsetHeight ?? 46,
-        viewportWidth,
-        viewportHeight,
-        devPanelSafeAreaInsets,
-      ),
-    );
-    setZenToolLabPosition((current) =>
-      clampDevToolsPanelPosition(
-        current.x,
-        current.y,
-        zenToolLabRef.current?.offsetWidth ?? 46,
-        zenToolLabRef.current?.offsetHeight ?? 46,
-        viewportWidth,
-        viewportHeight,
-        devPanelSafeAreaInsets,
-      ),
-    );
-  }, [
-    devPanelSafeAreaInsets,
-    devToolsRuntimeActive,
-    viewportHeight,
-    viewportWidth,
-  ]);
-
-  useEffect(() => {
-    if (!devToolsRuntimeActive) return;
-    setDevDebugComposerY((current) =>
-      clampDevDebugComposerY(
-        current,
-        debugComposerRef.current?.offsetHeight ??
-          DEV_DEBUG_COMPOSER_DEFAULT_HEIGHT,
-        viewportHeight,
-      ),
-    );
-    setDevDebugComposerRestorePosition((current) =>
-      clampDevOverlayPositionToViewport(
-        current.x,
-        current.y,
-        debugComposerRestoreRef.current?.offsetWidth ??
-          DEV_DEBUG_COMPOSER_RESTORE_WIDTH,
-        debugComposerRestoreRef.current?.offsetHeight ??
-          DEV_DEBUG_COMPOSER_RESTORE_HEIGHT,
-        viewportWidth,
-        viewportHeight,
-      ),
-    );
-  }, [devToolsRuntimeActive, viewportHeight, viewportWidth]);
 
   const beginSidebarEdgeSwipe = useCallback(
     (event: React.TouchEvent<HTMLElement>) => {
@@ -53679,346 +52624,6 @@ function HomeContent(): React.JSX.Element {
     },
     [],
   );
-  const startDevToolsPanelDrag = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      if (event.button !== 0) return;
-      const panel = devToolsPanelRef.current;
-      if (!panel) return;
-
-      const rect = panel.getBoundingClientRect();
-      devToolsPanelDragRef.current = {
-        pointerId: event.pointerId,
-        offsetX: event.clientX - rect.left,
-        offsetY: event.clientY - rect.top,
-      };
-
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture is missing in some test environments.
-      }
-      event.preventDefault();
-    },
-    [],
-  );
-  const dragDevToolsPanel = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      const dragState = devToolsPanelDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      const panel = devToolsPanelRef.current;
-      if (!panel) return;
-
-      const rect = panel.getBoundingClientRect();
-      const next = clampDevToolsPanelPosition(
-        event.clientX - dragState.offsetX,
-        event.clientY - dragState.offsetY,
-        rect.width,
-        rect.height,
-        window.innerWidth,
-        window.innerHeight,
-        devPanelSafeAreaInsets,
-      );
-      panel.style.left = `${next.x}px`;
-      panel.style.top = `${next.y}px`;
-      setDevToolsPanelPosition(next);
-    },
-    [devPanelSafeAreaInsets],
-  );
-  const endDevToolsPanelDrag = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      const dragState = devToolsPanelDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      devToolsPanelDragRef.current = null;
-
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      } catch {
-        // Safe no-op for environments without pointer capture support.
-      }
-    },
-    [],
-  );
-  const startDevLayerOrbDrag = useCallback(
-    <T extends HTMLElement>(
-      event: React.PointerEvent<T>,
-      panel: HTMLElement | null,
-      dragRef: { current: DevLayerOrbDragState | null },
-      suppressClickRef: { current: boolean },
-    ) => {
-      if (event.button !== 0 || !panel) return;
-      const rect = panel.getBoundingClientRect();
-      dragRef.current = {
-        pointerId: event.pointerId,
-        offsetX: event.clientX - rect.left,
-        offsetY: event.clientY - rect.top,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        moved: false,
-      };
-      suppressClickRef.current = false;
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture is missing in some test environments.
-      }
-    },
-    [],
-  );
-  const dragDevLayerOrb = useCallback(
-    <T extends HTMLElement>(
-      event: React.PointerEvent<T>,
-      panel: HTMLElement | null,
-      dragRef: { current: DevLayerOrbDragState | null },
-      setPosition: (next: DevToolsPanelPosition) => void,
-    ) => {
-      const dragState = dragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId || !panel)
-        return;
-      const dx = Math.abs(event.clientX - dragState.startClientX);
-      const dy = Math.abs(event.clientY - dragState.startClientY);
-      if (dx > 3 || dy > 3) dragState.moved = true;
-      const rect = panel.getBoundingClientRect();
-      const next = clampDevToolsPanelPosition(
-        event.clientX - dragState.offsetX,
-        event.clientY - dragState.offsetY,
-        rect.width,
-        rect.height,
-        window.innerWidth,
-        window.innerHeight,
-        devPanelSafeAreaInsets,
-      );
-      panel.style.left = `${next.x}px`;
-      panel.style.top = `${next.y}px`;
-      setPosition(next);
-    },
-    [devPanelSafeAreaInsets],
-  );
-  const endDevLayerOrbDrag = useCallback(
-    <T extends HTMLElement>(
-      event: React.PointerEvent<T>,
-      dragRef: { current: DevLayerOrbDragState | null },
-      suppressClickRef: { current: boolean },
-    ) => {
-      const dragState = dragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      dragRef.current = null;
-      suppressClickRef.current = dragState.moved;
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      } catch {
-        // Safe no-op for environments without pointer capture support.
-      }
-      if (dragState.moved) {
-        window.setTimeout(() => {
-          suppressClickRef.current = false;
-        }, 0);
-      }
-    },
-    [],
-  );
-  const startDebugComposerExpandedDrag = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      if (event.button !== 0) return;
-      const panel = debugComposerRef.current;
-      if (!panel) return;
-      const rect = panel.getBoundingClientRect();
-      debugComposerExpandedDragRef.current = {
-        pointerId: event.pointerId,
-        offsetY: event.clientY - rect.top,
-      };
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture is missing in some test environments.
-      }
-      event.preventDefault();
-    },
-    [],
-  );
-  const dragDebugComposerExpanded = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      const dragState = debugComposerExpandedDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      const panel = debugComposerRef.current;
-      if (!panel) return;
-      const nextY = clampDevDebugComposerY(
-        event.clientY - dragState.offsetY,
-        panel.getBoundingClientRect().height,
-        window.innerHeight,
-      );
-      panel.style.top = `${nextY}px`;
-      setDevDebugComposerY(nextY);
-      event.preventDefault();
-    },
-    [],
-  );
-  const endDebugComposerExpandedDrag = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      const dragState = debugComposerExpandedDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      debugComposerExpandedDragRef.current = null;
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      } catch {
-        // Safe no-op for environments without pointer capture support.
-      }
-    },
-    [],
-  );
-  const startDebugComposerRestoreDrag = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      if (event.button !== 0) return;
-      const panel = debugComposerRestoreRef.current;
-      if (!panel) return;
-      const rect = panel.getBoundingClientRect();
-      debugComposerRestoreDragRef.current = {
-        pointerId: event.pointerId,
-        offsetX: event.clientX - rect.left,
-        offsetY: event.clientY - rect.top,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        moved: false,
-      };
-      debugComposerRestoreSuppressClickRef.current = false;
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture is missing in some test environments.
-      }
-    },
-    [],
-  );
-  const dragDebugComposerRestore = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const dragState = debugComposerRestoreDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      const panel = debugComposerRestoreRef.current;
-      if (!panel) return;
-      const dx = Math.abs(event.clientX - dragState.startClientX);
-      const dy = Math.abs(event.clientY - dragState.startClientY);
-      if (dx > 3 || dy > 3) {
-        dragState.moved = true;
-        debugComposerRestoreSuppressClickRef.current = true;
-      }
-      const rect = panel.getBoundingClientRect();
-      const next = clampDevOverlayPositionToViewport(
-        event.clientX - dragState.offsetX,
-        event.clientY - dragState.offsetY,
-        rect.width,
-        rect.height,
-        window.innerWidth,
-        window.innerHeight,
-      );
-      panel.style.left = `${next.x}px`;
-      panel.style.top = `${next.y}px`;
-      setDevDebugComposerRestorePosition(next);
-    },
-    [],
-  );
-  const endDebugComposerRestoreDrag = useCallback(
-    (event: React.PointerEvent<HTMLButtonElement>) => {
-      const dragState = debugComposerRestoreDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      debugComposerRestoreDragRef.current = null;
-      debugComposerRestoreSuppressClickRef.current = dragState.moved;
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      } catch {
-        // Safe no-op for environments without pointer capture support.
-      }
-      if (dragState.moved) {
-        window.setTimeout(() => {
-          debugComposerRestoreSuppressClickRef.current = false;
-        }, 0);
-      }
-    },
-    [],
-  );
-  const startDevMoodVisualDrag = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      if (event.button !== 0) return;
-      const panel = devMoodVisualRef.current;
-      if (!panel) return;
-      const rect = panel.getBoundingClientRect();
-      devMoodVisualDragRef.current = {
-        pointerId: event.pointerId,
-        offsetX: event.clientX - rect.left,
-        offsetY: event.clientY - rect.top,
-        startClientX: event.clientX,
-        startClientY: event.clientY,
-        moved: false,
-      };
-      devMoodVisualSuppressClickRef.current = false;
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture is missing in some test environments.
-      }
-    },
-    [],
-  );
-  const dragDevMoodVisual = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      const dragState = devMoodVisualDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      const panel = devMoodVisualRef.current;
-      if (!panel) return;
-      const dx = Math.abs(event.clientX - dragState.startClientX);
-      const dy = Math.abs(event.clientY - dragState.startClientY);
-      if (dx > 3 || dy > 3) {
-        dragState.moved = true;
-        devMoodVisualSuppressClickRef.current = true;
-      }
-      const rect = panel.getBoundingClientRect();
-      setDevMoodVisualPosition(
-        clampDevToolsPanelPosition(
-          event.clientX - dragState.offsetX,
-          event.clientY - dragState.offsetY,
-          rect.width,
-          rect.height,
-          window.innerWidth,
-          window.innerHeight,
-          devPanelSafeAreaInsets,
-        ),
-      );
-    },
-    [devPanelSafeAreaInsets],
-  );
-  const endDevMoodVisualDrag = useCallback(
-    (event: React.PointerEvent<HTMLElement>) => {
-      const dragState = devMoodVisualDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      devMoodVisualDragRef.current = null;
-      devMoodVisualSuppressClickRef.current = dragState.moved;
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      } catch {
-        // Safe no-op for environments without pointer capture support.
-      }
-      if (dragState.moved) {
-        window.setTimeout(() => {
-          devMoodVisualSuppressClickRef.current = false;
-        }, 0);
-      }
-    },
-    [],
-  );
-  const closeImportBotModal = useCallback(() => {
-    setImportBotModalPhase("closed");
-    setImportBotPasteText("");
-    setImportBotPasteError(null);
-    setImportBotPasteBusy(false);
-  }, []);
-  useEffect(() => {
-    if (importBotModalPhase === "closed") return;
-    function onKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        closeImportBotModal();
-      }
-    }
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [importBotModalPhase, closeImportBotModal]);
   useEffect(() => {
     if (!botTransferOverlay) return;
     setBotTransferOverlayNowMs(Date.now());
@@ -54048,7 +52653,6 @@ function HomeContent(): React.JSX.Element {
     setFactoryResetArmed(false);
     setDeleteAccountArmed(false);
     setEditingBotId(null);
-    closeImportBotModal();
     if (botLibraryCloseTimerRef.current) {
       clearTimeout(botLibraryCloseTimerRef.current);
       botLibraryCloseTimerRef.current = null;
@@ -54070,7 +52674,7 @@ function HomeContent(): React.JSX.Element {
     setPanelBotDeleteConfirm(null);
     setSelectedBotDeleteConfirm(null);
     setMemoryPanelLoading(false);
-  }, [closeImportBotModal]);
+  }, []);
 
   const closePanel = useCallback(() => {
     if (!panel || panelClosing) return;
@@ -55069,114 +53673,6 @@ function HomeContent(): React.JSX.Element {
   }, [panel, editingBotId, botPanelView]);
 
   useEffect(() => {
-    if (!devToolsRuntimeActive) return;
-    const panelNode = devToolsPanelRef.current;
-    const node = panelNode ?? devToolsBubbleRef.current;
-    if (!node) return;
-    const rect = node.getBoundingClientRect();
-    if (panelNode) {
-      setDevToolsConsoleOnly(
-        shouldShowDevToolsConsoleOnly(rect.width, rect.height),
-      );
-    }
-
-    setDevToolsPanelPosition((position) => {
-      const next = clampDevToolsPanelPosition(
-        position.x,
-        position.y,
-        rect.width,
-        rect.height,
-        viewportWidth,
-        viewportHeight,
-        devPanelSafeAreaInsets,
-      );
-      return next.x === position.x && next.y === position.y ? position : next;
-    });
-  }, [
-    devPanelSafeAreaInsets,
-    devToolsMinimized,
-    devToolsOpen,
-    devToolsRuntimeActive,
-    viewportHeight,
-    viewportWidth,
-  ]);
-
-  useEffect(() => {
-    const panelNode = devToolsPanelRef.current;
-    if (!panelNode) return;
-    panelNode.style.left = `${devToolsPanelPosition.x}px`;
-    panelNode.style.top = `${devToolsPanelPosition.y}px`;
-    panelNode.style.setProperty(
-      "--dev-tools-panel-left",
-      `${devToolsPanelPosition.x}px`,
-    );
-    panelNode.style.setProperty(
-      "--dev-tools-panel-top",
-      `${devToolsPanelPosition.y}px`,
-    );
-    if (devToolsPanelSize) {
-      panelNode.style.width = `${devToolsPanelSize.width}px`;
-      panelNode.style.height = `${devToolsPanelSize.height}px`;
-    } else {
-      panelNode.style.removeProperty("width");
-      panelNode.style.removeProperty("height");
-    }
-  }, [devToolsPanelPosition, devToolsPanelSize]);
-
-  useEffect(() => {
-    if (!devToolsOpen) {
-      devToolsPanelResizePrimedRef.current = false;
-      return;
-    }
-    const panelNode = devToolsPanelRef.current;
-    if (!panelNode || typeof ResizeObserver === "undefined") return;
-
-    const resizeObserver = new ResizeObserver(() => {
-      const rect = panelNode.getBoundingClientRect();
-      const width = Math.round(rect.width);
-      const height = Math.round(rect.height);
-      setDevToolsConsoleOnly(shouldShowDevToolsConsoleOnly(width, height));
-      const position = devToolsPanelPositionRef.current;
-      const next = clampDevToolsPanelRect(
-        {
-          x: position.x,
-          y: position.y,
-          width,
-          height,
-        },
-        viewportWidth,
-        viewportHeight,
-        devPanelSafeAreaInsets,
-      );
-      if (next.x !== position.x || next.y !== position.y) {
-        const nextPosition = { x: next.x, y: next.y };
-        devToolsPanelPositionRef.current = nextPosition;
-        setDevToolsPanelPosition(nextPosition);
-      }
-
-      const hasSeenInitialMeasurement = devToolsPanelResizePrimedRef.current;
-      devToolsPanelResizePrimedRef.current = true;
-      if (!hasSeenInitialMeasurement && !devToolsPanelSizeRef.current) return;
-
-      setDevToolsPanelSize((current) => {
-        if (
-          current &&
-          Math.abs(current.width - next.width) < 1 &&
-          Math.abs(current.height - next.height) < 1
-        ) {
-          return current;
-        }
-        const nextSize = { width: next.width, height: next.height };
-        devToolsPanelSizeRef.current = nextSize;
-        return nextSize;
-      });
-    });
-
-    resizeObserver.observe(panelNode);
-    return () => resizeObserver.disconnect();
-  }, [devPanelSafeAreaInsets, devToolsOpen, viewportHeight, viewportWidth]);
-
-  useEffect(() => {
     const media = window.matchMedia("(prefers-color-scheme: dark)");
     const update = () => setSystemTheme(media.matches ? "dark" : "light");
     update();
@@ -55225,10 +53721,6 @@ function HomeContent(): React.JSX.Element {
       if (copiedMessageTimerRef.current) {
         clearTimeout(copiedMessageTimerRef.current);
         copiedMessageTimerRef.current = null;
-      }
-      if (copiedAtmospherePromptTimerRef.current) {
-        clearTimeout(copiedAtmospherePromptTimerRef.current);
-        copiedAtmospherePromptTimerRef.current = null;
       }
       if (fieldHelpHideTimerRef.current) {
         clearTimeout(fieldHelpHideTimerRef.current);
@@ -55660,11 +54152,7 @@ function HomeContent(): React.JSX.Element {
     const privateBlurred = isPrivateGeneratedImageHidden(
       sentGeneratedImage.imageId,
     );
-    const imageSrc =
-      isZenToolLabDevImageId(sentGeneratedImage.imageId) &&
-      sentGeneratedImage.displayUrl?.trim()
-        ? sentGeneratedImage.displayUrl.trim()
-        : apiGeneratedImageThumbUrl(sentGeneratedImage.imageId);
+    const imageSrc = apiGeneratedImageThumbUrl(sentGeneratedImage.imageId);
     const image = (
       <>
         {/* eslint-disable-next-line @next/next/no-img-element */}
@@ -56233,10 +54721,7 @@ function HomeContent(): React.JSX.Element {
     return displayAccentForMode(raw, resolvedTheme, appWidePrivateMode);
   }, [appWidePrivateMode, bots, composeBotAccentId, resolvedTheme]);
 
-  const zenPersonaBackdropStyleVars = useMemo(
-    () => zenPersonaBackdropCssVars(zenPersonaBackdropTuning),
-    [zenPersonaBackdropTuning],
-  );
+  const zenPersonaBackdropStyleVars = ZEN_PERSONA_BACKDROP_STYLE_VARS;
 
   const zenPersonaContinuityWashStyle = useMemo<
     React.CSSProperties | undefined
@@ -56450,6 +54935,24 @@ function HomeContent(): React.JSX.Element {
       color: null,
     };
   }, [detail, activeBot, defaultConversationUsesPrismIdentity]);
+  const headerMemoryReceipt = useMemo(() => {
+    const learnerBotId =
+      activeBot?.id ?? zenLivePresenceBot?.id ?? zenPersonaBot?.id ?? null;
+    if (!learnerBotId) return null;
+    return (
+      memoryAcquisitionReceipts.find(
+        (receipt) =>
+          receipt.kind === "bot_relation" &&
+          receipt.readAt === null &&
+          receipt.learnerBotId === learnerBotId,
+      ) ?? null
+    );
+  }, [
+    activeBot?.id,
+    memoryAcquisitionReceipts,
+    zenLivePresenceBot?.id,
+    zenPersonaBot?.id,
+  ]);
   const onlineChatModelOptions = useMemo(
     () => onlineModelOptionsForPicker(modelCatalog, settings),
     [modelCatalog, settings],
@@ -57940,7 +56443,10 @@ function HomeContent(): React.JSX.Element {
             choice === "premium"
               ? "Premium · ONLINE"
               : voiceModeDisplayName(choice),
-          checked: choice === currentChoice,
+          checked:
+            voiceModeSelectorInteractionMode === "keyboard"
+              ? choice === activeHighlightedVoicePlaybackChoice
+              : choice === currentChoice,
           disabled: optionDisabled,
           disabledReason: disabledReason ?? premiumDisabledReason,
           onSelect: () => {
@@ -57981,7 +56487,14 @@ function HomeContent(): React.JSX.Element {
           }
           title={disabled ? disabledReason : undefined}
           disabled={disabled}
-          onClick={() => setVoiceModeSelectorOpen((open) => !open)}
+          onClick={() => {
+            if (!voiceModeSelectorOpen) {
+              announcePrismNavbarPickerOpen(voiceModeSelectorPickerId);
+            }
+            setVoiceModeSelectorInteractionMode("pointer");
+            setHighlightedVoicePlaybackChoice(null);
+            setVoiceModeSelectorOpen((open) => !open);
+          }}
         >
           <span>Speech Type</span>
           <span aria-hidden="true">·</span>
@@ -58004,13 +56517,40 @@ function HomeContent(): React.JSX.Element {
                   },
                   accent: prismDefaultAccentForTheme(resolvedTheme),
                   theme: resolvedTheme,
-                  minWidth: 180,
+                  minWidth: 320,
                   focusRestoreTarget: voiceModeSelectorButtonRef,
                   entries: voiceEntries,
                 }}
                 navbarPicker
+                cursorAgnostic={voiceModeSelectorInteractionMode === "keyboard"}
+                onDismissOutside={() => {
+                  if (voiceModeSelectorInteractionMode !== "keyboard") {
+                    return false;
+                  }
+                  commitHotkeyVoiceSelection();
+                  return true;
+                }}
+                onKeyDownCapture={(event) => {
+                  if (voiceModeSelectorInteractionMode !== "keyboard") return;
+                  if (event.key === "Enter" || event.code === "Space") {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    commitHotkeyVoiceSelection();
+                    return;
+                  }
+                  if (
+                    event.key === "Escape" ||
+                    event.key === "Backspace" ||
+                    event.key === "Delete"
+                  ) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    closeHotkeyVoicePicker();
+                  }
+                }}
                 onClose={(closeOptions) => {
                   setVoiceModeSelectorOpen(false);
+                  setVoiceModeSelectorInteractionMode("pointer");
                   if (closeOptions?.restoreFocus === false) return;
                   window.requestAnimationFrame(() =>
                     voiceModeSelectorButtonRef.current?.focus({
@@ -59915,16 +58455,16 @@ function HomeContent(): React.JSX.Element {
         ? detail.id
         : selectedId
       : null;
-  const summaryDebugMatchesActiveZen =
+  const summarySnapshotMatchesActiveZen =
     activeZenConversationId !== null &&
-    summaryDebug?.conversationId === activeZenConversationId &&
-    summaryDebug?.mode === "zen";
-  const currentZenInternalSummary = summaryDebugMatchesActiveZen
-    ? summaryDebug.latestSummary?.trim() || null
+    summarySnapshot?.conversationId === activeZenConversationId &&
+    summarySnapshot?.mode === "zen";
+  const currentZenInternalSummary = summarySnapshotMatchesActiveZen
+    ? summarySnapshot.latestSummary?.trim() || null
     : null;
-  const currentZenDisplaySummary = summaryDebugMatchesActiveZen
-    ? summaryDebug.latestDisplaySummary?.trim() ||
-      summaryDebug.latestSummary?.trim() ||
+  const currentZenDisplaySummary = summarySnapshotMatchesActiveZen
+    ? summarySnapshot.latestDisplaySummary?.trim() ||
+      summarySnapshot.latestSummary?.trim() ||
       null
     : !chatStartupSummaryIsDefault
       ? chatStartupSummary?.trim() || null
@@ -61397,14 +59937,8 @@ function HomeContent(): React.JSX.Element {
           : new Error("The silent reply did not finish settling.");
       }
       const conversation = result.conversation
-        ? attachLivePsychicScratchpadToConversation(
-            applyCommandDisplayAliases(
-              applyExplicitAskQuestionFallback(result.conversation),
-            ),
-            undefined,
-            psychicTextEnabledForConversation(result.conversation, {
-              productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
-            }),
+        ? applyCommandDisplayAliases(
+            applyExplicitAskQuestionFallback(result.conversation),
           )
         : undefined;
       if (conversation) {
@@ -61916,7 +60450,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <div
         className={`${styles.askQuestionRecallBubbleDock} ${styles.manualCompactionDock}`}
-        data-dev-panel-safe-area="bottom"
+        data-viewport-safe-area="bottom"
         data-compaction-state={manualCompactionStatus.state}
       >
         <div
@@ -61940,413 +60474,6 @@ function HomeContent(): React.JSX.Element {
     selectedId,
     view,
   ]);
-  const copyAtmospherePromptToClipboard = useCallback(
-    async (promptText: string) => {
-      const trimmedPrompt = promptText.trim();
-      if (!trimmedPrompt) return;
-      try {
-        await writeClipboardText(trimmedPrompt);
-        setCopiedAtmospherePromptText(trimmedPrompt);
-        if (copiedAtmospherePromptTimerRef.current) {
-          clearTimeout(copiedAtmospherePromptTimerRef.current);
-        }
-        copiedAtmospherePromptTimerRef.current = setTimeout(() => {
-          setCopiedAtmospherePromptText((current) =>
-            current === trimmedPrompt ? null : current,
-          );
-          copiedAtmospherePromptTimerRef.current = null;
-        }, MESSAGE_COPY_FEEDBACK_MS);
-      } catch {
-        setError(
-          "Copy failed. Select the Atmosphere prompt and copy it manually.",
-        );
-      }
-    },
-    [],
-  );
-
-  const compactedSummaryDebugFloatingEnabled =
-    viewportWidth >= COMPACTED_SUMMARY_DEBUG_PANEL_FLOATING_MIN_VIEWPORT_WIDTH;
-  const compactedSummaryDebugPanelStyle = useMemo(
-    () =>
-      ({
-        "--compacted-summary-debug-left": `${compactedSummaryDebugPanelRect.x}px`,
-        "--compacted-summary-debug-top": `${compactedSummaryDebugPanelRect.y}px`,
-        "--compacted-summary-debug-width": `${compactedSummaryDebugPanelRect.width}px`,
-        "--compacted-summary-debug-height": `${compactedSummaryDebugPanelRect.height}px`,
-      }) as React.CSSProperties,
-    [compactedSummaryDebugPanelRect],
-  );
-  const startCompactedSummaryDebugPanelDrag = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      if (!compactedSummaryDebugFloatingEnabled || event.button !== 0) return;
-      const target = event.target;
-      if (
-        target instanceof Element &&
-        target.closest("button, a, input, textarea, select, [role='button']")
-      ) {
-        return;
-      }
-      const panel = compactedSummaryDebugDockRef.current;
-      if (!panel) return;
-      const rect = panel.getBoundingClientRect();
-      compactedSummaryDebugPanelDragRef.current = {
-        pointerId: event.pointerId,
-        offsetX: event.clientX - rect.left,
-        offsetY: event.clientY - rect.top,
-      };
-
-      try {
-        event.currentTarget.setPointerCapture(event.pointerId);
-      } catch {
-        // Pointer capture is missing in some test environments.
-      }
-      event.preventDefault();
-    },
-    [compactedSummaryDebugFloatingEnabled],
-  );
-  const dragCompactedSummaryDebugPanel = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      const dragState = compactedSummaryDebugPanelDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      const panel = compactedSummaryDebugDockRef.current;
-      if (!panel) return;
-
-      const rect = panel.getBoundingClientRect();
-      const next = clampCompactedSummaryDebugPanelRect(
-        {
-          x: event.clientX - dragState.offsetX,
-          y: event.clientY - dragState.offsetY,
-          width: rect.width,
-          height: rect.height,
-        },
-        window.innerWidth,
-        window.innerHeight,
-        devPanelSafeAreaInsets,
-      );
-      panel.style.setProperty("--compacted-summary-debug-left", `${next.x}px`);
-      panel.style.setProperty("--compacted-summary-debug-top", `${next.y}px`);
-      panel.style.setProperty(
-        "--compacted-summary-debug-width",
-        `${next.width}px`,
-      );
-      panel.style.setProperty(
-        "--compacted-summary-debug-height",
-        `${next.height}px`,
-      );
-      setCompactedSummaryDebugPanelRect(next);
-    },
-    [devPanelSafeAreaInsets],
-  );
-  const endCompactedSummaryDebugPanelDrag = useCallback(
-    (event: React.PointerEvent<HTMLDivElement>) => {
-      const dragState = compactedSummaryDebugPanelDragRef.current;
-      if (!dragState || dragState.pointerId !== event.pointerId) return;
-      compactedSummaryDebugPanelDragRef.current = null;
-
-      try {
-        event.currentTarget.releasePointerCapture(event.pointerId);
-      } catch {
-        // Safe no-op for environments without pointer capture support.
-      }
-    },
-    [],
-  );
-
-  useEffect(() => {
-    if (!compactedSummaryDebugFloatingEnabled) return;
-    setCompactedSummaryDebugPanelRect((current) => {
-      const next = clampCompactedSummaryDebugPanelRect(
-        current,
-        viewportWidth,
-        viewportHeight,
-        devPanelSafeAreaInsets,
-      );
-      return next.x === current.x &&
-        next.y === current.y &&
-        next.width === current.width &&
-        next.height === current.height
-        ? current
-        : next;
-    });
-  }, [
-    compactedSummaryDebugFloatingEnabled,
-    devPanelSafeAreaInsets,
-    viewportHeight,
-    viewportWidth,
-  ]);
-
-  useEffect(() => {
-    if (
-      !compactedSummaryDebugFloatingEnabled ||
-      compactedSummaryDebugMinimized ||
-      !devToolsRuntimeActive
-    ) {
-      return;
-    }
-    const panel = compactedSummaryDebugDockRef.current;
-    if (!panel || typeof ResizeObserver === "undefined") return;
-
-    const resizeObserver = new ResizeObserver(([entry]) => {
-      const width = Math.round(entry.contentRect.width);
-      const height = Math.round(entry.contentRect.height);
-      setCompactedSummaryDebugPanelRect((current) => {
-        if (
-          Math.abs(width - current.width) < 1 &&
-          Math.abs(height - current.height) < 1
-        ) {
-          return current;
-        }
-        return clampCompactedSummaryDebugPanelRect(
-          { ...current, width, height },
-          viewportWidth,
-          viewportHeight,
-          devPanelSafeAreaInsets,
-        );
-      });
-    });
-    resizeObserver.observe(panel);
-    return () => resizeObserver.disconnect();
-  }, [
-    compactedSummaryDebugFloatingEnabled,
-    compactedSummaryDebugMinimized,
-    devPanelSafeAreaInsets,
-    devToolsRuntimeActive,
-    viewportHeight,
-    viewportWidth,
-  ]);
-
-  const compactedSummaryDebugNode = useMemo(() => {
-    if (!devToolsRuntimeActive) return null;
-    if (view !== "chat") return null;
-    const summaryFromManual =
-      manualCompactionStatus?.conversationId === activeZenConversationId &&
-      manualCompactionStatus.mode === "zen"
-        ? manualCompactionStatus.summary
-        : null;
-    const displaySummaryText =
-      currentZenDisplaySummary ||
-      (summaryFromManual ?? "").trim() ||
-      zenSessionBreak?.displaySummary ||
-      null;
-    const internalSummaryText =
-      currentZenInternalSummary || zenSessionBreak?.internalSummary || null;
-    const summaryText =
-      displaySummaryText || internalSummaryText || "No compacted summary yet.";
-    const showInternalSummary = Boolean(
-      displaySummaryText &&
-      internalSummaryText &&
-      displaySummaryText.trim() !== internalSummaryText.trim(),
-    );
-    const summaryAt = summaryDebugMatchesActiveZen
-      ? summaryDebug.latestSummaryAt
-      : (manualCompactionStatus?.summaryAt ?? null);
-    const latestAtmosphereEntry =
-      zenAtmosphereTimeline.reduce<ZenWallpaperHistoryEntry | null>(
-        (latest, entry) => {
-          if (!entry.promptSeed?.trim()) return latest;
-          if (!latest) return entry;
-          const countDelta =
-            entry.generationMessageCount - latest.generationMessageCount;
-          if (countDelta !== 0) return countDelta > 0 ? entry : latest;
-          return (entry.createdAt ?? "").localeCompare(latest.createdAt ?? "") >
-            0
-            ? entry
-            : latest;
-        },
-        null,
-      );
-    const atmospherePromptText =
-      latestAtmosphereEntry?.promptSeed?.trim() ||
-      detail?.zenWallpaper?.promptSeed?.trim() ||
-      null;
-    const atmospherePromptCopyText = customAtmospherePromptEnabled
-      ? customAtmospherePromptDraft.trim()
-      : atmospherePromptText;
-    const atmospherePromptLabel = customAtmospherePromptEnabled
-      ? "custom $atmosphere"
-      : latestAtmosphereEntry?.generationMessageCount !== undefined
-        ? `message ${latestAtmosphereEntry.generationMessageCount}`
-        : detail?.zenWallpaper?.generationMessageCount !== null &&
-            detail?.zenWallpaper?.generationMessageCount !== undefined
-          ? `message ${detail.zenWallpaper.generationMessageCount}`
-          : null;
-    return (
-      <div
-        ref={compactedSummaryDebugDockRef}
-        className={styles.compactedSummaryDebugDock}
-        role="note"
-        data-floating={
-          compactedSummaryDebugFloatingEnabled ? "true" : undefined
-        }
-        data-minimized={compactedSummaryDebugMinimized ? "true" : undefined}
-        style={compactedSummaryDebugPanelStyle}
-      >
-        <div
-          className={styles.compactedSummaryDebugBubble}
-          data-minimized={compactedSummaryDebugMinimized ? "true" : undefined}
-          data-empty={
-            !displaySummaryText &&
-            !internalSummaryText &&
-            !atmospherePromptText &&
-            !customAtmospherePromptEnabled
-              ? "true"
-              : undefined
-          }
-        >
-          <div
-            className={styles.compactedSummaryDebugHeader}
-            onPointerDown={startCompactedSummaryDebugPanelDrag}
-            onPointerMove={dragCompactedSummaryDebugPanel}
-            onPointerUp={endCompactedSummaryDebugPanelDrag}
-            onPointerCancel={endCompactedSummaryDebugPanelDrag}
-          >
-            <div className={styles.compactedSummaryDebugTitle}>
-              <strong>Compacted context</strong>
-              <span>zen{summaryAt ? ` - ${summaryAt}` : ""}</span>
-            </div>
-            <span
-              className={styles.compactedSummaryDebugGrip}
-              aria-hidden="true"
-            />
-            <button
-              type="button"
-              className={styles.compactedSummaryDebugMinimizeButton}
-              aria-label={
-                compactedSummaryDebugMinimized
-                  ? "Expand compacted context"
-                  : "Minimize compacted context"
-              }
-              aria-expanded={!compactedSummaryDebugMinimized}
-              title={
-                compactedSummaryDebugMinimized
-                  ? "Expand compacted context"
-                  : "Minimize compacted context"
-              }
-              data-glyph-tooltip={
-                compactedSummaryDebugMinimized
-                  ? "Expand compacted context"
-                  : "Minimize compacted context"
-              }
-              onClick={() => {
-                setCompactedSummaryDebugMinimized((current) => !current);
-              }}
-            >
-              {compactedSummaryDebugMinimized ? (
-                <Maximize2 aria-hidden="true" size={14} />
-              ) : (
-                <Minimize2 aria-hidden="true" size={14} />
-              )}
-            </button>
-          </div>
-          {compactedSummaryDebugMinimized ? null : (
-            <>
-              <pre>{summaryText}</pre>
-              {showInternalSummary ? (
-                <div className={styles.compactedSummaryDebugDetails}>
-                  <span>Internal compact</span>
-                  <pre>{internalSummaryText}</pre>
-                </div>
-              ) : null}
-              <div
-                className={styles.compactedSummaryDebugDetails}
-                data-kind="atmosphere"
-                data-custom={customAtmospherePromptEnabled ? "true" : undefined}
-                data-copy-state={
-                  atmospherePromptCopyText &&
-                  copiedAtmospherePromptText === atmospherePromptCopyText
-                    ? "copied"
-                    : undefined
-                }
-              >
-                <div className={styles.compactedSummaryDebugDetailsHeader}>
-                  <span>
-                    Atmosphere prompt
-                    {atmospherePromptLabel ? ` - ${atmospherePromptLabel}` : ""}
-                  </span>
-                  <span className={styles.compactedSummaryDebugHeaderActions}>
-                    <label className={styles.compactedSummaryDebugToggle}>
-                      <input
-                        type="checkbox"
-                        checked={customAtmospherePromptEnabled}
-                        onChange={(event) => {
-                          const next = event.target.checked;
-                          setCustomAtmospherePromptEnabled(next);
-                          if (next) {
-                            setCustomAtmospherePromptDraft("");
-                          }
-                        }}
-                      />
-                      Custom
-                    </label>
-                    <button
-                      type="button"
-                      className={styles.compactedSummaryDebugCopyButton}
-                      disabled={!atmospherePromptCopyText}
-                      title="Copy Atmosphere prompt to clipboard"
-                      aria-label="Copy Atmosphere prompt to clipboard"
-                      onClick={() => {
-                        if (!atmospherePromptCopyText) return;
-                        void copyAtmospherePromptToClipboard(
-                          atmospherePromptCopyText,
-                        );
-                      }}
-                    >
-                      {atmospherePromptCopyText &&
-                      copiedAtmospherePromptText === atmospherePromptCopyText
-                        ? "Copied"
-                        : "Copy"}
-                    </button>
-                  </span>
-                </div>
-                {customAtmospherePromptEnabled ? (
-                  <textarea
-                    className={styles.compactedSummaryDebugPromptEditor}
-                    value={customAtmospherePromptDraft}
-                    onChange={(event) =>
-                      setCustomAtmospherePromptDraft(event.target.value)
-                    }
-                    placeholder="Type the exact Atmosphere prompt to test with $atmosphere..."
-                    aria-label="Custom Atmosphere prompt"
-                  />
-                ) : (
-                  <pre data-empty={atmospherePromptText ? undefined : "true"}>
-                    {atmospherePromptText ?? "No Atmosphere prompt yet."}
-                  </pre>
-                )}
-              </div>
-            </>
-          )}
-        </div>
-      </div>
-    );
-  }, [
-    activeZenConversationId,
-    compactedSummaryDebugMinimized,
-    compactedSummaryDebugFloatingEnabled,
-    compactedSummaryDebugPanelStyle,
-    copiedAtmospherePromptText,
-    copyAtmospherePromptToClipboard,
-    currentZenDisplaySummary,
-    currentZenInternalSummary,
-    customAtmospherePromptDraft,
-    customAtmospherePromptEnabled,
-    detail?.zenWallpaper?.generationMessageCount,
-    detail?.zenWallpaper?.promptSeed,
-    detail?.id,
-    devToolsRuntimeActive,
-    manualCompactionStatus,
-    dragCompactedSummaryDebugPanel,
-    endCompactedSummaryDebugPanelDrag,
-    startCompactedSummaryDebugPanelDrag,
-    summaryDebug,
-    summaryDebugMatchesActiveZen,
-    view,
-    zenAtmosphereTimeline,
-    zenSessionBreak,
-  ]);
-  // Metrics now live in the floating developer terminal, not inside the chat transcript.
-  const devChatDebugEventsNode = null;
 
   const clearConversationUnread = useCallback((conversationId: string) => {
     setUnreadConversationIds((previous) => {
@@ -62689,27 +60816,6 @@ function HomeContent(): React.JSX.Element {
     conversationId: string;
     message: string;
   } | null>(null);
-  const [coffeeDevModeEnabled, setCoffeeDevModeEnabled] = useState(false);
-  const coffeeDevModeEnabledRef = useRef(false);
-  const [coffeeDevPanelBotId, setCoffeeDevPanelBotId] = useState<string | null>(
-    null,
-  );
-  const [coffeeDevSocialDraftByBotId, setCoffeeDevSocialDraftByBotId] =
-    useState<Record<string, CoffeeBotSocialSnapshot>>({});
-  const [coffeeDevMoodSavingBotId, setCoffeeDevMoodSavingBotId] = useState<
-    string | null
-  >(null);
-  const [coffeeDevSipBusyBotId, setCoffeeDevSipBusyBotId] = useState<
-    string | null
-  >(null);
-  const [coffeeDevSpeakBusyBotId, setCoffeeDevSpeakBusyBotId] = useState<
-    string | null
-  >(null);
-  const [coffeeDevUndoBusy, setCoffeeDevUndoBusy] = useState(false);
-  const [coffeeDevPanelPosition, setCoffeeDevPanelPosition] =
-    useState<CoffeeDevPanelPosition | null>(null);
-  const coffeeDevBotPanelRef = useRef<HTMLElement | null>(null);
-  const coffeeDevPanelDragRef = useRef<CoffeeDevPanelDragState | null>(null);
   const coffeeWorkspaceRef = useRef<HTMLDivElement | null>(null);
   const coffeeStageRef = useRef<HTMLElement | null>(null);
   const coffeeTableSceneRef = useRef<HTMLDivElement | null>(null);
@@ -62912,20 +61018,8 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     clearCoffeeRefillAcknowledgement();
   }, [clearCoffeeRefillAcknowledgement, coffeeConversation?.id]);
-  const coffeeSeatDebugDragRef = useRef<CoffeeSeatDebugDragState | null>(null);
-  const coffeeSeatDebugSuppressClickRef = useRef<string | null>(null);
-  const [coffeeSeatDebugDraggingBotId, setCoffeeSeatDebugDraggingBotId] =
-    useState<string | null>(null);
-  const [coffeeSeatDebugOverrides, setCoffeeSeatDebugOverrides] = useState<
-    Record<string, { leftPct: number; topPct: number }>
-  >({});
-  const [coffeeDevCopiedCoordinates, setCoffeeDevCopiedCoordinates] =
-    useState<CoffeeDevCopiedCoordinates | null>(null);
-  const [coffeeTopicDebugClipboard, setCoffeeTopicDebugClipboard] =
-    useState<CoffeeTopicDebugClipboardState | null>(null);
-  /** Dev: index into {@link COFFEE_SEAT_MOOD_DEV_CYCLE} for cycling all seat-plate moods. */
-  const [coffeeSeatMoodDevCycleIndex, setCoffeeSeatMoodDevCycleIndex] =
-    useState(0);
+  const [coffeeTopicClipboardFallback, setCoffeeTopicClipboardFallback] =
+    useState<CoffeeTopicClipboardFallbackState | null>(null);
   const [coffeeSessionPhase, setCoffeeSessionPhase] =
     useState<CoffeeSessionPhase>("selecting");
   const [coffeeIntroPlaying, setCoffeeIntroPlaying] = useState(false);
@@ -64432,7 +62526,6 @@ function HomeContent(): React.JSX.Element {
     setActiveTutorialStepIndex(0);
     setCommandCenterHelpModalOpen(false);
     setChatOverflowMenuOpen(false);
-    closeDevTools();
     setMessageContextMenu(null);
     setContextFocusedMessageId(null);
     setMobileFocusedMessageId(null);
@@ -64470,7 +62563,7 @@ function HomeContent(): React.JSX.Element {
     setStoryMapOpen(false);
     setStoryInventoryOpen(false);
     setStoryTranscriptOpen(false);
-  }, [closeDevTools, panel]);
+  }, [panel]);
   const clearCoffeeTranscriptCloseTimer = (): void => {
     if (coffeeTranscriptCloseTimerRef.current) {
       clearTimeout(coffeeTranscriptCloseTimerRef.current);
@@ -64746,17 +62839,6 @@ function HomeContent(): React.JSX.Element {
       }
     };
   }, []);
-  useEffect(() => {
-    coffeeDevModeEnabledRef.current = coffeeDevModeEnabled;
-  }, [coffeeDevModeEnabled]);
-  useEffect(() => {
-    if (view !== "coffee" && coffeeDevModeEnabledRef.current) {
-      applyCoffeeDevMode(false);
-    }
-  }, [view]);
-  useEffect(() => {
-    applyCoffeeDevMode(false);
-  }, [coffeeConversation?.id]);
   useEffect(() => {
     coffeeAutoplayPausedRef.current =
       coffeeAutoplayPaused || prismSystemPaused || prismPresentationSuspended;
@@ -65162,30 +63244,6 @@ function HomeContent(): React.JSX.Element {
     coffeeActivePollRef.current = coffeeActivePoll;
   }, [coffeeActivePoll]);
   useEffect(() => {
-    if (!coffeeDevPanelPosition) return;
-    const panel = coffeeDevBotPanelRef.current;
-    if (!panel) return;
-    const offsetParent =
-      panel.offsetParent instanceof HTMLElement
-        ? panel.offsetParent
-        : panel.parentElement;
-    const containerRect = offsetParent?.getBoundingClientRect();
-    if (!containerRect) return;
-    const rect = panel.getBoundingClientRect();
-    setCoffeeDevPanelPosition((current) => {
-      if (!current) return current;
-      const next = clampCoffeeDevPanelPosition(
-        current.x,
-        current.y,
-        rect.width,
-        rect.height,
-        containerRect.width,
-        containerRect.height,
-      );
-      return next.x === current.x && next.y === current.y ? current : next;
-    });
-  }, [coffeeDevPanelPosition, viewportHeight, viewportWidth]);
-  useEffect(() => {
     const conversation = coffeeConversation;
     const poll = coffeeActivePoll;
     if (!conversation || !poll) return;
@@ -65428,7 +63486,6 @@ function HomeContent(): React.JSX.Element {
       autoplayPaused:
         coffeeAutoplayPausedRef.current ||
         coffeeModelWarmupRef.current !== null,
-      devModeEnabled: coffeeDevModeEnabledRef.current,
       requestInFlight,
       pendingReveal:
         coffeePendingRevealConversation !== null ||
@@ -65461,7 +63518,6 @@ function HomeContent(): React.JSX.Element {
       autoplayPaused:
         coffeeAutoplayPausedRef.current ||
         coffeeModelWarmupRef.current !== null,
-      devModeEnabled: coffeeDevModeEnabledRef.current,
       rhythmState: coffeeTurnRhythmStateRef.current,
       loopScheduled: coffeeLoopTimerOwnsAutoplayTurn({
         timerPresent,
@@ -65490,7 +63546,6 @@ function HomeContent(): React.JSX.Element {
   }, [
     coffeeAutoplayPaused,
     coffeeConversation?.id,
-    coffeeDevModeEnabled,
     coffeeModelWarmup,
     coffeeSessionClockMs,
     coffeeSessionEndsAtMs,
@@ -73051,14 +71106,6 @@ function HomeContent(): React.JSX.Element {
       cancelled = true;
     };
   }, [appWidePrivateMode, view, zenPersonaBotId]);
-  const zenToolLabHasActiveThread = Boolean(
-    view === "chat" &&
-    detail?.id &&
-    detail.id !== "pending" &&
-    (visibleDetailMessages.length > 0 ||
-      pendingReplyVisible ||
-      zenInitialThinkingActive),
-  );
   const emptyStateTypingSearchAvailable =
     (view === "chat" || view === "sandbox") &&
     pickerSourceBots.length > 0 &&
@@ -73839,14 +71886,6 @@ function HomeContent(): React.JSX.Element {
     user,
     view,
   ]);
-  useEffect(() => {
-    if (!devToolsOpen) return;
-    void refreshSummaryDebug(summaryModeForView(view));
-  }, [devToolsOpen, view, detail?.id, detail?.messages.length, selectedId]);
-  useEffect(() => {
-    if (!devToolsRuntimeActive) return;
-    void refreshSummaryDebug(summaryModeForView(view));
-  }, [devToolsRuntimeActive, view, detail?.id, selectedId]);
   useEffect(() => {
     return () => {
       if (botLibraryCloseTimerRef.current) {
@@ -75631,9 +73670,12 @@ function HomeContent(): React.JSX.Element {
   async function restartBackendFromConnectionNotice(): Promise<void> {
     setBackendRestartBusy(true);
     try {
-      await api<{ restarting?: boolean; mode?: string }>("/api/dev/restart", {
+      await api<{ restarting?: boolean; mode?: string }>(
+        "/api/maintenance/restart",
+        {
         method: "POST",
-      });
+        },
+      );
       window.setTimeout(() => {
         void retryBackendConnection();
       }, 900);
@@ -75990,11 +74032,6 @@ function HomeContent(): React.JSX.Element {
       comfyUiWorkflows: Array.isArray(d.settings.comfyUiWorkflows)
         ? (d.settings.comfyUiWorkflows as ComfyUiWorkflowRegistration[])
         : [],
-      devMemoriesEnabled: d.settings.devMemoriesEnabled === true,
-      devMemoriesText:
-        typeof d.settings.devMemoriesText === "string"
-          ? d.settings.devMemoriesText
-          : "",
       zenPersonaTransitionChoice,
       prismDefaultLlmModel:
         typeof d.settings.prismDefaultLlmModel === "string"
@@ -76514,7 +74551,7 @@ function HomeContent(): React.JSX.Element {
       await refreshBotMemories(memoryPanelBot.id);
     }
   }
-  async function refreshSummaryDebug(
+  async function refreshSummarySnapshot(
     modeOverride?: ChatLikeSummaryMode,
   ): Promise<void> {
     const conversationId =
@@ -76522,177 +74559,20 @@ function HomeContent(): React.JSX.Element {
         ? detailIdRef.current
         : selectedIdRef.current;
     if (!conversationId) {
-      setSummaryDebug(null);
+      setSummarySnapshot(null);
       return;
     }
     const modeForDebug = modeOverride ?? summaryModeForView(view);
     try {
-      const d = await api<{ debug: SummaryCompactionDebug }>(
+      const d = await api<{ debug: SummaryCompactionSnapshot }>(
         `/api/conversations/${encodeURIComponent(
           conversationId,
         )}/summarization-debug?mode=${modeForDebug}`,
       );
-      setSummaryDebug(d.debug);
+      setSummarySnapshot(d.debug);
     } catch {
       // Developer-only surface; ignore read failures.
     }
-  }
-  const appendDevChatDebugLines = useCallback(
-    (
-      entries: Array<{
-        kind: DevChatDebugEvent["kind"];
-        text: string;
-      }>,
-    ) => {
-      if (!devChatMetricsTerminalActive || entries.length === 0) return;
-      const createdAt = new Date().toISOString();
-      const nextEvents = entries.map((entry, index) => ({
-        id: `dev-metric-${createdAt}-${index}-${Math.random().toString(36).slice(2, 9)}`,
-        createdAt,
-        kind: entry.kind,
-        text: entry.text,
-      }));
-      setDevChatDebugEvents((current) => [
-        ...current.slice(-60),
-        ...nextEvents,
-      ]);
-    },
-    [devChatMetricsTerminalActive],
-  );
-
-  function collectDebugLinesFromEnvelope(
-    envelope: ChatPostEnvelope,
-    source: "send" | "edit",
-  ): Array<{ kind: DevChatDebugEvent["kind"]; text: string }> {
-    const lines: Array<{ kind: DevChatDebugEvent["kind"]; text: string }> = [];
-    const prefix = source === "edit" ? "[edit]" : "[send]";
-    for (const event of envelope.backendEvents ?? []) {
-      lines.push({
-        kind: devDebugKindForBackendEvent(event.kind),
-        text: formatBackendDebugLine(prefix, event),
-      });
-    }
-    if (envelope.summaryCompaction?.triggered) {
-      const summaryPreview = envelope.summaryCompaction.latestSummary?.trim();
-      lines.push({
-        kind: "summary",
-        text: `${prefix} summary (${envelope.summaryCompaction.mode}, ${envelope.summaryCompaction.reason}) triggered.`,
-      });
-      if (summaryPreview && summaryPreview.length > 0) {
-        lines.push({
-          kind: "summary",
-          text: `${prefix} summary text: ${summaryPreview}`,
-        });
-      }
-    }
-    const createdMemories = envelope.memoryLearned?.created ?? [];
-    const retractedMemories = envelope.memoryLearned?.retracted ?? [];
-    const rejectedMemories = envelope.memoryLearned?.rejected ?? [];
-    if (createdMemories.length > 0) {
-      lines.push({
-        kind: "memory",
-        text: `${prefix} memories created (${createdMemories.length}): ${createdMemories
-          .map((memory) => memory.text)
-          .join(" | ")}`,
-      });
-    }
-    if (retractedMemories.length > 0) {
-      lines.push({
-        kind: "memory",
-        text: `${prefix} memories retracted (${retractedMemories.length}): ${retractedMemories
-          .map((memory) => memory.text)
-          .join(" | ")}`,
-      });
-    }
-    if (rejectedMemories.length > 0) {
-      lines.push({
-        kind: "memory",
-        text: `${prefix} memories rejected (${rejectedMemories.length}).`,
-      });
-    }
-    if (envelope.opinion) {
-      lines.push({
-        kind: "opinion",
-        text: `${prefix} session opinion: ${envelope.opinion.band} ${envelope.opinion.score}% (${envelope.opinion.trend})`,
-      });
-    }
-    if (envelope.botOpinion) {
-      lines.push({
-        kind: "opinion",
-        text: `${prefix} bot opinion: ${envelope.botOpinion.band} ${envelope.botOpinion.score}% (${envelope.botOpinion.trend})`,
-      });
-    }
-    if (envelope.autoRecovery) {
-      const recovery = envelope.autoRecovery;
-      lines.push({
-        kind: "summary",
-        text:
-          `${prefix} Auto recovered with ${recovery.finalProvider}:${recovery.finalModel}. ` +
-          recovery.attempts
-            .map(
-              (attempt) =>
-                `${attempt.provider}:${attempt.model}=${attempt.outcome}${attempt.reason ? `(${attempt.reason})` : ""}`,
-            )
-            .join(" -> "),
-      });
-    }
-    if (
-      envelope.psychicDebug &&
-      psychicTextEnabledForConversation(envelope.conversation, {
-        productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
-      })
-    ) {
-      const debug = envelope.psychicDebug;
-      lines.push({
-        kind: "summary",
-        text:
-          `${prefix} psychic ${debug.simulated ? "simulated effort" : "summary"} ` +
-          `(${debug.provider}${debug.model ? `:${debug.model}` : ""}, effort=${debug.effort}): ` +
-          debug.summary,
-      });
-      if (
-        typeof debug.passCount === "number" ||
-        typeof debug.guidanceChars === "number"
-      ) {
-        lines.push({
-          kind: "summary",
-          text:
-            `${prefix} psychic diagnostics: passes=${debug.passCount ?? 0}; ` +
-            `guidance=${debug.guidanceChars ?? 0} chars`,
-        });
-      }
-      for (const pass of debug.passes ?? []) {
-        lines.push({
-          kind: "summary",
-          text:
-            `${prefix} psychic pass ${pass.name}: ${pass.chars} chars` +
-            (pass.warning ? `; warning=${pass.warning}` : ""),
-        });
-      }
-      if (debug.scratchpad.trim().length > 0) {
-        lines.push({
-          kind: "summary",
-          text: `${prefix} psychic scratchpad: ${debug.scratchpad}`,
-        });
-      }
-    }
-    const toolCallEvents = envelope.toolCalls ?? [];
-    for (const event of toolCallEvents) {
-      lines.push({
-        kind: "tool",
-        text: formatChatToolCallDebugLine(prefix, event),
-      });
-    }
-    if (envelope.pendingImageJob) {
-      lines.push({
-        kind: "tool",
-        text:
-          `${prefix} tool sendGeneratedImage queued — pending image job ` +
-          `${envelope.pendingImageJob.jobId} ` +
-          `(conversation ${envelope.pendingImageJob.conversationId ?? "incognito"})`,
-      });
-    }
-    return lines;
   }
   async function refreshBots(): Promise<Bot[]> {
     const d = await api<{ bots: Bot[] }>("/api/bots");
@@ -76758,6 +74638,85 @@ function HomeContent(): React.JSX.Element {
       recoveries: ImageAssetCleanupRecoverySummary[];
     }>("/api/images/cleanup-recovery");
     setImageCleanupRecoveries(response.recoveries);
+  }
+
+  function createHelpDiagnosticReport(): string {
+    const rendering = getPrismSceneDiagnosticsSnapshot();
+    return buildHelpDiagnosticReport({
+      version: PRISM_APP_VERSION,
+      surface: view,
+      provider: effectivePreferredProvider,
+      botCount: bots.length,
+      conversationCount: visibleConversations.length,
+      memoryCount: memories.length,
+      backendState: helpConnectionState,
+      rendering: {
+        rendererStatus: rendering.rendererStatus,
+        lifecycle: rendering.lifecycle,
+        quality: rendering.quality,
+        targetFps: rendering.targetFps,
+        observedFps: rendering.observedFps,
+        p95FrameIntervalMs: rendering.p95FrameIntervalMs,
+        missedFramePercentage: rendering.missedFramePercentage,
+        effectiveDpr: rendering.effectiveDpr,
+        contextLossCount: rendering.contextLossCount,
+      },
+      runtime: {
+        route: window.location.pathname,
+        online: navigator.onLine,
+        language: navigator.language || "unknown",
+        timeZone:
+          Intl.DateTimeFormat().resolvedOptions().timeZone || "unknown",
+        viewportWidth: window.innerWidth,
+        viewportHeight: window.innerHeight,
+        devicePixelRatio: window.devicePixelRatio,
+        userAgent: navigator.userAgent || "unknown",
+      },
+    });
+  }
+
+  async function testHelpConnection(): Promise<void> {
+    if (helpConnectionState === "checking") return;
+    setHelpConnectionState("checking");
+    setHelpFeedback("Checking the local PRISM service…");
+    try {
+      await api<{ ok?: boolean }>("/api/health");
+      setHelpConnectionState("connected");
+      setHelpFeedback("Local service is connected.");
+    } catch (cause) {
+      setHelpConnectionState("error");
+      setHelpFeedback(
+        cause instanceof Error
+          ? `Connection check failed: ${cause.message}`
+          : "Connection check failed.",
+      );
+    }
+  }
+
+  async function copyHelpDiagnosticReport(): Promise<void> {
+    try {
+      await writeDiagnosticClipboard(createHelpDiagnosticReport());
+      setHelpFeedback("Support report copied. It contains no conversation content or credentials.");
+    } catch (cause) {
+      setHelpFeedback(
+        cause instanceof Error
+          ? `Could not copy the report: ${cause.message}`
+          : "Could not copy the support report.",
+      );
+    }
+  }
+
+  function downloadHelpDiagnosticReport(): void {
+    const blob = new Blob([createHelpDiagnosticReport()], {
+      type: "text/plain;charset=utf-8",
+    });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `prism-support-${new Date().toISOString().slice(0, 10)}.txt`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+    setHelpFeedback("Support report downloaded.");
   }
 
   async function previewUnusedImageAssets(): Promise<void> {
@@ -78198,33 +76157,6 @@ function HomeContent(): React.JSX.Element {
     };
   }
 
-  function appendDevChatRouteStart(
-    source: "send" | "edit",
-    body: ReturnType<typeof buildChatRequestBody>,
-  ): void {
-    const prefix = source === "edit" ? "[edit]" : "[send]";
-    const messageLength =
-      typeof body.message === "string" ? body.message.length : 0;
-    const modeLabel = body.mode ?? "sandbox";
-    const botLabel =
-      typeof body.botId === "string" && body.botId.length > 0
-        ? body.botId
-        : body.botId === null
-          ? "default"
-          : "unchanged";
-    appendDevChatDebugLines([
-      {
-        kind: "backend",
-        text:
-          `${prefix} route POST /api/chat started — mode=${modeLabel}; ` +
-          `chars=${messageLength}; bot=${botLabel}; ` +
-          `provider=${body.preferredProvider ?? "auto"}; ` +
-          `model=${body.modelOverride ?? "auto"}; ` +
-          `incognito=${body.incognito === true ? "yes" : "no"}`,
-      },
-    ]);
-  }
-
   function beginEditMessage(msg: Message): void {
     if (!messageHistoryMutationActionsEnabled) return;
     closeMessageContextOverlay();
@@ -78357,7 +76289,6 @@ function HomeContent(): React.JSX.Element {
           ephemeralMessages: rewoundMessages,
           ...editChatOptions,
         });
-        appendDevChatRouteStart("edit", chatBody);
         const d = await api<ChatPostEnvelope>("/api/chat", {
           method: "POST",
           body: JSON.stringify(chatBody),
@@ -78370,15 +76301,8 @@ function HomeContent(): React.JSX.Element {
           null,
         );
         pushMemoryToasts(d.memoryLearned);
-        appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
-        const patchedConversation = attachLivePsychicScratchpadToConversation(
-          applyCommandDisplayAliases(
-            applyExplicitAskQuestionFallback(d.conversation),
-          ),
-          d.psychicDebug,
-          psychicTextEnabledForConversation(d.conversation, {
-            productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
-          }),
+        const patchedConversation = applyCommandDisplayAliases(
+          applyExplicitAskQuestionFallback(d.conversation),
         );
         markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
@@ -78410,7 +76334,6 @@ function HomeContent(): React.JSX.Element {
           ...editChatOptions,
           conversationIdOverride: selectedId,
         });
-        appendDevChatRouteStart("edit", chatBody);
         const d = await api<ChatPostEnvelope>("/api/chat", {
           method: "POST",
           body: JSON.stringify(chatBody),
@@ -78423,15 +76346,8 @@ function HomeContent(): React.JSX.Element {
           null,
         );
         pushMemoryToasts(d.memoryLearned);
-        appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "edit"));
-        const patchedConversation = attachLivePsychicScratchpadToConversation(
-          applyCommandDisplayAliases(
-            applyExplicitAskQuestionFallback(d.conversation),
-          ),
-          d.psychicDebug,
-          psychicTextEnabledForConversation(d.conversation, {
-            productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
-          }),
+        const patchedConversation = applyCommandDisplayAliases(
+          applyExplicitAskQuestionFallback(d.conversation),
         );
         markLatestAssistantRevealEligible(patchedConversation);
         setDetail(patchedConversation);
@@ -78508,161 +76424,6 @@ function HomeContent(): React.JSX.Element {
     void performMessageEdit(messageId, text, options);
   }
 
-  function buildZenToolLabEphemeralMessage(toolId: ZenToolLabToolId): Message {
-    const sample = buildZenToolLabMessageSample(toolId);
-    return {
-      id: `dev-tool-lab-${toolId}-${Date.now()}-${Math.random().toString(36).slice(2, 9)}`,
-      role: "assistant",
-      createdAt: new Date().toISOString(),
-      provider: "local",
-      model: "dev/tool-lab",
-      content: sample.content,
-      ...(sample.askQuestion ? { askQuestion: sample.askQuestion } : {}),
-      ...(sample.tellFictionalStory
-        ? { tellFictionalStory: sample.tellFictionalStory }
-        : {}),
-      ...(sample.sentGeneratedImage
-        ? { sentGeneratedImage: sample.sentGeneratedImage }
-        : {}),
-      ...(sample.zenDisplay ? { zenDisplay: sample.zenDisplay } : {}),
-    };
-  }
-
-  function appendZenToolLabSample(toolId: ZenToolLabToolId): boolean {
-    const activeDetail = detail;
-    if (!activeDetail || !zenToolLabHasActiveThread) {
-      setError("Start a Zen thread before using Tool Lab.");
-      return false;
-    }
-    const message = buildZenToolLabEphemeralMessage(toolId);
-    setConversationStarterPrompts(null);
-    setAskQuestionComposerRevealed(false);
-    setStarterComposerRevealed(false);
-    setError(null);
-    setDetail((current) => {
-      if (!current || current.id !== activeDetail.id) return current;
-      const previousMessages = current.messages.map((existing) => {
-        if (!existing.id.startsWith("dev-tool-lab-")) return existing;
-        const rest = { ...existing };
-        delete rest.askQuestion;
-        delete rest.tellFictionalStory;
-        return rest;
-      });
-      return {
-        ...current,
-        hasAssistantReply: true,
-        messages: [...previousMessages, message],
-      };
-    });
-    return true;
-  }
-
-  /** `$dev ...` - local overlay only; omitted from production bundles unless NEXT_PUBLIC_PRISM_DEV_COMMANDS. */
-  function consumePrismDevComposerCommand(trimmedLine: string): boolean {
-    if (!PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED) return false;
-    const parsed = parsePrismDevChatCommand(trimmedLine);
-    if (!parsed) return false;
-    if (editingMessageId !== null) {
-      setEditingMessageId(null);
-      setEditingOriginalText("");
-    }
-    setConversationStarterPrompts(null);
-    setError(null);
-
-    if (parsed.kind === "unknown") {
-      setError(
-        `Unknown dev command "${parsed.token}". Type $dev to toggle developer tools.`,
-      );
-      return true;
-    }
-
-    if (parsed.kind === "panel") {
-      if (!DEV_TOOLS_ENABLED) {
-        setError("Developer tools are not enabled in this build.");
-        return true;
-      }
-      if (trimmedLine.trimStart().slice(4).trim().length === 0) {
-        toggleDevToolsPanel();
-        return true;
-      }
-      openDevTools();
-      return true;
-    }
-
-    if (parsed.kind === "close") {
-      closeDevTools();
-      return true;
-    }
-
-    if (parsed.kind === "toggles") {
-      if (!DEV_TOOLS_ENABLED) {
-        setError("Developer tools are not enabled in this build.");
-        return true;
-      }
-      openDevTools("system");
-      setDevToolsMessage("Dev toggles live in System.");
-      return true;
-    }
-
-    if (parsed.kind === "help") {
-      if (!DEV_TOOLS_ENABLED) {
-        setError("Developer tools are not enabled in this build.");
-        return true;
-      }
-      openDevTools("system");
-      setDevToolsMessage("Dev commands are listed in System.");
-      return true;
-    }
-
-    if (!detail || detail.id === "pending") {
-      setError(
-        "Open a chat first - then try $dev askquestion in the composer.",
-      );
-      return true;
-    }
-
-    setDevToolsUnlocked(true);
-    setDevDebugComposerMinimized(false);
-    setCompactedSummaryDebugMinimized(false);
-    setZenToolLabOpen(true);
-    appendZenToolLabSample("ask-question");
-    return true;
-  }
-
-  async function clearSummariesFromSlashCommand(): Promise<void> {
-    const modeForSummary: ChatLikeSummaryMode = summaryModeForView(view);
-    const activeConversationId =
-      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
-    const fallbackChatConversationId =
-      modeForSummary === "zen"
-        ? (conversations.find(
-            (conversation) =>
-              conversation.mode === "zen" && !conversation.incognito,
-          )?.id ?? null)
-        : null;
-    const conversationId = activeConversationId ?? fallbackChatConversationId;
-    // Clear the visible chat startup summary immediately for responsive feedback.
-    setChatStartupSummary(null);
-    setPendingZenSessionBreak(null);
-    setPendingZenSessionResumeContext(null);
-    chatSummaryRefreshMarkerRef.current = null;
-    if (!conversationId || conversationId === "pending") return;
-    try {
-      await api(
-        `/api/conversations/${encodeURIComponent(conversationId)}/summarization-debug`,
-        {
-          method: "POST",
-          body: JSON.stringify({ action: "reset", mode: modeForSummary }),
-        },
-      );
-      if (DEV_TOOLS_ENABLED) {
-        await refreshSummaryDebug(modeForSummary);
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Summary reset failed.");
-    }
-  }
-
   async function runZenSummaryForSessionBreak(conversationId: string): Promise<{
     displaySummary: string | null;
     internalSummary: string | null;
@@ -78674,7 +76435,7 @@ function HomeContent(): React.JSX.Element {
         latestSummary?: string;
         latestSummaryAt?: string;
       };
-      debug?: SummaryCompactionDebug;
+      debug?: SummaryCompactionSnapshot;
     }>(
       `/api/conversations/${encodeURIComponent(conversationId)}/summarization-debug`,
       {
@@ -78696,14 +76457,14 @@ function HomeContent(): React.JSX.Element {
       result.compacted?.latestSummaryAt ??
       null;
     if (result.debug) {
-      setSummaryDebug({
+      setSummarySnapshot({
         ...result.debug,
         latestSummary: internalSummary,
         latestDisplaySummary: displaySummary,
         latestSummaryAt: summaryAt,
       });
     } else {
-      await refreshSummaryDebug("zen");
+      await refreshSummarySnapshot("zen");
     }
     return { displaySummary, internalSummary, summaryAt };
   }
@@ -78755,7 +76516,7 @@ function HomeContent(): React.JSX.Element {
           latestSummary?: string;
           latestSummaryAt?: string;
         };
-        debug?: SummaryCompactionDebug;
+        debug?: SummaryCompactionSnapshot;
       }>(
         `/api/conversations/${encodeURIComponent(activeConversationId)}/summarization-debug`,
         {
@@ -78779,23 +76540,15 @@ function HomeContent(): React.JSX.Element {
         result.compacted?.latestSummaryAt ??
         null;
       if (result.debug) {
-        setSummaryDebug({
+        setSummarySnapshot({
           ...result.debug,
           latestSummary,
           latestDisplaySummary,
           latestSummaryAt,
         });
       } else {
-        await refreshSummaryDebug(modeForSummary);
+        await refreshSummarySnapshot(modeForSummary);
       }
-      appendDevChatDebugLines([
-        {
-          kind: "summary",
-          text:
-            `[/${commandName}] compacted current ${modeForSummary} chat` +
-            (latestSummary ? ` - ${latestSummary.length} chars` : ""),
-        },
-      ]);
       setManualCompactionStatus({
         conversationId: activeConversationId,
         mode: modeForSummary,
@@ -78863,23 +76616,8 @@ function HomeContent(): React.JSX.Element {
         await runZenSummaryForSessionBreak(activeConversationId);
       displaySummary = summarized.displaySummary ?? displaySummary;
       internalSummary = summarized.internalSummary ?? internalSummary;
-      appendDevChatDebugLines([
-        {
-          kind: "summary",
-          text:
-            "[$new-session] compacted current Zen chat before session marker" +
-            (displaySummary ? ` - ${displaySummary.length} chars` : ""),
-        },
-      ]);
-    } catch (err) {
-      appendDevChatDebugLines([
-        {
-          kind: "summary",
-          text:
-            "[$new-session] could not refresh compacted context before session marker" +
-            (err instanceof Error ? ` - ${err.message}` : ""),
-        },
-      ]);
+    } catch {
+      // Continue with the last known summaries when compaction is unavailable.
     }
 
     const anchorMessages =
@@ -79005,7 +76743,7 @@ function HomeContent(): React.JSX.Element {
       setPendingZenSessionBreak(null);
       setPendingZenSessionResumeContext(null);
       chatSummaryRefreshMarkerRef.current = null;
-      setSummaryDebug((current) =>
+      setSummarySnapshot((current) =>
         current?.conversationId === conversationId ? null : current,
       );
       setZenSessionBreak((current) => {
@@ -79061,7 +76799,6 @@ function HomeContent(): React.JSX.Element {
             ? { ...current, prismMood: result.prismMood }
             : current,
         );
-        setDevMoodDebugSnapshot({ conversationId, mood: result.prismMood });
       }
       setPanelNotice("Prism mood reset.");
     } catch (err) {
@@ -79264,23 +77001,11 @@ function HomeContent(): React.JSX.Element {
           body: JSON.stringify({ count }),
         },
       );
-      const patchedConversation = attachLivePsychicScratchpadToConversation(
-        applyCommandDisplayAliases(
-          applyExplicitAskQuestionFallback(result.conversation),
-        ),
-        undefined,
-        psychicTextEnabledForConversation(result.conversation, {
-          productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
-        }),
+      const patchedConversation = applyCommandDisplayAliases(
+        applyExplicitAskQuestionFallback(result.conversation),
       );
       setDetail(patchedConversation);
       setSelectedId(patchedConversation.id);
-      if (result.prismMood) {
-        setDevMoodDebugSnapshot({
-          conversationId: patchedConversation.id,
-          mood: result.prismMood,
-        });
-      }
       setSessionOpinion(null);
       setBotOpinion(null);
       hardResetChatArchiveStateForConversation(patchedConversation.id, {
@@ -79290,7 +77015,7 @@ function HomeContent(): React.JSX.Element {
       await refreshConversations();
       await refreshOpenMemoryViews();
       if (view === "chat") {
-        void refreshSummaryDebug("zen");
+        void refreshSummarySnapshot("zen");
       }
       setPanelNotice(
         (result.undone?.count ?? count) === 1
@@ -79304,60 +77029,6 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
-  // Wipes every per-user memory artifact (extracted facts, SQLite summary
-  // rows, Qdrant vectors) so the next chat starts with no recall surface.
-  // Mirrors the server-side `/api/dev/clear-session-memory` contract.
-  async function clearAllSessionMemoryFromSlashCommand(): Promise<void> {
-    try {
-      await api<{
-        deletedMemories?: number;
-        deletedSummaries?: number;
-        deletedZenSessionMemories?: number;
-        vectorsCleared?: boolean;
-      }>("/api/dev/clear-session-memory", { method: "POST" });
-      try {
-        await refreshMemories();
-        await refreshZenSessionMemory();
-      } catch {
-        // Best-effort UI refresh; the server is the source of truth.
-      }
-    } catch (err) {
-      setError(
-        err instanceof Error ? err.message : "Session memory clear failed.",
-      );
-    }
-  }
-
-  function currentSlashMemoryScopeBotId(): string | null {
-    return visualBotSelection.botId ?? activeBot?.id ?? null;
-  }
-
-  async function forgetCurrentBotMemoryFromSlashCommand(): Promise<void> {
-    const botId = currentSlashMemoryScopeBotId();
-    try {
-      await api<{
-        deletedMemories?: number;
-        scope?: "bot" | "default";
-        botId?: string | null;
-      }>("/api/dev/clear-bot-memory", {
-        method: "POST",
-        body: JSON.stringify({ botId }),
-      });
-      try {
-        await refreshMemories();
-        if (botId && memoryPanelBot?.id === botId) {
-          await refreshBotMemories(botId);
-        } else if (memoryPanelScope === "default") {
-          await refreshPrismMemoryPanel();
-        }
-      } catch {
-        // Best-effort UI refresh; the server is the source of truth.
-      }
-    } catch (err) {
-      setError(err instanceof Error ? err.message : "Memory forget failed.");
-    }
-  }
-
   async function restartServerFromSlashCommand(): Promise<void> {
     setError(null);
     setConversationStarterPrompts(null);
@@ -79367,18 +77038,12 @@ function HomeContent(): React.JSX.Element {
       setEditingOriginalText("");
     }
     try {
-      const result = await api<{ restarting?: boolean; mode?: string }>(
-        "/api/dev/restart",
+      await api<{ restarting?: boolean; mode?: string }>(
+        "/api/maintenance/restart",
         {
           method: "POST",
         },
       );
-      appendDevChatDebugLines([
-        {
-          kind: "backend",
-          text: `[$restart] Prism API restart requested${result.mode ? ` (${result.mode})` : ""}.`,
-        },
-      ]);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Server restart failed.");
     }
@@ -79412,16 +77077,6 @@ function HomeContent(): React.JSX.Element {
       setError("Atmosphere is already generating.");
       return;
     }
-    const promptOverride = customAtmospherePromptEnabled
-      ? customAtmospherePromptDraft.trim()
-      : undefined;
-    if (customAtmospherePromptEnabled && !promptOverride) {
-      setError(
-        "Type a custom Atmosphere prompt, or turn off Custom before using $atmosphere.",
-      );
-      return;
-    }
-
     setError(null);
     setConversationStarterPrompts(null);
     clearComposerDraftNow();
@@ -79432,7 +77087,6 @@ function HomeContent(): React.JSX.Element {
     await requestZenWallpaperUpdate(conversationId, {
       enabled: true,
       force: true,
-      promptOverride,
       direction,
     });
   }
@@ -79571,32 +77225,9 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  function isPrismDevComposerCommand(trimmedLine: string): boolean {
-    return (
-      PRISM_WEB_DEV_CHAT_COMMANDS_ENABLED &&
-      parsePrismDevChatCommand(trimmedLine) !== null
-    );
-  }
-
-  function isDevOnlySlashCommand(trimmedLine: string): boolean {
-    if (DEV_TOOLS_ENABLED) {
-      const normalizedCommand = firstComposerCommandToken(trimmedLine);
-      if (
-        normalizedCommand === "$forget" ||
-        normalizedCommand === "$forget-all"
-      ) {
-        return true;
-      }
-    }
-    return isPrismDevComposerCommand(trimmedLine);
-  }
-
   function isLocalOnlyComposerCommand(trimmedLine: string): boolean {
     if (parseGlobalClearCommand(trimmedLine).kind !== "none") return true;
-    return (
-      isBuiltInOperationalSlashCommand(trimmedLine) ||
-      isDevOnlySlashCommand(trimmedLine)
-    );
+    return isBuiltInOperationalSlashCommand(trimmedLine);
   }
 
   function ignoreLocalOnlyComposerCommandWhileReplying(
@@ -79604,7 +77235,6 @@ function HomeContent(): React.JSX.Element {
   ): boolean {
     if (parseUndoSlashCommand(trimmedLine).kind !== "none") return false;
     if (parseNvmSlashCommand(trimmedLine).kind !== "none") return false;
-    if (isPrismDevComposerCommand(trimmedLine)) return false;
     const replyBusy =
       (pendingReply && !canSendTextWhileReplyPending()) ||
       chatAssistantRevealInProgress;
@@ -79686,66 +77316,6 @@ function HomeContent(): React.JSX.Element {
       normalizedCommand === "$summarize" ? "summarize" : "compact",
     );
     return true;
-  }
-
-  /** Local system dev commands hidden from normal system discovery. */
-  async function consumeDevSlashCommand(trimmedLine: string): Promise<boolean> {
-    if (!DEV_TOOLS_ENABLED) return false;
-    const tokens = trimmedLine
-      .split(/\s+/)
-      .map((token) => token.trim())
-      .filter((token) => token.length > 0);
-    if (tokens.length === 0) return false;
-    const normalizedCommand = tokens[0].toLowerCase();
-    if (
-      normalizedCommand !== "$forget" &&
-      normalizedCommand !== "$forget-all"
-    ) {
-      return false;
-    }
-    setError(null);
-    setConversationStarterPrompts(null);
-    clearComposerDraftNow();
-    if (tokens.length > 1) {
-      setError(
-        `${normalizedCommand} does not take extra text. Use $forget or $forget-all by itself.`,
-      );
-      return true;
-    }
-    if (normalizedCommand === "$forget") {
-      await forgetCurrentBotMemoryFromSlashCommand();
-      if (editingMessageId !== null) {
-        setEditingMessageId(null);
-        setEditingOriginalText("");
-      }
-      setForceNewConversationOnNextSend(true);
-      startFreshConversation(false);
-      setComposerPrimed(false);
-      return true;
-    }
-    if (normalizedCommand === "$forget-all") {
-      // `$forget-all` is the hard reset for chat testing, so summary context
-      // and every per-user memory artifact are always cleared.
-      await clearSummariesFromSlashCommand();
-      // Order matters: nuke the conversation first so its messages stop
-      // referencing memories/summaries, then drop every per-user memory
-      // artifact so the next chat starts with no recall surface at all.
-      await clearConversationFromSlashCommand();
-      await clearAllSessionMemoryFromSlashCommand();
-      // Keep Chat mode from auto-reopening the latest saved thread until the
-      // user explicitly starts or opens a conversation again.
-      setChatAutoRestoreSuppressed(true);
-      // Next real send must open a brand-new chat conversation server-side.
-      setForceNewConversationOnNextSend(true);
-      if (editingMessageId !== null) {
-        setEditingMessageId(null);
-        setEditingOriginalText("");
-      }
-      startFreshConversation(false);
-      setComposerPrimed(false);
-      return true;
-    }
-    return false;
   }
 
   function resolveCommandCenterExpression(
@@ -80340,25 +77910,9 @@ function HomeContent(): React.JSX.Element {
         );
         if (poll.status === "failed") {
           setError(poll.error ?? "Image generation did not finish.");
-          appendDevChatDebugLines([
-            {
-              kind: "tool",
-              text:
-                `[poll] tool sendGeneratedImage: failed — jobId=${jobId}` +
-                (poll.error ? ` — ${poll.error}` : ""),
-            },
-          ]);
           return;
         }
         const incoming = poll.messages ?? [];
-        appendDevChatDebugLines([
-          {
-            kind: "tool",
-            text:
-              `[poll] tool sendGeneratedImage: succeeded — jobId=${jobId} — ` +
-              `${incoming.length} new message(s) attached`,
-          },
-        ]);
         if (incoming.length === 0) return;
         if (options?.markPrivateGenerated) {
           const generatedIds = collectGeneratedImageIds(incoming);
@@ -80472,14 +78026,8 @@ function HomeContent(): React.JSX.Element {
     options: { consumeCache: boolean },
   ): void {
     showZenAutoRecovery(envelope.autoRecovery);
-    const patchedConversation = attachLivePsychicScratchpadToConversation(
-      applyCommandDisplayAliases(
-        applyExplicitAskQuestionFallback(envelope.conversation),
-      ),
-      envelope.psychicDebug,
-      psychicTextEnabledForConversation(envelope.conversation, {
-        productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
-      }),
+    const patchedConversation = applyCommandDisplayAliases(
+      applyExplicitAskQuestionFallback(envelope.conversation),
     );
     if (options.consumeCache) {
       clearZenInitialStarterReplyCache();
@@ -80621,7 +78169,7 @@ function HomeContent(): React.JSX.Element {
     setPendingZenSessionBreak(null);
     setPendingZenSessionResumeContext(null);
     chatSummaryRefreshMarkerRef.current = null;
-    setSummaryDebug(null);
+    setSummarySnapshot(null);
     setZenSessionBreak(null);
     persistZenSessionBreak(null);
     setManualCompactionStatus(null);
@@ -81046,29 +78594,6 @@ function HomeContent(): React.JSX.Element {
       if (!options.skipComposerHistory) {
         appendComposerHistoryEntry(rawDraft);
       }
-      return;
-    }
-    if (
-      commandTrimmed.length > 0 &&
-      !options.starterPrompt &&
-      !isAssistantOnlyTurn &&
-      (await consumeDevSlashCommand(commandTrimmed))
-    ) {
-      if (!options.skipComposerHistory) {
-        appendComposerHistoryEntry(rawDraft);
-      }
-      return;
-    }
-    if (
-      commandTrimmed.length > 0 &&
-      !options.starterPrompt &&
-      !isAssistantOnlyTurn &&
-      consumePrismDevComposerCommand(commandTrimmed)
-    ) {
-      if (!options.skipComposerHistory) {
-        appendComposerHistoryEntry(rawDraft);
-      }
-      clearComposerDraftNow();
       return;
     }
     if (
@@ -82033,18 +79558,6 @@ function HomeContent(): React.JSX.Element {
                     passes: event.passes,
                     createdAt: event.createdAt,
                   },
-                  psychicScratchpad: {
-                    v: 1,
-                    scratchpad: event.scratchpad,
-                    stage: event.stage,
-                    effort: event.effort,
-                    provider: event.provider,
-                    ...(event.model ? { model: event.model } : {}),
-                    simulated: event.simulated,
-                    passCount: event.passCount,
-                    guidanceChars: event.guidanceChars,
-                    createdAt: event.createdAt,
-                  },
                 }
               : message,
           ),
@@ -82553,7 +80066,6 @@ function HomeContent(): React.JSX.Element {
       const requestChatBody = psychicProgressStreamRequested
         ? { ...chatBody, psychicProgressStream: true }
         : chatBody;
-      appendDevChatRouteStart("send", requestChatBody);
       const d =
         chatBody.progressiveZenVoice === true || psychicProgressStreamRequested
           ? await apiZenProgressiveChat<ChatPostEnvelope>({
@@ -82611,7 +80123,6 @@ function HomeContent(): React.JSX.Element {
         return;
       }
       pushMemoryToasts(d.memoryLearned);
-      appendDevChatDebugLines(collectDebugLinesFromEnvelope(d, "send"));
       options.onZenAutonomyResult?.(d.zenAutonomyDecision ?? null);
       successfulConversationId = d.conversation.id;
       if (
@@ -82659,7 +80170,7 @@ function HomeContent(): React.JSX.Element {
         setSandboxSummaryBusy(true);
         window.setTimeout(() => {
           setSandboxSummaryBusy(false);
-          void refreshSummaryDebug(summaryRefreshMode);
+          void refreshSummarySnapshot(summaryRefreshMode);
         }, 1300);
       }
       const stillViewingRequest = requestConversationId
@@ -82672,14 +80183,8 @@ function HomeContent(): React.JSX.Element {
       const zenAutonomySpoke =
         isZenAutonomy && d.zenAutonomyDecision?.action === "speak";
       if (stillViewingRequest) {
-        const patchedConversation = attachLivePsychicScratchpadToConversation(
-          applyCommandDisplayAliases(
-            applyExplicitAskQuestionFallback(d.conversation),
-          ),
-          d.psychicDebug,
-          psychicTextEnabledForConversation(d.conversation, {
-            productChatSurface: isPsychicPresentationSurfaceView(view, chatPresentation),
-          }),
+        const patchedConversation = applyCommandDisplayAliases(
+          applyExplicitAskQuestionFallback(d.conversation),
         );
         if (isInitialZenStarterPrompt) {
           zenInitialStarterLiveEnvelopeRef.current = {
@@ -83667,7 +81172,7 @@ function HomeContent(): React.JSX.Element {
       return (
         <div
           className={styles.askQuestionRecallBubbleDock}
-          data-dev-panel-safe-area="bottom"
+          data-viewport-safe-area="bottom"
         >
           <button
             type="button"
@@ -83700,7 +81205,7 @@ function HomeContent(): React.JSX.Element {
         <div
           ref={askQuestionRailRef}
           className={styles.askQuestionCollapsedPromptDock}
-          data-dev-panel-safe-area="bottom"
+          data-viewport-safe-area="bottom"
           data-ask-question-collapsed-prompt="true"
           role="status"
           aria-live="polite"
@@ -83723,7 +81228,7 @@ function HomeContent(): React.JSX.Element {
         role="group"
         aria-label="Suggested replies"
         className={railClassName}
-        data-dev-panel-safe-area="bottom"
+        data-viewport-safe-area="bottom"
       >
         {rail.source === "askquestion" || rail.source === "story" ? (
           <div className={styles.conversationStarterHeadingRow}>
@@ -83789,10 +81294,10 @@ function HomeContent(): React.JSX.Element {
     ) {
       return null;
     }
-    const psychicLine = psychicThoughtDisplayLineForMessage(
-      { ...psychicSource, role: "user" },
-      { showScratchpad: devToolsRuntimeActive },
-    );
+    const psychicLine = psychicThoughtDisplayLineForMessage({
+      ...psychicSource,
+      role: "user",
+    });
     if (!psychicLine) return null;
     const expanded = expandedPsychicAssistantMessageId === msg.id;
     return (
@@ -83850,23 +81355,6 @@ function HomeContent(): React.JSX.Element {
                 </span>
               </p>
             )}
-            {psychicLine.scratchpad ? (
-              <div className={styles.psychicScratchpadBlock}>
-                <div className={styles.psychicScratchpadHeader}>
-                  <span className={styles.psychicScratchpadLabel}>
-                    Scratchpad
-                  </span>
-                  {psychicLine.scratchpadMeta ? (
-                    <span className={styles.psychicScratchpadMeta}>
-                      {psychicLine.scratchpadMeta}
-                    </span>
-                  ) : null}
-                </div>
-                <pre className={styles.psychicScratchpadText}>
-                  {psychicLine.scratchpad}
-                </pre>
-              </div>
-            ) : null}
           </div>
         ) : (
           <span className={styles.srOnly}>{psychicLine.summary}</span>
@@ -84121,7 +81609,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <div
         className={`${styles.askQuestionRecallBubbleDock} ${styles.imageJobOrbDock}`}
-        data-dev-panel-safe-area="bottom"
+        data-viewport-safe-area="bottom"
       >
         <div
           className={`${styles.memoryBubble} ${styles.askQuestionRecallBubble}`}
@@ -84605,11 +82093,7 @@ function HomeContent(): React.JSX.Element {
       if (
         !stillViewingConversation ||
         !stillActiveOrLocallyClosed ||
-        (result.applied !== true &&
-          !(
-            result.reason === "missing_message" &&
-            args.assistantMessageId.startsWith("dev-tool-lab-")
-          ))
+        result.applied !== true
       ) {
         return;
       }
@@ -85566,6 +83050,8 @@ function HomeContent(): React.JSX.Element {
         wheelDeltaY: event.deltaY,
         minSizePx: ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX,
         maxSizePx: ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX,
+        compactMaxSizePx: ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX,
+        fullMinSizePx: ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX,
       });
       if (next !== current) persistZenLiveBotAvatarSizePx(next);
       return next;
@@ -86233,7 +83719,6 @@ function HomeContent(): React.JSX.Element {
     showEditNotice?: boolean;
     showQueuedPromptRail?: boolean;
     stacked?: boolean;
-    showDebugComposer?: boolean;
     showZenLivePresence?: boolean;
     zenPresenceAtmosphereActive?: boolean;
     composeBotSelected?: boolean;
@@ -86282,7 +83767,6 @@ function HomeContent(): React.JSX.Element {
     showEditNotice = false,
     showQueuedPromptRail = true,
     stacked = false,
-    showDebugComposer = false,
     showZenLivePresence = false,
     zenPresenceAtmosphereActive = false,
     composeBotSelected = Boolean(selectedComposeBotAccent),
@@ -86350,7 +83834,7 @@ function HomeContent(): React.JSX.Element {
         ref={formRef}
         className={formClassName}
         data-tutorial-target="composer"
-        data-dev-panel-safe-area="bottom"
+        data-viewport-safe-area="bottom"
         data-starter-compose-surface="true"
         data-compose-bot-selected={composeBotSelected ? "true" : undefined}
         data-compose-ready={composeReady ? "true" : undefined}
@@ -86390,7 +83874,6 @@ function HomeContent(): React.JSX.Element {
         {!composerHiddenByChoiceChips ? (
           stacked ? (
             <div className={styles.chatComposerStack}>
-              {showDebugComposer ? renderDebugComposer() : null}
               {showZenLivePresence &&
               zenLivePresenceRailVisible &&
               !zenCanvasBotSuppressedForPanel ? (
@@ -86438,72 +83921,6 @@ function HomeContent(): React.JSX.Element {
       </form>
     );
   };
-
-  function updateDebugComposerDraft(nextDraft: string): void {
-    setDebugComposerDraft(nextDraft);
-    publishComposerTypingActivity(Date.now());
-  }
-
-  function submitDebugComposerEcho(): void {
-    const trimmed = debugComposerDraft.trim();
-    if (!trimmed || pendingReply || view !== "chat") return;
-    if (chatAutoRestoreSuppressed) {
-      setChatAutoRestoreSuppressed(false);
-    }
-    if (forceNewConversationOnNextSend) {
-      setForceNewConversationOnNextSend(false);
-    }
-    if (editingMessageId !== null) {
-      setEditingMessageId(null);
-      setEditingOriginalText("");
-    }
-    setConversationStarterPrompts(null);
-    setChatStartupSummary(null);
-    chatSummaryRefreshMarkerRef.current = null;
-    setError(null);
-    setDebugComposerDraft("");
-    debugComposerDraftRef.current = "";
-    setZenEphemeralUserActionMessage(null);
-    setZenLiveBotAction(null);
-    const fallbackBotId = zenPersonaBotId;
-    const fallbackBot = fallbackBotId
-      ? (bots.find((bot) => bot.id === fallbackBotId) ?? null)
-      : null;
-    const debugBot = zenPersonaBot ?? fallbackBot;
-    const nowIso = new Date().toISOString();
-    const debugAssistantMessage: Message = {
-      id: `debug-echo-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`,
-      role: "assistant",
-      content: trimmed,
-      createdAt: nowIso,
-      provider: "local",
-      model: "dev/debug-echo",
-      botId: fallbackBotId,
-      botName: debugBot?.name ?? DEFAULT_ASSISTANT_NAME,
-      botColor: debugBot?.color ?? undefined,
-      botGlyph: debugBot?.glyph ?? undefined,
-      moodKey: "neutral",
-      moodConfidence: 1,
-    };
-    setDetail((current) => {
-      const nextBotId = fallbackBotId;
-      const nextBotColor = debugBot?.color ?? null;
-      const baseMessages = current?.messages ?? [];
-      const nextConversation = {
-        id: current?.id ?? "pending",
-        title: current?.title ?? "New chat",
-        botId: current?.botId ?? null,
-        incognito: current?.incognito ?? pendingIncognito,
-        lastBotId: nextBotId,
-        lastBotColor: nextBotColor,
-        hasAssistantReply: true,
-        messages: [...baseMessages, debugAssistantMessage],
-      };
-      markLatestAssistantRevealEligible(nextConversation);
-      return nextConversation;
-    });
-    setChatEphemeralNowMs(Date.now());
-  }
 
   const primeStarterComposer = useCallback(
     (value: string) => {
@@ -86677,7 +84094,6 @@ function HomeContent(): React.JSX.Element {
   function handleComposerKeyDown(e: React.KeyboardEvent<HTMLFormElement>) {
     const target = e.target;
     if (!(target instanceof HTMLElement)) return;
-    if (target.closest("[data-debug-composer='true']")) return;
     if (e.defaultPrevented) return;
     setComposerSendTintActive(true);
     const fromMarkdownEditor =
@@ -87142,6 +84558,66 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  const availableVoicePlaybackChoices = useMemo(() => {
+    if (!settings) return [] as VoicePlaybackChoice[];
+    const premiumUnavailable = settings.elevenLabsApiKeySource === "none";
+    const premiumLocalOnly = blocksOnlineCapabilities(
+      responseModeForProvider(effectivePreferredProvider),
+    );
+    return VOICE_PLAYBACK_CHOICES.filter(
+      (choice) =>
+        choice !== "premium" || (!premiumUnavailable && !premiumLocalOnly),
+    );
+  }, [effectivePreferredProvider, settings]);
+
+  const currentVoicePlaybackChoice = settings
+    ? voicePlaybackChoice(
+        normalizeVoiceMode(settings.voiceMode),
+        normalizeEnglishVoiceEngine(settings.englishVoiceEngine),
+      )
+    : null;
+  const activeHighlightedVoicePlaybackChoice =
+    highlightedVoicePlaybackChoice &&
+    availableVoicePlaybackChoices.includes(highlightedVoicePlaybackChoice)
+      ? highlightedVoicePlaybackChoice
+      : currentVoicePlaybackChoice;
+
+  const closeHotkeyVoicePicker = useCallback((): void => {
+    setVoiceModeSelectorOpen(false);
+    setVoiceModeSelectorInteractionMode("pointer");
+    window.requestAnimationFrame(() =>
+      voiceModeSelectorButtonRef.current?.focus({ preventScroll: true }),
+    );
+  }, []);
+
+  const commitHotkeyVoiceSelection = useCallback((): void => {
+    const nextChoice = activeHighlightedVoicePlaybackChoice;
+    closeHotkeyVoicePicker();
+    if (nextChoice) void selectGlobalVoiceChoice(nextChoice);
+  }, [activeHighlightedVoicePlaybackChoice, closeHotkeyVoicePicker]);
+
+  useEffect(() => {
+    const trigger = voiceModeSelectorButtonRef.current;
+    if (!trigger) return;
+    const openQuickVoicePicker = (): void => {
+      if (!currentVoicePlaybackChoice) return;
+      announcePrismNavbarPickerOpen(voiceModeSelectorPickerId);
+      setHighlightedVoicePlaybackChoice(currentVoicePlaybackChoice);
+      setVoiceModeSelectorInteractionMode("keyboard");
+      setVoiceModeSelectorOpen(true);
+      window.requestAnimationFrame(() => trigger.focus());
+    };
+    trigger.addEventListener(
+      SPEECH_TYPE_QUICK_OPEN_EVENT,
+      openQuickVoicePicker,
+    );
+    return () =>
+      trigger.removeEventListener(
+        SPEECH_TYPE_QUICK_OPEN_EVENT,
+        openQuickVoicePicker,
+      );
+  }, [currentVoicePlaybackChoice, voiceModeSelectorPickerId]);
+
   useEffect(() => {
     if (!voiceModeSelectorOpen || !settings) return;
     const handleSpeechTypeWheel = (event: WheelEvent): void => {
@@ -87151,27 +84627,20 @@ function HomeContent(): React.JSX.Element {
       ) {
         return;
       }
-      const premiumUnavailable = settings.elevenLabsApiKeySource === "none";
-      const premiumLocalOnly = blocksOnlineCapabilities(
-        responseModeForProvider(effectivePreferredProvider),
-      );
-      const selectableChoices = VOICE_PLAYBACK_CHOICES.filter(
-        (choice) =>
-          choice !== "premium" || (!premiumUnavailable && !premiumLocalOnly),
-      );
-      if (selectableChoices.length <= 1) return;
-      const currentChoice = voicePlaybackChoice(
-        normalizeVoiceMode(settings.voiceMode),
-        normalizeEnglishVoiceEngine(settings.englishVoiceEngine),
-      );
+      if (availableVoicePlaybackChoices.length <= 1) return;
+      const currentChoice =
+        voiceModeSelectorInteractionMode === "keyboard"
+          ? activeHighlightedVoicePlaybackChoice
+          : currentVoicePlaybackChoice;
+      if (!currentChoice) return;
       const direction = modelEffortWheelDirection(event.deltaX, event.deltaY);
       if (direction === 0) return;
-      const currentIndex = selectableChoices.indexOf(currentChoice);
+      const currentIndex = availableVoicePlaybackChoices.indexOf(currentChoice);
       const nextIndex = Math.min(
-        selectableChoices.length - 1,
+        availableVoicePlaybackChoices.length - 1,
         Math.max(0, currentIndex + direction),
       );
-      const nextChoice = selectableChoices[nextIndex];
+      const nextChoice = availableVoicePlaybackChoices[nextIndex];
       if (!nextChoice || nextChoice === currentChoice) return;
       event.preventDefault();
       event.stopPropagation();
@@ -87180,14 +84649,25 @@ function HomeContent(): React.JSX.Element {
       window.setTimeout(() => {
         speechTypeWheelLockedRef.current = false;
       }, 90);
-      void selectGlobalVoiceChoice(nextChoice);
+      if (voiceModeSelectorInteractionMode === "keyboard") {
+        setHighlightedVoicePlaybackChoice(nextChoice);
+      } else {
+        void selectGlobalVoiceChoice(nextChoice);
+      }
     };
     document.addEventListener("wheel", handleSpeechTypeWheel, {
       capture: true,
       passive: false,
     });
     return () => document.removeEventListener("wheel", handleSpeechTypeWheel, true);
-  }, [effectivePreferredProvider, settings, voiceModeSelectorOpen]);
+  }, [
+    activeHighlightedVoicePlaybackChoice,
+    availableVoicePlaybackChoices,
+    currentVoicePlaybackChoice,
+    settings,
+    voiceModeSelectorInteractionMode,
+    voiceModeSelectorOpen,
+  ]);
 
   async function saveVoiceSettings(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
@@ -88490,6 +85970,7 @@ function HomeContent(): React.JSX.Element {
       })),
     ];
     setMemoryToasts((current) => [...nextToasts, ...current].slice(0, 8));
+    void refreshMemoryAcquisitionReceipts();
   }
 
   async function undoMemoryToast(toast: MemoryToast) {
@@ -92095,31 +89576,9 @@ function HomeContent(): React.JSX.Element {
     if (blockCoffeeConfigurationMutation()) return;
     if (botTransferBusy) return;
     setPanelError(null);
-    setImportBotPasteError(null);
-    setImportBotPasteText("");
-    setImportBotPasteBusy(false);
-    if (!devToolsRuntimeActive || !devToolsBotImportPasteEnabled) {
-      setImportBotModalPhase("closed");
-      queueMicrotask(() => {
-        botImportInputRef.current?.click();
-      });
-      return;
-    }
-    setImportBotModalPhase("choose");
-  }
-
-  function handleImportBotChooseUpload(): void {
-    closeImportBotModal();
     queueMicrotask(() => {
       botImportInputRef.current?.click();
     });
-  }
-
-  async function handleConfirmImportBotPaste(): Promise<void> {
-    if (botTransferBusy) return;
-    setImportBotPasteError(
-      "Pasted JSON bot imports are no longer supported. Import a zipped .bot file instead.",
-    );
   }
 
   const updateCanvasBotMarqueeSelection = useCallback(
@@ -92432,25 +89891,14 @@ function HomeContent(): React.JSX.Element {
       event.stopPropagation();
       return;
     }
-    const shouldZoomOutFocusedBot = canvasBackgroundShouldZoomOutFocusedBot({
-      view:
-        view === "chat" || view === "sandbox" || view === "coffee"
-          ? view
-          : "other",
-      conversationMessageCount: detail ? detail.messages.length : null,
-      focusedBotId: zenPersonaBotId,
-      pendingIncognito,
-      canZoomOutToAllBots: zenCanZoomOutToAllBots,
-    });
-    // Empty canvas always collapses to All Bots Home — never one-step history
-    // back (Back/Escape still walk the relationship stack one level at a time).
-    if (
-      shouldZoomOutFocusedBot ||
-      (view === "chat" && relationshipDepthReturnDepth > 0)
-    ) {
+    // Chat and Zen canvas clicks never own directory navigation. Keep explicit
+    // Back/Escape/header controls responsible for moving up the hierarchy.
+    if (view === "chat") {
       event.preventDefault();
       event.stopPropagation();
-      jumpCanvasToAllBotsHome();
+      setCanvasSelectedBotIds((current) =>
+        current.size === 0 ? current : new Set(),
+      );
       return;
     }
     if (detail || pendingIncognito) return;
@@ -94640,8 +92088,6 @@ function HomeContent(): React.JSX.Element {
                   "--coffee-plate-emoji-face-scale-y": faceScaleY,
                   "--avatar-details-facing-scale-x":
                     botAvatarDetailsFacingScaleX(faceScaleY),
-                  "--avatar-details-facing-offset-y":
-                    botAvatarDetailsFacingOffsetY(faceScaleY),
                 } as React.CSSProperties;
                 return (
                   <li
@@ -95826,18 +93272,6 @@ function HomeContent(): React.JSX.Element {
     }, remainingMs);
     return () => window.clearTimeout(timer);
   }, [sweepUndoToast]);
-
-  useEffect(() => {
-    if (!devToolsOpen && !devToolsMinimized) return;
-    function handleKey(event: KeyboardEvent) {
-      if (event.key === "Escape") {
-        event.stopPropagation();
-        closeDevTools();
-      }
-    }
-    document.addEventListener("keydown", handleKey);
-    return () => document.removeEventListener("keydown", handleKey);
-  }, [devToolsMinimized, devToolsOpen, closeDevTools]);
 
   // Clicking anywhere outside the delete / confirm affordance should disarm it.
   // This prevents the confirm pill from lingering in an awkward in-between
@@ -98401,604 +95835,6 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  async function devToolsDeleteAllBots() {
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    const previousBots = bots;
-    const previousSelectedBotId = selectedBotId;
-    setBots([]);
-    setSelectedBotId(null);
-    try {
-      const result = await api<{ deleted?: number }>(
-        "/api/bots?includeProtected=1",
-        {
-          method: "DELETE",
-        },
-      );
-      await refreshBots();
-      const deleted = typeof result?.deleted === "number" ? result.deleted : 0;
-      setDevToolsMessage(
-        deleted === 0
-          ? "No bots to delete."
-          : deleted === 1
-            ? "Deleted 1 bot."
-            : `Deleted ${deleted} bots.`,
-      );
-    } catch (err) {
-      setBots(previousBots);
-      setSelectedBotId(previousSelectedBotId);
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Delete all bots failed.",
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  async function devToolsCreateRandomBotBatch(batchSize: number) {
-    if (batchSize <= 0) return;
-
-    const names = sampleBotNames(batchSize);
-    for (
-      let start = 0;
-      start < names.length;
-      start += DEV_TOOLS_BOT_CREATE_CHUNK_SIZE
-    ) {
-      const chunk = names.slice(start, start + DEV_TOOLS_BOT_CREATE_CHUNK_SIZE);
-      await Promise.all(
-        chunk.map((name) => {
-          const profile = randomBotProfile(name);
-          return api("/api/bots", {
-            method: "POST",
-            body: JSON.stringify({
-              name,
-              systemPrompt: serializeStoredBotPrompt(profile, name),
-              temperature: BOT_TEMPERATURE_DEFAULT,
-              maxTokens: BOT_REPLY_LENGTH_DEFAULT_TOKENS,
-              topP: BOT_TOP_P_DEFAULT,
-              topK: BOT_TOP_K_DEFAULT,
-              repetitionPenalty: BOT_REPETITION_PENALTY_DEFAULT,
-              color: randomHex(
-                bots
-                  .map((bot) => bot.color?.trim() ?? "")
-                  .filter((hex) => hex.length > 0),
-              ),
-              glyph: randomBotGlyph(),
-            }),
-          });
-        }),
-      );
-    }
-  }
-
-  async function devToolsAddRandomBots() {
-    const batchSize = resolvedDevToolsBotQuantity;
-    if (batchSize <= 0) {
-      setDevToolsMessage(randomDevToolsGhostMessage());
-      return;
-    }
-
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    try {
-      await devToolsCreateRandomBotBatch(batchSize);
-      await refreshBots();
-      setDevToolsMessage(
-        batchSize === 1
-          ? "Added 1 random bot."
-          : `Added ${batchSize} random bots.`,
-      );
-    } catch (err) {
-      try {
-        await refreshBots();
-      } catch {
-        /* best-effort refresh */
-      }
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Add random bots failed.",
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  async function devToolsAddSeedChats() {
-    const count = resolvedDevToolsBotQuantity;
-    if (count <= 0) {
-      setDevToolsMessage(randomDevToolsGhostMessage());
-      return;
-    }
-
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    try {
-      const result = await api<{ created?: number }>(
-        "/api/conversations/dev-seed",
-        {
-          method: "POST",
-          body: JSON.stringify({ count }),
-        },
-      );
-      await refreshConversations();
-      const created =
-        typeof result?.created === "number" ? result.created : count;
-      setDevToolsMessage(
-        created === 1 ? "Added 1 seed chat." : `Added ${created} seed chats.`,
-      );
-    } catch (err) {
-      try {
-        await refreshConversations();
-      } catch {
-        /* best-effort refresh */
-      }
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Add seed chats failed.",
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  async function devToolsSetConnectionPreset(preset: DevToolsConnectionPreset) {
-    const conversationId =
-      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
-    if (!conversationId || conversationId === "pending") {
-      setDevToolsMessage("Open a saved chat first to test Connection states.");
-      return;
-    }
-
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    try {
-      const result = await api<{ opinion?: SessionOpinion }>(
-        `/api/conversations/${encodeURIComponent(conversationId)}/dev-connection`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            score: preset.score,
-            trend: preset.trend,
-            lastReason: preset.reason,
-            recentReasons: preset.recentReasons,
-          }),
-        },
-      );
-      if (result.opinion) {
-        setSessionOpinion(result.opinion);
-      } else {
-        await refreshConversation(conversationId);
-      }
-      openConversationMemoriesPanel();
-      setDevToolsMessage(`Connection set to ${preset.label}.`);
-    } catch (err) {
-      try {
-        await refreshConversation(conversationId);
-      } catch {
-        /* best-effort refresh */
-      }
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Set Connection state failed.",
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  async function devToolsSetBotOpinionPreset(preset: DevToolsBotOpinionPreset) {
-    const targetBotId = detail?.botId ?? selectedBotId ?? activeBot?.id ?? null;
-    const routeBotId = targetBotId
-      ? encodeURIComponent(targetBotId)
-      : "_default";
-
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    try {
-      const result = await api<{ botOpinion?: BotOpinion }>(
-        `/api/bots/${routeBotId}/dev-opinion`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            score: preset.score,
-            trend: preset.trend,
-            lastReason: preset.reason,
-            recentReasons: preset.recentReasons,
-            repairCount: preset.repairCount,
-          }),
-        },
-      );
-      if (result.botOpinion) {
-        setBotOpinion(result.botOpinion);
-      }
-      openConversationMemoriesPanel();
-      setDevToolsMessage(`Bot opinion set to ${preset.label}.`);
-    } catch (err) {
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Set bot opinion state failed.",
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  async function devMoodDebugPatch(
-    patch: {
-      action?: "nudge" | "reset";
-      annoyanceDelta?: number;
-      warmthDelta?: number;
-      engagementDelta?: number;
-      restraintDelta?: number;
-      freeze?: boolean;
-      reason?: string;
-    },
-    label: string,
-  ) {
-    const conversationId =
-      detail?.id && detail.id !== "pending"
-        ? detail.id
-        : view === "coffee" && coffeeConversation?.id
-          ? coffeeConversation.id
-          : selectedId;
-    if (!conversationId || conversationId === "pending") {
-      setDevToolsMessage("Open a saved thread first to inspect Prism mood.");
-      return;
-    }
-    const mode =
-      view === "coffee"
-        ? "coffee"
-        : detail?.mode === "sandbox" || view === "sandbox"
-          ? "sandbox"
-          : "zen";
-    setDevMoodDebugBusy(true);
-    setDevToolsMessage(null);
-    try {
-      const result = await api<{ prismMood?: PrismMoodSnapshot }>(
-        `/api/conversations/${encodeURIComponent(conversationId)}/mood-debug`,
-        {
-          method: "POST",
-          body: JSON.stringify({
-            action: patch.action ?? "nudge",
-            mode,
-            ...patch,
-          }),
-        },
-      );
-      if (result.prismMood) {
-        setDevMoodDebugSnapshot({ conversationId, mood: result.prismMood });
-        setDetail((current) =>
-          current?.id === conversationId
-            ? { ...current, prismMood: result.prismMood }
-            : current,
-        );
-      }
-      setDevToolsMessage(label);
-    } catch (err) {
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Mood debug update failed.",
-      );
-    } finally {
-      setDevMoodDebugBusy(false);
-    }
-  }
-
-  async function devToolsRunSummaryNow(modeOverride?: ChatLikeSummaryMode) {
-    const conversationId =
-      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
-    if (!conversationId || conversationId === "pending") {
-      setDevToolsMessage("Open a saved chat first to test summarization.");
-      return;
-    }
-    const modeForSummary = modeOverride ?? summaryModeForView(view);
-    setDevToolsBusy(true);
-    setDevToolsMessage(null);
-    try {
-      const result = await api<{
-        compacted?: { triggered?: boolean };
-        debug?: SummaryCompactionDebug;
-      }>(
-        `/api/conversations/${encodeURIComponent(conversationId)}/summarization-debug`,
-        {
-          method: "POST",
-          body: JSON.stringify({ action: "run", mode: modeForSummary }),
-        },
-      );
-      await refreshSummaryDebug(modeForSummary);
-      const triggered = result.compacted?.triggered === true;
-      setDevToolsMessage(
-        triggered
-          ? "Summary compaction run finished."
-          : "Summary call completed, but no summary was produced.",
-      );
-    } catch (err) {
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Summary run failed.",
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  async function devToolsResetSummary(modeOverride?: ChatLikeSummaryMode) {
-    const conversationId =
-      detail?.id && detail.id !== "pending" ? detail.id : selectedId;
-    if (!conversationId || conversationId === "pending") {
-      setDevToolsMessage(
-        "Open a saved chat first to reset summarization state.",
-      );
-      return;
-    }
-    const modeForSummary = modeOverride ?? summaryModeForView(view);
-    setDevToolsBusy(true);
-    setDevToolsMessage(null);
-    try {
-      await api(
-        `/api/conversations/${encodeURIComponent(conversationId)}/summarization-debug`,
-        {
-          method: "POST",
-          body: JSON.stringify({ action: "reset", mode: modeForSummary }),
-        },
-      );
-      await refreshSummaryDebug(modeForSummary);
-      setDevToolsMessage("Summary compaction state reset.");
-    } catch (err) {
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Summary reset failed.",
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  async function devToolsSaveDevMemories() {
-    if (!settings) {
-      setDevToolsMessage("Settings are still loading. Try again in a moment.");
-      return;
-    }
-    setDevToolsBusy(true);
-    setDevToolsMessage(null);
-    try {
-      await api("/api/settings", {
-        method: "PATCH",
-        body: JSON.stringify({
-          devMemoriesEnabled: settings.devMemoriesEnabled,
-          devMemoriesText: settings.devMemoriesText,
-        }),
-      });
-      await refreshSettings();
-      setDevToolsMessage(
-        settings.devMemoriesEnabled
-          ? "Dev memories saved and enabled."
-          : "Dev memories saved (currently disabled).",
-      );
-    } catch (err) {
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Saving dev memories failed.",
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  // Distribute random seed memories across every bot the user owns. Used
-  // when the Memories panel is showing the All-memories view, so the
-  // bubble cluster has something to chew on without having to wire each
-  // bot up by hand.
-  async function devToolsAddAllMemories() {
-    const count = resolvedDevToolsBotQuantity;
-    if (count <= 0) {
-      setDevToolsMessage(randomDevToolsGhostMessage());
-      return;
-    }
-    if (bots.length === 0) {
-      setDevToolsMessage("Create at least one bot before seeding memories.");
-      return;
-    }
-
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    try {
-      const seedPayload: Record<string, unknown> = {
-        count,
-        source: devToolsMemorySeedSource,
-      };
-      if (devToolsMemorySeedSource !== "direct") {
-        seedPayload.certainty = devToolsMemoryCertainty;
-      }
-      const result = await api<{ created?: number }>("/api/memories/dev-seed", {
-        method: "POST",
-        body: JSON.stringify(seedPayload),
-      });
-      await refreshMemories();
-      const created =
-        typeof result?.created === "number" ? result.created : count;
-      setDevToolsMessage(
-        created === 1
-          ? `Added 1 ${devToolsMemorySeedSource} memory across bots.`
-          : `Added ${created} ${devToolsMemorySeedSource} memories across ${bots.length} bots.`,
-      );
-    } catch (err) {
-      try {
-        await refreshMemories();
-      } catch {
-        /* best-effort refresh */
-      }
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Add memories failed.",
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  // Seed memories for whichever bot is currently focused in the
-  // Memories panel. Falls back to a clear status message if the panel
-  // isn't on a specific bot — keeps the operator from accidentally
-  // dumping memories on the wrong bot.
-  async function devToolsAddBotMemories() {
-    const targetBot = memoryPanelBot ?? activeBot;
-    if (!targetBot?.id) {
-      setDevToolsMessage(
-        "Open a bot's memories panel first to seed for that bot.",
-      );
-      return;
-    }
-    const count = resolvedDevToolsBotQuantity;
-    if (count <= 0) {
-      setDevToolsMessage(randomDevToolsGhostMessage());
-      return;
-    }
-
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    try {
-      const seedPayload: Record<string, unknown> = {
-        count,
-        botId: targetBot.id,
-        source: devToolsMemorySeedSource,
-      };
-      if (devToolsMemorySeedSource !== "direct") {
-        seedPayload.certainty = devToolsMemoryCertainty;
-      }
-      const result = await api<{ created?: number }>("/api/memories/dev-seed", {
-        method: "POST",
-        body: JSON.stringify(seedPayload),
-      });
-      await refreshMemories();
-      await refreshBotMemories(targetBot.id);
-      const created =
-        typeof result?.created === "number" ? result.created : count;
-      setDevToolsMessage(
-        created === 1
-          ? `Added 1 ${devToolsMemorySeedSource} memory to ${targetBot.name}.`
-          : `Added ${created} ${devToolsMemorySeedSource} memories to ${targetBot.name}.`,
-      );
-    } catch (err) {
-      try {
-        await refreshMemories();
-        await refreshBotMemories(targetBot.id);
-      } catch {
-        /* best-effort refresh */
-      }
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Add bot memories failed.",
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  // Wipe every memory (global + bot-scoped) for the current user.
-  // Server-side this is `DELETE /api/memories` — there's no per-bot
-  // endpoint today, so this is intentionally a blunt instrument for
-  // dev resets.
-  async function devToolsClearAllMemories() {
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    try {
-      const result = await api<{ deleted?: number }>("/api/memories", {
-        method: "DELETE",
-      });
-      await refreshMemories();
-      if (memoryPanelBot?.id) {
-        await refreshBotMemories(memoryPanelBot.id);
-      }
-      const deleted = typeof result?.deleted === "number" ? result.deleted : 0;
-      setDevToolsMessage(
-        deleted === 0
-          ? "No memories to clear."
-          : deleted === 1
-            ? "Cleared 1 memory."
-            : `Cleared ${deleted} memories.`,
-      );
-    } catch (err) {
-      try {
-        await refreshMemories();
-        if (memoryPanelBot?.id) {
-          await refreshBotMemories(memoryPanelBot.id);
-        }
-      } catch {
-        /* best-effort refresh */
-      }
-      setDevToolsMessage(
-        err instanceof Error ? err.message : "Clear memories failed.",
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
-  async function devToolsSetBotDensityStage(stageId: PickerDensityStageId) {
-    const liveViewportWidth =
-      typeof window === "undefined" ? viewportWidth : window.innerWidth;
-    const liveViewportHeight =
-      typeof window === "undefined" ? viewportHeight : window.innerHeight;
-    const stage = pickerDensityStageTargets(
-      liveViewportWidth,
-      liveViewportHeight,
-    ).find((target) => target.id === stageId);
-    if (!stage) return;
-
-    const targetCount = clampDevToolsBotQuantity(stage.targetCount);
-    const delta = targetCount - bots.length;
-    setDevToolsBotQuantity(targetCount);
-
-    if (delta === 0) {
-      setDevToolsMessage(
-        `${stage.label} (${stage.description}) is already active at ${targetCount} bots for ${liveViewportWidth}x${liveViewportHeight}.`,
-      );
-      return;
-    }
-
-    setDevToolsMessage(null);
-    setDevToolsBusy(true);
-    const previousBots = bots;
-    const previousSelectedBotId = selectedBotId;
-
-    try {
-      if (delta > 0) {
-        await devToolsCreateRandomBotBatch(delta);
-        await refreshBots();
-        setDevToolsMessage(
-          `${stage.label} (${stage.description}) target: ${targetCount} bots for ${liveViewportWidth}x${liveViewportHeight}. Added ${delta} bots.`,
-        );
-        return;
-      }
-
-      const deleteCount = Math.abs(delta);
-      const optimisticDeletedIds = new Set(
-        previousBots.slice(0, deleteCount).map((bot) => bot.id),
-      );
-      setBots((list) =>
-        list.filter((bot) => !optimisticDeletedIds.has(bot.id)),
-      );
-      if (selectedBotId && optimisticDeletedIds.has(selectedBotId)) {
-        setSelectedBotId(null);
-      }
-
-      const result = await api<{ deleted?: number }>(
-        `/api/bots?limit=${deleteCount}`,
-        { method: "DELETE" },
-      );
-      await refreshBots();
-      const deleted =
-        typeof result?.deleted === "number" ? result.deleted : deleteCount;
-      setDevToolsMessage(
-        `${stage.label} (${stage.description}) target: ${targetCount} bots for ${liveViewportWidth}x${liveViewportHeight}. Deleted ${deleted} bots.`,
-      );
-    } catch (err) {
-      setBots(previousBots);
-      setSelectedBotId(previousSelectedBotId);
-      try {
-        await refreshBots();
-      } catch {
-        /* best-effort refresh */
-      }
-      setDevToolsMessage(
-        err instanceof Error ? err.message : `Set ${stage.label} failed.`,
-      );
-    } finally {
-      setDevToolsBusy(false);
-    }
-  }
-
   // Load a specific bot into the top form for editing. The form itself
   // doesn't change shape — it just flips from "create" to "edit" mode
   // via editingBotId, and the name / prompt / color / glyph fields are
@@ -99337,6 +96173,93 @@ function HomeContent(): React.JSX.Element {
     void openDefaultMemoriesPanel();
   }
 
+  function renderMemoryAcquisitionReceiptCard(): React.JSX.Element | null {
+    const receipt = selectedMemoryReceipt;
+    if (!receipt || receipt.kind !== "bot_relation") return null;
+    const learner = bots.find(
+      (candidate) => candidate.id === receipt.learnerBotId,
+    );
+    const target = bots.find(
+      (candidate) => candidate.id === receipt.targetBotId,
+    );
+    return (
+      <aside
+        className={styles.memoryAcquisitionReceiptCard}
+        role="dialog"
+        aria-label="New bot memory details"
+      >
+        <button
+          type="button"
+          className={styles.memoryAcquisitionReceiptClose}
+          onClick={() => setSelectedMemoryReceipt(null)}
+          aria-label="Close memory details"
+        >
+          ×
+        </button>
+        <span className={styles.memoryAcquisitionReceiptEyebrow}>New memory</span>
+        <strong>
+          {learner?.name ?? "This bot"}
+          {" → "}
+          {target?.name ?? "another bot"}
+        </strong>
+        <p>{receipt.memory?.text ?? "The memory is no longer available."}</p>
+        <div className={styles.memoryAcquisitionReceiptMeta}>
+          <span>
+            {Math.round((receipt.memory?.confidence ?? 0) * 100)}% confidence
+          </span>
+          <time dateTime={receipt.createdAt}>
+            {new Date(receipt.createdAt).toLocaleString()}
+          </time>
+        </div>
+        <button
+          type="button"
+          className={styles.memoryAcquisitionReceiptViewButton}
+          disabled={!learner}
+          onClick={() => {
+            if (!learner) return;
+            const memoryId = receipt.memoryId;
+            setSelectedMemoryReceipt(null);
+            void (async () => {
+              await openMemoriesPanelForBot(learner);
+              setFocusedMemoryId(memoryId);
+            })();
+          }}
+        >
+          View in Memories
+        </button>
+      </aside>
+    );
+  }
+
+  function renderLiveBotMemoryReceiptChip(
+    botId: string,
+    botName: string,
+  ): React.JSX.Element | null {
+    const receipt = memoryAcquisitionReceipts.find(
+      (candidate) =>
+        candidate.kind === "bot_relation" &&
+        candidate.readAt === null &&
+        candidate.learnerBotId === botId,
+    );
+    if (!receipt) return null;
+    return (
+      <button
+        type="button"
+        className={styles.liveBotMemoryReceiptChip}
+        data-memory-acquisition-receipt="true"
+        aria-label={`${botName} learned something new about another bot`}
+        title={`${botName} learned something new about another bot`}
+        onPointerDown={(event) => event.stopPropagation()}
+        onClick={(event) => {
+          event.stopPropagation();
+          void openMemoryAcquisitionReceipt(receipt);
+        }}
+      >
+        !
+      </button>
+    );
+  }
+
   function handleHeaderHubClick() {
     pendingPrivateExitOnChatHomeRef.current = true;
     setSelectedId(null);
@@ -99360,7 +96283,7 @@ function HomeContent(): React.JSX.Element {
       setPendingZenSessionResumeContext(null);
       persistZenSessionBreak(null);
       setZenSessionBreak(null);
-      setSummaryDebug(null);
+      setSummarySnapshot(null);
       setManualCompactionStatus(null);
       setZenWallpaperBusyConversationId(null);
       setZenWallpaperError(null);
@@ -99998,7 +96921,10 @@ function HomeContent(): React.JSX.Element {
   const visibleMemoryBubbles = useMemo(() => {
     if (memoryPanelScope === "all") return [];
     const shortTermMemories = botMemories.filter(
-      (memory) => memoryTier(memory) === "short_term",
+      (memory) =>
+        memoryTier(memory) === "short_term" &&
+        memory.lifecycle !== "derived" &&
+        memory.source !== "inferred",
     );
     const groupedByDedupKey = new Map<
       string,
@@ -100029,10 +96955,26 @@ function HomeContent(): React.JSX.Element {
     );
   }, [memoryPanelScope, botMemories]);
 
+  const visibleDerivedMemories = useMemo(() => {
+    if (memoryPanelScope === "all") return [];
+    return botMemories.filter(
+      (memory) =>
+        memory.lifecycle === "derived" || memory.source === "inferred",
+    );
+  }, [botMemories, memoryPanelScope]);
+
+  const visibleMemoryById = useMemo(
+    () => new Map(botMemories.map((memory) => [memory.id, memory])),
+    [botMemories],
+  );
+
   const visibleLongTermMemories = useMemo(() => {
     if (memoryPanelScope === "all") return [];
     const memories = botMemories.filter(
-      (memory) => memoryTier(memory) === "long_term",
+      (memory) =>
+        memoryTier(memory) === "long_term" &&
+        memory.lifecycle !== "derived" &&
+        memory.source !== "inferred",
     );
     if (memoryPanelScope !== "bot") return memories;
     return [...memories, ...botAboutYouMemories];
@@ -100468,11 +97410,61 @@ function HomeContent(): React.JSX.Element {
     activeMemoryBubblePositions,
   ]);
 
+  const derivedMemoryEnclosures = useMemo(() => {
+    const accent = memoryPanelAccent;
+    return visibleDerivedMemories.map((memory, index) => {
+      const positionKey = `derived:${memory.id}`;
+      const saved = activeMemoryBubblePositions[positionKey];
+      const evidence = (memory.evidenceMemoryIds ?? [])
+        .map((id) => visibleMemoryById.get(id))
+        .filter((item): item is UserMemory => Boolean(item));
+      const size = Math.min(
+        330,
+        178 + Math.max(1, evidence.length) * 24 + memory.confidence * 42,
+      );
+      const x = saved?.xPct ?? 24 + stableUnitValue(`${memory.id}:derived:x`) * 52;
+      const y = saved?.yPct ?? 24 + stableUnitValue(`${memory.id}:derived:y`) * 50;
+      const radii = [
+        38 + Math.round(stableUnitValue(`${memory.id}:r:0`) * 20),
+        42 + Math.round(stableUnitValue(`${memory.id}:r:1`) * 18),
+        36 + Math.round(stableUnitValue(`${memory.id}:r:2`) * 24),
+        40 + Math.round(stableUnitValue(`${memory.id}:r:3`) * 20),
+      ];
+      return {
+        memory,
+        evidence,
+        positionKey,
+        style: {
+          "--memory-derived-size": `${Math.round(size)}px`,
+          "--memory-derived-x": `${x.toFixed(2)}%`,
+          "--memory-derived-y": `${y.toFixed(2)}%`,
+          "--memory-derived-color": accent,
+          "--memory-derived-radius": `${radii[0]}% ${radii[1]}% ${radii[2]}% ${radii[3]}% / ${radii[2]}% ${radii[0]}% ${radii[3]}% ${radii[1]}%`,
+          "--memory-derived-z": `${7 + index}`,
+        } as React.CSSProperties,
+      };
+    });
+  }, [
+    activeMemoryBubblePositions,
+    memoryPanelAccent,
+    visibleDerivedMemories,
+    visibleMemoryById,
+  ]);
+
   const selectedVisibleMemory = useMemo(
     () =>
       visibleMemoryBubbles.find((memory) => memory.id === focusedMemoryId) ??
+      visibleDerivedMemories.find((memory) => memory.id === focusedMemoryId) ??
+      visibleLongTermMemories.find((memory) => memory.id === focusedMemoryId) ??
+      visibleMemoryById.get(focusedMemoryId ?? "") ??
       null,
-    [focusedMemoryId, visibleMemoryBubbles],
+    [
+      focusedMemoryId,
+      visibleDerivedMemories,
+      visibleLongTermMemories,
+      visibleMemoryBubbles,
+      visibleMemoryById,
+    ],
   );
   const memoryCardDeleteActionKey = selectedVisibleMemory
     ? memoryCardDeleteKey(selectedVisibleMemory.id)
@@ -100501,6 +97493,45 @@ function HomeContent(): React.JSX.Element {
         memoryCategory(memory),
       ),
     [memoryPanelSubjectLabel],
+  );
+  const renderDerivedEvidenceDetail = useCallback(
+    (memory: UserMemory): React.JSX.Element | null => {
+      if (memory.lifecycle !== "derived" && memory.source !== "inferred") {
+        return null;
+      }
+      const evidence = (memory.evidenceMemoryIds ?? [])
+        .map((id) => visibleMemoryById.get(id))
+        .filter((item): item is UserMemory => Boolean(item));
+      if (evidence.length === 0) {
+        return (
+          <p className={styles.memoryDerivedEvidenceUnavailable}>
+            Evidence unavailable for this historical Derived item.
+          </p>
+        );
+      }
+      return (
+        <div className={styles.memoryDerivedEvidenceDetail}>
+          <small>Supported by {evidence.length} memories</small>
+          <ul>
+            {evidence.map((source) => (
+              <li key={source.id}>
+                <button
+                  type="button"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setFocusedMemoryId(source.id);
+                  }}
+                >
+                  <span data-tier={memoryTier(source)} aria-hidden="true" />
+                  {renderMemoryPanelText(source)}
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      );
+    },
+    [renderMemoryPanelText, visibleMemoryById],
   );
   const handleMemoryBubbleActivate = useCallback(
     (memory: UserMemory) => {
@@ -100654,11 +97685,21 @@ function HomeContent(): React.JSX.Element {
     }
     if (
       focusedMemoryId &&
-      !visibleMemoryBubbles.some((memory) => memory.id === focusedMemoryId)
+      !visibleMemoryBubbles.some((memory) => memory.id === focusedMemoryId) &&
+      !visibleDerivedMemories.some((memory) => memory.id === focusedMemoryId) &&
+      !visibleLongTermMemories.some((memory) => memory.id === focusedMemoryId) &&
+      !visibleMemoryById.has(focusedMemoryId)
     ) {
       setFocusedMemoryId(null);
     }
-  }, [focusedMemoryId, memoryPanelScope, visibleMemoryBubbles]);
+  }, [
+    focusedMemoryId,
+    memoryPanelScope,
+    visibleDerivedMemories,
+    visibleLongTermMemories,
+    visibleMemoryBubbles,
+    visibleMemoryById,
+  ]);
 
   const handleMemoryBubblePointerDown = useCallback(
     (event: React.PointerEvent<HTMLElement>, memoryId: string) => {
@@ -105682,7 +102723,7 @@ function HomeContent(): React.JSX.Element {
       <button
         type="button"
         className={`${styles.menuToggle} ${hidden ? styles.menuToggleHidden : ""}`}
-        data-dev-panel-safe-area="top"
+        data-viewport-safe-area="top"
         onClick={() => {
           setSidebarOpen((open) => !open);
         }}
@@ -107349,7 +104390,7 @@ function HomeContent(): React.JSX.Element {
         data-live-session-locked={
           options.liveSessionActive ? "true" : undefined
         }
-        data-dev-panel-safe-area="top"
+        data-viewport-safe-area="top"
         data-zen-live-bot-drag-exclusion={
           options.zenDragExclusion ? "top-bar" : undefined
         }
@@ -108181,25 +105222,22 @@ function HomeContent(): React.JSX.Element {
                 : undefined,
           onSelect: () => createConversationTranscriptStory(),
         },
-        ...(DEV_TOOLS_ENABLED
-          ? ([
-              {
-                id: "copy-verbose-transcript",
-                icon: <Copy />,
-                label: "Copy Verbose Transcript",
-                feedback: "Copied",
-                disabled: verboseTranscriptDisabled,
-                disabledReason: privateChatActive
-                  ? "Private chats stay on this device."
-                  : !selectedId
-                    ? "Open a conversation first."
-                    : !detail || detail.messages.length === 0
-                      ? "No messages to copy yet."
-                      : undefined,
-                onSelect: () => copyVerboseTranscriptToClipboard(),
-              },
-            ] satisfies PrismMenuEntry[])
-          : []),
+        {
+          id: "copy-verbose-transcript",
+          icon: <Copy />,
+          label: "Copy diagnostic transcript",
+          description: "Includes technical timing and replay details",
+          feedback: "Copied",
+          disabled: verboseTranscriptDisabled,
+          disabledReason: privateChatActive
+            ? "Private chats stay on this device."
+            : !selectedId
+              ? "Open a conversation first."
+              : !detail || detail.messages.length === 0
+                ? "No messages to copy yet."
+                : undefined,
+          onSelect: () => copyVerboseTranscriptToClipboard(),
+        },
       ];
     } else {
       entries = buildSharedWorkspaceMenuEntries({ importBots: true });
@@ -108584,2034 +105622,6 @@ function HomeContent(): React.JSX.Element {
     );
   }
 
-  const renderDebugComposer = (): React.JSX.Element | null => {
-    if (!devToolsRuntimeActive) return null;
-    if (devDebugComposerMinimized) {
-      return (
-        <button
-          ref={debugComposerRestoreRef}
-          type="button"
-          className={styles.debugComposerRestoreButton}
-          style={{
-            left: devDebugComposerRestorePosition.x,
-            top: devDebugComposerRestorePosition.y,
-          }}
-          onPointerDown={startDebugComposerRestoreDrag}
-          onPointerMove={dragDebugComposerRestore}
-          onPointerUp={endDebugComposerRestoreDrag}
-          onPointerCancel={endDebugComposerRestoreDrag}
-          onClick={() => {
-            if (debugComposerRestoreSuppressClickRef.current) return;
-            setDevDebugComposerMinimized(false);
-          }}
-          aria-label="Restore debug composer"
-        >
-          <Maximize2 aria-hidden="true" size={14} />
-          <span>Debug composer</span>
-        </button>
-      );
-    }
-    return (
-      <div
-        ref={debugComposerRef}
-        className={styles.debugComposerBox}
-        style={{ top: devDebugComposerY }}
-        data-floating="true"
-      >
-        <div
-          className={styles.debugComposerHeader}
-          onPointerDown={startDebugComposerExpandedDrag}
-          onPointerMove={dragDebugComposerExpanded}
-          onPointerUp={endDebugComposerExpandedDrag}
-          onPointerCancel={endDebugComposerExpandedDrag}
-        >
-          <div className={styles.debugComposerLabel} aria-live="polite">
-            DEBUG COMPOSER (echo + actions)
-          </div>
-          <button
-            type="button"
-            className={styles.debugComposerMinimizeButton}
-            onPointerDown={(event) => event.stopPropagation()}
-            onClick={() => setDevDebugComposerMinimized(true)}
-            aria-label="Minimize debug composer"
-          >
-            <Minimize2 aria-hidden="true" size={13} />
-          </button>
-        </div>
-        <div className={styles.debugComposerRow} data-debug-composer="true">
-          <textarea
-            value={debugComposerDraft}
-            onChange={(event) =>
-              updateDebugComposerDraft(event.currentTarget.value)
-            }
-            placeholder="Type a debug reply; *actions* drive the bot panel..."
-            onKeyDown={(event) => {
-              if (
-                !shouldSubmitComposerOnEnter({
-                  key: event.key,
-                  shiftKey: event.shiftKey,
-                  isComposing: event.nativeEvent.isComposing,
-                })
-              ) {
-                return;
-              }
-              event.preventDefault();
-              submitDebugComposerEcho();
-            }}
-          />
-          <button
-            type="button"
-            onClick={submitDebugComposerEcho}
-            disabled={debugComposerDraft.trim().length === 0 || pendingReply}
-          >
-            Send debug echo
-          </button>
-        </div>
-      </div>
-    );
-  };
-
-  const renderDevMoodVisual = (): React.JSX.Element | null => {
-    if (!devToolsRuntimeActive) return null;
-    const coffeeMood =
-      view === "coffee"
-        ? coffeeSocialByIdToPrismMood(coffeeConversation?.coffeeBotSocialById)
-        : null;
-    const debugConversationId =
-      detail?.id && detail.id !== "pending"
-        ? detail.id
-        : view === "coffee" && coffeeConversation?.id
-          ? coffeeConversation.id
-          : selectedId;
-    const debugMood =
-      devMoodDebugSnapshot?.conversationId === debugConversationId
-        ? devMoodDebugSnapshot.mood
-        : null;
-    const mood = detail?.prismMood ?? debugMood ?? coffeeMood;
-    const moodKey = normalizeAssistantMoodKey(mood?.moodKey);
-    const percent = (value: number | undefined): string =>
-      `${Math.round(Math.max(0, Math.min(1, value ?? 0)) * 100)}%`;
-    const declineReason = mood ? prismMoodDeclineReason(mood) : null;
-    const recentDeltas = mood?.recentDeltas ?? [];
-    const ignoreUntilMs = Date.parse(mood?.ignoreUntil ?? "");
-    const ignoreRemainingMs =
-      Number.isFinite(ignoreUntilMs) && ignoreUntilMs > devMoodNowMs
-        ? ignoreUntilMs - devMoodNowMs
-        : 0;
-    const ignoreRemainingLabel =
-      ignoreRemainingMs > 0
-        ? formatMoodIgnoreRemainingMs(ignoreRemainingMs)
-        : null;
-    const ignoreForgivenessLabel =
-      ignoreRemainingLabel && typeof mood?.ignoreForgivenessChance === "number"
-        ? percent(mood.ignoreForgivenessChance)
-        : null;
-    const debugControlsDisabled =
-      devMoodDebugBusy ||
-      !debugConversationId ||
-      debugConversationId === "pending";
-    const chatRevealVisibleLength = (() => {
-      if (
-        !chatAssistantRevealInProgress ||
-        !detail?.id ||
-        !latestAssistantMessageId
-      ) {
-        return null;
-      }
-      const revealKey = `${detail.id}:${latestAssistantMessageId}`;
-      if (!chatAssistantRevealEligibleKeysRef.current.has(revealKey))
-        return null;
-      const latestAssistant =
-        detail.messages.find(
-          (message) => message.id === latestAssistantMessageId,
-        ) ?? null;
-      if (!latestAssistant) return null;
-      const displayContent = resolveVisibleMessageContent(latestAssistant);
-      const revealTokens = tokenizeMessageReveal(displayContent);
-      const visibleTokenCount = resolveAssistantRevealVisibleTokenCount({
-        revealKey,
-        displayContent,
-        nowMs: chatEphemeralNowMs,
-        completed: false,
-        moodKey: DEFAULT_MESSAGE_MOOD,
-        delayMultiplier: resolveZenAssistantRevealDelayMultiplier(revealKey),
-        startDelayMs: resolveMessageActionTextLagMs(latestAssistant),
-      });
-      return revealTokens.slice(0, visibleTokenCount).join("").length;
-    })();
-    const coffeeRevealVisibleLength = (() => {
-      if (view !== "coffee") return null;
-      if (
-        coffeeTurnRhythmState === "tableTyping" &&
-        coffeePendingSpeakerBotId
-      ) {
-        const pendingMessages = coffeePendingRevealConversation?.messages ?? [];
-        const pendingLatestMessage =
-          pendingMessages.length > 0
-            ? pendingMessages[pendingMessages.length - 1]
-            : null;
-        if (!coffeeMessageHasTableText(pendingLatestMessage)) return null;
-        return coffeeTypewriterLength;
-      }
-      if (
-        !coffeeReplayActive ||
-        !coffeeConversation ||
-        coffeeConversation.messages.length === 0
-      ) {
-        return null;
-      }
-      const replayIndex = Math.max(
-        0,
-        Math.min(
-          coffeeReplayMessageIndex,
-          coffeeConversation.messages.length - 1,
-        ),
-      );
-      const replayMessage = coffeeConversation.messages[replayIndex] ?? null;
-      if (!replayMessage || replayMessage.role !== "assistant") return null;
-      const displayLength = coffeeReplayDisplayLengthForMessage(replayMessage);
-      if (displayLength <= 0 || coffeeReplayTypewriterLength >= displayLength)
-        return null;
-      return coffeeReplayTypewriterLength;
-    })();
-    const devMoodFaceVisibleLength =
-      chatRevealVisibleLength ?? coffeeRevealVisibleLength;
-    const devMoodFaceTalking = devMoodFaceVisibleLength !== null;
-    const devMoodFaceMouthShape = devMoodFaceTalking
-      ? coffeeSeatMouthShapeFromVisibleLength(
-          devMoodFaceVisibleLength,
-          `dev-mood:${moodKey}:${activeBot?.id ?? "default"}`,
-          settings?.voiceMode === "english",
-          settings?.voiceMode === "bottish"
-            ? COFFEE_SEAT_BOTTISH_MOUTH_CHARACTERS_PER_PHASE
-            : undefined,
-        )
-      : "closed";
-    return (
-      <div
-        ref={devMoodVisualRef}
-        className={styles.devMoodVisual}
-        data-open={devMoodVisualOpen ? "true" : undefined}
-        data-mood={moodKey}
-        style={{
-          left: `${devMoodVisualPosition.x}px`,
-          top: `${devMoodVisualPosition.y}px`,
-        }}
-      >
-        <button
-          type="button"
-          className={styles.devMoodFaceButton}
-          onPointerDown={startDevMoodVisualDrag}
-          onPointerMove={dragDevMoodVisual}
-          onPointerUp={endDevMoodVisualDrag}
-          onPointerCancel={endDevMoodVisualDrag}
-          onClick={() => {
-            if (devMoodVisualSuppressClickRef.current) return;
-            setDevMoodVisualOpen((open) => !open);
-          }}
-          aria-label="Open Prism mood details"
-          title="Prism mood"
-        >
-          <MessageMoodFace
-            moodKey={moodKey}
-            variant="prism"
-            color={activeBot?.color}
-            voicePreset={coffeeSeatVoicePreset(activeBot)}
-            faceStyle={resolveBotFaceStyleForBot(activeBot)}
-            isTalking={devMoodFaceTalking}
-            mouthShape={devMoodFaceMouthShape}
-          />
-        </button>
-        {ignoreRemainingLabel ? (
-          <span className={styles.devMoodCooldownBadge}>
-            Ignoring {ignoreRemainingLabel}
-          </span>
-        ) : null}
-        {devMoodVisualOpen ? (
-          <div
-            className={styles.devMoodPanel}
-            role="dialog"
-            aria-label="Prism mood details"
-          >
-            <div className={styles.devMoodPanelHeader}>
-              <div>
-                <span className={styles.devToolsKicker}>Prism mood</span>
-                <strong>{messageMoodLabel(moodKey)}</strong>
-              </div>
-              <button
-                type="button"
-                className={styles.devToolsIconButton}
-                onClick={() => setDevMoodVisualOpen(false)}
-                aria-label="Close Prism mood details"
-              >
-                ×
-              </button>
-            </div>
-            {mood ? (
-              <>
-                <div className={styles.devMoodGrid}>
-                  <span>
-                    <small>Confidence</small>
-                    <strong>{percent(mood.confidence)}</strong>
-                  </span>
-                  <span>
-                    <small>Annoyance</small>
-                    <strong>{percent(mood.annoyance)}</strong>
-                  </span>
-                  <span>
-                    <small>Warmth</small>
-                    <strong>{percent(mood.warmth)}</strong>
-                  </span>
-                  <span>
-                    <small>Engagement</small>
-                    <strong>{percent(mood.engagement)}</strong>
-                  </span>
-                  <span>
-                    <small>Restraint</small>
-                    <strong>{percent(mood.restraint)}</strong>
-                  </span>
-                  <span>
-                    <small>Frozen</small>
-                    <strong>{mood.frozen ? "Yes" : "No"}</strong>
-                  </span>
-                  <span>
-                    <small>Ignore</small>
-                    <strong>{ignoreRemainingLabel ?? "No"}</strong>
-                  </span>
-                  <span>
-                    <small>Forgive</small>
-                    <strong>{ignoreForgivenessLabel ?? "No"}</strong>
-                  </span>
-                  <span>
-                    <small>Penalty</small>
-                    <strong>{mood.ignorePenaltyLevel ?? 0}</strong>
-                  </span>
-                </div>
-                <p className={styles.devMoodNote}>
-                  {ignoreRemainingLabel
-                    ? `Prism is ignoring Zen messages for ${ignoreRemainingLabel}. Repair chance: ${ignoreForgivenessLabel ?? "0%"}.`
-                    : (declineReason ??
-                      "Prism is available to answer normally.")}
-                </p>
-                <div className={styles.devMoodActions}>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    disabled={debugControlsDisabled}
-                    onClick={() =>
-                      void devMoodDebugPatch(
-                        {
-                          annoyanceDelta: -0.12,
-                          warmthDelta: 0.08,
-                          engagementDelta: 0.04,
-                          restraintDelta: 0.04,
-                          reason: "Developer Tools simulated a warmer turn.",
-                        },
-                        "Mood nudged warmer.",
-                      )
-                    }
-                  >
-                    Warmer
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    disabled={debugControlsDisabled}
-                    onClick={() =>
-                      void devMoodDebugPatch(
-                        {
-                          annoyanceDelta: 0.14,
-                          warmthDelta: -0.06,
-                          engagementDelta: -0.03,
-                          restraintDelta: -0.03,
-                          reason: "Developer Tools simulated an interruption.",
-                        },
-                        "Mood nudged guarded.",
-                      )
-                    }
-                  >
-                    Annoy
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    disabled={debugControlsDisabled}
-                    onClick={() =>
-                      void devMoodDebugPatch(
-                        {
-                          freeze: !mood.frozen,
-                          reason: mood.frozen
-                            ? "Developer Tools unfroze mood decay."
-                            : "Developer Tools froze mood decay.",
-                        },
-                        mood.frozen ? "Mood unfrozen." : "Mood frozen.",
-                      )
-                    }
-                  >
-                    {mood.frozen ? "Unfreeze" : "Freeze"}
-                  </button>
-                  <button
-                    type="button"
-                    className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
-                    disabled={debugControlsDisabled}
-                    onClick={() =>
-                      void devMoodDebugPatch(
-                        {
-                          action: "reset",
-                          reason: "Developer Tools reset mood.",
-                        },
-                        "Mood reset.",
-                      )
-                    }
-                  >
-                    Reset
-                  </button>
-                </div>
-                <div className={styles.devMoodDeltaList}>
-                  {recentDeltas.length > 0 ? (
-                    recentDeltas.slice(0, 4).map((delta, index) => (
-                      <p key={`${delta.at}-${delta.kind}-${index}`}>
-                        <strong>{delta.kind}</strong> · {delta.reason}
-                      </p>
-                    ))
-                  ) : (
-                    <p>No mood deltas yet.</p>
-                  )}
-                </div>
-              </>
-            ) : (
-              <p className={styles.devMoodNote}>No mood snapshot yet.</p>
-            )}
-          </div>
-        ) : null}
-      </div>
-    );
-  };
-
-  const updateDevZenPauseTiming = (
-    key: keyof ChatRevealTimingSettings,
-    valueSeconds: string,
-  ): void => {
-    const seconds = Number.parseFloat(valueSeconds);
-    setDevZenPauseTiming((current) =>
-      normalizeChatRevealTimingSettings(
-        {
-          ...current,
-          [key]: Number.isFinite(seconds) ? seconds * 1000 : current[key],
-        },
-        current,
-      ),
-    );
-  };
-
-  const formatDevZenPauseSeconds = (ms: number): string =>
-    (ms / 1000).toFixed(3);
-  const formatDevZenPauseSummarySeconds = (ms: number): string =>
-    ms >= 1000 ? `${(ms / 1000).toFixed(2)}s` : `${(ms / 1000).toFixed(3)}s`;
-  const devZenPauseKindLabel = (
-    kind: ReturnType<typeof resolveChatRevealPauseKind>,
-  ): string => {
-    switch (kind) {
-      case "ellipsis":
-        return "Ellipsis";
-      case "sentence":
-        return "Sentence";
-      case "clause":
-        return "Clause";
-      case "base":
-      default:
-        return "Word";
-    }
-  };
-  const devZenPauseTokenPreview = (token: string): string => {
-    const display = formatChatRevealTokenDisplay(token, {
-      ellipsisPhase: isChatRevealEllipsisToken(token) ? "complete" : undefined,
-    }).trim();
-    if (!display) return "whitespace";
-    return display.length > 28 ? `${display.slice(0, 25)}...` : display;
-  };
-  const resolveDevZenPauseTesterStatus = (): {
-    active: boolean;
-    label: string;
-    delayMs: number;
-    token: string;
-  } => {
-    if (!detail?.id || !latestAssistantMessageId) {
-      return {
-        active: false,
-        label: "Idle",
-        delayMs: 0,
-        token: "No active reveal",
-      };
-    }
-    const latestAssistant =
-      detail.messages.find(
-        (message) => message.id === latestAssistantMessageId,
-      ) ?? null;
-    if (!latestAssistant) {
-      return {
-        active: false,
-        label: "Idle",
-        delayMs: 0,
-        token: "No active reveal",
-      };
-    }
-    const revealKey = `${detail.id}:${latestAssistantMessageId}`;
-    if (
-      !chatAssistantRevealEligibleKeysRef.current.has(revealKey) ||
-      chatCompletedRevealKeysRef.current.has(revealKey) ||
-      chatCancelledRevealTokenCountByKeyRef.current.has(revealKey)
-    ) {
-      return {
-        active: false,
-        label: "Idle",
-        delayMs: 0,
-        token: "Reveal complete",
-      };
-    }
-    const revealTokens = tokenizeMessageReveal(
-      resolveVisibleMessageContent(latestAssistant),
-    );
-    const tokenTotal = Math.max(1, revealTokens.length);
-    const pacedVisibleTokenCount =
-      chatRevealPaceByKeyRef.current.get(revealKey)?.visibleTokenCount ?? 1;
-    const previousTokenIndex = Math.max(
-      0,
-      Math.min(tokenTotal - 1, Math.max(1, pacedVisibleTokenCount) - 1),
-    );
-    const token = revealTokens[previousTokenIndex] ?? "";
-    const pauseKind = resolveChatRevealPauseKind(token);
-    return {
-      active: true,
-      label: devZenPauseKindLabel(pauseKind),
-      delayMs: resolveRevealStepDelayMs(
-        token,
-        DEFAULT_MESSAGE_MOOD,
-        effectiveChatRevealTiming,
-      ),
-      token: devZenPauseTokenPreview(token),
-    };
-  };
-
-  const renderDevZenPauseTester = (): React.JSX.Element | null => {
-    if (!devToolsRuntimeActive || view !== "chat") return null;
-    const status = resolveDevZenPauseTesterStatus();
-    return (
-      <div
-        ref={devZenPauseTesterRef}
-        className={styles.devZenPauseTester}
-        data-open={devZenPauseTesterOpen ? "true" : undefined}
-        style={{
-          left: `${devZenPauseTesterPosition.x}px`,
-          top: `${devZenPauseTesterPosition.y}px`,
-        }}
-      >
-        <button
-          type="button"
-          className={styles.devZenPauseTesterBubble}
-          onPointerDown={(event) =>
-            startDevLayerOrbDrag(
-              event,
-              devZenPauseTesterRef.current,
-              devZenPauseTesterDragRef,
-              devZenPauseTesterSuppressClickRef,
-            )
-          }
-          onPointerMove={(event) =>
-            dragDevLayerOrb(
-              event,
-              devZenPauseTesterRef.current,
-              devZenPauseTesterDragRef,
-              setDevZenPauseTesterPosition,
-            )
-          }
-          onPointerUp={(event) =>
-            endDevLayerOrbDrag(
-              event,
-              devZenPauseTesterDragRef,
-              devZenPauseTesterSuppressClickRef,
-            )
-          }
-          onPointerCancel={(event) =>
-            endDevLayerOrbDrag(
-              event,
-              devZenPauseTesterDragRef,
-              devZenPauseTesterSuppressClickRef,
-            )
-          }
-          onClick={() => {
-            if (devZenPauseTesterSuppressClickRef.current) return;
-            setDevZenPauseTesterOpen((open) => !open);
-          }}
-          aria-label={
-            devZenPauseTesterOpen
-              ? "Collapse Zen pause tester"
-              : "Open Zen pause tester"
-          }
-          aria-expanded={devZenPauseTesterOpen}
-          data-glyph-tooltip={
-            devZenPauseTesterOpen ? "Collapse pause tester" : "Zen pause tester"
-          }
-        >
-          <Timer size={18} aria-hidden="true" />
-        </button>
-        {devZenPauseTesterOpen ? (
-          <div
-            className={styles.devZenPauseTesterPanel}
-            role="dialog"
-            aria-label="Zen pause tester"
-          >
-            <div className={styles.devZenPauseTesterHeader}>
-              <div>
-                <span className={styles.devToolsKicker}>Zen timing</span>
-                <strong>Pause tester</strong>
-              </div>
-              <button
-                type="button"
-                className={styles.devToolsIconButton}
-                onClick={() => setDevZenPauseTesterOpen(false)}
-                aria-label="Collapse Zen pause tester"
-              >
-                ×
-              </button>
-            </div>
-            <p
-              className={styles.devZenPauseTesterStatus}
-              data-active={status.active ? "true" : undefined}
-              aria-live="polite"
-            >
-              <span>Current pause</span>
-              <strong>
-                {status.active
-                  ? `${status.label} · ${formatDevZenPauseSummarySeconds(status.delayMs)}`
-                  : "Idle"}
-              </strong>
-              <small>{status.token}</small>
-            </p>
-            <div className={styles.devZenPauseTesterControls}>
-              {DEV_ZEN_PAUSE_TESTER_CONTROLS.map((control) => (
-                <label
-                  key={control.key}
-                  className={styles.devZenPauseTesterControl}
-                >
-                  <span>
-                    {control.label}
-                    <strong>
-                      {formatDevZenPauseSummarySeconds(
-                        effectiveChatRevealTiming[control.key],
-                      )}
-                    </strong>
-                  </span>
-                  <input
-                    type="number"
-                    min={0}
-                    max={5}
-                    step={0.001}
-                    value={formatDevZenPauseSeconds(
-                      effectiveChatRevealTiming[control.key],
-                    )}
-                    onChange={(event) =>
-                      updateDevZenPauseTiming(
-                        control.key,
-                        event.currentTarget.value,
-                      )
-                    }
-                    aria-label={`${control.label} seconds`}
-                  />
-                </label>
-              ))}
-            </div>
-            <button
-              type="button"
-              className={`${styles.devToolsAction} ${styles.devZenPauseTesterReset}`}
-              onClick={() => setDevZenPauseTiming(DEFAULT_CHAT_REVEAL_TIMING)}
-            >
-              <RotateCcw size={14} aria-hidden="true" />
-              Reset defaults
-            </button>
-          </div>
-        ) : null}
-      </div>
-    );
-  };
-
-  const renderZenToolLab = (): React.JSX.Element | null => {
-    if (!devToolsRuntimeActive || view !== "chat") return null;
-    return (
-      <div
-        ref={zenToolLabRef}
-        className={styles.zenToolLabDock}
-        data-open={zenToolLabOpen ? "true" : undefined}
-        style={{
-          left: `${zenToolLabPosition.x}px`,
-          top: `${zenToolLabPosition.y}px`,
-        }}
-      >
-        <button
-          type="button"
-          className={styles.zenToolLabBubble}
-          onPointerDown={(event) =>
-            startDevLayerOrbDrag(
-              event,
-              zenToolLabRef.current,
-              zenToolLabDragRef,
-              zenToolLabSuppressClickRef,
-            )
-          }
-          onPointerMove={(event) =>
-            dragDevLayerOrb(
-              event,
-              zenToolLabRef.current,
-              zenToolLabDragRef,
-              setZenToolLabPosition,
-            )
-          }
-          onPointerUp={(event) =>
-            endDevLayerOrbDrag(
-              event,
-              zenToolLabDragRef,
-              zenToolLabSuppressClickRef,
-            )
-          }
-          onPointerCancel={(event) =>
-            endDevLayerOrbDrag(
-              event,
-              zenToolLabDragRef,
-              zenToolLabSuppressClickRef,
-            )
-          }
-          onClick={() => {
-            if (zenToolLabSuppressClickRef.current) return;
-            setZenToolLabOpen((open) => !open);
-          }}
-          aria-label={
-            zenToolLabOpen ? "Collapse Zen Tool Lab" : "Open Zen Tool Lab"
-          }
-          aria-expanded={zenToolLabOpen}
-          aria-controls="zen-tool-lab-panel"
-          data-glyph-tooltip={
-            zenToolLabOpen ? "Collapse Tool Lab" : "Zen Tool Lab"
-          }
-        >
-          <Play size={17} aria-hidden="true" />
-        </button>
-        {zenToolLabOpen ? (
-          <div
-            id="zen-tool-lab-panel"
-            className={styles.zenToolLabPanel}
-            role="dialog"
-            aria-label="Zen Tool Lab"
-          >
-            <div className={styles.zenToolLabHeader}>
-              <div>
-                <span className={styles.devToolsKicker}>Zen tools</span>
-                <strong>Tool Lab</strong>
-              </div>
-              <button
-                type="button"
-                className={styles.devToolsIconButton}
-                onClick={() => setZenToolLabOpen(false)}
-                aria-label="Collapse Zen Tool Lab"
-              >
-                ×
-              </button>
-            </div>
-            <p
-              className={styles.zenToolLabStatus}
-              data-active={zenToolLabHasActiveThread ? "true" : undefined}
-              role="status"
-            >
-              {zenToolLabHasActiveThread
-                ? "Samples append to this thread only."
-                : "Start a Zen thread to enable tool samples."}
-            </p>
-            <div
-              className={styles.zenToolLabGrid}
-              aria-label="Zen Tool Lab samples"
-            >
-              {ZEN_TOOL_LAB_TOOLS.map((tool) => (
-                <button
-                  key={tool.id}
-                  type="button"
-                  className={styles.zenToolLabToolButton}
-                  disabled={!zenToolLabHasActiveThread}
-                  onClick={() => appendZenToolLabSample(tool.id)}
-                >
-                  <span
-                    className={styles.zenToolLabToolIcon}
-                    aria-hidden="true"
-                  >
-                    <Play size={13} strokeWidth={2.4} />
-                  </span>
-                  <span>
-                    <strong>{tool.label}</strong>
-                    <small>{tool.description}</small>
-                  </span>
-                </button>
-              ))}
-            </div>
-          </div>
-        ) : null}
-      </div>
-    );
-  };
-
-  const renderDevToolsPanel = (): React.JSX.Element | null => {
-    if (!DEV_TOOLS_ENABLED || !devToolsUnlocked) return null;
-    if (!devToolsOpen || devToolsMinimized) {
-      return (
-        <button
-          ref={devToolsBubbleRef}
-          type="button"
-          className={styles.devToolsBubble}
-          style={
-            {
-              left: `${devToolsPanelPosition.x}px`,
-              top: `${devToolsPanelPosition.y}px`,
-            } as React.CSSProperties
-          }
-          onPointerDown={(event) =>
-            startDevLayerOrbDrag(
-              event,
-              devToolsBubbleRef.current,
-              devToolsBubbleDragRef,
-              devToolsBubbleSuppressClickRef,
-            )
-          }
-          onPointerMove={(event) =>
-            dragDevLayerOrb(
-              event,
-              devToolsBubbleRef.current,
-              devToolsBubbleDragRef,
-              setDevToolsPanelPosition,
-            )
-          }
-          onPointerUp={(event) =>
-            endDevLayerOrbDrag(
-              event,
-              devToolsBubbleDragRef,
-              devToolsBubbleSuppressClickRef,
-            )
-          }
-          onPointerCancel={(event) =>
-            endDevLayerOrbDrag(
-              event,
-              devToolsBubbleDragRef,
-              devToolsBubbleSuppressClickRef,
-            )
-          }
-          onClick={() => {
-            if (devToolsBubbleSuppressClickRef.current) return;
-            setDevToolsMinimized(false);
-            setDevToolsOpen(true);
-          }}
-          aria-label="Restore developer tools"
-          title="Developer tools"
-        >
-          <Maximize2 aria-hidden="true" size={15} />
-          <span className={styles.devToolsBubbleLabel}>Dev</span>
-        </button>
-      );
-    }
-    const densityStageTargets = pickerDensityStageTargets(
-      viewportWidth,
-      viewportHeight,
-    );
-    const devToolsMemoryPanelOpen = panel === "memories";
-    const devToolsMemoryScopeLabel =
-      memoryPanelScope === "bot" && memoryPanelBot
-        ? memoryPanelBot.name
-        : memoryPanelScope === "session"
-          ? "Zen session"
-          : "all bots";
-    const devToolsHasSavedConversation = Boolean(
-      (detail?.id && detail.id !== "pending") ||
-      (selectedId && selectedId !== "pending"),
-    );
-    const devToolsSummaryMode: ChatLikeSummaryMode = summaryModeForView(view);
-    const devToolsSummaryPreview = summaryDebug?.latestSummary
-      ? summaryDebug.latestSummary.length > 220
-        ? `${summaryDebug.latestSummary.slice(0, 217)}...`
-        : summaryDebug.latestSummary
-      : null;
-    const coffeeSocialById =
-      view === "coffee"
-        ? (coffeeConversation?.coffeeBotSocialById ?? null)
-        : null;
-    const coffeeSocialSeatOrder =
-      view === "coffee" && coffeeConversation
-        ? (coffeeConversation.coffeeSeatBotIds ??
-          coffeeSeatsFromBotIds(coffeeConversation.botGroupIds))
-        : [];
-    const coffeeSocialOrderedBotIds = Array.from(
-      new Set(
-        coffeeSocialSeatOrder
-          .filter((botId): botId is string => typeof botId === "string")
-          .concat(
-            coffeeSocialById
-              ? Object.keys(coffeeSocialById ?? {}).filter(
-                  (botId) =>
-                    !coffeeSocialSeatOrder.some(
-                      (seatBotId) => seatBotId === botId,
-                    ),
-                )
-              : [],
-          ),
-      ),
-    );
-    const formatSocialPercent = (value: number): string =>
-      `${Math.round(Math.max(0, Math.min(1, value)) * 100)}%`;
-    const activeDevToolsNavItem =
-      DEV_TOOLS_NAV_ITEMS.find((item) => item.id === devToolsActiveSection) ??
-      DEV_TOOLS_NAV_ITEMS[0];
-    const devToolsConversationName =
-      detail?.title?.trim() ||
-      (devToolsHasSavedConversation ? "Saved thread" : "No saved thread");
-    const devToolsMemoryTargetLabel =
-      memoryPanelScope === "bot" && memoryPanelBot
-        ? memoryPanelBot.name
-        : memoryPanelScope === "default"
-          ? "Default Prism"
-          : memoryPanelScope === "session"
-            ? "Zen session"
-            : "All bots";
-    const devToolsTraceCount = devChatDebugEvents.length;
-    const renderDevMetricsTerminalLog = (): React.JSX.Element => (
-      <div className={styles.devMetricsTerminal} role="log" aria-live="polite">
-        {!devChatMetricsTerminalActive ? (
-          <div className={styles.devMetricsTerminalEmpty}>
-            Open this panel with $dev to stream backend traces here.
-          </div>
-        ) : devChatDebugEvents.length === 0 ? (
-          <div className={styles.devMetricsTerminalEmpty}>
-            Waiting for the next chat request...
-          </div>
-        ) : (
-          devChatDebugEvents.slice(-80).map((event) => {
-            const kind = inferDevChatDebugKind(event);
-            const eventDate = new Date(event.createdAt);
-            const timestampTitle = Number.isNaN(eventDate.getTime())
-              ? event.createdAt
-              : eventDate.toLocaleTimeString();
-            return (
-              <div
-                key={event.id}
-                className={styles.devMetricsTerminalLine}
-                data-kind={kind}
-              >
-                <time
-                  className={styles.devMetricsTerminalTime}
-                  dateTime={event.createdAt}
-                  title={timestampTitle}
-                >
-                  {formatDevMetricsTimestamp(event.createdAt)}
-                </time>
-                <code>{renderDevMetricsInlineText(event.text)}</code>
-              </div>
-            );
-          })
-        )}
-      </div>
-    );
-    const renderDevMetricsTerminal = (
-      consoleOnly = false,
-    ): React.JSX.Element => (
-      <section
-        className={`${styles.devToolsCard} ${styles.devToolsCardWide} ${styles.devMetricsTerminalSection}`}
-        aria-labelledby="dev-metrics-terminal-title"
-        data-console-only={consoleOnly ? "true" : undefined}
-      >
-        <div className={styles.devMetricsTerminalHeader}>
-          <div>
-            <h3 id="dev-metrics-terminal-title">Developer metrics terminal</h3>
-            <p>
-              Backend route, model, memory, summary, and tool events for the
-              current chat run.
-            </p>
-          </div>
-          <div className={styles.devMetricsTerminalActions}>
-            <span
-              data-enabled={devChatMetricsTerminalActive ? "true" : "false"}
-            >
-              {devChatMetricsTerminalActive ? "Live" : "Off"}
-            </span>
-            <button
-              type="button"
-              className={styles.devToolsAction}
-              onClick={() => setDevChatDebugEvents([])}
-              disabled={devChatDebugEvents.length === 0}
-            >
-              Clear
-            </button>
-          </div>
-        </div>
-        {renderDevMetricsTerminalLog()}
-      </section>
-    );
-    const devToolsSectionContent = (() => {
-      switch (devToolsActiveSection) {
-        case "seed":
-          return (
-            <div className={styles.devToolsCardGrid}>
-              <section className={styles.devToolsCard}>
-                <div className={styles.devToolsCardHeader}>
-                  <span>Quantity</span>
-                  <strong>
-                    {resolvedDevToolsBotQuantity.toLocaleString()}
-                  </strong>
-                </div>
-                <p className={styles.devToolsSectionHint}>
-                  Shared by bot creation, seed chats, density stages, and memory
-                  seed actions.
-                </p>
-                <label className={styles.devToolsCountControl}>
-                  <span>Count</span>
-                  <input
-                    type="number"
-                    min={DEV_TOOLS_BOT_QUANTITY_MIN}
-                    max={DEV_TOOLS_BOT_QUANTITY_MAX}
-                    step={1}
-                    value={devToolsBotQuantity}
-                    aria-label="Quantity for developer tools add actions"
-                    onChange={(event) => {
-                      const next = event.currentTarget.value;
-                      setDevToolsBotQuantity(
-                        next === ""
-                          ? ""
-                          : clampDevToolsBotQuantity(Number(next)),
-                      );
-                    }}
-                    disabled={devToolsBusy}
-                  />
-                </label>
-                <div
-                  className={styles.devToolsQuantityRail}
-                  aria-label="Quick quantities"
-                >
-                  {DEV_TOOLS_BOT_QUANTITY_PRESETS.map((quantity) => (
-                    <button
-                      key={quantity}
-                      type="button"
-                      className={`${styles.devToolsPresetButton} ${
-                        resolvedDevToolsBotQuantity === quantity
-                          ? styles.devToolsPresetButtonActive
-                          : ""
-                      }`}
-                      onClick={() => setDevToolsBotQuantity(quantity)}
-                      disabled={devToolsBusy}
-                    >
-                      {quantity}
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section
-                className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}
-              >
-                <div className={styles.devToolsCardHeader}>
-                  <span>Picker density stages</span>
-                  <strong>{bots.length.toLocaleString()} bots</strong>
-                </div>
-                <p className={styles.devToolsSectionHint}>
-                  Stage buttons set the total bot count for the live viewport.
-                </p>
-                <div
-                  className={styles.devToolsStageRail}
-                  aria-label="Bot picker density stages"
-                >
-                  {densityStageTargets.map((stage) => {
-                    const isCurrentTarget = bots.length === stage.targetCount;
-                    return (
-                      <button
-                        key={stage.id}
-                        type="button"
-                        className={`${styles.devToolsStageButton} ${
-                          isCurrentTarget
-                            ? styles.devToolsStageButtonActive
-                            : ""
-                        }`}
-                        onClick={() =>
-                          void devToolsSetBotDensityStage(stage.id)
-                        }
-                        disabled={devToolsBusy}
-                      >
-                        <span>{stage.label}</span>
-                        <strong>{stage.targetCount}</strong>
-                        <small>{stage.description}</small>
-                      </button>
-                    );
-                  })}
-                </div>
-              </section>
-
-              <section className={styles.devToolsCard}>
-                <div className={styles.devToolsCardHeader}>
-                  <span>Generate fixtures</span>
-                  <strong>Safe add</strong>
-                </div>
-                <p className={styles.devToolsSectionHint}>
-                  Add randomized bots or seed conversations without leaving the
-                  current surface.
-                </p>
-                <div className={styles.devToolsActions}>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    onClick={() => void devToolsAddRandomBots()}
-                    disabled={devToolsBusy}
-                  >
-                    Add bots
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    onClick={() => void devToolsAddSeedChats()}
-                    disabled={devToolsBusy}
-                  >
-                    Add chats
-                  </button>
-                </div>
-              </section>
-
-              <section
-                className={`${styles.devToolsCard} ${styles.devToolsDangerCard}`}
-              >
-                <div className={styles.devToolsCardHeader}>
-                  <span>Danger zone</span>
-                  <strong>{bots.length.toLocaleString()} bots</strong>
-                </div>
-                <p className={styles.devToolsSectionHint}>
-                  Clears generated and user-created bots, including protected
-                  bots.
-                </p>
-                <div className={styles.devToolsActions}>
-                  <button
-                    type="button"
-                    className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
-                    onClick={() => void devToolsDeleteAllBots()}
-                    disabled={devToolsBusy || bots.length === 0}
-                  >
-                    Clear all bots
-                  </button>
-                </div>
-              </section>
-            </div>
-          );
-
-        case "conversation":
-          return (
-            <div className={styles.devToolsCardGrid}>
-              <section className={styles.devToolsCard}>
-                <div className={styles.devToolsCardHeader}>
-                  <span>Current thread</span>
-                  <strong>{devToolsSummaryMode}</strong>
-                </div>
-                <div className={styles.devToolsStatGrid}>
-                  <span className={styles.devToolsStat}>
-                    <small>Thread</small>
-                    <strong>{devToolsConversationName}</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Connection</small>
-                    <strong>
-                      {devToolsHasSavedConversation
-                        ? sessionOpinion
-                          ? `${opinionBandTitle(sessionOpinion.band)} · ${sessionOpinion.score}%`
-                          : "No read"
-                        : "Unsaved"}
-                    </strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Bot opinion</small>
-                    <strong>
-                      {botOpinion
-                        ? `${botOpinionBandTitle(botOpinion.band)} · ${botOpinion.score}%`
-                        : "No read"}
-                    </strong>
-                  </span>
-                </div>
-              </section>
-
-              <section className={styles.devToolsCard}>
-                <div className={styles.devToolsCardHeader}>
-                  <span>Connection presets</span>
-                  <strong>
-                    {devToolsHasSavedConversation ? "Ready" : "No chat"}
-                  </strong>
-                </div>
-                <p className={styles.devToolsSectionHint}>
-                  Sets the selected chat Connection state and opens the panel
-                  for visual checks.
-                </p>
-                <div
-                  className={styles.devToolsConnectionRail}
-                  aria-label="Connection panel presets"
-                >
-                  {DEV_TOOLS_CONNECTION_PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      className={styles.devToolsPresetButton}
-                      onClick={() => void devToolsSetConnectionPreset(preset)}
-                      disabled={devToolsBusy || !devToolsHasSavedConversation}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section className={styles.devToolsCard}>
-                <div className={styles.devToolsCardHeader}>
-                  <span>Bot relationship</span>
-                  <strong>{activeBot?.name ?? "Default Prism"}</strong>
-                </div>
-                <p className={styles.devToolsSectionHint}>
-                  Forces long-term relationship states for the active bot or
-                  Default Prism.
-                </p>
-                <div
-                  className={styles.devToolsConnectionRail}
-                  aria-label="Bot opinion presets"
-                >
-                  {DEV_TOOLS_BOT_OPINION_PRESETS.map((preset) => (
-                    <button
-                      key={preset.id}
-                      type="button"
-                      className={styles.devToolsPresetButton}
-                      onClick={() => void devToolsSetBotOpinionPreset(preset)}
-                      disabled={devToolsBusy}
-                    >
-                      {preset.label}
-                    </button>
-                  ))}
-                </div>
-              </section>
-
-              <section
-                className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}
-              >
-                <div className={styles.devToolsCardHeader}>
-                  <span>Summarization</span>
-                  <strong>
-                    {summaryDebug?.inProgress ? "Running" : "Idle"}
-                  </strong>
-                </div>
-                <div className={styles.devToolsStatGrid}>
-                  <span className={styles.devToolsStat}>
-                    <small>Latest</small>
-                    <strong>{summaryDebug?.latestSummaryAt ?? "none"}</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Messages since compact</small>
-                    <strong>
-                      {summaryDebug?.messagesSinceLastCompaction ?? 0}
-                    </strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Summary count</small>
-                    <strong>{summaryDebug?.summaryCount ?? 0}</strong>
-                  </span>
-                </div>
-                <p className={styles.devToolsSectionHint}>
-                  Latest payload:{" "}
-                  <strong>{devToolsSummaryPreview ?? "none"}</strong>
-                </p>
-                <div className={styles.devToolsActions}>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    onClick={() =>
-                      void devToolsRunSummaryNow(devToolsSummaryMode)
-                    }
-                    disabled={devToolsBusy || !devToolsHasSavedConversation}
-                  >
-                    Run summary now
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    onClick={() =>
-                      void refreshSummaryDebug(devToolsSummaryMode)
-                    }
-                    disabled={devToolsBusy || !devToolsHasSavedConversation}
-                  >
-                    Refresh metrics
-                  </button>
-                  <button
-                    type="button"
-                    className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
-                    onClick={() =>
-                      void devToolsResetSummary(devToolsSummaryMode)
-                    }
-                    disabled={devToolsBusy || !devToolsHasSavedConversation}
-                  >
-                    Reset summary state
-                  </button>
-                </div>
-              </section>
-            </div>
-          );
-
-        case "memory":
-          return (
-            <div className={styles.devToolsCardGrid}>
-              <section className={styles.devToolsCard}>
-                <div className={styles.devToolsCardHeader}>
-                  <span>Memory inventory</span>
-                  <strong>{memories.length.toLocaleString()}</strong>
-                </div>
-                <div className={styles.devToolsStatGrid}>
-                  <span className={styles.devToolsStat}>
-                    <small>All memories</small>
-                    <strong>{memories.length}</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Target</small>
-                    <strong>{devToolsMemoryTargetLabel}</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Target count</small>
-                    <strong>{botMemories.length}</strong>
-                  </span>
-                </div>
-                {!devToolsMemoryPanelOpen ? (
-                  <p className={styles.devToolsSectionHint}>
-                    Open the Memories panel to target a specific bot; otherwise
-                    use all-bot seeding.
-                  </p>
-                ) : null}
-              </section>
-
-              <section className={styles.devToolsCard}>
-                <div className={styles.devToolsCardHeader}>
-                  <span>Seed configuration</span>
-                  <strong>{devToolsMemorySeedSource}</strong>
-                </div>
-                <label className={styles.devToolsCountControl}>
-                  <span className={styles.controlLabelWithInfo}>
-                    <span>Seed type</span>
-                    <PanelSectionInfo
-                      id="dev-tools-seed-type-info"
-                      label="About seed type"
-                      variant="control"
-                    >
-                      Chooses whether generated seed memories are direct facts,
-                      inferred assumptions, or compiled summaries.
-                    </PanelSectionInfo>
-                  </span>
-                  <select
-                    value={devToolsMemorySeedSource}
-                    onChange={(event) =>
-                      setDevToolsMemorySeedSource(
-                        event.currentTarget.value as DevToolsMemorySeedSource,
-                      )
-                    }
-                    disabled={devToolsBusy}
-                  >
-                    <option value="direct">Direct memories</option>
-                    <option value="inferred">Inferred assumptions</option>
-                    <option value="compiled">Compiled assumptions</option>
-                  </select>
-                </label>
-                <label className={styles.devToolsCountControl}>
-                  <span className={styles.controlLabelWithInfo}>
-                    <span>
-                      Certainty{" "}
-                      <strong>
-                        {Math.round(devToolsMemoryCertainty * 100)}%
-                      </strong>
-                    </span>
-                    <PanelSectionInfo
-                      id="dev-tools-memory-certainty-info"
-                      label="About memory certainty"
-                      variant="control"
-                    >
-                      Sets the confidence score assigned to generated non-direct
-                      memory seeds.
-                    </PanelSectionInfo>
-                  </span>
-                  <input
-                    type="range"
-                    min={0}
-                    max={1}
-                    step={0.05}
-                    value={devToolsMemoryCertainty}
-                    onChange={(event) =>
-                      setDevToolsMemoryCertainty(
-                        Math.max(
-                          0,
-                          Math.min(1, Number(event.currentTarget.value)),
-                        ),
-                      )
-                    }
-                    disabled={
-                      devToolsBusy || devToolsMemorySeedSource === "direct"
-                    }
-                  />
-                </label>
-              </section>
-
-              <section
-                className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}
-              >
-                <div className={styles.devToolsCardHeader}>
-                  <span>Memory actions</span>
-                  <strong>
-                    {resolvedDevToolsBotQuantity.toLocaleString()} each
-                  </strong>
-                </div>
-                <p className={styles.devToolsSectionHint}>
-                  Uses the shared quantity from Seed. Targeted seeding follows
-                  the currently focused memory bot.
-                </p>
-                <div className={styles.devToolsActions}>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    onClick={() => void devToolsAddBotMemories()}
-                    disabled={devToolsBusy || !memoryPanelBot}
-                  >
-                    Add to target
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    onClick={() => void devToolsAddAllMemories()}
-                    disabled={devToolsBusy || bots.length === 0}
-                  >
-                    Add across bots
-                  </button>
-                  <button
-                    type="button"
-                    className={`${styles.devToolsAction} ${styles.devToolsActionDanger}`}
-                    onClick={() => void devToolsClearAllMemories()}
-                    disabled={devToolsBusy || memories.length === 0}
-                  >
-                    Clear all memories
-                  </button>
-                </div>
-              </section>
-            </div>
-          );
-
-        case "system":
-          return (
-            <div className={styles.devToolsCardGrid}>
-              <section className={styles.devToolsCard}>
-                <div className={styles.devToolsCardHeader}>
-                  <span>Local controls</span>
-                  <strong>
-                    {devToolsRuntimeActive ? "Layer on" : "Layer off"}
-                  </strong>
-                </div>
-                <div className={styles.devToolsStatGrid}>
-                  <span className={styles.devToolsStat}>
-                    <small>Debug composer</small>
-                    <strong>
-                      {devDebugComposerMinimized ? "Minimized" : "Visible"}
-                    </strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Mood visual</small>
-                    <strong>{devMoodVisualOpen ? "Open" : "Bubble"}</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Context dock</small>
-                    <strong>
-                      {compactedSummaryDebugMinimized ? "Minimized" : "Visible"}
-                    </strong>
-                  </span>
-                </div>
-                <p className={styles.devToolsSectionHint}>
-                  Visual dev tools appear together while $dev is active.
-                  Minimize individual surfaces when they get in the way; $dev
-                  close hides the whole layer.
-                </p>
-                <div className={styles.devToolsToggleList}>
-                  <label className={styles.devToolsToggleOption}>
-                    <input
-                      type="checkbox"
-                      checked={devToolsBotImportPasteEnabled}
-                      onChange={(event) =>
-                        persistDevToolsBotImportPaste(
-                          event.currentTarget.checked,
-                        )
-                      }
-                    />
-                    <span>
-                      <strong>Bot import paste</strong>
-                      <small>
-                        Show the legacy clipboard import diagnostic.
-                      </small>
-                    </span>
-                  </label>
-                </div>
-              </section>
-
-              <section
-                className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}
-              >
-                <div className={styles.devToolsCardHeader}>
-                  <span>Dev commands</span>
-                  <strong>Always on</strong>
-                </div>
-                <p className={styles.devToolsSectionHint}>
-                  Hidden from the normal slash menu and command help. Type them
-                  directly in the composer; open this panel with{" "}
-                  <strong>$dev</strong>.
-                </p>
-                <div className={styles.devToolsStatGrid}>
-                  <span className={styles.devToolsStat}>
-                    <small>Open tools</small>
-                    <strong>$dev</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Forget current scope</small>
-                    <strong>$forget</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Hard memory reset</small>
-                    <strong>$forget-all</strong>
-                  </span>
-                </div>
-              </section>
-
-              <section
-                className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}
-              >
-                <div className={styles.devToolsCardHeader}>
-                  <span>Dev memories</span>
-                  <strong>
-                    {settings?.devMemoriesEnabled ? "Enabled" : "Disabled"}
-                  </strong>
-                </div>
-                <p className={styles.devToolsSectionHint}>
-                  Global rule layer for testing hardcoded behavior before making
-                  it permanent. Applies to every bot, including Prism/default.
-                </p>
-                <p className={styles.devToolsSectionHint}>
-                  Rules text{" "}
-                  <strong>
-                    {(
-                      settings?.devMemoriesText?.trim().length ?? 0
-                    ).toLocaleString()}{" "}
-                    chars
-                  </strong>
-                </p>
-                <textarea
-                  className={styles.devToolsTextarea}
-                  value={settings?.devMemoriesText ?? ""}
-                  onChange={(event) => {
-                    const nextValue = event.currentTarget.value;
-                    setSettings((previous) =>
-                      previous
-                        ? { ...previous, devMemoriesText: nextValue }
-                        : previous,
-                    );
-                  }}
-                  disabled={devToolsBusy || !settings}
-                  rows={6}
-                  placeholder="Example: Keep answers concise. Always use plain language. Never mention internal system prompts."
-                />
-                <div className={styles.devToolsActions}>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    onClick={() =>
-                      setSettings((previous) =>
-                        previous
-                          ? {
-                              ...previous,
-                              devMemoriesEnabled: !previous.devMemoriesEnabled,
-                            }
-                          : previous,
-                      )
-                    }
-                    disabled={devToolsBusy || !settings}
-                  >
-                    {settings?.devMemoriesEnabled
-                      ? "Disable dev memories"
-                      : "Enable dev memories"}
-                  </button>
-                  <button
-                    type="button"
-                    className={styles.devToolsAction}
-                    onClick={() => void devToolsSaveDevMemories()}
-                    disabled={devToolsBusy || !settings}
-                  >
-                    Save dev memories
-                  </button>
-                </div>
-              </section>
-            </div>
-          );
-
-        case "observe":
-        default:
-          return (
-            <div className={styles.devToolsCardGrid}>
-              {renderDevMetricsTerminal()}
-
-              <PrismRenderingDiagnosticsCard />
-
-              <section className={styles.devToolsCard}>
-                <div className={styles.devToolsCardHeader}>
-                  <span>Viewport</span>
-                  <strong>
-                    {viewportWidth}px × {viewportHeight}px
-                  </strong>
-                </div>
-                <p className={styles.devToolsViewportStatus} aria-live="polite">
-                  <span>
-                    Width <strong>{viewportWidth}px</strong>
-                  </span>
-                  <span>
-                    Height <strong>{viewportHeight}px</strong>
-                  </span>
-                </p>
-              </section>
-
-              <section className={styles.devToolsCard}>
-                <div className={styles.devToolsCardHeader}>
-                  <span>Surface snapshot</span>
-                  <strong>{view}</strong>
-                </div>
-                <div className={styles.devToolsStatGrid}>
-                  <span className={styles.devToolsStat}>
-                    <small>Bots</small>
-                    <strong>{bots.length}</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Chats</small>
-                    <strong>{visibleConversations.length}</strong>
-                  </span>
-                  <span className={styles.devToolsStat}>
-                    <small>Trace lines</small>
-                    <strong>{devToolsTraceCount}</strong>
-                  </span>
-                </div>
-              </section>
-
-              {view === "chat" ? (
-                <section
-                  className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}
-                >
-                  <div className={styles.devToolsCardHeader}>
-                    <span>Zen Facet backdrop</span>
-                    <strong>
-                      {selectedComposeBotAccent
-                        ? (zenPersonaBot?.name ?? "Equipped")
-                        : "No Facet"}
-                    </strong>
-                  </div>
-                  <div className={styles.devToolsBackdropPreview}>
-                    <span
-                      className={styles.devToolsBackdropSwatch}
-                      style={
-                        selectedComposeBotAccent
-                          ? ({
-                              "--dev-tools-backdrop-color":
-                                selectedComposeBotAccent,
-                            } as React.CSSProperties)
-                          : undefined
-                      }
-                      aria-hidden="true"
-                    />
-                    <span>
-                      Blend {Math.round(zenPersonaBackdropTuning.blend)}% ·
-                      opacity{" "}
-                      {formatZenPersonaBackdropPercent(
-                        zenPersonaBackdropTuning.opacity,
-                      )}{" "}
-                      · saturation{" "}
-                      {formatZenPersonaBackdropPercent(
-                        zenPersonaBackdropTuning.saturation,
-                      )}{" "}
-                      · dark{" "}
-                      {formatZenPersonaBackdropBlendMode(
-                        zenPersonaBackdropTuning.darkBlendMode,
-                      )}{" "}
-                      · light{" "}
-                      {formatZenPersonaBackdropBlendMode(
-                        zenPersonaBackdropTuning.lightBlendMode,
-                      )}
-                    </span>
-                  </div>
-                  <label className={styles.devToolsCountControl}>
-                    <span>Blend strength</span>
-                    <input
-                      type="range"
-                      min={MIN_ZEN_PERSONA_BACKDROP_BLEND}
-                      max={MAX_ZEN_PERSONA_BACKDROP_BLEND}
-                      step={1}
-                      value={zenPersonaBackdropTuning.blend}
-                      onChange={(event) =>
-                        persistZenPersonaBackdropTuning({
-                          blend: Number(event.target.value),
-                        })
-                      }
-                    />
-                  </label>
-                  <label className={styles.devToolsCountControl}>
-                    <span>Opacity</span>
-                    <input
-                      type="range"
-                      min={MIN_ZEN_PERSONA_BACKDROP_OPACITY}
-                      max={MAX_ZEN_PERSONA_BACKDROP_OPACITY}
-                      step={0.01}
-                      value={zenPersonaBackdropTuning.opacity}
-                      onChange={(event) =>
-                        persistZenPersonaBackdropTuning({
-                          opacity: Number(event.target.value),
-                        })
-                      }
-                    />
-                  </label>
-                  <label className={styles.devToolsCountControl}>
-                    <span>Saturation</span>
-                    <input
-                      type="range"
-                      min={MIN_ZEN_PERSONA_BACKDROP_SATURATION}
-                      max={MAX_ZEN_PERSONA_BACKDROP_SATURATION}
-                      step={0.01}
-                      value={zenPersonaBackdropTuning.saturation}
-                      onChange={(event) =>
-                        persistZenPersonaBackdropTuning({
-                          saturation: Number(event.target.value),
-                        })
-                      }
-                    />
-                  </label>
-                  <label className={styles.devToolsCountControl}>
-                    <span>Dark blend mode</span>
-                    <select
-                      value={zenPersonaBackdropTuning.darkBlendMode}
-                      onChange={(event) =>
-                        persistZenPersonaBackdropTuning({
-                          darkBlendMode: normalizeZenPersonaBackdropBlendMode(
-                            event.target.value,
-                            DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.darkBlendMode,
-                          ),
-                        })
-                      }
-                    >
-                      {ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS.map((option) => (
-                        <option
-                          key={`dark:${option.value}`}
-                          value={option.value}
-                        >
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label className={styles.devToolsCountControl}>
-                    <span>Light blend mode</span>
-                    <select
-                      value={zenPersonaBackdropTuning.lightBlendMode}
-                      onChange={(event) =>
-                        persistZenPersonaBackdropTuning({
-                          lightBlendMode: normalizeZenPersonaBackdropBlendMode(
-                            event.target.value,
-                            DEFAULT_ZEN_PERSONA_BACKDROP_TUNING.lightBlendMode,
-                          ),
-                        })
-                      }
-                    >
-                      {ZEN_PERSONA_BACKDROP_BLEND_MODE_OPTIONS.map((option) => (
-                        <option
-                          key={`light:${option.value}`}
-                          value={option.value}
-                        >
-                          {option.label}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <div className={styles.devToolsActions}>
-                    <button
-                      type="button"
-                      className={styles.devToolsAction}
-                      onClick={resetZenPersonaBackdropTuning}
-                    >
-                      Reset backdrop tuning
-                    </button>
-                  </div>
-                </section>
-              ) : null}
-
-              {view === "coffee" ? (
-                <section
-                  className={`${styles.devToolsCard} ${styles.devToolsCardWide}`}
-                >
-                  <div className={styles.devToolsCardHeader}>
-                    <span>Coffee social diagnostics</span>
-                    <strong>
-                      {coffeeSocialById
-                        ? `${Object.keys(coffeeSocialById ?? {}).length} bots`
-                        : "No snapshot"}
-                    </strong>
-                  </div>
-                  <p className={styles.devToolsSectionHint}>
-                    Hidden per-bot metrics for this Coffee conversation.
-                    Player-facing UI never shows this.
-                  </p>
-                  {coffeeSocialById ? (
-                    coffeeSocialOrderedBotIds.length > 0 ? (
-                      <div className={styles.devToolsDiagnosticList}>
-                        {coffeeSocialOrderedBotIds.map((botId) => {
-                          const social = coffeeSocialById?.[botId];
-                          if (!social) return null;
-                          const bot = coffeeBotsById.get(botId);
-                          return (
-                            <p
-                              key={botId}
-                              className={styles.devToolsSectionHint}
-                            >
-                              <strong>{bot?.name ?? botId}</strong> ·
-                              disposition{" "}
-                              <strong>
-                                {formatSocialPercent(social.disposition)}
-                              </strong>{" "}
-                              · values friction{" "}
-                              <strong>
-                                {formatSocialPercent(social.valuesFriction)}
-                              </strong>{" "}
-                              · restraint{" "}
-                              <strong>
-                                {formatSocialPercent(social.restraint)}
-                              </strong>{" "}
-                              · engagement{" "}
-                              <strong>
-                                {formatSocialPercent(social.engagement)}
-                              </strong>{" "}
-                              · leave pressure{" "}
-                              <strong>
-                                {formatSocialPercent(social.leavePressure)}
-                              </strong>
-                            </p>
-                          );
-                        })}
-                      </div>
-                    ) : (
-                      <p className={styles.devToolsSectionHint}>
-                        No seated bots in this snapshot.
-                      </p>
-                    )
-                  ) : (
-                    <p className={styles.devToolsSectionHint}>
-                      Start or continue a Coffee turn to populate social
-                      diagnostics.
-                    </p>
-                  )}
-                  <div className={styles.devToolsActions}>
-                    <button
-                      type="button"
-                      className={styles.devToolsAction}
-                      onClick={() =>
-                        setCoffeeSeatMoodDevCycleIndex(
-                          (i) => (i + 1) % COFFEE_SEAT_MOOD_DEV_CYCLE.length,
-                        )
-                      }
-                    >
-                      Cycle all seat moods
-                    </button>
-                  </div>
-                </section>
-              ) : null}
-            </div>
-          );
-      }
-    })();
-    return (
-      <>
-        <div
-          ref={devToolsPanelRef}
-          className={styles.devToolsFloatingPanel}
-          role="dialog"
-          aria-label={
-            devToolsConsoleOnly ? "Developer metrics terminal" : undefined
-          }
-          aria-labelledby={devToolsConsoleOnly ? undefined : "dev-tools-title"}
-          aria-busy={devToolsBusy ? "true" : undefined}
-          data-section={devToolsActiveSection}
-          data-console-only={devToolsConsoleOnly ? "true" : undefined}
-          style={
-            {
-              left: `${devToolsPanelPosition.x}px`,
-              top: `${devToolsPanelPosition.y}px`,
-              "--dev-tools-panel-left": `${devToolsPanelPosition.x}px`,
-              "--dev-tools-panel-top": `${devToolsPanelPosition.y}px`,
-              ...(devToolsPanelSize
-                ? {
-                    width: `${devToolsPanelSize.width}px`,
-                    height: `${devToolsPanelSize.height}px`,
-                  }
-                : {}),
-            } as React.CSSProperties
-          }
-        >
-          {!devToolsConsoleOnly ? (
-            <div
-              className={styles.devToolsHeader}
-              onPointerDown={startDevToolsPanelDrag}
-              onPointerMove={dragDevToolsPanel}
-              onPointerUp={endDevToolsPanelDrag}
-              onPointerCancel={endDevToolsPanelDrag}
-            >
-              <div className={styles.devToolsHeaderCopy}>
-                <span className={styles.devToolsKicker}>
-                  Local control center
-                </span>
-                <h2 id="dev-tools-title" className={styles.deleteAllModalTitle}>
-                  Developer tools
-                </h2>
-                <p>
-                  Inspect, seed, and stress-test PRISM without losing your
-                  place.
-                </p>
-              </div>
-              <div className={styles.devToolsHeaderMeta}>
-                <span
-                  className={styles.devToolsPill}
-                  data-tone={devToolsBusy ? "busy" : "ready"}
-                >
-                  {devToolsBusy ? "Working" : "Ready"}
-                </span>
-                {process.env.NODE_ENV !== "production" ? (
-                  <a
-                    className={`${styles.devToolsPill} ${styles.devToolsLabLink}`}
-                    href="/qa-voice-sync"
-                    target="_blank"
-                    rel="noreferrer"
-                    onPointerDown={(event) => event.stopPropagation()}
-                  >
-                    Voice sync
-                  </a>
-                ) : null}
-                <span className={styles.devToolsDragHint} aria-hidden="true">
-                  drag
-                </span>
-                <button
-                  type="button"
-                  className={styles.devToolsIconButton}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={minimizeDevTools}
-                  aria-label="Minimize developer tools"
-                >
-                  <Minimize2 aria-hidden="true" size={15} />
-                </button>
-                <button
-                  type="button"
-                  className={styles.devToolsIconButton}
-                  onPointerDown={(event) => event.stopPropagation()}
-                  onClick={closeDevTools}
-                  aria-label="Close developer tools"
-                >
-                  ×
-                </button>
-              </div>
-            </div>
-          ) : null}
-
-          {devToolsConsoleOnly ? (
-            <>
-              <button
-                type="button"
-                className={styles.devToolsConsoleDragGrip}
-                onPointerDown={startDevToolsPanelDrag}
-                onPointerMove={dragDevToolsPanel}
-                onPointerUp={endDevToolsPanelDrag}
-                onPointerCancel={endDevToolsPanelDrag}
-                aria-label="Drag developer metrics terminal"
-              />
-              <button
-                type="button"
-                className={styles.devToolsConsoleMinimizeButton}
-                onClick={minimizeDevTools}
-                aria-label="Minimize developer metrics terminal"
-                title="Minimize"
-              >
-                <Minimize2 aria-hidden="true" size={13} />
-              </button>
-              <main className={styles.devToolsConsoleOnlyContent}>
-                {renderDevMetricsTerminal(true)}
-              </main>
-            </>
-          ) : (
-            <>
-              <div
-                className={styles.devToolsOverviewGrid}
-                aria-label="Developer tool status"
-              >
-                <span className={styles.devToolsOverviewItem}>
-                  <small>Surface</small>
-                  <strong>{view}</strong>
-                </span>
-                <span className={styles.devToolsOverviewItem}>
-                  <small>Viewport</small>
-                  <strong>
-                    {viewportWidth}×{viewportHeight}
-                  </strong>
-                </span>
-                <span className={styles.devToolsOverviewItem}>
-                  <small>Bots</small>
-                  <strong>{bots.length.toLocaleString()}</strong>
-                </span>
-                <span className={styles.devToolsOverviewItem}>
-                  <small>Memories</small>
-                  <strong>{memories.length.toLocaleString()}</strong>
-                </span>
-              </div>
-
-              {devToolsMessage ? (
-                <p className={styles.devToolsStatus} role="status">
-                  {devToolsMessage}
-                </p>
-              ) : null}
-
-              <div className={styles.devToolsLayout}>
-                <nav
-                  className={styles.devToolsNav}
-                  aria-label="Developer tool categories"
-                >
-                  {DEV_TOOLS_NAV_ITEMS.map((item) => (
-                    <button
-                      key={item.id}
-                      type="button"
-                      className={styles.devToolsNavButton}
-                      data-active={
-                        item.id === devToolsActiveSection ? "true" : undefined
-                      }
-                      onClick={() => setDevToolsActiveSection(item.id)}
-                      aria-pressed={item.id === devToolsActiveSection}
-                    >
-                      <span>{item.label}</span>
-                      <small>{item.description}</small>
-                    </button>
-                  ))}
-                </nav>
-
-                <main className={styles.devToolsContent}>
-                  <header className={styles.devToolsContentHeader}>
-                    <div>
-                      <span className={styles.devToolsKicker}>Category</span>
-                      <h3>{activeDevToolsNavItem.label}</h3>
-                    </div>
-                    <p>{activeDevToolsNavItem.description}</p>
-                  </header>
-                  {devToolsSectionContent}
-                </main>
-              </div>
-            </>
-          )}
-        </div>
-      </>
-    );
-  };
-
   const renderMemoryDetailMeta = (memory: UserMemory): React.JSX.Element => {
     const signal = Math.round(memoryBubbleSignalValue(memory) * 100);
     const detailLabel = isAssumptionMemory(memory) ? "certainty" : "confidence";
@@ -110927,7 +105937,7 @@ function HomeContent(): React.JSX.Element {
         className={`${styles.panel} ${styles.panelUsage}`}
         data-prism-panel="usage"
         data-prism-panel-layer="true"
-        data-dev-panel-safe-area="right"
+        data-viewport-safe-area="right"
         data-closing={panelClosing ? "true" : undefined}
         role="dialog"
         aria-modal="true"
@@ -112032,7 +107042,7 @@ function HomeContent(): React.JSX.Element {
           className={`${styles.panel} ${styles.panelMemories}`}
           data-prism-panel="memories"
           data-prism-panel-layer="true"
-          data-dev-panel-safe-area="right"
+          data-viewport-safe-area="right"
           data-closing={panelClosing ? "true" : undefined}
           data-memory-scope={memoryPanelScope}
           data-memory-physics-active={memoryPhysicsActive ? "true" : undefined}
@@ -112203,6 +107213,45 @@ function HomeContent(): React.JSX.Element {
                     ? "Previous context stays; session checkpoints fade after about four days."
                     : "Short-term memories float here; protected long-term memories stack below by category."}
             </p>
+            <div
+              className={styles.memoryPanelSettingsLinks}
+              aria-label="Memory settings shortcuts"
+            >
+              <button
+                type="button"
+                className={styles.memoryDirectoryIndexItem}
+                data-memory-settings-shortcut="storage"
+                onClick={() => openSettingsPanel("storage")}
+              >
+                <span
+                  className={styles.memoryDirectoryIndexGlyph}
+                  aria-hidden="true"
+                >
+                  <HardDrive size={18} />
+                </span>
+                <span>
+                  <strong>Storage Settings</strong>
+                  <small>Review files and account storage</small>
+                </span>
+              </button>
+              <button
+                type="button"
+                className={styles.memoryDirectoryIndexItem}
+                data-memory-settings-shortcut="memories"
+                onClick={() => openSettingsPanel("memories")}
+              >
+                <span
+                  className={styles.memoryDirectoryIndexGlyph}
+                  aria-hidden="true"
+                >
+                  <Brain size={18} />
+                </span>
+                <span>
+                  <strong>Memory Settings</strong>
+                  <small>Manage capture, usage, and deletion</small>
+                </span>
+              </button>
+            </div>
             {memoryPanelScope === "default" ? (
               <div className={styles.memoryPanelRouteActions}>
                 <button
@@ -112215,7 +107264,6 @@ function HomeContent(): React.JSX.Element {
                 >
                   <span
                     className={styles.memoryDirectoryIndexGlyph}
-                    aria-hidden="true"
                   >
                     <PrismTriangleMark />
                   </span>
@@ -112503,13 +107551,15 @@ function HomeContent(): React.JSX.Element {
                 {renderZenSessionMemorySection()}
               </div>
             ) : visibleMemoryBubbles.length > 0 ||
+              visibleDerivedMemories.length > 0 ||
               visibleLongTermMemories.length > 0 ||
               showZenSessionMemoryInPrismPanel ? (
               <div className={styles.memoryPanelMemoryStacks}>
                 {showZenSessionMemoryInPrismPanel
                   ? renderZenSessionMemorySection()
                   : null}
-                {visibleMemoryBubbles.length > 0 ? (
+                {visibleMemoryBubbles.length > 0 ||
+                visibleDerivedMemories.length > 0 ? (
                   <>
                     <ul
                       ref={memoryBubbleCloudRef}
@@ -112520,6 +107570,123 @@ function HomeContent(): React.JSX.Element {
                         }
                       }}
                     >
+                      {derivedMemoryEnclosures.map(
+                        ({ memory, evidence, positionKey, style }) => {
+                          const selected = focusedMemoryId === memory.id;
+                          const dimmed = Boolean(focusedMemoryId && !selected);
+                          const moveEnclosure = (xPct: number, yPct: number) => {
+                            if (!memoryBubbleScopeKey) return;
+                            commitMemoryBubbleScopePositions(
+                              memoryBubbleScopeKey,
+                              {
+                                ...activeMemoryBubblePositions,
+                                [positionKey]: {
+                                  xPct: Math.max(12, Math.min(88, xPct)),
+                                  yPct: Math.max(14, Math.min(86, yPct)),
+                                },
+                              },
+                            );
+                          };
+                          const currentPosition =
+                            activeMemoryBubblePositions[positionKey];
+                          return (
+                            <li
+                              key={`derived:${memoryPhysicsSeed}:${memory.id}`}
+                              className={styles.memoryDerivedEnclosure}
+                              data-memory-selected={selected ? "true" : undefined}
+                              data-memory-dimmed={dimmed ? "true" : undefined}
+                              data-memory-physics-id={`derived:${memory.id}`}
+                              style={style}
+                              draggable={Boolean(memoryBubbleScopeKey)}
+                              role="group"
+                              tabIndex={0}
+                              aria-label={`Derived opinion: ${renderMemoryPanelText(memory)}. Supported by ${evidence.length} linked ${evidence.length === 1 ? "memory" : "memories"}.`}
+                              title={renderMemoryPanelText(memory)}
+                              onClick={(event) => {
+                                if (event.target === event.currentTarget) {
+                                  handleMemoryBubbleActivate(memory);
+                                }
+                              }}
+                              onDragEnd={(event) => {
+                                const cloud = memoryBubbleCloudRef.current;
+                                if (!cloud || event.clientX === 0) return;
+                                const rect = cloud.getBoundingClientRect();
+                                moveEnclosure(
+                                  ((event.clientX - rect.left) / rect.width) * 100,
+                                  ((event.clientY - rect.top) / rect.height) * 100,
+                                );
+                              }}
+                              onKeyDown={(event) => {
+                                if (event.key === "Enter" || event.key === " ") {
+                                  event.preventDefault();
+                                  handleMemoryBubbleActivate(memory);
+                                  return;
+                                }
+                                const delta = event.shiftKey ? 5 : 2;
+                                const styleVars = style as Record<string, unknown>;
+                                const x = currentPosition?.xPct ??
+                                  (Number.parseFloat(String(styleVars["--memory-derived-x"])) || 50);
+                                const y = currentPosition?.yPct ??
+                                  (Number.parseFloat(String(styleVars["--memory-derived-y"])) || 50);
+                                if (event.key === "ArrowLeft") moveEnclosure(x - delta, y);
+                                else if (event.key === "ArrowRight") moveEnclosure(x + delta, y);
+                                else if (event.key === "ArrowUp") moveEnclosure(x, y - delta);
+                                else if (event.key === "ArrowDown") moveEnclosure(x, y + delta);
+                                else return;
+                                event.preventDefault();
+                              }}
+                            >
+                              <button
+                                type="button"
+                                className={styles.memoryDerivedOpinionLabel}
+                                onClick={(event) => {
+                                  event.stopPropagation();
+                                  handleMemoryBubbleActivate(memory);
+                                }}
+                              >
+                                <Sparkles size={12} aria-hidden="true" />
+                                <span>{renderMemoryPanelText(memory)}</span>
+                                <small>{Math.round(memory.confidence * 100)}%</small>
+                              </button>
+                              <div
+                                className={styles.memoryDerivedEvidenceBubbles}
+                                aria-label="Opinion evidence"
+                              >
+                                {evidence.length > 0 ? (
+                                  evidence.map((source) => (
+                                    <button
+                                      key={source.id}
+                                      type="button"
+                                      data-tier={memoryTier(source)}
+                                      style={
+                                        {
+                                          "--memory-derived-evidence-scale":
+                                            memoryTier(source) === "long_term"
+                                              ? 1
+                                              : Math.max(
+                                                  0.38,
+                                                  memoryBubbleSignalValue(source),
+                                                ),
+                                        } as React.CSSProperties
+                                      }
+                                      title={renderMemoryPanelText(source)}
+                                      aria-label={`${memoryTier(source) === "long_term" ? "Long-term anchor" : "Short-term evidence"}: ${renderMemoryPanelText(source)}. Confidence ${Math.round(source.confidence * 100)} percent.`}
+                                      onClick={(event) => {
+                                        event.stopPropagation();
+                                        setFocusedMemoryId(source.id);
+                                      }}
+                                    >
+                                      <span aria-hidden="true" />
+                                    </button>
+                                  ))
+                                ) : (
+                                  <small>Evidence unavailable</small>
+                                )}
+                              </div>
+                            </li>
+                          );
+                        },
+                      )}
                       {visibleMemoryBubbles.map((memory) => {
                         const layout = memoryBubbleLayoutById.get(memory.id);
                         const uncertain = layout?.uncertain ?? false;
@@ -112650,14 +107817,16 @@ function HomeContent(): React.JSX.Element {
                             aria-live="polite"
                           >
                             <strong>
-                              {isAssumptionMemory(selectedVisibleMemory)
-                                ? "Assumption"
+                              {selectedVisibleMemory.lifecycle === "derived" ||
+                              selectedVisibleMemory.source === "inferred"
+                                ? "Derived opinion"
                                 : "Memory"}
                             </strong>
                             <p>
                               {renderMemoryPanelText(selectedVisibleMemory)}
                             </p>
                             {renderMemoryDetailMeta(selectedVisibleMemory)}
+                            {renderDerivedEvidenceDetail(selectedVisibleMemory)}
                             <button
                               type="button"
                               className={`${styles.memoryFullProseDeleteButton} ${
@@ -112721,12 +107890,14 @@ function HomeContent(): React.JSX.Element {
                         aria-live="polite"
                       >
                         <strong>
-                          {isAssumptionMemory(selectedVisibleMemory)
-                            ? "Assumption"
+                          {selectedVisibleMemory.lifecycle === "derived" ||
+                          selectedVisibleMemory.source === "inferred"
+                            ? "Derived opinion"
                             : "Memory"}
                         </strong>
                         <p>{renderMemoryPanelText(selectedVisibleMemory)}</p>
                         {renderMemoryDetailMeta(selectedVisibleMemory)}
+                        {renderDerivedEvidenceDetail(selectedVisibleMemory)}
                         <button
                           type="button"
                           className={`${styles.memoryFullProseDeleteButton} ${
@@ -112964,7 +108135,7 @@ function HomeContent(): React.JSX.Element {
           className={`${styles.panel} ${styles.panelPromptCenter}`}
           data-prism-panel="command-center"
           data-prism-panel-layer="true"
-          data-dev-panel-safe-area="right"
+          data-viewport-safe-area="right"
           data-closing={panelClosing ? "true" : undefined}
           role="dialog"
           aria-modal="true"
@@ -117260,13 +112431,17 @@ function HomeContent(): React.JSX.Element {
                     onChange={updateKeyboardShortcuts}
                   />
                 )}
+                {settings && activeSettingsScope === "memories" && (
+                  <MemorySettings />
+                )}
                 {settings &&
                   activeSettingsScope !== "coffee" &&
                   activeSettingsScope !== "zen" &&
                   activeSettingsScope !== "debate" &&
                   activeSettingsScope !== "botcast" &&
                   activeSettingsScope !== "slate" &&
-                  activeSettingsScope !== "shortcuts" && (
+                  activeSettingsScope !== "shortcuts" &&
+                  activeSettingsScope !== "memories" && (
                     <form
                       className={`${styles.form} ${styles.settingsWorkspace}`}
                       onSubmit={saveSettings}
@@ -118774,20 +113949,6 @@ function HomeContent(): React.JSX.Element {
                               <label className={styles.checkbox}>
                                 <input
                                   type="checkbox"
-                                  checked={settings.autoMemory}
-                                  onChange={(e) =>
-                                    setSettings((p) =>
-                                      p
-                                        ? { ...p, autoMemory: e.target.checked }
-                                        : p,
-                                    )
-                                  }
-                                />
-                                Auto memory
-                              </label>
-                              <label className={styles.checkbox}>
-                                <input
-                                  type="checkbox"
                                   checked={settings.composerWritingAssist}
                                   onChange={(e) =>
                                     setSettings((p) =>
@@ -118856,24 +114017,193 @@ function HomeContent(): React.JSX.Element {
                               </div>
                             </header>
                             <p className={styles.settingsCompactCopy}>
-                              Diagnose problems and safely reclaim storage used
-                              by abandoned applet media.
+                              Check the local service, collect a private support
+                              snapshot, inspect rendering health, and safely
+                              reclaim storage.
                             </p>
-                            <button
-                              type="button"
-                              className={styles.settingsInfoButton}
-                              data-settings-action="clean-unused-assets"
-                              onClick={() => void previewUnusedImageAssets()}
-                              disabled={busy || imageCleanupPreviewLoading}
-                            >
-                              <strong>Clean unused assets</strong>
-                              <span>
-                                Review and permanently delete orphaned
-                                PRISM-managed applet media. Intentional Image
-                                Library generations, chat images, uploads, and
-                                imports are never included.
-                              </span>
-                            </button>
+                            <div className={styles.helpToolGroups}>
+                              <section
+                                className={styles.helpToolGroup}
+                                aria-labelledby="settings-help-connection-title"
+                              >
+                                <header className={styles.helpToolGroupHeader}>
+                                  <div>
+                                    <span>Connection</span>
+                                    <h5 id="settings-help-connection-title">
+                                      Local service
+                                    </h5>
+                                  </div>
+                                  <span
+                                    className={styles.helpStatusPill}
+                                    data-status={helpConnectionState}
+                                  >
+                                    {helpConnectionState === "checking"
+                                      ? "Checking"
+                                      : helpConnectionState === "connected"
+                                        ? "Connected"
+                                        : helpConnectionState === "error"
+                                          ? "Needs attention"
+                                          : "Not checked"}
+                                  </span>
+                                </header>
+                                <p>
+                                  Confirm that this window can reach PRISM’s
+                                  local API. No outside service is contacted.
+                                </p>
+                                <div className={styles.helpToolActions}>
+                                  <button
+                                    type="button"
+                                    className={styles.settingsInfoButton}
+                                    data-settings-action="test-local-service"
+                                    onClick={() => void testHelpConnection()}
+                                    disabled={helpConnectionState === "checking"}
+                                  >
+                                    <strong>Test local service</strong>
+                                    <span>Run a quick local health check.</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={styles.settingsInfoButton}
+                                    data-settings-action="reload-prism"
+                                    onClick={() => reloadPrismPage(window.location)}
+                                  >
+                                    <strong>Reload PRISM</strong>
+                                    <span>
+                                      Refresh this window without changing saved
+                                      data.
+                                    </span>
+                                  </button>
+                                </div>
+                              </section>
+
+                              <section
+                                className={styles.helpToolGroup}
+                                aria-labelledby="settings-help-report-title"
+                              >
+                                <header className={styles.helpToolGroupHeader}>
+                                  <div>
+                                    <span>Support</span>
+                                    <h5 id="settings-help-report-title">
+                                      Diagnostic report
+                                    </h5>
+                                  </div>
+                                </header>
+                                <p>
+                                  Create a device and rendering snapshot for
+                                  troubleshooting. Prompts, transcripts, account
+                                  details, IDs, and credentials are excluded.
+                                </p>
+                                <div className={styles.helpToolActions}>
+                                  <button
+                                    type="button"
+                                    className={styles.settingsInfoButton}
+                                    data-settings-action="copy-support-report"
+                                    onClick={() =>
+                                      void copyHelpDiagnosticReport()
+                                    }
+                                  >
+                                    <strong>Copy support report</strong>
+                                    <span>Copy a plain-text snapshot.</span>
+                                  </button>
+                                  <button
+                                    type="button"
+                                    className={styles.settingsInfoButton}
+                                    data-settings-action="download-support-report"
+                                    onClick={downloadHelpDiagnosticReport}
+                                  >
+                                    <strong>Download support report</strong>
+                                    <span>Save the same snapshot as a text file.</span>
+                                  </button>
+                                </div>
+                              </section>
+
+                              <PrismRenderingDiagnosticsCard />
+
+                              <section
+                                className={styles.helpToolGroup}
+                                aria-labelledby="settings-help-advanced-title"
+                              >
+                                <header className={styles.helpToolGroupHeader}>
+                                  <div>
+                                    <span>Advanced</span>
+                                    <h5 id="settings-help-advanced-title">
+                                      Diagnostics labs
+                                    </h5>
+                                  </div>
+                                </header>
+                                <p>
+                                  Open focused local tools for checking voice
+                                  timing or reviewing and shaping sound effects.
+                                  Labs open in this window and do not change
+                                  conversation history.
+                                </p>
+                                <div className={styles.helpToolActions}>
+                                  <a
+                                    className={`${styles.settingsInfoButton} ${styles.helpToolLink}`}
+                                    data-settings-action="open-voice-sync-lab"
+                                    href="/qa-voice-sync"
+                                  >
+                                    <strong>Voice Sync Lab</strong>
+                                    <span>
+                                      Inspect audible speech and mouth timing.
+                                    </span>
+                                  </a>
+                                  <a
+                                    className={`${styles.settingsInfoButton} ${styles.helpToolLink}`}
+                                    data-settings-action="open-sound-fx-bench"
+                                    href="/tools/sound-fx-bench.html"
+                                  >
+                                    <strong>Sound FX Bench</strong>
+                                    <span>
+                                      Preview, compare, and export sound effects.
+                                    </span>
+                                  </a>
+                                </div>
+                              </section>
+
+                              <section
+                                className={styles.helpToolGroup}
+                                aria-labelledby="settings-help-maintenance-title"
+                              >
+                                <header className={styles.helpToolGroupHeader}>
+                                  <div>
+                                    <span>Storage</span>
+                                    <h5 id="settings-help-maintenance-title">
+                                      Maintenance
+                                    </h5>
+                                  </div>
+                                </header>
+                                <p>
+                                  Review temporary media that is no longer used
+                                  by an applet before deciding whether to delete
+                                  it.
+                                </p>
+                                <button
+                                  type="button"
+                                  className={styles.settingsInfoButton}
+                                  data-settings-action="clean-unused-assets"
+                                  onClick={() => void previewUnusedImageAssets()}
+                                  disabled={busy || imageCleanupPreviewLoading}
+                                >
+                                  <strong>Clean unused assets</strong>
+                                  <span>
+                                    Review orphaned PRISM-managed applet media
+                                    before permanent deletion. Image Library
+                                    generations, chat images, uploads, and imports
+                                    are never included.
+                                  </span>
+                                </button>
+                              </section>
+                            </div>
+                            {helpFeedback ? (
+                              <p
+                                className={styles.helpFeedback}
+                                role="status"
+                                aria-live="polite"
+                              >
+                                {helpFeedback}
+                              </p>
+                            ) : null}
                           </section>
                         )}
 
@@ -120469,7 +115799,7 @@ function HomeContent(): React.JSX.Element {
               className={`${styles.panel} ${styles.panelBots}`}
               data-prism-panel="bots"
               data-prism-panel-layer="true"
-              data-dev-panel-safe-area="right"
+              data-viewport-safe-area="right"
               data-closing={panelClosing ? "true" : undefined}
               data-color-picker-open={colorWheelOpen ? "true" : undefined}
               data-profile-builder-open={
@@ -123055,13 +118385,15 @@ function HomeContent(): React.JSX.Element {
                           />
                         }
                       />
-                      <header
-                        className={styles.botGeneratorHeader}
+                      <div
+                        className={styles.botGeneratorBriefCard}
+                        data-bot-generator-brief-card="true"
                         hidden={
                           botFoundryPhase !== "brief" &&
                           botFoundryPhase !== "error"
                         }
                       >
+                      <header className={styles.botGeneratorHeader}>
                         <span
                           className={styles.botGeneratorGlyph}
                           aria-hidden="true"
@@ -123092,13 +118424,7 @@ function HomeContent(): React.JSX.Element {
                           </button>
                         </div>
                       </header>
-                      <div
-                        className={styles.botGeneratorBody}
-                        hidden={
-                          botFoundryPhase !== "brief" &&
-                          botFoundryPhase !== "error"
-                        }
-                      >
+                      <div className={styles.botGeneratorBody}>
                         <p>
                           Give PRISM a spark or a full brief. It will draft the
                           identity, personality, behavior, face, ink, local
@@ -123176,13 +118502,7 @@ function HomeContent(): React.JSX.Element {
                           </p>
                         ) : null}
                       </div>
-                      <footer
-                        className={styles.botGeneratorActions}
-                        hidden={
-                          botFoundryPhase !== "brief" &&
-                          botFoundryPhase !== "error"
-                        }
-                      >
+                      <footer className={styles.botGeneratorActions}>
                         <button
                           type="button"
                           onClick={() => void openManualBotDraft()}
@@ -123213,156 +118533,11 @@ function HomeContent(): React.JSX.Element {
                               : "Generate draft"}
                         </button>
                       </footer>
+                      </div>
                     </section>
                   </div>,
                   document.body,
                 )}
-              {importBotModalPhase !== "closed" && (
-                <div
-                  className={styles.botPreferredModelsModalBackdrop}
-                  role="presentation"
-                  onClick={() => closeImportBotModal()}
-                >
-                  <div
-                    className={styles.botPreferredModelsModal}
-                    role="dialog"
-                    aria-modal="true"
-                    aria-labelledby="import-bot-modal-title"
-                    onClick={(event) => event.stopPropagation()}
-                  >
-                    <header className={styles.botPreferredModelsModalHeader}>
-                      <div>
-                        <span>
-                          {editorMode
-                            ? "Edit bot"
-                            : botPanelView === "create"
-                              ? "Create bot"
-                              : "Bot library"}
-                        </span>
-                        <h4 id="import-bot-modal-title">
-                          {importBotModalPhase === "choose"
-                            ? "Import bot"
-                            : "Legacy paste"}
-                        </h4>
-                        <p>
-                          {importBotModalPhase === "choose"
-                            ? "Bring in a bot from another Prism setup — from a file or the clipboard."
-                            : "Legacy JSON paste is no longer supported for zipped .bot archives."}
-                        </p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => closeImportBotModal()}
-                        aria-label="Close import bot dialog"
-                      >
-                        ×
-                      </button>
-                    </header>
-                    <div className={styles.botPreferredModelsModalBody}>
-                      {importBotModalPhase === "choose" ? (
-                        <>
-                          <button
-                            type="button"
-                            className={styles.importBotModalChoiceButton}
-                            onClick={() => handleImportBotChooseUpload()}
-                          >
-                            <strong>Upload from file</strong>
-                            <small>.bot or .bots file from disk</small>
-                          </button>
-                          {devToolsRuntimeActive &&
-                          devToolsBotImportPasteEnabled ? (
-                            <button
-                              type="button"
-                              className={styles.importBotModalChoiceButton}
-                              onClick={() => {
-                                setImportBotPasteError(null);
-                                setImportBotModalPhase("paste");
-                              }}
-                            >
-                              <strong>Legacy paste</strong>
-                              <small>
-                                Shows the hard-cutover message for old JSON
-                                exports
-                              </small>
-                            </button>
-                          ) : null}
-                        </>
-                      ) : (
-                        <>
-                          <label
-                            className={styles.importBotModalPasteLabel}
-                            htmlFor="import-bot-paste-json"
-                          >
-                            Legacy bot export JSON
-                          </label>
-                          <textarea
-                            id="import-bot-paste-json"
-                            className={styles.importBotModalPasteTextarea}
-                            value={importBotPasteText}
-                            onChange={(event) => {
-                              setImportBotPasteText(event.currentTarget.value);
-                              if (importBotPasteError)
-                                setImportBotPasteError(null);
-                            }}
-                            spellCheck={false}
-                            autoComplete="off"
-                            rows={10}
-                            placeholder='{"schema":"prism-bot-export-v2", ...}'
-                            aria-invalid={
-                              importBotPasteError ? "true" : undefined
-                            }
-                            aria-describedby={
-                              importBotPasteError
-                                ? "import-bot-paste-json-hint import-bot-paste-json-error"
-                                : "import-bot-paste-json-hint"
-                            }
-                            disabled={importBotPasteBusy}
-                          />
-                          <p
-                            id="import-bot-paste-json-hint"
-                            className={styles.muted}
-                          >
-                            Zipped .bot archives must be imported from disk.
-                          </p>
-                          {importBotPasteError && (
-                            <p
-                              id="import-bot-paste-json-error"
-                              className={styles.error}
-                              role="alert"
-                            >
-                              {importBotPasteError}
-                            </p>
-                          )}
-                          <div className={styles.importBotModalPasteActions}>
-                            <button
-                              type="button"
-                              className={styles.deleteAllModalCancel}
-                              onClick={() => {
-                                setImportBotPasteError(null);
-                                setImportBotModalPhase("choose");
-                              }}
-                              disabled={importBotPasteBusy}
-                            >
-                              Back
-                            </button>
-                            <button
-                              type="button"
-                              className={styles.deleteAllModalConfirm}
-                              onClick={() => void handleConfirmImportBotPaste()}
-                              disabled={
-                                importBotPasteBusy ||
-                                importBotPasteText.trim().length === 0
-                              }
-                            >
-                              {importBotPasteBusy ? "Importing…" : "Import"}
-                            </button>
-                          </div>
-                        </>
-                      )}
-                    </div>
-                  </div>
-                </div>
-              )}
               {/* Errors from createBot / deleteBot / saveBot used to silently
                 surface in the composer behind the drawer overlay. They now
                 live inside the panel next to the action that triggered
@@ -123679,7 +118854,7 @@ function HomeContent(): React.JSX.Element {
                 className={`${styles.panel} ${styles.panelImages}`}
                 data-prism-panel="images"
                 data-prism-panel-layer="true"
-                data-dev-panel-safe-area="right"
+                data-viewport-safe-area="right"
                 data-closing={panelClosing ? "true" : undefined}
                 data-image-scope={
                   imagePanelScope === "prism" ? "all" : imagePanelScope
@@ -123929,6 +119104,7 @@ function HomeContent(): React.JSX.Element {
                   viewAllLabel="Asset Library"
                   context={imagePanelBot?.name ?? activeBot?.name ?? imagePrompt}
                   refreshKey={images.length}
+                  onOpenStorageSettings={() => openSettingsPanel("storage")}
                   onSynthesize={synthesizeGeneralImage}
                   synthesizeDisabled={
                     !canGenerate ||
@@ -125889,134 +121065,6 @@ function HomeContent(): React.JSX.Element {
     coffeeAutoplayPausedRef.current = paused;
     setCoffeeAutoplayPaused(paused);
   };
-  function applyCoffeeDevMode(enabled: boolean): void {
-    coffeeDevModeEnabledRef.current = enabled;
-    setCoffeeDevModeEnabled(enabled);
-    setCoffeeError(null);
-    setCoffeeDraft("");
-    if (enabled) {
-      clearCoffeeLoopTimer();
-      clearCoffeeRhythmTimers();
-      abortCoffeeRequests();
-      assignCoffeeSessionEndsAtMs(null);
-      setCoffeeAutoBusy(false);
-      setCoffeeAutoplayPausedValue(true);
-      setCoffeeTurnRhythmState((current) =>
-        current === "botThinking" || current === "cooldown" ? "idle" : current,
-      );
-      setCoffeeDevCopiedCoordinates(null);
-    } else {
-      setCoffeeDevPanelBotId(null);
-      setCoffeeDevSocialDraftByBotId({});
-      setCoffeeDevSipBusyBotId(null);
-      setCoffeeSeatDebugOverrides({});
-      setCoffeeDevCopiedCoordinates(null);
-    }
-  }
-  const coffeeDevCoordinateMode = (): CoffeeTableCoordinateMode =>
-    !coffeeReplayActive &&
-    (coffeeSessionPhaseRef.current === "arriving" ||
-      coffeeSessionPhaseRef.current === "live")
-      ? "experimental"
-      : "legacy";
-  const coffeeDevSocialDraftForBot = (
-    botId: string,
-  ): CoffeeBotSocialSnapshot => {
-    return (
-      coffeeDevSocialDraftByBotId[botId] ??
-      coffeeConversation?.coffeeBotSocialById?.[botId] ??
-      COFFEE_DEV_MOOD_PRESETS.neutral
-    );
-  };
-  const setCoffeeDevSocialDraftForBot = (
-    botId: string,
-    updater: (current: CoffeeBotSocialSnapshot) => CoffeeBotSocialSnapshot,
-  ) => {
-    setCoffeeDevSocialDraftByBotId((current) => ({
-      ...current,
-      [botId]: updater(
-        current[botId] ??
-          coffeeConversationRef.current?.coffeeBotSocialById?.[botId] ??
-          COFFEE_DEV_MOOD_PRESETS.neutral,
-      ),
-    }));
-  };
-  const saveCoffeeDevSocialForBot = async (botId: string) => {
-    const conversation = coffeeConversationRef.current ?? coffeeConversation;
-    if (!conversation || coffeeDevMoodSavingBotId) return;
-    const social = coffeeDevSocialDraftForBot(botId);
-    setCoffeeDevMoodSavingBotId(botId);
-    setCoffeeError(null);
-    try {
-      const response = await api<{
-        ok: true;
-        conversation: CoffeeConversationState;
-      }>(
-        `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/debug/bots/${encodeURIComponent(
-          botId,
-        )}/social`,
-        {
-          method: "PATCH",
-          body: JSON.stringify({ social }),
-        },
-      );
-      setCoffeeConversation(response.conversation);
-      coffeeConversationRef.current = response.conversation;
-      setCoffeeDevSocialDraftByBotId((current) => {
-        const next = { ...current };
-        delete next[botId];
-        return next;
-      });
-    } catch (err) {
-      setCoffeeError(
-        err instanceof Error ? err.message : "Failed to save Coffee mood.",
-      );
-    } finally {
-      setCoffeeDevMoodSavingBotId(null);
-    }
-  };
-  const undoLatestCoffeeDevMessage = async () => {
-    const conversation = coffeeConversationRef.current ?? coffeeConversation;
-    if (!conversation || coffeeDevUndoBusy) return;
-    clearCoffeeLoopTimer();
-    clearCoffeeRhythmTimers();
-    abortCoffeeRequests();
-    setCoffeeDevUndoBusy(true);
-    setCoffeeError(null);
-    try {
-      const response = await api<{
-        ok: true;
-        conversation: CoffeeConversationState;
-        undone?: { count?: number; messageIds?: string[] };
-      }>(
-        `/api/coffee/sessions/${encodeURIComponent(conversation.id)}/debug/undo`,
-        {
-          method: "POST",
-        },
-      );
-      setCoffeeConversation(response.conversation);
-      coffeeConversationRef.current = response.conversation;
-      setCoffeeSelectedSessionId(response.conversation.id);
-      setCoffeePendingSpeakerBotId(null);
-      setCoffeePendingRevealConversation(null);
-      setCoffeeUserRevealText("");
-      setCoffeeTypewriterLength(0);
-      setCoffeeTurnRhythmState("idle");
-      setCoffeeSessionPhase(
-        response.conversation.messages.length === 0 &&
-          !response.conversation.coffeeTopic
-          ? "topic"
-          : "live",
-      );
-      void refreshConversations();
-    } catch (err) {
-      setCoffeeError(
-        err instanceof Error ? err.message : "Coffee undo failed.",
-      );
-    } finally {
-      setCoffeeDevUndoBusy(false);
-    }
-  };
   const coffeeCupTopOffTargetAtPoint = (
     clientX: number,
     clientY: number,
@@ -126452,178 +121500,6 @@ function HomeContent(): React.JSX.Element {
   topOffCoffeeCupFromPotRef.current = (botId, progress, progressAfter) => {
     void topOffCoffeeCupFromPot(botId, progress, progressAfter);
   };
-  const copyCoffeeSeatDebugCoordinates = async (text: string) => {
-    try {
-      await navigator.clipboard.writeText(text);
-      setCoffeeDevCopiedCoordinates({ text, copied: true });
-    } catch {
-      setCoffeeDevCopiedCoordinates({ text, copied: false });
-    }
-  };
-  const startCoffeeDevPanelDrag = (event: React.PointerEvent<HTMLElement>) => {
-    if (event.button !== 0) return;
-    const target = event.target;
-    if (target instanceof HTMLElement && target.closest("button")) return;
-    const panel = coffeeDevBotPanelRef.current;
-    if (!panel) return;
-    const rect = panel.getBoundingClientRect();
-    coffeeDevPanelDragRef.current = {
-      pointerId: event.pointerId,
-      offsetX: event.clientX - rect.left,
-      offsetY: event.clientY - rect.top,
-    };
-    try {
-      event.currentTarget.setPointerCapture(event.pointerId);
-    } catch {
-      // Pointer capture is missing in some test environments.
-    }
-    event.preventDefault();
-  };
-  const moveCoffeeDevPanelDrag = (event: React.PointerEvent<HTMLElement>) => {
-    const dragState = coffeeDevPanelDragRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    const panel = coffeeDevBotPanelRef.current;
-    if (!panel) return;
-    const offsetParent =
-      panel.offsetParent instanceof HTMLElement
-        ? panel.offsetParent
-        : panel.parentElement;
-    const containerRect = offsetParent?.getBoundingClientRect();
-    if (!containerRect) return;
-    const rect = panel.getBoundingClientRect();
-    const next = clampCoffeeDevPanelPosition(
-      event.clientX - dragState.offsetX - containerRect.left,
-      event.clientY - dragState.offsetY - containerRect.top,
-      rect.width,
-      rect.height,
-      containerRect.width,
-      containerRect.height,
-    );
-    panel.style.left = `${next.x}px`;
-    panel.style.top = `${next.y}px`;
-    panel.style.right = "auto";
-    setCoffeeDevPanelPosition(next);
-    event.preventDefault();
-  };
-  const finishCoffeeDevPanelDrag = (event: React.PointerEvent<HTMLElement>) => {
-    const dragState = coffeeDevPanelDragRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    coffeeDevPanelDragRef.current = null;
-    try {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    } catch {
-      // Safe no-op for environments without pointer capture support.
-    }
-  };
-  const updateCoffeeSeatDebugDragPosition = (
-    dragState: CoffeeSeatDebugDragState,
-    clientX: number,
-    clientY: number,
-  ): { leftPct: number; topPct: number } => {
-    const leftPct =
-      clampUnitInterval(
-        (dragState.startLeftPct +
-          ((clientX - dragState.startClientX) / dragState.sceneRect.width) *
-            100) /
-          100,
-      ) * 100;
-    const topPct =
-      clampUnitInterval(
-        (dragState.startTopPct +
-          ((clientY - dragState.startClientY) / dragState.sceneRect.height) *
-            100) /
-          100,
-      ) * 100;
-    setCoffeeSeatDebugOverrides((current) => ({
-      ...current,
-      [dragState.botId]: { leftPct, topPct },
-    }));
-    return { leftPct, topPct };
-  };
-  const startCoffeeSeatDebugDrag = (
-    event: React.PointerEvent<HTMLButtonElement>,
-    args: {
-      bot: Bot;
-      seatIndex: number;
-      layoutIndex: number;
-      seatCount: number;
-    },
-  ) => {
-    if (!coffeeDevModeEnabledRef.current || event.button !== 0) return;
-    const scene = event.currentTarget.closest(
-      "[data-coffee-table-scene='true']",
-    );
-    if (!(scene instanceof HTMLElement)) return;
-    const sceneRect = scene.getBoundingClientRect();
-    const seatRect = event.currentTarget.getBoundingClientRect();
-    if (sceneRect.width <= 0 || sceneRect.height <= 0) return;
-    event.currentTarget.setPointerCapture(event.pointerId);
-    coffeeSeatDebugDragRef.current = {
-      pointerId: event.pointerId,
-      botId: args.bot.id,
-      botName: args.bot.name,
-      seatIndex: args.seatIndex,
-      layoutIndex: args.layoutIndex,
-      seatCount: args.seatCount,
-      mode: coffeeDevCoordinateMode(),
-      sceneRect,
-      startClientX: event.clientX,
-      startClientY: event.clientY,
-      startLeftPct:
-        ((seatRect.left + seatRect.width / 2 - sceneRect.left) /
-          sceneRect.width) *
-        100,
-      startTopPct:
-        ((seatRect.top + seatRect.height / 2 - sceneRect.top) /
-          sceneRect.height) *
-        100,
-      moved: false,
-    };
-    setCoffeeSeatDebugDraggingBotId(args.bot.id);
-  };
-  const moveCoffeeSeatDebugDrag = (
-    event: React.PointerEvent<HTMLButtonElement>,
-  ) => {
-    const dragState = coffeeSeatDebugDragRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    const distance = Math.hypot(
-      event.clientX - dragState.startClientX,
-      event.clientY - dragState.startClientY,
-    );
-    if (distance < COFFEE_DRAG_SUPPRESS_CLICK_PX && !dragState.moved) return;
-    dragState.moved = true;
-    event.preventDefault();
-    updateCoffeeSeatDebugDragPosition(dragState, event.clientX, event.clientY);
-  };
-  const finishCoffeeSeatDebugDrag = (
-    event: React.PointerEvent<HTMLButtonElement>,
-  ) => {
-    const dragState = coffeeSeatDebugDragRef.current;
-    if (!dragState || dragState.pointerId !== event.pointerId) return;
-    coffeeSeatDebugDragRef.current = null;
-    setCoffeeSeatDebugDraggingBotId(null);
-    if (event.currentTarget.hasPointerCapture(event.pointerId)) {
-      event.currentTarget.releasePointerCapture(event.pointerId);
-    }
-    if (!dragState.moved) return;
-    const finalPosition = updateCoffeeSeatDebugDragPosition(
-      dragState,
-      event.clientX,
-      event.clientY,
-    );
-    coffeeSeatDebugSuppressClickRef.current = dragState.botId;
-    window.setTimeout(() => {
-      if (coffeeSeatDebugSuppressClickRef.current === dragState.botId) {
-        coffeeSeatDebugSuppressClickRef.current = null;
-      }
-    }, 0);
-    const text = formatCoffeeSeatDebugCoordinates({
-      ...dragState,
-      leftPct: finalPosition.leftPct,
-      topPct: finalPosition.topPct,
-    });
-    void copyCoffeeSeatDebugCoordinates(text);
-  };
   const coffeeBotVisualStyle = (
     bot: Bot | null | undefined,
   ): React.CSSProperties => {
@@ -126887,31 +121763,31 @@ function HomeContent(): React.JSX.Element {
     if (!text) return;
     try {
       await writeClipboardText(text);
-      setCoffeeTopicDebugClipboard(null);
+      setCoffeeTopicClipboardFallback(null);
       showLocalCommandToast(
         "Coffee topics copied",
         `${group.name} starter topics are on your clipboard.`,
       );
     } catch {
-      setCoffeeTopicDebugClipboard({ text, copied: false, groupId: group.id });
+      setCoffeeTopicClipboardFallback({ text, copied: false, groupId: group.id });
       showLocalCommandToast(
         "Coffee topics ready",
         "Clipboard blocked the automatic copy.",
       );
     }
   };
-  const copyCoffeeTopicDebugClipboardText = async (): Promise<void> => {
-    const snapshot = coffeeTopicDebugClipboard;
+  const copyCoffeeTopicClipboardText = async (): Promise<void> => {
+    const snapshot = coffeeTopicClipboardFallback;
     if (!snapshot) return;
     try {
       await writeClipboardText(snapshot.text);
-      setCoffeeTopicDebugClipboard({ ...snapshot, copied: true });
+      setCoffeeTopicClipboardFallback({ ...snapshot, copied: true });
       showLocalCommandToast(
         "Coffee topics copied",
         "Canonical starter topics are on your clipboard.",
       );
     } catch {
-      setCoffeeTopicDebugClipboard({ ...snapshot, copied: false });
+      setCoffeeTopicClipboardFallback({ ...snapshot, copied: false });
     }
   };
   const resetCoffeeOpeningPollDraft = () => {
@@ -127205,7 +122081,6 @@ function HomeContent(): React.JSX.Element {
     delayOverrideMs?: number | null,
   ) => {
     clearCoffeeLoopTimer();
-    if (coffeeDevModeEnabledRef.current) return;
     const activeConv = coffeeConversationRef.current;
     if (
       activeConv &&
@@ -127238,8 +122113,7 @@ function HomeContent(): React.JSX.Element {
       coffeeLoopDeadlineMsRef.current = null;
       if (
         coffeeAutoplayPausedRef.current ||
-        coffeeModelWarmupRef.current !== null ||
-        coffeeDevModeEnabledRef.current
+        coffeeModelWarmupRef.current !== null
       )
         return;
       const voicePlaybackOwnsAutoplay = coffeeVoicePlaybackOwnsAutoplayGate({
@@ -127281,8 +122155,7 @@ function HomeContent(): React.JSX.Element {
       return;
     if (
       coffeeAutoplayPausedRef.current ||
-      coffeeModelWarmupRef.current !== null ||
-      coffeeDevModeEnabledRef.current
+      coffeeModelWarmupRef.current !== null
     )
       return;
     const effectiveEndsAt =
@@ -127315,8 +122188,7 @@ function HomeContent(): React.JSX.Element {
     if (coffeeSessionPhaseRef.current !== "arriving") return;
     if (
       coffeeAutoplayPausedRef.current ||
-      coffeeModelWarmupRef.current !== null ||
-      coffeeDevModeEnabledRef.current
+      coffeeModelWarmupRef.current !== null
     )
       return;
     if (coffeeFirmlySeatedBotIds().length === 0) {
@@ -127337,7 +122209,6 @@ function HomeContent(): React.JSX.Element {
   scheduleCoffeeArrivalAutonomousTurnRef.current =
     scheduleCoffeeArrivalAutonomousTurn;
   const currentCoffeeSessionRemainingMs = (): number | null => {
-    if (coffeeDevModeEnabledRef.current) return null;
     const endsAt = coffeeSessionEndsAtRef.current ?? coffeeSessionEndsAtMs;
     if (typeof endsAt !== "number" || !Number.isFinite(endsAt)) return null;
     const now = coffeeModelWarmupRef.current
@@ -129418,11 +124289,7 @@ function HomeContent(): React.JSX.Element {
       return;
     }
     const endsAtLive = coffeeSessionEndsAtRef.current ?? endsAtOverride ?? null;
-    if (
-      !coffeeDevModeEnabledRef.current &&
-      endsAtLive &&
-      Date.now() >= endsAtLive
-    ) {
+    if (endsAtLive && Date.now() >= endsAtLive) {
       finishCoffeeSessionRef.current(conversationId);
       return;
     }
@@ -129675,90 +124542,6 @@ function HomeContent(): React.JSX.Element {
     }
   };
   continueCoffeeSessionRef.current = continueCoffeeSession;
-  const makeCoffeeDevSipMessage = (
-    speaker: Pick<Bot, "id" | "name" | "color" | "glyph">,
-  ): CoffeeConversationMessage => ({
-    id: `coffee-dev-sip-${speaker.id}-${Date.now().toString(36)}-${Math.random()
-      .toString(36)
-      .slice(2, 8)}`,
-    role: "assistant",
-    content: "*takes a quiet sip*",
-    createdAt: new Date().toISOString(),
-    botName: speaker.name,
-    botColor: speaker.color ?? undefined,
-    botGlyph: speaker.glyph ?? undefined,
-  });
-  const sipAsCoffeeDevBot = (botId: string) => {
-    const conversation = coffeeConversationRef.current ?? coffeeConversation;
-    const speaker = coffeeBotsById.get(botId);
-    if (
-      !coffeeDevModeEnabledRef.current ||
-      !conversation ||
-      !speaker ||
-      coffeeDevSipBusyBotId ||
-      coffeeDevSpeakBusyBotId ||
-      coffeeBusy ||
-      coffeeAutoBusy ||
-      coffeeSessionPhase !== "live" ||
-      coffeeTurnRhythmStateRef.current === "botThinking" ||
-      coffeeTurnRhythmStateRef.current === "tableTyping" ||
-      coffeeTurnRhythmStateRef.current === "cooldown"
-    ) {
-      return;
-    }
-    clearCoffeeLoopTimer();
-    clearCoffeeRhythmTimers();
-    setCoffeeAutoplayPausedValue(true);
-    setCoffeeDevSipBusyBotId(botId);
-    setCoffeeError(null);
-    const sipMessage = makeCoffeeDevSipMessage(speaker);
-    const nextConversation: CoffeeConversationState = {
-      ...conversation,
-      hasAssistantReply: true,
-      lastBotId: speaker.id,
-      lastBotColor: speaker.color ?? null,
-      updatedAt: sipMessage.createdAt,
-      messages: [...conversation.messages, sipMessage],
-    };
-    const endsAt = coffeeDevModeEnabledRef.current
-      ? null
-      : (coffeeSessionEndsAtMs ??
-        coffeeSessionDeadlineAtMs(nextConversation, Date.now()));
-    assignCoffeeSessionEndsAtMs(endsAt);
-    queueCoffeeReveal({
-      conversation: nextConversation,
-      speakerBotId: speaker.id,
-      includeCooldown: false,
-      prepareNextTurn: false,
-      onReveal: () => {
-        setCoffeeDevSipBusyBotId(null);
-      },
-    });
-  };
-  const saySomethingAsCoffeeDevBot = async (botId: string) => {
-    const conversation = coffeeConversationRef.current ?? coffeeConversation;
-    if (
-      !coffeeDevModeEnabledRef.current ||
-      !conversation ||
-      coffeeDevSipBusyBotId ||
-      coffeeDevSpeakBusyBotId ||
-      coffeeBusy ||
-      coffeeAutoBusy ||
-      coffeeSessionPhase !== "live"
-    ) {
-      return;
-    }
-    clearCoffeeLoopTimer();
-    clearCoffeeRhythmTimers();
-    setCoffeeAutoplayPausedValue(true);
-    setCoffeeDevSpeakBusyBotId(botId);
-    setCoffeeError(null);
-    try {
-      await continueCoffeeSession(conversation.id, undefined, botId);
-    } finally {
-      setCoffeeDevSpeakBusyBotId(null);
-    }
-  };
   const recallPreviousCoffeeDraft = (): string | null => {
     const remembered = coffeeLastSubmittedDraftRef.current;
     if (typeof remembered === "string" && remembered.trim().length > 0) {
@@ -129946,15 +124729,6 @@ function HomeContent(): React.JSX.Element {
     )
       return;
     if (coffeeBusy && overrideText === undefined) return;
-    const coffeeCommand = parseCoffeeDevCommand(trimmed);
-    if (coffeeCommand.kind === "error") {
-      setCoffeeError(coffeeCommand.error);
-      return;
-    }
-    if (coffeeCommand.kind === "toggleDev") {
-      applyCoffeeDevMode(!coffeeDevModeEnabledRef.current);
-      return;
-    }
     if (modelCatalogLoading) {
       showLocalCommandToast(
         "Models are still loading",
@@ -132212,7 +126986,7 @@ function HomeContent(): React.JSX.Element {
       <>
         <aside
           className={styles.coffeeTranscriptPanel}
-          data-dev-panel-safe-area="right"
+          data-viewport-safe-area="right"
           data-closing={coffeeTranscriptClosing ? "true" : undefined}
           data-topic-status={
             coffeeConversation.coffeeTeams || coffeeActivePoll
@@ -133290,58 +128064,27 @@ function HomeContent(): React.JSX.Element {
       visibleTableTypingBot
         ? visibleTableTypingBot.id
         : null);
-    /**
-     * Bots referenced by name in the most recently delivered message (or in the
-     * line the user is mid-typing). Powers the small `!` "you've been called on"
-     * indicator next to each addressed bot's seat.
-     */
-    const notifiedBotIds = (() => {
-      const out = new Set<string>();
-      if (
-        !conversationActive ||
-        (coffeeSessionPhase === "finished" && !coffeeReplayActive)
-      ) {
-        return out;
-      }
-      const activeSeatBotIds = coffeeActiveSeatBotIds.filter(
-        (id): id is string => typeof id === "string" && id.length > 0,
-      );
-      if (userLineTyping) {
-        for (const id of coffeeVisibleDirectedMentionBotIds(
-          userTypingDisplayText,
-          activeSeatBotIds,
-          activeTypewriterLength,
-        )) {
-          out.add(id);
+    /** The Coffee `!` is exclusively an unread bot-to-bot memory receipt. */
+    const unreadMemoryReceiptByBotId = new Map<
+      string,
+      MemoryAcquisitionReceiptView
+    >();
+    if (conversationActive && !coffeeReplayActive) {
+      for (const receipt of memoryAcquisitionReceipts) {
+        if (
+          receipt.kind !== "bot_relation" ||
+          receipt.readAt ||
+          !receipt.learnerBotId ||
+          unreadMemoryReceiptByBotId.has(receipt.learnerBotId)
+        ) {
+          continue;
         }
+        unreadMemoryReceiptByBotId.set(receipt.learnerBotId, receipt);
       }
-      if (tableTypingBot && tableTypingAssistantDisplayText) {
-        for (const id of coffeeVisibleDirectedMentionBotIds(
-          tableTypingAssistantDisplayText,
-          activeSeatBotIds,
-          activeTypewriterLength,
-        )) {
-          out.add(id);
-        }
-      }
-      if (centerMessageDisplayText) {
-        for (const id of coffeeDirectedMentionBotIds(
-          centerMessageDisplayText,
-          activeSeatBotIds,
-        )) {
-          out.add(id);
-        }
-      }
-      // Don't show "you were addressed" on the seat that's actively talking.
-      if (tableTypingBot) out.delete(tableTypingBot.id);
-      if (centerMessage?.role === "assistant" && centerMessage.botName) {
-        const speaker = coffeeMentionBotPicks.find(
-          (b) => b.name === centerMessage.botName,
-        );
-        if (speaker) out.delete(speaker.id);
-      }
-      return out;
-    })();
+    }
+    const unreadMemoryReceiptBotIds = new Set(
+      unreadMemoryReceiptByBotId.keys(),
+    );
     const coffeeSeatActionState = (() => {
       const topOffsByBotIdForCache =
         coffeeReplayActive && replayState?.hasReplayEvents
@@ -133402,9 +128145,6 @@ function HomeContent(): React.JSX.Element {
         const botId = botIdByName.get(message.botName);
         if (!botId) continue;
         const bot = coffeeBotsById.get(botId) ?? null;
-        const forceSipForDebug =
-          typeof message.id === "string" &&
-          message.id.startsWith("coffee-dev-sip-");
         const actionHistory: string[] = [];
         let acceptedSipForMessage = false;
         for (const action of coffeeActionsForMessage(message)) {
@@ -133417,7 +128157,6 @@ function HomeContent(): React.JSX.Element {
               topOff: topOffsByBotId[botId],
             });
             if (
-              !forceSipForDebug &&
               sipBelongsToCurrentFill &&
               !coffeeActionPassesSipCadence(
                 action,
@@ -133429,7 +128168,7 @@ function HomeContent(): React.JSX.Element {
               continue;
             }
             acceptedSipForMessage = true;
-            if (!forceSipForDebug && sipBelongsToCurrentFill) {
+            if (sipBelongsToCurrentFill) {
               lastSipMessageIndexByBotId.set(botId, messageIndex);
             }
             if (sipBelongsToCurrentFill) {
@@ -133640,24 +128379,21 @@ function HomeContent(): React.JSX.Element {
     );
     const coffeeGazeVisibleSeats = visibleCoffeeSeats.map(
       ({ bot, seatIndex, layoutIndex }) => {
-        const seatDebugOverride = coffeeSeatDebugOverrides[bot.id];
         return {
           botId: bot.id,
           seatIndex,
           layoutIndex,
-          leftPercent: seatDebugOverride
-            ? seatDebugOverride.leftPct
-            : coffeeSeatCanvasLeftPercent({
-                compact: compactCoffeeStage,
-                seatIndex,
-                seatCount: coffeeSeatLayoutCount,
-                layoutIndex,
-                phase: coffeeSessionPhase,
-                groupReady: coffeeGroupReadyToStart,
-                autoplayDock: coffeeSessionJoinedDock,
-                experimentalTableAngle: coffeeFirstPersonPerspective,
-                replayActive: coffeeReplayActive,
-              }),
+          leftPercent: coffeeSeatCanvasLeftPercent({
+            compact: compactCoffeeStage,
+            seatIndex,
+            seatCount: coffeeSeatLayoutCount,
+            layoutIndex,
+            phase: coffeeSessionPhase,
+            groupReady: coffeeGroupReadyToStart,
+            autoplayDock: coffeeSessionJoinedDock,
+            experimentalTableAngle: coffeeFirstPersonPerspective,
+            replayActive: coffeeReplayActive,
+          }),
         };
       },
     );
@@ -133774,20 +128510,17 @@ function HomeContent(): React.JSX.Element {
         : null;
     const coffeeSeatActionDisplays = visibleCoffeeSeats
       .map(({ seatIndex, layoutIndex, bot }) => {
-        const seatDebugOverride = coffeeSeatDebugOverrides[bot.id];
-        const seatCanvasLeftPercent = seatDebugOverride
-          ? seatDebugOverride.leftPct
-          : coffeeSeatCanvasLeftPercent({
-              compact: compactCoffeeStage,
-              seatIndex,
-              seatCount: coffeeSeatLayoutCount,
-              layoutIndex,
-              phase: coffeeSessionPhase,
-              groupReady: coffeeGroupReadyToStart,
-              autoplayDock: coffeeSessionJoinedDock,
-              experimentalTableAngle: false,
-              replayActive: coffeeReplayActive,
-            });
+        const seatCanvasLeftPercent = coffeeSeatCanvasLeftPercent({
+          compact: compactCoffeeStage,
+          seatIndex,
+          seatCount: coffeeSeatLayoutCount,
+          layoutIndex,
+          phase: coffeeSessionPhase,
+          groupReady: coffeeGroupReadyToStart,
+          autoplayDock: coffeeSessionJoinedDock,
+          experimentalTableAngle: false,
+          replayActive: coffeeReplayActive,
+        });
         const teamId = coffeeTeamsState?.bots[bot.id]?.currentTeamId ?? null;
         const seatTypingActionState =
           typingSeatActionByBotId.get(bot.id) ?? null;
@@ -133803,7 +128536,7 @@ function HomeContent(): React.JSX.Element {
           activeCoffeeListenerReaction?.listenerBotId === bot.id &&
           activeTableSpeakerBotId !== bot.id &&
           !seatIsThinkingThisSeat &&
-          !notifiedBotIds.has(bot.id) &&
+          !unreadMemoryReceiptBotIds.has(bot.id) &&
           !(
             seatLiveActionBadgeText &&
             coffeeActionIsSip(seatLiveActionBadgeText)
@@ -133818,7 +128551,7 @@ function HomeContent(): React.JSX.Element {
           activeCoffeeDeadAirAside?.commentatorBotId === bot.id &&
           !botPowerIsMutedV1(bot.powers) &&
           !seatIsThinkingThisSeat &&
-          !notifiedBotIds.has(bot.id);
+          !unreadMemoryReceiptBotIds.has(bot.id);
         // Intelligible asides must remain visibly owned by their seat for the
         // whole audible presentation; otherwise they read as ghost speech.
         const seatActionPrimaryText =
@@ -133840,7 +128573,7 @@ function HomeContent(): React.JSX.Element {
                     null)
                   : null;
         const displayPrimaryText =
-          !seatIsThinkingThisSeat && !notifiedBotIds.has(bot.id)
+          !seatIsThinkingThisSeat && !unreadMemoryReceiptBotIds.has(bot.id)
             ? seatActionPrimaryText
             : null;
         return {
@@ -133919,46 +128652,6 @@ function HomeContent(): React.JSX.Element {
           }))
           .filter((action) => action.action.length > 0)
       : [];
-    const coffeeDevPanelBot = coffeeDevPanelBotId
-      ? (coffeeBotsById.get(coffeeDevPanelBotId) ?? null)
-      : null;
-    const coffeeDevPanelSeat = coffeeDevPanelBot
-      ? (visibleCoffeeSeats.find(
-          (entry) => entry.bot.id === coffeeDevPanelBot.id,
-        ) ?? null)
-      : null;
-    const coffeeDevPanelLayoutIndex =
-      coffeeDevPanelSeat && coffeeDevPanelBot
-        ? coffeeDevPanelSeat.layoutIndex
-        : -1;
-    const coffeeDevPanelSocial =
-      coffeeDevPanelBot != null
-        ? coffeeDevSocialDraftForBot(coffeeDevPanelBot.id)
-        : COFFEE_DEV_MOOD_PRESETS.neutral;
-    const coffeeDevPanelMood =
-      coffeeSeatSocialHeuristicMood(coffeeDevPanelSocial) ?? "neutral";
-    const coffeeDevPanelLastMessage =
-      coffeeDevPanelBot != null
-        ? [...messages]
-            .reverse()
-            .find(
-              (message) =>
-                message.role === "assistant" &&
-                message.botName === coffeeDevPanelBot.name,
-            )
-        : null;
-    const coffeeDevPanelActions =
-      coffeeDevPanelBot != null
-        ? collectCoffeeReplayActionsForBot(messages, coffeeDevPanelBot.name)
-            .slice(-4)
-            .map((action) =>
-              normalizeCoffeeSeatActionBadgeText(
-                action.action,
-                coffeeDevPanelBot,
-              ),
-            )
-            .filter((action) => action.length > 0)
-        : [];
     const handleCoffeeReplayWheel = (
       event: React.WheelEvent<HTMLElement>,
     ): void => {
@@ -134018,7 +128711,6 @@ function HomeContent(): React.JSX.Element {
         data-autoplay-dock={coffeeSessionJoinedDock ? "true" : undefined}
         data-coffee-pot-dragging={coffeePotDrag ? "true" : undefined}
         data-team-mode={coffeeTeamsState ? "true" : undefined}
-        data-coffee-dev-mode={coffeeDevModeEnabled ? "true" : undefined}
         data-model-warmup={coffeeModelWarmup?.phase}
         data-room-return-source-group={
           coffeeRoomReturnCheckpoint?.sourceGroupId
@@ -134727,8 +129419,6 @@ function HomeContent(): React.JSX.Element {
                         replayPlayerFaceScaleY,
                       ["--avatar-details-facing-scale-x" as string]:
                         botAvatarDetailsFacingScaleX(replayPlayerFaceScaleY),
-                      ["--avatar-details-facing-offset-y" as string]:
-                        botAvatarDetailsFacingOffsetY(replayPlayerFaceScaleY),
                     } as CSSProperties
                   }
                   aria-hidden="true"
@@ -135005,27 +129695,19 @@ function HomeContent(): React.JSX.Element {
                   : coffeeConversation?.coffeeBotSocialById?.[bot.id];
               const heuristicMood =
                 coffeeSeatSocialHeuristicMood(socialSnapshot);
-              const moodDevSlot =
-                COFFEE_SEAT_MOOD_DEV_CYCLE[coffeeSeatMoodDevCycleIndex];
-              const basePrismSeatMood =
-                moodDevSlot === "live"
-                  ? normalizeAssistantMoodKey(
-                      isTableTypingThisSeat
-                        ? pendingAssistantMood
-                        : (lastBotMood ?? heuristicMood),
-                    )
-                  : moodDevSlot;
-              const prismSeatMood =
-                moodDevSlot === "live"
-                  ? coffeeSeatLiveMood({
-                      baseMood: basePrismSeatMood,
-                      social: socialSnapshot,
-                      botId: bot.id,
-                      nowMs: coffeeSessionClockMs,
-                      isSpeaking: isTableTypingThisSeat,
-                      sessionLive: coffeeSessionPhase === "live",
-                    })
-                  : basePrismSeatMood;
+              const basePrismSeatMood = normalizeAssistantMoodKey(
+                isTableTypingThisSeat
+                  ? pendingAssistantMood
+                  : (lastBotMood ?? heuristicMood),
+              );
+              const prismSeatMood = coffeeSeatLiveMood({
+                baseMood: basePrismSeatMood,
+                social: socialSnapshot,
+                botId: bot.id,
+                nowMs: coffeeSessionClockMs,
+                isSpeaking: isTableTypingThisSeat,
+                sessionLive: coffeeSessionPhase === "live",
+              });
               const seatNearDesaturated =
                 socialSnapshot != null &&
                 coffeeSocialSnapshotIsNearDesaturated(socialSnapshot);
@@ -135209,30 +129891,22 @@ function HomeContent(): React.JSX.Element {
                 coffeeSeatLayoutCount,
                 layoutIndex,
               );
-              const seatDebugOverride = coffeeSeatDebugOverrides[bot.id];
               const reviewSeatPosition = coffeeReplayActive
                 ? coffeeReviewBotPosition(coffeeSeatLayoutCount, layoutIndex)
                 : null;
-              const seatCanvasLeftPercent = seatDebugOverride
-                ? seatDebugOverride.leftPct
-                : reviewSeatPosition
-                  ? reviewSeatPosition.leftPercent
-                  : coffeeSeatCanvasLeftPercent({
-                      compact: compactCoffeeStage,
-                      seatIndex,
-                      seatCount: coffeeSeatLayoutCount,
-                      layoutIndex,
-                      phase: coffeeSessionPhase,
-                      groupReady: coffeeGroupReadyToStart,
-                      autoplayDock: coffeeSessionJoinedDock,
-                      experimentalTableAngle: coffeeFirstPersonPerspective,
-                      replayActive: coffeeReplayActive,
-                    });
-              const resolvedSeatHorizontalSide = seatDebugOverride
-                ? coffeeSeatHorizontalSideFromLeftPercent(
-                    seatDebugOverride.leftPct,
-                  )
-                : seatHorizontalSide;
+              const seatCanvasLeftPercent = reviewSeatPosition
+                ? reviewSeatPosition.leftPercent
+                : coffeeSeatCanvasLeftPercent({
+                    compact: compactCoffeeStage,
+                    seatIndex,
+                    seatCount: coffeeSeatLayoutCount,
+                    layoutIndex,
+                    phase: coffeeSessionPhase,
+                    groupReady: coffeeGroupReadyToStart,
+                    autoplayDock: coffeeSessionJoinedDock,
+                    experimentalTableAngle: coffeeFirstPersonPerspective,
+                    replayActive: coffeeReplayActive,
+                  });
               const tableStreamingSpeakerBotId = tableTypingBot?.id ?? null;
               const seatSpeakerGazeDirection =
                 coffeeSpeakerGazeParticipant?.kind === "bot" &&
@@ -135253,7 +129927,7 @@ function HomeContent(): React.JSX.Element {
               const seatEyeTargetDirection =
                 seatSpeakerGazeDirection ?? seatListenerGazeDirection ?? 0;
               const neutralCoffeePlateFaceScaleY =
-                isTopHeadSeat && !seatDebugOverride
+                isTopHeadSeat
                   ? coffeeHeadPlateFaceScaleYFromGazeTargetSide(
                       coffeeHeadGazeHorizontalSign({
                         compact: compactCoffeeStage,
@@ -135270,7 +129944,7 @@ function HomeContent(): React.JSX.Element {
                       }),
                     )
                   : coffeePlateFaceScaleYFromSeatHorizontalSide(
-                      resolvedSeatHorizontalSide,
+                      seatHorizontalSide,
                     );
               const coffeePlateFaceScaleY =
                 seatSpeakerGazeDirection === null
@@ -135456,7 +130130,7 @@ function HomeContent(): React.JSX.Element {
                 isSpeaking: isTableTypingThisSeat,
                 cupSide: coffeeCupSide,
                 faceScaleY: coffeePlateFaceScaleY,
-                seatHorizontalSide: resolvedSeatHorizontalSide,
+                seatHorizontalSide,
               });
               const seatSipMouthTreatmentActive =
                 coffeeSeatSipMouthTreatmentActive({
@@ -135545,23 +130219,17 @@ function HomeContent(): React.JSX.Element {
                 !emptyCupAttemptActive &&
                 activeCoffeeCupTopOffAnimation == null &&
                 coffeePotDrag?.pouringBotId !== bot.id &&
-                !coffeeReplayActive &&
-                coffeeSeatDebugDraggingBotId !== bot.id;
+                !coffeeReplayActive;
               const seatInteractive =
-                !seatLiveDeparting &&
-                (coffeeDevModeEnabled || replayActionReviewEnabled);
+                !seatLiveDeparting && replayActionReviewEnabled;
               const seatAriaLabel = seatLiveDeparting
                 ? `${bot.name} is leaving the coffee table`
-                : coffeeDevModeEnabled
-                  ? `Open ${bot.name} Coffee debug panel`
-                  : replayActionReviewEnabled
+                : replayActionReviewEnabled
                     ? `Show ${bot.name} actions so far`
                     : seatTeamLabel
                       ? `${bot.name} at the coffee table, ${seatTeamLabel}`
                       : `${bot.name} at the coffee table`;
-              const seatTitle = coffeeDevModeEnabled
-                ? `Debug ${bot.name}`
-                : replayActionReviewEnabled
+              const seatTitle = replayActionReviewEnabled
                   ? `Show ${bot.name} actions so far`
                   : undefined;
               const replayActionPopoverSelected =
@@ -135582,20 +130250,12 @@ function HomeContent(): React.JSX.Element {
                       top: `${reviewSeatPosition.topPercent}%`,
                     }
                   : {}),
-                ...(seatDebugOverride
-                  ? {
-                      left: `${seatDebugOverride.leftPct}%`,
-                      top: `${seatDebugOverride.topPct}%`,
-                    }
-                  : {}),
               } as React.CSSProperties;
               const coffeeHeadPlateStyle = {
                 ["--coffee-plate-emoji-face-scale-y" as string]:
                   coffeePlateFaceScaleY,
                 ["--avatar-details-facing-scale-x" as string]:
                   botAvatarDetailsFacingScaleX(coffeePlateFaceScaleY),
-                ["--avatar-details-facing-offset-y" as string]:
-                  botAvatarDetailsFacingOffsetY(coffeePlateFaceScaleY),
                 ["--coffee-seat-sip-mouth-offset-x" as string]:
                   seatSipPresentation.mouthOffsetX,
                 ["--coffee-seat-sip-mouth-offset-y" as string]:
@@ -135668,9 +130328,6 @@ function HomeContent(): React.JSX.Element {
                   data-prism-mood={prismSeatMood}
                   data-mood-near-desaturated={
                     seatNearDesaturated ? "true" : undefined
-                  }
-                  data-coffee-dev-seat={
-                    coffeeDevModeEnabled ? "true" : undefined
                   }
                   data-replay-review-enabled={
                     replayActionReviewEnabled ? "true" : undefined
@@ -135749,7 +130406,9 @@ function HomeContent(): React.JSX.Element {
                       : undefined
                   }
                   style={seatStyle}
-                  disabled={!seatInteractive}
+                  disabled={
+                    !seatInteractive && !unreadMemoryReceiptBotIds.has(bot.id)
+                  }
                   aria-haspopup={
                     replayActionReviewEnabled ? "dialog" : undefined
                   }
@@ -135763,29 +130422,7 @@ function HomeContent(): React.JSX.Element {
                       ? replayActionPopoverId
                       : undefined
                   }
-                  onPointerDown={(event) =>
-                    startCoffeeSeatDebugDrag(event, {
-                      bot,
-                      seatIndex,
-                      layoutIndex,
-                      seatCount: coffeeSeatLayoutCount,
-                    })
-                  }
-                  onPointerMove={moveCoffeeSeatDebugDrag}
-                  onPointerUp={finishCoffeeSeatDebugDrag}
-                  onPointerCancel={finishCoffeeSeatDebugDrag}
                   onClick={(event) => {
-                    if (coffeeSeatDebugSuppressClickRef.current === bot.id) {
-                      coffeeSeatDebugSuppressClickRef.current = null;
-                      return;
-                    }
-                    if (coffeeDevModeEnabled) {
-                      setCoffeeDevPanelBotId((current) =>
-                        current === bot.id ? null : bot.id,
-                      );
-                      setCoffeeDevCopiedCoordinates(null);
-                      return;
-                    }
                     if (replayActionReviewEnabled) {
                       if (replayActionPopoverSelected) {
                         dismissCoffeeReplayActionPanel(false);
@@ -136073,11 +130710,26 @@ function HomeContent(): React.JSX.Element {
                         voicePreset={seatVoicePreset}
                       />
                     </div>
-                  ) : notifiedBotIds.has(bot.id) ? (
+                  ) : unreadMemoryReceiptBotIds.has(bot.id) ? (
                     <div
                       className={styles.coffeeSeatNotifiedIndicator}
-                      aria-label={`${bot.name} was just addressed`}
-                      title={`${bot.name} was just addressed`}
+                      role="button"
+                      tabIndex={0}
+                      aria-label={`${bot.name} learned a new memory about another bot. Open details.`}
+                      title={`${bot.name} learned something about another bot`}
+                      onClick={(event) => {
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const receipt = unreadMemoryReceiptByBotId.get(bot.id);
+                        if (receipt) void openMemoryAcquisitionReceipt(receipt);
+                      }}
+                      onKeyDown={(event) => {
+                        if (event.key !== "Enter" && event.key !== " ") return;
+                        event.preventDefault();
+                        event.stopPropagation();
+                        const receipt = unreadMemoryReceiptByBotId.get(bot.id);
+                        if (receipt) void openMemoryAcquisitionReceipt(receipt);
+                      }}
                     >
                       <span aria-hidden="true">!</span>
                     </div>
@@ -136085,6 +130737,7 @@ function HomeContent(): React.JSX.Element {
                 </button>
               );
             })}
+            {renderMemoryAcquisitionReceiptCard()}
             {coffeeSeatActionDisplays.length > 0 ? (
               <div
                 className={styles.coffeeSeatActionLayer}
@@ -136092,8 +130745,6 @@ function HomeContent(): React.JSX.Element {
               >
                 {coffeeSeatActionDisplays.map((display) =>
                   (() => {
-                    const debugOverride =
-                      coffeeSeatDebugOverrides[display.bot.id];
                     const anchorStyle = {
                       ...coffeeBotVisualStyle(display.bot),
                       ...coffeeArrivalMotionStyle(
@@ -136113,12 +130764,6 @@ function HomeContent(): React.JSX.Element {
                                 }
                               : {};
                           })()
-                        : {}),
-                      ...(debugOverride
-                        ? {
-                            left: `${debugOverride.leftPct}%`,
-                            top: `${debugOverride.topPct}%`,
-                          }
                         : {}),
                     } as React.CSSProperties;
                     return (
@@ -136265,227 +130910,6 @@ function HomeContent(): React.JSX.Element {
                   </ul>
                 ) : (
                   <p>No actions yet.</p>
-                )}
-              </aside>
-            ) : null}
-            {coffeeDevModeEnabled && coffeeDevPanelBot ? (
-              <aside
-                ref={coffeeDevBotPanelRef}
-                className={styles.coffeeDevBotPanel}
-                style={
-                  {
-                    ...coffeeBotVisualStyle(coffeeDevPanelBot),
-                    ...(coffeeDevPanelPosition
-                      ? {
-                          left: `${coffeeDevPanelPosition.x}px`,
-                          right: "auto",
-                          top: `${coffeeDevPanelPosition.y}px`,
-                        }
-                      : {}),
-                  } as React.CSSProperties
-                }
-                aria-label={`${coffeeDevPanelBot.name} Coffee debug panel`}
-              >
-                <header
-                  onPointerDown={startCoffeeDevPanelDrag}
-                  onPointerMove={moveCoffeeDevPanelDrag}
-                  onPointerUp={finishCoffeeDevPanelDrag}
-                  onPointerCancel={finishCoffeeDevPanelDrag}
-                >
-                  <div>
-                    <span>Coffee debug</span>
-                    <strong>{coffeeDevPanelBot.name}</strong>
-                  </div>
-                  <button
-                    type="button"
-                    onClick={() => setCoffeeDevPanelBotId(null)}
-                    aria-label="Close Coffee debug panel"
-                  >
-                    ×
-                  </button>
-                </header>
-                <div className={styles.coffeeDevBotStats}>
-                  <span>{`Mood ${messageMoodLabel(coffeeDevPanelMood)}`}</span>
-                  <span>
-                    {coffeeDevPanelSeat && coffeeDevPanelLayoutIndex >= 0
-                      ? `Seat ${coffeeDevPanelSeat.seatIndex + 1} / layout ${coffeeDevPanelLayoutIndex}`
-                      : "Seat unknown"}
-                  </span>
-                  <span>
-                    {activeTableSpeakerBotId === coffeeDevPanelBot.id
-                      ? "Speaking"
-                      : thinkingBotId === coffeeDevPanelBot.id
-                        ? "Thinking"
-                        : "Idle"}
-                  </span>
-                  {coffeeTeamsState ? (
-                    <span>
-                      {`Team ${
-                        coffeeTeamsState.bots[coffeeDevPanelBot.id]
-                          ?.currentTeamId ?? "undecided"
-                      }`}
-                    </span>
-                  ) : null}
-                  {coffeeActivePoll ? (
-                    <span>
-                      {`Poll ${
-                        coffeePollVoteByBotId.get(coffeeDevPanelBot.id)?.kind ??
-                        "pending"
-                      }`}
-                    </span>
-                  ) : null}
-                </div>
-                <div className={styles.coffeeDevMoodPresets}>
-                  {(Object.keys(COFFEE_DEV_MOOD_PRESETS) as BotMoodKey[]).map(
-                    (preset) => (
-                      <button
-                        key={preset}
-                        type="button"
-                        data-active={
-                          coffeeDevPanelMood === preset ? "true" : undefined
-                        }
-                        onClick={() =>
-                          setCoffeeDevSocialDraftForBot(
-                            coffeeDevPanelBot.id,
-                            () => coffeeDevMoodPresetPayload(preset),
-                          )
-                        }
-                      >
-                        {messageMoodLabel(preset)}
-                      </button>
-                    ),
-                  )}
-                </div>
-                <div className={styles.coffeeDevSocialSliders}>
-                  {COFFEE_DEV_SOCIAL_FIELDS.map((field) => (
-                    <label key={field.key}>
-                      <span>{field.label}</span>
-                      <input
-                        type="range"
-                        min={0}
-                        max={100}
-                        step={1}
-                        value={Math.round(
-                          coffeeDevPanelSocial[field.key] * 100,
-                        )}
-                        onChange={(event) => {
-                          const nextValue = clampUnitInterval(
-                            Number(event.target.value) / 100,
-                          );
-                          setCoffeeDevSocialDraftForBot(
-                            coffeeDevPanelBot.id,
-                            (current) => ({
-                              ...current,
-                              [field.key]: nextValue,
-                            }),
-                          );
-                        }}
-                      />
-                      <small>
-                        {Math.round(coffeeDevPanelSocial[field.key] * 100)}
-                      </small>
-                    </label>
-                  ))}
-                </div>
-                <div className={styles.coffeeDevRecentContext}>
-                  <span>Recent</span>
-                  <p>
-                    {coffeeDevPanelLastMessage
-                      ? coffeeTableDisplayText(
-                          coffeeDevPanelLastMessage.content,
-                        ).slice(0, 160)
-                      : "No bot line yet."}
-                  </p>
-                  {coffeeDevPanelActions.length > 0 ? (
-                    <ul>
-                      {coffeeDevPanelActions.map((action, index) => (
-                        <li key={`${coffeeDevPanelBot.id}-dev-action-${index}`}>
-                          {action}
-                        </li>
-                      ))}
-                    </ul>
-                  ) : null}
-                </div>
-                <footer>
-                  <button
-                    type="button"
-                    onClick={() => sipAsCoffeeDevBot(coffeeDevPanelBot.id)}
-                    disabled={
-                      coffeeDevSipBusyBotId != null ||
-                      coffeeDevSpeakBusyBotId != null ||
-                      coffeeBusy ||
-                      coffeeAutoBusy ||
-                      coffeeSessionPhase !== "live" ||
-                      coffeeTurnRhythmState === "botThinking" ||
-                      coffeeTurnRhythmState === "tableTyping" ||
-                      coffeeTurnRhythmState === "cooldown"
-                    }
-                  >
-                    {coffeeDevSipBusyBotId === coffeeDevPanelBot.id
-                      ? "Sipping..."
-                      : "Sip"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void saySomethingAsCoffeeDevBot(coffeeDevPanelBot.id)
-                    }
-                    disabled={
-                      coffeeDevSipBusyBotId != null ||
-                      coffeeDevSpeakBusyBotId != null ||
-                      coffeeBusy ||
-                      coffeeAutoBusy ||
-                      coffeeSessionModelDisabled ||
-                      coffeeSessionPhase !== "live" ||
-                      coffeeTurnRhythmState === "botThinking" ||
-                      coffeeTurnRhythmState === "tableTyping" ||
-                      coffeeTurnRhythmState === "cooldown"
-                    }
-                  >
-                    {coffeeDevSpeakBusyBotId === coffeeDevPanelBot.id
-                      ? "Speaking..."
-                      : "Say something"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() =>
-                      void saveCoffeeDevSocialForBot(coffeeDevPanelBot.id)
-                    }
-                    disabled={coffeeDevMoodSavingBotId === coffeeDevPanelBot.id}
-                  >
-                    {coffeeDevMoodSavingBotId === coffeeDevPanelBot.id
-                      ? "Applying..."
-                      : "Apply mood"}
-                  </button>
-                </footer>
-              </aside>
-            ) : null}
-            {coffeeDevModeEnabled && coffeeDevCopiedCoordinates ? (
-              <aside
-                className={styles.coffeeDevCoordinatePanel}
-                data-copied={
-                  coffeeDevCopiedCoordinates.copied ? "true" : undefined
-                }
-                aria-live="polite"
-              >
-                <header>
-                  <strong>
-                    {coffeeDevCopiedCoordinates.copied
-                      ? "Coordinates copied"
-                      : "Copy coordinates"}
-                  </strong>
-                  <button
-                    type="button"
-                    onClick={() => setCoffeeDevCopiedCoordinates(null)}
-                    aria-label="Dismiss coordinates"
-                  >
-                    ×
-                  </button>
-                </header>
-                {!coffeeDevCopiedCoordinates.copied ? (
-                  <textarea readOnly value={coffeeDevCopiedCoordinates.text} />
-                ) : (
-                  <code>{coffeeDevCopiedCoordinates.text.split("\n")[0]}</code>
                 )}
               </aside>
             ) : null}
@@ -136666,19 +131090,16 @@ function HomeContent(): React.JSX.Element {
         {coffeeSessionJoinedDock ? (
           <div
             className={styles.coffeeAutoplayDock}
-            data-dev-panel-safe-area="bottom"
+            data-viewport-safe-area="bottom"
           >
             <p className={styles.coffeeAutoplayDockCaption}>
-              {coffeeDevModeEnabled
-                ? "Coffee dev mode — timers are off and manual test turns are enabled."
-                : coffeeReplayActive
+              {coffeeReplayActive
                   ? "Replay mode — watching the saved session back with shorter pauses."
                   : coffeeAutoplayPaused
                     ? "The table is paused while Coffee waits to recover."
                     : "Bots take turns naturally as the conversation unfolds."}
             </p>
-            {!coffeeDevModeEnabled &&
-            coffeeSessionEndsAtMs != null &&
+            {coffeeSessionEndsAtMs != null &&
             (coffeeSessionPhase === "live" ||
               coffeeSessionPhase === "arriving") ? (
               <p
@@ -136701,21 +131122,6 @@ function HomeContent(): React.JSX.Element {
                   left
                 </span>
               </p>
-            ) : null}
-            {coffeeDevModeEnabled ? (
-              <button
-                type="button"
-                className={styles.coffeeAutoplayGlyphButton}
-                data-active="true"
-                onClick={() => void undoLatestCoffeeDevMessage()}
-                disabled={
-                  coffeeDevUndoBusy || !coffeeConversation?.messages.length
-                }
-                aria-label="Undo latest Coffee message"
-                title="Undo latest Coffee message"
-              >
-                <RotateCcw aria-hidden="true" />
-              </button>
             ) : null}
           </div>
         ) : null}
@@ -137663,7 +132069,7 @@ function HomeContent(): React.JSX.Element {
     const renderCoffeeSetupComposer = (): React.JSX.Element => (
       <form
         className={`${styles.compose} ${styles.coffeeGlobalComposer} ${styles.coffeeSetupComposer}`}
-        data-dev-panel-safe-area="bottom"
+        data-viewport-safe-area="bottom"
         data-starter-compose-surface="true"
         data-coffee-global-compose="true"
         data-coffee-setup-composer="true"
@@ -137730,7 +132136,7 @@ function HomeContent(): React.JSX.Element {
     const renderCoffeeGroupStartComposer = (): React.JSX.Element => (
       <form
         className={`${styles.compose} ${styles.coffeeGlobalComposer} ${styles.coffeeSetupComposer}`}
-        data-dev-panel-safe-area="bottom"
+        data-viewport-safe-area="bottom"
         data-starter-compose-surface="true"
         data-coffee-group-start-composer="true"
         data-coffee-group-start-ready={
@@ -138114,7 +132520,7 @@ function HomeContent(): React.JSX.Element {
           <aside
             className={styles.coffeeSidebar}
             data-tutorial-target="coffee-groups"
-            data-dev-panel-safe-area="left"
+            data-viewport-safe-area="left"
           >
             <div className={styles.coffeeSidebarHeader}>
               <span className={styles.sectionLabel}>Coffee Groups</span>
@@ -138292,28 +132698,28 @@ function HomeContent(): React.JSX.Element {
               </p>
             ) : null}
 
-            {coffeeTopicDebugClipboard ? (
+            {coffeeTopicClipboardFallback ? (
               <aside
-                className={`${styles.coffeeDevCoordinatePanel} ${styles.coffeeTopicDebugClipboardPanel}`}
+                className={styles.coffeeTopicClipboardFallbackPanel}
                 data-copied={
-                  coffeeTopicDebugClipboard.copied ? "true" : undefined
+                  coffeeTopicClipboardFallback.copied ? "true" : undefined
                 }
                 aria-live="polite"
               >
                 <header>
                   <strong>
-                    {coffeeTopicDebugClipboard.copied
+                    {coffeeTopicClipboardFallback.copied
                       ? "Coffee topics copied"
                       : "Coffee topics ready"}
                   </strong>
-                  <div className={styles.coffeeTopicDebugClipboardActions}>
+                  <div className={styles.coffeeTopicClipboardFallbackActions}>
                     <button
                       type="button"
-                      onClick={() => void copyCoffeeTopicDebugClipboardText()}
+                      onClick={() => void copyCoffeeTopicClipboardText()}
                       aria-label="Copy Coffee topics to clipboard"
                       title="Copy Coffee topics"
                     >
-                      {coffeeTopicDebugClipboard.copied ? (
+                      {coffeeTopicClipboardFallback.copied ? (
                         <Check aria-hidden="true" />
                       ) : (
                         <Copy aria-hidden="true" />
@@ -138321,17 +132727,17 @@ function HomeContent(): React.JSX.Element {
                     </button>
                     <button
                       type="button"
-                      onClick={() => setCoffeeTopicDebugClipboard(null)}
+                      onClick={() => setCoffeeTopicClipboardFallback(null)}
                       aria-label="Dismiss Coffee topics"
                     >
                       ×
                     </button>
                   </div>
                 </header>
-                {!coffeeTopicDebugClipboard.copied ? (
-                  <textarea readOnly value={coffeeTopicDebugClipboard.text} />
+                {!coffeeTopicClipboardFallback.copied ? (
+                  <textarea readOnly value={coffeeTopicClipboardFallback.text} />
                 ) : (
-                  <code>{coffeeTopicDebugClipboard.text.split("\n")[0]}</code>
+                  <code>{coffeeTopicClipboardFallback.text.split("\n")[0]}</code>
                 )}
               </aside>
             ) : null}
@@ -138378,7 +132784,7 @@ function HomeContent(): React.JSX.Element {
           {coffeeFinishedControlsVisible && (
             <section
               className={`${styles.coffeeComposer} ${styles.coffeeGlobalComposer} ${styles.coffeeReplayComposerControls}`}
-              data-dev-panel-safe-area="bottom"
+              data-viewport-safe-area="bottom"
               aria-label="Coffee replay controls"
             >
               <div className={styles.coffeeReplayTimelineRow}>
@@ -138763,8 +133169,6 @@ function HomeContent(): React.JSX.Element {
         {renderSelectedBotDeleteModal()}
         {renderImagesDeleteAllModal()}
         {renderImageCleanupPreviewModal()}
-        {renderDevToolsPanel()}
-        {renderDevMoodVisual()}
         {renderContextMenuPortal(renderCoffeeShellContextMenu())}
         {renderContextMenuPortal(renderCoffeeBotContextMenu())}
         {renderViewSwitchOverlay()}
@@ -139176,7 +133580,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <aside
         className={styles.storyOverlayPanel}
-        data-dev-panel-safe-area="right"
+        data-viewport-safe-area="right"
         aria-label="Story map"
       >
         <div className={styles.storyOverlayHeader}>
@@ -139225,7 +133629,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <aside
         className={styles.storyOverlayPanel}
-        data-dev-panel-safe-area="right"
+        data-viewport-safe-area="right"
         aria-label="Story inventory"
       >
         <div className={styles.storyOverlayHeader}>
@@ -139282,7 +133686,7 @@ function HomeContent(): React.JSX.Element {
     return (
       <aside
         className={styles.storyOverlayPanel}
-        data-dev-panel-safe-area="right"
+        data-viewport-safe-area="right"
         aria-label="Story transcript"
       >
         <div className={styles.storyOverlayHeader}>
@@ -139589,7 +133993,7 @@ function HomeContent(): React.JSX.Element {
         style={appShellStyle ?? undefined}
         onContextMenu={handleStoryShellContextMenu}
       >
-        <aside className={styles.storySidebar} data-dev-panel-safe-area="left">
+        <aside className={styles.storySidebar} data-viewport-safe-area="left">
           <button
             type="button"
             className={styles.storyHomeButton}
@@ -139711,9 +134115,14 @@ function HomeContent(): React.JSX.Element {
         {renderSelectedBotDeleteModal()}
         {renderImagesDeleteAllModal()}
         {renderImageCleanupPreviewModal()}
-        {renderDevToolsPanel()}
-        {renderDevMoodVisual()}
         {renderContextMenuPortal(renderStoryShellContextMenu())}
+        {storySession?.status === "playing" ? (
+          <PrismCompanionSessionNoteBoundary
+            reason="story-live-session"
+            surface="story"
+            sessionId={storySession.id}
+          />
+        ) : null}
         {renderGlobalPrismCompanion()}
         <GlyphTooltipLayer />
       </main>
@@ -140283,16 +134692,26 @@ function HomeContent(): React.JSX.Element {
                       ]!;
                   const galleryTalking =
                     avatarState.talking || avatarState.foleyMouthShape !== null;
+                  const galleryBinaryMouthShape = miniAvatarBinaryMouthShape({
+                    talking: galleryTalking,
+                    mouthShape:
+                      moderatorMiniPortrait
+                        ? debateMouthShape === "closed"
+                          ? "speech-closed"
+                          : "open-wide"
+                        : avatarState.foleyMouthShape === "open-wide"
+                          ? "open-wide"
+                          : galleryTalking
+                            ? "speech-closed"
+                            : "closed",
+                    mouthCharacter: faceStyle.mouthCharacter,
+                  });
                   const galleryMouthAnimated =
-                    galleryTalking && faceStyle.mouthAnimation === "none";
+                    galleryTalking &&
+                    normalizeBotFaceMouthCharacter(faceStyle.mouthCharacter) ===
+                      null;
                   const galleryMouthShape = galleryMouthAnimated
-                    ? moderatorMiniPortrait
-                      ? debateMouthShape === "closed"
-                        ? "speech-closed"
-                        : "open-wide"
-                      : avatarState.foleyMouthShape === "open-wide"
-                        ? "open-wide"
-                        : "speech-closed"
+                    ? galleryBinaryMouthShape
                     : "closed";
                   const galleryFace = coffeeSeatPlateGlyph(
                     galleryMood,
@@ -140397,6 +134816,7 @@ function HomeContent(): React.JSX.Element {
                           >
                             <CoffeeSeatPlateEmoji
                               enabled={false}
+                              pixelated
                               isTalking={galleryMouthAnimated}
                               mouthShape={galleryMouthShape}
                               scheduleKey={`debate-${
@@ -140413,7 +134833,7 @@ function HomeContent(): React.JSX.Element {
                               )}
                               faceEyesFont={faceStyle.eyesFont}
                               faceEyeCharacter={faceStyle.eyeCharacter}
-                              faceEyeMovement={faceStyle.eyeAnimation}
+                              faceEyeMovement="still"
                               faceMouthFont={faceStyle.mouthFont}
                               faceMouthCharacter={faceStyle.mouthCharacter}
                               faceMouthAnimation={faceStyle.mouthAnimation}
@@ -140445,7 +134865,7 @@ function HomeContent(): React.JSX.Element {
                       glyph={
                         <BotGlyph
                           name={glyph}
-                          size={14}
+                          size={12}
                           className={styles.emptyStateHeroMiniGlyph}
                         />
                       }
@@ -140490,8 +134910,6 @@ function HomeContent(): React.JSX.Element {
                         faceScaleY,
                       ["--avatar-details-facing-scale-x" as string]:
                         botAvatarDetailsFacingScaleX(faceScaleY),
-                      ["--avatar-details-facing-offset-y" as string]:
-                        botAvatarDetailsFacingOffsetY(faceScaleY),
                     }}
                     aria-hidden="true"
                   >
@@ -140606,6 +135024,12 @@ function HomeContent(): React.JSX.Element {
                         runtimeEffectsEnabled={!staticAudiencePortrait}
                       />
                     </BotAmbientPresenceRig>
+                    {liveBot
+                      ? renderLiveBotMemoryReceiptChip(
+                          liveBot.id,
+                          liveBot.name,
+                        )
+                      : null}
                   </span>
                 );
               }}
@@ -141151,8 +135575,6 @@ function HomeContent(): React.JSX.Element {
                     ["--coffee-plate-emoji-face-scale-y" as string]: faceScaleY,
                     ["--avatar-details-facing-scale-x" as string]:
                       botAvatarDetailsFacingScaleX(faceScaleY),
-                    ["--avatar-details-facing-offset-y" as string]:
-                      botAvatarDetailsFacingOffsetY(faceScaleY),
                     ["--coffee-seat-sip-mouth-offset-x" as string]:
                       sipPresentation.mouthOffsetX,
                     ["--coffee-seat-sip-mouth-offset-y" as string]:
@@ -141289,8 +135711,6 @@ function HomeContent(): React.JSX.Element {
                   ["--coffee-plate-emoji-face-scale-y" as string]: faceScaleY,
                   ["--avatar-details-facing-scale-x" as string]:
                     botAvatarDetailsFacingScaleX(faceScaleY),
-                  ["--avatar-details-facing-offset-y" as string]:
-                    botAvatarDetailsFacingOffsetY(faceScaleY),
                   ["--coffee-seat-sip-mouth-offset-x" as string]:
                     sipPresentation.mouthOffsetX,
                   ["--coffee-seat-sip-mouth-offset-y" as string]:
@@ -141368,6 +135788,7 @@ function HomeContent(): React.JSX.Element {
                   />
                 </BotAmbientPresenceRig>
                 <BotPowerBadge powers={bot.powers} passive />
+                {renderLiveBotMemoryReceiptChip(bot.id, bot.name)}
               </span>
             );
           }}
@@ -141600,8 +136021,6 @@ function HomeContent(): React.JSX.Element {
           <div className={styles.hubAdvancedRow} />
         </div>
         {renderSharedPanels()}
-        {renderDevToolsPanel()}
-        {renderDevMoodVisual()}
         {renderViewSwitchOverlay()}
         {renderModeTutorialOverlay()}
         {renderDesktopFirstRunChecklist()}
@@ -141914,7 +136333,7 @@ function HomeContent(): React.JSX.Element {
           className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
             panel !== null ? styles.sidebarHandleHidden : ""
           }`}
-          data-dev-panel-safe-area="left"
+          data-viewport-safe-area="left"
           onClick={() => {
             setSidebarOpen((open) => !open);
           }}
@@ -141932,7 +136351,7 @@ function HomeContent(): React.JSX.Element {
         <aside
           id={APP_SIDEBAR_NAVIGATION_ID}
           className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}
-          data-dev-panel-safe-area="left"
+          data-viewport-safe-area="left"
           aria-label="Primary navigation"
           aria-hidden={
             panel !== null || (sidebarDrawerMode && !sidebarOpen)
@@ -143492,7 +137911,6 @@ function HomeContent(): React.JSX.Element {
                   </Fragment>
                 );
               })}
-              {devChatDebugEventsNode}
               {renderPrismHomeOrchestrationCards()}
               {!chatLikeSurface ? typingIndicatorNode : null}
               {sandboxSummaryIndicatorNode}
@@ -143507,14 +137925,13 @@ function HomeContent(): React.JSX.Element {
             </div>
             {renderComposerChipRail()}
             {renderImageJobOrbDock()}
-            {compactedSummaryDebugNode}
             {manualCompactionIndicatorNode}
           </div>
 
           <form
             className={styles.compose}
             data-tutorial-target="composer"
-            data-dev-panel-safe-area="bottom"
+            data-viewport-safe-area="bottom"
             data-starter-compose-surface="true"
             data-compose-bot-selected={
               selectedComposeBotAccent ? "true" : undefined
@@ -143602,8 +138019,7 @@ function HomeContent(): React.JSX.Element {
             {!composerHiddenByChoiceChips ? (
               chatLikeSurface ? (
                 <div className={styles.chatComposerStack}>
-                  {renderDebugComposer()}
-                  {zenLivePresenceRailVisible &&
+                      {zenLivePresenceRailVisible &&
                   !zenCanvasBotSuppressedForPanel ? (
                     <div className={styles.zenLiveActionStatusRail}>
                       <ZenLiveBotPresencePlate
@@ -143749,10 +138165,6 @@ function HomeContent(): React.JSX.Element {
         {renderSweepConfirmModal()}
         {renderSweepUndoToast()}
         {renderLocalCommandToast()}
-        {renderDevToolsPanel()}
-        {renderDevMoodVisual()}
-        {renderZenToolLab()}
-        {renderDevZenPauseTester()}
         {touchPreview && (
           <TouchPreviewBalloon
             bot={
@@ -143807,7 +138219,7 @@ function HomeContent(): React.JSX.Element {
           className={`${styles.sidebarHandle} ${sidebarOpen ? styles.sidebarHandleOpen : ""} ${
             panel !== null ? styles.sidebarHandleHidden : ""
           }`}
-          data-dev-panel-safe-area="left"
+          data-viewport-safe-area="left"
           onClick={() => {
             setSidebarOpen((o) => !o);
           }}
@@ -143831,7 +138243,7 @@ function HomeContent(): React.JSX.Element {
       <aside
         id={APP_SIDEBAR_NAVIGATION_ID}
         className={`${styles.sidebar} ${sidebarOpen ? styles.sidebarOpen : ""}`}
-        data-dev-panel-safe-area="left"
+        data-viewport-safe-area="left"
         aria-label="Primary navigation"
         aria-hidden={
           panel !== null || (sidebarDrawerMode && !sidebarOpen)
@@ -143950,7 +138362,7 @@ function HomeContent(): React.JSX.Element {
           ref={chatHeaderRef}
           className={styles.chatHeader}
           data-app-shell-header="true"
-          data-dev-panel-safe-area="top"
+          data-viewport-safe-area="top"
           data-zen-live-bot-drag-exclusion="top-bar"
           onPointerEnter={(event) => {
             if (event.pointerType !== "mouse") return;
@@ -144038,6 +138450,17 @@ function HomeContent(): React.JSX.Element {
                 </span>
               </button>
             ) : null}
+            {headerMemoryReceipt ? (
+              <button
+                type="button"
+                className={styles.botMemoryReceiptChip}
+                aria-label={`${headerIdentity?.name ?? "This bot"} learned a new memory about another bot. Open details.`}
+                title={`${headerIdentity?.name ?? "This bot"} learned something about another bot`}
+                onClick={() => void openMemoryAcquisitionReceipt(headerMemoryReceipt)}
+              >
+                !
+              </button>
+            ) : null}
             {renderAppSwitcher()}
             {viewportWidth <= PHONE_MENU_BREAKPOINT
               ? renderMemoryToasts()
@@ -144071,6 +138494,7 @@ function HomeContent(): React.JSX.Element {
           )}
           {renderChatOverflowGear()}
         </header>
+        {renderMemoryAcquisitionReceiptCard()}
         {relationshipDepthInputLocked ? (
           <div
             className={styles.relationshipDepthInputShield}
@@ -145633,7 +140057,6 @@ function HomeContent(): React.JSX.Element {
                 </Fragment>
               );
             })}
-            {devChatDebugEventsNode}
             {!chatLikeSurface ? typingIndicatorNode : null}
             {sandboxSummaryIndicatorNode}
             {/* Scroll sentinel: kept at the very end so the scroll effect can
@@ -145649,7 +140072,6 @@ function HomeContent(): React.JSX.Element {
           </div>
           {renderComposerChipRail()}
           {renderImageJobOrbDock()}
-          {compactedSummaryDebugNode}
           {manualCompactionIndicatorNode}
         </div>
 
@@ -145702,7 +140124,6 @@ function HomeContent(): React.JSX.Element {
           ) : null,
           showEditNotice: true,
           stacked: chatLikeSurface,
-          showDebugComposer: chatLikeSurface,
           showZenLivePresence: chatLikeSurface,
           zenPresenceAtmosphereActive: false,
         })}
@@ -145723,8 +140144,6 @@ function HomeContent(): React.JSX.Element {
       {renderSweepConfirmModal()}
       {renderSweepUndoToast()}
       {renderLocalCommandToast()}
-      {renderDevToolsPanel()}
-      {renderDevMoodVisual()}
       {touchPreview && (
         <TouchPreviewBalloon
           bot={

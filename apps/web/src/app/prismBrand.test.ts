@@ -186,11 +186,6 @@ describe("PRISM brand system", () => {
       pageCss,
       /settingsSection\[data-settings-section="experimental"\][\s\S]*?--settings-section-color:\s*var\(--prism-dev-accent/u,
     );
-    assert.match(pageCss, /\.devToolsFloatingPanel[\s\S]*?--dev-tools-accent:/u);
     assert.doesNotMatch(pageCss, /#48d6c8/u);
-    assert.match(
-      pageCss,
-      /\.coffeeDevBotPanel,[\s\S]*?var\(--prism-dev-accent/u,
-    );
   });
 });

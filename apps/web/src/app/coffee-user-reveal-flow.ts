@@ -233,7 +233,6 @@ export function coffeeAutoplayForceTurnShouldRun(args: {
   hasPresentBot: boolean;
   sessionPhase: string;
   autoplayPaused: boolean;
-  devModeEnabled: boolean;
   requestInFlight: boolean;
   pendingReveal: boolean;
   timerPresent: boolean;
@@ -249,7 +248,7 @@ export function coffeeAutoplayForceTurnShouldRun(args: {
   if (!args.hasConversation || !args.hasPresentBot) return false;
   if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live")
     return false;
-  if (args.autoplayPaused || args.devModeEnabled) return false;
+  if (args.autoplayPaused) return false;
   if (args.requestInFlight || args.pendingReveal) return false;
   if (args.sessionEndsAtMs !== null && args.nowMs >= args.sessionEndsAtMs)
     return false;
@@ -275,7 +274,6 @@ export function coffeeAutoplayWatchdogShouldWake(args: {
   hasConversation: boolean;
   sessionPhase: string;
   autoplayPaused: boolean;
-  devModeEnabled: boolean;
   rhythmState: CoffeeUserRevealFlowState;
   loopScheduled: boolean;
   requestInFlight: boolean;
@@ -285,7 +283,7 @@ export function coffeeAutoplayWatchdogShouldWake(args: {
   if (!args.hasConversation) return false;
   if (args.sessionPhase !== "arriving" && args.sessionPhase !== "live")
     return false;
-  if (args.autoplayPaused || args.devModeEnabled) return false;
+  if (args.autoplayPaused) return false;
   if (!coffeeArrivalAutoplayCanScheduleNow(args.rhythmState)) return false;
   if (args.loopScheduled || args.requestInFlight) return false;
   return args.sessionEndsAtMs === null || args.nowMs < args.sessionEndsAtMs;

@@ -95,8 +95,8 @@ test("Avatar Studio exposes atomic semantic and bounded local field dice", () =>
   assert.match(reroll, /"\/api\/bots\/generate-field"/u);
   assert.match(reroll, /botFieldGenerationRunRef/u);
   assert.match(reroll, /pushBotAvatarUndoSnapshot\(\)/u);
-  assert.match(reroll, /preferredProvider,/u);
-  assert.match(reroll, /\.\.\.\(modelOverride \? \{ modelOverride \} : \{\}\)/u);
+  assert.match(reroll, /preferredProvider:\s*settings\?\.preferredProvider\s*\?\?\s*"local"/u);
+  assert.doesNotMatch(reroll, /\.\.\.\(modelOverride \? \{ modelOverride \} : \{\}\)/u);
   assert.match(pageSource, /function BotFieldRandomizerButton/u);
   assert.match(pageSource, /label="temperature"/u);
   assert.match(pageSource, /BOT_POWER_SIGIL_IDS_V1/u);
@@ -155,6 +155,23 @@ test("the generator overlays Avatar Studio and has a responsive review surface",
   assert.match(cssSource, /\.botGeneratorDialog\s*\{/u);
   assert.match(cssSource, /\.botGeneratedBriefCard\s+p\s*\{/u);
   assert.match(cssSource, /@media \(max-width: 640px\)/u);
+  assert.match(pageSource, /data-bot-generator-brief-card="true"/u);
+  assert.match(
+    cssSource,
+    /\.botGeneratorDialog\[data-foundry-phase\]\s*>\s*\.botGeneratorBriefCard\s*\{/u,
+  );
+  assert.match(
+    cssSource,
+    /--bot-foundry-chrome-inset-inline:\s*clamp\(24px,\s*3\.5vw,\s*54px\)/u,
+  );
+  assert.match(
+    ritualCssSource,
+    /left:\s*var\(--bot-foundry-chrome-inset-inline,\s*clamp\(24px,\s*3\.5vw,\s*54px\)\)/u,
+  );
+  assert.doesNotMatch(
+    cssSource,
+    /\.botGeneratorDialog\s*>\s*\.botGeneratorHeader[\s\S]{0,220}transform:\s*translateY\(-100%\)/u,
+  );
 });
 
 test("prompt generation becomes an accessible PRISM assembly ritual", () => {

@@ -24,7 +24,6 @@ describe("Coffee seat hover treatment", () => {
     assert.match(pageSource, /const coffeeSeatHoverActive =[\s\S]*!coffeeCupVisual\.sipping/);
     assert.match(pageSource, /const coffeeSeatHoverActive =[\s\S]*activeCoffeeCupTopOffAnimation == null/);
     assert.match(pageSource, /const coffeeSeatHoverActive =[\s\S]*!coffeeReplayActive/);
-    assert.match(pageSource, /const coffeeSeatHoverActive =[\s\S]*coffeeSeatDebugDraggingBotId !== bot\.id/);
   });
 
   it("uses a subtle staggered nine-second drift with compact restraint", () => {
