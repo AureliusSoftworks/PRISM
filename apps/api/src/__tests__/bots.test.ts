@@ -13,7 +13,6 @@ import {
   composeBotSystemPrompt,
   deleteAllBots,
   deleteBot,
-  deleteBots,
   deleteSelectedBots,
   normalizeBotExportHash,
   patchSelectedBots,
@@ -682,103 +681,6 @@ describe("deleteBot", () => {
   });
 });
 
-describe("deleteBots", () => {
-  it("removes the newest limited set and leaves older bots intact", () => {
-    const db = createTestDb();
-    seedBot(db, "user-1", "old", "2026-01-01T00:00:00.000Z");
-    seedBot(db, "user-1", "middle", "2026-01-02T00:00:00.000Z");
-    seedBot(db, "user-1", "new", "2026-01-03T00:00:00.000Z");
-    seedHistoryReferencingBot(db, "user-1", "new", "new");
-    seedHistoryReferencingBot(db, "user-1", "middle", "middle");
-    seedMemory(db, "user-1", "old", "memory-old");
-    seedMemory(db, "user-1", "middle", "memory-middle");
-    seedMemory(db, "user-1", "new", "memory-new");
-    seedMemory(db, "user-1", null, "memory-global");
-
-    const deleted = deleteBots(db, "user-1", 2);
-
-    assert.equal(deleted, 2);
-    const survivors = db
-      .prepare("SELECT id FROM bots ORDER BY id")
-      .all() as Array<{ id: string }>;
-    assert.deepEqual(
-      survivors.map((bot) => bot.id),
-      ["old"]
-    );
-
-    for (const suffix of ["new", "middle"]) {
-      const msg = db
-        .prepare("SELECT bot_id FROM messages WHERE id = ?")
-        .get(`msg-${suffix}`) as { bot_id: string | null } | undefined;
-      assert.equal(msg?.bot_id, null);
-    }
-    const memories = db
-      .prepare("SELECT id FROM memories ORDER BY id")
-      .all() as Array<{ id: string }>;
-    assert.deepEqual(
-      memories.map((memory) => memory.id),
-      ["memory-global", "memory-old"]
-    );
-  });
-
-  it("stays scoped to the acting user", () => {
-    const db = createTestDb();
-    seedBot(db, "user-1", "mine-1", "2026-01-01T00:00:00.000Z");
-    seedBot(db, "user-1", "mine-2", "2026-01-02T00:00:00.000Z");
-    seedBot(db, "user-2", "theirs", "2026-01-03T00:00:00.000Z");
-    seedHistoryReferencingBot(db, "user-2", "theirs", "theirs");
-    seedMemory(db, "user-2", "theirs", "memory-theirs");
-
-    const deleted = deleteBots(db, "user-1", 10);
-
-    assert.equal(deleted, 2);
-    const survivor = db
-      .prepare("SELECT id FROM bots WHERE user_id = ?")
-      .get("user-2") as { id: string } | undefined;
-    assert.equal(survivor?.id, "theirs");
-    const msg = db
-      .prepare("SELECT bot_id FROM messages WHERE id = ?")
-      .get("msg-theirs") as { bot_id: string | null } | undefined;
-    assert.equal(msg?.bot_id, "theirs");
-    const memory = db
-      .prepare("SELECT bot_id FROM memories WHERE id = ?")
-      .get("memory-theirs") as { bot_id: string | null } | undefined;
-    assert.equal(memory?.bot_id, "theirs");
-  });
-
-  it("skips protected bots when deleting a limited newest set", () => {
-    const db = createTestDb();
-    seedBot(db, "user-1", "old", "2026-01-01T00:00:00.000Z");
-    seedBot(db, "user-1", "protected-new", "2026-01-03T00:00:00.000Z", true);
-    seedBot(db, "user-1", "unprotected-new", "2026-01-02T00:00:00.000Z");
-    seedHistoryReferencingBot(db, "user-1", "protected-new", "protected");
-    seedHistoryReferencingBot(db, "user-1", "unprotected-new", "unprotected");
-    seedMemory(db, "user-1", "protected-new", "memory-protected");
-    seedMemory(db, "user-1", "unprotected-new", "memory-unprotected");
-
-    const deleted = deleteBots(db, "user-1", 10);
-
-    assert.equal(deleted, 2);
-    const survivors = db
-      .prepare("SELECT id FROM bots ORDER BY id")
-      .all() as Array<{ id: string }>;
-    assert.deepEqual(
-      survivors.map((bot) => bot.id),
-      ["protected-new"]
-    );
-    assert.equal(
-      (db.prepare("SELECT bot_id FROM messages WHERE id = ?")
-        .get("msg-protected") as { bot_id: string | null }).bot_id,
-      "protected-new"
-    );
-    assert.equal(
-      (db.prepare("SELECT bot_id FROM memories WHERE id = ?")
-        .get("memory-protected") as { bot_id: string | null }).bot_id,
-      "protected-new"
-    );
-  });
-});
-
 /**
  * The deleteAllBots suite pins the bulk-clear behaviour used by the Bots panel
  * press-and-hold "delete all" affordance. The contract mirrors deleteBot
@@ -924,44 +826,6 @@ describe("deleteAllBots", () => {
     );
   });
 
-  it("deletes protected bots when explicitly requested", () => {
-    const db = createTestDb();
-    seedBot(db, "user-1", "protected", "2026-01-03T00:00:00.000Z", true);
-    seedBot(db, "user-1", "unprotected");
-    seedBot(db, "user-2", "theirs", "2026-01-04T00:00:00.000Z", true);
-    seedHistoryReferencingBot(db, "user-1", "protected", "protected");
-    seedHistoryReferencingBot(db, "user-1", "unprotected", "unprotected");
-    seedHistoryReferencingBot(db, "user-2", "theirs", "theirs");
-    seedMemory(db, "user-1", "protected", "memory-protected");
-    seedMemory(db, "user-1", "unprotected", "memory-unprotected");
-    seedMemory(db, "user-2", "theirs", "memory-theirs");
-
-    const deleted = deleteAllBots(db, "user-1", { includeProtected: true });
-
-    assert.equal(deleted, 2);
-    assert.deepEqual(
-      (db.prepare("SELECT id FROM bots ORDER BY id").all() as Array<{ id: string }>).map(
-        (bot) => bot.id
-      ),
-      ["theirs"]
-    );
-    assert.equal(
-      (db.prepare("SELECT bot_id FROM messages WHERE id = ?")
-        .get("msg-protected") as { bot_id: string | null }).bot_id,
-      null
-    );
-    assert.equal(
-      (db.prepare("SELECT bot_id FROM messages WHERE id = ?")
-        .get("msg-theirs") as { bot_id: string | null }).bot_id,
-      "theirs"
-    );
-    assert.deepEqual(
-      (db.prepare("SELECT id FROM memories ORDER BY id").all() as Array<{ id: string }>).map(
-        (memory) => memory.id
-      ),
-      ["memory-theirs"]
-    );
-  });
 });
 
 describe("deleteSelectedBots", () => {

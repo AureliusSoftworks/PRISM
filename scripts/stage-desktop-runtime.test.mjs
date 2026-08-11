@@ -7,7 +7,10 @@ import path from "node:path";
 import { promisify } from "node:util";
 import { test } from "node:test";
 
-import { nodeRuntimeSourceCandidates } from "./stage-desktop-runtime.mjs";
+import {
+  STEAM_PUBLIC_EXCLUDED_TOP_LEVEL,
+  nodeRuntimeSourceCandidates,
+} from "./stage-desktop-runtime.mjs";
 
 const execFileAsync = promisify(execFile);
 const repositoryRoot = path.resolve(import.meta.dirname, "..");
@@ -47,6 +50,13 @@ test("desktop staging preserves host Node behavior on Linux and Windows", () => 
     }),
     ["C:\\nodejs\\node.exe"],
   );
+});
+
+test("Steam staging excludes development-only public tools", () => {
+  assert.deepEqual(STEAM_PUBLIC_EXCLUDED_TOP_LEVEL, [
+    "bot-marketplace",
+    "tools",
+  ]);
 });
 
 test(

@@ -23,6 +23,10 @@ const workspaceRuntimePackages = new Set([
   "@localai/config",
   "@localai/shared"
 ]);
+export const STEAM_PUBLIC_EXCLUDED_TOP_LEVEL = Object.freeze([
+  "bot-marketplace",
+  "tools",
+]);
 // Transformers.js selects onnxruntime-node through its Node export. Its browser
 // backend is not used by the bundled API and would add roughly 90 MB.
 const omittedDesktopRuntimePackages = new Set(["onnxruntime-web"]);
@@ -135,6 +139,7 @@ async function copyDirExcludingTopLevel(source, destination, excludedNames) {
     recursive: true,
     force: true,
     filter: (sourcePath) => {
+      if (path.basename(sourcePath) === ".DS_Store") return false;
       const relative = path.relative(source, sourcePath);
       if (!relative) return true;
       return !excludedNames.has(relative.split(path.sep)[0]);
@@ -512,7 +517,7 @@ async function main() {
       await copyDirExcludingTopLevel(
         publicDir,
         stagedPublicDir,
-        new Set(["bot-marketplace"])
+        new Set(STEAM_PUBLIC_EXCLUDED_TOP_LEVEL)
       );
       const steamContentReport = await stageSteamMarketplace({
         sourcePublicRoot: publicDir,

@@ -114,7 +114,7 @@ describe("unused image asset cleanup", () => {
     assert.match(modalSlice, /Run audit again/u);
     assert.match(
       pageSource,
-      /activeSettingsScope === "help"[\s\S]{0,6000}data-settings-action="clean-unused-assets"/u,
+      /activeSettingsScope === "help"[\s\S]{0,14000}data-settings-action="clean-unused-assets"/u,
     );
     assert.match(settingsPanelSource, /\| "help"/u);
     assert.match(
@@ -130,7 +130,7 @@ describe("unused image asset cleanup", () => {
     assert.match(pageSource, /<strong>Clean unused assets<\/strong>/u);
     assert.match(
       pageSource,
-      /Intentional Image[\s\S]{0,120}chat images, uploads, and[\s\S]{0,50}imports are never included/u,
+      /Image Library[\s\S]{0,140}chat images, uploads, and imports[\s\S]{0,50}never included/u,
     );
     assert.doesNotMatch(
       pageSource,

@@ -318,71 +318,12 @@ export function deleteBot(
 }
 
 /**
- * Permanently remove up to `limit` of the caller's most recently updated bots.
- *
- * This powers the Developer Tools density controls. It skips protected bots,
- * preserves historical chats by nulling bot references before deleting the bot
- * rows, and removes bot-scoped memories for those deleted bots.
- */
-export function deleteBots(
-  db: DatabaseSync,
-  userId: string,
-  limit: number
-): number {
-  const normalizedLimit = Math.floor(limit);
-  if (!Number.isFinite(normalizedLimit) || normalizedLimit <= 0) return 0;
-
-  db.exec("BEGIN IMMEDIATE TRANSACTION");
-  try {
-    const botIds = db
-      .prepare(
-        "SELECT id FROM bots WHERE user_id = ? AND delete_protected = 0 ORDER BY updated_at DESC, id DESC LIMIT ?"
-      )
-      .all(userId, normalizedLimit) as Array<{ id: string }>;
-
-    if (botIds.length === 0) {
-      db.exec("COMMIT");
-      return 0;
-    }
-
-    const ids = botIds.map(({ id }) => id);
-    const placeholders = ids.map(() => "?").join(", ");
-
-    db.prepare(
-      `UPDATE messages SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${placeholders})`
-    ).run(userId, ...ids);
-    db.prepare(
-      `UPDATE conversations SET bot_id = NULL WHERE user_id = ? AND bot_id IN (${placeholders})`
-    ).run(userId, ...ids);
-    db.prepare(
-      `DELETE FROM memories
-       WHERE user_id = ?
-         AND (bot_id IN (${placeholders}) OR target_bot_id IN (${placeholders}))
-         AND COALESCE(source, 'direct') != 'about_you'`
-    ).run(userId, ...ids, ...ids);
-    db.prepare(
-      `DELETE FROM bot_relationships
-       WHERE user_id = ?
-         AND (source_bot_id IN (${placeholders}) OR target_bot_id IN (${placeholders}))`
-    ).run(userId, ...ids, ...ids);
-    db.prepare(
-      `DELETE FROM bots WHERE user_id = ? AND id IN (${placeholders})`
-    ).run(userId, ...ids);
-    db.exec("COMMIT");
-    return ids.length;
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-}
-
-/**
  * Permanently remove every bot owned by `userId` in a single transaction.
  *
  * Behaviour mirrors {@link deleteBot} applied in bulk:
  *   - Runs inside an IMMEDIATE transaction so either every bot is gone
  *     or the database is untouched.
- *   - Skips protected bots unless `includeProtected` is explicitly true.
+ *   - Skips protected bots.
  *   - Nulls out `bot_id` on the user's past messages and conversations
  *     for deleted bots first, so historical threads keep their content and
  *     fall back to the generic "Assistant" label via the chat read path's
@@ -394,22 +335,17 @@ export function deleteBots(
  *     own) are never touched.
  *   - Returns the count of bots removed (0 if the user had none).
  *
- * Intended for the user-facing Bots panel press-and-hold "delete all" flow;
- * Developer Tools can opt into deleting protected bots for fixture cleanup.
+ * Intended for the user-facing Bots panel press-and-hold "delete all" flow.
  */
 export function deleteAllBots(
   db: DatabaseSync,
-  userId: string,
-  options: { includeProtected?: boolean } = {}
+  userId: string
 ): number {
-  const includeProtected = options.includeProtected === true;
   db.exec("BEGIN IMMEDIATE TRANSACTION");
   try {
     const botIds = db
       .prepare(
-        includeProtected
-          ? "SELECT id FROM bots WHERE user_id = ?"
-          : "SELECT id FROM bots WHERE user_id = ? AND delete_protected = 0"
+        "SELECT id FROM bots WHERE user_id = ? AND delete_protected = 0"
       )
       .all(userId) as Array<{ id: string }>;
 

@@ -68,7 +68,7 @@ async function requestApiSelfRestart(request: NextRequest): Promise<Response | n
     if (cookie) headers.set("cookie", cookie);
     if (authorization) headers.set("authorization", authorization);
     if (clientAccess) headers.set("x-prism-client-access", clientAccess);
-    return await fetch(`${API_ORIGIN}/api/dev/restart`, {
+    return await fetch(`${API_ORIGIN}/api/maintenance/restart`, {
       method: "POST",
       headers,
       body: "{}",

@@ -95,7 +95,7 @@ describe("resolveLeadingDevCommandTextRanges", () => {
   });
 
   it("only highlights the first immediate quoted token after command", () => {
-    const out = resolveLeadingDevCommandTextRanges('$dev askquestion "pick one"');
+    const out = resolveLeadingDevCommandTextRanges('$say askquestion "pick one"');
     assert.deepEqual(out, {
       commandStart: 0,
       commandEnd: 4,

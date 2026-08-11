@@ -46,8 +46,8 @@ compatible while each consumer moves to the shared surface registry.
 
 The same Prism identity follows the player through every authenticated surface.
 Full Prism contracts into the movable rainbow orb; the orb opens an ephemeral
-conversation in place. Players can click it or press **Option Space** on macOS
-and **Control Space** on Windows or Linux. The orb has bounded, weighted drag
+conversation in place. Players can click it or press **Control + Option/Alt**.
+The orb has bounded, weighted drag
 momentum and glides to a stop after release; reduced-motion mode keeps placement
 direct. Full-size Zen bots remain directly positioned and stop on release.
 

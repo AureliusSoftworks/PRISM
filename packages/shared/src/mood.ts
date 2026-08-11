@@ -61,15 +61,6 @@ export interface PrismMoodInterruptionInput {
 
 export type PrismMoodIgnoredQuestionPenaltyLevel = "light" | "normal" | "elevated";
 
-export interface PrismMoodDebugPatch {
-  annoyanceDelta?: number;
-  warmthDelta?: number;
-  engagementDelta?: number;
-  restraintDelta?: number;
-  reason?: string;
-  freeze?: boolean;
-}
-
 export interface CoffeeSocialLikeSnapshot {
   disposition: number;
   valuesFriction: number;
@@ -772,24 +763,6 @@ export function decayPrismMood(
   });
 }
 
-export function debugPatchPrismMood(
-  previous: PrismMoodState,
-  patch: PrismMoodDebugPatch,
-  now?: string | Date
-): PrismMoodState {
-  const base = sanitizePrismMoodState(previous, previous.mode, now);
-  return withMoodDelta(base, {
-    kind: "debug_nudge",
-    now,
-    reason: patch.reason?.trim() || "Developer Tools nudged mood.",
-    annoyanceDelta: patch.annoyanceDelta ?? 0,
-    warmthDelta: patch.warmthDelta ?? 0,
-    engagementDelta: patch.engagementDelta ?? 0,
-    restraintDelta: patch.restraintDelta ?? 0,
-    frozenOverride: patch.freeze,
-  });
-}
-
 export function resetPrismMood(
   mode: PrismMoodMode = "zen",
   now?: string | Date
@@ -798,7 +771,7 @@ export function resetPrismMood(
   const delta: PrismMoodDelta = {
     kind: "reset",
     at: reset.lastUpdatedAt,
-    reason: "Developer Tools reset mood.",
+    reason: "Mood reset to baseline.",
     annoyanceDelta: 0,
     warmthDelta: 0,
     engagementDelta: 0,

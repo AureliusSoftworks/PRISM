@@ -4,7 +4,6 @@ import { DatabaseSync } from "node:sqlite";
 import {
   buildZenWallpaperHistoryForGeneratedImage,
   clearConversationMessages,
-  createDevSeedConversations,
   dedupeActiveZenWallpaperGeneration,
   deleteAllConversations,
   deleteConversation,
@@ -1661,57 +1660,6 @@ describe("sweepConversations + undoLatestConversationSweep", () => {
       .prepare("SELECT archived_at FROM conversations WHERE id = ?")
       .get("chat-1") as { archived_at: string | null };
     assert.ok(archived.archived_at, "expired undo should not restore archived chats");
-  });
-});
-
-describe("createDevSeedConversations", () => {
-  it("creates saved sidebar chats with lorem assistant replies", () => {
-    const db = createTestDb();
-    const now = "2026-01-01T00:00:00.000Z";
-    db.prepare(
-      "INSERT INTO bots (id, user_id, name, color, glyph, created_at, updated_at) VALUES (?, ?, ?, ?, ?, ?, ?)"
-    ).run("bot-1", "user-1", "Ada", "#67e8f9", "bot", now, now);
-
-    const created = createDevSeedConversations(db, "user-1", 2);
-
-    assert.equal(created, 2);
-    const conversations = listConversationSummaries(db, "user-1");
-    assert.equal(conversations.length, 2);
-    assert.ok(conversations.every((conversation) => conversation.hasAssistantReply));
-    assert.ok(conversations.every((conversation) => conversation.botId === "bot-1"));
-    assert.ok(conversations.every((conversation) => conversation.lastBotId === "bot-1"));
-    assert.ok(conversations.every((conversation) => conversation.lastBotColor === "#67e8f9"));
-
-    const messages = db
-      .prepare("SELECT role, content, bot_id FROM messages WHERE user_id = ? ORDER BY created_at ASC")
-      .all("user-1") as Array<{ role: string; content: string; bot_id: string | null }>;
-    assert.equal(messages.length, 4);
-    assert.equal(messages.filter((message) => message.role === "assistant").length, 2);
-    assert.ok(
-      messages
-        .filter((message) => message.role === "assistant")
-        .every((message) => message.content.includes("Lorem ipsum") && message.bot_id === "bot-1")
-    );
-  });
-
-  it("falls back to default assistant chats when the user has no bots", () => {
-    const db = createTestDb();
-
-    createDevSeedConversations(db, "user-1", 1);
-
-    const [conversation] = listConversationSummaries(db, "user-1");
-    assert.equal(conversation?.botId, null);
-    assert.equal(conversation?.lastBotId, null);
-    assert.equal(conversation?.hasAssistantReply, true);
-  });
-
-  it("rejects non-positive seed counts", () => {
-    const db = createTestDb();
-
-    assert.throws(
-      () => createDevSeedConversations(db, "user-1", 0),
-      /positive integer/
-    );
   });
 });
 
