@@ -60,7 +60,6 @@ import {
   debateRecessResumePresentationContent,
   debateSessionAwaitsPresentationSeal,
   debateSessionAwaitingDeferredStart,
-  debateSessionAwaitingFirstPresentation,
   debateSpectatorAwaitingFirstWatch,
   normalizeBotAudioVoiceControl,
   normalizeBotAudioVoiceProfileV1,
@@ -494,7 +493,6 @@ import {
   DEBATE_IDENT_AUDIO,
   DEBATE_IDENT_OUTRO_LEAD_MS,
   playDebateIdentAudio,
-  preloadDebateIdentAudio,
   setDebateIdentAudioVolume,
   stopDebateIdentAudio,
   type DebateIdentKind,
@@ -1382,8 +1380,6 @@ const DEBATE_AUDIENCE_OPENING_HUSH_MIX = {
 } as const satisfies SessionAtmosphereMix;
 /** Brief settle after the opening gavel before the Living Chamber intro. */
 const DEBATE_OPENING_GAVEL_SETTLE_MS = 900;
-/** Fast musical release before the prepared opening gavel lands. */
-const DEBATE_OPENING_TITLE_CUT_FADE_MS = 120;
 const DEBATE_AUDIENCE_DUCKED_MIX = {
   ...DEBATE_FOLEY_MIX,
   background: 0.24,
@@ -2830,7 +2826,7 @@ function DebateIdentOverlay({
               ? "Prevailing side"
               : "No side prevailed"}
         </small>
-        {hold && (holdTitle || holdDetail || holdAction || holdBackAction) ? (
+        {hold && holdAction ? (
           <div className={styles.identHoldActions}>
             {holdTitle ? (
               <strong className={styles.identHoldTitle}>{holdTitle}</strong>
@@ -2838,33 +2834,29 @@ function DebateIdentOverlay({
             {holdDetail ? (
               <p className={styles.identHoldDetail}>{holdDetail}</p>
             ) : null}
-            {holdAction || holdBackAction ? (
-              <div className={styles.identHoldActionRow}>
-                {holdBackAction ? (
-                  <button
-                    type="button"
-                    className={styles.identHoldBackAction}
-                    data-action="back"
-                    onClick={holdBackAction.onClick}
-                    disabled={holdBackAction.disabled}
-                  >
-                    {holdBackAction.label}
-                  </button>
-                ) : null}
-                {holdAction ? (
-                  <button
-                    type="button"
-                    className={styles.identHoldAction}
-                    data-action={holdAction.action ?? "start"}
-                    data-tutorial-target="debate-start-from-ident"
-                    onClick={holdAction.onClick}
-                    disabled={holdAction.disabled}
-                  >
-                    {holdAction.label}
-                  </button>
-                ) : null}
-              </div>
-            ) : null}
+            <div className={styles.identHoldActionRow}>
+              {holdBackAction ? (
+                <button
+                  type="button"
+                  className={styles.identHoldBackAction}
+                  data-action="back"
+                  onClick={holdBackAction.onClick}
+                  disabled={holdBackAction.disabled}
+                >
+                  {holdBackAction.label}
+                </button>
+              ) : null}
+              <button
+                type="button"
+                className={styles.identHoldAction}
+                data-action={holdAction.action ?? "start"}
+                data-tutorial-target="debate-start-from-ident"
+                onClick={holdAction.onClick}
+                disabled={holdAction.disabled}
+              >
+                {holdAction.label}
+              </button>
+            </div>
           </div>
         ) : null}
       </div>
@@ -4102,14 +4094,6 @@ export function DebateExperience(
   const [activeSession, setActiveSession] = useState<DebateSessionV1 | null>(
     null,
   );
-  useEffect(() => {
-    if (view !== "baking" || !activeSession) return;
-    setSpectatorGalleryArrivalNowMs(Date.now());
-    const intervalId = window.setInterval(() => {
-      setSpectatorGalleryArrivalNowMs(Date.now());
-    }, 50);
-    return () => window.clearInterval(intervalId);
-  }, [activeSession, view]);
   const [persistedPresenceBeats, setPersistedPresenceBeats] = useState<
     BotPresenceBeatV1[]
   >([]);
@@ -4480,8 +4464,6 @@ export function DebateExperience(
   );
   const presentationStore = useMemo(createDebatePresentationStore, []);
   const activeSessionIdRef = useRef<string | null>(activeSession?.id ?? null);
-  /** Invalidates an Archive-open preload when the player leaves or opens another. */
-  const archiveOpenRunRef = useRef(0);
   const activeSessionRef = useRef(activeSession);
   useEffect(() => {
     activeSessionIdRef.current = activeSession?.id ?? null;
@@ -4781,19 +4763,6 @@ export function DebateExperience(
   >(null);
   const [debateIdentPlaying, setDebateIdentPlaying] =
     useState<DebateIdentKind | null>(null);
-  /** Archive-open loading owns the title card until its first spoken beat is hot. */
-  const [openingPreloadSessionId, setOpeningPreloadSessionId] = useState<
-    string | null
-  >(null);
-  /** Keeps the already-visible title card mounted while its music plays/holds. */
-  const [openingTitleMusicSessionId, setOpeningTitleMusicSessionId] = useState<
-    string | null
-  >(null);
-  const openingTitleMusicSessionIdRef = useRef<string | null>(null);
-  /** Start removes the title controls immediately, before its resume request. */
-  const [openingLaunchSessionId, setOpeningLaunchSessionId] = useState<
-    string | null
-  >(null);
   /** After the opening gavel, keep the gallery bed silent until speech begins. */
   const [debateOpeningGalleryHushed, setDebateOpeningGalleryHushed] =
     useState(false);
@@ -5545,9 +5514,6 @@ export function DebateExperience(
       !exhaustedExitOpen &&
       activeSession?.status === "paused" &&
       !presenting;
-    const allowOpeningTitleMusic =
-      allowRecessMurmur &&
-      openingTitleMusicSessionId === activeSession?.id;
     if (allowSpeechAudio && props.audioEnabled && props.audioVolume > 0) {
       debateAtmosphereControllerRef.current?.setPresentationSuspended(
         participantSlowTimeActive,
@@ -5556,16 +5522,8 @@ export function DebateExperience(
       if (participantSlowTimeActive) stopDebateAmbientBotVocalization();
       return;
     }
-    if (allowOpeningTitleMusic && props.audioEnabled && props.audioVolume > 0) {
-      stopDebateAmbientBotVocalization();
-      debateAtmosphereControllerRef.current?.setPresentationSuspended(
-        false,
-        80,
-      );
-      return;
-    }
     stopDebateAmbientBotVocalization();
-    if (!allowSpeechAudio && !allowOpeningTitleMusic) {
+    if (!allowSpeechAudio) {
       props.onStopUtterance?.();
       void stopDebateIdentAudio();
       if (allowRecessMurmur && props.audioEnabled && props.audioVolume > 0) {
@@ -5585,7 +5543,6 @@ export function DebateExperience(
   }, [
     activeSession?.status,
     exhaustedExitOpen,
-    openingTitleMusicSessionId,
     participantSlowTimeActive,
     presenting,
     props.audioEnabled,
@@ -8857,7 +8814,6 @@ export function DebateExperience(
         automaticJudgeGavel?: boolean;
         resumedLifecycleGavelPresentationEventId?: string | null;
         releaseResumeCeremonyCameraOnEventId?: string | null;
-        releaseOpeningGalleryHushOnEventId?: string | null;
       } = {},
     ): Promise<void> => {
       const freshWithAudienceOrder = debatePresentationEvents(
@@ -9182,9 +9138,6 @@ export function DebateExperience(
         }
         await voiceReady;
         if (presentationRunRef.current !== runId) return;
-        if (options.releaseOpeningGalleryHushOnEventId === event.id) {
-          setDebateOpeningGalleryHushed(false);
-        }
         setVoicePreparationSpeakerBotId(null);
         if (options.releaseResumeCeremonyCameraOnEventId === event.id) {
           setResumeCeremonySessionId(null);
@@ -10171,8 +10124,6 @@ export function DebateExperience(
 
   const playDebateIdent = useCallback(
     async (kind: DebateIdentKind): Promise<void> => {
-      openingTitleMusicSessionIdRef.current = null;
-      setOpeningTitleMusicSessionId(null);
       setDebateIdentPlaying(kind);
       try {
         await playDebateIdentAudio({
@@ -10189,44 +10140,6 @@ export function DebateExperience(
       }
     },
     [props.audioEnabled, props.audioVolume],
-  );
-
-  const playPreparedOpeningTitleMusic = useCallback(
-    (sessionId: string): void => {
-      if (openingTitleMusicSessionIdRef.current === sessionId) return;
-      openingTitleMusicSessionIdRef.current = sessionId;
-      setOpeningTitleMusicSessionId(sessionId);
-      void playDebateIdentAudio({
-        kind: "intro",
-        enabled: props.audioEnabled,
-        volume: props.audioVolume,
-      });
-    },
-    [props.audioEnabled, props.audioVolume],
-  );
-
-  const prepareArchivedOpeningVoice = useCallback(
-    async (session: DebateSessionV1): Promise<string | null> => {
-      const event = debatePresentationEvents(null, session, false).find(
-        (candidate) =>
-          candidate.speakerKind !== "system" && candidate.kind !== "error",
-      );
-      if (!event) return null;
-      const utterance = debateUtteranceForEvent(session, event);
-      if (!utterance || !onPrepareUtterance) return event.id;
-      setVoicePreparationSpeakerBotId(
-        utterance.speaker?.id ?? event.speakerBotId,
-      );
-      try {
-        await onPrepareUtterance(utterance);
-      } catch {
-        // System voice remains an immediate fallback; Start must never deadlock.
-      } finally {
-        if (mountedRef.current) setVoicePreparationSpeakerBotId(null);
-      }
-      return event.id;
-    },
-    [debateUtteranceForEvent, onPrepareUtterance],
   );
 
   const discardPreparedTurn = useCallback(
@@ -10315,7 +10228,6 @@ export function DebateExperience(
         automaticJudgeGavel?: boolean;
         resumedLifecycleGavelPresentationEventId?: string | null;
         releaseResumeCeremonyCameraOnEventId?: string | null;
-        releaseOpeningGalleryHushOnEventId?: string | null;
       } = {},
     ): Promise<void> => {
       const runId = presentationRunRef.current + 1;
@@ -10408,20 +10320,13 @@ export function DebateExperience(
           );
           if (presentationRunRef.current !== runId) return;
         }
-        if (
-          mountedRef.current &&
-          !options.releaseOpeningGalleryHushOnEventId
-        ) {
-          setDebateOpeningGalleryHushed(false);
-        }
+        if (mountedRef.current) setDebateOpeningGalleryHushed(false);
         await consumeNewEvents(previous, next, runId, {
           automaticJudgeGavel: options.automaticJudgeGavel,
           resumedLifecycleGavelPresentationEventId:
             options.resumedLifecycleGavelPresentationEventId,
           releaseResumeCeremonyCameraOnEventId:
             options.releaseResumeCeremonyCameraOnEventId,
-          releaseOpeningGalleryHushOnEventId:
-            options.releaseOpeningGalleryHushOnEventId,
         });
         if (presentationRunRef.current !== runId) return;
         if (
@@ -10525,7 +10430,6 @@ export function DebateExperience(
   };
 
   const cancelSpectatorBake = async (): Promise<void> => {
-    archiveOpenRunRef.current += 1;
     const sessionId =
       spectatorBakeSessionIdRef.current ||
       activeSessionIdRef.current ||
@@ -10551,10 +10455,6 @@ export function DebateExperience(
     setSpectatorGalleryArrivalUnlockedAt(null);
     spectatorGalleryArrivalCompleteRef.current = false;
     setStartExhibitSynthesis(null);
-    setOpeningPreloadSessionId(null);
-    setOpeningLaunchSessionId(null);
-    openingTitleMusicSessionIdRef.current = null;
-    setOpeningTitleMusicSessionId(null);
     spectatorBakeSessionIdRef.current = null;
     setActiveSession(null);
     setView("dashboard");
@@ -10564,18 +10464,7 @@ export function DebateExperience(
   const openSession = async (
     archived: DebateSessionListItemV1,
   ): Promise<void> => {
-    const archiveOpenRunId = archiveOpenRunRef.current + 1;
-    archiveOpenRunRef.current = archiveOpenRunId;
-    const openingIsCurrent = (): boolean =>
-      mountedRef.current && archiveOpenRunRef.current === archiveOpenRunId;
-    let archiveOpeningLifted = false;
-    let openingGalleryStartedAtMs: number | null = null;
     setBusy(true);
-    setOpeningLaunchSessionId(null);
-    setOpeningPreloadSessionId(null);
-    openingTitleMusicSessionIdRef.current = null;
-    setOpeningTitleMusicSessionId(null);
-    void stopDebateIdentAudio();
     setSetupRestoreNotice(null);
     setError(null);
     try {
@@ -10583,9 +10472,7 @@ export function DebateExperience(
       const result = await props.request<{ session: DebateSessionV1 }>(
         `/api/debates/${encodeURIComponent(archived.id)}?perspective=${perspective}`,
       );
-      if (!openingIsCurrent()) return;
       let session = result.session;
-      const deferredStartAtOpen = debateSessionAwaitingDeferredStart(session);
       const exhaustedMarker = debateExhaustedRecessRecoveryMarker(session);
       if (
         exhaustedMarker &&
@@ -10607,36 +10494,6 @@ export function DebateExperience(
         session.playerRole === "spectator" &&
         session.liveBake?.status !== "ready" &&
         liveBakeShouldResumeOnOpen(session.liveBake);
-      const openingPreloadRequested =
-        deferredStartAtOpen ||
-        debateSessionAwaitingFirstPresentation(session) ||
-        needsSpectatorBakeResume;
-      if (openingPreloadRequested) {
-        openingGalleryStartedAtMs = Date.now();
-        setOpeningPreloadSessionId(session.id);
-        setSpectatorBakeStartedAt(
-          new Date(openingGalleryStartedAtMs).toISOString(),
-        );
-        setSpectatorGalleryBakeUnlocked(false);
-        setSpectatorGalleryArrivalUnlockedAt(null);
-        setSpectatorGalleryArrivalNowMs(openingGalleryStartedAtMs);
-        spectatorGalleryArrivalCompleteRef.current = false;
-        if (!needsSpectatorBakeResume) {
-          setSpectatorBake(null);
-          spectatorBakeArtifactRef.current = null;
-        }
-        activeSessionIdRef.current = session.id;
-        setActiveSession(session);
-        setObserverPerspective("live");
-        setView("baking");
-        // Let the live room mount first so local gavel/room Foley begins
-        // preloading while the gallery visibly walks in and model/voice
-        // preparation continues behind it.
-        await new Promise<void>((resolve) =>
-          window.requestAnimationFrame(() => resolve()),
-        );
-        if (!openingIsCurrent()) return;
-      }
       const restoreReadyHold =
         needsSpectatorBakeResume &&
         session.status === "paused" &&
@@ -10647,58 +10504,7 @@ export function DebateExperience(
         session.pausedPresentationEventId
           ? session.pausedPresentationEventId
           : null;
-      if (
-        deferredStartAtOpen &&
-        session.playerRole !== "spectator" &&
-        session.status === "paused"
-      ) {
-        archiveOpeningLifted = true;
-        session = (
-          await props.request<{ session: DebateSessionV1 }>(
-            `/api/debates/${encodeURIComponent(session.id)}/resume`,
-            requestBody({
-              expectedRevision: session.revision,
-              idempotencyKey: nextMutationKey("archive-preload-start"),
-              exitRecovery: true,
-              quietSave: true,
-              ...(props.modelOverride
-                ? {
-                    startPreferredProvider: props.modelOverride.provider,
-                    startModelOverride: props.modelOverride.model,
-                    startResponseMode: props.responseMode,
-                  }
-                : {}),
-            }),
-          )
-        ).session;
-        session = (
-          await props.request<{ session: DebateSessionV1 }>(
-            `/api/debates/${encodeURIComponent(session.id)}/advance`,
-            requestBody({
-              expectedRevision: session.revision,
-              idempotencyKey: nextMutationKey("archive-preload-opening"),
-              skip: false,
-            }),
-          )
-        ).session;
-        if (session.status === "paused") {
-          throw new Error(
-            session.error || "The Moderator opening could not be prepared.",
-          );
-        }
-        session = (
-          await props.request<{ session: DebateSessionV1 }>(
-            `/api/debates/${encodeURIComponent(session.id)}/pause`,
-            requestBody({
-              expectedRevision: session.revision,
-              idempotencyKey: nextMutationKey("archive-preload-hold"),
-              exitRecovery: true,
-              presentationEventId: null,
-            }),
-          )
-        ).session;
-        archiveOpeningLifted = false;
-      } else if (needsSpectatorBakeResume && session.status === "paused") {
+      if (needsSpectatorBakeResume && session.status === "paused") {
         session = (
           await props.request<{ session: DebateSessionV1 }>(
             `/api/debates/${encodeURIComponent(session.id)}/resume`,
@@ -10707,13 +10513,6 @@ export function DebateExperience(
               idempotencyKey: nextMutationKey("bake-lift-recess"),
               exitRecovery: true,
               quietSave: true,
-              ...(deferredStartAtOpen && props.modelOverride
-                ? {
-                    startPreferredProvider: props.modelOverride.provider,
-                    startModelOverride: props.modelOverride.model,
-                    startResponseMode: props.responseMode,
-                  }
-                : {}),
             }),
           )
         ).session;
@@ -10747,9 +10546,7 @@ export function DebateExperience(
         setSpectatorBakeLiveFallback(false);
         setSpectatorBake(session.liveBake ?? null);
         spectatorBakeArtifactRef.current = session.liveBake ?? null;
-        const bakeStartedIso = new Date(
-          openingGalleryStartedAtMs ?? Date.now(),
-        ).toISOString();
+        const bakeStartedIso = new Date().toISOString();
         setSpectatorBakeStartedAt(bakeStartedIso);
         setSpectatorGalleryBakeUnlocked(false);
         setSpectatorGalleryArrivalUnlockedAt(null);
@@ -10781,10 +10578,7 @@ export function DebateExperience(
               elapsedMs: now - bakeStartedMs,
               unlockElapsedMs: now - unlockAt,
             });
-            if (arrival.arrivalComplete) {
-              spectatorGalleryArrivalCompleteRef.current = true;
-              break;
-            }
+            if (arrival.arrivalComplete) break;
             await new Promise((resolve) => window.setTimeout(resolve, 50));
           }
           if (!mountedRef.current) return;
@@ -10812,16 +10606,16 @@ export function DebateExperience(
               elapsedMs: now - bakeStartedMs,
               unlockElapsedMs: now - unlockAt,
             });
-            if (arrival.arrivalComplete) {
-              spectatorGalleryArrivalCompleteRef.current = true;
-              break;
-            }
+            if (arrival.arrivalComplete) break;
             await new Promise((resolve) => window.setTimeout(resolve, 50));
           }
           if (!mountedRef.current) return;
         }
         setSpectatorBake(null);
         spectatorBakeArtifactRef.current = null;
+        setSpectatorBakeStartedAt(null);
+        setSpectatorGalleryBakeUnlocked(false);
+        setSpectatorGalleryArrivalUnlockedAt(null);
         // Restore the recess we lifted so Open still lands on Start / Resume.
         if (
           (restoreReadyHold || restoreMidPauseEventId !== null) &&
@@ -10843,7 +10637,6 @@ export function DebateExperience(
         }
       }
 
-      if (!openingIsCurrent()) return;
       clearDebateDebrief();
       selectDebateCameraMode("auto");
       setTurnaboutObjecting(false);
@@ -10863,77 +10656,8 @@ export function DebateExperience(
       );
       setActiveSession(session);
       setExhaustedExitOpen(false);
-      if (debateSessionAwaitingFirstPresentation(session)) {
-        await Promise.all([
-          prepareArchivedOpeningVoice(session),
-          preloadDebateIdentAudio("intro"),
-        ]);
-        if (!openingIsCurrent()) return;
-        if (!spectatorGalleryArrivalCompleteRef.current) {
-          const arrivalStartedAt = openingGalleryStartedAtMs ?? Date.now();
-          const unlockAt = Date.now();
-          const audienceCount = debateAudienceBotCount(props.graphicsQuality);
-          const nonPlayerCount = Math.max(
-            0,
-            audienceCount - (session.playerRole === "spectator" ? 1 : 0),
-          );
-          setSpectatorGalleryBakeUnlocked(true);
-          setSpectatorGalleryArrivalUnlockedAt(unlockAt);
-          while (openingIsCurrent()) {
-            const now = Date.now();
-            setSpectatorGalleryArrivalNowMs(now);
-            const arrival = debateGalleryArrivalRevealedCount({
-              nonPlayerCount,
-              progressRatio: null,
-              bakeUnlocked: true,
-              elapsedMs: now - arrivalStartedAt,
-              unlockElapsedMs: now - unlockAt,
-            });
-            if (arrival.arrivalComplete) {
-              spectatorGalleryArrivalCompleteRef.current = true;
-              break;
-            }
-            await new Promise((resolve) => window.setTimeout(resolve, 50));
-          }
-        }
-        if (!openingIsCurrent()) return;
-        setSpectatorBakeStartedAt(null);
-        setSpectatorGalleryBakeUnlocked(false);
-        setSpectatorGalleryArrivalUnlockedAt(null);
-        setView("live");
-        setOpeningPreloadSessionId(null);
-        playPreparedOpeningTitleMusic(session.id);
-      } else {
-        setSpectatorBakeStartedAt(null);
-        setSpectatorGalleryBakeUnlocked(false);
-        setSpectatorGalleryArrivalUnlockedAt(null);
-        setView("live");
-        setOpeningPreloadSessionId(null);
-      }
+      setView("live");
     } catch (caught) {
-      if (archiveOpeningLifted) {
-        try {
-          const refreshed = await props.request<{ session: DebateSessionV1 }>(
-            `/api/debates/${encodeURIComponent(archived.id)}?perspective=live`,
-          );
-          if (refreshed.session.status !== "paused") {
-            await props.request(
-              `/api/debates/${encodeURIComponent(archived.id)}/pause`,
-              requestBody({
-                expectedRevision: refreshed.session.revision,
-                idempotencyKey: nextMutationKey(
-                  "archive-preload-failure-hold",
-                ),
-                exitRecovery: true,
-                presentationEventId: null,
-              }),
-            );
-          }
-        } catch {
-          // The next Archive open reconciles any committed server revision.
-        }
-      }
-      if (!openingIsCurrent()) return;
       if (
         caught instanceof Error &&
         (caught.name === "AbortError" || /aborted|cancelled/i.test(caught.message))
@@ -10944,20 +10668,11 @@ export function DebateExperience(
         setSpectatorBakeStartedAt(null);
         setSpectatorGalleryBakeUnlocked(false);
         setSpectatorGalleryArrivalUnlockedAt(null);
-        setOpeningPreloadSessionId(null);
-        setOpeningLaunchSessionId(null);
         return;
       }
       setError(caught instanceof Error ? caught.message : "Debate not found.");
-      setOpeningPreloadSessionId(null);
-      setOpeningLaunchSessionId(null);
-      if (archiveOpeningLifted) {
-        activeSessionIdRef.current = null;
-        setActiveSession(null);
-        setView("dashboard");
-      }
     } finally {
-      if (archiveOpenRunRef.current === archiveOpenRunId) setBusy(false);
+      setBusy(false);
     }
   };
 
@@ -12501,10 +12216,6 @@ export function DebateExperience(
     cancelJudgeGavelCeremonyRef.current?.();
     props.onStopUtterance?.();
     void stopDebateIdentAudio();
-    openingTitleMusicSessionIdRef.current = null;
-    setOpeningTitleMusicSessionId(null);
-    setOpeningPreloadSessionId(null);
-    setOpeningLaunchSessionId(null);
     stopDebateAmbientBotVocalization();
     debateAtmosphereControllerRef.current?.setPresentationSuspended(true, 60);
     if (speechRevealRunRef.current) {
@@ -13100,11 +12811,6 @@ export function DebateExperience(
       resume && debateSpectatorAwaitingFirstWatch(previous);
     const startDeferredSetup =
       resume && debateSessionAwaitingDeferredStart(previous);
-    const startPreparedOpening =
-      resume && debateSessionAwaitingFirstPresentation(previous);
-    const startFromTitleCard =
-      startSpectatorWatch || startDeferredSetup || startPreparedOpening;
-    let titleStartCommitted = false;
     const heldBeforeResume = resume
       ? previous.pausedPresentationEventId
         ? (previous.events.find(
@@ -13119,7 +12825,8 @@ export function DebateExperience(
     // actual Resume—including a held opening intro—returns through the gavel.
     const silentLifecycle =
       !lifecycleCutscene ||
-      startFromTitleCard;
+      startSpectatorWatch ||
+      startDeferredSetup;
     const resumeCeremonyStarted = resume && !silentLifecycle;
     const previousEventIds = new Set(previous.events.map((event) => event.id));
     let replayEventId = resume
@@ -13128,19 +12835,6 @@ export function DebateExperience(
     if (!resume) {
       // Always cut immediately — same floor-hold contract as leaving mid-speech.
       interruptPresentationForRecess(replayEventId);
-    }
-    if (startFromTitleCard) {
-      const openingGavelEventId =
-        `opening-start:${previous.id}:${previous.revision}`;
-      setOpeningLaunchSessionId(previous.id);
-      setOpeningPreloadSessionId(null);
-      openingTitleMusicSessionIdRef.current = null;
-      setOpeningTitleMusicSessionId(null);
-      void stopDebateIdentAudio(DEBATE_OPENING_TITLE_CUT_FADE_MS);
-      setDebateOpeningGalleryHushed(true);
-      setResumeCeremonySessionId(previous.id);
-      // The click itself owns the cut. No network or voice wait may precede it.
-      triggerJudgeGavelSmash("order", openingGavelEventId);
     }
     if (resumeCeremonyStarted) {
       // The button owns the first beat: strike before any network/model wait,
@@ -13171,11 +12865,9 @@ export function DebateExperience(
           ? "spectator-start"
           : startDeferredSetup
             ? "deferred-start"
-            : startPreparedOpening
-              ? "prepared-opening-start"
-              : resume
-                ? "resume"
-                : "pause",
+            : resume
+              ? "resume"
+              : "pause",
       );
       const requestQuietLifecycle = (session: DebateSessionV1) =>
         props.request<{ session: DebateSessionV1 }>(
@@ -13185,7 +12877,7 @@ export function DebateExperience(
             idempotencyKey: `${lifecycleIdempotencyKey}:quiet`,
             juryVisible: !lifecycleCutscene,
             quietSave: true,
-            ...(startFromTitleCard
+            ...(startSpectatorWatch || startDeferredSetup
               ? { exitRecovery: true }
               : {}),
             ...(startDeferredSetup && props.modelOverride
@@ -13251,8 +12943,6 @@ export function DebateExperience(
         void loadSessions();
         return;
       }
-      titleStartCommitted =
-        startFromTitleCard && quiet.session.status !== "paused";
       // Quiet bookmark is authoritative before any ceremony speech starts.
       // Ceremonial resume keeps the recess UI until adopt presents — otherwise
       // Auto can expose the next floor holder before the Moderator call.
@@ -13289,23 +12979,9 @@ export function DebateExperience(
           event.stepKey === (resume ? "resume" : "pause"),
       );
       if (resume) {
-        if (startPreparedOpening || startSpectatorWatch) {
-          const firstOpeningEventId =
-            debatePresentationEvents(null, result.session, false).find(
-              (event) =>
-                event.speakerKind !== "system" && event.kind !== "error",
-            )?.id ?? null;
+        if (startSpectatorWatch) {
           if (mountedRef.current) setBusy(false);
-          await adoptSession(null, result.session, {
-            automaticJudgeGavel: true,
-            resumedLifecycleGavelPresentationEventId: firstOpeningEventId,
-            releaseResumeCeremonyCameraOnEventId: firstOpeningEventId,
-            releaseOpeningGalleryHushOnEventId: firstOpeningEventId,
-          });
-          if (mountedRef.current) {
-            setOpeningLaunchSessionId(null);
-            if (!firstOpeningEventId) setResumeCeremonySessionId(null);
-          }
+          await adoptSession(null, result.session, { playIntro: true });
           void loadSessions();
           return;
         }
@@ -13422,13 +13098,6 @@ export function DebateExperience(
       void loadSessions();
     } catch (caught) {
       if (resume && mountedRef.current) setResumeCeremonySessionId(null);
-      if (startFromTitleCard && mountedRef.current) {
-        setOpeningLaunchSessionId(null);
-        setDebateOpeningGalleryHushed(false);
-        if (!titleStartCommitted) {
-          playPreparedOpeningTitleMusic(previous.id);
-        }
-      }
       setError(
         caught instanceof Error
           ? caught.message
@@ -13570,7 +13239,6 @@ export function DebateExperience(
     previous: DebateSessionV1 | null,
     options: { preserveParticipantRecoveryMarker?: boolean } = {},
   ): void => {
-    archiveOpenRunRef.current += 1;
     cancelCurrentPresentation();
     // Hard silence before the menu remounts — no lingering advocate voice.
     props.onStopUtterance?.();
@@ -13597,10 +13265,6 @@ export function DebateExperience(
     setSpectatorBakeStartedAt(null);
     setSpectatorBakeLiveFallback(false);
     setDebateOpeningGalleryHushed(false);
-    setOpeningPreloadSessionId(null);
-    setOpeningLaunchSessionId(null);
-    openingTitleMusicSessionIdRef.current = null;
-    setOpeningTitleMusicSessionId(null);
     setLeaveDebateArmed(false);
     setEarlyEndOpen(false);
     setExhaustedExitOpen(false);
@@ -13612,7 +13276,6 @@ export function DebateExperience(
     }
     setView("dashboard");
     setActiveSession(null);
-    setBusy(false);
     void loadSessions();
   };
 
@@ -21824,12 +21487,8 @@ export function DebateExperience(
     const spectatorAwaitingFirstWatch =
       debateSpectatorAwaitingFirstWatch(session);
     const awaitingDeferredStart = debateSessionAwaitingDeferredStart(session);
-    const awaitingFirstPresentation =
-      debateSessionAwaitingFirstPresentation(session);
     const readyToBeginOverlay =
-      awaitingFirstPresentation || awaitingDeferredStart;
-    const openingPreloading = openingPreloadSessionId === session.id;
-    const openingLaunching = openingLaunchSessionId === session.id;
+      spectatorAwaitingFirstWatch || awaitingDeferredStart;
     const galleryArriving = view === "baking";
     const roomPresence = galleryArriving
       ? ("arriving" as const)
@@ -22424,7 +22083,7 @@ export function DebateExperience(
           revealedCount: galleryArrivalReveal?.revealedCount ?? 0,
           nonPlayerCount: galleryArrivalRevealOrder.length,
         })
-      : readyToBeginOverlay
+      : spectatorAwaitingFirstWatch
         ? 1
         : null;
     const galleryPrestartMurmur =
@@ -22777,12 +22436,10 @@ export function DebateExperience(
           }
           data-debate-room-presence={roomPresence}
           data-gallery-ready-hold={
-            readyToBeginOverlay && !galleryArriving
+            spectatorAwaitingFirstWatch && !galleryArriving
               ? "true"
               : undefined
           }
-          data-opening-preload={openingPreloading ? "true" : undefined}
-          data-opening-launch={openingLaunching ? "true" : undefined}
           data-debate-material-quality={debateMaterialQuality}
           data-jury-chamber={juryChamberVisible ? "true" : undefined}
           data-evidence-on-table={activeEvidenceItem ? "true" : undefined}
@@ -22803,27 +22460,33 @@ export function DebateExperience(
               role="status"
               aria-live="polite"
             >
-              <p className={styles.galleryArrivalKicker}>The Forum</p>
-              <strong>The gallery is arriving</strong>
+              <p className={styles.galleryArrivalKicker}>Spectator</p>
+              <strong>Preparing the gallery</strong>
               <p>
-                Guests are finding their seats while the opening is prepared.
-                Progress is saved if you leave.
+                The floor stays covered while seats fill. Progress is saved if
+                you leave.
               </p>
             </div>
           ) : debateIdentPlaying ? (
             <DebateIdentOverlay kind={debateIdentPlaying} session={session} />
           ) : session.status === "paused" &&
             !presenting &&
-            readyToBeginOverlay &&
-            !openingPreloading &&
-            !openingLaunching ? (
+            readyToBeginOverlay ? (
             <DebateIdentOverlay
               kind="intro"
               session={session}
               hold
               holdScope="full"
-              holdTitle="Gallery ready"
-              holdDetail="The opening is loaded. Start cuts straight from this title card to the Moderator’s gavel."
+              holdTitle={
+                spectatorAwaitingFirstWatch
+                  ? "Gallery ready"
+                  : "Saved · ready to start"
+              }
+              holdDetail={
+                spectatorAwaitingFirstWatch
+                  ? "The proceeding stays covered until you start — no spoilers from the prepared floor."
+                  : "This Archive setup is frozen. Start opens the chamber when you are ready."
+              }
               holdBackAction={{
                 label: leaveDebateArmed ? "Confirm leave" : "Leave Debate",
                 disabled: false,

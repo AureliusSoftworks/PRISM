@@ -1449,6 +1449,7 @@ import {
   prismSurfaceViewForRouteParam,
   type PrismSurfaceView,
 } from "./viewRouting";
+import { syncTurboAppletSessionContext } from "./turboAppletSession";
 import {
   prismRestorableWorkspaceLocation,
   prismStartupLocationFor,
@@ -64257,42 +64258,30 @@ function HomeContent(): React.JSX.Element {
   );
   const [storySetupPinned, setStorySetupPinned] = useState(false);
   const storyModelChoiceByProvider = globalModelChoiceByProvider;
-  const turboSafetySessionKey =
-    view === "chat" || view === "sandbox"
-      ? `${detail?.mode ?? "home"}:${detail?.id ?? selectedId ?? "new"}`
-      : view === "coffee"
-        ? (coffeeSelectedSessionId ??
-          coffeeConversation?.id ??
-          coffeeSelectedGroupId ??
-          "setup")
-        : view === "story"
-          ? (storySelectedSessionId ?? storySession?.id ?? "setup")
-          : view === "debate"
-            ? (debateLiveSessionId ?? "setup")
-            : view === "botcast"
-              ? (signalLiveSessionId ?? "setup")
-              : view === "slate"
-                ? (requestedSlateProjectId ?? "workspace")
-                : "home";
-  const turboSafetyContextRef = useRef<string | null>(null);
+  const turboAppletContextRef = useRef<string | null>(null);
   useEffect(() => {
     if (!user || !settings) {
-      turboSafetyContextRef.current = null;
+      turboAppletContextRef.current = null;
       return;
     }
-    const nextContext = `${user.id}:${view}:${turboSafetySessionKey}`;
-    const previousContext = turboSafetyContextRef.current;
-    turboSafetyContextRef.current = nextContext;
-    if (previousContext === null || previousContext !== nextContext) {
+    const nextContext = `${user.id}:${view}`;
+    const previousContext = turboAppletContextRef.current;
+    let storage: Storage | null = null;
+    try {
+      storage = window.sessionStorage;
+    } catch {
+      // The context helper conservatively disables Turbo on a blocked load.
+    }
+    const shouldDisableTurbo = syncTurboAppletSessionContext(
+      storage,
+      previousContext,
+      nextContext,
+    );
+    turboAppletContextRef.current = nextContext;
+    if (shouldDisableTurbo) {
       resetAllModelTurboPreferences("session");
     }
-  }, [
-    resetAllModelTurboPreferences,
-    settings,
-    turboSafetySessionKey,
-    user,
-    view,
-  ]);
+  }, [resetAllModelTurboPreferences, settings, user, view]);
   useEffect(() => {
     const previousPanel = panelPopupCleanupLastPanelRef.current;
     panelPopupCleanupLastPanelRef.current = panel;

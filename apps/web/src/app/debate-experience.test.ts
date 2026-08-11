@@ -3848,7 +3848,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /setActiveSession\(reuseDebateSessionEventPrefix\(previous, next\)\)[\s\S]{0,480}options\.playIntro[\s\S]{0,420}await playDebateIdent\("intro"\)[\s\S]{0,240}judgeGavelSmashRef\.current\?\.\("order"\)[\s\S]{0,160}setDebateOpeningGalleryHushed\(true\)[\s\S]{0,620}await consumeNewEvents/u,
+      /setActiveSession\(reuseDebateSessionEventPrefix\(previous, next\)\)[\s\S]{0,260}options\.playIntro[\s\S]{0,280}await playDebateIdent\("intro"\)[\s\S]{0,200}judgeGavelSmashRef\.current\?\.\("order"\)[\s\S]{0,120}setDebateOpeningGalleryHushed\(true\)[\s\S]{0,360}await consumeNewEvents/u,
     );
     assert.match(
       source,
@@ -3877,61 +3877,6 @@ describe("Debate experience", () => {
     assert.match(
       source,
       /deferBotVocalization=\{\s*debateIdentPlaying !== null \|\|\s*\(presenting &&\s*\(audiencePressureBand === null \|\|\s*audiencePressureBand === "settled"\)\) \|\|\s*audienceReactingSeatIndices\.size > 0 \|\|\s*\(busy && !presenting\)\s*\}/u,
-    );
-  });
-
-  it("hot-preloads an archived opening before exposing its title-card Start", () => {
-    assert.match(source, /debateSessionAwaitingFirstPresentation/u);
-    assert.match(
-      source,
-      /deferredStartAtOpen[\s\S]{0,1300}setOpeningPreloadSessionId\(session\.id\)[\s\S]{0,2600}archive-preload-start[\s\S]{0,1800}archive-preload-opening[\s\S]{0,1800}archive-preload-hold/u,
-    );
-    assert.match(
-      source,
-      /openingPreloadRequested[\s\S]{0,900}setSpectatorGalleryBakeUnlocked\(false\)[\s\S]{0,500}setView\("baking"\)/u,
-    );
-    assert.match(
-      source,
-      /await Promise\.all\(\[[\s\S]{0,180}prepareArchivedOpeningVoice\(session\)[\s\S]{0,180}preloadDebateIdentAudio\("intro"\)[\s\S]{0,1400}arrival\.arrivalComplete[\s\S]{0,500}setView\("live"\)[\s\S]{0,180}setOpeningPreloadSessionId\(null\)[\s\S]{0,140}playPreparedOpeningTitleMusic\(session\.id\)/u,
-    );
-    assert.match(
-      source,
-      /session\.status === "paused" &&[\s\S]{0,160}readyToBeginOverlay &&[\s\S]{0,100}!openingPreloading &&[\s\S]{0,100}!openingLaunching/u,
-    );
-    assert.match(
-      source,
-      /holdTitle="Gallery ready"[\s\S]{0,500}label: "Start Debate"/u,
-    );
-  });
-
-  it("cuts the prepared title straight to the opening gavel", () => {
-    assert.match(
-      source,
-      /if \(startFromTitleCard\)[\s\S]{0,240}setOpeningLaunchSessionId\(previous\.id\)[\s\S]{0,320}stopDebateIdentAudio\(DEBATE_OPENING_TITLE_CUT_FADE_MS\)[\s\S]{0,240}triggerJudgeGavelSmash\("order", openingGavelEventId\)/u,
-    );
-    assert.match(
-      source,
-      /startPreparedOpening \|\| startSpectatorWatch[\s\S]{0,900}automaticJudgeGavel: true[\s\S]{0,300}resumedLifecycleGavelPresentationEventId: firstOpeningEventId[\s\S]{0,300}releaseOpeningGalleryHushOnEventId: firstOpeningEventId/u,
-    );
-    assert.match(
-      source,
-      /data-opening-launch=\{openingLaunching \? "true" : undefined\}/u,
-    );
-    assert.match(
-      source,
-      /catch \(caught\) \{[\s\S]{0,180}if \(startFromTitleCard && mountedRef\.current\)[\s\S]{0,240}setOpeningLaunchSessionId\(null\)[\s\S]{0,220}setDebateOpeningGalleryHushed\(false\)[\s\S]{0,220}if \(!titleStartCommitted\)[\s\S]{0,140}playPreparedOpeningTitleMusic\(previous\.id\)/u,
-    );
-    assert.match(
-      source,
-      /const archiveOpenRunRef = useRef\(0\)/u,
-    );
-    assert.match(
-      source,
-      /const openingIsCurrent = \(\): boolean =>[\s\S]{0,180}archiveOpenRunRef\.current === archiveOpenRunId/u,
-    );
-    assert.match(
-      source,
-      /returnLiveSessionToStudio[\s\S]{0,260}archiveOpenRunRef\.current \+= 1/u,
     );
   });
 

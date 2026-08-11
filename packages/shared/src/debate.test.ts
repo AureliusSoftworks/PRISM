@@ -49,7 +49,6 @@ import {
   debateSessionAwaitsPresentationSeal,
   debateSessionFloorIsSettled,
   debateSpectatorAwaitingFirstWatch,
-  debateSessionAwaitingFirstPresentation,
   debateSessionAwaitingDeferredStart,
   debateRecessResumeFiller,
   debateRecessResumePresentationContent,
@@ -863,24 +862,6 @@ test("Spectator floor settlement awaits a presentation seal until watched", () =
       pausedPresentationEventId: null,
       events: [activeDurationEvent({})],
       stepKey: "opening_for",
-      completedAt: null,
-    }),
-    false,
-  );
-  assert.equal(
-    debateSessionAwaitingFirstPresentation({
-      status: "paused",
-      pausedPresentationEventId: null,
-      events: [activeDurationEvent({})],
-      completedAt: null,
-    }),
-    true,
-  );
-  assert.equal(
-    debateSessionAwaitingFirstPresentation({
-      status: "paused",
-      pausedPresentationEventId: "event-1",
-      events: [activeDurationEvent({})],
       completedAt: null,
     }),
     false,
