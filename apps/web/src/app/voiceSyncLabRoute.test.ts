@@ -16,12 +16,8 @@ const labCss = readFileSync(
 );
 const homeSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
 
-test("Voice Sync Lab is a server-gated development-only route", () => {
-  assert.match(routeSource, /import \{ notFound \} from "next\/navigation"/u);
-  assert.match(
-    routeSource,
-    /if \(process\.env\.NODE_ENV === "production"\) notFound\(\)/u,
-  );
+test("Voice Sync Lab is a shippable standalone route", () => {
+  assert.doesNotMatch(routeSource, /notFound|NODE_ENV|production/u);
   assert.doesNotMatch(routeSource, /["']use client["']/u);
   assert.match(routeSource, /return <VoiceSyncLab \/>/u);
 });
@@ -124,9 +120,13 @@ test("Voice Sync Lab keeps signed-out and ephemeral states explicit", () => {
   assert.match(labCss, /@media \(max-width: 1360px\)[\s\S]*?\.setupPanel \{[\s\S]*?grid-template-columns: minmax\(0, 1fr\)/u);
 });
 
-test("local Developer Tools expose the Voice Sync Lab route", () => {
+test("Help exposes the Voice Sync Lab as a same-window link", () => {
   assert.match(
     homeSource,
-    /className=\{`\$\{styles\.devToolsPill\} \$\{styles\.devToolsLabLink\}`\}[\s\S]*?href="\/qa-voice-sync"/u,
+    /data-settings-action="open-voice-sync-lab"[\s\S]{0,120}href="\/qa-voice-sync"/u,
+  );
+  assert.doesNotMatch(
+    homeSource,
+    /data-settings-action="open-voice-sync-lab"[^>]*target=/u,
   );
 });

@@ -8,10 +8,10 @@ import {
   type LocalVoiceSpeechprintV1,
 } from "./audioVoice.js";
 
-export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.8";
+export const LOCAL_VOICE_SPEECHPRINT_RULESET_VERSION = "2026.08.9";
 /** SHA-256 of the qualified Instant IPA matrix (see speechprint-runtime.test.ts). */
 export const LOCAL_VOICE_SPEECHPRINT_RULESET_SHA256 =
-  "5d2203640d06eaebd5ab321f18468e63c11abc7df531b6b037dccf8f0523bccf";
+  "827e0b63e76fec41e23a641c390628c54100b445c04175342a8e790dc2e72359";
 
 export interface LocalVoiceSpeechprintCapabilityV1 {
   id: Exclude<LocalVoiceSpeechprintInfluence, "none">;
@@ -1289,6 +1289,32 @@ const STRESS_RHYTHM_PROFILES: Partial<
   },
 };
 
+/**
+ * Phase 2 approximate phrase-melody contours. IPA stress scheduling only —
+ * never inserts client clause-breath pauses or Feel-stage pitch envelopes.
+ */
+type MelodyContour =
+  | "wave-final"
+  | "peak-edges"
+  | "final-group"
+  | "penult-nuclear";
+
+interface MelodyProfile {
+  contour: MelodyContour;
+}
+
+const MELODY_PROFILES: Partial<
+  Record<Exclude<LocalVoiceSpeechprintInfluence, "none">, MelodyProfile>
+> = {
+  "italian-influenced-english": { contour: "wave-final" },
+  "spanish-influenced-english": { contour: "peak-edges" },
+  "latin-american-spanish-influenced-english": { contour: "peak-edges" },
+  "mexican-spanish-influenced-english": { contour: "peak-edges" },
+  "brazilian-portuguese-influenced-english": { contour: "penult-nuclear" },
+  "european-portuguese-influenced-english": { contour: "penult-nuclear" },
+  "french-influenced-english": { contour: "final-group" },
+};
+
 interface IpaNucleus {
   start: number;
   end: number;
@@ -1532,23 +1558,207 @@ function applyStressRhythmToWord(args: {
   return { word: result, appliedRuleIds };
 }
 
+function splitTrailingPunctuation(word: string): {
+  body: string;
+  punct: string;
+} {
+  const match = /^(.*?)([,.;:!?)]*)$/u.exec(word);
+  if (!match) return { body: word, punct: "" };
+  return { body: match[1] ?? word, punct: match[2] ?? "" };
+}
+
+function isPhraseContentWord(word: string): boolean {
+  const { body } = splitTrailingPunctuation(word);
+  if (!body || shouldSkipStressRhythmWord(body)) return false;
+  if (body.includes("ˈ")) return true;
+  return listIpaNuclei(body).length >= 2;
+}
+
+function demotePrimaryToSecondary(word: string): {
+  word: string;
+  changed: boolean;
+} {
+  if (!word.includes("ˈ")) return { word, changed: false };
+  return { word: word.replace(/ˈ/gu, "ˌ"), changed: true };
+}
+
+function ensureWordPrimaryStress(word: string): {
+  word: string;
+  changed: boolean;
+} {
+  const { body, punct } = splitTrailingPunctuation(word);
+  if (!body) return { word, changed: false };
+  if (body.includes("ˈ")) return { word, changed: false };
+  const nuclei = listIpaNuclei(body);
+  if (nuclei.length === 0) return { word, changed: false };
+  const stressed = placePrimaryStress(body, 0);
+  const next = `${stressed}${punct}`;
+  return { word: next, changed: next !== word };
+}
+
+function lengthenPrimaryNucleus(word: string): {
+  word: string;
+  changed: boolean;
+} {
+  const { body, punct } = splitTrailingPunctuation(word);
+  const nuclei = listIpaNuclei(body);
+  const stressedIndex = primaryStressNucleusIndex(body, nuclei);
+  if (stressedIndex < 0) return { word, changed: false };
+  const nucleus = nuclei[stressedIndex]!;
+  if (nucleus.text.endsWith("ː")) return { word, changed: false };
+  const nextBody = `${body.slice(0, nucleus.end)}ː${body.slice(nucleus.end)}`;
+  const next = `${nextBody}${punct}`;
+  return { word: next, changed: next !== word };
+}
+
+function nuclearContentOffset(
+  contour: MelodyContour,
+  contentCount: number,
+): number {
+  if (contentCount <= 0) return -1;
+  switch (contour) {
+    case "wave-final":
+    case "peak-edges":
+    case "final-group":
+      return contentCount - 1;
+    case "penult-nuclear":
+      return contentCount >= 3 ? contentCount - 2 : contentCount - 1;
+    default: {
+      const _exhaustive: never = contour;
+      return _exhaustive;
+    }
+  }
+}
+
+function shouldDemoteContentAt(args: {
+  contour: MelodyContour;
+  contentOffset: number;
+  nuclearOffset: number;
+  contentCount: number;
+}): boolean {
+  if (args.contentOffset === args.nuclearOffset) return false;
+  switch (args.contour) {
+    case "wave-final":
+      // Italian-like wave: soften the opening peak so the final can bloom.
+      return args.contentOffset === 0 && args.contentCount >= 3;
+    case "peak-edges":
+      // Spanish-like: keep the first peak, soften the middle, keep the last.
+      return (
+        args.contentOffset > 0 &&
+        args.contentOffset < args.nuclearOffset &&
+        args.contentCount >= 3
+      );
+    case "final-group":
+      // French-like: one clear final accent group.
+      return true;
+    case "penult-nuclear":
+      // Portuguese-like: soften non-nuclear peaks when the phrase is long enough.
+      return args.contentCount >= 3;
+    default: {
+      const _exhaustive: never = args.contour;
+      return _exhaustive;
+    }
+  }
+}
+
+/**
+ * Approximate phrase melody via IPA stress scheduling across the utterance.
+ * Does not insert punctuation or breath marks — client clause breaths and
+ * Feel-stage Pitch/Lilt remain separate surfaces.
+ */
 export function localVoiceSpeechprintIsActive(
   value: LocalVoiceSpeechprintV1 | null | undefined,
 ): boolean {
   return normalizeLocalVoiceSpeechprintInfluence(value?.influence) !== "none";
 }
 
-/**
- * Phase 2 (deferred): approximate phrase melody via IPA stress/pacing.
- * Identity until the melody milestone ships — do not double-stack with
- * Feel-stage Pitch/Lilt or client clause-breath pauses.
- */
 export function applyLocalVoiceSpeechprintMelodyToIpa(args: {
   ipa: string;
   speechprint: LocalVoiceSpeechprintV1;
 }): { ipa: string; appliedRuleIds: string[] } {
-  void args.speechprint;
-  return { ipa: args.ipa, appliedRuleIds: [] };
+  const influence = normalizeLocalVoiceSpeechprintInfluence(
+    args.speechprint.influence,
+  );
+  if (influence === "none") return { ipa: args.ipa, appliedRuleIds: [] };
+  const profile = MELODY_PROFILES[influence];
+  if (!profile) return { ipa: args.ipa, appliedRuleIds: [] };
+
+  const strength = normalizeLocalVoiceSpeechprintStrength(
+    args.speechprint.strength,
+  );
+  const seed = normalizeLocalVoiceSpeechprintVariationSeed(
+    args.speechprint.variationSeed,
+    `speechprint-melody-${influence}`.slice(0, 64),
+  );
+  const maximumTier = TIER_WEIGHT[strength];
+  const appliedRuleIds = new Set<string>();
+
+  const parts = args.ipa.split(/(\s+)/gu);
+  const contentOffsets: number[] = [];
+  for (let index = 0; index < parts.length; index += 1) {
+    const part = parts[index]!;
+    if (!part || /^\s+$/u.test(part)) continue;
+    if (isPhraseContentWord(part)) contentOffsets.push(index);
+  }
+  if (maximumTier < TIER_WEIGHT.balanced) {
+    return { ipa: args.ipa, appliedRuleIds: [] };
+  }
+
+  if (contentOffsets.length === 0) {
+    return { ipa: args.ipa, appliedRuleIds: [] };
+  }
+
+  const nuclearLocal = nuclearContentOffset(
+    profile.contour,
+    contentOffsets.length,
+  );
+  if (nuclearLocal < 0) return { ipa: args.ipa, appliedRuleIds: [] };
+  const nuclearPartIndex = contentOffsets[nuclearLocal]!;
+
+  if (contentOffsets.length >= 2) {
+    for (let local = 0; local < contentOffsets.length; local += 1) {
+      if (
+        !shouldDemoteContentAt({
+          contour: profile.contour,
+          contentOffset: local,
+          nuclearOffset: nuclearLocal,
+          contentCount: contentOffsets.length,
+        })
+      ) {
+        continue;
+      }
+      const partIndex = contentOffsets[local]!;
+      const demoted = demotePrimaryToSecondary(parts[partIndex]!);
+      if (demoted.changed) {
+        parts[partIndex] = demoted.word;
+        appliedRuleIds.add(`melody-contour-${profile.contour}`);
+      }
+    }
+  }
+
+  const nuclearAgain = ensureWordPrimaryStress(parts[nuclearPartIndex]!);
+  if (nuclearAgain.changed) {
+    parts[nuclearPartIndex] = nuclearAgain.word;
+    appliedRuleIds.add("melody-nuclear-ensure");
+  }
+
+  if (maximumTier >= TIER_WEIGHT.strong) {
+    const optionalSkip =
+      stableUnitInterval(`${seed}:melody-nuclear-lengthen`) >=
+      optionalRuleThreshold(strength);
+    if (!optionalSkip) {
+      const lengthened = lengthenPrimaryNucleus(parts[nuclearPartIndex]!);
+      if (lengthened.changed) {
+        parts[nuclearPartIndex] = lengthened.word;
+        appliedRuleIds.add("melody-nuclear-lengthen");
+      }
+    }
+  }
+
+  return {
+    ipa: parts.join(""),
+    appliedRuleIds: [...appliedRuleIds].sort(),
+  };
 }
 
 export function applyLocalVoiceSpeechprintToIpa(args: {

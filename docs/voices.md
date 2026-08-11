@@ -2,7 +2,8 @@
 
 Prism Voices is account-wide: **Mute** (the default), **English**, **Babble**, or
 **Bottish**. A bot owns one compatible V3 voice profile with separate Local and
-Premium identities, shared delivery, and portable Voice Character settings. Existing
+Premium identities, each with its own Feel (voice, pitch, lilt, pace), plus a
+shared playback effect and portable Voice Character for Local. Existing
 profiles and backups may still contain the retired `bottishTone` field, but
 Prism no longer exposes, randomizes, or applies it. Account Voice Volume remains
 the master level.
@@ -52,9 +53,10 @@ identity.
 
 V1 and V2 profiles remain readable indefinitely. Saving an edited profile
 serializes V3 with `local`, `premium`, and `delivery` sections; loading an older
-profile does not bulk-rewrite its bot file. ElevenLabs remains the expressive
-provider option for native audio tags, directed delivery, and higher emotional
-range.
+profile does not bulk-rewrite its bot file. Older shared delivery pace/lilt
+values migrate onto both Local and Premium Feel lanes. ElevenLabs remains the
+expressive provider option for native audio tags, directed delivery, and higher
+emotional range.
 
 ## Accent sources and Speechprints
 
@@ -81,8 +83,10 @@ Local identity has four independent layers:
   private stress and rhythm (for example early Spanish stress vs Italian
   penultimate bias) after the sound swaps, and map English STRUT vowels such as
   the vowel in "sun" toward open/central /a/ (European Portuguese toward /ɐ/)
-  for a more realist L1 substitution. Phrase melody remains a later
-  approximate Instant pass and is not Feel-stage Pitch or Lilt.
+  for a more realist L1 substitution. Qualified Romance influences then apply
+  an approximate phrase-melody contour in private IPA stress only — Instant
+  never invents Feel-stage Pitch/Lilt changes or extra client clause-breath
+  pauses for that contour.
 
 Cross-accent pronunciation and Speechprints run only through Instant. Auto
 selects Instant when either is active; a forced Voice+ or installed
@@ -94,9 +98,10 @@ the same line.
 
 Instant phonemizes each speech segment locally from its genuine American or
 British base, applies deterministic word-boundary-aware sound rules, then a
-second private stress/rhythm pass for qualified influences, then uses
-Kokoro's pinned token-ID interface. A private per-profile variation seed keeps
-optional details stable for that character and travels with bot exports.
+private stress/rhythm pass and approximate phrase-melody stress contour for
+qualified influences, then uses Kokoro's pinned token-ID interface. A private
+per-profile variation seed keeps optional details stable for that character and
+travels with bot exports.
 Explicit name pronunciations, initialisms, numbers, and code-like tokens are
 protected. Only private phonemes change: visible dialogue, captions, prompts,
 memories, summaries, boards, ballots, and transcript exports retain the
@@ -176,15 +181,15 @@ directions.
 - Bottish is Prism's original procedural robot language. It does not call the
   synthesis API. Its deterministic beeps, chirps, and fitted timing are restored
   as the complete voice rather than mixed under synthesized speech.
-- Local pitch, brightness, resonance, Open–Nasal, and Light–Chest shape local
-  English, Babble, and Bottish without changing the Premium identity. Shared
-  pace, lilt, mood performance, effect, texture, and volume continue to affect
-  Local and Premium. Prism applies local tone through a
-  formant-preserving browser worklet, while **Pace is the only profile control
-  that changes duration**. Local and provider synthesis stay neutral-tempo so
-  Pace is applied exactly once. If a browser cannot start the worklet, Prism
-  still honors Pace and plays neutral pitch rather than resampling into a
-  tempo wobble.
+- Local pitch, pace, lilt, brightness, resonance, Open–Nasal, and Light–Chest
+  shape local English, Babble, and Bottish without changing the Premium Feel.
+  Premium keeps its own pitch, pace, and lilt. Shared mood performance, effect,
+  texture, and volume continue to affect both lanes. Prism applies local tone
+  through a formant-preserving browser worklet, while **Pace is the only
+  profile control that changes duration**. Local and provider synthesis stay
+  neutral-tempo so Pace is applied exactly once. If a browser cannot start the
+  worklet, Prism still honors Pace and plays neutral pitch rather than
+  resampling into a tempo wobble.
 
 Avatar Studio's Local card exposes the two-dimensional **Open–Nasal / Light–Chest**
 pad plus advanced pitch, brightness, resonance, and local gain. The center is

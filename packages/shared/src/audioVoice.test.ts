@@ -10,7 +10,9 @@ import {
   VOICE_DELIVERY_RATE_BY_MOOD,
   applyVoiceDeliveryMoodToProfile,
   applyBotNamePronunciations,
+  botAudioVoiceProfileForFeelLane,
   DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+  DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3,
   DEFAULT_VOICE_EFFECT,
   PRISM_BUILTIN_ENGLISH_VOICES,
   VOICE_EFFECT_DESCRIPTIONS,
@@ -210,7 +212,12 @@ describe("audio voice normalization", () => {
     );
   });
   it("uses a deterministic portable profile and clamps controls", () => {
-    assert.deepEqual(normalizeBotAudioVoiceProfileV1(undefined), DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
+    assert.deepEqual(normalizeBotAudioVoiceProfileV1(undefined), {
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      premiumPitch: 0,
+      premiumPace: 0,
+      premiumLilt: 0,
+    });
     assert.deepEqual(normalizeBotAudioVoiceProfileV1({ v: 1, baseVoiceId: "voice-4", pitch: 4, warmth: -4, pace: ".125", lilt: 0.2, signal: 4 }), {
       v: 2,
       enabled: true,
@@ -232,6 +239,9 @@ describe("audio voice normalization", () => {
       speechprintVariationSeed: "natural-v1",
       pace: 0.125,
       lilt: 0.2,
+      premiumPitch: 0,
+      premiumPace: 0.125,
+      premiumLilt: 0.2,
       bottishTone: 1,
       corporality: 0.5,
       eqTilt: 0,
@@ -282,7 +292,9 @@ describe("audio voice normalization", () => {
       variationSeed: "voice-28-japanese",
     });
     assert.equal(v3.premium.voiceId, "premium-id");
-    assert.equal(v3.delivery.pace, 0.2);
+    assert.equal(v3.local.tone.pace, 0.2);
+    assert.equal(v3.premium.pace, 0.2);
+    assert.equal(v3.delivery.pace, undefined);
 
     const serialized = serializeBotAudioVoiceProfileV1(v3);
     assert.equal(JSON.parse(serialized).v, 3);
@@ -295,6 +307,73 @@ describe("audio voice normalization", () => {
       x: 0.28731,
       y: 0.29842,
     });
+    assert.equal(compatible?.pace, 0.2);
+    assert.equal(compatible?.premiumPace, 0.2);
+  });
+
+  it("keeps independent Local and Premium Feel after V3 round-trip", () => {
+    const v3 = normalizeBotAudioVoiceProfileV3({
+      ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+      pitch: 0.4,
+      pace: -0.2,
+      lilt: 0.1,
+      premiumPitch: -0.35,
+      premiumPace: 0.55,
+      premiumLilt: -0.25,
+    });
+    assert.equal(v3.local.tone.pitch, 0.4);
+    assert.equal(v3.local.tone.pace, -0.2);
+    assert.equal(v3.local.tone.lilt, 0.1);
+    assert.equal(v3.premium.pitch, -0.35);
+    assert.equal(v3.premium.pace, 0.55);
+    assert.equal(v3.premium.lilt, -0.25);
+
+    const compatible = parseStoredBotAudioVoiceProfileV1(
+      serializeBotAudioVoiceProfileV1(v3),
+    );
+    assert.equal(compatible?.pitch, 0.4);
+    assert.equal(compatible?.premiumPitch, -0.35);
+    assert.equal(compatible?.premiumPace, 0.55);
+    assert.equal(
+      botAudioVoiceProfileForFeelLane(compatible!, "premium").pitch,
+      -0.35,
+    );
+    assert.equal(
+      botAudioVoiceProfileForFeelLane(compatible!, "premium").pace,
+      0.55,
+    );
+  });
+
+  it("migrates legacy shared delivery Feel onto both Local and Premium lanes", () => {
+    const { pace: _pace, lilt: _lilt, ...legacyTone } =
+      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3.local.tone;
+    const compatible = normalizeBotAudioVoiceProfileV1({
+      v: 3,
+      enabled: true,
+      local: {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3.local,
+        tone: {
+          ...legacyTone,
+          pitch: 0.2,
+        },
+      },
+      // Legacy Premium identity had no per-lane Feel keys yet.
+      premium: { voiceId: "premium-id" },
+      delivery: {
+        effect: "prism",
+        pace: 0.3,
+        lilt: -0.15,
+        volume: 1,
+        texture: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.texture,
+      },
+      bottishTone: 0.45,
+    });
+    assert.equal(compatible.pitch, 0.2);
+    assert.equal(compatible.pace, 0.3);
+    assert.equal(compatible.lilt, -0.15);
+    assert.equal(compatible.premiumPitch, 0);
+    assert.equal(compatible.premiumPace, 0.3);
+    assert.equal(compatible.premiumLilt, -0.15);
   });
 
   it("clamps Accent Map positions without replacing their free placement", () => {
@@ -483,7 +562,13 @@ describe("audio voice normalization", () => {
     assert.equal(normalizeOptionalBotAudioVoiceProfileV1({}), null);
     assert.deepEqual(
       normalizeOptionalBotAudioVoiceProfileV1({ v: 1, baseVoiceId: "voice-2" }),
-      { ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1, baseVoiceId: "voice-2" }
+      {
+        ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
+        baseVoiceId: "voice-2",
+        premiumPitch: 0,
+        premiumPace: 0,
+        premiumLilt: 0,
+      },
     );
     assert.deepEqual(
       normalizeOptionalBotAudioVoiceProfileV1(JSON.stringify({
@@ -494,7 +579,10 @@ describe("audio voice normalization", () => {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
         baseVoiceId: "voice-3",
         systemVoiceName: "Samantha",
-      }
+        premiumPitch: 0,
+        premiumPace: 0,
+        premiumLilt: 0,
+      },
     );
   });
 
@@ -653,6 +741,9 @@ describe("audio voice normalization", () => {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
         elevenLabsEffect: "clean",
         voiceEffectExplicit: true,
+        premiumPitch: 0,
+        premiumPace: 0,
+        premiumLilt: 0,
       },
     );
     assert.equal(
@@ -672,6 +763,9 @@ describe("audio voice normalization", () => {
         ...DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1,
         elevenLabsEffect: "resonance",
         voiceEffectExplicit: true,
+        premiumPitch: 0,
+        premiumPace: 0,
+        premiumLilt: 0,
       },
     );
   });

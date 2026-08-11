@@ -20,9 +20,10 @@ const atlasMap = new URL(
 describe("cross-accent local voice pronunciation controls", () => {
   it("uses the Foundry adjustment console for bots and Default PRISM", () => {
     assert.match(pageSource, /value: "pronunciation", label: "1 Accent"/u);
-    assert.match(pageSource, /value: "feel", label: "2 Feel"/u);
-    assert.match(pageSource, /value: "voice", label: "3 Voice"/u);
-    assert.match(pageSource, /data-bot-voice-feel-stage="true"/u);
+    assert.match(pageSource, /value: "local", label: "2 Local"/u);
+    assert.match(pageSource, /value: "premium", label: "3 Premium"/u);
+    assert.match(pageSource, /data-bot-voice-local-stage="true"/u);
+    assert.match(pageSource, /data-bot-voice-premium-stage="true"/u);
     assert.match(pageSource, /data-bot-voice-identity-stage=/u);
     assert.match(pageSource, /<PronunciationAtlas/u);
     assert.match(pageSource, /data-adjustment-target=/u);

@@ -319,7 +319,7 @@ describe("voice settings preview", () => {
   it("keeps Pace local and exposes only ElevenLabs performance stability", () => {
     const performanceSource = pageSource.slice(
       pageSource.indexOf("function BotVoicePerformanceControls("),
-      pageSource.indexOf("function BotVoiceFeelStage("),
+      pageSource.indexOf("function BotVoiceLocalStage("),
     );
     const editorSource = pageSource.slice(
       pageSource.indexOf("function BotVoiceEditor("),
@@ -432,7 +432,7 @@ describe("voice settings preview", () => {
   it("shows per-profile effects for every voice engine", () => {
     const performanceSource = pageSource.slice(
       pageSource.indexOf("function BotVoicePerformanceControls("),
-      pageSource.indexOf("function BotVoiceFeelStage("),
+      pageSource.indexOf("function BotVoiceLocalStage("),
     );
     assert.match(
       performanceSource,
@@ -483,7 +483,7 @@ describe("voice settings preview", () => {
   it("keeps only audible performance controls and removes custom textures", () => {
     const performanceSource = pageSource.slice(
       pageSource.indexOf("function BotVoicePerformanceControls("),
-      pageSource.indexOf("function BotVoiceFeelStage("),
+      pageSource.indexOf("function BotVoiceLocalStage("),
     );
     const editorSource = pageSource.slice(
       pageSource.indexOf("function BotVoiceEditor("),
@@ -513,7 +513,7 @@ describe("voice settings preview", () => {
   it("keeps voice and pronunciation changes in the Avatar Studio draft until explicit Save", () => {
     const performanceSource = pageSource.slice(
       pageSource.indexOf("function BotVoicePerformanceControls("),
-      pageSource.indexOf("function BotVoiceFeelStage("),
+      pageSource.indexOf("function BotVoiceLocalStage("),
     );
     const saveSource = pageSource.slice(
       pageSource.indexOf("async function saveBot(id: string)"),
@@ -715,8 +715,8 @@ describe("voice settings preview", () => {
     assert.match(pageSource, />Voice range</);
     assert.match(pageSource, /Place the Accent pin first/);
     assert.match(pageSource, /1 Accent/);
-    assert.match(pageSource, /2 Feel/);
-    assert.match(pageSource, /3 Voice/);
+    assert.match(pageSource, /2 Local/);
+    assert.match(pageSource, /3 Premium/);
     assert.match(pageSource, /import \{ PronunciationAtlas \}/);
     assert.match(pageSource, /label="Zen accent map"/);
     assert.doesNotMatch(

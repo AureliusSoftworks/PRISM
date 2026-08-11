@@ -301,13 +301,17 @@ describe("local voice Speechprints", () => {
     });
 
     assert.notEqual(italian.ipa, spanish.ipa);
-    assert.match(italian.ipa, /sˈan/u);
+    assert.match(italian.ipa, /s[ˈˌ]an/u);
     assert.match(spanish.ipa, /sˈan/u);
     assert.match(italian.ipa, /k[ɾɹ]iːˈeɪɾɪv/u);
-    assert.match(spanish.ipa, /k[ɾɹ]ˈiːeɪɾɪv/u);
+    assert.match(spanish.ipa, /k[ɾɹ][ˈˌ]iːeɪɾɪv|k[ɾɹ]iː[ˈˌ]eɪɾɪv/u);
     assert.ok(italian.appliedRuleIds.includes("rhythm-demote-secondary"));
     assert.ok(spanish.appliedRuleIds.includes("rhythm-stress-early"));
     assert.equal(italian.appliedRuleIds.includes("rhythm-stress-early"), false);
+    assert.ok(
+      italian.appliedRuleIds.includes("melody-contour-wave-final") ||
+        spanish.appliedRuleIds.includes("melody-contour-peak-edges"),
+    );
   });
 
   it("skips stress-rhythm reshaping for digit and code-like tokens", () => {
@@ -324,18 +328,71 @@ describe("local voice Speechprints", () => {
     assert.match(spanish.ipa, /k[ɾɹ]ˈiːe[iɪ]ɾ[iɪ]v/u);
   });
 
-  it("keeps Phase 2 melody as an identity pass until that milestone ships", () => {
-    const phrase = "ðə sˈʌn ɹˈaɪzᵻz";
-    assert.deepEqual(
-      applyLocalVoiceSpeechprintMelodyToIpa({
-        ipa: phrase,
-        speechprint: {
-          influence: "italian-influenced-english",
-          strength: "strong",
-          variationSeed: "melody-deferred",
-        },
-      }),
-      { ipa: phrase, appliedRuleIds: [] },
-    );
+  it("applies distinct approximate phrase-melody contours for Romance Speechprints", () => {
+    // Four content peaks: sun, rises, creative, people.
+    const phrase = "ðə sˈʌn ɹˈaɪzᵻz ˌoʊvɚ ðə kɹiːˈeɪɾɪv pˈiːpəl";
+    const italian = applyLocalVoiceSpeechprintMelodyToIpa({
+      ipa: phrase,
+      speechprint: {
+        influence: "italian-influenced-english",
+        strength: "balanced",
+        variationSeed: "melody-bench",
+      },
+    });
+    const spanish = applyLocalVoiceSpeechprintMelodyToIpa({
+      ipa: phrase,
+      speechprint: {
+        influence: "spanish-influenced-english",
+        strength: "balanced",
+        variationSeed: "melody-bench",
+      },
+    });
+    const french = applyLocalVoiceSpeechprintMelodyToIpa({
+      ipa: phrase,
+      speechprint: {
+        influence: "french-influenced-english",
+        strength: "balanced",
+        variationSeed: "melody-bench",
+      },
+    });
+
+    assert.notEqual(italian.ipa, phrase);
+    assert.notEqual(spanish.ipa, italian.ipa);
+    assert.notEqual(french.ipa, spanish.ipa);
+    // Italian wave softens the opening peak.
+    assert.match(italian.ipa, /sˌʌn/u);
+    assert.match(italian.ipa, /pˈiːpəl/u);
+    assert.ok(italian.appliedRuleIds.includes("melody-contour-wave-final"));
+    // Spanish keeps the first peak and softens a middle peak.
+    assert.match(spanish.ipa, /sˈʌn/u);
+    assert.match(spanish.ipa, /ɹˌaɪzᵻz|kɹiːˌeɪɾɪv/u);
+    assert.ok(spanish.appliedRuleIds.includes("melody-contour-peak-edges"));
+    // French concentrates on the final group.
+    assert.match(french.ipa, /pˈiːpəl/u);
+    assert.ok(french.appliedRuleIds.includes("melody-contour-final-group"));
+  });
+
+  it("leaves non-Romance melody as a no-op and never invents pause marks", () => {
+    const phrase = "ðə sˈʌn ɹˈaɪzᵻz, kɹiːˈeɪɾɪv.";
+    const german = applyLocalVoiceSpeechprintMelodyToIpa({
+      ipa: phrase,
+      speechprint: {
+        influence: "german-influenced-english",
+        strength: "strong",
+        variationSeed: "melody-noop",
+      },
+    });
+    assert.deepEqual(german, { ipa: phrase, appliedRuleIds: [] });
+    const italian = applyLocalVoiceSpeechprintMelodyToIpa({
+      ipa: phrase,
+      speechprint: {
+        influence: "italian-influenced-english",
+        strength: "balanced",
+        variationSeed: "melody-punct",
+      },
+    });
+    assert.equal(italian.ipa.includes(","), true);
+    assert.equal(italian.ipa.endsWith("."), true);
+    assert.equal(/\s{2,}/u.test(italian.ipa), false);
   });
 });

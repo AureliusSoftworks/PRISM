@@ -45,7 +45,7 @@ describe("Speechprint phoneme runtime snapshots", () => {
     assert.equal(rows.length, 252);
     assert.equal(
       createHash("sha256").update(JSON.stringify(rows)).digest("hex"),
-      "5d2203640d06eaebd5ab321f18468e63c11abc7df531b6b037dccf8f0523bccf",
+      "827e0b63e76fec41e23a641c390628c54100b445c04175342a8e790dc2e72359",
     );
   });
 });

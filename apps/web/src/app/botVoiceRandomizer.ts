@@ -47,16 +47,22 @@ export function randomizeBotAudioVoiceProfile(
       selectedBuiltinVoiceId && isBotAudioVoiceId(selectedBuiltinVoiceId)
         ? selectedBuiltinVoiceId
         : choose(BOT_AUDIO_VOICE_IDS, random),
-    pitch: randomControl(random),
-    lilt: randomControl(random),
     bottishTone: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.bottishTone,
     texture: DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.texture,
     ...(engine === "builtin"
-      ? { systemVoiceName: selectedSystemVoiceName }
+      ? {
+          systemVoiceName: selectedSystemVoiceName,
+          pitch: randomControl(random),
+          pace: randomControl(random),
+          lilt: randomControl(random),
+        }
       : {
           elevenLabsVoiceId: identity,
           elevenLabsVoiceIdOverride: null,
           elevenLabsVoiceInitialized: true,
+          premiumPitch: randomControl(random),
+          premiumPace: randomControl(random),
+          premiumLilt: randomControl(random),
         }),
   });
 }

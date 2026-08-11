@@ -1,5 +1,7 @@
 import {
   applyVoiceDeliveryMoodToProfile,
+  botAudioVoiceProfileForFeelLane,
+  botVoiceFeelLaneForEngine,
   normalizeBotAudioVoiceProfileV1,
   normalizeLocalVoiceAccentLocale,
   normalizeLocalVoicePronunciationBase,
@@ -320,11 +322,12 @@ export function resolveEnglishVoicePlaybackDetuneCents(
   rawProfile: BotAudioVoiceProfileV1,
   engineUsed: string | null,
 ): number {
-  // Local and Premium share the same client pitch transform. Premium still
-  // skips local timbre (warmth/EQ/resonance) via localToneEnabled — pitch is
-  // an authored identity control, not a provider reshape.
-  void engineUsed;
-  return resolveVoicePlaybackTransform(rawProfile).pitchCents;
+  // Local and Premium each own pitch / pace / lilt. Premium still skips local
+  // timbre (warmth/EQ/resonance) via localToneEnabled.
+  const lane = botVoiceFeelLaneForEngine(engineUsed);
+  return resolveVoicePlaybackTransform(
+    botAudioVoiceProfileForFeelLane(rawProfile, lane),
+  ).pitchCents;
 }
 
 /** Convert the media element's source-time clock to audible playback time. */
@@ -1418,8 +1421,12 @@ export function enqueueEnglishVoice(
   channel: VoicePlaybackChannel = "primary",
 ): Promise<void> {
   const expectedGeneration = generation;
+  const feelProfile = botAudioVoiceProfileForFeelLane(
+    profile,
+    botVoiceFeelLaneForEngine(engineUsed),
+  );
   const playbackProfile = {
-    ...applyVoiceDeliveryMoodToProfile(profile, deliveryMood),
+    ...applyVoiceDeliveryMoodToProfile(feelProfile, deliveryMood),
     volume: normalizeBotVoiceVolume(globalVolume),
   };
   const run = () =>
@@ -1459,13 +1466,15 @@ export function enqueueStreamingEnglishVoice(
 ): Promise<void> {
   void seed;
   const expectedGeneration = generation;
+  // Streaming is Premium-only today; project that Feel lane before tempo/pitch.
+  const feelProfile = botAudioVoiceProfileForFeelLane(profile, "premium");
   const playbackProfile = {
-    ...applyVoiceDeliveryMoodToProfile(profile, deliveryMood),
+    ...applyVoiceDeliveryMoodToProfile(feelProfile, deliveryMood),
     volume: normalizeBotVoiceVolume(globalVolume),
   };
   if (
     !englishVoiceProfileSupportsStreaming(
-      profile,
+      feelProfile,
       effectsEnabled,
       deliveryMood,
     )
@@ -1505,8 +1514,12 @@ export function enqueueChunkedEnglishVoice(
   pacingProfile?: EnglishPacingProfileV1 | null,
 ): Promise<void> {
   const expectedGeneration = generation;
+  const feelProfile = botAudioVoiceProfileForFeelLane(
+    profile,
+    botVoiceFeelLaneForEngine(engineUsed),
+  );
   const playbackProfile = {
-    ...applyVoiceDeliveryMoodToProfile(profile, deliveryMood),
+    ...applyVoiceDeliveryMoodToProfile(feelProfile, deliveryMood),
     volume: normalizeBotVoiceVolume(globalVolume),
   };
   queue = queue

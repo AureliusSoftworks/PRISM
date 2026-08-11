@@ -19,7 +19,8 @@ describe("bot voice randomizer", () => {
     assert.equal(profile.systemVoiceName, "Fred");
     assert.equal(profile.baseVoiceId, "voice-1");
     assert.equal(profile.pitch, -0.35);
-    assert.equal(profile.lilt, 0);
+    assert.equal(profile.pace, 0);
+    assert.equal(profile.lilt, 0.35);
     assert.equal(
       profile.bottishTone,
       DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1.bottishTone,

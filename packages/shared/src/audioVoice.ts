@@ -431,8 +431,16 @@ export interface BotAudioVoiceProfileV2 {
   speechprintInfluence?: LocalVoiceSpeechprintInfluence;
   speechprintStrength?: LocalVoiceSpeechprintStrength;
   speechprintVariationSeed?: string;
+  /** Local-lane Feel tempo. */
   pace: number;
+  /** Local-lane Feel melodic wander. */
   lilt: number;
+  /** Premium-lane Feel pitch. Defaults to neutral when absent. */
+  premiumPitch?: number;
+  /** Premium-lane Feel tempo. Falls back to local pace for older profiles. */
+  premiumPace?: number;
+  /** Premium-lane Feel melodic wander. Falls back to local lilt for older profiles. */
+  premiumLilt?: number;
   bottishTone: number;
   /**
    * Bodily Foley material continuum for stock Action SFX fallbacks.
@@ -547,6 +555,10 @@ export interface LocalVoiceSpeechprintV1 {
 
 export interface BotLocalVoiceToneV1 {
   pitch: number;
+  /** Local-only tempo. Pace is the only Feel control that changes duration. */
+  pace: number;
+  /** Local-only melodic pitch wander applied after synthesis. */
+  lilt: number;
   warmth: number;
   openness: number;
   weight: number;
@@ -579,19 +591,36 @@ export interface BotPremiumVoiceProfileV1 {
   initialized?: boolean;
   direction?: string | null;
   stability?: number;
+  /** Premium-only pitch transform applied after ElevenLabs synthesis. */
+  pitch: number;
+  /** Premium-only tempo. Pace is the only Feel control that changes duration. */
+  pace: number;
+  /** Premium-only melodic pitch wander applied after synthesis. */
+  lilt: number;
 }
 
 export interface BotVoiceDeliveryProfileV1 {
   effect: VoiceEffect;
   effectExplicit?: boolean;
-  pace: number;
-  lilt: number;
+  /**
+   * Legacy shared pace retained for older V3 files. Newer profiles store
+   * per-lane pace under local.tone / premium and leave this unset on write.
+   */
+  pace?: number;
+  /**
+   * Legacy shared lilt retained for older V3 files. Newer profiles store
+   * per-lane lilt under local.tone / premium and leave this unset on write.
+   */
+  lilt?: number;
   volume: number;
   texture: BotVoiceTextureV1;
 }
 
-/** Portable V3 storage separates local identity and tone from Premium identity
- * while keeping delivery shared across every synthesis engine. */
+/** Which English synthesis lane owns pitch / pace / lilt Feel controls. */
+export type BotVoiceFeelLane = "local" | "premium";
+
+/** Portable V3 storage separates local identity/feel from Premium identity/feel
+ * while keeping playback effect and master volume shared. */
 export interface BotAudioVoiceProfileV3 {
   v: 3;
   enabled: boolean;
@@ -726,7 +755,42 @@ export function voiceDeliveryRateForMood(value: unknown): number {
   return VOICE_DELIVERY_RATE_BY_MOOD[normalizeVoiceDeliveryMood(value)];
 }
 
-/** Apply mood without mutating or persisting the bot's authored profile. */
+/** Map a synthesis engine (or babble/bottish) onto the Feel lane that owns it. */
+export function botVoiceFeelLaneForEngine(
+  engineUsed: string | null | undefined,
+): BotVoiceFeelLane {
+  return engineUsed === "elevenlabs" ? "premium" : "local";
+}
+
+/**
+ * Project a portable profile onto one Feel lane so pitch / pace / lilt read
+ * from the active Local or Premium controls. Identity fields stay intact.
+ */
+export function botAudioVoiceProfileForFeelLane(
+  rawProfile: BotAudioVoiceProfileV1,
+  lane: BotVoiceFeelLane,
+): BotAudioVoiceProfileV2 {
+  const profile = normalizeBotAudioVoiceProfileV1(rawProfile);
+  if (lane === "local") return profile;
+  return {
+    ...profile,
+    pitch: normalizeBotAudioVoiceControl(
+      profile.premiumPitch,
+      DEFAULT_BOT_AUDIO_VOICE_PROFILE_V2.premiumPitch,
+    ),
+    pace: normalizeBotAudioVoiceControl(
+      profile.premiumPace,
+      profile.pace,
+    ),
+    lilt: normalizeBotAudioVoiceControl(
+      profile.premiumLilt,
+      profile.lilt,
+    ),
+  };
+}
+
+/** Apply mood without mutating or persisting the bot's authored profile.
+ * Pass a Feel-lane projection when Premium owns the utterance. */
 export function applyVoiceDeliveryMoodToProfile(
   rawProfile: BotAudioVoiceProfileV1,
   mood: unknown,
@@ -758,6 +822,16 @@ export function resolveVoicePlaybackTransform(
     ),
     pitchCents: Math.round(profile.pitch * BOT_AUDIO_VOICE_PITCH_DEPTH_CENTS),
   };
+}
+
+/** Resolve tempo/pitch for a specific Local or Premium Feel lane. */
+export function resolveVoicePlaybackTransformForLane(
+  rawProfile: BotAudioVoiceProfileV1,
+  lane: BotVoiceFeelLane,
+): VoicePlaybackTransformV1 {
+  return resolveVoicePlaybackTransform(
+    botAudioVoiceProfileForFeelLane(rawProfile, lane),
+  );
 }
 
 export function expectedVoicePlaybackDurationMs(
@@ -996,6 +1070,8 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3: Readonly<BotAudioVoiceProfileV3
       },
       tone: {
         pitch: 0,
+        pace: 0,
+        lilt: 0,
         warmth: 0,
         openness: 0,
         weight: 0,
@@ -1004,11 +1080,13 @@ export const DEFAULT_BOT_AUDIO_VOICE_PROFILE_V3: Readonly<BotAudioVoiceProfileV3
         gainDb: 0,
       },
     },
-    premium: {},
-    delivery: {
-      effect: DEFAULT_VOICE_EFFECT,
+    premium: {
+      pitch: 0,
       pace: 0,
       lilt: 0,
+    },
+    delivery: {
+      effect: DEFAULT_VOICE_EFFECT,
       volume: 1,
       texture: BOT_VOICE_TEXTURE_RECIPES.clean,
     },
@@ -1412,8 +1490,14 @@ function flattenBotAudioVoiceProfileV3Record(
     speechprintInfluence: speechprint.influence,
     speechprintStrength: speechprint.strength,
     speechprintVariationSeed: speechprint.variationSeed,
-    pace: delivery.pace,
-    lilt: delivery.lilt,
+    // Prefer per-lane Feel; older V3 files kept pace/lilt only on delivery.
+    // Use `in` so an authored 0 is kept and a missing key can migrate.
+    pace: "pace" in tone ? tone.pace : delivery.pace,
+    lilt: "lilt" in tone ? tone.lilt : delivery.lilt,
+    // Premium pitch was not authored before; stay neutral unless set.
+    premiumPitch: "pitch" in premium ? premium.pitch : 0,
+    premiumPace: "pace" in premium ? premium.pace : delivery.pace,
+    premiumLilt: "lilt" in premium ? premium.lilt : delivery.lilt,
     bottishTone: value.bottishTone,
     corporality: value.corporality,
     eqTilt: tone.brightness,
@@ -1569,6 +1653,19 @@ export function normalizeBotAudioVoiceProfileV1(
     ),
     pace: normalizeBotAudioVoiceControl(record.pace, fallbackProfile.pace),
     lilt: normalizeBotAudioVoiceControl(record.lilt, fallbackProfile.lilt),
+    premiumPitch: normalizeBotAudioVoiceControl(
+      record.premiumPitch,
+      fallbackProfile.premiumPitch ?? 0,
+    ),
+    // Older shared delivery Feel becomes both lanes until Premium is edited.
+    premiumPace: normalizeBotAudioVoiceControl(
+      record.premiumPace,
+      normalizeBotAudioVoiceControl(record.pace, fallbackProfile.pace),
+    ),
+    premiumLilt: normalizeBotAudioVoiceControl(
+      record.premiumLilt,
+      normalizeBotAudioVoiceControl(record.lilt, fallbackProfile.lilt),
+    ),
     bottishTone: normalizeBotAudioVoiceControl(
       legacy ? record.signal : record.bottishTone,
       fallbackProfile.bottishTone,
@@ -1754,6 +1851,8 @@ export function normalizeBotAudioVoiceProfileV3(
       }),
       tone: {
         pitch: normalizeBotAudioVoiceControl(profile.pitch),
+        pace: normalizeBotAudioVoiceControl(profile.pace),
+        lilt: normalizeBotAudioVoiceControl(profile.lilt),
         warmth: normalizeBotAudioVoiceControl(profile.warmth),
         openness: normalizeBotAudioVoiceControl(profile.openness),
         weight: normalizeBotAudioVoiceControl(profile.weight),
@@ -1777,12 +1876,13 @@ export function normalizeBotAudioVoiceProfileV3(
               profile.elevenLabsStability,
             ),
           }),
+      pitch: normalizeBotAudioVoiceControl(profile.premiumPitch, 0),
+      pace: normalizeBotAudioVoiceControl(profile.premiumPace, profile.pace),
+      lilt: normalizeBotAudioVoiceControl(profile.premiumLilt, profile.lilt),
     },
     delivery: {
       effect: normalizeVoiceEffect(profile.elevenLabsEffect),
       ...(profile.voiceEffectExplicit ? { effectExplicit: true } : {}),
-      pace: normalizeBotAudioVoiceControl(profile.pace),
-      lilt: normalizeBotAudioVoiceControl(profile.lilt),
       volume: normalizeBotVoiceVolume(profile.volume),
       texture: normalizeBotVoiceTexture(profile.texture),
     },
