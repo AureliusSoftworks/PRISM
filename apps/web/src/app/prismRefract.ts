@@ -7,13 +7,7 @@ export const PRISM_REFRACT_TARGET_ATTRIBUTE = "data-prism-refract-id";
 export type PrismRefractInvocation =
   | "modifier-click"
   | "wield-click"
-  | "focused-shortcut"
-  | "orb-drop";
-
-export interface PrismRefractOrigin {
-  clientX: number;
-  clientY: number;
-}
+  | "focused-shortcut";
 
 export interface PrismRefractGenerationInput {
   currentValue: string;
@@ -94,7 +88,6 @@ export interface RegisteredPrismRefractTarget {
 export interface PrismRefractRequest {
   targetId: string;
   invocation: PrismRefractInvocation;
-  origin?: PrismRefractOrigin;
 }
 
 type TargetRegistration = {
@@ -134,12 +127,11 @@ export function subscribePrismRefractRequests(
 export function requestPrismRefract(
   targetId: string,
   invocation: PrismRefractInvocation,
-  origin?: PrismRefractOrigin,
 ): boolean {
   const registration = registeredPrismRefractTarget(targetId);
   if (!registration || registration.target.disabled?.()) return false;
   for (const listener of requestListeners) {
-    listener({ targetId, invocation, origin });
+    listener({ targetId, invocation });
   }
   return requestListeners.size > 0;
 }

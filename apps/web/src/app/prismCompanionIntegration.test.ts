@@ -167,6 +167,7 @@ test("opens the assistant menu from the live orb while preserving Home hero Chat
     /keyboardShortcutMatchesEvent\(keyboardShortcut, event\)[\s\S]*?activatePrismConversation\(\)/u,
   );
   assert.doesNotMatch(component, /focusedPrismRefractTargetId/u);
+  assert.doesNotMatch(component, /"orb-drop"/u);
   assert.match(component, /inheritChatHomeDockPosition\(\);[\s\S]*?setOpen\(true\)/u);
   assert.ok(
     (component.match(/activatePrismConversation\((?:true)?\)/gu)?.length ?? 0) >=

@@ -83,6 +83,10 @@ test("turns the floating assistant into a session-note plus during live Signal, 
     debate,
     /liveSessionActive && activeSession \? \([\s\S]{0,220}<PrismCompanionSessionNoteBoundary[\s\S]{0,180}surface="debate"/u,
   );
+  assert.match(
+    page,
+    /storySession\?\.status === "playing" \? \([\s\S]{0,220}<PrismCompanionSessionNoteBoundary[\s\S]{0,180}surface="story"/u,
+  );
   assert.match(presence, /PrismCompanionSessionNoteBoundary/u);
   assert.match(companion, /getPrismCompanionSessionNoteSnapshot/u);
   assert.match(companion, /data-session-note="true"/u);

@@ -21,9 +21,12 @@ describe("PRISM GPU scene foundation integration", () => {
     assert.doesNotMatch(pageSource, /from ["']pixi\.js["']/);
   });
 
-  it("mounts the shared lifecycle and isolated Observe diagnostics card", () => {
+  it("mounts the shared lifecycle and Help rendering diagnostics card", () => {
     assert.match(pageSource, /<PrismVisualLifecycleBridge \/>/);
-    assert.match(pageSource, /case "observe":[\s\S]*<PrismRenderingDiagnosticsCard \/>/);
+    assert.match(
+      pageSource,
+      /activeSettingsScope === "help"[\s\S]*<PrismRenderingDiagnosticsCard \/>/,
+    );
     assert.match(
       pageSource,
       /subscribePrismVisualLifecycle\([\s\S]*lifecycle === "suspended"[\s\S]*hideCursor\(\)/,

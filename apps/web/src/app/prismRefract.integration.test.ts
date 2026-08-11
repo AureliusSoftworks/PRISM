@@ -172,9 +172,9 @@ describe("Prism Refract integration", () => {
       companionSource,
       /isIdlePresenceBlocked[\s\S]*refractSessionRef\.current !== null/u,
     );
-    assert.match(
+    assert.doesNotMatch(
       companionSource,
-      /releasePrismRefract\(true\);[\s\S]*clearIdleDim\(\);[\s\S]*invocation === "wield-click"/u,
+      /invocation === "wield-click"[\s\S]*resetPrismWield\(true\)/u,
     );
     assert.match(
       companionSource,
@@ -204,22 +204,17 @@ describe("Prism Refract integration", () => {
       companionSource,
       /removeAttribute\(PRISM_REFRACT_CURSOR_ATTRIBUTE\)/u,
     );
+    assert.doesNotMatch(companionSource, /PRISM_REFRACT_TRAVEL_MS/u);
+    assert.doesNotMatch(companionSource, /moveToTarget|phase: "traveling"/u);
     assert.match(
       companionSource,
-      /prefers-reduced-motion: reduce[\s\S]*PRISM_REFRACT_TRAVEL_MS/u,
-    );
-    assert.match(
-      companionSource,
-      /Establish the traveling state before changing coordinates[\s\S]*requestAnimationFrame\([\s\S]*moveToTarget/u,
+      /phase: target\.kind === "magic" \? "prompting" : "generating"/u,
     );
     assert.match(
       companionSource,
       /className=\{styles\.refractGlyph\}[\s\S]*M16 5\.2 27 25H5Z/u,
     );
-    assert.match(
-      companionSource,
-      /prismRefractTargetIdAtPoint\([\s\S]*"orb-drop"/u,
-    );
+    assert.doesNotMatch(companionSource, /"orb-drop"/u);
     assert.match(
       companionSource,
       /const session = refractSessionRef\.current;[\s\S]*refractRunRef\.current \+= 1;[\s\S]*anchorRef\.current\?\.removeAttribute\("data-refracting"\)[\s\S]*updateRefractSession\(null\)/u,
@@ -241,7 +236,7 @@ describe("Prism Refract integration", () => {
     );
     assert.match(
       companionSource,
-      /requestPrismRefract\(targetId, "wield-click",[\s\S]*if \(!started\)[\s\S]*return[\s\S]*event\.preventDefault\(\)[\s\S]*event\.stopPropagation\(\)/u,
+      /requestPrismRefract\(targetId, "wield-click"\)[\s\S]*if \(!started\)[\s\S]*return[\s\S]*event\.preventDefault\(\)[\s\S]*event\.stopPropagation\(\)/u,
     );
     assert.doesNotMatch(refractSource, /shift-click|shiftKey|onClickCapture/u);
   });

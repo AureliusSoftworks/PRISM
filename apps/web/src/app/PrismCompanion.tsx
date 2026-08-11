@@ -129,7 +129,6 @@ import {
   requestPrismRefract,
   subscribePrismRefractRequests,
   type PrismRefractInvocation,
-  type PrismRefractOrigin,
   type RegisteredPrismRefractTarget,
 } from "./prismRefract";
 import {
@@ -158,7 +157,6 @@ import styles from "./prismCompanion.module.css";
 const PRISM_COMPANION_SYSTEM_PAUSE_REASON = "prism-companion";
 const PRISM_SYSTEM_PAUSE_EXEMPT_SELECTOR =
   '[data-prism-system-pause-exempt="true"]';
-const PRISM_REFRACT_TRAVEL_MS = 420;
 const PRISM_REFRACT_CURSOR_ATTRIBUTE = "data-prism-refract-cursor-hidden";
 const PRISM_WIELD_CURSOR_ATTRIBUTE = "data-prism-wielding";
 /** After settle, dim the idle orb so it stays out of the way. */
@@ -167,7 +165,6 @@ export const PRISM_COMPANION_IDLE_DIM_MS = 3_000;
 export const PRISM_COMPANION_IDLE_VANISH_MS = PRISM_COMPANION_IDLE_DIM_MS;
 
 type PrismRefractPhase =
-  | "traveling"
   | "generating"
   | "ready"
   | "prompting"
@@ -644,14 +641,10 @@ export default function PrismCompanion({
   const chatHomeDockPositionRef = useRef<PrismCompanionPosition | null>(null);
   const chatHomeDockReturnTimerRef = useRef<number | null>(null);
   const refractSessionRef = useRef<PrismRefractSession | null>(null);
-  const refractReturnPositionRef = useRef<PrismCompanionPosition | null>(null);
-  const refractTimerRef = useRef<number | null>(null);
-  const refractTravelFrameRef = useRef<number | null>(null);
   const refractMagicHandoffFrameRef = useRef<number | null>(null);
   const refractAbortRef = useRef<AbortController | null>(null);
   const copyFeedbackTimerRef = useRef<number | null>(null);
   const refractRunRef = useRef(0);
-  const refractDropTargetRef = useRef<HTMLElement | null>(null);
   const wieldTutorialTargetRef = useRef<HTMLElement | null>(null);
   const wieldTutorialVisibleRef = useRef(false);
   const wieldTutorialStageRef = useRef<"hold" | "target" | "release">("hold");
@@ -698,8 +691,6 @@ export default function PrismCompanion({
   const idleVanishTimerRef = useRef<number | null>(null);
   const wieldHoverTargetRef = useRef<HTMLElement | null>(null);
   const wieldReturnPositionRef = useRef<PrismCompanionPosition | null>(null);
-  const wieldCaptureReturnPositionRef =
-    useRef<PrismCompanionPosition | null>(null);
   const wieldSuppressedClickRef = useRef<HTMLElement | null>(null);
   const wieldSuppressedClickTimerRef = useRef<number | null>(null);
   const dragRef = useRef<
@@ -1271,9 +1262,6 @@ export default function PrismCompanion({
       anchorRef.current?.style.removeProperty("transform");
       wieldReturnPositionRef.current = null;
       wieldVelocitySampleRef.current = null;
-      if (!preserveCaptureReturn) {
-        wieldCaptureReturnPositionRef.current = null;
-      }
       if (
         !options.skipCursorDock &&
         !preserveCaptureReturn &&
@@ -2214,7 +2202,7 @@ export default function PrismCompanion({
       element.dataset.prismRefractState = phase;
       element.setAttribute(
         "aria-busy",
-        phase === "traveling" || phase === "generating" ? "true" : "false",
+        phase === "generating" ? "true" : "false",
       );
       if (session.registration.target.kind !== "magic") {
         element.setAttribute("aria-readonly", "true");
@@ -2229,14 +2217,6 @@ export default function PrismCompanion({
       refractRunRef.current += 1;
       refractAbortRef.current?.abort();
       refractAbortRef.current = null;
-      if (refractTimerRef.current !== null) {
-        window.clearTimeout(refractTimerRef.current);
-        refractTimerRef.current = null;
-      }
-      if (refractTravelFrameRef.current !== null) {
-        window.cancelAnimationFrame(refractTravelFrameRef.current);
-        refractTravelFrameRef.current = null;
-      }
       if (session) {
         const { element, target } = session.registration;
         if (restoreOriginal && target.kind !== "magic") {
@@ -2256,11 +2236,6 @@ export default function PrismCompanion({
       }
       document.documentElement.removeAttribute(PRISM_REFRACT_CURSOR_ATTRIBUTE);
       anchorRef.current?.removeAttribute("data-refracting");
-      const returnPosition =
-        refractReturnPositionRef.current ?? positionRef.current;
-      refractReturnPositionRef.current = null;
-      positionRef.current = returnPosition;
-      setPosition(returnPosition);
       updateRefractSession(null);
       setRefractPrompt("");
       setRefractStatus("");
@@ -2537,7 +2512,6 @@ export default function PrismCompanion({
     (
       targetId: string,
       invocation: PrismRefractInvocation,
-      origin?: PrismRefractOrigin,
     ): void => {
       const registration = registeredPrismRefractTarget(targetId);
       if (!registration || registration.target.disabled?.()) return;
@@ -2548,49 +2522,21 @@ export default function PrismCompanion({
         refractTutorialRunRef.current = true;
         updateRefractTutorialStage("reroll");
       }
-      const wieldReturnPosition =
-        invocation === "wield-click"
-          ? wieldCaptureReturnPositionRef.current
-          : null;
       releasePrismRefract(true);
       // Refract is an active interaction, even while its direction prompt is
       // waiting on the player. Cancel any idle presence timer that the release
       // above scheduled so the prompt cannot disappear mid-entry.
       clearIdleDim();
-      if (invocation === "wield-click") {
-        resetPrismWield(true);
-      }
       setOpen(false);
       cancelSpeech(true);
       stopInertia(false);
-      const returnPosition = wieldReturnPosition ?? positionRef.current;
-      refractReturnPositionRef.current = returnPosition;
-      wieldCaptureReturnPositionRef.current = null;
-      if (invocation === "wield-click" && origin) {
-        const pointerPosition = clampPrismCompanionPosition(
-          {
-            x: origin.clientX / Math.max(1, window.innerWidth),
-            y: origin.clientY / Math.max(1, window.innerHeight),
-          },
-          liveBoundsRef.current,
-        );
-        positionRef.current = pointerPosition;
-        setPosition(pointerPosition);
-      }
       const rect = registration.element.getBoundingClientRect();
-      const targetPosition = clampPrismCompanionPosition(
-        {
-          x: (rect.left + rect.width / 2) / Math.max(1, window.innerWidth),
-          y: (rect.top + rect.height / 2) / Math.max(1, window.innerHeight),
-        },
-        liveBoundsRef.current,
-      );
       const target = registration.target;
       const originalValue = target.kind === "magic" ? "" : target.read();
       const session: PrismRefractSession = {
         registration,
         invocation,
-        phase: "traveling",
+        phase: target.kind === "magic" ? "prompting" : "generating",
         targetWidth: rect.width,
         originalValue,
         candidateValue: null,
@@ -2600,59 +2546,25 @@ export default function PrismCompanion({
           registration.element.getAttribute("aria-readonly"),
       };
       registration.element.focus({ preventScroll: true });
-      markRefractTarget(session, "traveling");
+      markRefractTarget(session, session.phase);
       updateRefractSession(session);
       setRefractPrompt("");
-      setRefractStatus(`Prism is moving into ${target.label}.`);
+      setRefractStatus(`Prism is refracting ${target.label}.`);
       if (invocation === "focused-shortcut") {
         document.documentElement.setAttribute(
           PRISM_REFRACT_CURSOR_ATTRIBUTE,
           "true",
         );
       }
-      const travelMs = window.matchMedia("(prefers-reduced-motion: reduce)")
-        .matches
-        ? 1
-        : PRISM_REFRACT_TRAVEL_MS;
-      const settleAtTarget = (): void => {
-        refractTimerRef.current = null;
-        const current = refractSessionRef.current;
-        if (!current || current.registration.element !== registration.element) {
-          return;
-        }
-        playPrismCompanionGlassTap();
-        if (target.kind === "magic") {
-          const promptingSession = {
-            ...current,
-            phase: "prompting" as const,
-          };
-          markRefractTarget(promptingSession, "prompting");
-          updateRefractSession(promptingSession);
-          document.documentElement.removeAttribute(
-            PRISM_REFRACT_CURSOR_ATTRIBUTE,
-          );
-          setRefractStatus(
-            `Tell Prism how to shape ${target.label}, then press Enter.`,
-          );
-          window.requestAnimationFrame(() => refractPromptRef.current?.focus());
-          return;
-        }
-        generatePrismRefractCandidate(current);
-      };
-      const moveToTarget = (): void => {
-        refractTravelFrameRef.current = null;
-        positionRef.current = targetPosition;
-        setPosition(targetPosition);
-        refractTimerRef.current = window.setTimeout(settleAtTarget, travelMs);
-      };
-      if (travelMs === 1) {
-        moveToTarget();
-      } else {
-        // Establish the traveling state before changing coordinates. Applying
-        // both in one render makes the browser intermittently skip the flight.
-        refractTravelFrameRef.current = window.requestAnimationFrame(
-          moveToTarget,
+      playPrismCompanionGlassTap();
+      if (target.kind === "magic") {
+        document.documentElement.removeAttribute(PRISM_REFRACT_CURSOR_ATTRIBUTE);
+        setRefractStatus(
+          `Tell Prism how to shape ${target.label}, then press Enter.`,
         );
+        window.requestAnimationFrame(() => refractPromptRef.current?.focus());
+      } else {
+        generatePrismRefractCandidate(session);
       }
     },
     [
@@ -2665,7 +2577,6 @@ export default function PrismCompanion({
       updateRefractSession,
       updateRefractTutorialStage,
       refractTutorialVisible,
-      resetPrismWield,
     ],
   );
 
@@ -2810,8 +2721,8 @@ export default function PrismCompanion({
   useEffect(
     () => {
       if (companionSuppressed || sessionNoteContext) return;
-      return subscribePrismRefractRequests(({ targetId, invocation, origin }) => {
-        beginPrismRefract(targetId, invocation, origin);
+      return subscribePrismRefractRequests(({ targetId, invocation }) => {
+        beginPrismRefract(targetId, invocation);
       });
     },
     [beginPrismRefract, companionSuppressed, sessionNoteContext],
@@ -2871,11 +2782,7 @@ export default function PrismCompanion({
             acceptPrismRefract();
           }
           if (decision === "begin" || decision === "accept-and-begin") {
-            requestPrismRefract(
-              shiftedRegistration.target.id,
-              "modifier-click",
-              { clientX: event.clientX, clientY: event.clientY },
-            );
+            requestPrismRefract(shiftedRegistration.target.id, "modifier-click");
           }
         }
         wieldSuppressedClickRef.current = shiftedRegistration.element;
@@ -2992,12 +2899,6 @@ export default function PrismCompanion({
     return () => {
       refractRunRef.current += 1;
       refractAbortRef.current?.abort();
-      if (refractTimerRef.current !== null) {
-        window.clearTimeout(refractTimerRef.current);
-      }
-      if (refractTravelFrameRef.current !== null) {
-        window.cancelAnimationFrame(refractTravelFrameRef.current);
-      }
       if (refractMagicHandoffFrameRef.current !== null) {
         window.cancelAnimationFrame(refractMagicHandoffFrameRef.current);
       }
@@ -3021,7 +2922,6 @@ export default function PrismCompanion({
         }
       }
       document.documentElement.removeAttribute(PRISM_REFRACT_CURSOR_ATTRIBUTE);
-      delete refractDropTargetRef.current?.dataset.prismRefractDropTarget;
     };
   }, []);
 
@@ -3232,15 +3132,10 @@ export default function PrismCompanion({
       });
       if (captured.phase !== "captured") return;
       wieldStateRef.current = captured;
-      wieldCaptureReturnPositionRef.current =
-        wieldReturnPositionRef.current ?? positionRef.current;
       wieldSuppressedClickRef.current = registration.element;
       let started = false;
       try {
-        started = requestPrismRefract(targetId, "wield-click", {
-          clientX: event.clientX,
-          clientY: event.clientY,
-        });
+        started = requestPrismRefract(targetId, "wield-click");
       } catch {
         started = false;
       }
@@ -4000,23 +3895,6 @@ export default function PrismCompanion({
     positionRef.current = next;
     publishSoftSynthesisPosition(next);
     setPosition(next);
-    if (sessionNoteContextRef.current) {
-      delete refractDropTargetRef.current?.dataset.prismRefractDropTarget;
-      refractDropTargetRef.current = null;
-      return;
-    }
-    const targetId = prismRefractTargetIdAtPoint(
-      event.clientX,
-      event.clientY,
-    );
-    const targetElement = targetId
-      ? registeredPrismRefractTarget(targetId)?.element ?? null
-      : null;
-    if (targetElement !== refractDropTargetRef.current) {
-      delete refractDropTargetRef.current?.dataset.prismRefractDropTarget;
-      refractDropTargetRef.current = targetElement;
-      if (targetElement) targetElement.dataset.prismRefractDropTarget = "true";
-    }
   };
 
   const endDrag = (event: ReactPointerEvent<HTMLButtonElement>): void => {
@@ -4032,23 +3910,12 @@ export default function PrismCompanion({
     }
     dragRef.current = null;
     setDragging(false);
-    const dropTargetId = drag.moved && !sessionNoteContextRef.current
-      ? prismRefractTargetIdAtPoint(event.clientX, event.clientY)
-      : null;
-    delete refractDropTargetRef.current?.dataset.prismRefractDropTarget;
-    refractDropTargetRef.current = null;
     try {
       event.currentTarget.releasePointerCapture(event.pointerId);
     } catch {
       // Pointer capture may already have ended at a browser boundary.
     }
     if (drag.moved) {
-      if (
-        dropTargetId &&
-        requestPrismRefract(dropTargetId, "orb-drop")
-      ) {
-        return;
-      }
       startInertia({ x: drag.velocityX, y: drag.velocityY });
     } else {
       playPrismCompanionGlassTap();
@@ -4067,8 +3934,6 @@ export default function PrismCompanion({
     dragRef.current = null;
     setDragging(false);
     draggingRef.current = false;
-    delete refractDropTargetRef.current?.dataset.prismRefractDropTarget;
-    refractDropTargetRef.current = null;
     persistPosition(positionRef.current);
     scheduleIdleDim();
   };
@@ -4086,8 +3951,7 @@ export default function PrismCompanion({
     const keepFieldRefract =
       session != null &&
       session.registration.target.kind !== "magic" &&
-      (session.phase === "traveling" ||
-        session.phase === "generating" ||
+      (session.phase === "generating" ||
         session.phase === "ready" ||
         session.phase === "error");
     if (!keepFieldRefract) {
@@ -4315,7 +4179,7 @@ export default function PrismCompanion({
               </strong>
               <p>
                 {refractTutorialStage === "summon"
-                  ? `Wield Prism with ${modifierPresentation.modifierLabel} and click the highlighted field, focus it and use ${shortcutPresentation.spokenLabel}, or drag the orb onto it.`
+                  ? `Wield Prism with ${modifierPresentation.modifierLabel} and click the highlighted field, or focus it and use ${shortcutPresentation.spokenLabel}.`
                   : refractTutorialStage === "reroll"
                     ? "Space refracts another candidate. It never types into the captured field."
                     : "Click away, Enter, or Tab keeps the draft. Escape restores the original."}
