@@ -38,6 +38,20 @@ describe("PrismBlockingLoader", () => {
     assert.match(css, /\.backdrop\[data-theme="light"\]/u);
   });
 
+  it("honors the document light theme when a portaled loader defaults to dark", () => {
+    assert.match(source, /theme = "dark"/u);
+    assert.match(
+      css,
+      /:global\(html\[data-theme="light"\]\) \.backdrop,[\s\S]{0,100}:global\(html\[data-theme="light"\]\) \.docked\s*\{[^}]*--loader-card:\s*rgba\(255, 255, 255, \.88\)[^}]*--loader-ink:\s*#181725/u,
+    );
+    assert.match(
+      css,
+      /:global\(html\[data-theme="light"\]\) \.backdrop \.card,[\s\S]{0,100}:global\(html\[data-theme="light"\]\) \.docked \.card\s*\{[^}]*#ffffffe8[^}]*#f4fbffe0[^}]*#f8f1ffe3/u,
+    );
+    assert.match(css, /border-color:\s*color-mix\([^;]*var\(--prism-s\)/u);
+    assert.match(css, /\.backdrop,[\s\S]{0,40}\.docked\s*\{[^}]*--loader-card:\s*rgba\(18, 19, 31, \.92\)/u);
+  });
+
   it("keeps Signal's light copy as the default while allowing contextual handoffs", () => {
     assert.match(source, /footer\?: string/u);
     assert.match(

@@ -185,13 +185,35 @@
 }
 
 .backdrop[data-theme="light"],
-.docked[data-theme="light"] {
+.docked[data-theme="light"],
+:global(html[data-theme="light"]) .backdrop,
+:global(html[data-theme="light"]) .docked {
   --loader-bg: rgba(246, 246, 252, .82);
   --loader-card: rgba(255, 255, 255, .88);
   --loader-ink: #181725;
   --loader-muted: rgba(45, 43, 64, .66);
   --loader-line: rgba(47, 45, 70, .13);
   --loader-shadow: rgba(63, 58, 108, .18);
+}
+
+/* Portaled loaders may omit `theme`, so the document theme is also an
+   authoritative light-mode source. These selectors intentionally outrank the
+   component's default data-theme="dark" without changing a dark document. */
+.backdrop[data-theme="light"] .card,
+.docked[data-theme="light"] .card,
+:global(html[data-theme="light"]) .backdrop .card,
+:global(html[data-theme="light"]) .docked .card {
+  border-color: color-mix(in srgb, var(--prism-s) 31%, #8094aa52);
+  background:
+    radial-gradient(circle at 12% -8%, color-mix(in srgb, var(--prism-s) 16%, transparent), transparent 42%),
+    radial-gradient(circle at 92% 8%, color-mix(in srgb, var(--prism-m) 13%, transparent), transparent 40%),
+    linear-gradient(124deg, #ffffffe8 0%, #f4fbffe0 54%, #f8f1ffe3 100%);
+  box-shadow:
+    0 28px 72px -38px #536d8a66,
+    0 0 24px color-mix(in srgb, var(--prism-m) 11%, transparent),
+    inset 0 1px 0 #fff;
+  backdrop-filter: blur(20px) saturate(1.12);
+  -webkit-backdrop-filter: blur(20px) saturate(1.12);
 }
 
 .card {

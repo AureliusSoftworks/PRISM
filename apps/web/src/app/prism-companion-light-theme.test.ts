@@ -54,6 +54,38 @@ describe("Prism companion light material", () => {
     assert.match(lightPanels, /color:\s*#1f3148/u);
   });
 
+  it("gives only the light tiny wielding pearl a compact prismatic rim", () => {
+    const lightTinyAvatar = rule(
+      companionCss,
+      ':global(html[data-theme="light"]) .anchor[data-wielding="true"] .avatar',
+    );
+    const lightTinyHalo = rule(
+      companionCss,
+      ':global(html[data-theme="light"]) .anchor[data-wielding="true"] .avatar::before',
+    );
+    const lightTinyPearl = rule(
+      companionCss,
+      ':global(html[data-theme="light"]) .anchor[data-wielding="true"] .avatar::after',
+    );
+    const wieldingAnchor = rule(
+      companionCss,
+      '.anchor[data-wielding="true"]',
+    );
+
+    assert.match(wieldingAnchor, /width:\s*28px/u);
+    assert.match(wieldingAnchor, /height:\s*28px/u);
+    assert.match(lightTinyAvatar, /#668ca066/u);
+    assert.match(lightTinyHalo, /conic-gradient/u);
+    assert.match(lightTinyHalo, /#ff7894/u);
+    assert.match(lightTinyHalo, /#42d7e5/u);
+    assert.match(lightTinyPearl, /#f7fbff/u);
+    assert.match(lightTinyPearl, /border-color:\s*#a8bed0/u);
+    assert.doesNotMatch(
+      `${lightTinyAvatar}${lightTinyHalo}${lightTinyPearl}`,
+      /#000|black/u,
+    );
+  });
+
   it("keeps the Synthesis, Chat, and Notes switcher luminous in light mode", () => {
     const selectedTab = rule(
       tabsCss,

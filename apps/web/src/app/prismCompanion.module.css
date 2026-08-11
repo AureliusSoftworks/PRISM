@@ -1080,6 +1080,44 @@
   filter: drop-shadow(0 8px 15px #5c739136);
 }
 
+/* The 28px grabbed state needs its own small-scale separation treatment on
+   white canvases. Keep the pearl center while tightening the spectrum into a
+   readable rim instead of introducing a dark outline. */
+:global(html[data-theme="light"]) .anchor[data-wielding="true"] .avatar {
+  filter: drop-shadow(0 2px 5px #668ca066);
+}
+
+:global(html[data-theme="light"]) .anchor[data-wielding="true"] .avatar::before {
+  background: conic-gradient(
+    from 18deg,
+    #ff7894,
+    #ffbd67,
+    #c9eb58,
+    #42d7e5,
+    #8d71ff,
+    #ff7894
+  );
+  opacity: .82;
+  filter: blur(2px);
+}
+
+:global(html[data-theme="light"]) .anchor[data-wielding="true"] .avatar::after {
+  border-color: #a8bed0;
+  background: radial-gradient(
+    circle at 35% 30%,
+    #fff 0 18%,
+    #fff 34%,
+    #f7fbff 58%,
+    #e2eef5 82%,
+    #bed2df 100%
+  );
+  box-shadow:
+    inset 2px 2px 4px #fff,
+    inset -2px -3px 5px #7895aa55,
+    0 0 0 1px #ffffffd9,
+    0 0 7px 2px #69cee878;
+}
+
 :global([data-theme="light"]) .anchor[data-session-note="true"] .avatar,
 :global([data-theme="light"]) .anchor[data-soft-synthesis="true"] .avatar {
   filter: drop-shadow(0 8px 16px #5c739142);
