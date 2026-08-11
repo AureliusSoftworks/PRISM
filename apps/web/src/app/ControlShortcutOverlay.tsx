@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { createPortal } from "react-dom";
 import { holdAppNavbarForControlShortcuts } from "./appNavbarChrome";
 import {
@@ -9,9 +9,7 @@ import {
   controlShortcutGuideShouldShow,
   isControlHeldAlone,
   isControlKeyEvent,
-  readPrismCompanionOrbAnchor,
   type ControlShortcutGuideEntry,
-  type PrismCompanionOrbAnchor,
 } from "./controlShortcutGuide";
 import {
   keyboardShortcutEventIsRecording,
@@ -37,6 +35,13 @@ function GuideChip({
   );
 }
 
+const CONTROL_ROOT_ACTIONS = new Set<ControlShortcutGuideEntry["action"]>([
+  "turbo",
+  "modelPicker",
+  "effortPicker",
+  "speechType",
+]);
+
 export function ControlShortcutGuide({
   platform,
   shortcuts,
@@ -45,11 +50,6 @@ export function ControlShortcutGuide({
   const [controlHeld, setControlHeld] = useState(false);
   const [recordingShortcut, setRecordingShortcut] = useState(false);
   const [visible, setVisible] = useState(false);
-  const [orbAnchor, setOrbAnchor] = useState<PrismCompanionOrbAnchor | null>(
-    null,
-  );
-  const guideRef = useRef<HTMLDivElement | null>(null);
-  const frameRef = useRef<number | null>(null);
 
   const entries = useMemo(
     () => controlShortcutGuideEntries(shortcuts, platform),
@@ -112,93 +112,29 @@ export function ControlShortcutGuide({
     };
   }, [controlHeld, recordingShortcut]);
 
-  useEffect(() => {
-    const tracking = controlShortcutGuideShouldShow({
-      controlHeld,
-      prismWielding: false,
-      recordingShortcut,
-    });
-    if (!tracking) {
-      setOrbAnchor(null);
-      return;
-    }
-    const syncOrb = (): void => {
-      const next = readPrismCompanionOrbAnchor();
-      setOrbAnchor((current) => {
-        if (
-          current &&
-          next &&
-          Math.abs(current.x - next.x) < 0.5 &&
-          Math.abs(current.y - next.y) < 0.5 &&
-          Math.abs(current.size - next.size) < 0.5
-        ) {
-          return current;
-        }
-        return next;
-      });
-      const node = guideRef.current;
-      if (node && next) {
-        node.style.setProperty("--orb-x", `${next.x}px`);
-        node.style.setProperty("--orb-y", `${next.y}px`);
-        node.style.setProperty("--orb-size", `${next.size}px`);
-      }
-      frameRef.current = window.requestAnimationFrame(syncOrb);
-    };
-    frameRef.current = window.requestAnimationFrame(syncOrb);
-    return () => {
-      if (frameRef.current !== null) {
-        window.cancelAnimationFrame(frameRef.current);
-        frameRef.current = null;
-      }
-    };
-  }, [controlHeld, recordingShortcut]);
-
   if (!mounted || typeof document === "undefined" || entries.length === 0) {
     return null;
   }
 
-  const bySlot = (slot: ControlShortcutGuideEntry["slot"]) =>
-    entries.filter((entry) => entry.slot === slot);
+  const controlRootEntries = entries.filter((entry) =>
+    CONTROL_ROOT_ACTIONS.has(entry.action),
+  );
 
   return createPortal(
     <div
-      ref={guideRef}
       className={styles.guide}
       data-prism-control-shortcut-guide="true"
       data-visible={visible ? "true" : undefined}
-      data-orb-missing={orbAnchor ? undefined : "true"}
       role="status"
       aria-live="polite"
       aria-hidden={visible ? undefined : "true"}
     >
-      <div className={styles.compass} aria-hidden="true">
-        <div className={styles.slotUp}>
-          {bySlot("up").map((entry) => (
-            <GuideChip key={entry.action} entry={entry} />
-          ))}
-        </div>
-        <div className={styles.slotLeft}>
-          {bySlot("left").map((entry) => (
-            <GuideChip key={entry.action} entry={entry} />
-          ))}
-        </div>
-        <div className={styles.slotHub} aria-hidden="true" />
-        <div className={styles.slotRight}>
-          {bySlot("right").map((entry) => (
-            <GuideChip key={entry.action} entry={entry} />
-          ))}
-        </div>
-        <div className={styles.slotDown}>
-          {bySlot("down").map((entry) => (
-            <GuideChip key={entry.action} entry={entry} />
-          ))}
-        </div>
-      </div>
-      <div className={styles.footer}>
-        {bySlot("footer").map((entry) => (
+      <span className={styles.title}>Control shortcuts</span>
+      <span className={styles.shortcuts}>
+        {controlRootEntries.map((entry) => (
           <GuideChip key={entry.action} entry={entry} />
         ))}
-      </div>
+      </span>
     </div>,
     document.body,
   );

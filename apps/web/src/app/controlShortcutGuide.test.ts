@@ -49,7 +49,7 @@ test("shows the guide only while Control is held", () => {
   );
 });
 
-test("builds a compass of Control-root shortcuts from preferences", () => {
+test("builds Control-root shortcut entries from preferences", () => {
   const entries = controlShortcutGuideEntries(
     defaultPrismKeyboardShortcuts("MacIntel"),
     "MacIntel",
@@ -80,7 +80,7 @@ test("recognizes Control key events and alone-held Control", () => {
   );
 });
 
-test("reads the live Prism companion orb center for the compass hub", () => {
+test("reads the live Prism companion orb center when another UI needs it", () => {
   assert.equal(readPrismCompanionOrbAnchor({ querySelector: () => null }), null);
   const anchor = {
     getBoundingClientRect: () => ({

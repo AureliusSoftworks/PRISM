@@ -1,99 +1,43 @@
 .guide {
-  --orb-x: 50vw;
-  --orb-y: 50vh;
-  --orb-size: 68px;
   position: fixed;
-  left: var(--orb-x);
-  top: var(--orb-y);
-  /* Sit behind the live Prism pearl (anchor 855 / wielding 857). */
-  z-index: 850;
-  isolation: isolate;
-  display: grid;
-  width: min(82vw, 580px);
+  z-index: 179;
+  top: max(48px, env(safe-area-inset-top, 0px) + 16px);
+  left: 50%;
+  display: inline-flex;
+  align-items: center;
+  width: max-content;
+  max-width: calc(100vw - 24px);
   gap: 7px;
-  justify-items: center;
-  padding: 0;
-  transform: translate(-50%, -50%);
+  padding: 6px 9px;
+  border: 1px solid #ffffff16;
+  border-radius: 999px;
+  background: #080b13e8;
+  box-shadow: 0 8px 22px #00000042;
+  transform: translateX(-50%) translateY(-4px);
   opacity: 0;
   pointer-events: none;
-  transition: opacity 160ms ease;
+  transition: opacity 140ms ease, transform 140ms ease;
 }
 
 .guide[data-visible="true"] {
   opacity: 1;
+  transform: translateX(-50%) translateY(0);
 }
 
-.guide[data-orb-missing="true"] {
-  left: 50%;
-  top: auto;
-  bottom: max(22px, env(safe-area-inset-bottom, 0px) + 18px);
-  transform: translateX(-50%);
+.title {
+  flex: 0 0 auto;
+  color: #ffffffa8;
+  font: 650 0.62rem/1 system-ui, sans-serif;
+  letter-spacing: 0.02em;
+  text-transform: uppercase;
 }
 
-/* A quiet dark vignette keeps the live Prism pearl readable without turning
-   the shortcut hint into a modal surface. */
-.guide::before {
-  position: absolute;
-  z-index: -1;
-  width: clamp(150px, calc(var(--orb-size) + 92px), 210px);
-  aspect-ratio: 1;
-  border-radius: 50%;
-  content: "";
-  background:
-    radial-gradient(circle, #02050bd6 0 23%, #070b1275 49%, transparent 72%),
-    radial-gradient(circle, color-mix(in srgb, var(--prism-i, #b7e63a) 14%, transparent) 0 19%, transparent 62%);
-  box-shadow:
-    0 12px 28px #00000072,
-    0 0 34px color-mix(in srgb, var(--prism-s, #2fd3e3) 12%, transparent);
-  pointer-events: none;
-}
-
-.compass {
-  display: grid;
-  width: 100%;
-  grid-template-columns: minmax(120px, 1fr) auto minmax(120px, 1fr);
-  grid-template-rows: auto auto auto;
-  gap: 7px 12px;
-  align-items: center;
-  justify-items: center;
-}
-
-.slotUp {
-  grid-column: 2;
-  grid-row: 1;
-}
-
-.slotLeft {
-  grid-column: 1;
-  grid-row: 2;
-  justify-self: end;
-}
-
-/* Empty hub: the live Prism orb paints through the open center. */
-.slotHub {
-  grid-column: 2;
-  grid-row: 2;
-  width: calc(var(--orb-size) + 14px);
-  height: calc(var(--orb-size) + 14px);
-}
-
-.slotRight {
-  grid-column: 3;
-  grid-row: 2;
-  justify-self: start;
-}
-
-.slotDown {
-  grid-column: 2;
-  grid-row: 3;
-}
-
-.footer {
-  position: relative;
+.shortcuts {
   display: flex;
-  flex-wrap: wrap;
-  gap: 5px;
-  justify-content: center;
+  min-width: 0;
+  align-items: center;
+  gap: 3px;
+  overflow: hidden;
 }
 
 .chip {
@@ -101,13 +45,10 @@
   display: inline-flex;
   align-items: center;
   gap: 5px;
-  max-width: min(38vw, 154px);
-  padding: 4px 6px;
-  border: 1px solid #ffffff12;
-  border-radius: 999px;
-  color: #ffffffd0;
-  background: #080b13a8;
-  font: 600 0.62rem/1.1 system-ui, sans-serif;
+  max-width: min(22vw, 118px);
+  padding: 2px 4px;
+  color: #ffffffbf;
+  font: 600 0.58rem/1 system-ui, sans-serif;
   white-space: nowrap;
 }
 
@@ -115,13 +56,13 @@
   display: inline-flex;
   align-items: center;
   justify-content: center;
-  min-width: 1.55em;
-  padding: 2px 4px;
+  min-width: 1.4em;
+  padding: 1px 3px;
   border: 0;
   border-radius: 4px;
   color: #ffffffa8;
   background: #ffffff0a;
-  font: 700 0.58rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+  font: 700 0.54rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
 }
 
 .chipLabel {
@@ -131,15 +72,15 @@
 
 @media (max-width: 640px) {
   .guide {
-    width: min(90vw, 430px);
+    gap: 4px;
+    padding-inline: 7px;
   }
 
-  .compass {
-    grid-template-columns: 1fr auto 1fr;
-    gap: 8px;
+  .title {
+    display: none;
   }
 
   .chip {
-    max-width: 40vw;
+    max-width: 22vw;
   }
 }
