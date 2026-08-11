@@ -6,8 +6,8 @@
   "scripts": {
     "test": "node --test --experimental-strip-types src/app/*.test.ts",
     "test:coverage": "node --test --experimental-strip-types --experimental-test-coverage --test-coverage-lines=85 --test-coverage-branches=65 --test-coverage-functions=85 --test-coverage-exclude='**/packages/**' src/app/*.test.ts",
-    "pretest": "npm --prefix ../../packages/config run build && npm --prefix ../../packages/shared run build",
-    "pretest:coverage": "npm --prefix ../../packages/config run build && npm --prefix ../../packages/shared run build",
+    "pretest": "npm --prefix ../../packages/config run build && npm --prefix ../../packages/shared run build && npm run typecheck",
+    "pretest:coverage": "npm --prefix ../../packages/config run build && npm --prefix ../../packages/shared run build && npm run typecheck",
     "generate:ghost-lexicon": "node scripts/generate-composer-ghost-lexicon.mjs",
     "predev": "npm --prefix ../../packages/shared run build",
     "prebuild": "npm --prefix ../../packages/shared run build",

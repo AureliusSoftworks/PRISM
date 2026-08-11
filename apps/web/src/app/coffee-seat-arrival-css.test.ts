@@ -145,6 +145,18 @@ function ruleForExactSelector(selector: string): string {
   return match[2]!;
 }
 
+function ruleForNormalizedSelector(selector: string): string {
+  const normalizedSelector = selector.replace(/\s+/gu, " ").trim();
+  const match = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find((entry) =>
+    (entry[1] ?? "")
+      .split(",")
+      .map((candidate) => candidate.replace(/\s+/gu, " ").trim())
+      .includes(normalizedSelector),
+  );
+  assert.ok(match, `Missing normalized CSS rule for ${selector}`);
+  return match[2]!;
+}
+
 function rulesForExactSelector(selector: string): string[] {
   return [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)]
     .filter((entry) =>

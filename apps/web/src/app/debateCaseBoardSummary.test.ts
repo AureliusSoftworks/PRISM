@@ -45,6 +45,7 @@ test("round key stays stable within a round and advances between rounds", () => 
   const opening = stubSession({
     stepKey: "opening_against",
     formatState: {
+      version: 1,
       format: "forum",
       rebuttalRound: 1,
       rebuttalRoundTarget: 2,
@@ -57,6 +58,7 @@ test("round key stays stable within a round and advances between rounds", () => 
   const rebuttal1 = stubSession({
     stepKey: "rebuttal_for",
     formatState: {
+      version: 1,
       format: "forum",
       rebuttalRound: 1,
       rebuttalRoundTarget: 2,
@@ -69,6 +71,7 @@ test("round key stays stable within a round and advances between rounds", () => 
   const rebuttal2 = stubSession({
     stepKey: "rebuttal_against",
     formatState: {
+      version: 1,
       format: "forum",
       rebuttalRound: 2,
       rebuttalRoundTarget: 2,
@@ -106,6 +109,7 @@ test("orders case cards by source-event sequence for the SMS stream", () => {
   ];
   const session = stubSession({
     formatState: {
+      version: 1,
       format: "forum",
       rebuttalRound: 1,
       rebuttalRoundTarget: 1,
@@ -114,20 +118,28 @@ test("orders case cards by source-event sequence for the SMS stream", () => {
     },
     events: [
       {
+        version: 1,
         id: "e1",
         sequence: 1,
+        phase: "rebuttal",
+        stepKey: "rebuttal_for",
         kind: "speech",
         speakerKind: "advocate",
+        speakerBotId: "for-bot",
         sideId: "for",
         content: "First claim.",
         sourceIds: [],
         createdAt: "2026-01-01T00:00:01Z",
       },
       {
+        version: 1,
         id: "e2",
         sequence: 2,
+        phase: "rebuttal",
+        stepKey: "rebuttal_against",
         kind: "speech",
         speakerKind: "advocate",
+        speakerBotId: "against-bot",
         sideId: "against",
         content: "Second claim.",
         sourceIds: [],
@@ -156,6 +168,7 @@ test("hydrates summary from session board when gated board is empty", () => {
   const session = stubSession({
     stepKey: "rebuttal_for",
     formatState: {
+      version: 1,
       format: "forum",
       rebuttalRound: 3,
       rebuttalRoundTarget: 3,
@@ -165,10 +178,14 @@ test("hydrates summary from session board when gated board is empty", () => {
     caseBoard: cards,
     events: [
       {
+        version: 1,
         id: "e1",
         sequence: 1,
+        phase: "rebuttal",
+        stepKey: "rebuttal_for",
         kind: "speech",
         speakerKind: "advocate",
+        speakerBotId: "for-bot",
         sideId: "for",
         content: "Dogs travel better.",
         sourceIds: [],
@@ -191,6 +208,7 @@ test("empty sealed case board uses silence-aware summary copy", () => {
     status: "completed",
     stepKey: "completed",
     formatState: {
+      version: 1,
       format: "forum",
       rebuttalRound: 3,
       rebuttalRoundTarget: 3,
@@ -217,6 +235,7 @@ test("composes at most five summary sentences from the case board", () => {
   }));
   const session = stubSession({
     formatState: {
+      version: 1,
       format: "forum",
       rebuttalRound: 1,
       rebuttalRoundTarget: 1,
@@ -224,10 +243,14 @@ test("composes at most five summary sentences from the case board", () => {
       rebuttalRoundRationale: "One exchange.",
     },
     events: cards.map((card, index) => ({
+      version: 1,
       id: card.createdEventId,
       sequence: index + 1,
+      phase: "rebuttal" as const,
+      stepKey: card.sideId === "for" ? "rebuttal_for" : "rebuttal_against",
       kind: "speech",
       speakerKind: "advocate",
+      speakerBotId: card.sideId === "for" ? "for-bot" : "against-bot",
       sideId: card.sideId,
       content: card.summary,
       sourceIds: [],
@@ -266,6 +289,7 @@ test("formats a plain-text Living Case Board clipboard transcript", () => {
   ];
   const session = stubSession({
     formatState: {
+      version: 1,
       format: "forum",
       rebuttalRound: 1,
       rebuttalRoundTarget: 1,
@@ -274,20 +298,28 @@ test("formats a plain-text Living Case Board clipboard transcript", () => {
     },
     events: [
       {
+        version: 1,
         id: "e1",
         sequence: 1,
+        phase: "rebuttal",
+        stepKey: "rebuttal_for",
         kind: "speech",
         speakerKind: "advocate",
+        speakerBotId: "for-bot",
         sideId: "for",
         content: cards[0]!.summary,
         sourceIds: ["src-a"],
         createdAt: "2026-01-01T00:00:01Z",
       },
       {
+        version: 1,
         id: "e2",
         sequence: 2,
+        phase: "rebuttal",
+        stepKey: "rebuttal_against",
         kind: "speech",
         speakerKind: "advocate",
+        speakerBotId: "against-bot",
         sideId: "against",
         content: cards[1]!.summary,
         sourceIds: [],
