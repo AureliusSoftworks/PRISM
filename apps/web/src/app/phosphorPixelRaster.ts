@@ -314,3 +314,91 @@ export function resamplePhosphorRgbaCoverage(
 
   return output;
 }
+
+/**
+ * Upsample or downsample RGBA with hard nearest-neighbor cells. Used when the
+ * Avatar Studio pixel grid is visible so authored Ink stays blocky and
+ * placement-aligned instead of bilinear-soft.
+ */
+export function resamplePhosphorRgbaNearestNeighbor(
+  rgba: Uint8ClampedArray,
+  sourceWidth: number,
+  sourceHeight: number,
+  outputWidth: number,
+  outputHeight: number,
+): Uint8ClampedArray {
+  const normalizedSourceWidth = Math.max(0, Math.floor(sourceWidth));
+  const normalizedSourceHeight = Math.max(0, Math.floor(sourceHeight));
+  const normalizedOutputWidth = Math.max(0, Math.floor(outputWidth));
+  const normalizedOutputHeight = Math.max(0, Math.floor(outputHeight));
+  const output = new Uint8ClampedArray(
+    normalizedOutputWidth * normalizedOutputHeight * 4,
+  );
+  if (
+    normalizedSourceWidth === 0 ||
+    normalizedSourceHeight === 0 ||
+    normalizedOutputWidth === 0 ||
+    normalizedOutputHeight === 0 ||
+    rgba.length < normalizedSourceWidth * normalizedSourceHeight * 4
+  ) {
+    return output;
+  }
+  if (
+    normalizedSourceWidth === normalizedOutputWidth &&
+    normalizedSourceHeight === normalizedOutputHeight
+  ) {
+    output.set(
+      rgba.subarray(0, normalizedOutputWidth * normalizedOutputHeight * 4),
+    );
+    return output;
+  }
+
+  const scaleX = normalizedSourceWidth / normalizedOutputWidth;
+  const scaleY = normalizedSourceHeight / normalizedOutputHeight;
+  for (let y = 0; y < normalizedOutputHeight; y += 1) {
+    const sourceY = Math.min(
+      normalizedSourceHeight - 1,
+      Math.max(0, Math.floor((y + 0.5) * scaleY)),
+    );
+    for (let x = 0; x < normalizedOutputWidth; x += 1) {
+      const sourceX = Math.min(
+        normalizedSourceWidth - 1,
+        Math.max(0, Math.floor((x + 0.5) * scaleX)),
+      );
+      const sourceIndex = (sourceY * normalizedSourceWidth + sourceX) * 4;
+      const outputIndex = (y * normalizedOutputWidth + x) * 4;
+      output[outputIndex] = rgba[sourceIndex] ?? 0;
+      output[outputIndex + 1] = rgba[sourceIndex + 1] ?? 0;
+      output[outputIndex + 2] = rgba[sourceIndex + 2] ?? 0;
+      output[outputIndex + 3] = rgba[sourceIndex + 3] ?? 0;
+    }
+  }
+  return output;
+}
+
+/** Pick coverage (CRT soft) or nearest-neighbor (pixel-grid editing) resampling. */
+export function resamplePhosphorRgbaForPresentation(
+  rgba: Uint8ClampedArray,
+  sourceWidth: number,
+  sourceHeight: number,
+  outputWidth: number,
+  outputHeight: number,
+  mode: "coverage" | "nearest" = "coverage",
+): Uint8ClampedArray {
+  if (mode === "nearest") {
+    return resamplePhosphorRgbaNearestNeighbor(
+      rgba,
+      sourceWidth,
+      sourceHeight,
+      outputWidth,
+      outputHeight,
+    );
+  }
+  return resamplePhosphorRgbaCoverage(
+    rgba,
+    sourceWidth,
+    sourceHeight,
+    outputWidth,
+    outputHeight,
+  );
+}

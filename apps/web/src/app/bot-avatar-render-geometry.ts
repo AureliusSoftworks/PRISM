@@ -15,6 +15,18 @@ export const BOT_AVATAR_CANONICAL_FACE_PLACEMENT: BotAvatarFacePlacement = {
 export const BOT_AVATAR_FACE_GLYPH_FRAME_RATIO = 0.217;
 
 /**
+ * Avatar Studio's canonical ink-free face registration. Apply this at the
+ * shared mannequin boundary so live surfaces cannot introduce their own
+ * face offsets or scale.
+ */
+export const BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE = {
+  "--zen-live-bot-face-x": `${BOT_AVATAR_CANONICAL_FACE_PLACEMENT.xPct}%`,
+  "--zen-live-bot-face-y": `${BOT_AVATAR_CANONICAL_FACE_PLACEMENT.yPct}%`,
+  "--zen-live-bot-face-scale": BOT_AVATAR_CANONICAL_FACE_PLACEMENT.scale,
+  "--zen-live-bot-avatar-face-glyph-size": `${BOT_AVATAR_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
+} as const;
+
+/**
  * Face registration shared by the Details editor and every live avatar that
  * renders authored screen ink. Keeping this contract separate from the
  * ink-free default prevents face-relative paint from drifting at runtime.

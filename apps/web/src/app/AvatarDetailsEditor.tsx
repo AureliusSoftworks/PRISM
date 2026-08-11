@@ -79,7 +79,7 @@ import {
 } from "./avatar-details";
 import {
   PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
-  resamplePhosphorRgbaCoverage,
+  resamplePhosphorRgbaForPresentation,
 } from "./phosphorPixelRaster";
 import {
   AVATAR_DETAIL_INK_TEMPLATE_LIMIT,
@@ -188,6 +188,8 @@ export interface AvatarDetailsEditorProps {
   layout?: "panel" | "foundry";
   canvasPortalTarget?: HTMLElement | null;
   autoCommit?: boolean;
+  /** When true (Studio pixel grid visible), ink draws as hard nearest-neighbor cells. */
+  pixelPerfectInk?: boolean;
 }
 
 interface AvatarDetailsPointerStroke {
@@ -264,9 +266,40 @@ const AvatarDetailsEditorSession = forwardRef<
     layout = "panel",
     canvasPortalTarget = null,
     autoCommit = false,
+    pixelPerfectInk = false,
   },
   ref,
 ): React.JSX.Element {
+  const [gridPixelPerfectInk, setGridPixelPerfectInk] = useState(false);
+  useEffect(() => {
+    if (layout !== "foundry" || !canvasPortalTarget) {
+      setGridPixelPerfectInk(false);
+      return;
+    }
+    const syncGridVisibility = (): void => {
+      setGridPixelPerfectInk(
+        Boolean(
+          canvasPortalTarget.closest(
+            '[data-avatar-details-grid-visible="true"]',
+          ),
+        ),
+      );
+    };
+    syncGridVisibility();
+    const stage =
+      canvasPortalTarget.closest("[data-foundry-camera-surface]") ??
+      canvasPortalTarget.parentElement;
+    if (!stage) return;
+    const observer = new MutationObserver(syncGridVisibility);
+    observer.observe(stage, {
+      attributes: true,
+      attributeFilter: ["data-avatar-details-grid-visible"],
+    });
+    return () => observer.disconnect();
+  }, [canvasPortalTarget, layout]);
+  const inkResampleMode =
+    pixelPerfectInk || gridPixelPerfectInk ? "nearest" : "coverage";
+  const inkPixelPerfect = inkResampleMode === "nearest";
   const normalizedValue = useMemo(() => normalizeAvatarDetails(value), [value]);
   const legacyFlattenResult = useMemo(
     () => flattenLegacyAvatarDetailStampsToInk(normalizedValue, faceStyle),
@@ -434,18 +467,19 @@ const AvatarDetailsEditorSession = forwardRef<
         PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
       );
       imageData.data.set(
-        resamplePhosphorRgbaCoverage(
+        resamplePhosphorRgbaForPresentation(
           pixels,
           AVATAR_DETAILS_CANVAS_SIZE,
           AVATAR_DETAILS_CANVAS_SIZE,
           PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
           PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
+          inkResampleMode,
         ),
       );
       context.imageSmoothingEnabled = false;
       context.putImageData(imageData, 0, 0);
     },
-    [faceStyle],
+    [faceStyle, inkResampleMode],
   );
 
   const updateWorking = useCallback(
@@ -610,12 +644,13 @@ const AvatarDetailsEditorSession = forwardRef<
       PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
     );
     imageData.data.set(
-      resamplePhosphorRgbaCoverage(
+      resamplePhosphorRgbaForPresentation(
         rasterizeAvatarDetailsSemanticRgba(preview.details, faceStyle),
         AVATAR_DETAILS_CANVAS_SIZE,
         AVATAR_DETAILS_CANVAS_SIZE,
         PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
         PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
+        inkResampleMode,
       ),
     );
     context.imageSmoothingEnabled = false;
@@ -623,6 +658,7 @@ const AvatarDetailsEditorSession = forwardRef<
   }, [
     equippedTemplate,
     faceStyle,
+    inkResampleMode,
     templateOffsetX,
     templateOffsetY,
     templateScalePct,
@@ -1451,6 +1487,12 @@ const AvatarDetailsEditorSession = forwardRef<
           data-avatar-details-mask-size={
             PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX
           }
+          data-avatar-details-rendering={
+            inkPixelPerfect ? "nearest-neighbor" : "coverage-sampled"
+          }
+          data-avatar-details-pixel-perfect={
+            inkPixelPerfect ? "true" : undefined
+          }
           aria-hidden="true"
         />
         <canvas
@@ -1459,6 +1501,9 @@ const AvatarDetailsEditorSession = forwardRef<
           width={PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX}
           height={PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX}
           data-avatar-details-stamp-preview="true"
+          data-avatar-details-pixel-perfect={
+            inkPixelPerfect ? "true" : undefined
+          }
           data-visible={equippedTemplate ? "true" : undefined}
           aria-hidden="true"
         />

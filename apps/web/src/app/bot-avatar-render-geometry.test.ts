@@ -3,7 +3,10 @@ import { readFileSync } from "node:fs";
 import { describe, it } from "node:test";
 import {
   BOT_AVATAR_CANONICAL_FACE_FACING_STYLE,
+  BOT_AVATAR_CANONICAL_FACE_PLACEMENT,
+  BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE,
   BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
+  BOT_AVATAR_FACE_GLYPH_FRAME_RATIO,
   BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO,
   BOT_AVATAR_DETAILS_FACE_NUDGE_Y,
   BOT_AVATAR_DETAILS_FACE_PLACEMENT,
@@ -20,6 +23,23 @@ const pageCss = readFileSync(
 );
 
 describe("Avatar Details face registration", () => {
+  it("applies Avatar Studio's canonical registration at the shared mannequin boundary", () => {
+    assert.deepEqual(BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE, {
+      "--zen-live-bot-face-x":
+        `${BOT_AVATAR_CANONICAL_FACE_PLACEMENT.xPct}%`,
+      "--zen-live-bot-face-y":
+        `${BOT_AVATAR_CANONICAL_FACE_PLACEMENT.yPct}%`,
+      "--zen-live-bot-face-scale": BOT_AVATAR_CANONICAL_FACE_PLACEMENT.scale,
+      "--zen-live-bot-avatar-face-glyph-size":
+        `${BOT_AVATAR_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
+    });
+    assert.match(
+      pageSource,
+      /const avatarFaceRegistrationStyle = hasAvatarDetailsVisuals\s*\? BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE\s*:\s*BOT_AVATAR_CANONICAL_FACE_REGISTRATION_STYLE;/,
+    );
+    assert.doesNotMatch(pageSource, /ZEN_LIVE_BOT_LOCKED_FACE_PLACEMENT/);
+  });
+
   it("uses the editor calibration for details-bearing live avatars", () => {
     assert.deepEqual(BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE, {
       "--zen-live-bot-face-x":

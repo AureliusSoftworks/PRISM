@@ -427,6 +427,30 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       editorCss,
+      /\[data-avatar-details-grid-visible="true"\] \.canvas[\s\S]*?filter:\s*none !important/,
+    );
+    assert.match(editorSource, /resamplePhosphorRgbaForPresentation\(/);
+    assert.match(editorSource, /inkResampleMode/);
+    assert.match(
+      editorSource,
+      /data-avatar-details-grid-visible="true"/,
+    );
+    assert.match(maskSource, /pixelPerfectInk/);
+    assert.match(maskSource, /resamplePhosphorRgbaForPresentation\(/);
+    assert.match(
+      maskCss,
+      /\.core\[data-avatar-details-pixel-perfect="true"\][\s\S]*?filter:\s*none/,
+    );
+    assert.match(
+      pageCss,
+      /data-avatar-details-grid-visible="true"\][\s\S]*?\[data-avatar-details-emission\][\s\S]*?filter:\s*none !important/,
+    );
+    assert.match(
+      pageSource,
+      /pixelPerfectInk=\{botAvatarFoundryPixelGridVisible\(\s*foundryViewport\.zoom,\s*\)\}/,
+    );
+    assert.match(
+      editorCss,
       /\.canvasFrame\[data-foundry-canvas="true"\] \.canvasViewport\s*\{[\s\S]*?transform:\s*none;[\s\S]*?transform-origin:\s*center;/,
     );
     assert.match(pageSource, /runtimeEffectsEnabled=\{screenMode === "live"\}/);

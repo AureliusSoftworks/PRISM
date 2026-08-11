@@ -13,6 +13,8 @@ import {
   phosphorCanvasFontShorthand,
   phosphorTextAlphabeticBaseline,
   resamplePhosphorRgbaCoverage,
+  resamplePhosphorRgbaForPresentation,
+  resamplePhosphorRgbaNearestNeighbor,
   samplePhosphorAlphaCells,
   thresholdPhosphorPixelAlpha,
 } from "./phosphorPixelRaster.ts";
@@ -149,5 +151,32 @@ describe("phosphor pixel raster", () => {
     assert.equal(alphaAt(1, 1), 143);
     assert.equal(alphaAt(2, 2), 16);
     assert.deepEqual(Array.from(result.slice(0, 3)), [220, 40, 70]);
+  });
+
+  it("keeps hard block cells when nearest-neighbor resampling for the pixel grid", () => {
+    const source = new Uint8ClampedArray(2 * 2 * 4);
+    source.set([220, 40, 70, 255], 0);
+    source.set([10, 200, 30, 255], 4);
+
+    const result = resamplePhosphorRgbaNearestNeighbor(source, 2, 2, 4, 4);
+    const pixelAt = (x: number, y: number): number[] =>
+      Array.from(result.slice((y * 4 + x) * 4, (y * 4 + x) * 4 + 4));
+
+    assert.deepEqual(pixelAt(0, 0), [220, 40, 70, 255]);
+    assert.deepEqual(pixelAt(1, 0), [220, 40, 70, 255]);
+    assert.deepEqual(pixelAt(2, 0), [10, 200, 30, 255]);
+    assert.deepEqual(pixelAt(3, 0), [10, 200, 30, 255]);
+    assert.deepEqual(pixelAt(0, 1), [220, 40, 70, 255]);
+    assert.deepEqual(pixelAt(2, 1), [10, 200, 30, 255]);
+
+    const viaPresentation = resamplePhosphorRgbaForPresentation(
+      source,
+      2,
+      2,
+      4,
+      4,
+      "nearest",
+    );
+    assert.deepEqual(Array.from(viaPresentation), Array.from(result));
   });
 });

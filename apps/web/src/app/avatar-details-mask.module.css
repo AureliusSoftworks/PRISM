@@ -244,3 +244,10 @@
     )
     var(--zen-live-bot-crt-flicker-base-filter);
 }
+
+.layer[data-avatar-details-pixel-perfect="true"],
+.core[data-avatar-details-pixel-perfect="true"] {
+  --zen-live-bot-crt-flicker-base-filter: none;
+  filter: none;
+  mix-blend-mode: normal;
+}

@@ -789,6 +789,28 @@
   opacity: 0.42;
 }
 
+/* Pixel-grid zoom: kill CRT bloom/blur so ink snaps to hard cells for placement. */
+[data-avatar-details-grid-visible="true"] .canvas,
+[data-avatar-details-grid-visible="true"] .stampPreview,
+[data-avatar-details-grid-visible="true"] .canvas[data-avatar-details-editor-core="true"],
+.canvas[data-avatar-details-pixel-perfect="true"],
+.stampPreview[data-avatar-details-pixel-perfect="true"] {
+  filter: none !important;
+  image-rendering: pixelated;
+  image-rendering: crisp-edges;
+}
+
+[data-avatar-details-grid-visible="true"] .stampPreview {
+  filter: none !important;
+}
+
+[data-avatar-details-grid-visible="true"] .paintHalo,
+[data-avatar-details-grid-visible="true"] .paintBloom,
+[data-avatar-details-grid-visible="true"] .paintCore {
+  filter: none !important;
+  mix-blend-mode: normal;
+}
+
 .symmetryGuide {
   position: absolute;
   top: 0;

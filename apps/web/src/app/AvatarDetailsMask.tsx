@@ -29,7 +29,7 @@ import {
   avatarDetailsSpeechMotionOrigin,
   type AvatarDetailsSpeechMotionOrigin,
 } from "./avatar-details-speech-motion";
-import { resamplePhosphorRgbaCoverage } from "./phosphorPixelRaster";
+import { resamplePhosphorRgbaForPresentation } from "./phosphorPixelRaster";
 import styles from "./avatar-details-mask.module.css";
 
 export interface AvatarDetailsMaskProps {
@@ -45,6 +45,8 @@ export interface AvatarDetailsMaskProps {
   staticRaster?: boolean;
   coreColor?: "phosphor" | "ink";
   rasterSize?: number;
+  /** Hard nearest-neighbor cells; used when the Studio pixel grid is visible. */
+  pixelPerfectInk?: boolean;
 }
 
 type AvatarDetailsSpeechMotion = Exclude<
@@ -64,6 +66,7 @@ interface AvatarDetailsEmissionPlanesProps {
   staticRaster?: boolean;
   coreColor: "phosphor" | "ink";
   rasterSize: number;
+  pixelPerfectInk?: boolean;
 }
 
 function AvatarDetailsEmissionPlanes({
@@ -78,6 +81,7 @@ function AvatarDetailsEmissionPlanes({
   staticRaster = false,
   coreColor,
   rasterSize,
+  pixelPerfectInk = false,
 }: AvatarDetailsEmissionPlanesProps): React.JSX.Element | null {
   const haloCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const bloomCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -88,27 +92,30 @@ function AvatarDetailsEmissionPlanes({
     [pixels],
   );
   useLayoutEffect(() => {
+    const resampleMode = pixelPerfectInk ? "nearest" : "coverage";
     const rasterizedGlowPixels =
       rasterSize === AVATAR_DETAILS_CANVAS_SIZE
         ? pixels
-        : resamplePhosphorRgbaCoverage(
+        : resamplePhosphorRgbaForPresentation(
             pixels,
             AVATAR_DETAILS_CANVAS_SIZE,
             AVATAR_DETAILS_CANVAS_SIZE,
             rasterSize,
             rasterSize,
+            resampleMode,
           );
     const sourceCorePixels =
       coreColor === "ink" ? pixels : avatarDetailsPhosphorCoreRgba(pixels);
     const rasterizedCorePixels =
       rasterSize === AVATAR_DETAILS_CANVAS_SIZE
         ? sourceCorePixels
-        : resamplePhosphorRgbaCoverage(
+        : resamplePhosphorRgbaForPresentation(
             sourceCorePixels,
             AVATAR_DETAILS_CANVAS_SIZE,
             AVATAR_DETAILS_CANVAS_SIZE,
             rasterSize,
             rasterSize,
+            resampleMode,
           );
     if (staticRaster && detailLevel === "audience") {
       if (!hasPixels) {
@@ -134,11 +141,13 @@ function AvatarDetailsEmissionPlanes({
     const haloCanvas = haloCanvasRef.current;
     const bloomCanvas = bloomCanvasRef.current;
     const coreCanvas = coreCanvasRef.current;
+    const needsGlowPlanes = detailLevel === "full" && !pixelPerfectInk;
+    const needsBloomPlane = detailLevel === "reduced" && !pixelPerfectInk;
     if (
       !hasPixels ||
       !coreCanvas ||
-      (detailLevel === "full" && (!haloCanvas || !bloomCanvas)) ||
-      (detailLevel === "reduced" && !bloomCanvas)
+      (needsGlowPlanes && (!haloCanvas || !bloomCanvas)) ||
+      (needsBloomPlane && !bloomCanvas)
     ) {
       return;
     }
@@ -146,7 +155,7 @@ function AvatarDetailsEmissionPlanes({
     const bloomContext =
       bloomCanvas?.getContext("2d", { alpha: true }) ?? null;
     const coreContext = coreCanvas.getContext("2d", { alpha: true });
-    if (!coreContext || (detailLevel !== "audience" && !bloomContext)) {
+    if (!coreContext || (needsGlowPlanes || needsBloomPlane ? !bloomContext : false)) {
       return;
     }
     const glowImageData = coreContext.createImageData(
@@ -166,7 +175,15 @@ function AvatarDetailsEmissionPlanes({
     }
     coreContext.imageSmoothingEnabled = false;
     coreContext.putImageData(coreImageData, 0, 0);
-  }, [coreColor, detailLevel, hasPixels, pixels, rasterSize, staticRaster]);
+  }, [
+    coreColor,
+    detailLevel,
+    hasPixels,
+    pixelPerfectInk,
+    pixels,
+    rasterSize,
+    staticRaster,
+  ]);
 
   if (!hasPixels) return null;
 
@@ -194,6 +211,7 @@ function AvatarDetailsEmissionPlanes({
     "data-avatar-details-ink-motion": motion ?? undefined,
     "data-avatar-details-mouth-shape": motion ? mouthShape : undefined,
     "data-avatar-details-render-detail": detailLevel,
+    "data-avatar-details-pixel-perfect": pixelPerfectInk ? "true" : undefined,
     "aria-hidden": true,
   } as const;
 
@@ -216,7 +234,7 @@ function AvatarDetailsEmissionPlanes({
 
   return (
     <>
-      {detailLevel === "full" ? (
+      {detailLevel === "full" && !pixelPerfectInk ? (
         <canvas
           ref={haloCanvasRef}
           className={`${styles.layer} ${depthClassName} ${styles.halo}${motionClassName}`}
@@ -224,7 +242,7 @@ function AvatarDetailsEmissionPlanes({
           {...sharedProps}
         />
       ) : null}
-      {detailLevel !== "audience" ? (
+      {detailLevel !== "audience" && !pixelPerfectInk ? (
         <canvas
           ref={bloomCanvasRef}
           className={`${styles.layer} ${depthClassName} ${styles.bloom}${motionClassName}`}
@@ -238,7 +256,7 @@ function AvatarDetailsEmissionPlanes({
         data-avatar-details-mask="true"
         data-avatar-details-emission="core"
         data-avatar-details-rendering={
-          rasterSize === AVATAR_DETAILS_CANVAS_SIZE
+          pixelPerfectInk || rasterSize === AVATAR_DETAILS_CANVAS_SIZE
             ? "nearest-neighbor"
             : "coverage-sampled"
         }
@@ -269,6 +287,7 @@ export function AvatarDetailsMask({
   staticRaster = false,
   coreColor = "phosphor",
   rasterSize = AVATAR_DETAILS_CANVAS_SIZE,
+  pixelPerfectInk = false,
 }: AvatarDetailsMaskProps): React.JSX.Element | null {
   const normalizedRasterSize = Number.isFinite(rasterSize)
     ? Math.max(1, Math.floor(rasterSize))
@@ -365,6 +384,7 @@ export function AvatarDetailsMask({
         staticRaster={staticRaster}
         coreColor={coreColor}
         rasterSize={normalizedRasterSize}
+        pixelPerfectInk={pixelPerfectInk}
       />
       {speechPixels && speechMotion ? (
         <AvatarDetailsEmissionPlanes
@@ -379,6 +399,7 @@ export function AvatarDetailsMask({
           staticRaster={staticRaster}
           coreColor={coreColor}
           rasterSize={normalizedRasterSize}
+          pixelPerfectInk={pixelPerfectInk}
         />
       ) : null}
     </>
