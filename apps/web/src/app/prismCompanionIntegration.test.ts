@@ -483,12 +483,12 @@ test("keeps the app shell crisp behind a local focus orb while pausing motion", 
   assert.equal(companionWieldLayer > navbarPickerLayer, true);
 });
 
-test("gives only the companion orb momentum", () => {
+test("keeps companion-orb momentum independent from the Zen avatar", () => {
   assert.match(component, /const startInertia = useCallback/u);
   assert.match(component, /stepPrismCompanionInertia/u);
   assert.match(component, /prefers-reduced-motion: reduce/u);
   assert.match(component, /data-inertial=\{inertial \? "true" : undefined\}/u);
-  assert.doesNotMatch(page, /startAvatarMomentum|data-flinging/u);
+  assert.doesNotMatch(page, /data-flinging/u);
 });
 
 test("collides the orb with open right navbar drawers and shoves left", () => {

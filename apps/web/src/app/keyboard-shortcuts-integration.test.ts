@@ -121,6 +121,29 @@ test("lets Model, Effort, and Speech Type select values from the wheel", () => {
   assert.match(pageSource, /commitHotkeyModelSelection\(\)/u);
   assert.match(pageSource, /commitHotkeyEffortSelection\(\)/u);
   assert.match(pageSource, /commitHotkeyVoiceSelection\(\)/u);
+  assert.match(pageSource, /commitPendingPickerRef\.current\(\)/u);
+  assert.match(pageSource, /commitPendingVoicePickerRef\.current\(\)/u);
+  assert.match(
+    pageSource,
+    /type PrismNavbarShortcutPickerSurface = "model" \| "effort" \| "speech"/u,
+  );
+  assert.match(pageSource, /flushSync\(\(\) => trigger\.click\(\)\)/u);
+  assert.match(
+    pageSource,
+    /const closedPicker = closeOpenPrismShortcutPicker\(\);\s*if \(closedPicker === "model"\)[\s\S]{0,700}dispatchEvent\(new Event\(MODEL_PICKER_QUICK_OPEN_EVENT\)\)/u,
+  );
+  assert.match(
+    pageSource,
+    /const closedPicker = closeOpenPrismShortcutPicker\(\);\s*if \(closedPicker === "effort"\)[\s\S]{0,700}dispatchEvent\(new Event\(EFFORT_PICKER_QUICK_OPEN_EVENT\)\)/u,
+  );
+  assert.match(
+    pageSource,
+    /const closedPicker = closeOpenPrismShortcutPicker\(\);\s*if \(closedPicker === "speech"\)[\s\S]{0,700}dispatchEvent\(new Event\(SPEECH_TYPE_QUICK_OPEN_EVENT\)\)/u,
+  );
+  assert.match(
+    pageSource,
+    /Opening another navbar picker is an explicit "keep this" gesture/u,
+  );
   assert.match(pageSource, /cursorAgnostic=\{voiceModeSelectorInteractionMode === "keyboard"\}/u);
   assert.match(
     pageSource,
@@ -150,7 +173,7 @@ test("turns Turbo into a compatible ONLINE route when the current model cannot u
   assert.match(pageSource, /persistModelTurboPreference\(turboTarget, true\)/u);
 });
 
-test("mounts a Control-hold shortcut guide beside Prism", () => {
+test("mounts a Control-hold shortcut toast", () => {
   assert.match(pageSource, /ControlShortcutGuide/u);
   assert.match(
     pageSource,
@@ -162,16 +185,17 @@ test("mounts a Control-hold shortcut guide beside Prism", () => {
   );
   assert.match(guideSource, /data-prism-control-shortcut-guide="true"/u);
   assert.match(guideSource, /holdAppNavbarForControlShortcuts\(\)/u);
-  assert.match(guideSource, /readPrismCompanionOrbAnchor/u);
+  assert.match(guideSource, /CONTROL_ROOT_ACTIONS/u);
   assert.doesNotMatch(guideSource, />Ctrl</u);
-  assert.doesNotMatch(guideSource, /styles\.eyebrow/u);
+  assert.match(guideSource, /styles\.title/u);
   const guideCss = readFileSync(
     new URL("./ControlShortcutGuide.module.css", import.meta.url),
     "utf8",
   );
-  assert.match(guideCss, /padding: 0;/u);
-  assert.match(guideCss, /without turning\s+the shortcut hint into a modal surface/u);
+  assert.match(guideCss, /border-radius: 999px;/u);
+  assert.match(guideCss, /top: max\(48px/u);
   assert.doesNotMatch(guideCss, /backdrop-filter/u);
+  assert.doesNotMatch(guideCss, /\.compass\s*\{/u);
   assert.match(
     readFileSync(new URL("./controlShortcutGuide.ts", import.meta.url), "utf8"),
     /return args\.controlHeld;/u,
@@ -188,14 +212,24 @@ test("updates contextual guidance without adding first-run setup", () => {
   assert.match(tutorialSource, /arrow keys do not roam their lists/u);
   assert.match(tutorialSource, /Shift\+Tab flips LOCAL\/ONLINE directly/u);
   assert.match(tutorialSource, /Control\+Right opens Speech Type/u);
-  assert.match(tutorialSource, /Tab keeps its normal focus behavior and never advances or commits a picker/u);
+  assert.match(
+    tutorialSource,
+    /Tab then closes the picker and places the cursor in the nearest visible composer/u,
+  );
   assert.match(tutorialSource, /Control\+Up toggles Turbo/u);
   assert.match(
     tutorialSource,
-    /Hold Control for a moment to reveal a live shortcut compass[\s\S]*Wield Prism stays legend-free/u,
+    /Hold Control for a moment to reveal a small shortcut toast[\s\S]*Wield Prism stays legend-free/u,
   );
   assert.match(tutorialSource, /scroll anywhere to move its pending value without moving the cursor/u);
-  assert.match(tutorialSource, /Enter, Space, or clicking outside commits that pending value/u);
+  assert.match(
+    tutorialSource,
+    /Enter, Space, clicking outside, or Tab commits that pending value/u,
+  );
+  assert.match(
+    tutorialSource,
+    /Using another picker hotkey commits the current pending value and opens that requested picker immediately/u,
+  );
   assert.match(tutorialSource, /Escape, Backspace, or Delete exits without changing it/u);
   assert.match(tutorialSource, /Model and Effort never remain open together/u);
   assert.match(tutorialSource, /Settings → Shortcuts/u);

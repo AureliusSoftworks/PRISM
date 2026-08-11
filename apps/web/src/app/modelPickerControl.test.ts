@@ -13,6 +13,16 @@ test("steps through model candidates and clamps at both ends", () => {
   assert.equal(modelPickerStepValue(values, "auto", -1), "auto");
 });
 
+test("continues a pending wheel highlight across multiple steps", () => {
+  const values = ["auto", "local-a", "online-b"];
+  let pendingHighlight: string | null = "auto";
+
+  pendingHighlight = modelPickerStepValue(values, pendingHighlight, 1);
+  pendingHighlight = modelPickerStepValue(values, pendingHighlight, 1);
+
+  assert.equal(pendingHighlight, "online-b");
+});
+
 test("starts unknown candidates in the direction of travel", () => {
   const values = ["auto", "local-a", "online-b"];
   assert.equal(modelPickerStepValue(values, null, 1), "auto");

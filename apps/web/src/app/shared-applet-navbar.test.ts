@@ -299,3 +299,21 @@ test("shared navbar model picker matches its dropdown width", () => {
     /\.chatHeaderModelPicker \.composeModelTriggerName\s*\{[\s\S]*max-width:\s*min\(14ch, 24vw\);/u,
   );
 });
+
+test("the header hides its redundant bot dropdown and places Speech Type first", () => {
+  const headerPicker = pageSource.slice(
+    pageSource.indexOf("const renderHeaderModelPicker"),
+    pageSource.indexOf("const renderSharedAppletNavbar"),
+  );
+  assert.match(
+    headerPicker,
+    /const directBotSelectionVisible\s*=\s*emptyStateLensVisible\s*\|\|\s*\(activeConversationIsEmpty && canvasBotDirectoryInteractive\);/u,
+  );
+  assert.match(
+    headerPicker,
+    /!activeSideChat &&\s*!directBotSelectionVisible &&\s*zenPersonaPickerBots\.length > 0;/u,
+  );
+  const speechIndex = headerPicker.indexOf("renderVoiceModeSelector({");
+  const botIndex = headerPicker.indexOf("<ComposerBotPicker");
+  assert.ok(speechIndex !== -1 && botIndex !== -1 && speechIndex < botIndex);
+});

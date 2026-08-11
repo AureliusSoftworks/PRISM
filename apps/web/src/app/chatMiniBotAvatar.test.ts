@@ -34,6 +34,13 @@ function pngHeader(fileName: string): {
 }
 
 describe("chatMiniBotAvatar", () => {
+  it("keeps every mini buckle glyph two pixels inside its nominal size", () => {
+    assert.match(
+      pageCssSource,
+      /\.emptyStateHeroMiniGlyph\s*\{[^}]*width:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 2px[^}]*height:\s*calc\([^}]*--chat-mini-bot-glyph-size[^}]*- 2px/,
+    );
+  });
+
   it("switches between dedicated low-resolution dark and light pixel chassis", () => {
     assert.match(componentSource, /\/bot-frame\/bot-frame-mini-dark\.png/);
     assert.match(componentSource, /\/bot-frame\/bot-frame-mini-light\.png/);

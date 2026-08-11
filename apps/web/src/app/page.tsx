@@ -1092,6 +1092,7 @@ import {
   type BotCustomFact,
   type BotGeneratedDraftV1,
   type BotGenerationFieldKeyV1,
+  resolveBotAccentColor,
   botFaceThinkingFramesEqual,
   type BotFaceBlinkBar,
   type BotFaceFontId,
@@ -1624,11 +1625,19 @@ import {
   type ZenLiveBotMouthShape,
 } from "./zenLiveMouth";
 import {
-  advanceZenLiveBotLaneDrift,
-  createZenLiveBotLaneDriftState,
-  zenLiveBotLaneDriftShouldRun,
-  type ZenLiveBotLaneDriftState,
-} from "./zenLiveBotLaneDrift";
+  advanceZenLiveBotPhysics,
+  createZenLiveBotDragVelocitySample,
+  planZenLiveBotFreeRoamDestination,
+  resolveZenLiveBotReleaseVelocity,
+  sampleZenLiveBotIdleBob,
+  sampleZenLiveBotDragVelocity,
+  sampleZenLiveBotMotionPresentation,
+  settleZenLiveBotPhysicsForReducedMotion,
+  stepZenLiveBotAutonomousTravel,
+  zenLiveBotFreeRoamShouldRun,
+  type ZenLiveBotDragVelocitySample,
+  type ZenLiveBotPhysicsState,
+} from "./zenLiveBotFreeRoam";
 import {
   applyPrismBotLinkBackspace,
   applyPrismBotLinkBoundaryDelete,
@@ -2178,6 +2187,7 @@ type ZenLiveBotAvatarDragState = {
   startClientX: number;
   startClientY: number;
   moved: boolean;
+  velocitySample: ZenLiveBotDragVelocitySample;
 };
 type ZenLiveBotGrabGeometry = {
   centerX: number;
@@ -6188,6 +6198,7 @@ function resolvedBotAccentStyle(
       : null;
   return {
     ["--bot-color" as string]: accent,
+    ["--bot-primary-color" as string]: accent,
     ["--bot-ink" as string]: ink,
     ...(rgbChannels ? { ["--bot-color-rgb" as string]: rgbChannels } : {}),
   } as React.CSSProperties;
@@ -11088,6 +11099,7 @@ interface Bot {
   top_k?: number | null;
   repetition_penalty?: number | null;
   color: string | null;
+  accentColor?: string | null;
   glyph: string | null;
   face_eyes_font?: string | null;
   face_eye_character?: string | null;
@@ -11243,6 +11255,7 @@ function marketplacePreviewBotFromArchive(
     top_k: body.topK as number,
     repetition_penalty: body.repetitionPenalty as number,
     color: body.color as string | null,
+    accentColor: body.accentColor as string | null,
     glyph: body.glyph as string | null,
     face_eyes_font: body.faceEyesFont as string | null,
     face_eye_character: body.faceEyeCharacter as string | null,
@@ -12397,6 +12410,7 @@ type BotEditOriginalSnapshot = {
   topK: number;
   repetitionPenalty: number;
   color: string;
+  accentColor: string | null;
   glyph: BotGlyphName;
   faceEyesFont: BotFaceFontId;
   faceEyeCharacter: string | null;
@@ -12436,6 +12450,7 @@ type BotAvatarDraftSnapshot = Pick<
   | "namePronunciation"
   | "selfReferral"
   | "color"
+  | "accentColor"
   | "glyph"
   | "faceEyesFont"
   | "faceEyeCharacter"
@@ -12820,6 +12835,7 @@ function prepareBotArchivePayload(
         typeof parsedBot.color === "string" && parsedBot.color.trim().length > 0
           ? parsedBot.color.trim()
           : null,
+      accentColor: parsedBot.accentColor ?? null,
       glyph:
         typeof parsedBot.glyph === "string" && parsedBot.glyph.trim().length > 0
           ? parsedBot.glyph.trim()
@@ -23400,26 +23416,31 @@ function findVisiblePrismShortcutTrigger(
   );
 }
 
-/** Close whichever navbar picker currently owns the interaction. */
-function closeOpenPrismShortcutPicker(): boolean {
+type PrismNavbarShortcutPickerSurface = "model" | "effort" | "speech";
+
+/** Commit and close whichever navbar picker currently owns the interaction. */
+function closeOpenPrismShortcutPicker(): PrismNavbarShortcutPickerSurface | null {
   const picker = document.querySelector<HTMLElement>("[data-picker-surface]");
   const surface = picker?.dataset.pickerSurface;
   if (!picker || (surface !== "model" && surface !== "effort")) {
     const voiceTrigger = document.querySelector<HTMLButtonElement>(
       '[data-prism-speech-type-trigger="true"][aria-expanded="true"]',
     );
-    if (!voiceTrigger) return false;
-    voiceTrigger.click();
-    return true;
+    if (!voiceTrigger) return null;
+    // Finish the current selection before the next quick-open event broadcasts
+    // to every picker, so it cannot commit the same voice choice twice.
+    flushSync(() => voiceTrigger.click());
+    return "speech";
   }
   const trigger = picker.querySelector<HTMLButtonElement>(
     surface === "model"
       ? '[data-prism-model-picker-trigger="true"]'
       : '[data-prism-effort-picker-trigger="true"]',
   );
-  if (!trigger) return false;
-  trigger.click();
-  return true;
+  if (!trigger) return null;
+  // A different picker shortcut is a handoff, not a two-key close/open dance.
+  flushSync(() => trigger.click());
+  return surface;
 }
 
 type ComposerModelPickerSurface = "model" | "effort";
@@ -23506,6 +23527,7 @@ function ComposerModelPicker({
   const effortMenuRef = useRef<HTMLDivElement>(null);
   const modelWheelLockedRef = useRef(false);
   const effortWheelLockedRef = useRef(false);
+  const commitPendingPickerRef = useRef<() => void>(() => {});
   const formValueRef = useRef<HTMLInputElement>(null);
   const turboSmokeBurstSequenceRef = useRef(0);
   const [turboSmokeBurstId, setTurboSmokeBurstId] = useState<number | null>(
@@ -23527,8 +23549,20 @@ function ComposerModelPicker({
     autoTurboButtonInteractive && provider === "online";
   const autoLocalTurboPreviewAvailable =
     autoTurboButtonInteractive && provider === "local";
+  const fixedOnlineTurboToggleAvailable =
+    !autoSelected &&
+    !interactionDisabled &&
+    Boolean(effortControl) &&
+    effortControl?.disabled !== true &&
+    provider === "online" &&
+    effortControl?.capability.mode === "unavailable" &&
+    effortControl?.turboSupported === true;
+  const onlineTurboToggleAvailable =
+    autoOnlineTurboToggleAvailable || fixedOnlineTurboToggleAvailable;
   const autoTurboActionAvailable =
     autoOnlineTurboToggleAvailable || autoLocalTurboPreviewAvailable;
+  const effortDirectActionAvailable =
+    onlineTurboToggleAvailable || autoLocalTurboPreviewAvailable;
   const turboVisuallyActive =
     effortControl?.turboEnabled === true &&
     (!autoSelected || autoOnlineTurboToggleAvailable);
@@ -23566,7 +23600,7 @@ function ComposerModelPicker({
     (effortControl.capability.mode === "unavailable" &&
       !effortControl.turboSupported);
   const effortTriggerDisabled =
-    effortInteractionDisabled && !autoTurboActionAvailable;
+    effortInteractionDisabled && !effortDirectActionAvailable;
   const effortDisabledReason = effortInteractionDisabled
     ? autoSelected
       ? "Effort is chosen automatically for each request."
@@ -23574,12 +23608,17 @@ function ComposerModelPicker({
       effortControl?.capability.disabledReason ??
       (loading ? "Models are still loading." : "Effort is unavailable."))
     : undefined;
-  const effortTriggerTooltip = autoOnlineTurboToggleAvailable
-    ? `Turbo ${effortControl?.turboEnabled ? "on" : "off"}. Click the triangle to turn it ${effortControl?.turboEnabled ? "off" : "on"}.`
+  const effortTriggerTooltip = onlineTurboToggleAvailable
+    ? `Turbo ${effortControl?.turboEnabled ? "on" : "off"}. Click the ${
+        autoSelected ? "triangle" : "Effort control"
+      } to turn it ${effortControl?.turboEnabled ? "off" : "on"}.`
     : autoLocalTurboPreviewAvailable
       ? "Turbo needs ONLINE. Click the triangle for a failed ignition."
       : effortDisabledReason;
-  const effortMenuOpen = effortOpen && !effortInteractionDisabled;
+  const effortMenuOpen =
+    effortOpen &&
+    !effortInteractionDisabled &&
+    !effortDirectActionAvailable;
   const effortMenuPortalStyle = useComposeMenuPortalStyle(
     effortMenuOpen,
     effortTriggerRef,
@@ -23679,11 +23718,41 @@ function ComposerModelPicker({
     [activeHighlightedModelValue, selectableModelValues],
   );
 
+  const moveEffortHighlight = useCallback(
+    (direction: -1 | 1): void => {
+      if (
+        !effortControl ||
+        effortInteractionDisabled ||
+        effortLevels.length <= 1
+      ) {
+        return;
+      }
+      setHighlightedEffortValue((current) =>
+        modelEffortStep(
+          effortLevels,
+          effortLevels.includes(current ?? "auto")
+            ? current!
+            : effortControl.value,
+          direction,
+        ),
+      );
+    },
+    [effortControl, effortInteractionDisabled, effortLevels],
+  );
+
   const setEffortValue = useCallback(
-    (nextValue: ReasoningEffort): void => {
+    (
+      nextValue: ReasoningEffort,
+      options: { playTick?: boolean } = {},
+    ): void => {
       if (!effortControl || effortInteractionDisabled) return;
       effortControl.onActivate?.();
       if (nextValue !== effortControl.value) {
+        if (options.playTick !== false) {
+          void playSpatialUiSfx("effort-tick", {
+            anchor: effortMenuRef.current ?? effortTriggerRef.current,
+          });
+        }
         if (effortControl.capability.mode === "simulated") {
           effortControl.onSimulatedEffortEducate?.();
         }
@@ -23732,7 +23801,7 @@ function ComposerModelPicker({
     const closeForOtherPicker = (event: Event): void => {
       const source = (event as CustomEvent<{ source?: string }>).detail?.source;
       if (source === pickerId) return;
-      setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
+      commitPendingPickerRef.current();
     };
     window.addEventListener(PRISM_NAVBAR_PICKER_OPEN_EVENT, closeForOtherPicker);
     return () =>
@@ -23759,12 +23828,33 @@ function ComposerModelPicker({
     pick(activeHighlightedModelValue ?? normalizedValue);
   }, [activeHighlightedModelValue, normalizedValue, pick]);
 
+  const commitHotkeyModelSelectionToComposer = useCallback((): void => {
+    commitHotkeyModelSelection();
+    window.requestAnimationFrame(focusVisibleComposer);
+  }, [commitHotkeyModelSelection]);
+
   const commitHotkeyEffortSelection = useCallback((): void => {
     if (activeHighlightedEffortValue) {
-      setEffortValue(activeHighlightedEffortValue);
+      setEffortValue(activeHighlightedEffortValue, { playTick: false });
     }
     dismissPickersToComposer();
   }, [activeHighlightedEffortValue, dismissPickersToComposer, setEffortValue]);
+
+  // Opening another navbar picker is an explicit "keep this" gesture for a
+  // hotkey wheel highlight. Pointer-wheel selection already commits eagerly.
+  commitPendingPickerRef.current = () => {
+    if (pickerOpenState.interactionMode !== "keyboard") {
+      setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
+      return;
+    }
+    if (pickerOpenState.surface === "model") {
+      commitHotkeyModelSelection();
+      return;
+    }
+    if (pickerOpenState.surface === "effort") {
+      commitHotkeyEffortSelection();
+    }
+  };
 
   useEffect(() => {
     const trigger = triggerRef.current;
@@ -23794,7 +23884,7 @@ function ComposerModelPicker({
     const trigger = effortTriggerRef.current;
     if (!trigger || !effortControl) return;
     const openQuickEffort = (): void => {
-      if (effortInteractionDisabled) return;
+      if (effortInteractionDisabled || effortDirectActionAvailable) return;
       announcePrismNavbarPickerOpen(pickerId);
       effortControl.onActivate?.();
       setHighlightedEffortValue(effortControl.value);
@@ -23810,7 +23900,7 @@ function ComposerModelPicker({
         EFFORT_PICKER_QUICK_OPEN_EVENT,
         openQuickEffort,
       );
-  }, [effortControl, effortInteractionDisabled, pickerId]);
+  }, [effortControl, effortDirectActionAvailable, effortInteractionDisabled, pickerId]);
 
   useEffect(() => {
     if (!menuOpen && !effortMenuOpen) {
@@ -23838,10 +23928,7 @@ function ComposerModelPicker({
         ) {
           return;
         }
-        const currentValue =
-          pickerOpenState.interactionMode === "keyboard"
-            ? activeHighlightedModelValue
-            : normalizedValue;
+        const currentValue = activeHighlightedModelValue;
         const nextValue = modelPickerStepValue(
           selectableModelValues,
           currentValue,
@@ -23852,9 +23939,11 @@ function ComposerModelPicker({
         window.setTimeout(() => {
           modelWheelLockedRef.current = false;
         }, 90);
-        if (pickerOpenState.interactionMode === "keyboard") {
-          setHighlightedModelValue(nextValue);
-        } else {
+        setHighlightedModelValue(nextValue);
+        void playSpatialUiSfx("bot-hover", {
+          anchor: menuRef.current ?? triggerRef.current,
+        });
+        if (pickerOpenState.interactionMode === "pointer") {
           if (formValueRef.current) {
             formValueRef.current.value = nextValue;
           }
@@ -23891,48 +23980,40 @@ function ComposerModelPicker({
         effortWheelLockedRef.current = false;
       }, 90);
       if (pickerOpenState.interactionMode === "keyboard") {
+        void playSpatialUiSfx("effort-tick", {
+          anchor: effortMenuRef.current ?? effortTriggerRef.current,
+        });
         setHighlightedEffortValue(nextValue);
       } else {
         setEffortValue(nextValue);
       }
     };
     const handleQuickArrows = (event: KeyboardEvent): void => {
-      if (pickerOpenState.interactionMode !== "keyboard") return;
-      // Navbar pickers stay pointer/wheel driven so Control-root chords
-      // are never stolen by in-menu arrow selection.
-      if (navbarPicker) return;
-      if (
-        event.key !== "ArrowDown" &&
-        event.key !== "ArrowRight" &&
-        event.key !== "ArrowUp" &&
-        event.key !== "ArrowLeft"
-      ) {
+      if (event.key !== "ArrowDown" && event.key !== "ArrowUp") {
         return;
       }
       event.preventDefault();
       event.stopPropagation();
-      if (menuOpen) {
-        moveModelHighlight(
-          event.key === "ArrowDown" || event.key === "ArrowRight" ? 1 : -1,
+      if (pickerOpenState.interactionMode !== "keyboard") {
+        setPickerOpenState((current) =>
+          current.surface
+            ? { ...current, interactionMode: "keyboard" }
+            : current,
         );
+      }
+      const direction = event.key === "ArrowDown" ? 1 : -1;
+      if (menuOpen) {
+        moveModelHighlight(direction);
         return;
       }
       if (!effortControl || effortInteractionDisabled) return;
-      setEffortValue(
-        modelEffortStep(
-          effortLevels,
-          effortControl.value,
-          event.key === "ArrowUp" || event.key === "ArrowRight" ? 1 : -1,
-        ),
-      );
+      moveEffortHighlight(direction);
     };
     document.addEventListener("wheel", handleQuickWheel, {
       capture: true,
       passive: false,
     });
-    if (!navbarPicker) {
-      document.addEventListener("keydown", handleQuickArrows, true);
-    }
+    document.addEventListener("keydown", handleQuickArrows, true);
     return () => {
       document.removeEventListener("wheel", handleQuickWheel, true);
       document.removeEventListener("keydown", handleQuickArrows, true);
@@ -23943,8 +24024,8 @@ function ComposerModelPicker({
     effortLevels,
     effortMenuOpen,
     menuOpen,
+    moveEffortHighlight,
     moveModelHighlight,
-    navbarPicker,
     normalizedValue,
     activeHighlightedEffortValue,
     activeHighlightedModelValue,
@@ -23957,10 +24038,12 @@ function ComposerModelPicker({
 
   useEffect(() => {
     if (!menuOpen) return;
-    setHighlightedModelValue(
-      selectableModelValues.includes(normalizedValue)
-        ? normalizedValue
-        : (selectableModelValues[0] ?? null),
+    setHighlightedModelValue((current) =>
+      selectableModelValues.includes(current ?? "")
+        ? current
+        : (selectableModelValues.includes(normalizedValue)
+          ? normalizedValue
+          : (selectableModelValues[0] ?? null)),
     );
   }, [menuOpen, normalizedValue, selectableModelValues]);
 
@@ -24034,6 +24117,16 @@ function ComposerModelPicker({
   useEffect(() => {
     if (!menuOpen) return;
     const handler = (event: KeyboardEvent) => {
+      if (event.key === "Tab" && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (pickerOpenState.interactionMode === "keyboard") {
+          commitHotkeyModelSelectionToComposer();
+        } else {
+          dismissPickersToComposer();
+        }
+        return;
+      }
       if (
         event.key === "Escape" ||
         event.key === "Backspace" ||
@@ -24044,13 +24137,28 @@ function ComposerModelPicker({
         dismissPickersToComposer();
       }
     };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [dismissPickersToComposer, menuOpen]);
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [
+    commitHotkeyModelSelectionToComposer,
+    dismissPickersToComposer,
+    menuOpen,
+    pickerOpenState.interactionMode,
+  ]);
 
   useEffect(() => {
     if (!effortMenuOpen) return;
     const handler = (event: KeyboardEvent) => {
+      if (event.key === "Tab" && !event.shiftKey) {
+        event.preventDefault();
+        event.stopPropagation();
+        if (pickerOpenState.interactionMode === "keyboard") {
+          commitHotkeyEffortSelection();
+        } else {
+          dismissPickersToComposer();
+        }
+        return;
+      }
       if (
         event.key === "Escape" ||
         event.key === "Backspace" ||
@@ -24061,9 +24169,14 @@ function ComposerModelPicker({
         dismissPickersToComposer();
       }
     };
-    document.addEventListener("keydown", handler);
-    return () => document.removeEventListener("keydown", handler);
-  }, [dismissPickersToComposer, effortMenuOpen]);
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [
+    commitHotkeyEffortSelection,
+    dismissPickersToComposer,
+    effortMenuOpen,
+    pickerOpenState.interactionMode,
+  ]);
 
   useEffect(() => {
     if (!interactionDisabled || !open) return;
@@ -24107,16 +24220,21 @@ function ComposerModelPicker({
     event.preventDefault();
     event.stopPropagation();
     if (modelWheelLockedRef.current) return;
+    const currentValue = activeHighlightedModelValue;
     const nextValue = modelPickerStepValue(
       selectableModelValues,
-      normalizedValue,
+      currentValue,
       direction,
     );
-    if (!nextValue || nextValue === normalizedValue) return;
+    if (!nextValue || nextValue === currentValue) return;
     modelWheelLockedRef.current = true;
     window.setTimeout(() => {
       modelWheelLockedRef.current = false;
     }, 90);
+    setHighlightedModelValue(nextValue);
+    void playSpatialUiSfx("bot-hover", {
+      anchor: menuRef.current ?? triggerRef.current,
+    });
     if (formValueRef.current) {
       formValueRef.current.value = nextValue;
     }
@@ -24208,6 +24326,15 @@ function ComposerModelPicker({
         data-prism-model-picker-trigger="true"
         onClick={(event) => {
           event.currentTarget.focus();
+          if (pickerOpenState.interactionMode === "keyboard") {
+            if (pickerOpenState.surface === "model") {
+              commitHotkeyModelSelection();
+              return;
+            }
+            if (pickerOpenState.surface === "effort") {
+              commitHotkeyEffortSelection();
+            }
+          }
           if (pickerOpenState.surface !== "model") {
             announcePrismNavbarPickerOpen(pickerId);
           }
@@ -24285,8 +24412,7 @@ function ComposerModelPicker({
             data-tutorial-target="model-effort"
             data-adjustable={
               !autoSelected &&
-              (effortControl.capability.mode !== "unavailable" ||
-                effortControl.turboSupported)
+              effortControl.capability.mode !== "unavailable"
                 ? "true"
                 : "false"
             }
@@ -24295,6 +24421,9 @@ function ComposerModelPicker({
             data-turbo={turboVisuallyActive ? "true" : undefined}
             data-auto-turbo-toggle={
               autoOnlineTurboToggleAvailable ? "true" : undefined
+            }
+            data-fixed-turbo-toggle={
+              fixedOnlineTurboToggleAvailable ? "true" : undefined
             }
             data-auto-turbo-preview={
               autoLocalTurboPreviewAvailable ? "true" : undefined
@@ -24305,6 +24434,15 @@ function ComposerModelPicker({
             onClick={(event) => {
               event.currentTarget.focus();
               effortControl.onActivate?.();
+              if (pickerOpenState.interactionMode === "keyboard") {
+                if (pickerOpenState.surface === "effort") {
+                  commitHotkeyEffortSelection();
+                  return;
+                }
+                if (pickerOpenState.surface === "model") {
+                  commitHotkeyModelSelection();
+                }
+              }
               if (autoLocalTurboPreviewAvailable) {
                 setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
                 void playSpatialUiSfx("turbo-on", {
@@ -24314,7 +24452,7 @@ function ComposerModelPicker({
                 setTurboSmokeBurstId(turboSmokeBurstSequenceRef.current);
                 return;
               }
-              if (autoOnlineTurboToggleAvailable) {
+              if (onlineTurboToggleAvailable) {
                 setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
                 event.currentTarget.dispatchEvent(
                   new Event(TURBO_TOGGLE_QUICK_EVENT, { bubbles: true }),
@@ -24333,18 +24471,22 @@ function ComposerModelPicker({
             onKeyDown={handleEffortKeyDown}
             onWheel={handleEffortWheel}
             disabled={effortTriggerDisabled}
-            aria-haspopup={autoTurboActionAvailable ? undefined : "dialog"}
+            aria-haspopup={effortDirectActionAvailable ? undefined : "dialog"}
             aria-expanded={
-              autoTurboActionAvailable ? undefined : effortMenuOpen
+              effortDirectActionAvailable ? undefined : effortMenuOpen
             }
             aria-pressed={
-              autoOnlineTurboToggleAvailable
+              onlineTurboToggleAvailable
                 ? effortControl.turboEnabled
                 : undefined
             }
             aria-label={
-              autoOnlineTurboToggleAvailable
-                ? `Auto effort. Turbo ${effortControl.turboEnabled ? "on" : "off"}. Click to turn Turbo ${effortControl.turboEnabled ? "off" : "on"}.`
+              onlineTurboToggleAvailable
+                ? `${autoSelected ? "Auto effort" : "Fixed effort"}. Turbo ${
+                    effortControl.turboEnabled ? "on" : "off"
+                  }. Click to turn Turbo ${
+                    effortControl.turboEnabled ? "off" : "on"
+                  }.`
                 : autoLocalTurboPreviewAvailable
                   ? "Auto effort. Turbo requires ONLINE. Click for a failed ignition."
                   : autoSelected
@@ -24451,7 +24593,6 @@ function ComposerModelPicker({
                   data-model-choice="auto"
                   data-model-value={autoOptionValue}
                   data-highlighted={
-                    pickerOpenState.interactionMode === "keyboard" &&
                     activeHighlightedModelValue === autoOptionValue
                       ? "true"
                       : undefined
@@ -24502,7 +24643,6 @@ function ComposerModelPicker({
                     data-model-provider={model.provider}
                     data-model-value={model.id}
                     data-highlighted={
-                      pickerOpenState.interactionMode === "keyboard" &&
                       activeHighlightedModelValue === model.id
                         ? "true"
                         : undefined
@@ -31617,6 +31757,8 @@ function ZenLiveBotPresencePlate({
     : defaultPrismGlyph;
   const bodySize = normalizeZenLiveBotAvatarSizePx(avatarSizePx);
   const avatarRenderMode = zenLiveBotAvatarRenderMode(bodySize);
+  const dominantFullAvatar =
+    avatarRenderMode === "full" && bodySize >= 640;
   const bodyScale =
     avatarRenderMode === "full"
       ? bodySize / ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX
@@ -31993,6 +32135,39 @@ function ZenLiveBotPresencePlate({
     };
   }, [persistAvatarPositionIfUserRelocated]);
 
+  const freeRoamMotionRef = useRef<{
+    physics: ZenLiveBotPhysicsState;
+    target: ZenLiveBotAvatarPosition | null;
+    nextRoamAtMs: number;
+    throwing: boolean;
+  } | null>(null);
+  const startAvatarMomentum = useCallback(
+    (sample: ZenLiveBotDragVelocitySample): void => {
+      const current = avatarPositionRef.current;
+      if (!current || typeof window === "undefined") return;
+      const reducedMotion = window.matchMedia(
+        "(prefers-reduced-motion: reduce)",
+      ).matches;
+      const velocity = resolveZenLiveBotReleaseVelocity({
+        sample,
+        moved: true,
+        reducedMotion,
+      });
+      freeRoamMotionRef.current = {
+        physics: {
+          x: current.x,
+          y: current.y,
+          velocityX: velocity.x,
+          velocityY: velocity.y,
+        },
+        target: null,
+        nextRoamAtMs: performance.now() + 2_400,
+        throwing: Math.hypot(velocity.x, velocity.y) > 0,
+      };
+    },
+    [],
+  );
+
   const beginAvatarGrab = useCallback(
     (
       pointerId: number,
@@ -32016,6 +32191,16 @@ function ZenLiveBotPresencePlate({
         y: rect.top,
       };
       const positioned = setAvatarPositionClamped(current);
+      const freeRoamMotion = freeRoamMotionRef.current;
+      if (freeRoamMotion) {
+        freeRoamMotion.physics = {
+          ...settleZenLiveBotPhysicsForReducedMotion(freeRoamMotion.physics),
+          ...positioned,
+        };
+        freeRoamMotion.target = null;
+        freeRoamMotion.throwing = false;
+        freeRoamMotion.nextRoamAtMs = performance.now() + 2_400;
+      }
       avatarDragRef.current = {
         pointerId,
         offsetX: clientX - positioned.x,
@@ -32023,6 +32208,11 @@ function ZenLiveBotPresencePlate({
         startClientX: clientX,
         startClientY: clientY,
         moved: false,
+        velocitySample: createZenLiveBotDragVelocitySample(
+          clientX,
+          clientY,
+          _timeStamp,
+        ),
       };
       setAvatarDragging(false);
       const { captureTarget } = options;
@@ -32055,6 +32245,12 @@ function ZenLiveBotPresencePlate({
         setAvatarDragging(true);
       }
       if (!dragState.moved) return true;
+      sampleZenLiveBotDragVelocity(
+        dragState.velocitySample,
+        clientX,
+        clientY,
+        _timeStamp,
+      );
       setAvatarPositionClamped({
         x: clientX - dragState.offsetX,
         y: clientY - dragState.offsetY,
@@ -32071,6 +32267,7 @@ function ZenLiveBotPresencePlate({
       clientY: number,
       _timeStamp: number,
       releaseTarget?: HTMLElement,
+      cancelled = false,
     ): boolean => {
       const dragState = avatarDragRef.current;
       if (!dragState || dragState.pointerId !== pointerId) return false;
@@ -32083,7 +32280,13 @@ function ZenLiveBotPresencePlate({
           // Safe no-op for environments without pointer capture support.
         }
       }
-      if (dragState.moved) {
+      if (dragState.moved && !cancelled) {
+        sampleZenLiveBotDragVelocity(
+          dragState.velocitySample,
+          clientX,
+          clientY,
+          _timeStamp,
+        );
         setAvatarPositionClamped(
           {
             x: clientX - dragState.offsetX,
@@ -32092,12 +32295,23 @@ function ZenLiveBotPresencePlate({
           true,
           true,
         );
+        startAvatarMomentum(dragState.velocitySample);
+      } else if (cancelled && freeRoamMotionRef.current) {
+        freeRoamMotionRef.current.physics =
+          settleZenLiveBotPhysicsForReducedMotion(
+            freeRoamMotionRef.current.physics,
+          );
+        freeRoamMotionRef.current.throwing = false;
       } else if (avatarPositionRef.current) {
         persistAvatarPositionIfUserRelocated(avatarPositionRef.current);
       }
       return true;
     },
-    [persistAvatarPositionIfUserRelocated, setAvatarPositionClamped],
+    [
+      persistAvatarPositionIfUserRelocated,
+      setAvatarPositionClamped,
+      startAvatarMomentum,
+    ],
   );
 
   useEffect(() => {
@@ -32173,6 +32387,8 @@ function ZenLiveBotPresencePlate({
           event.clientX,
           event.clientY,
           event.timeStamp || Date.now(),
+          undefined,
+          true,
         )
       ) {
         event.preventDefault();
@@ -32183,6 +32399,14 @@ function ZenLiveBotPresencePlate({
     const handleGlobalBlur = (): void => {
       avatarDragRef.current = null;
       setAvatarDragging(false);
+      const motion = freeRoamMotionRef.current;
+      if (motion) {
+        motion.physics = settleZenLiveBotPhysicsForReducedMotion(
+          motion.physics,
+        );
+        motion.target = null;
+        motion.throwing = false;
+      }
     };
 
     window.addEventListener("pointerdown", handleGlobalPointerDown, true);
@@ -32249,6 +32473,24 @@ function ZenLiveBotPresencePlate({
           event.clientY,
           event.timeStamp || Date.now(),
           event.currentTarget,
+        )
+      ) {
+        event.preventDefault();
+      }
+    },
+    [finishAvatarGrab],
+  );
+
+  const handleAvatarPointerCancel = useCallback(
+    (event: React.PointerEvent<HTMLDivElement>): void => {
+      if (
+        finishAvatarGrab(
+          event.pointerId,
+          event.clientX,
+          event.clientY,
+          event.timeStamp || Date.now(),
+          event.currentTarget,
+          true,
         )
       ) {
         event.preventDefault();
@@ -32327,18 +32569,12 @@ function ZenLiveBotPresencePlate({
     [onContextMenuRequest, persistAvatarPositionIfUserRelocated],
   );
 
-  const laneDriftSeed = bot?.id ?? "prism";
-  const laneDriftStateRef = useRef<ZenLiveBotLaneDriftState | null>(null);
   const avatarCanvasSideRef = useRef(avatarCanvasSide);
-  const avatarDraggingRef = useRef(avatarDragging);
   const transitioningRef = useRef(transitioning);
-  const faceTalkingRef = useRef(utteranceActive);
   useLayoutEffect(() => {
     avatarCanvasSideRef.current = avatarCanvasSide;
-    avatarDraggingRef.current = avatarDragging;
     transitioningRef.current = transitioning;
-    faceTalkingRef.current = utteranceActive;
-  }, [avatarCanvasSide, avatarDragging, utteranceActive, transitioning]);
+  }, [avatarCanvasSide, transitioning]);
   const presencePlateMounted =
     Boolean(bot) ||
     Boolean(actionState) ||
@@ -32354,67 +32590,184 @@ function ZenLiveBotPresencePlate({
     const node = avatarRef.current;
     if (!node) return;
 
-    laneDriftStateRef.current = createZenLiveBotLaneDriftState(
-      laneDriftSeed,
-      performance.now(),
-    );
     const reducedMotionQuery = window.matchMedia(
       "(prefers-reduced-motion: reduce)",
     );
     let frameId = 0;
+    let previousNowMs = performance.now();
 
-    const clearLaneDriftOffset = (): void => {
+    const applyPresentation = (
+      velocityX: number,
+      velocityY: number,
+      bobYPx: number,
+    ): void => {
+      const presentation = sampleZenLiveBotMotionPresentation(
+        velocityX,
+        velocityY,
+      );
       node.style.setProperty("--zen-live-bot-lane-drift-x", "0px");
-      node.style.setProperty("--zen-live-bot-lane-drift-y", "0px");
-      node.removeAttribute("data-lane-drift-phase");
-      node.removeAttribute("data-lane-drift-direction");
+      node.style.setProperty("--zen-live-bot-lane-drift-y", `${bobYPx.toFixed(2)}px`);
+      node.style.setProperty("--zen-live-bot-motion-tilt", `${presentation.tiltDeg.toFixed(2)}deg`);
+      node.style.setProperty("--zen-live-bot-motion-glow", presentation.glow.toFixed(3));
+      node.dataset.freeRoamMotion = presentation.speed > 0.012 ? "moving" : "idle";
     };
 
     const tick = (nowMs: number): void => {
-      const active = zenLiveBotLaneDriftShouldRun({
-        reducedMotion: reducedMotionQuery.matches,
-        dragging: avatarDraggingRef.current,
-        transitioning: transitioningRef.current,
-      });
-      if (!active) {
-        clearLaneDriftOffset();
+      if (reducedMotionQuery.matches) {
+        const motion = freeRoamMotionRef.current;
+        if (motion) {
+          motion.physics = settleZenLiveBotPhysicsForReducedMotion(
+            motion.physics,
+          );
+          motion.target = null;
+          motion.throwing = false;
+          motion.nextRoamAtMs = nowMs + 2_400;
+        }
+        previousNowMs = nowMs;
+        applyPresentation(0, 0, 0);
         frameId = window.requestAnimationFrame(tick);
         return;
       }
-
-      const previous =
-        laneDriftStateRef.current ??
-        createZenLiveBotLaneDriftState(laneDriftSeed, nowMs);
-      const { state, sample } = advanceZenLiveBotLaneDrift(previous, {
-        nowMs,
-        canvasSide: avatarCanvasSideRef.current,
-        active: true,
-        allowTravel: !faceTalkingRef.current,
+      const active = zenLiveBotFreeRoamShouldRun({
+        reducedMotion: false,
+        dragging: avatarDragRef.current !== null,
+        transitioning: transitioningRef.current,
       });
-      laneDriftStateRef.current = state;
-      node.style.setProperty(
-        "--zen-live-bot-lane-drift-x",
-        `${sample.offsetXPx.toFixed(2)}px`,
-      );
-      node.style.setProperty(
-        "--zen-live-bot-lane-drift-y",
-        `${sample.offsetYPx.toFixed(2)}px`,
-      );
-      node.dataset.laneDriftPhase = sample.phase;
-      if (sample.direction) {
-        node.dataset.laneDriftDirection = sample.direction;
-      } else {
-        delete node.dataset.laneDriftDirection;
+      if (!active) {
+        previousNowMs = nowMs;
+        applyPresentation(0, 0, 0);
+        frameId = window.requestAnimationFrame(tick);
+        return;
       }
+      const safeAreaInsets = collectZenLiveBotAvatarSafeAreaInsets(
+        window.innerWidth,
+        window.innerHeight,
+      );
+      const nodeRect = node.getBoundingClientRect();
+      const bounds = {
+        left: safeAreaInsets.left,
+        top: safeAreaInsets.top,
+        right: Math.max(safeAreaInsets.left, window.innerWidth - safeAreaInsets.right - nodeRect.width),
+        bottom: Math.max(safeAreaInsets.top, window.innerHeight - safeAreaInsets.bottom - nodeRect.height),
+      };
+      const current = avatarPositionRef.current ?? {
+        x: nodeRect.left,
+        y: nodeRect.top,
+      };
+      const motion = freeRoamMotionRef.current ?? {
+        physics: { x: current.x, y: current.y, velocityX: 0, velocityY: 0 },
+        target: null,
+        nextRoamAtMs: nowMs + 2_200,
+        throwing: false,
+      };
+      const elapsedMs = nowMs - previousNowMs;
+      previousNowMs = nowMs;
+      if (motion.throwing) {
+        const next = advanceZenLiveBotPhysics(
+          motion.physics,
+          elapsedMs,
+          bounds,
+          window.innerWidth,
+          window.innerHeight,
+        );
+        motion.physics = next;
+        motion.throwing = next.moving;
+        if (!next.moving) {
+          motion.nextRoamAtMs = nowMs + 2_400;
+        }
+      } else {
+        const prose = collectZenLiveBotProseHillRect(
+          window.innerWidth,
+          window.innerHeight,
+          safeAreaInsets,
+        );
+        const chrome = collectZenLiveBotChromeAvoidanceRects(
+          window.innerWidth,
+          window.innerHeight,
+          safeAreaInsets,
+          node,
+        );
+        const avoidRects = [
+          ...(prose
+            ? [
+                zenLiveBotInflateRect(
+                  prose,
+                  ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX,
+                  ZEN_LIVE_BOT_PROSE_HILL_VERTICAL_CLEARANCE_PX,
+                ),
+              ]
+            : []),
+          ...chrome.map((rect) =>
+            zenLiveBotInflateRect(
+              rect,
+              ZEN_LIVE_BOT_CHROME_AVOIDANCE_CLEARANCE_PX,
+            ),
+          ),
+        ];
+        const currentOverlapsAvoidance = avoidRects.some((rect) =>
+          zenLiveBotRectsOverlap(
+            zenLiveBotAvatarRectForPosition(motion.physics, {
+              offsetX: 0,
+              offsetY: 0,
+              width: nodeRect.width,
+              height: nodeRect.height,
+            }),
+            rect,
+          ),
+        );
+        if (
+          !motion.target &&
+          (nowMs >= motion.nextRoamAtMs || currentOverlapsAvoidance)
+        ) {
+          motion.target = planZenLiveBotFreeRoamDestination({
+            current: motion.physics,
+            bounds,
+            avatarWidth: nodeRect.width,
+            avatarHeight: nodeRect.height,
+            avoidRects,
+          });
+        }
+        if (motion.target) {
+          const next = stepZenLiveBotAutonomousTravel({
+            current: motion.physics,
+            target: motion.target,
+            elapsedMs,
+          });
+          const arrived =
+            next.x === motion.target.x && next.y === motion.target.y;
+          motion.physics = next;
+          if (arrived) {
+            motion.target = null;
+            motion.nextRoamAtMs = nowMs + 3_800 + Math.random() * 4_200;
+          }
+        }
+      }
+      freeRoamMotionRef.current = motion;
+      const settled = setAvatarPositionClamped(
+        { x: motion.physics.x, y: motion.physics.y },
+        false,
+        !motion.target && !motion.throwing,
+      );
+      motion.physics.x = settled.x;
+      motion.physics.y = settled.y;
+      applyPresentation(
+        motion.physics.velocityX,
+        motion.physics.velocityY,
+        motion.target || motion.throwing ? 0 : sampleZenLiveBotIdleBob(nowMs),
+      );
       frameId = window.requestAnimationFrame(tick);
     };
 
     frameId = window.requestAnimationFrame(tick);
     return () => {
       window.cancelAnimationFrame(frameId);
-      clearLaneDriftOffset();
+      node.style.removeProperty("--zen-live-bot-motion-tilt");
+      node.style.removeProperty("--zen-live-bot-motion-glow");
+      node.style.removeProperty("--zen-live-bot-lane-drift-x");
+      node.style.removeProperty("--zen-live-bot-lane-drift-y");
+      delete node.dataset.freeRoamMotion;
     };
-  }, [laneDriftSeed, presencePlateMounted]);
+  }, [presencePlateMounted, setAvatarPositionClamped]);
 
   if (
     !bot &&
@@ -32575,6 +32928,7 @@ function ZenLiveBotPresencePlate({
       data-body-sized="true"
       data-user-avatar-scale="true"
       data-avatar-render-mode={avatarRenderMode}
+      data-dominant-full-avatar={dominantFullAvatar ? "true" : undefined}
       data-zen-live-bot-presence-plate="true"
       data-relationship-depth-anchor="home"
       data-relationship-depth-identity={relationshipDepthIdentity(
@@ -32592,7 +32946,7 @@ function ZenLiveBotPresencePlate({
       onPointerDown={handleAvatarPointerDown}
       onPointerMove={handleAvatarPointerMove}
       onPointerUp={handleAvatarPointerUp}
-      onPointerCancel={handleAvatarPointerUp}
+      onPointerCancel={handleAvatarPointerCancel}
       onMouseDown={handleAvatarMouseDown}
     >
       <BotAmbientPresenceRig
@@ -37564,6 +37918,7 @@ interface BotAvatarCustomizerModalProps {
   screenMaterialSeed: string;
   frameMaterialSeed: string;
   color: string;
+  accentColor: string | null;
   glyph: BotGlyphName;
   isDefaultPrismBot?: boolean;
   identityControlsVisible?: boolean;
@@ -37634,6 +37989,7 @@ interface BotAvatarCustomizerModalProps {
   onCancelSavePrompt: () => void;
   onThemeCycle: () => void | Promise<void>;
   onColorChange: (next: string) => void;
+  onAccentColorChange: (next: string | null) => void;
   onGlyphChange: (next: BotGlyphName) => void;
   onColorPickerToggle: () => void;
   onEyesFontChange: (fontId: BotFaceFontId) => void;
@@ -41309,6 +41665,73 @@ function BotAvatarGlyphAnimationControl({
   );
 }
 
+function BotAtmosphereAccentControl({
+  primaryColor,
+  accentColor,
+  onChange,
+}: {
+  primaryColor: string;
+  accentColor: string | null;
+  onChange: (next: string | null) => void;
+}): React.JSX.Element {
+  const resolvedAccent = resolveBotAccentColor(primaryColor, accentColor);
+  const primaryHsl = hexToHsl(primaryColor);
+  const accentHue = Math.round(hexToHsl(resolvedAccent).h);
+  return (
+    <fieldset
+      className={styles.botAtmosphereAccentControl}
+      style={
+        {
+          "--bot-primary-color": primaryColor,
+          "--bot-accent-color": resolvedAccent,
+        } as React.CSSProperties
+      }
+    >
+      <legend>Atmosphere accent</legend>
+      <div className={styles.botAtmosphereAccentHeader}>
+        <span>Environmental companion hue</span>
+        <button
+          type="button"
+          aria-pressed={accentColor === null}
+          data-active={accentColor === null ? "true" : undefined}
+          onClick={() => onChange(null)}
+        >
+          Auto
+        </button>
+      </div>
+      <div
+        className={styles.botAtmosphereAccentPreview}
+        role="img"
+        aria-label={`Atmosphere preview from primary ${primaryColor} to accent ${resolvedAccent}`}
+      />
+      <input
+        className={styles.botAtmosphereAccentHue}
+        type="range"
+        min={0}
+        max={359}
+        step={1}
+        value={accentHue}
+        aria-label="Atmosphere accent hue"
+        aria-valuetext={`${accentHue} degrees${accentColor === null ? ", Auto" : ""}`}
+        onChange={(event) =>
+          onChange(
+            hslToHex(
+              Number(event.currentTarget.value),
+              100,
+              primaryHsl.l,
+            ),
+          )
+        }
+      />
+      <small>
+        {accentColor === null
+          ? "Auto follows the primary with a stable analogous hue."
+          : "Used only in this bot’s Chat and Zen Atmospheres."}
+      </small>
+    </fieldset>
+  );
+}
+
 function BotAvatarFaceControls({
   activeTab,
   identitySurface = "identity-core",
@@ -41434,6 +41857,7 @@ function BotAvatarFaceControls({
     corporality: number;
     onCorporalityChange: (next: number) => void;
     color: string;
+    accentColor: string | null;
     glyph: BotGlyphName;
     colorPickerOpen: boolean;
     resolvedTheme: "light" | "dark";
@@ -41442,6 +41866,7 @@ function BotAvatarFaceControls({
     onNameSample: () => void;
     onRandomizeName?: () => void | Promise<void>;
     onColorChange: (next: string) => void;
+    onAccentColorChange: (next: string | null) => void;
     onGlyphChange: (next: BotGlyphName) => void;
     onColorPickerToggle: () => void;
   };
@@ -41574,6 +41999,11 @@ function BotAvatarFaceControls({
       </div>
         )}
       </BotAvatarRefractRandomizer>
+      <BotAtmosphereAccentControl
+        primaryColor={identitySection.color}
+        accentColor={identitySection.accentColor}
+        onChange={identitySection.onAccentColorChange}
+      />
     </div>
   ) : (
     <section
@@ -42916,6 +43346,7 @@ function BotAvatarCustomizerModal({
   screenMaterialSeed,
   frameMaterialSeed,
   color,
+  accentColor,
   glyph,
   isDefaultPrismBot = false,
   identityControlsVisible = true,
@@ -42986,6 +43417,7 @@ function BotAvatarCustomizerModal({
   onCancelSavePrompt,
   onThemeCycle,
   onColorChange,
+  onAccentColorChange,
   onGlyphChange,
   onColorPickerToggle,
   onEyesFontChange,
@@ -44765,6 +45197,7 @@ function BotAvatarCustomizerModal({
                             );
                           },
                           color,
+                          accentColor,
                           glyph,
                           colorPickerOpen,
                           resolvedTheme,
@@ -44776,6 +45209,7 @@ function BotAvatarCustomizerModal({
                             void previewBotNamePronunciation();
                           },
                           onColorChange,
+                          onAccentColorChange,
                           onGlyphChange,
                           onColorPickerToggle,
                         }
@@ -47619,6 +48053,7 @@ function HomeContent(): React.JSX.Element {
   const speechTypeWheelLockedRef = useRef(false);
   const voiceModeSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const voiceModeSelectorPickerId = useId();
+  const commitPendingVoicePickerRef = useRef<() => void>(() => {});
   const [voiceModeSelectorOpen, setVoiceModeSelectorOpen] = useState(false);
   const [voiceModeSelectorInteractionMode, setVoiceModeSelectorInteractionMode] =
     useState<"pointer" | "keyboard">("pointer");
@@ -47632,8 +48067,7 @@ function HomeContent(): React.JSX.Element {
     const closeForOtherPicker = (event: Event): void => {
       const source = (event as CustomEvent<{ source?: string }>).detail?.source;
       if (source === voiceModeSelectorPickerId) return;
-      setVoiceModeSelectorOpen(false);
-      setVoiceModeSelectorInteractionMode("pointer");
+      commitPendingVoicePickerRef.current();
     };
     window.addEventListener(PRISM_NAVBAR_PICKER_OPEN_EVENT, closeForOtherPicker);
     return () =>
@@ -48020,7 +48454,8 @@ function HomeContent(): React.JSX.Element {
           playPrismHotkeyInaccessibleSfx();
           return;
         }
-        if (closeOpenPrismShortcutPicker()) {
+        const closedPicker = closeOpenPrismShortcutPicker();
+        if (closedPicker === "model") {
           event.preventDefault();
           event.stopPropagation();
           return;
@@ -48045,7 +48480,8 @@ function HomeContent(): React.JSX.Element {
           playPrismHotkeyInaccessibleSfx();
           return;
         }
-        if (closeOpenPrismShortcutPicker()) {
+        const closedPicker = closeOpenPrismShortcutPicker();
+        if (closedPicker === "effort") {
           event.preventDefault();
           event.stopPropagation();
           return;
@@ -48059,11 +48495,6 @@ function HomeContent(): React.JSX.Element {
       }
 
       if (keyboardShortcutMatchesEvent(keyboardShortcuts.speechType, event)) {
-        if (closeOpenPrismShortcutPicker()) {
-          event.preventDefault();
-          event.stopPropagation();
-          return;
-        }
         const active = findVisiblePrismShortcutTrigger(
           '[data-prism-speech-type-trigger="true"]',
         );
@@ -48071,6 +48502,12 @@ function HomeContent(): React.JSX.Element {
           event.preventDefault();
           event.stopPropagation();
           playPrismHotkeyInaccessibleSfx();
+          return;
+        }
+        const closedPicker = closeOpenPrismShortcutPicker();
+        if (closedPicker === "speech") {
+          event.preventDefault();
+          event.stopPropagation();
           return;
         }
         event.preventDefault();
@@ -51039,7 +51476,7 @@ function HomeContent(): React.JSX.Element {
         else setImageCleanupPreviewOpen(false);
         return;
       }
-      if (event.key !== "Tab") return;
+      if (event.key !== "Tab" || event.shiftKey) return;
       const focusable = panelFocusableElements(modal);
       if (focusable.length === 0) {
         event.preventDefault();
@@ -51266,6 +51703,9 @@ function HomeContent(): React.JSX.Element {
     useState<BotAudioVoiceProfileV1>(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
   const [newBotColor, setNewBotColor] = useState<string>(
     DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR,
+  );
+  const [newBotAccentColor, setNewBotAccentColor] = useState<string | null>(
+    null,
   );
   const [newBotGlyph, setNewBotGlyph] =
     useState<BotGlyphName>(DEFAULT_BOT_GLYPH);
@@ -51878,6 +52318,7 @@ function HomeContent(): React.JSX.Element {
       namePronunciation: newBotNamePronunciation,
       selfReferral: newBotSelfReferral,
       color: newBotColor,
+      accentColor: newBotAccentColor,
       glyph: newBotGlyph,
       faceEyesFont: newBotFaceEyesFont,
       faceEyeCharacter: newBotFaceEyeCharacter,
@@ -51920,6 +52361,7 @@ function HomeContent(): React.JSX.Element {
     }),
     [
       newBotColor,
+      newBotAccentColor,
       newBotFaceBlinkBar,
       newBotFaceBlinkScale,
       newBotFaceBlinkOffsetX,
@@ -51971,6 +52413,7 @@ function HomeContent(): React.JSX.Element {
       setNewBotNamePronunciation(snapshot.namePronunciation);
       setNewBotSelfReferral(snapshot.selfReferral);
       setNewBotColor(snapshot.color);
+      setNewBotAccentColor(snapshot.accentColor);
       setNewBotGlyph(snapshot.glyph);
       setNewBotFaceEyesFont(snapshot.faceEyesFont);
       setNewBotFaceEyeCharacter(snapshot.faceEyeCharacter);
@@ -52090,6 +52533,7 @@ function HomeContent(): React.JSX.Element {
     const pristine = editOriginalRef.current;
     if (!pristine) return;
     setNewBotColor(pristine.color);
+    setNewBotAccentColor(pristine.accentColor);
     setNewBotNamePronunciation(pristine.namePronunciation);
     setNewBotSelfReferral(pristine.selfReferral);
     setNewBotGlyph(pristine.glyph);
@@ -54690,6 +55134,7 @@ function HomeContent(): React.JSX.Element {
         accent,
         resolvedTheme,
         personaFillProgress,
+        activeBot.accentColor,
       ),
     };
   }, [
@@ -54732,6 +55177,16 @@ function HomeContent(): React.JSX.Element {
       : null;
     return displayAccentForMode(raw, resolvedTheme, appWidePrivateMode);
   }, [appWidePrivateMode, bots, composeBotAccentId, resolvedTheme]);
+  const selectedComposeBotAtmosphereAccent = useMemo<string | null>(() => {
+    const bot = composeBotAccentId
+      ? bots.find((candidate) => candidate.id === composeBotAccentId)
+      : null;
+    if (!bot?.color || appWidePrivateMode) return null;
+    return normalizeAccentForTheme(
+      resolveBotAccentColor(bot.color, bot.accentColor),
+      resolvedTheme,
+    );
+  }, [appWidePrivateMode, bots, composeBotAccentId, resolvedTheme]);
 
   const zenPersonaBackdropStyleVars = ZEN_PERSONA_BACKDROP_STYLE_VARS;
 
@@ -54741,6 +55196,8 @@ function HomeContent(): React.JSX.Element {
     if (
       view !== "chat" ||
       !selectedComposeBotAccent ||
+      !selectedComposeBotAtmosphereAccent ||
+      appWidePrivateMode ||
       selectedBotGradientActive
     ) {
       return undefined;
@@ -54748,45 +55205,60 @@ function HomeContent(): React.JSX.Element {
     return {
       ...zenPersonaBackdropStyleVars,
       ["--zen-persona-ink-color" as string]: selectedComposeBotAccent,
+      ["--bot-primary-color" as string]: selectedComposeBotAccent,
+      ["--bot-accent-color" as string]: selectedComposeBotAtmosphereAccent,
     };
   }, [
     selectedBotGradientActive,
     selectedComposeBotAccent,
+    selectedComposeBotAtmosphereAccent,
+    appWidePrivateMode,
     view,
     zenPersonaBackdropStyleVars,
   ]);
   const previousZenPersonaWashColorRef = useRef<string | null>(null);
+  const previousZenPersonaWashAccentColorRef = useRef<string | null>(null);
   const [exitingZenPersonaWash, setExitingZenPersonaWash] = useState<{
     color: string;
+    accentColor: string;
     id: number;
   } | null>(null);
   useEffect(() => {
     const previousColor = previousZenPersonaWashColorRef.current;
+    const previousAccentColor = previousZenPersonaWashAccentColorRef.current;
     if (view !== "chat") {
       previousZenPersonaWashColorRef.current = null;
+      previousZenPersonaWashAccentColorRef.current = null;
       setExitingZenPersonaWash(null);
       return;
     }
-    if (selectedComposeBotAccent) {
+    if (selectedComposeBotAccent && selectedComposeBotAtmosphereAccent) {
       previousZenPersonaWashColorRef.current = selectedComposeBotAccent;
+      previousZenPersonaWashAccentColorRef.current =
+        selectedComposeBotAtmosphereAccent;
       setExitingZenPersonaWash(null);
       return;
     }
     previousZenPersonaWashColorRef.current = null;
+    previousZenPersonaWashAccentColorRef.current = null;
     if (!previousColor) {
       setExitingZenPersonaWash(null);
       return;
     }
 
     const id = Date.now();
-    setExitingZenPersonaWash({ color: previousColor, id });
+    setExitingZenPersonaWash({
+      color: previousColor,
+      accentColor: previousAccentColor ?? previousColor,
+      id,
+    });
     const timeout = window.setTimeout(() => {
       setExitingZenPersonaWash((current) =>
         current?.id === id ? null : current,
       );
     }, ZEN_ATMOSPHERE_COLOR_TRANSITION_MS);
     return () => window.clearTimeout(timeout);
-  }, [selectedComposeBotAccent, view]);
+  }, [selectedComposeBotAccent, selectedComposeBotAtmosphereAccent, view]);
   const exitingZenPersonaWashStyle = useMemo<
     React.CSSProperties | undefined
   >(() => {
@@ -54794,6 +55266,8 @@ function HomeContent(): React.JSX.Element {
     return {
       ...zenPersonaBackdropStyleVars,
       ["--zen-persona-ink-color" as string]: exitingZenPersonaWash.color,
+      ["--bot-primary-color" as string]: exitingZenPersonaWash.color,
+      ["--bot-accent-color" as string]: exitingZenPersonaWash.accentColor,
     };
   }, [exitingZenPersonaWash, zenPersonaBackdropStyleVars]);
 
@@ -56436,39 +56910,36 @@ function HomeContent(): React.JSX.Element {
       localPremiumFallback: premiumLocalOnly,
     });
     const menuId = "navbar-voice-mode-menu";
-    const voiceEntries = VOICE_PLAYBACK_CHOICES.map(
-      (choice): PrismMenuEntry => {
-        const optionDisabled =
-          disabled ||
-          (choice === "premium" && (premiumUnavailable || premiumLocalOnly));
-        const premiumDisabledReason =
-          choice === "premium" && premiumLocalOnly
-            ? "Switch response routing to AUTO or ONLINE before choosing Premium. LOCAL keeps speech on this device."
-            : choice === "premium" && premiumUnavailable
-              ? "Connect an ElevenLabs key in Settings → Keys to use Premium."
-              : undefined;
-        return {
-          id: `voice-${choice}`,
-          kind: "radio",
-          group: "voice-mode",
-          label:
-            choice === "premium"
-              ? "Premium · ONLINE"
-              : voiceModeDisplayName(choice),
-          checked:
-            voiceModeSelectorInteractionMode === "keyboard"
-              ? choice === activeHighlightedVoicePlaybackChoice
-              : choice === currentChoice,
-          disabled: optionDisabled,
-          disabledReason: disabledReason ?? premiumDisabledReason,
-          onSelect: () => {
-            if (choice !== currentChoice) {
-              return selectGlobalVoiceChoice(choice);
-            }
-          },
-        };
-      },
-    );
+    const voiceEntries = VOICE_PLAYBACK_CHOICES.filter(
+      (choice) => choice !== "premium" || !premiumLocalOnly,
+    ).map((choice): PrismMenuEntry => {
+      const optionDisabled =
+        disabled || (choice === "premium" && premiumUnavailable);
+      const premiumDisabledReason =
+        choice === "premium" && premiumUnavailable
+          ? "Connect an ElevenLabs key in Settings → Keys to use Premium."
+          : undefined;
+      return {
+        id: `voice-${choice}`,
+        kind: "radio",
+        group: "voice-mode",
+        label:
+          choice === "premium"
+            ? "Premium · ONLINE"
+            : voiceModeDisplayName(choice),
+        checked:
+          voiceModeSelectorInteractionMode === "keyboard"
+            ? choice === activeHighlightedVoicePlaybackChoice
+            : choice === currentChoice,
+        disabled: optionDisabled,
+        disabledReason: disabledReason ?? premiumDisabledReason,
+        onSelect: () => {
+          if (choice !== currentChoice) {
+            return selectGlobalVoiceChoice(choice);
+          }
+        },
+      };
+    });
     return (
       <div
         key={disabled ? "voice-mode-locked" : "voice-mode-active"}
@@ -56500,6 +56971,13 @@ function HomeContent(): React.JSX.Element {
           title={disabled ? disabledReason : undefined}
           disabled={disabled}
           onClick={() => {
+            if (
+              voiceModeSelectorOpen &&
+              voiceModeSelectorInteractionMode === "keyboard"
+            ) {
+              commitHotkeyVoiceSelection();
+              return;
+            }
             if (!voiceModeSelectorOpen) {
               announcePrismNavbarPickerOpen(voiceModeSelectorPickerId);
             }
@@ -56530,8 +57008,7 @@ function HomeContent(): React.JSX.Element {
                   accent: prismDefaultAccentForTheme(resolvedTheme),
                   theme: resolvedTheme,
                   minWidth: 320,
-                  // Five Speech Types stay available, but the navbar menu should
-                  // remain a compact scrollable picker rather than a tall panel.
+                  // LOCAL omits Premium; the remaining Speech Types stay compact.
                   maxHeight: 224,
                   focusRestoreTarget: voiceModeSelectorButtonRef,
                   entries: voiceEntries,
@@ -56637,10 +57114,16 @@ function HomeContent(): React.JSX.Element {
       view === "chat" &&
       (pendingReplyVisible || chatAssistantRevealInProgress || activeSideChat);
     const showModelControls = options.showModelControls ?? true;
+    // The empty canvas already exposes direct bot cards and, when useful, a
+    // full hue lens. Do not duplicate that browsing surface in the navbar.
+    const directBotSelectionVisible =
+      emptyStateLensVisible ||
+      (activeConversationIsEmpty && canvasBotDirectoryInteractive);
     const showBotPicker =
       (options.showBotPicker ?? true) &&
       view === "chat" &&
       !activeSideChat &&
+      !directBotSelectionVisible &&
       zenPersonaPickerBots.length > 0;
     const showVoiceSelector = options.showVoiceSelector ?? true;
     if (!showModelControls && !showBotPicker) {
@@ -56684,6 +57167,11 @@ function HomeContent(): React.JSX.Element {
             />
           </>
         ) : null}
+        {showVoiceSelector
+          ? renderVoiceModeSelector({
+              localPremiumFallback: blocksOnlineCapabilities(responseMode),
+            })
+          : null}
         {showBotPicker ? (
           <ComposerBotPicker
             value={zenPersonaBotId ?? ""}
@@ -56711,11 +57199,6 @@ function HomeContent(): React.JSX.Element {
             navbarPicker
           />
         ) : null}
-        {showVoiceSelector
-          ? renderVoiceModeSelector({
-              localPremiumFallback: blocksOnlineCapabilities(responseMode),
-            })
-          : null}
         {view === "chat" && detail?.incognito === true ? (
           <span
             className={styles.chatPrivateStatusBadge}
@@ -84611,6 +85094,54 @@ function HomeContent(): React.JSX.Element {
     if (nextChoice) void selectGlobalVoiceChoice(nextChoice);
   }, [activeHighlightedVoicePlaybackChoice, closeHotkeyVoicePicker]);
 
+  const closeVoicePickerToComposer = useCallback((): void => {
+    setVoiceModeSelectorOpen(false);
+    setVoiceModeSelectorInteractionMode("pointer");
+    window.requestAnimationFrame(focusVisibleComposer);
+  }, []);
+
+  const commitHotkeyVoiceSelectionToComposer = useCallback((): void => {
+    const nextChoice = activeHighlightedVoicePlaybackChoice;
+    closeVoicePickerToComposer();
+    if (nextChoice) void selectGlobalVoiceChoice(nextChoice);
+  }, [activeHighlightedVoicePlaybackChoice, closeVoicePickerToComposer]);
+
+  useEffect(() => {
+    if (!voiceModeSelectorOpen) return;
+    const handleVoicePickerTab = (event: KeyboardEvent): void => {
+      if (event.key !== "Tab") return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (voiceModeSelectorInteractionMode === "keyboard") {
+        commitHotkeyVoiceSelectionToComposer();
+      } else {
+        closeVoicePickerToComposer();
+      }
+    };
+    document.addEventListener("keydown", handleVoicePickerTab, true);
+    return () =>
+      document.removeEventListener("keydown", handleVoicePickerTab, true);
+  }, [
+    closeVoicePickerToComposer,
+    commitHotkeyVoiceSelectionToComposer,
+    voiceModeSelectorInteractionMode,
+    voiceModeSelectorOpen,
+  ]);
+
+  // The shared picker-open event is also a commit boundary for a Speech Type
+  // highlight produced by location-agnostic hotkey scrolling.
+  commitPendingVoicePickerRef.current = () => {
+    if (
+      voiceModeSelectorOpen &&
+      voiceModeSelectorInteractionMode === "keyboard"
+    ) {
+      commitHotkeyVoiceSelection();
+      return;
+    }
+    setVoiceModeSelectorOpen(false);
+    setVoiceModeSelectorInteractionMode("pointer");
+  };
+
   useEffect(() => {
     const trigger = voiceModeSelectorButtonRef.current;
     if (!trigger) return;
@@ -84656,9 +85187,9 @@ function HomeContent(): React.JSX.Element {
         Math.max(0, currentIndex + direction),
       );
       const nextChoice = availableVoicePlaybackChoices[nextIndex];
-      if (!nextChoice || nextChoice === currentChoice) return;
       event.preventDefault();
       event.stopPropagation();
+      if (!nextChoice || nextChoice === currentChoice) return;
       if (speechTypeWheelLockedRef.current) return;
       speechTypeWheelLockedRef.current = true;
       window.setTimeout(() => {
@@ -84669,6 +85200,9 @@ function HomeContent(): React.JSX.Element {
       } else {
         void selectGlobalVoiceChoice(nextChoice);
       }
+      void playSpatialUiSfx("bot-hover", {
+        anchor: voiceModeSelectorButtonRef.current,
+      });
     };
     document.addEventListener("wheel", handleSpeechTypeWheel, {
       capture: true,
@@ -86910,6 +87444,7 @@ function HomeContent(): React.JSX.Element {
         ),
         selfReferral: normalizeBotSelfReferral(bot.self_referral),
         color: bot.color ?? null,
+        accentColor: bot.accentColor ?? null,
         glyph: bot.glyph ?? null,
         avatarDetails: resolveBotAvatarDetails(bot),
         temperature: bot.temperature,
@@ -93721,6 +94256,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotAudioVoiceProfile(DEFAULT_BOT_AUDIO_VOICE_PROFILE_V1);
     createBotAppearanceTouchedRef.current = false;
     setNewBotColor(DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR);
+    setNewBotAccentColor(null);
     setNewBotGlyph(DEFAULT_BOT_GLYPH);
     setNewBotFaceEyesFont(DEFAULT_BOT_FACE_STYLE.eyesFont);
     setNewBotFaceEyeCharacter(DEFAULT_BOT_FACE_STYLE.eyeCharacter);
@@ -93897,6 +94433,7 @@ function HomeContent(): React.JSX.Element {
             selfReferral: newBotSelfReferral,
             profile: botProfile,
             color: newBotColor,
+            accentColor: newBotAccentColor,
             glyph: newBotGlyph,
             face: {
               eyesFont: newBotFaceEyesFont,
@@ -93963,6 +94500,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotAudioVoiceProfile(draft.audioVoiceProfile);
     createBotAppearanceTouchedRef.current = true;
     setNewBotColor(draft.color);
+    setNewBotAccentColor(draft.accentColor);
     setNewBotGlyph(draft.glyph);
     setNewBotFaceEyesFont(draft.face.eyesFont);
     setNewBotFaceEyeCharacter(draft.face.eyeCharacter);
@@ -94312,6 +94850,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotAudioVoiceProfile(seededAudioVoiceProfile);
     voiceRestoreRequestedRef.current = false;
     setNewBotColor(seededColor);
+    setNewBotAccentColor(null);
     setNewBotGlyph(seededGlyph);
     setNewBotFaceEyesFont(seededFaceEyesFont);
     setNewBotFaceEyeCharacter(seededFaceEyeCharacter);
@@ -94364,6 +94903,7 @@ function HomeContent(): React.JSX.Element {
       topK: seededTopK,
       repetitionPenalty: seededRepetitionPenalty,
       color: seededColor,
+      accentColor: null,
       glyph: seededGlyph,
       faceEyesFont: seededFaceEyesFont,
       faceEyeCharacter: seededFaceEyeCharacter,
@@ -94507,6 +95047,7 @@ function HomeContent(): React.JSX.Element {
           topK: newBotTopK,
           repetitionPenalty: newBotRepetitionPenalty,
           color: newBotColor,
+          accentColor: newBotAccentColor,
           glyph: newBotGlyph,
           faceEyesFont: newBotFaceEyesFont,
           faceEyeCharacter: newBotFaceEyeCharacter,
@@ -94646,6 +95187,7 @@ function HomeContent(): React.JSX.Element {
             bot.repetition_penalty,
           ),
           color: bot.color,
+          accentColor: bot.accentColor ?? null,
           glyph: bot.glyph,
           faceEyesFont: faceStyle.eyesFont,
           faceEyeCharacter: faceStyle.eyeCharacter,
@@ -94744,6 +95286,7 @@ function HomeContent(): React.JSX.Element {
           topK: newBotTopK,
           repetitionPenalty: newBotRepetitionPenalty,
           color: newBotColor,
+          accentColor: newBotAccentColor,
           glyph: newBotGlyph,
           faceEyesFont: newBotFaceEyesFont,
           faceEyeCharacter: newBotFaceEyeCharacter,
@@ -94816,6 +95359,7 @@ function HomeContent(): React.JSX.Element {
         topK: newBotTopK,
         repetitionPenalty: newBotRepetitionPenalty,
         color: newBotColor,
+        accentColor: newBotAccentColor,
         glyph: newBotGlyph,
         faceEyesFont: newBotFaceEyesFont,
         faceEyeCharacter: newBotFaceEyeCharacter,
@@ -95948,6 +96492,7 @@ function HomeContent(): React.JSX.Element {
     setNewBotRepetitionPenalty(seededRepetitionPenalty);
     setNewBotAudioVoiceProfile(seededAudioVoiceProfile);
     setNewBotColor(seededColor);
+    setNewBotAccentColor(bot.accentColor ?? null);
     setNewBotGlyph(seededGlyph);
     setNewBotFaceEyesFont(seededFaceStyle.eyesFont);
     setNewBotFaceEyeCharacter(seededFaceStyle.eyeCharacter);
@@ -96001,6 +96546,7 @@ function HomeContent(): React.JSX.Element {
       topK: seededTopK,
       repetitionPenalty: seededRepetitionPenalty,
       color: seededColor,
+      accentColor: bot.accentColor ?? null,
       glyph: seededGlyph,
       faceEyesFont: seededFaceStyle.eyesFont,
       faceEyeCharacter: seededFaceStyle.eyeCharacter,
@@ -98244,6 +98790,7 @@ function HomeContent(): React.JSX.Element {
         topK: BOT_TOP_K_DEFAULT,
         repetitionPenalty: BOT_REPETITION_PENALTY_DEFAULT,
         color: DEFAULT_PRISM_BOT_CUSTOMIZER_COLOR,
+        accentColor: null,
         glyph: DEFAULT_PRISM_BOT_GLYPH,
         faceEyesFont: newBotFaceEyesFont,
         faceEyeCharacter: newBotFaceEyeCharacter,
@@ -98413,6 +98960,7 @@ function HomeContent(): React.JSX.Element {
         topK: newBotTopK,
         repetitionPenalty: newBotRepetitionPenalty,
         color: newBotColor,
+        accentColor: newBotAccentColor,
         glyph: newBotGlyph,
         faceEyesFont: newBotFaceEyesFont,
         faceEyeCharacter: newBotFaceEyeCharacter,
@@ -98501,6 +99049,7 @@ function HomeContent(): React.JSX.Element {
         topK: newBotTopK,
         repetitionPenalty: newBotRepetitionPenalty,
         color: newBotColor,
+        accentColor: newBotAccentColor,
         glyph: newBotGlyph,
         faceEyesFont: newBotFaceEyesFont,
         faceEyeCharacter: newBotFaceEyeCharacter,
@@ -115425,6 +115974,8 @@ function HomeContent(): React.JSX.Element {
                 newBotRepetitionPenalty !== editPristine.repetitionPenalty ||
                 normalizeColor(newBotColor) !==
                   normalizeColor(editPristine.color) ||
+                normalizeColor(newBotAccentColor) !==
+                  normalizeColor(editPristine.accentColor) ||
                 newBotGlyph !== editPristine.glyph ||
                 newBotFaceEyesFont !== editPristine.faceEyesFont ||
                 newBotFaceEyeCharacter !== editPristine.faceEyeCharacter ||
@@ -116910,6 +117461,7 @@ function HomeContent(): React.JSX.Element {
                           }`,
                         )}
                         color={newBotColor}
+                        accentColor={newBotAccentColor}
                         glyph={newBotGlyph}
                         isDefaultPrismBot={editingDefaultBot}
                         identityControlsVisible={!editingDefaultBot}
@@ -117220,6 +117772,11 @@ function HomeContent(): React.JSX.Element {
                         onColorChange={(next) => {
                           pushBotAvatarUndoSnapshot("color");
                           handleNewBotColorChange(next);
+                        }}
+                        onAccentColorChange={(next) => {
+                          pushBotAvatarUndoSnapshot("atmosphere-accent");
+                          createBotAppearanceTouchedRef.current = true;
+                          setNewBotAccentColor(next);
                         }}
                         onGlyphChange={(next) => {
                           pushBotAvatarUndoSnapshot();
@@ -136165,19 +136722,30 @@ function HomeContent(): React.JSX.Element {
           ZEN_ATMOSPHERE_READABILITY_OVERLAY_STRENGTH,
       ),
     } as React.CSSProperties;
-    // Persona startup wash must show whenever the empty bot room has no
-    // wallpaper image. Do not gate on selectedBotGradientActive — blank /
-    // near-empty gradients still flip that flag and were hiding bot color.
+    // The selected-bot canvas gradient is the empty-room Atmosphere. Mount the
+    // startup fallback only when that owner is unavailable so a second field
+    // never stacks over it and recreates the former monochromatic wash.
     const zenPersonaFallbackAtmosphereVisible =
       sharedChatConversationPresentation &&
       zenEmptyHeroVisible &&
       Boolean(zenPersonaBot) &&
       !appWidePrivateMode &&
+      !selectedBotGradientActive &&
       !zenRememberedWallpaperVisible &&
       !zenFallbackWallpaperVisible &&
       !zenGeneratedAtmosphereVisible;
-    const zenPersonaAtmosphereAccentStyle = zenPersonaBot
-      ? botAccentStyle(zenPersonaBot.color, resolvedTheme, appWidePrivateMode)
+    const zenPersonaAtmosphereAccentStyle =
+      zenPersonaBot && !appWidePrivateMode
+      ? ({
+          ...botAccentStyle(zenPersonaBot.color, resolvedTheme),
+          ["--bot-accent-color" as string]: normalizeAccentForTheme(
+            resolveBotAccentColor(
+              zenPersonaBot.color,
+              zenPersonaBot.accentColor,
+            ),
+            resolvedTheme,
+          ),
+        } as React.CSSProperties)
       : undefined;
     const zenPersonaFallbackAtmosphereStyle = zenPersonaBot
       ? ({

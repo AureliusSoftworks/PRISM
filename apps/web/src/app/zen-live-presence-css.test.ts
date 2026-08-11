@@ -3657,7 +3657,8 @@ describe("Zen live presence CSS", () => {
       /const proseSettled = avoidChrome[\s\S]*?resolveZenLiveBotAvatarProseHillPosition\([\s\S]*?const settled = avoidChrome[\s\S]*?resolveZenLiveBotAvatarChromeAvoidancePosition\(\s*proseSettled,/,
     );
     assert.doesNotMatch(pageSource, /resolveZenLiveBotAvatarProseHillMotion/);
-    assert.doesNotMatch(pageSource, /startAvatarMomentum/);
+    assert.match(pageSource, /planZenLiveBotFreeRoamDestination\([\s\S]*?avoidRects,/);
+    assert.match(pageSource, /startAvatarMomentum\(dragState\.velocitySample\)/);
     assert.doesNotMatch(pageSource, /data-flinging/);
     assert.match(
       pageSource,
@@ -4254,19 +4255,21 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(css, /data-refresh-splash-active/);
   });
 
-  it("soft lane-drifts the live presence plate with vertical bob and hops only", () => {
-    assert.match(pageSource, /from "\.\/zenLiveBotLaneDrift"/);
-    assert.match(pageSource, /advanceZenLiveBotLaneDrift\(/);
-    assert.match(pageSource, /allowTravel:\s*!faceTalkingRef\.current/);
+  it("integrates free-roam motion, directional tilt, and a speed-tied glow", () => {
+    assert.match(pageSource, /from "\.\/zenLiveBotFreeRoam"/);
+    assert.match(pageSource, /planZenLiveBotFreeRoamDestination\(/);
+    assert.match(pageSource, /advanceZenLiveBotPhysics\(/);
+    assert.match(pageSource, /sampleZenLiveBotIdleBob\(/);
+    assert.match(pageSource, /data-dominant-full-avatar/);
     assert.match(pageSource, /--zen-live-bot-lane-drift-y/);
     const plateRule = ruleForExactSelector(".zenLiveBotPresencePlate");
     assert.match(
       plateRule,
       /translate:\s*var\(--zen-live-bot-lane-drift-x,\s*0px\)[\s\S]*var\(--zen-live-bot-lane-drift-y,\s*0px\)/,
     );
-    assert.match(
-      css,
-      /\.zenLiveBotPresencePlate\s*>\s*\.botAmbientPresenceRig\s*\{[\s\S]*--bot-ambient-hover-amplitude:\s*0px\s*;/,
-    );
+    assert.match(plateRule, /rotate:\s*var\(--zen-live-bot-motion-tilt\)/);
+    assert.match(css, /data-free-roam-motion="moving"[\s\S]*--bot-ambient-underglow-rest-opacity/);
+    assert.match(css, /data-dominant-full-avatar="true"\]\[data-canvas-side="left"\]/);
+    assert.match(css, /data-dominant-full-avatar="true"\]\[data-canvas-side="right"\]/);
   });
 });

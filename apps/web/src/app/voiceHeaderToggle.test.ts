@@ -20,7 +20,7 @@ describe("universal voice selector", () => {
     );
     assert.match(
       pageSource,
-      /VOICE_PLAYBACK_CHOICES\.map\( \(choice\): PrismMenuEntry =>/,
+      /VOICE_PLAYBACK_CHOICES\.filter\( \(choice\) => choice !== "premium" \|\| !premiumLocalOnly, \)\.map\(\(choice\): PrismMenuEntry =>/,
     );
     assert.match(pageSource, /kind: "radio", group: "voice-mode"/);
     assert.match(pageSource, /`Speech Type: \$\{currentDisplayName\}`/);
@@ -75,10 +75,10 @@ describe("universal voice selector", () => {
     );
   });
 
-  it("moves the same five choices into the constrained tools menu", () => {
+  it("moves the available choices into the constrained tools menu", () => {
     assert.match(
       pageSource,
-      /VOICE_PLAYBACK_CHOICES\.map\(\(choice\): PrismMenuEntry => \{/,
+      /VOICE_PLAYBACK_CHOICES\.filter\( \(choice\) => choice !== "premium" \|\| !premiumLocalOnly, \)\.map\(\(choice\): PrismMenuEntry => \{/,
     );
     assert.match(pageSource, /kind: "radio"/);
     assert.match(pageSource, /group: "voice-mode"/);
@@ -87,6 +87,22 @@ describe("universal voice selector", () => {
       /@media \(max-width: 560px\)[\s\S]*?\.voiceModeSelector\s*\{\s*display:\s*none/,
     );
     assert.match(pageSource, /Settings → Keys to use Premium/);
+  });
+
+  it("removes Premium from the menu while LOCAL is active", () => {
+    const selectorSource = pageSource.slice(
+      pageSource.indexOf("const renderVoiceModeSelector ="),
+      pageSource.indexOf("const renderHeaderModelPicker ="),
+    );
+    assert.match(
+      selectorSource,
+      /VOICE_PLAYBACK_CHOICES\.filter\( \(choice\) => choice !== "premium" \|\| !premiumLocalOnly/,
+    );
+    assert.match(
+      selectorSource,
+      /const optionDisabled = disabled \|\| \(choice === "premium" && premiumUnavailable\)/,
+    );
+    assert.doesNotMatch(selectorSource, /Switch response routing to AUTO or ONLINE/);
   });
 
   it("keeps the selector in the header without repeating it in the Zen hero", () => {

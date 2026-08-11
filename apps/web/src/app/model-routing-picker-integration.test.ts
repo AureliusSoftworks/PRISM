@@ -164,7 +164,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       pageSource,
-      /const effortTriggerDisabled =[\s\S]{0,100}!autoTurboActionAvailable/u,
+      /const effortTriggerDisabled =[\s\S]{0,100}!effortDirectActionAvailable/u,
     );
     assert.match(pageSource, /Effort chosen automatically/u);
     assert.match(pageSource, /<HollowTriangleEffortIcon \/>/u);
@@ -178,7 +178,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.doesNotMatch(
       pageSource.match(
-        /if \(autoLocalTurboPreviewAvailable\)[\s\S]*?\n\s*\}\n\s*if \(autoOnlineTurboToggleAvailable\)/u,
+        /if \(autoLocalTurboPreviewAvailable\)[\s\S]*?\n\s*\}\n\s*if \(onlineTurboToggleAvailable\)/u,
       )?.[0] ?? "",
       /onTurboChange|persistGlobalModelSelection|TURBO_TOGGLE_QUICK_EVENT/u,
     );
@@ -471,6 +471,11 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       cssSource,
+      /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelControl\[data-turbo="true"\]\s*\{[^}]*border-color:[^}]*#0284c7[^}]*box-shadow:/u,
+      "light mode should give the complete Turbo picker a stronger blue perimeter",
+    );
+    assert.match(
+      cssSource,
       /body\[data-prism-theme="light"\][\s\S]{0,180}composeModelControl\[data-turbo="true"\]::after\s*\{[^}]*#38bdf8/u,
       "light mode should own the blue outer pulse override",
     );
@@ -556,7 +561,47 @@ describe("shared routing model picker integration", () => {
     assert.match(pageSource, /const handleModelWheel =/u);
     assert.match(pageSource, /modelPickerWheelDirection\(event\.deltaX, event\.deltaY\)/u);
     assert.match(pageSource, /modelPickerStepValue\([\s\S]{0,120}selectableModelValues/u);
+    assert.match(
+      pageSource,
+      /const currentValue = activeHighlightedModelValue;[\s\S]{0,400}setHighlightedModelValue\(nextValue\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const handleModelWheel =[\s\S]{0,1400}setHighlightedModelValue\(nextValue\)[\s\S]{0,240}onChange\(nextValue\)/u,
+    );
     assert.match(pageSource, /onWheel=\{handleModelWheel\}/u);
+  });
+
+  it("gives navbar picker wheels tactile feedback only when selection changes", () => {
+    assert.doesNotMatch(pageSource, /playNavbarPickerBoundarySfx|picker-boundary/u);
+    assert.match(
+      pageSource,
+      /const handleModelWheel =[\s\S]{0,1500}if \(!nextValue \|\| nextValue === currentValue\) return;[\s\S]{0,500}playSpatialUiSfx\("bot-hover"/u,
+    );
+    assert.match(
+      pageSource,
+      /const handleEffortWheel =[\s\S]{0,1300}if \(nextValue === effortControl\.value\) return;[\s\S]{0,300}setEffortValue\(nextValue\)/u,
+    );
+    assert.match(
+      pageSource,
+      /pickerOpenState\.interactionMode === "keyboard"[\s\S]{0,240}playSpatialUiSfx\("effort-tick"[\s\S]{0,180}setHighlightedEffortValue\(nextValue\)/u,
+    );
+    assert.match(
+      pageSource,
+      /commitHotkeyEffortSelection[\s\S]{0,280}setEffortValue\(activeHighlightedEffortValue, \{ playTick: false \}\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const setEffortValue =[\s\S]{0,800}nextValue !== effortControl\.value[\s\S]{0,260}playSpatialUiSfx\("effort-tick"/u,
+    );
+    assert.match(
+      pageSource,
+      /type="range"[\s\S]{0,700}setEffortValue\(nextValue\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const handleSpeechTypeWheel =[\s\S]{0,1600}if \(!nextChoice \|\| nextChoice === currentChoice\) return;[\s\S]{0,700}playSpatialUiSfx\("bot-hover"/u,
+    );
   });
 
   it("spins the selected Zen and Chat effort glyphs only during active generation", () => {
@@ -594,26 +639,31 @@ describe("shared routing model picker integration", () => {
     );
   });
 
-  it("leaves Tab to native focus navigation instead of advancing pickers", () => {
-    const modelKeySource = pageSource.match(
-      /const handleModelKeyDown[\s\S]*?\n  \};/u,
-    )?.[0];
-    const effortKeySource = pageSource.match(
-      /const handleEffortKeyDown[\s\S]*?\n  \};/u,
-    )?.[0];
-
-    assert.ok(modelKeySource);
-    assert.ok(effortKeySource);
-    assert.doesNotMatch(modelKeySource, /event\.key === "Tab"/u);
-    assert.doesNotMatch(effortKeySource, /event\.key === "Tab"/u);
-    assert.doesNotMatch(pageSource, /keep repeated Tab presses/u);
+  it("uses Tab to close navbar pickers and return to the composer", () => {
+    assert.match(
+      pageSource,
+      /if \(event\.key === "Tab" && !event\.shiftKey\)[\s\S]{0,360}commitHotkeyModelSelectionToComposer\(\)[\s\S]{0,500}document\.addEventListener\("keydown", handler, true\)/u,
+    );
+    assert.match(
+      pageSource,
+      /if \(event\.key === "Tab" && !event\.shiftKey\)[\s\S]{0,360}commitHotkeyEffortSelection\(\)[\s\S]{0,500}document\.addEventListener\("keydown", handler, true\)/u,
+    );
+    assert.match(
+      pageSource,
+      /const handleVoicePickerTab[\s\S]{0,420}commitHotkeyVoiceSelectionToComposer\(\)[\s\S]{0,500}document\.addEventListener\("keydown", handleVoicePickerTab, true\)/u,
+    );
+    assert.match(pageSource, /event\.key !== "Tab" \|\| event\.shiftKey/u);
+    assert.match(
+      pageSource,
+      /const closeVoicePickerToComposer[\s\S]{0,240}window\.requestAnimationFrame\(focusVisibleComposer\)/u,
+    );
     assert.match(
       tutorialSource,
-      /Tab keeps its normal focus behavior and never advances or commits a picker/u,
+      /Tab then closes the picker and places the cursor in the nearest visible composer/u,
     );
   });
 
-  it("keeps pointer-opened pickers focusable without a Tab handoff", () => {
+  it("keeps pointer-opened pickers focusable until Tab returns to composing", () => {
     assert.match(
       pageSource,
       /className=\{styles\.composeModelTrigger\}[\s\S]{0,220}onClick=\{\(event\) => \{[\s\S]{0,100}event\.currentTarget\.focus\(\)/u,
@@ -625,7 +675,38 @@ describe("shared routing model picker integration", () => {
     assert.doesNotMatch(pageSource, /commitHighlightedModelToEffort/u);
     assert.match(
       tutorialSource,
-      /Tab keeps its normal focus behavior and never advances or commits a picker/u,
+      /Tab then closes the picker and places the cursor in the nearest visible composer/u,
+    );
+  });
+
+  it("moves pending model and effort choices with Up and Down only", () => {
+    const arrowHandler =
+      pageSource.match(
+        /const handleQuickArrows = \(event: KeyboardEvent\): void => \{[\s\S]*?\n    \};/u,
+      )?.[0] ?? "";
+    assert.match(
+      arrowHandler,
+      /event\.key !== "ArrowDown" && event\.key !== "ArrowUp"/u,
+    );
+    assert.doesNotMatch(arrowHandler, /ArrowLeft|ArrowRight/u);
+    assert.match(
+      arrowHandler,
+      /interactionMode !== "keyboard"[\s\S]*interactionMode: "keyboard"/u,
+    );
+    assert.match(
+      arrowHandler,
+      /const direction = event\.key === "ArrowDown" \? 1 : -1/u,
+    );
+    assert.match(arrowHandler, /moveModelHighlight\(direction\)/u);
+    assert.match(arrowHandler, /moveEffortHighlight\(direction\)/u);
+    assert.doesNotMatch(arrowHandler, /setEffortValue/u);
+    assert.match(
+      pageSource,
+      /document\.addEventListener\("keydown", handleQuickArrows, true\)/u,
+    );
+    assert.doesNotMatch(
+      pageSource,
+      /if \(!navbarPicker\) \{\s*document\.addEventListener\("keydown", handleQuickArrows/u,
     );
   });
 
@@ -752,10 +833,14 @@ describe("shared routing model picker integration", () => {
     assert.match(tutorialSource, /Cmd\/Ctrl\+Shift\+E/u);
     assert.match(tutorialSource, /Control\+Left opens Model/u);
     assert.match(tutorialSource, /Shift\+Tab flips LOCAL\/ONLINE/u);
-    assert.match(tutorialSource, /arrow keys do not roam their lists/u);
     assert.match(
       tutorialSource,
-      /Tab keeps its normal focus behavior and never advances or commits a picker/u,
+      /Up\/Down moves the pending option whether it was opened by hotkey or click/u,
+    );
+    assert.match(tutorialSource, /Left\/Right remain available/u);
+    assert.match(
+      tutorialSource,
+      /Tab then closes the picker and places the cursor in the nearest visible composer/u,
     );
     assert.match(tutorialSource, /Settings → Shortcuts/u);
     assert.match(tutorialSource, /prepared work is discarded/u);

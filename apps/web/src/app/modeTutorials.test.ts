@@ -4,6 +4,17 @@ import { describe, it } from "node:test";
 import { MODE_TUTORIALS, modeTutorialStep } from "./modeTutorials.ts";
 
 describe("mode tutorials", () => {
+  it("teaches vertical keyboard navigation for the model and effort pickers", () => {
+    const copy = MODE_TUTORIALS.zen.steps
+      .map((step) => step.body)
+      .join(" ");
+    assert.match(
+      copy,
+      /Up\/Down moves the pending option whether it was opened by hotkey or click/u,
+    );
+    assert.match(copy, /Left\/Right remain available/u);
+  });
+
   it("explains semantic Ink movement and Speech animation", () => {
     const step = MODE_TUTORIALS.avatar.steps[1];
     assert.match(step?.body ?? "", /Speech ink has its own animation selector/u);
@@ -535,7 +546,7 @@ describe("mode tutorials", () => {
     );
     assert.match(copy, /As I was saying/u);
     assert.match(copy, /without rewriting the archived Proceedings text/u);
-    assert.match(copy, /exact next Jury preparation, ballot/u);
+    assert.match(copy, /exact next juror, chamber discussion turn, ballot/u);
     assert.match(
       copy,
       /neither housekeeping beat enters the readable proceedings/u,
@@ -549,12 +560,12 @@ describe("mode tutorials", () => {
     assert.match(copy, /End Debate skips the remaining rounds/u);
     assert.match(copy, /not to penalize unheard rounds/u);
     assert.match(copy, /automatically enters a dim chamber/u);
-    assert.match(copy, /jurors' mouths move/u);
-    assert.match(copy, /without audible words or captions/u);
-    assert.match(copy, /all five final ballot monologues generate/u);
+    assert.match(copy, /five short, routed, audible juror turns/u);
+    assert.match(copy, /three after End Debate/u);
+    assert.match(copy, /same saved voice and caption path/u);
     assert.doesNotMatch(copy, /choose Participate/u);
-    assert.match(copy, /Deliberation and voting are unskippable/u);
-    assert.match(copy, /they cast their votes one at a time/u);
+    assert.match(copy, /Deliberation and voting are automatic and unskippable/u);
+    assert.match(copy, /cast final ballots one at a time/u);
     assert.match(copy, /open the five-seat Jury camera manually once leanings, deliberation, or ballots begin/u);
     assert.match(copy, /trade short reactions between public-floor turns/u);
     assert.match(
@@ -563,7 +574,7 @@ describe("mode tutorials", () => {
     );
     assert.match(copy, /hover it to read that opinion/u);
     assert.match(copy, /seats bot faces and frames around/u);
-    assert.match(copy, /Each juror reads the same final reason/u);
+    assert.match(copy, /Each audible juror reads the same final reason/u);
     assert.match(copy, /as each final ballot is cast, its side appears/u);
     assert.match(copy, /running five-vote tally updates/u);
     assert.match(copy, /canonically silent juror still casts/u);
@@ -729,7 +740,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /End, and Skip actions are put away/u);
     assert.match(
       copy,
-      /Pause and Resume remain instantaneous and silent while the Jury chamber is visible/u,
+      /Pause preserves the exact juror or ballot/u,
     );
     assert.match(
       copy,
@@ -779,7 +790,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
-      /PRISM automatically visits the chamber for leanings, sealed deliberation, ballots, and the split/u,
+      /PRISM automatically visits the chamber for leanings, audible deliberation, ballots, and the split/u,
     );
     assert.match(copy, /Choose a manual view to hold the shot/u);
     assert.match(copy, /only the heard fragment remains public/iu);
@@ -1390,7 +1401,7 @@ describe("mode tutorials", () => {
     assert.match(routing?.body ?? "", /Voice remains independent from text routing/u);
     assert.match(
       routing?.body ?? "",
-      /Chat and Zen share your saved Mute, English, Premium, Babble, or Bottish choice, while LOCAL disables only Premium/u,
+      /Chat and Zen share your saved Mute, English, Premium, Babble, or Bottish choice, while LOCAL hides Premium from the picker/u,
     );
     assert.match(
       routing?.body ?? "",

@@ -153,10 +153,16 @@ describe("Zen live presence body hit target", () => {
     assert.match(pageSource, /event\.stopPropagation\(\)/);
     assert.match(
       pageSource,
-      /if \(dragState\.moved\) \{[\s\S]*?setAvatarPositionClamped\([\s\S]*?x: clientX - dragState\.offsetX,[\s\S]*?y: clientY - dragState\.offsetY,[\s\S]*?true,[\s\S]*?\);/
+      /if \(dragState\.moved && !cancelled\) \{[\s\S]*?setAvatarPositionClamped\([\s\S]*?x: clientX - dragState\.offsetX,[\s\S]*?y: clientY - dragState\.offsetY,[\s\S]*?true,[\s\S]*?\);/
     );
-    assert.doesNotMatch(pageSource, /startAvatarMomentum/);
-    assert.doesNotMatch(pageSource, /resolveZenLiveBotAvatarReleaseVelocity/);
+    assert.match(
+      pageSource,
+      /startAvatarMomentum\(dragState\.velocitySample\)/,
+    );
+    assert.match(pageSource, /createZenLiveBotDragVelocitySample\(/);
+    assert.match(pageSource, /sampleZenLiveBotDragVelocity\(/);
+    assert.match(pageSource, /resolveZenLiveBotReleaseVelocity\(/);
+    assert.match(pageSource, /onPointerCancel=\{handleAvatarPointerCancel\}/);
   });
 
   it("does not run bot cursor hover side effects on global pointer move", () => {

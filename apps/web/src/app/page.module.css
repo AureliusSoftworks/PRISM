@@ -3022,6 +3022,18 @@
   initial-value: #ffffff;
 }
 
+@property --bot-primary-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #ffffff;
+}
+
+@property --bot-accent-color {
+  syntax: "<color>";
+  inherits: true;
+  initial-value: #ffffff;
+}
+
 @property --coffee-bot-color {
   syntax: "<color>";
   inherits: true;
@@ -10400,33 +10412,14 @@
   transition: background 720ms cubic-bezier(0.18, 0.72, 0.22, 1);
 }
 
-/* Light mode + live wallpaper: keep the plate transparent so atmosphere grain
-   stays visible while streaming. Persona color rides as a soft translucent wash
-   scaled by --bot-chat-persona-fill instead of an opaque gradient base. */
+/* Live wallpaper already receives the semantic primary/accent edge-light field
+   from .zenAtmosphereBackdrop::before. Keep the reading plate transparent here
+   so the former single-primary wash cannot stack underneath and muddy it. */
 .themeLight.appLayout[data-zen-surface="true"][data-zen-atmosphere-active="true"][data-bot-gradient-active="true"]:not(
     [data-private-active="true"]
   )
   .messagesFrame {
-  background:
-    radial-gradient(
-      ellipse 128% 92% at 48% 18%,
-      color-mix(
-        in srgb,
-        var(--accent) calc(var(--bot-chat-persona-fill, 0) * 22%),
-        transparent
-      ),
-      transparent 72%
-    ),
-    radial-gradient(
-      ellipse 90% 70% at 82% 58%,
-      color-mix(
-        in srgb,
-        var(--accent) calc(var(--bot-chat-persona-fill, 0) * 10%),
-        transparent
-      ),
-      transparent 78%
-    ),
-    transparent;
+  background: transparent;
 }
 
 .appLayout[data-chat-sidebar-hidden="true"][data-accent-active="true"]:not(
@@ -14301,32 +14294,38 @@
 
 .zenAtmosphereBackdrop[data-persona-color="true"]::before {
   opacity: calc(
-    var(--zen-atmosphere-opacity, 0.28) * 0.92 *
+    var(--zen-atmosphere-opacity, 0.28) * 0.78 *
       var(--zen-atmosphere-bot-tint-amount, 0)
   );
   background:
     radial-gradient(
-      ellipse 92% 74% at 50% 42%,
-      color-mix(in srgb, var(--bot-color, var(--accent)) 92%, transparent) 0%,
-      color-mix(in srgb, var(--bot-color, var(--accent)) 62%, transparent) 58%,
-      transparent 100%
+      ellipse 92% 118% at -8% 38%,
+      color-mix(in srgb, var(--bot-primary-color, var(--bot-color)) 68%, transparent) 0%,
+      color-mix(in srgb, var(--bot-primary-color, var(--bot-color)) 24%, transparent) 46%,
+      transparent 76%
     ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bot-color, var(--accent)) 72%, transparent),
-      color-mix(in srgb, var(--bot-color, var(--accent)) 48%, transparent)
+    radial-gradient(
+      ellipse 62% 96% at 108% 66%,
+      color-mix(in srgb, var(--bot-accent-color, var(--bot-color)) 34%, transparent) 0%,
+      color-mix(in srgb, var(--bot-accent-color, var(--bot-color)) 12%, transparent) 42%,
+      transparent 74%
+    ),
+    radial-gradient(
+      ellipse 76% 48% at 22% 112%,
+      color-mix(in srgb, var(--bot-primary-color, var(--bot-color)) 22%, transparent) 0%,
+      transparent 72%
     );
-  mix-blend-mode: color;
-  filter: blur(24px) saturate(1.08);
+  mix-blend-mode: screen;
+  filter: blur(30px) saturate(1.02);
 }
 
 .themeLight .zenAtmosphereBackdrop[data-persona-color="true"]::before {
   opacity: calc(
-    var(--zen-atmosphere-opacity, 0.28) * 0.72 *
+    var(--zen-atmosphere-opacity, 0.28) * 0.46 *
       var(--zen-atmosphere-bot-tint-amount, 0)
   );
-  mix-blend-mode: color;
-  filter: blur(26px) saturate(0.96);
+  mix-blend-mode: multiply;
+  filter: blur(34px) saturate(0.72);
 }
 
 .zenAtmosphereBackdrop::after {
@@ -14456,25 +14455,31 @@
   z-index: -1;
   background:
     radial-gradient(
-      ellipse 118% 84% at 50% 62%,
-      color-mix(in srgb, var(--bot-color, var(--accent)) 62%, transparent) 0%,
-      color-mix(in srgb, var(--bot-color, var(--accent)) 34%, transparent) 54%,
-      transparent 100%
+      ellipse 94% 118% at -4% 34%,
+      color-mix(in srgb, var(--bot-primary-color, var(--bot-color)) 64%, transparent) 0%,
+      color-mix(in srgb, var(--bot-primary-color, var(--bot-color)) 22%, transparent) 48%,
+      transparent 76%
     ),
-    linear-gradient(
-      180deg,
-      color-mix(in srgb, var(--bot-color, var(--accent)) 14%, transparent) 0%,
-      color-mix(in srgb, var(--bot-color, var(--accent)) 38%, transparent) 72%,
-      color-mix(in srgb, var(--bot-color, var(--accent)) 18%, transparent) 100%
+    radial-gradient(
+      ellipse 64% 94% at 106% 70%,
+      color-mix(in srgb, var(--bot-accent-color, var(--bot-color)) 34%, transparent) 0%,
+      color-mix(in srgb, var(--bot-accent-color, var(--bot-color)) 10%, transparent) 44%,
+      transparent 74%
+    ),
+    radial-gradient(
+      ellipse 72% 44% at 18% 112%,
+      color-mix(in srgb, var(--bot-primary-color, var(--bot-color)) 18%, transparent) 0%,
+      transparent 72%
     );
-  filter: blur(44px) saturate(1.1);
-  mix-blend-mode: color;
-  opacity: 0.7;
+  filter: blur(48px) saturate(1.02);
+  mix-blend-mode: screen;
+  opacity: 0.62;
 }
 
 .themeLight .zenPersonaStartupAtmosphere::after {
-  mix-blend-mode: color;
-  opacity: 0.62;
+  mix-blend-mode: multiply;
+  filter: blur(52px) saturate(0.7);
+  opacity: 0.3;
 }
 
 @keyframes zenPersonaStartupAtmosphereDrift {
@@ -17925,8 +17930,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .emptyStateHeroMiniGlyph {
-  width: var(--chat-mini-bot-glyph-size, clamp(14px, 1.35vw, 17px));
-  height: var(--chat-mini-bot-glyph-size, clamp(14px, 1.35vw, 17px));
+  width: calc(
+    var(--chat-mini-bot-glyph-size, clamp(14px, 1.35vw, 17px)) - 2px
+  );
+  height: calc(
+    var(--chat-mini-bot-glyph-size, clamp(14px, 1.35vw, 17px)) - 2px
+  );
   color: color-mix(in srgb, var(--chat-mini-bot-color, var(--accent)) 88%, #ffffff);
 }
 
@@ -20984,12 +20993,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenPersonaContinuityWash {
-  --zen-persona-ink-opacity: 0.6;
-  --zen-persona-ink-saturation: 1.6;
-  --zen-persona-ink-blend-strong: 100%;
-  --zen-persona-ink-blend-mid: 68%;
-  --zen-persona-ink-blend-soft: 50%;
-  --zen-persona-ink-blend-edge: 34%;
+  --zen-persona-ink-opacity: 0.5;
+  --zen-persona-ink-saturation: 1.08;
   --zen-persona-ink-blend-mode-dark: screen;
   --zen-persona-ink-blend-mode-light: multiply;
   position: fixed;
@@ -20999,62 +21004,23 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-radius: 34vw / 32dvh;
   background:
     radial-gradient(
-      ellipse 132% 112% at 50% 62%,
-      color-mix(
-          in srgb,
-          var(--zen-persona-ink-color, transparent)
-            var(--zen-persona-ink-blend-strong),
-          transparent
-        )
-        0%,
-      color-mix(
-          in srgb,
-          var(--zen-persona-ink-color, transparent)
-            var(--zen-persona-ink-blend-mid),
-          transparent
-        )
-        58%,
-      color-mix(
-          in srgb,
-          var(--zen-persona-ink-color, transparent)
-            var(--zen-persona-ink-blend-edge),
-          transparent
-        )
-        86%,
-      transparent 100%
+      ellipse 90% 116% at -6% 38%,
+      color-mix(in srgb, var(--bot-primary-color, transparent) 64%, transparent) 0%,
+      color-mix(in srgb, var(--bot-primary-color, transparent) 22%, transparent) 46%,
+      transparent 74%
     ),
-    linear-gradient(
-      180deg,
-      color-mix(
-          in srgb,
-          var(--zen-persona-ink-color, transparent)
-            var(--zen-persona-ink-blend-edge),
-          transparent
-        )
-        0%,
-      color-mix(
-          in srgb,
-          var(--zen-persona-ink-color, transparent)
-            var(--zen-persona-ink-blend-soft),
-          transparent
-        )
-        20%,
-      color-mix(
-          in srgb,
-          var(--zen-persona-ink-color, transparent)
-            var(--zen-persona-ink-blend-strong),
-          transparent
-        )
-        64%,
-      color-mix(
-          in srgb,
-          var(--zen-persona-ink-color, transparent)
-            var(--zen-persona-ink-blend-mid),
-          transparent
-        )
-        100%
+    radial-gradient(
+      ellipse 62% 94% at 106% 68%,
+      color-mix(in srgb, var(--bot-accent-color, transparent) 34%, transparent) 0%,
+      color-mix(in srgb, var(--bot-accent-color, transparent) 11%, transparent) 44%,
+      transparent 74%
+    ),
+    radial-gradient(
+      ellipse 74% 42% at 20% 112%,
+      color-mix(in srgb, var(--bot-primary-color, transparent) 18%, transparent) 0%,
+      transparent 72%
     );
-  filter: blur(54px) saturate(var(--zen-persona-ink-saturation));
+  filter: blur(58px) saturate(var(--zen-persona-ink-saturation));
   mix-blend-mode: var(--zen-persona-ink-blend-mode-dark, screen);
   opacity: var(--zen-persona-ink-opacity);
   transform: translateZ(0);
@@ -21163,6 +21129,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .themeLight .zenPersonaContinuityWash,
 .themeLight .zenPersonaComposerBrushWash {
   mix-blend-mode: var(--zen-persona-ink-blend-mode-light, multiply);
+}
+
+.themeLight .zenPersonaContinuityWash {
+  --zen-persona-ink-opacity: 0.27;
+  --zen-persona-ink-saturation: 0.72;
+  filter: blur(62px) saturate(var(--zen-persona-ink-saturation));
 }
 
 .appLayout[data-zen-fallback-wallpaper-active="true"] .zenPersonaInkWash {
@@ -26790,6 +26762,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     #ffffff 12%
   );
   --bot-face-crt-screen-texture-blend-mode: luminosity;
+  --zen-live-bot-motion-tilt: 0deg;
+  --zen-live-bot-motion-glow: 0;
   position: relative;
   width: var(--zen-live-bot-avatar-size, clamp(156px, 14.8vw, 196px));
   min-height: clamp(92px, 9.8vw, 128px);
@@ -26812,6 +26786,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   -webkit-user-select: none;
   translate: var(--zen-live-bot-lane-drift-x, 0px)
     var(--zen-live-bot-lane-drift-y, 0px);
+  rotate: var(--zen-live-bot-motion-tilt);
+  transition: rotate 360ms cubic-bezier(0.22, 0.72, 0.24, 1);
   animation: zenActionCueIn 0.24s cubic-bezier(0.2, 0.72, 0.18, 1) both;
 }
 
@@ -26819,6 +26795,47 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
    stacking a second bob on the same avatar. */
 .zenLiveBotPresencePlate > .botAmbientPresenceRig {
   --bot-ambient-hover-amplitude: 0px;
+}
+
+/* Travel gets a quiet color-matched lift, not a particle trail. */
+.zenLiveBotPresencePlate[data-free-roam-motion="moving"]
+  > .botAmbientPresenceRig {
+  --bot-ambient-underglow-rest-opacity: calc(
+    0.34 + var(--zen-live-bot-motion-glow) * 0.32
+  );
+  --bot-ambient-underglow-rise-opacity: calc(
+    0.42 + var(--zen-live-bot-motion-glow) * 0.3
+  );
+  --bot-ambient-underglow-contact-opacity: calc(
+    0.54 + var(--zen-live-bot-motion-glow) * 0.28
+  );
+}
+
+@media (min-width: 960px) {
+  .appLayout[data-zen-surface="true"]:has(
+      .zenLiveBotPresencePlate[data-dominant-full-avatar="true"][data-canvas-side="left"]
+    )
+    .messages[data-chat-ephemeral="true"] {
+    --chat-reading-width: min(44vw, 720px);
+    margin-left: auto;
+    margin-right: clamp(28px, 7vw, 144px);
+  }
+
+  .appLayout[data-zen-surface="true"]:has(
+      .zenLiveBotPresencePlate[data-dominant-full-avatar="true"][data-canvas-side="right"]
+    )
+    .messages[data-chat-ephemeral="true"] {
+    --chat-reading-width: min(44vw, 720px);
+    margin-left: clamp(28px, 7vw, 144px);
+    margin-right: auto;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .zenLiveBotPresencePlate {
+    rotate: 0deg;
+    transition: none;
+  }
 }
 
 .zenLiveBotPresencePlate[data-floating="true"] {
@@ -33113,29 +33130,38 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 @keyframes turboPickerEmberPulseLight {
   0%,
   100% {
-    opacity: 0.5;
-    filter: saturate(0.96) brightness(0.98);
+    opacity: 0.64;
+    filter: saturate(0.98) brightness(0.99);
   }
 
   36% {
-    opacity: 0.7;
-    filter: saturate(1.08) brightness(1.03);
+    opacity: 0.86;
+    filter: saturate(1.08) brightness(1.04);
   }
 
   68% {
-    opacity: 0.56;
-    filter: saturate(1.01) brightness(1);
+    opacity: 0.72;
+    filter: saturate(1.03) brightness(1.01);
   }
 }
 
 :global(body[data-prism-theme="light"])
-  .composeModelControl[data-turbo="true"]::after {
-  border-color: color-mix(in srgb, #38bdf8 58%, transparent);
+  .composeModelControl[data-turbo="true"] {
+  border-color: color-mix(in srgb, #0284c7 78%, #1e3a5f 22%);
   box-shadow:
-    inset 0 0 2px color-mix(in srgb, #dff7ff 28%, transparent),
-    inset 0 0 6px color-mix(in srgb, #60a5fa 10%, transparent),
-    0 0 3px color-mix(in srgb, #38bdf8 26%, transparent),
-    0 0 8px color-mix(in srgb, #2563eb 9%, transparent);
+    inset 0 0 0 1px color-mix(in srgb, #7dd3fc 26%, transparent),
+    0 0 0 1px color-mix(in srgb, #38bdf8 16%, transparent),
+    0 0 7px color-mix(in srgb, #0ea5e9 28%, transparent);
+}
+
+:global(body[data-prism-theme="light"])
+  .composeModelControl[data-turbo="true"]::after {
+  border-color: color-mix(in srgb, #0ea5e9 82%, transparent);
+  box-shadow:
+    inset 0 0 0 1px color-mix(in srgb, #bae6fd 34%, transparent),
+    inset 0 0 5px color-mix(in srgb, #60a5fa 16%, transparent),
+    0 0 4px color-mix(in srgb, #38bdf8 36%, transparent),
+    0 0 10px color-mix(in srgb, #2563eb 14%, transparent);
   animation-name: turboPickerEmberPulseLight;
 }
 
@@ -48217,6 +48243,88 @@ a.settingsCreditItem:focus-visible {
 .botAvatarShellControls {
   min-width: 0;
   display: grid;
+  gap: 14px;
+}
+
+.botAtmosphereAccentControl {
+  min-width: 0;
+  display: grid;
+  gap: 9px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 22%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg-deep) 78%, transparent);
+}
+
+.botAtmosphereAccentControl legend {
+  padding: 0 5px;
+  color: var(--fg);
+  font-size: 12px;
+  font-weight: 780;
+}
+
+.botAtmosphereAccentHeader {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+  color: var(--fg-muted);
+  font-size: 11px;
+}
+
+.botAtmosphereAccentHeader button {
+  min-height: 30px;
+  padding: 0 12px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: transparent;
+  color: var(--fg-muted);
+  font: inherit;
+  font-weight: 760;
+}
+
+.botAtmosphereAccentHeader button[data-active="true"] {
+  border-color: color-mix(in srgb, var(--editor-bot-color) 54%, var(--line));
+  background: color-mix(in srgb, var(--editor-bot-color) 16%, transparent);
+  color: var(--fg);
+}
+
+.botAtmosphereAccentHeader button:focus-visible,
+.botAtmosphereAccentHue:focus-visible {
+  outline: 2px solid
+    color-mix(in srgb, var(--editor-bot-color, var(--accent)) 62%, #ffffff);
+  outline-offset: 2px;
+}
+
+.botAtmosphereAccentPreview {
+  height: 44px;
+  border-radius: 9px;
+  background:
+    radial-gradient(
+      ellipse 74% 130% at 92% 50%,
+      color-mix(in srgb, var(--bot-accent-color) 76%, transparent),
+      transparent 76%
+    ),
+    linear-gradient(
+      112deg,
+      var(--bot-primary-color) 0%,
+      color-mix(in srgb, var(--bot-primary-color) 76%, var(--bot-accent-color)) 66%,
+      var(--bot-accent-color) 100%
+    );
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, #ffffff 18%, transparent);
+}
+
+.botAtmosphereAccentHue {
+  width: 100%;
+  accent-color: var(--bot-accent-color, var(--editor-bot-color));
+}
+
+.botAtmosphereAccentControl small {
+  color: var(--fg-muted);
+  font-size: 10px;
+  line-height: 1.45;
 }
 
 .botAvatarIdentitySurfaceToggle {
@@ -48265,7 +48373,21 @@ a.settingsCreditItem:focus-visible {
 }
 
 .botAvatarShellControls .botAvatarIdentityPicker {
-  height: clamp(260px, 42dvh, 410px);
+  height: clamp(190px, 30dvh, 300px);
+}
+
+@media (max-width: 720px), (max-height: 680px) {
+  .botAvatarShellControls {
+    gap: 10px;
+  }
+
+  .botAvatarShellControls .botAvatarIdentityPicker {
+    height: clamp(150px, 24dvh, 220px);
+  }
+
+  .botAtmosphereAccentControl {
+    padding: 9px;
+  }
 }
 
 .botAvatarFactoryShellNotice {
