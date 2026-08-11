@@ -25,6 +25,7 @@ import {
   DEBATE_TURNABOUT_STATEMENTS_PER_SIDE,
   debateAudienceEventIsShocking,
   debateAudienceModeratorOrderPlan,
+  debateAdvocacyConsentMatchesRouting,
   applyBotPowerEternalIntroductionResponseV1,
   applyBotPowerMumbledResponseV1,
   applyBotPowerMuteResponseV1,
@@ -126,6 +127,7 @@ import {
   type DebateBotPowerPlanV1,
   type DebateBotSnapshotV1,
   type DebateCaseCardV1,
+  type DebateConsentRoutingV1,
   type DebateEventKind,
   type DebateEventV1,
   type DebateEvidencePacketV1,
@@ -2057,6 +2059,7 @@ async function roleCheck(
   formality: DebateFormalityId,
   runtime: DebateAiRuntime,
 ): Promise<DebateAdvocacyConsent> {
+  const consentRoutingLane = selectedLane(runtime);
   const side = sideId === "for" ? motion.forSide : motion.againstSide;
   const opposite = sideId === "for" ? motion.againstSide : motion.forSide;
   const generation = await generateJson(
@@ -2124,6 +2127,13 @@ async function roleCheck(
     checkedAt: new Date().toISOString(),
     provider: generation.provider,
     model: generation.model,
+    routingProvider: consentRoutingLane.providerName,
+    routingModel: consentRoutingLane.model,
+    routingResponseMode:
+      runtime.responseMode ??
+      (consentRoutingLane.providerName === "local" ? "local" : "online"),
+    modelSelectionKind: runtime.modelSelectionKind ?? "fixed",
+    reasoningEffort: consentRoutingLane.reasoningEffort ?? "auto",
     ...(generation.autoRecovery
       ? { autoRecovery: generation.autoRecovery }
       : {}),
@@ -3622,9 +3632,22 @@ function validateConsents(
   }[],
   format: DebateFormatId,
   formality: DebateFormalityId,
-  responseMode: ResponseMode,
+  runtime: DebateAiRuntime,
 ): DebateAdvocacyConsent[] {
   const expectedHash = debateMotionHash(motion);
+  const consentRoutingLane = selectedLane(runtime);
+  const expectedRouting = {
+    provider: consentRoutingLane.providerName,
+    model: consentRoutingLane.model,
+    reasoningEffort: consentRoutingLane.reasoningEffort ?? "auto",
+    responseMode:
+      runtime.responseMode ??
+      (consentRoutingLane.providerName === "local" ? "local" : "online"),
+    modelSelectionKind: runtime.modelSelectionKind ?? "fixed",
+  } satisfies DebateConsentRoutingV1;
+  const expectedResponseMode: ResponseMode =
+    runtime.responseMode ??
+    (consentRoutingLane.providerName === "local" ? "local" : "online");
   return advocates.map(({ bot, sideId }) => {
     const consent = consents.find(
       (candidate) => candidate.botId === bot.id && candidate.sideId === sideId,
@@ -3641,7 +3664,8 @@ function validateConsents(
       consent.botRevision !== botRevision(bot) ||
       (consent.format ?? "forum") !== format ||
       normalizeDebateFormalityId(consent.formality) !== formality ||
-      consentLane !== responseMode
+      consentLane !== expectedResponseMode ||
+      !debateAdvocacyConsentMatchesRouting(consent, expectedRouting)
     ) {
       throw new HttpError(
         409,
@@ -3769,7 +3793,7 @@ export function createDebateSession(
     consentAdvocates,
     format,
     formality,
-    responseMode,
+    runtime,
   );
   const now = new Date().toISOString();
   const juryEnabled = request.jury?.enabled === true;

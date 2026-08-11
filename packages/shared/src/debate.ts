@@ -13,7 +13,11 @@ import type {
 import type { LlmProviderName } from "./index.js";
 import type { AutoRouteDecisionV1 } from "./modelRouting.js";
 import type { LiveBakeArtifactV1 } from "./liveBake.js";
-import type { ModelReasoningEffortPreference } from "./reasoningEffort.js";
+import {
+  normalizeReasoningEffort,
+  type ModelReasoningEffortPreference,
+  type ReasoningEffort,
+} from "./reasoningEffort.ts";
 
 /** Keep silence compare local so Debate unit tests need no botPower value import. */
 const DEBATE_CANONICAL_SILENCE = "..." as const;
@@ -573,8 +577,63 @@ export interface DebateAdvocacyConsent {
   checkedAt: string;
   provider?: LlmProviderName;
   model?: string;
+  /** Concrete semantic route selected when consent was requested. */
+  routingProvider?: LlmProviderName;
+  routingModel?: string;
+  routingResponseMode?: ResponseMode;
+  modelSelectionKind?: "auto" | "fixed";
+  /** Deliberation depth selected when consent was requested. Turbo is excluded. */
+  reasoningEffort?: ReasoningEffort;
   autoRoute?: AutoRouteDecisionV1;
   autoRecovery?: AutoRecoveryTraceV1;
+}
+
+export interface DebateConsentRoutingV1 {
+  provider: LlmProviderName;
+  model: string;
+  reasoningEffort: ReasoningEffort;
+  responseMode: ResponseMode;
+  modelSelectionKind: "auto" | "fixed";
+}
+
+/**
+ * Consent is configuration-bound. Refusals are intentionally handled by the
+ * caller as sticky authored boundaries, while affirmative consent must match
+ * the exact semantic route that requested it. Turbo is not part of this
+ * fingerprint because it changes processing priority rather than deliberation.
+ */
+export function debateAdvocacyConsentMatchesRouting(
+  consent: DebateAdvocacyConsent,
+  routing: DebateConsentRoutingV1,
+): boolean {
+  return (
+    consent.routingProvider === routing.provider &&
+    consent.routingModel === routing.model &&
+    consent.routingResponseMode === routing.responseMode &&
+    consent.modelSelectionKind === routing.modelSelectionKind &&
+    normalizeReasoningEffort(consent.reasoningEffort) ===
+      normalizeReasoningEffort(routing.reasoningEffort)
+  );
+}
+
+/**
+ * The setup UI can compare fixed selections exactly. Auto's concrete route is
+ * server-owned and contextual, so the UI compares its stable Auto + lane
+ * selection while launch validation still checks the exact resolved route.
+ */
+export function debateAdvocacyConsentMatchesSelection(
+  consent: DebateAdvocacyConsent,
+  routing: DebateConsentRoutingV1,
+): boolean {
+  if (
+    consent.routingResponseMode !== routing.responseMode ||
+    consent.modelSelectionKind !== routing.modelSelectionKind
+  ) {
+    return false;
+  }
+  return routing.modelSelectionKind === "auto"
+    ? true
+    : debateAdvocacyConsentMatchesRouting(consent, routing);
 }
 
 export interface DebateBotSnapshotV1 {

@@ -489,7 +489,10 @@ describe("Debate experience", () => {
       source,
       /const comment =[\s\S]{0,420}I’m willing to argue \$\{sideLabel\}/u,
     );
-    assert.match(source, /<p>\{comment\}<\/p>/u);
+    assert.match(
+      source,
+      /checkNeedsReconfirmation[\s\S]{0,220}Reasoning settings changed[\s\S]{0,220}: comment/u,
+    );
     assert.doesNotMatch(
       source,
       /\{check\.reason \? <p>\{check\.reason\}<\/p> : null\}/u,
@@ -1184,10 +1187,8 @@ describe("Debate experience", () => {
       source,
       /const chooseFormality[\s\S]{0,180}setFormality\(nextFormality\)[\s\S]{0,100}setRoleChecks\(\[\]\)/u,
     );
-    assert.match(
-      source,
-      /advocacyConsentPrivacyLaneRef[\s\S]{0,220}setRoleChecks\(\[\]\)/u,
-    );
+    assert.match(source, /debateAdvocacyConsentMatchesSelection/u);
+    assert.match(source, /consentNeedsReconfirmation/u);
     assert.match(source, /props\.responseMode/u);
     assert.match(source, /data-tutorial-target="debate-rowdiness"/u);
     assert.match(source, /aria-label="Debate atmosphere"/u);
@@ -1331,6 +1332,37 @@ describe("Debate experience", () => {
     assert.match(source, /Swap sides/u);
     assert.match(source, /Change bot/u);
     assert.match(source, /Revise motion/u);
+    assert.match(
+      source,
+      /disabled=\{!castComplete \|\| busy \|\| declinedChecks\.length > 0\}/u,
+    );
+    assert.match(source, /Resolve declined role/u);
+    assert.match(
+      source,
+      /if \(!castComplete \|\| declinedChecks\.length > 0\) return/u,
+    );
+    assert.match(source, /stickyDeclinedConsentForCast/u);
+    assert.match(
+      source,
+      /clearCastSlot\([\s\S]{0,180}declinedChecks\[0\]\?\.sideId/u,
+    );
+  });
+
+  it("reconfirms accepted Debate consent after semantic routing changes", () => {
+    assert.match(page, /consentRouting=\{debateConsentRouting\}/u);
+    assert.match(
+      page,
+      /const debateConsentRouting = debateEffortTarget[\s\S]{0,420}savedModelReasoningEffort/u,
+    );
+    assert.match(
+      source,
+      /check\.status !== "decline"[\s\S]{0,120}debateAdvocacyConsentMatchesSelection/u,
+    );
+    assert.match(source, /Needs reconfirmation/u);
+    assert.match(source, /Reconfirm willingness/u);
+    assert.match(source, /The model or Effort changed/u);
+    assert.match(css, /data-status="needs_reconfirmation"/u);
+    assert.doesNotMatch(source, /consentRouting.*turbo/iu);
   });
 
   it("captures editor values before functional state updates run", () => {

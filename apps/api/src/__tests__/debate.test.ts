@@ -1451,6 +1451,7 @@ async function createJudgeDebate(
     playerJudgeUsesPrism?: boolean;
     forumRounds?: { mode: "auto" | "fixed"; count?: number };
     againstPowers?: BotPowerV1[];
+    createRuntime?: DebateAiRuntime;
   } = {},
 ) {
   seedBot(db, "moderator", "Mira");
@@ -1507,7 +1508,7 @@ async function createJudgeDebate(
       ...(options.deferStart ? { deferStart: true } : {}),
       idempotencyKey: options.idempotencyKey ?? "create:judge:0001",
     },
-    debateRuntime,
+    options.createRuntime ?? debateRuntime,
   );
 }
 
@@ -6703,6 +6704,91 @@ describe("Debate engine", () => {
           error instanceof HttpError &&
           error.statusCode === 409 &&
           /advocacy consent is stale/u.test(error.message),
+      );
+    } finally {
+      db.close();
+    }
+  });
+
+  it("binds affirmative advocacy consent to the concrete model and Effort", async () => {
+    const consentRuntime: DebateAiRuntime = {
+      ...runtime(),
+      local: {
+        ...runtime().local,
+        model: "debate-consent-model",
+        reasoningEffort: "medium",
+      },
+    };
+
+    const changedModelDb = createTestDb();
+    try {
+      await assert.rejects(
+        () =>
+          createJudgeDebate(changedModelDb, consentRuntime, {
+            createRuntime: {
+              ...consentRuntime,
+              local: {
+                ...consentRuntime.local,
+                model: "debate-new-model",
+              },
+            },
+          }),
+        (error) =>
+          error instanceof HttpError &&
+          error.statusCode === 409 &&
+          /advocacy consent is stale/u.test(error.message),
+      );
+    } finally {
+      changedModelDb.close();
+    }
+
+    const changedEffortDb = createTestDb();
+    try {
+      await assert.rejects(
+        () =>
+          createJudgeDebate(changedEffortDb, consentRuntime, {
+            createRuntime: {
+              ...consentRuntime,
+              local: {
+                ...consentRuntime.local,
+                reasoningEffort: "high",
+              },
+            },
+          }),
+        (error) =>
+          error instanceof HttpError &&
+          error.statusCode === 409 &&
+          /advocacy consent is stale/u.test(error.message),
+      );
+    } finally {
+      changedEffortDb.close();
+    }
+  });
+
+  it("does not invalidate advocacy consent for a Turbo-only change", async () => {
+    const db = createTestDb();
+    try {
+      const consentRuntime: DebateAiRuntime = {
+        ...runtime(),
+        local: {
+          ...runtime().local,
+          reasoningEffort: "medium",
+          turbo: false,
+        },
+      };
+      const session = await createJudgeDebate(db, consentRuntime, {
+        createRuntime: {
+          ...consentRuntime,
+          local: { ...consentRuntime.local, turbo: true },
+        },
+      });
+      assert.equal(session.status, "live");
+      assert.ok(
+        session.advocacyConsent.every(
+          (consent) =>
+            consent.routingModel === consentRuntime.local.model &&
+            consent.reasoningEffort === "medium",
+        ),
       );
     } finally {
       db.close();

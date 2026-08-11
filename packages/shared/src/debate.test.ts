@@ -15,6 +15,8 @@ import {
   defaultDebateJuryStateV1,
   defaultDebateFormatStateV1,
   debateActivePresentationDurationMs,
+  debateAdvocacyConsentMatchesRouting,
+  debateAdvocacyConsentMatchesSelection,
   debateEventIsAtmosphericVocalFoley,
   debateEventIsCanonicalSilence,
   debateSilenceHoldDurationMs,
@@ -54,7 +56,74 @@ import {
   debateRecessResumeFiller,
   debateRecessResumePresentationContent,
   type DebateEventV1,
+  type DebateAdvocacyConsent,
 } from "./debate.ts";
+
+test("binds affirmative Debate consent to model and Effort but not Turbo", () => {
+  const consent: DebateAdvocacyConsent = {
+    version: 1,
+    format: "forum",
+    formality: "parliamentary",
+    botId: "bot-1",
+    sideId: "for",
+    status: "accept",
+    reason: "I can argue this fairly.",
+    motionHash: "motion-hash",
+    botRevision: "bot-revision",
+    checkedAt: "2026-08-11T00:00:00.000Z",
+    provider: "openai",
+    model: "gpt-5.6-sol",
+    routingProvider: "openai",
+    routingModel: "gpt-5.6-sol",
+    routingResponseMode: "online",
+    modelSelectionKind: "fixed",
+    reasoningEffort: "medium",
+  };
+
+  assert.equal(
+    debateAdvocacyConsentMatchesRouting(consent, {
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "medium",
+      responseMode: "online",
+      modelSelectionKind: "fixed",
+    }),
+    true,
+  );
+  assert.equal(
+    debateAdvocacyConsentMatchesRouting(consent, {
+      provider: "openai",
+      model: "gpt-5.6-terra",
+      reasoningEffort: "medium",
+      responseMode: "online",
+      modelSelectionKind: "fixed",
+    }),
+    false,
+  );
+  assert.equal(
+    debateAdvocacyConsentMatchesRouting(consent, {
+      provider: "openai",
+      model: "gpt-5.6-sol",
+      reasoningEffort: "high",
+      responseMode: "online",
+      modelSelectionKind: "fixed",
+    }),
+    false,
+  );
+  assert.equal(
+    debateAdvocacyConsentMatchesSelection(
+      { ...consent, modelSelectionKind: "auto" },
+      {
+        provider: "anthropic",
+        model: "claude-sonnet-4-6",
+        reasoningEffort: "high",
+        responseMode: "online",
+        modelSelectionKind: "auto",
+      },
+    ),
+    true,
+  );
+});
 
 test("auto Forum rounds stay bounded and grow with debate complexity", () => {
   const focusedMotion = normalizeDebateMotionSlateV1({

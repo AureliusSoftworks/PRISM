@@ -36,6 +36,7 @@ import {
   botPowerIsBreathlessV1,
   botPowerObserverProjectionFromEffectsV1,
   botPowerStripBreathPerformanceTextV1,
+  debateAdvocacyConsentMatchesSelection,
   debateEventIsAtmosphericVocalFoley,
   debateEventIsCanonicalSilence,
   debateEventIsTranscriptHousekeeping,
@@ -67,6 +68,7 @@ import {
   hexToHsl,
   type DebateAdvocacyConsent,
   type DebateCaseCardV1,
+  type DebateConsentRoutingV1,
   type DebateDebriefChatMessageV1,
   type DebateDebriefEligibleBotV1,
   type DebateEventV1,
@@ -617,6 +619,8 @@ export interface DebateExperienceProps {
     provider: "local" | "openai" | "anthropic";
     model: string;
   } | null;
+  /** Current concrete semantic route for configuration-bound consent. */
+  consentRouting?: DebateConsentRoutingV1 | null;
   /** Quiet locked routing summary while the chamber is live. */
   lockedRoutingChip?: LiveSessionRoutingChipLabels | null;
   graphicsQuality: GraphicsQuality;
@@ -715,6 +719,19 @@ type DebateView = "dashboard" | "live" | "baking";
 type DebateStudioPanel = "motion" | "cast" | "evidence" | "archive";
 const DEBATE_ROWDINESS_SPECTRUM = [...DEBATE_FORMALITY_SPECTRUM].reverse();
 type DebateCastSlot = "moderator" | "forAdvocate" | "againstAdvocate";
+
+function stickyDeclinedConsentForCast(
+  checks: readonly DebateAdvocacyConsent[],
+  cast: DebateCastSelection,
+): DebateAdvocacyConsent[] {
+  return checks.filter(
+    (check) =>
+      check.status === "decline" &&
+      (check.sideId === "for"
+        ? cast.forAdvocate === check.botId
+        : cast.againstAdvocate === check.botId),
+  );
+}
 type DebateCameraView = "wide" | "left" | "moderator" | "right" | "jury";
 type DebateCameraMode = "auto" | DebateCameraView;
 type DebateClipboardState = "idle" | "copying" | "copied" | "failed";
@@ -4495,14 +4512,6 @@ export function DebateExperience(
       activeSession,
     );
   }, [activeSession]);
-  // Consent is lane-bound: LOCAL↔ONLINE must re-check so a weaker lane cannot
-  // rubber-stamp a stronger floor.
-  const advocacyConsentPrivacyLaneRef = useRef(props.responseMode);
-  useEffect(() => {
-    if (advocacyConsentPrivacyLaneRef.current === props.responseMode) return;
-    advocacyConsentPrivacyLaneRef.current = props.responseMode;
-    setRoleChecks([]);
-  }, [props.responseMode]);
   const [liveReveal, setLiveRevealState] = useState<DebateLiveReveal | null>(
     null,
   );
@@ -6478,9 +6487,20 @@ export function DebateExperience(
   const declinedChecks = roleChecks.filter(
     (check) => check.status === "decline",
   );
+  const consentRouting = props.consentRouting;
+  const checksNeedingReconfirmation = consentRouting
+    ? roleChecks.filter(
+        (check) =>
+          check.status !== "decline" &&
+          !debateAdvocacyConsentMatchesSelection(check, consentRouting),
+      )
+    : [];
+  const consentNeedsReconfirmation = checksNeedingReconfirmation.length > 0;
   const expectedRoleCheckCount = playerRole === "participant" ? 1 : 2;
   const roleChecksComplete =
-    roleChecks.length === expectedRoleCheckCount && declinedChecks.length === 0;
+    roleChecks.length === expectedRoleCheckCount &&
+    declinedChecks.length === 0 &&
+    !consentNeedsReconfirmation;
   const debateCanStart =
     motionComplete &&
     castComplete &&
@@ -6863,7 +6883,7 @@ export function DebateExperience(
     const nextCast = { ...cast, [slot]: botId };
     setCast(nextCast);
     setActiveJurySeatIndex(null);
-    setRoleChecks([]);
+    setRoleChecks((checks) => stickyDeclinedConsentForCast(checks, nextCast));
     const slotOrder = [...selectableCastSlots];
     const activeIndex = slotOrder.indexOf(slot);
     const nextIncomplete = [
@@ -6875,8 +6895,9 @@ export function DebateExperience(
 
   const clearCastSlot = (slot: DebateCastSlot): void => {
     if (!selectableCastSlots.includes(slot)) return;
-    setCast((current) => ({ ...current, [slot]: "" }));
-    setRoleChecks([]);
+    const nextCast = { ...cast, [slot]: "" };
+    setCast(nextCast);
+    setRoleChecks((checks) => stickyDeclinedConsentForCast(checks, nextCast));
     setActiveJurySeatIndex(null);
     setActiveCastSlot(slot);
   };
@@ -7783,7 +7804,9 @@ export function DebateExperience(
   };
 
   const checkRoles = async (): Promise<void> => {
-    if (!castComplete) return;
+    // A refusal is sticky for this prepared assignment. The player must
+    // change the bot, side, or motion before another consent request exists.
+    if (!castComplete || declinedChecks.length > 0) return;
     setBusy(true);
     setError(null);
     try {
@@ -16871,6 +16894,14 @@ export function DebateExperience(
         <div className={styles.consentList}>
           {roleChecks.map((check) => {
             const bot = botById.get(check.botId);
+            const checkNeedsReconfirmation = Boolean(
+              check.status !== "decline" &&
+                consentRouting &&
+                !debateAdvocacyConsentMatchesSelection(
+                  check,
+                  consentRouting,
+                ),
+            );
             const sideLabel =
               check.sideId === "for"
                 ? motion.forSide.label
@@ -16883,22 +16914,46 @@ export function DebateExperience(
                   ? `I’m not willing to argue ${sideLabel}.`
                   : `I’m willing to argue ${sideLabel}.`);
             return (
-              <article key={check.botId} data-status={check.status}>
+              <article
+                key={check.botId}
+                data-status={
+                  checkNeedsReconfirmation ? "needs_reconfirmation" : check.status
+                }
+              >
                 <div>
                   <strong>{bot?.name ?? check.botId}</strong>
                   <span>{sideLabel}</span>
                 </div>
                 <b>
-                  {check.status === "accept"
+                  {checkNeedsReconfirmation
+                    ? "Needs reconfirmation"
+                    : check.status === "accept"
                     ? "Accepted"
                     : check.status === "devils_advocate"
                       ? "Devil’s Advocate"
                       : "Declined"}
                 </b>
-                <p>{comment}</p>
+                <p>
+                  {checkNeedsReconfirmation
+                    ? "Reasoning settings changed. This participant will reconsider under the new configuration."
+                    : comment}
+                </p>
               </article>
             );
           })}
+        </div>
+      ) : null}
+      {consentNeedsReconfirmation && declinedChecks.length === 0 ? (
+        <div
+          className={styles.consentReconfirmation}
+          role="status"
+          data-debate-consent-reconfirmation="true"
+        >
+          <strong>Consent needs reconfirmation</strong>
+          <p>
+            The model or Effort changed. Accepted participants must reconsider
+            under the new reasoning configuration before this Debate can begin.
+          </p>
         </div>
       ) : null}
       {declinedChecks.length > 0 ? (
@@ -16913,7 +16968,16 @@ export function DebateExperience(
                 Swap sides
               </button>
             ) : null}
-            <button type="button" onClick={() => setRoleChecks([])}>
+            <button
+              type="button"
+              onClick={() =>
+                clearCastSlot(
+                  declinedChecks[0]?.sideId === "against"
+                    ? "againstAdvocate"
+                    : "forAdvocate",
+                )
+              }
+            >
               {playerRole === "participant" ? "Change opponent" : "Change bot"}
             </button>
             <button type="button" onClick={() => setStudioPanel("motion")}>
@@ -16939,7 +17003,7 @@ export function DebateExperience(
         <button
           type="button"
           className={styles.primaryButton}
-          disabled={!castComplete || busy}
+          disabled={!castComplete || busy || declinedChecks.length > 0}
           onClick={() => {
             if (roleChecksComplete) {
               setStudioPanel("evidence");
@@ -16950,9 +17014,15 @@ export function DebateExperience(
           data-tutorial-target="debate-consent"
         >
           {busy
-            ? "Checking privately…"
+            ? consentNeedsReconfirmation
+              ? "Reconfirming privately…"
+              : "Checking privately…"
+            : declinedChecks.length > 0
+              ? "Resolve declined role"
             : roleChecksComplete
               ? "Choose evidence →"
+              : consentNeedsReconfirmation
+                ? "Reconfirm willingness"
               : "Make sure they’re willing"}
         </button>
       </div>

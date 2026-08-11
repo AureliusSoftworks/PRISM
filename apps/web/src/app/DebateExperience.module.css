@@ -166,6 +166,7 @@
 .setup[data-theme="light"] .rolePicker span,
 .setup[data-theme="light"] .consentList article span,
 .setup[data-theme="light"] .consentList article p,
+.setup[data-theme="light"] .consentReconfirmation p,
 .setup[data-theme="light"] .researchBox p,
 .setup[data-theme="light"] .reviewGrid p {
   color: #6e6678;
@@ -176,6 +177,7 @@
 .setup[data-theme="light"] .sideEditor,
 .setup[data-theme="light"] .rolePicker label,
 .setup[data-theme="light"] .consentList article,
+.setup[data-theme="light"] .consentReconfirmation,
 .setup[data-theme="light"] .refusalRecovery,
 .setup[data-theme="light"] .researchBox,
 .setup[data-theme="light"] .evidenceList li > button:first-child,
@@ -1267,6 +1269,11 @@
   border-color: #a64f69;
 }
 
+.consentList article[data-status="needs_reconfirmation"] {
+  border-color: #b597e8;
+  background: color-mix(in srgb, #b597e8 8%, #19151f);
+}
+
 .consentList article div {
   display: grid;
   gap: 3px;
@@ -1282,12 +1289,23 @@
   margin: 0;
 }
 
+.consentReconfirmation,
 .refusalRecovery,
 .researchBox {
   border: 1px solid #4a4059;
   border-radius: 16px;
   padding: 16px;
   background: #1b1724;
+}
+
+.consentReconfirmation {
+  display: grid;
+  gap: 5px;
+}
+
+.consentReconfirmation p {
+  margin: 0;
+  color: #b9afc9;
 }
 
 .refusalRecovery div,
@@ -11381,6 +11399,7 @@
 .dashboard .rolePicker span,
 .dashboard .consentList article span,
 .dashboard .consentList article p,
+.dashboard .consentReconfirmation p,
 .dashboard .researchBox p {
   color: var(--debate-studio-muted);
 }
@@ -11391,6 +11410,7 @@
   background: var(--debate-studio-surface);
 }
 
+.dashboard .consentReconfirmation,
 .dashboard .refusalRecovery,
 .dashboard .researchBox {
   border: 1px solid var(--debate-studio-line-strong);
