@@ -25,6 +25,8 @@ export const SPATIAL_UI_SFX_SOURCES = {
     "/audio/ui-asmr/toggle-02.mp3",
     "/audio/ui-asmr/toggle-03.mp3",
   ],
+  // Deliberately uncooldowned so a range drag acknowledges every crossed tick.
+  "effort-tick": ["/audio/ui-asmr/bot-select-03.mp3"],
   confirm: [
     "/audio/prism-companion/glass-tap-01.mp3",
     "/audio/prism-companion/glass-tap-02.mp3",
@@ -53,6 +55,7 @@ export const SPATIAL_UI_SFX_CONFIG: Record<
   "panel-open": { cooldownMs: 90, volume: 0.18 },
   "panel-close": { cooldownMs: 90, volume: 0.18 },
   toggle: { cooldownMs: 55, volume: 0.16 },
+  "effort-tick": { cooldownMs: 0, volume: 0.09 },
   confirm: { cooldownMs: 80, volume: 0.2 },
   // These generated cues carry more energy than the short tactile UI library.
   // Keep the sustained extinguish hiss especially restrained.
