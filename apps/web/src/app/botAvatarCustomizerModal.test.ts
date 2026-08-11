@@ -1207,15 +1207,10 @@ test("avatar customization uses the workspace below the shared navbar as a found
   assert.match(foundryBackdropRule, /z-index:\s*170;/);
   assert.match(foundryBackdropRule, /backdrop-filter:\s*none;/);
   assert.match(foundryBackdropRule, /-webkit-backdrop-filter:\s*none;/);
-  assert.match(
-    modalRule,
-    /inset:\s*var\(--app-shell-top-nav-height, 60px\) 0 0;/,
-  );
-  assert.match(modalRule, /width:\s*100vw;/);
-  assert.match(
-    modalRule,
-    /height:\s*calc\(100dvh - var\(--app-shell-top-nav-height, 60px\)\);/,
-  );
+  assert.match(modalRule, /position:\s*absolute;/);
+  assert.match(modalRule, /inset:\s*0;/);
+  assert.match(modalRule, /width:\s*100%;/);
+  assert.match(modalRule, /height:\s*100%;/);
   assert.match(modalRule, /border-radius:\s*0;/);
   assert.match(modalRule, /background:\s*#111722;/);
   assert.doesNotMatch(modalRule, /var\(--panel-width/);
@@ -1223,7 +1218,10 @@ test("avatar customization uses the workspace below the shared navbar as a found
     '.botAvatarCustomizer[data-foundry="true"] .botAvatarControlTabs',
   );
   assert.match(controlTabsRule, /position:\s*absolute;/);
-  assert.match(controlTabsRule, /bottom:\s*22px;/);
+  assert.match(
+    controlTabsRule,
+    /bottom:\s*var\(--avatar-foundry-navigation-bottom, 22px\);/,
+  );
   assert.match(controlTabsRule, /z-index:\s*2;/);
   assert.match(modalBackingRule, /background:/);
   assert.match(modalRailRule, /height:\s*2px;/);
@@ -1980,7 +1978,9 @@ test("Avatar Foundry bounds the editor rail and gives light mode a pale-metal hi
   const foundryRule = cssRuleBody(
     '.botProfileBuilder.botAvatarCustomizer[data-foundry="true"]',
   );
-  assert.match(foundryRule, /height:\s*calc\(100dvh - var\(--app-shell-top-nav-height, 60px\)\)\s*;/);
+  assert.match(foundryRule, /position:\s*absolute\s*;/);
+  assert.match(foundryRule, /inset:\s*0\s*;/);
+  assert.match(foundryRule, /height:\s*100%\s*;/);
   assert.match(foundryRule, /min-height:\s*0\s*;/);
   assert.match(foundryRule, /grid-template-rows:\s*auto minmax\(0, 1fr\)\s*;/);
   assert.match(foundryRule, /overflow:\s*hidden\s*;/);
@@ -1988,17 +1988,27 @@ test("Avatar Foundry bounds the editor rail and gives light mode a pale-metal hi
   const foundryBodyRule = cssRuleBody(
     '.botAvatarCustomizer[data-foundry="true"] .botAvatarCustomizerBody',
   );
+  assert.match(foundryBodyRule, /height:\s*100%\s*;/);
   assert.match(foundryBodyRule, /min-height:\s*0\s*;/);
   assert.match(foundryBodyRule, /overflow:\s*hidden\s*;/);
 
   const editorRailRule = cssRuleBody(
     '.botAvatarCustomizer[data-foundry="true"] .botAvatarControlStack',
   );
-  assert.match(editorRailRule, /top:\s*20px\s*;/);
-  assert.match(editorRailRule, /bottom:\s*82px\s*;/);
+  assert.match(
+    editorRailRule,
+    /top:\s*var\(--avatar-foundry-inspector-top, 20px\)\s*;/,
+  );
+  assert.match(
+    editorRailRule,
+    /bottom:\s*calc\([\s\S]*--avatar-foundry-navigation-bottom[\s\S]*--avatar-foundry-navigation-height[\s\S]*--avatar-foundry-navigation-gap[\s\S]*\)\s*;/,
+  );
+  assert.match(editorRailRule, /height:\s*auto\s*;/);
+  assert.match(editorRailRule, /max-height:\s*none\s*;/);
   assert.match(editorRailRule, /min-height:\s*0\s*;/);
   assert.match(editorRailRule, /box-sizing:\s*border-box\s*;/);
   assert.match(editorRailRule, /overflow:\s*auto\s*;/);
+  assert.match(editorRailRule, /scrollbar-gutter:\s*stable\s*;/);
 
   assert.match(
     cssSource,
