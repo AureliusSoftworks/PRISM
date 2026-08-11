@@ -56,27 +56,23 @@ describe("zenLiveBotFreeRoam", () => {
     const destination = planZenLiveBotFreeRoamDestination({
       current: { x: 400, y: 240 },
       bounds,
-      avatarWidth: 100,
-      avatarHeight: 100,
-      avoidRects: [],
       random: () => values[index++ % values.length]!,
     });
 
-    // Avatar dimensions must not be subtracted from right/bottom a second time.
+    // The planner returns a legal top-left coordinate without collision offsets.
     assertClose(destination.x, 648);
     assertClose(destination.y, 552);
   });
 
-  it("escapes a prose overlap to a clear side destination", () => {
+  it("does not model prose or chrome collision geometry", () => {
     const destination = planZenLiveBotFreeRoamDestination({
       current: { x: 390, y: 200 },
       bounds,
-      avatarWidth: 100,
-      avatarHeight: 100,
-      avoidRects: [{ left: 250, top: 80, right: 650, bottom: 520 }],
       random: () => 0.15,
     });
-    assert.ok(destination.x + 100 <= 250 || destination.x >= 650);
+    assert.ok(destination.x >= bounds.left && destination.x <= bounds.right);
+    assert.ok(destination.y >= bounds.top && destination.y <= bounds.bottom);
+    assert.doesNotMatch(helperSource, /avoidRects|overlaps\(|rectAt\(/);
   });
 
   it("converts Zen top-left pixels to normalized Prism companion coordinates", () => {

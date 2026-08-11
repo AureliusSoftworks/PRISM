@@ -1180,8 +1180,11 @@ test("default Prism bot card opens an avatar-only customizer path", () => {
   assert.match(apiServerSource, /prismDefaultBotGlyph: ""/);
 });
 
-test("avatar customization uses the entire viewport as a foundry", () => {
+test("avatar customization uses the workspace below the shared navbar as a foundry", () => {
   const backdropRule = cssRuleBody(".botAvatarCustomizerBackdrop");
+  const foundryBackdropRule = cssRuleBody(
+    '.botAvatarCustomizerBackdrop[data-avatar-foundry="true"]',
+  );
   const modalRule = cssRuleBody(
     '.botProfileBuilder.botAvatarCustomizer[data-foundry="true"]',
   );
@@ -1197,14 +1200,42 @@ test("avatar customization uses the entire viewport as a foundry", () => {
     backdropRule,
     /backdrop-filter:\s*blur\(12px\)\s*saturate\(112%\);/,
   );
-  assert.match(modalRule, /inset:\s*0;/);
+  assert.match(
+    foundryBackdropRule,
+    /inset:\s*var\(--app-shell-top-nav-height, 60px\) 0 0;/,
+  );
+  assert.match(foundryBackdropRule, /z-index:\s*170;/);
+  assert.match(foundryBackdropRule, /backdrop-filter:\s*none;/);
+  assert.match(foundryBackdropRule, /-webkit-backdrop-filter:\s*none;/);
+  assert.match(
+    modalRule,
+    /inset:\s*var\(--app-shell-top-nav-height, 60px\) 0 0;/,
+  );
   assert.match(modalRule, /width:\s*100vw;/);
-  assert.match(modalRule, /height:\s*100dvh;/);
+  assert.match(
+    modalRule,
+    /height:\s*calc\(100dvh - var\(--app-shell-top-nav-height, 60px\)\);/,
+  );
   assert.match(modalRule, /border-radius:\s*0;/);
   assert.match(modalRule, /background:\s*#111722;/);
   assert.doesNotMatch(modalRule, /var\(--panel-width/);
+  const controlTabsRule = cssRuleBody(
+    '.botAvatarCustomizer[data-foundry="true"] .botAvatarControlTabs',
+  );
+  assert.match(controlTabsRule, /position:\s*absolute;/);
+  assert.match(controlTabsRule, /bottom:\s*22px;/);
+  assert.match(controlTabsRule, /z-index:\s*2;/);
   assert.match(modalBackingRule, /background:/);
   assert.match(modalRailRule, /height:\s*2px;/);
+  assert.match(pageSource, /data-avatar-foundry="true"/);
+  assert.doesNotMatch(
+    pageSource,
+    /data-foundry="true"[\s\S]{0,140}aria-modal="true"/,
+  );
+  assert.match(
+    pageSource,
+    /event\.defaultPrevented \|\|[\s\S]{0,220}data-shared-app-navbar="true"\], \[data-navbar-picker-surface="true"\]/,
+  );
   assert.match(
     cssSource,
     /\.botAvatarControlPanel\s*\{[\s\S]*overflow:\s*hidden;/,
@@ -1942,6 +1973,44 @@ test("avatar customizer preview uses full-stage foundry framing", () => {
   assert.match(
     cssSource,
     /\.themeLight\.botAvatarStudioThemeScope[\s\S]*?\.botAvatarCustomizer\[data-foundry="true"\][\s\S]*?:is\(\.botAvatarMannequinPanel, \.botAvatarControlPanel\)\s*\{[\s\S]*?background:\s*transparent !important;/,
+  );
+});
+
+test("Avatar Foundry bounds the editor rail and gives light mode a pale-metal hierarchy", () => {
+  const foundryRule = cssRuleBody(
+    '.botProfileBuilder.botAvatarCustomizer[data-foundry="true"]',
+  );
+  assert.match(foundryRule, /height:\s*calc\(100dvh - var\(--app-shell-top-nav-height, 60px\)\)\s*;/);
+  assert.match(foundryRule, /min-height:\s*0\s*;/);
+  assert.match(foundryRule, /grid-template-rows:\s*auto minmax\(0, 1fr\)\s*;/);
+  assert.match(foundryRule, /overflow:\s*hidden\s*;/);
+
+  const foundryBodyRule = cssRuleBody(
+    '.botAvatarCustomizer[data-foundry="true"] .botAvatarCustomizerBody',
+  );
+  assert.match(foundryBodyRule, /min-height:\s*0\s*;/);
+  assert.match(foundryBodyRule, /overflow:\s*hidden\s*;/);
+
+  const editorRailRule = cssRuleBody(
+    '.botAvatarCustomizer[data-foundry="true"] .botAvatarControlStack',
+  );
+  assert.match(editorRailRule, /top:\s*20px\s*;/);
+  assert.match(editorRailRule, /bottom:\s*82px\s*;/);
+  assert.match(editorRailRule, /min-height:\s*0\s*;/);
+  assert.match(editorRailRule, /box-sizing:\s*border-box\s*;/);
+  assert.match(editorRailRule, /overflow:\s*auto\s*;/);
+
+  assert.match(
+    cssSource,
+    /\.themeLight\.botAvatarStudioThemeScope[\s\S]*?\.botAvatarControlStack\s*\{[\s\S]*?#f5f8fb/,
+  );
+  assert.match(
+    cssSource,
+    /\.themeLight\.botAvatarStudioThemeScope[\s\S]*?\.botAvatarVoiceTestDock\s*\{[\s\S]*?#f4f8fb/,
+  );
+  assert.match(
+    cssSource,
+    /\.themeLight\.botAvatarStudioThemeScope[\s\S]*?\.botAvatarVoiceTestComposer[\s\S]*?input\s*\{[\s\S]*?background:\s*#ffffff/,
   );
 });
 

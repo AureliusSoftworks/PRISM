@@ -21,7 +21,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
     steps: [
       {
         heading: "Open Eyes from the dock",
-        body: "Chassis lights share one accent color and stay fully dark only while a new manual shell is completely blank. The first meaningful identity choice wakes a slow, dim breath; generated drafts and existing bots are already alive. Before generation, Model can follow Auto or target one model for that draft without changing your account default. Start from the perimeter dock—open Eyes first, then Mouth, Identity (Core or Shell), Ink Display, and the rest of the foundry tabs.",
+        body: "Chassis lights share one accent color and stay fully dark only while a new manual shell is completely blank. The first meaningful identity choice wakes a slow, dim breath; generated drafts and existing bots are already alive. The shared navbar stays available through the creation brief and Avatar Studio: its LOCAL/ONLINE, model, and Effort settings update the brief live and power the next generated draft. Auto chooses both model and effort automatically. Start from the perimeter dock—open Eyes first, then Mouth, Identity (Core or Shell), Ink Display, and the rest of the foundry tabs.",
         clickLabel: "the Eyes tab in the perimeter dock",
         targetSelector: '[data-tutorial-target="avatar-foundry-eyes-tab"]',
       },
@@ -33,7 +33,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Find the rest of the foundry",
-        body: "Identity, Eyes, Mouth, Details, Profile, Powers, Voice, SFX, and Settings remain available in the perimeter dock. On Identity, use Core for name and thinking, or Shell for the primary hue strip, badge, and subordinate Atmosphere accent. Accent Auto chooses a stable analogous environmental hue; selecting the hue control makes it explicit without repainting the avatar. The top LOCAL/ONLINE toggle and model picker choose which model compiles Powers—switch to ONLINE when a local compile fails. Prism stays unavailable inside this main panel. Everything stays a draft until the top Save or Create bot action.",
+        body: "Identity, Eyes, Mouth, Details, Profile, Powers, Voice, SFX, and Settings remain available in the perimeter dock. On Identity, use Core for name and thinking, or Shell for the primary hue strip, badge, and subordinate Atmosphere accent. Accent Auto chooses a stable analogous environmental hue; selecting the hue control makes it explicit without repainting the avatar. The visible shared navbar's LOCAL/ONLINE, model, and Effort controls also choose how drafts generate and which model compiles Powers—switch to ONLINE when a local compile fails. Prism stays unavailable inside this main panel. Everything stays a draft until the top Save or Create bot action.",
         clickLabel: "the perimeter dock",
         targetSelector: '[data-tutorial-target="avatar-foundry-dock"]',
       },
@@ -86,7 +86,7 @@ const BASE_MODE_TUTORIALS: Record<TutorialMode, ModeTutorial> = {
       },
       {
         heading: "Open Atmosphere gently",
-        body: "Atmosphere starts on for every Chat/Zen conversation. Blank bot gradients hold the room until a wallpaper arrives. The same room appears behind transcript Chat and immersive Zen. Open Settings to turn Atmosphere off, reuse a prior room, upload one, or synthesize another. $atmosphere remains available from the composer.",
+        body: "Atmosphere starts on for every Chat/Zen conversation. Blank bot gradients hold the room until a wallpaper arrives. The same room appears behind transcript Chat and immersive Zen. A first Zen reply enters as soon as it is ready by default; Settings can instead wait for its Atmosphere before opening the room. Open Settings to turn Atmosphere off, reuse a prior room, upload one, or synthesize another. $atmosphere remains available from the composer.",
         clickLabel: "Settings in the top toolbar",
         targetSelector: '[data-tutorial-target="zen-atmosphere"]',
       },

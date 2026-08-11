@@ -31,9 +31,12 @@ test("new bot creation starts with a bounded, privacy-labelled prompt", () => {
   assert.doesNotMatch(openCreator, /setBotAvatarCustomizerOpen\(true\)/u);
   assert.match(pageSource, /maxLength=\{BOT_GENERATION_PROMPT_MAX_LENGTH\}/u);
   assert.match(pageSource, /data-tutorial-target="bot-generator-prompt"/u);
-  assert.match(pageSource, /data-tutorial-target="bot-generator-model"/u);
-  assert.match(pageSource, /ariaLabel="Model for this bot draft"/u);
-  assert.match(pageSource, /This choice applies only to this draft\./u);
+  assert.match(pageSource, /data-tutorial-target="bot-generator-routing"/u);
+  assert.match(pageSource, /Navbar routing/u);
+  assert.match(pageSource, /Auto model/u);
+  assert.match(pageSource, /automatic effort/u);
+  assert.match(pageSource, /next draft uses those live account settings/u);
+  assert.doesNotMatch(pageSource, /ariaLabel="Model for this bot draft"/u);
   assert.match(pageSource, /Nothing is saved until you choose Create bot\./u);
   assert.match(pageSource, /data-mode=/u);
   assert.match(pageSource, /\? "AUTO"/u);
@@ -111,6 +114,7 @@ test("generation produces only a reviewable draft and keeps manual creation", ()
 
   assert.match(generateDraft, /"\/api\/bots\/generate-draft"/u);
   assert.match(generateDraft, /\.\.\.\(modelOverride \? \{ modelOverride \} : \{\}\)/u);
+  assert.match(generateDraft, /\.\.\.\(reasoningEffort \? \{ reasoningEffort \} : \{\}\)/u);
   assert.match(generateDraft, /preferredProvider,/u);
   assert.match(generateDraft, /generateBotThinkingSfxProfile\(/u);
   assert.match(generateDraft, /audioVoiceProfile: await/u);
@@ -147,10 +151,15 @@ test("closing regeneration preserves the current unsaved draft", () => {
   assert.match(pageSource, /Keep current draft/u);
 });
 
-test("the generator overlays Avatar Studio and has a responsive review surface", () => {
+test("the generator stays below shared navbar chrome and has a responsive review surface", () => {
   assert.match(
     cssSource,
-    /\.botGeneratorBackdrop\s*\{[\s\S]*?z-index:\s*4200/u,
+    /\.botGeneratorBackdrop\[data-avatar-foundry="true"\]\s*\{[\s\S]*?inset:\s*var\(--app-shell-top-nav-height, 60px\) 0 0;[\s\S]*?z-index:\s*170/u,
+  );
+  assert.match(pageSource, /styles\.botAvatarStudioThemeScope/u);
+  assert.doesNotMatch(
+    pageSource,
+    /data-foundry-phase=\{botFoundryPhase\}[\s\S]{0,120}aria-modal="true"/u,
   );
   assert.match(cssSource, /\.botGeneratorDialog\s*\{/u);
   assert.match(cssSource, /\.botGeneratedBriefCard\s+p\s*\{/u);
@@ -167,6 +176,10 @@ test("the generator overlays Avatar Studio and has a responsive review surface",
   assert.match(
     ritualCssSource,
     /left:\s*var\(--bot-foundry-chrome-inset-inline,\s*clamp\(24px,\s*3\.5vw,\s*54px\)\)/u,
+  );
+  assert.match(
+    cssSource,
+    /\.themeLight\.botAvatarStudioThemeScope\.botGeneratorBackdrop\[data-avatar-foundry="true"\]/u,
   );
   assert.doesNotMatch(
     cssSource,

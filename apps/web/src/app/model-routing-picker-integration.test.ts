@@ -103,6 +103,14 @@ function backgroundColors(block: string): string[] {
   return [...new Set(background.match(/#[0-9a-f]{6}/giu) ?? [])];
 }
 
+function cssRuleBlock(selector: string): string {
+  const selectorIndex = cssSource.indexOf(selector);
+  assert.notEqual(selectorIndex, -1, `missing ${selector} rule`);
+  const blockEnd = cssSource.indexOf("}", selectorIndex);
+  assert.notEqual(blockEnd, -1, `unclosed ${selector} rule`);
+  return cssSource.slice(selectorIndex, blockEnd + 1);
+}
+
 function effortSliderColors(level: string): string[] {
   const block = cssSource.match(
     new RegExp(
@@ -455,6 +463,16 @@ describe("shared routing model picker integration", () => {
       /document\.body\.dataset\.prismTheme = resolvedTheme;[\s\S]{0,180}\}, \[resolvedTheme\]\);/u,
     );
     assert.match(
+      pageSource,
+      /key=\{renderTheme\}[\s\S]{0,120}data-render-theme=\{renderTheme\}/u,
+      "theme changes should remount the filtered animated flame layer",
+    );
+    assert.equal(
+      pageSource.match(/renderTheme=\{resolvedTheme\}/gu)?.length,
+      6,
+      "every text-model picker with an Effort control should receive the active theme",
+    );
+    assert.match(
       cssSource,
       /composeModelEffortTriggerWrap\[data-turbo-capable="true"\]::after\s*\{[^}]*#ff6200[^}]*mix-blend-mode:\s*screen/u,
       "dark mode should retain the original warm flame treatment",
@@ -779,6 +797,47 @@ describe("shared routing model picker integration", () => {
         lightEffortGlyphColors(level),
       );
     }
+  });
+
+  it("uses a thinner effort rail with saturation tied to the selected level", () => {
+    const railRule = cssRuleBlock(".composeModelEffortSliderRail {");
+    assert.match(railRule, /width:\s*2px/u);
+    assert.match(
+      railRule,
+      /filter:\s*saturate\(var\(--model-effort-saturation\)\)/u,
+    );
+
+    const fillRule = cssRuleBlock(".composeModelEffortSliderFill {");
+    assert.match(
+      fillRule,
+      /filter:\s*saturate\(var\(--model-effort-saturation\)\)/u,
+    );
+
+    const tickRule = cssRuleBlock(".composeModelEffortSliderTick {");
+    assert.match(
+      tickRule,
+      /filter:\s*saturate\(var\(--model-effort-saturation\)\)/u,
+    );
+
+    const thumbRule = cssRuleBlock(".composeModelEffortSliderThumb {");
+    assert.match(
+      thumbRule,
+      /filter:\s*saturate\(var\(--model-effort-saturation\)\)/u,
+    );
+
+    const hudRailRule = cssRuleBlock(".modelEffortHudRail {");
+    assert.match(
+      hudRailRule,
+      /filter:\s*saturate\(var\(--model-effort-saturation\)\)/u,
+    );
+    assert.match(
+      pageSource,
+      /"--model-effort-saturation":\s*`\$\{displayedEffortSliderProgress\}%`/u,
+    );
+    assert.match(
+      pageSource,
+      /"--model-effort-saturation":\s*`\$\{hudEffortSaturation\}%`/u,
+    );
   });
 
   it("shows each saved effort glyph while reserving color for the selected model", () => {

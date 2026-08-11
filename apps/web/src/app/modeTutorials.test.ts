@@ -139,6 +139,9 @@ describe("mode tutorials", () => {
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /stay fully dark only/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /slow, dim breath/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /generated drafts/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /shared navbar stays available/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /model, and Effort settings/u);
+    assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /Auto chooses both model and effort automatically/u);
     assert.match(MODE_TUTORIALS.avatar.steps[0]!.body, /perimeter dock/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /lights stay dim and breathing/u);
     assert.match(MODE_TUTORIALS.avatar.steps[1]!.body, /microphone-like accents/u);
@@ -186,6 +189,7 @@ describe("mode tutorials", () => {
       MODE_TUTORIALS.avatar.steps[2]!.body,
       /Prism stays unavailable inside this main panel/u,
     );
+    assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /visible shared navbar/u);
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Save or Create bot/u);
     assert.match(MODE_TUTORIALS.avatar.steps[2]!.body, /Core for name/u);
   });

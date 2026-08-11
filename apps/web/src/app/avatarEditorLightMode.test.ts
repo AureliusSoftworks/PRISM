@@ -38,6 +38,10 @@ test("Avatar Studio carries the resolved app theme through its portal", () => {
     [...pageSource.matchAll(/function BotAvatarCustomizerModal\(/gu)].length,
     1,
   );
+  assert.match(
+    pageSource,
+    /styles\.botAvatarStudioThemeScope[\s\S]{0,180}styles\.botGeneratorBackdrop/u,
+  );
 });
 
 test("Avatar Studio includes the app-wide theme cycle control", () => {
@@ -87,6 +91,10 @@ test("Light Mode covers studio chrome, panels, controls, fields, and dialogs", (
     ".botAvatarPreviewThemeToggle",
     ".botAvatarControlTabs",
     ".botAvatarSavePromptPanel",
+    ".botGeneratorBackdrop",
+    ".botGeneratorBriefCard",
+    ".botGeneratorRoutingSummary",
+    ".botAvatarMannequinStage",
   ]) {
     assert.match(lightMode, new RegExp(selector.replaceAll(".", "\\.")));
   }
@@ -96,6 +104,11 @@ test("Light Mode covers studio chrome, panels, controls, fields, and dialogs", (
   assert.match(lightMode, /background:\s*var\(--bg-elevated\)/);
   assert.match(lightMode, /color:\s*var\(--fg\)/);
   assert.match(lightMode, /color:\s*var\(--danger\)/);
+  assert.match(lightMode, /linear-gradient\(145deg, #f7fafc, #e7eef5 54%, #f4eff5\)/);
+  assert.doesNotMatch(
+    lightMode,
+    /zenLiveBotPresencePlate[\s\S]{0,180}filter:/u,
+  );
 });
 
 test("Light Mode preserves clear interactive states", () => {

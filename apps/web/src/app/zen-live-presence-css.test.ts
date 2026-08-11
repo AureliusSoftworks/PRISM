@@ -3409,26 +3409,9 @@ describe("Zen live presence CSS", () => {
     );
     assert.notEqual(centerXEnd, -1);
     const centerXSource = pageSource.slice(centerXStart, centerXEnd);
-    assert.match(centerXSource, /collectZenLiveBotProseHillRect\(/);
-    assert.match(
-      centerXSource,
-      /const proseGap = Math\.max\(16,\s*ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX \* 0\.65\);/,
-    );
-    assert.match(
-      centerXSource,
-      /const copyLeft = viewportClampedCenter - copyWidth \/ 2;/,
-    );
-    assert.match(
-      centerXSource,
-      /const copyRight = viewportClampedCenter \+ copyWidth \/ 2;/,
-    );
-    assert.match(
-      centerXSource,
-      /const preferRight = bodyCenterX >= proseCenterX;/,
-    );
-    assert.match(centerXSource, /rightMinCenter/);
-    assert.match(centerXSource, /leftMaxCenter/);
+    assert.match(centerXSource, /const viewportClampedCenter = clampZenLiveBotActionCopyAnchor\(/);
     assert.match(centerXSource, /return viewportClampedCenter;/);
+    assert.doesNotMatch(centerXSource, /prose|collectZenLiveBot/i);
 
     const anchorStart = pageSource.indexOf(
       "function resolveZenLiveBotActionCopyAnchor",
@@ -3629,45 +3612,15 @@ describe("Zen live presence CSS", () => {
     );
   });
 
-  it("keeps directly placed live bots clear of the visible Zen prose hill", () => {
+  it("allows live bots to rest over Zen prose and chrome after release", () => {
+    assert.doesNotMatch(pageSource, /ZenLiveBot(ProseHill|ChromeAvoidance)/);
+    assert.doesNotMatch(pageSource, /data-zen-live-(prose-target|bot-chrome-avoid)/);
+    assert.match(pageSource, /const settled = clamped;/);
     assert.match(
       pageSource,
-      /const ZEN_LIVE_BOT_PROSE_HILL_SELECTOR = "\[data-zen-live-prose-target='true'\]";/,
+      /if \(!motion\.target && nowMs >= motion\.nextRoamAtMs\) \{\s+motion\.target = planZenLiveBotFreeRoamDestination\(\{\s+current: motion\.physics,\s+bounds,\s+\}\);/,
     );
-    assert.match(
-      pageSource,
-      /const ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX = 34;/,
-    );
-    assert.match(pageSource, /function collectZenLiveBotProseHillRect\(/);
-    assert.match(
-      pageSource,
-      /querySelectorAll<HTMLElement>\(ZEN_LIVE_BOT_PROSE_HILL_SELECTOR\)/,
-    );
-    assert.match(
-      pageSource,
-      /function resolveZenLiveBotAvatarProseHillPosition\(/,
-    );
-    assert.match(pageSource, /Math\.min\(320,\s*bounds\.width \* 1\.18\)/);
-    assert.match(
-      pageSource,
-      /const preferredSide =\s+currentRect\.centerX < proseHillRect\.centerX/,
-    );
-    assert.match(
-      pageSource,
-      /const proseSettled = avoidChrome[\s\S]*?resolveZenLiveBotAvatarProseHillPosition\([\s\S]*?const settled = avoidChrome[\s\S]*?resolveZenLiveBotAvatarChromeAvoidancePosition\(\s*proseSettled,/,
-    );
-    assert.doesNotMatch(pageSource, /resolveZenLiveBotAvatarProseHillMotion/);
-    assert.match(pageSource, /planZenLiveBotFreeRoamDestination\([\s\S]*?avoidRects,/);
     assert.match(pageSource, /startAvatarMomentum\(dragState\.velocitySample\)/);
-    assert.doesNotMatch(pageSource, /data-flinging/);
-    assert.match(
-      pageSource,
-      /resolveZenLiveBotActionCopyPlacement\([\s\S]*collectZenLiveBotProseHillRect/,
-    );
-    assert.match(
-      pageSource,
-      /data-zen-live-prose-target=\{\s*chatLikeSurface\s*\?\s*"true"\s*:\s*undefined\s*\}/,
-    );
   });
 
   it("routes pre-stream Zen thinking state into the shared face spinner", () => {
@@ -4010,46 +3963,24 @@ describe("Zen live presence CSS", () => {
     assert.match(css, /--bot-face-metal-light-opacity:\s*0\.34\s*;/);
   });
 
-  it("lets the live bot overlap side panels while keeping top and bottom safe areas", () => {
+  it("lets the live bot overlap chrome on every side", () => {
+    assert.doesNotMatch(pageSource, /collectZenLiveBotAvatarSafeAreaInsets/);
+    assert.doesNotMatch(pageSource, /collectViewportSafeAreaInsets/);
     assert.match(
       pageSource,
-      /const panelInsets = collectDevPanelSafeAreaInsets\(\s*viewportWidth\s*,\s*viewportHeight\s*,?\s*\);/,
+      /const safeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS;/,
     );
-    assert.match(
-      pageSource,
-      /const insets = \{\s+\.\.\.panelInsets,\s+left: 0,\s+right: 0,\s+\};/,
-    );
-    assert.match(pageSource, /safeAreaInsets\.top/);
-    assert.match(pageSource, /safeAreaInsets\.bottom/);
   });
 
-  it("keeps the resting live bot away from marked chrome without momentum", () => {
+  it("clamps only to the viewport after a live-bot release", () => {
     assert.match(
       pageSource,
-      /const ZEN_LIVE_BOT_CHROME_AVOIDANCE_SELECTOR = \[/,
+      /setAvatarPositionClamped\(\s*\{\s*x: clientX - dragState\.offsetX,\s*y: clientY - dragState\.offsetY,\s*\},\s*true,?\s*\);/,
     );
+    assert.match(pageSource, /function clampZenLiveBotAvatarPosition\(/);
     assert.match(
       pageSource,
-      /function collectZenLiveBotChromeAvoidanceRects\(/,
-    );
-    assert.match(
-      pageSource,
-      /function resolveZenLiveBotAvatarChromeAvoidancePosition\(/,
-    );
-    assert.match(pageSource, /const overlappingRects = inflatedRects\.filter/);
-    assert.match(pageSource, /overlapArea \* 120/);
-    assert.match(pageSource, /data-zen-live-bot-chrome-avoid="true"/);
-    assert.match(
-      pageSource,
-      /data-zen-live-bot-chrome-avoid=\{variant === "chat" \? "true" : undefined\}/,
-    );
-    assert.match(
-      pageSource,
-      /setAvatarPositionClamped\(\s*current\s*,\s*persist\s*,\s*avatarDragRef\.current === null\s*,?\s*\);/,
-    );
-    assert.doesNotMatch(
-      pageSource,
-      /resolveZenLiveBotAvatarChromeAvoidanceMotion/,
+      /const safeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS;/,
     );
   });
 

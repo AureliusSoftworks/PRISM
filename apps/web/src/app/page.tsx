@@ -213,6 +213,10 @@ import { PrismRefractTarget, type PrismRefractBinding, type PrismRefractMagicTar
 import { playSpatialUiSfx, registerSpatialUiSfx } from "./spatialUiSfx";
 import PrismHandoffCanvas from "./PrismHandoffCanvas";
 import { PrismBlockingLoader } from "./PrismBlockingLoader";
+import {
+  zenInitialCeremonyCanReveal,
+  zenInitialCeremonyShouldStart,
+} from "./zenInitialCeremony";
 import { PrismOrb } from "./PrismOrb";
 import { registerPrismSoftSynthesisJobs } from "./prismSoftSynthesisUi.ts";
 import {
@@ -486,12 +490,8 @@ import {
 } from "./appletSessionNotes";
 import {
   VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
-  VIEWPORT_SAFE_AREA_SIDES,
   clampPositionToViewportSafeArea,
-  resolveViewportSafeAreaInsets,
-  type ViewportSafeAreaBlocker,
   type ViewportSafeAreaInsets,
-  type ViewportSafeAreaSide,
 } from "./viewportSafeArea";
 import {
   resolveZenLineDisplayPlacements,
@@ -2107,9 +2107,6 @@ const CLIENT_ACCESS_REQUIRED =
 const DESKTOP_FIRST_RUN_CHECKLIST_AUTO_REFRESH_MS = 5000;
 const TUTORIAL_REMIND_LATER_MS = 24 * 60 * 60 * 1000;
 
-const VIEWPORT_SAFE_AREA_ATTRIBUTE = "data-viewport-safe-area";
-const ZEN_LIVE_BOT_COMPOSER_BOUNDARY_ATTRIBUTE =
-  "data-zen-live-bot-composer-boundary";
 const IMAGE_KEYWORD_EDITOR_SIDE_LAYOUT_MIN_VIEWPORT_PX = 1260;
 const RANDOM_NUDGE_STOP_WORDS = new Set([
   "about",
@@ -2162,18 +2159,6 @@ type ZenLiveBotAvatarBounds = {
   width: number;
   height: number;
 };
-type ZenLiveBotAvatarRect = {
-  left: number;
-  top: number;
-  right: number;
-  bottom: number;
-  width: number;
-  height: number;
-  centerX: number;
-  centerY: number;
-};
-type ZenLiveBotProseHillRect = ZenLiveBotAvatarRect;
-type ZenLiveBotChromeAvoidanceRect = ZenLiveBotAvatarRect;
 type ZenLiveBotActionCopyPlacement = "top" | "bottom";
 type ZenLiveBotActionCopyAnchor = {
   key: string;
@@ -2701,71 +2686,6 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-function parseViewportSafeAreaSides(
-  value: string | null | undefined,
-): ViewportSafeAreaSide[] {
-  if (!value) return [];
-  const rawSides = value.split(/\s+/).filter(Boolean);
-  if (rawSides.includes("all")) return [...VIEWPORT_SAFE_AREA_SIDES];
-  const sides = new Set<ViewportSafeAreaSide>();
-  for (const side of rawSides) {
-    if (VIEWPORT_SAFE_AREA_SIDES.includes(side as ViewportSafeAreaSide)) {
-      sides.add(side as ViewportSafeAreaSide);
-    }
-  }
-  return [...sides];
-}
-
-function viewportSafeAreaRectFromDomRect(
-  rect: DOMRect,
-): ViewportSafeAreaBlocker["rect"] {
-  return {
-    left: rect.left,
-    top: rect.top,
-    right: rect.right,
-    bottom: rect.bottom,
-  };
-}
-
-function collectViewportSafeAreaInsets(
-  viewportWidth: number,
-  viewportHeight: number,
-): ViewportSafeAreaInsets {
-  if (typeof document === "undefined")
-    return VIEWPORT_SAFE_AREA_DEFAULT_INSETS;
-  const blockers: ViewportSafeAreaBlocker[] = [];
-  document
-    .querySelectorAll<HTMLElement>(`[${VIEWPORT_SAFE_AREA_ATTRIBUTE}]`)
-    .forEach((node) => {
-      const sides = parseViewportSafeAreaSides(
-        node.getAttribute(VIEWPORT_SAFE_AREA_ATTRIBUTE),
-      );
-      if (sides.length === 0) return;
-      if (node.getAttribute("aria-hidden") === "true" || node.inert) return;
-      const style = window.getComputedStyle(node);
-      if (
-        style.display === "none" ||
-        style.visibility === "hidden" ||
-        style.opacity === "0" ||
-        style.pointerEvents === "none"
-      ) {
-        return;
-      }
-      const rect = node.getBoundingClientRect();
-      if (rect.width <= 0 && rect.height <= 0) return;
-      blockers.push({
-        sides,
-        rect: viewportSafeAreaRectFromDomRect(rect),
-      });
-    });
-
-  return resolveViewportSafeAreaInsets({
-    blockers,
-    viewportWidth,
-    viewportHeight,
-  });
-}
-
 function isElementVisibleForZenLiveBotBoundary(node: HTMLElement): boolean {
   if (node.getAttribute("aria-hidden") === "true" || node.inert) return false;
   const style = window.getComputedStyle(node);
@@ -2778,44 +2698,6 @@ function isElementVisibleForZenLiveBotBoundary(node: HTMLElement): boolean {
   }
   const rect = node.getBoundingClientRect();
   return rect.width > 0 && rect.height > 0;
-}
-
-function collectZenLiveBotAvatarSafeAreaInsets(
-  viewportWidth: number,
-  viewportHeight: number,
-): ViewportSafeAreaInsets {
-  const panelInsets = collectViewportSafeAreaInsets(
-    viewportWidth,
-    viewportHeight,
-  );
-  const insets = {
-    ...panelInsets,
-    left: 0,
-    right: 0,
-  };
-  if (typeof document === "undefined") return insets;
-
-  let composerBottomInset: number | null = null;
-  document
-    .querySelectorAll<HTMLElement>(
-      `[${ZEN_LIVE_BOT_COMPOSER_BOUNDARY_ATTRIBUTE}]`,
-    )
-    .forEach((node) => {
-      if (!isElementVisibleForZenLiveBotBoundary(node)) return;
-      const rect = node.getBoundingClientRect();
-      if (rect.bottom <= 0 || rect.top >= viewportHeight) return;
-      const bottomInset = Math.max(0, viewportHeight - rect.top);
-      composerBottomInset =
-        composerBottomInset === null
-          ? bottomInset
-          : Math.max(composerBottomInset, bottomInset);
-    });
-
-  if (composerBottomInset === null) return insets;
-  return {
-    ...insets,
-    bottom: Math.min(insets.bottom, composerBottomInset),
-  };
 }
 
 function readStoredMemoryBubbleLayouts(): MemoryBubbleLayoutByScope {
@@ -3091,18 +2973,10 @@ const ZEN_LIVE_BOT_AVATAR_DRAG_BLOCKED_SELECTOR = [
   "[data-zen-live-bot-composer-boundary='true']",
   "[data-zen-live-bot-drag-exclusion='top-bar']",
 ].join(", ");
-const ZEN_LIVE_BOT_CHROME_AVOIDANCE_SELECTOR = [
-  "[data-zen-live-bot-chrome-avoid='true']",
-  ZEN_LIVE_BOT_AVATAR_DRAG_BLOCKED_SELECTOR,
-].join(", ");
 const ZEN_LIVE_BOT_AVATAR_DRAG_INTERACTIVE_SELECTOR = [
   PRISM_APP_CURSOR_TEXT_SELECTOR,
   PRISM_APP_CURSOR_FINGER_SELECTOR,
 ].join(", ");
-const ZEN_LIVE_BOT_PROSE_HILL_SELECTOR = "[data-zen-live-prose-target='true']";
-const ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX = 34;
-const ZEN_LIVE_BOT_PROSE_HILL_VERTICAL_CLEARANCE_PX = 18;
-const ZEN_LIVE_BOT_CHROME_AVOIDANCE_CLEARANCE_PX = 14;
 const ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX = 190;
 const ZEN_LIVE_BOT_AVATAR_METAL_ROTATION_SPEED_SCALE = 0.42;
 const ZEN_LIVE_BOT_AVATAR_METAL_MAX_ROTATION_STEP_DEGREES = 24;
@@ -3346,169 +3220,6 @@ function measureZenLiveBotAvatarBounds(
     width: Math.max(1, right - left),
     height: Math.max(1, bottom - top),
   };
-}
-
-function zenLiveBotRectFromEdges(
-  left: number,
-  top: number,
-  right: number,
-  bottom: number,
-): ZenLiveBotAvatarRect {
-  const normalizedLeft = Math.min(left, right);
-  const normalizedRight = Math.max(left, right);
-  const normalizedTop = Math.min(top, bottom);
-  const normalizedBottom = Math.max(top, bottom);
-  const width = Math.max(0, normalizedRight - normalizedLeft);
-  const height = Math.max(0, normalizedBottom - normalizedTop);
-  return {
-    left: normalizedLeft,
-    top: normalizedTop,
-    right: normalizedRight,
-    bottom: normalizedBottom,
-    width,
-    height,
-    centerX: normalizedLeft + width / 2,
-    centerY: normalizedTop + height / 2,
-  };
-}
-
-function zenLiveBotAvatarRectForPosition(
-  position: ZenLiveBotAvatarPosition,
-  bounds: ZenLiveBotAvatarBounds,
-): ZenLiveBotAvatarRect {
-  return zenLiveBotRectFromEdges(
-    position.x + bounds.offsetX,
-    position.y + bounds.offsetY,
-    position.x + bounds.offsetX + bounds.width,
-    position.y + bounds.offsetY + bounds.height,
-  );
-}
-
-function zenLiveBotRectsOverlap(
-  first: ZenLiveBotAvatarRect,
-  second: ZenLiveBotAvatarRect,
-): boolean {
-  return (
-    first.left < second.right &&
-    first.right > second.left &&
-    first.top < second.bottom &&
-    first.bottom > second.top
-  );
-}
-
-function zenLiveBotRectOverlapArea(
-  first: ZenLiveBotAvatarRect,
-  second: ZenLiveBotAvatarRect,
-): number {
-  const width = Math.max(
-    0,
-    Math.min(first.right, second.right) - Math.max(first.left, second.left),
-  );
-  const height = Math.max(
-    0,
-    Math.min(first.bottom, second.bottom) - Math.max(first.top, second.top),
-  );
-  return width * height;
-}
-
-function collectZenLiveBotProseHillRect(
-  viewportWidth: number,
-  viewportHeight: number,
-  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
-): ZenLiveBotProseHillRect | null {
-  if (typeof document === "undefined") return null;
-  const safeTop = safeAreaInsets.top;
-  const safeBottom = viewportHeight - safeAreaInsets.bottom;
-  let left = Number.POSITIVE_INFINITY;
-  let top = Number.POSITIVE_INFINITY;
-  let right = Number.NEGATIVE_INFINITY;
-  let bottom = Number.NEGATIVE_INFINITY;
-
-  document
-    .querySelectorAll<HTMLElement>(ZEN_LIVE_BOT_PROSE_HILL_SELECTOR)
-    .forEach((target) => {
-      const rect = target.getBoundingClientRect();
-      if (rect.width <= 0 || rect.height <= 0) return;
-      if (
-        rect.bottom <= safeTop ||
-        rect.top >= safeBottom ||
-        rect.right <= 0 ||
-        rect.left >= viewportWidth
-      ) {
-        return;
-      }
-      left = Math.min(left, Math.max(0, rect.left));
-      top = Math.min(top, Math.max(safeTop, rect.top));
-      right = Math.max(right, Math.min(viewportWidth, rect.right));
-      bottom = Math.max(bottom, Math.min(safeBottom, rect.bottom));
-    });
-
-  if (
-    !Number.isFinite(left) ||
-    !Number.isFinite(top) ||
-    !Number.isFinite(right) ||
-    !Number.isFinite(bottom) ||
-    right <= left ||
-    bottom <= top
-  ) {
-    return null;
-  }
-  return zenLiveBotRectFromEdges(left, top, right, bottom);
-}
-
-function zenLiveBotInflateRect(
-  rect: ZenLiveBotAvatarRect,
-  horizontalClearance: number,
-  verticalClearance = horizontalClearance,
-): ZenLiveBotAvatarRect {
-  return zenLiveBotRectFromEdges(
-    rect.left - horizontalClearance,
-    rect.top - verticalClearance,
-    rect.right + horizontalClearance,
-    rect.bottom + verticalClearance,
-  );
-}
-
-function collectZenLiveBotChromeAvoidanceRects(
-  viewportWidth: number,
-  viewportHeight: number,
-  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
-  avatarNode: HTMLElement | null = null,
-): ZenLiveBotChromeAvoidanceRect[] {
-  if (typeof document === "undefined") return [];
-  const safeLeft = safeAreaInsets.left;
-  const safeTop = safeAreaInsets.top;
-  const safeRight = viewportWidth - safeAreaInsets.right;
-  const safeBottom = viewportHeight - safeAreaInsets.bottom;
-  if (safeRight <= safeLeft || safeBottom <= safeTop) return [];
-
-  const rects: ZenLiveBotChromeAvoidanceRect[] = [];
-  document
-    .querySelectorAll<HTMLElement>(ZEN_LIVE_BOT_CHROME_AVOIDANCE_SELECTOR)
-    .forEach((target) => {
-      if (avatarNode && (target === avatarNode || avatarNode.contains(target)))
-        return;
-      if (!isElementVisibleForZenLiveBotBoundary(target)) return;
-      const rect = target.getBoundingClientRect();
-      if (
-        rect.bottom <= safeTop ||
-        rect.top >= safeBottom ||
-        rect.right <= safeLeft ||
-        rect.left >= safeRight
-      ) {
-        return;
-      }
-      const clipped = zenLiveBotRectFromEdges(
-        Math.max(safeLeft, rect.left),
-        Math.max(safeTop, rect.top),
-        Math.min(safeRight, rect.right),
-        Math.min(safeBottom, rect.bottom),
-      );
-      if (clipped.width <= 0 || clipped.height <= 0) return;
-      rects.push(clipped);
-    });
-
-  return rects;
 }
 
 function zenLiveBotGrabGeometryFromElement(
@@ -3945,7 +3656,6 @@ function clampZenLiveBotActionCopyAnchor(
 function resolveZenLiveBotActionCopyCenterX(
   defaultCenterX: number,
   copyWidth: number,
-  bodyRect: DOMRect,
   viewportWidth: number,
   viewportHeight: number,
   safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
@@ -3960,44 +3670,6 @@ function resolveZenLiveBotActionCopyCenterX(
     minCenter,
     maxCenter,
   );
-  const proseRect = collectZenLiveBotProseHillRect(
-    viewportWidth,
-    viewportHeight,
-    safeAreaInsets,
-  );
-  if (!proseRect) return viewportClampedCenter;
-
-  const proseGap = Math.max(16, ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX * 0.65);
-  const proseLeft = proseRect.left - proseGap;
-  const proseRight = proseRect.right + proseGap;
-  const copyLeft = viewportClampedCenter - copyWidth / 2;
-  const copyRight = viewportClampedCenter + copyWidth / 2;
-  if (copyRight <= proseLeft || copyLeft >= proseRight) {
-    return viewportClampedCenter;
-  }
-
-  const bodyCenterX = bodyRect.left + bodyRect.width / 2;
-  const proseCenterX = proseRect.left + proseRect.width / 2;
-  const leftMaxCenter = Math.min(maxCenter, proseLeft - copyWidth / 2);
-  const rightMinCenter = Math.max(minCenter, proseRight + copyWidth / 2);
-  const leftAvailable = leftMaxCenter >= minCenter;
-  const rightAvailable = rightMinCenter <= maxCenter;
-  const preferRight = bodyCenterX >= proseCenterX;
-
-  if ((preferRight && rightAvailable) || (!leftAvailable && rightAvailable)) {
-    return clampZenLiveBotActionCopyAnchor(
-      viewportClampedCenter,
-      rightMinCenter,
-      maxCenter,
-    );
-  }
-  if (leftAvailable) {
-    return clampZenLiveBotActionCopyAnchor(
-      viewportClampedCenter,
-      minCenter,
-      leftMaxCenter,
-    );
-  }
   return viewportClampedCenter;
 }
 
@@ -4030,7 +3702,6 @@ function resolveZenLiveBotActionCopyAnchor(
   const anchoredCenterX = resolveZenLiveBotActionCopyCenterX(
     centerX,
     copyWidth,
-    bodyRect,
     viewportWidth,
     viewportHeight,
     safeAreaInsets,
@@ -4109,224 +3780,6 @@ function clampZenLiveBotAvatarPosition(
     x: Math.max(minX, Math.min(maxX, position.x)),
     y: Math.max(minY, Math.min(maxY, position.y)),
   };
-}
-
-function resolveZenLiveBotAvatarProseHillPosition(
-  position: ZenLiveBotAvatarPosition,
-  bounds: ZenLiveBotAvatarBounds,
-  viewportWidth: number,
-  viewportHeight: number,
-  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
-): ZenLiveBotAvatarPosition {
-  const proseHillRect = collectZenLiveBotProseHillRect(
-    viewportWidth,
-    viewportHeight,
-    safeAreaInsets,
-  );
-  if (!proseHillRect) return position;
-
-  const horizontalClearance = Math.max(
-    ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX,
-    Math.min(320, bounds.width * 1.18),
-  );
-  const inflatedHillRect = zenLiveBotRectFromEdges(
-    proseHillRect.left - horizontalClearance,
-    proseHillRect.top - ZEN_LIVE_BOT_PROSE_HILL_VERTICAL_CLEARANCE_PX,
-    proseHillRect.right + horizontalClearance,
-    proseHillRect.bottom + ZEN_LIVE_BOT_PROSE_HILL_VERTICAL_CLEARANCE_PX,
-  );
-  const currentRect = zenLiveBotAvatarRectForPosition(position, bounds);
-  if (!zenLiveBotRectsOverlap(currentRect, inflatedHillRect)) return position;
-
-  const { minX, maxX } = zenLiveBotAvatarPositionLimits(
-    bounds,
-    viewportWidth,
-    viewportHeight,
-    safeAreaInsets,
-  );
-  const leftPosition = clampZenLiveBotAvatarPosition(
-    {
-      x: inflatedHillRect.left - bounds.width - bounds.offsetX,
-      y: position.y,
-    },
-    bounds,
-    viewportWidth,
-    viewportHeight,
-    safeAreaInsets,
-  );
-  const rightPosition = clampZenLiveBotAvatarPosition(
-    {
-      x: inflatedHillRect.right - bounds.offsetX,
-      y: position.y,
-    },
-    bounds,
-    viewportWidth,
-    viewportHeight,
-    safeAreaInsets,
-  );
-  const leftFreeSpace = Math.max(0, proseHillRect.left - minX);
-  const rightFreeSpace = Math.max(
-    0,
-    maxX + bounds.offsetX + bounds.width - proseHillRect.right,
-  );
-  const preferredSide =
-    currentRect.centerX < proseHillRect.centerX
-      ? "left"
-      : currentRect.centerX > proseHillRect.centerX
-        ? "right"
-        : rightFreeSpace >= leftFreeSpace
-          ? "right"
-          : "left";
-  const candidates: Array<{
-    side: "left" | "right";
-    position: ZenLiveBotAvatarPosition;
-  }> = [
-    { side: "left", position: leftPosition },
-    { side: "right", position: rightPosition },
-  ];
-
-  return candidates
-    .map((candidate) => {
-      const candidateRect = zenLiveBotAvatarRectForPosition(
-        candidate.position,
-        bounds,
-      );
-      const overlapArea = zenLiveBotRectOverlapArea(
-        candidateRect,
-        inflatedHillRect,
-      );
-      const distance = Math.hypot(
-        candidate.position.x - position.x,
-        candidate.position.y - position.y,
-      );
-      const sidePenalty = candidate.side === preferredSide ? 0 : 24;
-      return {
-        ...candidate,
-        score: overlapArea * 100 + distance + sidePenalty,
-      };
-    })
-    .sort((first, second) => first.score - second.score)[0]!.position;
-}
-
-function resolveZenLiveBotAvatarChromeAvoidancePosition(
-  position: ZenLiveBotAvatarPosition,
-  bounds: ZenLiveBotAvatarBounds,
-  viewportWidth: number,
-  viewportHeight: number,
-  safeAreaInsets: ViewportSafeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS,
-  avatarNode: HTMLElement | null = null,
-): ZenLiveBotAvatarPosition {
-  const chromeRects = collectZenLiveBotChromeAvoidanceRects(
-    viewportWidth,
-    viewportHeight,
-    safeAreaInsets,
-    avatarNode,
-  );
-  if (chromeRects.length === 0) return position;
-
-  const horizontalClearance = Math.max(
-    ZEN_LIVE_BOT_CHROME_AVOIDANCE_CLEARANCE_PX,
-    Math.min(42, bounds.width * 0.12),
-  );
-  const verticalClearance = Math.max(
-    ZEN_LIVE_BOT_CHROME_AVOIDANCE_CLEARANCE_PX,
-    Math.min(36, bounds.height * 0.1),
-  );
-  const inflatedRects = chromeRects.map((rect) =>
-    zenLiveBotInflateRect(rect, horizontalClearance, verticalClearance),
-  );
-  const currentRect = zenLiveBotAvatarRectForPosition(position, bounds);
-  const overlappingRects = inflatedRects.filter((rect) =>
-    zenLiveBotRectsOverlap(currentRect, rect),
-  );
-  if (overlappingRects.length === 0) return position;
-
-  type ChromeAvoidanceSide = "left" | "right" | "top" | "bottom";
-  const currentOverlapArea = inflatedRects.reduce(
-    (total, rect) => total + zenLiveBotRectOverlapArea(currentRect, rect),
-    0,
-  );
-  const candidates: Array<{
-    side: ChromeAvoidanceSide;
-    position: ZenLiveBotAvatarPosition;
-    escapeDistance: number;
-  }> = [];
-
-  overlappingRects.forEach((rect) => {
-    candidates.push(
-      {
-        side: "left",
-        position: {
-          x: rect.left - bounds.width - bounds.offsetX,
-          y: position.y,
-        },
-        escapeDistance: Math.max(0, currentRect.right - rect.left),
-      },
-      {
-        side: "right",
-        position: {
-          x: rect.right - bounds.offsetX,
-          y: position.y,
-        },
-        escapeDistance: Math.max(0, rect.right - currentRect.left),
-      },
-      {
-        side: "top",
-        position: {
-          x: position.x,
-          y: rect.top - bounds.height - bounds.offsetY,
-        },
-        escapeDistance: Math.max(0, currentRect.bottom - rect.top),
-      },
-      {
-        side: "bottom",
-        position: {
-          x: position.x,
-          y: rect.bottom - bounds.offsetY,
-        },
-        escapeDistance: Math.max(0, rect.bottom - currentRect.top),
-      },
-    );
-  });
-
-  const scoredCandidates = candidates.map((candidate) => {
-    const clampedPosition = clampZenLiveBotAvatarPosition(
-      candidate.position,
-      bounds,
-      viewportWidth,
-      viewportHeight,
-      safeAreaInsets,
-    );
-    const candidateRect = zenLiveBotAvatarRectForPosition(
-      clampedPosition,
-      bounds,
-    );
-    const overlapArea = inflatedRects.reduce(
-      (total, rect) => total + zenLiveBotRectOverlapArea(candidateRect, rect),
-      0,
-    );
-    const distance = Math.hypot(
-      clampedPosition.x - position.x,
-      clampedPosition.y - position.y,
-    );
-    return {
-      position: clampedPosition,
-      score: overlapArea * 120 + distance + candidate.escapeDistance * 0.34,
-    };
-  });
-
-  const best = scoredCandidates.sort(
-    (first, second) => first.score - second.score,
-  )[0];
-  if (!best) return position;
-  const currentScore = currentOverlapArea * 120;
-  const movement = Math.hypot(
-    best.position.x - position.x,
-    best.position.y - position.y,
-  );
-  if (movement < 0.75 || (best.score >= currentScore && movement < 2))
-    return position;
-  return best.position;
 }
 
 function resolveDefaultZenLiveBotAvatarPosition(
@@ -10529,6 +9982,7 @@ interface UserSettings {
   zenMessageFontMaxPx: number;
   zenAskQuestionPatienceEnabled: boolean;
   zenAskQuestionPatienceMs: number;
+  zenInitialAtmosphereWaitEnabled: boolean;
   zenAutonomyEnabled: boolean;
   zenPersonaTransitionChoice: ZenPersonaTransitionChoice;
   /** Local ComfyUI / Ollama image model used when the primary image call is refused (online or local). */
@@ -10829,6 +10283,7 @@ type ZenModeSettingsFields = Pick<
   | "zenMessageFontMaxPx"
   | "zenAskQuestionPatienceEnabled"
   | "zenAskQuestionPatienceMs"
+  | "zenInitialAtmosphereWaitEnabled"
   | "zenAutonomyEnabled"
 >;
 
@@ -15295,6 +14750,7 @@ function defaultZenModeSettings(): ZenModeSettingsFields {
     zenMessageFontMaxPx: DEFAULT_ZEN_MESSAGE_FONT_MAX_PX,
     zenAskQuestionPatienceEnabled: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_ENABLED,
     zenAskQuestionPatienceMs: DEFAULT_ZEN_ASK_QUESTION_PATIENCE_MS,
+    zenInitialAtmosphereWaitEnabled: false,
     zenAutonomyEnabled: false,
   };
 }
@@ -15354,6 +14810,8 @@ function normalizeZenModeSettingsFields(
     zenAskQuestionPatienceMs: normalizeZenAskQuestionPatienceMsSetting(
       settings?.zenAskQuestionPatienceMs,
     ),
+    zenInitialAtmosphereWaitEnabled:
+      settings?.zenInitialAtmosphereWaitEnabled === true,
     zenAutonomyEnabled: normalizeZenAutonomyEnabledSetting(
       settings?.zenAutonomyEnabled,
     ),
@@ -23358,6 +22816,8 @@ interface ComposerModelPickerProps {
   loading?: boolean;
   /** True only while the selected model is actively generating a reply. */
   generating?: boolean;
+  /** Remounts the filtered Turbo raster when its Light/Dark palette changes. */
+  renderTheme?: "light" | "dark";
   title?: string;
   ariaLabel: string;
   formName?: string;
@@ -23496,6 +22956,7 @@ function ComposerModelPicker({
   disabled,
   loading = false,
   generating = false,
+  renderTheme,
   title,
   ariaLabel,
   formName,
@@ -23903,7 +23364,13 @@ function ComposerModelPicker({
         EFFORT_PICKER_QUICK_OPEN_EVENT,
         openQuickEffort,
       );
-  }, [effortControl, effortDirectActionAvailable, effortInteractionDisabled, pickerId]);
+  }, [
+    effortControl,
+    effortDirectActionAvailable,
+    effortInteractionDisabled,
+    pickerId,
+    renderTheme,
+  ]);
 
   useEffect(() => {
     if (!menuOpen && !effortMenuOpen) {
@@ -24377,7 +23844,9 @@ function ComposerModelPicker({
       </button>
       {effortControl ? (
         <span
+          key={renderTheme}
           className={styles.composeModelEffortTriggerWrap}
+          data-render-theme={renderTheme}
           data-turbo={turboVisuallyActive ? "true" : undefined}
           data-turbo-capable={
             effortControl.turboSupported || autoOnlineTurboToggleAvailable
@@ -24752,6 +24221,8 @@ function ComposerModelPicker({
                 style={
                   {
                     "--model-effort-progress": `${displayedEffortSliderProgress}%`,
+                    "--model-effort-saturation":
+                      `${displayedEffortSliderProgress}%`,
                     "--model-effort-stop-count": effortLevels.length,
                   } as CSSProperties
                 }
@@ -25763,6 +25234,25 @@ function ColorGlyphPicker({
 
 interface GlyphProps {
   size?: number;
+}
+
+/** Shared applet glyph registry used by tiles, menus, and the Home orb. */
+function PrismAppletGlyph({
+  appletId,
+  size = 88,
+}: GlyphProps & { appletId: PrismAppletId }): React.JSX.Element {
+  if (appletId === "debate") return <GlyphDebate size={size} />;
+  if (appletId === "polling") return <GlyphPolling size={size} />;
+  if (appletId === "coffee") return <GlyphCoffee size={size} />;
+  if (appletId === "botcast") return <GlyphSignal size={size} />;
+  if (appletId === "feed") return <GlyphFeed size={size} />;
+  if (appletId === "games") return <GlyphGames size={size} />;
+  if (appletId === "story") return <GlyphStory size={size} />;
+  if (appletId === "gym") return <GlyphGym size={size} />;
+  if (appletId === "slate") return <GlyphSlate size={size} />;
+  if (appletId === "pseudo") return <GlyphPseudo size={size} />;
+  if (appletId === "surf") return <GlyphSurf size={size} />;
+  return <GlyphChat size={size} />;
 }
 
 function GlyphChat({ size = 88 }: GlyphProps): React.JSX.Element {
@@ -31886,7 +31376,6 @@ function ZenLiveBotPresencePlate({
     (
       nextPosition: ZenLiveBotAvatarPosition,
       persist = false,
-      avoidChrome = false,
     ): ZenLiveBotAvatarPosition => {
       const node = avatarRef.current;
       if (typeof window === "undefined" || !node) {
@@ -31914,10 +31403,7 @@ function ZenLiveBotPresencePlate({
       }
       const bounds = measureZenLiveBotAvatarBounds(node);
       const rootWidth = node.getBoundingClientRect().width || bounds.width;
-      const safeAreaInsets = collectZenLiveBotAvatarSafeAreaInsets(
-        window.innerWidth,
-        window.innerHeight,
-      );
+      const safeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS;
       const clamped = clampZenLiveBotAvatarPosition(
         nextPosition,
         bounds,
@@ -31925,25 +31411,7 @@ function ZenLiveBotPresencePlate({
         window.innerHeight,
         safeAreaInsets,
       );
-      const proseSettled = avoidChrome
-        ? resolveZenLiveBotAvatarProseHillPosition(
-            clamped,
-            bounds,
-            window.innerWidth,
-            window.innerHeight,
-            safeAreaInsets,
-          )
-        : clamped;
-      const settled = avoidChrome
-        ? resolveZenLiveBotAvatarChromeAvoidancePosition(
-            proseSettled,
-            bounds,
-            window.innerWidth,
-            window.innerHeight,
-            safeAreaInsets,
-            node,
-          )
-        : clamped;
+      const settled = clamped;
       setAvatarCanvasSide(
         zenLiveBotCanvasSideFromCenterX(
           settled.x + rootWidth / 2,
@@ -31991,10 +31459,7 @@ function ZenLiveBotPresencePlate({
     if (typeof window === "undefined") return;
     const node = avatarRef.current;
     if (!node) return;
-    const safeAreaInsets = collectZenLiveBotAvatarSafeAreaInsets(
-      window.innerWidth,
-      window.innerHeight,
-    );
+    const safeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS;
     const placement = resolveZenLiveBotActionCopyPlacement(
       node,
       window.innerWidth,
@@ -32035,10 +31500,7 @@ function ZenLiveBotPresencePlate({
     if (!node) return;
     let animationFrame: number | null = null;
     const clampCurrent = (persist = false): void => {
-      const safeAreaInsets = collectZenLiveBotAvatarSafeAreaInsets(
-        window.innerWidth,
-        window.innerHeight,
-      );
+      const safeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS;
       const current =
         avatarPositionRef.current ??
         resolveDefaultZenLiveBotAvatarPosition(
@@ -32047,11 +31509,7 @@ function ZenLiveBotPresencePlate({
           window.innerHeight,
           safeAreaInsets,
         );
-      setAvatarPositionClamped(
-        current,
-        persist,
-        avatarDragRef.current === null,
-      );
+      setAvatarPositionClamped(current, persist);
     };
     const scheduleClamp = (): void => {
       if (animationFrame !== null) {
@@ -32074,47 +31532,8 @@ function ZenLiveBotPresencePlate({
     }
     const observer = new ResizeObserverCtor(scheduleClamp);
     observer.observe(node);
-    const observeSafeAreaNodes = (): void => {
-      document
-        .querySelectorAll<HTMLElement>(
-          [
-            `[${VIEWPORT_SAFE_AREA_ATTRIBUTE}]`,
-            `[${ZEN_LIVE_BOT_COMPOSER_BOUNDARY_ATTRIBUTE}]`,
-            "[data-zen-live-bot-chrome-avoid='true']",
-          ].join(", "),
-        )
-        .forEach((safeAreaNode) => observer.observe(safeAreaNode));
-    };
-    observeSafeAreaNodes();
-    const mutationObserver =
-      typeof MutationObserver === "undefined"
-        ? null
-        : new MutationObserver(() => {
-            observeSafeAreaNodes();
-            scheduleClamp();
-          });
-    mutationObserver?.observe(document.body, {
-      attributes: true,
-      childList: true,
-      subtree: true,
-      attributeFilter: [
-        "class",
-        "style",
-        VIEWPORT_SAFE_AREA_ATTRIBUTE,
-        ZEN_LIVE_BOT_COMPOSER_BOUNDARY_ATTRIBUTE,
-        "data-zen-live-bot-chrome-avoid",
-        "data-chat-sidebar-hidden",
-        "data-chat-overflow-menu-open",
-        "data-choice-composer-hidden",
-        "data-session-active",
-        "data-transcript-open",
-      ],
-    });
-    window.addEventListener("transitionend", scheduleClamp, true);
     return () => {
       observer.disconnect();
-      mutationObserver?.disconnect();
-      window.removeEventListener("transitionend", scheduleClamp, true);
       if (animationFrame !== null) {
         window.cancelAnimationFrame(animationFrame);
       }
@@ -32134,11 +31553,7 @@ function ZenLiveBotPresencePlate({
     if (typeof window === "undefined") return;
     const handleResize = (): void => {
       if (!avatarPositionRef.current) return;
-      setAvatarPositionClamped(
-        avatarPositionRef.current,
-        true,
-        avatarDragRef.current === null,
-      );
+      setAvatarPositionClamped(avatarPositionRef.current, true);
     };
     window.addEventListener("resize", handleResize);
     return () => window.removeEventListener("resize", handleResize);
@@ -32312,7 +31727,6 @@ function ZenLiveBotPresencePlate({
             x: clientX - dragState.offsetX,
             y: clientY - dragState.offsetY,
           },
-          true,
           true,
         );
         startAvatarMomentum(dragState.velocitySample);
@@ -32659,10 +32073,7 @@ function ZenLiveBotPresencePlate({
         frameId = window.requestAnimationFrame(tick);
         return;
       }
-      const safeAreaInsets = collectZenLiveBotAvatarSafeAreaInsets(
-        window.innerWidth,
-        window.innerHeight,
-      );
+      const safeAreaInsets = VIEWPORT_SAFE_AREA_DEFAULT_INSETS;
       const nodeRect = node.getBoundingClientRect();
       const bounds = {
         left: safeAreaInsets.left,
@@ -32696,55 +32107,10 @@ function ZenLiveBotPresencePlate({
           motion.nextRoamAtMs = nowMs + 2_400;
         }
       } else {
-        const prose = collectZenLiveBotProseHillRect(
-          window.innerWidth,
-          window.innerHeight,
-          safeAreaInsets,
-        );
-        const chrome = collectZenLiveBotChromeAvoidanceRects(
-          window.innerWidth,
-          window.innerHeight,
-          safeAreaInsets,
-          node,
-        );
-        const avoidRects = [
-          ...(prose
-            ? [
-                zenLiveBotInflateRect(
-                  prose,
-                  ZEN_LIVE_BOT_PROSE_HILL_CLEARANCE_PX,
-                  ZEN_LIVE_BOT_PROSE_HILL_VERTICAL_CLEARANCE_PX,
-                ),
-              ]
-            : []),
-          ...chrome.map((rect) =>
-            zenLiveBotInflateRect(
-              rect,
-              ZEN_LIVE_BOT_CHROME_AVOIDANCE_CLEARANCE_PX,
-            ),
-          ),
-        ];
-        const currentOverlapsAvoidance = avoidRects.some((rect) =>
-          zenLiveBotRectsOverlap(
-            zenLiveBotAvatarRectForPosition(motion.physics, {
-              offsetX: 0,
-              offsetY: 0,
-              width: nodeRect.width,
-              height: nodeRect.height,
-            }),
-            rect,
-          ),
-        );
-        if (
-          !motion.target &&
-          (nowMs >= motion.nextRoamAtMs || currentOverlapsAvoidance)
-        ) {
+        if (!motion.target && nowMs >= motion.nextRoamAtMs) {
           motion.target = planZenLiveBotFreeRoamDestination({
             current: motion.physics,
             bounds,
-            avatarWidth: nodeRect.width,
-            avatarHeight: nodeRect.height,
-            avoidRects,
           });
         }
         if (motion.target) {
@@ -32766,7 +32132,6 @@ function ZenLiveBotPresencePlate({
       const settled = setAvatarPositionClamped(
         { x: motion.physics.x, y: motion.physics.y },
         false,
-        !motion.target && !motion.throwing,
       );
       motion.physics.x = settled.x;
       motion.physics.y = settled.y;
@@ -43725,6 +43090,16 @@ function BotAvatarCustomizerModal({
     if (!open || profileEditorLayerOpen) return;
     const handleEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
+      const target = event.target;
+      if (
+        event.defaultPrevented ||
+        (target instanceof HTMLElement &&
+          target.closest(
+            '[data-shared-app-navbar="true"], [data-navbar-picker-surface="true"]',
+          ))
+      ) {
+        return;
+      }
       if (
         activeControlTab === "details" &&
         detailsEditorRef.current?.cancelEquippedStamp()
@@ -44529,6 +43904,7 @@ function BotAvatarCustomizerModal({
   const modal = (
     <div
       className={styles.botAvatarCustomizerBackdrop}
+      data-avatar-foundry="true"
       role="presentation"
       onPointerDown={(event) => {
         if (event.target !== event.currentTarget) return;
@@ -44542,7 +43918,6 @@ function BotAvatarCustomizerModal({
         data-foundry="true"
         data-draft-mode={draftMode ? "true" : undefined}
         role="dialog"
-        aria-modal="true"
         aria-labelledby="bot-avatar-customizer-title"
         tabIndex={-1}
         onKeyDown={(event) => {
@@ -48205,8 +47580,31 @@ function HomeContent(): React.JSX.Element {
     zenMessageFontMaxPx,
     zenAskQuestionPatienceEnabled,
     zenAskQuestionPatienceMs,
+    zenInitialAtmosphereWaitEnabled: savedZenInitialAtmosphereWaitEnabled,
     zenAutonomyEnabled,
   } = effectiveZenModeSettings;
+  const [zenInitialAtmosphereWaitPreference, setZenInitialAtmosphereWaitPreference] =
+    useState(false);
+  const zenInitialAtmosphereWaitStorageKey = user?.id
+    ? `prism_zen_initial_atmosphere_wait:${user.id}`
+    : null;
+  useEffect(() => {
+    if (!zenInitialAtmosphereWaitStorageKey) {
+      setZenInitialAtmosphereWaitPreference(false);
+      return;
+    }
+    try {
+      setZenInitialAtmosphereWaitPreference(
+        window.localStorage.getItem(zenInitialAtmosphereWaitStorageKey) ===
+          "true",
+      );
+    } catch {
+      // Storage can be unavailable in private browsing; the saved account
+      // preference remains the fallback.
+    }
+  }, [zenInitialAtmosphereWaitStorageKey]);
+  const zenInitialAtmosphereWaitEnabled =
+    savedZenInitialAtmosphereWaitEnabled || zenInitialAtmosphereWaitPreference;
   const zenMessageFontBounds = useMemo<ZenMessageFontBounds>(
     () => ({
       minPx: zenMessageFontMinPx,
@@ -48944,6 +48342,16 @@ function HomeContent(): React.JSX.Element {
     useState(0);
   const [zenInitialStarterOverlayActive, setZenInitialStarterOverlayActive] =
     useState(false);
+  const [zenFreshConversationHandoff, setZenFreshConversationHandoff] =
+    useState<{
+      conversationId: string | null;
+      startedAtMs: number;
+      responseStreamReady: boolean;
+    } | null>(null);
+  const zenFreshConversationHandoffRef = useRef(false);
+  useEffect(() => {
+    zenFreshConversationHandoffRef.current = zenFreshConversationHandoff !== null;
+  }, [zenFreshConversationHandoff]);
   const [sandboxSummaryBusy, setSandboxSummaryBusy] = useState(false);
   const [manualCompactionStatus, setManualCompactionStatus] = useState<{
     conversationId: string;
@@ -50222,6 +49630,9 @@ function HomeContent(): React.JSX.Element {
       }
       return;
     }
+    // The ceremonial veil owns the first-response clock. Clearing the
+    // handoff re-runs this effect with the assistant message still unseen.
+    if (zenFreshConversationHandoff !== null) return;
 
     const assistantMessages = detail.messages.filter(
       (message): message is Message =>
@@ -50694,6 +50105,7 @@ function HomeContent(): React.JSX.Element {
     settings?.voiceVolume,
     startChatSpeechReveal,
     view,
+    zenFreshConversationHandoff,
   ]);
 
   useEffect(
@@ -51654,8 +51066,6 @@ function HomeContent(): React.JSX.Element {
   const [newBotVoicePreviewLine, setNewBotVoicePreviewLine] = useState("");
   const [botGeneratorOpen, setBotGeneratorOpen] = useState(false);
   const [botGeneratorPrompt, setBotGeneratorPrompt] = useState("");
-  const [botGeneratorModelChoice, setBotGeneratorModelChoice] =
-    useState(AUTO_MODEL_CHOICE);
   const [botGeneratorBusy, setBotGeneratorBusy] = useState(false);
   const [botGeneratorError, setBotGeneratorError] = useState<string | null>(
     null,
@@ -55549,27 +54959,70 @@ function HomeContent(): React.JSX.Element {
   const botGeneratorResponseMode = responseModeForProvider(
     settings?.preferredProvider ?? "local",
   );
-  const botGeneratorModelOptions = useMemo(
-    () =>
-      modelOptionsForResponseMode(
-        modelCatalog,
-        settings,
-        botGeneratorResponseMode,
-      ),
-    [botGeneratorResponseMode, modelCatalog, settings],
+  const botGeneratorRoutingChoice = resolveModelChoiceForResponseMode({
+    responseMode: botGeneratorResponseMode,
+    providerPreference: settings?.preferredProvider ?? "local",
+    choices: visibleModelChoicesByProvider(
+      modelCatalog,
+      settings,
+      globalModelChoiceByProvider,
+    ),
+    onlineOptions: onlineChatModelOptions,
+  });
+  const botGeneratorModelChoice = botGeneratorRoutingChoice.modelChoice;
+  const botGeneratorSelectedProvider = botGeneratorRoutingChoice.provider;
+  const botGeneratorModelOptions = includeSelectedResponseModeModelOption(
+    modelCatalog,
+    settings,
+    botGeneratorResponseMode,
+    modelOptionsForResponseMode(
+      modelCatalog,
+      settings,
+      botGeneratorResponseMode,
+    ),
+    botGeneratorModelChoice,
+    botGeneratorSelectedProvider,
   );
   const botGeneratorSelectedModel =
     botGeneratorModelChoice === AUTO_MODEL_CHOICE
       ? null
       : (botGeneratorModelOptions.find(
-          (model) => model.id === botGeneratorModelChoice,
+          (model) =>
+            model.provider === botGeneratorSelectedProvider &&
+            model.id === botGeneratorModelChoice,
         ) ?? null);
-  const botGeneratorSelectedProvider =
-    botGeneratorSelectedModel?.provider ??
-    (botGeneratorModelChoice !== AUTO_MODEL_CHOICE &&
-    botGeneratorResponseMode === "online"
-      ? inferOnlineProviderForModelId(botGeneratorModelChoice)
-      : (settings?.preferredProvider ?? "local"));
+  const botGeneratorEffortTarget =
+    botGeneratorModelChoice === AUTO_MODEL_CHOICE
+      ? null
+      : modelEffortTargetForSelection({
+          provider: botGeneratorSelectedProvider,
+          modelId: botGeneratorModelChoice,
+          options: botGeneratorModelOptions,
+          simulatedEffortEnabled: true,
+        });
+  const botGeneratorReasoningEffort = botGeneratorEffortTarget
+    ? savedModelReasoningEffort(
+        settings,
+        botGeneratorEffortTarget.provider,
+        botGeneratorEffortTarget.modelId,
+        botGeneratorEffortTarget.capability,
+      )
+    : "auto";
+  const botGeneratorModelLabel =
+    botGeneratorModelChoice === AUTO_MODEL_CHOICE
+      ? "Auto model"
+      : (botGeneratorSelectedModel?.label ??
+        modelLabelFromId(botGeneratorModelChoice));
+  const botGeneratorEffortLabel =
+    botGeneratorModelChoice === AUTO_MODEL_CHOICE
+      ? "automatic effort"
+      : botGeneratorEffortTarget?.capability.mode === "unavailable"
+        ? "model-managed effort"
+        : `${REASONING_EFFORT_LABELS[botGeneratorReasoningEffort]}${
+            botGeneratorEffortTarget?.capability.mode === "simulated"
+              ? " simulated effort"
+              : " effort"
+          }`;
   const headerConversationTitle = useMemo(() => {
     if (view === "sandbox") {
       const sandboxTitle = detail?.title?.trim();
@@ -56560,6 +56013,7 @@ function HomeContent(): React.JSX.Element {
           }}
           options={modelOptions}
           provider={modelProvider === "local" ? "local" : "online"}
+          renderTheme={resolvedTheme}
           selectedProvider={modelProvider}
           loading={modelCatalogLoading}
           disabled={!settings}
@@ -56869,6 +56323,7 @@ function HomeContent(): React.JSX.Element {
         }}
         options={modelOptions}
         provider={isLocal ? "local" : "online"}
+        renderTheme={resolvedTheme}
         selectedProvider={modelProvider}
         loading={modelCatalogLoading}
         disabled={coffeeHeaderModelControlsLocked()}
@@ -57172,6 +56627,7 @@ function HomeContent(): React.JSX.Element {
               }}
               options={modelOptions}
               provider={isLocal ? "local" : "online"}
+              renderTheme={resolvedTheme}
               selectedProvider={modelProvider}
               loading={modelCatalogLoading}
               disabled={!settings || pendingReplyVisible}
@@ -58586,6 +58042,8 @@ function HomeContent(): React.JSX.Element {
     setStarterComposerRevealed(false);
     setAskQuestionComposerRevealed(false);
     setZenInitialStarterOverlayActive(false);
+    zenFreshConversationHandoffRef.current = false;
+    setZenFreshConversationHandoff(null);
     setConversationStarterPrompts(null);
     setChatStartupSummary(null);
     setPendingZenSessionBreak(null);
@@ -58641,6 +58099,10 @@ function HomeContent(): React.JSX.Element {
     delayMultiplier?: number;
     startDelayMs?: number;
   }): number {
+    // The first focused response owns a ceremonial full-screen clock. Do not
+    // let hidden typewriter work consume words before the avatar reaches the
+    // live canvas.
+    if (zenFreshConversationHandoff !== null) return 0;
     const revealTokens = tokenizeMessageReveal(displayContent);
     const tokenTotal = Math.max(1, revealTokens.length);
     if (completed) {
@@ -59696,6 +59158,7 @@ function HomeContent(): React.JSX.Element {
       : false;
     const shouldRun =
       view === "chat" &&
+      zenFreshConversationHandoff === null &&
       (voiceSelection.voiceMode === "bottish" ||
         voiceSelection.voiceMode === "babble") &&
       settings !== null &&
@@ -59844,6 +59307,7 @@ function HomeContent(): React.JSX.Element {
     settings?.voiceVolume,
     startChatSpeechReveal,
     view,
+    zenFreshConversationHandoff,
   ]);
   useEffect(() => {
     if (!activeTutorialMode || typeof document === "undefined") {
@@ -60718,13 +60182,96 @@ function HomeContent(): React.JSX.Element {
         return timeline && !speechRevealTimelineComplete(timeline);
       })(),
   );
+  const zenFreshConversationHandoffActive =
+    chatImmersivePresentation && zenFreshConversationHandoff !== null;
+  useEffect(() => {
+    if (view === "chat" && chatImmersivePresentation) return;
+    if (!zenFreshConversationHandoff && !zenInitialStarterOverlayActive) return;
+    setZenFreshConversationHandoff(null);
+    setZenInitialStarterOverlayActive(false);
+  }, [
+    chatImmersivePresentation,
+    view,
+    zenFreshConversationHandoff,
+    zenInitialStarterOverlayActive,
+  ]);
   const zenInitialThinkingActive =
-    view === "chat" &&
+    chatImmersivePresentation &&
     zenInitialStarterOverlayActive &&
-    pendingReplyVisible &&
-    !zenPlayerMessageRevealActive &&
-    pendingReplyStartMessageCount === 0 &&
-    detail?.hasAssistantReply !== true;
+    (zenFreshConversationHandoffActive ||
+      (pendingReplyVisible &&
+        !zenPlayerMessageRevealActive &&
+        pendingReplyStartMessageCount === 0 &&
+        detail?.hasAssistantReply !== true));
+
+  // Response readiness is always the first gate. Atmosphere is deliberately
+  // optional: players can enter as soon as the reply is stream-ready, or ask
+  // Zen to wait for the room image too. A terminal image state never traps the
+  // response behind the ceremonial veil.
+  const zenInitialCeremonyAvatarReady =
+    zenFreshConversationHandoffActive &&
+    zenInitialCeremonyCanReveal({
+      responseStreamReady:
+        zenFreshConversationHandoff?.responseStreamReady === true,
+      waitForAtmosphere: zenInitialAtmosphereWaitEnabled,
+      atmosphereEnabled: detail?.zenWallpaper?.enabled,
+      atmosphereImageId: detail?.zenWallpaper?.imageId,
+      atmosphereStatus: detail?.zenWallpaper?.status,
+      imageLaneUnavailable:
+        Boolean(settings) &&
+        !modelCatalogLoading &&
+        !zenWallpaperImageGenerationAvailable(),
+    });
+
+  useEffect(() => {
+    const handoff = zenFreshConversationHandoff;
+    if (!handoff?.conversationId || detail?.id !== handoff.conversationId) {
+      return;
+    }
+    if (detail.incognito || (detail.mode && detail.mode !== "zen")) {
+      setZenFreshConversationHandoff(null);
+      setZenInitialStarterOverlayActive(false);
+      return;
+    }
+    if (!zenInitialCeremonyAvatarReady) return;
+    const reducedMotion = window.matchMedia?.("(prefers-reduced-motion: reduce)")
+      .matches;
+    const timer = window.setTimeout(
+      () => {
+        if (handoff.conversationId && latestAssistantMessageId) {
+          const revealKey = `${handoff.conversationId}:${latestAssistantMessageId}`;
+          chatAssistantRevealEligibleKeysRef.current.add(revealKey);
+          chatCompletedRevealKeysRef.current.delete(revealKey);
+          chatRevealPaceByKeyRef.current.delete(revealKey);
+          chatMessageFirstSeenAtRef.current.set(revealKey, Date.now());
+        }
+        setZenFreshConversationHandoff(null);
+        setZenInitialStarterOverlayActive(false);
+      },
+      reducedMotion ? 0 : 900,
+    );
+    return () => window.clearTimeout(timer);
+  }, [
+    detail?.id,
+    latestAssistantMessageId,
+    zenFreshConversationHandoff,
+    zenInitialCeremonyAvatarReady,
+  ]);
+
+  // A failed or unavailable image lane must never strand a new room behind
+  // the handoff. This is only a safety valve for unusual provider stalls.
+  useEffect(() => {
+    if (!zenFreshConversationHandoff) return;
+    const remainingMs = Math.max(
+      1_000,
+      45_000 - (Date.now() - zenFreshConversationHandoff.startedAtMs),
+    );
+    const timer = window.setTimeout(() => {
+      setZenFreshConversationHandoff(null);
+      setZenInitialStarterOverlayActive(false);
+    }, remainingMs);
+    return () => window.clearTimeout(timer);
+  }, [zenFreshConversationHandoff]);
 
   const replyInFlightSignals =
     pendingReplyVisualVisible ||
@@ -60850,7 +60397,17 @@ function HomeContent(): React.JSX.Element {
     const personaStyle = personaBot
       ? botAccentStyle(personaBot.color, resolvedTheme)
       : undefined;
-    const label = personaBot
+    const ceremonyFaceStyle = personaBot
+      ? resolveBotFaceStyleForBot(personaBot)
+      : zenDefaultPrismFaceStyle;
+    const ceremonyPlateFace = zenLiveActionPlateFace("warm", "closed");
+    const ceremonyVoicePreset = coffeeSeatVoicePreset(personaBot);
+    const avatarHandoff = zenInitialCeremonyAvatarReady;
+    const label = avatarHandoff
+      ? `${personaBot?.name?.trim() || "Prism"} is here`
+      : zenFreshConversationHandoffActive && zenInitialAtmosphereWaitEnabled
+        ? "Setting the atmosphere"
+      : personaBot
       ? immersiveThinkingCaption(
           {
             id: personaBot.id,
@@ -60864,6 +60421,10 @@ function HomeContent(): React.JSX.Element {
       <div
         className={styles.zenInitialThinkingOverlay}
         data-phase="thinking"
+        data-avatar-handoff={avatarHandoff ? "true" : undefined}
+        data-atmosphere-handoff={
+          zenFreshConversationHandoffActive ? "true" : undefined
+        }
         data-persona={personaBot ? "bot" : "prism"}
         style={personaStyle}
         role="status"
@@ -60886,21 +60447,101 @@ function HomeContent(): React.JSX.Element {
             }
             onActivate(event);
           }}
-          aria-label={`${label}. Cancel reply and return to the Zen start`}
-          title="Cancel reply"
+          aria-label={`${label}. ${
+            zenFreshConversationHandoffActive
+              ? "Cancel the transition and return to the Zen start"
+              : "Cancel reply and return to the Zen start"
+          }`}
+          title={
+            zenFreshConversationHandoffActive
+              ? "Cancel transition"
+              : "Cancel reply"
+          }
         >
           <span
             className={styles.zenInitialThinkingGlyphHalo}
             aria-hidden="true"
           >
-            {personaBot ? (
-              <BotGlyph
-                name={personaBot.glyph}
-                size={58}
-                className={styles.zenInitialThinkingGlyph}
-              />
+            {avatarHandoff ? (
+              <span
+                className={styles.zenInitialCeremonyAvatar}
+                data-zen-initial-ceremony-avatar="true"
+              >
+                <ZenLiveBotMannequin
+                  glyph={
+                    personaBot
+                      ? resolveCustomBotGlyph(personaBot.glyph)
+                      : zenDefaultPrismGlyph
+                  }
+                  faceStyle={
+                    personaBot
+                      ? resolveBotFaceStyleForBot(personaBot)
+                      : zenDefaultPrismFaceStyle
+                  }
+                  voicePreset={coffeeSeatVoicePreset(personaBot)}
+                  isTalking={false}
+                  mouthShape="closed"
+                  moodHint="warm"
+                  scheduleKey={`zen-initial-ceremony-${personaBot?.id ?? "prism"}`}
+                  thinkingScheduleKey={`zen-initial-ceremony-thinking-${personaBot?.id ?? "prism"}`}
+                  screenMaterialSeed={botScreenMaterialSeedForBot(personaBot, "prism")}
+                  frameMaterialSeed={
+                    personaBot
+                      ? botFrameMaterialSeedForBot(personaBot, "prism")
+                      : PRISM_FACTORY_CLEAN_FRAME_SEED
+                  }
+                  avatarDetails={
+                    personaBot ? resolveBotAvatarDetails(personaBot) : null
+                  }
+                  avatarDetailsColor={
+                    personaBot
+                      ? botOrPrismAccentForTheme(personaBot.color, resolvedTheme)
+                      : null
+                  }
+                  metalAlloyEnabled={personaBot !== null}
+                  runtimeEffectsEnabled={!avatarHandoff ? false : true}
+                />
+              </span>
             ) : (
-              <PrismTriangleMark className={styles.zenInitialThinkingGlyph} />
+              <span
+                className={styles.zenInitialLoadingScreen}
+                data-zen-initial-loading-screen="true"
+              >
+                <CoffeeSeatPlateEmoji
+                  enabled
+                  pixelated
+                  isTalking={false}
+                  scheduleKey={`zen-initial-loading-${personaBot?.id ?? "prism"}`}
+                  showThinkingSpinner
+                  baseText={ceremonyPlateFace.text}
+                  rotateDeg={ceremonyPlateFace.rotateDeg}
+                  voicePreset={ceremonyVoicePreset}
+                  faceEyesFont={ceremonyFaceStyle.eyesFont}
+                  faceEyeCharacter={ceremonyFaceStyle.eyeCharacter}
+                  faceMouthFont={ceremonyFaceStyle.mouthFont}
+                  faceMouthCharacter={ceremonyFaceStyle.mouthCharacter}
+                  faceMouthAnimation={ceremonyFaceStyle.mouthAnimation}
+                  faceEyeScale={ceremonyFaceStyle.eyeScale}
+                  faceEyeOffsetX={ceremonyFaceStyle.eyeOffsetX}
+                  faceEyeOffsetY={ceremonyFaceStyle.eyeOffsetY}
+                  faceEyeRotationDeg={ceremonyFaceStyle.eyeRotationDeg}
+                  faceEyeCount={ceremonyFaceStyle.eyeCount}
+                  faceMouthScale={ceremonyFaceStyle.mouthScale}
+                  faceMouthOffsetX={ceremonyFaceStyle.mouthOffsetX}
+                  faceMouthOffsetY={ceremonyFaceStyle.mouthOffsetY}
+                  faceMouthRotationDeg={ceremonyFaceStyle.mouthRotationDeg}
+                  faceBlinkBar={ceremonyFaceStyle.blinkBar}
+                  faceBlinkScale={ceremonyFaceStyle.blinkScale}
+                  faceBlinkOffsetX={ceremonyFaceStyle.blinkOffsetX}
+                  faceBlinkOffsetY={ceremonyFaceStyle.blinkOffsetY}
+                  faceBlinkRotationDeg={ceremonyFaceStyle.blinkRotationDeg}
+                  faceThinkingFrames={ceremonyFaceStyle.thinkingFrames}
+                  faceThinkingScale={ceremonyFaceStyle.thinkingScale}
+                  faceThinkingOffsetX={ceremonyFaceStyle.thinkingOffsetX}
+                  faceThinkingOffsetY={ceremonyFaceStyle.thinkingOffsetY}
+                  className={`${styles.coffeeSeatPlateEmoji} ${styles.zenInitialLoadingScreenGlyph}`}
+                />
+              </span>
             )}
           </span>
           <span className={styles.zenInitialThinkingCopy}>
@@ -60921,6 +60562,11 @@ function HomeContent(): React.JSX.Element {
     resolvedTheme,
     zenPersonaBot,
     zenInitialThinkingActive,
+    zenInitialCeremonyAvatarReady,
+    zenInitialAtmosphereWaitEnabled,
+    zenFreshConversationHandoffActive,
+    zenDefaultPrismFaceStyle,
+    zenDefaultPrismGlyph,
   ]);
   const sandboxSummaryIndicatorNode = useMemo(() => {
     if (view !== "sandbox") return null;
@@ -67684,10 +67330,12 @@ function HomeContent(): React.JSX.Element {
       const silentRevealDurationMs = fallbackDurationMs;
       prepareChatSpeechReveal(revealKey, spokenText);
       setZenPlayerSpeechReveal({ messageId, content: messageText, revealKey });
-      // The opening veil is only the handoff from Home. Once the player's
-      // line enters the Zen room, keep that room visible while voice work and
-      // the bot's ordinary thinking state continue independently.
-      setZenInitialStarterOverlayActive(false);
+      // A fresh focused Home keeps its ceremony intact until the bot's first
+      // response is stream-ready. Ordinary Zen openings still reveal with the
+      // player's line as before.
+      if (!zenFreshConversationHandoffRef.current) {
+        setZenInitialStarterOverlayActive(false);
+      }
 
       let revealStarted = false;
       let revealFinished = false;
@@ -73295,6 +72943,7 @@ function HomeContent(): React.JSX.Element {
   useEffect(() => {
     void chatSpeechRevealVersion;
     if (!chatAssistantTypingMechanicsActive || !detail?.id) return;
+    if (zenFreshConversationHandoff !== null) return;
     if (pendingReplyVisible) return;
     const source = detail.messages;
     let latestAssistant: Message | null = null;
@@ -73350,6 +72999,7 @@ function HomeContent(): React.JSX.Element {
     resolveVisibleMessageContent,
     resolveZenAssistantRevealDelayMultiplier,
     pendingReplyVisible,
+    zenFreshConversationHandoff,
   ]);
   useEffect(() => {
     if (viewportWidth > PICKER_MOBILE_BREAKPOINT) {
@@ -74255,7 +73905,9 @@ function HomeContent(): React.JSX.Element {
     }
     return next;
   }
-  async function refreshConversation(id: string): Promise<void> {
+  async function refreshConversation(
+    id: string,
+  ): Promise<ConversationDetail | null> {
     clearConversationUnread(id);
     const sameSurface = selectedId === id && detail != null && detail.id === id;
     const previousSelectedId = selectedId;
@@ -74282,7 +73934,7 @@ function HomeContent(): React.JSX.Element {
         botOpinion?: BotOpinion;
       }>(`/api/conversations/${id}`);
       if (selectedIdRef.current !== id) {
-        return;
+        return null;
       }
       const hydratedConversation = applyCommandDisplayAliases(
         applyExplicitAskQuestionFallback(d.conversation),
@@ -74323,6 +73975,7 @@ function HomeContent(): React.JSX.Element {
         setBotMemories([]);
         setBotMemoryDossier(null);
       }
+      return conversationForDisplay;
     } catch (err) {
       if (!sameSurface && selectedIdRef.current === id) {
         setSelectedId(previousSelectedId);
@@ -78597,7 +78250,13 @@ function HomeContent(): React.JSX.Element {
     const cached = zenInitialStarterCachedReplyRef.current;
     if (!cached) return false;
     const conversationId = cached.envelope.conversation.id;
+    zenFreshConversationHandoffRef.current = true;
     setZenInitialStarterOverlayActive(true);
+    setZenFreshConversationHandoff({
+      conversationId,
+      startedAtMs: Date.now(),
+      responseStreamReady: false,
+    });
     setChatAutoRestoreSuppressed(false);
     setPendingReply(true);
     setPendingReplyStartedAtMs(Date.now());
@@ -78619,12 +78278,18 @@ function HomeContent(): React.JSX.Element {
         await cached.suppressPromise;
         await setZenInitialStarterReplaySuppression(conversationId, "promote");
         if (zenInitialStarterCachedReplyRef.current !== cached) return;
+        setZenFreshConversationHandoff((current) =>
+          current?.conversationId === conversationId
+            ? { ...current, responseStreamReady: true }
+            : current,
+        );
         commitZenInitialStarterEnvelope(cached.envelope, {
           consumeCache: true,
         });
       } catch (err) {
         if (zenInitialStarterCachedReplyRef.current !== cached) return;
         clearPendingReplyState();
+        setZenFreshConversationHandoff(null);
         setChatAutoRestoreSuppressed(true);
         setError(
           err instanceof Error
@@ -78640,7 +78305,13 @@ function HomeContent(): React.JSX.Element {
     const starterRequest = zenInitialStarterRequestRef.current;
     if (!starterRequest?.cancelled) return false;
     starterRequest.replayWhenReady = true;
+    zenFreshConversationHandoffRef.current = true;
     setZenInitialStarterOverlayActive(true);
+    setZenFreshConversationHandoff({
+      conversationId: starterRequest.conversationId,
+      startedAtMs: Date.now(),
+      responseStreamReady: false,
+    });
     setChatAutoRestoreSuppressed(false);
     setPendingReply(true);
     setPendingReplyStartedAtMs(Date.now());
@@ -78692,6 +78363,8 @@ function HomeContent(): React.JSX.Element {
     persistZenSessionBreak(null);
     setManualCompactionStatus(null);
     setConversationStarterPrompts(null);
+    setZenFreshConversationHandoff(null);
+    setZenInitialStarterOverlayActive(false);
     setAskQuestionComposerRevealed(false);
     revealZenHeaderForFreshSurface();
     if (editingMessageId !== null) {
@@ -79023,6 +78696,8 @@ function HomeContent(): React.JSX.Element {
       isAssistantInterruptionReaction;
     const preserveComposerDraft = options.preserveComposerDraft === true;
     const rawDraft = options.draftOverride ?? draft;
+    const requestedConversationDetail =
+      options.conversationDetailOverride ?? detail;
     const rawTrimmed = rawDraft.trim();
     const actionOnlySubmission =
       view === "chat" &&
@@ -79257,7 +78932,8 @@ function HomeContent(): React.JSX.Element {
       : trimmed;
     const isStarterPrompt =
       options.starterPrompt === true &&
-      (!detail || detail.messages.length === 0);
+      (!requestedConversationDetail ||
+        requestedConversationDetail.messages.length === 0);
     const commandCenterPromptHasTrueWildcardSlots =
       commandCenterPromptActive && draftContainsTrueWildcardSlots(trimmed);
     const composerPromptHasTrueWildcardSlots =
@@ -79409,9 +79085,10 @@ function HomeContent(): React.JSX.Element {
       scheduleZenFollowupMergedSend();
       return;
     }
-    let detailForSend = options.conversationDetailOverride ?? detail;
+    let detailForSend = requestedConversationDetail;
     let baselineMessageCount = detailForSend?.messages.length ?? 0;
     const isInitialZenOpeningTurn =
+      chatImmersivePresentation &&
       view === "chat" &&
       !isAssistantOnlyTurn &&
       !editingMessageId &&
@@ -79748,6 +79425,23 @@ function HomeContent(): React.JSX.Element {
         : selectedId);
     const requestStartedNewConversation =
       requestConversationId === null || forceNewConversation;
+    const zenFreshConversationHandoffRequested =
+      zenInitialCeremonyShouldStart({
+        initialZenOpeningTurn: isInitialZenOpeningTurn,
+        assistantOnlyTurn: isAssistantOnlyTurn,
+        editingMessage: Boolean(editingMessageId),
+        pendingIncognito,
+        conversationIncognito: detailForSend?.incognito,
+      });
+    if (zenFreshConversationHandoffRequested) {
+      zenFreshConversationHandoffRef.current = true;
+      setZenFreshConversationHandoff({
+        conversationId: requestConversationId,
+        startedAtMs: Date.now(),
+        responseStreamReady: false,
+      });
+      setZenInitialStarterOverlayActive(true);
+    }
     if (!isZenAutonomy && !isZenLiveActionInterrupt) {
       resumeChatModeAutoscrollForOutgoingTurn(
         requestConversationId ??
@@ -80513,7 +80207,7 @@ function HomeContent(): React.JSX.Element {
           );
         }
       }
-      const chatBody = buildChatRequestBody(
+      const generatedChatBody = buildChatRequestBody(
         isStarterPrompt ||
           isZenAutonomy ||
           isAskQuestionPatienceTurn ||
@@ -80579,6 +80273,12 @@ function HomeContent(): React.JSX.Element {
             : {}),
         },
       );
+      // Progressive voice would otherwise begin underneath the ceremonial
+      // veil. The settled-message path starts both speech and text after the
+      // avatar has descended into the live canvas.
+      const chatBody = zenFreshConversationHandoffRequested
+        ? { ...generatedChatBody, progressiveZenVoice: false }
+        : generatedChatBody;
       const psychicProgressStreamRequested =
         chatBody.psychicModeEnabled === true;
       const requestChatBody = psychicProgressStreamRequested
@@ -80633,6 +80333,15 @@ function HomeContent(): React.JSX.Element {
         activeInitialStarterRequest.cancelled
       ) {
         if (activeInitialStarterRequest.replayWhenReady) {
+          setZenFreshConversationHandoff((current) =>
+            current
+              ? {
+                  ...current,
+                  conversationId: d.conversation.id,
+                  responseStreamReady: true,
+                }
+              : current,
+          );
           commitZenInitialStarterEnvelope(d, { consumeCache: true });
         } else {
           cacheZenInitialStarterReply(d);
@@ -80643,6 +80352,17 @@ function HomeContent(): React.JSX.Element {
       pushMemoryToasts(d.memoryLearned);
       options.onZenAutonomyResult?.(d.zenAutonomyDecision ?? null);
       successfulConversationId = d.conversation.id;
+      if (zenFreshConversationHandoffRequested) {
+        setZenFreshConversationHandoff((current) =>
+          current
+            ? {
+                ...current,
+                conversationId: d.conversation.id,
+                responseStreamReady: true,
+              }
+            : current,
+        );
+      }
       if (
         view === "chat" &&
         requestStartedNewConversation &&
@@ -80856,6 +80576,10 @@ function HomeContent(): React.JSX.Element {
             : [...previous, d.conversation.id],
         );
       }
+      if (zenFreshConversationHandoffRequested && !stillViewingRequest) {
+        setZenFreshConversationHandoff(null);
+        setZenInitialStarterOverlayActive(false);
+      }
       if (stillViewingRequest && isStarterPrompt) {
         if (
           Array.isArray(d.conversationStarters) &&
@@ -80969,6 +80693,10 @@ function HomeContent(): React.JSX.Element {
       const requestWasPriorityCommandCancelled =
         priorityCommandCancelControllerRef.current === chatRequestController;
       if (requestWasAborted) {
+        if (zenFreshConversationHandoffRequested) {
+          setZenFreshConversationHandoff(null);
+          setZenInitialStarterOverlayActive(false);
+        }
         if (
           requestWasManualCompactionCancelled ||
           requestWasPriorityCommandCancelled
@@ -81061,6 +80789,10 @@ function HomeContent(): React.JSX.Element {
       if (isAssistantInterruptionReaction) {
         throw err;
       }
+      if (zenFreshConversationHandoffRequested) {
+        setZenFreshConversationHandoff(null);
+        setZenInitialStarterOverlayActive(false);
+      }
       const autoFailed =
         err instanceof Error &&
         /all auto models failed|auto_fallback_exhausted/i.test(err.message);
@@ -81116,6 +80848,9 @@ function HomeContent(): React.JSX.Element {
           options.zenFollowupCleanupMessageIds ?? [],
         );
         scheduleNextQueuedPrompt(successfulConversationId);
+      } else if (zenFreshConversationHandoffRequested) {
+        setZenFreshConversationHandoff(null);
+        setZenInitialStarterOverlayActive(false);
       }
     }
   }
@@ -84965,6 +84700,17 @@ function HomeContent(): React.JSX.Element {
         method: "PATCH",
         body: JSON.stringify(payload),
       });
+      setZenInitialAtmosphereWaitPreference(false);
+      try {
+        if (zenInitialAtmosphereWaitStorageKey) {
+          window.localStorage.setItem(
+            zenInitialAtmosphereWaitStorageKey,
+            "false",
+          );
+        }
+      } catch {
+        // The in-memory default still applies for this session.
+      }
       setSettings((previous) =>
         previous ? ({ ...previous, ...payload } as UserSettings) : previous,
       );
@@ -90581,10 +90327,13 @@ function HomeContent(): React.JSX.Element {
       await refreshConversations();
       if (zenOpenRunRef.current !== summonRunId) return;
       selectedIdRef.current = opened.conversationId;
-      await refreshConversation(opened.conversationId);
+      const freshConversation = await refreshConversation(
+        opened.conversationId,
+      );
       if (
         zenOpenRunRef.current !== summonRunId ||
-        selectedIdRef.current !== opened.conversationId
+        selectedIdRef.current !== opened.conversationId ||
+        !freshConversation
       ) {
         return;
       }
@@ -90593,6 +90342,15 @@ function HomeContent(): React.JSX.Element {
       chatAutoRestoreSuppressedRef.current = false;
       setChatAutoRestoreSuppressed(false);
       focusDraftInput();
+      await sendMessage(
+        { preventDefault: () => {} } as React.FormEvent<HTMLFormElement>,
+        {
+          starterPrompt: true,
+          starterPromptWarrantsIntro: true,
+          queuedConversationId: opened.conversationId,
+          conversationDetailOverride: freshConversation,
+        },
+      );
     } catch (err) {
       if (zenOpenRunRef.current !== summonRunId) return;
       setError(
@@ -92053,7 +91811,6 @@ function HomeContent(): React.JSX.Element {
         role="search"
         data-bot-browser-variant={variant}
         data-starter-bot-affordance={variant === "chat" ? "true" : undefined}
-        data-zen-live-bot-chrome-avoid={variant === "chat" ? "true" : undefined}
         onClick={(event) => event.stopPropagation()}
       >
         <label
@@ -92405,7 +92162,6 @@ function HomeContent(): React.JSX.Element {
           botGroupWaitingRoomReducedMotion ? "true" : undefined
         }
         data-starter-bot-affordance="true"
-        data-zen-live-bot-chrome-avoid="true"
         aria-labelledby="bot-group-waiting-room-title"
         onClick={(event) => event.stopPropagation()}
         onPointerDownCapture={() =>
@@ -92899,7 +92655,6 @@ function HomeContent(): React.JSX.Element {
             resolvedTheme,
           )}
           data-starter-bot-affordance="true"
-          data-zen-live-bot-chrome-avoid="true"
           data-room-variant={
             botGroupWaitingRoomRenderActive ? "waiting" : undefined
           }
@@ -93284,7 +93039,6 @@ function HomeContent(): React.JSX.Element {
                   "data-marquee-selected": isMarqueeSelected
                     ? "true"
                     : undefined,
-                  "data-zen-live-bot-chrome-avoid": "true",
                   onPointerDown: (e) => {
                     lastBotPickerPointerTypeRef.current = e.pointerType;
                     startBotContextLongPress(e, b);
@@ -94248,7 +94002,6 @@ function HomeContent(): React.JSX.Element {
     setNewBotVoicePreviewLine("");
     setBotGeneratorOpen(false);
     setBotGeneratorPrompt("");
-    setBotGeneratorModelChoice(AUTO_MODEL_CHOICE);
     setBotGeneratorBusy(false);
     setBotGeneratorError(null);
     setBotGeneratorCompletedDraft(null);
@@ -94357,20 +94110,6 @@ function HomeContent(): React.JSX.Element {
     );
     setBotFoundryPhase("arrival");
     setBotGeneratorCompletedDraft(null);
-    const responseMode = responseModeForProvider(
-      settings?.preferredProvider ?? "local",
-    );
-    const currentNavbarChoice = resolveModelChoiceForResponseMode({
-      responseMode,
-      providerPreference: settings?.preferredProvider ?? "local",
-      choices: visibleModelChoicesByProvider(
-        modelCatalog,
-        settings,
-        chatModelChoiceByProvider,
-      ),
-      onlineOptions: onlineChatModelOptions,
-    });
-    setBotGeneratorModelChoice(currentNavbarChoice.modelChoice);
     setBotGeneratorOpen(true);
   }
 
@@ -94593,6 +94332,10 @@ function HomeContent(): React.JSX.Element {
       botGeneratorModelChoice === AUTO_MODEL_CHOICE
         ? null
         : botGeneratorModelChoice;
+    const reasoningEffort =
+      modelOverride && botGeneratorEffortTarget?.capability.mode !== "unavailable"
+        ? botGeneratorReasoningEffort
+        : null;
     try {
       const minimumChoreography = (async (): Promise<void> => {
         await new Promise<void>((resolve) =>
@@ -94620,6 +94363,7 @@ function HomeContent(): React.JSX.Element {
           preferredProvider,
           responseMode,
           ...(modelOverride ? { modelOverride } : {}),
+          ...(reasoningEffort ? { reasoningEffort } : {}),
         }),
       });
       const [result] = await Promise.all([resultPromise, minimumChoreography]);
@@ -103348,6 +103092,38 @@ function HomeContent(): React.JSX.Element {
     void openZenMode();
   };
 
+  const switchToSelectableApplet = (appletId: PrismAppletId): void => {
+    setAppSwitcherOpen(false);
+    if (appletId === "coffee") {
+      if (view !== "coffee") navigateToView("coffee");
+      return;
+    }
+    if (appletId === "debate") {
+      if (view !== "debate") {
+        debateOriginLocationRef.current =
+          typeof window === "undefined"
+            ? "/?view=chat"
+            : `${window.location.pathname}${window.location.search}${window.location.hash}`;
+        navigateToView("debate");
+      }
+      return;
+    }
+    if (appletId === "botcast") {
+      if (view !== "botcast") navigateToView("botcast");
+      return;
+    }
+    if (appletId === "story") {
+      if (view !== "story") navigateToView("story");
+      return;
+    }
+    if (appletId === "slate") {
+      if (view !== "slate") navigateToView("slate");
+      return;
+    }
+    // Chat and Zen are owned by the Home surface and are intentionally not
+    // offered by this sibling-applet switcher.
+  };
+
   const prismCompanionSurfaceReference = (): PrismCompanionSurfaceReference => {
     const checkpointId =
       detail?.id && detail.id !== "pending"
@@ -104375,6 +104151,7 @@ function HomeContent(): React.JSX.Element {
         {firstRunLayer}
         <PrismCompanion
           accountKey={user.id}
+          theme={resolvedTheme}
           keyboardShortcut={keyboardShortcuts.prism}
           surface={prismCompanionSurfaceReference()}
           presentation={view === "chat" ? chatPresentation : null}
@@ -104383,6 +104160,18 @@ function HomeContent(): React.JSX.Element {
             prismHomeEmptyHeroVisible &&
             panel === null &&
             !botAvatarCustomizerOpen
+          }
+          homeBaseAppletTargets={prismTopLevelSwitcherApplets()
+            .filter((applet) => applet.id !== "chat" && applet.id !== "zen")
+            .map((applet) => ({
+              id: applet.id,
+              label: applet.name,
+              glyph: (
+                <PrismAppletGlyph appletId={applet.id} size={56} />
+              ),
+            }))}
+          onHomeBaseAppletSelect={(appletId) =>
+            switchToSelectableApplet(appletId as PrismAppletId)
           }
           onChatHomeHeroActivate={() => void summonPrismIntoFreshChat()}
           onPersistentConversationChange={async (conversationId) => {
@@ -104522,20 +104311,9 @@ function HomeContent(): React.JSX.Element {
                   : "chat";
     const menuId = "prism-app-switcher-menu";
     const disabled = options.disabled === true;
-    const appletGlyph = (appletId: PrismAppletId): React.ReactNode => {
-      if (appletId === "debate") return <GlyphDebate size={24} />;
-      if (appletId === "polling") return <GlyphPolling size={24} />;
-      if (appletId === "coffee") return <GlyphCoffee size={24} />;
-      if (appletId === "botcast") return <GlyphSignal size={24} />;
-      if (appletId === "feed") return <GlyphFeed size={24} />;
-      if (appletId === "games") return <GlyphGames size={24} />;
-      if (appletId === "story") return <GlyphStory size={24} />;
-      if (appletId === "gym") return <GlyphGym size={24} />;
-      if (appletId === "slate") return <GlyphSlate size={24} />;
-      if (appletId === "pseudo") return <GlyphPseudo size={24} />;
-      if (appletId === "surf") return <GlyphSurf size={24} />;
-      return <GlyphChat size={24} />;
-    };
+    const appletGlyph = (appletId: PrismAppletId): React.ReactNode => (
+      <PrismAppletGlyph appletId={appletId} size={24} />
+    );
     const appletIsSelected = (appletId: PrismAppletId): boolean => {
       if (appletId === "coffee") return view === "coffee";
       if (appletId === "debate") return view === "debate";
@@ -104549,43 +104327,6 @@ function HomeContent(): React.JSX.Element {
         return view === "chat" && chatPresentation === "chat";
       }
       return false;
-    };
-    const switchToApplet = (appletId: PrismAppletId): void => {
-      setAppSwitcherOpen(false);
-      if (appletId === "coffee") {
-        if (view !== "coffee") navigateToView("coffee");
-        return;
-      }
-      if (appletId === "debate") {
-        if (view !== "debate") {
-          debateOriginLocationRef.current =
-            typeof window === "undefined"
-              ? "/?view=chat"
-              : `${window.location.pathname}${window.location.search}${window.location.hash}`;
-          navigateToView("debate");
-        }
-        return;
-      }
-      if (appletId === "botcast") {
-        if (view !== "botcast") navigateToView("botcast");
-        return;
-      }
-      if (appletId === "story") {
-        if (view !== "story") navigateToView("story");
-        return;
-      }
-      if (appletId === "slate") {
-        if (view !== "slate") navigateToView("slate");
-        return;
-      }
-      if (appletId === "zen") {
-        if (view !== "chat") navigateToView("chat");
-        return;
-      }
-      if (appletId === "chat") {
-        if (view === "coffee") void exitCoffeeToChat();
-        else if (view !== "chat") navigateToView("chat");
-      }
     };
     const entries: PrismMenuEntry[] = [
       { id: "available-label", kind: "label", label: "Available applets" },
@@ -104605,7 +104346,7 @@ function HomeContent(): React.JSX.Element {
             coffeeConfigurationLocked && !selected
               ? COFFEE_CONFIGURATION_LOCK_MESSAGE
               : undefined,
-          onSelect: () => switchToApplet(applet.id),
+          onSelect: () => switchToSelectableApplet(applet.id),
         };
       }),
     ];
@@ -112733,6 +112474,48 @@ function HomeContent(): React.JSX.Element {
                               </PanelSectionInfo>
                             </span>
                           </label>
+                          <label
+                            className={`${styles.checkbox} ${styles.settingsInlineToggle} ${styles.settingsFieldFull}`}
+                          >
+                            <input
+                              type="checkbox"
+                              checked={zenInitialAtmosphereWaitEnabled}
+                              onChange={(event) => {
+                                const next = event.target.checked;
+                                setZenInitialAtmosphereWaitPreference(next);
+                                try {
+                                  if (zenInitialAtmosphereWaitStorageKey) {
+                                    window.localStorage.setItem(
+                                      zenInitialAtmosphereWaitStorageKey,
+                                      String(next),
+                                    );
+                                  }
+                                } catch {
+                                  // Keep the session preference when browser storage is unavailable.
+                                }
+                                setSettings((previous) =>
+                                  previous
+                                    ? {
+                                        ...previous,
+                                        zenInitialAtmosphereWaitEnabled: next,
+                                      }
+                                    : previous,
+                                );
+                              }}
+                            />
+                            <span className={styles.controlLabelWithInfo}>
+                              <span>Wait for atmosphere before entering chat</span>
+                              <PanelSectionInfo
+                                id="settings-control-info-zen-initial-atmosphere-wait"
+                                label="About first-response atmosphere"
+                                variant="control"
+                              >
+                                Keeps the first Zen reply behind its opening
+                                ceremony until the room image is ready. If the
+                                image cannot finish, Zen enters normally.
+                              </PanelSectionInfo>
+                            </span>
+                          </label>
                           <label className={styles.settingsRangeField}>
                             <span className={styles.settingsRangeHeader}>
                               <span className={styles.controlLabelWithInfo}>
@@ -118877,7 +118660,11 @@ function HomeContent(): React.JSX.Element {
                 typeof document !== "undefined" &&
                 createPortal(
                   <div
-                    className={styles.botGeneratorBackdrop}
+                    className={`${styles.botAvatarStudioThemeScope} ${
+                      resolvedTheme === "light"
+                        ? styles.themeLight
+                        : styles.themeDark
+                    } ${styles.botGeneratorBackdrop}`}
                     data-avatar-foundry="true"
                     role="presentation"
                     onClick={closeBotGenerator}
@@ -118888,7 +118675,6 @@ function HomeContent(): React.JSX.Element {
                       data-creating={botGeneratorBusy}
                       data-foundry-phase={botFoundryPhase}
                       role="dialog"
-                      aria-modal="true"
                       aria-labelledby="bot-generator-title"
                       onClick={(event) => event.stopPropagation()}
                       onKeyDown={(event) => {
@@ -119024,33 +118810,20 @@ function HomeContent(): React.JSX.Element {
                           together.
                         </p>
                         <div
-                          className={styles.botGeneratorModelField}
-                          data-tutorial-target="bot-generator-model"
+                          className={styles.botGeneratorRoutingSummary}
+                          data-tutorial-target="bot-generator-routing"
+                          role="status"
+                          aria-live="polite"
                         >
                           <span className={styles.botGeneratorFieldLabel}>
-                            Generation model
+                            Navbar routing
                           </span>
-                          <ComposerModelPicker
-                            value={botGeneratorModelChoice}
-                            onChange={setBotGeneratorModelChoice}
-                            options={botGeneratorModelOptions}
-                            provider={
-                              botGeneratorResponseMode === "local"
-                                ? "local"
-                                : "online"
-                            }
-                            selectedProvider={botGeneratorSelectedProvider}
-                            loading={modelCatalogLoading}
-                            disabled={botGeneratorBusy || !settings}
-                            title="Model for this bot draft"
-                            ariaLabel="Model for this bot draft"
-                            placement="down"
-                            minMenuWidthPx={260}
-                            portalZIndex={4300}
-                            autoOptionMetaOverride="Prism chooses a suitable model for this bot brief"
-                          />
+                          <strong>
+                            {botGeneratorModelLabel} · {botGeneratorEffortLabel}
+                          </strong>
                           <small>
-                            This choice applies only to this draft.
+                            Change provider, model, or Effort in the navbar. The
+                            next draft uses those live account settings.
                           </small>
                         </div>
                         <label htmlFor="bot-generator-prompt">
@@ -133916,6 +133689,7 @@ function HomeContent(): React.JSX.Element {
         }}
         options={storyModelOptions}
         provider={storyResponseMode === "local" ? "local" : "online"}
+        renderTheme={resolvedTheme}
         loading={modelCatalogLoading}
         disabled={
           !settings || storyBusy || storySession?.status === "generating"
@@ -135094,6 +134868,7 @@ function HomeContent(): React.JSX.Element {
                   provider={
                     debateModelProvider === "local" ? "local" : "online"
                   }
+                  renderTheme={resolvedTheme}
                   selectedProvider={debateModelProvider}
                   loading={modelCatalogLoading}
                   disabled={!settings || debateLiveSessionActive}
@@ -136483,6 +136258,7 @@ function HomeContent(): React.JSX.Element {
                     provider={
                       signalResponseMode === "local" ? "local" : "online"
                     }
+                    renderTheme={resolvedTheme}
                     selectedProvider={episodeSelectedModelProvider}
                     loading={modelCatalogLoading}
                     disabled={!settings || episodeModelControl.disabled}
@@ -138145,18 +137921,6 @@ function HomeContent(): React.JSX.Element {
                       data-starter-prompt-align={starterPromptAlignment}
                       data-chat-latest-user-anchor={
                         chatLikeSurface && msg.id === latestUserMessageId
-                          ? "true"
-                          : undefined
-                      }
-                      data-zen-live-prose-target={
-                        chatLikeSurface ? "true" : undefined
-                      }
-                      data-zen-live-prose-latest={
-                        chatLikeSurface &&
-                        msg.id ===
-                          (latestMessageRole === "assistant"
-                            ? latestAssistantMessageId
-                            : latestUserMessageId)
                           ? "true"
                           : undefined
                       }
@@ -139857,7 +139621,6 @@ function HomeContent(): React.JSX.Element {
                                       "data-marquee-selected": isMarqueeSelected
                                         ? "true"
                                         : undefined,
-                                      "data-zen-live-bot-chrome-avoid": "true",
                                       onPointerDown: (e) => {
                                         lastBotPickerPointerTypeRef.current =
                                           e.pointerType;
@@ -140321,18 +140084,6 @@ function HomeContent(): React.JSX.Element {
                         ? "true"
                         : undefined
                     }
-                    data-zen-live-prose-target={
-                      chatLikeSurface ? "true" : undefined
-                    }
-                    data-zen-live-prose-latest={
-                      chatLikeSurface &&
-                      msg.id ===
-                        (latestMessageRole === "assistant"
-                          ? latestAssistantMessageId
-                          : latestUserMessageId)
-                        ? "true"
-                        : undefined
-                    }
                     data-private-user-role-header={
                       privateUserRoleHeader ? "true" : undefined
                     }
@@ -140785,65 +140536,76 @@ function HomeContent(): React.JSX.Element {
       {renderBackendUnavailableNotice("banner")}
       {renderGlobalPrismCompanion()}
       {modelEffortHudTarget ? (
-        <div
-          className={styles.modelEffortHud}
-          data-provider={modelEffortHudTarget.provider}
-          role="status"
-          aria-live="polite"
-        >
-          <div className={styles.modelEffortHudIdentity}>
-            <span>Effort · {modelEffortHudTarget.modelLabel}</span>
-            <strong>
-              {modelEffortHudTarget.capability.mode === "unavailable"
-                ? "Not adjustable"
-                : (() => {
-                    const level = savedModelReasoningEffort(
-                      settings,
-                      modelEffortHudTarget.provider,
-                      modelEffortHudTarget.modelId,
-                      modelEffortHudTarget.capability,
-                    );
-                    return (
-                      <>
-                        <ModelEffortIcon
-                          level={level}
-                          mode={modelEffortHudTarget.capability.mode}
-                        />
-                        {REASONING_EFFORT_LABELS[level]}
-                      </>
-                    );
-                  })()}
-            </strong>
-          </div>
-          <div className={styles.modelEffortHudRail} aria-hidden="true">
-            {modelEffortSliderLevels(modelEffortHudTarget.capability).map(
-              (level) => {
-                const active =
-                  savedModelReasoningEffort(
-                    settings,
-                    modelEffortHudTarget.provider,
-                    modelEffortHudTarget.modelId,
-                    modelEffortHudTarget.capability,
-                  ) === level;
-                return (
-                  <span key={level} data-active={active ? "true" : undefined}>
-                    <ModelEffortIcon level={level} />
-                    <em>{REASONING_EFFORT_LABELS[level]}</em>
-                  </span>
-                );
-              },
-            )}
-          </div>
-          <small>
-            ← → adjust · D{" "}
-            {modelEffortHudTarget.capability.mode === "simulated"
-              ? "none"
-              : "default"}
-            {modelEffortHudTarget.capability.mode === "simulated"
-              ? " · multi-call simulation"
-              : ""}
-          </small>
-        </div>
+        (() => {
+          const hudEffortLevels = modelEffortSliderLevels(
+            modelEffortHudTarget.capability,
+          );
+          const hudEffortValue = savedModelReasoningEffort(
+            settings,
+            modelEffortHudTarget.provider,
+            modelEffortHudTarget.modelId,
+            modelEffortHudTarget.capability,
+          );
+          const hudEffortSaturation = modelEffortSliderProgress(
+            hudEffortLevels,
+            hudEffortValue,
+          );
+          return (
+            <div
+              className={styles.modelEffortHud}
+              data-provider={modelEffortHudTarget.provider}
+              role="status"
+              aria-live="polite"
+            >
+              <div className={styles.modelEffortHudIdentity}>
+                <span>Effort · {modelEffortHudTarget.modelLabel}</span>
+                <strong>
+                  {modelEffortHudTarget.capability.mode === "unavailable"
+                    ? "Not adjustable"
+                    : (() => {
+                        return (
+                          <>
+                            <ModelEffortIcon
+                              level={hudEffortValue}
+                              mode={modelEffortHudTarget.capability.mode}
+                            />
+                            {REASONING_EFFORT_LABELS[hudEffortValue]}
+                          </>
+                        );
+                      })()}
+                </strong>
+              </div>
+              <div
+                className={styles.modelEffortHudRail}
+                aria-hidden="true"
+                style={
+                  {
+                    "--model-effort-saturation": `${hudEffortSaturation}%`,
+                  } as CSSProperties
+                }
+              >
+                {hudEffortLevels.map((level) => {
+                  const active = hudEffortValue === level;
+                  return (
+                    <span key={level} data-active={active ? "true" : undefined}>
+                      <ModelEffortIcon level={level} />
+                      <em>{REASONING_EFFORT_LABELS[level]}</em>
+                    </span>
+                  );
+                })}
+              </div>
+              <small>
+                ← → adjust · D{" "}
+                {modelEffortHudTarget.capability.mode === "simulated"
+                  ? "none"
+                  : "default"}
+                {modelEffortHudTarget.capability.mode === "simulated"
+                  ? " · multi-call simulation"
+                  : ""}
+              </small>
+            </div>
+          );
+        })()
       ) : null}
       <GlyphTooltipLayer />
     </main>

@@ -202,13 +202,30 @@
 }
 
 .botGeneratorBackdrop[data-avatar-foundry="true"] {
+  inset: var(--app-shell-top-nav-height, 60px) 0 0;
+  z-index: 170;
   padding: 0;
   background: #030407;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
 }
 
+.botAvatarCustomizerBackdrop[data-avatar-foundry="true"] {
+  /* Leave the app top nav visible. Clear backdrop-filter so it does not become
+     a containing block for the fixed studio dialog — otherwise a second
+     top-nav offset on the dialog double-counts and clips the bottom module
+     dock below the viewport. */
+  inset: var(--app-shell-top-nav-height, 60px) 0 0;
+  z-index: 170;
+  background: #030407;
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
+}
+
 .botGeneratorDialog[data-foundry-phase] {
+  --bot-foundry-workspace-height: calc(
+    100dvh - var(--app-shell-top-nav-height, 60px)
+  );
   --bot-foundry-chrome-inset-inline: clamp(24px, 3.5vw, 54px);
   --bot-foundry-brief-top: clamp(112px, 16dvh, 154px);
   --bot-foundry-brief-width: min(
@@ -216,9 +233,9 @@
     calc(100vw - (2 * var(--bot-foundry-chrome-inset-inline)))
   );
   position: fixed;
-  inset: 0;
+  inset: var(--app-shell-top-nav-height, 60px) 0 0;
   width: 100vw;
-  height: 100dvh;
+  height: var(--bot-foundry-workspace-height);
   max-width: none;
   max-height: none;
   min-height: 0;
@@ -232,7 +249,7 @@
 
 .botGeneratorDialog[data-foundry-phase][data-creating="true"] {
   width: 100vw;
-  height: 100dvh;
+  height: var(--bot-foundry-workspace-height);
   max-width: none;
 }
 
@@ -244,7 +261,7 @@
   z-index: 30;
   width: var(--bot-foundry-brief-width);
   max-height: min(
-    calc(100dvh - var(--bot-foundry-brief-top) - 24px),
+    calc(var(--bot-foundry-workspace-height) - var(--bot-foundry-brief-top) - 24px),
     560px
   );
   display: grid;
@@ -299,18 +316,25 @@
 .botProfileBuilder.botAvatarCustomizer[data-foundry="true"] {
   --bot-avatar-studio-inline-margin: 0px;
   --bot-avatar-studio-block-margin: 0px;
-  inset: 0;
-  top: 0;
+  /* Viewport-anchored under the top nav. The foundry backdrop clears
+     backdrop-filter so this fixed dialog is not trapped in a containing block
+     that already inset the same top-nav offset (which clipped the module dock). */
+  inset: var(--app-shell-top-nav-height, 60px) 0 0;
+  top: var(--app-shell-top-nav-height, 60px);
   right: 0;
   bottom: 0;
   left: 0;
   width: 100vw;
-  height: 100dvh;
+  height: calc(100dvh - var(--app-shell-top-nav-height, 60px));
   max-height: none;
+  min-height: 0;
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr);
   border: 0;
   border-radius: 0;
   background: #111722;
   box-shadow: none;
+  overflow: hidden;
 }
 
 .botAvatarCustomizer[data-foundry="true"]::before {
@@ -403,6 +427,7 @@
 .botAvatarCustomizer[data-foundry="true"] .botAvatarCustomizerBody {
   position: relative;
   display: block;
+  min-height: 0;
   padding: 0;
   overflow: hidden;
   background: transparent;
@@ -1380,6 +1405,7 @@
   position: absolute;
   inset: 0;
   z-index: 24;
+  min-height: 0;
   display: block;
   padding: 0;
   border: 0;
@@ -1414,6 +1440,8 @@
   bottom: 82px;
   z-index: 3;
   width: min(390px, calc(100vw - 44px));
+  min-height: 0;
+  box-sizing: border-box;
   padding: 14px;
   overflow: auto;
   pointer-events: auto;
@@ -1823,6 +1851,147 @@
   border-color: transparent !important;
   background: transparent !important;
   box-shadow: none !important;
+}
+
+/* The Foundry rail is a real editor surface in light mode, not a dark
+   translucent overlay. Keep its hierarchy pale-metal so controls remain
+   readable over the preview and its own scroll boundary is obvious. */
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarControlStack {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 22%,
+    #9aabba
+  );
+  background:
+    linear-gradient(
+      145deg,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 8%,
+        transparent
+      ),
+      transparent 38%
+    ),
+    #f5f8fb;
+  box-shadow:
+    0 20px 52px rgba(53, 73, 94, 0.18),
+    inset 0 1px 0 rgba(255, 255, 255, 0.9);
+  scrollbar-color: color-mix(
+      in srgb,
+      var(--editor-bot-color, var(--accent)) 32%,
+      #9aaebe
+    )
+    transparent;
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarControlTabs {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 22%,
+    #a7b7c6
+  );
+  background: color-mix(in srgb, #f8fbfd 92%, transparent);
+  box-shadow:
+    0 10px 28px rgba(53, 73, 94, 0.14),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarControlTabs
+  button {
+  color: color-mix(in srgb, var(--fg) 78%, #52697e);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarControlTabs
+  button[data-active="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--avatar-tab-module-color, var(--editor-bot-color, var(--accent))) 58%,
+    #8ea2b5
+  );
+  background: var(--avatar-studio-selected);
+  color: var(--fg);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarGlobalAdjustmentConsole,
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarShellAdjustmentSummary {
+  border-color: color-mix(
+    in srgb,
+    var(--foundry-module-color, var(--editor-bot-color, var(--accent))) 20%,
+    #a6b6c5
+  );
+  background: color-mix(in srgb, #eaf1f7 84%, #ffffff);
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.9);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarVoiceTestDock {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 24%,
+    #9caebd
+  );
+  background:
+    radial-gradient(
+      circle at 92% 18%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 10%,
+        transparent
+      ),
+      transparent 45%
+    ),
+    #f4f8fb;
+  box-shadow:
+    0 18px 44px rgba(53, 73, 94, 0.17),
+    inset 0 1px 0 rgba(255, 255, 255, 0.92);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarVoiceTestModes
+  button {
+  border-color: #b9c7d3;
+  color: color-mix(in srgb, var(--fg) 82%, #52697e);
+  background: #ffffff;
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarVoiceTestModes
+  button:is(:hover, :focus-visible),
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarVoiceTestModes
+  button[data-active="true"] {
+  border-color: color-mix(
+    in srgb,
+    var(--editor-bot-color, var(--accent)) 54%,
+    #8fa4b7
+  );
+  background: var(--avatar-studio-selected);
+  color: var(--fg);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarVoiceTestComposer
+  input {
+  border-color: #b9c7d3;
+  background: #ffffff;
+  color: var(--fg);
 }
 
 /* Desktop Foundry workspace
@@ -24453,6 +24622,43 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: none;
 }
 
+.zenInitialThinkingOverlay[data-avatar-handoff="true"] .zenInitialThinkingGlyphHalo {
+  width: clamp(240px, 38dvh, 390px);
+  height: clamp(240px, 38dvh, 390px);
+  background: none;
+  box-shadow: none;
+  animation: zenInitialCeremonyAvatarDescent 900ms
+    cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.zenInitialThinkingOverlay[data-avatar-handoff="true"]
+  .zenInitialThinkingGlyphHalo::before,
+.zenInitialThinkingOverlay[data-avatar-handoff="true"]
+  .zenInitialThinkingGlyphHalo::after {
+  display: none;
+}
+
+.zenInitialCeremonyAvatar {
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+  transform-origin: center 42%;
+}
+
+.zenInitialCeremonyAvatar .zenLiveBotPresenceBody {
+  width: min(72vw, 360px);
+  height: min(72vw, 360px);
+}
+
+.zenInitialThinkingOverlay[data-avatar-handoff="true"] .zenInitialThinkingGlyph {
+  animation: none;
+}
+
+.zenInitialThinkingOverlay[data-avatar-handoff="true"] .zenInitialThinkingCopy {
+  animation: zenInitialCeremonyCopyRelease 900ms ease both;
+}
+
 .zenInitialThinkingButton {
   appearance: none;
   border: 0;
@@ -24540,6 +24746,85 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     inset 0 0 0 1px color-mix(in srgb, #ffffff 14%, transparent);
   isolation: isolate;
   animation: zenInitialThinkingGlyphDrift 2.6s ease-in-out infinite;
+}
+
+.zenInitialLoadingScreen {
+  position: relative;
+  isolation: isolate;
+  display: grid;
+  width: 72%;
+  height: 72%;
+  place-items: center;
+  overflow: hidden;
+  border: 1px solid
+    color-mix(in srgb, var(--bot-color, #5de6ff) 32%, var(--fg) 12%);
+  border-radius: 30%;
+  color: var(--bot-ink, var(--bot-color, var(--fg)));
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in srgb, var(--bot-color, #5de6ff) 16%, transparent),
+      transparent 60%
+    ),
+    color-mix(in srgb, var(--bg-deep) 88%, #05090c 12%);
+  box-shadow:
+    0 0 34px color-mix(in srgb, var(--bot-color, #5de6ff) 24%, transparent),
+    inset 0 0 28px color-mix(in srgb, var(--bot-color, #5de6ff) 12%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 12%, transparent);
+}
+
+.zenInitialLoadingScreen::after {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  pointer-events: none;
+  background: repeating-linear-gradient(
+    to bottom,
+    transparent 0 3px,
+    color-mix(in srgb, var(--fg) 7%, transparent) 3px 4px
+  );
+  opacity: 0.42;
+  mix-blend-mode: soft-light;
+}
+
+.themeLight .zenInitialLoadingScreen {
+  border-color: color-mix(
+    in srgb,
+    var(--bot-color, #1aa6c3) 42%,
+    #6c7b8b 14%
+  );
+  color: color-mix(
+    in srgb,
+    var(--bot-color, #155b78) 72%,
+    #142536 28%
+  );
+  background:
+    radial-gradient(
+      circle at 50% 42%,
+      color-mix(in srgb, var(--bot-color, #1aa6c3) 18%, transparent),
+      transparent 62%
+    ),
+    color-mix(in srgb, #f8fbff 90%, var(--bot-color, #1aa6c3) 10%);
+  box-shadow:
+    0 14px 34px rgba(54, 76, 98, 0.16),
+    0 0 32px color-mix(in srgb, var(--bot-color, #1aa6c3) 18%, transparent),
+    inset 0 1px 0 rgba(255, 255, 255, 0.94);
+}
+
+.zenInitialLoadingScreenGlyph {
+  --crt-face-edge-color: currentColor;
+  position: relative;
+  z-index: 1;
+  display: inline-grid;
+  place-items: center;
+  min-width: 1.1em;
+  color: currentColor;
+  font-size: clamp(2.25rem, 6.5dvh, 4rem);
+  line-height: 1;
+  filter: drop-shadow(
+    0 0 12px color-mix(in srgb, currentColor 46%, transparent)
+  );
 }
 
 .zenInitialThinkingOverlay[data-persona="bot"] .zenInitialThinkingGlyphHalo {
@@ -24877,6 +25162,34 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   }
 }
 
+@keyframes zenInitialCeremonyAvatarDescent {
+  0% {
+    opacity: 0;
+    transform: translateY(22px) scale(0.84);
+  }
+  22%,
+  58% {
+    opacity: 1;
+    transform: translateY(0) scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(clamp(120px, 22dvh, 240px)) scale(0.86);
+  }
+}
+
+@keyframes zenInitialCeremonyCopyRelease {
+  0%,
+  58% {
+    opacity: 1;
+    transform: translateY(0);
+  }
+  100% {
+    opacity: 0;
+    transform: translateY(18px);
+  }
+}
+
 @media (prefers-reduced-motion: reduce) {
   .zenInitialThinkingOverlay,
   .zenInitialThinkingButton,
@@ -24884,6 +25197,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .zenInitialThinkingGlyphHalo::before,
   .zenInitialThinkingGlyphHalo::after,
   .zenInitialThinkingGlyph,
+  .zenInitialThinkingCopy,
+  .zenInitialCeremonyAvatar,
   .zenPersonaStartupAtmosphere::before,
   .zenPersonaStartupAtmosphere::after {
     animation: none;
@@ -34423,6 +34738,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   position: relative;
   width: 44px;
   height: 100%;
+  --model-effort-saturation: 100%;
   touch-action: none;
 }
 
@@ -34431,11 +34747,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   top: 19px;
   bottom: 19px;
   left: 50%;
-  width: 5px;
+  width: 2px;
   transform: translateX(-50%);
   border-radius: 999px;
   background: color-mix(in srgb, var(--fg) 14%, transparent);
   box-shadow: inset 0 1px 2px color-mix(in srgb, #000000 34%, transparent);
+  filter: saturate(var(--model-effort-saturation));
   pointer-events: none;
 }
 
@@ -34448,6 +34765,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background: #a7b2bd;
   box-shadow: 0 0 8px
     color-mix(in srgb, var(--model-effort-slider-glow) 34%, transparent);
+  filter: saturate(var(--model-effort-saturation));
 }
 
 .composeModelEffortSliderFill[data-effort-level="auto"] {
@@ -34563,6 +34881,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   border-radius: 999px;
   background: var(--bg-elevated);
   box-shadow: 0 0 0 1px color-mix(in srgb, var(--fg) 28%, transparent);
+  filter: saturate(var(--model-effort-saturation));
 }
 
 .composeModelEffortSliderTick[data-active="true"] {
@@ -34579,7 +34898,8 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   transform: translate(-50%, -50%);
   border-radius: 50%;
   background-color: var(--bg-elevated);
-  filter: drop-shadow(0 0 0.5px var(--fg))
+  filter: saturate(var(--model-effort-saturation))
+    drop-shadow(0 0 0.5px var(--fg))
     drop-shadow(0 3px 7px color-mix(in srgb, #000000 52%, transparent));
 }
 
@@ -34774,6 +35094,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 .modelEffortHud {
   --model-effort-hud-accent: var(--accent);
+  --model-effort-saturation: 100%;
   position: fixed;
   left: 50%;
   bottom: 30px;
@@ -34844,6 +35165,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   grid-auto-flow: column;
   grid-auto-columns: minmax(0, 1fr);
   gap: 4px;
+  filter: saturate(var(--model-effort-saturation));
 }
 
 .modelEffortHudRail > span {
@@ -49086,11 +49408,9 @@ a.settingsCreditItem:focus-visible {
   line-height: 1.55;
 }
 
-.botGeneratorModelField {
+.botGeneratorRoutingSummary {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  align-items: center;
-  gap: 6px 14px;
+  gap: 5px;
   margin-bottom: 18px;
   padding: 12px 14px;
   border: 1px solid var(--line);
@@ -49106,14 +49426,16 @@ a.settingsCreditItem:focus-visible {
   text-transform: uppercase;
 }
 
-.botGeneratorModelField > small {
-  grid-column: 1 / -1;
-  color: var(--fg-subtle);
-  font-size: 0.75rem;
+.botGeneratorRoutingSummary > strong {
+  color: var(--fg);
+  font-size: 0.9rem;
+  font-weight: 700;
 }
 
-.botGeneratorModelField > .composeModelControl {
-  justify-self: end;
+.botGeneratorRoutingSummary > small {
+  color: var(--fg-subtle);
+  font-size: 0.75rem;
+  line-height: 1.45;
 }
 
 .botGeneratorBody label {
@@ -54310,8 +54632,132 @@ a.settingsCreditItem:focus-visible {
     .botAvatarSaveError,
     .botAvatarSavePromptError,
     .botPowerCompileStatus[data-status="error"]
-  ) {
+) {
   color: var(--danger);
+}
+
+/* Foundry light workspace: pearl/frosted surroundings frame the authored
+   metallic avatar without recoloring or filtering the chassis itself. */
+.themeLight.botAvatarStudioThemeScope.botGeneratorBackdrop[data-avatar-foundry="true"],
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizerBackdrop[data-avatar-foundry="true"] {
+  background:
+    radial-gradient(
+      circle at 14% 12%,
+      color-mix(in srgb, #86bce8 18%, transparent),
+      transparent 38%
+    ),
+    radial-gradient(
+      circle at 88% 22%,
+      color-mix(in srgb, #c5a7dc 16%, transparent),
+      transparent 40%
+    ),
+    linear-gradient(145deg, #f7fafc, #e7eef5 54%, #f4eff5);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botGeneratorDialog[data-foundry-phase] {
+  color: #172638;
+  background: #edf3f8;
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botGeneratorDialog[data-foundry-phase]
+  > .botGeneratorBriefCard {
+  border-color: color-mix(in srgb, #607b96 20%, transparent);
+  background: color-mix(in srgb, #ffffff 82%, transparent);
+  box-shadow:
+    0 24px 64px color-mix(in srgb, #39536c 18%, transparent),
+    inset 0 1px 0 color-mix(in srgb, #ffffff 92%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botGeneratorDialog[data-foundry-phase]
+  :is(.botGeneratorHeader, .botGeneratorActions) {
+  border-color: color-mix(in srgb, #607b96 16%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope .botGeneratorRoutingSummary {
+  border-color: color-mix(in srgb, #65819c 20%, transparent);
+  background: color-mix(in srgb, #eaf1f7 72%, transparent);
+  box-shadow: inset 0 1px 0 color-mix(in srgb, #ffffff 86%, transparent);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botProfileBuilder.botAvatarCustomizer[data-foundry="true"] {
+  background: #edf3f8;
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]::before {
+  background:
+    radial-gradient(
+      ellipse at 50% 58%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 13%,
+        transparent
+      ),
+      transparent 38%
+    ),
+    radial-gradient(ellipse at 16% 18%, rgba(126, 171, 209, 0.2), transparent 42%),
+    radial-gradient(ellipse at 86% 24%, rgba(194, 161, 207, 0.18), transparent 43%),
+    linear-gradient(145deg, #f8fbfd, #e6edf4 54%, #f3edf4);
+  box-shadow:
+    inset 0 1px 0 rgba(255, 255, 255, 0.92),
+    inset 0 0 0 1px rgba(75, 102, 128, 0.08);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  > .botProfileBuilderHeader {
+  border-bottom-color: rgba(66, 88, 111, 0.14);
+  background: color-mix(in srgb, #ffffff 76%, transparent);
+  box-shadow: 0 10px 34px rgba(53, 73, 94, 0.08);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarMannequinStage {
+  background:
+    linear-gradient(
+      90deg,
+      transparent 49.92%,
+      rgba(52, 75, 98, 0.07) 50%,
+      transparent 50.08%
+    ),
+    radial-gradient(
+      ellipse at calc(50% - 8vw) 92%,
+      color-mix(
+        in srgb,
+        var(--editor-bot-color, var(--accent)) 19%,
+        transparent
+      ),
+      transparent 42%
+    ),
+    radial-gradient(ellipse at 18% 18%, rgba(111, 158, 199, 0.2), transparent 43%),
+    radial-gradient(ellipse at 84% 26%, rgba(194, 158, 204, 0.16), transparent 44%),
+    linear-gradient(145deg, #f5f9fc, #dfe8f0 56%, #f0e9f1);
+  box-shadow: inset 0 0 150px rgba(66, 86, 106, 0.1);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarMannequinStage::before {
+  opacity: 0.32;
+  background-image:
+    linear-gradient(rgba(41, 63, 84, 0.055) 1px, transparent 1px),
+    linear-gradient(90deg, rgba(41, 63, 84, 0.045) 1px, transparent 1px);
+}
+
+.themeLight.botAvatarStudioThemeScope
+  .botAvatarCustomizer[data-foundry="true"]
+  .botAvatarMannequinStage::after {
+  border-color: rgba(54, 73, 92, 0.14);
+  background: radial-gradient(ellipse, #b8c4ce, #667481 62%, transparent 65%);
+  box-shadow:
+    inset 0 5px 18px rgba(15, 25, 34, 0.38),
+    0 20px 42px rgba(53, 72, 90, 0.24);
 }
 
 /* Wide-screen affordance: when there's room to the left of the bot
