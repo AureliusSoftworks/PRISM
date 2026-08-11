@@ -18,7 +18,7 @@ describe("marketplace group atmosphere presets", () => {
       const second = resolveBotMarketplaceGroupAtmosphere(theme.id);
       assert.deepEqual(second, first);
       assert.ok(first);
-      assert.match(first.src, /^\/zen-fallback-wallpapers\/[a-z-]+\.png$/u);
+      assert.match(first.src, /^\/zen-fallback-wallpapers\/[a-z-]+\.webp$/u);
     }
   });
 

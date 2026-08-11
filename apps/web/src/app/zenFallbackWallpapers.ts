@@ -5,11 +5,11 @@ export type ZenFallbackWallpaperVariant = {
 };
 
 export const ZEN_FALLBACK_WALLPAPER_ASSETS = [
-  "/zen-fallback-wallpapers/soft-glass-light.png",
-  "/zen-fallback-wallpapers/paper-grain-wash.png",
-  "/zen-fallback-wallpapers/ocean-haze.png",
-  "/zen-fallback-wallpapers/prismatic-mist.png",
-  "/zen-fallback-wallpapers/mineral-aurora.png",
+  "/zen-fallback-wallpapers/soft-glass-light.webp",
+  "/zen-fallback-wallpapers/paper-grain-wash.webp",
+  "/zen-fallback-wallpapers/ocean-haze.webp",
+  "/zen-fallback-wallpapers/prismatic-mist.webp",
+  "/zen-fallback-wallpapers/mineral-aurora.webp",
 ] as const;
 
 export interface ZenFallbackWallpaperEligibilityArgs {

@@ -35,14 +35,18 @@ import {
 } from "./coffee-cup-sprites.ts";
 import { coffeeReplayPlayhead } from "./coffee-replay.ts";
 
-function coffeeCupAssetPngSize(assetName: string): { width: number; height: number } {
+function coffeeCupAssetWebpSize(assetName: string): { width: number; height: number } {
   const data = readFileSync(
     new URL(`../../public/coffee-cups/${assetName}`, import.meta.url)
   );
-  assert.equal(data.subarray(1, 4).toString("ascii"), "PNG");
+  assert.equal(data.subarray(0, 4).toString("ascii"), "RIFF");
+  assert.equal(data.subarray(8, 12).toString("ascii"), "WEBP");
+  assert.equal(data.subarray(12, 16).toString("ascii"), "VP8L");
+  assert.equal(data[20], 0x2f);
+  const dimensions = data.readUInt32LE(21);
   return {
-    width: data.readUInt32BE(16),
-    height: data.readUInt32BE(20),
+    width: (dimensions & 0x3fff) + 1,
+    height: ((dimensions >>> 14) & 0x3fff) + 1,
   };
 }
 
@@ -172,8 +176,8 @@ describe("coffee cup sprites", () => {
 
     assert.equal(full.frameIndex, 0);
     assert.equal(full.color, "blue");
-    assert.match(full.restImageUrl, /coffee_blue\.png$/);
-    assert.match(full.sipImageUrl, /coffee_blue_sip\.png$/);
+    assert.match(full.restImageUrl, /coffee_blue\.webp$/);
+    assert.match(full.sipImageUrl, /coffee_blue_sip\.webp$/);
     assert.ok(empty.progress > full.progress);
     assert.ok(empty.frameIndex >= full.frameIndex);
     assert.equal(finished.frameIndex, 6);
@@ -304,10 +308,10 @@ describe("coffee cup sprites", () => {
       theme: "light",
     });
 
-    assert.match(dark.restImageUrl, /coffee_red\.png$/);
-    assert.match(dark.sipImageUrl, /coffee_red_sip\.png$/);
-    assert.match(light.restImageUrl, /coffee_light_red\.png$/);
-    assert.match(light.sipImageUrl, /coffee_light_red_sip\.png$/);
+    assert.match(dark.restImageUrl, /coffee_red\.webp$/);
+    assert.match(dark.sipImageUrl, /coffee_red_sip\.webp$/);
+    assert.match(light.restImageUrl, /coffee_light_red\.webp$/);
+    assert.match(light.sipImageUrl, /coffee_light_red_sip\.webp$/);
   });
 
   it("ships every rest and sip sprite as a 500x576 seven-frame sheet", () => {
@@ -316,8 +320,8 @@ describe("coffee cup sprites", () => {
     for (const color of [...COFFEE_CUP_SPRITE_COLORS, "prism"]) {
       for (const themePrefix of ["", "light_"]) {
         for (const stateSuffix of ["", "_sip"]) {
-          const assetName = `coffee_${themePrefix}${color}${stateSuffix}.png`;
-          assert.deepEqual(coffeeCupAssetPngSize(assetName), expectedSize, assetName);
+          const assetName = `coffee_${themePrefix}${color}${stateSuffix}.webp`;
+          assert.deepEqual(coffeeCupAssetWebpSize(assetName), expectedSize, assetName);
         }
       }
     }

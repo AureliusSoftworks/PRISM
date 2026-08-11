@@ -9,7 +9,7 @@ export const COFFEE_POT_RETURN_MS = 280;
 export const COFFEE_POT_TARGET_HIT_SLOP_PX = 112;
 export const COFFEE_POT_TEXT_FORCEFIELD_PADDING_PX = 64;
 export const COFFEE_POT_POUR_FRAME_INDICES = [0, 1, 2, 3, 4] as const;
-export const COFFEE_POT_ASSET_VERSION = "dark-refill-2026-07-02";
+export const COFFEE_POT_ASSET_VERSION = "lossless-webp-2026-08-10";
 export type CoffeePotAssetTheme = "light" | "dark";
 export type CoffeePotTargetRect = Pick<DOMRect, "left" | "right" | "top" | "bottom">;
 
@@ -101,13 +101,13 @@ function coffeePotAssetUrl(path: string): string {
 }
 
 export function coffeePotRestImageUrl(theme: CoffeePotAssetTheme): string {
-  return coffeePotAssetUrl(`/coffee-pot/${coffeePotAssetPrefix(theme)}_pot.png`);
+  return coffeePotAssetUrl(`/coffee-pot/${coffeePotAssetPrefix(theme)}_pot.webp`);
 }
 
 export function coffeePotPourImageUrl(theme: CoffeePotAssetTheme): string {
   const path = theme === "light"
-    ? "/coffee-pot/coffee_light_pot_light_pour.png"
-    : "/coffee-pot/coffee_pot_pour.png";
+    ? "/coffee-pot/coffee_light_pot_light_pour.webp"
+    : "/coffee-pot/coffee_pot_pour.webp";
   return coffeePotAssetUrl(path);
 }
 
@@ -119,7 +119,7 @@ export function coffeePotPourFrameImageUrl(
     0,
     Math.min(COFFEE_POT_FINAL_POUR_FRAME_INDEX, Math.round(frameIndex))
   );
-  return coffeePotAssetUrl(`/coffee-pot/${coffeePotAssetPrefix(theme)}_${frame}.png`);
+  return coffeePotAssetUrl(`/coffee-pot/${coffeePotAssetPrefix(theme)}_${frame}.webp`);
 }
 
 export function coffeePotPointerIsInsideTarget(

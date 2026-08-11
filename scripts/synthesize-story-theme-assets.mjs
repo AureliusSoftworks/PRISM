@@ -1,7 +1,9 @@
-import { existsSync, mkdirSync, readFileSync, writeFileSync, copyFileSync } from "node:fs";
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { spawnSync } from "node:child_process";
 import { fileURLToPath } from "node:url";
+
+import sharp from "sharp";
 
 const ROOT = fileURLToPath(new URL("..", import.meta.url));
 const THEME_ID = "prism_default";
@@ -149,6 +151,13 @@ mkdirSync(RAW_DIR, { recursive: true });
 mkdirSync(POSE_RAW_DIR, { recursive: true });
 mkdirSync(SYNTHESIZED_DIR, { recursive: true });
 mkdirSync(PUBLIC_DIR, { recursive: true });
+
+async function promoteLosslessWebp(sourcePath, publicPath) {
+  mkdirSync(dirname(publicPath), { recursive: true });
+  await sharp(sourcePath, { failOn: "error" })
+    .webp({ lossless: true, effort: 6 })
+    .toFile(publicPath);
+}
 
 const PYTHON_RESIZE_SCRIPT = String.raw`
 from PIL import Image
@@ -373,12 +382,14 @@ for (const asset of assets) {
   const mockupPath = join(MOCKUP_DIR, asset.fileName);
   const rawPath = join(RAW_DIR, asset.fileName);
   const finalDraftPath = join(SYNTHESIZED_DIR, asset.fileName);
-  const publicPath = join(PUBLIC_DIR, asset.fileName);
+  const publicPath = join(
+    PUBLIC_DIR,
+    asset.fileName.replace(/\.png$/u, ".webp"),
+  );
 
   if (asset.source === "sprite_sheet_poses") {
     await synthesizeSpriteSheetFromPoses(asset, finalDraftPath);
-    mkdirSync(dirname(publicPath), { recursive: true });
-    copyFileSync(finalDraftPath, publicPath);
+    await promoteLosslessWebp(finalDraftPath, publicPath);
     console.log(`Promoted ${asset.fileName} -> ${asset.targetWidth}x${asset.targetHeight}`);
     continue;
   }
@@ -390,8 +401,7 @@ for (const asset of assets) {
     }
 
     deriveSpriteFallbackFromSheet(sheetPath, finalDraftPath, asset.targetWidth, asset.targetHeight);
-    mkdirSync(dirname(publicPath), { recursive: true });
-    copyFileSync(finalDraftPath, publicPath);
+    await promoteLosslessWebp(finalDraftPath, publicPath);
     console.log(`Derived ${asset.fileName} from sprite_reference_sheet.png -> ${asset.targetWidth}x${asset.targetHeight}`);
     continue;
   }
@@ -419,8 +429,7 @@ for (const asset of assets) {
     asset.fit,
     asset.transparent ? asset.cleanup ?? "none" : "opaque"
   );
-  mkdirSync(dirname(publicPath), { recursive: true });
-  copyFileSync(finalDraftPath, publicPath);
+  await promoteLosslessWebp(finalDraftPath, publicPath);
   console.log(`Promoted ${asset.fileName} -> ${asset.targetWidth}x${asset.targetHeight}`);
 }
 

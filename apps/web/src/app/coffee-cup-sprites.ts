@@ -659,7 +659,7 @@ function coffeeCupSpritePath(args: {
 }): string {
   const themePrefix = args.theme === "light" ? "coffee_light" : "coffee";
   const sipSuffix = args.sip === true ? "_sip" : "";
-  return `/coffee-cups/${themePrefix}_${args.color}${sipSuffix}.png`;
+  return `/coffee-cups/${themePrefix}_${args.color}${sipSuffix}.webp`;
 }
 
 export function buildCoffeeCupVisualState(args: {
