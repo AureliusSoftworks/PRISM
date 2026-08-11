@@ -42,6 +42,7 @@ export const BOT_GENERATION_FIELD_REGISTRY_V1 = {
     "Spoken-name authoring was removed; bots use their display name when speaking.",
   ),
   "identity.color": bounded("string"),
+  "identity.accentColor": bounded("string"),
   "identity.glyph": bounded("string"),
 
   "profile.purpose.statement": prose(500),

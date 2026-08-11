@@ -16,6 +16,7 @@ import {
   type BotAudioVoiceProfileV2,
 } from "./audioVoice.ts";
 import { inferCorporalityFromPersona } from "./corporalityFoley.ts";
+import { normalizeBotIdentityColor } from "./color.ts";
 import {
   parseStoredBotPrompt,
   serializeStoredBotPrompt,
@@ -163,6 +164,7 @@ export interface BotGeneratedDraftV1 {
   selfReferral: string;
   profile: BotProfileFields;
   color: string;
+  accentColor: string | null;
   glyph: BotGenerationGlyphId;
   face: BotFaceStyle;
   avatarDetails: BotAvatarDetailsV1 | null;
@@ -604,6 +606,7 @@ export function normalizeBotGeneratedDraftV1(
     selfReferral: "",
     profile,
     color: normalizeGeneratedHexColor(value.color),
+    accentColor: normalizeBotIdentityColor(value.accentColor),
     glyph: normalizeGeneratedGlyph(value.glyph),
     face,
     avatarDetails,

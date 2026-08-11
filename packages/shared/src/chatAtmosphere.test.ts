@@ -24,6 +24,27 @@ describe("chatAtmosphere", () => {
     assert.doesNotMatch(prompt, /transcript|message history|conversation so far/iu);
   });
 
+  it("uses a primary-majority palette with explicit or Auto Atmosphere accent", () => {
+    const explicit = composeChatAtmospherePrompt({
+      botName: "Mira",
+      botSystemPrompt: "A calm navigator.",
+      primaryColor: "#ff0000",
+      accentColor: "#00ff00",
+      variationSeed: "explicit",
+    });
+    const auto = composeChatAtmospherePrompt({
+      botName: "Mira",
+      botSystemPrompt: "A calm navigator.",
+      primaryColor: "#ff0000",
+      accentColor: null,
+      variationSeed: "auto",
+    });
+    assert.match(explicit, /primary #ff0000 as the majority palette/u);
+    assert.match(explicit, /Atmosphere accent #00ff00/u);
+    assert.match(auto, /Atmosphere accent #ffdd00/u);
+    assert.match(explicit, /do not default to a literal two-color gradient/u);
+  });
+
   it("formats UTC date and retention cutoff", () => {
     const now = new Date("2026-08-06T15:00:00.000Z");
     assert.equal(chatAtmosphereUtcDate(now), "2026-08-06");

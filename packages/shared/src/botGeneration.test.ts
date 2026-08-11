@@ -69,6 +69,7 @@ function completeDraft(): Record<string, unknown> {
       },
     },
     color: "#7A5CFF",
+    accentColor: "#7799AA",
     glyph: "moon",
     face: {
       faceEyesFont: "warm",
@@ -143,6 +144,7 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.profile.core.communicationStyle, "warm");
     assert.equal(draft.profile.facts.customFacts.length, 1);
     assert.equal(draft.color, "#7a5cff");
+    assert.equal(draft.accentColor, "#22b5ff");
     assert.equal(draft.glyph, "moon");
     assert.equal(draft.face.eyeCharacter, "*");
     assert.equal(draft.face.eyeCount, 2);
@@ -164,6 +166,16 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.audioVoiceProfile.systemVoiceName, undefined);
     assert.equal(draft.audioVoiceProfile.elevenLabsDirection, "hushed, wry, deliberate");
     assert.equal(draft.settings.maxTokens, 1800);
+  });
+
+  it("keeps generated Atmosphere accents optional and portable", () => {
+    const auto = completeDraft();
+    delete auto.accentColor;
+    assert.equal(normalizeBotGeneratedDraftV1(auto).accentColor, null);
+
+    const invalid = completeDraft();
+    invalid.accentColor = "blue";
+    assert.equal(normalizeBotGeneratedDraftV1(invalid).accentColor, null);
   });
 
   it("creates at most one compiler-ready prompt Power from a master draft", () => {

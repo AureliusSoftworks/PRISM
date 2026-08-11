@@ -1279,6 +1279,8 @@ export {
   ACCENT_LIGHTNESS_MAX_DARK,
   ACCENT_LIGHTNESS_MIN,
   ACCENT_LIGHTNESS_MIN_DARK,
+  BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES,
+  DEFAULT_BOT_IDENTITY_COLOR,
   accentLightnessBand,
   clampAccentLightness,
   clampLuminance,
@@ -1288,8 +1290,10 @@ export {
   hexToHsl,
   hslToHex,
   normalizeAccentForTheme,
+  normalizeBotIdentityColor,
   pickReadableText,
   relativeLuminance,
+  resolveBotAccentColor,
   swatchBorderCompensation,
 } from "./color.js";
 

@@ -244,6 +244,68 @@ export function fullySaturateBotColor(color: string): string {
   return hslToHex(h, 100, l);
 }
 
+/** The semantic default used when a surface has no valid bot primary color. */
+export const DEFAULT_BOT_IDENTITY_COLOR = "#7c6cff";
+
+/** Hue offset for the stable analogous Atmosphere accent. */
+export const BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES = 52;
+
+/**
+ * Normalize a portable bot identity color. Identity colors are deliberately
+ * stricter than legacy CSS presentation values: only six-digit hex can cross
+ * storage/export boundaries, and every accepted color is fully saturated.
+ */
+export function normalizeBotIdentityColor(
+  value: unknown,
+): string | null {
+  if (typeof value !== "string") return null;
+  const trimmed = value.trim();
+  if (!/^#[0-9a-fA-F]{6}$/u.test(trimmed)) return null;
+  return fullySaturateBotColor(trimmed).toLowerCase();
+}
+
+/**
+ * Resolve the environmental companion color for one bot.
+ *
+ * Explicit valid accents win. Auto (`null`, missing, or an invalid legacy
+ * value) rotates the valid primary hue by +52 degrees while preserving its
+ * HSL lightness and full saturation. No id or device-local seed participates,
+ * so the result is stable across exports, clones, and reinstalls.
+ */
+export function resolveBotAccentColor(
+  primaryColor: unknown,
+  accentColor: unknown,
+  fallbackColor: unknown = DEFAULT_BOT_IDENTITY_COLOR,
+): string {
+  const explicit = normalizeBotIdentityColor(accentColor);
+  if (explicit) return explicit;
+
+  const primary = normalizeBotIdentityColor(primaryColor);
+  if (primary) {
+    const { h, l } = hexToHsl(primary);
+    return hslToHex(
+      (h + BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES) % 360,
+      100,
+      l,
+    ).toLowerCase();
+  }
+
+  if (
+    typeof fallbackColor === "string" &&
+    /^#[0-9a-fA-F]{6}$/u.test(fallbackColor.trim())
+  ) {
+    const trimmedFallback = fallbackColor.trim().toLowerCase();
+    const fallbackHsl = hexToHsl(trimmedFallback);
+    // Existing neutral surface fallbacks intentionally stay neutral. Chromatic
+    // fallbacks use the same canonical full-saturation identity treatment.
+    return fallbackHsl.s === 0
+      ? trimmedFallback
+      : normalizeBotIdentityColor(trimmedFallback) ?? DEFAULT_BOT_IDENTITY_COLOR;
+  }
+
+  return DEFAULT_BOT_IDENTITY_COLOR;
+}
+
 /**
  * HSL-lightness range the app's accent color picker is allowed to produce.
  * Clamping both ends (not just one) means bot colors never go dark enough

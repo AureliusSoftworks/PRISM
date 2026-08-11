@@ -7,6 +7,7 @@ import {
   ACCENT_LIGHTNESS_MAX_DARK,
   ACCENT_LIGHTNESS_MIN,
   ACCENT_LIGHTNESS_MIN_DARK,
+  BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES,
   accentLightnessBand,
   clampAccentLightness,
   clampLuminance,
@@ -16,8 +17,10 @@ import {
   hexToHsl,
   hslToHex,
   normalizeAccentForTheme,
+  normalizeBotIdentityColor,
   pickReadableText,
   relativeLuminance,
+  resolveBotAccentColor,
   swatchBorderCompensation,
 } from "@localai/shared";
 
@@ -39,6 +42,47 @@ describe("fullySaturateBotColor", () => {
     const saturated = fullySaturateBotColor("#ff0055");
     assert.equal(fullySaturateBotColor(saturated), saturated);
     assert.equal(fullySaturateBotColor("  rebeccapurple  "), "rebeccapurple");
+  });
+});
+
+describe("bot Atmosphere accent identity", () => {
+  it("normalizes valid explicit accents and lets them win", () => {
+    assert.equal(normalizeBotIdentityColor("  #7799aa  "), "#22b5ff");
+    assert.equal(
+      resolveBotAccentColor("#ff0000", "#7799aa"),
+      "#22b5ff",
+    );
+  });
+
+  it("derives a stable fully saturated analogous Auto accent", () => {
+    const primary = "#ff0000";
+    const first = resolveBotAccentColor(primary, null);
+    const second = resolveBotAccentColor(primary, undefined);
+    const primaryHsl = hexToHsl(primary);
+    const accentHsl = hexToHsl(first);
+    assert.equal(first, second);
+    assert.ok(
+      Math.abs(
+        ((accentHsl.h - primaryHsl.h + 360) % 360) -
+          BOT_AUTO_ACCENT_HUE_OFFSET_DEGREES,
+      ) < 0.6,
+    );
+    assert.ok(Math.abs(accentHsl.s - 100) < 0.6);
+    assert.ok(Math.abs(accentHsl.l - primaryHsl.l) < 0.6);
+  });
+
+  it("uses the caller's surface fallback for an invalid primary", () => {
+    assert.equal(
+      resolveBotAccentColor("rebeccapurple", null, "#808080"),
+      "#808080",
+    );
+    assert.equal(resolveBotAccentColor(null, null), "#7c6cff");
+    assert.equal(
+      resolveBotAccentColor(undefined, "not-a-color", "#f3f3f3"),
+      "#f3f3f3",
+    );
+    assert.equal(normalizeBotIdentityColor("#abc"), null);
+    assert.equal(normalizeBotIdentityColor("red"), null);
   });
 });
 
