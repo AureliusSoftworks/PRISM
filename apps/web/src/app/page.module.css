@@ -170,6 +170,17 @@
   pointer-events: auto;
 }
 
+/* When the Studio pixel grid is on, strip phosphor blur from live ink so
+   placement matches the grid cells. */
+.botAvatarMannequinStage[data-avatar-details-grid-visible="true"]
+  [data-avatar-details-emission],
+.botAvatarMannequinStage[data-avatar-details-grid-visible="true"]
+  [data-avatar-details-mask="true"] {
+  filter: none !important;
+  --zen-live-bot-crt-flicker-base-filter: none;
+  --crt-beam-softness: 0px;
+}
+
 .botAvatarMannequinPanel[data-foundry-ritual="true"] {
   width: 100%;
   height: 100%;
@@ -211,12 +222,11 @@
 }
 
 .botAvatarCustomizerBackdrop[data-avatar-foundry="true"] {
-  /* Leave the app top nav visible. Clear backdrop-filter so it does not become
-     a containing block for the fixed studio dialog — otherwise a second
-     top-nav offset on the dialog double-counts and clips the bottom module
-     dock below the viewport. */
+  /* This backdrop alone owns the app-nav clearance. The studio is absolute
+     inside it, so no descendant repeats the viewport offset. */
   inset: var(--app-shell-top-nav-height, 60px) 0 0;
   z-index: 170;
+  min-height: 0;
   background: #030407;
   backdrop-filter: none;
   -webkit-backdrop-filter: none;
@@ -316,16 +326,17 @@
 .botProfileBuilder.botAvatarCustomizer[data-foundry="true"] {
   --bot-avatar-studio-inline-margin: 0px;
   --bot-avatar-studio-block-margin: 0px;
-  /* Viewport-anchored under the top nav. The foundry backdrop clears
-     backdrop-filter so this fixed dialog is not trapped in a containing block
-     that already inset the same top-nav offset (which clipped the module dock). */
-  inset: var(--app-shell-top-nav-height, 60px) 0 0;
-  top: var(--app-shell-top-nav-height, 60px);
+  /* The backdrop is the viewport-height owner. Filling that positioned parent
+     keeps the header, inspector, navigation, and voice dock in one definite
+     block even if a theme later changes backdrop compositing. */
+  position: absolute;
+  inset: 0;
+  top: 0;
   right: 0;
   bottom: 0;
   left: 0;
-  width: 100vw;
-  height: calc(100dvh - var(--app-shell-top-nav-height, 60px));
+  width: 100%;
+  height: 100%;
   max-height: none;
   min-height: 0;
   display: grid;
@@ -427,6 +438,7 @@
 .botAvatarCustomizer[data-foundry="true"] .botAvatarCustomizerBody {
   position: relative;
   display: block;
+  height: 100%;
   min-height: 0;
   padding: 0;
   overflow: hidden;
@@ -1256,7 +1268,12 @@
 .botAvatarVoiceTestDock {
   position: absolute;
   left: 42vw;
-  bottom: 84px;
+  bottom: calc(
+    var(--avatar-foundry-navigation-bottom, 22px) +
+      var(--avatar-foundry-navigation-height, 44px) +
+      var(--avatar-foundry-navigation-gap, 16px) +
+      var(--avatar-foundry-voice-gap, 2px)
+  );
   z-index: 22;
   width: min(620px, 52vw);
   display: grid;
@@ -1418,9 +1435,11 @@
 .botAvatarCustomizer[data-foundry="true"] .botAvatarControlTabs {
   position: absolute;
   left: 50%;
-  bottom: 22px;
+  bottom: var(--avatar-foundry-navigation-bottom, 22px);
   z-index: 2;
   width: auto;
+  min-height: var(--avatar-foundry-navigation-height, 44px);
+  box-sizing: border-box;
   max-width: calc(100vw - 610px);
   display: flex;
   align-items: center;
@@ -1435,15 +1454,22 @@
 
 .botAvatarCustomizer[data-foundry="true"] .botAvatarControlStack {
   position: absolute;
-  top: 20px;
+  top: var(--avatar-foundry-inspector-top, 20px);
   right: 22px;
-  bottom: 82px;
+  bottom: calc(
+    var(--avatar-foundry-navigation-bottom, 22px) +
+      var(--avatar-foundry-navigation-height, 44px) +
+      var(--avatar-foundry-navigation-gap, 16px)
+  );
   z-index: 3;
   width: min(390px, calc(100vw - 44px));
+  height: auto;
+  max-height: none;
   min-height: 0;
   box-sizing: border-box;
   padding: 14px;
   overflow: auto;
+  scrollbar-gutter: stable;
   pointer-events: auto;
   border: 1px solid
     color-mix(
@@ -3436,6 +3462,15 @@
   .storySpriteWrap[data-speaking="true"] .storySpriteAsciiFace,
   .storySpriteWrap[data-speaking="true"] .storySpriteChestGlyph {
     animation: none;
+  }
+
+  .zenInitialCeremonyAvatar[data-visible="true"] {
+    opacity: 1;
+  }
+
+  .zenInitialPrismCeremonyStage[data-avatar-handoff="true"]
+    .zenInitialPrismCeremonyOrb {
+    opacity: 0;
   }
 }
 
@@ -24570,7 +24605,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
       color-mix(in srgb, #d9a800 8%, transparent) 0 20%,
       transparent 46%
     ),
-    color-mix(in srgb, #f8fbff 78%, transparent);
+    color-mix(in srgb, #f8fbff 94%, transparent);
 }
 
 .zenInitialThinkingOverlay[data-persona="bot"] {
@@ -24631,6 +24666,73 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     cubic-bezier(0.16, 1, 0.3, 1) both;
 }
 
+.zenInitialThinkingOverlay[data-persona="prism"] .zenInitialThinkingGlyphHalo {
+  width: clamp(240px, 38dvh, 390px);
+  height: clamp(240px, 38dvh, 390px);
+  background: none;
+  box-shadow: none;
+}
+
+.zenInitialThinkingOverlay[data-persona="prism"]
+  .zenInitialThinkingGlyphHalo::before,
+.zenInitialThinkingOverlay[data-persona="prism"]
+  .zenInitialThinkingGlyphHalo::after {
+  display: none;
+}
+
+.zenInitialPrismCeremonyStage {
+  position: relative;
+  display: grid;
+  width: 100%;
+  height: 100%;
+  place-items: center;
+}
+
+.zenInitialPrismCeremonyOrb,
+.zenInitialCeremonyAvatar {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+}
+
+.zenInitialPrismCeremonyOrb {
+  inset: auto;
+  width: min(72vw, 360px);
+  height: min(72vw, 360px);
+  opacity: 1;
+}
+
+.zenInitialPrismCeremonyOrb :global([data-prism-orb="true"]) svg {
+  opacity: 0;
+  animation: zenInitialPrismMarkToLoader 480ms ease both;
+}
+
+.zenInitialPrismCeremonyLoaderGlyph {
+  position: absolute;
+  inset: 0;
+  z-index: 2;
+  display: grid;
+  color: #f8fbff;
+  place-items: center;
+  opacity: 1;
+  pointer-events: none;
+  animation: zenInitialPrismLoaderReveal 480ms 110ms ease both;
+}
+
+.zenInitialPrismCeremonyLoaderGlyph .zenInitialLoadingScreenGlyph {
+  font-size: clamp(3.5rem, 8.5dvh, 5.75rem);
+}
+
+.themeLight .zenInitialPrismCeremonyLoaderGlyph {
+  color: #142536;
+}
+
+.zenInitialPrismCeremonyStage[data-avatar-handoff="true"]
+  .zenInitialPrismCeremonyOrb {
+  animation: zenInitialCeremonyOrbCrossfade 900ms ease both;
+}
+
 .zenInitialThinkingOverlay[data-avatar-handoff="true"]
   .zenInitialThinkingGlyphHalo::before,
 .zenInitialThinkingOverlay[data-avatar-handoff="true"]
@@ -24639,11 +24741,12 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 }
 
 .zenInitialCeremonyAvatar {
-  display: grid;
-  width: 100%;
-  height: 100%;
-  place-items: center;
+  opacity: 0;
   transform-origin: center 42%;
+}
+
+.zenInitialCeremonyAvatar[data-visible="true"] {
+  animation: zenInitialCeremonyAvatarCrossfade 900ms ease both;
 }
 
 .zenInitialCeremonyAvatar .zenLiveBotPresenceBody {
@@ -24968,6 +25071,13 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     0 0 18px color-mix(in srgb, #5de6ff 18%, transparent);
 }
 
+.themeLight .zenInitialThinkingLabel {
+  color: #142536;
+  text-shadow:
+    0 1px 0 rgba(255, 255, 255, 0.96),
+    0 0 18px rgba(255, 255, 255, 0.72);
+}
+
 .zenInitialThinkingCopy {
   display: grid;
   justify-items: center;
@@ -25164,10 +25274,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 
 @keyframes zenInitialCeremonyAvatarDescent {
   0% {
-    opacity: 0;
-    transform: translateY(22px) scale(0.84);
+    opacity: 1;
+    transform: translateY(0) scale(1);
   }
-  22%,
   58% {
     opacity: 1;
     transform: translateY(0) scale(1);
@@ -25175,6 +25284,51 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   100% {
     opacity: 0;
     transform: translateY(clamp(120px, 22dvh, 240px)) scale(0.86);
+  }
+}
+
+@keyframes zenInitialCeremonyOrbCrossfade {
+  0%,
+  12% {
+    opacity: 1;
+  }
+  40%,
+  100% {
+    opacity: 0;
+  }
+}
+
+@keyframes zenInitialPrismMarkToLoader {
+  0%,
+  20% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  100% {
+    opacity: 0;
+    transform: scale(0.72);
+  }
+}
+
+@keyframes zenInitialPrismLoaderReveal {
+  0% {
+    opacity: 0;
+    transform: scale(0.76);
+  }
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+}
+
+@keyframes zenInitialCeremonyAvatarCrossfade {
+  0%,
+  12% {
+    opacity: 0;
+  }
+  40%,
+  100% {
+    opacity: 1;
   }
 }
 
@@ -25199,6 +25353,9 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   .zenInitialThinkingGlyph,
   .zenInitialThinkingCopy,
   .zenInitialCeremonyAvatar,
+  .zenInitialPrismCeremonyOrb,
+  .zenInitialPrismCeremonyOrb :global([data-prism-orb="true"]) svg,
+  .zenInitialPrismCeremonyLoaderGlyph,
   .zenPersonaStartupAtmosphere::before,
   .zenPersonaStartupAtmosphere::after {
     animation: none;
@@ -35452,6 +35609,19 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .composeBotControl[data-navbar-picker="true"] {
   width: min(260px, calc(100vw - 24px));
   flex: 0 0 min(260px, calc(100vw - 24px));
+}
+
+.composeBotControl[data-navbar-picker="true"][data-render-theme="light"]:not(
+    [data-bot-selected="true"]
+  )
+  :is(.composeBotTriggerGlyph, .composeBotTriggerName) {
+  color: #142536;
+}
+
+.composeBotMenu[data-navbar-picker-surface="true"][data-render-theme="light"]
+  .composeBotOptionDefault[aria-selected="true"]
+  :is(.composeBotOptionGlyph, .composeBotOptionName) {
+  color: #142536;
 }
 
 /* When a bot is selected, tint the pill with that bot's color so the
@@ -50163,8 +50333,8 @@ a.settingsCreditItem:focus-visible {
   overflow-x: hidden;
   overflow-y: auto;
   overscroll-behavior-y: contain;
-  padding-bottom: 36px;
-  scroll-padding-bottom: 36px;
+  padding-bottom: var(--avatar-foundry-scroll-end-padding, 36px);
+  scroll-padding-bottom: var(--avatar-foundry-scroll-end-padding, 36px);
   scrollbar-width: thin;
 }
 
@@ -50846,8 +51016,8 @@ a.settingsCreditItem:focus-visible {
   overflow-y: auto;
   overscroll-behavior-y: contain;
   padding-right: 6px;
-  padding-bottom: 36px;
-  scroll-padding-bottom: 36px;
+  padding-bottom: var(--avatar-foundry-scroll-end-padding, 36px);
+  scroll-padding-bottom: var(--avatar-foundry-scroll-end-padding, 36px);
   scrollbar-width: thin;
 }
 
@@ -54653,6 +54823,10 @@ a.settingsCreditItem:focus-visible {
       transparent 40%
     ),
     linear-gradient(145deg, #f7fafc, #e7eef5 54%, #f4eff5);
+  /* The generic light modal blur must not turn this inset height owner into a
+     second fixed-position containing block. */
+  backdrop-filter: none;
+  -webkit-backdrop-filter: none;
 }
 
 .themeLight.botAvatarStudioThemeScope

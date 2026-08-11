@@ -61,6 +61,12 @@ test("the Zen setting defaults off and retains the player's preference", () => {
   assert.match(page, /Wait for atmosphere before entering chat/);
   assert.match(page, /data-zen-initial-ceremony-avatar/);
   assert.match(page, /<ZenLiveBotMannequin/);
+  assert.match(page, /data-zen-initial-prism-orb="true"/);
+  assert.match(page, /data-zen-initial-prism-loader-glyph="true"/);
+  assert.match(page, /<PrismOrb aura size="100%" \/>/);
+  assert.match(page, /const ceremonyLoadingGlyphNode = \(/);
+  assert.match(page, /faceThinkingFrames=\{ceremonyFaceStyle\.thinkingFrames\}/);
+  assert.match(page, /!personaBot \? \(/);
   assert.match(page, /data-zen-initial-loading-screen/);
   assert.match(page, /showThinkingSpinner/);
   assert.match(page, /initialZenOpeningTurn: isInitialZenOpeningTurn/);
@@ -68,5 +74,10 @@ test("the Zen setting defaults off and retains the player's preference", () => {
   assert.match(page, /progressiveZenVoice: false/);
   assert.match(page, /zenFreshConversationHandoff !== null\) return 0/);
   assert.match(css, /data-avatar-handoff="true"/);
+  assert.match(css, /zenInitialCeremonyOrbCrossfade/);
+  assert.match(css, /zenInitialPrismMarkToLoader/);
+  assert.match(css, /zenInitialPrismLoaderReveal/);
+  assert.match(css, /zenInitialCeremonyAvatarCrossfade/);
+  assert.match(css, /\.themeLight \.zenInitialThinkingLabel \{[\s\S]*?color: #142536;/);
   assert.match(css, /@media \(prefers-reduced-motion: reduce\)/);
 });

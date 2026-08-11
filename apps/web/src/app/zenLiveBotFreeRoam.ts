@@ -11,7 +11,7 @@ import {
 } from "./prismCompanionPhysics.ts";
 
 export type ZenLiveBotPoint = { x: number; y: number };
-export type ZenLiveBotMotionBounds = {
+export type ZenLiveBotRect = {
   left: number;
   top: number;
   right: number;
@@ -19,6 +19,7 @@ export type ZenLiveBotMotionBounds = {
 };
 
 /** Inclusive legal top-left coordinates for the avatar. */
+export type ZenLiveBotMotionBounds = ZenLiveBotRect;
 export type ZenLiveBotDragVelocitySample = PrismCompanionDragVelocitySample;
 
 export type ZenLiveBotPhysicsState = ZenLiveBotPoint & {
@@ -39,6 +40,28 @@ const ZEN_LIVE_BOT_AUTONOMOUS_SPEED_PX_PER_SECOND = 52;
 
 function clamp(value: number, min: number, max: number): number {
   return Math.max(min, Math.min(max, value));
+}
+
+function overlaps(first: ZenLiveBotRect, second: ZenLiveBotRect): boolean {
+  return (
+    first.left < second.right &&
+    first.right > second.left &&
+    first.top < second.bottom &&
+    first.bottom > second.top
+  );
+}
+
+function rectAt(
+  position: ZenLiveBotPoint,
+  width: number,
+  height: number,
+): ZenLiveBotRect {
+  return {
+    left: position.x,
+    top: position.y,
+    right: position.x + width,
+    bottom: position.y + height,
+  };
 }
 
 export function zenLiveBotFreeRoamShouldRun(input: {
@@ -230,12 +253,16 @@ export function stepZenLiveBotAutonomousTravel(input: {
 }
 
 /**
- * Plans calm destinations across the whole safe field. `bounds` contains
- * legal top-left limits; side lanes are chosen about 72% of the time.
+ * Plans calm destinations across the whole safe field. `bounds` already
+ * contains legal top-left limits, so avatar dimensions are used only for
+ * overlap testing. Side lanes are chosen about 72% of the time.
  */
 export function planZenLiveBotFreeRoamDestination(input: {
   current: ZenLiveBotPoint;
   bounds: ZenLiveBotMotionBounds;
+  avatarWidth: number;
+  avatarHeight: number;
+  avoidRects: ZenLiveBotRect[];
   random?: () => number;
 }): ZenLiveBotPoint {
   const random = input.random ?? Math.random;
@@ -243,9 +270,12 @@ export function planZenLiveBotFreeRoamDestination(input: {
   const maxX = Math.max(minX, input.bounds.right);
   const minY = input.bounds.top;
   const maxY = Math.max(minY, input.bounds.bottom);
+  const currentOverlaps = input.avoidRects.some((rect) =>
+    overlaps(rectAt(input.current, input.avatarWidth, input.avatarHeight), rect),
+  );
   const candidates: ZenLiveBotPoint[] = [];
   for (let index = 0; index < 16; index += 1) {
-    const useSideLane = random() < 0.72;
+    const useSideLane = currentOverlaps || random() < 0.72;
     const chooseLeft = random() < 0.5;
     const laneFraction = 0.06 + random() * 0.22;
     const x = useSideLane
@@ -258,5 +288,17 @@ export function planZenLiveBotFreeRoamDestination(input: {
       y: minY + (maxY - minY) * (0.08 + random() * 0.84),
     });
   }
-  return candidates[0] ?? input.current;
+  return (
+    candidates.find((candidate) =>
+      input.avoidRects.every(
+        (rect) =>
+          !overlaps(
+            rectAt(candidate, input.avatarWidth, input.avatarHeight),
+            rect,
+          ),
+      ),
+    ) ??
+    candidates[0] ??
+    input.current
+  );
 }

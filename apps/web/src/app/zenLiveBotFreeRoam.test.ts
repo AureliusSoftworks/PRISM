@@ -56,6 +56,9 @@ describe("zenLiveBotFreeRoam", () => {
     const destination = planZenLiveBotFreeRoamDestination({
       current: { x: 400, y: 240 },
       bounds,
+      avatarWidth: 100,
+      avatarHeight: 100,
+      avoidRects: [],
       random: () => values[index++ % values.length]!,
     });
 
@@ -64,15 +67,26 @@ describe("zenLiveBotFreeRoam", () => {
     assertClose(destination.y, 552);
   });
 
-  it("does not model prose or chrome collision geometry", () => {
+  it("moves away from the newest prose or chrome avoidance geometry", () => {
     const destination = planZenLiveBotFreeRoamDestination({
       current: { x: 390, y: 200 },
       bounds,
+      avatarWidth: 120,
+      avatarHeight: 120,
+      avoidRects: [
+        { left: 300, top: 100, right: 700, bottom: 500 },
+      ],
       random: () => 0.15,
     });
     assert.ok(destination.x >= bounds.left && destination.x <= bounds.right);
     assert.ok(destination.y >= bounds.top && destination.y <= bounds.bottom);
-    assert.doesNotMatch(helperSource, /avoidRects|overlaps\(|rectAt\(/);
+    assert.ok(
+      destination.x + 120 <= 300 ||
+        destination.x >= 700 ||
+        destination.y + 120 <= 100 ||
+        destination.y >= 500,
+    );
+    assert.match(helperSource, /avoidRects|overlaps\(|rectAt\(/);
   });
 
   it("converts Zen top-left pixels to normalized Prism companion coordinates", () => {

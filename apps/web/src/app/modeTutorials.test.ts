@@ -156,7 +156,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,
-      /At 150% zoom, a pixel grid fades onto the CRT/u,
+      /At 150% zoom, a pixel grid fades onto the CRT and ink draws as hard blocky cells/u,
     );
     assert.match(
       MODE_TUTORIALS.avatar.steps[1]!.body,
