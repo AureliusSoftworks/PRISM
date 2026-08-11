@@ -230,6 +230,25 @@ export function zoomBotAvatarFoundryViewport(
   });
 }
 
+/** Keeps the same authored point beneath the cursor while camera zoom changes.
+ * `anchor` is measured in screen pixels from the transformed camera-rig center. */
+export function zoomBotAvatarFoundryViewportAtAnchor(
+  viewport: BotAvatarFoundryViewport,
+  wheelDeltaY: number,
+  anchor: Readonly<{ x: number; y: number }>,
+): BotAvatarFoundryViewport {
+  const current = normalizeBotAvatarFoundryViewport(viewport);
+  const zoomed = zoomBotAvatarFoundryViewport(current, wheelDeltaY);
+  const ratio = zoomed.zoom / current.zoom;
+  const anchorX = Number.isFinite(anchor.x) ? anchor.x : 0;
+  const anchorY = Number.isFinite(anchor.y) ? anchor.y : 0;
+  return normalizeBotAvatarFoundryViewport({
+    ...zoomed,
+    x: current.x + anchorX * (1 - ratio),
+    y: current.y + anchorY * (1 - ratio),
+  });
+}
+
 export type BotAvatarFoundryCreationPath = "ai" | "manual";
 
 export interface BotAvatarFoundryState {

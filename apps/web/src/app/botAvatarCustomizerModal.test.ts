@@ -1954,7 +1954,9 @@ test("avatar foundry locks the product preview and reserves camera navigation fo
   assert.match(pageSource, /className=\{styles\.botAvatarFoundryBotAssembly\}/);
   assert.match(pageSource, /data-avatar-foundry-platform="true"/);
   assert.match(pageSource, /data-avatar-foundry-bot-assembly="true"/);
-  assert.match(pageSource, /Drag to align · Scroll to resize/);
+  assert.match(pageSource, /Drag to pan · Scroll at cursor to zoom/);
+  assert.match(pageSource, /aria-label="Zoom ink camera out"/);
+  assert.match(pageSource, /aria-label="Zoom ink camera in"/);
   assert.match(
     pageSource,
     /const foundryCameraEditable =\s*spatialControls && foundryCameraMode === "ink";/,
@@ -1964,7 +1966,7 @@ test("avatar foundry locks the product preview and reserves camera navigation fo
   assert.match(pageSource, /stage\.style\.setProperty\("--foundry-pan-x"/);
   assert.match(
     pageSource,
-    /zoomBotAvatarFoundryViewport\(\s*foundryViewportRef\.current,\s*event\.deltaY/,
+    /zoomBotAvatarFoundryViewportAtAnchor\(\s*foundryViewportRef\.current,\s*event\.deltaY,\s*foundryZoomAnchor\(event\.clientX, event\.clientY\)/,
   );
   assert.match(pageSource, /setFoundryViewport\(viewport\);/);
   assert.match(pageSource, /data-tutorial-target="avatar-foundry-controls"/);
@@ -2049,6 +2051,8 @@ test("avatar foundry keeps a reusable color-linked adjustment console visible", 
   assert.match(pageSource, /<AdjustmentPad/);
   assert.match(pageSource, /restoreX=\{DEFAULT_BOT_FACE_STYLE\.eyeOffsetX\}/);
   assert.match(pageSource, /restoreY=\{DEFAULT_BOT_FACE_STYLE\.mouthOffsetY\}/);
+  assert.match(pageSource, /activeAdjustmentTarget === "stamp"/);
+  assert.match(pageSource, /detailsEditorRef\.current\?\.setEquippedStampPosition/);
   assert.match(adjustmentPadSource, /renderOverlay\?/);
   assert.match(adjustmentPadSource, /onCancel\?/);
   assert.match(

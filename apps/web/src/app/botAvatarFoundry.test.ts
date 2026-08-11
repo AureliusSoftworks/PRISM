@@ -18,6 +18,7 @@ import {
   normalizeBotAvatarFoundryViewport,
   transitionBotAvatarFoundry,
   zoomBotAvatarFoundryViewport,
+  zoomBotAvatarFoundryViewportAtAnchor,
   type BotAvatarFoundryState,
 } from "./botAvatarFoundry.ts";
 
@@ -156,6 +157,34 @@ describe("Avatar Foundry presentation contracts", () => {
     assert.equal(
       zoomBotAvatarFoundryViewport({ x: 0, y: 0, zoom: 1.85 }, -999).zoom,
       1.85,
+    );
+  });
+
+  it("keeps cursor-anchored canvas content stationary while zooming", () => {
+    const viewport = { x: 18, y: -12, zoom: 1 };
+    const anchor = { x: 120, y: -60 };
+    const zoomed = zoomBotAvatarFoundryViewportAtAnchor(
+      viewport,
+      -120,
+      anchor,
+    );
+    const ratio = zoomed.zoom / viewport.zoom;
+
+    assert.ok(zoomed.zoom > viewport.zoom);
+    assert.equal(
+      Number((zoomed.x + anchor.x * ratio).toFixed(6)),
+      viewport.x + anchor.x,
+    );
+    assert.equal(
+      Number((zoomed.y + anchor.y * ratio).toFixed(6)),
+      viewport.y + anchor.y,
+    );
+    assert.deepEqual(
+      zoomBotAvatarFoundryViewportAtAnchor(viewport, -120, {
+        x: Number.NaN,
+        y: Number.NaN,
+      }),
+      zoomBotAvatarFoundryViewport(viewport, -120),
     );
   });
 

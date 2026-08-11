@@ -251,6 +251,7 @@ import {
   normalizeBotAvatarFoundryViewport,
   normalizeBotAvatarFoundryOrigin,
   zoomBotAvatarFoundryViewport,
+  zoomBotAvatarFoundryViewportAtAnchor,
   type BotAvatarFoundryCameraMode,
   type BotAvatarFoundryIdentitySurface,
   type BotAvatarFoundryModulePopulation,
@@ -305,6 +306,7 @@ import {
 import { stopPrismSceneAudio } from "./scene-audio-lifecycle";
 import {
   AvatarDetailsEditor,
+  type AvatarDetailsEquippedStamp,
   type AvatarDetailsEditorHandle,
 } from "./AvatarDetailsEditor";
 import { AvatarDetailsMask } from "./AvatarDetailsMask";
@@ -325,6 +327,8 @@ import {
   normalizeAvatarDetails,
 } from "./avatar-details";
 import {
+  AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MAX,
+  AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MIN,
   avatarDetailInkTemplateStorageKey,
   loadAvatarDetailInkTemplates,
   normalizeAvatarDetailInkTemplates,
@@ -38654,6 +38658,7 @@ type BotAvatarAdjustmentTarget =
   | "eyes"
   | "blink"
   | "mouth"
+  | "stamp"
   | "pronunciation"
   | "feel"
   | "voice";
@@ -38664,6 +38669,7 @@ function botAvatarAdjustmentTargetForControl(
   if (control === "face") return "thinking";
   if (control === "eyes") return "eyes";
   if (control === "mouth") return "mouth";
+  if (control === "details") return "stamp";
   if (control === "voice") return "pronunciation";
   return null;
 }
@@ -39362,6 +39368,7 @@ function BotAvatarPreviewPanel({
     BOT_AVATAR_FOUNDRY_DEFAULT_VIEWPORT,
   );
   const foundryStageRef = useRef<HTMLDivElement>(null);
+  const foundryCameraRigRef = useRef<HTMLDivElement>(null);
   const foundryZoomReadoutRef = useRef<HTMLElement>(null);
   const foundryPendingViewportRef = useRef<BotAvatarFoundryViewport | null>(
     null,
@@ -39523,6 +39530,17 @@ function BotAvatarPreviewPanel({
     setFoundryCameraActive(false);
     commitFoundryViewport(BOT_AVATAR_FOUNDRY_DEFAULT_VIEWPORT);
   };
+  const foundryZoomAnchor = (
+    clientX: number,
+    clientY: number,
+  ): { x: number; y: number } => {
+    const bounds = foundryCameraRigRef.current?.getBoundingClientRect();
+    if (!bounds) return { x: 0, y: 0 };
+    return {
+      x: clientX - (bounds.left + bounds.width / 2),
+      y: clientY - (bounds.top + bounds.height / 2),
+    };
+  };
   useEffect(() => {
     return () => {
       if (foundryViewportFrameRef.current != null) {
@@ -39654,7 +39672,7 @@ function BotAvatarPreviewPanel({
         }
         aria-label={
           foundryCameraEditable
-            ? "Ink camera. Drag to pan, scroll to resize, or use arrow and plus or minus keys."
+            ? "Ink camera. Drag to pan, scroll at the cursor to zoom, or use arrow and plus or minus keys."
             : undefined
         }
         onPointerDown={beginFoundryPan}
@@ -39666,9 +39684,10 @@ function BotAvatarPreviewPanel({
           event.preventDefault();
           setFoundryCameraActive(true);
           queueFoundryViewport(
-            zoomBotAvatarFoundryViewport(
+            zoomBotAvatarFoundryViewportAtAnchor(
               foundryViewportRef.current,
               event.deltaY,
+              foundryZoomAnchor(event.clientX, event.clientY),
             ),
           );
           clearFoundryWheelCommit();
@@ -39727,6 +39746,7 @@ function BotAvatarPreviewPanel({
         }}
       >
         <div
+          ref={foundryCameraRigRef}
           className={styles.botAvatarFoundryCameraRig}
           data-spatial-camera-rig={spatialControls ? "true" : undefined}
           style={spatialControls ? avatarStyle : undefined}
@@ -39921,10 +39941,46 @@ function BotAvatarPreviewPanel({
             <strong ref={foundryZoomReadoutRef}>
               {Math.round(foundryViewport.zoom * 100)}%
             </strong>
+            <div
+              className={styles.botAvatarFoundryCameraZoomChips}
+              role="group"
+              aria-label="Ink camera zoom"
+            >
+              <button
+                type="button"
+                aria-label="Zoom ink camera out"
+                title="Zoom out"
+                onClick={() =>
+                  commitFoundryViewport(
+                    zoomBotAvatarFoundryViewport(
+                      foundryViewportRef.current,
+                      120,
+                    ),
+                  )
+                }
+              >
+                <Minus size={10} strokeWidth={2.4} aria-hidden="true" />
+              </button>
+              <button
+                type="button"
+                aria-label="Zoom ink camera in"
+                title="Zoom in"
+                onClick={() =>
+                  commitFoundryViewport(
+                    zoomBotAvatarFoundryViewport(
+                      foundryViewportRef.current,
+                      -120,
+                    ),
+                  )
+                }
+              >
+                <Plus size={10} strokeWidth={2.4} aria-hidden="true" />
+              </button>
+            </div>
             <button type="button" onClick={resetFoundryViewport}>
               Reset view
             </button>
-            <small>Drag to align · Scroll to resize</small>
+            <small>Drag to pan · Scroll at cursor to zoom</small>
           </div>
         ) : null}
       </div>
@@ -43467,6 +43523,8 @@ function BotAvatarCustomizerModal({
   const controlStackRef = useRef<HTMLDivElement | null>(null);
   const studioDialogRef = useRef<HTMLElement | null>(null);
   const detailsEditorRef = useRef<AvatarDetailsEditorHandle | null>(null);
+  const [equippedInkStamp, setEquippedInkStamp] =
+    useState<AvatarDetailsEquippedStamp | null>(null);
   const avatarVoicePreviewRunRef = useRef(0);
   const [detailsEditorDirty, setDetailsEditorDirty] = useState(false);
   const [avatarDetailsPreview, setAvatarDetailsPreview] =
@@ -43545,6 +43603,7 @@ function BotAvatarCustomizerModal({
     setPreviewSpeechPaused(false);
     setNameSampleState("idle");
     setDetailsEditorDirty(false);
+    setEquippedInkStamp(null);
   }, [identityControlsVisible, initialTab, open, resolvedTheme]);
 
   useEffect(() => {
@@ -43668,6 +43727,15 @@ function BotAvatarCustomizerModal({
     if (!open || profileEditorLayerOpen) return;
     const handleEscape = (event: KeyboardEvent): void => {
       if (event.key !== "Escape") return;
+      if (
+        activeControlTab === "details" &&
+        detailsEditorRef.current?.cancelEquippedStamp()
+      ) {
+        setEquippedInkStamp(null);
+        event.preventDefault();
+        event.stopPropagation();
+        return;
+      }
       event.preventDefault();
       if (
         activeControlTab === "eyes" ||
@@ -43846,6 +43914,10 @@ function BotAvatarCustomizerModal({
   if (!open) return null;
 
   const requestControlTab = (tab: BotAvatarCustomizerTab): void => {
+    if (tab !== "details") {
+      detailsEditorRef.current?.cancelEquippedStamp();
+      setEquippedInkStamp(null);
+    }
     if (tab !== "details" && inkLivePreview) {
       setInkLivePreview(false);
       setPreviewMode("idle");
@@ -43872,6 +43944,8 @@ function BotAvatarCustomizerModal({
   const returnFoundryCameraToOverview = (): void => {
     if (botAvatarFoundryCameraForControl(activeControlTab) === "overview")
       return;
+    detailsEditorRef.current?.cancelEquippedStamp();
+    setEquippedInkStamp(null);
     setActiveControlTab("face");
     setActiveUpgradeNode(null);
   };
@@ -44062,6 +44136,8 @@ function BotAvatarCustomizerModal({
           ]
           : activeControlTab === "mouth"
           ? [{ value: "mouth", label: "Mouth" }]
+          : activeControlTab === "details" && equippedInkStamp
+            ? [{ value: "stamp", label: "Stamp" }]
           : activeControlTab === "voice"
             ? [
                 { value: "pronunciation", label: "1 Accent" },
@@ -44071,6 +44147,36 @@ function BotAvatarCustomizerModal({
             : [];
   const activeAdjustmentControl = (() => {
     if (activeAdjustmentOptions.length === 0) return null;
+    if (
+      activeControlTab === "details" &&
+      activeAdjustmentTarget === "stamp" &&
+      equippedInkStamp
+    ) {
+      return (
+        <BotAvatarCoordinateControl
+          label={`${equippedInkStamp.name} position`}
+          x={-equippedInkStamp.offsetX}
+          y={equippedInkStamp.offsetY}
+          minX={-AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MAX}
+          maxX={-AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MIN}
+          stepX={1}
+          minY={AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MIN}
+          maxY={AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MAX}
+          stepY={1}
+          restoreX={0}
+          restoreY={0}
+          onChange={(next) => {
+            detailsEditorRef.current?.setEquippedStampPosition({
+              x: -next.x,
+              y: next.y,
+            });
+          }}
+          onReset={() => {
+            detailsEditorRef.current?.setEquippedStampPosition({ x: 0, y: 0 });
+          }}
+        />
+      );
+    }
     if (
       activeControlTab === "voice" &&
       activeAdjustmentTarget === "pronunciation"
@@ -44435,9 +44541,38 @@ function BotAvatarCustomizerModal({
         aria-labelledby="bot-avatar-customizer-title"
         tabIndex={-1}
         onKeyDown={(event) => {
-          if (event.key !== "Escape" || profileEditorLayerOpen) return;
+          if (profileEditorLayerOpen) return;
+          const target = event.target;
+          const isTextEntry =
+            target instanceof HTMLElement &&
+            Boolean(
+              target.closest(
+                'input, textarea, [contenteditable="true"], [contenteditable="plaintext-only"]',
+              ),
+            );
+          if (
+            event.key === "Enter" &&
+            activeControlTab === "details" &&
+            equippedInkStamp &&
+            !isTextEntry
+          ) {
+            if (detailsEditorRef.current?.commitEquippedStamp()) {
+              setEquippedInkStamp(null);
+              event.preventDefault();
+              event.stopPropagation();
+            }
+            return;
+          }
+          if (event.key !== "Escape") return;
           event.preventDefault();
           event.stopPropagation();
+          if (
+            activeControlTab === "details" &&
+            detailsEditorRef.current?.cancelEquippedStamp()
+          ) {
+            setEquippedInkStamp(null);
+            return;
+          }
           if (foundryCameraMode !== "overview") {
             returnFoundryCameraToOverview();
             return;
@@ -44792,8 +44927,9 @@ function BotAvatarCustomizerModal({
                         onCommit={() => undefined}
                       />
                       <p>
-                        This module has no positional offset. Select Identity,
-                        Eyes, or Mouth to move a visible element.
+                        {activeControlTab === "details"
+                          ? "Equip a stamp below to position it with this grid pad."
+                          : "This module has no positional offset. Select Identity, Eyes, or Mouth to move a visible element."}
                       </p>
                     </div>
                   ))}
@@ -44997,6 +45133,10 @@ function BotAvatarCustomizerModal({
                   }}
                   onDirtyChange={setDetailsEditorDirty}
                   onPreviewChange={setAvatarDetailsPreview}
+                  onEquippedStampChange={(stamp) => {
+                    setEquippedInkStamp(stamp);
+                    if (stamp) setActiveAdjustmentTarget("stamp");
+                  }}
                   onLivePreview={() => {
                     setMouthPhase(0);
                     setPreviewSpeechMouthShape(null);

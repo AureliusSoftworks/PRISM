@@ -11,6 +11,7 @@ import {
   type CSSProperties,
   type KeyboardEvent,
   type PointerEvent,
+  type WheelEvent,
 } from "react";
 import { createPortal } from "react-dom";
 import {
@@ -19,7 +20,6 @@ import {
   type BotFaceStyle,
 } from "@localai/shared";
 import {
-  BookmarkPlus,
   Brush,
   Check,
   Circle,
@@ -31,6 +31,7 @@ import {
   Move,
   PaintBucket,
   Play,
+  Plus,
   Redo2,
   Trash2,
   Undo2,
@@ -83,6 +84,7 @@ import {
   AVATAR_DETAIL_INK_TEMPLATE_SCALE_MIN,
   applyAvatarDetailInkTemplate,
   createAvatarDetailInkTemplate,
+  filterAvatarDetailInkTemplates,
   loadAvatarDetailInkTemplates,
   rasterizeAvatarDetailInkTemplateRgba,
   renameAvatarDetailInkTemplate,
@@ -151,6 +153,17 @@ export interface AvatarDetailsEditorHandle {
   hasDirtyChanges(): boolean;
   undo(): boolean;
   redo(): boolean;
+  setEquippedStampPosition(next: Readonly<{ x: number; y: number }>): void;
+  commitEquippedStamp(): boolean;
+  cancelEquippedStamp(): boolean;
+}
+
+export interface AvatarDetailsEquippedStamp {
+  templateId: string;
+  name: string;
+  offsetX: number;
+  offsetY: number;
+  scalePct: number;
 }
 
 export interface AvatarDetailsEditorProps {
@@ -165,6 +178,7 @@ export interface AvatarDetailsEditorProps {
   onPreviewChange?: (details: AvatarDetailsV1) => void;
   onLivePreview?: () => void;
   onEditStart?: () => void;
+  onEquippedStampChange?: (stamp: AvatarDetailsEquippedStamp | null) => void;
   layout?: "panel" | "foundry";
   canvasPortalTarget?: HTMLElement | null;
   autoCommit?: boolean;
@@ -237,6 +251,7 @@ const AvatarDetailsEditorSession = forwardRef<
     onPreviewChange,
     onLivePreview,
     onEditStart,
+    onEquippedStampChange,
     layout = "panel",
     canvasPortalTarget = null,
     autoCommit = false,
@@ -278,12 +293,17 @@ const AvatarDetailsEditorSession = forwardRef<
     null,
   );
   const [selectedTemplateName, setSelectedTemplateName] = useState("");
+  const [equippedTemplateId, setEquippedTemplateId] = useState<string | null>(
+    null,
+  );
   const [templateOffsetX, setTemplateOffsetX] = useState(0);
   const [templateOffsetY, setTemplateOffsetY] = useState(0);
   const [templateScalePct, setTemplateScalePct] = useState(100);
   const [templateStatus, setTemplateStatus] = useState<string | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
+  const stampPreviewRef = useRef<HTMLCanvasElement | null>(null);
   const screenGuideRef = useRef<HTMLCanvasElement | null>(null);
+  const inputSurfaceRef = useRef<HTMLDivElement | null>(null);
   const pointerStrokeRef = useRef<AvatarDetailsPointerStroke | null>(null);
   const symmetryAxisPointerRef = useRef<number | null>(null);
   const previewFrameRef = useRef<number | null>(null);
@@ -326,6 +346,35 @@ const AvatarDetailsEditorSession = forwardRef<
   } as CSSProperties;
   const selectedTemplate =
     inkTemplates.find((template) => template.id === selectedTemplateId) ?? null;
+  const equippedTemplate =
+    inkTemplates.find((template) => template.id === equippedTemplateId) ?? null;
+  const normalizedTemplateQuery = templateName.trim().toLowerCase();
+  const filteredInkTemplates = filterAvatarDetailInkTemplates(
+    inkTemplates,
+    templateName,
+  );
+  const stampNameAlreadyExists = inkTemplates.some(
+    (template) =>
+      template.name.toLowerCase() === normalizedTemplateQuery,
+  );
+  const equippedStamp = useMemo<AvatarDetailsEquippedStamp | null>(
+    () =>
+      equippedTemplate
+        ? {
+            templateId: equippedTemplate.id,
+            name: equippedTemplate.name,
+            offsetX: templateOffsetX,
+            offsetY: templateOffsetY,
+            scalePct: templateScalePct,
+          }
+        : null,
+    [
+      equippedTemplate,
+      templateOffsetX,
+      templateOffsetY,
+      templateScalePct,
+    ],
+  );
 
   useEffect(() => {
     if (typeof window === "undefined") return;
@@ -337,16 +386,17 @@ const AvatarDetailsEditorSession = forwardRef<
     setSelectedTemplateId((current) =>
       current && loaded.some((template) => template.id === current)
         ? current
-        : (loaded[0]?.id ?? null),
+        : null,
     );
   }, [templateOwnerId]);
 
   useEffect(() => {
     setSelectedTemplateName(selectedTemplate?.name ?? "");
-    setTemplateOffsetX(0);
-    setTemplateOffsetY(0);
-    setTemplateScalePct(100);
-  }, [selectedTemplate?.id, selectedTemplate?.name]);
+  }, [selectedTemplate?.name]);
+
+  useEffect(() => {
+    onEquippedStampChange?.(equippedStamp);
+  }, [equippedStamp, onEquippedStampChange]);
 
   const drawWorkingCanvas = useCallback(
     (details: AvatarDetailsV1): void => {
@@ -507,6 +557,38 @@ const AvatarDetailsEditorSession = forwardRef<
     drawWorkingCanvas(workingRef.current);
   }, [drawWorkingCanvas, workingKey]);
 
+  useEffect(() => {
+    const canvas = stampPreviewRef.current;
+    const context = canvas?.getContext("2d", { alpha: true });
+    if (!canvas || !context) return;
+    context.clearRect(0, 0, canvas.width, canvas.height);
+    if (!equippedTemplate) return;
+    const preview = applyAvatarDetailInkTemplate(
+      normalizeAvatarDetails(null),
+      equippedTemplate,
+      {
+        offsetX: templateOffsetX,
+        offsetY: templateOffsetY,
+        scalePct: templateScalePct,
+      },
+    );
+    const imageData = context.createImageData(
+      AVATAR_DETAILS_CANVAS_SIZE,
+      AVATAR_DETAILS_CANVAS_SIZE,
+    );
+    imageData.data.set(
+      rasterizeAvatarDetailsSemanticRgba(preview.details, faceStyle),
+    );
+    context.imageSmoothingEnabled = false;
+    context.putImageData(imageData, 0, 0);
+  }, [
+    equippedTemplate,
+    faceStyle,
+    templateOffsetX,
+    templateOffsetY,
+    templateScalePct,
+  ]);
+
   const commitMutation = useCallback(
     (next: AvatarDetailsV1): void => {
       const current = workingRef.current;
@@ -550,17 +632,110 @@ const AvatarDetailsEditorSession = forwardRef<
         );
         return true;
       } catch {
-        setTemplateStatus("This device could not save the ink library.");
+        setTemplateStatus("This device could not save the stamp library.");
         return false;
       }
     },
     [templateOwnerId],
   );
 
+  const equipInkStamp = useCallback(
+    (template: AvatarDetailInkTemplateV1): void => {
+      setSelectedTemplateId(template.id);
+      setEquippedTemplateId(template.id);
+      setTemplateOffsetX(0);
+      setTemplateOffsetY(0);
+      setTemplateScalePct(100);
+      setTemplateStatus(
+        `Equipped “${template.name}”. Position it with the grid pad, then click the canvas or press Enter.`,
+      );
+      window.requestAnimationFrame(() => inputSurfaceRef.current?.focus());
+    },
+    [],
+  );
+
+  const setEquippedStampPosition = useCallback(
+    (next: Readonly<{ x: number; y: number }>): void => {
+      if (!equippedTemplateId) return;
+      setTemplateOffsetX(
+        Math.max(
+          AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MIN,
+          Math.min(AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MAX, Math.round(next.x)),
+        ),
+      );
+      setTemplateOffsetY(
+        Math.max(
+          AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MIN,
+          Math.min(AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MAX, Math.round(next.y)),
+        ),
+      );
+    },
+    [equippedTemplateId],
+  );
+
+  const adjustEquippedStampScale = useCallback(
+    (step: number): void => {
+      if (!equippedTemplateId) return;
+      setTemplateScalePct((current) =>
+        Math.max(
+          AVATAR_DETAIL_INK_TEMPLATE_SCALE_MIN,
+          Math.min(
+            AVATAR_DETAIL_INK_TEMPLATE_SCALE_MAX,
+            Math.round((current + step) / 5) * 5,
+          ),
+        ),
+      );
+    },
+    [equippedTemplateId],
+  );
+
+  const cancelEquippedStamp = useCallback((): boolean => {
+    if (!equippedTemplate) return false;
+    setEquippedTemplateId(null);
+    setTemplateStatus(`Canceled “${equippedTemplate.name}” placement.`);
+    return true;
+  }, [equippedTemplate]);
+
+  const commitEquippedStamp = useCallback((): boolean => {
+    if (!equippedTemplate) return false;
+    const result = applyAvatarDetailInkTemplate(
+      workingRef.current,
+      equippedTemplate,
+      {
+        offsetX: templateOffsetX,
+        offsetY: templateOffsetY,
+        scalePct: templateScalePct,
+      },
+    );
+    setLimitReached(result.limitReached);
+    if (result.limitReached) {
+      setTemplateStatus("Erase some ink before placing this stamp.");
+      return false;
+    }
+    if (!result.changed) {
+      setTemplateStatus("That stamp is already present at this position.");
+      return false;
+    }
+    onEditStart?.();
+    commitMutation(result.details);
+    setEquippedTemplateId(null);
+    setTemplateStatus(
+      `Placed “${equippedTemplate.name}” as editable ink. Use Move if you want to reposition it.`,
+    );
+    return true;
+  }, [
+    commitMutation,
+    equippedTemplate,
+    onEditStart,
+    templateOffsetX,
+    templateOffsetY,
+    templateScalePct,
+  ]);
+
   const saveCurrentInkTemplate = (): void => {
     if (inkTemplates.length >= AVATAR_DETAIL_INK_TEMPLATE_LIMIT) {
       setTemplateStatus(
-        `The ink library can hold ${AVATAR_DETAIL_INK_TEMPLATE_LIMIT} templates.`,
+        `The stamp library can hold ${AVATAR_DETAIL_INK_TEMPLATE_LIMIT} stamps.`,
       );
       return;
     }
@@ -571,42 +746,15 @@ const AvatarDetailsEditorSession = forwardRef<
     if (!template) {
       setTemplateStatus(
         templateName.trim()
-          ? "Draw some ink before saving a template."
-          : "Name this ink before saving it.",
+          ? "Draw some ink before saving a stamp."
+          : "Name this stamp before saving it.",
       );
       return;
     }
     if (!persistInkTemplates([...inkTemplates, template])) return;
     setTemplateName("");
-    setSelectedTemplateId(template.id);
-    setTemplateStatus(`Saved “${template.name}” to your ink library.`);
-  };
-
-  const applySelectedInkTemplate = (): void => {
-    if (!selectedTemplate) return;
-    const result = applyAvatarDetailInkTemplate(
-      workingRef.current,
-      selectedTemplate,
-      {
-        offsetX: templateOffsetX,
-        offsetY: templateOffsetY,
-        scalePct: templateScalePct,
-      },
-    );
-    setLimitReached(result.limitReached);
-    if (result.limitReached) {
-      setTemplateStatus("Erase some ink before placing this template.");
-      return;
-    }
-    if (!result.changed) {
-      setTemplateStatus("That ink is already present at this position.");
-      return;
-    }
-    onEditStart?.();
-    commitMutation(result.details);
-    setTemplateStatus(
-      `Placed “${selectedTemplate.name}” as editable ink. Undo it or erase it with any drawing tool.`,
-    );
+    equipInkStamp(template);
+    setTemplateStatus(`Saved and equipped “${template.name}”.`);
   };
 
   const saveSelectedTemplateName = (): void => {
@@ -625,7 +773,7 @@ const AvatarDetailsEditorSession = forwardRef<
       return;
     }
     setSelectedTemplateName(renamed.name);
-    setTemplateStatus(`Renamed the template to “${renamed.name}”.`);
+    setTemplateStatus(`Renamed the stamp to “${renamed.name}”.`);
   };
 
   const deleteSelectedInkTemplate = (): void => {
@@ -634,8 +782,11 @@ const AvatarDetailsEditorSession = forwardRef<
       (template) => template.id !== selectedTemplate.id,
     );
     if (!persistInkTemplates(nextTemplates)) return;
+    if (equippedTemplateId === selectedTemplate.id) {
+      setEquippedTemplateId(null);
+    }
     setSelectedTemplateId(nextTemplates[0]?.id ?? null);
-    setTemplateStatus(`Removed “${selectedTemplate.name}” from your library.`);
+    setTemplateStatus(`Removed “${selectedTemplate.name}” from your stamps.`);
   };
 
   const convertLegacyDetailsToInk = (): void => {
@@ -735,10 +886,22 @@ const AvatarDetailsEditorSession = forwardRef<
       cancel: cancelWorkingCopy,
       undo,
       redo,
+      setEquippedStampPosition,
+      commitEquippedStamp,
+      cancelEquippedStamp,
       hasDirtyChanges: () =>
         !avatarDetailsEqual(workingRef.current, normalizedSource),
     }),
-    [applyWorkingCopy, cancelWorkingCopy, normalizedSource, redo, undo],
+    [
+      applyWorkingCopy,
+      cancelEquippedStamp,
+      cancelWorkingCopy,
+      commitEquippedStamp,
+      normalizedSource,
+      redo,
+      setEquippedStampPosition,
+      undo,
+    ],
   );
 
   const paintPoints = useCallback(
@@ -882,6 +1045,12 @@ const AvatarDetailsEditorSession = forwardRef<
       event.isPrimary === false
     )
       return;
+    if (equippedTemplate) {
+      event.currentTarget.focus();
+      commitEquippedStamp();
+      event.preventDefault();
+      return;
+    }
     onEditStart?.();
     const point = pointerGridPoint(event);
     event.currentTarget.focus();
@@ -916,6 +1085,26 @@ const AvatarDetailsEditorSession = forwardRef<
       stroke.changed = previewCircleStroke(stroke, point);
     }
     event.preventDefault();
+  };
+
+  const handleCanvasWheel = (event: WheelEvent<HTMLDivElement>): void => {
+    if (!equippedTemplate || event.deltaY === 0) return;
+    adjustEquippedStampScale(event.deltaY < 0 ? 5 : -5);
+    event.preventDefault();
+    event.stopPropagation();
+  };
+
+  const handleCanvasKeyDown = (event: KeyboardEvent<HTMLDivElement>): void => {
+    if (!equippedTemplate) return;
+    if (event.key === "Enter") {
+      commitEquippedStamp();
+    } else if (event.key === "Escape") {
+      cancelEquippedStamp();
+    } else {
+      return;
+    }
+    event.preventDefault();
+    event.stopPropagation();
   };
 
   const handlePointerMove = (event: PointerEvent<HTMLDivElement>): void => {
@@ -1115,25 +1304,27 @@ const AvatarDetailsEditorSession = forwardRef<
     commitMutation(avatarDetailsWithPaintColorMap(workingRef.current, colorMap));
   };
 
-  const canvasInstruction = `${
-    paintMode === "move"
-      ? inkRole === "erase"
-        ? "Drag to move all ink."
-        : `Drag to move only ${AVATAR_DETAILS_INK_OPTIONS.find((option) => option.role === inkRole)?.label ?? "the selected ink"}.`
-      : paintMode === "bucket"
-        ? inkRole === "erase"
-          ? "Click a painted region to erase it."
-          : "Click a painted region to change its ink behavior."
-      : paintMode === "line"
-        ? "Drag between two points to draw a straight line."
-        : paintMode === "circle"
-          ? "Drag from the center to draw a circle."
-          : "Drag to paint on the screen."
-  }${
-    symmetryEnabled
-      ? ` Vertical symmetry is on at column ${Math.round(symmetryAxisX + 0.5)}.`
-      : ""
-  }`;
+  const canvasInstruction = equippedTemplate
+    ? `${equippedTemplate.name} stamp equipped at ${templateScalePct} percent. Use the grid pad to position it, scroll or use plus and minus to resize, click or press Enter to place, or press Escape to cancel.`
+    : `${
+        paintMode === "move"
+          ? inkRole === "erase"
+            ? "Drag to move all ink."
+            : `Drag to move only ${AVATAR_DETAILS_INK_OPTIONS.find((option) => option.role === inkRole)?.label ?? "the selected ink"}.`
+          : paintMode === "bucket"
+            ? inkRole === "erase"
+              ? "Click a painted region to erase it."
+              : "Click a painted region to change its ink behavior."
+          : paintMode === "line"
+            ? "Drag between two points to draw a straight line."
+            : paintMode === "circle"
+              ? "Drag from the center to draw a circle."
+              : "Drag to paint on the screen."
+      }${
+        symmetryEnabled
+          ? ` Vertical symmetry is on at column ${Math.round(symmetryAxisX + 0.5)}.`
+          : ""
+      }`;
 
   const canvasEditor = (
     <div className={styles.canvasFrame} data-foundry-canvas={layout === "foundry" ? "true" : undefined}>
@@ -1201,6 +1392,15 @@ const AvatarDetailsEditorSession = forwardRef<
           data-avatar-details-editor-core="true"
           aria-hidden="true"
         />
+        <canvas
+          ref={stampPreviewRef}
+          className={styles.stampPreview}
+          width={AVATAR_DETAILS_CANVAS_SIZE}
+          height={AVATAR_DETAILS_CANVAS_SIZE}
+          data-avatar-details-stamp-preview="true"
+          data-visible={equippedTemplate ? "true" : undefined}
+          aria-hidden="true"
+        />
         <span
           className={styles.pixelGrid}
           data-avatar-details-pixel-grid="true"
@@ -1235,13 +1435,14 @@ const AvatarDetailsEditorSession = forwardRef<
           />
         </div>
         <div
+          ref={inputSurfaceRef}
           className={styles.inputSurface}
-          data-tool={paintMode}
+          data-tool={equippedTemplate ? "stamp" : paintMode}
           data-symmetry-enabled={symmetryEnabled ? "true" : undefined}
           data-dragging={pointerActive ? "true" : undefined}
           role="application"
           tabIndex={0}
-          aria-label={`Avatar pixel canvas. ${inkRole === "erase" ? "erase ink" : `${inkRole} ink`}, ${paintMode}, ${brushSize} pixel size. ${canvasInstruction}`}
+          aria-label={`Avatar pixel canvas. ${equippedTemplate ? `${equippedTemplate.name} stamp equipped` : inkRole === "erase" ? "erase ink" : `${inkRole} ink`}, ${paintMode}, ${brushSize} pixel size. ${canvasInstruction}`}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={finishPointerStroke}
@@ -1249,6 +1450,8 @@ const AvatarDetailsEditorSession = forwardRef<
           // tap. Reverting here wiped single-click brush stamps and bucket fills
           // before pointerup could commit them; treat cancel as stroke end.
           onPointerCancel={finishPointerStroke}
+          onWheel={handleCanvasWheel}
+          onKeyDown={handleCanvasKeyDown}
         />
       </div>
     </div>
@@ -1545,12 +1748,12 @@ const AvatarDetailsEditorSession = forwardRef<
 
       <section
         className={styles.templateSection}
-        aria-label="Saved ink templates"
+        aria-label="Stamps"
       >
         <header>
-          <strong>Saved ink</strong>
+          <strong>Stamps</strong>
           <small>
-            Reuse your own drawings. Placed templates become ordinary ink.
+            Equip your drawings, position them with the grid pad, then place.
           </small>
         </header>
         <div className={styles.templateSaveRow}>
@@ -1558,8 +1761,8 @@ const AvatarDetailsEditorSession = forwardRef<
             type="text"
             value={templateName}
             maxLength={AVATAR_DETAIL_INK_TEMPLATE_NAME_MAX_LENGTH}
-            placeholder="Name this drawing"
-            aria-label="Ink template name"
+            placeholder="Find a stamp by name"
+            aria-label="Search stamps"
             onChange={(event) => {
               setTemplateName(event.currentTarget.value);
               setTemplateStatus(null);
@@ -1567,20 +1770,27 @@ const AvatarDetailsEditorSession = forwardRef<
             onKeyDown={(event) => {
               if (event.key !== "Enter") return;
               event.preventDefault();
-              saveCurrentInkTemplate();
+              if (filteredInkTemplates.length === 1) {
+                equipInkStamp(filteredInkTemplates[0]!);
+              } else if (filteredInkTemplates.length === 0) {
+                saveCurrentInkTemplate();
+              }
             }}
           />
           <button
             type="button"
             onClick={saveCurrentInkTemplate}
+            aria-label="Save current ink as a stamp"
+            title="Save current ink as a stamp"
             disabled={
               paintedPixels === 0 ||
               !templateName.trim() ||
+              stampNameAlreadyExists ||
+              filteredInkTemplates.length > 0 ||
               inkTemplates.length >= AVATAR_DETAIL_INK_TEMPLATE_LIMIT
             }
           >
-            <BookmarkPlus size={13} aria-hidden="true" />
-            Save current ink
+            <Plus size={13} aria-hidden="true" />
           </button>
         </div>
         {working.screen.stamps.length > 0 ? (
@@ -1594,13 +1804,13 @@ const AvatarDetailsEditorSession = forwardRef<
             </button>
           </div>
         ) : null}
-        {inkTemplates.length > 0 ? (
+        {filteredInkTemplates.length > 0 ? (
           <div
             className={styles.templateLibrary}
             role="listbox"
-            aria-label="Personal ink library"
+            aria-label="Personal stamps"
           >
-            {inkTemplates.map((template) => (
+            {filteredInkTemplates.map((template) => (
               <button
                 key={template.id}
                 type="button"
@@ -1609,9 +1819,11 @@ const AvatarDetailsEditorSession = forwardRef<
                 data-selected={
                   selectedTemplateId === template.id ? "true" : undefined
                 }
+                data-equipped={
+                  equippedTemplateId === template.id ? "true" : undefined
+                }
                 onClick={() => {
-                  setSelectedTemplateId(template.id);
-                  setTemplateStatus(null);
+                  equipInkStamp(template);
                 }}
               >
                 <AvatarDetailInkTemplatePreview template={template} />
@@ -1624,8 +1836,9 @@ const AvatarDetailsEditorSession = forwardRef<
           </div>
         ) : (
           <p className={styles.emptyTemplateLibrary}>
-            Your personal ink library is empty. Draw something above, name it,
-            and save it for another bot.
+            {normalizedTemplateQuery
+              ? `No stamps match “${templateName.trim()}”. Use + to save the current ink with that name.`
+              : "No stamps yet. Type a name, then use + to save the current ink."}
           </p>
         )}
         {selectedTemplate ? (
@@ -1635,7 +1848,7 @@ const AvatarDetailsEditorSession = forwardRef<
                 type="text"
                 value={selectedTemplateName}
                 maxLength={AVATAR_DETAIL_INK_TEMPLATE_NAME_MAX_LENGTH}
-                aria-label="Rename selected ink template"
+                aria-label="Rename selected stamp"
                 onChange={(event) =>
                   setSelectedTemplateName(event.currentTarget.value)
                 }
@@ -1647,7 +1860,7 @@ const AvatarDetailsEditorSession = forwardRef<
               />
               <button
                 type="button"
-                aria-label="Save ink template name"
+                aria-label="Save stamp name"
                 title="Save name"
                 disabled={
                   !selectedTemplateName.trim() ||
@@ -1659,70 +1872,60 @@ const AvatarDetailsEditorSession = forwardRef<
               </button>
               <button
                 type="button"
-                aria-label={`Delete ${selectedTemplate.name} ink template`}
-                title="Delete template"
+                aria-label={`Delete ${selectedTemplate.name} stamp`}
+                title="Delete stamp"
                 onClick={deleteSelectedInkTemplate}
               >
                 <Trash2 size={13} aria-hidden="true" />
               </button>
             </div>
-            <div className={styles.templateTransformGrid}>
-              <label>
+            {equippedTemplate?.id === selectedTemplate.id ? (
+              <div
+                className={styles.equippedStampControls}
+                data-stamp-equipped="true"
+              >
                 <span>
-                  X <output>{templateOffsetX}</output>
+                  <strong>Equipped</strong>
+                  <small>Position with the grid pad</small>
                 </span>
-                <input
-                  type="range"
-                  aria-label="Ink template horizontal offset"
-                  min={AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MIN}
-                  max={AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MAX}
-                  step={1}
-                  value={templateOffsetX}
-                  onChange={(event) =>
-                    setTemplateOffsetX(Number(event.currentTarget.value))
-                  }
-                />
-              </label>
-              <label>
-                <span>
-                  Y <output>{templateOffsetY}</output>
-                </span>
-                <input
-                  type="range"
-                  aria-label="Ink template vertical offset"
-                  min={AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MIN}
-                  max={AVATAR_DETAIL_INK_TEMPLATE_OFFSET_MAX}
-                  step={1}
-                  value={templateOffsetY}
-                  onChange={(event) =>
-                    setTemplateOffsetY(Number(event.currentTarget.value))
-                  }
-                />
-              </label>
-              <label>
-                <span>
-                  Scale <output>{templateScalePct}%</output>
-                </span>
-                <input
-                  type="range"
-                  aria-label="Ink template scale"
-                  min={AVATAR_DETAIL_INK_TEMPLATE_SCALE_MIN}
-                  max={AVATAR_DETAIL_INK_TEMPLATE_SCALE_MAX}
-                  step={5}
-                  value={templateScalePct}
-                  onChange={(event) =>
-                    setTemplateScalePct(Number(event.currentTarget.value))
-                  }
-                />
-              </label>
-            </div>
-            <button
-              type="button"
-              className={styles.placeTemplateButton}
-              onClick={applySelectedInkTemplate}
-            >
-              Place as editable ink
-            </button>
+                <div
+                  className={styles.stampScaleChips}
+                  role="group"
+                  aria-label="Stamp size"
+                >
+                  <button
+                    type="button"
+                    aria-label="Make stamp smaller"
+                    title="Make stamp smaller"
+                    disabled={
+                      templateScalePct <= AVATAR_DETAIL_INK_TEMPLATE_SCALE_MIN
+                    }
+                    onClick={() => adjustEquippedStampScale(-5)}
+                  >
+                    <Minus size={12} aria-hidden="true" />
+                  </button>
+                  <output aria-live="polite">{templateScalePct}%</output>
+                  <button
+                    type="button"
+                    aria-label="Make stamp larger"
+                    title="Make stamp larger"
+                    disabled={
+                      templateScalePct >= AVATAR_DETAIL_INK_TEMPLATE_SCALE_MAX
+                    }
+                    onClick={() => adjustEquippedStampScale(5)}
+                  >
+                    <Plus size={12} aria-hidden="true" />
+                  </button>
+                </div>
+                <small>
+                  Scroll to resize · Click the canvas or press Enter to place ·
+                  Escape cancels
+                </small>
+                <button type="button" onClick={cancelEquippedStamp}>
+                  Cancel placement
+                </button>
+              </div>
+            ) : null}
           </div>
         ) : null}
         {templateStatus ? (

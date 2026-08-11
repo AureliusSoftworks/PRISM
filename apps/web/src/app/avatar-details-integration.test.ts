@@ -67,15 +67,28 @@ describe("Avatar Details Studio integration", () => {
     );
   });
 
-  it("uses user-authored saved ink instead of a canned accessory catalog", () => {
+  it("equips searchable user-authored stamps that flatten into editable ink", () => {
     assert.match(editorSource, /<strong>Screen editor<\/strong>/);
     assert.match(editorSource, /Shell-scaled preview/);
-    assert.match(editorSource, /<strong>Saved ink<\/strong>/);
+    assert.match(editorSource, /<strong>Stamps<\/strong>/);
+    assert.match(editorSource, /aria-label="Search stamps"/);
+    assert.match(editorSource, /filterAvatarDetailInkTemplates\(/);
+    assert.match(editorSource, /No stamps match/);
+    assert.match(editorSource, /aria-label="Save current ink as a stamp"/);
     assert.match(editorSource, /createAvatarDetailInkTemplate\(/);
     assert.match(editorSource, /applyAvatarDetailInkTemplate\(/);
     assert.match(editorSource, /saveAvatarDetailInkTemplates\(/);
-    assert.match(editorSource, /Place as editable ink/);
-    assert.match(editorSource, /erase it with any drawing tool/);
+    assert.match(editorSource, /data-avatar-details-stamp-preview="true"/);
+    assert.match(editorSource, /data-stamp-equipped="true"/);
+    assert.match(editorSource, /aria-label="Make stamp smaller"/);
+    assert.match(editorSource, /aria-label="Make stamp larger"/);
+    assert.match(editorSource, /handleCanvasWheel/);
+    assert.match(editorSource, /event\.key === "Enter"/);
+    assert.match(editorSource, /event\.key === "Escape"/);
+    assert.match(editorSource, /Use Move if you want to reposition it/);
+    assert.match(editorSource, /setEquippedStampPosition/);
+    assert.match(editorSource, /commitEquippedStamp/);
+    assert.match(editorSource, /cancelEquippedStamp/);
     assert.match(editorSource, /Convert to ink/);
     assert.doesNotMatch(editorSource, /AVATAR_DETAIL_STAMP_DEFINITIONS/);
     assert.doesNotMatch(editorSource, /toggleAvatarDetailStamp\(/);
@@ -87,6 +100,8 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /aria-label="Randomize ink recipe"/);
     assert.match(pageSource, /templateOwnerId=\{avatarInkTemplateOwnerId\}/);
     assert.match(pageSource, /avatarInkTemplateOwnerId=\{user\?\.id \?\? "local"\}/);
+    assert.match(pageSource, /label=\{`\$\{equippedInkStamp\.name\} position`\}/);
+    assert.match(pageSource, /onEquippedStampChange=\{\(stamp\) =>/);
   });
 
   it("uses compact icon tools without losing labels or selected state", () => {
@@ -446,12 +461,14 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorSource, /setPaintMode\("bucket"\)/);
     assert.match(editorSource, /setPaintMode\("circle"\)/);
     assert.match(editorSource, /setPaintMode\("move"\)/);
-    assert.match(editorSource, /data-tool=\{paintMode\}/);
+    assert.match(
+      editorSource,
+      /data-tool=\{(?:equippedTemplate \? "stamp" : )?paintMode\}/,
+    );
     assert.match(
       editorCss,
       /\.inputSurface\[data-tool="move"\][\s\S]*cursor:\s*grab/,
     );
-    assert.doesNotMatch(editorSource, /onKeyDown=\{handleCanvasKeyDown\}/);
     assert.doesNotMatch(editorSource, /Keyboard: B\/E\/C\/M/);
     assert.doesNotMatch(editorCss, /\.keyboardHelp|\.keyboardCursor/);
   });
@@ -657,7 +674,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       editorCss,
-      /\.screenBoundary,\s*\.canvas,\s*\.pixelGrid,\s*\.symmetryGuide,\s*\.inputSurface\s*\{[\s\S]*transform:\s*scale\(var\(--avatar-details-ink-aperture-scale, 1\)\);[\s\S]*transform-origin:\s*center;/,
+      /\.screenBoundary,\s*\.canvas,\s*\.stampPreview,\s*\.pixelGrid,\s*\.symmetryGuide,\s*\.inputSurface\s*\{[\s\S]*transform:\s*scale\(var\(--avatar-details-ink-aperture-scale, 1\)\);[\s\S]*transform-origin:\s*center;/,
     );
     assert.doesNotMatch(pageCss, /--coffee-speaker-gaze-face-shift-x/);
     assert.doesNotMatch(

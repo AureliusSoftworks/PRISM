@@ -179,6 +179,18 @@ export function saveAvatarDetailInkTemplates(
   return normalized;
 }
 
+export function filterAvatarDetailInkTemplates(
+  templates: readonly AvatarDetailInkTemplateV1[],
+  query: string,
+): AvatarDetailInkTemplateV1[] {
+  const normalizedQuery = query.trim().toLowerCase();
+  return normalizedQuery
+    ? templates.filter((template) =>
+        template.name.toLowerCase().includes(normalizedQuery),
+      )
+    : [...templates];
+}
+
 export function createAvatarDetailInkTemplate(
   details: AvatarDetailsV1,
   name: string,

@@ -20,6 +20,7 @@ import {
   applyAvatarDetailInkTemplate,
   avatarDetailInkTemplateStorageKey,
   createAvatarDetailInkTemplate,
+  filterAvatarDetailInkTemplates,
   loadAvatarDetailInkTemplates,
   normalizeAvatarDetailInkTemplates,
   saveAvatarDetailInkTemplates,
@@ -173,6 +174,35 @@ test("keeps saved ink libraries scoped to the signed-in owner", () => {
     avatarDetailInkTemplateStorageKey("one"),
     avatarDetailInkTemplateStorageKey("two"),
   );
+});
+
+test("filters stamps by a case-insensitive name fragment", () => {
+  const heart = createAvatarDetailInkTemplate(
+    detailsWithInk([{ x: 64, y: 64, role: "effect" }]),
+    "Heart Eyes",
+    { id: "heart", nowMs: 42 },
+  );
+  const smile = createAvatarDetailInkTemplate(
+    detailsWithInk([{ x: 63, y: 64, role: "talking" }]),
+    "Small Smile",
+    { id: "smile", nowMs: 43 },
+  );
+  assert.ok(heart);
+  assert.ok(smile);
+
+  assert.deepEqual(
+    filterAvatarDetailInkTemplates([heart, smile], "  HEART ").map(
+      (template) => template.id,
+    ),
+    ["heart"],
+  );
+  assert.deepEqual(
+    filterAvatarDetailInkTemplates([heart, smile], "sm").map(
+      (template) => template.id,
+    ),
+    ["smile"],
+  );
+  assert.equal(filterAvatarDetailInkTemplates([heart, smile], " ").length, 2);
 });
 
 test("flattens retired catalog decorations into effect ink without visual loss", () => {
