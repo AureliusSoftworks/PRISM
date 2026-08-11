@@ -10205,28 +10205,79 @@ export function DebateExperience(
     [props.audioEnabled, props.audioVolume],
   );
 
-  const prepareArchivedOpeningVoice = useCallback(
-    async (session: DebateSessionV1): Promise<string | null> => {
-      const event = debatePresentationEvents(null, session, false).find(
-        (candidate) =>
-          candidate.speakerKind !== "system" && candidate.kind !== "error",
-      );
-      if (!event) return null;
-      const utterance = debateUtteranceForEvent(session, event);
-      if (!utterance || !onPrepareUtterance) return event.id;
-      setVoicePreparationSpeakerBotId(
-        utterance.speaker?.id ?? event.speakerBotId,
-      );
-      try {
-        await onPrepareUtterance(utterance);
-      } catch {
-        // System voice remains an immediate fallback; Start must never deadlock.
-      } finally {
-        if (mountedRef.current) setVoicePreparationSpeakerBotId(null);
+  const preloadDebateVoiceRunway = useCallback(
+    async (
+      session: DebateSessionV1,
+      events: DebateSessionV1["events"],
+      showFirstSpeaker = false,
+    ): Promise<string | null> => {
+      if (!onPrepareUtterance) return null;
+      const utterances = events.flatMap((event) => {
+        const utterance = debateUtteranceForEvent(session, event);
+        return utterance ? [utterance] : [];
+      });
+      const first = utterances[0] ?? null;
+      if (!first) return null;
+
+      // The exact next audible beat is the return gate. Everything after it is
+      // an opportunistic runway: two workers keep voice synthesis ahead of the
+      // presenter without mutating Proceedings or advancing the saved floor.
+      if (showFirstSpeaker) {
+        setVoicePreparationSpeakerBotId(
+          first.speaker?.id ?? first.event.speakerBotId,
+        );
       }
-      return event.id;
+      try {
+        await onPrepareUtterance(first).catch(() => undefined);
+      } finally {
+        if (showFirstSpeaker && mountedRef.current) {
+          setVoicePreparationSpeakerBotId(null);
+        }
+      }
+      const remaining = utterances.slice(1);
+      if (remaining.length > 0) {
+        let nextIndex = 0;
+        const worker = async (): Promise<void> => {
+          while (nextIndex < remaining.length) {
+            const utterance = remaining[nextIndex];
+            nextIndex += 1;
+            if (!utterance) continue;
+            await onPrepareUtterance(utterance).catch(() => undefined);
+          }
+        };
+        void Promise.allSettled([worker(), worker()]);
+      }
+      return first.event.id;
     },
     [debateUtteranceForEvent, onPrepareUtterance],
+  );
+
+  const preloadReturnedDebateVoices = useCallback(
+    async (session: DebateSessionV1): Promise<string | null> => {
+      const heldEvent = session.pausedPresentationEventId
+        ? (session.events.find(
+            (event) => event.id === session.pausedPresentationEventId,
+          ) ?? null)
+        : null;
+      const returnEvents = heldEvent
+        ? debateResumeFloorReplayEvents(
+            session.events,
+            heldEvent.sequence,
+          )
+        : debateSessionAwaitingFirstPresentation(session) ||
+            debateSpectatorAwaitingFirstWatch(session) ||
+            session.playerRole === "spectator" ||
+            session.status === "completed"
+          ? session.events
+          : [];
+      const presentationEvents = debatePresentationEvents(
+        null,
+        { ...session, events: returnEvents },
+        true,
+      );
+      return preloadDebateVoiceRunway(session, presentationEvents, true);
+    },
+    [preloadDebateVoiceRunway],
   );
 
   const discardPreparedTurn = useCallback(
@@ -10605,8 +10656,12 @@ export function DebateExperience(
       // waits until after that lift, or we restore the same hold when done.
       const needsSpectatorBakeResume =
         session.playerRole === "spectator" &&
+        session.status !== "completed" &&
+        session.status !== "cancelled" &&
+        session.status !== "failed" &&
         session.liveBake?.status !== "ready" &&
-        liveBakeShouldResumeOnOpen(session.liveBake);
+        (session.liveBake?.status === "baking" ||
+          liveBakeShouldResumeOnOpen(session.liveBake));
       const openingPreloadRequested =
         deferredStartAtOpen ||
         debateSessionAwaitingFirstPresentation(session) ||
@@ -10861,11 +10916,12 @@ export function DebateExperience(
             session.liveBake?.status === "ready",
         ),
       );
+      activeSessionRef.current = session;
       setActiveSession(session);
       setExhaustedExitOpen(false);
       if (debateSessionAwaitingFirstPresentation(session)) {
         await Promise.all([
-          prepareArchivedOpeningVoice(session),
+          preloadReturnedDebateVoices(session),
           preloadDebateIdentAudio("intro"),
         ]);
         if (!openingIsCurrent()) return;
@@ -10909,6 +10965,14 @@ export function DebateExperience(
         setSpectatorGalleryArrivalUnlockedAt(null);
         setView("live");
         setOpeningPreloadSessionId(null);
+        // Mount the exact returned chamber before waiting on its first voice.
+        // CSS scene media + gavel Foley preload from the live surface, then the
+        // already-generated audible tail keeps filling its cache in background.
+        await new Promise<void>((resolve) =>
+          window.requestAnimationFrame(() => resolve()),
+        );
+        if (!openingIsCurrent()) return;
+        await preloadReturnedDebateVoices(session);
       }
     } catch (caught) {
       if (archiveOpeningLifted) {
@@ -11929,7 +11993,10 @@ export function DebateExperience(
     }
     const sessionId = activeSession.id;
     let cancelled = false;
+    let pollInFlight = false;
     const tick = async (): Promise<void> => {
+      if (pollInFlight) return;
+      pollInFlight = true;
       try {
         const polled = await props.request<{ session: DebateSessionV1 }>(
           `/api/debates/${encodeURIComponent(sessionId)}`,
@@ -11939,6 +12006,8 @@ export function DebateExperience(
         if (activeSessionIdRef.current !== sessionId) return;
         const previous = activeSession;
         if (previous.id !== sessionId) return;
+        let acceptedPolledRevision =
+          previous.revision === polled.session.revision;
         if (previous.revision === polled.session.revision) {
           if (
             JSON.stringify(previous.liveBake) !==
@@ -11955,18 +12024,53 @@ export function DebateExperience(
           !debateFloorMutationInFlightRef.current &&
           !presentationSuspended
         ) {
+          const freshRunway = debatePresentationEvents(
+            previous,
+            polled.session,
+            debateJuryCameraIsActive(
+              debateCameraModeForSession(
+                cameraModeRef.current,
+                polled.session,
+              ),
+              polled.session,
+            ),
+          );
+          await preloadDebateVoiceRunway(
+            polled.session,
+            freshRunway,
+          );
+          if (cancelled || !mountedRef.current) return;
+          if (activeSessionIdRef.current !== sessionId) return;
           await adoptSession(previous, polled.session);
+          acceptedPolledRevision = true;
         } else {
-          setActiveSession(polled.session);
+          // Never absorb a new event revision while its predecessor is still
+          // presenting. Doing so erases the delta before adoptSession can play
+          // it, causing skipped lines and camera-angle ping-pong. Bake metadata
+          // may advance independently while still baking. A terminal bake state
+          // stays withheld so this poller survives to adopt the final revision.
+          if (
+            polled.session.liveBake?.status === "baking" &&
+            JSON.stringify(previous.liveBake) !==
+              JSON.stringify(polled.session.liveBake)
+          ) {
+            setActiveSession({
+              ...previous,
+              liveBake: polled.session.liveBake,
+            });
+          }
         }
         if (
-          polled.session.liveBake?.status === "failed" ||
-          polled.session.liveBake?.status === "cancelled"
+          (polled.session.liveBake?.status === "failed" ||
+            polled.session.liveBake?.status === "cancelled") &&
+          acceptedPolledRevision
         ) {
           setSpectatorBakeLiveFallback(true);
         }
       } catch {
         // Soft poll — next interval retries.
+      } finally {
+        pollInFlight = false;
       }
     };
     const timer = window.setInterval(() => {
@@ -11983,6 +12087,7 @@ export function DebateExperience(
     busy,
     presentationSuspended,
     presenting,
+    preloadDebateVoiceRunway,
     props.request,
     spectatorBakeLiveFallback,
     view,

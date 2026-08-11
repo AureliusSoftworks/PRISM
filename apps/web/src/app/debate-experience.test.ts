@@ -374,10 +374,7 @@ describe("Debate experience", () => {
       pageCss,
       /\.debateBotPresencePlate\s*\{[\s\S]{0,240}--avatar-details-offset-y:/u,
     );
-    assert.match(
-      avatarDetailsCss,
-      /translateY\(var\(--avatar-details-offset-y,\s*0px\)\)/u,
-    );
+    assert.doesNotMatch(avatarDetailsCss, /--avatar-details-offset-y/u);
   });
 
   it("mounts the live chamber during Spectator pre-bake instead of a fullscreen loader", () => {
@@ -3680,6 +3677,43 @@ describe("Debate experience", () => {
     assert.match(css, /pointer-events:\s*auto/u);
   });
 
+  it("places theme-aware fog between the rear and front gallery rows", () => {
+    assert.match(css, /gallery-chamber-dark\.webp/u);
+    assert.match(css, /gallery-chamber-light\.webp/u);
+    assert.ok(
+      existsSync(
+        fileURLToPath(
+          new URL("../../public/debate/gallery-chamber-dark.webp", import.meta.url),
+        ),
+      ),
+    );
+    assert.ok(
+      existsSync(
+        fileURLToPath(
+          new URL("../../public/debate/gallery-chamber-light.webp", import.meta.url),
+        ),
+      ),
+    );
+    assert.match(css, /--debate-gallery-fog-core:/u);
+    assert.match(css, /--debate-gallery-fog-opacity:\s*0\.2/u);
+    assert.match(
+      css,
+      /\.debateAudienceRow::after\s*\{[^}]*z-index:\s*2[^}]*var\(--debate-gallery-fog-core\)[^}]*filter:\s*blur\(8px\)[^}]*opacity:\s*var\(--debate-gallery-fog-opacity\)/u,
+    );
+    assert.match(
+      css,
+      /\.debateAudienceLayer\s*\{[^}]*z-index:\s*3/u,
+    );
+    assert.match(
+      css,
+      /\.debateAudienceLayer\[data-depth-row="rear"\]\s*\{[^}]*z-index:\s*1/u,
+    );
+    assert.match(
+      css,
+      /\.live\[data-theme="light"\] \.debateAudienceRow\s*\{[^}]*--debate-gallery-fog-core:\s*rgba\(203, 197, 207, 0\.88\)[^}]*--debate-gallery-fog-opacity:\s*0\.12/u,
+    );
+  });
+
   it("shouts bot objections while keeping the visible transcript literal", () => {
     assert.match(source, /voicePerformanceText\?: string \| null/u);
     assert.match(
@@ -3892,7 +3926,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /await Promise\.all\(\[[\s\S]{0,180}prepareArchivedOpeningVoice\(session\)[\s\S]{0,180}preloadDebateIdentAudio\("intro"\)[\s\S]{0,1400}arrival\.arrivalComplete[\s\S]{0,500}setView\("live"\)[\s\S]{0,180}setOpeningPreloadSessionId\(null\)[\s\S]{0,140}playPreparedOpeningTitleMusic\(session\.id\)/u,
+      /await Promise\.all\(\[[\s\S]{0,180}preloadReturnedDebateVoices\(session\)[\s\S]{0,180}preloadDebateIdentAudio\("intro"\)[\s\S]{0,1400}arrival\.arrivalComplete[\s\S]{0,500}setView\("live"\)[\s\S]{0,180}setOpeningPreloadSessionId\(null\)[\s\S]{0,140}playPreparedOpeningTitleMusic\(session\.id\)/u,
     );
     assert.match(
       source,
@@ -3901,6 +3935,41 @@ describe("Debate experience", () => {
     assert.match(
       source,
       /holdTitle="Gallery ready"[\s\S]{0,500}label: "Start Debate"/u,
+    );
+  });
+
+  it("preloads the exact returned floor and keeps an audible runway ahead", () => {
+    assert.match(
+      source,
+      /const preloadDebateVoiceRunway = useCallback\([\s\S]{0,500}debateUtteranceForEvent\(session, event\)[\s\S]{0,1200}Promise\.allSettled\(\[worker\(\), worker\(\)\]\)/u,
+    );
+    assert.match(
+      source,
+      /const preloadReturnedDebateVoices = useCallback\([\s\S]{0,600}session\.pausedPresentationEventId[\s\S]{0,400}debateResumeFloorReplayEvents\([\s\S]{0,800}debatePresentationEvents\([\s\S]{0,300}preloadDebateVoiceRunway\(session, presentationEvents, true\)/u,
+    );
+    assert.match(
+      source,
+      /activeSessionRef\.current = session;[\s\S]{0,120}setActiveSession\(session\)[\s\S]{0,5000}setView\("live"\)[\s\S]{0,900}requestAnimationFrame[\s\S]{0,260}await preloadReturnedDebateVoices\(session\)/u,
+    );
+    assert.match(
+      source,
+      /session\.liveBake\?\.status === "baking" \|\|[\s\S]{0,100}liveBakeShouldResumeOnOpen\(session\.liveBake\)/u,
+    );
+    assert.match(
+      source,
+      /const freshRunway = debatePresentationEvents\([\s\S]{0,500}await preloadDebateVoiceRunway\([\s\S]{0,220}await adoptSession\(previous, polled\.session\)/u,
+    );
+    assert.match(
+      source,
+      /let pollInFlight = false[\s\S]{0,120}if \(pollInFlight\) return[\s\S]{0,120}pollInFlight = true[\s\S]{0,5000}finally \{[\s\S]{0,80}pollInFlight = false/u,
+    );
+    assert.match(
+      source,
+      /Never absorb a new event revision while its predecessor is still[\s\S]{0,500}polled\.session\.liveBake\?\.status === "baking"[\s\S]{0,300}\.\.\.previous,[\s\S]{0,120}liveBake: polled\.session\.liveBake/u,
+    );
+    assert.match(
+      source,
+      /polled\.session\.liveBake\?\.status === "failed"[\s\S]{0,160}acceptedPolledRevision[\s\S]{0,100}setSpectatorBakeLiveFallback\(true\)/u,
     );
   });
 
@@ -4326,11 +4395,11 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.forumCamera\[data-camera-view="moderator"\]\s+\.receiverMatte\s*\{[^}]*moderator-dark\.png/u,
+      /\.forumCamera\[data-camera-view="moderator"\]\s+\.receiverMatte\s*\{[^}]*moderator-dark\.webp/u,
     );
     assert.match(
       css,
-      /\.live\[data-theme="light"\]\s+\.forumCamera\[data-camera-view="moderator"\]\s+\.receiverMatte\s*\{[^}]*moderator-light\.png/u,
+      /\.live\[data-theme="light"\]\s+\.forumCamera\[data-camera-view="moderator"\]\s+\.receiverMatte\s*\{[^}]*moderator-light\.webp/u,
     );
     assert.match(
       css,

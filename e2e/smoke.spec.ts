@@ -6025,7 +6025,7 @@ test.describe("PRISM desktop smoke", () => {
         [
           "/debate/forum-light.webp",
           "/debate/forum-light-foreground.png",
-          "/debate/moderator-light.png",
+          "/debate/moderator-light.webp",
           "/debate/moderator-light-foreground.png",
         ].map(async (source) => {
           const image = new Image();
@@ -6047,7 +6047,7 @@ test.describe("PRISM desktop smoke", () => {
     ).toBeVisible();
     await expect(alignmentReceiver).toHaveCSS(
       "background-image",
-      /moderator-light\.png/u,
+      /moderator-light\.webp/u,
     );
     await expect(
       dashboardAlignment.locator('[data-light-depth="backdrop"]'),
