@@ -123442,6 +123442,7 @@ function HomeContent(): React.JSX.Element {
                 <AssetRail
                   kind="general_image"
                   label="Recent images"
+                  viewAllLabel="Asset Library"
                   context={imagePanelBot?.name ?? activeBot?.name ?? imagePrompt}
                   refreshKey={images.length}
                   onSynthesize={synthesizeGeneralImage}

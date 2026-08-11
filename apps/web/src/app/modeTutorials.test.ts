@@ -180,6 +180,14 @@ describe("mode tutorials", () => {
     assert.match(step.body, /Original and With accent/u);
   });
 
+  it("points Images players to the Asset Library", () => {
+    const step = MODE_TUTORIALS.chat.steps.find(
+      (candidate) => candidate.heading === "Use quick tools",
+    );
+    assert.ok(step);
+    assert.match(step.body, /Asset Library opens the searchable general-image collection/u);
+  });
+
   it("teaches shared Chat/Zen Atmosphere with gradient fallback", () => {
     const step = MODE_TUTORIALS.zen.steps.find(
       (candidate) =>

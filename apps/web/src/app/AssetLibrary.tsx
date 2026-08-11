@@ -59,6 +59,7 @@ interface MagentaPassResponse {
 export interface AssetRailProps {
   kind: ImageAssetKind;
   label?: string;
+  viewAllLabel?: string;
   context?: string | null;
   currentImageIds?: readonly (string | null | undefined)[];
   refreshKey?: string | number | null;
@@ -204,6 +205,7 @@ function AssetPreview({ asset }: { asset: ImageAssetSet }) {
 export function AssetRail({
   kind,
   label,
+  viewAllLabel = "View all",
   context,
   currentImageIds = [],
   refreshKey,
@@ -336,7 +338,7 @@ export function AssetRail({
           className={sharedStyles.linkButton}
           onClick={() => setModalOpen(true)}
         >
-          View all
+          {viewAllLabel}
         </button>
       </header>
       <div className={styles.rail}>

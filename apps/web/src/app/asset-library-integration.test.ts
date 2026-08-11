@@ -53,7 +53,8 @@ describe("typed local asset library", () => {
     assert.match(assetSource, /query\.set\("context", context\.trim\(\)\)/u);
     assert.match(assetSource, /currentImageIds/u);
     assert.match(assetSource, /assetSourceLabel\(asset\)/u);
-    assert.match(assetSource, /View all/u);
+    assert.match(assetSource, /viewAllLabel = "View all"/u);
+    assert.match(assetSource, /\{viewAllLabel\}/u);
   });
 
   it("uses one dual-purpose + target with an accessible touch fallback", () => {
@@ -172,6 +173,7 @@ describe("typed local asset library", () => {
       pageSource.indexOf('<AssetRail\n                  kind="general_image"'),
       pageSource.indexOf("{imageKeywordEditorOpen &&"),
     );
+    assert.match(generalImageRail, /viewAllLabel="Asset Library"/u);
     assert.doesNotMatch(generalImageRail, /onUpload/u);
     assert.doesNotMatch(pageSource, /generalImageUploadRef|uploadGeneralImage/u);
     assert.match(assetSource, /onUpload\?: \(\) => void/u);
