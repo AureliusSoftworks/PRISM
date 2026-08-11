@@ -10,9 +10,6 @@ import {
   BOT_AVATAR_SFX_ATTACK_MS,
   BOT_AVATAR_SFX_LOOP_CROSSFADE_SECONDS,
   BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
-  BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS,
-  BOT_AVATAR_SFX_PLAYBACK_LOOP_RESTART_LEAD_SECONDS,
-  BOT_AVATAR_SFX_PLAYBACK_SHORT_LOOP_TRIM_RATIO,
   BOT_AVATAR_SFX_SHORT_LOOP_TRIM_RATIO,
   BOT_AVATAR_SFX_RELEASE_MS,
   GENERATED_BOT_THINKING_SFX_PROMPT,
@@ -112,7 +109,7 @@ test("bot thinking SFX follows the rendered bot's horizontal location", () => {
   );
 });
 
-test("avatar SFX trims both loop edges and scales the trim for short clips", () => {
+test("avatar SFX trims silent loop pads and plays the full audible body", () => {
   assert.deepEqual(botAvatarSfxLoopBounds(4), {
     startTime: BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
     endTime: 4 - BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
@@ -133,46 +130,23 @@ test("avatar SFX trims both loop edges and scales the trim for short clips", () 
   assert.equal(botAvatarSfxLoopBounds(Number.NaN), null);
   assert.equal(
     botAvatarSfxLoopRestartTime(0, 4),
-    BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS,
+    BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
   );
   assert.equal(
     botAvatarSfxLoopRestartTime(
-      4 - BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS,
+      4 - BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
       4,
     ),
-    BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS,
+    BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
   );
   assert.equal(
     botAvatarSfxLoopRestartTime(
-      4 -
-        BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS -
-        BOT_AVATAR_SFX_PLAYBACK_LOOP_RESTART_LEAD_SECONDS,
-      4,
-    ),
-    BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS,
-  );
-  assert.equal(
-    botAvatarSfxLoopRestartTime(
-      4 -
-        BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS -
-        BOT_AVATAR_SFX_PLAYBACK_LOOP_RESTART_LEAD_SECONDS -
-        0.01,
+      4 - BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS - 0.01,
       4,
     ),
     null,
   );
   assert.equal(botAvatarSfxLoopRestartTime(2, 4), null);
-  const shortPlayback = botAvatarSfxLoopBounds(0.4, {
-    edgeTrimSeconds: BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS,
-    shortLoopTrimRatio: BOT_AVATAR_SFX_PLAYBACK_SHORT_LOOP_TRIM_RATIO,
-  });
-  assert.ok(shortPlayback);
-  assert.ok(
-    Math.abs(
-      shortPlayback.startTime -
-        0.4 * BOT_AVATAR_SFX_PLAYBACK_SHORT_LOOP_TRIM_RATIO,
-    ) < 1e-10,
-  );
 });
 
 test("generated avatar loops bake the trimmed tail into a crossfaded buffer", () => {
@@ -461,7 +435,7 @@ test("Avatar Studio sample fades in, trims its start, and releases before pausin
     audio as unknown as HTMLMediaElement,
     sfx,
   );
-  assert.equal(audio.currentTime, BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS);
+  assert.equal(audio.currentTime, BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS);
   assert.equal(audio.loop, false);
   assert.equal(audio.paused, false);
   assert.equal(audio.volume, 0);
@@ -490,7 +464,7 @@ test("Avatar Studio restarts at the trimmed start when the media element reaches
   audio.paused = true;
   audio.emit("ended");
 
-  assert.equal(audio.currentTime, BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS);
+  assert.equal(audio.currentTime, BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS);
   assert.equal(audio.playCalls, 2);
   assert.equal(audio.loop, false);
   stopBotAvatarSfxSampleAudio(audio as unknown as HTMLMediaElement);
@@ -524,7 +498,7 @@ test("Avatar Studio sample cancels a release and fades source replacements safel
   );
   assert.equal(audio.src, replacement.audioDataUrl);
   assert.equal(audio.loadCalls, 2);
-  assert.equal(audio.currentTime, BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS);
+  assert.equal(audio.currentTime, BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS);
   assert.equal(audio.paused, false);
 
   stopBotAvatarSfxSampleAudio(audio as unknown as HTMLMediaElement);
