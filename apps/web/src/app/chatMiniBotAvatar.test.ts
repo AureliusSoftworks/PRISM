@@ -85,7 +85,7 @@ describe("chatMiniBotAvatar", () => {
     assert.doesNotMatch(componentSource, /magentaTintedRasterUrl/);
   });
 
-  it("adds the communication-style alloy while remaining non-emissive", () => {
+  it("adds the communication-style alloy and keeps illumination opt-in", () => {
     assert.match(cssSource, /\.frameBase/);
     assert.match(cssSource, /\.frameAlloy/);
     assert.match(cssSource, /bot-frame-mini-metal-mask\.png/);
@@ -113,7 +113,7 @@ describe("chatMiniBotAvatar", () => {
     assert.match(cssSource, /\.lowerScreen/);
     assert.match(
       cssSource,
-      /\.upperScreen\s*\{[^}]*z-index:\s*4/,
+      /\.upperScreen\s*\{[^}]*z-index:\s*7/,
     );
     assert.match(cssSource, /\.frameBase\s*\{[^}]*z-index:\s*2/);
     assert.match(
@@ -132,17 +132,51 @@ describe("chatMiniBotAvatar", () => {
     assert.match(cssSource, /\.sizeHero/);
     assert.match(
       cssSource,
-      /\.sizeHero\s*\{[^}]*--chat-mini-bot-glyph-size:\s*clamp\(19px, 1\.8vw, 23px\)/,
+      /\.sizeHero\s*\{[^}]*--chat-mini-bot-glyph-size:\s*clamp\(20px, 1\.9vw, 24px\)/,
+    );
+    assert.match(
+      cssSource,
+      /\.sizeRoom\s*\{[^}]*--chat-mini-bot-glyph-size:\s*11px/,
     );
     assert.match(cssSource, /\.sizeBadge/);
     assert.doesNotMatch(cssSource, /\.frameOff|\.frameOn/);
     assert.doesNotMatch(componentSource, /data-talking/);
     assert.doesNotMatch(componentSource, /data-tint-ready/);
     assert.match(componentSource, /size\?: "badge" \| "room" \| "hero"/);
+    assert.match(componentSource, /lightMode\?: "off" \| "breathing"/);
+    assert.match(componentSource, /const lightMode = props\.lightMode \?\? "off"/);
+    assert.match(componentSource, /data-light-mode=\{lightMode\}/);
+    assert.match(componentSource, /lightMode === "breathing"/);
+    assert.match(componentSource, /styles\.frameLightAura/);
+    assert.match(componentSource, /styles\.frameLightEmitter/);
+    assert.match(componentSource, /styles\.frameLightCore/);
     assert.match(cssSource, /\.root\[data-size="hero"\]::before/);
     assert.match(cssSource, /\.root\[data-size="hero"\]::after/);
-    assert.match(cssSource, /width: clamp\(132px, 11vw, 154px\)/);
-    assert.match(cssSource, /width: 116px/);
+    assert.match(cssSource, /width: clamp\(160px, 12\.5vw, 184px\)/);
+    assert.match(cssSource, /width: 140px/);
+    assert.match(cssSource, /bot-frame-tint-mask\.png\?v=1000/);
+    assert.match(cssSource, /bot-frame-led\.png\?v=1000/);
+    assert.match(
+      cssSource,
+      /\.root\[data-light-mode="breathing"\] \.frameLightAura/,
+    );
+    assert.match(cssSource, /chatMiniBotLightAuraBreath 6\.4s/);
+    assert.match(cssSource, /chatMiniBotLightEmitterBreath 6\.4s/);
+    assert.match(cssSource, /chatMiniBotLightCoreBreath 6\.4s/);
+    assert.match(cssSource, /@media \(prefers-reduced-motion: reduce\)/);
+    assert.match(
+      cssSource,
+      /\.root:is\(\[data-size="hero"\], \[data-size="room"\]\) \.lowerScreen::before/,
+    );
+    assert.match(cssSource, /--chat-mini-buckle-crt-cell-pitch:\s*2px/);
+    assert.match(cssSource, /--chat-mini-buckle-crt-cell-pitch:\s*1\.5px/);
+    assert.match(cssSource, /repeating-linear-gradient\(\s*90deg/);
+    assert.match(cssSource, /repeating-linear-gradient\(\s*0deg/);
+    assert.match(cssSource, /\.lowerScreen\s*\{[^}]*overflow:\s*hidden/);
+    assert.doesNotMatch(
+      cssSource,
+      /\.root\[data-size="badge"\][^{]*\.lowerScreen::before/,
+    );
   });
 
   it("mounts the mini avatar in the empty Chat/Zen selected-bot hero", () => {
@@ -153,6 +187,10 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(pageSource, /size = "hero"/);
     assert.match(pageSource, /<ChatMiniBotAvatar\s+size=\{size\}/);
+    assert.match(
+      pageSource,
+      /lightMode=\{size === "hero" \? "breathing" : "off"\}/,
+    );
     assert.match(pageSource, /SELECT THE BOT TO START THE CHAT/);
     assert.match(pageCssSource, /\.emptyStateHeroMiniBot\b/);
     assert.match(pageCssSource, /\.emptyStateHeroMiniFace\b/);
@@ -178,13 +216,24 @@ describe("chatMiniBotAvatar", () => {
     ];
     assert.equal(miniFaceCalls.length, 3);
     for (const [miniFaceCall] of miniFaceCalls) {
+      assert.match(
+        miniFaceCall,
+        /faceEyeMovement="still"/,
+        "mini faces must keep their authored geometry stationary inside the small CRT aperture",
+      );
       assert.doesNotMatch(
         miniFaceCall,
+        /faceEyeMovement=\{/,
+        "mini faces must not inherit a bot's full-size eye-movement animation",
+      );
+      assert.match(
+        miniFaceCall,
         /\bpixelated\b/,
-        "mini faces must use the synchronous glyph path so a failed or pending full-size raster cannot blank them",
+        "mini faces use pixel glyphs as part of the chassis charm",
       );
       assert.doesNotMatch(miniFaceCall, /zenLiveBotPresenceFaceGlyph/);
     }
+    assert.match(pageSource, /miniAvatarBinaryMouthShape/);
     assert.match(pageSource, /style=\{miniFaceRegistrationStyle\}/);
     assert.match(pageSource, /BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE/);
     assert.match(pageSource, /BOT_AVATAR_FACE_GLYPH_FRAME_RATIO/);
@@ -230,7 +279,7 @@ describe("chatMiniBotAvatar", () => {
     );
     assert.match(pageSource, /coreColor="ink"/);
     assert.match(pageSource, /color=\{normalizedBotColor\}/);
-    assert.match(pageSource, /faceEyeMovement=\{faceStyle\.eyeAnimation\}/);
+    assert.match(pageSource, /faceEyeMovement="still"/);
     assert.match(
       pageCssSource,
       /\.emptyStateHeroMiniArt\[data-avatar-details-depth="behind-face"\][\s\S]*?z-index:\s*1/,

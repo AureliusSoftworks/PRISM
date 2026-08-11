@@ -10,9 +10,7 @@ import {
   BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE,
   BOT_AVATAR_DETAILS_INK_APERTURE_SCALE,
   botAvatarFaceFacingStyle,
-  botAvatarDetailsFacingOffsetY,
   botAvatarDetailsFacingScaleX,
-  botAvatarDetailsSignalFacingOffsetY,
 } from "./bot-avatar-render-geometry.ts";
 
 const pageSource = readFileSync(new URL("./page.tsx", import.meta.url), "utf8");
@@ -32,8 +30,6 @@ describe("Avatar Details face registration", () => {
       "--zen-live-bot-avatar-face-glyph-size":
         `${BOT_AVATAR_DETAILS_FACE_GLYPH_FRAME_RATIO * 100}cqw`,
       "--coffee-plate-emoji-nudge-y": BOT_AVATAR_DETAILS_FACE_NUDGE_Y,
-      "--avatar-details-ink-aperture-scale":
-        BOT_AVATAR_DETAILS_INK_APERTURE_SCALE,
     });
     assert.equal(BOT_AVATAR_DETAILS_INK_APERTURE_SCALE, 1);
   });
@@ -54,18 +50,6 @@ describe("botAvatarDetailsFacingScaleX", () => {
   });
 });
 
-describe("botAvatarDetailsFacingOffsetY", () => {
-  it("keeps canonical ink registration and lifts only the left-facing mirror", () => {
-    assert.equal(
-      botAvatarDetailsFacingOffsetY(BOT_AVATAR_CANONICAL_FACE_SCALE_Y),
-      "0%",
-    );
-    assert.equal(botAvatarDetailsFacingOffsetY(-1), "0%");
-    assert.equal(botAvatarDetailsFacingOffsetY("1"), "-2.34375%");
-    assert.equal(botAvatarDetailsFacingOffsetY(1), "-2.34375%");
-  });
-});
-
 describe("botAvatarFaceFacingStyle", () => {
   it("defines Avatar Studio's front-facing orientation as the default", () => {
     assert.deepEqual(BOT_AVATAR_CANONICAL_FACE_FACING_STYLE, {
@@ -73,7 +57,6 @@ describe("botAvatarFaceFacingStyle", () => {
         BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
       "--zen-live-bot-screen-facing-scale-x": "1",
       "--avatar-details-facing-scale-x": "1",
-      "--avatar-details-facing-offset-y": "0%",
     });
   });
 
@@ -85,17 +68,15 @@ describe("botAvatarFaceFacingStyle", () => {
           BOT_AVATAR_CANONICAL_FACE_SCALE_Y,
         "--zen-live-bot-screen-facing-scale-x": "1",
         "--avatar-details-facing-scale-x": "1",
-        "--avatar-details-facing-offset-y": "0%",
       },
     );
   });
 
-  it("mirrors and optically registers face ink as one operation", () => {
+  it("mirrors face and ink as one operation without translating either", () => {
     assert.deepEqual(botAvatarFaceFacingStyle(1), {
       "--coffee-plate-emoji-face-scale-y": "1",
       "--zen-live-bot-screen-facing-scale-x": "-1",
       "--avatar-details-facing-scale-x": "-1",
-      "--avatar-details-facing-offset-y": "-2.34375%",
     });
   });
 
@@ -109,10 +90,6 @@ describe("botAvatarFaceFacingStyle", () => {
       assert.equal(
         style["--zen-live-bot-screen-facing-scale-x"],
         botAvatarDetailsFacingScaleX(faceScaleY),
-      );
-      assert.equal(
-        style["--avatar-details-facing-offset-y"],
-        botAvatarDetailsFacingOffsetY(faceScaleY),
       );
     }
   });
@@ -132,7 +109,7 @@ describe("botAvatarFaceFacingStyle", () => {
     );
   });
 
-  it("preserves the flipped Ink optical offset inside the shared screen rig", () => {
+  it("forbids any post-flip Ink translation inside the shared screen rig", () => {
     const screenContentRigRule = pageCss.match(
       /\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*\}/,
     )?.[0];
@@ -145,25 +122,7 @@ describe("botAvatarFaceFacingStyle", () => {
     assert.doesNotMatch(
       screenContentRigRule,
       /--avatar-details-facing-offset-y\s*:/,
-      "the Ink layer must inherit the left-facing three-pixel lift",
-    );
-  });
-});
-
-describe("botAvatarDetailsSignalFacingOffsetY", () => {
-  it("lifts only Signal's Align-stage ink by one authored pixel", () => {
-    assert.equal(
-      botAvatarDetailsSignalFacingOffsetY(-1, "alignment"),
-      "calc(0% - 0.78125%)",
-    );
-    assert.equal(
-      botAvatarDetailsSignalFacingOffsetY(1, "alignment"),
-      "calc(-2.34375% - 0.78125%)",
-    );
-    assert.equal(botAvatarDetailsSignalFacingOffsetY(-1, "stage"), "0%");
-    assert.equal(
-      botAvatarDetailsSignalFacingOffsetY(1, "dashboard"),
-      "-2.34375%",
+      "the Ink layer may mirror but must never move after authoring",
     );
   });
 });

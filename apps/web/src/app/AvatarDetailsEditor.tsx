@@ -49,6 +49,7 @@ import {
   AVATAR_DETAILS_SYMMETRY_AXIS_X_MIN,
   avatarDetailsCirclePoints,
   avatarDetailsGridPointFromClient,
+  avatarDetailsMoveSelectionAt,
   avatarDetailsEqual,
   avatarDetailsKey,
   avatarDetailsPaintColorCoveragePercent,
@@ -72,9 +73,14 @@ import {
   type AvatarDetailsGridPoint,
   type AvatarDetailsInkRole,
   type AvatarDetailsInkSelection,
+  type AvatarDetailsMoveSelection,
   type AvatarDetailsTool,
   type AvatarDetailsV1,
 } from "./avatar-details";
+import {
+  PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
+  resamplePhosphorRgbaCoverage,
+} from "./phosphorPixelRaster";
 import {
   AVATAR_DETAIL_INK_TEMPLATE_LIMIT,
   AVATAR_DETAIL_INK_TEMPLATE_NAME_MAX_LENGTH,
@@ -191,8 +197,11 @@ interface AvatarDetailsPointerStroke {
   lastPoint: AvatarDetailsGridPoint;
   before: AvatarDetailsV1;
   beforeColorMap: Uint8Array;
+  moveSelection: AvatarDetailsMoveSelection;
   changed: boolean;
 }
+
+type AvatarDetailsMoveTarget = "auto" | AvatarDetailsInkRole[];
 
 function pointerGridPoint(
   event: Pick<
@@ -275,6 +284,8 @@ const AvatarDetailsEditorSession = forwardRef<
   const [paintMode, setPaintMode] = useState<AvatarDetailsTool>("brush");
   const [inkRole, setInkRole] =
     useState<AvatarDetailsInkSelection>("effect");
+  const [moveInkTarget, setMoveInkTarget] =
+    useState<AvatarDetailsMoveTarget>("auto");
   const [brushSize, setBrushSize] = useState<AvatarDetailsBrushSize>(3);
   const [symmetryEnabled, setSymmetryEnabled] = useState(false);
   const [symmetryAxisX, setSymmetryAxisX] = useState(
@@ -346,6 +357,20 @@ const AvatarDetailsEditorSession = forwardRef<
   } as CSSProperties;
   const selectedTemplate =
     inkTemplates.find((template) => template.id === selectedTemplateId) ?? null;
+  const moveInkAuto = moveInkTarget === "auto";
+  const selectedMoveInkRoles = moveInkAuto ? [] : moveInkTarget;
+
+  const toggleMoveInkRole = (role: AvatarDetailsInkRole): void => {
+    setMoveInkTarget((current) => {
+      const selected = new Set(current === "auto" ? [] : current);
+      if (selected.has(role)) selected.delete(role);
+      else selected.add(role);
+      if (selected.size === 0) return "auto";
+      return AVATAR_DETAILS_INK_ROLES.filter((candidate) =>
+        selected.has(candidate),
+      );
+    });
+  };
   const equippedTemplate =
     inkTemplates.find((template) => template.id === equippedTemplateId) ?? null;
   const normalizedTemplateQuery = templateName.trim().toLowerCase();
@@ -405,10 +430,18 @@ const AvatarDetailsEditorSession = forwardRef<
       if (!canvas || !context) return;
       const pixels = rasterizeAvatarDetailsSemanticRgba(details, faceStyle);
       const imageData = context.createImageData(
-        AVATAR_DETAILS_CANVAS_SIZE,
-        AVATAR_DETAILS_CANVAS_SIZE,
+        PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
+        PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
       );
-      imageData.data.set(pixels);
+      imageData.data.set(
+        resamplePhosphorRgbaCoverage(
+          pixels,
+          AVATAR_DETAILS_CANVAS_SIZE,
+          AVATAR_DETAILS_CANVAS_SIZE,
+          PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
+          PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
+        ),
+      );
       context.imageSmoothingEnabled = false;
       context.putImageData(imageData, 0, 0);
     },
@@ -573,11 +606,17 @@ const AvatarDetailsEditorSession = forwardRef<
       },
     );
     const imageData = context.createImageData(
-      AVATAR_DETAILS_CANVAS_SIZE,
-      AVATAR_DETAILS_CANVAS_SIZE,
+      PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
+      PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
     );
     imageData.data.set(
-      rasterizeAvatarDetailsSemanticRgba(preview.details, faceStyle),
+      resamplePhosphorRgbaCoverage(
+        rasterizeAvatarDetailsSemanticRgba(preview.details, faceStyle),
+        AVATAR_DETAILS_CANVAS_SIZE,
+        AVATAR_DETAILS_CANVAS_SIZE,
+        PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
+        PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
+      ),
     );
     context.imageSmoothingEnabled = false;
     context.putImageData(imageData, 0, 0);
@@ -995,10 +1034,14 @@ const AvatarDetailsEditorSession = forwardRef<
       stroke: AvatarDetailsPointerStroke,
       point: AvatarDetailsGridPoint,
     ): boolean => {
-      const result = moveAvatarDetailsPaintColorMap(stroke.beforeColorMap, {
-        x: point.x - stroke.startPoint.x,
-        y: point.y - stroke.startPoint.y,
-      }, inkRole === "erase" ? "all" : inkRole);
+      const result = moveAvatarDetailsPaintColorMap(
+        stroke.beforeColorMap,
+        {
+          x: point.x - stroke.startPoint.x,
+          y: point.y - stroke.startPoint.y,
+        },
+        stroke.moveSelection,
+      );
       setLimitReached(false);
       updateWorking(
         avatarDetailsWithPaintColorMap(stroke.before, result.colorMap),
@@ -1006,7 +1049,7 @@ const AvatarDetailsEditorSession = forwardRef<
       );
       return result.changed;
     },
-    [inkRole, updateWorking],
+    [updateWorking],
   );
 
   const applyBucket = useCallback(
@@ -1071,6 +1114,12 @@ const AvatarDetailsEditorSession = forwardRef<
       lastPoint: point,
       before,
       beforeColorMap,
+      moveSelection:
+        paintMode !== "move"
+          ? []
+          : moveInkAuto
+            ? avatarDetailsMoveSelectionAt(beforeColorMap, point)
+            : [...selectedMoveInkRoles],
       changed: false,
     };
     pointerStrokeRef.current = stroke;
@@ -1304,22 +1353,29 @@ const AvatarDetailsEditorSession = forwardRef<
     commitMutation(avatarDetailsWithPaintColorMap(workingRef.current, colorMap));
   };
 
+  const selectedMoveInkLabel = selectedMoveInkRoles
+    .map(
+      (role) =>
+        AVATAR_DETAILS_INK_OPTIONS.find((option) => option.role === role)
+          ?.label ?? role,
+    )
+    .join(" + ");
   const canvasInstruction = equippedTemplate
     ? `${equippedTemplate.name} stamp equipped at ${templateScalePct} percent. Use the grid pad to position it, scroll or use plus and minus to resize, click or press Enter to place, or press Escape to cancel.`
     : `${
         paintMode === "move"
-          ? inkRole === "erase"
-            ? "Drag to move all ink."
-            : `Drag to move only ${AVATAR_DETAILS_INK_OPTIONS.find((option) => option.role === inkRole)?.label ?? "the selected ink"}.`
+          ? moveInkAuto
+            ? "Drag painted ink to move the layer under your pointer."
+            : `Drag to move ${selectedMoveInkLabel} together.`
           : paintMode === "bucket"
             ? inkRole === "erase"
               ? "Click a painted region to erase it."
               : "Click a painted region to change its ink behavior."
-          : paintMode === "line"
-            ? "Drag between two points to draw a straight line."
-            : paintMode === "circle"
-              ? "Drag from the center to draw a circle."
-              : "Drag to paint on the screen."
+            : paintMode === "line"
+              ? "Drag between two points to draw a straight line."
+              : paintMode === "circle"
+                ? "Drag from the center to draw a circle."
+                : "Drag to paint on the screen."
       }${
         symmetryEnabled
           ? ` Vertical symmetry is on at column ${Math.round(symmetryAxisX + 0.5)}.`
@@ -1331,7 +1387,9 @@ const AvatarDetailsEditorSession = forwardRef<
       <div
         className={styles.canvasViewport}
         style={inkApertureStyle}
-        data-avatar-canonical-screen-size={AVATAR_DETAILS_CANVAS_SIZE}
+        data-avatar-canonical-screen-size={
+          PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX
+        }
       >
         <span
           className={`${pageStyles.zenLiveBotPresenceFaceRig} ${styles.faceGuide}`}
@@ -1387,16 +1445,19 @@ const AvatarDetailsEditorSession = forwardRef<
         <canvas
           ref={canvasRef}
           className={styles.canvas}
-          width={AVATAR_DETAILS_CANVAS_SIZE}
-          height={AVATAR_DETAILS_CANVAS_SIZE}
+          width={PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX}
+          height={PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX}
           data-avatar-details-editor-core="true"
+          data-avatar-details-mask-size={
+            PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX
+          }
           aria-hidden="true"
         />
         <canvas
           ref={stampPreviewRef}
           className={styles.stampPreview}
-          width={AVATAR_DETAILS_CANVAS_SIZE}
-          height={AVATAR_DETAILS_CANVAS_SIZE}
+          width={PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX}
+          height={PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX}
           data-avatar-details-stamp-preview="true"
           data-visible={equippedTemplate ? "true" : undefined}
           aria-hidden="true"
@@ -1442,7 +1503,7 @@ const AvatarDetailsEditorSession = forwardRef<
           data-dragging={pointerActive ? "true" : undefined}
           role="application"
           tabIndex={0}
-          aria-label={`Avatar pixel canvas. ${equippedTemplate ? `${equippedTemplate.name} stamp equipped` : inkRole === "erase" ? "erase ink" : `${inkRole} ink`}, ${paintMode}, ${brushSize} pixel size. ${canvasInstruction}`}
+          aria-label={`Avatar pixel canvas. ${equippedTemplate ? `${equippedTemplate.name} stamp equipped` : paintMode === "move" ? moveInkAuto ? "auto layer selection" : `${selectedMoveInkLabel} selected` : inkRole === "erase" ? "erase ink" : `${inkRole} ink`}, ${paintMode}, ${brushSize} pixel size. ${canvasInstruction}`}
           onPointerDown={handlePointerDown}
           onPointerMove={handlePointerMove}
           onPointerUp={finishPointerStroke}
@@ -1635,30 +1696,53 @@ const AvatarDetailsEditorSession = forwardRef<
             <span>{paintMode === "move" ? "Move ink" : "Ink behavior"}</span>
             <small>
               {paintMode === "move"
-                ? "Choose one ink layer, or All."
+                ? "Select one or more layers, or let Auto pick what you grab."
                 : "Colors are editing labels—not final colors."}
             </small>
           </div>
           <div
             className={styles.inkRoleOptions}
-            role="radiogroup"
+            role={paintMode === "move" ? "group" : "radiogroup"}
             aria-label={
               paintMode === "move" ? "Move ink selection" : "Semantic ink color"
             }
             data-move-selection={paintMode === "move" ? "true" : undefined}
           >
             {AVATAR_DETAILS_INK_OPTIONS.map((option) => {
-              const isMoveAll =
+              const isMoveAuto =
                 paintMode === "move" && option.role === "erase";
+              const moveRoleSelected =
+                paintMode === "move" &&
+                option.role !== "erase" &&
+                selectedMoveInkRoles.includes(option.role);
+              const selected =
+                paintMode === "move"
+                  ? isMoveAuto
+                    ? moveInkAuto
+                    : moveRoleSelected
+                  : inkRole === option.role;
               return (
                 <button
                   key={option.role}
                   type="button"
-                  role="radio"
-                  aria-checked={inkRole === option.role}
-                  data-selected={inkRole === option.role ? "true" : undefined}
-                  data-ink-role={option.role}
-                  onClick={() => setInkRole(option.role)}
+                  role={paintMode === "move" ? undefined : "radio"}
+                  aria-checked={
+                    paintMode === "move" ? undefined : inkRole === option.role
+                  }
+                  aria-pressed={
+                    paintMode === "move" ? selected : undefined
+                  }
+                  data-selected={selected ? "true" : undefined}
+                  data-ink-role={isMoveAuto ? "auto" : option.role}
+                  onClick={() => {
+                    if (paintMode !== "move") {
+                      setInkRole(option.role);
+                    } else if (option.role === "erase") {
+                      setMoveInkTarget("auto");
+                    } else {
+                      toggleMoveInkRole(option.role);
+                    }
+                  }}
                 >
                   <span
                     className={styles.inkRoleSwatch}
@@ -1671,10 +1755,10 @@ const AvatarDetailsEditorSession = forwardRef<
                     aria-hidden="true"
                   />
                   <span>
-                    <strong>{isMoveAll ? "All" : option.label}</strong>
+                    <strong>{isMoveAuto ? "Auto" : option.label}</strong>
                     <small>
-                      {isMoveAll
-                        ? "Moves every ink type together."
+                      {isMoveAuto
+                        ? "Moves whichever ink layer the drag begins on."
                         : option.description}
                     </small>
                   </span>
@@ -1713,7 +1797,7 @@ const AvatarDetailsEditorSession = forwardRef<
             <span style={runtimeColorPreviewStyle} aria-hidden="true" />
             <small>
               {paintMode === "move"
-                ? "Only the selected ink layer moves. All moves the complete drawing."
+                ? "Selected layers move together. Auto moves the layer under your pointer."
                 : "Painted ink becomes the bot color. Erase writes transparency."}
             </small>
           </div>

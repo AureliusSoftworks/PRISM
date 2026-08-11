@@ -29,6 +29,7 @@ import {
   avatarDetailsSpeechMotionOrigin,
   type AvatarDetailsSpeechMotionOrigin,
 } from "./avatar-details-speech-motion";
+import { resamplePhosphorRgbaCoverage } from "./phosphorPixelRaster";
 import styles from "./avatar-details-mask.module.css";
 
 export interface AvatarDetailsMaskProps {
@@ -43,6 +44,7 @@ export interface AvatarDetailsMaskProps {
   depth?: Exclude<AvatarDetailsFaceDepth, "all">;
   staticRaster?: boolean;
   coreColor?: "phosphor" | "ink";
+  rasterSize?: number;
 }
 
 type AvatarDetailsSpeechMotion = Exclude<
@@ -61,6 +63,7 @@ interface AvatarDetailsEmissionPlanesProps {
   mouthShape?: ZenLiveBotMouthShape | null;
   staticRaster?: boolean;
   coreColor: "phosphor" | "ink";
+  rasterSize: number;
 }
 
 function AvatarDetailsEmissionPlanes({
@@ -74,6 +77,7 @@ function AvatarDetailsEmissionPlanes({
   mouthShape = null,
   staticRaster = false,
   coreColor,
+  rasterSize,
 }: AvatarDetailsEmissionPlanesProps): React.JSX.Element | null {
   const haloCanvasRef = useRef<HTMLCanvasElement | null>(null);
   const bloomCanvasRef = useRef<HTMLCanvasElement | null>(null);
@@ -84,23 +88,43 @@ function AvatarDetailsEmissionPlanes({
     [pixels],
   );
   useLayoutEffect(() => {
+    const rasterizedGlowPixels =
+      rasterSize === AVATAR_DETAILS_CANVAS_SIZE
+        ? pixels
+        : resamplePhosphorRgbaCoverage(
+            pixels,
+            AVATAR_DETAILS_CANVAS_SIZE,
+            AVATAR_DETAILS_CANVAS_SIZE,
+            rasterSize,
+            rasterSize,
+          );
+    const sourceCorePixels =
+      coreColor === "ink" ? pixels : avatarDetailsPhosphorCoreRgba(pixels);
+    const rasterizedCorePixels =
+      rasterSize === AVATAR_DETAILS_CANVAS_SIZE
+        ? sourceCorePixels
+        : resamplePhosphorRgbaCoverage(
+            sourceCorePixels,
+            AVATAR_DETAILS_CANVAS_SIZE,
+            AVATAR_DETAILS_CANVAS_SIZE,
+            rasterSize,
+            rasterSize,
+          );
     if (staticRaster && detailLevel === "audience") {
       if (!hasPixels) {
         queueMicrotask(() => setStaticRasterUrl(null));
         return;
       }
       const canvas = document.createElement("canvas");
-      canvas.width = AVATAR_DETAILS_CANVAS_SIZE;
-      canvas.height = AVATAR_DETAILS_CANVAS_SIZE;
+      canvas.width = rasterSize;
+      canvas.height = rasterSize;
       const context = canvas.getContext("2d", { alpha: true });
       if (!context) return;
       const imageData = context.createImageData(
-        AVATAR_DETAILS_CANVAS_SIZE,
-        AVATAR_DETAILS_CANVAS_SIZE,
+        rasterSize,
+        rasterSize,
       );
-      imageData.data.set(
-        coreColor === "ink" ? pixels : avatarDetailsPhosphorCoreRgba(pixels),
-      );
+      imageData.data.set(rasterizedCorePixels);
       context.imageSmoothingEnabled = false;
       context.putImageData(imageData, 0, 0);
       const nextRasterUrl = canvas.toDataURL("image/png");
@@ -126,17 +150,15 @@ function AvatarDetailsEmissionPlanes({
       return;
     }
     const glowImageData = coreContext.createImageData(
-      AVATAR_DETAILS_CANVAS_SIZE,
-      AVATAR_DETAILS_CANVAS_SIZE,
+      rasterSize,
+      rasterSize,
     );
-    glowImageData.data.set(pixels);
+    glowImageData.data.set(rasterizedGlowPixels);
     const coreImageData = coreContext.createImageData(
-      AVATAR_DETAILS_CANVAS_SIZE,
-      AVATAR_DETAILS_CANVAS_SIZE,
+      rasterSize,
+      rasterSize,
     );
-    coreImageData.data.set(
-      coreColor === "ink" ? pixels : avatarDetailsPhosphorCoreRgba(pixels),
-    );
+    coreImageData.data.set(rasterizedCorePixels);
     for (const context of [haloContext, bloomContext]) {
       if (!context) continue;
       context.imageSmoothingEnabled = false;
@@ -144,7 +166,7 @@ function AvatarDetailsEmissionPlanes({
     }
     coreContext.imageSmoothingEnabled = false;
     coreContext.putImageData(coreImageData, 0, 0);
-  }, [coreColor, detailLevel, hasPixels, pixels, staticRaster]);
+  }, [coreColor, detailLevel, hasPixels, pixels, rasterSize, staticRaster]);
 
   if (!hasPixels) return null;
 
@@ -164,8 +186,8 @@ function AvatarDetailsEmissionPlanes({
     depth === "behind-face" ? styles.behindFace : styles.aboveFace;
   const motionClassName = motion ? ` ${styles.speechMotion}` : "";
   const sharedProps = {
-    width: AVATAR_DETAILS_CANVAS_SIZE,
-    height: AVATAR_DETAILS_CANVAS_SIZE,
+    width: rasterSize,
+    height: rasterSize,
     style: canvasStyle,
     "data-avatar-details-depth": depth,
     "data-avatar-details-ink-role": inkRole,
@@ -215,8 +237,12 @@ function AvatarDetailsEmissionPlanes({
         className={`${styles.layer} ${depthClassName} ${styles.core}${motionClassName}`}
         data-avatar-details-mask="true"
         data-avatar-details-emission="core"
-        data-avatar-details-rendering="nearest-neighbor"
-        data-avatar-details-mask-size={AVATAR_DETAILS_CANVAS_SIZE}
+        data-avatar-details-rendering={
+          rasterSize === AVATAR_DETAILS_CANVAS_SIZE
+            ? "nearest-neighbor"
+            : "coverage-sampled"
+        }
+        data-avatar-details-mask-size={rasterSize}
         {...sharedProps}
       />
     </>
@@ -242,7 +268,11 @@ export function AvatarDetailsMask({
   depth = "above-face",
   staticRaster = false,
   coreColor = "phosphor",
+  rasterSize = AVATAR_DETAILS_CANVAS_SIZE,
 }: AvatarDetailsMaskProps): React.JSX.Element | null {
+  const normalizedRasterSize = Number.isFinite(rasterSize)
+    ? Math.max(1, Math.floor(rasterSize))
+    : AVATAR_DETAILS_CANVAS_SIZE;
   const normalizedDetails = useMemo(
     () => normalizeAvatarDetails(details),
     [details],
@@ -334,6 +364,7 @@ export function AvatarDetailsMask({
         inkRole="visible"
         staticRaster={staticRaster}
         coreColor={coreColor}
+        rasterSize={normalizedRasterSize}
       />
       {speechPixels && speechMotion ? (
         <AvatarDetailsEmissionPlanes
@@ -347,6 +378,7 @@ export function AvatarDetailsMask({
           mouthShape={mouthShape}
           staticRaster={staticRaster}
           coreColor={coreColor}
+          rasterSize={normalizedRasterSize}
         />
       ) : null}
     </>

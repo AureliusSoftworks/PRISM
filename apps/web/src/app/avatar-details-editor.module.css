@@ -565,7 +565,7 @@
 }
 
 .inkRoleOptions[data-move-selection="true"]
-  button[data-ink-role="erase"]
+  button[data-ink-role="auto"]
   .inkRoleSwatch {
   background: conic-gradient(
     from 30deg,

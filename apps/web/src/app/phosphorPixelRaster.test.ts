@@ -4,6 +4,7 @@ import { describe, it } from "node:test";
 import {
   PHOSPHOR_FACE_PIXEL_CELL_SIZE_PX,
   PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX,
+  PHOSPHOR_FACE_CANONICAL_DENSITY_SCALE,
   PHOSPHOR_FACE_PIXEL_COVERAGE_GAMMA,
   PHOSPHOR_PIXEL_ALPHA_THRESHOLD,
   PHOSPHOR_PIXEL_CELL_SIZE_PX,
@@ -11,6 +12,7 @@ import {
   phosphorCanonicalRasterDimension,
   phosphorCanvasFontShorthand,
   phosphorTextAlphabeticBaseline,
+  resamplePhosphorRgbaCoverage,
   samplePhosphorAlphaCells,
   thresholdPhosphorPixelAlpha,
 } from "./phosphorPixelRaster.ts";
@@ -41,10 +43,11 @@ describe("phosphor pixel raster", () => {
     );
   });
 
-  it("keeps the full-size face on the authored 128px screen grid", () => {
-    assert.equal(PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX, 128);
-    assert.equal(phosphorCanonicalPresentationScale(128), 1);
-    assert.equal(phosphorCanonicalPresentationScale(320), 2.5);
+  it("keeps full-avatar emitters on one scale-independent 256px plane", () => {
+    assert.equal(PHOSPHOR_FACE_CANONICAL_DENSITY_SCALE, 2);
+    assert.equal(PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX, 256);
+    assert.equal(phosphorCanonicalPresentationScale(256), 1);
+    assert.equal(phosphorCanonicalPresentationScale(640), 2.5);
     assert.equal(phosphorCanonicalRasterDimension(75, 2.5), 30);
     assert.equal(phosphorCanonicalRasterDimension(150, 5), 30);
   });
@@ -120,5 +123,31 @@ describe("phosphor pixel raster", () => {
       Array.from(source.slice(0, 8)),
       [0, 0, 0, 0, 0, 0, 0, 255],
     );
+  });
+
+  it("gives authored Ink fractional subcells without changing its geometry", () => {
+    const source = new Uint8ClampedArray(2 * 2 * 4);
+    source.set([220, 40, 70, 255], 0);
+
+    const result = resamplePhosphorRgbaCoverage(
+      source,
+      2,
+      2,
+      4,
+      4,
+      1,
+      0,
+    );
+    const alphaAt = (x: number, y: number): number =>
+      result[(y * 4 + x) * 4 + 3] ?? 0;
+
+    assert.equal(alphaAt(0, 0), 255);
+    assert.equal(alphaAt(1, 0), 191);
+    assert.equal(alphaAt(2, 0), 64);
+    assert.equal(alphaAt(3, 0), 0);
+    assert.equal(alphaAt(0, 1), 191);
+    assert.equal(alphaAt(1, 1), 143);
+    assert.equal(alphaAt(2, 2), 16);
+    assert.deepEqual(Array.from(result.slice(0, 3)), [220, 40, 70]);
   });
 });

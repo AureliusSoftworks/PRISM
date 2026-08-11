@@ -23,6 +23,10 @@ const editorCss = readFileSync(
   new URL("./avatar-details-editor.module.css", import.meta.url),
   "utf8",
 );
+const avatarDetailsSource = readFileSync(
+  new URL("./avatar-details.ts", import.meta.url),
+  "utf8",
+);
 
 describe("Avatar Details Studio integration", () => {
   it("shows Details for every custom bot in development and release builds", () => {
@@ -194,25 +198,43 @@ describe("Avatar Details Studio integration", () => {
     assert.match(editorCss, /\.runtimeColorNote/);
   });
 
-  it("turns the ink palette into a layer selector for Move", () => {
+  it("turns the Move palette into multi-select layers with Auto hit-testing", () => {
     assert.match(
       editorSource,
-      /moveAvatarDetailsPaintColorMap\([\s\S]*inkRole === "erase" \? "all" : inkRole/,
+      /moveAvatarDetailsPaintColorMap\([\s\S]*stroke\.moveSelection/,
     );
     assert.match(
       editorSource,
-      /paintMode === "move" && option\.role === "erase"/,
+      /const \[moveInkTarget, setMoveInkTarget\][\s\S]*useState<AvatarDetailsMoveTarget>\("auto"\)/,
     );
-    assert.match(editorSource, /isMoveAll \? "All" : option\.label/);
-    assert.match(editorSource, /Moves every ink type together\./);
-    assert.match(editorSource, /Choose one ink layer, or All\./);
     assert.match(
       editorSource,
-      /Only the selected ink layer moves\. All moves the complete drawing\./,
+      /avatarDetailsMoveSelectionAt\(beforeColorMap, point\)/,
     );
+    assert.match(
+      editorSource,
+      /selectedMoveInkRoles\.includes\(option\.role\)/,
+    );
+    assert.match(editorSource, /toggleMoveInkRole\(option\.role\)/);
+    assert.match(editorSource, /aria-pressed=/);
+    assert.match(editorSource, /isMoveAuto \? "Auto" : option\.label/);
+    assert.match(
+      editorSource,
+      /Moves whichever ink layer the drag begins on\./,
+    );
+    assert.match(
+      editorSource,
+      /Select one or more layers, or let Auto pick what you grab\./,
+    );
+    assert.match(
+      editorSource,
+      /Selected layers move together\. Auto moves the layer under your pointer\./,
+    );
+    assert.doesNotMatch(editorSource, /Moves every ink type together\./);
+    assert.doesNotMatch(editorSource, /Choose one ink layer, or All\./);
     assert.match(
       editorCss,
-      /\.inkRoleOptions\[data-move-selection="true"\][\s\S]*button\[data-ink-role="erase"\][\s\S]*\.inkRoleSwatch[\s\S]*conic-gradient/,
+      /\.inkRoleOptions\[data-move-selection="true"\][\s\S]*button\[data-ink-role="auto"\][\s\S]*\.inkRoleSwatch[\s\S]*conic-gradient/,
     );
   });
 
@@ -245,7 +267,8 @@ describe("Avatar Details Studio integration", () => {
       pageSource,
       /"--coffee-plate-emoji-face-scale-y": BOT_AVATAR_CANONICAL_FACE_SCALE_Y/,
     );
-    assert.match(pageSource, /"--avatar-details-scale-x": "1"/);
+    assert.match(pageSource, /"--avatar-details-facing-scale-x": "1"/);
+    assert.doesNotMatch(pageSource, /"--avatar-details-scale-x"/);
     assert.match(editorSource, /data-avatar-details-writable-guide="true"/);
     assert.match(editorSource, /avatarDetailsWritablePixel\(x, y\)/);
     assert.match(editorSource, /rasterizeAvatarDetailsSemanticRgba\(/);
@@ -334,7 +357,7 @@ describe("Avatar Details Studio integration", () => {
     );
     assert.match(
       editorSource,
-      /ref=\{canvasRef\}[\s\S]*?width=\{AVATAR_DETAILS_CANVAS_SIZE\}[\s\S]*?height=\{AVATAR_DETAILS_CANVAS_SIZE\}/,
+      /ref=\{canvasRef\}[\s\S]*?width=\{PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX\}[\s\S]*?height=\{PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX\}/,
     );
   });
 
@@ -445,7 +468,7 @@ describe("Avatar Details Studio integration", () => {
     );
   });
 
-  it("offers bucket recoloring, shapes, and whole-illustration dragging without hotkeys", () => {
+  it("offers bucket recoloring, shapes, and semantic-layer dragging without hotkeys", () => {
     assert.match(editorSource, /aria-label="Paint bucket tool"/u);
     assert.match(editorSource, /aria-label="Line tool"/u);
     assert.match(editorSource, /aria-label="Circle tool"/u);
@@ -555,9 +578,10 @@ describe("Avatar Details shared mannequin rendering", () => {
       /coreContext\.putImageData\(coreImageData, 0, 0\)/,
     );
     assert.doesNotMatch(maskSource, /toBlob|createObjectURL|maskState/);
+    assert.match(maskSource, /resamplePhosphorRgbaCoverage\(/);
     assert.match(
       maskSource,
-      /data-avatar-details-rendering="nearest-neighbor"/,
+      /data-avatar-details-rendering=\{[\s\S]*?rasterSize === AVATAR_DETAILS_CANVAS_SIZE[\s\S]*?"nearest-neighbor"[\s\S]*?: "coverage-sampled"/,
     );
     assert.match(maskCss, /image-rendering: pixelated/);
     assert.match(maskCss, /\.behindFace\s*\{[\s\S]*z-index:\s*5/);
@@ -666,11 +690,15 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /avatarDetails=\{resolveBotAvatarDetails\(bot\)\}/,
+      /avatarDetails=\{\s*playerJudgePrism \? null : botSnapshot\.avatarDetails\s*\}/,
     );
     assert.match(
       maskCss,
-      /translateX\(var\(--avatar-details-offset-x, 0px\)\)[\s\S]*translateY\(var\(--zen-live-bot-ink-offset-y, 0%\)\)[\s\S]*translateY\(var\(--avatar-details-facing-offset-y, 0%\)\)[\s\S]*scale\(var\(--avatar-details-ink-aperture-scale, 1\)\)[\s\S]*scaleX\(var\(--avatar-details-scale-x, 1\)\)[\s\S]*scaleX\(var\(--avatar-details-facing-scale-x, 1\)\)/,
+      /transform:[\s\S]*scaleX\(var\(--avatar-details-facing-scale-x, 1\)\)/,
+    );
+    assert.doesNotMatch(
+      maskCss,
+      /--avatar-details-(?:offset|scale-x|facing-offset)|--zen-live-bot-(?:ink-offset|face-thumbnail)/,
     );
     assert.match(
       editorCss,
@@ -683,7 +711,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageCss,
-      /\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*--avatar-details-offset-x:\s*0px;[^}]*--avatar-details-offset-y:\s*0px;[^}]*--avatar-details-facing-scale-x:\s*1;[^}]*--zen-live-bot-ink-offset-y:\s*0%;[^}]*--zen-live-bot-face-layer-scale-x:\s*1;[^}]*transform:\s*scaleX\(var\(--zen-live-bot-screen-facing-scale-x, 1\)\)/,
+      /\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*--avatar-details-facing-scale-x:\s*1;[^}]*--zen-live-bot-face-layer-scale-x:\s*1;[^}]*transform:\s*scaleX\(var\(--zen-live-bot-screen-facing-scale-x, 1\)\)/,
     );
     const screenContentRigRule = pageCss.match(
       /\.zenLiveBotPresenceScreenContentRig\s*\{[^}]*\}/,
@@ -692,7 +720,7 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.doesNotMatch(
       screenContentRigRule,
       /--avatar-details-facing-offset-y\s*:/,
-      "the shared rig must inherit flipped Ink's optical registration offset",
+      "the shared rig may mirror Ink but must never translate it",
     );
     assert.match(
       pageSource,
@@ -739,15 +767,28 @@ describe("Avatar Details shared mannequin rendering", () => {
     assert.equal(
       [
         ...pageSource.matchAll(
-          /data-avatar-canonical-screen-size=\{AVATAR_DETAILS_CANVAS_SIZE\}/g,
+          /data-avatar-canonical-screen-size=\{[\s\S]{0,80}?PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX[\s\S]{0,20}?\}/g,
         ),
       ].length,
       2,
-      "both full-size mannequin branches must rasterize on the authored 128px screen",
+      "both full-size mannequin branches must rasterize on the shared dense phosphor plane",
+    );
+    assert.equal(
+      [
+        ...pageSource.matchAll(
+          /rasterSize=\{PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX\}/g,
+        ),
+      ].length,
+      4,
+      "both Ink depth planes in both mannequin branches must use the shared dense phosphor plane",
     );
     assert.match(
       editorSource,
-      /className=\{styles\.canvasViewport\}[\s\S]{0,160}data-avatar-canonical-screen-size=\{AVATAR_DETAILS_CANVAS_SIZE\}/,
+      /className=\{styles\.canvasViewport\}[\s\S]{0,180}data-avatar-canonical-screen-size=\{[\s\S]{0,80}?PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX[\s\S]{0,20}?\}/,
+    );
+    assert.match(
+      editorSource,
+      /resamplePhosphorRgbaCoverage\([\s\S]{0,260}?PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX/,
     );
     assert.doesNotMatch(maskCss, /--coffee-plate-emoji-face-scale-y/);
     assert.match(
@@ -756,17 +797,14 @@ describe("Avatar Details shared mannequin rendering", () => {
     );
     assert.match(
       pageSource,
-      /"--avatar-details-facing-offset-y":\s*botAvatarDetailsFacingOffsetY\(faceScaleY\)/,
-    );
-    assert.match(
-      pageSource,
       /\["--avatar-details-facing-scale-x" as string\]:\s*botAvatarDetailsFacingScaleX\(coffeePlateFaceScaleY\)/,
     );
-    assert.match(
-      pageSource,
-      /\["--avatar-details-facing-offset-y" as string\]:\s*botAvatarDetailsFacingOffsetY\(coffeePlateFaceScaleY\)/,
-    );
     assert.match(pageSource, /"--avatar-details-facing-scale-x": "1"/);
+    assert.doesNotMatch(pageSource, /--avatar-details-facing-offset-y/);
+    assert.match(
+      avatarDetailsSource,
+      /pixelRole[\s\S]{0,520}depth !== "behind-face"/,
+    );
     assert.match(
       pageSource,
       /const hasAvatarDetailsVisuals = avatarDetailsHasVisuals\(avatarDetails\);[\s\S]*hasAvatarDetailsVisuals[\s\S]*BOT_AVATAR_DETAILS_FACE_REGISTRATION_STYLE/,
@@ -792,7 +830,6 @@ describe("Avatar Details shared mannequin rendering", () => {
       pageSource,
       /\{directionIndependentThinkingScreen \?\? \([\s\S]*?data-zen-live-bot-screen-content-rig="true"/,
     );
-    assert.match(pageSource, /avatarDetailsColor=\{normalizeAccentForTheme\(/);
   });
 
   it("keeps Default Speech ink hidden and animates it independently from Mouth", () => {

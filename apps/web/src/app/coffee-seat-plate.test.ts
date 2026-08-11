@@ -16,6 +16,7 @@ import {
   coffeeSeatSipMouthOffsetY,
   coffeeSeatScreenRelativeFeatureRotationDeg,
   coffeeSeatScreenRelativeMouthRotationDeg,
+  miniAvatarBinaryMouthShape,
   resolveCoffeeSeatSipFacePresentation,
 } from "./coffee-seat-plate.ts";
 
@@ -479,6 +480,57 @@ describe("coffeeSeatPlateGlyph", () => {
         seatHorizontalSide: 0,
       }),
       "-0.36em",
+    );
+  });
+});
+
+describe("miniAvatarBinaryMouthShape", () => {
+  it("flips default mouths between closed and open-wide (:0)", () => {
+    assert.equal(
+      miniAvatarBinaryMouthShape({
+        talking: false,
+        mouthShape: "open-wide",
+        mouthCharacter: null,
+      }),
+      "closed",
+    );
+    assert.equal(
+      miniAvatarBinaryMouthShape({
+        talking: true,
+        mouthShape: "open-small",
+        mouthCharacter: null,
+      }),
+      "open-wide",
+    );
+    assert.equal(
+      miniAvatarBinaryMouthShape({
+        talking: true,
+        mouthShape: "speech-closed",
+        mouthCharacter: null,
+      }),
+      "closed",
+    );
+    assert.deepEqual(
+      coffeeSeatPlateGlyph(
+        "warm",
+        miniAvatarBinaryMouthShape({
+          talking: true,
+          mouthShape: "open-round",
+          mouthCharacter: null,
+        }),
+      ),
+      { text: ":0", rotateDeg: 90 },
+    );
+  });
+
+  it("freezes authored special mouths", () => {
+    assert.equal(
+      miniAvatarBinaryMouthShape({
+        talking: true,
+        mouthShape: "open-wide",
+        mouthCharacter: "△",
+      }),
+      "closed",
     );
   });
 });

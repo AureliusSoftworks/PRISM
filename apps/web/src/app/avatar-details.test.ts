@@ -5,6 +5,7 @@ import {
   AVATAR_DETAILS_CANVAS_SIZE,
   AVATAR_DETAILS_COLOR_MAP_BASE64_LENGTH,
   AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+  AVATAR_DETAILS_INK_ROLES,
   AVATAR_DETAILS_MASK_BASE64_LENGTH,
   AVATAR_DETAILS_MASK_BYTE_LENGTH,
   AVATAR_DETAILS_MAX_PAINT_PIXELS,
@@ -15,6 +16,7 @@ import {
   avatarDetailsGridPointFromClient,
   avatarDetailsEqual,
   avatarDetailsInkRoleAt,
+  avatarDetailsMoveSelectionAt,
   avatarDetailsKey,
   avatarDetailsMaskPixel,
   avatarDetailsPaintPixelCount,
@@ -151,7 +153,11 @@ describe("avatar details semantic ink", () => {
       1,
       "talking",
     ).colorMap;
-    const moved = moveAvatarDetailsPaintColorMap(colorMap, { x: 3, y: 2 });
+    const moved = moveAvatarDetailsPaintColorMap(
+      colorMap,
+      { x: 3, y: 2 },
+      AVATAR_DETAILS_INK_ROLES,
+    );
     assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 63, 62), "blink");
     assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 65, 62), "talking");
   });
@@ -182,7 +188,7 @@ describe("avatar details semantic ink", () => {
     const moved = moveAvatarDetailsPaintColorMap(
       colorMap,
       { x: 3, y: 2 },
-      "talking",
+      ["talking"],
     );
 
     assert.equal(moved.changed, true);
@@ -213,12 +219,80 @@ describe("avatar details semantic ink", () => {
     const moved = moveAvatarDetailsPaintColorMap(
       colorMap,
       { x: 4, y: 0 },
-      "talking",
+      ["talking"],
     );
 
     assert.deepEqual(moved.offset, { x: 1, y: 0 });
     assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 61, 60), "talking");
     assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 62, 60), "effect");
+  });
+
+  it("moves any explicit combination of semantic ink layers together", () => {
+    let colorMap: Uint8Array = new Uint8Array(
+      AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+    );
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 56, y: 60 }],
+      1,
+      "blink",
+    ).colorMap;
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 62, y: 60 }],
+      1,
+      "talking",
+    ).colorMap;
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 70, y: 60 }],
+      1,
+      "effect",
+    ).colorMap;
+
+    const moved = moveAvatarDetailsPaintColorMap(
+      colorMap,
+      { x: 2, y: 3 },
+      ["blink", "talking"],
+    );
+
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 58, 63), "blink");
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 64, 63), "talking");
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 70, 60), "effect");
+  });
+
+  it("resolves Auto from the semantic layer under the drag origin", () => {
+    let colorMap: Uint8Array = new Uint8Array(
+      AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
+    );
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 56, y: 60 }],
+      1,
+      "blink",
+    ).colorMap;
+    colorMap = paintAvatarDetailsColorMap(
+      colorMap,
+      [{ x: 62, y: 60 }],
+      1,
+      "talking",
+    ).colorMap;
+
+    assert.deepEqual(
+      avatarDetailsMoveSelectionAt(colorMap, { x: 62, y: 60 }),
+      ["talking"],
+    );
+    assert.deepEqual(
+      avatarDetailsMoveSelectionAt(colorMap, { x: 80, y: 80 }),
+      [],
+    );
+    const moved = moveAvatarDetailsPaintColorMap(
+      colorMap,
+      { x: 2, y: 0 },
+      avatarDetailsMoveSelectionAt(colorMap, { x: 62, y: 60 }),
+    );
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 56, 60), "blink");
+    assert.equal(avatarDetailsInkRoleAt(moved.colorMap, 64, 60), "talking");
   });
 
   it("uses the paint bucket to recolor only the connected ink selection", () => {
@@ -460,7 +534,7 @@ describe("avatar details semantic ink", () => {
     );
   });
 
-  it("keeps noses and mustaches above the face while placing beards behind the mouth", () => {
+  it("keeps all authored paint above the face while preserving legacy beard depth", () => {
     let colorMap: Uint8Array = new Uint8Array(
       AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH,
     );
@@ -495,10 +569,10 @@ describe("avatar details semantic ink", () => {
 
     assert.equal(alphaAt(paintedAbove, 64, 60), 255);
     assert.equal(alphaAt(paintedAbove, 64, 75), 255);
-    assert.equal(alphaAt(paintedAbove, 64, 88), 0);
+    assert.equal(alphaAt(paintedAbove, 64, 88), 255);
     assert.equal(alphaAt(paintedBehind, 64, 60), 0);
     assert.equal(alphaAt(paintedBehind, 64, 75), 0);
-    assert.equal(alphaAt(paintedBehind, 64, 88), 255);
+    assert.equal(alphaAt(paintedBehind, 64, 88), 0);
 
     const mustacheDetails: AvatarDetailsV1 = {
       version: 1,

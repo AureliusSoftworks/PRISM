@@ -275,7 +275,7 @@ describe("relationship-depth page integration", () => {
     );
   });
 
-  it("guards relationship returns while global Home and empty canvas go to All Bots", () => {
+  it("guards relationship returns while canvas clicks stay in the current Chat or Zen directory", () => {
     const returnRoute = sourceSlice(
       "async function returnFromRelationshipDepth",
       "async function visitZenHome",
@@ -283,6 +283,10 @@ describe("relationship-depth page integration", () => {
     const visitRoute = sourceSlice(
       "async function visitZenHome",
       "useEffect(() => {\n    if (view !== \"chat\" || relationshipDepthReturnDepth <= 0)",
+    );
+    const backgroundClick = sourceSlice(
+      "function handleEmptyStateBackgroundClick",
+      "const openEmptyStateBotSearch",
     );
     assert.match(
       returnRoute,
@@ -312,14 +316,13 @@ describe("relationship-depth page integration", () => {
     assert.doesNotMatch(pageSource, /relationshipDepthReturnBlockedByReply/);
     assert.match(pageSource, /performShowAllBotsView\(\);\s*void openZenMode\(\)/);
     assert.match(pageSource, /function jumpCanvasToAllBotsHome\(/);
-    assert.match(pageSource, /jumpCanvasToAllBotsHome\(\)/);
     assert.match(
-      pageSource,
-      /Empty canvas always collapses to All Bots Home/,
+      backgroundClick,
+      /if \(view === "chat"\) \{[\s\S]{0,240}setCanvasSelectedBotIds[\s\S]{0,160}return;/,
     );
     assert.doesNotMatch(
-      pageSource,
-      /handleEmptyStateBackgroundClick[\s\S]{0,2500}returnFromRelationshipDepth\(/,
+      backgroundClick,
+      /returnFromRelationshipDepth\(|relationshipDepthReturnDepth|canvasBackgroundShouldZoomOutFocusedBot/,
     );
     assert.match(
       pageSource,

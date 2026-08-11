@@ -116,11 +116,15 @@ export function resizeZenLiveBotAvatarFromWheel({
   wheelDeltaY,
   minSizePx,
   maxSizePx,
+  compactMaxSizePx,
+  fullMinSizePx,
 }: {
   currentSizePx: number;
   wheelDeltaY: number;
   minSizePx: number;
   maxSizePx: number;
+  compactMaxSizePx?: number;
+  fullMinSizePx?: number;
 }): number {
   const boundedMin = Number.isFinite(minSizePx) ? minSizePx : 0;
   const boundedMax = Number.isFinite(maxSizePx)
@@ -136,6 +140,25 @@ export function resizeZenLiveBotAvatarFromWheel({
     boundedMin,
     Math.min(boundedMax, current * scaleFactor),
   );
+  const compactMax =
+    typeof compactMaxSizePx === "number" && Number.isFinite(compactMaxSizePx)
+      ? Math.max(boundedMin, Math.min(boundedMax, compactMaxSizePx))
+    : null;
+  const fullMin =
+    typeof fullMinSizePx === "number" && Number.isFinite(fullMinSizePx)
+      ? Math.max(boundedMin, Math.min(boundedMax, fullMinSizePx))
+    : null;
+  if (compactMax !== null && fullMin !== null && fullMin > compactMax) {
+    if (wheelDeltaY < 0 && current <= compactMax && next > compactMax) {
+      return fullMin;
+    }
+    if (wheelDeltaY > 0 && current >= fullMin && next < fullMin) {
+      return compactMax;
+    }
+    if (current > compactMax && current < fullMin) {
+      return wheelDeltaY < 0 ? fullMin : compactMax;
+    }
+  }
   return Math.round(next * 10) / 10;
 }
 

@@ -75,16 +75,8 @@ export type AvatarDetailsTool =
   | "move";
 export type AvatarDetailsInkRole = (typeof AVATAR_DETAILS_INK_ROLES)[number];
 export type AvatarDetailsInkSelection = AvatarDetailsInkRole | "erase";
-export type AvatarDetailsMoveSelection = AvatarDetailsInkRole | "all";
+export type AvatarDetailsMoveSelection = readonly AvatarDetailsInkRole[];
 export type AvatarDetailsFaceDepth = "all" | "behind-face" | "above-face";
-
-/**
- * The live mouth sits across the lower-face seam on the authored 128 grid.
- * Pixels below this seam are beard territory and render behind the animated
- * mouth; pixels above it remain available for noses, mustaches, hair, and
- * other details that belong over the face glyphs.
- */
-export const AVATAR_DETAILS_LOWER_FACE_DEPTH_Y = 81;
 
 export type AvatarDetailStampV1 = BotAvatarDetailStampV1;
 export type AvatarDetailsV1 = BotAvatarDetailsV1;
@@ -715,12 +707,12 @@ export interface MoveAvatarDetailsPaintColorMapResult {
 function avatarDetailsPaintColorTranslationIsValid(
   source: Uint8Array,
   offset: AvatarDetailsGridPoint,
-  selection: AvatarDetailsMoveSelection,
+  selectedRoles: ReadonlySet<AvatarDetailsInkRole>,
 ): boolean {
   for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
     for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
       const role = avatarDetailsInkRoleAt(source, x, y);
-      if (!role || (selection !== "all" && role !== selection)) continue;
+      if (!role || !selectedRoles.has(role)) continue;
       const destinationX = x + offset.x;
       const destinationY = y + offset.y;
       if (!avatarDetailsWritablePixel(destinationX, destinationY)) return false;
@@ -730,9 +722,8 @@ function avatarDetailsPaintColorTranslationIsValid(
         destinationY,
       );
       if (
-        selection !== "all" &&
         destinationRole !== null &&
-        destinationRole !== selection
+        !selectedRoles.has(destinationRole)
       ) {
         return false;
       }
@@ -741,15 +732,42 @@ function avatarDetailsPaintColorTranslationIsValid(
   return true;
 }
 
+/** Resolves Photoshop-style Auto targeting from the semantic ink under a
+ * pointer-down point. Empty canvas intentionally produces no move target. */
+export function avatarDetailsMoveSelectionAt(
+  source: Uint8Array,
+  point: AvatarDetailsGridPoint,
+): AvatarDetailsMoveSelection {
+  if (source.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
+    throw new RangeError(
+      `Avatar detail color map must contain ${AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH} bytes.`,
+    );
+  }
+  const role = avatarDetailsInkRoleAt(
+    source,
+    Math.round(point.x),
+    Math.round(point.y),
+  );
+  return role ? [role] : [];
+}
+
 export function moveAvatarDetailsPaintColorMap(
   source: Uint8Array,
   desiredOffset: AvatarDetailsGridPoint,
-  selection: AvatarDetailsMoveSelection = "all",
+  selection: AvatarDetailsMoveSelection,
 ): MoveAvatarDetailsPaintColorMapResult {
   if (source.length !== AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH) {
     throw new RangeError(
       `Avatar detail color map must contain ${AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH} bytes.`,
     );
+  }
+  const selectedRoles = new Set(selection);
+  if (selectedRoles.size === 0) {
+    return {
+      colorMap: source.slice(),
+      changed: false,
+      offset: { x: 0, y: 0 },
+    };
   }
   const requested = {
     x: Math.round(desiredOffset.x),
@@ -762,7 +780,11 @@ export function moveAvatarDetailsPaintColorMap(
   let offset = { x: 0, y: 0 };
   for (const candidate of candidates) {
     if (
-      !avatarDetailsPaintColorTranslationIsValid(source, candidate, selection)
+      !avatarDetailsPaintColorTranslationIsValid(
+        source,
+        candidate,
+        selectedRoles,
+      )
     ) {
       break;
     }
@@ -772,7 +794,7 @@ export function moveAvatarDetailsPaintColorMap(
   for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
     for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
       const role = avatarDetailsInkRoleAt(source, x, y);
-      if (role && (selection === "all" || role === selection)) {
+      if (role && selectedRoles.has(role)) {
         movablePixelCount += 1;
       }
     }
@@ -781,23 +803,19 @@ export function moveAvatarDetailsPaintColorMap(
     (offset.x !== 0 || offset.y !== 0) && movablePixelCount > 0;
   if (!changed) return { colorMap: source.slice(), changed: false, offset };
 
-  const colorMap =
-    selection === "all"
-      ? new Uint8Array(AVATAR_DETAILS_COLOR_MAP_BYTE_LENGTH)
-      : source.slice();
-  if (selection !== "all") {
-    for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
-      for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
-        if (avatarDetailsInkRoleAt(source, x, y) === selection) {
-          setAvatarDetailsInkRole(colorMap, x, y, null);
-        }
+  const colorMap = source.slice();
+  for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
+    for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
+      const role = avatarDetailsInkRoleAt(source, x, y);
+      if (role && selectedRoles.has(role)) {
+        setAvatarDetailsInkRole(colorMap, x, y, null);
       }
     }
   }
   for (let y = 0; y < AVATAR_DETAILS_CANVAS_SIZE; y += 1) {
     for (let x = 0; x < AVATAR_DETAILS_CANVAS_SIZE; x += 1) {
       const role = avatarDetailsInkRoleAt(source, x, y);
-      if (role && (selection === "all" || role === selection)) {
+      if (role && selectedRoles.has(role)) {
         setAvatarDetailsInkRole(colorMap, x + offset.x, y + offset.y, role);
       }
     }
@@ -1499,14 +1517,6 @@ function avatarDetailStampFaceDepth(
     : "above-face";
 }
 
-function avatarDetailPaintFaceDepth(
-  y: number,
-): Exclude<AvatarDetailsFaceDepth, "all"> {
-  return y >= AVATAR_DETAILS_LOWER_FACE_DEPTH_Y
-    ? "behind-face"
-    : "above-face";
-}
-
 export interface AvatarDetailsResolvedStampAnchor {
   centerX: number;
   centerY: number;
@@ -1613,7 +1623,12 @@ export function rasterizeAvatarDetailsAlpha(
         if (
           pixelRole &&
           (role === "all" || pixelRole === role) &&
-          (depth === "all" || avatarDetailPaintFaceDepth(y) === depth)
+          // Painted Ink is the authored 128x128 screen itself. Splitting its
+          // lower rows behind the live mouth made a centered lip stamp look
+          // higher everywhere outside the editor. Keep every painted pixel
+          // above the face exactly where it was authored; only legacy
+          // structured beard stamps retain an intentional depth treatment.
+          depth !== "behind-face"
         ) {
           alpha[alphaIndex(x, y)] = 255;
         }

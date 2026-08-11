@@ -8,6 +8,7 @@ export const PHOSPHOR_FACE_PIXEL_MIN_COVERAGE = 0.006;
 export const PHOSPHOR_FACE_PIXEL_OVERSCAN_CELLS = 2;
 export const PHOSPHOR_FACE_SUPERSAMPLE_MIN = 2;
 export const PHOSPHOR_FACE_SUPERSAMPLE_MAX = 4;
+export const PHOSPHOR_FACE_CANONICAL_DENSITY_SCALE = 2;
 
 /**
  * Face glyphs, thinking frames, authored Ink, and the lower buckle share this
@@ -15,7 +16,8 @@ export const PHOSPHOR_FACE_SUPERSAMPLE_MAX = 4;
  * they must never rasterize a glyph again at the room's display size or its
  * silhouette and apparent phosphor pitch will change.
  */
-export const PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX = 128;
+export const PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX =
+  128 * PHOSPHOR_FACE_CANONICAL_DENSITY_SCALE;
 
 export function phosphorCanonicalPresentationScale(
   renderedScreenSize: number,
@@ -202,6 +204,111 @@ export function samplePhosphorAlphaCells(
           output[index + 3] = alpha;
         }
       }
+    }
+  }
+
+  return output;
+}
+
+/**
+ * Reconstruct authored binary Ink on the denser full-avatar phosphor plane.
+ * Bilinear, premultiplied-alpha sampling preserves the exact 128px authored
+ * geometry while giving its edges the same fractional cell coverage as text
+ * and SVG emitters. Mini avatars can keep the original raster by requesting
+ * the authored dimensions instead.
+ */
+export function resamplePhosphorRgbaCoverage(
+  rgba: Uint8ClampedArray,
+  sourceWidth: number,
+  sourceHeight: number,
+  outputWidth: number,
+  outputHeight: number,
+  coverageGamma = PHOSPHOR_FACE_PIXEL_COVERAGE_GAMMA,
+  minimumCoverage = PHOSPHOR_FACE_PIXEL_MIN_COVERAGE,
+): Uint8ClampedArray {
+  const normalizedSourceWidth = Math.max(0, Math.floor(sourceWidth));
+  const normalizedSourceHeight = Math.max(0, Math.floor(sourceHeight));
+  const normalizedOutputWidth = Math.max(0, Math.floor(outputWidth));
+  const normalizedOutputHeight = Math.max(0, Math.floor(outputHeight));
+  const output = new Uint8ClampedArray(
+    normalizedOutputWidth * normalizedOutputHeight * 4,
+  );
+  if (
+    normalizedSourceWidth === 0 ||
+    normalizedSourceHeight === 0 ||
+    normalizedOutputWidth === 0 ||
+    normalizedOutputHeight === 0 ||
+    rgba.length < normalizedSourceWidth * normalizedSourceHeight * 4
+  ) {
+    return output;
+  }
+  if (
+    normalizedSourceWidth === normalizedOutputWidth &&
+    normalizedSourceHeight === normalizedOutputHeight
+  ) {
+    output.set(
+      rgba.subarray(0, normalizedOutputWidth * normalizedOutputHeight * 4),
+    );
+    return output;
+  }
+
+  const normalizedGamma = Math.max(0.01, coverageGamma);
+  const normalizedMinimumCoverage = Math.max(
+    0,
+    Math.min(1, minimumCoverage),
+  );
+  const scaleX = normalizedSourceWidth / normalizedOutputWidth;
+  const scaleY = normalizedSourceHeight / normalizedOutputHeight;
+  const clampX = (value: number): number =>
+    Math.max(0, Math.min(normalizedSourceWidth - 1, value));
+  const clampY = (value: number): number =>
+    Math.max(0, Math.min(normalizedSourceHeight - 1, value));
+
+  for (let y = 0; y < normalizedOutputHeight; y += 1) {
+    const sourceY = (y + 0.5) * scaleY - 0.5;
+    const sourceY0 = Math.floor(sourceY);
+    const sourceY1 = sourceY0 + 1;
+    const mixY = sourceY - sourceY0;
+    for (let x = 0; x < normalizedOutputWidth; x += 1) {
+      const sourceX = (x + 0.5) * scaleX - 0.5;
+      const sourceX0 = Math.floor(sourceX);
+      const sourceX1 = sourceX0 + 1;
+      const mixX = sourceX - sourceX0;
+      const samples = [
+        [clampX(sourceX0), clampY(sourceY0), (1 - mixX) * (1 - mixY)],
+        [clampX(sourceX1), clampY(sourceY0), mixX * (1 - mixY)],
+        [clampX(sourceX0), clampY(sourceY1), (1 - mixX) * mixY],
+        [clampX(sourceX1), clampY(sourceY1), mixX * mixY],
+      ] as const;
+      let alphaCoverage = 0;
+      let premultipliedRed = 0;
+      let premultipliedGreen = 0;
+      let premultipliedBlue = 0;
+      for (const [sampleX, sampleY, weight] of samples) {
+        if (weight <= 0) continue;
+        const index = (sampleY * normalizedSourceWidth + sampleX) * 4;
+        const alpha = (rgba[index + 3] ?? 0) / 255;
+        alphaCoverage += alpha * weight;
+        premultipliedRed += ((rgba[index] ?? 0) / 255) * alpha * weight;
+        premultipliedGreen +=
+          ((rgba[index + 1] ?? 0) / 255) * alpha * weight;
+        premultipliedBlue +=
+          ((rgba[index + 2] ?? 0) / 255) * alpha * weight;
+      }
+      if (alphaCoverage < normalizedMinimumCoverage) continue;
+      const outputIndex = (y * normalizedOutputWidth + x) * 4;
+      output[outputIndex] = Math.round(
+        (premultipliedRed / alphaCoverage) * 255,
+      );
+      output[outputIndex + 1] = Math.round(
+        (premultipliedGreen / alphaCoverage) * 255,
+      );
+      output[outputIndex + 2] = Math.round(
+        (premultipliedBlue / alphaCoverage) * 255,
+      );
+      output[outputIndex + 3] = Math.round(
+        Math.pow(alphaCoverage, normalizedGamma) * 255,
+      );
     }
   }
 

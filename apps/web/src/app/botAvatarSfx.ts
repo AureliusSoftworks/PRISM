@@ -29,10 +29,17 @@ export const BOT_AVATAR_SFX_SHORT_LOOP_TRIM_RATIO = 0.12;
 export const BOT_AVATAR_SFX_LOOP_CROSSFADE_SECONDS = 0.22;
 /**
  * Playback-only restart trim. Existing clips keep their baked bytes; the
- * live loop wraps earlier so drawn-out tails never reach the file end.
+ * live loop wraps earlier so soft fade-out tails never reach the ear as a gap.
+ * Measured soft tails on stock calculating loops run ~0.55–0.95s, so keep the
+ * wrap ahead of that quiet region.
  */
-export const BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS = 0.48;
-export const BOT_AVATAR_SFX_PLAYBACK_SHORT_LOOP_TRIM_RATIO = 0.2;
+export const BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS = 1;
+export const BOT_AVATAR_SFX_PLAYBACK_SHORT_LOOP_TRIM_RATIO = 0.3;
+/**
+ * Seek a hair early so RAF + HTMLMediaElement seek latency cannot slip into
+ * the trimmed quiet zone before currentTime jumps.
+ */
+export const BOT_AVATAR_SFX_PLAYBACK_LOOP_RESTART_LEAD_SECONDS = 0.05;
 export const BOT_AVATAR_SFX_ATTACK_MS = 120;
 export const BOT_AVATAR_SFX_RELEASE_MS = 240;
 
@@ -176,7 +183,13 @@ export function botAvatarSfxLoopRestartTime(
 ): number | null {
   const bounds = botAvatarSfxPlaybackLoopBounds(durationSeconds);
   if (!bounds || !Number.isFinite(currentTime)) return null;
-  return currentTime < bounds.startTime || currentTime >= bounds.endTime
+  const usable = Math.max(0, bounds.endTime - bounds.startTime);
+  const restartLead = Math.min(
+    BOT_AVATAR_SFX_PLAYBACK_LOOP_RESTART_LEAD_SECONDS,
+    usable * 0.25,
+  );
+  const restartAt = Math.max(bounds.startTime, bounds.endTime - restartLead);
+  return currentTime < bounds.startTime || currentTime >= restartAt
     ? bounds.startTime
     : null;
 }

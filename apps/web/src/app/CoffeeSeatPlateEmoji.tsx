@@ -375,12 +375,12 @@ export function CoffeeSeatPlateEmoji({
     );
   const normalizedFaceMouthAnimation =
     normalizeBotFaceGlyphAnimation(faceMouthAnimation) ?? "none";
-  // Default means the authored glyph is the resting mouth while speech uses
-  // the same |/./ɵ/o/O/@/0/ʘ viseme sequence as every standard bot mouth.
-  // Alternate effects keep the custom glyph visible and reinterpret those
-  // speech beats. Sip mouths stay on ⁎ only.
+  // Default mouths clear the authored glyph while talking so the plate
+  // viseme (or mini binary `:0`) can drive the mouth. Special/custom mouths
+  // keep their authored glyph and never join speech morphs.
+  const hasCustomMouth = normalizedFaceMouthCharacter !== null;
   const renderedFaceMouthCharacter =
-    isTalking && normalizedFaceMouthAnimation === "none"
+    hasCustomMouth && isTalking && normalizedFaceMouthAnimation === "none"
       ? null
       : normalizedFaceMouthCharacter;
   const normalizedFaceBlinkBar =
@@ -767,6 +767,7 @@ export function CoffeeSeatPlateEmoji({
   const streamedMouthShape =
     mouthShape ?? (inferredMouthOpen ? "open-wide" : "closed");
   const mouthOpen =
+    !hasCustomMouth &&
     isTalking &&
     streamedMouthShape !== "closed" &&
     streamedMouthShape !== "speech-closed" &&

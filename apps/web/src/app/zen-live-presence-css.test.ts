@@ -24,6 +24,14 @@ const phosphorPixelGlyphPath = join(
   dirname(fileURLToPath(import.meta.url)),
   "PhosphorPixelGlyph.tsx",
 );
+const phosphorPixelRasterPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "phosphorPixelRaster.ts",
+);
+const chatMiniBotAvatarPath = join(
+  dirname(fileURLToPath(import.meta.url)),
+  "ChatMiniBotAvatar.tsx",
+);
 const botFramePublicDir = join(
   dirname(fileURLToPath(import.meta.url)),
   "../../public/bot-frame",
@@ -65,6 +73,11 @@ const coffeeSeatPlateEmojiSource = readFileSync(
 );
 const phosphorPixelGlyphCss = readFileSync(phosphorPixelGlyphCssPath, "utf8");
 const phosphorPixelGlyphSource = readFileSync(phosphorPixelGlyphPath, "utf8");
+const phosphorPixelRasterSource = readFileSync(
+  phosphorPixelRasterPath,
+  "utf8",
+);
+const chatMiniBotAvatarSource = readFileSync(chatMiniBotAvatarPath, "utf8");
 
 function ruleForExactSelector(selector: string): string {
   const match = [...css.matchAll(/([^{}]+)\{([^}]*)\}/g)].find((entry) =>
@@ -434,8 +447,26 @@ describe("Zen live presence CSS", () => {
   it("resizes the Zen bot only from wheel gestures beside prose", () => {
     assert.match(
       pageSource,
-      /const PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY =\s+"prism_zen_live_bot_avatar_size_v1";/,
+      /const PRISM_ZEN_LIVE_BOT_AVATAR_LEGACY_SIZE_STORAGE_KEY =\s+"prism_zen_live_bot_avatar_size_v1";/,
     );
+    assert.match(
+      pageSource,
+      /const PRISM_ZEN_LIVE_BOT_AVATAR_SIZE_STORAGE_KEY =\s+"prism_zen_live_bot_avatar_size_v2";/,
+    );
+    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_MIN_SIZE_PX = 94;/);
+    assert.match(
+      pageSource,
+      /const ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX = 184;/,
+    );
+    assert.match(
+      pageSource,
+      /const ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX = 240;/,
+    );
+    assert.match(
+      pageSource,
+      /const ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX = 480;/,
+    );
+    assert.match(pageSource, /const ZEN_LIVE_BOT_AVATAR_MAX_SIZE_PX = 840;/);
     assert.match(pageSource, /const ZEN_LIVE_BOT_PROSE_WIDTH_MIN_PX = 680;/);
     assert.match(
       pageSource,
@@ -454,7 +485,11 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /if \(normalizedSize === ZEN_LIVE_BOT_LOCKED_BODY_SIZE_PX\) \{\s+return ZEN_LIVE_BOT_PROSE_WIDTH_DEFAULT_PX;/,
+      /if \(normalizedSize === ZEN_LIVE_BOT_AVATAR_DEFAULT_SIZE_PX\)\s+return ZEN_LIVE_BOT_PROSE_WIDTH_DEFAULT_PX;/,
+    );
+    assert.match(
+      pageSource,
+      /function zenLiveBotAvatarRenderMode\([\s\S]*?\): "mini" \| "full"/,
     );
     assert.match(
       pageSource,
@@ -497,6 +532,14 @@ describe("Zen live presence CSS", () => {
     assert.match(pageSource, /resizeZenLiveBotAvatarFromWheel\(\{/);
     assert.match(
       pageSource,
+      /compactMaxSizePx: ZEN_LIVE_BOT_AVATAR_MINI_MAX_SIZE_PX/,
+    );
+    assert.match(
+      pageSource,
+      /fullMinSizePx: ZEN_LIVE_BOT_AVATAR_FULL_MIN_SIZE_PX/,
+    );
+    assert.match(
+      pageSource,
       /onWheelCapture=\{handleZenLiveBotResizeWheel\}/,
     );
     assert.match(
@@ -531,7 +574,7 @@ describe("Zen live presence CSS", () => {
 
     const rigidScaleRule = ruleForSelectorNeedlesWithBody(
       [
-        '.zenLiveBotPresencePlate[data-user-avatar-scale="true"]',
+        '.zenLiveBotPresencePlate[data-user-avatar-scale="true"][data-avatar-render-mode="full"]',
         "> .botAmbientPresenceRig",
       ],
       "--zen-live-bot-avatar-size",
@@ -548,6 +591,20 @@ describe("Zen live presence CSS", () => {
       rigidScaleRule,
       /transform:\s*scale\(var\(--zen-live-bot-user-scale,\s*1\)\)\s*;/,
     );
+
+    assert.match(pageSource, /data-avatar-render-mode=\{avatarRenderMode\}/);
+    assert.match(pageSource, /avatarRenderMode === "mini"/);
+    assert.match(pageSource, /<EmptyStateHeroMiniBot/);
+    assert.match(pageSource, /lightMode="breathing"/);
+    assert.match(pageSource, /faceEyeMovement="still"/);
+    const compactScaleRule = ruleForSelectorNeedlesWithBody(
+      [
+        '.zenLiveBotPresencePlate[data-avatar-render-mode="mini"]',
+        "> .botAmbientPresenceRig",
+      ],
+      "--zen-live-bot-mini-size",
+    );
+    assert.match(compactScaleRule, /transform:\s*none\s*;/);
   });
 
   it("keeps body raster and face as fixed non-editable layers", () => {
@@ -690,18 +747,13 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       detailsInkClipRule,
-      /--avatar-details-runtime-clip-offset-y:\s*calc\(/,
+      /-webkit-clip-path:\s*inset\(0 0 22\.65625% 0\)/,
     );
-    assert.match(detailsInkClipRule, /--avatar-details-offset-y/);
-    assert.match(detailsInkClipRule, /--zen-live-bot-ink-offset-y/);
-    assert.match(detailsInkClipRule, /--avatar-details-facing-offset-y/);
     assert.match(
       detailsInkClipRule,
-      /--zen-live-bot-face-thumbnail-offset-y/,
+      /clip-path:\s*inset\(0 0 22\.65625% 0\)/,
     );
-    assert.match(detailsInkClipRule, /-webkit-clip-path:\s*inset\(/);
-    assert.match(detailsInkClipRule, /clip-path:\s*inset\(/);
-    assert.match(detailsInkClipRule, /22\.65625%/);
+    assert.doesNotMatch(detailsInkClipRule, /offset-y|translate|scale/);
 
     const cleanProfileRule = ruleForExactSelector(
       '.zenLiveBotPresenceFaceEmissionMask[data-crt-profile="clean"]',
@@ -1197,7 +1249,7 @@ describe("Zen live presence CSS", () => {
     assert.match(faceRigRule, /left:\s*var\(--zen-live-bot-face-x,\s*50%\)/);
     assert.match(
       faceRigRule,
-      /top:\s*calc\([\s\S]*var\(--zen-live-bot-face-y,\s*50%\)[\s\S]*var\(--zen-live-bot-ink-offset-y,\s*0%\)[\s\S]*\)/,
+      /top:\s*var\(--zen-live-bot-face-y,\s*50%\)/,
     );
     assert.match(faceRigRule, /z-index:\s*6\s*;/);
     assert.match(faceRigRule, /scale\(var\(--zen-live-bot-face-scale,\s*1\)\)/);
@@ -3158,6 +3210,34 @@ describe("Zen live presence CSS", () => {
     assert.doesNotMatch(glyphRule, /radial-gradient/);
   });
 
+  it("renders a canonical CRT lattice behind the lower buckle glyph", () => {
+    const bodyRule = ruleForExactSelector(".zenLiveBotPresenceBody");
+    assert.match(
+      bodyRule,
+      /--zen-live-bot-buckle-crt-cell-pitch:\s*clamp\(\s*1px,\s*calc\(var\(--zen-live-bot-body-frame-size\) \* 0\.0078125\),\s*4px\s*\)/,
+    );
+    const latticeRule = ruleForExactSelector(
+      ".zenLiveBotPresenceBody::after",
+    );
+    assert.match(latticeRule, /content:\s*""\s*;/);
+    assert.match(latticeRule, /z-index:\s*11\s*;/);
+    assert.match(latticeRule, /border-radius:\s*50%\s*;/);
+    assert.match(latticeRule, /repeating-linear-gradient\(\s*90deg/);
+    assert.match(latticeRule, /repeating-linear-gradient\(\s*0deg/);
+    assert.match(
+      latticeRule,
+      /var\(--zen-live-bot-buckle-crt-cell-pitch\)/,
+    );
+    assert.match(latticeRule, /var\(--coffee-bot-color, currentColor\)/);
+    assert.match(latticeRule, /mask-image:\s*radial-gradient/);
+    assert.match(latticeRule, /opacity:\s*0\.78\s*;/);
+    assert.match(latticeRule, /pointer-events:\s*none\s*;/);
+
+    const glyphRule = ruleForExactSelector(".zenLiveBotPresenceBotGlyph");
+    assert.match(glyphRule, /z-index:\s*12\s*;/);
+    assert.doesNotMatch(glyphRule, /repeating-linear-gradient/);
+  });
+
   it("quantizes every full-size phosphor glyph on one canonical surface", () => {
     assert.match(coffeeSeatPlateEmojiSource, /pixelated\?: boolean;/);
     assert.match(
@@ -3166,7 +3246,19 @@ describe("Zen live presence CSS", () => {
     );
     assert.match(
       pageSource,
-      /data-avatar-canonical-screen-size=\{AVATAR_DETAILS_CANVAS_SIZE\}[\s\S]{0,2400}<CoffeeSeatPlateEmoji[\s\S]{0,180}\bpixelated\b/,
+      /data-avatar-canonical-screen-size=\{\s*PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX\s*\}[\s\S]{0,2400}<CoffeeSeatPlateEmoji[\s\S]{0,180}\bpixelated\b/,
+    );
+    assert.match(
+      phosphorPixelRasterSource,
+      /PHOSPHOR_FACE_CANONICAL_DENSITY_SCALE = 2/,
+    );
+    assert.match(
+      phosphorPixelRasterSource,
+      /128 \* PHOSPHOR_FACE_CANONICAL_DENSITY_SCALE/,
+    );
+    assert.match(
+      chatMiniBotAvatarSource,
+      /CHAT_MINI_BOT_AVATAR_CANONICAL_SCREEN_SIZE = 128/,
     );
     assert.match(
       pageSource,
@@ -3208,7 +3300,11 @@ describe("Zen live presence CSS", () => {
     const focusedFaceRule = ruleForExactSelector(
       ".coffeeSeatPlateEmoji.zenLiveBotPresenceFaceGlyph",
     );
-    assert.match(focusedFaceRule, /--crt-beam-softness:\s*0\.32px\s*;/);
+    assert.doesNotMatch(focusedFaceRule, /--crt-beam-softness/);
+    assert.match(
+      focusedFaceRule,
+      /--crt-glyph-core-paint-bleed:\s*0\.14em\s*;/,
+    );
     const thinkingPendingMaskRule = ruleForNormalizedSelector(
       '.zenLiveBotPresenceThinkingGlyph [data-crt-glyph-layer="true"][data-crt-pixel-mask-pending="true"]',
     );

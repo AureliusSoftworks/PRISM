@@ -544,20 +544,28 @@ describe("Coffee seat arrival CSS", () => {
     );
   });
 
-  it("keeps shared face parts fixed while Default uses visemes and alternates keep custom mouths", () => {
+  it("keeps shared face parts fixed while Default uses visemes and custom mouths stay authored", () => {
+    assert.match(coffeeSeatPlateEmojiSource, /const hasCustomMouth =/);
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /isTalking && normalizedFaceMouthAnimation === "none"\s*\?\s*null\s*:\s*normalizedFaceMouthCharacter/,
+      /const renderedFaceMouthCharacter = hasCustomMouth/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
+      /!hasCustomMouth &&\s*isTalking &&/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
       /\(\/\[0oOI\]\/\.test\(baseText\)/,
     );
     assert.match(css, /data-coffee-plate-emoji-glyph="I"/);
-    const sharedFaceRule = ruleForSelectorNeedles(
-      ".coffeeSeatPlateEmoji",
-      ".messageMoodCoffeeFace",
-      ".zenLiveBotPresenceFaceGlyph",
+    const sharedFaceRule = ruleForSelectorNeedlesWithBody(
+      [
+        ".coffeeSeatPlateEmoji",
+        ".messageMoodCoffeeFace",
+        ".zenLiveBotPresenceFaceGlyph",
+      ],
+      'grid-template-areas: "eyes mouth"',
     );
     assert.match(sharedFaceRule, /grid-template-areas:\s*"eyes mouth"\s*;/);
     assert.match(
@@ -660,7 +668,7 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       sharedMouthGlyphLayerRule,
-      /transform-origin:\s*center center\s*;/,
+      /transform-origin:\s*var\(\s*--bot-face-mouth-origin-x,\s*50%\s*\)\s*var\(\s*--bot-face-mouth-origin-y,\s*50%\s*\)\s*;/,
     );
     const openMouthRule = ruleForSelectorNeedlesWithBody(
       [

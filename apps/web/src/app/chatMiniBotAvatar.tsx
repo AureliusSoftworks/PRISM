@@ -9,10 +9,8 @@ export const CHAT_MINI_BOT_AVATAR_DARK_BASE_SRC =
 export const CHAT_MINI_BOT_AVATAR_LIGHT_BASE_SRC =
   "/bot-frame/bot-frame-mini-light.png?v=2";
 
-/**
- * Compact bot chassis for identity portraits. It omits the full avatar's
- * talking LEDs, while callers may still supply a lightweight animated face.
- */
+/** Compact bot chassis for identity portraits. Chassis lamps stay opt-in so
+ * room and editor minis remain quiet while Home can present a living preview. */
 export function ChatMiniBotAvatar(props: {
   color?: string | null;
   alloyColor?: string | null;
@@ -22,10 +20,13 @@ export function ChatMiniBotAvatar(props: {
   className?: string;
   /** `badge` is message-chip sized; `room` is aquarium sized; `hero` is the empty-state preview. */
   size?: "badge" | "room" | "hero";
+  /** `breathing` softly illuminates the authored chassis lamp apertures. */
+  lightMode?: "off" | "breathing";
 }): React.JSX.Element {
   const color = props.color?.trim() || null;
   const size = props.size ?? "badge";
   const theme = props.theme ?? "dark";
+  const lightMode = props.lightMode ?? "off";
   const frameBaseSrc =
     theme === "light"
       ? CHAT_MINI_BOT_AVATAR_LIGHT_BASE_SRC
@@ -55,6 +56,7 @@ export function ChatMiniBotAvatar(props: {
       data-chat-mini-bot-avatar="true"
       data-size={size}
       data-theme={theme}
+      data-light-mode={lightMode}
       style={rootStyle}
       aria-hidden="true"
     >
@@ -68,6 +70,13 @@ export function ChatMiniBotAvatar(props: {
         draggable={false}
       />
       <span className={styles.frameAlloy} aria-hidden="true" />
+      {lightMode === "breathing" ? (
+        <>
+          <span className={styles.frameLightAura} aria-hidden="true" />
+          <span className={styles.frameLightEmitter} aria-hidden="true" />
+          <span className={styles.frameLightCore} aria-hidden="true" />
+        </>
+      ) : null}
       <span
         className={styles.upperScreen}
         data-avatar-canonical-screen-size={

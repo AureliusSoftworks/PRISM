@@ -248,40 +248,65 @@ describe("resizeZenLiveBotAvatarFromWheel", () => {
   it("grows upward scrolls and shrinks downward scrolls smoothly", () => {
     assert.ok(
       resizeZenLiveBotAvatarFromWheel({
-        currentSizePx: 190,
+        currentSizePx: 360,
         wheelDeltaY: -80,
-        minSizePx: 118,
-        maxSizePx: 300,
-      }) > 190,
+        minSizePx: 94,
+        maxSizePx: 840,
+      }) > 360,
     );
     assert.ok(
       resizeZenLiveBotAvatarFromWheel({
-        currentSizePx: 190,
+        currentSizePx: 360,
         wheelDeltaY: 80,
-        minSizePx: 118,
-        maxSizePx: 300,
-      }) < 190,
+        minSizePx: 94,
+        maxSizePx: 840,
+      }) < 360,
     );
   });
 
   it("clamps inertial wheel motion to the authored size range", () => {
     assert.equal(
       resizeZenLiveBotAvatarFromWheel({
-        currentSizePx: 299,
+        currentSizePx: 839,
         wheelDeltaY: -10_000,
-        minSizePx: 118,
-        maxSizePx: 300,
+        minSizePx: 94,
+        maxSizePx: 840,
       }),
-      300,
+      840,
     );
     assert.equal(
       resizeZenLiveBotAvatarFromWheel({
-        currentSizePx: 119,
+        currentSizePx: 95,
         wheelDeltaY: 10_000,
-        minSizePx: 118,
-        maxSizePx: 300,
+        minSizePx: 94,
+        maxSizePx: 840,
       }),
-      118,
+      94,
+    );
+  });
+
+  it("jumps across the protected gap between compact and full renderers", () => {
+    const geometry = {
+      minSizePx: 94,
+      maxSizePx: 840,
+      compactMaxSizePx: 184,
+      fullMinSizePx: 240,
+    };
+    assert.equal(
+      resizeZenLiveBotAvatarFromWheel({
+        ...geometry,
+        currentSizePx: 184,
+        wheelDeltaY: -80,
+      }),
+      240,
+    );
+    assert.equal(
+      resizeZenLiveBotAvatarFromWheel({
+        ...geometry,
+        currentSizePx: 240,
+        wheelDeltaY: 80,
+      }),
+      184,
     );
   });
 });

@@ -65,13 +65,13 @@
 }
 
 .sizeHero {
-  --chat-mini-bot-glyph-size: clamp(19px, 1.8vw, 23px);
-  width: clamp(132px, 11vw, 154px);
-  height: clamp(132px, 11vw, 154px);
+  --chat-mini-bot-glyph-size: clamp(20px, 1.9vw, 24px);
+  width: clamp(160px, 12.5vw, 184px);
+  height: clamp(160px, 12.5vw, 184px);
 }
 
 .sizeRoom {
-  --chat-mini-bot-glyph-size: 15px;
+  --chat-mini-bot-glyph-size: 11px;
   width: clamp(76px, 6.7vw, 94px);
   height: clamp(76px, 6.7vw, 94px);
 }
@@ -117,6 +117,71 @@
   mix-blend-mode: color;
 }
 
+/* Home's selected bot is awake before the conversation begins. Reuse the
+   canonical authored spill and lamp-aperture masks so the mini reads as the
+   same chassis instead of a generic CSS glow. */
+.frameLightAura,
+.frameLightEmitter,
+.frameLightCore {
+  position: absolute;
+  left: var(--chat-mini-bot-frame-left);
+  top: var(--chat-mini-bot-frame-top);
+  width: var(--chat-mini-bot-frame-width);
+  height: var(--chat-mini-bot-frame-height);
+  pointer-events: none;
+  mix-blend-mode: screen;
+}
+
+.frameLightAura {
+  z-index: 4;
+  background: var(--chat-mini-bot-color);
+  -webkit-mask: url("/bot-frame/bot-frame-tint-mask.png?v=1000") center / 100%
+    100% no-repeat;
+  mask: url("/bot-frame/bot-frame-tint-mask.png?v=1000") center / 100% 100%
+    no-repeat;
+  filter: saturate(1.12) brightness(0.98);
+}
+
+.frameLightEmitter,
+.frameLightCore {
+  -webkit-mask: url("/bot-frame/bot-frame-led.png?v=1000") center / 100% 100%
+    no-repeat;
+  mask: url("/bot-frame/bot-frame-led.png?v=1000") center / 100% 100%
+    no-repeat;
+}
+
+.frameLightEmitter {
+  z-index: 5;
+  background: var(--chat-mini-bot-color);
+  filter: drop-shadow(
+    0 0 4px color-mix(in srgb, var(--chat-mini-bot-color) 62%, transparent)
+  );
+}
+
+.frameLightCore {
+  z-index: 6;
+  background: #ffffff;
+  filter: drop-shadow(0 0 1px rgba(255, 255, 255, 0.92));
+}
+
+.root[data-light-mode="breathing"] .frameLightAura {
+  animation:
+    chatMiniBotLightAuraIgnite 600ms ease-out,
+    chatMiniBotLightAuraBreath 6.4s ease-in-out 600ms infinite;
+}
+
+.root[data-light-mode="breathing"] .frameLightEmitter {
+  animation:
+    chatMiniBotLightEmitterIgnite 600ms ease-out,
+    chatMiniBotLightEmitterBreath 6.4s ease-in-out 600ms infinite;
+}
+
+.root[data-light-mode="breathing"] .frameLightCore {
+  animation:
+    chatMiniBotLightCoreIgnite 600ms ease-out,
+    chatMiniBotLightCoreBreath 6.4s ease-in-out 600ms infinite;
+}
+
 .upperScreen,
 .lowerScreen {
   position: absolute;
@@ -137,7 +202,7 @@
   /* The authored mini chassis includes an opaque black screen substrate.
      Paint the clipped face plane above it or restored/rehydrated portraits
      resolve to an empty ring even though their face DOM is present. */
-  z-index: 4;
+  z-index: 7;
   width: var(--chat-mini-bot-frame-width);
   height: var(--chat-mini-bot-frame-height);
   container-type: inline-size;
@@ -150,10 +215,12 @@
 .lowerScreen {
   left: 40.6%;
   top: 67.2%;
-  z-index: 4;
+  z-index: 7;
   width: 18%;
   height: 20.3%;
   border-radius: 50%;
+  overflow: hidden;
+  isolation: isolate;
 }
 
 .upperScreen > *,
@@ -162,9 +229,123 @@
   max-height: 100%;
 }
 
+.lowerScreen > * {
+  position: relative;
+  z-index: 1;
+}
+
+/* Hero and room portraits have enough physical pixels to suggest the same CRT
+   cell lattice as the full buckle. Badge portraits intentionally omit it so a
+   sub-pixel repeat cannot turn into moire or muddy the glyph silhouette. */
+.root:is([data-size="hero"], [data-size="room"]) .lowerScreen::before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  background:
+    repeating-linear-gradient(
+      90deg,
+      transparent 0
+        calc(
+          var(--chat-mini-buckle-crt-cell-pitch) -
+            var(--chat-mini-buckle-crt-line-width)
+        ),
+      rgb(0 0 0 / 0.76)
+        calc(
+          var(--chat-mini-buckle-crt-cell-pitch) -
+            var(--chat-mini-buckle-crt-line-width)
+        )
+        var(--chat-mini-buckle-crt-cell-pitch)
+    ),
+    repeating-linear-gradient(
+      0deg,
+      transparent 0
+        calc(
+          var(--chat-mini-buckle-crt-cell-pitch) -
+            var(--chat-mini-buckle-crt-line-width)
+        ),
+      rgb(0 0 0 / 0.68)
+        calc(
+          var(--chat-mini-buckle-crt-cell-pitch) -
+            var(--chat-mini-buckle-crt-line-width)
+        )
+        var(--chat-mini-buckle-crt-cell-pitch)
+    ),
+    radial-gradient(
+      circle at 50% 48%,
+      color-mix(in srgb, var(--chat-mini-bot-color) 18%, transparent) 0 46%,
+      color-mix(in srgb, var(--chat-mini-bot-color) 8%, transparent) 68%,
+      transparent 84%
+    );
+  opacity: var(--chat-mini-buckle-crt-opacity);
+}
+
+.root[data-size="hero"] {
+  --chat-mini-buckle-crt-cell-pitch: 2px;
+  --chat-mini-buckle-crt-line-width: 0.34px;
+  --chat-mini-buckle-crt-opacity: 0.78;
+}
+
+.root[data-size="room"] {
+  --chat-mini-buckle-crt-cell-pitch: 1.5px;
+  --chat-mini-buckle-crt-line-width: 0.3px;
+  --chat-mini-buckle-crt-opacity: 0.52;
+}
+
+@keyframes chatMiniBotLightAuraIgnite {
+  from { opacity: 0; }
+  to { opacity: 0.22; }
+}
+
+@keyframes chatMiniBotLightAuraBreath {
+  0%, 100% { opacity: 0.22; }
+  50% { opacity: 0.28; }
+}
+
+@keyframes chatMiniBotLightEmitterIgnite {
+  from { opacity: 0; }
+  to { opacity: 0.52; }
+}
+
+@keyframes chatMiniBotLightEmitterBreath {
+  0%, 100% { opacity: 0.52; }
+  50% { opacity: 0.58; }
+}
+
+@keyframes chatMiniBotLightCoreIgnite {
+  from { opacity: 0; }
+  to { opacity: 0.58; }
+}
+
+@keyframes chatMiniBotLightCoreBreath {
+  0%, 100% { opacity: 0.58; }
+  50% { opacity: 0.64; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .root[data-light-mode="breathing"] .frameLightAura,
+  .root[data-light-mode="breathing"] .frameLightEmitter,
+  .root[data-light-mode="breathing"] .frameLightCore {
+    animation: none;
+  }
+
+  .root[data-light-mode="breathing"] .frameLightAura {
+    opacity: 0.24;
+  }
+
+  .root[data-light-mode="breathing"] .frameLightEmitter {
+    opacity: 0.55;
+  }
+
+  .root[data-light-mode="breathing"] .frameLightCore {
+    opacity: 0.62;
+  }
+}
+
 @media (max-width: 560px) {
   .sizeHero {
-    width: 116px;
-    height: 116px;
+    width: 140px;
+    height: 140px;
   }
 }

@@ -11,6 +11,7 @@ import {
   BOT_AVATAR_SFX_LOOP_CROSSFADE_SECONDS,
   BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
   BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS,
+  BOT_AVATAR_SFX_PLAYBACK_LOOP_RESTART_LEAD_SECONDS,
   BOT_AVATAR_SFX_PLAYBACK_SHORT_LOOP_TRIM_RATIO,
   BOT_AVATAR_SFX_SHORT_LOOP_TRIM_RATIO,
   BOT_AVATAR_SFX_RELEASE_MS,
@@ -143,10 +144,22 @@ test("avatar SFX trims both loop edges and scales the trim for short clips", () 
   );
   assert.equal(
     botAvatarSfxLoopRestartTime(
-      4 - BOT_AVATAR_SFX_LOOP_EDGE_TRIM_SECONDS,
+      4 -
+        BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS -
+        BOT_AVATAR_SFX_PLAYBACK_LOOP_RESTART_LEAD_SECONDS,
       4,
     ),
     BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS,
+  );
+  assert.equal(
+    botAvatarSfxLoopRestartTime(
+      4 -
+        BOT_AVATAR_SFX_PLAYBACK_LOOP_EDGE_TRIM_SECONDS -
+        BOT_AVATAR_SFX_PLAYBACK_LOOP_RESTART_LEAD_SECONDS -
+        0.01,
+      4,
+    ),
+    null,
   );
   assert.equal(botAvatarSfxLoopRestartTime(2, 4), null);
   const shortPlayback = botAvatarSfxLoopBounds(0.4, {
