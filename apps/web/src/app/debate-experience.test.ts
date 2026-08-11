@@ -2815,6 +2815,30 @@ describe("Debate experience", () => {
     const audiencePortraitRule =
       css.match(/\.debateAudienceBotPortrait\s*\{[^}]*\}/u)?.[0] ?? "";
     assert.doesNotMatch(audiencePortraitRule, /filter:/u);
+    assert.match(audiencePortraitRule, /opacity:\s*1/u);
+    assert.doesNotMatch(audiencePortraitRule, /opacity:\s*0\.72/u);
+    const audienceTalkingRule =
+      css.match(/\.debateAudienceBotPortrait\[data-talking="true"\]\s*\{[^}]*\}/u)?.[0] ??
+      "";
+    assert.doesNotMatch(
+      audienceTalkingRule,
+      /^\s*opacity:\s*[\d.]+/mu,
+    );
+    const audienceReactingRule =
+      css.match(/\.debateAudienceBotPortrait\[data-live-reacting="true"\]\s*\{[^}]*\}/u)?.[0] ??
+      "";
+    assert.doesNotMatch(
+      audienceReactingRule,
+      /^\s*opacity:\s*[\d.]+/mu,
+    );
+    assert.match(
+      css,
+      /\.debateAudienceRow\[data-audience-order-response="hush"\]\s*\.debateAudienceLayer\s*\{[^}]*transform:\s*translateY\(5%\)/u,
+    );
+    assert.match(
+      css,
+      /\.debateAudienceRow\[data-audience-order-response="hush"\]\s*\.debateAudienceBotPortrait\s*\{[^}]*--debate-audience-shade-opacity:\s*0\.58/u,
+    );
     assert.match(
       css,
       /\.debateAudienceBotPortrait::before\s*\{[^}]*--debate-audience-shade-opacity/u,
@@ -2825,13 +2849,21 @@ describe("Debate experience", () => {
     );
     assert.match(
       css,
-      /\.debateAudienceLayer\[data-depth-row="rear"\]\s*\{[^}]*opacity:\s*0\.5/u,
+      /\.debateAudienceLayer\[data-depth-row="rear"\]\s*\{[^}]*opacity:\s*1/u,
     );
     assert.match(css, /\.debateAudienceChatterChip\s*\{/u);
     assert.doesNotMatch(css, /@keyframes debate-audience-mouth-crosstalk/u);
     assert.doesNotMatch(css, /@keyframes debate-audience-head-crosstalk/u);
     assert.doesNotMatch(css, /@keyframes debate-audience-cascade-hush/u);
     assert.doesNotMatch(css, /@keyframes debate-audience-awkward-glance/u);
+    assert.match(
+      css,
+      /@keyframes debate-gallery-seat-arrive[\s\S]*?100%\s*\{[\s\S]*?opacity:\s*1/u,
+    );
+    assert.match(
+      css,
+      /\.live\[data-debate-room-presence="arriving"\][\s\S]*?\.debateAudienceBotPortrait\[data-gallery-arrived="true"\]:not\(\s*\[data-audience-source="player"\]\s*\)[\s\S]*?animation: debate-gallery-seat-arrive[\s\S]*?both;/u,
+    );
     assert.match(page, /debateAudienceBotIsGenerated\(botSnapshot\)/u);
     assert.match(
       page,
@@ -2866,6 +2898,37 @@ describe("Debate experience", () => {
       /Ambient chatter animates only the compact mouth/u,
     );
     assert.match(source, /data-vocal-reaction=/u);
+  });
+
+  it("keeps public gallery spectators physically opaque when stable", () => {
+    assert.match(
+      css,
+      /\.debateAudienceBotPortrait\s*\{[^}]*opacity:\s*1/u,
+    );
+    const talkingRule =
+      css.match(/\.debateAudienceBotPortrait\[data-talking="true"\]\s*\{[^}]*\}/u)?.[0] ??
+      "";
+    assert.doesNotMatch(talkingRule, /^\s*opacity:\s*[\d.]+/mu);
+    const reactingRule =
+      css.match(/\.debateAudienceBotPortrait\[data-live-reacting="true"\]\s*\{[^}]*\}/u)?.[0] ??
+      "";
+    assert.doesNotMatch(reactingRule, /^\s*opacity:\s*[\d.]+/mu);
+    assert.match(
+      css,
+      /\.debateAudienceRow\[data-audience-order-response="hush"\]\s*\.debateAudienceLayer\s*\{[^}]*transform:/u,
+    );
+    assert.match(
+      css,
+      /\.debateAudienceRow\[data-audience-order-response="hush"\]\s*\.debateAudienceBotPortrait\s*\{[^}]*--debate-audience-shade-opacity/u,
+    );
+    assert.match(
+      css,
+      /@keyframes\s+debate-gallery-seat-arrive[\s\S]*100%[\s\S]*opacity:\s*1/u,
+    );
+    assert.match(
+      css,
+      /@keyframes\s+debate-gallery-seat-depart[\s\S]*100%[\s\S]*opacity:\s*0/u,
+    );
   });
 
   it("uses a persistent five-seat Jury camera with progressive visible final ballots", () => {
@@ -3918,7 +3981,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /setActiveSession\(reuseDebateSessionEventPrefix\(previous, next\)\)[\s\S]{0,480}options\.playIntro[\s\S]{0,420}await playDebateIdent\("intro"\)[\s\S]{0,240}judgeGavelSmashRef\.current\?\.\("order"\)[\s\S]{0,160}setDebateOpeningGalleryHushed\(true\)[\s\S]{0,620}await consumeNewEvents/u,
+      /const adopted = reuseDebateSessionEventPrefix\(previous, next\)[\s\S]{0,160}activeSessionRef\.current = adopted[\s\S]{0,100}setActiveSession\(adopted\)[\s\S]{0,480}options\.playIntro[\s\S]{0,420}await playDebateIdent\("intro"\)[\s\S]{0,240}judgeGavelSmashRef\.current\?\.\("order"\)[\s\S]{0,160}setDebateOpeningGalleryHushed\(true\)[\s\S]{0,620}await consumeNewEvents/u,
     );
     assert.match(
       source,
@@ -4200,17 +4263,19 @@ describe("Debate experience", () => {
       source.slice(juryCameraStart, juryCameraEnd),
       /playerRole/u,
     );
+    assert.doesNotMatch(source, /forumPreparingNextTurn/u);
     assert.match(
       source,
-      /const forumPreparingNextTurn =\s*busy && !presenting && judgeGavelSmashCue === null/u,
+      /recessSettledWide[\s\S]{0,900}recessLifecycleModerator[\s\S]{0,1400}juryCameraActive[\s\S]{0,120}\? "jury"[\s\S]{0,200}speakerHandoffKeepsWide[\s\S]{0,400}introCameraView/u,
+    );
+    assert.match(source, /lifecycleModeratorShot[\s\S]{0,100}debateAutoCameraView\(activeRole\)/u);
+    assert.match(
+      source,
+      /Metadata-only revision drift is safe to absorb without clearing[\s\S]{0,260}setActiveSession\(recovered\)[\s\S]{0,120}requestAdvance\(recovered\)/u,
     );
     assert.match(
       source,
-      /recessSettledWide[\s\S]{0,900}recessLifecycleModerator[\s\S]{0,1400}juryCameraActive[\s\S]{0,120}\? "jury"[\s\S]{0,200}speakerHandoffKeepsWide[\s\S]{0,400}introCameraView[\s\S]{0,400}forumPreparingNextTurn[\s\S]{0,60}\? "wide"/u,
-    );
-    assert.match(
-      source,
-      /forumPreparingNextTurn[\s\S]{0,80}\? "wide"[\s\S]{0,200}lifecycleModeratorShot[\s\S]{0,80}debateAutoCameraView\(activeRole\)/u,
+      /Another accepted floor action won the race[\s\S]{0,220}adoptSession\(previous, recovered\)/u,
     );
     assert.match(source, /debateAdoptProceedingsCursor\(previous, next\)/u);
     assert.doesNotMatch(

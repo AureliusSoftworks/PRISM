@@ -2655,7 +2655,7 @@
   bottom: 22%;
   z-index: 1;
   padding-inline: clamp(34px, 6vw, 126px);
-  opacity: 0.5;
+  opacity: 1;
 }
 
 .live[data-theme="light"] .debateAudienceRow {
@@ -2736,7 +2736,7 @@
   aspect-ratio: 0.9;
   overflow: hidden;
   border-radius: 46% 46% 12% 12%;
-  opacity: 0.72;
+  opacity: 1;
   transform: translateY(4%) scale(var(--debate-audience-depth));
   transform-origin: 50% 100%;
   contain: layout paint style;
@@ -2749,7 +2749,7 @@
   --debate-audience-depth: 0.9;
   --debate-audience-shade-opacity: 0.38;
   width: clamp(48px, 5.85vw, 88px);
-  opacity: 0.64;
+  opacity: 1;
 }
 
 .debateAudienceBotPortrait[data-conversation-facing="right"] {
@@ -2886,7 +2886,6 @@
 
 .debateAudienceBotPortrait[data-talking="true"] {
   --debate-audience-shade-opacity: 0.12;
-  opacity: 0.94;
   transform: translateY(11%) scale(var(--debate-audience-depth));
 }
 
@@ -2902,8 +2901,11 @@
 }
 
 .debateAudienceRow[data-audience-order-response="hush"] .debateAudienceLayer {
-  opacity: 0.58;
   transform: translateY(5%);
+}
+
+.debateAudienceRow[data-audience-order-response="hush"] .debateAudienceBotPortrait {
+  --debate-audience-shade-opacity: 0.58;
 }
 
 .debateAudienceRow[data-audience-order-response="awkward"]
@@ -2913,7 +2915,6 @@
 
 .debateAudienceBotPortrait[data-live-reacting="true"] {
   --debate-audience-shade-opacity: 0.08;
-  opacity: 0.96;
 }
 
 .debateAudienceBotPortrait[data-audience-bounce="true"] {
@@ -14897,6 +14898,11 @@
 }
 
 .live[data-debate-room-presence="arriving"]
+  .debateAudienceBotPortrait[data-gallery-arrived="true"] {
+  opacity: 1;
+}
+
+.live[data-debate-room-presence="arriving"]
   .debateAudienceBotPortrait[data-gallery-arrived="true"]:not(
     [data-audience-source="player"]
   ) {
@@ -15206,7 +15212,7 @@
 
   100% {
     visibility: visible;
-    opacity: 0.72;
+    opacity: 1;
     transform: translate(0, 4%) scale(var(--debate-audience-depth, 1));
   }
 }
@@ -15256,7 +15262,7 @@
       [data-audience-source="player"]
     ) {
     animation: none !important;
-    opacity: 0.72;
+    opacity: 1;
     transform: translateY(4%) scale(var(--debate-audience-depth, 1));
   }
 

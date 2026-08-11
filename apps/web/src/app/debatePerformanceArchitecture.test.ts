@@ -122,6 +122,13 @@ test("audience materials throttle without removing semantic reactions", () => {
   );
 });
 
+test("arriving gallery seats stay opaque once seated", () => {
+  assert.match(
+    debateCss,
+    /\.live\[data-debate-room-presence="arriving"\]\s*\.debateAudienceBotPortrait\[data-gallery-arrived="true"\]\s*\{\s*opacity:\s*1/u,
+  );
+});
+
 test("talking gallery seats animate compact mouths without waking the full portrait", () => {
   assert.match(
     debateSource,

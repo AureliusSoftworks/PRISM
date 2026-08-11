@@ -238,6 +238,10 @@ import {
   type DebateJuryCameraPresentationV1,
 } from "./debateJuryCamera";
 import {
+  debateCanRetryStaleAutomaticAdvance,
+  debateRequestIsRevisionConflict,
+} from "./debateRevisionRecovery";
+import {
   debateUrlEvidenceSourceFromDraft,
   emptyDebateUrlEvidenceDraft,
   type DebateUrlEvidenceDraft,
@@ -2438,15 +2442,6 @@ function debateCastBotHue(bot: {
 function debateCircularHueDistance(left: number, right: number): number {
   const delta = Math.abs(left - right) % 360;
   return Math.min(delta, 360 - delta);
-}
-
-function debateRequestIsRevisionConflict(error: unknown): boolean {
-  return (
-    error instanceof Error &&
-    /Debate changed from revision \d+ to \d+\. Refresh and retry\./u.test(
-      error.message,
-    )
-  );
 }
 
 function readDebateEvidenceImageFile(file: File): Promise<string> {
@@ -10471,7 +10466,9 @@ export function DebateExperience(
       setTurnaboutObjecting(false);
       setTurnaboutEvidenceSourceId("");
       setObserverPerspective("live");
-      setActiveSession(reuseDebateSessionEventPrefix(previous, next));
+      const adopted = reuseDebateSessionEventPrefix(previous, next);
+      activeSessionRef.current = adopted;
+      setActiveSession(adopted);
       if (fresh.length > 0) prepareNextAutomaticTurn(next);
       const presentingStartedAt = debateClientPerfNowMs();
       audienceReactionFoleyStartsRef.current = 0;
@@ -11766,7 +11763,7 @@ export function DebateExperience(
 
   const advance = useCallback(
     async (skip = false): Promise<void> => {
-      const previous = activeSession;
+      const previous = activeSessionRef.current ?? activeSession;
       if (
         !previous ||
         busy ||
@@ -11785,6 +11782,7 @@ export function DebateExperience(
       setBusy(true);
       setError(null);
       const advanceStartedAt = debateClientPerfNowMs();
+      const advanceMutationKey = nextMutationKey(skip ? "skip" : "advance");
       let finishResponseCue: (() => Promise<void>) | null = null;
       try {
         const prepared = preparedTurnRef.current;
@@ -11822,15 +11820,48 @@ export function DebateExperience(
                 sessionId: previous.id,
               }) ?? null;
           }
-          result = await request<{ session: DebateSessionV1 }>(
-            `/api/debates/${encodeURIComponent(previous.id)}/advance`,
-            requestBody({
-              expectedRevision: previous.revision,
-              idempotencyKey: nextMutationKey(skip ? "skip" : "advance"),
-              skip,
-              preferredProvider,
-            }),
-          );
+          const requestAdvance = (session: DebateSessionV1) =>
+            request<{ session: DebateSessionV1 }>(
+              `/api/debates/${encodeURIComponent(session.id)}/advance`,
+              requestBody({
+                expectedRevision: session.revision,
+                idempotencyKey: advanceMutationKey,
+                skip,
+                preferredProvider,
+              }),
+            );
+          try {
+            result = await requestAdvance(previous);
+          } catch (caught) {
+            if (!debateRequestIsRevisionConflict(caught)) throw caught;
+            const refreshed = await request<{ session: DebateSessionV1 }>(
+              `/api/debates/${encodeURIComponent(previous.id)}?perspective=live`,
+            );
+            if (
+              !mountedRef.current ||
+              activeSessionIdRef.current !== previous.id
+            ) {
+              return;
+            }
+            const recovered = reuseDebateSessionEventPrefix(
+              previous,
+              refreshed.session,
+            );
+            if (
+              debateCanRetryStaleAutomaticAdvance(previous, recovered)
+            ) {
+              // Metadata-only revision drift is safe to absorb without clearing
+              // the visible caption, presentation store, or camera owner.
+              activeSessionRef.current = recovered;
+              setActiveSession(recovered);
+              result = await requestAdvance(recovered);
+            } else {
+              // Another accepted floor action won the race. Present only its
+              // unseen event delta; never repeat the stale automatic action.
+              await adoptSession(previous, recovered);
+              return;
+            }
+          }
           await finishResponseCue?.();
         }
         logDebateClientPerf(
@@ -22105,8 +22136,6 @@ export function DebateExperience(
       activeGavelCue.kind === "order" ||
       activeGavelCue.kind === "attention" ||
       presentationEventId === activeGavelCue.eventId;
-    const forumPreparingNextTurn =
-      busy && !presenting && judgeGavelSmashCue === null;
     const resumeCeremonyCameraForced =
       resumeCeremonySessionId === session.id;
     const judgeGavelCameraForced =
@@ -22158,10 +22187,8 @@ export function DebateExperience(
                   ? introCameraView
                   : effectiveCameraMode === "auto" ||
                       effectiveCameraMode === "jury"
-                    ? forumPreparingNextTurn
-                      ? "wide"
-                      : (activeGavelCue && gavelCameraReady) ||
-                          lifecycleModeratorShot
+                    ? (activeGavelCue && gavelCameraReady) ||
+                        lifecycleModeratorShot
                         ? "moderator"
                         : debateAutoCameraView(activeRole)
                     : effectiveCameraMode;

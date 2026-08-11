@@ -1733,6 +1733,116 @@ async function createTurnaboutForRole(
 }
 
 describe("Debate engine", () => {
+  it("rejects an 8 to 11 stale mutation without consuming its idempotency key", async () => {
+    const db = createTestDb();
+    try {
+      const debateRuntime = runtime();
+      let session = await createJudgeDebate(db, debateRuntime, {
+        idempotencyKey: "revision-race:create",
+      });
+      for (let cycle = 0; cycle < 3; cycle += 1) {
+        session = pauseDebateSession(db, "user-1", session.id, {
+          expectedRevision: session.revision,
+          idempotencyKey: `revision-race:pause:${cycle}`,
+          quietSave: true,
+        });
+        session = resumeDebateSession(db, "user-1", session.id, {
+          expectedRevision: session.revision,
+          idempotencyKey: `revision-race:resume:${cycle}`,
+          quietSave: true,
+        });
+      }
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "revision-race:advance-to-eight",
+        },
+        debateRuntime,
+      );
+      assert.equal(session.revision, 8);
+      const staleRevision = session.revision;
+
+      session = pauseDebateSession(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "revision-race:pause-nine",
+        quietSave: true,
+      });
+      session = resumeDebateSession(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "revision-race:resume-ten",
+        quietSave: true,
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "revision-race:advance-eleven",
+        },
+        debateRuntime,
+      );
+      assert.equal(session.revision, 11);
+      const recoveryKey = "revision-race:recover-once";
+      const eventCountAtEleven = session.events.length;
+
+      await assert.rejects(
+        () =>
+          advanceDebateSession(
+            db,
+            "user-1",
+            session.id,
+            {
+              expectedRevision: staleRevision,
+              idempotencyKey: recoveryKey,
+            },
+            debateRuntime,
+          ),
+        (error: unknown) =>
+          error instanceof HttpError &&
+          error.statusCode === 409 &&
+          error.message ===
+            "Debate changed from revision 8 to 11. Refresh and retry.",
+      );
+      assert.equal(
+        getDebateSession(db, "user-1", session.id).events.length,
+        eventCountAtEleven,
+      );
+
+      const recovered = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: recoveryKey,
+        },
+        debateRuntime,
+      );
+      const replay = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: recoveryKey,
+        },
+        debateRuntime,
+      );
+      assert.equal(recovered.revision, 12);
+      assert.deepEqual(replay, recovered);
+      assert.equal(
+        getDebateSession(db, "user-1", session.id).events.length,
+        recovered.events.length,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("pins post-session synopsis and debrief contracts without durable memory writes", () => {
     const source = readFileSync(
       fileURLToPath(new URL("../debate.ts", import.meta.url)),
