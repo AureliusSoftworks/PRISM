@@ -11,6 +11,8 @@ import { normalizeBotResponseCueProfileV1 } from "./responseCue.ts";
 /// Sentinel block embedded at the end of `system_prompt` for structured bots.
 export const BOT_PROFILE_META_START = "<<<PRISM_BOT_META>>>";
 export const BOT_PROFILE_META_END = "<<<END_PRISM_BOT_META>>>";
+/** The compact Purpose editor is intentionally a single, readable thought. */
+export const BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH = 120;
 
 export type BotProfileCategoryId =
   | "purpose"

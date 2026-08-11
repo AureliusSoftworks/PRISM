@@ -1,12 +1,12 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import {
+  BOT_GENERATED_AVATAR_INK_MAX_PAINTED_PIXELS,
   BOT_GENERATION_PROMPT_MAX_LENGTH,
   normalizeBotGeneratedDraftV1,
   normalizeBotGenerationPrompt,
 } from "./botGeneration.ts";
 import {
-  BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS,
   decodeBotAvatarDetailsPaintColorMap,
 } from "./botAvatarDetails.ts";
 
@@ -72,6 +72,9 @@ function completeDraft(): Record<string, unknown> {
     accentColor: "#7799AA",
     glyph: "moon",
     face: {
+      intentionalCustomEyes: true,
+      intentionalCustomMouth: true,
+      intentionalGeometryException: false,
       faceEyesFont: "warm",
       faceEyeCharacter: "*",
       faceEyeCount: 2,
@@ -148,6 +151,9 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.glyph, "moon");
     assert.equal(draft.face.eyeCharacter, "*");
     assert.equal(draft.face.eyeCount, 2);
+    assert.equal(draft.face.mouthCharacter, "_");
+    assert.equal(draft.face.eyeScale, 1);
+    assert.equal(draft.face.mouthScale, 1);
     assert.equal(draft.face.eyeRotationDeg, 0);
     assert.equal(draft.face.eyeOffsetX, 0);
     assert.equal(draft.face.eyeOffsetY, 0.18);
@@ -166,6 +172,69 @@ describe("normalizeBotGeneratedDraftV1", () => {
     assert.equal(draft.audioVoiceProfile.systemVoiceName, undefined);
     assert.equal(draft.audioVoiceProfile.elevenLabsDirection, "hushed, wry, deliberate");
     assert.equal(draft.settings.maxTokens, 1800);
+  });
+
+  it("defaults unrequested generated eye and mouth glyphs while preserving deliberate canon", () => {
+    const ordinary = completeDraft();
+    ordinary.face = {
+      ...(ordinary.face as Record<string, unknown>),
+      intentionalCustomEyes: false,
+      intentionalCustomMouth: false,
+      faceEyeCharacter: "*",
+      faceMouthCharacter: "_",
+      faceEyeCount: 2,
+    };
+    const ordinaryDraft = normalizeBotGeneratedDraftV1(ordinary);
+    assert.ok(ordinaryDraft);
+    assert.equal(ordinaryDraft.face.eyeCharacter, null);
+    assert.equal(ordinaryDraft.face.eyeCount, 1);
+    assert.equal(ordinaryDraft.face.mouthCharacter, null);
+
+    const canon = completeDraft();
+    const canonDraft = normalizeBotGeneratedDraftV1(canon);
+    assert.ok(canonDraft);
+    assert.equal(canonDraft.face.eyeCharacter, "*");
+    assert.equal(canonDraft.face.mouthCharacter, "_");
+  });
+
+  it("uses canonical generated face geometry unless a deliberate exception is flagged", () => {
+    const exception = completeDraft();
+    exception.face = {
+      ...(exception.face as Record<string, unknown>),
+      intentionalGeometryException: true,
+      faceEyeScale: 1.2,
+      faceEyeOffsetX: -0.3,
+      faceEyeOffsetY: -0.04,
+      faceEyeRotationDeg: 25,
+      faceMouthScale: 0.9,
+      faceMouthOffsetX: 0.2,
+      faceMouthOffsetY: 0.04,
+      faceMouthRotationDeg: -15,
+    };
+    const draft = normalizeBotGeneratedDraftV1(exception);
+    assert.ok(draft);
+    assert.deepEqual(
+      {
+        eyeScale: draft.face.eyeScale,
+        eyeX: draft.face.eyeOffsetX,
+        eyeY: draft.face.eyeOffsetY,
+        eyeRotation: draft.face.eyeRotationDeg,
+        mouthScale: draft.face.mouthScale,
+        mouthX: draft.face.mouthOffsetX,
+        mouthY: draft.face.mouthOffsetY,
+        mouthRotation: draft.face.mouthRotationDeg,
+      },
+      {
+        eyeScale: 1.2,
+        eyeX: -0.3,
+        eyeY: -0.04,
+        eyeRotation: 25,
+        mouthScale: 0.9,
+        mouthX: 0.2,
+        mouthY: 0.04,
+        mouthRotation: -15,
+      },
+    );
   });
 
   it("keeps generated Atmosphere accents optional and portable", () => {
@@ -320,7 +389,7 @@ describe("normalizeBotGeneratedDraftV1", () => {
     ), false);
   });
 
-  it("caps filled portrait paths at the existing semantic ink density limit", () => {
+  it("caps generated portrait ink at the restrained accent density", () => {
     const input = completeDraft();
     input.avatarDetails = {
       ink: [
@@ -342,7 +411,10 @@ describe("normalizeBotGeneratedDraftV1", () => {
     const bytes = decodeBotAvatarDetailsPaintColorMap(
       draft.avatarDetails.screen.paintColorMapBase64,
     );
-    assert.equal(paintedPixelCount(bytes), BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS);
+    assert.equal(
+      paintedPixelCount(bytes),
+      BOT_GENERATED_AVATAR_INK_MAX_PAINTED_PIXELS,
+    );
   });
 
   it("clamps malformed geometry and generation settings", () => {
@@ -404,5 +476,24 @@ describe("normalizeBotGenerationPrompt", () => {
     assert.equal(prompt.length, BOT_GENERATION_PROMPT_MAX_LENGTH);
     assert.match(prompt, /^A calm archivist/u);
     assert.doesNotMatch(prompt, /\n/u);
+  });
+
+  it("keeps generated Purpose within the editor limit at a completed sentence", () => {
+    const input = completeDraft();
+    input.profile = {
+      ...(input.profile as Record<string, unknown>),
+      purpose: {
+        statement:
+          "a meticulous keeper of forgotten gardens who teaches patience through weather, soil, and small rituals. This sentence must not enter the short Purpose field.",
+        legacyNotes: "",
+      },
+    };
+    const draft = normalizeBotGeneratedDraftV1(input);
+    assert.ok(draft);
+    assert.equal(
+      draft.profile.purpose.statement,
+      "a meticulous keeper of forgotten gardens who teaches patience through weather, soil, and small rituals.",
+    );
+    assert.ok(draft.profile.purpose.statement.length <= 120);
   });
 });

@@ -5,6 +5,7 @@ import {
   botGenerationFieldDefinitionV1,
   normalizeBotGenerationFieldKeyV1,
 } from "./botGenerationFields.ts";
+import { BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH } from "./botProfile.ts";
 
 test("Avatar Studio field registry covers every creative surface and explicit safety exclusion", () => {
   const keys = Object.keys(BOT_GENERATION_FIELD_REGISTRY_V1);
@@ -12,6 +13,10 @@ test("Avatar Studio field registry covers every creative surface and explicit sa
     assert.ok(keys.some((key) => key.startsWith(prefix)), `missing ${prefix}`);
   }
   assert.equal(botGenerationFieldDefinitionV1("power.prompt").policy, "semantic");
+  assert.equal(
+    botGenerationFieldDefinitionV1("profile.purpose.statement").maxLength,
+    BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH,
+  );
   assert.equal(
     botGenerationFieldDefinitionV1("identity.namePronunciation").policy,
     "excluded",

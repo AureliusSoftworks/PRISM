@@ -258,6 +258,11 @@ describe("PRISM bot generator", () => {
     assert.doesNotMatch(JSON.stringify(capturedOptions?.jsonSchema), /elevenLabsVoiceId/u);
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /"points"/u);
     assert.match(JSON.stringify(capturedOptions?.jsonSchema), /"enum":\["effect"\]/u);
+    assert.match(JSON.stringify(capturedOptions?.jsonSchema), /intentionalCustomEyes/u);
+    assert.match(
+      JSON.stringify(capturedOptions?.jsonSchema),
+      /"statement":\{"type":"string","maxLength":120\}/u,
+    );
     assert.deepEqual(result.draft.avatarDetails?.screen.stamps, []);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /named local PRISM Voice Pack timbre/u);
     assert.match(
@@ -267,8 +272,8 @@ describe("PRISM bot generator", () => {
     assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not select or link an ElevenLabs voice/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not create memories/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /Do not create stamps or raw image\/accessory data/u);
-    assert.match(provider.calls[0]?.[0]?.content ?? "", /safe static pixel-portrait layer/u);
-    assert.match(provider.calls[0]?.[0]?.content ?? "", /calibrated portrait landmarks/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /safe static pixel-portrait accent layer/u);
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /shared canonical placement and size/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /eye window x 42-86 and y 50-70/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /do not use blink or talking paths/u);
     assert.match(provider.calls[0]?.[0]?.content ?? "", /subtle three-quarter view/u);
@@ -281,8 +286,13 @@ describe("PRISM bot generator", () => {
     );
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",
-      /keep faceEyeRotationDeg at 0 unless/u,
+      /shared canonical placement and size/u,
     );
+    assert.match(
+      provider.calls[0]?.[0]?.content ?? "",
+      /intentionalCustomEyes/u,
+    );
+    assert.match(provider.calls[0]?.[0]?.content ?? "", /Bob Ross-scale accents/u);
   });
 
   it("uses explicit LOCAL effort for private preparation and the final structured draft", async () => {

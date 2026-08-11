@@ -18,6 +18,7 @@ import {
 import { inferCorporalityFromPersona } from "./corporalityFoley.ts";
 import { normalizeBotIdentityColor } from "./color.ts";
 import {
+  BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH,
   parseStoredBotPrompt,
   serializeStoredBotPrompt,
   type BotProfileFields,
@@ -31,9 +32,11 @@ import {
 export const BOT_GENERATION_DRAFT_VERSION = 1 as const;
 export const BOT_GENERATION_PROMPT_MAX_LENGTH = 2_000;
 export const BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH = 240;
+/** Generated ink is an accent layer, not a fully painted portrait. */
+export const BOT_GENERATED_AVATAR_INK_MAX_PATHS = 8;
+export const BOT_GENERATED_AVATAR_INK_MAX_PAINTED_PIXELS = 900;
 const BOT_GENERATED_INK_MAX_LINE_LENGTH = 32;
 const BOT_GENERATED_INK_MAX_CIRCLE_RADIUS = 16;
-const BOT_GENERATED_INK_MAX_PATHS = 36;
 const BOT_GENERATED_INK_MAX_PATH_POINTS = 18;
 const BOT_GENERATED_INK_MAX_PATH_SEGMENT_LENGTH = 96;
 const BOT_GENERATED_PORTRAIT_EYE_OFFSET_X = 0;
@@ -223,9 +226,40 @@ function normalizeGeneratedGlyph(value: unknown): BotGenerationGlyphId {
 function normalizeGeneratedProfile(value: unknown, botName: string): BotProfileFields {
   const candidate = isRecord(value) ? value : {};
   // The profile serializer owns the canonical field parsing and bounds custom facts.
-  return parseStoredBotPrompt(
+  const profile = parseStoredBotPrompt(
     serializeStoredBotPrompt(candidate as unknown as BotProfileFields, botName),
   ).fields;
+  profile.purpose.statement = fitGeneratedPurpose(profile.purpose.statement);
+  return profile;
+}
+
+/** Keep an overlong model result readable instead of silently cutting a thought. */
+function fitGeneratedPurpose(value: string): string {
+  const compact = compactText(value, 500);
+  if (compact.length <= BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH) return compact;
+  const withinLimit = compact.slice(0, BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH);
+  const terminal = [...withinLimit.matchAll(/[.!?](?=\s|$)/gu)].at(-1)?.index;
+  if (terminal !== undefined && terminal >= 24) {
+    return withinLimit.slice(0, terminal + 1).trim();
+  }
+  const wordBoundary = withinLimit.lastIndexOf(
+    " ",
+    BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH - 2,
+  );
+  return `${withinLimit.slice(0, Math.max(1, wordBoundary)).trim()}…`;
+}
+
+function generatedFaceIntent(value: unknown): {
+  customEyes: boolean;
+  customMouth: boolean;
+  geometryException: boolean;
+} {
+  const face = isRecord(value) ? value : {};
+  return {
+    customEyes: face.intentionalCustomEyes === true,
+    customMouth: face.intentionalCustomMouth === true,
+    geometryException: face.intentionalGeometryException === true,
+  };
 }
 
 function normalizeInkStroke(value: unknown): BotGeneratedInkStrokeV1 | null {
@@ -313,7 +347,10 @@ function setInkPixel(
   state: { painted: number },
 ): void {
   if (
-    state.painted >= BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS ||
+    state.painted >= Math.min(
+      BOT_AVATAR_DETAILS_MAX_PAINTED_PIXELS,
+      BOT_GENERATED_AVATAR_INK_MAX_PAINTED_PIXELS,
+    ) ||
     generatedPortraitPixelIsReserved(x, y) ||
     !isBotAvatarDetailsWritablePixel(x, y)
   ) return;
@@ -461,7 +498,7 @@ function normalizeGeneratedAvatarDetails(value: unknown): BotAvatarDetailsV1 | n
           normalizeInkPath(candidate) ?? normalizeInkStroke(candidate)
         )
         .filter((primitive): primitive is BotGeneratedInkPrimitiveV1 => primitive !== null)
-        .slice(0, BOT_GENERATED_INK_MAX_PATHS)
+        .slice(0, BOT_GENERATED_AVATAR_INK_MAX_PATHS)
     : [];
   const colorMap = new Uint8Array(BOT_AVATAR_DETAILS_PAINT_COLOR_MAP_BYTE_LENGTH);
   const paintState = { painted: 0 };
@@ -547,22 +584,33 @@ export function normalizeBotGeneratedDraftV1(
   if (!isRecord(value)) return null;
   const name = compactText(value.name, 80) || "New bot";
   const profile = normalizeGeneratedProfile(value.profile, name);
+  const faceInput = recordAt(value, "face");
+  const faceIntent = generatedFaceIntent(faceInput);
   const resolvedFace = resolveBotFaceStyle(
-    recordAt(value, "face"),
+    faceInput,
     profile.core.communicationStyle,
   );
   const avatarDetails = normalizeGeneratedAvatarDetails(value.avatarDetails);
-  const face: BotFaceStyle = avatarDetails
-    ? {
-        ...resolvedFace,
-        eyeOffsetX: BOT_GENERATED_PORTRAIT_EYE_OFFSET_X,
-        eyeOffsetY: BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y,
-        mouthOffsetX: BOT_GENERATED_PORTRAIT_MOUTH_OFFSET_X,
-        mouthOffsetY: BOT_GENERATED_PORTRAIT_MOUTH_OFFSET_Y,
-        blinkOffsetX: BOT_GENERATED_PORTRAIT_EYE_OFFSET_X,
-        blinkOffsetY: BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y,
-      }
-    : resolvedFace;
+  const face: BotFaceStyle = {
+    ...resolvedFace,
+    eyeCharacter: faceIntent.customEyes ? resolvedFace.eyeCharacter : null,
+    eyeCount: faceIntent.customEyes ? resolvedFace.eyeCount : 1,
+    mouthCharacter: faceIntent.customMouth ? resolvedFace.mouthCharacter : null,
+    ...(faceIntent.geometryException
+      ? {}
+      : {
+          eyeScale: 1,
+          eyeOffsetX: BOT_GENERATED_PORTRAIT_EYE_OFFSET_X,
+          eyeOffsetY: BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y,
+          eyeRotationDeg: 0,
+          mouthScale: 1,
+          mouthOffsetX: BOT_GENERATED_PORTRAIT_MOUTH_OFFSET_X,
+          mouthOffsetY: BOT_GENERATED_PORTRAIT_MOUTH_OFFSET_Y,
+          mouthRotationDeg: 0,
+          blinkOffsetX: BOT_GENERATED_PORTRAIT_EYE_OFFSET_X,
+          blinkOffsetY: BOT_GENERATED_PORTRAIT_EYE_OFFSET_Y,
+        }),
+  };
   const voicePreviewLine = compactText(
     value.voicePreviewLine,
     BOT_GENERATION_VOICE_PREVIEW_MAX_LENGTH,

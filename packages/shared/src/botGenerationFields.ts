@@ -1,3 +1,5 @@
+import { BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH } from "./botProfile.ts";
+
 export const BOT_GENERATION_FIELD_REGISTRY_VERSION = 1 as const;
 
 export type BotGenerationFieldPolicyV1 = "semantic" | "bounded" | "excluded";
@@ -45,7 +47,7 @@ export const BOT_GENERATION_FIELD_REGISTRY_V1 = {
   "identity.accentColor": bounded("string"),
   "identity.glyph": bounded("string"),
 
-  "profile.purpose.statement": prose(500),
+  "profile.purpose.statement": prose(BOT_PROFILE_PURPOSE_STATEMENT_MAX_LENGTH),
   "profile.purpose.legacyNotes": prose(500),
   "profile.core.traits": prose(500),
   "profile.core.communicationStyle": semanticChoice([
