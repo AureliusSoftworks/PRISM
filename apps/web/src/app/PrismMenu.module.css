@@ -101,12 +101,16 @@
   cursor: default;
 }
 
-.item:hover,
-.item:focus-visible,
-.item[data-active="true"] {
+.item:hover {
   outline: none;
   border-color: color-mix(in srgb, var(--prism-menu-accent) 26%, transparent);
   background: color-mix(in srgb, var(--prism-menu-accent) 10%, rgba(255, 255, 255, 0.055));
+}
+
+.item:focus-visible {
+  outline: 2px solid
+    color-mix(in srgb, var(--prism-menu-accent) 58%, transparent);
+  outline-offset: -2px;
 }
 
 .item[data-tone="danger"] {
@@ -119,8 +123,7 @@
 }
 
 .item:disabled:hover,
-.item:disabled:focus-visible,
-.item:disabled[data-active="true"] {
+.item:disabled:focus-visible {
   border-color: transparent;
   background: transparent;
 }

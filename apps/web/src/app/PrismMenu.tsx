@@ -622,7 +622,6 @@ export function PrismMenuSurface({
               aria-description={entry.disabledReason}
               disabled={disabled}
               className={styles.item}
-              data-active={activeId === entry.id ? "true" : undefined}
               data-icon-presentation={preservesIdentityIcon ? "identity" : undefined}
               data-tone={entry.tone ?? "default"}
               title={entry.disabledReason}

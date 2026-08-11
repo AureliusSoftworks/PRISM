@@ -72,6 +72,23 @@ test("visual shell follows the PRISM instrument-glass contract", () => {
   assert.doesNotMatch(menuCss, /dashed/u);
 });
 
+test("menu checkmarks own selection while pointer hover owns the row fill", () => {
+  assert.match(menuSource, /checked\s*\?\s*<Check aria-hidden="true"/u);
+  assert.doesNotMatch(menuSource, /data-active=/u);
+  assert.match(
+    menuCss,
+    /\.item:hover\s*\{[^}]*border-color:[^}]*background:/u,
+  );
+  assert.match(
+    menuCss,
+    /\.item:focus-visible\s*\{[^}]*outline:\s*2px solid[^}]*outline-offset:\s*-2px/u,
+  );
+  assert.doesNotMatch(
+    menuCss,
+    /\.item:hover,\s*\.item:focus-visible/u,
+  );
+});
+
 test("approved control changes are pinned", () => {
   assert.match(pageSource, /label: "Remove selected from current group"/u);
   assert.match(pageSource, /label: "Reset size"/u);
