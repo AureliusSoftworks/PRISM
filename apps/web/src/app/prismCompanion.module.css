@@ -1056,3 +1056,174 @@
   .orb { --prism-orb-size: 52px; }
   .conversation { width: min(390px, calc(100vw - 16px)); }
 }
+
+/* Light companion material: glass and caustics, never a dark modal wash.
+   These selectors are deliberately theme-qualified so the dark presentation
+   above remains the unchanged reference state. */
+:global([data-theme="light"]) .focusOrb {
+  background: radial-gradient(
+    circle,
+    color-mix(in srgb, var(--companion-s) 16%, transparent) 0 16%,
+    color-mix(in srgb, var(--companion-m) 9%, transparent) 34%,
+    color-mix(in srgb, #dcefff 18%, transparent) 53%,
+    transparent 74%
+  );
+  filter: blur(30px);
+}
+
+:global([data-theme="light"]) .anchor[data-open="true"] .focusOrb {
+  opacity: .72;
+}
+
+:global([data-theme="light"]) .avatar {
+  color: #263d59;
+  filter: drop-shadow(0 8px 15px #5c739136);
+}
+
+:global([data-theme="light"]) .anchor[data-session-note="true"] .avatar,
+:global([data-theme="light"]) .anchor[data-soft-synthesis="true"] .avatar {
+  filter: drop-shadow(0 8px 16px #5c739142);
+}
+
+:global([data-theme="light"]) .shortcut {
+  border-color: #54708b2b;
+  color: #36516a;
+  background: #f8fcffdf;
+  box-shadow: 0 5px 14px #5b769124;
+}
+
+:global([data-theme="light"]) .bubble,
+:global([data-theme="light"]) .thinking,
+:global([data-theme="light"]) .composer,
+:global([data-theme="light"]) .refractPrompt,
+:global([data-theme="light"]) .refractTutorial {
+  border-color: color-mix(in srgb, var(--companion-s) 28%, #6d7e9a42);
+  color: #1f3148;
+  background:
+    linear-gradient(118deg, #ffffffd9 0%, #f6fbffca 52%, #f6efffd0 100%),
+    radial-gradient(circle at 9% 0%, color-mix(in srgb, var(--companion-s) 16%, transparent), transparent 48%);
+  box-shadow:
+    0 18px 42px -28px #344f7061,
+    0 0 24px color-mix(in srgb, var(--companion-m) 10%, transparent),
+    inset 0 1px 0 #ffffffd9;
+  backdrop-filter: blur(20px) saturate(1.12);
+  -webkit-backdrop-filter: blur(20px) saturate(1.12);
+}
+
+:global([data-theme="light"]) .bubbleHeader > span,
+:global([data-theme="light"]) .thinking > span,
+:global([data-theme="light"]) .sessionNoteHeading > span,
+:global([data-theme="light"]) .refractTutorial > span {
+  color: #216e89;
+}
+
+:global([data-theme="light"]) .bubble[data-role="user"] .bubbleHeader > span {
+  color: #9e3b76;
+}
+
+:global([data-theme="light"]) .thinking p,
+:global([data-theme="light"]) .sessionNoteHeading > small,
+:global([data-theme="light"]) .sessionNoteComposer footer > small,
+:global([data-theme="light"]) .composer small,
+:global([data-theme="light"]) .refractTutorial p,
+:global([data-theme="light"]) .refractPrompt small {
+  color: #52677d;
+}
+
+:global([data-theme="light"]) .markdown a,
+:global([data-theme="light"]) .refractPrompt label {
+  color: #176d91;
+}
+
+:global([data-theme="light"]) .markdown code {
+  background: #dceaf080;
+}
+
+:global([data-theme="light"]) .copyButton,
+:global([data-theme="light"]) .actions button,
+:global([data-theme="light"]) .orchestrationCard button,
+:global([data-theme="light"]) .actionHistory button {
+  border-color: #477c9a48;
+  color: #24546f;
+  background: #ffffff9e;
+}
+
+:global([data-theme="light"]) .userNotesCard,
+:global([data-theme="light"]) .orchestrationCard,
+:global([data-theme="light"]) .actionHistory {
+  border-color: #54708b32;
+  color: #1f3148;
+  background:
+    linear-gradient(128deg, #ffffffc4, #edf8ffbd 58%, #f5edffbd),
+    color-mix(in srgb, var(--companion-s) 7%, transparent);
+  box-shadow: 0 11px 28px -22px #344f704a, inset 0 1px 0 #ffffffcc;
+}
+
+:global([data-theme="light"]) .userNotesEyebrow,
+:global([data-theme="light"]) .orchestrationCard > span {
+  color: #216e89;
+}
+
+:global([data-theme="light"]) .userNotesHeadline,
+:global([data-theme="light"]) .userNotesList,
+:global([data-theme="light"]) .orchestrationCard p,
+:global([data-theme="light"]) .orchestrationCard small,
+:global([data-theme="light"]) .actionHistory small {
+  color: #52677d;
+}
+
+:global([data-theme="light"]) .actionHistory article {
+  background: #ffffff8c;
+}
+
+:global([data-theme="light"]) .composer textarea,
+:global([data-theme="light"]) .personalNoteTitle,
+:global([data-theme="light"]) .refractPrompt input {
+  color: #1f3148;
+}
+
+:global([data-theme="light"]) .composer textarea::placeholder,
+:global([data-theme="light"]) .personalNoteTitle::placeholder {
+  color: #6b7d90;
+}
+
+:global([data-theme="light"]) .refractPrompt input {
+  border-color: #54708b38;
+  background: #ffffffae;
+}
+
+:global([data-theme="light"]) .composer .privacyToggle,
+:global([data-theme="light"]) .composer .continueButton,
+:global([data-theme="light"]) .composer .voiceToggle,
+:global([data-theme="light"]) .composer .historyToggle,
+:global([data-theme="light"]) .composer .noteSecondaryButton,
+:global([data-theme="light"]) .personalNoteChoice {
+  border-color: #54708b2d !important;
+  color: #36516a !important;
+  background: #ffffff91 !important;
+}
+
+:global([data-theme="light"]) .personalNoteChoice[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--companion-s) 48%, #54708b) !important;
+  color: #1f3148 !important;
+  background: color-mix(in srgb, var(--companion-s) 13%, #ffffff) !important;
+}
+
+:global([data-theme="light"]) .synthesisEmptyOrb {
+  color: #263d59 !important;
+  background:
+    radial-gradient(circle at 38% 27%, #ffffffec, transparent 29%),
+    linear-gradient(145deg, #fffefb, #e5f4ff 58%, #eee4ff) !important;
+  box-shadow:
+    inset 0 1px 0 #ffffff,
+    inset 0 -8px 17px #91aec42b,
+    0 8px 20px #5b769136,
+    0 0 25px color-mix(in srgb, var(--companion-s) 21%, transparent);
+}
+
+:global([data-theme="light"]) .personalNoteBlocked,
+:global([data-theme="light"]) .personalNoteEmpty {
+  border-color: #54708b33;
+  color: #52677d;
+  background: #ffffff80;
+}

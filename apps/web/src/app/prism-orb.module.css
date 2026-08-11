@@ -77,6 +77,55 @@
     drop-shadow(0 0 10px color-mix(in srgb, var(--prism-orb-i) 80%, transparent));
 }
 
+/* The dark orb is the default material. Light surfaces get their own pearl
+   glass recipe so the shared mark remains legible without changing dark mode. */
+:global([data-theme="light"]) .orb {
+  border-color: transparent;
+  background:
+    radial-gradient(
+      circle at var(--prism-orb-glare-x, 35%)
+        var(--prism-orb-glare-y, 24%),
+      #ffffffd9 0 12%,
+      #ffffff8a 25%,
+      transparent 43%
+    ) padding-box,
+    radial-gradient(
+      circle at 33% 28%,
+      #fffefb 0 20%,
+      #e9f4ff 44%,
+      #e9ddff 70%,
+      #d0e7f7 100%
+    ) padding-box,
+    conic-gradient(
+      from 205deg,
+      var(--prism-orb-p),
+      var(--prism-orb-r),
+      var(--prism-orb-i),
+      var(--prism-orb-s),
+      var(--prism-orb-m),
+      var(--prism-orb-p)
+    ) border-box;
+  box-shadow:
+    0 3px 10px #5b76913d,
+    0 0 0 4px color-mix(in srgb, var(--prism-orb-m) 12%, transparent),
+    0 0 19px color-mix(in srgb, var(--prism-orb-s) 27%, transparent),
+    inset 0 1px 0 #ffffff;
+}
+
+:global([data-theme="light"]) .aura::before {
+  inset: -4px;
+  filter: blur(7px);
+  opacity: .46;
+}
+
+:global([data-theme="light"]) .orb svg {
+  fill: #ffffff99;
+  stroke: #263d59;
+  filter:
+    drop-shadow(0 1px 0 #ffffff)
+    drop-shadow(0 0 4px color-mix(in srgb, var(--prism-orb-s) 38%, transparent));
+}
+
 @keyframes prismOrbAuraTurn {
   to { transform: rotate(1turn); }
 }

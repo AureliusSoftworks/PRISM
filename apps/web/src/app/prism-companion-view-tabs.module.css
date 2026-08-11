@@ -50,3 +50,21 @@
   font: 850 .5rem/1 system-ui, sans-serif;
   font-variant-numeric: tabular-nums;
 }
+
+/* The companion supplies dark text in light mode; give its compact view
+   switcher a distinct glass rail and a crisp, prismatic selected state. */
+:global([data-theme="light"]) .tabs {
+  border-color: #54708b2e;
+  background: #ffffff8a;
+  box-shadow: inset 0 1px 0 #ffffffcc;
+}
+
+:global([data-theme="light"]) .tab {
+  color: #52677d;
+}
+
+:global([data-theme="light"]) .tab[aria-selected="true"] {
+  color: #203c56;
+  background: linear-gradient(105deg, #dff5f3ba, #f2eaffbc 55%, #fff4ddba);
+  box-shadow: inset 0 1px 0 #ffffff, 0 1px 4px #5b76911f;
+}
