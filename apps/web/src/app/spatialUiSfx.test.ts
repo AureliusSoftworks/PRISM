@@ -13,8 +13,8 @@ import {
 
 test("ships a varied tactile UI library with real local assets", () => {
   const sources = Object.values(SPATIAL_UI_SFX_SOURCES).flat();
-  assert.equal(sources.length, 22);
-  assert.equal(new Set(sources).size, 22);
+  assert.equal(sources.length, 26);
+  assert.equal(new Set(sources).size, 26);
   assert.equal(SPATIAL_UI_SFX_SOURCES["bot-hover"].length, 4);
   assert.equal(SPATIAL_UI_SFX_SOURCES["bot-select"].length, 3);
   assert.deepEqual(SPATIAL_UI_SFX_SOURCES["turbo-on"], [
@@ -23,8 +23,10 @@ test("ships a varied tactile UI library with real local assets", () => {
   assert.deepEqual(SPATIAL_UI_SFX_SOURCES["turbo-off"], [
     "/audio/ui-asmr/turbo-steam-extinguish-01.mp3",
   ]);
+  assert.equal(SPATIAL_UI_SFX_SOURCES["turbo-denied"].length, 4);
   assert.equal(SPATIAL_UI_SFX_CONFIG["turbo-on"].volume, 0.08);
-  assert.equal(SPATIAL_UI_SFX_CONFIG["turbo-off"].volume, 0.02);
+  assert.equal(SPATIAL_UI_SFX_CONFIG["turbo-off"].volume, 0.01);
+  assert.equal(SPATIAL_UI_SFX_CONFIG["turbo-denied"].volume, 0.22);
   assert.ok(
     SPATIAL_UI_SFX_CONFIG["turbo-off"].volume <
       SPATIAL_UI_SFX_CONFIG["turbo-on"].volume,

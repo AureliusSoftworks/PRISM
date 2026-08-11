@@ -142,8 +142,13 @@ import {
   modelEffortWheelDirection,
 } from "./modelEffortControl";
 import { isPendingReplyVisible } from "./pendingReplyVisible";
-import { modelPickerStepValue } from "./modelPickerControl";
+import { turboModelShortcutCandidate } from "./turboModelShortcut";
+import {
+  modelPickerStepValue,
+  modelPickerWheelDirection,
+} from "./modelPickerControl";
 import { KeyboardShortcutSettings } from "./KeyboardShortcutSettings";
+import { ControlShortcutGuide } from "./ControlShortcutOverlay";
 import {
   defaultPrismKeyboardShortcuts,
   keyboardShortcutEventIsRecording,
@@ -178,6 +183,7 @@ import {
   hideAppNavbarForImmersion,
   holdAppNavbarForDropdown,
   revealAppNavbarForFreshSurface,
+  revealAppNavbarForShortcutAction,
   revealAppNavbarFromPointerClientY,
   scheduleAppNavbarAutoHide,
   setAppNavbarAutoHideEnabled,
@@ -1750,6 +1756,7 @@ import {
   type CoffeeActionSfxKind,
 } from "./coffee-action-sfx";
 import { ActionSfxPackMagicButton } from "./ActionSfxPackMagicButton";
+import { playPrismHotkeyInaccessibleSfx } from "./prismHotkeySfx";
 import { buildSignalActionSfxDirectionPayload } from "./signalActionSfxDirection";
 import {
   cleanPlayerVoiceProfile,
@@ -24195,6 +24202,52 @@ interface ComposerModelPickerProps {
 }
 
 const MODEL_PICKER_QUICK_OPEN_EVENT = "prism:model-picker-quick-open";
+const EFFORT_PICKER_QUICK_OPEN_EVENT = "prism:effort-picker-quick-open";
+
+function findVisiblePrismShortcutTrigger(
+  selector: string,
+  options: { allowDisabled?: boolean } = {},
+): HTMLButtonElement | null {
+  const allowDisabled = options.allowDisabled === true;
+  const candidates = Array.from(
+    document.querySelectorAll<HTMLButtonElement>(selector),
+  ).filter((candidate) => {
+    if ((!allowDisabled && candidate.disabled) || candidate.closest("[inert]")) {
+      return false;
+    }
+    const rect = candidate.getBoundingClientRect();
+    if (rect.width <= 0 || rect.height <= 0) return false;
+    const style = window.getComputedStyle(candidate);
+    return style.display !== "none" && style.visibility !== "hidden";
+  });
+  return (
+    candidates.find((candidate) =>
+      candidate.parentElement?.contains(document.activeElement),
+    ) ??
+    candidates
+      .slice()
+      .sort(
+        (left, right) =>
+          left.getBoundingClientRect().top - right.getBoundingClientRect().top,
+      )[0] ??
+    null
+  );
+}
+
+/** Close whichever navbar picker currently owns the interaction. */
+function closeOpenPrismShortcutPicker(): boolean {
+  const picker = document.querySelector<HTMLElement>("[data-picker-surface]");
+  const surface = picker?.dataset.pickerSurface;
+  if (!picker || (surface !== "model" && surface !== "effort")) return false;
+  const trigger = picker.querySelector<HTMLButtonElement>(
+    surface === "model"
+      ? '[data-prism-model-picker-trigger="true"]'
+      : '[data-prism-effort-picker-trigger="true"]',
+  );
+  if (!trigger) return false;
+  trigger.click();
+  return true;
+}
 
 type ComposerModelPickerSurface = "model" | "effort";
 type ComposerModelPickerInteractionMode = "pointer" | "keyboard";
@@ -24274,6 +24327,7 @@ function ComposerModelPicker({
   const menuRef = useRef<HTMLDivElement>(null);
   const effortTriggerRef = useRef<HTMLButtonElement>(null);
   const effortMenuRef = useRef<HTMLDivElement>(null);
+  const modelWheelLockedRef = useRef(false);
   const effortWheelLockedRef = useRef(false);
   const formValueRef = useRef<HTMLInputElement>(null);
   const turboSmokeBurstSequenceRef = useRef(0);
@@ -24482,6 +24536,26 @@ function ComposerModelPicker({
   }, [normalizedValue, selectableModelValues]);
 
   useEffect(() => {
+    const trigger = effortTriggerRef.current;
+    if (!trigger || !effortControl) return;
+    const openQuickEffort = (): void => {
+      if (effortInteractionDisabled) return;
+      effortControl.onActivate?.();
+      setPickerOpenState({
+        surface: "effort",
+        interactionMode: "keyboard",
+      });
+      window.requestAnimationFrame(() => trigger.focus());
+    };
+    trigger.addEventListener(EFFORT_PICKER_QUICK_OPEN_EVENT, openQuickEffort);
+    return () =>
+      trigger.removeEventListener(
+        EFFORT_PICKER_QUICK_OPEN_EVENT,
+        openQuickEffort,
+      );
+  }, [effortControl, effortInteractionDisabled]);
+
+  useEffect(() => {
     if (
       pickerOpenState.interactionMode !== "keyboard" ||
       (!menuOpen && !effortMenuOpen)
@@ -24502,22 +24576,49 @@ function ComposerModelPicker({
   }, [effortMenuOpen, menuOpen, pickerOpenState.interactionMode]);
 
   useEffect(() => {
-    if (
-      pickerOpenState.interactionMode !== "keyboard" ||
-      (!menuOpen && !effortMenuOpen)
-    ) {
+    if (!menuOpen && !effortMenuOpen) {
       return;
     }
     const handleQuickWheel = (event: WheelEvent): void => {
-      // Model always keeps native wheel scrolling. Only Effort owns wheel
-      // selection, including cursor-independent keyboard quick-select mode.
-      if (menuOpen) return;
       if (
         event.ctrlKey ||
         Math.max(Math.abs(event.deltaX), Math.abs(event.deltaY)) < 2
       ) {
         return;
       }
+
+      if (pickerOpenState.surface === "model" && menuOpen) {
+        const direction = modelPickerWheelDirection(
+          event.deltaX,
+          event.deltaY,
+        );
+        if (direction === 0) return;
+        event.preventDefault();
+        event.stopPropagation();
+        if (
+          selectableModelValues.length <= 1 ||
+          modelWheelLockedRef.current
+        ) {
+          return;
+        }
+        const nextValue = modelPickerStepValue(
+          selectableModelValues,
+          normalizedValue,
+          direction,
+        );
+        if (!nextValue || nextValue === normalizedValue) return;
+        modelWheelLockedRef.current = true;
+        window.setTimeout(() => {
+          modelWheelLockedRef.current = false;
+        }, 90);
+        if (formValueRef.current) {
+          formValueRef.current.value = nextValue;
+        }
+        onChange(nextValue);
+        return;
+      }
+
+      if (pickerOpenState.surface !== "effort" || !effortMenuOpen) return;
       const direction = modelEffortWheelDirection(event.deltaX, event.deltaY);
       if (direction === 0) return;
       event.preventDefault();
@@ -24543,6 +24644,10 @@ function ComposerModelPicker({
       setEffortValue(nextValue);
     };
     const handleQuickArrows = (event: KeyboardEvent): void => {
+      if (pickerOpenState.interactionMode !== "keyboard") return;
+      // Navbar pickers stay pointer/wheel driven so Control-root chords
+      // are never stolen by in-menu arrow selection.
+      if (navbarPicker) return;
       if (
         event.key !== "ArrowDown" &&
         event.key !== "ArrowRight" &&
@@ -24572,7 +24677,9 @@ function ComposerModelPicker({
       capture: true,
       passive: false,
     });
-    document.addEventListener("keydown", handleQuickArrows, true);
+    if (!navbarPicker) {
+      document.addEventListener("keydown", handleQuickArrows, true);
+    }
     return () => {
       document.removeEventListener("wheel", handleQuickWheel, true);
       document.removeEventListener("keydown", handleQuickArrows, true);
@@ -24584,7 +24691,12 @@ function ComposerModelPicker({
     effortMenuOpen,
     menuOpen,
     moveModelHighlight,
+    navbarPicker,
+    normalizedValue,
     pickerOpenState.interactionMode,
+    pickerOpenState.surface,
+    onChange,
+    selectableModelValues,
     setEffortValue,
   ]);
 
@@ -24709,23 +24821,35 @@ function ComposerModelPicker({
     triggerRef.current?.focus();
   };
 
-  const commitHighlightedModelToEffort = (): void => {
-    const nextValue = activeHighlightedModelValue;
-    if (!nextValue) return;
+  const handleModelWheel = (event: React.WheelEvent<HTMLElement>): void => {
+    if (
+      pickerOpenState.interactionMode !== "pointer" ||
+      !menuOpen ||
+      selectableModelValues.length <= 1 ||
+      event.ctrlKey ||
+      Math.max(Math.abs(event.deltaX), Math.abs(event.deltaY)) < 2
+    ) {
+      return;
+    }
+    const direction = modelPickerWheelDirection(event.deltaX, event.deltaY);
+    if (direction === 0) return;
+    event.preventDefault();
+    event.stopPropagation();
+    if (modelWheelLockedRef.current) return;
+    const nextValue = modelPickerStepValue(
+      selectableModelValues,
+      normalizedValue,
+      direction,
+    );
+    if (!nextValue || nextValue === normalizedValue) return;
+    modelWheelLockedRef.current = true;
+    window.setTimeout(() => {
+      modelWheelLockedRef.current = false;
+    }, 90);
     if (formValueRef.current) {
       formValueRef.current.value = nextValue;
     }
-    if (nextValue !== normalizedValue) onChange(nextValue);
-    if (!effortInteractionDisabled) {
-      setPickerOpenState({
-        surface: "effort",
-        interactionMode: "keyboard",
-      });
-      window.requestAnimationFrame(() => effortTriggerRef.current?.focus());
-      return;
-    }
-    setPickerOpenState(CLOSED_COMPOSER_MODEL_PICKER_STATE);
-    triggerRef.current?.focus();
+    onChange(nextValue);
   };
 
   const handleModelKeyDown = (
@@ -24747,15 +24871,6 @@ function ComposerModelPicker({
       pick(activeHighlightedModelValue ?? normalizedValue);
       return;
     }
-    if (event.key === "Tab" && !effortInteractionDisabled) {
-      event.preventDefault();
-      event.stopPropagation();
-      setPickerOpenState({
-        surface: "model",
-        interactionMode: "keyboard",
-      });
-      commitHighlightedModelToEffort();
-    }
   };
 
   const handleEffortKeyDown = (
@@ -24767,19 +24882,6 @@ function ComposerModelPicker({
       dismissPickersToComposer();
       return;
     }
-    if (event.key !== "Tab" || !effortMenuOpen) return;
-    event.preventDefault();
-    event.stopPropagation();
-    setHighlightedModelValue(
-      selectableModelValues.includes(normalizedValue)
-        ? normalizedValue
-        : (selectableModelValues[0] ?? null),
-    );
-    setPickerOpenState({
-      surface: "model",
-      interactionMode: "keyboard",
-    });
-    window.requestAnimationFrame(() => triggerRef.current?.focus());
   };
 
   useEffect(() => {
@@ -24825,6 +24927,7 @@ function ComposerModelPicker({
           );
         }}
         onKeyDown={handleModelKeyDown}
+        onWheel={handleModelWheel}
         disabled={interactionDisabled}
         data-glyph-tooltip={loading ? "Models are still loading." : title}
         aria-haspopup="listbox"
@@ -24855,6 +24958,9 @@ function ComposerModelPicker({
         <span
           className={styles.composeModelEffortTriggerWrap}
           data-turbo={turboVisuallyActive ? "true" : undefined}
+          data-turbo-capable={
+            effortControl.turboSupported ? "true" : undefined
+          }
           data-glyph-tooltip={effortDisabledReason}
           tabIndex={effortInteractionDisabled ? 0 : undefined}
           aria-label={
@@ -24882,6 +24988,7 @@ function ComposerModelPicker({
             ref={effortTriggerRef}
             type="button"
             className={styles.composeModelEffortTrigger}
+            data-prism-effort-picker-trigger="true"
             data-tutorial-target="model-effort"
             data-adjustable={
               !autoSelected &&
@@ -24963,6 +25070,7 @@ function ComposerModelPicker({
             data-compose-model-menu="true"
             data-navbar-picker-surface={navbarPicker ? "true" : undefined}
             onKeyDown={handleModelKeyDown}
+            onWheel={handleModelWheel}
             onPointerDown={(event) => {
               // Keep window-capture outside handlers from treating option
               // presses as dismissals when the portal remounts mid-gesture.
@@ -47171,54 +47279,6 @@ function HomeContent(): React.JSX.Element {
     [user?.id],
   );
   useEffect(() => {
-    const handler = (event: KeyboardEvent): void => {
-      if (
-        event.repeat ||
-        keyboardShortcutEventIsRecording(event) ||
-        !keyboardShortcutMatchesEvent(keyboardShortcuts.modelPicker, event)
-      ) {
-        return;
-      }
-      const candidates = Array.from(
-        document.querySelectorAll<HTMLButtonElement>(
-          '[data-prism-model-picker-trigger="true"]',
-        ),
-      ).filter((candidate) => {
-        if (candidate.disabled || candidate.closest("[inert]")) return false;
-        const rect = candidate.getBoundingClientRect();
-        if (rect.width <= 0 || rect.height <= 0) return false;
-        const style = window.getComputedStyle(candidate);
-        return style.display !== "none" && style.visibility !== "hidden";
-      });
-      const active =
-        candidates.find((candidate) =>
-          candidate.parentElement?.contains(document.activeElement),
-        ) ??
-        candidates
-          .slice()
-          .sort(
-            (left, right) =>
-              left.getBoundingClientRect().top -
-              right.getBoundingClientRect().top,
-          )[0];
-      if (!active) return;
-      const activePickerControl = active.closest<HTMLElement>(
-        "[data-picker-surface]",
-      );
-      if (activePickerControl?.dataset.pickerSurface) {
-        // Once the shortcut has opened this control, keep repeated Tab presses
-        // inside the picker loop even if Shift is still held.
-        return;
-      }
-      event.preventDefault();
-      event.stopPropagation();
-      active.focus();
-      active.dispatchEvent(new Event(MODEL_PICKER_QUICK_OPEN_EVENT));
-    };
-    document.addEventListener("keydown", handler, true);
-    return () => document.removeEventListener("keydown", handler, true);
-  }, [keyboardShortcuts.modelPicker]);
-  useEffect(() => {
     if (!user?.id) return;
     void retryPendingFaithfulReplaySessions().then((completed) => {
       if (completed > 0) {
@@ -47867,6 +47927,7 @@ function HomeContent(): React.JSX.Element {
     applyPrismTypographyScaleToDocument(document, typographyScale);
   }, [typographyScale]);
   const voiceModeSelectionBusyRef = useRef(false);
+  const speechTypeWheelLockedRef = useRef(false);
   const voiceModeSelectorButtonRef = useRef<HTMLButtonElement | null>(null);
   const [voiceModeSelectorOpen, setVoiceModeSelectorOpen] = useState(false);
   useEffect(() => {
@@ -48044,10 +48105,21 @@ function HomeContent(): React.JSX.Element {
     };
     const handler = (event: KeyboardEvent): void => {
       const key = event.key.toLowerCase();
-      if (keyboardShortcutEventIsRecording(event)) return;
+      if (event.repeat || keyboardShortcutEventIsRecording(event)) return;
       if (keyboardShortcutMatchesEvent(keyboardShortcuts.effortHud, event)) {
+        if (modelEffortHudTarget) {
+          event.preventDefault();
+          event.stopPropagation();
+          setModelEffortHudTarget(null);
+          return;
+        }
         const active = activeModelEffortTargetRef.current ?? fallbackTarget();
-        if (!active) return;
+        if (!active) {
+          event.preventDefault();
+          event.stopPropagation();
+          playPrismHotkeyInaccessibleSfx();
+          return;
+        }
         event.preventDefault();
         event.stopPropagation();
         activeModelEffortTargetRef.current = active;
@@ -48098,6 +48170,237 @@ function HomeContent(): React.JSX.Element {
     modelEffortHudTarget,
     keyboardShortcuts.effortHud,
     persistModelEffortPreference,
+    settings,
+  ]);
+  useEffect(() => {
+    const handler = (event: KeyboardEvent): void => {
+      if (event.repeat || keyboardShortcutEventIsRecording(event)) return;
+
+      if (
+        keyboardShortcutMatchesEvent(keyboardShortcuts.providerMode, event)
+      ) {
+        if (!settings) {
+          event.preventDefault();
+          event.stopPropagation();
+          playPrismHotkeyInaccessibleSfx();
+          return;
+        }
+        const nextProvider =
+          settings.preferredProvider === "local" ? "openai" : "local";
+        if (nextProvider === settings.preferredProvider) return;
+        event.preventDefault();
+        event.stopPropagation();
+        revealAppNavbarForShortcutAction();
+        void switchProvider(nextProvider);
+        return;
+      }
+
+      if (keyboardShortcutMatchesEvent(keyboardShortcuts.modelPicker, event)) {
+        const active = findVisiblePrismShortcutTrigger(
+          '[data-prism-model-picker-trigger="true"]',
+        );
+        if (!active) {
+          event.preventDefault();
+          event.stopPropagation();
+          playPrismHotkeyInaccessibleSfx();
+          return;
+        }
+        if (closeOpenPrismShortcutPicker()) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        revealAppNavbarForShortcutAction();
+        active.focus();
+        active.dispatchEvent(new Event(MODEL_PICKER_QUICK_OPEN_EVENT));
+        return;
+      }
+
+      if (
+        keyboardShortcutMatchesEvent(keyboardShortcuts.effortPicker, event)
+      ) {
+        const active = findVisiblePrismShortcutTrigger(
+          '[data-prism-effort-picker-trigger="true"]',
+        );
+        if (!active) {
+          event.preventDefault();
+          event.stopPropagation();
+          playPrismHotkeyInaccessibleSfx();
+          return;
+        }
+        if (closeOpenPrismShortcutPicker()) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        revealAppNavbarForShortcutAction();
+        active.focus();
+        active.dispatchEvent(new Event(EFFORT_PICKER_QUICK_OPEN_EVENT));
+        return;
+      }
+
+      if (keyboardShortcutMatchesEvent(keyboardShortcuts.speechType, event)) {
+        if (closeOpenPrismShortcutPicker()) {
+          event.preventDefault();
+          event.stopPropagation();
+          return;
+        }
+        const active = findVisiblePrismShortcutTrigger(
+          '[data-prism-speech-type-trigger="true"]',
+        );
+        if (!active) {
+          event.preventDefault();
+          event.stopPropagation();
+          playPrismHotkeyInaccessibleSfx();
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        revealAppNavbarForShortcutAction();
+        active.focus();
+        active.click();
+        return;
+      }
+
+      if (keyboardShortcutMatchesEvent(keyboardShortcuts.turbo, event)) {
+        const effortTrigger = findVisiblePrismShortcutTrigger(
+          '[data-prism-effort-picker-trigger="true"]',
+          { allowDisabled: true },
+        );
+        if (!effortTrigger) {
+          event.preventDefault();
+          event.stopPropagation();
+          playPrismHotkeyInaccessibleSfx();
+          return;
+        }
+        event.preventDefault();
+        event.stopPropagation();
+        revealAppNavbarForShortcutAction();
+        if (!settings) {
+          void playSpatialUiSfx("turbo-denied", { anchor: effortTrigger });
+          playPrismHotkeyInaccessibleSfx();
+          return;
+        }
+        const fallbackTarget = (): ActiveModelEffortTarget | null => {
+          if (!settings) return null;
+          const primary = resolvedAutoPrimaryForComposer(
+            modelCatalog,
+            settings,
+            settings.preferredProvider,
+            AUTO_MODEL_CHOICE,
+          );
+          const provider = primary?.provider ?? settings.preferredProvider;
+          const modelId =
+            primary?.model ||
+            defaultModelChoiceForProvider(modelCatalog, settings, provider);
+          return modelEffortTargetForSelection({
+            provider,
+            modelId,
+            options: modelOptionsForResponseMode(
+              modelCatalog,
+              settings,
+              "auto",
+            ),
+            simulatedEffortEnabled: true,
+          });
+        };
+        const target = activeModelEffortTargetRef.current ?? fallbackTarget();
+        if (target?.turboSupported) {
+          const nextTurboEnabled = !savedModelTurboMode(
+            settings,
+            target.provider,
+            target.modelId,
+          );
+          activeModelEffortTargetRef.current = target;
+          void playSpatialUiSfx(nextTurboEnabled ? "turbo-on" : "turbo-off", {
+            anchor: effortTrigger,
+          });
+          persistModelTurboPreference(target, nextTurboEnabled);
+          return;
+        }
+
+        const onlineOptions = modelOptionsForResponseMode(
+          modelCatalog,
+          settings,
+          "online",
+        ).filter((option) => option.provider !== "local");
+        // Rank only Fast-capable ONLINE options through the existing Auto
+        // policy, so this fallback continues to respect its rate/lean rules.
+        const turboEligibleOnlineOptions = onlineOptions.filter(
+          (option) => modelSupportsTurboMode(option.provider, option.id),
+        );
+        const onlineTurboAutoPrimary = autoFallbackPrimaryForSelection({
+          provider: "openai",
+          modelChoice: AUTO_MODEL_CHOICE,
+          hiddenModelIds: settings.hiddenBotModelIds,
+          catalog: { local: [], online: turboEligibleOnlineOptions },
+          onlineAutoProviderBias: settings.onlineAutoProviderBias,
+        });
+        const sameProviderTurboAutoPrimary =
+          target?.provider && target.provider !== "local"
+            ? autoFallbackPrimaryForSelection({
+                provider: target.provider,
+                modelChoice: AUTO_MODEL_CHOICE,
+                hiddenModelIds: settings.hiddenBotModelIds,
+                catalog: {
+                  local: [],
+                  online: turboEligibleOnlineOptions.filter(
+                    (option) => option.provider === target.provider,
+                  ),
+                },
+                onlineAutoProviderBias: settings.onlineAutoProviderBias,
+              })
+            : null;
+        const turboCandidate = turboModelShortcutCandidate(
+          onlineOptions,
+          target?.provider ?? settings?.preferredProvider ?? "local",
+          sameProviderTurboAutoPrimary?.model ?? onlineTurboAutoPrimary?.model,
+        );
+        if (!turboCandidate) {
+          void playSpatialUiSfx("turbo-denied", { anchor: effortTrigger });
+          playPrismHotkeyInaccessibleSfx();
+          return;
+        }
+
+        const turboTarget = modelEffortTargetForSelection({
+          provider: turboCandidate.provider,
+          modelId: turboCandidate.id,
+          options: onlineOptions,
+          simulatedEffortEnabled: true,
+        });
+        if (!turboTarget?.turboSupported) {
+          void playSpatialUiSfx("turbo-denied", { anchor: effortTrigger });
+          playPrismHotkeyInaccessibleSfx();
+          return;
+        }
+        persistGlobalModelSelection(
+          {
+            ...globalModelChoiceByProviderRef.current,
+            [turboCandidate.provider]: turboCandidate.id,
+          },
+          turboCandidate.provider,
+        );
+        activeModelEffortTargetRef.current = turboTarget;
+        void playSpatialUiSfx("turbo-on", {
+          anchor: effortTrigger,
+        });
+        persistModelTurboPreference(turboTarget, true);
+      }
+    };
+    document.addEventListener("keydown", handler, true);
+    return () => document.removeEventListener("keydown", handler, true);
+  }, [
+    keyboardShortcuts.effortPicker,
+    keyboardShortcuts.modelPicker,
+    keyboardShortcuts.providerMode,
+    keyboardShortcuts.speechType,
+    keyboardShortcuts.turbo,
+    modelCatalog,
+    persistModelTurboPreference,
     settings,
   ]);
   useEffect(
@@ -57523,6 +57826,7 @@ function HomeContent(): React.JSX.Element {
           ref={voiceModeSelectorButtonRef}
           type="button"
           className={styles.voiceModeSelectorButton}
+          data-prism-speech-type-trigger="true"
           aria-label={
             disabled && disabledReason
               ? `Speech Type: ${currentDisplayName}. ${disabledReason}`
@@ -86709,6 +87013,53 @@ function HomeContent(): React.JSX.Element {
     }
   }
 
+  useEffect(() => {
+    if (!voiceModeSelectorOpen || !settings) return;
+    const handleSpeechTypeWheel = (event: WheelEvent): void => {
+      if (
+        event.ctrlKey ||
+        Math.max(Math.abs(event.deltaX), Math.abs(event.deltaY)) < 2
+      ) {
+        return;
+      }
+      const premiumUnavailable = settings.elevenLabsApiKeySource === "none";
+      const premiumLocalOnly = blocksOnlineCapabilities(
+        responseModeForProvider(effectivePreferredProvider),
+      );
+      const selectableChoices = VOICE_PLAYBACK_CHOICES.filter(
+        (choice) =>
+          choice !== "premium" || (!premiumUnavailable && !premiumLocalOnly),
+      );
+      if (selectableChoices.length <= 1) return;
+      const currentChoice = voicePlaybackChoice(
+        normalizeVoiceMode(settings.voiceMode),
+        normalizeEnglishVoiceEngine(settings.englishVoiceEngine),
+      );
+      const direction = modelEffortWheelDirection(event.deltaX, event.deltaY);
+      if (direction === 0) return;
+      const currentIndex = selectableChoices.indexOf(currentChoice);
+      const nextIndex = Math.min(
+        selectableChoices.length - 1,
+        Math.max(0, currentIndex + direction),
+      );
+      const nextChoice = selectableChoices[nextIndex];
+      if (!nextChoice || nextChoice === currentChoice) return;
+      event.preventDefault();
+      event.stopPropagation();
+      if (speechTypeWheelLockedRef.current) return;
+      speechTypeWheelLockedRef.current = true;
+      window.setTimeout(() => {
+        speechTypeWheelLockedRef.current = false;
+      }, 90);
+      void selectGlobalVoiceChoice(nextChoice);
+    };
+    document.addEventListener("wheel", handleSpeechTypeWheel, {
+      capture: true,
+      passive: false,
+    });
+    return () => document.removeEventListener("wheel", handleSpeechTypeWheel, true);
+  }, [effectivePreferredProvider, settings, voiceModeSelectorOpen]);
+
   async function saveVoiceSettings(e: React.FormEvent<HTMLFormElement>) {
     e.preventDefault();
     if (!settings) return;
@@ -106383,6 +106734,10 @@ function HomeContent(): React.JSX.Element {
             );
             return playbackStarted && !callbacks.signal.aborted;
           }}
+        />
+        <ControlShortcutGuide
+          platform={keyboardShortcutPlatform}
+          shortcuts={keyboardShortcuts}
         />
       </>
     );

@@ -49,7 +49,7 @@ test("gives the orb a weighted sampled release velocity", () => {
   assert.equal(Math.round(Math.hypot(bounded.x, bounded.y)), 1_650);
 });
 
-test("samples wield-style pointer motion into bounded release velocity", () => {
+test("samples direct-drag pointer motion into bounded release velocity", () => {
   const sample = createPrismCompanionDragVelocitySample(200, 300, 1_000);
   assert.equal(sample.velocityX, 0);
   assert.equal(sample.velocityY, 0);

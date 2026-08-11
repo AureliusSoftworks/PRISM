@@ -6,9 +6,8 @@
   --companion-s: #2fd3e3;
   --companion-m: #7b5cff;
   position: fixed;
-  /* Above ordinary drawers and Avatar Studio, below modal/tutorial safety
-     layers (which begin at 4000). */
-  z-index: 3055;
+  /* Above ordinary drawers, below modal/tutorial safety layers. */
+  z-index: 855;
   width: 68px;
   height: 68px;
   transform: translate(-50%, -50%);
@@ -36,7 +35,7 @@
   top: 0 !important;
   width: 28px;
   height: 28px;
-  z-index: 3057;
+  z-index: 857;
   pointer-events: none;
   transform: translate3d(0, 0, 0) translate(-50%, -50%);
   will-change: transform;

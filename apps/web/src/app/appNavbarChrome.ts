@@ -13,6 +13,7 @@ export type AppNavbarChromeSnapshot = {
   wielding: boolean;
   pinned: boolean;
   dropdownHeld: boolean;
+  controlHeld: boolean;
   autoHideEnabled: boolean;
 };
 
@@ -25,6 +26,7 @@ let autoHideEnabled = true;
 let sessionHidden = false;
 let pinned = false;
 let dropdownHoldCount = 0;
+let controlHoldCount = 0;
 let companionOpen = false;
 let wielding = false;
 let autoHideTimer: ReturnType<typeof setTimeout> | null = null;
@@ -45,16 +47,27 @@ function isDropdownHeld(): boolean {
   return dropdownHoldCount > 0;
 }
 
-/** True when idle tuck should wait (menus, overflow, companion pin). */
+function isControlHeld(): boolean {
+  return controlHoldCount > 0;
+}
+
+/** True when any explicit hold should keep the bar painted. */
+function isVisibilityHeld(): boolean {
+  return pinned || isDropdownHeld() || isControlHeld();
+}
+
+/** True when idle tuck should wait (menus, Control-root, companion pin). */
 function blocksIdleHide(): boolean {
-  return companionOpen || pinned || isDropdownHeld();
+  return companionOpen || isVisibilityHeld();
 }
 
 function computeHidden(): boolean {
   if (companionOpen) return false;
+  // Dropdowns / Control-root discovery win over Zen Wield tuck so players can
+  // always see the controls they are about to use.
+  if (isVisibilityHeld()) return false;
   // Wield tuck is Zen-only; other modes keep the bar even while Wielding.
   if (wielding && autoHideEnabled) return true;
-  if (pinned || isDropdownHeld()) return false;
   return !visible;
 }
 
@@ -69,6 +82,11 @@ function syncDocumentAttributes(): void {
     root.setAttribute("data-app-navbar-dropdown-held", "true");
   } else {
     root.removeAttribute("data-app-navbar-dropdown-held");
+  }
+  if (isControlHeld()) {
+    root.setAttribute("data-app-navbar-control-held", "true");
+  } else {
+    root.removeAttribute("data-app-navbar-control-held");
   }
   if (computeHidden()) root.setAttribute("data-app-navbar-hidden", "true");
   else root.removeAttribute("data-app-navbar-hidden");
@@ -103,6 +121,7 @@ export function getAppNavbarChromeSnapshot(): AppNavbarChromeSnapshot {
     wielding,
     pinned,
     dropdownHeld: isDropdownHeld(),
+    controlHeld: isControlHeld(),
     autoHideEnabled,
   };
 }
@@ -115,6 +134,7 @@ export function getAppNavbarChromeServerSnapshot(): AppNavbarChromeSnapshot {
     wielding: false,
     pinned: false,
     dropdownHeld: false,
+    controlHeld: false,
     autoHideEnabled: true,
   };
 }
@@ -137,10 +157,11 @@ export function clearAppNavbarSessionHiddenForTests(): void {
   commit();
 }
 
-/** Drain leftover dropdown holds between unit tests. */
+/** Drain leftover dropdown / Control holds between unit tests. */
 export function clearAppNavbarDropdownHoldsForTests(): void {
-  if (dropdownHoldCount === 0) return;
+  if (dropdownHoldCount === 0 && controlHoldCount === 0) return;
   dropdownHoldCount = 0;
+  controlHoldCount = 0;
   clearAutoHideTimer();
   visible = true;
   commit();
@@ -190,11 +211,39 @@ export function holdAppNavbarForDropdown(): () => void {
   commit();
   return () => {
     dropdownHoldCount = Math.max(0, dropdownHoldCount - 1);
-    if (dropdownHoldCount === 0) {
+    if (!isVisibilityHeld()) {
       maybeScheduleAfterRelease();
     }
     commit();
   };
+}
+
+/**
+ * Keep the navbar visible while Control is held or the Control-root shortcut
+ * compass is showing. Wins over Zen Wield tuck so shortcut targets stay in view.
+ */
+export function holdAppNavbarForControlShortcuts(): () => void {
+  controlHoldCount += 1;
+  clearAutoHideTimer();
+  visible = true;
+  commit();
+  return () => {
+    controlHoldCount = Math.max(0, controlHoldCount - 1);
+    if (!isVisibilityHeld()) {
+      maybeScheduleAfterRelease();
+    }
+    commit();
+  };
+}
+
+/**
+ * Reveal the shared navbar before a Control-root shortcut mutates UI.
+ * Prefer this immediately before opening a picker or flipping a toggle.
+ */
+export function revealAppNavbarForShortcutAction(): void {
+  clearAutoHideTimer();
+  visible = true;
+  commit();
 }
 
 export function setAppNavbarCompanionOpen(open: boolean): void {

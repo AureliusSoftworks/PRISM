@@ -409,7 +409,7 @@ test("keeps the app shell crisp behind a local focus orb while pausing motion", 
     companionCss,
     /\.focusOrb \{[\s\S]*width: min\(74vw, 760px\)[\s\S]*radial-gradient[\s\S]*filter: blur\(26px\)/u,
   );
-  assert.match(companionCss, /\.anchor \{[\s\S]*z-index: 3055/u);
+  assert.match(companionCss, /\.anchor \{[\s\S]*z-index: 855/u);
   assert.match(
     globalCss,
     /html\[data-prism-system-paused="true"\][\s\S]*data-prism-system-pause-exempt[\s\S]*animation-play-state: paused !important/u,

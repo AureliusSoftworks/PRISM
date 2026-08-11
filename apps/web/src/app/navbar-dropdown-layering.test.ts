@@ -24,6 +24,17 @@ function sourceBetween(start: string, end: string): string {
   return pageSource.slice(startIndex, endIndex);
 }
 
+test("navbar dropdown pickers disable arrow-key list selection", () => {
+  assert.match(
+    pageSource,
+    /Navbar pickers stay pointer\/wheel\/Tab driven[\s\S]{0,120}if \(navbarPicker\) return;/u,
+  );
+  assert.match(
+    prismMenuSource,
+    /Top-navbar menus are pointer\/wheel driven[\s\S]{0,160}if \(!navbarPicker\) \{\s*if \(event\.key === "ArrowDown"/u,
+  );
+});
+
 test("navbar dropdowns escape header stacking contexts through body portals", () => {
   const voiceSelector = sourceBetween(
     "const renderVoiceModeSelector",

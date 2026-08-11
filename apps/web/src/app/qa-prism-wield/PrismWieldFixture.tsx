@@ -177,7 +177,7 @@ export function PrismWieldFixture({
         <>
           <PrismCompanion
             accountKey="qa-prism-wield"
-            keyboardShortcut={homeDocked ? "Alt+Space" : "Control+Space"}
+            keyboardShortcut="Control+Alt"
             surface={
               homeDocked
                 ? { surfaceId: "home" }

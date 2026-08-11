@@ -418,19 +418,30 @@ export function PrismMenuSurface({
       onClose({ restoreFocus: false });
       return;
     }
-    if (event.key === "ArrowDown" || event.key === "ArrowUp") {
-      event.preventDefault();
-      const direction = event.key === "ArrowDown" ? 1 : -1;
-      focusIndex((currentIndex + direction + interactiveEntries.length) % interactiveEntries.length);
-      return;
-    }
-    if (event.key === "Home" || event.key === "End") {
-      event.preventDefault();
-      focusIndex(event.key === "Home" ? 0 : interactiveEntries.length - 1);
-      return;
+    // Top-navbar menus are pointer/wheel driven. Keep Escape/Tab/Enter/Space,
+    // but do not let arrows steal Control-root chords or roam the list.
+    if (!navbarPicker) {
+      if (event.key === "ArrowDown" || event.key === "ArrowUp") {
+        event.preventDefault();
+        const direction = event.key === "ArrowDown" ? 1 : -1;
+        focusIndex(
+          (currentIndex + direction + interactiveEntries.length) %
+            interactiveEntries.length,
+        );
+        return;
+      }
+      if (event.key === "Home" || event.key === "End") {
+        event.preventDefault();
+        focusIndex(event.key === "Home" ? 0 : interactiveEntries.length - 1);
+        return;
+      }
     }
     const activeEntry = interactiveEntries[currentIndex];
-    if (event.key === "ArrowRight" && activeEntry?.kind === "submenu") {
+    if (
+      !navbarPicker &&
+      event.key === "ArrowRight" &&
+      activeEntry?.kind === "submenu"
+    ) {
       event.preventDefault();
       void invoke(activeEntry);
       return;
@@ -440,7 +451,7 @@ export function PrismMenuSurface({
       void invoke(activeEntry);
       return;
     }
-    if (event.key === "ArrowLeft") {
+    if (!navbarPicker && event.key === "ArrowLeft") {
       if (onBack) {
         event.preventDefault();
         onBack();
@@ -470,7 +481,16 @@ export function PrismMenuSurface({
         typeaheadRef.current.value = "";
       }, 520);
     }
-  }, [activeId, focusIndex, interactiveEntries, invoke, onBack, onClose, openSubmenuId]);
+  }, [
+    activeId,
+    focusIndex,
+    interactiveEntries,
+    invoke,
+    navbarPicker,
+    onBack,
+    onClose,
+    openSubmenuId,
+  ]);
 
   const openSubmenu = request.entries.find(
     (entry): entry is PrismMenuSubmenuEntry =>

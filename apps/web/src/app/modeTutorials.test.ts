@@ -4,10 +4,23 @@ import { describe, it } from "node:test";
 import { MODE_TUTORIALS, modeTutorialStep } from "./modeTutorials.ts";
 
 describe("mode tutorials", () => {
-  it("explains that Speech ink animation is independent from Mouth", () => {
+  it("explains semantic Ink movement and Speech animation", () => {
     const step = MODE_TUTORIALS.avatar.steps[1];
     assert.match(step?.body ?? "", /Speech ink has its own animation selector/u);
     assert.match(step?.body ?? "", /motion can differ from the mouth/u);
+    assert.match(
+      step?.body ?? "",
+      /Move tool can carry any combination of Blink, Speech, and Effect ink/u,
+    );
+    assert.match(
+      step?.body ?? "",
+      /Auto moves whichever layer you grab/u,
+    );
+    assert.match(step?.body ?? "", /cursor-anchored scroll zoom/u);
+    assert.match(step?.body ?? "", /Search Stamps by name/u);
+    assert.match(step?.body ?? "", /position it with the grid pad/u);
+    assert.match(step?.body ?? "", /Click the canvas or press Enter/u);
+    assert.match(step?.body ?? "", /Escape cancels/u);
   });
 
   it("explains bot hub editor shortcuts and exact voice testing", () => {
@@ -166,13 +179,14 @@ describe("mode tutorials", () => {
       (candidate) => candidate.heading === "Shape an offline voice",
     );
     assert.ok(step);
-    assert.match(step.body, /Accent, Feel, and Voice stages/u);
+    assert.match(step.body, /Accent, Local, and Premium stages/u);
     assert.match(step.body, /full-width map/u);
     assert.match(step.body, /anywhere in the world/u);
     assert.match(step.body, /pin stays exactly where you leave it/u);
     assert.match(step.body, /nearest broadly regional pronunciation/u);
     assert.match(step.body, /required Accent pin/u);
-    assert.match(step.body, /named Voice/u);
+    assert.match(step.body, /Local voice and Feel/u);
+    assert.match(step.body, /Premium voice and Feel/u);
     assert.match(step.body, /does not move the bot across regions/u);
     assert.match(step.body, /without exposing engine regions/u);
     assert.match(step.body, /All accents/u);
@@ -615,7 +629,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /selector on Auto preserves the model already chosen/u);
     assert.match(
       copy,
-      /Spectator Start seats you in the gallery first, lets the rest of the house walk in/u,
+      /Spectator preparation also lets the rest of the house walk in/u,
     );
     assert.match(
       copy,
@@ -627,12 +641,18 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
-      /Living Chamber title card plays over the chamber with the gallery still murmuring/u,
+      /gallery walk in as the loader/u,
     );
     assert.match(
       copy,
-      /moderator.?s opening gavel hushes the house before the floor opens/u,
+      /Moderator.?s first line finishes voice preparation/u,
     );
+    assert.match(copy, /Intro music begins as that ready title card settles/u);
+    assert.match(
+      copy,
+      /Choosing Start removes the title controls and cuts straight to the Moderator slamming the already-loaded gavel/u,
+    );
+    assert.match(copy, /never replays the title card/u);
     assert.match(copy, /Pause sits beside the stage CC control/u);
     assert.doesNotMatch(copy, /instead of in the app chrome/u);
     assert.match(copy, /traditional three-bot majority/u);
@@ -1956,7 +1976,7 @@ describe("mode tutorials", () => {
     );
     assert.match(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",
-      /hold Option.*Control.*Wield Prism.*Space rerolls.*Clicking away.*Escape restores.*Control Space.*opens the assistant menu at the orb/u,
+      /hold Option.*Control.*Wield Prism.*Space rerolls.*Clicking away.*Escape restores.*Control \+ Option.*opens the assistant menu at the orb/u,
     );
     assert.doesNotMatch(
       MODE_TUTORIALS.botcast.steps[5]?.body ?? "",

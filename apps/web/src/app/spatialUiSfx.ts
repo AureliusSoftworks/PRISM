@@ -33,6 +33,13 @@ export const SPATIAL_UI_SFX_SOURCES = {
   ],
   "turbo-on": ["/audio/ui-asmr/turbo-flame-ignition-01.mp3"],
   "turbo-off": ["/audio/ui-asmr/turbo-steam-extinguish-01.mp3"],
+  // Reuse Coffee bodily Foley when Turbo is unavailable for the active model.
+  "turbo-denied": [
+    "/audio/coffee/action-reactions/fart-01.mp3",
+    "/audio/coffee/action-reactions/fart-02.mp3",
+    "/audio/coffee/action-reactions/fart-03.mp3",
+    "/audio/coffee/action-reactions/fart-04.mp3",
+  ],
 } as const;
 
 export type SpatialUiSfxCue = keyof typeof SPATIAL_UI_SFX_SOURCES;
@@ -50,7 +57,8 @@ export const SPATIAL_UI_SFX_CONFIG: Record<
   // These generated cues carry more energy than the short tactile UI library.
   // Keep the sustained extinguish hiss especially restrained.
   "turbo-on": { cooldownMs: 140, volume: 0.08 },
-  "turbo-off": { cooldownMs: 140, volume: 0.02 },
+  "turbo-off": { cooldownMs: 140, volume: 0.01 },
+  "turbo-denied": { cooldownMs: 280, volume: 0.22 },
 };
 
 const BOT_CARD_SELECTOR = [

@@ -7,9 +7,11 @@ import {
   clearAppNavbarSessionHiddenForTests,
   getAppNavbarChromeSnapshot,
   hideAppNavbarForImmersion,
+  holdAppNavbarForControlShortcuts,
   holdAppNavbarForDropdown,
   pinAppNavbar,
   revealAppNavbarForFreshSurface,
+  revealAppNavbarForShortcutAction,
   revealAppNavbarFromPointerClientY,
   scheduleAppNavbarAutoHide,
   setAppNavbarAutoHideEnabled,
@@ -90,6 +92,31 @@ test("open navbar dropdown holds the bar against idle tuck", () => {
   assert.equal(getAppNavbarChromeSnapshot().hidden, false);
   release();
   assert.equal(getAppNavbarChromeSnapshot().dropdownHeld, false);
+});
+
+test("dropdown and Control holds win over Zen Wield tuck", () => {
+  resetChrome();
+  setAppNavbarWielding(true);
+  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
+  const releaseDropdown = holdAppNavbarForDropdown();
+  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
+  releaseDropdown();
+  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
+  const releaseControl = holdAppNavbarForControlShortcuts();
+  assert.equal(getAppNavbarChromeSnapshot().controlHeld, true);
+  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
+  releaseControl();
+  assert.equal(getAppNavbarChromeSnapshot().controlHeld, false);
+  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
+  setAppNavbarWielding(false);
+});
+
+test("shortcut actions can force a tucked navbar back into view", () => {
+  resetChrome();
+  hideAppNavbarForImmersion();
+  assert.equal(getAppNavbarChromeSnapshot().hidden, true);
+  revealAppNavbarForShortcutAction();
+  assert.equal(getAppNavbarChromeSnapshot().hidden, false);
 });
 
 test("overlapping dropdown holds release independently", () => {

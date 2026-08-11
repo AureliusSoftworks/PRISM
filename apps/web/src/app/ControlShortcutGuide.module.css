@@ -1,0 +1,145 @@
+.guide {
+  --orb-x: 50vw;
+  --orb-y: 50vh;
+  --orb-size: 68px;
+  position: fixed;
+  left: var(--orb-x);
+  top: var(--orb-y);
+  /* Sit behind the live Prism pearl (anchor 855 / wielding 857). */
+  z-index: 850;
+  isolation: isolate;
+  display: grid;
+  width: min(82vw, 580px);
+  gap: 7px;
+  justify-items: center;
+  padding: 0;
+  transform: translate(-50%, -50%);
+  opacity: 0;
+  pointer-events: none;
+  transition: opacity 160ms ease;
+}
+
+.guide[data-visible="true"] {
+  opacity: 1;
+}
+
+.guide[data-orb-missing="true"] {
+  left: 50%;
+  top: auto;
+  bottom: max(22px, env(safe-area-inset-bottom, 0px) + 18px);
+  transform: translateX(-50%);
+}
+
+/* A quiet dark vignette keeps the live Prism pearl readable without turning
+   the shortcut hint into a modal surface. */
+.guide::before {
+  position: absolute;
+  z-index: -1;
+  width: clamp(150px, calc(var(--orb-size) + 92px), 210px);
+  aspect-ratio: 1;
+  border-radius: 50%;
+  content: "";
+  background:
+    radial-gradient(circle, #02050bd6 0 23%, #070b1275 49%, transparent 72%),
+    radial-gradient(circle, color-mix(in srgb, var(--prism-i, #b7e63a) 14%, transparent) 0 19%, transparent 62%);
+  box-shadow:
+    0 12px 28px #00000072,
+    0 0 34px color-mix(in srgb, var(--prism-s, #2fd3e3) 12%, transparent);
+  pointer-events: none;
+}
+
+.compass {
+  display: grid;
+  width: 100%;
+  grid-template-columns: minmax(120px, 1fr) auto minmax(120px, 1fr);
+  grid-template-rows: auto auto auto;
+  gap: 7px 12px;
+  align-items: center;
+  justify-items: center;
+}
+
+.slotUp {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.slotLeft {
+  grid-column: 1;
+  grid-row: 2;
+  justify-self: end;
+}
+
+/* Empty hub: the live Prism orb paints through the open center. */
+.slotHub {
+  grid-column: 2;
+  grid-row: 2;
+  width: calc(var(--orb-size) + 14px);
+  height: calc(var(--orb-size) + 14px);
+}
+
+.slotRight {
+  grid-column: 3;
+  grid-row: 2;
+  justify-self: start;
+}
+
+.slotDown {
+  grid-column: 2;
+  grid-row: 3;
+}
+
+.footer {
+  position: relative;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+  justify-content: center;
+}
+
+.chip {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  max-width: min(38vw, 154px);
+  padding: 4px 6px;
+  border: 1px solid #ffffff12;
+  border-radius: 999px;
+  color: #ffffffd0;
+  background: #080b13a8;
+  font: 600 0.62rem/1.1 system-ui, sans-serif;
+  white-space: nowrap;
+}
+
+.chipKbd {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-width: 1.55em;
+  padding: 2px 4px;
+  border: 0;
+  border-radius: 4px;
+  color: #ffffffa8;
+  background: #ffffff0a;
+  font: 700 0.58rem/1 ui-monospace, SFMono-Regular, Menlo, monospace;
+}
+
+.chipLabel {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+@media (max-width: 640px) {
+  .guide {
+    width: min(90vw, 430px);
+  }
+
+  .compass {
+    grid-template-columns: 1fr auto 1fr;
+    gap: 8px;
+  }
+
+  .chip {
+    max-width: 40vw;
+  }
+}

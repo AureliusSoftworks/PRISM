@@ -15,3 +15,12 @@ export function modelPickerStepValue(
         );
   return values[nextIndex] ?? null;
 }
+
+/** Scroll down/right advances through the visibly ordered model choices. */
+export function modelPickerWheelDirection(
+  deltaX: number,
+  deltaY: number,
+): -1 | 0 | 1 {
+  const dominantDelta = Math.abs(deltaY) >= Math.abs(deltaX) ? deltaY : deltaX;
+  return dominantDelta === 0 ? 0 : dominantDelta > 0 ? 1 : -1;
+}

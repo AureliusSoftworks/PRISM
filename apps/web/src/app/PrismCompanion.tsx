@@ -88,6 +88,7 @@ import {
 } from "./prismCompanionSpeech";
 import { setPrismSystemPause } from "./prismVisualLifecycle";
 import { PrismOrb } from "./PrismOrb";
+import { playPrismHotkeyInaccessibleSfx } from "./prismHotkeySfx";
 import { PrismCompanionViewTabs } from "./PrismCompanionViewTabs";
 import {
   getPrismCompanionSuppressedServerSnapshot,
@@ -3323,7 +3324,18 @@ export default function PrismCompanion({
   useEffect(() => {
     const platform = navigator.platform;
     const onKeyDown = (event: KeyboardEvent): void => {
-      if (companionSuppressed) return;
+      if (companionSuppressed) {
+        if (
+          !event.repeat &&
+          !keyboardShortcutEventIsRecording(event) &&
+          keyboardShortcutMatchesEvent(keyboardShortcut, event)
+        ) {
+          event.preventDefault();
+          event.stopPropagation();
+          playPrismHotkeyInaccessibleSfx();
+        }
+        return;
+      }
       if (keyboardShortcutEventIsRecording(event)) return;
       if (sessionNoteContext) {
         if (keyboardShortcutMatchesEvent(keyboardShortcut, event)) {
@@ -4107,6 +4119,7 @@ export default function PrismCompanion({
         <div
           ref={anchorRef}
           className={styles.anchor}
+          data-prism-companion-anchor="true"
           data-prism-system-pause-exempt="true"
           data-open={open ? "true" : undefined}
           data-session-note="true"
@@ -4224,6 +4237,7 @@ export default function PrismCompanion({
       <div
         ref={anchorRef}
         className={styles.anchor}
+        data-prism-companion-anchor="true"
         data-prism-system-pause-exempt="true"
         data-open={open ? "true" : undefined}
         data-dragging={dragging ? "true" : undefined}

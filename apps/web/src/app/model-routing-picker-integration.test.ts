@@ -192,7 +192,7 @@ describe("shared routing model picker integration", () => {
     );
   });
 
-  it("offers deliberate temporary Turbo with an organic effort-control flame", () => {
+  it("offers applet-scoped Turbo with an organic effort-control flame", () => {
     assert.match(pageSource, /modelSupportsTurboMode/u);
     assert.match(pageSource, /\/api\/model-turbo-preferences/u);
     assert.match(pageSource, /Faster priority processing · premium rates/u);
@@ -214,25 +214,36 @@ describe("shared routing model picker integration", () => {
       /@keyframes turboPickerEmberPulse\s*\{[\s\S]*?36%\s*\{[\s\S]*?68%\s*\{/u,
     );
     assert.match(cssSource, /composeModelEffortTriggerWrap\[data-turbo="true"\]::before/u);
-    assert.match(cssSource, /composeModelEffortTriggerWrap\[data-turbo="true"\]::after/u);
+    assert.match(
+      pageSource,
+      /data-turbo-capable=\{[\s\S]{0,100}effortControl\.turboSupported/u,
+    );
+    assert.match(
+      cssSource,
+      /composeModelEffortTriggerWrap\[data-turbo-capable="true"\]::after/u,
+    );
     assert.match(cssSource, /turbo-fire-loop\.webp/u);
     assert.match(cssSource, /turbo-fire-loop\.gif/u);
     assert.match(cssSource, /turbo-fire-still\.png/u);
     assert.match(cssSource, /background-image:\s*image-set/u);
     assert.match(
       cssSource,
-      /composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*image-rendering:\s*auto/u,
+      /composeModelEffortTriggerWrap\[data-turbo-capable="true"\]::after\s*\{[^}]*image-rendering:\s*auto[^}]*opacity:\s*0/u,
     );
     assert.match(cssSource, /inset:\s*-20px -7px -5px -6px/u);
     assert.match(cssSource, /background-size:\s*100% 89%/u);
     assert.match(cssSource, /background-position:\s*left bottom/u);
     assert.match(
       cssSource,
-      /composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*transform:\s*translate3d\(0, -2px, 0\)/u,
+      /composeModelEffortTriggerWrap\[data-turbo-capable="true"\]::after\s*\{[^}]*transform:\s*translate3d\(0, -2px, 0\)/u,
     );
     assert.match(
       cssSource,
-      /composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*z-index:\s*3/u,
+      /composeModelEffortTriggerWrap\[data-turbo-capable="true"\]::after\s*\{[^}]*z-index:\s*3/u,
+    );
+    assert.match(
+      cssSource,
+      /composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*opacity:\s*1/u,
     );
     assert.match(cssSource, /@keyframes turboSmolderGlow/u);
     assert.match(cssSource, /@keyframes turboEffortHeatPulse/u);
@@ -244,7 +255,7 @@ describe("shared routing model picker integration", () => {
     assert.match(cssSource, /@keyframes turboPickerEmberPulseLight/u);
     assert.match(
       cssSource,
-      /composeModelEffortTriggerWrap\[data-turbo="true"\]::after\s*\{[^}]*mix-blend-mode:\s*screen/u,
+      /composeModelEffortTriggerWrap\[data-turbo-capable="true"\]::after\s*\{[^}]*mix-blend-mode:\s*screen/u,
     );
     assert.match(
       cssSource,
@@ -263,7 +274,11 @@ describe("shared routing model picker integration", () => {
     assert.match(pageSource, /composeModelTurboSmokeBurst/u);
     assert.match(pageSource, /composeModelTurboBurnAtmosphere/u);
     assert.match(cssSource, /@keyframes turboAmbientRedFlicker/u);
-    assert.match(cssSource, /@keyframes turboCinderRise/u);
+    assert.match(cssSource, /@keyframes turboCinderFall/u);
+    assert.doesNotMatch(cssSource, /turbo-cinder-rise/u);
+    assert.match(cssSource, /ellipse at 34% 58%/u);
+    assert.match(cssSource, /--turbo-cinder-fall:\s*48px/u);
+    assert.match(cssSource, /width:\s*3\.5px;\s*height:\s*5px/u);
     assert.match(
       cssSource,
       /composeModelTurboBurnAtmosphere::before\s*\{[^}]*mix-blend-mode:\s*screen[^}]*animation:\s*turboAmbientRedFlicker 2630ms/u,
@@ -323,7 +338,8 @@ describe("shared routing model picker integration", () => {
     assert.match(cssSource, /prefers-reduced-motion: reduce/u);
     assert.match(pageSource, /resetAllModelTurboPreferences/u);
     assert.match(pageSource, /disableTurboForSafetyTransitionRef/u);
-    assert.match(pageSource, /turboSafetyContextRef/u);
+    assert.match(pageSource, /syncTurboAppletSessionContext/u);
+    assert.match(pageSource, /turboAppletContextRef/u);
     assert.match(
       signalSource,
       /episode\?\.id \?\? \(watchBakeActive \? "baking" : null\)/u,
@@ -338,7 +354,7 @@ describe("shared routing model picker integration", () => {
     );
     assert.match(
       tutorialSource,
-      /Turbo is deliberately temporary:[\s\S]{0,180}consciously re-enabled/u,
+      /Turbo remains active across screens and browser refreshes while you stay in the current applet[\s\S]{0,220}consciously re-enabled/u,
     );
   });
 
@@ -413,6 +429,13 @@ describe("shared routing model picker integration", () => {
     assert.doesNotMatch(pageSource, /composeModelEffortHint/u);
   });
 
+  it("steps available Model choices from the wheel like Effort", () => {
+    assert.match(pageSource, /const handleModelWheel =/u);
+    assert.match(pageSource, /modelPickerWheelDirection\(event\.deltaX, event\.deltaY\)/u);
+    assert.match(pageSource, /modelPickerStepValue\([\s\S]{0,120}selectableModelValues/u);
+    assert.match(pageSource, /onWheel=\{handleModelWheel\}/u);
+  });
+
   it("spins the selected Zen and Chat effort glyphs only during active generation", () => {
     assert.match(pageSource, /generating\?: boolean/u);
     assert.match(
@@ -448,7 +471,7 @@ describe("shared routing model picker integration", () => {
     );
   });
 
-  it("keeps the Model and Effort Tab loop active while Shift remains held", () => {
+  it("leaves Tab to native focus navigation instead of advancing pickers", () => {
     const modelKeySource = pageSource.match(
       /const handleModelKeyDown[\s\S]*?\n  \};/u,
     )?.[0];
@@ -458,18 +481,16 @@ describe("shared routing model picker integration", () => {
 
     assert.ok(modelKeySource);
     assert.ok(effortKeySource);
-    assert.match(modelKeySource, /event\.key === "Tab"/u);
-    assert.doesNotMatch(modelKeySource, /event\.shiftKey/u);
-    assert.match(effortKeySource, /event\.key !== "Tab"/u);
-    assert.doesNotMatch(effortKeySource, /event\.shiftKey/u);
+    assert.doesNotMatch(modelKeySource, /event\.key === "Tab"/u);
+    assert.doesNotMatch(effortKeySource, /event\.key === "Tab"/u);
+    assert.doesNotMatch(pageSource, /keep repeated Tab presses/u);
     assert.match(
-      pageSource,
-      /activePickerControl\?\.dataset\.pickerSurface[\s\S]{0,220}keep repeated Tab presses[\s\S]{0,100}return;/u,
+      tutorialSource,
+      /Tab keeps its normal focus behavior and never advances or commits a picker/u,
     );
-    assert.match(tutorialSource, /even if Shift is still held/u);
   });
 
-  it("hands a pointer-opened picker to its sibling when Tab is pressed", () => {
+  it("keeps pointer-opened pickers focusable without a Tab handoff", () => {
     assert.match(
       pageSource,
       /className=\{styles\.composeModelTrigger\}[\s\S]{0,220}onClick=\{\(event\) => \{[\s\S]{0,100}event\.currentTarget\.focus\(\)/u,
@@ -478,11 +499,11 @@ describe("shared routing model picker integration", () => {
       pageSource,
       /className=\{styles\.composeModelEffortTrigger\}[\s\S]{0,700}onClick=\{\(event\) => \{[\s\S]{0,100}event\.currentTarget\.focus\(\)/u,
     );
+    assert.doesNotMatch(pageSource, /commitHighlightedModelToEffort/u);
     assert.match(
-      pageSource,
-      /if \(event\.key === "Tab" && !effortInteractionDisabled\)/u,
+      tutorialSource,
+      /Tab keeps its normal focus behavior and never advances or commits a picker/u,
     );
-    assert.match(tutorialSource, /Pressing Tab after clicking either picker/u);
   });
 
   it("adds exactly one spectrum color at each effort increase", () => {
@@ -606,8 +627,13 @@ describe("shared routing model picker integration", () => {
       /ONLINE models use only provider-native effort/u,
     );
     assert.match(tutorialSource, /Cmd\/Ctrl\+Shift\+E/u);
-    assert.match(tutorialSource, /Shift\+Tab opens Model/u);
-    assert.match(tutorialSource, /tap Tab again to commit it and move directly into Effort/u);
+    assert.match(tutorialSource, /Control\+Left opens Model/u);
+    assert.match(tutorialSource, /Shift\+Tab flips LOCAL\/ONLINE/u);
+    assert.match(tutorialSource, /arrow keys do not roam their lists/u);
+    assert.match(
+      tutorialSource,
+      /Tab keeps its normal focus behavior and never advances or commits a picker/u,
+    );
     assert.match(tutorialSource, /Settings → Shortcuts/u);
     assert.match(tutorialSource, /prepared work is discarded/u);
   });

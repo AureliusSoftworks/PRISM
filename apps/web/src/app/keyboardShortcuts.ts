@@ -3,7 +3,11 @@ export const PRISM_KEYBOARD_SHORTCUTS_CHANGED_EVENT =
 
 export type PrismKeyboardShortcutAction =
   | "prism"
+  | "providerMode"
   | "modelPicker"
+  | "effortPicker"
+  | "turbo"
+  | "speechType"
   | "effortHud";
 
 export type PrismKeyboardShortcutPreferencesV1 = Record<
@@ -26,10 +30,31 @@ export const PRISM_KEYBOARD_SHORTCUT_DEFINITIONS: readonly PrismKeyboardShortcut
         "Summon Prism, or refract the currently focused Prism control.",
     },
     {
-      action: "modelPicker",
-      label: "Model + effort picker",
+      action: "providerMode",
+      label: "LOCAL / ONLINE",
       description:
-        "Open the active Model picker. Tab commits the highlighted model and moves to Effort.",
+        "Flip the navbar privacy lane between LOCAL and ONLINE, separate from the Control shortcut root.",
+    },
+    {
+      action: "modelPicker",
+      label: "Model picker",
+      description: "Open the active Model picker.",
+    },
+    {
+      action: "effortPicker",
+      label: "Effort picker",
+      description: "Open the active Effort menu beside Model.",
+    },
+    {
+      action: "turbo",
+      label: "Turbo",
+      description:
+        "Toggle Turbo, switching to the first eligible Fast ONLINE model when needed.",
+    },
+    {
+      action: "speechType",
+      label: "Speech Type",
+      description: "Open the navbar Speech Type menu.",
     },
     {
       action: "effortHud",
@@ -40,7 +65,11 @@ export const PRISM_KEYBOARD_SHORTCUT_DEFINITIONS: readonly PrismKeyboardShortcut
 
 const ACTIONS: readonly PrismKeyboardShortcutAction[] = [
   "prism",
+  "providerMode",
   "modelPicker",
+  "effortPicker",
+  "turbo",
+  "speechType",
   "effortHud",
 ];
 
@@ -55,6 +84,8 @@ const MODIFIER_CODES = new Set([
   "ShiftRight",
 ]);
 
+const SHORTCUT_MODIFIERS = ["Meta", "Control", "Alt", "Shift"] as const;
+
 const VALID_KEY_CODE = /^(?:Key[A-Z]|Digit[0-9]|F(?:[1-9]|1[0-2])|Arrow(?:Up|Down|Left|Right)|Space|Tab|Enter|Home|End|PageUp|PageDown|Backquote|BracketLeft|BracketRight|Backslash|Semicolon|Quote|Comma|Period|Slash|Minus|Equal)$/;
 
 function isApplePlatform(platform: string): boolean {
@@ -65,8 +96,12 @@ export function defaultPrismKeyboardShortcuts(
   platform: string,
 ): PrismKeyboardShortcutPreferencesV1 {
   return {
-    prism: "Control+Space",
-    modelPicker: "Shift+Tab",
+    prism: "Control+Alt",
+    providerMode: "Shift+Tab",
+    modelPicker: "Control+ArrowLeft",
+    effortPicker: "Control+ArrowDown",
+    turbo: "Control+ArrowUp",
+    speechType: "Control+ArrowRight",
     effortHud: isApplePlatform(platform)
       ? "Meta+Shift+KeyE"
       : "Control+Shift+KeyE",
@@ -74,7 +109,7 @@ export function defaultPrismKeyboardShortcuts(
 }
 
 export function prismKeyboardShortcutsStorageKey(accountKey: string): string {
-  return `prism_keyboard_shortcuts_v1:${encodeURIComponent(accountKey)}`;
+  return `prism_keyboard_shortcuts_v2:${encodeURIComponent(accountKey)}`;
 }
 
 interface ShortcutEventLike {
@@ -90,6 +125,16 @@ function normalizedShortcut(value: unknown): string | null | undefined {
   if (typeof value !== "string") return undefined;
   const pieces = value.split("+").filter(Boolean);
   if (pieces.length < 2) return undefined;
+  const modifierOnly = pieces.every((piece) =>
+    SHORTCUT_MODIFIERS.includes(
+      piece as (typeof SHORTCUT_MODIFIERS)[number],
+    ),
+  );
+  if (modifierOnly) {
+    return SHORTCUT_MODIFIERS.filter((modifier) => pieces.includes(modifier)).join(
+      "+",
+    );
+  }
   const code = pieces.at(-1) ?? "";
   if (!VALID_KEY_CODE.test(code)) return undefined;
   const modifiers = new Set(pieces.slice(0, -1));
@@ -157,10 +202,28 @@ export function readPrismKeyboardShortcuts(
 ): PrismKeyboardShortcutPreferencesV1 {
   try {
     const raw = storage.getItem(prismKeyboardShortcutsStorageKey(accountKey));
-    return normalizePrismKeyboardShortcuts(
+    const preferences = normalizePrismKeyboardShortcuts(
       raw === null ? null : JSON.parse(raw),
       platform,
     );
+    // Migrate retired defaults without changing deliberately customized
+    // device-local shortcuts.
+    if (preferences.prism === "Control+Space") {
+      preferences.prism = defaultPrismKeyboardShortcuts(platform).prism;
+    }
+    if (
+      preferences.providerMode === "Control+ArrowLeft" &&
+      preferences.modelPicker === "Control+ArrowDown" &&
+      preferences.effortPicker === "Control+ArrowRight" &&
+      preferences.speechType === "Shift+Tab"
+    ) {
+      const defaults = defaultPrismKeyboardShortcuts(platform);
+      preferences.providerMode = defaults.providerMode;
+      preferences.modelPicker = defaults.modelPicker;
+      preferences.effortPicker = defaults.effortPicker;
+      preferences.speechType = defaults.speechType;
+    }
+    return preferences;
   } catch {
     return defaultPrismKeyboardShortcuts(platform);
   }
@@ -180,7 +243,18 @@ export function writePrismKeyboardShortcuts(
 export function keyboardShortcutFromEvent(
   event: ShortcutEventLike,
 ): string | null {
-  if (MODIFIER_CODES.has(event.code) || !VALID_KEY_CODE.test(event.code)) {
+  if (MODIFIER_CODES.has(event.code)) {
+    if (
+      event.ctrlKey &&
+      event.altKey &&
+      !event.metaKey &&
+      !event.shiftKey
+    ) {
+      return "Control+Alt";
+    }
+    return null;
+  }
+  if (!VALID_KEY_CODE.test(event.code)) {
     return null;
   }
   if (!event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
@@ -202,6 +276,18 @@ export function keyboardShortcutMatchesEvent(
   event: ShortcutEventLike,
 ): boolean {
   if (!shortcut) return false;
+  if (shortcut === "Control+Alt") {
+    return (
+      event.ctrlKey &&
+      event.altKey &&
+      !event.metaKey &&
+      !event.shiftKey &&
+      (event.code === "ControlLeft" ||
+        event.code === "ControlRight" ||
+        event.code === "AltLeft" ||
+        event.code === "AltRight")
+    );
+  }
   return keyboardShortcutFromEvent(event) === shortcut;
 }
 
@@ -231,15 +317,19 @@ export function keyboardShortcutDisplay(
   platform: string,
 ): string {
   if (!shortcut) return "Not set";
-  const parts = shortcut.split("+");
-  const code = parts.pop() ?? "";
+  const allParts = shortcut.split("+");
+  const modifierOnly = allParts.every((part) =>
+    SHORTCUT_MODIFIERS.includes(part as (typeof SHORTCUT_MODIFIERS)[number]),
+  );
+  const parts = modifierOnly ? allParts : allParts.slice(0, -1);
+  const code = modifierOnly ? null : (allParts.at(-1) ?? "");
   if (isApplePlatform(platform)) {
     return [
       parts.includes("Meta") ? "⌘" : null,
       parts.includes("Control") ? "⌃" : null,
       parts.includes("Alt") ? "⌥" : null,
       parts.includes("Shift") ? "⇧" : null,
-      displayCode(code),
+      code ? displayCode(code) : null,
     ]
       .filter(Boolean)
       .join(" ");
@@ -249,7 +339,7 @@ export function keyboardShortcutDisplay(
     parts.includes("Control") ? "Ctrl" : null,
     parts.includes("Alt") ? "Alt" : null,
     parts.includes("Shift") ? "Shift" : null,
-    displayCode(code),
+    code ? displayCode(code) : null,
   ]
     .filter(Boolean)
     .join(" + ");
