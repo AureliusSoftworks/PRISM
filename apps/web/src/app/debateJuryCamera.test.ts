@@ -1,7 +1,11 @@
 import assert from "node:assert/strict";
 import { describe, it } from "node:test";
 import type { DebateEventV1, DebateSessionV1 } from "@localai/shared";
-import { debateJuryPresentationKeepsForumCamera } from "./debateJuryCamera.ts";
+import {
+  debateJuryEventCanPresent,
+  debateJuryPresentationKeepsForumCamera,
+  debateJuryPresentationUsesChamber,
+} from "./debateJuryCamera.ts";
 
 function session(): Pick<DebateSessionV1, "jury"> {
   return {
@@ -78,6 +82,60 @@ describe("Debate Jury camera handoff", () => {
         preparingSpeakerBotId: null,
       }),
       false,
+    );
+  });
+
+  it("keeps unheard Jury events presentable after a Spectator bake completes", () => {
+    const bakedSpectator = {
+      ...session(),
+      playerRole: "spectator" as const,
+      jury: { ...session().jury, enabled: true },
+    };
+    const deliberation = event({
+      kind: "jury_deliberation",
+      speakerKind: "juror",
+      speakerBotId: "juror-1",
+      stepKey: "jury_deliberation_0",
+    });
+    const ballot = event({
+      kind: "ballot",
+      speakerKind: "juror",
+      speakerBotId: "juror-1",
+      stepKey: "jury_final_0",
+    });
+
+    assert.equal(debateJuryEventCanPresent(bakedSpectator, deliberation), true);
+    assert.equal(debateJuryEventCanPresent(bakedSpectator, ballot), true);
+    assert.equal(
+      debateJuryEventCanPresent(
+        { ...bakedSpectator, playerRole: "participant" },
+        deliberation,
+      ),
+      false,
+    );
+  });
+
+  it("lets the presented Jury event own the chamber after server completion", () => {
+    assert.equal(
+      debateJuryPresentationUsesChamber(session(), {
+        presenting: true,
+        event: event({
+          kind: "jury_deliberation",
+          speakerKind: "juror",
+          speakerBotId: "juror-1",
+          stepKey: "jury_deliberation_0",
+        }),
+        preparingSpeakerBotId: null,
+      }),
+      true,
+    );
+    assert.equal(
+      debateJuryPresentationUsesChamber(session(), {
+        presenting: true,
+        event: null,
+        preparingSpeakerBotId: "juror-1",
+      }),
+      true,
     );
   });
 });

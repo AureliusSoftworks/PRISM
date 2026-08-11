@@ -1176,7 +1176,7 @@ export interface DebateJuryStateV1 {
   jurors: DebateJurorSnapshotV1[];
   forepersonBotId: string | null;
   initialBallots: DebateJuryBallotV1[];
-  /** Final ballots generated behind the sealed deliberation view, before reveal. */
+  /** Legacy bake-ahead ballots retained for resumable pre-discussion sessions. */
   preparedFinalBallots: DebateJuryBallotV1[];
   finalBallots: DebateJuryBallotV1[];
   discussionTurnTarget: number;

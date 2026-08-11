@@ -2899,7 +2899,7 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /function debateJuryCameraIsActive[\s\S]{0,620}debateJuryPresentationKeepsForumCamera\(session, presentation\)[\s\S]{0,120}debateJuryAutoChamberActive\(session\)/u,
+      /function debateJuryCameraIsActive[\s\S]{0,760}debateJuryPresentationUsesChamber\(session, presentation\)[\s\S]{0,220}debateJuryPresentationKeepsForumCamera\(session, presentation\)[\s\S]{0,120}debateJuryAutoChamberActive\(session\)/u,
     );
     assert.match(source, /silentDeliberationPreparing/u);
     assert.match(source, /juryDeliberationInFlightSessionId/u);
@@ -2918,7 +2918,11 @@ describe("Debate experience", () => {
     );
     assert.match(
       source,
-      /!juryCameraActive[\s\S]{0,180}event\.kind === "jury_deliberation"/u,
+      /function debatePresentationEvents[\s\S]{0,420}debateJuryEventCanPresent\(next, event\)/u,
+    );
+    assert.match(
+      source,
+      /juryCameraActive: debateJuryCameraIsActive\([\s\S]{0,280}presenting: true,[\s\S]{0,120}event,/u,
     );
     assert.match(
       source,

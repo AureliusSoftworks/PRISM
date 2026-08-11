@@ -6,12 +6,41 @@ export interface DebateJuryCameraPresentationV1 {
   preparingSpeakerBotId: string | null;
 }
 
-function debateEventUsesJuryCamera(event: DebateEventV1): boolean {
+export function debateEventUsesJuryCamera(event: DebateEventV1): boolean {
   return (
     event.speakerKind === "juror" ||
     event.kind === "jury_deliberation" ||
     event.kind === "jury_verdict"
   );
+}
+
+/**
+ * A baked Spectator session may already be complete while the client is still
+ * replaying unheard events. Public Jury events remain presentable from their
+ * own provenance; the terminal server step must not erase them from playback.
+ */
+export function debateJuryEventCanPresent(
+  session: Pick<DebateSessionV1, "jury" | "playerRole">,
+  event: DebateEventV1,
+): boolean {
+  if (!debateEventUsesJuryCamera(event)) return true;
+  return session.jury.enabled && session.playerRole !== "participant";
+}
+
+/** Current or preparing Jury speech owns the chamber even after bake-ahead. */
+export function debateJuryPresentationUsesChamber(
+  session: Pick<DebateSessionV1, "jury">,
+  presentation: DebateJuryCameraPresentationV1 | undefined,
+): boolean {
+  if (!presentation?.presenting) return false;
+  if (presentation.preparingSpeakerBotId) {
+    return session.jury.jurors.some(
+      (juror) => juror.id === presentation.preparingSpeakerBotId,
+    );
+  }
+  return presentation.event
+    ? debateEventUsesJuryCamera(presentation.event)
+    : false;
 }
 
 /**

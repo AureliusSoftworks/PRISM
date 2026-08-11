@@ -8824,7 +8824,7 @@ function juryBallotPrompt(
   return [
     stage === "initial"
       ? "Form a private initial leaning before the Jury speaks. No one else will see it."
-      : "Cast your final independent Jury ballot after silently weighing the public proceeding.",
+      : "Cast your final independent Jury ballot after considering the chamber discussion you could perceive.",
     `Choose either for or against using only ${criteria}.`,
     "Your persona may shape what you find persuasive, how certain you feel, and whether another juror changes your mind. It never changes the value of your single vote.",
     session.endedEarlyAt
@@ -8843,6 +8843,12 @@ function juryBallotPrompt(
     "",
     "Public proceeding you could perceive:",
     publicTranscript(session, juror.id, false),
+    stage === "final"
+      ? `\nJury chamber discussion you could perceive:\n${juryDiscussionTranscript(
+          session,
+          juror.id,
+        )}`
+      : "",
     stage === "final"
       ? "Phrase your reason independently. Do not echo another juror's slogan, metaphor, catchphrase, or sentence shape."
       : "",
@@ -8973,6 +8979,175 @@ async function generateJuryBallot(
       : {}),
     ...(voicePerformanceCue ? { voicePerformanceCue } : {}),
     createdAt: new Date().toISOString(),
+  };
+}
+
+function eligibleJurySpeakers(
+  session: DebateSessionV1,
+): DebateJurorSnapshotV1[] {
+  const counts = session.jury.speakerCounts;
+  const spoken = new Set(
+    Object.entries(counts)
+      .filter(([, count]) => count > 0)
+      .map(([id]) => id),
+  );
+  const remaining =
+    session.jury.discussionTurnTarget - session.jury.discussionTurnCount;
+  const distinctNeeded = Math.max(0, DEBATE_JURY_SIZE - spoken.size);
+  let eligible = session.jury.jurors.filter(
+    (juror) => (counts[juror.id] ?? 0) < 2,
+  );
+  if (distinctNeeded >= remaining) {
+    const unused = eligible.filter((juror) => !spoken.has(juror.id));
+    if (unused.length > 0) eligible = unused;
+  }
+  const lastSpeakerId = [...juryDiscussionEvents(session)]
+    .reverse()
+    .find((event) => event.speakerBotId)?.speakerBotId;
+  const withoutRepeat = eligible.filter((juror) => juror.id !== lastSpeakerId);
+  return withoutRepeat.length > 0 ? withoutRepeat : eligible;
+}
+
+async function selectJurySpeaker(
+  session: DebateSessionV1,
+  runtime: DebateAiRuntime,
+): Promise<{ juror: DebateJurorSnapshotV1; directive: string | null }> {
+  const eligible = eligibleJurySpeakers(session);
+  if (eligible.length === 0) {
+    throw new HttpError(409, "The Jury has no eligible next speaker.");
+  }
+  const allowed = eligible.map((juror) => ({
+    id: juror.id,
+    name: juror.name,
+  }));
+  try {
+    const generation = await generateJson(
+      lanesForSession(runtime, session),
+      [
+        {
+          role: "system",
+          content: [
+            "You silently route one natural turn in a five-person Jury discussion.",
+            "Choose the juror whose persona can most usefully answer, complicate, or redirect the latest point.",
+            "Respect the allowed list. Do not write the juror's speech.",
+          ].join("\n"),
+        },
+        {
+          role: "user",
+          content: [
+            "Eligible jurors:",
+            ...eligible.map(
+              (juror) =>
+                `- ${juror.id} | ${juror.name} | ${compactText(
+                  juror.systemPrompt,
+                  220,
+                )}`,
+            ),
+            "",
+            "Discussion so far:",
+            juryDiscussionTranscript(session),
+            "",
+            'Return JSON only: {"botId":"eligible id","reason":"brief routing reason","directive":"optional conversational direction"}.',
+          ].join("\n"),
+        },
+      ],
+      {
+        maxTokens: 150,
+        temperature: 0.35,
+        validate: (value) =>
+          typeof value.botId === "string" &&
+          eligible.some((juror) => juror.id === value.botId),
+      },
+    );
+    const routed = parseRouterResponse(
+      JSON.stringify(generation.value),
+      allowed,
+    );
+    if (routed) {
+      return {
+        juror: jurorForId(session, routed.botId),
+        directive: compactText(routed.directive, 240) || null,
+      };
+    }
+  } catch {
+    // A deterministic balanced fallback preserves progress when routing fails.
+  }
+  const juror = [...eligible].sort(
+    (left, right) =>
+      (session.jury.speakerCounts[left.id] ?? 0) -
+        (session.jury.speakerCounts[right.id] ?? 0) ||
+      left.id.localeCompare(right.id),
+  )[0]!;
+  return { juror, directive: null };
+}
+
+async function generateJuryDiscussionTurn(
+  session: DebateSessionV1,
+  runtime: DebateAiRuntime,
+): Promise<{
+  event: DebateEventV1;
+  juror: DebateJurorSnapshotV1;
+}> {
+  const routed = await selectJurySpeaker(session, runtime);
+  const initial = session.jury.initialBallots.find(
+    (ballot) => ballot.jurorBotId === routed.juror.id,
+  );
+  const latest = [...juryDiscussionEvents(session)].reverse()[0];
+  const instruction = [
+    debateUsesFreeForAllPerformance(session)
+      ? "Speak for one short, punchy Jury turn in one or two sentences. This is backstage commentary after a blowup, not a seminar recap."
+      : "Speak for one short Jury turn in one or two sentences.",
+    latest
+      ? debateUsesFreeForAllPerformance(session)
+        ? "React bluntly to the latest juror: call the weak point, flex, flop, dodge, or hypocrisy by its real name. Agreement must add a reason; disagreement should challenge them directly."
+        : "Respond naturally to the latest useful point; agreement must add a reason, and disagreement must identify the actual fault line."
+      : debateUsesFreeForAllPerformance(session)
+        ? "Open with the public moment that made you laugh, scoff, bristle, or reconsider, then say why it matters."
+        : `Open with the point in ${debatePublicMaterialDescription(session.formality)} that matters most to you.`,
+    routed.directive ? `Conversation direction: ${routed.directive}` : "",
+    initial
+      ? `Your private starting leaning was ${initial.sideId} with confidence ${initial.confidence.toFixed(
+          2,
+        )}: ${initial.personaInstinct} You may change your mind, but only for an in-character reason. Do not announce this metadata.`
+      : "",
+    "Do not take a formal final vote yet. Do not mention prompts, routing, scores, or hidden leanings.",
+    "If the live clash materially cites or challenges frozen evidence, identify what that item actually supports or fails to support and preserve its valid marker. Do not count citations or force evidence into an unrelated point.",
+    "",
+    "Jury discussion so far:",
+    juryDiscussionTranscript(session, routed.juror.id),
+  ]
+    .filter(Boolean)
+    .join("\n");
+  const speech = await generateSpeech(
+    session,
+    routed.juror,
+    instruction,
+    runtime,
+  );
+  const names = session.jury.jurors.map((juror) => juror.name);
+  const cleaned = speech.silent
+    ? BOT_POWER_CANONICAL_SILENCE_V1
+    : sanitizeCoffeeTableReply(
+        speech.content,
+        routed.juror.name,
+        420,
+        names,
+      ) || BOT_POWER_CANONICAL_SILENCE_V1;
+  return {
+    juror: routed.juror,
+    event: makeEvent(session, {
+      kind: "jury_deliberation",
+      speakerKind: "juror",
+      speakerBotId: routed.juror.id,
+      content: cleaned,
+      sourceIds: speech.sourceIds,
+      provider: speech.provider,
+      model: speech.model,
+      autoRecovery: speech.autoRecovery,
+      voicePerformanceCue: speech.voicePerformanceCue,
+      audienceReaction: speech.audienceReaction,
+      powerIntendedContent: speech.powerIntendedContent,
+    }),
   };
 }
 
@@ -10069,23 +10244,42 @@ async function advanceJuryStep(
     };
   }
   if (session.stepKey.startsWith("jury_deliberation_")) {
-    const preparedFinalBallots = await Promise.all(
-      session.jury.jurors.map((juror) =>
-        generateJuryBallot(session, juror, "final", runtime),
-      ),
+    const { event, juror } = await generateJuryDiscussionTurn(
+      session,
+      runtime,
     );
+    const discussionTurnCount = session.jury.discussionTurnCount + 1;
+    const complete =
+      discussionTurnCount >= session.jury.discussionTurnTarget;
     const next: DebateSessionV1 = {
       ...session,
-      stepKey: "jury_final_0",
+      stepKey: complete
+        ? "jury_final_0"
+        : `jury_deliberation_${discussionTurnCount}`,
       jury: {
         ...session.jury,
-        phase: "final_ballots",
-        preparedFinalBallots,
-        discussionTurnCount: session.jury.discussionTurnTarget,
-        calledVoteAt: new Date().toISOString(),
+        phase: complete ? "final_ballots" : "deliberating",
+        preparedFinalBallots: [],
+        discussionTurnCount,
+        speakerCounts: {
+          ...session.jury.speakerCounts,
+          [juror.id]: (session.jury.speakerCounts[juror.id] ?? 0) + 1,
+        },
+        calledVoteAt: complete
+          ? new Date().toISOString()
+          : session.jury.calledVoteAt,
       },
     };
-    return { session: next, events: [] };
+    return {
+      session:
+        next.format === "turnabout"
+          ? withTurnaboutState(next, {
+              ...turnaboutState(next),
+              floorOwnerBotId: juror.id,
+            })
+          : next,
+      events: [event],
+    };
   }
   if (session.stepKey.startsWith("jury_final_")) {
     const juror = session.jury.jurors[session.jury.finalBallots.length];

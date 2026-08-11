@@ -569,6 +569,7 @@ class JuryProvider extends DebateProviderStub {
   public aftermathPrompts: string[] = [];
   public ballotPrompts: string[] = [];
   public discussionPrompt = "";
+  public juryHandoffPrompt = "";
   public closingPrompt = "";
 
   public override async generateResponse(
@@ -584,6 +585,12 @@ class JuryProvider extends DebateProviderStub {
       text.includes("Close this like the last beat")
     ) {
       this.closingPrompt = text;
+    }
+    if (text.includes("announce that the Jury will now")) {
+      this.juryHandoffPrompt = text;
+      return JSON.stringify({
+        content: "Advocacy is finished; the Jury will now deliberate.",
+      });
     }
     if (
       text.includes("Form a private initial leaning") ||
@@ -2959,7 +2966,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("prepares all final Jury monologues behind sealed deliberation, then reveals five ballots", async () => {
+  it("holds a bounded public Jury discussion, then reveals five ballots", async () => {
     const db = createTestDb();
     try {
       const created = await createJuryDebateForRole(db, "spectator", 5);
@@ -3005,31 +3012,54 @@ describe("Debate engine", () => {
         false,
       );
 
-      session = await advanceDebateSession(
-        db,
-        "user-1",
-        session.id,
-        {
-          expectedRevision: session.revision,
-          idempotencyKey: "jury:discussion:0001",
-        },
-        created.runtime,
+      const moderatorHandoff = session.events.find(
+        (event) => event.stepKey === "moderator_to_jury",
       );
+      while (session.jury.phase === "deliberating") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `jury:discussion:${mutation}`,
+          },
+          created.runtime,
+        );
+        assert.ok(mutation < 12);
+      }
       assert.equal(
         session.jury.discussionTurnCount,
         session.jury.discussionTurnTarget,
       );
-      assert.equal(session.jury.preparedFinalBallots.length, 5);
+      assert.equal(session.jury.preparedFinalBallots.length, 0);
       assert.equal(session.jury.finalBallots.length, 0);
       assert.equal(session.stepKey, "jury_final_0");
-      assert.equal(
-        session.events.filter(
-          (event) =>
-            event.kind === "jury_deliberation" &&
-            !event.stepKey.startsWith("jury_sidebar_"),
-        ).length,
-        0,
+      const formalDiscussion = session.events.filter(
+        (event) =>
+          event.kind === "jury_deliberation" &&
+          event.stepKey.startsWith("jury_deliberation_"),
       );
+      assert.equal(formalDiscussion.length, 3);
+      assert.deepEqual(
+        formalDiscussion.map((event) => event.stepKey),
+        ["jury_deliberation_0", "jury_deliberation_1", "jury_deliberation_2"],
+      );
+      assert.equal(
+        new Set(formalDiscussion.map((event) => event.speakerBotId)).size,
+        3,
+      );
+      assert.ok(
+        formalDiscussion.every(
+          (event) =>
+            event.sequence > (moderatorHandoff?.sequence ?? -1) &&
+            event.speakerKind === "juror" &&
+            event.provider === "local" &&
+            event.model === "debate-test",
+        ),
+      );
+      assert.match(created.provider.discussionPrompt, /Do not take a formal final vote yet/u);
 
       let sawVerdictHandoff = false;
       while (session.status !== "completed" && session.stepKey !== "completed") {
@@ -3064,6 +3094,11 @@ describe("Debate engine", () => {
           (event) => event.kind === "ballot" && event.speakerKind === "juror",
         ).length,
         5,
+      );
+      assert.ok(
+        created.provider.ballotPrompts
+          .filter((prompt) => prompt.includes("Cast your final independent Jury ballot"))
+          .every((prompt) => prompt.includes("Jury chamber discussion you could perceive")),
       );
       const verdictSequence = session.events.find(
         (event) => event.kind === "jury_verdict",
@@ -3236,7 +3271,11 @@ describe("Debate engine", () => {
           /what the item actually supports or fails to support/u,
         );
       }
-      assert.equal(provider.discussionPrompt, "");
+      assert.match(provider.discussionPrompt, /Rail Housing Evidence/u);
+      assert.match(
+        provider.discussionPrompt,
+        /what that item actually supports or fails to support/u,
+      );
 
       const ballotEvents = session.events.filter(
         (event) => event.kind === "ballot" && event.speakerKind === "juror",
@@ -3404,7 +3443,7 @@ describe("Debate engine", () => {
         idempotencyKey: "sealed-jury:end-early",
       });
       let mutation = 0;
-      while (session.stepKey !== "jury_final_0") {
+      while (session.jury.finalBallots.length < 5) {
         mutation += 1;
         session = await advanceDebateSession(
           db,
@@ -3416,7 +3455,7 @@ describe("Debate engine", () => {
           },
           created.runtime,
         );
-        assert.ok(mutation < 8);
+        assert.ok(mutation < 16);
       }
 
       assert.equal(provider.ballotPrompts.length, 10);
@@ -3586,6 +3625,30 @@ describe("Debate engine", () => {
         },
         created.runtime,
       );
+      assert.equal(session.stepKey, "jury_deliberation_1");
+      assert.equal(session.jury.phase, "deliberating");
+      assert.equal(session.jury.discussionTurnCount, 1);
+      assert.partialDeepStrictEqual(session.events.at(-1), {
+        kind: "jury_deliberation",
+        speakerKind: "juror",
+        stepKey: "jury_deliberation_0",
+        provider: "local",
+        model: "debate-test",
+      });
+      while (session.jury.phase === "deliberating") {
+        mutation += 1;
+        session = await advanceDebateSession(
+          db,
+          "user-1",
+          session.id,
+          {
+            expectedRevision: session.revision,
+            idempotencyKey: `jury:automatic-deliberation:${mutation}`,
+          },
+          created.runtime,
+        );
+        assert.ok(mutation < 48);
+      }
       assert.equal(session.stepKey, "jury_final_0");
       assert.equal(session.status, "live");
       assert.equal(session.jury.phase, "final_ballots");
@@ -3593,7 +3656,7 @@ describe("Debate engine", () => {
         session.jury.discussionTurnCount,
         session.jury.discussionTurnTarget,
       );
-      assert.equal(session.jury.preparedFinalBallots.length, 5);
+      assert.equal(session.jury.preparedFinalBallots.length, 0);
       assert.ok(session.jury.calledVoteAt);
       assert.equal(session.endedEarlyAt, null);
       while (session.status !== "completed" && session.stepKey !== "completed") {
@@ -3617,7 +3680,7 @@ describe("Debate engine", () => {
     }
   });
 
-  it("keeps formal Jury deliberation silent while preparing five independent ballots", async () => {
+  it("keeps formal Jury deliberation bounded, audible, and provenance-complete", async () => {
     const db = createTestDb();
     try {
       const created = await createJuryDebateForRole(db, "spectator", 5);
@@ -3637,15 +3700,55 @@ describe("Debate engine", () => {
         );
         assert.ok(mutation < 48);
       }
+      assert.equal(session.format, "forum");
+      assert.equal(session.formatVersion, 1);
+      assert.equal(session.playerRole, "spectator");
+      assert.equal(session.jury.enabled, true);
+      assert.equal(session.endedEarlyAt, null);
       assert.equal(session.jury.discussionTurnCount, 5);
-      assert.deepEqual(session.jury.speakerCounts, {});
       assert.equal(
-        session.events.filter(
+        Object.values(session.jury.speakerCounts).reduce(
+          (total, count) => total + count,
+          0,
+        ),
+        5,
+      );
+      const formalDiscussion = session.events.filter(
+        (event) =>
+          event.kind === "jury_deliberation" &&
+          event.stepKey.startsWith("jury_deliberation_"),
+      );
+      assert.equal(formalDiscussion.length, 5);
+      assert.equal(
+        new Set(formalDiscussion.map((event) => event.speakerBotId)).size,
+        5,
+      );
+      assert.ok(
+        formalDiscussion.every(
           (event) =>
-            event.kind === "jury_deliberation" &&
-            !event.stepKey.startsWith("jury_sidebar_"),
-        ).length,
-        0,
+            event.provider === "local" &&
+            event.model === "debate-test" &&
+            event.content.includes("strongest point"),
+        ),
+      );
+      const handoffSequence = session.events.find(
+        (event) => event.stepKey === "moderator_to_jury",
+      )?.sequence;
+      assert.match(
+        session.events.find((event) => event.stepKey === "moderator_to_jury")
+          ?.content ?? "",
+        /Jury will now deliberate/u,
+      );
+      const firstBallotSequence = session.events.find(
+        (event) => event.kind === "ballot" && event.speakerKind === "juror",
+      )?.sequence;
+      assert.ok(handoffSequence !== undefined && firstBallotSequence !== undefined);
+      assert.ok(
+        formalDiscussion.every(
+          (event) =>
+            event.sequence > handoffSequence &&
+            event.sequence < firstBallotSequence,
+        ),
       );
     } finally {
       db.close();
@@ -6493,7 +6596,8 @@ describe("Debate engine", () => {
         provider.ballotPrompts.at(-1) ?? "",
         /punchy, persona-shaped public reason/u,
       );
-      assert.equal(provider.discussionPrompt, "");
+      assert.match(provider.discussionPrompt, /short, punchy Jury turn/u);
+      assert.match(provider.discussionPrompt, /React bluntly/u);
       assert.match(
         provider.ballotPrompts.at(-1) ?? "",
         /Phrase your reason independently/u,

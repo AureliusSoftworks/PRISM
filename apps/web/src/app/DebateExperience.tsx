@@ -230,7 +230,9 @@ import {
   formatDebateJuryRecord,
 } from "./debateJuryRecord";
 import {
+  debateJuryEventCanPresent,
   debateJuryPresentationKeepsForumCamera,
+  debateJuryPresentationUsesChamber,
   type DebateJuryCameraPresentationV1,
 } from "./debateJuryCamera";
 import {
@@ -2197,7 +2199,7 @@ function debateExpectedBotId(session: DebateSessionV1): string | null {
 function debatePresentationEvents(
   previous: DebateSessionV1 | null,
   next: DebateSessionV1,
-  juryCameraActive: boolean,
+  _juryCameraActive: boolean,
 ): DebateEventV1[] {
   const previousEventIds = new Set(
     previous?.events.map((event) => event.id) ?? [],
@@ -2205,11 +2207,7 @@ function debatePresentationEvents(
   return next.events.filter(
     (event) =>
       !previousEventIds.has(event.id) &&
-      !(
-        !juryCameraActive &&
-        (event.kind === "jury_deliberation" ||
-          (event.kind === "ballot" && event.speakerKind === "juror"))
-      ) &&
+      debateJuryEventCanPresent(next, event) &&
       !(
         next.jury.enabled &&
         next.playerRole === "participant" &&
@@ -2274,6 +2272,9 @@ function debateJuryCameraIsActive(
   if (!session.jury.enabled) return false;
   // Locked manual Jury shot — recovery path when Auto leaves you on the forum.
   if (cameraMode === "jury" && debateJuryManualCameraAvailable(session)) {
+    return true;
+  }
+  if (debateJuryPresentationUsesChamber(session, presentation)) {
     return true;
   }
   return (
@@ -8997,6 +8998,12 @@ export function DebateExperience(
           juryCameraActive: debateJuryCameraIsActive(
             effectivePresentationCameraMode,
             next,
+            {
+              presenting: true,
+              event,
+              preparingSpeakerBotId:
+                utterance?.speaker?.id ?? event.speakerBotId,
+            },
           ),
           gavelLed: gavelCue !== null,
           hasEvidence:
