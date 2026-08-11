@@ -2609,7 +2609,23 @@ export function debateSpectatorAwaitingFirstWatch(
     | "completedAt"
   >,
 ): boolean {
-  if (session.playerRole !== "spectator") return false;
+  return (
+    session.playerRole === "spectator" &&
+    debateSessionAwaitingFirstPresentation(session)
+  );
+}
+
+/**
+ * A prepared opening that has never been shown. Unlike a normal recess, this
+ * checkpoint has no heard presentation event, so every player role may use the
+ * title card as a Start gate while the opening is prepared ahead of time.
+ */
+export function debateSessionAwaitingFirstPresentation(
+  session: Pick<
+    DebateSessionV1,
+    "status" | "pausedPresentationEventId" | "completedAt"
+  > & { events: readonly unknown[] },
+): boolean {
   if (session.status !== "paused") return false;
   if (session.pausedPresentationEventId) return false;
   if (session.events.length === 0) return false;
@@ -2624,8 +2640,8 @@ export function debateSpectatorAwaitingFirstWatch(
 export function debateSessionAwaitingDeferredStart(
   session: Pick<
     DebateSessionV1,
-    "status" | "pausedPresentationEventId" | "events" | "completedAt" | "stepKey"
-  >,
+    "status" | "pausedPresentationEventId" | "completedAt" | "stepKey"
+  > & { events: readonly unknown[] },
 ): boolean {
   if (session.status !== "paused") return false;
   if (session.completedAt != null) return false;

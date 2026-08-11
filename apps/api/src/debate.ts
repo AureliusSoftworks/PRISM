@@ -73,6 +73,7 @@ import {
   debateEstimatedSpeechDurationMs,
   debateSessionAwaitsPresentationSeal,
   debateSessionAwaitingDeferredStart,
+  debateSessionAwaitingFirstPresentation,
   botPowerPairwisePerceptionFromEffectsV1,
   debateSourceIdsFromText,
   debateSpokenText,
@@ -3387,8 +3388,12 @@ export function listDebateSessions(
   return (
     db
       .prepare(
-        `SELECT id, status, phase, motion, player_role, winner_side_id,
-                session_json, updated_at, completed_at
+        `SELECT debate_sessions.id, status, phase, motion, player_role,
+                winner_side_id, session_json, updated_at, completed_at,
+                (SELECT COUNT(*)
+                   FROM debate_events
+                  WHERE debate_events.user_id = debate_sessions.user_id
+                    AND debate_events.session_id = debate_sessions.id) AS event_count
            FROM debate_sessions
           WHERE user_id = ? AND status != 'cancelled'
           ORDER BY updated_at DESC
@@ -3404,6 +3409,7 @@ export function listDebateSessions(
       session_json: string;
       updated_at: string;
       completed_at: string | null;
+      event_count: number;
     }>
   ).map((row) => {
     let format: DebateFormatId = "forum";
@@ -3486,15 +3492,13 @@ export function listDebateSessions(
             : row.player_role,
         juryEnabled,
       });
-      awaitingDeferredStart = debateSessionAwaitingDeferredStart({
+      const archiveStartGate = {
         status: row.status as DebateSessionV1["status"],
         pausedPresentationEventId:
           typeof parsed.pausedPresentationEventId === "string"
             ? parsed.pausedPresentationEventId
-            : parsed.pausedPresentationEventId === null
-              ? null
-              : null,
-        events: Array.isArray(parsed.events) ? parsed.events : [],
+            : null,
+        events: row.event_count > 0 ? [null] : [],
         completedAt: row.completed_at,
         stepKey:
           typeof parsed.stepKey === "string" && parsed.stepKey.trim()
@@ -3502,7 +3506,10 @@ export function listDebateSessions(
             : format === "turnabout"
               ? "turnabout_intro"
               : "intro",
-      });
+      };
+      awaitingDeferredStart =
+        debateSessionAwaitingDeferredStart(archiveStartGate) ||
+        debateSessionAwaitingFirstPresentation(archiveStartGate);
       if (
         parsed.provider === "local" ||
         parsed.provider === "openai" ||

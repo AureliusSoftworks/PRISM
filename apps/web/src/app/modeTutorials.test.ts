@@ -629,7 +629,7 @@ describe("mode tutorials", () => {
     assert.match(copy, /selector on Auto preserves the model already chosen/u);
     assert.match(
       copy,
-      /Spectator preparation also lets the rest of the house walk in/u,
+      /visible gallery walk-in as its loading screen/u,
     );
     assert.match(
       copy,
@@ -645,9 +645,13 @@ describe("mode tutorials", () => {
     );
     assert.match(
       copy,
-      /Moderator.?s first line finishes voice preparation/u,
+      /local gavel assets, the Moderator.?s first voice, and the first camera beat prepare in parallel/u,
     );
-    assert.match(copy, /Intro music begins as that ready title card settles/u);
+    assert.match(
+      copy,
+      /after every gallery member is seated and the opening is hot/u,
+    );
+    assert.match(copy, /title card settle with intro music/u);
     assert.match(
       copy,
       /Choosing Start removes the title controls and cuts straight to the Moderator slamming the already-loaded gavel/u,
