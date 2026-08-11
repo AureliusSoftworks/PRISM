@@ -17,7 +17,7 @@ description: Review PRISM experimental/simulated Effort evals, Psychic planning 
    - confidence: `observed`, `inferred`, or `unknown`.
 4. Trace suspicious output through `effort selection -> simulation gate -> private passes (plan/draft/audit/revision) -> guidance assembly -> final visible generation -> Psychic debug payload -> persistence/redaction -> eval report/judge`. Never call the visible answer raw private-pass output without preserved draft evidence. Treat scratchpads and private drafts as diagnostic evidence only; never paste full private artifacts into docs, commits, or player-facing surfaces.
 5. Audit on two separate axes:
-   - **Answer quality:** constraint fidelity, directness, structure (table / `R1`–`R3` / feasibility when using the cafe prompt), distinct improvement over the same-model baseline, and whether higher Effort tiers earn their latency.
+   - **Answer quality:** constraint fidelity, directness, structure (table / `R1`–`R3` / feasibility when using the cafe prompt), distinct improvement over the same-model baseline, and whether higher Effort tiers earn their latency. Preserve the blind judge's raw quality score, then apply the latency-adjusted comparison below for the product verdict.
    - **System integrity:** native models keep provider-native Effort; simulation only runs when the experiment allows it; LOCAL private passes stay on the local provider; Psychic summaries stay concise; private plans/drafts/audits/revisions stay ephemeral; Auto Effort never selects Extra High unless policy explicitly changes.
 6. Audit collapses and leakage separately:
    - empty, tiny, or role-token finals such as a leading/lone `assistant` line while private passes look healthy;
@@ -41,6 +41,21 @@ description: Review PRISM experimental/simulated Effort evals, Psychic planning 
 - Prefer prompt contracts, validation, orchestration, guidance assembly, serialization, Psychic presentation, and eval-harness fixes over model-specific prompt hacks or rewriting a saved artifact by hand.
 - Method lives in `docs/experimental-effort-eval-runbook.md`; dated interpretation lives in `docs/experimental-effort-research-log.md`.
 
+## Latency-adjusted comparison
+
+Use this only for a same-model None/baseline arm versus a simulated-Effort arm. Keep native-Effort comparisons separate.
+
+- Preserve and report the raw blind-judge quality scores unchanged.
+- Compute `latencyRatio = max(1, simulatedDurationMs / baselineDurationMs)`.
+- Compute `latencyPenalty = min(0.5, 0.1 * log2(latencyRatio))` on the 0–5 score scale.
+- Compute `adjustedSimulatedScore = rawSimulatedScore - latencyPenalty`; the baseline's adjusted score equals its raw score.
+- Calculate with unrounded values, then display the ratio, penalty, and adjusted scores to two decimals.
+- Award raw ties, adjusted ties, and adjusted losses to the baseline. Call simulated Effort the winner only when its adjusted score remains strictly higher.
+- For repeated suites, apply the adjustment to each paired case before aggregating. Do not use one unusually fast or slow run to adjust the whole suite.
+- If either duration is missing or the arms differ in model, prompt, temperature, or token cap, report raw quality and latency separately and mark the adjusted verdict unavailable.
+
+This is a deliberately slight baseline bias: a 2x slowdown costs 0.10 points, 4x costs 0.20, 8x costs 0.30, and the penalty caps at 0.50. Do not rewrite historical raw judge scores.
+
 ## Key surfaces
 
 - Runtime / simulation: `apps/api/src/chat.ts`, `apps/api/src/model-effort-runtime.ts`
@@ -51,7 +66,7 @@ description: Review PRISM experimental/simulated Effort evals, Psychic planning 
 
 ## Output
 
-- `Findings`: evidence-led failures with layer and confidence.
+- `Findings`: evidence-led failures with layer and confidence, including raw quality, latency ratio, latency penalty, adjusted score, and baseline-biased verdict when eligible.
 - `Root cause`: provenance chain and why adjacent layers are ruled out.
 - `Fixes`: systemic app changes made, or focused recommendations in review-only mode.
 - `Verification`: baseline and exact checks after the change.

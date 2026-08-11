@@ -737,3 +737,30 @@ Bead `PRISM-gz07b` closed. Starter continuity stack is shipped and measured:
 4. Chat Qdrant summary read/write revived; Sandbox stays thread-only  
 
 Parent north star `PRISM-jwe8r` remains open. Optional next: playtest Chat/Zen expansive LOCAL recall, or Phase C Deep/multi-agent workshop.
+
+## 2026-08-11 - GPT-3.5 Turbo cafe benchmark
+
+Artifact: [`experimental-effort-2026-08-11T19-07-32-375Z.md`](../artifacts/experimental-effort-evals/experimental-effort-2026-08-11T19-07-32-375Z.md)
+
+| Arm | Judge total | Duration | Result |
+| --- | ---: | ---: | --- |
+| llama3.2 None | 3.5/5 | 9.9s | Invalid schedule; omitted feasibility sentence |
+| GPT-3.5 Turbo reference | 3.5/5 | 18.7s | Invalid schedule; best-ranked on format |
+| llama3.2 High simulated | 2.75/5 | 18.0s | Invalid schedule; weakest risk notes |
+
+High simulation did not beat either comparator on this cafe run. All arms assigned Bob to close and used a two-hour final shift; none found a valid staggered-overlap solution such as Bob 8–12, Cara 10–2, and Alice 2–6.
+
+Clarification: the GPT-3.5 Turbo reference requested High, and this non-native-effort model therefore entered PRISM's standard simulated ladder even though the deeper experimental ladder and Psychic presentation were disabled. It recorded two private passes, 1600 guidance characters, and repair attempts. The provider rejected structured-output schema requests before compatibility fallback recovery. This was a paid simulated-Effort arm, not a clean default GPT-3.5 Turbo reference.
+
+## 2026-08-11 - GPT-3.5 Turbo None vs simulated High
+
+Artifact: [`experimental-effort-2026-08-11T19-20-00-341Z.md`](../artifacts/experimental-effort-evals/experimental-effort-2026-08-11T19-20-00-341Z.md)
+
+| Arm | Judge total | Duration | Provenance |
+| --- | ---: | ---: | --- |
+| GPT-3.5 Turbo None | 3.0/5 | 3.2s | `simulated=false`, 0 passes, verified |
+| GPT-3.5 Turbo simulated High | 3.0/5 | 20.0s | `simulated=true`, 2 passes, verified |
+
+The judge ranked simulated High first because it covered exactly 8am-6pm, while None extended the last shift to 8pm. Both still assigned Bob to close, claimed feasibility incorrectly, and missed a valid staggered-overlap solution. High cost about 6.2x the latency without improving the numeric quality score.
+
+The private ladder did not transfer its own constraint warnings into a valid final. Draft was skipped for hard constraints, audit fell back after GPT-3.5 rejected structured output, and both repair candidates were rejected with blocking violations remaining. This run supports stronger constraint-solving/repair enforcement rather than adding more passes.

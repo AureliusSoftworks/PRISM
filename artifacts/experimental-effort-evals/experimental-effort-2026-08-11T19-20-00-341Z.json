@@ -1,0 +1,129 @@
+{
+  "schema": "prism-experimental-effort-eval-v1",
+  "createdAt": "2026-08-11T19:20:00.341Z",
+  "prompt": "A cafe has 3 baristas and must cover Sat 8am–6pm.\nShifts must be 4 hours. No barista works more than 8 hours.\nAlice can't work before noon. Bob can't close. Cara can do any shift.\nProduce:\n1) a coverage schedule as a Markdown table with columns: Time, Barista\n2) exactly 3 rows of uncovered risk notes labeled R1–R3\n3) one sentence saying whether the schedule is feasible\n\nConstraints:\n- Use only Alice, Bob, Cara\n- Do not invent extra staff\n- Keep the whole answer under 220 words\n- Do not show step-by-step private reasoning",
+  "options": {
+    "suite": "cafe",
+    "thinkingProvider": "openai",
+    "localModel": "llama3.2",
+    "thinkingModel": "gpt-5.5",
+    "judgeModel": "gpt-5.5",
+    "effort": "high",
+    "outDir": "artifacts/experimental-effort-evals",
+    "temperature": 0.25,
+    "maxTokens": 3200,
+    "noJudge": false,
+    "includeScratchpad": false,
+    "onlineSimulationModel": "gpt-3.5-turbo",
+    "acknowledgePaidMultiCall": true
+  },
+  "tempDbPath": "<removed>",
+  "runs": [
+    {
+      "id": "online-single-call-baseline",
+      "label": "A — OpenAI ordinary single-call baseline",
+      "provider": "openai",
+      "model": "gpt-3.5-turbo",
+      "reasoningEffort": "none",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "expectedSimulated": false,
+      "callBehavior": "ordinary-single-visible-call",
+      "simulated": false,
+      "passCount": 0,
+      "provenanceVerified": true,
+      "status": "ok",
+      "durationMs": 3217,
+      "assistant": "| Time  | Barista |\n|-------|---------|\n| 8am-12pm | Cara    |\n| 12pm-4pm | Alice   |\n| 4pm-8pm  | Bob     |\n\n**Uncovered Risk Notes:**\n- R1: Shortage of a barista for the 8am-12pm shift.\n- R2: Bob may need to cover the 4pm-8pm shift.\n- R3: Potential gap in coverage between 12pm-4pm.\n\nThe schedule is feasible as it meets all constraints: Alice works after noon, Bob doesn't close, and Cara can cover any shift.",
+      "assistantChars": 412
+    },
+    {
+      "id": "online-simulated-high",
+      "label": "B — OpenAI PRISM simulated High",
+      "provider": "openai",
+      "model": "gpt-3.5-turbo",
+      "reasoningEffort": "high",
+      "experimentalAllModelEffortEnabled": false,
+      "psychicModeEnabled": false,
+      "requiresApiKey": "openai",
+      "expectedSimulated": true,
+      "callBehavior": "private-pass-ladder-plus-visible-call",
+      "simulated": true,
+      "passCount": 2,
+      "provenanceVerified": true,
+      "status": "ok",
+      "durationMs": 19977,
+      "assistant": "| Time | Barista |\n|------|---------|\n| 8am-12pm | Cara |\n| 12pm-4pm | Alice |\n| 4pm-6pm | Bob |\n\nRisk Notes:\n- R1: Bob may need to leave before closing time.\n- R2: Alice's shift starts close to her earliest availability.\n- R3: Bob's shift is near the end of the day.\n\nThe schedule is feasible within the constraints provided.",
+      "assistantChars": 326,
+      "planningWarnings": [
+        "draft_skipped_hard_constraints",
+        "audit_unusable; provider=openai; model=gpt-3.5-turbo; chars=377; fallbackChars=361",
+        "final_constraint_repair; breaks=2; Bob appears on a closing or late shift but Bob can't close. | A shift appears shorter than the required 4 hours.",
+        "final_constraint_repair_rejected; attempt=1; reason=blocking_breaks_remain; before=2; after=2",
+        "final_constraint_repair_rejected; attempt=2; reason=blocking_breaks_remain; before=2; after=1"
+      ],
+      "psychicDebug": {
+        "summary": "This reply will generate a cafe coverage schedule using the given constraints. The goal is to ensure that all shifts are covered while respecting the baristas' availability and shift limits. We'll use Alice, Bob, and Cara as the available staff.",
+        "effort": "high",
+        "provider": "openai",
+        "model": "gpt-3.5-turbo",
+        "simulated": true,
+        "passCount": 2,
+        "passes": [
+          {
+            "name": "plan",
+            "chars": 251,
+            "summary": "This reply will generate a cafe coverage schedule using the given constraints. The goal is to ensure that all shifts are covered while respecting the baristas' availability and shift limits. We'll use Alice, Bob, and Cara as the available staff."
+          },
+          {
+            "name": "draft",
+            "chars": 0,
+            "warning": "draft_skipped_hard_constraints"
+          },
+          {
+            "name": "audit",
+            "chars": 361,
+            "summary": "I'm generating a cafe coverage schedule while respecting the baristas' availability and shift limits. I'll use Alice, Bob, and Cara as the available staff.",
+            "warning": "audit_unusable; provider=openai; model=gpt-3.5-turbo; chars=377; fallbackChars=361"
+          }
+        ],
+        "guidanceChars": 1600,
+        "scratchpadChars": 645
+      }
+    }
+  ],
+  "judge": {
+    "model": "gpt-5.5",
+    "responseMap": {
+      "A": "online-single-call-baseline",
+      "B": "online-simulated-high"
+    },
+    "result": {
+      "scores": {
+        "A": {
+          "correctness": 2,
+          "reasoning": 2,
+          "actionability": 3,
+          "constraints": 4,
+          "total": 3,
+          "notes": "Uses only allowed staff, has 4-hour shifts, and is under the word limit, but it schedules 4pm-8pm instead of covering only until 6pm, has Bob closing despite the constraint, and incorrectly claims feasibility. Risk notes conflict with the schedule."
+        },
+        "B": {
+          "correctness": 3,
+          "reasoning": 2,
+          "actionability": 4,
+          "constraints": 4,
+          "total": 3,
+          "notes": "Covers 8am-6pm using only allowed staff and stays concise, but the 4pm-6pm shift violates the 4-hour shift requirement and Bob is assigned the closing period despite not being allowed to close. The feasibility sentence is incorrect."
+        }
+      },
+      "ranking": [
+        "B",
+        "A"
+      ],
+      "winner": "B",
+      "summary": "Both responses violate key constraints and incorrectly state the schedule is feasible. B is slightly better because it covers exactly 8am-6pm, while A extends the schedule to 8pm and assigns Bob to close."
+    }
+  }
+}

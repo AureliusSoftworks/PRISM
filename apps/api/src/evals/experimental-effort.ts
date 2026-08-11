@@ -1,6 +1,7 @@
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
+import { pathToFileURL } from "node:url";
 import type { DatabaseSync } from "node:sqlite";
 import type { ChatMessage, ReasoningEffort } from "@localai/shared";
 import { REASONING_EFFORT_VALUES } from "@localai/shared";
@@ -9,7 +10,9 @@ import type { ProviderName } from "../providers.ts";
 type EvalRunId =
   | "local-baseline"
   | "thinking-reference"
-  | "local-simulated-effort";
+  | "local-simulated-effort"
+  | "online-single-call-baseline"
+  | "online-simulated-high";
 
 type EvalSuiteId =
   | "none"
@@ -32,6 +35,8 @@ interface CliOptions {
   noJudge: boolean;
   includeScratchpad: boolean;
   keepDb: boolean;
+  onlineSimulationModel: string | null;
+  acknowledgePaidMultiCall: boolean;
 }
 
 interface ContinuityScore {
@@ -70,6 +75,10 @@ interface EvalRunConfig {
   experimentalAllModelEffortEnabled: boolean;
   psychicModeEnabled: boolean;
   requiresApiKey: "openai" | "anthropic" | null;
+  expectedSimulated: boolean;
+  callBehavior:
+    | "ordinary-single-visible-call"
+    | "private-pass-ladder-plus-visible-call";
 }
 
 interface EvalRunResult {
@@ -80,6 +89,11 @@ interface EvalRunResult {
   reasoningEffort: ReasoningEffort;
   experimentalAllModelEffortEnabled: boolean;
   psychicModeEnabled: boolean;
+  expectedSimulated: boolean;
+  simulated: boolean;
+  passCount: number;
+  callBehavior: EvalRunConfig["callBehavior"];
+  provenanceVerified: boolean;
   status: "ok" | "skipped" | "error";
   durationMs: number;
   assistant: string;
@@ -137,7 +151,7 @@ interface EvalReport {
   };
 }
 
-const DEFAULT_PROMPT = [
+export const DEFAULT_PROMPT = [
   "A cafe has 3 baristas and must cover Sat 8am–6pm.",
   "Shifts must be 4 hours. No barista works more than 8 hours.",
   "Alice can't work before noon. Bob can't close. Cara can do any shift.",
@@ -358,6 +372,8 @@ const DEFAULT_OPTIONS: CliOptions = {
   noJudge: false,
   includeScratchpad: false,
   keepDb: false,
+  onlineSimulationModel: null,
+  acknowledgePaidMultiCall: false,
 };
 
 function printHelp(): void {
@@ -367,6 +383,10 @@ Runs the same prompt through:
   1. local baseline (${DEFAULT_OPTIONS.localModel}, no simulated effort)
   2. thinking reference (${DEFAULT_OPTIONS.thinkingModel}, native effort)
   3. local simulated effort (${DEFAULT_OPTIONS.localModel}, tiered private passes + final pass)
+
+Eval-only paid online comparison (requires both explicit flags):
+  A. OpenAI model ordinary single visible call (Effort None)
+  B. The same OpenAI model with PRISM simulated High private passes + final call
 
 Usage:
   npm run eval:experimental-effort -- [options]
@@ -389,13 +409,22 @@ Options:
   --no-judge                   Skip the blind judge comparison.
   --include-scratchpad         Include simulated scratchpad in the JSON artifact.
   --keep-db                    Keep the temporary SQLite DB for inspection.
+  --same-model-online-simulation <model>
+                               Eval-only A/B using one OpenAI non-native-effort model.
+                               Forces the canonical cafe prompt and never changes product routing.
+  --acknowledge-paid-multi-call
+                               Required acknowledgement that the simulated arm makes multiple paid
+                               calls to the selected online model and the blind judge adds a paid call.
   --help                       Show this help.
 `);
 }
 
-function readCliOptions(argv: string[]): CliOptions | null {
+export function readCliOptions(argv: string[]): CliOptions | null {
   const options: CliOptions = { ...DEFAULT_OPTIONS };
   let thinkingModelProvided = false;
+  let promptProvided = false;
+  let suiteProvided = false;
+  let effortProvided = false;
   for (let index = 0; index < argv.length; index += 1) {
     const arg = argv[index];
     const next = () => {
@@ -413,6 +442,7 @@ function readCliOptions(argv: string[]): CliOptions | null {
         return null;
       case "--prompt":
         options.prompt = next();
+        promptProvided = true;
         break;
       case "--suite": {
         const suite = next().trim().toLowerCase();
@@ -428,6 +458,7 @@ function readCliOptions(argv: string[]): CliOptions | null {
           );
         }
         options.suite = suite;
+        suiteProvided = true;
         break;
       }
       case "--local-model":
@@ -454,6 +485,7 @@ function readCliOptions(argv: string[]): CliOptions | null {
           throw new Error(`Unsupported effort: ${effort}`);
         }
         options.effort = effort as ReasoningEffort;
+        effortProvided = true;
         break;
       }
       case "--temperature":
@@ -474,6 +506,12 @@ function readCliOptions(argv: string[]): CliOptions | null {
       case "--keep-db":
         options.keepDb = true;
         break;
+      case "--same-model-online-simulation":
+        options.onlineSimulationModel = next().trim();
+        break;
+      case "--acknowledge-paid-multi-call":
+        options.acknowledgePaidMultiCall = true;
+        break;
       default:
         throw new Error(`Unknown option: ${arg}`);
     }
@@ -487,10 +525,70 @@ function readCliOptions(argv: string[]): CliOptions | null {
   if (options.thinkingProvider === "anthropic" && !thinkingModelProvided) {
     options.thinkingModel = "claude-opus-4-8";
   }
+  if (options.onlineSimulationModel !== null) {
+    if (!options.onlineSimulationModel) {
+      throw new Error("--same-model-online-simulation requires a model id.");
+    }
+    if (!options.acknowledgePaidMultiCall) {
+      throw new Error(
+        "--same-model-online-simulation requires --acknowledge-paid-multi-call because the simulated arm makes multiple paid online calls.",
+      );
+    }
+    if (options.includeScratchpad) {
+      throw new Error(
+        "--include-scratchpad is not allowed for the paid same-model online comparison; private scratchpads stay out of artifacts.",
+      );
+    }
+    if (promptProvided || (suiteProvided && options.suite !== "cafe")) {
+      throw new Error(
+        "The paid same-model online comparison is pinned to --suite cafe and does not accept a custom prompt.",
+      );
+    }
+    if (effortProvided && options.effort !== "high") {
+      throw new Error(
+        "The paid same-model online comparison is pinned to --effort high.",
+      );
+    }
+    options.suite = "cafe";
+    options.prompt = DEFAULT_PROMPT;
+    options.effort = "high";
+  } else if (options.acknowledgePaidMultiCall) {
+    throw new Error(
+      "--acknowledge-paid-multi-call is only valid with --same-model-online-simulation <model>.",
+    );
+  }
   return options;
 }
 
-function evalRuns(options: CliOptions): EvalRunConfig[] {
+export function evalRuns(options: CliOptions): EvalRunConfig[] {
+  if (options.onlineSimulationModel) {
+    return [
+      {
+        id: "online-single-call-baseline",
+        label: "A — OpenAI ordinary single-call baseline",
+        provider: "openai",
+        model: options.onlineSimulationModel,
+        reasoningEffort: "none",
+        experimentalAllModelEffortEnabled: false,
+        psychicModeEnabled: false,
+        requiresApiKey: "openai",
+        expectedSimulated: false,
+        callBehavior: "ordinary-single-visible-call",
+      },
+      {
+        id: "online-simulated-high",
+        label: "B — OpenAI PRISM simulated High",
+        provider: "openai",
+        model: options.onlineSimulationModel,
+        reasoningEffort: "high",
+        experimentalAllModelEffortEnabled: false,
+        psychicModeEnabled: false,
+        requiresApiKey: "openai",
+        expectedSimulated: true,
+        callBehavior: "private-pass-ladder-plus-visible-call",
+      },
+    ];
+  }
   return [
     {
       id: "local-baseline",
@@ -501,6 +599,8 @@ function evalRuns(options: CliOptions): EvalRunConfig[] {
       experimentalAllModelEffortEnabled: false,
       psychicModeEnabled: false,
       requiresApiKey: null,
+      expectedSimulated: false,
+      callBehavior: "ordinary-single-visible-call",
     },
     {
       id: "thinking-reference",
@@ -511,6 +611,8 @@ function evalRuns(options: CliOptions): EvalRunConfig[] {
       experimentalAllModelEffortEnabled: false,
       psychicModeEnabled: false,
       requiresApiKey: options.thinkingProvider,
+      expectedSimulated: false,
+      callBehavior: "ordinary-single-visible-call",
     },
     {
       id: "local-simulated-effort",
@@ -522,6 +624,8 @@ function evalRuns(options: CliOptions): EvalRunConfig[] {
       experimentalAllModelEffortEnabled: false,
       psychicModeEnabled: true,
       requiresApiKey: null,
+      expectedSimulated: true,
+      callBehavior: "private-pass-ladder-plus-visible-call",
     },
   ];
 }
@@ -568,6 +672,27 @@ function redactedOptions(options: CliOptions): EvalReport["options"] {
     maxTokens: options.maxTokens,
     noJudge: options.noJudge,
     includeScratchpad: options.includeScratchpad,
+    onlineSimulationModel: options.onlineSimulationModel,
+    acknowledgePaidMultiCall: options.acknowledgePaidMultiCall,
+  };
+}
+
+export function evalRunProvenance(
+  run: Pick<EvalRunConfig, "expectedSimulated" | "callBehavior">,
+  psychicDebug: EvalRunResult["psychicDebug"] | undefined,
+): Pick<
+  EvalRunResult,
+  "simulated" | "passCount" | "callBehavior" | "provenanceVerified"
+> {
+  const simulated = psychicDebug?.simulated === true;
+  const passCount = psychicDebug?.passCount ?? 0;
+  return {
+    simulated,
+    passCount,
+    callBehavior: run.callBehavior,
+    provenanceVerified:
+      simulated === run.expectedSimulated &&
+      (run.expectedSimulated ? passCount > 0 : passCount === 0),
   };
 }
 
@@ -744,6 +869,8 @@ function extractArmTotals(judge: unknown): {
     "local-baseline": null,
     "thinking-reference": null,
     "local-simulated-effort": null,
+    "online-single-call-baseline": null,
+    "online-simulated-high": null,
   };
   for (const [label, runId] of Object.entries(map)) {
     const total = scores[label]?.total;
@@ -755,9 +882,11 @@ function extractArmTotals(judge: unknown): {
     ? payload.result.ranking.map((item) => String(item))
     : [];
   return {
-    baseline: byId["local-baseline"],
+    baseline:
+      byId["online-single-call-baseline"] ?? byId["local-baseline"],
     reference: byId["thinking-reference"],
-    simulated: byId["local-simulated-effort"],
+    simulated:
+      byId["online-simulated-high"] ?? byId["local-simulated-effort"],
     ranking,
   };
 }
@@ -883,6 +1012,16 @@ function markdownReport(report: EvalReport): string {
     report.prompt,
     "```",
     "",
+    `Temperature: ${report.options.temperature}`,
+    `Max completion tokens per arm: ${report.options.maxTokens}`,
+    ...(report.options.onlineSimulationModel
+      ? [
+          `Eval profile: paid same-model online simulation (${report.options.onlineSimulationModel})`,
+          `Paid multi-call acknowledged: ${report.options.acknowledgePaidMultiCall ? "yes" : "no"}`,
+          "Private scratchpad content included: no",
+        ]
+      : []),
+    "",
     "## Runs",
     "",
   ];
@@ -893,8 +1032,10 @@ function markdownReport(report: EvalReport): string {
       `- Status: ${run.status}`,
       `- Provider/model: ${run.provider} / ${run.model}`,
       `- Effort: ${run.reasoningEffort}`,
-      `- Simulated effort enabled: ${run.experimentalAllModelEffortEnabled ? "yes" : "no"}`,
+      `- Deep simulated ladder requested: ${run.experimentalAllModelEffortEnabled ? "yes" : "no"}`,
       `- Psychic summaries enabled: ${run.psychicModeEnabled ? "yes" : "no"}`,
+      `- Call behavior: ${run.callBehavior}`,
+      `- Simulation provenance: simulated=${run.simulated}; passCount=${run.passCount}; verified=${run.provenanceVerified}`,
       `- Duration: ${run.durationMs}ms`,
       `- Assistant chars: ${run.assistantChars}`
     );
@@ -1012,7 +1153,6 @@ async function runBlindJudge(args: {
       const label = responseLabels[index] ?? String(index + 1);
       return [
         `Response ${label}`,
-        `Run id: ${run.id}`,
         "```text",
         run.assistant,
         "```",
@@ -1084,10 +1224,12 @@ async function runSinglePromptEval(args: {
       (run.requiresApiKey === "openai" && !args.openAiApiKey?.trim()) ||
       (run.requiresApiKey === "anthropic" && !args.anthropicApiKey?.trim());
     if (missingRequiredKey) {
+      const provenance = evalRunProvenance(run, undefined);
       const envName =
         run.requiresApiKey === "anthropic" ? "ANTHROPIC_API_KEY" : "OPENAI_API_KEY";
       results.push({
         ...run,
+        ...provenance,
         status: "skipped",
         durationMs: 0,
         assistant: "",
@@ -1151,36 +1293,47 @@ async function runSinglePromptEval(args: {
             warning.includes("continuity_digest"),
           )
         : undefined;
+      const psychicDebug = result.psychicDebug
+        ? {
+            summary: result.psychicDebug.summary,
+            effort: result.psychicDebug.effort,
+            provider: result.psychicDebug.provider,
+            ...(result.psychicDebug.model
+              ? { model: result.psychicDebug.model }
+              : {}),
+            simulated: result.psychicDebug.simulated,
+            passCount: result.psychicDebug.passCount,
+            passes: result.psychicDebug.passes,
+            guidanceChars: result.psychicDebug.guidanceChars,
+            scratchpadChars: scratchpad.length,
+            ...(args.options.includeScratchpad ? { scratchpad } : {}),
+          }
+        : undefined;
+      const provenance = evalRunProvenance(run, psychicDebug);
+      const strictProvenance = args.options.onlineSimulationModel !== null;
+      const provenanceError =
+        strictProvenance && !provenance.provenanceVerified
+          ? `Eval provenance mismatch: expected simulated=${run.expectedSimulated} with ${run.expectedSimulated ? "nonzero" : "zero"} private passes; observed simulated=${provenance.simulated}, passCount=${provenance.passCount}.`
+          : undefined;
       results.push({
         ...run,
-        status: "ok",
+        ...provenance,
+        status: provenanceError ? "error" : "ok",
         durationMs: Date.now() - startedAt,
         assistant,
         assistantChars: assistant.length,
+        ...(provenanceError ? { error: provenanceError } : {}),
         ...(user?.psychicThought ? { psychicThought: user.psychicThought } : {}),
         ...(planningWarnings.length > 0 ? { planningWarnings } : {}),
         ...(continuityScore ? { continuityScore } : {}),
         ...(continuityDigestSeen != null ? { continuityDigestSeen } : {}),
-        ...(result.psychicDebug
-          ? {
-              psychicDebug: {
-                summary: result.psychicDebug.summary,
-                effort: result.psychicDebug.effort,
-                provider: result.psychicDebug.provider,
-                ...(result.psychicDebug.model ? { model: result.psychicDebug.model } : {}),
-                simulated: result.psychicDebug.simulated,
-                passCount: result.psychicDebug.passCount,
-                passes: result.psychicDebug.passes,
-                guidanceChars: result.psychicDebug.guidanceChars,
-                scratchpadChars: scratchpad.length,
-                ...(args.options.includeScratchpad ? { scratchpad } : {}),
-              },
-            }
-          : {}),
+        ...(psychicDebug ? { psychicDebug } : {}),
       });
     } catch (error) {
+      const provenance = evalRunProvenance(run, undefined);
       results.push({
         ...run,
+        ...provenance,
         status: "error",
         durationMs: Date.now() - startedAt,
         assistant: "",
@@ -1242,6 +1395,21 @@ async function runSinglePromptEval(args: {
 async function main(): Promise<void> {
   const options = readCliOptions(process.argv.slice(2));
   if (!options) return;
+
+  if (options.onlineSimulationModel) {
+    console.warn(
+      [
+        "PAID ONLINE EVAL ACKNOWLEDGED.",
+        `Model: openai/${options.onlineSimulationModel}`,
+        "Arm A makes one ordinary visible generation call with Effort None.",
+        "Arm B makes multiple paid calls for PRISM simulated High private passes plus the visible generation.",
+        options.noJudge
+          ? "Blind judge disabled."
+          : `The blind judge adds a paid OpenAI call using ${options.judgeModel}.`,
+        "Private scratchpad content will not be written to artifacts.",
+      ].join("\n"),
+    );
+  }
 
   const createdAt = new Date().toISOString();
   const outDir = resolve(options.outDir);
@@ -1411,7 +1579,12 @@ async function main(): Promise<void> {
   }
 }
 
-main().catch((error) => {
-  console.error(error instanceof Error ? error.message : error);
-  process.exitCode = 1;
-});
+const directEntry = process.argv[1]
+  ? pathToFileURL(resolve(process.argv[1])).href
+  : null;
+if (directEntry === import.meta.url) {
+  main().catch((error) => {
+    console.error(error instanceof Error ? error.message : error);
+    process.exitCode = 1;
+  });
+}

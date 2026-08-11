@@ -17,8 +17,8 @@ For iterative diagnosis of a run (collapse, leakage, native-vs-simulated mismatc
 
 Simulated effort is the product-default quality booster for LOCAL models without adjustable native effort (lean standard ladder + thrifty budgets). It is not a claim that those models become true reasoning models. The heavier Deep LOCAL workshop remains Settings → Experimental.
 
-- Prism simulated planning/draft/audit/(synthesis) passes run only on the selected LOCAL Ollama model.
-- OpenAI and Anthropic models never receive Prism's simulated multi-call ladder. ONLINE Effort is available only when the selected model exposes provider-native effort.
+- LOCAL simulated planning/draft/audit/(synthesis) passes stay on the selected Ollama model.
+- Online models with native Effort keep provider-native Effort. A non-native online model can use PRISM's simulated ladder when a nonzero simulated Effort is explicitly selected; this multiplies paid provider calls.
 - Deep experimental adds Alternatives / Red-team / Constraint Lock / Revise Draft / Compliance Sweep to LOCAL simulation only.
 - Models with native effort keep provider-native effort; fixed-effort models remain fixed.
 - Psychic disclosure is transcript-Chat only; private plans, drafts, audits, and revisions remain ephemeral.
@@ -143,6 +143,37 @@ artifacts/experimental-effort-evals/
 ```
 
 Inspect the latest Markdown report first, then the JSON if exact fields matter. Append dated interpretation to `docs/experimental-effort-research-log.md`.
+
+## Eval-only same-model online simulation A/B
+
+Use this profile only for an explicit paid quality comparison on an online model without native Effort. It pins both arms to the canonical cafe prompt, provider, model, temperature, and token cap:
+
+- A: `openai/gpt-3.5-turbo`, Effort None, one ordinary visible generation call
+- B: `openai/gpt-3.5-turbo`, PRISM simulated High, private-pass ladder plus visible generation
+- blind judge: one additional paid OpenAI call unless `--no-judge` is supplied
+
+Exact live command:
+
+```bash
+/Users/jared/.codex/bin/with-secrets npm run eval:experimental-effort -- \
+  --same-model-online-simulation gpt-3.5-turbo \
+  --acknowledge-paid-multi-call \
+  --temperature 0.25 \
+  --max-tokens 3200 \
+  --judge-model gpt-5.5
+```
+
+Both flags are required so an ordinary eval invocation cannot accidentally start the paid multi-call arm. This is a harness profile only: it does not change ONLINE routing or the production simulation gate. It also rejects `--include-scratchpad`; artifacts retain only pass names, sizes, warnings, latency, final output, and provenance.
+
+Before accepting the comparison, confirm:
+
+- both runs report provider/model `openai / gpt-3.5-turbo`
+- A reports `simulated=false`, `passCount=0`, and `ordinary-single-visible-call`
+- B reports `simulated=true`, a nonzero `passCount`, and `private-pass-ladder-plus-visible-call`
+- both runs share the report-level prompt, temperature, and max-token settings
+- `provenanceVerified=true` for both arms
+
+The 2026-08-11 reference arm unexpectedly simulated because it requested `high` from GPT-3.5 Turbo. GPT-3.5 Turbo has no native Effort dial, so PRISM correctly selected its simulated ladder even though the deep-ladder setting was false. The A arm now requests Effort None, which skips Psychic planning and final constraint repair and therefore preserves the ordinary single-call baseline.
 
 ### What Good Looks Like
 
@@ -283,10 +314,10 @@ When validating LOCAL behavior:
 
 When validating online behavior:
 
-- Use an unsupported/non-native model such as `gpt-4o` with the experiment enabled.
+- Use an unsupported/non-native model such as `gpt-4o` with a nonzero simulated Effort.
 - Confirm the selected provider and model handle every private pass and the final response.
 - Confirm native-effort models still make one visible generation call and receive provider-native effort.
-- Confirm disabling the experiment removes simulated levels and prevents private-pass calls.
+- Confirm Effort None prevents private-pass calls; the Deep experimental setting changes ladder depth, not whether simulation is available.
 
 ## Follow-Up Validation
 
