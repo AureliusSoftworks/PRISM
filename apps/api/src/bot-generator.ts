@@ -41,6 +41,7 @@ import {
   type AutoRecoveryTraceV1,
   type BotGeneratedDraftV1,
   type BotGenerationFieldKeyV1,
+  type ReasoningEffort,
 } from "@localai/shared";
 import {
   AutoFallbackExhaustedError,
@@ -54,6 +55,7 @@ import {
   type ProviderMessage,
   type ProviderName,
 } from "./providers.ts";
+import { prepareMessagesWithSimulatedEffort } from "./model-effort-runner.ts";
 
 export interface GenerateBotDraftArgs {
   prompt: string;
@@ -61,6 +63,7 @@ export interface GenerateBotDraftArgs {
   providerName: ProviderName;
   model: string;
   responseMode: "local" | "auto" | "online";
+  reasoningEffort?: ReasoningEffort;
   autoFallbackChain?: AutoFallbackChainV1 | null;
   providerFactory?: typeof selectProvider;
   openAiApiKey?: string;
@@ -472,6 +475,7 @@ function generationOptions(
   model: string,
   schema: Record<string, unknown>,
   signal?: AbortSignal,
+  reasoningEffort?: ReasoningEffort,
 ): GenerateOptions {
   return {
     model,
@@ -481,8 +485,35 @@ function generationOptions(
     jsonMode: true,
     jsonSchema: schema,
     jsonSchemaName: "prism_bot_generated_draft_v1",
+    ...(reasoningEffort ? { reasoningEffort } : {}),
     signal,
   };
+}
+
+async function generateBotDraftResponse(args: {
+  provider: LlmProvider;
+  model: string;
+  messages: ProviderMessage[];
+  schema: Record<string, unknown>;
+  reasoningEffort?: ReasoningEffort;
+  signal?: AbortSignal;
+}): Promise<string> {
+  const options = generationOptions(
+    args.model,
+    args.schema,
+    args.signal,
+    args.reasoningEffort,
+  );
+  const messages = await prepareMessagesWithSimulatedEffort({
+    provider: args.provider,
+    messages: args.messages,
+    options,
+    effort: args.reasoningEffort,
+    surface: "bots",
+    outputContract:
+      "Return only one complete bot draft matching the supplied JSON Schema.",
+  });
+  return args.provider.generateResponse(messages, options);
 }
 
 export async function generateBotDraft(
@@ -525,13 +556,17 @@ export async function generateBotDraft(
                   args.secondaryOllamaHost,
                   args.anthropicApiKey,
                 );
-            return provider.generateResponse(
+            return generateBotDraftResponse({
+              provider,
+              model: attempt.model,
               messages,
-              {
-                ...generationOptions(attempt.model, schema, signal),
-                reasoningEffort: autoFallbackReasoningEffort(index, undefined),
-              },
-            );
+              schema,
+              reasoningEffort: autoFallbackReasoningEffort(
+                index,
+                args.reasoningEffort,
+              ),
+              signal,
+            });
           },
         })),
         perAttemptTimeoutMs: 90_000,
@@ -556,10 +591,14 @@ export async function generateBotDraft(
     }
   }
 
-  const raw = await args.provider.generateResponse(
+  const raw = await generateBotDraftResponse({
+    provider: args.provider,
+    model: args.model,
     messages,
-    generationOptions(args.model, schema, args.signal),
-  );
+    schema,
+    reasoningEffort: args.reasoningEffort,
+    signal: args.signal,
+  });
   const draft = parseGeneratedBotDraftText(raw);
   if (!draft) {
     throw new BotGenerationError(

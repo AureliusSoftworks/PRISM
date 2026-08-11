@@ -14,7 +14,7 @@ import type { GenerateOptions, ProviderMessage } from "../providers.ts";
 const serverSource = readFileSync(new URL("../server.ts", import.meta.url), "utf8");
 
 describe("bot generation route", () => {
-  it("honors an explicit per-draft model while preserving Auto routing", () => {
+  it("honors live navbar model and effort while preserving Auto routing", () => {
     const routeSource = serverSource.slice(
       serverSource.indexOf('route("POST", "/api/bots/generate-draft"'),
       serverSource.indexOf('route("POST", "/api/bots"'),
@@ -23,6 +23,10 @@ describe("bot generation route", () => {
     assert.match(routeSource, /readModelOverride\(body\.modelOverride\)/u);
     assert.match(routeSource, /requestedModelOverride\?\.toLowerCase\(\) === "auto"/u);
     assert.match(routeSource, /explicitModelOverride,/u);
+    assert.match(routeSource, /normalizeModelReasoningEffortPreference\(body\.reasoningEffort\)/u);
+    assert.match(routeSource, /resolvedEffortCapability\.levels\.includes\(requestedReasoningEffort\)/u);
+    assert.match(routeSource, /resolved\.autoRoute\?\.reasoningEffort/u);
+    assert.match(routeSource, /reasoningEffort,/u);
     assert.doesNotMatch(routeSource, /requestElevenLabsVoiceCatalog/u);
     assert.doesNotMatch(routeSource, /voiceCatalog/u);
   });
@@ -278,6 +282,41 @@ describe("PRISM bot generator", () => {
     assert.match(
       provider.calls[0]?.[0]?.content ?? "",
       /keep faceEyeRotationDeg at 0 unless/u,
+    );
+  });
+
+  it("uses explicit LOCAL effort for private preparation and the final structured draft", async () => {
+    const provider = createDeterministicProvider([
+      "Keep the cartographer coherent and protect the JSON contract.",
+      JSON.stringify(rawDraft()),
+    ]);
+    const deterministicGenerate = provider.generateResponse.bind(provider);
+    const capturedOptions: GenerateOptions[] = [];
+    provider.generateResponse = async (
+      messages: ProviderMessage[],
+      options?: GenerateOptions,
+    ) => {
+      if (options) capturedOptions.push(options);
+      return deterministicGenerate(messages, options);
+    };
+
+    const result = await generateBotDraft({
+      prompt: "A lunar cartographer with dry warmth.",
+      provider,
+      providerName: "local",
+      model: "llama-local",
+      responseMode: "local",
+      reasoningEffort: "low",
+    });
+
+    assert.equal(result.modelUsed, "llama-local");
+    assert.equal(provider.calls.length, 2);
+    assert.equal(capturedOptions[0]?.usagePurpose, "psychic_planning");
+    assert.equal(capturedOptions[1]?.usagePurpose, "bot_generation");
+    assert.equal(capturedOptions[1]?.reasoningEffort, "low");
+    assert.match(
+      provider.calls[1]?.at(-1)?.content ?? "",
+      /Private PRISM preparation notes follow/u,
     );
   });
 

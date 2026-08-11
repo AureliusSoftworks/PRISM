@@ -18,6 +18,7 @@ import type {
 } from "./providers.ts";
 
 export type SimulatedEffortSurface =
+  | "bots"
   | "coffee"
   | "signal"
   | "debate"

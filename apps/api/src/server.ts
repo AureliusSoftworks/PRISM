@@ -28209,6 +28209,8 @@ function buildRoutes(): RouteDefinition[] {
           : requestedResponseMode;
       const requestedProvider = readProvider(body.preferredProvider);
       const requestedModelOverride = readModelOverride(body.modelOverride);
+      const requestedReasoningEffort =
+        normalizeModelReasoningEffortPreference(body.reasoningEffort);
       const explicitModelOverride =
         requestedModelOverride?.toLowerCase() === "auto"
           ? null
@@ -28252,8 +28254,20 @@ function buildRoutes(): RouteDefinition[] {
           structuredOutput: true,
           outputTokens: 6_000,
           highStakes: true,
+          simulatedEffortEnabled: true,
         },
       });
+      const resolvedEffortCapability = resolveModelReasoningEffortCapability({
+        provider: resolved.provider,
+        modelId: resolved.model,
+        simulatedEffortEnabled: true,
+      });
+      const reasoningEffort = explicitModelOverride
+        ? requestedReasoningEffort &&
+          resolvedEffortCapability.levels.includes(requestedReasoningEffort)
+          ? requestedReasoningEffort
+          : undefined
+        : resolved.autoRoute?.reasoningEffort;
       const provider = providerFactoryOverride(
         resolved.provider,
         openAiApiKey,
@@ -28280,6 +28294,7 @@ function buildRoutes(): RouteDefinition[] {
               providerName: resolved.provider,
               model: resolved.model,
               responseMode,
+              reasoningEffort,
               autoFallbackChain: storedAutoFallbackChain,
               providerFactory: providerFactoryOverride,
               openAiApiKey,
