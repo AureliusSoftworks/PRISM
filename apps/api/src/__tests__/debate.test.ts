@@ -1772,6 +1772,50 @@ describe("Debate engine", () => {
     }
   });
 
+  it("keeps a hot-prepared, unheard opening in Archive Open", async () => {
+    const db = createTestDb();
+    try {
+      const debateRuntime = runtime();
+      let session = await createJudgeDebate(db, debateRuntime, {
+        deferStart: true,
+        idempotencyKey: "create:judge:hot-opening",
+      });
+      session = resumeDebateSession(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "hot-opening:lift",
+        quietSave: true,
+        exitRecovery: true,
+      });
+      session = await advanceDebateSession(
+        db,
+        "user-1",
+        session.id,
+        {
+          expectedRevision: session.revision,
+          idempotencyKey: "hot-opening:prepare",
+        },
+        debateRuntime,
+      );
+      session = pauseDebateSession(db, "user-1", session.id, {
+        expectedRevision: session.revision,
+        idempotencyKey: "hot-opening:hold",
+        quietSave: true,
+        exitRecovery: true,
+        presentationEventId: null,
+      });
+
+      assert.equal(session.status, "paused");
+      assert.ok(session.events.length > 0);
+      assert.equal(session.pausedPresentationEventId, null);
+      assert.equal(
+        listDebateSessions(db, "user-1")[0]?.awaitingDeferredStart,
+        true,
+      );
+    } finally {
+      db.close();
+    }
+  });
+
   it("applies the current explicit model only when a saved Debate starts", async () => {
     const db = createTestDb();
     try {

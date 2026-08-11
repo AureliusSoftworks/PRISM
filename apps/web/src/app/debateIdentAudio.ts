@@ -34,6 +34,8 @@ interface ActiveDebateIdent {
 
 let activeIdent: ActiveDebateIdent | null = null;
 let requestedPlaybackId = 0;
+const preparedIdentAudio = new Map<DebateIdentKind, HTMLAudioElement>();
+const identPreloadPromises = new Map<DebateIdentKind, Promise<void>>();
 
 function clampAudioLevel(value: number): number {
   if (!Number.isFinite(value)) return 0;
@@ -109,6 +111,59 @@ export function setDebateIdentAudioVolume(volume: number): void {
   activeIdent.audio.volume = clampAudioLevel(volume);
 }
 
+/**
+ * Warms and decodes a title cue before its card is declared ready. The same
+ * element is consumed by playback so a local cache hit cannot still leave a
+ * perceptible decode gap between the gallery preload and its music.
+ */
+export async function preloadDebateIdentAudio(
+  kind: DebateIdentKind,
+): Promise<void> {
+  if (typeof Audio === "undefined" || typeof window === "undefined") return;
+  const existing = preparedIdentAudio.get(kind);
+  if (existing && existing.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA) {
+    return;
+  }
+  const pending = identPreloadPromises.get(kind);
+  if (pending) {
+    await pending;
+    return;
+  }
+  const cue = DEBATE_IDENT_AUDIO[kind];
+  const audio = existing ?? new Audio(cue.url);
+  audio.preload = "auto";
+  preparedIdentAudio.set(kind, audio);
+  const promise = new Promise<void>((resolve) => {
+    let settled = false;
+    const finish = (keepPrepared: boolean): void => {
+      if (settled) return;
+      settled = true;
+      window.clearTimeout(timeoutId);
+      audio.removeEventListener("loadeddata", handleReady);
+      audio.removeEventListener("canplaythrough", handleReady);
+      audio.removeEventListener("error", handleError);
+      if (!keepPrepared && preparedIdentAudio.get(kind) === audio) {
+        preparedIdentAudio.delete(kind);
+      }
+      resolve();
+    };
+    const handleReady = (): void => finish(true);
+    const handleError = (): void => finish(false);
+    const timeoutId = window.setTimeout(
+      () => finish(audio.readyState >= HTMLMediaElement.HAVE_CURRENT_DATA),
+      2_500,
+    );
+    audio.addEventListener("loadeddata", handleReady, { once: true });
+    audio.addEventListener("canplaythrough", handleReady, { once: true });
+    audio.addEventListener("error", handleError, { once: true });
+    audio.load();
+  }).finally(() => {
+    identPreloadPromises.delete(kind);
+  });
+  identPreloadPromises.set(kind, promise);
+  await promise;
+}
+
 export async function playDebateIdentAudio(args: {
   kind: DebateIdentKind;
   enabled: boolean;
@@ -130,8 +185,10 @@ export async function playDebateIdentAudio(args: {
   }
 
   await new Promise<void>((resolve) => {
-    const audio = new Audio(cue.url);
+    const audio = preparedIdentAudio.get(args.kind) ?? new Audio(cue.url);
+    preparedIdentAudio.delete(args.kind);
     audio.preload = "auto";
+    audio.currentTime = 0;
     audio.volume = clampAudioLevel(args.volume);
     const entry: ActiveDebateIdent = {
       audio,

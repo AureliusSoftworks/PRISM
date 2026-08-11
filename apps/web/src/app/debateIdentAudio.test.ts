@@ -49,6 +49,8 @@ describe("Debate Living Chamber ident", () => {
       "utf8",
     );
     assert.match(source, /routeAudioElementToPrismOutput\(audio\)/u);
+    assert.match(source, /preloadDebateIdentAudio/u);
+    assert.match(source, /preparedIdentAudio\.get\(args\.kind\)/u);
     assert.doesNotMatch(source, /RoomAcoustics|roomAcoustics/u);
   });
 });
