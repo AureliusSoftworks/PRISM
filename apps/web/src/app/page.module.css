@@ -35745,7 +35745,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   --turbo-red-flicker-high: 0.48;
   position: absolute;
   pointer-events: none;
-  inset: -38px -22px -16px -20px;
+  inset: -30px -22px -58px -54px;
   z-index: 1;
   overflow: visible;
   border-radius: 999px;
@@ -35754,116 +35754,116 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
 .composeModelTurboBurnAtmosphere::before {
   content: "";
   position: absolute;
-  inset: 19px 3px 7px 6px;
+  inset: 18px 7px 66px 4px;
   border-radius: inherit;
   background:
     radial-gradient(
-      ellipse at 68% 58%,
+      ellipse at 34% 58%,
       color-mix(in srgb, #ff2100 42%, transparent) 0%,
       color-mix(in srgb, #a60900 24%, transparent) 46%,
       transparent 76%
     ),
     radial-gradient(
-      ellipse at 38% 65%,
+      ellipse at 12% 65%,
       color-mix(in srgb, #750000 22%, transparent) 0%,
       transparent 70%
     );
   filter: blur(14px);
   mix-blend-mode: screen;
   opacity: var(--turbo-red-flicker-low);
-  transform: translate3d(1px, 2px, 0) scale(0.92, 0.78);
-  transform-origin: 66% 62%;
+  transform: translate3d(-2px, 2px, 0) scale(0.92, 0.78);
+  transform-origin: 34% 62%;
   animation: turboAmbientRedFlicker 2630ms ease-in-out infinite;
 }
 
 .composeModelTurboBurnAtmosphere > span {
   --turbo-cinder-drift-x: -7px;
-  --turbo-cinder-rise: -44px;
+  --turbo-cinder-fall: 48px;
   --turbo-cinder-rotate: 82deg;
   position: absolute;
-  left: 57%;
-  bottom: 12px;
-  width: 2px;
-  height: 3px;
+  left: 52%;
+  top: 22px;
+  width: 3.5px;
+  height: 5px;
   border-radius: 62% 38% 58% 42%;
   background: linear-gradient(180deg, #ffe19a 0%, #ff6a20 46%, #971000 100%);
   box-shadow:
-    0 0 3px color-mix(in srgb, #ff7a22 84%, transparent),
-    0 0 7px color-mix(in srgb, #c71b00 56%, transparent);
+    0 0 4px color-mix(in srgb, #ff7a22 88%, transparent),
+    0 0 9px color-mix(in srgb, #c71b00 62%, transparent);
   opacity: 0;
   transform-origin: center;
-  animation: turboCinderRise 2780ms cubic-bezier(0.2, 0.52, 0.34, 1) infinite;
+  animation: turboCinderFall 2780ms cubic-bezier(0.2, 0.52, 0.34, 1) infinite;
   animation-delay: -620ms;
 }
 
 .composeModelTurboBurnAtmosphere > span:nth-child(2) {
   --turbo-cinder-drift-x: 9px;
-  --turbo-cinder-rise: -37px;
+  --turbo-cinder-fall: 41px;
   --turbo-cinder-rotate: -106deg;
-  left: 73%;
-  bottom: 10px;
-  width: 1.5px;
-  height: 2.5px;
+  left: 66%;
+  top: 25px;
+  width: 3px;
+  height: 4px;
   animation-duration: 3260ms;
   animation-delay: -2140ms;
 }
 
 .composeModelTurboBurnAtmosphere > span:nth-child(3) {
   --turbo-cinder-drift-x: -11px;
-  --turbo-cinder-rise: -53px;
+  --turbo-cinder-fall: 58px;
   --turbo-cinder-rotate: 132deg;
-  left: 84%;
-  bottom: 13px;
-  width: 2px;
-  height: 2px;
+  left: 78%;
+  top: 20px;
+  width: 4px;
+  height: 4px;
   animation-duration: 3640ms;
   animation-delay: -1280ms;
 }
 
 .composeModelTurboBurnAtmosphere > span:nth-child(4) {
   --turbo-cinder-drift-x: 5px;
-  --turbo-cinder-rise: -46px;
+  --turbo-cinder-fall: 51px;
   --turbo-cinder-rotate: -74deg;
-  left: 44%;
-  bottom: 9px;
-  width: 1.5px;
-  height: 3px;
+  left: 38%;
+  top: 24px;
+  width: 3px;
+  height: 5px;
   animation-duration: 3050ms;
   animation-delay: -2670ms;
 }
 
 .composeModelTurboBurnAtmosphere > span:nth-child(5) {
   --turbo-cinder-drift-x: 13px;
-  --turbo-cinder-rise: -56px;
+  --turbo-cinder-fall: 62px;
   --turbo-cinder-rotate: 118deg;
-  left: 65%;
-  bottom: 8px;
-  width: 2.5px;
-  height: 2.5px;
+  left: 58%;
+  top: 18px;
+  width: 4.5px;
+  height: 4.5px;
   animation-duration: 4010ms;
   animation-delay: -3460ms;
 }
 
 .composeModelTurboBurnAtmosphere > span:nth-child(6) {
   --turbo-cinder-drift-x: -5px;
-  --turbo-cinder-rise: -34px;
+  --turbo-cinder-fall: 38px;
   --turbo-cinder-rotate: -91deg;
-  left: 91%;
-  bottom: 11px;
-  width: 1.5px;
-  height: 2px;
+  left: 86%;
+  top: 23px;
+  width: 3px;
+  height: 3.5px;
   animation-duration: 2890ms;
   animation-delay: -1780ms;
 }
 
 .composeModelTurboBurnAtmosphere > span:nth-child(7) {
   --turbo-cinder-drift-x: -14px;
-  --turbo-cinder-rise: -48px;
+  --turbo-cinder-fall: 54px;
   --turbo-cinder-rotate: 146deg;
-  left: 51%;
-  bottom: 14px;
-  width: 2px;
-  height: 2.5px;
+  left: 45%;
+  top: 19px;
+  width: 3.5px;
+  height: 4.5px;
   animation-duration: 3790ms;
   animation-delay: -80ms;
 }
@@ -35872,35 +35872,35 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   0%,
   100% {
     opacity: var(--turbo-red-flicker-low);
-    transform: translate3d(1px, 2px, 0) scale(0.92, 0.78);
+    transform: translate3d(-2px, 2px, 0) scale(0.92, 0.78);
   }
 
   18% {
     opacity: var(--turbo-red-flicker-high);
-    transform: translate3d(0, 0, 0) scale(1.02, 0.88);
+    transform: translate3d(-4px, 0, 0) scale(1.02, 0.88);
   }
 
   43% {
     opacity: var(--turbo-red-flicker-mid);
-    transform: translate3d(-1px, 1px, 0) scale(0.96, 0.82);
+    transform: translate3d(-5px, 1px, 0) scale(0.96, 0.82);
   }
 
   61% {
     opacity: var(--turbo-red-flicker-high);
-    transform: translate3d(1px, 0, 0) scale(1, 0.86);
+    transform: translate3d(-3px, 0, 0) scale(1, 0.86);
   }
 
   78% {
     opacity: var(--turbo-red-flicker-low);
-    transform: translate3d(0, 2px, 0) scale(0.94, 0.8);
+    transform: translate3d(-4px, 2px, 0) scale(0.94, 0.8);
   }
 }
 
-@keyframes turboCinderRise {
+@keyframes turboCinderFall {
   0% {
     opacity: 0;
     filter: brightness(0.72) saturate(0.86);
-    transform: translate3d(0, 7px, 0) scale(0.32) rotate(0deg);
+    transform: translate3d(0, -7px, 0) scale(0.46) rotate(0deg);
   }
 
   12% {
@@ -35926,10 +35926,10 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     filter: brightness(0.42) saturate(0.62);
     transform: translate3d(
         var(--turbo-cinder-drift-x),
-        var(--turbo-cinder-rise),
+        var(--turbo-cinder-fall),
         0
       )
-      scale(0.16) rotate(var(--turbo-cinder-rotate));
+      scale(0.24) rotate(var(--turbo-cinder-rotate));
   }
 }
 
@@ -35959,7 +35959,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   animation: turboSmolderGlow 1840ms ease-in-out infinite;
 }
 
-.composeModelEffortTriggerWrap[data-turbo="true"]::after {
+.composeModelEffortTriggerWrap[data-turbo-capable="true"]::after {
   content: "";
   position: absolute;
   pointer-events: none;
@@ -35974,11 +35974,16 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
   background-repeat: no-repeat;
   background-size: 100% 89%;
   image-rendering: auto;
+  opacity: 0;
   filter: drop-shadow(
     0 1px 5px color-mix(in srgb, #ff6200 30%, transparent)
   );
   mix-blend-mode: screen;
   transform: translate3d(0, -2px, 0);
+}
+
+.composeModelEffortTriggerWrap[data-turbo="true"]::after {
+  opacity: 1;
 }
 
 .composeModelEffortTriggerWrap[data-turbo="true"]
@@ -36246,7 +36251,7 @@ button.memoryBubble.askQuestionRecallBubble:focus-visible {
     transform: translate3d(1px, 1px, 0) scale(0.94, 0.84);
   }
 
-  .composeModelEffortTriggerWrap[data-turbo="true"]::after {
+  .composeModelEffortTriggerWrap[data-turbo-capable="true"]::after {
     background-image: url("/ui/turbo-fire-still.png");
   }
 
