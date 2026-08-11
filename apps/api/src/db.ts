@@ -54,6 +54,13 @@ export interface DbUserRecord {
   preferredImageProvider: "local" | "openai";
   providerLocked: number;
   autoMemory: number;
+  memoryLearnAboutPlayer?: number;
+  memoryLearnAboutBots?: number;
+  memoryAcquisitionSensitivity?: string;
+  memoryShortTermDays?: number;
+  memoryLongTermThreshold?: number;
+  memoryInferredMinEvidence?: number;
+  memoryInferredThreshold?: number;
   autoSwitchModel: number;
   preferredLocalModel: string | null;
   preferredOnlineModel: string | null;
@@ -82,6 +89,9 @@ export interface DbMemoryRecord {
   iv: string;
   tag: string;
   confidence: number;
+  baseConfidence?: number | null;
+  lifecycle?: "short_term" | "long_term" | "derived";
+  lastReinforcedAt?: string | null;
   category: MemoryCategory;
   tier: MemoryTier;
   durability: number;
@@ -196,6 +206,13 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       preferred_image_provider TEXT NOT NULL DEFAULT 'local',
       provider_locked INTEGER NOT NULL DEFAULT 0,
       auto_memory INTEGER NOT NULL DEFAULT 1,
+      memory_learn_about_player INTEGER NOT NULL DEFAULT 1,
+      memory_learn_about_bots INTEGER NOT NULL DEFAULT 1,
+      memory_acquisition_sensitivity TEXT NOT NULL DEFAULT 'balanced',
+      memory_short_term_days INTEGER NOT NULL DEFAULT 30,
+      memory_long_term_threshold REAL NOT NULL DEFAULT 0.9,
+      memory_inferred_min_evidence INTEGER NOT NULL DEFAULT 3,
+      memory_inferred_threshold REAL NOT NULL DEFAULT 0.8,
       auto_switch_model INTEGER NOT NULL DEFAULT 0,
       auto_fallback_chain TEXT,
       online_auto_provider_bias REAL NOT NULL DEFAULT 0,
@@ -669,7 +686,43 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       source TEXT NOT NULL DEFAULT 'direct',
       certainty REAL,
       source_message_ids TEXT NOT NULL DEFAULT '[]',
+      base_confidence REAL,
+      lifecycle TEXT NOT NULL DEFAULT 'short_term',
+      evidence_lineage_known INTEGER NOT NULL DEFAULT 0,
+      last_reinforced_at TEXT,
       created_at TEXT NOT NULL,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS memory_evidence_links (
+      user_id TEXT NOT NULL,
+      inferred_memory_id TEXT NOT NULL,
+      evidence_memory_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, inferred_memory_id, evidence_memory_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(inferred_memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+      FOREIGN KEY(evidence_memory_id) REFERENCES memories(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS memory_acquisition_receipts (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      memory_id TEXT NOT NULL,
+      learner_bot_id TEXT,
+      target_bot_id TEXT,
+      conversation_id TEXT,
+      kind TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      read_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS memory_relationship_projections (
+      user_id TEXT NOT NULL,
+      source_bot_id TEXT NOT NULL,
+      target_bot_id TEXT NOT NULL,
+      base_score REAL NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, source_bot_id, target_bot_id),
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
     CREATE TABLE IF NOT EXISTS user_notes (
@@ -2522,6 +2575,53 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   const userColumns = db.prepare("PRAGMA table_info(users)").all() as Array<{
     name: string;
   }>;
+  const hasMemoryLearnAboutPlayer = userColumns.some(
+    (column) => column.name === "memory_learn_about_player",
+  );
+  if (!hasMemoryLearnAboutPlayer) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN memory_learn_about_player INTEGER NOT NULL DEFAULT 1;",
+    );
+    db.exec(
+      "UPDATE users SET memory_learn_about_player = CASE WHEN auto_memory = 0 THEN 0 ELSE 1 END;",
+    );
+  }
+  const hasMemoryLearnAboutBots = userColumns.some(
+    (column) => column.name === "memory_learn_about_bots",
+  );
+  if (!hasMemoryLearnAboutBots) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN memory_learn_about_bots INTEGER NOT NULL DEFAULT 1;",
+    );
+    db.exec(
+      "UPDATE users SET memory_learn_about_bots = CASE WHEN auto_memory = 0 THEN 0 ELSE 1 END;",
+    );
+  }
+  if (!userColumns.some((column) => column.name === "memory_acquisition_sensitivity")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN memory_acquisition_sensitivity TEXT NOT NULL DEFAULT 'balanced';",
+    );
+  }
+  if (!userColumns.some((column) => column.name === "memory_short_term_days")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN memory_short_term_days INTEGER NOT NULL DEFAULT 30;",
+    );
+  }
+  if (!userColumns.some((column) => column.name === "memory_long_term_threshold")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN memory_long_term_threshold REAL NOT NULL DEFAULT 0.9;",
+    );
+  }
+  if (!userColumns.some((column) => column.name === "memory_inferred_min_evidence")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN memory_inferred_min_evidence INTEGER NOT NULL DEFAULT 3;",
+    );
+  }
+  if (!userColumns.some((column) => column.name === "memory_inferred_threshold")) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN memory_inferred_threshold REAL NOT NULL DEFAULT 0.8;",
+    );
+  }
   const zenSessionMemoryColumns = db
     .prepare("PRAGMA table_info(zen_session_memories)")
     .all() as Array<{ name: string }>;
@@ -3602,6 +3702,22 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       "ALTER TABLE memories ADD COLUMN durability REAL NOT NULL DEFAULT 0.5;",
     );
   }
+  if (!memoryColumns.some((column) => column.name === "base_confidence")) {
+    db.exec("ALTER TABLE memories ADD COLUMN base_confidence REAL;");
+  }
+  if (!memoryColumns.some((column) => column.name === "lifecycle")) {
+    db.exec(
+      "ALTER TABLE memories ADD COLUMN lifecycle TEXT NOT NULL DEFAULT 'short_term';",
+    );
+  }
+  if (!memoryColumns.some((column) => column.name === "evidence_lineage_known")) {
+    db.exec(
+      "ALTER TABLE memories ADD COLUMN evidence_lineage_known INTEGER NOT NULL DEFAULT 0;",
+    );
+  }
+  if (!memoryColumns.some((column) => column.name === "last_reinforced_at")) {
+    db.exec("ALTER TABLE memories ADD COLUMN last_reinforced_at TEXT;");
+  }
   db.exec(`
     UPDATE memories
     SET source = COALESCE(source, 'direct')
@@ -3616,6 +3732,72 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     UPDATE memories
     SET source_message_ids = '[]'
     WHERE source_message_ids IS NULL OR source_message_ids = '';
+  `);
+  db.exec(`
+    UPDATE memories
+    SET base_confidence = COALESCE(base_confidence, confidence),
+        last_reinforced_at = COALESCE(last_reinforced_at, created_at),
+        lifecycle = CASE
+          WHEN source = 'inferred' THEN 'derived'
+          WHEN tier = 'long_term' THEN 'long_term'
+          ELSE 'short_term'
+        END
+    WHERE base_confidence IS NULL
+       OR last_reinforced_at IS NULL
+       OR lifecycle IS NULL
+       OR trim(lifecycle) = '';
+  `);
+  db.exec(`
+    CREATE TABLE IF NOT EXISTS memory_evidence_links (
+      user_id TEXT NOT NULL,
+      inferred_memory_id TEXT NOT NULL,
+      evidence_memory_id TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, inferred_memory_id, evidence_memory_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(inferred_memory_id) REFERENCES memories(id) ON DELETE CASCADE,
+      FOREIGN KEY(evidence_memory_id) REFERENCES memories(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS memory_acquisition_receipts (
+      id TEXT PRIMARY KEY,
+      user_id TEXT NOT NULL,
+      memory_id TEXT NOT NULL,
+      learner_bot_id TEXT,
+      target_bot_id TEXT,
+      conversation_id TEXT,
+      kind TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      read_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE,
+      FOREIGN KEY(memory_id) REFERENCES memories(id) ON DELETE CASCADE
+    );
+    CREATE TABLE IF NOT EXISTS memory_relationship_projections (
+      user_id TEXT NOT NULL,
+      source_bot_id TEXT NOT NULL,
+      target_bot_id TEXT NOT NULL,
+      base_score REAL NOT NULL,
+      updated_at TEXT NOT NULL,
+      PRIMARY KEY (user_id, source_bot_id, target_bot_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_memory_evidence_inferred
+      ON memory_evidence_links(user_id, inferred_memory_id);
+    CREATE INDEX IF NOT EXISTS idx_memory_evidence_source
+      ON memory_evidence_links(user_id, evidence_memory_id);
+    CREATE INDEX IF NOT EXISTS idx_memory_receipts_unread_bot
+      ON memory_acquisition_receipts(user_id, learner_bot_id, read_at, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_memory_receipts_conversation
+      ON memory_acquisition_receipts(user_id, conversation_id, created_at DESC);
+  `);
+  db.exec(`
+    UPDATE memories
+       SET evidence_lineage_known = 1
+     WHERE EXISTS (
+       SELECT 1
+         FROM memory_evidence_links AS links
+        WHERE links.user_id = memories.user_id
+          AND links.inferred_memory_id = memories.id
+     );
   `);
   db.exec(`
     UPDATE memories

@@ -51,7 +51,11 @@ describe("restoreFactoryDefaultsInDatabase", () => {
           `
           SELECT
             email, display_name, theme, graphics_quality, typography_scale, hub_atmosphere_enabled, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked,
-            auto_memory, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids,
+            auto_memory, memory_learn_about_player, memory_learn_about_bots,
+            memory_acquisition_sensitivity, memory_short_term_days,
+            memory_long_term_threshold, memory_inferred_min_evidence,
+            memory_inferred_threshold, auto_switch_model, auto_fallback_chain,
+            online_auto_provider_bias, hidden_bot_model_ids,
             hidden_comfyui_workflow_ids, model_visibility_defaults_version,
             preferred_local_model, preferred_online_model,
             lenient_local_fallback_model, lenient_local_image_fallback_model,
@@ -117,6 +121,13 @@ describe("restoreFactoryDefaultsInDatabase", () => {
       assert.equal(user.preferred_image_provider, "local");
       assert.equal(user.provider_locked, 0);
       assert.equal(user.auto_memory, 1);
+      assert.equal(user.memory_learn_about_player, 1);
+      assert.equal(user.memory_learn_about_bots, 1);
+      assert.equal(user.memory_acquisition_sensitivity, "balanced");
+      assert.equal(user.memory_short_term_days, 30);
+      assert.equal(user.memory_long_term_threshold, 0.9);
+      assert.equal(user.memory_inferred_min_evidence, 3);
+      assert.equal(user.memory_inferred_threshold, 0.8);
       assert.equal(user.auto_switch_model, 0);
       assert.equal(user.auto_fallback_chain, null);
       assert.equal(user.online_auto_provider_bias, 0);
@@ -252,6 +263,13 @@ function seedResetFixture(db: DatabaseSync): void {
       preferred_image_provider = 'openai',
       provider_locked = 1,
       auto_memory = 0,
+      memory_learn_about_player = 0,
+      memory_learn_about_bots = 0,
+      memory_acquisition_sensitivity = 'curious',
+      memory_short_term_days = 2,
+      memory_long_term_threshold = 0.72,
+      memory_inferred_min_evidence = 8,
+      memory_inferred_threshold = 0.94,
       auto_switch_model = 1,
       auto_fallback_chain = '{"v":1,"fallbacks":[{"provider":"local","model":"fallback-a"},{"provider":"openai","model":"fallback-b"}]}',
       online_auto_provider_bias = 0.75,
@@ -427,6 +445,29 @@ function seedResetFixture(db: DatabaseSync): void {
     0.9,
     "2026-01-01T00:00:00.000Z"
   );
+  db.prepare(
+    `INSERT INTO memories
+      (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence,
+       source, lifecycle, created_at)
+     VALUES ('memory-derived', 'user-1', 'conversation-1', 'bot-1',
+             'ciphertext', 'iv', 'tag', 0.8, 'inferred', 'derived', ?)`,
+  ).run("2026-01-01T00:00:01.000Z");
+  db.prepare(
+    `INSERT INTO memory_evidence_links
+      (user_id, inferred_memory_id, evidence_memory_id, created_at)
+     VALUES ('user-1', 'memory-derived', 'memory-1', ?)`,
+  ).run("2026-01-01T00:00:01.000Z");
+  db.prepare(
+    `INSERT INTO memory_acquisition_receipts
+      (id, user_id, memory_id, learner_bot_id, conversation_id, kind, created_at)
+     VALUES ('receipt-1', 'user-1', 'memory-1', 'bot-1',
+             'conversation-1', 'player_memory', ?)`,
+  ).run("2026-01-01T00:00:01.000Z");
+  db.prepare(
+    `INSERT INTO memory_relationship_projections
+      (user_id, source_bot_id, target_bot_id, base_score, updated_at)
+     VALUES ('user-1', 'bot-1', 'bot-2', 72, ?)`,
+  ).run("2026-01-01T00:00:01.000Z");
   db.prepare(
     "INSERT INTO images (id, user_id, conversation_id, bot_id, prompt, url, provider, model, created_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
   ).run(

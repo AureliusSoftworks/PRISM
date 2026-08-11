@@ -62,6 +62,11 @@ import {
   retrieveRecentMemoriesForStarter,
 } from "./memory.ts";
 import {
+  readMemoryEcologySettings,
+  recordRelationshipProjectionBase,
+} from "./memory-ecology.ts";
+import { inferAndStoreBotMemories } from "./memory-inference.ts";
+import {
   buildCoffeeContinuityPromptContext,
   loadRecentCoffeeContinuityContexts,
 } from "./coffee-continuity.ts";
@@ -288,7 +293,6 @@ import {
   queueBotSemanticFacetsRefresh,
   type BotSemanticFacets,
 } from "./bot-facets.ts";
-import { undoLatestConversationMessages } from "./conversations.ts";
 import {
   attachUsageEventsToMessage,
   patchUsageSession,
@@ -506,20 +510,6 @@ const COFFEE_TOP_OFF_DISPOSITION_BOOST = 0.1;
 const COFFEE_TOP_OFF_ENGAGEMENT_BOOST = 0.12;
 const COFFEE_TOP_OFF_LEAVE_PRESSURE_RELIEF = 0.08;
 
-interface CoffeeDebugTurnSnapshotPayload {
-  v: 1;
-  name: "coffeeDebugTurnSnapshot";
-  beforeSocialByBotId: Record<string, CoffeeBotSocialSnapshot>;
-  afterSocialByBotId: Record<string, CoffeeBotSocialSnapshot>;
-  beforeConversation: {
-    botGroupIds: string | null;
-    coffeeAbsentBotIds: string | null;
-    coffeeTeamModeJson: string | null;
-  };
-  speakerBotId: string;
-  createdAt: string;
-}
-
 const COFFEE_INTERRUPTION_MIN_VISIBLE_TOKENS = 1;
 const COFFEE_INTERRUPTION_VISIBLE_TOKEN_SOFT_CAP = 24;
 const COFFEE_INTERRUPTION_BELL_CURVE_EDGE_WEIGHT = 0.42;
@@ -661,72 +651,6 @@ export function buildCoffeeReplayMoodEvents(args: {
       occurredAt: args.occurredAt,
       social,
     }));
-}
-
-function readCoffeeSocialSnapshotInput(raw: unknown): CoffeeBotSocialSnapshot {
-  const row = raw && typeof raw === "object" && !Array.isArray(raw)
-    ? (raw as Record<string, unknown>)
-    : {};
-  const numberOrUndefined = (value: unknown): number | undefined =>
-    typeof value === "number" && Number.isFinite(value) ? value : undefined;
-  return sanitizeCoffeeSocialSnapshot({
-    disposition: numberOrUndefined(row.disposition),
-    valuesFriction: numberOrUndefined(row.valuesFriction ?? row.friction),
-    restraint: numberOrUndefined(row.restraint),
-    engagement: numberOrUndefined(row.engagement),
-    leavePressure: numberOrUndefined(row.leavePressure),
-  });
-}
-
-function parseCoffeeDebugTurnSnapshot(
-  raw: string | null | undefined
-): CoffeeDebugTurnSnapshotPayload | null {
-  if (!raw || !raw.trim()) return null;
-  try {
-    const parsed = JSON.parse(raw) as unknown;
-    if (!parsed || typeof parsed !== "object") return null;
-    const row = parsed as Record<string, unknown>;
-    if (row.v !== 1 || row.name !== "coffeeDebugTurnSnapshot") {
-      const nested = row.coffeeDebugTurnSnapshot;
-      if (!nested || typeof nested !== "object") return null;
-      return parseCoffeeDebugTurnSnapshot(JSON.stringify(nested));
-    }
-    const beforeConversation =
-      row.beforeConversation && typeof row.beforeConversation === "object"
-        ? (row.beforeConversation as Record<string, unknown>)
-        : {};
-    const speakerBotId = typeof row.speakerBotId === "string" ? row.speakerBotId : "";
-    const createdAt = typeof row.createdAt === "string" ? row.createdAt : "";
-    if (!speakerBotId || !createdAt) return null;
-    return {
-      v: 1,
-      name: "coffeeDebugTurnSnapshot",
-      beforeSocialByBotId: sanitizeCoffeeSocialStateMap(
-        row.beforeSocialByBotId as Record<string, CoffeeBotSocialSnapshot> | undefined
-      ),
-      afterSocialByBotId: sanitizeCoffeeSocialStateMap(
-        row.afterSocialByBotId as Record<string, CoffeeBotSocialSnapshot> | undefined
-      ),
-      beforeConversation: {
-        botGroupIds:
-          typeof beforeConversation.botGroupIds === "string"
-            ? beforeConversation.botGroupIds
-            : null,
-        coffeeAbsentBotIds:
-          typeof beforeConversation.coffeeAbsentBotIds === "string"
-            ? beforeConversation.coffeeAbsentBotIds
-            : null,
-        coffeeTeamModeJson:
-          typeof beforeConversation.coffeeTeamModeJson === "string"
-            ? beforeConversation.coffeeTeamModeJson
-            : null,
-      },
-      speakerBotId,
-      createdAt,
-    };
-  } catch {
-    return null;
-  }
 }
 
 function coffeeReplyRepeatKey(raw: string): string {
@@ -3537,7 +3461,6 @@ function serializeCoffeeAssistantToolPayload(args: {
   interruptionEvent?: CoffeeInterruptionEvent;
   coffeeAmbientAction?: CoffeeAmbientActionPayload | null;
   coffeeStageAction?: CoffeeStageActionPayload | null;
-  coffeeDebugTurnSnapshot?: CoffeeDebugTurnSnapshotPayload | null;
   coffeeReplayEvents?: CoffeeReplayEventPayload[] | null;
   autoRecovery?: AutoRecoveryTraceV1;
   autoRoute?: AutoRouteDecisionV1;
@@ -3549,7 +3472,6 @@ function serializeCoffeeAssistantToolPayload(args: {
 }): string | null {
   const coffeeAmbientAction = args.coffeeAmbientAction ?? undefined;
   const coffeeStageAction = args.coffeeStageAction ?? undefined;
-  const coffeeDebugTurnSnapshot = args.coffeeDebugTurnSnapshot ?? undefined;
   const coffeeReplayEvents = args.coffeeReplayEvents ?? undefined;
   const botPowerIntendedSpeech = args.botPowerIntendedSpeech?.trim() || undefined;
   const withPrivateIntendedSpeech = (serialized: string | null): string | null => {
@@ -3559,7 +3481,6 @@ function serializeCoffeeAssistantToolPayload(args: {
     return JSON.stringify(root);
   };
   if (
-    !coffeeDebugTurnSnapshot &&
     !args.interruptionEvent &&
     (
       coffeeAmbientAction ||
@@ -3585,7 +3506,6 @@ function serializeCoffeeAssistantToolPayload(args: {
     }));
   }
   if (
-    !coffeeDebugTurnSnapshot &&
     !args.interruptionEvent &&
     !coffeeAmbientAction &&
     !coffeeStageAction &&
@@ -3605,7 +3525,6 @@ function serializeCoffeeAssistantToolPayload(args: {
     ...(coffeeAmbientAction ? { coffeeAmbientAction } : {}),
     ...(coffeeStageAction ? { coffeeStageAction } : {}),
     ...(coffeeReplayEvents && coffeeReplayEvents.length > 0 ? { coffeeReplayEvents } : {}),
-    ...(coffeeDebugTurnSnapshot ? { coffeeDebugTurnSnapshot } : {}),
     ...(args.autoRecovery ? { autoRecovery: args.autoRecovery } : {}),
     ...(args.autoRoute ? { autoRoute: args.autoRoute } : {}),
     ...(args.botPowerExactResponse
@@ -4655,10 +4574,7 @@ function sanitizeLoadedCoffeeAssistantContent(
 ): string {
   const storedToolPayload = parseStoredAssistantToolPayload(row.tool_payload);
   const exactResponse = storedToolPayload.botPowerExactResponse;
-  if (
-    exactResponse === "speech_copy" &&
-    parseCoffeeDebugTurnSnapshot(row.tool_payload)
-  ) {
+  if (exactResponse === "speech_copy") {
     return row.content || "...";
   }
   if (exactResponse !== undefined) {
@@ -18933,19 +18849,6 @@ async function generateCoffeeBotReply(args: {
   const allowCupStageActions =
     coffeeCupProgress !== null &&
     coffeeCupProgress < COFFEE_AMBIENT_EMPTY_PROGRESS;
-  const coffeeDebugTurnSnapshot: CoffeeDebugTurnSnapshotPayload = {
-    v: 1,
-    name: "coffeeDebugTurnSnapshot",
-    beforeSocialByBotId: sanitizeCoffeeSocialStateMap(preTurnSocialByBotId),
-    afterSocialByBotId: sanitizeCoffeeSocialStateMap(nextSocialByBotId),
-    beforeConversation: {
-      botGroupIds: row.bot_group_ids,
-      coffeeAbsentBotIds: row.coffee_absent_bot_ids,
-      coffeeTeamModeJson: row.coffee_team_mode_json,
-    },
-    speakerBotId: speaker.id,
-    createdAt: assistantNow,
-  };
   const coffeeReplayMoodEvents = buildCoffeeReplayMoodEvents({
     previousByBotId: preTurnSocialByBotId,
     nextByBotId: nextSocialByBotId,
@@ -19241,7 +19144,6 @@ async function generateCoffeeBotReply(args: {
     interruptionEvent,
     coffeeAmbientAction,
     coffeeStageAction,
-    coffeeDebugTurnSnapshot,
     coffeeReplayEvents,
     autoRecovery,
     autoRoute: settings.autoRouteDecision,
@@ -19314,7 +19216,10 @@ async function generateCoffeeBotReply(args: {
       "UPDATE conversations SET updated_at = ? WHERE id = ? AND user_id = ?"
     ).run(assistantNow, row.id, userId);
   }
-  const canPersistDurableCoffeeRelationship = row.incognito !== 1;
+  const canPersistDurableCoffeeRelationship =
+    row.incognito !== 1 &&
+    readMemoryEcologySettings(db, userId).learnAboutBots &&
+    Boolean(settings.userKey);
   if (canPersistDurableCoffeeRelationship && relationshipSignals.length > 0) {
     for (const signal of relationshipSignals) {
       const existing = readBotRelationship(db, userId, speaker.id, signal.targetBotId);
@@ -19334,6 +19239,38 @@ async function generateCoffeeBotReply(args: {
         ],
         updatedAt: assistantNow,
       });
+      const storedSignal = await persistMemoryCandidates(
+        db,
+        userId,
+        row.id,
+        speaker.id,
+        [{
+          text: signal.reason,
+          confidence: Math.min(0.88, 0.62 + Math.abs(signal.delta) / 100),
+          category: "bot_relation",
+          durability: 0.68,
+        }],
+        settings.userKey!,
+        {
+          source: "direct",
+          category: "bot_relation",
+          tier: "short_term",
+          targetBotId: signal.targetBotId,
+          sourceMessageIds: [assistantMessageId],
+          automatic: true,
+          createReceipt: true,
+        },
+      );
+      if (storedSignal.length > 0) {
+        recordRelationshipProjectionBase({
+          db,
+          userId,
+          sourceBotId: speaker.id,
+          targetBotId: signal.targetBotId,
+          baseScore: nextScore,
+          updatedAt: assistantNow,
+        });
+      }
     }
   }
   if (
@@ -19361,20 +19298,42 @@ async function generateCoffeeBotReply(args: {
         }
       );
       if (validation.candidates.length > 0) {
-        await persistMemoryCandidates(
-          db,
-          userId,
-          row.id,
-          speaker.id,
-          validation.candidates,
-          settings.userKey,
-          {
-            source: "inferred",
-            category: "bot_relation",
-            tier: "short_term",
-            sourceMessageIds: [assistantMessageId],
-          }
-        );
+        let storedRelationshipEvidence = false;
+        for (const candidate of validation.candidates) {
+          const target = group.find(
+            (bot) =>
+              bot.id !== speaker.id &&
+              candidate.text.toLocaleLowerCase().includes(bot.name.toLocaleLowerCase()),
+          );
+          if (!target) continue;
+          const stored = await persistMemoryCandidates(
+            db,
+            userId,
+            row.id,
+            speaker.id,
+            [candidate],
+            settings.userKey,
+            {
+              source: "direct",
+              category: "bot_relation",
+              tier: "short_term",
+              targetBotId: target.id,
+              sourceMessageIds: [assistantMessageId],
+              automatic: true,
+              createReceipt: true,
+            }
+          );
+          storedRelationshipEvidence ||= stored.length > 0;
+        }
+        if (storedRelationshipEvidence) {
+          void inferAndStoreBotMemories(
+            db,
+            coffeeAuxiliaryProvider(settings),
+            userId,
+            speaker.id,
+            settings.userKey,
+          ).catch(() => {});
+        }
       }
     }
   }
@@ -19401,7 +19360,7 @@ async function generateCoffeeBotReply(args: {
         }
       );
       if (validation.candidates.length > 0) {
-        await persistMemoryCandidates(
+        const stored = await persistMemoryCandidates(
           db,
           userId,
           row.id,
@@ -19409,12 +19368,24 @@ async function generateCoffeeBotReply(args: {
           validation.candidates,
           settings.userKey,
           {
-            source: "inferred",
+            source: "direct",
             category: "bot_relation",
             tier: "short_term",
+            targetBotId: speaker.id,
             sourceMessageIds: [assistantMessageId],
+            automatic: true,
+            createReceipt: true,
           }
         );
+        if (stored.length > 0) {
+          void inferAndStoreBotMemories(
+            db,
+            coffeeAuxiliaryProvider(settings),
+            userId,
+            priorAssistantSpeakerBotId,
+            settings.userKey,
+          ).catch(() => {});
+        }
       }
     }
   }
@@ -20643,162 +20614,6 @@ export function recordCoffeeReplayEvents(
     });
   }
   return buildCurrentCoffeeConversationResponse(db, userId, row.id);
-}
-
-function rebuildCoffeeDebugSocialStateFromRemainingMessages(args: {
-  db: DatabaseSync;
-  userId: string;
-  conversationId: string;
-  group: readonly CoffeeBotProfile[];
-}): Record<string, CoffeeBotSocialSnapshot> {
-  const groupById = new Map(args.group.map((bot) => [bot.id, bot]));
-  const rows = args.db
-    .prepare(
-      `SELECT role, content, bot_id
-         FROM messages
-        WHERE user_id = ? AND conversation_id = ?
-        ORDER BY created_at ASC, id ASC`
-    )
-    .all(args.userId, args.conversationId) as Array<{
-      role: string;
-      content: string;
-      bot_id: string | null;
-    }>;
-  let socialByBotId = initializeCoffeeSocialState(args.group, {});
-  let previousRole: string | null = null;
-  for (const row of rows) {
-    if (row.role !== "assistant" || !row.bot_id) {
-      previousRole = row.role;
-      continue;
-    }
-    const speaker = groupById.get(row.bot_id);
-    if (!speaker) {
-      previousRole = row.role;
-      continue;
-    }
-    socialByBotId = computeNextCoffeeSocialState({
-      previousByBotId: socialByBotId,
-      group: args.group,
-      speakerBotId: speaker.id,
-      turnKind: previousRole === "user" ? "user" : "autonomous",
-      replyText: row.content,
-    });
-    socialByBotId = applyCoffeeRelationshipSocialDeltas({
-      previousByBotId: socialByBotId,
-      speakerBotId: speaker.id,
-      signals: extractCoffeeRelationshipSignals({
-        speaker,
-        group: args.group,
-        replyText: row.content,
-      }),
-    });
-    previousRole = row.role;
-  }
-  return socialByBotId;
-}
-
-export function updateCoffeeBotSocialDebug(
-  db: DatabaseSync,
-  userId: string,
-  conversationId: string,
-  botId: string,
-  rawSocial: unknown
-): Conversation {
-  const { row, group, groupIds } = loadCoffeeConversationGroup(db, userId, conversationId);
-  if (!groupIds.includes(botId)) {
-    throw new Error("Bot is not seated in this Coffee session.");
-  }
-  const snapshot = readCoffeeSocialSnapshotInput(rawSocial);
-  const now = new Date().toISOString();
-  upsertCoffeeBotSocialState(db, userId, row.id, { [botId]: snapshot }, now);
-  appendCoffeeReplayEventMessage({
-    db,
-    userId,
-    conversationId: row.id,
-    event: {
-      v: 1,
-      name: "coffeeReplayEvent",
-      kind: "mood",
-      botId,
-      occurredAt: now,
-      social: snapshot,
-    },
-  });
-  return buildCurrentCoffeeConversationResponse(db, userId, row.id);
-}
-
-export function undoLatestCoffeeDebugMessage(
-  db: DatabaseSync,
-  userId: string,
-  conversationId: string
-): {
-  conversation: Conversation;
-  messageIds: string[];
-  deletedMessages: number;
-} {
-  const latest = db
-    .prepare(
-      `SELECT id, role, tool_payload
-         FROM messages
-        WHERE user_id = ? AND conversation_id = ?
-        ORDER BY created_at DESC, id DESC
-        LIMIT 1`
-    )
-    .get(userId, conversationId) as
-    | { id: string; role: string; tool_payload: string | null }
-    | undefined;
-  if (!latest) {
-    throw new Error("Nothing to undo.");
-  }
-  const snapshot =
-    latest.role === "assistant"
-      ? parseCoffeeDebugTurnSnapshot(latest.tool_payload)
-      : null;
-  const result = undoLatestConversationMessages(db, userId, conversationId, 1);
-  const { row, group } = loadCoffeeConversationGroup(db, userId, conversationId);
-  if (snapshot) {
-    db.prepare(
-      `UPDATE conversations
-          SET bot_group_ids = ?,
-              coffee_absent_bot_ids = ?,
-              coffee_team_mode_json = ?,
-              updated_at = ?
-        WHERE id = ? AND user_id = ?`
-    ).run(
-      snapshot.beforeConversation.botGroupIds,
-      snapshot.beforeConversation.coffeeAbsentBotIds,
-      snapshot.beforeConversation.coffeeTeamModeJson,
-      new Date().toISOString(),
-      row.id,
-      userId
-    );
-    const restored = loadCoffeeConversationGroup(db, userId, conversationId);
-    upsertCoffeeBotSocialState(
-      db,
-      userId,
-      restored.row.id,
-      initializeCoffeeSocialState(restored.group, snapshot.beforeSocialByBotId),
-      new Date().toISOString()
-    );
-  } else {
-    upsertCoffeeBotSocialState(
-      db,
-      userId,
-      row.id,
-      rebuildCoffeeDebugSocialStateFromRemainingMessages({
-        db,
-        userId,
-        conversationId: row.id,
-        group,
-      }),
-      new Date().toISOString()
-    );
-  }
-  return {
-    conversation: buildCurrentCoffeeConversationResponse(db, userId, row.id),
-    messageIds: result.messageIds,
-    deletedMessages: result.deletedMessages,
-  };
 }
 
 /**

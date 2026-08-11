@@ -294,6 +294,10 @@ import {
   retrieveRecentMemoriesForStarter,
 } from "./memory.ts";
 import {
+  readMemoryEcologySettings,
+  recordRelationshipProjectionBase,
+} from "./memory-ecology.ts";
+import {
   readBotRelationship,
   upsertBotRelationship,
   type BotRelationshipSnapshot,
@@ -8313,6 +8317,14 @@ function botcastPairRelationshipUpdate(args: {
     recentReasons: [reason, ...(existing?.recentReasons ?? [])],
     updatedAt: args.updatedAt,
   });
+  recordRelationshipProjectionBase({
+    db: args.db,
+    userId: args.userId,
+    sourceBotId: args.sourceBotId,
+    targetBotId: args.targetBotId,
+    baseScore: nextScore,
+    updatedAt: args.updatedAt,
+  });
 }
 
 /**
@@ -8326,6 +8338,9 @@ export function persistCompletedBotcastPairHistory(args: {
   episodeId: string;
   userKey: Buffer;
 }): boolean {
+  if (!readMemoryEcologySettings(args.db, args.userId).learnAboutBots) {
+    return false;
+  }
   const episode = getBotcastEpisode(args.db, args.userId, args.episodeId);
   if (
     episode.status !== "completed" ||

@@ -174,6 +174,13 @@ describe("typed local asset library", () => {
       pageSource.indexOf("{imageKeywordEditorOpen &&"),
     );
     assert.match(generalImageRail, /viewAllLabel="Asset Library"/u);
+    assert.match(
+      generalImageRail,
+      /onOpenStorageSettings=\{\(\) => openSettingsPanel\("storage"\)\}/u,
+    );
+    assert.match(assetSource, /data-asset-storage-settings-shortcut=\{kind\}/u);
+    assert.match(assetSource, /data-asset-library-shortcut=\{kind\}/u);
+    assert.match(assetSource, />\s*Storage Settings\s*</u);
     assert.doesNotMatch(generalImageRail, /onUpload/u);
     assert.doesNotMatch(pageSource, /generalImageUploadRef|uploadGeneralImage/u);
     assert.match(assetSource, /onUpload\?: \(\) => void/u);

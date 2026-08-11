@@ -97,6 +97,8 @@ import {
   type HubAtmosphereStyle,
   type ModelReasoningEffortPreferenceV1,
   type ModelTurboPreferenceV1,
+  type MemoryEcologySettings,
+  type MemoryLifecycle,
   type PrismStartupPreference,
   type PrismCapabilityRevelations,
   parseStoredAutoFallbackChain,
@@ -105,6 +107,11 @@ import {
   resolveImageProviderName,
   serializeAutoFallbackChain,
 } from "@localai/shared";
+import {
+  DEFAULT_MEMORY_ECOLOGY_SETTINGS,
+  normalizeMemoryEcologySettings,
+  resolveMemoryEcologySettingsPatch,
+} from "./memory-ecology.ts";
 import {
   normalizeZenAskQuestionPatienceEnabled,
   normalizeZenAskQuestionPatienceMs,
@@ -165,6 +172,8 @@ export interface BackupUserSettings {
   preferredImageProvider?: ImageProviderName;
   providerLocked: boolean;
   autoMemory: boolean;
+  /** Memory ecology controls. Older snapshots fall back to autoMemory. */
+  memoryEcology?: MemoryEcologySettings;
   composerWritingAssist: boolean;
   experimentalDualOllamaEnabled: boolean;
   experimentalAllModelEffortEnabled?: boolean;
@@ -393,11 +402,30 @@ export interface BackupSnapshot {
     /** Optional; directed bot-to-bot memories target this bot. */
     targetBotId?: string;
     confidence: number;
+    baseConfidence?: number;
     category?: "general" | "user" | "bot_relation";
     tier?: "short_term" | "long_term";
+    lifecycle?: MemoryLifecycle;
     durability?: number;
+    source?: "direct" | "inferred";
+    certainty?: number;
+    sourceMessageIds?: string[];
+    evidenceMemoryIds?: string[];
+    evidenceLineageKnown?: boolean;
+    lastReinforcedAt?: string;
     payload: Record<string, unknown>;
     createdAt: string;
+  }>;
+  /** Persistent acquisition receipts. Older snapshots omit them. */
+  memoryReceipts?: Array<{
+    id: string;
+    memoryId: string;
+    learnerBotId?: string;
+    targetBotId?: string;
+    conversationId?: string;
+    kind: "player_memory" | "bot_relation";
+    createdAt: string;
+    readAt?: string;
   }>;
   /** Optional in older v1 snapshots. This remains an account backup, not a `.slate` archive. */
   slate?: BackupSlateSnapshot;
@@ -1682,6 +1710,13 @@ export function exportUserSnapshot(
          preferred_image_provider,
          provider_locked,
          auto_memory,
+         memory_learn_about_player,
+         memory_learn_about_bots,
+         memory_acquisition_sensitivity,
+         memory_short_term_days,
+         memory_long_term_threshold,
+         memory_inferred_min_evidence,
+         memory_inferred_threshold,
          composer_writing_assist,
          experimental_dual_ollama_enabled,
          experimental_all_model_effort_enabled,
@@ -1751,6 +1786,13 @@ export function exportUserSnapshot(
         preferred_image_provider: ImageProviderName;
         provider_locked: number;
         auto_memory: number;
+        memory_learn_about_player: number | null;
+        memory_learn_about_bots: number | null;
+        memory_acquisition_sensitivity: string | null;
+        memory_short_term_days: number | null;
+        memory_long_term_threshold: number | null;
+        memory_inferred_min_evidence: number | null;
+        memory_inferred_threshold: number | null;
         composer_writing_assist: number;
         experimental_dual_ollama_enabled: number;
         experimental_all_model_effort_enabled: number;
@@ -1834,6 +1876,16 @@ export function exportUserSnapshot(
         preferredImageProvider: user.preferred_image_provider,
         providerLocked: user.provider_locked === 1,
         autoMemory: user.auto_memory === 1,
+        memoryEcology: normalizeMemoryEcologySettings({
+          auto_memory: user.auto_memory,
+          memory_learn_about_player: user.memory_learn_about_player,
+          memory_learn_about_bots: user.memory_learn_about_bots,
+          memory_acquisition_sensitivity: user.memory_acquisition_sensitivity,
+          memory_short_term_days: user.memory_short_term_days,
+          memory_long_term_threshold: user.memory_long_term_threshold,
+          memory_inferred_min_evidence: user.memory_inferred_min_evidence,
+          memory_inferred_threshold: user.memory_inferred_threshold,
+        }),
         composerWritingAssist: user.composer_writing_assist !== 0,
         experimentalDualOllamaEnabled:
           user.experimental_dual_ollama_enabled === 1,
@@ -2312,7 +2364,14 @@ export function exportUserSnapshot(
 
   const memories = db
     .prepare(
-      "SELECT id, conversation_id, bot_id, target_bot_id, confidence, category, tier, durability, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC",
+      `SELECT id, conversation_id, bot_id, target_bot_id, confidence,
+              base_confidence, category, tier, lifecycle, durability, source,
+              certainty, source_message_ids, evidence_lineage_known,
+              last_reinforced_at,
+              ciphertext, iv, tag, created_at
+         FROM memories
+        WHERE user_id = ?
+        ORDER BY created_at DESC`,
     )
     .all(userId) as Array<{
     id: string;
@@ -2320,13 +2379,54 @@ export function exportUserSnapshot(
     bot_id: string | null;
     target_bot_id: string | null;
     confidence: number;
+    base_confidence: number | null;
     category: "general" | "user" | "bot_relation";
     tier: "short_term" | "long_term";
+    lifecycle: MemoryLifecycle | null;
     durability: number | null;
+    source: "direct" | "inferred";
+    certainty: number | null;
+    source_message_ids: string | null;
+    evidence_lineage_known: number;
+    last_reinforced_at: string | null;
     ciphertext: string;
     iv: string;
     tag: string;
     created_at: string;
+  }>;
+  const memoryEvidenceIds = new Map<string, string[]>();
+  for (const link of db
+    .prepare(
+      `SELECT inferred_memory_id, evidence_memory_id
+         FROM memory_evidence_links
+        WHERE user_id = ?
+        ORDER BY created_at, evidence_memory_id`,
+    )
+    .all(userId) as Array<{
+    inferred_memory_id: string;
+    evidence_memory_id: string;
+  }>) {
+    const ids = memoryEvidenceIds.get(link.inferred_memory_id) ?? [];
+    ids.push(link.evidence_memory_id);
+    memoryEvidenceIds.set(link.inferred_memory_id, ids);
+  }
+  const memoryReceipts = db
+    .prepare(
+      `SELECT id, memory_id, learner_bot_id, target_bot_id, conversation_id,
+              kind, created_at, read_at
+         FROM memory_acquisition_receipts
+        WHERE user_id = ?
+        ORDER BY created_at`,
+    )
+    .all(userId) as Array<{
+    id: string;
+    memory_id: string;
+    learner_bot_id: string | null;
+    target_bot_id: string | null;
+    conversation_id: string | null;
+    kind: "player_memory" | "bot_relation";
+    created_at: string;
+    read_at: string | null;
   }>;
 
   const botcastShows = db
@@ -2888,9 +2988,21 @@ export function exportUserSnapshot(
       botId: memory.bot_id ?? undefined,
       targetBotId: memory.target_bot_id ?? undefined,
       confidence: memory.confidence,
+      baseConfidence: memory.base_confidence ?? memory.confidence,
       category: memory.category,
       tier: memory.tier,
+      lifecycle:
+        memory.lifecycle ??
+        (memory.source === "inferred" ? "derived" : memory.tier),
       durability: memory.durability ?? undefined,
+      source: memory.source,
+      certainty: memory.certainty ?? undefined,
+      sourceMessageIds: safeParseStringArray(memory.source_message_ids),
+      evidenceMemoryIds: memoryEvidenceIds.get(memory.id) ?? [],
+      evidenceLineageKnown:
+        memory.evidence_lineage_known !== 0 ||
+        (memoryEvidenceIds.get(memory.id)?.length ?? 0) > 0,
+      lastReinforcedAt: memory.last_reinforced_at ?? memory.created_at,
       createdAt: memory.created_at,
       payload: decryptJson(
         {
@@ -2900,6 +3012,16 @@ export function exportUserSnapshot(
         },
         userKey,
       ),
+    })),
+    memoryReceipts: memoryReceipts.map((receipt) => ({
+      id: receipt.id,
+      memoryId: receipt.memory_id,
+      learnerBotId: receipt.learner_bot_id ?? undefined,
+      targetBotId: receipt.target_bot_id ?? undefined,
+      conversationId: receipt.conversation_id ?? undefined,
+      kind: receipt.kind,
+      createdAt: receipt.created_at,
+      readAt: receipt.read_at ?? undefined,
     })),
   };
 }
@@ -2916,6 +3038,7 @@ function assertSnapshotIdsStayWithinTenant(
       | "conversations"
       | "messages"
       | "memories"
+      | "memory_acquisition_receipts"
       | "botcast_shows"
       | "botcast_episodes"
       | "botcast_episode_segments"
@@ -3014,6 +3137,14 @@ function assertSnapshotIdsStayWithinTenant(
     Array.isArray(snapshot.memories)
       ? snapshot.memories.flatMap((memory) =>
           memory && typeof memory.id === "string" ? [memory.id] : [],
+        )
+      : [],
+  );
+  assertIds(
+    "memory_acquisition_receipts",
+    Array.isArray(snapshot.memoryReceipts)
+      ? snapshot.memoryReceipts.flatMap((receipt) =>
+          receipt && typeof receipt.id === "string" ? [receipt.id] : [],
         )
       : [],
   );
@@ -3209,6 +3340,16 @@ function importUserSnapshotWithinTransaction(
 ): void {
   if (snapshot.settings) {
     const settings = snapshot.settings;
+    const memoryEcology = settings.memoryEcology
+      ? resolveMemoryEcologySettingsPatch(
+          settings.memoryEcology as unknown as Record<string, unknown>,
+          DEFAULT_MEMORY_ECOLOGY_SETTINGS,
+        )
+      : {
+          ...DEFAULT_MEMORY_ECOLOGY_SETTINGS,
+          learnAboutPlayer: settings.autoMemory,
+          learnAboutBots: settings.autoMemory,
+        };
     const openAiApiKey =
       typeof settings.openAiApiKey === "string" &&
       settings.openAiApiKey.length > 0
@@ -3292,6 +3433,13 @@ function importUserSnapshotWithinTransaction(
         preferred_image_provider = ?,
         provider_locked = ?,
         auto_memory = ?,
+        memory_learn_about_player = ?,
+        memory_learn_about_bots = ?,
+        memory_acquisition_sensitivity = ?,
+        memory_short_term_days = ?,
+        memory_long_term_threshold = ?,
+        memory_inferred_min_evidence = ?,
+        memory_inferred_threshold = ?,
         composer_writing_assist = ?,
         experimental_dual_ollama_enabled = ?,
         experimental_all_model_effort_enabled = ?,
@@ -3377,7 +3525,14 @@ function importUserSnapshotWithinTransaction(
           (settings.preferredProvider === "local" ? "local" : "openai"),
       }),
       settings.providerLocked ? 1 : 0,
-      settings.autoMemory ? 1 : 0,
+      memoryEcology.learnAboutPlayer || memoryEcology.learnAboutBots ? 1 : 0,
+      memoryEcology.learnAboutPlayer ? 1 : 0,
+      memoryEcology.learnAboutBots ? 1 : 0,
+      memoryEcology.acquisitionSensitivity,
+      memoryEcology.shortTermRetentionDays,
+      memoryEcology.longTermPromotionThreshold,
+      memoryEcology.inferredMinEvidenceCount,
+      memoryEcology.inferredConfidenceThreshold,
       settings.composerWritingAssist ? 1 : 0,
       settings.experimentalDualOllamaEnabled ? 1 : 0,
       settings.experimentalAllModelEffortEnabled === true ? 1 : 0,
@@ -4086,8 +4241,12 @@ function importUserSnapshotWithinTransaction(
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   const insertMemory = db.prepare(`
-    INSERT OR REPLACE INTO memories (id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv, tag, confidence, category, tier, durability, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT OR REPLACE INTO memories
+      (id, user_id, conversation_id, bot_id, target_bot_id,
+       ciphertext, iv, tag, confidence, base_confidence, category, tier,
+       lifecycle, durability, source, certainty, source_message_ids,
+       evidence_lineage_known, last_reinforced_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   for (const conversation of snapshot.conversations) {
@@ -4478,6 +4637,19 @@ function importUserSnapshotWithinTransaction(
 
   for (const memory of snapshot.memories) {
     const encrypted = encryptJson(memory.payload, userKey);
+    const tier = memory.tier ??
+      normalizeMemoryTier(
+        undefined,
+        memory.confidence,
+        memory.confidence,
+        memory.durability ?? 0.5,
+      );
+    const lifecycle: MemoryLifecycle =
+      memory.lifecycle === "derived" || memory.source === "inferred"
+        ? "derived"
+        : memory.lifecycle === "long_term" || tier === "long_term"
+          ? "long_term"
+          : "short_term";
     insertMemory.run(
       memory.id,
       userId,
@@ -4488,16 +4660,70 @@ function importUserSnapshotWithinTransaction(
       encrypted.iv,
       encrypted.tag,
       memory.confidence,
+      memory.baseConfidence ?? memory.confidence,
       memory.category ?? "user",
-      memory.tier ??
-        normalizeMemoryTier(
-          undefined,
-          memory.confidence,
-          memory.confidence,
-          memory.durability ?? 0.5,
-        ),
+      lifecycle === "derived" ? "short_term" : tier,
+      lifecycle,
       memory.durability ?? 0.5,
+      lifecycle === "derived" ? "inferred" : (memory.source ?? "direct"),
+      memory.certainty ?? null,
+      JSON.stringify(
+        Array.isArray(memory.sourceMessageIds)
+          ? memory.sourceMessageIds.filter(
+              (id): id is string => typeof id === "string" && id.length > 0,
+            )
+          : [],
+      ),
+      memory.evidenceLineageKnown ? 1 : 0,
+      memory.lastReinforcedAt ?? memory.createdAt,
       memory.createdAt,
+    );
+  }
+
+  const importedMemoryIds = new Set(snapshot.memories.map((memory) => memory.id));
+  const insertEvidenceLink = db.prepare(
+    `INSERT OR IGNORE INTO memory_evidence_links
+      (user_id, inferred_memory_id, evidence_memory_id, created_at)
+     VALUES (?, ?, ?, ?)`,
+  );
+  for (const memory of snapshot.memories) {
+    if (!importedMemoryIds.has(memory.id)) continue;
+    let restoredEvidence = false;
+    for (const evidenceId of memory.evidenceMemoryIds ?? []) {
+      if (!importedMemoryIds.has(evidenceId) || evidenceId === memory.id) continue;
+      insertEvidenceLink.run(
+        userId,
+        memory.id,
+        evidenceId,
+        memory.createdAt,
+      );
+      restoredEvidence = true;
+    }
+    if (restoredEvidence) {
+      db.prepare(
+        "UPDATE memories SET evidence_lineage_known = 1 WHERE id = ? AND user_id = ?",
+      ).run(memory.id, userId);
+    }
+  }
+
+  const insertMemoryReceipt = db.prepare(
+    `INSERT OR REPLACE INTO memory_acquisition_receipts
+      (id, user_id, memory_id, learner_bot_id, target_bot_id,
+       conversation_id, kind, created_at, read_at)
+     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+  );
+  for (const receipt of snapshot.memoryReceipts ?? []) {
+    if (!importedMemoryIds.has(receipt.memoryId)) continue;
+    insertMemoryReceipt.run(
+      receipt.id,
+      userId,
+      receipt.memoryId,
+      receipt.learnerBotId ?? null,
+      receipt.targetBotId ?? null,
+      receipt.conversationId ?? null,
+      receipt.kind === "bot_relation" ? "bot_relation" : "player_memory",
+      receipt.createdAt,
+      receipt.readAt ?? null,
     );
   }
 }

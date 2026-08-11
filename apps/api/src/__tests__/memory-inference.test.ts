@@ -9,6 +9,18 @@ import { persistMemoryCandidates } from "../memory.ts";
 function createMemoryInferenceTestDb(): DatabaseSync {
   const db = new DatabaseSync(":memory:");
   db.exec(`
+    CREATE TABLE users (
+      id TEXT PRIMARY KEY,
+      auto_memory INTEGER NOT NULL DEFAULT 1,
+      memory_learn_about_player INTEGER NOT NULL DEFAULT 1,
+      memory_learn_about_bots INTEGER NOT NULL DEFAULT 1,
+      memory_acquisition_sensitivity TEXT NOT NULL DEFAULT 'balanced',
+      memory_short_term_days INTEGER NOT NULL DEFAULT 30,
+      memory_long_term_threshold REAL NOT NULL DEFAULT 0.9,
+      memory_inferred_min_evidence INTEGER NOT NULL DEFAULT 2,
+      memory_inferred_threshold REAL NOT NULL DEFAULT 0.8
+    );
+    INSERT INTO users (id) VALUES ('user-1');
     CREATE TABLE memories (
       id TEXT PRIMARY KEY,
       user_id TEXT NOT NULL,
@@ -62,15 +74,17 @@ async function seedDirectMemories(
   userKey: Buffer,
   texts: string[]
 ): Promise<void> {
-  await persistMemoryCandidates(
-    db,
-    "user-1",
-    "conversation-1",
-    "bot-1",
-    texts.map((text) => ({ text, confidence: 0.92 })),
-    userKey,
-    { sourceMessageIds: ["message-1"], durability: 0.4 }
-  );
+  for (let index = 0; index < texts.length; index += 1) {
+    await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: texts[index]!, confidence: 0.92 }],
+      userKey,
+      { sourceMessageIds: [`message-${index + 1}`], durability: 0.4 },
+    );
+  }
 }
 
 function memoryRows(db: DatabaseSync): Array<{
@@ -96,7 +110,7 @@ function memoryRows(db: DatabaseSync): Array<{
 }
 
 describe("inferAndStoreBotMemories", () => {
-  it("merges direct clues into one inferred memory and deletes parents", async () => {
+  it("derives an opinion while preserving its direct evidence", async () => {
     const db = createMemoryInferenceTestDb();
     const userKey = Buffer.alloc(32, 7);
     const provider = inferenceProvider(
@@ -123,22 +137,32 @@ describe("inferAndStoreBotMemories", () => {
       userKey
     );
     const rows = memoryRows(db);
+    const inferredRow = rows.find((row) => row.source === "inferred");
     const payload = decryptJson(
       {
-        ciphertext: rows[0]?.ciphertext ?? "",
-        iv: rows[0]?.iv ?? "",
-        tag: rows[0]?.tag ?? "",
+        ciphertext: inferredRow?.ciphertext ?? "",
+        iv: inferredRow?.iv ?? "",
+        tag: inferredRow?.tag ?? "",
       },
       userKey
     ) as { text?: string };
 
     assert.equal(created.length, 1);
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0]?.source, "inferred");
-    assert.equal(rows[0]?.tier, "short_term");
-    assert.equal(rows[0]?.certainty, 0.92);
+    assert.equal(rows.length, 3);
+    assert.equal(inferredRow?.source, "inferred");
+    assert.equal(inferredRow?.tier, "short_term");
+    assert.equal(inferredRow?.certainty, 0.92);
     assert.equal(payload.text, "Your favorite instrument is the piano.");
-    assert.deepEqual(JSON.parse(rows[0]?.source_message_ids ?? "[]"), ["message-1"]);
+    assert.deepEqual(
+      (JSON.parse(inferredRow?.source_message_ids ?? "[]") as string[]).sort(),
+      ["message-1", "message-2"],
+    );
+    const evidenceCount = db
+      .prepare(
+        "SELECT COUNT(*) AS count FROM memory_evidence_links WHERE inferred_memory_id = ?",
+      )
+      .get(created[0]?.id) as { count: number };
+    assert.equal(evidenceCount.count, 2);
   });
 
   it("preserves favorite payload when merging synonym memories", async () => {
@@ -168,22 +192,23 @@ describe("inferAndStoreBotMemories", () => {
       userKey
     );
     const rows = memoryRows(db);
+    const inferredRow = rows.find((row) => row.source === "inferred");
     const payload = decryptJson(
       {
-        ciphertext: rows[0]?.ciphertext ?? "",
-        iv: rows[0]?.iv ?? "",
-        tag: rows[0]?.tag ?? "",
+        ciphertext: inferredRow?.ciphertext ?? "",
+        iv: inferredRow?.iv ?? "",
+        tag: inferredRow?.tag ?? "",
       },
       userKey
     ) as { text?: string };
 
     assert.equal(created.length, 1);
-    assert.equal(rows.length, 1);
-    assert.equal(rows[0]?.source, "inferred");
+    assert.equal(rows.length, 3);
+    assert.equal(inferredRow?.source, "inferred");
     assert.equal(payload.text, "Potatoes are spuds, and they are your favorite.");
   });
 
-  it("does not consume long-term direct memories during inference", async () => {
+  it("uses long-term anchors without consuming them", async () => {
     const db = createMemoryInferenceTestDb();
     const userKey = Buffer.alloc(32, 7);
     const provider = inferenceProvider(
@@ -197,18 +222,12 @@ describe("inferAndStoreBotMemories", () => {
         ],
       })
     );
-    await persistMemoryCandidates(
-      db,
-      "user-1",
-      "conversation-1",
-      "bot-1",
-      [
-        { text: "Your favorite instrument has black and white keys.", confidence: 0.98 },
-        { text: "You like to play the piano.", confidence: 0.98 },
-      ],
-      userKey,
-      { sourceMessageIds: ["message-1"] }
-    );
+    await persistMemoryCandidates(db, "user-1", "conversation-1", "bot-1", [
+      { text: "Your favorite instrument has black and white keys.", confidence: 0.98 },
+    ], userKey, { sourceMessageIds: ["message-1"] });
+    await persistMemoryCandidates(db, "user-1", "conversation-1", "bot-1", [
+      { text: "You like to play the piano.", confidence: 0.98 },
+    ], userKey, { sourceMessageIds: ["message-2"] });
 
     const created = await inferAndStoreBotMemories(
       db,
@@ -219,9 +238,13 @@ describe("inferAndStoreBotMemories", () => {
     );
     const rows = memoryRows(db);
 
-    assert.equal(created.length, 0);
-    assert.equal(rows.length, 2);
-    assert.deepEqual(rows.map((row) => row.source), ["direct", "direct"]);
+    assert.equal(created.length, 1);
+    assert.equal(rows.length, 3);
+    assert.deepEqual(rows.map((row) => row.source), [
+      "direct",
+      "direct",
+      "inferred",
+    ]);
   });
 
   it("preserves specific favorite descriptors when merging synonyms", async () => {
@@ -251,16 +274,17 @@ describe("inferAndStoreBotMemories", () => {
       userKey
     );
     const rows = memoryRows(db);
+    const inferredRow = rows.find((row) => row.source === "inferred");
     const payload = decryptJson(
       {
-        ciphertext: rows[0]?.ciphertext ?? "",
-        iv: rows[0]?.iv ?? "",
-        tag: rows[0]?.tag ?? "",
+        ciphertext: inferredRow?.ciphertext ?? "",
+        iv: inferredRow?.iv ?? "",
+        tag: inferredRow?.tag ?? "",
       },
       userKey
     ) as { text?: string };
 
-    assert.equal(rows.length, 1);
+    assert.equal(rows.length, 3);
     assert.equal(
       payload.text,
       "Potatoes are spuds, and they are your favorite comfort food."

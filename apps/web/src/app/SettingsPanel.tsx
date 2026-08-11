@@ -3,6 +3,7 @@
 import type { ReactNode } from "react";
 import {
   BookOpen,
+  Brain,
   CircleHelp,
   Coffee,
   FlaskConical,
@@ -36,6 +37,7 @@ export type SettingsScope =
   | "network"
   | "experimental"
   | "models"
+  | "memories"
   | "shortcuts"
   | "voice"
   | "storage"
@@ -64,17 +66,28 @@ const SETTINGS_NAV_GROUPS: readonly {
   }[];
 }[] = [
   {
-    label: "General",
+    label: "Prism",
     items: [
       { scope: "startup", title: "Startup", icon: <House size={16} strokeWidth={2} /> },
-      { scope: "connections", title: "Connections", icon: <KeyRound size={16} strokeWidth={2} /> },
-      { scope: "models", title: "Models", icon: <SlidersHorizontal size={16} strokeWidth={2} /> },
       { scope: "shortcuts", title: "Shortcuts", icon: <Keyboard size={16} strokeWidth={2} /> },
       { scope: "appearance", title: "Appearance", icon: <Monitor size={16} strokeWidth={2} /> },
-      { scope: "network", title: "Network", icon: <Network size={16} strokeWidth={2} /> },
-      { scope: "experimental", title: "Experimental", icon: <FlaskConical size={16} strokeWidth={2} /> },
+    ],
+  },
+  {
+    label: "AI & Voice",
+    items: [
+      { scope: "connections", title: "Connections", icon: <KeyRound size={16} strokeWidth={2} /> },
+      { scope: "models", title: "Models", icon: <SlidersHorizontal size={16} strokeWidth={2} /> },
       { scope: "voice", title: "Voice", icon: <Volume2 size={16} strokeWidth={2} /> },
+      { scope: "experimental", title: "Experimental", icon: <FlaskConical size={16} strokeWidth={2} /> },
+    ],
+  },
+  {
+    label: "Data & Network",
+    items: [
+      { scope: "memories", title: "Memories", icon: <Brain size={16} strokeWidth={2} /> },
       { scope: "storage", title: "Storage", icon: <HardDrive size={16} strokeWidth={2} /> },
+      { scope: "network", title: "Network", icon: <Network size={16} strokeWidth={2} /> },
     ],
   },
   {
@@ -116,7 +129,7 @@ export function SettingsPanel({
       className={`${styles.panel} ${styles.panelSettings}`}
       data-prism-panel="settings"
       data-prism-panel-layer="true"
-      data-dev-panel-safe-area="right"
+      data-viewport-safe-area="right"
       data-settings-scope={scope}
       data-closing={panelClosing ? "true" : undefined}
       role="dialog"

@@ -2,13 +2,19 @@ import type { DatabaseSync } from "node:sqlite";
 import type { UserMemory } from "@localai/shared";
 import type { LlmProvider } from "./providers.ts";
 import { decryptJson } from "./security.ts";
-import { deleteMemoryById, restoreMemory } from "./memory.ts";
+import { restoreMemory } from "./memory.ts";
 import { validateMemoryCandidates } from "./memory-validation.ts";
+import {
+  materializeShortTermMemoryDecay,
+  memoryCategoryCanBeLearned,
+  readMemoryEcologySettings,
+} from "./memory-ecology.ts";
 
 type DirectMemoryRow = {
   id: string;
   conversation_id: string | null;
   bot_id: string | null;
+  target_bot_id: string | null;
   confidence: number;
   category: "general" | "user" | "bot_relation";
   tier: "short_term" | "long_term";
@@ -61,17 +67,17 @@ type PreferenceMemoryFact = {
 };
 
 const INFERENCE_LOOKBACK_LIMIT = 12;
-const INFERENCE_MIN_PARENT_COUNT = 2;
-const INFERENCE_MIN_CERTAINTY = 0.78;
 const TASK_LIKE_MEMORY_PATTERN =
   /^(?:please\s+)?(?:write|draft|compose|create|make|generate|summarize|summarise|explain|help|help\s+me|give\s+me|show\s+me|tell\s+me|find|search|look\s+up|translate|rewrite|edit|review|fix|debug|build|plan)\b/i;
 
-const MEMORY_INFERENCE_PROMPT = `You are a memory analyst. Below are statements someone wrote about themselves. Identify groups that can be combined into ONE more specific fact through simple deduction. Only merge when the combined fact is logically implied (not just thematically related) and you are at least 78% confident.
+function memoryInferencePrompt(minEvidence: number, threshold: number): string {
+  return `You are a memory analyst. Below are direct observations owned by one bot. Identify groups that support ONE concise derived interpretation. The observations may describe the player or the bot's experience of another bot. Only merge when the interpretation is genuinely supported (not merely thematic), uses at least ${minEvidence} observations, and you are at least ${Math.round(threshold * 100)}% confident.
 
 Output JSON only. No prose.
 - No valid merges: {"merges": []}
 - One or more merges: {"merges": [{"text": "...", "parentIndices": [1, 2], "certainty": 0.0-1.0}]}
 - Preserve the durable personal fact from the parent memories. Do not reduce a merge to only a synonym/equivalence if the parents also say what the user likes, prefers, or considers favorite.
+- An opinion about another bot must be calm, provisional, and phrased from the learner bot's perspective. Never diagnose, insult, or turn one incident into a fixed identity.
 
 Examples:
 - ["Your favorite instrument has black and white keys.", "You like to play the piano."]
@@ -80,6 +86,7 @@ Examples:
   -> {"merges":[{"text":"Potatoes are spuds, and they are your favorite.","parentIndices":[1,2],"certainty":0.9}]}
 - ["You like cheese.", "Your favorite color is blue."]
   -> {"merges":[]}`;
+}
 
 function parseSourceMessageIds(raw: string): string[] {
   try {
@@ -115,7 +122,11 @@ function parseJsonPayload(raw: string): InferenceResponse | null {
   }
 }
 
-function normalizeMerge(candidate: unknown): InferenceMerge | null {
+function normalizeMerge(
+  candidate: unknown,
+  minParentCount: number,
+  minCertainty: number,
+): InferenceMerge | null {
   if (!candidate || typeof candidate !== "object") return null;
   const raw = candidate as Record<string, unknown>;
   const text = typeof raw.text === "string" ? raw.text.trim() : "";
@@ -126,8 +137,8 @@ function normalizeMerge(candidate: unknown): InferenceMerge | null {
     ? Math.max(0, Math.min(1, raw.certainty))
     : 0;
 
-  if (!text || parentIndices.length < INFERENCE_MIN_PARENT_COUNT) return null;
-  if (certainty < INFERENCE_MIN_CERTAINTY) return null;
+  if (!text || parentIndices.length < minParentCount) return null;
+  if (certainty < minCertainty) return null;
   return { text, parentIndices, certainty };
 }
 
@@ -138,12 +149,13 @@ function loadDirectMemoryCandidates(
   userKey: Buffer
 ): DirectMemoryCandidate[] {
   const rows = db.prepare(`
-    SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at
+    SELECT id, conversation_id, bot_id, target_bot_id, confidence, category, tier,
+           durability, source, certainty, source_message_ids, ciphertext, iv,
+           tag, created_at
     FROM memories
     WHERE user_id = ?
       AND bot_id = ?
       AND source = 'direct'
-      AND COALESCE(tier, 'short_term') != 'long_term'
     ORDER BY created_at DESC
     LIMIT ?
   `).all(userId, botId, INFERENCE_LOOKBACK_LIMIT) as DirectMemoryRow[];
@@ -182,6 +194,36 @@ function sourceMessageIdUnion(candidates: DirectMemoryCandidate[]): string[] {
     }
   }
   return [...ids];
+}
+
+function evidenceGroupAlreadyDerived(
+  db: DatabaseSync,
+  userId: string,
+  evidenceIds: readonly string[],
+): boolean {
+  const wanted = [...new Set(evidenceIds)].sort();
+  if (wanted.length === 0) return false;
+  const rows = db
+    .prepare(
+      `SELECT inferred_memory_id, evidence_memory_id
+         FROM memory_evidence_links
+        WHERE user_id = ?
+        ORDER BY inferred_memory_id, evidence_memory_id`,
+    )
+    .all(userId) as Array<{
+      inferred_memory_id: string;
+      evidence_memory_id: string;
+    }>;
+  const byInference = new Map<string, string[]>();
+  for (const row of rows) {
+    const values = byInference.get(row.inferred_memory_id) ?? [];
+    values.push(row.evidence_memory_id);
+    byInference.set(row.inferred_memory_id, values);
+  }
+  return [...byInference.values()].some((values) => {
+    const sorted = [...new Set(values)].sort();
+    return sorted.length === wanted.length && sorted.every((id, index) => id === wanted[index]);
+  });
 }
 
 function normalizeForComparison(text: string): string {
@@ -322,23 +364,39 @@ export async function inferAndStoreBotMemories(
   botId: string,
   userKey: Buffer
 ): Promise<UserMemory[]> {
-  const candidates = loadDirectMemoryCandidates(db, userId, botId, userKey);
-  if (candidates.length < INFERENCE_MIN_PARENT_COUNT) return [];
+  materializeShortTermMemoryDecay(db, userId);
+  const settings = readMemoryEcologySettings(db, userId);
+  const candidates = loadDirectMemoryCandidates(db, userId, botId, userKey).filter(
+    (candidate) =>
+      memoryCategoryCanBeLearned(settings, candidate.row.category),
+  );
+  if (candidates.length < settings.inferredMinEvidenceCount) return [];
 
   const response = await auxiliaryProvider.generateResponse([
-    { role: "system", content: MEMORY_INFERENCE_PROMPT },
+    {
+      role: "system",
+      content: memoryInferencePrompt(
+        settings.inferredMinEvidenceCount,
+        settings.inferredConfidenceThreshold,
+      ),
+    },
     { role: "user", content: buildInferenceRequest(candidates) },
   ], { usagePurpose: "memory_inference" });
   const parsed = parseJsonPayload(response);
   if (!parsed || !Array.isArray(parsed.merges)) return [];
 
   const merges = parsed.merges
-    .map(normalizeMerge)
+    .map((merge) =>
+      normalizeMerge(
+        merge,
+        settings.inferredMinEvidenceCount,
+        settings.inferredConfidenceThreshold,
+      ),
+    )
     .filter((merge): merge is InferenceMerge => merge !== null);
   if (merges.length === 0) return [];
 
   const created: UserMemory[] = [];
-  const consumedParentIds = new Set<string>();
   const validatedMerges: ValidatedInferenceMerge[] = [];
 
   for (const merge of merges) {
@@ -346,7 +404,21 @@ export async function inferAndStoreBotMemories(
       .map((index) => candidates[index - 1])
       .filter((candidate): candidate is DirectMemoryCandidate => candidate !== undefined);
     if (parents.length !== merge.parentIndices.length) continue;
-    if (parents.some((parent) => consumedParentIds.has(parent.row.id))) continue;
+    const targetIds = new Set(
+      parents.map((parent) => parent.row.target_bot_id ?? ""),
+    );
+    if (targetIds.size > 1) continue;
+    if (
+      parents.some(
+        (parent) => parent.row.category !== parents[0]?.row.category,
+      )
+    ) {
+      continue;
+    }
+    const distinctExchangeIds = new Set(
+      parents.flatMap((parent) => parent.sourceMessageIds),
+    );
+    if (distinctExchangeIds.size < 2) continue;
     const inferredText = preserveFavoritePayload(merge.text, parents);
     if (!mergePreservesFavoritePayload(inferredText, parents)) continue;
     if (taskMergeWouldDropPreferencePayload(inferredText, parents)) continue;
@@ -359,47 +431,52 @@ export async function inferAndStoreBotMemories(
       existingMemories: candidates.map((candidate) => candidate.text),
     });
     const [validated] = validation.candidates;
-    if (!validated) continue;
+    if (!validated || validated.confidence < settings.inferredConfidenceThreshold) {
+      continue;
+    }
     validatedMerges.push({
       text: validated.text,
       parents,
       certainty: validated.confidence,
     });
-    for (const parent of parents) {
-      consumedParentIds.add(parent.row.id);
-    }
   }
 
   if (validatedMerges.length === 0) return [];
-  consumedParentIds.clear();
-
-  db.exec("BEGIN IMMEDIATE TRANSACTION");
-  try {
-    for (const merge of validatedMerges) {
-      const parents = merge.parents;
-      if (parents.some((parent) => consumedParentIds.has(parent.row.id))) continue;
-
-      const inferred = await restoreMemory(db, userId, userKey, {
-        conversationId: parents[0]?.row.conversation_id ?? null,
-        botId,
-        text: merge.text,
-        confidence: merge.certainty,
-        category: parents[0]?.row.category ?? "user",
-        durability: Math.max(...parents.map((parent) => parent.row.durability ?? 0.5)),
-        source: "inferred",
-        certainty: merge.certainty,
-        sourceMessageIds: sourceMessageIdUnion(parents),
-      });
-      for (const parent of parents) {
-        deleteMemoryById(db, userId, parent.row.id);
-        consumedParentIds.add(parent.row.id);
-      }
-      created.push(inferred);
+  for (const merge of validatedMerges) {
+    const parents = merge.parents;
+    if (
+      evidenceGroupAlreadyDerived(
+        db,
+        userId,
+        parents.map((parent) => parent.row.id),
+      )
+    ) {
+      continue;
     }
-    db.exec("COMMIT");
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
+    const inferred = await restoreMemory(db, userId, userKey, {
+      conversationId: parents[0]?.row.conversation_id ?? null,
+      botId,
+      targetBotId: parents[0]?.row.target_bot_id ?? null,
+      text: merge.text,
+      confidence: merge.certainty,
+      category: parents[0]?.row.category ?? "user",
+      durability: Math.max(
+        ...parents.map((parent) => parent.row.durability ?? 0.5),
+      ),
+      source: "inferred",
+      certainty: merge.certainty,
+      sourceMessageIds: sourceMessageIdUnion(parents),
+      evidenceMemoryIds: parents.map((parent) => parent.row.id),
+    });
+    const targetBotId = parents[0]?.row.target_bot_id?.trim();
+    if (targetBotId) {
+      db.prepare(
+        `UPDATE bot_relationships
+            SET last_reason = ?, updated_at = ?
+          WHERE user_id = ? AND source_bot_id = ? AND target_bot_id = ?`,
+      ).run(merge.text, new Date().toISOString(), userId, botId, targetBotId);
+    }
+    created.push(inferred);
   }
 
   return created;

@@ -303,6 +303,27 @@ function decodeSummaryRecord(payload: string): EncodedSummaryRecord | null {
   return { v: 1, kind: SUMMARY_KIND_THREAD_COMPACT, mode: "sandbox", summary: raw };
 }
 
+export type PersistedMemorySummaryClass = "long_term" | "short_term";
+
+/**
+ * Classifies the prose stored in `memory_summaries` using the same decoder as
+ * prompt assembly. Cross-chat fact summaries are durable recall; rolling
+ * thread and bot-status summaries are working context.
+ */
+export function persistedMemorySummaryProse(
+  payload: string,
+): { memoryClass: PersistedMemorySummaryClass; prose: string } {
+  const decoded = decodeSummaryRecord(payload);
+  if (!decoded) {
+    return { memoryClass: "short_term", prose: "" };
+  }
+  return {
+    memoryClass:
+      decoded.kind === SUMMARY_KIND_CHAT_FACTS ? "long_term" : "short_term",
+    prose: decoded.summary,
+  };
+}
+
 /**
  * Companion-lane (Chat / Zen) cross-thread summarizer. Folds the conversation
  * so far into 1-3 bullet points of personal facts and indexes them into Qdrant

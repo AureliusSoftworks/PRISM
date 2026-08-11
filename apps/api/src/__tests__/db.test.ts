@@ -56,6 +56,48 @@ describe("bot color saturation migration", () => {
   });
 });
 
+describe("memory ecology settings migration", () => {
+  it("copies legacy auto_memory into both automatic learning permissions", () => {
+    const db = new DatabaseSync(":memory:");
+    initializeDatabase(db);
+    const insertUser = db.prepare(
+      `INSERT INTO users
+        (id, email, display_name, password_hash, password_salt,
+         wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag,
+         auto_memory, created_at, last_active_at)
+       VALUES (?, ?, ?, 'hash', 'salt', 'cipher', 'iv', 'tag', ?, ?, ?)`,
+    );
+    const now = "2026-08-11T00:00:00.000Z";
+    insertUser.run("memory-off", "off@example.test", "Off", 0, now, now);
+    insertUser.run("memory-on", "on@example.test", "On", 1, now, now);
+
+    db.exec("ALTER TABLE users DROP COLUMN memory_learn_about_player;");
+    db.exec("ALTER TABLE users DROP COLUMN memory_learn_about_bots;");
+    initializeDatabase(db);
+
+    const rows = db
+      .prepare(
+        `SELECT id, memory_learn_about_player, memory_learn_about_bots
+           FROM users
+          ORDER BY id`,
+      )
+      .all();
+    assert.deepEqual(rows.map((row) => ({ ...row })), [
+      {
+        id: "memory-off",
+        memory_learn_about_player: 0,
+        memory_learn_about_bots: 0,
+      },
+      {
+        id: "memory-on",
+        memory_learn_about_player: 1,
+        memory_learn_about_bots: 1,
+      },
+    ]);
+    db.close();
+  });
+});
+
 describe("resolveDbPath", () => {
   it("prefers DB_PATH for existing explicit deployments", () => {
     const previousDbPath = process.env.DB_PATH;

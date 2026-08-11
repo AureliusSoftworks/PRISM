@@ -16,6 +16,16 @@ import {
   extractCoffeeObserverMemoryCandidates,
   extractMemoryCandidates,
 } from "./memory-extraction.ts";
+import {
+  createMemoryAcquisitionReceipt,
+  ensureMemoryEcologyMemorySchema,
+  linkDerivedMemoryEvidence,
+  materializeShortTermMemoryDecay,
+  memoryEvidenceIds,
+  memoryExpiryAt,
+  readMemoryEcologySettings,
+  memoryCandidatePassesAcquisition,
+} from "./memory-ecology.ts";
 
 export {
   analyzeMemoryIntent,
@@ -30,16 +40,6 @@ interface StoredMemoryPayload {
   embedding: number[];
 }
 
-interface DevSeedMemoryOptions {
-  randomizeAcrossBots?: boolean;
-  random?: () => number;
-  source?: "direct" | "inferred" | "compiled" | "about_you";
-  certainty?: number;
-  category?: MemoryCategory;
-  tier?: MemoryTier;
-  durability?: number;
-}
-
 type MemoryRow = {
   id: string;
   user_id: string;
@@ -50,6 +50,9 @@ type MemoryRow = {
   iv: string;
   tag: string;
   confidence: number;
+  base_confidence?: number | null;
+  lifecycle?: "short_term" | "long_term" | "derived" | null;
+  last_reinforced_at?: string | null;
   category: MemoryCategory;
   tier: MemoryTier;
   durability: number | null;
@@ -66,11 +69,16 @@ interface PersistMemoryOptions {
   tier?: MemoryTier;
   durability?: number;
   sourceMessageIds?: string[];
+  targetBotId?: string | null;
+  evidenceMemoryIds?: string[];
+  createReceipt?: boolean;
+  automatic?: boolean;
 }
 
 interface RestoreMemoryOptions {
   conversationId?: string | null;
   botId?: string | null;
+  targetBotId?: string | null;
   text: string;
   confidence?: number;
   category?: MemoryCategory;
@@ -79,6 +87,8 @@ interface RestoreMemoryOptions {
   source?: "direct" | "inferred" | "compiled" | "about_you";
   certainty?: number;
   sourceMessageIds?: string[];
+  evidenceMemoryIds?: string[];
+  createReceipt?: boolean;
 }
 
 interface StoredMemoryWithEmbedding extends UserMemory {
@@ -148,19 +158,6 @@ const MEMORY_TARGET_STOP_WORDS = new Set([
   "the",
   "what",
 ]);
-
-const DEV_SEED_MEMORY_TEXTS = [
-  "The user likes surreal but calming interface details.",
-  "The user prefers short answers when testing UI changes.",
-  "The user enjoys soft neon colors against dark panels.",
-  "The user likes playful interactions that still feel real.",
-  "The user prefers controls that can be understood without instructions.",
-  "The user enjoys memory bubbles that feel physical and alive.",
-  "The user likes bots to develop distinct visual identities.",
-  "The user prefers gentle motion over abrupt state changes.",
-  "The user enjoys compact panels that still breathe on mobile.",
-  "The user likes developer tools that seed realistic test data.",
-] as const;
 
 export function normalizeMemoryCategory(
   category: MemoryCategory | string | null | undefined,
@@ -233,6 +230,24 @@ export function normalizeMemoryTier(
     : "short_term";
 }
 
+function normalizeMemoryTierForUser(
+  db: DatabaseSync,
+  userId: string,
+  tier: MemoryTier | string | null | undefined,
+  confidence: number,
+  certainty: number,
+  source: MemorySource | string | null,
+): MemoryTier {
+  if (source === "inferred") return "short_term";
+  if (tier === "short_term") return "short_term";
+  if (source === ABOUT_YOU_MEMORY_SOURCE) return "long_term";
+  const settings = readMemoryEcologySettings(db, userId);
+  const truthScore = (clampUnit(confidence) + clampUnit(certainty)) / 2;
+  return truthScore >= settings.longTermPromotionThreshold
+    ? "long_term"
+    : "short_term";
+}
+
 function normalizedMemoryText(text: string): string {
   return text
     .toLowerCase()
@@ -268,7 +283,7 @@ export function hasMemoryTextForBot(
         ORDER BY created_at DESC
         LIMIT 200
       `).all(userId) as MemoryRow[];
-  return rows.some((row) => normalizedMemoryText(decryptMemoryRow(row, userKey).text) === normalizedTarget);
+  return rows.some((row) => normalizedMemoryText(decryptMemoryRow(row, userKey, db).text) === normalizedTarget);
 }
 
 function normalizeSourceMessageIds(sourceMessageIds?: string[]): string[] {
@@ -621,6 +636,28 @@ export function deleteMemoryById(
   return Number(result.changes ?? 0) > 0;
 }
 
+export function readMemoryById(
+  db: DatabaseSync,
+  userId: string,
+  memoryId: string,
+  userKey: Buffer,
+): UserMemory | null {
+  materializeShortTermMemoryDecay(db, userId);
+  const row = db
+    .prepare(
+      `SELECT id, user_id, conversation_id, bot_id, target_bot_id, ciphertext,
+              iv, tag, confidence, base_confidence, category, tier, lifecycle,
+              durability, source, certainty, source_message_ids,
+              last_reinforced_at, created_at
+         FROM memories
+        WHERE id = ? AND user_id = ?`,
+    )
+    .get(memoryId, userId) as MemoryRow | undefined;
+  if (!row) return null;
+  const { embedding: _embedding, ...memory } = decryptMemoryRow(row, userKey, db);
+  return memory;
+}
+
 export function demoteMemoryToShortTerm(
   db: DatabaseSync,
   userId: string,
@@ -632,13 +669,23 @@ export function demoteMemoryToShortTerm(
     .prepare(
       `UPDATE memories
        SET tier = 'short_term',
+           lifecycle = 'short_term',
            confidence = ?,
-           certainty = ?
+           base_confidence = ?,
+           certainty = ?,
+           last_reinforced_at = ?
        WHERE id = ?
          AND user_id = ?
          AND COALESCE(source, 'direct') != '${ABOUT_YOU_MEMORY_SOURCE}'`
     )
-    .run(clampedConfidence, clampedConfidence, memoryId, userId);
+    .run(
+      clampedConfidence,
+      clampedConfidence,
+      clampedConfidence,
+      new Date().toISOString(),
+      memoryId,
+      userId,
+    );
   return Number(result.changes ?? 0) > 0;
 }
 
@@ -648,6 +695,8 @@ export async function restoreMemory(
   userKey: Buffer,
   options: RestoreMemoryOptions
 ): Promise<UserMemory> {
+  ensureMemoryEcologyMemorySchema(db);
+  materializeShortTermMemoryDecay(db, userId);
   let embedding: number[];
   try {
     embedding = await embedTextLocal(options.text);
@@ -662,38 +711,86 @@ export async function restoreMemory(
   const certainty = options.certainty ?? confidence;
   const category = normalizeMemoryCategory(options.category, options.text);
   const durability = explicitMemoryDurability(options.durability) ?? normalizeMemoryDurability(undefined, options.text);
-  const tier = normalizeMemoryTier(options.tier, confidence, certainty, durability, source);
+  const tier = normalizeMemoryTierForUser(
+    db,
+    userId,
+    options.tier,
+    confidence,
+    certainty,
+    source,
+  );
+  const lifecycle = source === "inferred" ? "derived" : tier;
   const sourceMessageIds = normalizeSourceMessageIds(options.sourceMessageIds);
   const encrypted = encryptJson(
     { text: options.text, embedding } as unknown as Record<string, unknown>,
     userKey
   );
   db.prepare(`
-    INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO memories (id, user_id, conversation_id, bot_id, target_bot_id,
+      ciphertext, iv, tag, confidence, base_confidence, category, tier,
+      lifecycle, durability, source, certainty, source_message_ids,
+      last_reinforced_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).run(
     id,
     userId,
     options.conversationId ?? null,
     options.botId ?? null,
+    options.targetBotId ?? null,
     encrypted.ciphertext,
     encrypted.iv,
     encrypted.tag,
     confidence,
+    confidence,
     category,
     tier,
+    lifecycle,
     durability,
     source,
     certainty,
     sourceMessageIdsJson(sourceMessageIds),
+    createdAt,
     createdAt
   );
+  if (lifecycle === "derived" && (options.evidenceMemoryIds?.length ?? 0) > 0) {
+    linkDerivedMemoryEvidence({
+      db,
+      userId,
+      inferredMemoryId: id,
+      evidenceMemoryIds: options.evidenceMemoryIds ?? [],
+      createdAt,
+    });
+  }
+  if (options.createReceipt) {
+    createMemoryAcquisitionReceipt({
+      db,
+      userId,
+      memoryId: id,
+      learnerBotId: options.botId ?? null,
+      targetBotId: options.targetBotId ?? null,
+      conversationId: options.conversationId ?? null,
+      kind: category === "bot_relation" ? "bot_relation" : "player_memory",
+      createdAt,
+    });
+  }
   return {
     id,
     userId,
     conversationId: options.conversationId ?? undefined,
     botId: options.botId ?? undefined,
+    targetBotId: options.targetBotId ?? undefined,
     confidence,
+    baseConfidence: confidence,
+    lifecycle,
+    lastReinforcedAt: createdAt,
+    expiresAt:
+      lifecycle === "short_term"
+        ? memoryExpiryAt(
+            createdAt,
+            readMemoryEcologySettings(db, userId).shortTermRetentionDays,
+          )
+        : undefined,
+    evidenceMemoryIds: options.evidenceMemoryIds ?? [],
     category,
     tier,
     durability,
@@ -721,7 +818,11 @@ function cosineSimilarity(a: number[], b: number[]): number {
   return dot / denom;
 }
 
-function decryptMemoryRow(row: MemoryRow, userKey: Buffer): StoredMemoryWithEmbedding {
+function decryptMemoryRow(
+  row: MemoryRow,
+  userKey: Buffer,
+  db?: DatabaseSync,
+): StoredMemoryWithEmbedding {
   const decrypted = decryptJson(
     {
       ciphertext: row.ciphertext,
@@ -735,24 +836,48 @@ function decryptMemoryRow(row: MemoryRow, userKey: Buffer): StoredMemoryWithEmbe
     ? decrypted.embedding.filter((value): value is number => typeof value === "number")
     : fallbackEmbedding(decrypted.text);
 
+  const source = row.source;
+  const tier = row.tier === "long_term" || row.tier === "short_term"
+    ? row.tier
+    : normalizeMemoryTier(
+      undefined,
+      row.confidence,
+      row.certainty ?? row.confidence,
+      row.durability ?? undefined,
+      source
+    );
+  const lifecycle =
+    row.lifecycle === "derived" || source === "inferred"
+      ? "derived"
+      : row.lifecycle === "long_term" || tier === "long_term"
+        ? "long_term"
+        : "short_term";
+  const lastReinforcedAt = row.last_reinforced_at ?? row.created_at;
+  const retentionDays = db
+    ? readMemoryEcologySettings(db, row.user_id).shortTermRetentionDays
+    : 30;
   return {
     id: row.id,
     userId: row.user_id,
     conversationId: row.conversation_id ?? undefined,
     botId: row.bot_id ?? undefined,
+    targetBotId: row.target_bot_id ?? undefined,
     confidence: row.confidence,
+    baseConfidence: row.base_confidence ?? row.confidence,
+    lifecycle,
+    lastReinforcedAt,
+    expiresAt:
+      lifecycle === "short_term"
+        ? memoryExpiryAt(lastReinforcedAt, retentionDays)
+        : undefined,
+    evidenceMemoryIds:
+      db && lifecycle === "derived"
+        ? memoryEvidenceIds(db, row.user_id, row.id)
+        : [],
     category: normalizeMemoryCategory(row.category, decrypted.text),
-    tier: row.tier === "long_term" || row.tier === "short_term"
-      ? row.tier
-      : normalizeMemoryTier(
-        undefined,
-        row.confidence,
-        row.certainty ?? row.confidence,
-        row.durability ?? undefined,
-        row.source
-      ),
+    tier,
     durability: normalizeMemoryDurability(row.durability, decrypted.text),
-    source: row.source,
+    source,
     certainty: row.certainty ?? row.confidence,
     sourceMessageIds: parseSourceMessageIds(row.source_message_ids),
     createdAt: row.created_at,
@@ -776,6 +901,8 @@ export function persistBotPairNarrativeMemory(args: {
   userKey: Buffer;
   createdAt?: string;
 }): UserMemory | null {
+  ensureMemoryEcologyMemorySchema(args.db);
+  materializeShortTermMemoryDecay(args.db, args.userId);
   const sourceBotId = args.sourceBotId.trim();
   const targetBotId = args.targetBotId.trim();
   const text = args.text.replace(/\s+/gu, " ").trim().slice(0, 2_000);
@@ -791,13 +918,22 @@ export function persistBotPairNarrativeMemory(args: {
     { text, embedding: fallbackEmbedding(text) } as unknown as Record<string, unknown>,
     args.userKey,
   );
+  const confidence = 0.98;
+  const tier = normalizeMemoryTierForUser(
+    args.db,
+    args.userId,
+    undefined,
+    confidence,
+    confidence,
+    "direct",
+  );
   args.db.prepare(
     `INSERT INTO memories
       (id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv, tag,
-       confidence, category, tier, durability, source, certainty,
-       source_message_ids, created_at)
-     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, 0.98, 'bot_relation', 'long_term',
-             0.95, 'direct', 0.98, ?, ?)`,
+       confidence, base_confidence, category, tier, lifecycle, durability,
+       source, certainty, source_message_ids, last_reinforced_at, created_at)
+     VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, 'bot_relation', ?, ?,
+             0.95, 'direct', ?, ?, ?, ?)`,
   ).run(
     id,
     args.userId,
@@ -806,19 +942,46 @@ export function persistBotPairNarrativeMemory(args: {
     encrypted.ciphertext,
     encrypted.iv,
     encrypted.tag,
+    confidence,
+    confidence,
+    tier,
+    tier,
+    confidence,
     sourceMessageIdsJson(sourceMessageIds),
     createdAt,
+    createdAt,
   );
+  createMemoryAcquisitionReceipt({
+    db: args.db,
+    userId: args.userId,
+    memoryId: id,
+    learnerBotId: sourceBotId,
+    targetBotId,
+    kind: "bot_relation",
+    createdAt,
+  });
   return {
     id,
     userId: args.userId,
     botId: sourceBotId,
-    confidence: 0.98,
+    targetBotId,
+    confidence,
+    baseConfidence: confidence,
+    lifecycle: tier,
+    lastReinforcedAt: createdAt,
+    expiresAt:
+      tier === "short_term"
+        ? memoryExpiryAt(
+            createdAt,
+            readMemoryEcologySettings(args.db, args.userId)
+              .shortTermRetentionDays,
+          )
+        : undefined,
     category: "bot_relation",
-    tier: "long_term",
+    tier,
     durability: 0.95,
     source: "direct",
-    certainty: 0.98,
+    certainty: confidence,
     sourceMessageIds,
     createdAt,
     text,
@@ -834,14 +997,16 @@ export function retrieveBotPairNarrativeMemories(args: {
   userKey: Buffer;
   limit?: number;
 }): UserMemory[] {
+  materializeShortTermMemoryDecay(args.db, args.userId);
   const sourceBotId = args.sourceBotId.trim();
   const targetBotId = args.targetBotId.trim();
   if (!sourceBotId || !targetBotId || sourceBotId === targetBotId) return [];
   const limit = Math.max(1, Math.min(20, Math.floor(args.limit ?? 4)));
   const rows = args.db.prepare(
     `SELECT id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv,
-            tag, confidence, category, tier, durability, source, certainty,
-            source_message_ids, created_at
+            tag, confidence, base_confidence, category, tier, lifecycle,
+            durability, source, certainty, source_message_ids,
+            last_reinforced_at, created_at
        FROM memories
       WHERE user_id = ? AND bot_id = ? AND target_bot_id = ?
       ORDER BY created_at DESC, rowid DESC
@@ -851,6 +1016,7 @@ export function retrieveBotPairNarrativeMemories(args: {
     const { embedding: _embedding, ...memory } = decryptMemoryRow(
       row,
       args.userKey,
+      args.db,
     );
     return memory;
   });
@@ -878,7 +1044,7 @@ function loadSameScopeDirectMemories(
         LIMIT ?
       `).all(userId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[];
 
-  return rows.map((row) => decryptMemoryRow(row, userKey));
+  return rows.map((row) => decryptMemoryRow(row, userKey, db));
 }
 
 async function resolveMemoryCulmination(
@@ -1032,20 +1198,31 @@ function loadScopeMemoriesForReinforcement(
   db: DatabaseSync,
   userId: string,
   botId: string | null,
+  targetBotId: string | null,
   userKey: Buffer
 ): StoredMemoryWithEmbedding[] {
   const rows = botId
     ? db.prepare(`
-        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
+        SELECT id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv, tag,
+               confidence, base_confidence, category, tier, lifecycle, durability,
+               source, certainty, source_message_ids, last_reinforced_at, created_at
         FROM memories
         WHERE user_id = ?
           AND bot_id = ?
-          AND target_bot_id IS NULL
+          AND ((? IS NULL AND target_bot_id IS NULL) OR target_bot_id = ?)
         ORDER BY created_at DESC
         LIMIT ?
-      `).all(userId, botId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[]
+      `).all(
+        userId,
+        botId,
+        targetBotId,
+        targetBotId,
+        CULMINATION_LOOKBACK_LIMIT,
+      ) as MemoryRow[]
     : db.prepare(`
-        SELECT id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at
+        SELECT id, user_id, conversation_id, bot_id, target_bot_id, ciphertext, iv, tag,
+               confidence, base_confidence, category, tier, lifecycle, durability,
+               source, certainty, source_message_ids, last_reinforced_at, created_at
         FROM memories
         WHERE user_id = ?
           AND bot_id IS NULL
@@ -1053,7 +1230,7 @@ function loadScopeMemoriesForReinforcement(
         LIMIT ?
       `).all(userId, CULMINATION_LOOKBACK_LIMIT) as MemoryRow[];
 
-  return rows.map((row) => decryptMemoryRow(row, userKey));
+  return rows.map((row) => decryptMemoryRow(row, userKey, db));
 }
 
 function pickReinforcementTarget(
@@ -1076,19 +1253,42 @@ export async function persistMemoryCandidates(
   userKey: Buffer,
   options: PersistMemoryOptions = {}
 ): Promise<UserMemory[]> {
+  ensureMemoryEcologyMemorySchema(db);
+  materializeShortTermMemoryDecay(db, userId);
   const insertMemory = db.prepare(`
-    INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+    INSERT INTO memories (id, user_id, conversation_id, bot_id, target_bot_id,
+      ciphertext, iv, tag, confidence, base_confidence, category, tier,
+      lifecycle, durability, source, certainty, source_message_ids,
+      last_reinforced_at, created_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `);
   let stored: UserMemory[] = [];
   const source = options.source ?? "direct";
+  const targetBotId = options.targetBotId?.trim() || null;
   const sourceMessageIds = normalizeSourceMessageIds(options.sourceMessageIds);
+  const ecologySettings = readMemoryEcologySettings(db, userId);
+  const eligibleCandidates = options.automatic
+    ? candidates.filter((candidate) =>
+        memoryCandidatePassesAcquisition(
+          ecologySettings,
+          options.category ?? candidate.category,
+          candidate.confidence,
+        ),
+      )
+    : candidates;
+  const createReceipt = options.createReceipt ?? options.automatic === true;
   const scopeMemoriesForReinforcement =
     source === "direct"
-      ? loadScopeMemoriesForReinforcement(db, userId, botId, userKey)
+      ? loadScopeMemoriesForReinforcement(
+          db,
+          userId,
+          botId,
+          targetBotId,
+          userKey,
+        )
       : [];
 
-  for (const candidate of candidates) {
+  for (const candidate of eligibleCandidates) {
     let embedding: number[];
     try {
       embedding = await embedTextLocal(candidate.text);
@@ -1112,7 +1312,15 @@ export async function persistMemoryCandidates(
     const target = source === "direct"
       ? pickReinforcementTarget(scopeMemoriesForReinforcement, candidate.text)
       : null;
-    const tier = normalizeMemoryTier(options.tier, candidateConfidence, certainty, durability, source);
+    const tier = normalizeMemoryTierForUser(
+      db,
+      userId,
+      options.tier,
+      candidateConfidence,
+      certainty,
+      source,
+    );
+    const lifecycle = source === "inferred" ? "derived" : tier;
     if (target) {
       const mergedSourceMessageIds = normalizeSourceMessageIds([
         ...target.sourceMessageIds,
@@ -1127,13 +1335,15 @@ export async function persistMemoryCandidates(
       const reinforcedDurability = clampMemoryDurability(
         Math.max(target.durability, durability) + DIRECT_MEMORY_REINFORCE_DURABILITY_BOOST
       );
-      const reinforcedTier = normalizeMemoryTier(
+      const reinforcedTier = normalizeMemoryTierForUser(
+        db,
+        userId,
         options.tier,
         reinforcedConfidence,
         reinforcedCertainty,
-        reinforcedDurability,
         source
       );
+      const reinforcedLifecycle = source === "inferred" ? "derived" : reinforcedTier;
       db.prepare(`
         UPDATE memories
         SET conversation_id = ?,
@@ -1141,13 +1351,17 @@ export async function persistMemoryCandidates(
             iv = ?,
             tag = ?,
             confidence = ?,
+            base_confidence = ?,
             category = ?,
             tier = ?,
+            lifecycle = ?,
             durability = ?,
             source = ?,
             certainty = ?,
             source_message_ids = ?,
-            created_at = ?
+            last_reinforced_at = ?,
+            created_at = ?,
+            target_bot_id = ?
         WHERE id = ?
       `).run(
         conversationId,
@@ -1155,19 +1369,34 @@ export async function persistMemoryCandidates(
         encrypted.iv,
         encrypted.tag,
         reinforcedConfidence,
+        reinforcedConfidence,
         category,
         reinforcedTier,
+        reinforcedLifecycle,
         reinforcedDurability,
         source,
         reinforcedCertainty,
         sourceMessageIdsJson(mergedSourceMessageIds),
         createdAt,
+        createdAt,
+        targetBotId,
         target.id
       );
       const reinforcedMemory: StoredMemoryWithEmbedding = {
         ...target,
         conversationId,
         confidence: reinforcedConfidence,
+        baseConfidence: reinforcedConfidence,
+        lifecycle: reinforcedLifecycle,
+        lastReinforcedAt: createdAt,
+        expiresAt:
+          reinforcedLifecycle === "short_term"
+            ? memoryExpiryAt(
+                createdAt,
+                readMemoryEcologySettings(db, userId).shortTermRetentionDays,
+              )
+            : undefined,
+        targetBotId: targetBotId ?? undefined,
         category,
         tier: reinforcedTier,
         durability: reinforcedDurability,
@@ -1179,12 +1408,29 @@ export async function persistMemoryCandidates(
         embedding,
       };
       scopeMemoriesForReinforcement.unshift(reinforcedMemory);
+      if (createReceipt) {
+        createMemoryAcquisitionReceipt({
+          db,
+          userId,
+          memoryId: target.id,
+          learnerBotId: botId,
+          targetBotId,
+          conversationId,
+          kind: category === "bot_relation" ? "bot_relation" : "player_memory",
+          createdAt,
+        });
+      }
       stored.push({
         id: reinforcedMemory.id,
         userId: reinforcedMemory.userId,
         conversationId: reinforcedMemory.conversationId,
         botId: reinforcedMemory.botId,
+        targetBotId: reinforcedMemory.targetBotId,
         confidence: reinforcedMemory.confidence,
+        baseConfidence: reinforcedMemory.baseConfidence,
+        lifecycle: reinforcedMemory.lifecycle,
+        lastReinforcedAt: reinforcedMemory.lastReinforcedAt,
+        expiresAt: reinforcedMemory.expiresAt,
         category: reinforcedMemory.category,
         tier: reinforcedMemory.tier,
         durability: reinforcedMemory.durability,
@@ -1201,16 +1447,20 @@ export async function persistMemoryCandidates(
       userId,
       conversationId,
       botId,
+      targetBotId,
       encrypted.ciphertext,
       encrypted.iv,
       encrypted.tag,
       candidateConfidence,
+      candidateConfidence,
       category,
       tier,
+      lifecycle,
       durability,
       source,
       certainty,
       sourceMessageIdsJson(sourceMessageIds),
+      createdAt,
       createdAt
     );
     const memory: StoredMemoryWithEmbedding = {
@@ -1218,7 +1468,19 @@ export async function persistMemoryCandidates(
       userId,
       conversationId,
       botId: botId ?? undefined,
+      targetBotId: targetBotId ?? undefined,
       confidence: candidateConfidence,
+      baseConfidence: candidateConfidence,
+      lifecycle,
+      lastReinforcedAt: createdAt,
+      expiresAt:
+        lifecycle === "short_term"
+          ? memoryExpiryAt(
+              createdAt,
+              readMemoryEcologySettings(db, userId).shortTermRetentionDays,
+            )
+          : undefined,
+      evidenceMemoryIds: options.evidenceMemoryIds ?? [],
       category,
       tier,
       durability,
@@ -1230,6 +1492,27 @@ export async function persistMemoryCandidates(
       embedding,
     };
     stored.push(memory);
+    if (lifecycle === "derived" && (options.evidenceMemoryIds?.length ?? 0) > 0) {
+      linkDerivedMemoryEvidence({
+        db,
+        userId,
+        inferredMemoryId: id,
+        evidenceMemoryIds: options.evidenceMemoryIds ?? [],
+        createdAt,
+      });
+    }
+    if (createReceipt) {
+      createMemoryAcquisitionReceipt({
+        db,
+        userId,
+        memoryId: id,
+        learnerBotId: botId,
+        targetBotId,
+        conversationId,
+        kind: category === "bot_relation" ? "bot_relation" : "player_memory",
+        createdAt,
+      });
+    }
     if (source === "direct") {
       scopeMemoriesForReinforcement.unshift(memory);
     }
@@ -1248,117 +1531,6 @@ export async function persistMemoryCandidates(
     }
   }
   return stored;
-}
-
-export function createDevSeedMemories(
-  db: DatabaseSync,
-  userId: string,
-  userKey: Buffer,
-  count: number,
-  botIds: string[],
-  options: DevSeedMemoryOptions = {}
-): number {
-  if (!Number.isInteger(count) || count < 1) {
-    throw new Error("Memory seed count must be a positive integer.");
-  }
-  if (botIds.length === 0) {
-    throw new Error("Create at least one bot before seeding memories.");
-  }
-
-  const insertMemory = db.prepare(`
-    INSERT INTO memories (id, user_id, conversation_id, bot_id, ciphertext, iv, tag, confidence, category, tier, durability, source, certainty, source_message_ids, created_at)
-    VALUES (?, ?, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, '[]', ?)
-  `);
-  const baseTime = Date.now();
-  const targets = devSeedMemoryTargets(count, botIds, options);
-
-  db.exec("BEGIN IMMEDIATE TRANSACTION");
-  try {
-    for (let index = 0; index < targets.length; index += 1) {
-      const botId = targets[index];
-      const template = DEV_SEED_MEMORY_TEXTS[index % DEV_SEED_MEMORY_TEXTS.length];
-      const variant = Math.floor(index / DEV_SEED_MEMORY_TEXTS.length) + 1;
-      const text = variant === 1 ? template : `${template} (${variant})`;
-      const payload: StoredMemoryPayload = {
-        text,
-        embedding: fallbackEmbedding(text),
-      };
-      const encrypted = encryptJson(payload as unknown as Record<string, unknown>, userKey);
-      const confidence = 0.62 + (index % 7) * 0.05;
-      const durability = explicitMemoryDurability(options.durability) ?? normalizeMemoryDurability(undefined, text);
-      insertMemory.run(
-        randomId(12),
-        userId,
-        botId,
-        encrypted.ciphertext,
-        encrypted.iv,
-        encrypted.tag,
-        confidence,
-        options.category ?? "user",
-        normalizeMemoryTier(options.tier, confidence, options.certainty ?? confidence, durability, options.source ?? "direct"),
-        durability,
-        options.source ?? "direct",
-        options.certainty ?? confidence,
-        new Date(baseTime + index).toISOString()
-      );
-    }
-    db.exec("COMMIT");
-    return targets.length;
-  } catch (error) {
-    db.exec("ROLLBACK");
-    throw error;
-  }
-}
-
-function devSeedMemoryTargets(
-  count: number,
-  botIds: string[],
-  options: DevSeedMemoryOptions
-): string[] {
-  if (!options.randomizeAcrossBots || botIds.length <= 1) {
-    return Array.from({ length: count }, (_unused, index) => botIds[index % botIds.length]);
-  }
-
-  const random = options.random ?? Math.random;
-  const shuffled = shuffleWithRandom(botIds, random);
-  const leaveEmptyCount = shuffled.length >= 3 ? 1 : 0;
-  const activeBotLimit = Math.max(1, Math.min(shuffled.length - leaveEmptyCount, count));
-  const minActiveBots = Math.min(activeBotLimit, Math.max(1, Math.ceil(count / 3)));
-  const activeBotCount =
-    minActiveBots + Math.floor(random() * (activeBotLimit - minActiveBots + 1));
-  const activeBots = shuffled.slice(0, activeBotCount);
-  const counts = new Map(activeBots.map((botId) => [botId, 1]));
-  const protectedSingleBot = activeBots.length > 1 ? activeBots[activeBots.length - 1] : null;
-  let remaining = count - activeBots.length;
-
-  while (remaining > 0) {
-    const hasBotBelowThree = activeBots.some((botId) => (counts.get(botId) ?? 0) < 3);
-    const belowThreeCandidates = hasBotBelowThree
-      ? activeBots.filter((botId) => (counts.get(botId) ?? 0) < 3)
-      : activeBots;
-    const nonProtectedCapacity = activeBots
-      .filter((botId) => botId !== protectedSingleBot)
-      .reduce((sum, botId) => sum + Math.max(0, 3 - (counts.get(botId) ?? 0)), 0);
-    const candidates = protectedSingleBot && remaining <= nonProtectedCapacity
-      ? belowThreeCandidates.filter((botId) => botId !== protectedSingleBot)
-      : belowThreeCandidates;
-    const botId = candidates[Math.floor(random() * candidates.length)] ?? activeBots[0];
-    counts.set(botId, (counts.get(botId) ?? 0) + 1);
-    remaining -= 1;
-  }
-
-  return activeBots.flatMap((botId) =>
-    Array.from({ length: counts.get(botId) ?? 0 }, () => botId)
-  );
-}
-
-function shuffleWithRandom<T>(source: readonly T[], random: () => number): T[] {
-  const result = [...source];
-  for (let index = result.length - 1; index > 0; index -= 1) {
-    const swapIndex = Math.floor(random() * (index + 1));
-    [result[index], result[swapIndex]] = [result[swapIndex], result[index]];
-  }
-  return result;
 }
 
 function memoryTargetTerms(text: string): Set<string> {
@@ -1397,6 +1569,7 @@ export async function findMemoryByCue(
   cueText: string,
   userKey: Buffer
 ): Promise<UserMemory | null> {
+  materializeShortTermMemoryDecay(db, userId);
   const normalizedBotId = typeof botId === "string" && botId.trim().length > 0
     ? botId.trim()
     : null;
@@ -1421,7 +1594,7 @@ export async function findMemoryByCue(
   const now = Date.now();
   const best = rows
     .map((row) => {
-      const memory = decryptMemoryRow(row, userKey);
+      const memory = decryptMemoryRow(row, userKey, db);
       const createdAtMs = memoryCreatedAtMs(memory);
       const sameConversationBoost =
         memory.conversationId === conversationId ? SAME_CONVERSATION_MEMORY_BOOST : 0;
@@ -1453,6 +1626,7 @@ export async function retrieveRelevantMemories(
   botId?: string | null,
   limit = 4
 ): Promise<UserMemory[]> {
+  materializeShortTermMemoryDecay(db, userId);
   const normalizedBotId = typeof botId === "string" && botId.trim().length > 0
     ? botId.trim()
     : null;
@@ -1469,7 +1643,7 @@ export async function retrieveRelevantMemories(
         .all(userId) as MemoryRow[];
   const queryEmbedding = await embedWithFallback(query);
   const scored = rows.map((row) => {
-    const memory = decryptMemoryRow(row, userKey);
+    const memory = decryptMemoryRow(row, userKey, db);
     return {
       ...memory,
       score: cosineSimilarity(queryEmbedding, memory.embedding)
@@ -1489,6 +1663,7 @@ export function retrieveRecentMemoriesForStarter(
   botId?: string | null,
   limit = 4
 ): UserMemory[] {
+  materializeShortTermMemoryDecay(db, userId);
   const normalizedBotId = typeof botId === "string" && botId.trim().length > 0
     ? botId.trim()
     : null;
@@ -1506,7 +1681,7 @@ export function retrieveRecentMemoriesForStarter(
 
   return filterConflictingMemories(
     rows.map((row) => ({
-      ...decryptMemoryRow(row, userKey),
+      ...decryptMemoryRow(row, userKey, db),
       score: 0,
     }))
   )
@@ -1521,6 +1696,7 @@ export function retrieveRecentBotMemoriesForStarter(
   botId: string,
   limit = 4
 ): UserMemory[] {
+  materializeShortTermMemoryDecay(db, userId);
   const normalizedBotId = botId.trim();
   if (!normalizedBotId) return [];
   const rows = db
@@ -1538,7 +1714,7 @@ export function retrieveRecentBotMemoriesForStarter(
 
   return filterConflictingMemories(
     rows.map((row) => ({
-      ...decryptMemoryRow(row, userKey),
+      ...decryptMemoryRow(row, userKey, db),
       score: 0,
     }))
   )

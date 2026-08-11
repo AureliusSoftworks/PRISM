@@ -15,6 +15,12 @@ import { normalizeMemoryDisplayText } from "./memory-validation.ts";
 import { decryptJson } from "./security.ts";
 import { HttpError } from "./utils.http.ts";
 import { getLatestSandboxBotStatusSummary } from "./memory-summarizer.ts";
+import {
+  materializeShortTermMemoryDecay,
+  memoryEvidenceIds,
+  memoryExpiryAt,
+  readMemoryEcologySettings,
+} from "./memory-ecology.ts";
 
 type MemorySource = NonNullable<UserMemory["source"]>;
 
@@ -22,7 +28,11 @@ interface MemoryPanelRow {
   id: string;
   conversation_id: string | null;
   bot_id: string | null;
+  target_bot_id: string | null;
   confidence: number;
+  base_confidence: number | null;
+  lifecycle: "short_term" | "long_term" | "derived";
+  last_reinforced_at: string | null;
   category: MemoryCategory;
   tier: MemoryTier;
   durability: number | null;
@@ -164,7 +174,12 @@ function memorySource(value: string | null | undefined): MemorySource {
   return "direct";
 }
 
-function decryptMemoryRow(row: MemoryPanelRow, userId: string, userKey: Buffer): UserMemory {
+function decryptMemoryRow(
+  db: DatabaseSync,
+  row: MemoryPanelRow,
+  userId: string,
+  userKey: Buffer,
+): UserMemory {
   const payload = decryptJson(
     {
       ciphertext: row.ciphertext,
@@ -178,13 +193,28 @@ function decryptMemoryRow(row: MemoryPanelRow, userId: string, userKey: Buffer):
   const category = memoryCategory(row.category);
   const tier = memoryTier(row.tier);
   const durability = normalizeMemoryDurability(row.durability, text);
+  const lifecycle = source === "inferred" ? "derived" : row.lifecycle ?? tier;
+  const lastReinforcedAt = row.last_reinforced_at ?? row.created_at;
   return {
     id: row.id,
     userId,
     conversationId: row.conversation_id ?? undefined,
     botId: row.bot_id ?? undefined,
+    targetBotId: row.target_bot_id ?? undefined,
     createdAt: row.created_at,
     confidence: row.confidence,
+    baseConfidence: row.base_confidence ?? row.confidence,
+    lifecycle,
+    lastReinforcedAt,
+    expiresAt:
+      lifecycle === "short_term"
+        ? memoryExpiryAt(
+            lastReinforcedAt,
+            readMemoryEcologySettings(db, userId).shortTermRetentionDays,
+          )
+        : undefined,
+    evidenceMemoryIds:
+      lifecycle === "derived" ? memoryEvidenceIds(db, userId, row.id) : [],
     category,
     tier,
     source,
@@ -300,6 +330,7 @@ export function loadBotMemoryPanelPayload(args: {
   limit?: number;
 }): BotMemoryPanelPayload {
   const { db, userId, userKey, botId } = args;
+  materializeShortTermMemoryDecay(db, userId);
   const bot = db
     .prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?")
     .get(botId, userId) as { id?: string } | undefined;
@@ -322,8 +353,10 @@ export function loadBotMemoryPanelPayload(args: {
   const limit = Math.max(1, Math.min(MEMORY_PANEL_LIMIT, Math.floor(args.limit ?? MEMORY_PANEL_LIMIT)));
   const rows = db
     .prepare(
-      `SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty,
-              source_message_ids, ciphertext, iv, tag, created_at
+      `SELECT id, conversation_id, bot_id, target_bot_id, confidence,
+              base_confidence, category, tier, lifecycle, durability, source,
+              certainty, source_message_ids, last_reinforced_at,
+              ciphertext, iv, tag, created_at
        FROM memories
        WHERE user_id = ? AND bot_id = ?
        ORDER BY created_at DESC
@@ -331,7 +364,7 @@ export function loadBotMemoryPanelPayload(args: {
     )
     .all(userId, botId, limit) as unknown as MemoryPanelRow[];
 
-  const decrypted = rows.map((row) => decryptMemoryRow(row, userId, userKey));
+  const decrypted = rows.map((row) => decryptMemoryRow(db, row, userId, userKey));
   const normalMemories = filterConflictingMemories(
     decrypted.filter((memory) => memory.source !== "about_you")
   );

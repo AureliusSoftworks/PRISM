@@ -25,10 +25,15 @@ import {
   findMemoryByCue,
   memoryQualifiesLongTerm,
   persistMemoryCandidates,
+  readMemoryById,
   retrieveRecentBotMemoriesForStarter,
   retrieveRecentMemoriesForStarter,
   retrieveRelevantMemories,
 } from "./memory.ts";
+import {
+  latestPlayerMemoryReceipt,
+  readMemoryEcologySettings,
+} from "./memory-ecology.ts";
 import {
   validateMemoryCandidates,
   type MemoryValidationReasonCode,
@@ -9832,6 +9837,30 @@ export async function processChatMessage(
     };
   }
   let memoryClarification: string | null = null;
+  const exactLatestReceiptRetractionRequested =
+    /^\s*(?:please[\s,]+)?(?:do\s+not|don't)\s+remember\s+(?:that|this)[.!?]*\s*$/iu.test(
+      message,
+    );
+  const exactLatestReceiptRetraction = exactLatestReceiptRetractionRequested
+      ? latestPlayerMemoryReceipt({
+          db,
+          userId,
+          conversationId: activeConversationId,
+          botId: activeMemoryBotId,
+        })
+      : null;
+  const exactLatestReceiptMemory = exactLatestReceiptRetraction
+    ? readMemoryById(
+        db,
+        userId,
+        exactLatestReceiptRetraction.memory_id,
+        userKey,
+      )
+    : null;
+  if (exactLatestReceiptRetractionRequested && !exactLatestReceiptMemory) {
+    memoryClarification =
+      "The player asked you not to remember a recent learned detail, but there is no single matching acquisition receipt for this bot and conversation. Ask which specific memory they want removed. Do not claim that anything was forgotten yet.";
+  }
   const longTermRetractionTargets = new Map<string, Awaited<ReturnType<typeof findMemoryByCue>>>();
   if (
     !skipPersonalFacts &&
@@ -9842,19 +9871,23 @@ export async function processChatMessage(
     (memoryIntent.kind === "retract" || memoryIntent.kind === "correct")
   ) {
     for (const cuePhrase of memoryIntent.cuePhrases) {
-      const target = await findMemoryByCue(
-        db,
-        userId,
-        activeConversationId,
-        activeMemoryBotId,
-        cuePhrase,
-        userKey
-      );
+      const target: Awaited<ReturnType<typeof findMemoryByCue>> =
+        exactLatestReceiptRetractionRequested
+          ? exactLatestReceiptMemory
+          : await findMemoryByCue(
+              db,
+              userId,
+              activeConversationId,
+              activeMemoryBotId,
+              cuePhrase,
+              userKey,
+            );
       longTermRetractionTargets.set(cuePhrase, target);
       if (
         target &&
         isLongTermMemory(target) &&
         target.conversationId !== activeConversationId &&
+        !exactLatestReceiptRetractionRequested &&
         !messageAllowsLongTermDemotion(message)
       ) {
         memoryClarification = longTermMemoryClarificationPrompt(target.text);
@@ -11070,6 +11103,11 @@ export async function processChatMessage(
   // Bot-authored judgment memories are treated as inferred bot-scoped memories
   // and only run when auto-memory is enabled.
   let memoryLearned: ProcessChatMessageResult["memoryLearned"];
+  const memoryEcologySettings = readMemoryEcologySettings(
+    db,
+    userId,
+    settings.autoMemory,
+  );
   const shouldProcessExplicitMemory = memoryIntent !== null &&
     (memoryIntent.kind !== "create" || memoryIntent.scope === "global" || memoryIntent.explicit);
   if (
@@ -11082,22 +11120,27 @@ export async function processChatMessage(
     const createdMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["created"] = [];
     const retractedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["retracted"] = [];
     const rejectedMemories: NonNullable<ProcessChatMessageResult["memoryLearned"]>["rejected"] = [];
-    if (memoryIntent && (settings.autoMemory || shouldProcessExplicitMemory)) {
+    if (
+      memoryIntent &&
+      (memoryEcologySettings.learnAboutPlayer || shouldProcessExplicitMemory)
+    ) {
       const cuePhrases =
         memoryIntent.kind === "retract" || memoryIntent.kind === "correct"
           ? memoryIntent.cuePhrases
           : [];
       for (const cuePhrase of cuePhrases) {
-        const target = longTermRetractionTargets.has(cuePhrase)
-          ? longTermRetractionTargets.get(cuePhrase)
-          : await findMemoryByCue(
-              db,
-              userId,
-              activeConversationId,
-              activeMemoryBotId,
-              cuePhrase,
-              userKey
-            );
+        const target = exactLatestReceiptRetractionRequested
+          ? exactLatestReceiptMemory
+          : longTermRetractionTargets.has(cuePhrase)
+            ? longTermRetractionTargets.get(cuePhrase)
+            : await findMemoryByCue(
+                db,
+                userId,
+                activeConversationId,
+                activeMemoryBotId,
+                cuePhrase,
+                userKey,
+              );
         const shouldDeleteLongTerm = Boolean(
           target &&
           isLongTermMemory(target) &&
@@ -11164,7 +11207,11 @@ export async function processChatMessage(
           memoryBotId,
           validation.candidates,
           userKey,
-          { sourceMessageIds: userMessageId ? [userMessageId] : [] }
+          {
+            sourceMessageIds: userMessageId ? [userMessageId] : [],
+            automatic: !shouldProcessExplicitMemory,
+            createReceipt: true,
+          }
         );
         createdMemories.push(
           ...storedMemories.map((memory) => {
@@ -11194,7 +11241,7 @@ export async function processChatMessage(
       }
     }
 
-    if (settings.autoMemory && activeMemoryBotId) {
+    if (memoryEcologySettings.learnAboutPlayer && activeMemoryBotId) {
       const judgmentCandidates = extractBotJudgmentMemoryCandidates({
         assistantMessage: assistantDisplay,
         botName: settings.starterPromptLabel ?? null,
@@ -11219,10 +11266,12 @@ export async function processChatMessage(
           validation.candidates,
           userKey,
           {
-            source: "inferred",
+            source: "direct",
             category: "general",
             tier: "short_term",
             sourceMessageIds: assistantProseMessageId ? [assistantProseMessageId] : [],
+            automatic: true,
+            createReceipt: true,
           }
         );
         createdMemories.push(
@@ -11294,7 +11343,7 @@ export async function processChatMessage(
     };
     if (
       companionLaneUsesQdrantMemorySummaries(mode) &&
-      settings.autoMemory &&
+      memoryEcologySettings.learnAboutPlayer &&
       !skipMemoryForMoodCooldownTurn
     ) {
       summarizeAndStoreMemories(

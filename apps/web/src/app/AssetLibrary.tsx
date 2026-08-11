@@ -65,6 +65,7 @@ export interface AssetRailProps {
   refreshKey?: string | number | null;
   disabled?: boolean;
   synthesizeDisabled?: boolean;
+  onOpenStorageSettings?: () => void;
   onUpload?: () => void;
   onSynthesize: (direction: string) => void | Promise<void>;
   onSelect: (asset: ImageAssetSet) => void | Promise<void>;
@@ -211,6 +212,7 @@ export function AssetRail({
   refreshKey,
   disabled = false,
   synthesizeDisabled = false,
+  onOpenStorageSettings,
   onUpload,
   onSynthesize,
   onSelect,
@@ -333,13 +335,26 @@ export function AssetRail({
               : "Reuse a recent image or synthesize a new one."}
           </small>
         </div>
-        <button
-          type="button"
-          className={sharedStyles.linkButton}
-          onClick={() => setModalOpen(true)}
-        >
-          {viewAllLabel}
-        </button>
+        <div className={styles.railHeaderActions}>
+          {onOpenStorageSettings ? (
+            <button
+              type="button"
+              className={sharedStyles.linkButton}
+              data-asset-storage-settings-shortcut={kind}
+              onClick={onOpenStorageSettings}
+            >
+              Storage Settings
+            </button>
+          ) : null}
+          <button
+            type="button"
+            className={sharedStyles.linkButton}
+            data-asset-library-shortcut={kind}
+            onClick={() => setModalOpen(true)}
+          >
+            {viewAllLabel}
+          </button>
+        </div>
       </header>
       <div className={styles.rail}>
         <PrismRefractTarget target={synthesizeTarget}>

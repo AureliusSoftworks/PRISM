@@ -108,6 +108,7 @@ const GLOBAL_SCOPE_PATTERNS = [
 ] as const;
 
 const RETRACTION_PATTERNS = [
+  /\b(?:do\s+not|don't)\s+remember\s+(?:that|this)\b/i,
   /\bforget\s+(?:what\s+i\s+said\s+(?:about\s+.+)?|that|the\s+.+|.+)\b/i,
   /\bnever\s?mind\s+(?:what\s+i\s+said\s+(?:about\s+.+)?|about\s+.+|that)\b/i,
   /\bignore\s+(?:that|what\s+i\s+said|the\s+.+)\b/i,

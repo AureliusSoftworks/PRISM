@@ -8110,6 +8110,49 @@ describe("refreshConversationTitle", () => {
 });
 
 describe("processChatMessage conversational memory cues", () => {
+  it("does not auto-learn player facts when only bot-to-bot learning is enabled", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    db.exec(`
+      CREATE TABLE users (
+        id TEXT PRIMARY KEY,
+        auto_memory INTEGER NOT NULL DEFAULT 1,
+        memory_learn_about_player INTEGER NOT NULL DEFAULT 1,
+        memory_learn_about_bots INTEGER NOT NULL DEFAULT 1,
+        memory_acquisition_sensitivity TEXT NOT NULL DEFAULT 'balanced',
+        memory_short_term_days INTEGER NOT NULL DEFAULT 30,
+        memory_long_term_threshold REAL NOT NULL DEFAULT 0.9,
+        memory_inferred_min_evidence INTEGER NOT NULL DEFAULT 3,
+        memory_inferred_threshold REAL NOT NULL DEFAULT 0.8
+      );
+      INSERT INTO users
+        (id, memory_learn_about_player, memory_learn_about_bots)
+      VALUES ('user-1', 0, 1);
+    `);
+    installChatFetchStub("Thanks for telling me.");
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "I prefer tea.",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: true,
+        botId: "bot-1",
+        incognito: false,
+        mode: "sandbox",
+      },
+    );
+
+    assert.equal(result.memoryLearned?.created.length ?? 0, 0);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS count FROM memories").get() as { count: number })
+        .count,
+      0,
+    );
+  });
+
   it("saves explicit fun-fact disclosures even when auto-memory is off", async () => {
     const db = createChatTestDb();
     const userKey = Buffer.alloc(32, 7);
@@ -8824,6 +8867,76 @@ describe("processChatMessage conversational memory cues", () => {
       .get() as { n: number };
     assert.equal(remaining.n, 0);
     assert.equal(result.memoryLearned?.retracted[0]?.text, "You love pistachios.");
+  });
+
+  it("deletes exactly the latest notified memory for don't remember that", async () => {
+    const db = createChatTestDb();
+    const userKey = Buffer.alloc(32, 7);
+    installChatFetchStub("Understood.");
+    const [older] = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "You prefer tea.", confidence: 0.82 }],
+      userKey,
+      { createReceipt: true },
+    );
+    const [latest] = await persistMemoryCandidates(
+      db,
+      "user-1",
+      "conversation-1",
+      "bot-1",
+      [{ text: "Your cat is named Miso.", confidence: 0.84 }],
+      userKey,
+      { createReceipt: true },
+    );
+    assert.ok(older?.id);
+    assert.ok(latest?.id);
+    db.prepare(
+      "UPDATE memory_acquisition_receipts SET created_at = ? WHERE memory_id = ?",
+    ).run("2026-08-10T00:00:00.000Z", older.id);
+    db.prepare(
+      "UPDATE memory_acquisition_receipts SET created_at = ? WHERE memory_id = ?",
+    ).run("2026-08-11T00:00:00.000Z", latest.id);
+    db.prepare(
+      "INSERT INTO conversations (id, user_id, title, conversation_mode, created_at, updated_at) VALUES (?, ?, ?, 'sandbox', ?, ?)",
+    ).run(
+      "conversation-1",
+      "user-1",
+      "Existing chat",
+      "2026-01-01T00:00:00.000Z",
+      "2026-01-01T00:00:00.000Z",
+    );
+
+    const result = await processChatMessage(
+      db,
+      "user-1",
+      "Don't remember that.",
+      userKey,
+      {
+        preferredProvider: "local",
+        autoMemory: false,
+        botId: "bot-1",
+        incognito: false,
+        mode: "sandbox",
+      },
+      "conversation-1",
+    );
+
+    assert.equal(result.memoryLearned?.retracted[0]?.id, latest.id);
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS count FROM memories WHERE id = ?").get(older.id) as {
+        count: number;
+      }).count,
+      1,
+    );
+    assert.equal(
+      (db.prepare("SELECT COUNT(*) AS count FROM memories WHERE id = ?").get(latest.id) as {
+        count: number;
+      }).count,
+      0,
+    );
   });
 
   it("retracts before creating replacement memories for correction cues", async () => {

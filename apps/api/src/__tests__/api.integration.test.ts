@@ -166,6 +166,67 @@ after(() => {
 });
 
 describe("API request integration", () => {
+  it("requires authentication for account memory settings endpoints", async () => {
+    const anonymous = createClient();
+    assert.equal((await anonymous.request("/api/settings/memories")).status, 400);
+    assert.equal(
+      (
+        await anonymous.request("/api/settings/memories/short_term", {
+          method: "DELETE",
+        })
+      ).status,
+      400,
+    );
+
+    const client = createClient();
+    const registered = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "memory-settings@example.com",
+        password: "memory-settings-password",
+      }),
+    );
+    assert.equal(registered.status, 201);
+    const overviewResponse = await client.request("/api/settings/memories");
+    assert.equal(overviewResponse.status, 200);
+    const memorySettingsPayload = await json(overviewResponse);
+    assert.deepEqual(memorySettingsPayload.settings, {
+      learnAboutPlayer: true,
+      learnAboutBots: true,
+      acquisitionSensitivity: "balanced",
+      shortTermRetentionDays: 30,
+      longTermPromotionThreshold: 0.9,
+      inferredMinEvidenceCount: 3,
+      inferredConfidenceThreshold: 0.8,
+    });
+    assert.deepEqual(memorySettingsPayload.overview, {
+      longTerm: { recordCount: 0, proseBytes: 0 },
+      shortTerm: { recordCount: 0, proseBytes: 0 },
+      derived: { recordCount: 0, proseBytes: 0 },
+      total: { recordCount: 0, proseBytes: 0 },
+    });
+
+    const patched = await client.request("/api/settings/memories", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        learnAboutPlayer: false,
+        acquisitionSensitivity: "curious",
+        shortTermRetentionDays: 14,
+      }),
+    });
+    assert.equal(patched.status, 200);
+    assert.deepEqual((await json(patched)).settings, {
+      learnAboutPlayer: false,
+      learnAboutBots: true,
+      acquisitionSensitivity: "curious",
+      shortTermRetentionDays: 14,
+      longTermPromotionThreshold: 0.9,
+      inferredMinEvidenceCount: 3,
+      inferredConfidenceThreshold: 0.8,
+    });
+  });
+
   it("authenticates model preparation and never warms an online route", async () => {
     const anonymous = createClient();
     const denied = await anonymous.request(

@@ -186,11 +186,9 @@ import {
   shouldGenerateCoffeeGroupNameFromInput,
   topOffCoffeeCupForBot,
   sipCoffeeJoinPlayerCup,
-  undoLatestCoffeeDebugMessage,
   updateCoffeeGroup,
   updateCoffeePreset,
   updateCoffeeGroupWithGeneratedTopics,
-  updateCoffeeBotSocialDebug,
   updateCoffeeConversationSettings,
 } from "./coffee.ts";
 import {
@@ -440,7 +438,6 @@ import {
   generateSignalStudioLightingMap,
 } from "./signal-studio-lighting.ts";
 import {
-  createDevSeedMemories,
   demoteMemoryToShortTerm,
   deleteMemoriesLinkedToMessages,
   deleteMemoriesForBotScope,
@@ -461,7 +458,6 @@ import { discardLatestZenAssistantMessage } from "./zen-message-discard.ts";
 import {
   buildZenWallpaperHistoryForGeneratedImage,
   clearConversationMessages,
-  createDevSeedConversations,
   dedupeActiveZenWallpaperGeneration,
   deleteConversation,
   deleteConversationMessage,
@@ -701,7 +697,6 @@ import {
 import {
   composeBotSystemPrompt,
   deleteAllBots,
-  deleteBots,
   deleteSelectedBots,
   normalizeBotExportHash,
   resolveBotExportHashForCreate,
@@ -988,7 +983,6 @@ import {
   applyPrismMoodIgnoredQuestion,
   applyPrismMoodInterruption,
   createDefaultPrismMoodState,
-  debugPatchPrismMood,
   resetPrismMood,
   type PrismMoodInterruptionInput,
   type PrismMoodMode,
@@ -1198,6 +1192,21 @@ import {
 } from "./local-voice-engine.ts";
 import { initializePremiumVoiceDefaults } from "./premium-voice-defaults.ts";
 import { deleteVector, deleteVectorsForUser } from "./qdrant.ts";
+import {
+  clearMemoryProseClass,
+  getMemoryProseOverview,
+  type MemoryProseClass,
+} from "./memory-settings.ts";
+import {
+  MemoryEcologySettingsInputError,
+  listUnreadMemoryAcquisitionReceipts,
+  markMemoryAcquisitionReceiptRead,
+  materializeShortTermMemoryDecay,
+  memoryEvidenceIds,
+  readMemoryEcologySettings,
+  resolveMemoryEcologySettingsPatch,
+  writeMemoryEcologySettings,
+} from "./memory-ecology.ts";
 let config: AppConfig = getAppConfig();
 let db: DatabaseSync = createDatabase();
 const signalArtworkJobs = new SignalArtworkJobManager();
@@ -2640,6 +2649,13 @@ interface UserDbRow {
   preferred_image_provider: ImageProviderName;
   provider_locked: number;
   auto_memory: number;
+  memory_learn_about_player: number;
+  memory_learn_about_bots: number;
+  memory_acquisition_sensitivity: string;
+  memory_short_term_days: number;
+  memory_long_term_threshold: number;
+  memory_inferred_min_evidence: number;
+  memory_inferred_threshold: number;
   composer_writing_assist: number;
   auto_switch_model: number;
   auto_fallback_chain: string | null;
@@ -3078,7 +3094,7 @@ function userBlocksOnlineCapabilities(
 function getUserRow(userId: string): UserDbRow {
   const row = db
     .prepare(
-      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
+      "SELECT id, email, display_name, password_hash, password_salt, wrapped_user_key, wrapped_user_key_iv, wrapped_user_key_tag, theme, atmosphere_style, hub_atmosphere_enabled, hub_atmosphere_image_id, hub_atmosphere_image_style, startup_preference, preferred_provider, ephemeral_chat_provider_preferences, preferred_image_provider, provider_locked, auto_memory, memory_learn_about_player, memory_learn_about_bots, memory_acquisition_sensitivity, memory_short_term_days, memory_long_term_threshold, memory_inferred_min_evidence, memory_inferred_threshold, composer_writing_assist, experimental_dual_ollama_enabled, experimental_all_model_effort_enabled, coffee_experimental_table_angle_enabled, psychic_mode_enabled, auto_switch_model, auto_fallback_chain, online_auto_provider_bias, hidden_bot_model_ids, hidden_comfyui_workflow_ids, model_visibility_defaults_version, preferred_local_model, preferred_online_model, lenient_local_fallback_model, lenient_local_image_fallback_model, secondary_ollama_host, comfyui_host, comfyui_workflows, preferred_local_image_model, preferred_openai_image_model, preferred_zen_wallpaper_local_image_model, preferred_zen_wallpaper_openai_image_model, preferred_home_atmosphere_image_model, preferred_home_atmosphere_image_provider, zen_wallpaper_opacity, zen_wallpaper_text_mask_enabled, zen_wallpaper_grayscale_enabled, zen_wallpaper_blurred_edges_enabled, zen_wallpaper_style_notes, zen_session_idle_gap_ms, zen_fresh_start_gap_ms, zen_recent_context_messages, zen_wallpaper_regen_message_interval, zen_mood_sensitivity, zen_canvas_typing_speed, zen_message_font_min_px, zen_message_font_max_px, zen_ask_question_patience_enabled, zen_ask_question_patience_ms, zen_autonomy_enabled, zen_persona_transition_choice, prism_default_bot_name, prism_default_bot_system_prompt, prism_default_bot_color, prism_default_bot_glyph, prism_default_bot_face_eyes_font, prism_default_bot_face_eye_character, prism_default_bot_face_eye_animation, prism_default_bot_face_mouth_font, prism_default_bot_face_mouth_character, prism_default_bot_face_mouth_animation, prism_default_bot_face_mouth_coffee_pucker, prism_default_bot_face_font_weight, prism_default_bot_face_eye_scale, prism_default_bot_face_eye_offset_x, prism_default_bot_face_eye_offset_y, prism_default_bot_face_eye_rotation_deg, prism_default_bot_face_eye_count, prism_default_bot_face_mouth_scale, prism_default_bot_face_mouth_offset_x, prism_default_bot_face_mouth_offset_y, prism_default_bot_face_mouth_rotation_deg, prism_default_bot_face_blink_bar, prism_default_bot_face_blink_scale, prism_default_bot_face_blink_offset_x, prism_default_bot_face_blink_offset_y, prism_default_bot_face_blink_rotation_deg, prism_default_bot_face_thinking_frames, prism_default_bot_face_thinking_scale, prism_default_bot_face_thinking_offset_x, prism_default_bot_face_thinking_offset_y, prism_default_bot_audio_voice_profile, prism_default_bot_temperature, prism_default_bot_max_tokens, prism_default_bot_top_p, prism_default_bot_top_k, prism_default_bot_repetition_penalty, prism_default_llm_model, prism_image_tool_llm_model, dev_memories_enabled, dev_memories_text, openai_key_ciphertext, openai_key_iv, openai_key_tag, anthropic_key_ciphertext, anthropic_key_iv, anthropic_key_tag, elevenlabs_key_ciphertext, elevenlabs_key_iv, elevenlabs_key_tag, brave_search_key_ciphertext, brave_search_key_iv, brave_search_key_tag, voice_mode, voice_effects_enabled, voice_volume, operating_system_voices_enabled, english_voice_engine, default_system_voice_name, default_elevenlabs_voice_id, elevenlabs_voice_bank, elevenlabs_voice_model, elevenlabs_voice_collection_id, zen_player_voice_enabled, player_audio_voice_profile, player_name_pronunciation, created_at, last_active_at FROM users WHERE id = ?",
     )
     .get(userId) as UserDbRow | undefined;
   if (!row) {
@@ -6574,12 +6590,6 @@ function readZenAskQuestionPatience(
     ...(penaltyLevel ? { penaltyLevel } : {}),
     clientTurnId,
   };
-}
-
-function devMoodDebugAllowed(): boolean {
-  return (
-    process.env.NODE_ENV !== "production" || process.env.PRISM_DEV_TOOLS === "1"
-  );
 }
 
 function readComposerRecentMessages(
@@ -12574,6 +12584,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/bots/:id/memory-panel", async (ctx) => {
       const userId = requireAuth(ctx);
       const userKey = decryptUserKey(userId);
+      materializeShortTermMemoryDecay(db, userId);
       const botId = ctx.params.id?.trim();
       if (!botId) {
         throw new HttpError(400, "Bot id is required.");
@@ -12931,171 +12942,6 @@ function buildRoutes(): RouteDefinition[] {
         );
       }
       json(ctx.res, 200, { ok: true, deleted: run.result.deleted });
-    }),
-    route("POST", "/api/conversations/dev-seed", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = ctx.body as Record<string, unknown>;
-      const count = Number(body.count);
-      if (!Number.isInteger(count) || count < 1 || count > 2000) {
-        throw new Error("Chat seed count must be between 1 and 2000.");
-      }
-      const created = createDevSeedConversations(db, userId, count);
-      json(ctx.res, 200, { ok: true, created });
-    }),
-    route("POST", "/api/conversations/:id/dev-connection", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const conversation = db
-        .prepare(
-          "SELECT id, bot_id FROM conversations WHERE id = ? AND user_id = ?",
-        )
-        .get(ctx.params.id, userId) as
-        { id: string; bot_id: string | null } | undefined;
-      if (!conversation) {
-        throw new Error("Conversation not found.");
-      }
-      const body = ctx.body as Record<string, unknown>;
-      const score = clampConnectionScore(Number(body.score));
-      const band = connectionBandFromScore(score);
-      const trend = readConnectionTrend(body.trend);
-      const lastReason =
-        readOptionalString(body.lastReason) ??
-        "Developer Tools set the connection state.";
-      const recentReasons = readConnectionReasons(
-        body.recentReasons,
-        lastReason,
-      );
-      const updatedAt = new Date().toISOString();
-      const botScopeKey = conversation.bot_id ?? "__default__";
-
-      db.prepare(
-        `INSERT INTO session_opinions (
-          user_id, conversation_id, bot_scope_key, bot_id, score, band, trend, last_reason, recent_reasons, updated_at
-        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ON CONFLICT(user_id, conversation_id, bot_scope_key) DO UPDATE SET
-          bot_id = excluded.bot_id,
-          score = excluded.score,
-          band = excluded.band,
-          trend = excluded.trend,
-          last_reason = excluded.last_reason,
-          recent_reasons = excluded.recent_reasons,
-          updated_at = excluded.updated_at`,
-      ).run(
-        userId,
-        conversation.id,
-        botScopeKey,
-        conversation.bot_id ?? null,
-        score,
-        band,
-        trend,
-        lastReason,
-        JSON.stringify(recentReasons),
-        updatedAt,
-      );
-
-      const opinion: SessionOpinion = {
-        score,
-        band,
-        trend,
-        lastReason,
-        recentReasons,
-        updatedAt,
-      };
-      json(ctx.res, 200, { ok: true, opinion });
-    }),
-    route("POST", "/api/bots/:id/dev-opinion", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const requestedBotId =
-        ctx.params.id === "_default" ? null : ctx.params.id;
-      if (requestedBotId) {
-        const bot = db
-          .prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?")
-          .get(requestedBotId, userId) as { id?: string } | undefined;
-        if (!bot?.id) {
-          throw new Error("Bot not found.");
-        }
-      }
-      const body = ctx.body as Record<string, unknown>;
-      const score = clampConnectionScore(Number(body.score));
-      const trend = readConnectionTrend(body.trend);
-      const lastReason =
-        readOptionalString(body.lastReason) ??
-        "Developer Tools set the bot opinion state.";
-      const recentReasons = readConnectionReasons(
-        body.recentReasons,
-        lastReason,
-      );
-      const repairCount =
-        typeof body.repairCount === "number" &&
-        Number.isFinite(body.repairCount)
-          ? Math.max(0, Math.round(body.repairCount))
-          : 0;
-      const botOpinion = upsertBotOpinion({
-        db,
-        userId,
-        botId: requestedBotId,
-        score,
-        trend,
-        lastReason,
-        recentReasons,
-        repairCount,
-        updatedAt: new Date().toISOString(),
-      });
-      json(ctx.res, 200, { ok: true, botOpinion });
-    }),
-    route("POST", "/api/conversations/:id/mood-debug", async (ctx) => {
-      if (!devMoodDebugAllowed()) {
-        throw new HttpError(403, "Mood debug controls are disabled.");
-      }
-      const userId = requireAuth(ctx);
-      const conversation = db
-        .prepare(
-          "SELECT id, conversation_mode FROM conversations WHERE id = ? AND user_id = ?",
-        )
-        .get(ctx.params.id, userId) as
-        { id: string; conversation_mode: string | null } | undefined;
-      if (!conversation) {
-        throw new Error("Conversation not found.");
-      }
-      const body = ctx.body as Record<string, unknown>;
-      const mode = readPrismMoodMode(
-        body.mode ?? conversation.conversation_mode,
-      );
-      const now = new Date().toISOString();
-      const current =
-        loadPrismMoodState(db, userId, conversation.id, mode) ??
-        resetPrismMood(mode, now);
-      const action = typeof body.action === "string" ? body.action : "nudge";
-      const mood =
-        action === "reset"
-          ? resetPrismMood(mode, now)
-          : debugPatchPrismMood(
-              current,
-              {
-                annoyanceDelta:
-                  typeof body.annoyanceDelta === "number"
-                    ? body.annoyanceDelta
-                    : 0,
-                warmthDelta:
-                  typeof body.warmthDelta === "number" ? body.warmthDelta : 0,
-                engagementDelta:
-                  typeof body.engagementDelta === "number"
-                    ? body.engagementDelta
-                    : 0,
-                restraintDelta:
-                  typeof body.restraintDelta === "number"
-                    ? body.restraintDelta
-                    : 0,
-                reason:
-                  readOptionalString(body.reason) ??
-                  "Developer Tools nudged mood.",
-                ...(typeof body.freeze === "boolean"
-                  ? { freeze: body.freeze }
-                  : {}),
-              },
-              now,
-            );
-      const persisted = upsertPrismMoodState(db, userId, conversation.id, mood);
-      json(ctx.res, 200, { ok: true, prismMood: persisted });
     }),
     route("POST", "/api/conversations/:id/prism-mood/reset", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -20696,37 +20542,6 @@ function buildRoutes(): RouteDefinition[] {
         coffeeSettings,
       });
     }),
-    route(
-      "PATCH",
-      "/api/coffee/sessions/:id/debug/bots/:botId/social",
-      async (ctx) => {
-        const userId = requireAuth(ctx);
-        const body = ctx.body as Record<string, unknown>;
-        const conversation = updateCoffeeBotSocialDebug(
-          db,
-          userId,
-          ctx.params.id,
-          ctx.params.botId,
-          body.social ?? body,
-        );
-        json(ctx.res, 200, {
-          ok: true,
-          conversation,
-        });
-      },
-    ),
-    route("POST", "/api/coffee/sessions/:id/debug/undo", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const result = undoLatestCoffeeDebugMessage(db, userId, ctx.params.id);
-      json(ctx.res, 200, {
-        ok: true,
-        conversation: result.conversation,
-        undone: {
-          count: result.deletedMessages,
-          messageIds: result.messageIds,
-        },
-      });
-    }),
     route("GET", "/api/coffee/sessions/:id/polls/active", async (ctx) => {
       const userId = requireAuth(ctx);
       const poll = getCoffeeSessionPoll(db, userId, ctx.params.id);
@@ -21517,6 +21332,7 @@ function buildRoutes(): RouteDefinition[] {
     route("GET", "/api/memories", async (ctx) => {
       const userId = requireAuth(ctx);
       const userKey = decryptUserKey(userId);
+      materializeShortTermMemoryDecay(db, userId);
       const { conversationId, botId, scope, inferBotMemories, limit } =
         parseMemoryListQueryOptions(ctx.query);
       backfillMissingCompletedBotcastPairHistory({
@@ -21543,7 +21359,11 @@ function buildRoutes(): RouteDefinition[] {
         id: string;
         conversation_id: string | null;
         bot_id: string | null;
+        target_bot_id: string | null;
         confidence: number;
+        base_confidence: number | null;
+        lifecycle: "short_term" | "long_term" | "derived";
+        last_reinforced_at: string | null;
         category: "general" | "user" | "bot_relation";
         tier: "short_term" | "long_term";
         durability: number | null;
@@ -21558,24 +21378,24 @@ function buildRoutes(): RouteDefinition[] {
       const rows = botId
         ? (db
             .prepare(
-              "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT ?",
+              "SELECT id, conversation_id, bot_id, target_bot_id, confidence, base_confidence, category, tier, lifecycle, durability, source, certainty, source_message_ids, last_reinforced_at, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id = ? ORDER BY created_at DESC LIMIT ?",
             )
             .all(userId, botId, limit) as MemoryRow[])
         : scope === "default"
           ? (db
               .prepare(
-                "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id IS NULL ORDER BY created_at DESC LIMIT ?",
+                "SELECT id, conversation_id, bot_id, target_bot_id, confidence, base_confidence, category, tier, lifecycle, durability, source, certainty, source_message_ids, last_reinforced_at, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND bot_id IS NULL ORDER BY created_at DESC LIMIT ?",
               )
               .all(userId, limit) as MemoryRow[])
           : conversationId
             ? (db
                 .prepare(
-                  "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT ?",
+                  "SELECT id, conversation_id, bot_id, target_bot_id, confidence, base_confidence, category, tier, lifecycle, durability, source, certainty, source_message_ids, last_reinforced_at, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? AND conversation_id = ? ORDER BY created_at DESC LIMIT ?",
                 )
                 .all(userId, conversationId, limit) as MemoryRow[])
             : (db
                 .prepare(
-                  "SELECT id, conversation_id, bot_id, confidence, category, tier, durability, source, certainty, source_message_ids, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
+                  "SELECT id, conversation_id, bot_id, target_bot_id, confidence, base_confidence, category, tier, lifecycle, durability, source, certainty, source_message_ids, last_reinforced_at, ciphertext, iv, tag, created_at FROM memories WHERE user_id = ? ORDER BY created_at DESC LIMIT ?",
                 )
                 .all(userId, limit) as MemoryRow[]);
       const memoryCountRows = db
@@ -21607,11 +21427,26 @@ function buildRoutes(): RouteDefinition[] {
         ) as { text?: string };
         const text = normalizeMemoryDisplayText(payload.text ?? "");
         const durability = normalizeMemoryDurability(row.durability, text);
+        const lastReinforcedAt = row.last_reinforced_at ?? row.created_at;
+        const ecologySettings = readMemoryEcologySettings(db, userId);
         return {
           id: row.id,
           conversationId: row.conversation_id ?? undefined,
           botId: row.bot_id ?? undefined,
+          targetBotId: row.target_bot_id ?? undefined,
           confidence: row.confidence,
+          baseConfidence: row.base_confidence ?? row.confidence,
+          lifecycle:
+            row.source === "inferred" ? "derived" : row.lifecycle ?? row.tier,
+          lastReinforcedAt,
+          expiresAt:
+            row.lifecycle === "short_term"
+              ? new Date(
+                  Date.parse(lastReinforcedAt) +
+                    ecologySettings.shortTermRetentionDays * 86_400_000,
+                ).toISOString()
+              : undefined,
+          evidenceMemoryIds: memoryEvidenceIds(db, userId, row.id),
           category: row.category,
           tier: row.tier,
           durability,
@@ -21633,6 +21468,142 @@ function buildRoutes(): RouteDefinition[] {
         directCountsByBotId: memoryCountsByBotId,
         defaultDirectCount: defaultMemoryCount,
       });
+    }),
+    route("GET", "/api/settings/memories", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      json(ctx.res, 200, {
+        ok: true,
+        settings: readMemoryEcologySettings(db, userId),
+        overview: getMemoryProseOverview(db, userId, userKey),
+      });
+    }),
+    route("PATCH", "/api/settings/memories", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const body = ctx.body as Record<string, unknown>;
+      const current = readMemoryEcologySettings(db, userId);
+      let settings;
+      try {
+        settings = resolveMemoryEcologySettingsPatch(body, current);
+      } catch (error) {
+        if (error instanceof MemoryEcologySettingsInputError) {
+          throw new HttpError(400, error.message);
+        }
+        throw error;
+      }
+      writeMemoryEcologySettings(db, userId, settings);
+      materializeShortTermMemoryDecay(db, userId);
+      json(ctx.res, 200, { ok: true, settings });
+    }),
+    route("DELETE", "/api/settings/memories/:memoryClass", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const memoryClass = ctx.params.memoryClass as MemoryProseClass;
+      if (memoryClass !== "long_term" && memoryClass !== "short_term") {
+        throw new HttpError(404, "Memory class not found.");
+      }
+      const result = await clearMemoryProseClass(db, userId, memoryClass);
+      json(ctx.res, 200, { ok: true, result });
+    }),
+    route("GET", "/api/memory-receipts", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const userKey = decryptUserKey(userId);
+      materializeShortTermMemoryDecay(db, userId);
+      const requestedKind = ctx.query.get("kind");
+      const receiptKind =
+        requestedKind === "player_memory" || requestedKind === "bot_relation"
+          ? requestedKind
+          : undefined;
+      const receipts = listUnreadMemoryAcquisitionReceipts(
+        db,
+        userId,
+        receiptKind,
+      );
+      const readMemory = db.prepare(
+        `SELECT id, user_id, conversation_id, bot_id, target_bot_id, ciphertext,
+                iv, tag, confidence, base_confidence, category, tier, lifecycle,
+                durability, source, certainty, source_message_ids,
+                last_reinforced_at, created_at
+           FROM memories
+          WHERE id = ? AND user_id = ?`,
+      );
+      const settings = readMemoryEcologySettings(db, userId);
+      const serialized = receipts.flatMap((receipt) => {
+        const row = readMemory.get(receipt.memory_id, userId) as
+          | {
+              id: string;
+              user_id: string;
+              conversation_id: string | null;
+              bot_id: string | null;
+              target_bot_id: string | null;
+              ciphertext: string;
+              iv: string;
+              tag: string;
+              confidence: number;
+              base_confidence: number | null;
+              category: "general" | "user" | "bot_relation";
+              tier: "short_term" | "long_term";
+              lifecycle: "short_term" | "long_term" | "derived";
+              durability: number;
+              source: "direct" | "inferred" | "compiled" | "about_you";
+              certainty: number | null;
+              source_message_ids: string;
+              last_reinforced_at: string | null;
+              created_at: string;
+            }
+          | undefined;
+        if (!row) return [];
+        const payload = decryptJson(
+          { ciphertext: row.ciphertext, iv: row.iv, tag: row.tag },
+          userKey,
+        ) as { text?: string };
+        const lastReinforcedAt = row.last_reinforced_at ?? row.created_at;
+        return [{
+          id: receipt.id,
+          memoryId: receipt.memory_id,
+          learnerBotId: receipt.learner_bot_id,
+          targetBotId: receipt.target_bot_id,
+          conversationId: receipt.conversation_id,
+          kind: receipt.kind,
+          createdAt: receipt.created_at,
+          readAt: receipt.read_at,
+          memory: {
+            id: row.id,
+            userId: row.user_id,
+            conversationId: row.conversation_id ?? undefined,
+            botId: row.bot_id ?? undefined,
+            targetBotId: row.target_bot_id ?? undefined,
+            createdAt: row.created_at,
+            confidence: row.confidence,
+            baseConfidence: row.base_confidence ?? row.confidence,
+            lifecycle: row.lifecycle,
+            lastReinforcedAt,
+            expiresAt:
+              row.lifecycle === "short_term"
+                ? new Date(
+                    Date.parse(lastReinforcedAt) +
+                      settings.shortTermRetentionDays * 86_400_000,
+                  ).toISOString()
+                : undefined,
+            evidenceMemoryIds: memoryEvidenceIds(db, userId, row.id),
+            category: row.category,
+            tier: row.tier,
+            source: row.source,
+            certainty: row.certainty ?? row.confidence,
+            durability: row.durability,
+            sourceMessageIds: parseSourceMessageIds(row.source_message_ids),
+            text: normalizeMemoryDisplayText(payload.text ?? ""),
+          },
+        }];
+      });
+      json(ctx.res, 200, { ok: true, receipts: serialized });
+    }),
+    route("POST", "/api/memory-receipts/:id/read", async (ctx) => {
+      const userId = requireAuth(ctx);
+      const id = decodeURIComponent(ctx.params.id ?? "").trim();
+      if (!id || !markMemoryAcquisitionReceiptRead(db, userId, id)) {
+        throw new HttpError(404, "Memory receipt not found.");
+      }
+      json(ctx.res, 200, { ok: true });
     }),
     route("GET", "/api/zen/session-memory", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -21662,75 +21633,6 @@ function buildRoutes(): RouteDefinition[] {
         throw new HttpError(404, "Session memory not found.");
       }
       json(ctx.res, 200, { ok: true, deleted: true });
-    }),
-    route("POST", "/api/memories/dev-seed", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const userKey = decryptUserKey(userId);
-      const body = ctx.body as Record<string, unknown>;
-      const count = Number(body.count);
-      if (!Number.isInteger(count) || count < 1 || count > 2000) {
-        throw new Error("Memory seed count must be between 1 and 2000.");
-      }
-      const requestedBotId = readOptionalString(body.botId);
-      const requestedSource = readOptionalString(body.source);
-      const source =
-        requestedSource === "inferred" ||
-        requestedSource === "compiled" ||
-        requestedSource === "about_you"
-          ? requestedSource
-          : "direct";
-      const requestedCategory = readOptionalString(body.category);
-      const category =
-        requestedCategory === "user" || requestedCategory === "bot_relation"
-          ? requestedCategory
-          : requestedCategory === "general"
-            ? "general"
-            : undefined;
-      const requestedTier = readOptionalString(body.tier);
-      const tier =
-        requestedTier === "long_term" || requestedTier === "short_term"
-          ? requestedTier
-          : undefined;
-      const requestedCertainty =
-        typeof body.certainty === "number" && Number.isFinite(body.certainty)
-          ? Math.max(0, Math.min(1, body.certainty))
-          : undefined;
-      const requestedDurability =
-        typeof body.durability === "number" && Number.isFinite(body.durability)
-          ? Math.max(0, Math.min(1, body.durability))
-          : undefined;
-      const botIds = requestedBotId
-        ? (
-            db
-              .prepare("SELECT id FROM bots WHERE user_id = ? AND id = ?")
-              .all(userId, requestedBotId) as Array<{ id: string }>
-          ).map((row) => row.id)
-        : (
-            db
-              .prepare(
-                "SELECT id FROM bots WHERE user_id = ? ORDER BY updated_at DESC, created_at DESC, name ASC",
-              )
-              .all(userId) as Array<{ id: string }>
-          ).map((row) => row.id);
-      if (requestedBotId && botIds.length === 0) {
-        throw new Error("Bot not found.");
-      }
-      const created = createDevSeedMemories(
-        db,
-        userId,
-        userKey,
-        count,
-        botIds,
-        {
-          randomizeAcrossBots: !requestedBotId,
-          source,
-          category,
-          tier,
-          durability: requestedDurability,
-          certainty: requestedCertainty,
-        },
-      );
-      json(ctx.res, 200, { ok: true, created });
     }),
     route("DELETE", "/api/memories", async (ctx) => {
       const userId = requireAuth(ctx);
@@ -21779,84 +21681,7 @@ function buildRoutes(): RouteDefinition[] {
       }
       json(ctx.res, 200, { ok: true, deleted: run.result.deleted });
     }),
-    route("POST", "/api/dev/clear-bot-memory", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = (ctx.body ?? {}) as Record<string, unknown>;
-      const requestedBotId = readOptionalString(body.botId);
-      if (requestedBotId) {
-        const bot = db
-          .prepare("SELECT id FROM bots WHERE id = ? AND user_id = ?")
-          .get(requestedBotId, userId) as { id?: string } | undefined;
-        if (!bot?.id) {
-          throw new Error("Bot not found.");
-        }
-      }
-      const deletedMemories = deleteMemoriesForBotScope(
-        db,
-        userId,
-        requestedBotId,
-      );
-      json(ctx.res, 200, {
-        ok: true,
-        scope: requestedBotId ? "bot" : "default",
-        botId: requestedBotId,
-        deletedMemories,
-      });
-    }),
-    // Hard-reset per-user memory artifacts: extracted memory facts, SQLite
-    // summary rows (both thread-scoped and global), and matching Qdrant
-    // vectors. Powers dev slash commands:
-    // - `$clear` (default): keeps `about_you` profile rows in SQLite.
-    // - `$forget`: same clear path with `includeAboutYou = true`.
-    // Qdrant cleanup is best-effort because the local stack often runs
-    // without a vector DB attached; SQLite truth wins either way.
-    route("POST", "/api/dev/clear-session-memory", async (ctx) => {
-      const userId = requireAuth(ctx);
-      const body = (ctx.body ?? {}) as Record<string, unknown>;
-      const includeAboutYou = body.includeAboutYou === true;
-      let deletedMemories = 0;
-      let deletedSummaries = 0;
-      let deletedZenSessionMemories = 0;
-      db.exec("BEGIN IMMEDIATE TRANSACTION");
-      try {
-        const memoryResult = db
-          .prepare(
-            includeAboutYou
-              ? "DELETE FROM memories WHERE user_id = ?"
-              : "DELETE FROM memories WHERE user_id = ? AND COALESCE(source, 'direct') != 'about_you'",
-          )
-          .run(userId);
-        const summaryResult = db
-          .prepare("DELETE FROM memory_summaries WHERE user_id = ?")
-          .run(userId);
-        const zenSessionResult = db
-          .prepare("DELETE FROM zen_session_memories WHERE user_id = ?")
-          .run(userId);
-        deletedMemories = Number(memoryResult.changes ?? 0);
-        deletedSummaries = Number(summaryResult.changes ?? 0);
-        deletedZenSessionMemories = Number(zenSessionResult.changes ?? 0);
-        db.exec("COMMIT");
-      } catch (error) {
-        db.exec("ROLLBACK");
-        throw error;
-      }
-      let vectorsCleared = false;
-      try {
-        await deleteVectorsForUser(userId);
-        vectorsCleared = true;
-      } catch {
-        vectorsCleared = false;
-      }
-      json(ctx.res, 200, {
-        ok: true,
-        deletedMemories,
-        deletedSummaries,
-        deletedZenSessionMemories,
-        includeAboutYou,
-        vectorsCleared,
-      });
-    }),
-    route("POST", "/api/dev/restart", async (ctx) => {
+    route("POST", "/api/maintenance/restart", async (ctx) => {
       requireAuth(ctx);
       requireLocalDeveloperRequest(ctx);
       const scheduled = scheduleApiWatchRestart();
@@ -29625,24 +29450,9 @@ function buildRoutes(): RouteDefinition[] {
       }
       json(ctx.res, 200, { ok: true, actionRun: run });
     }),
-    // User-facing bulk-clear removes every bot; Developer Tools can pass
-    // `limit` for bounded density-stage cleanup.
     route("DELETE", "/api/bots", async (ctx) => {
       const userId = requireAuth(ctx);
-      const rawLimit = ctx.query.get("limit");
-      if (rawLimit !== null) {
-        const limit = Number(rawLimit);
-        if (!Number.isInteger(limit) || limit < 1) {
-          throw new Error("Bot delete limit must be a positive integer.");
-        }
-        const deleted = deleteBots(db, userId, limit);
-        json(ctx.res, 200, { ok: true, deleted });
-        return;
-      }
-      const includeProtected =
-        ctx.query.get("includeProtected") === "1" ||
-        ctx.query.get("includeProtected") === "true";
-      const deleted = deleteAllBots(db, userId, { includeProtected });
+      const deleted = deleteAllBots(db, userId);
       json(ctx.res, 200, { ok: true, deleted });
     }),
     route("POST", "/api/conversations/:id/export", async (ctx) => {

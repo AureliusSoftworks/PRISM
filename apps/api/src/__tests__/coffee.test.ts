@@ -162,8 +162,6 @@ import {
   stripCoffeeChatRoleFraming,
   stripCoffeeSpeakerPrefix,
   coffeeTextMentionsInternalAccountMetadata,
-  undoLatestCoffeeDebugMessage,
-  updateCoffeeBotSocialDebug,
   updateCoffeeGroup,
   updateCoffeeGroupWithGeneratedTopics,
   updateCoffeePreset,
@@ -1775,6 +1773,41 @@ async function createCoffeeConversationWithId(
       id: conversationId,
     },
   };
+}
+
+function setCoffeeBotSocialForTest(
+  db: DatabaseSync,
+  userId: string,
+  conversationId: string,
+  botId: string,
+  social: {
+    disposition: number;
+    valuesFriction: number;
+    restraint: number;
+    engagement: number;
+    leavePressure: number;
+  },
+): void {
+  db.prepare(
+    `UPDATE coffee_bot_social_state
+        SET disposition = ?,
+            values_friction = ?,
+            restraint = ?,
+            engagement = ?,
+            leave_pressure = ?,
+            updated_at = ?
+      WHERE user_id = ? AND conversation_id = ? AND bot_id = ?`,
+  ).run(
+    social.disposition,
+    social.valuesFriction,
+    social.restraint,
+    social.engagement,
+    social.leavePressure,
+    new Date().toISOString(),
+    userId,
+    conversationId,
+    botId,
+  );
 }
 
 describe("retired Coffee service", () => {
@@ -6986,7 +7019,7 @@ describe("Coffee group foundation", () => {
       groupBotIds: [ALICE.id, BORIS.id],
       durationMinutes: 10,
     });
-    updateCoffeeBotSocialDebug(
+    setCoffeeBotSocialForTest(
       db,
       userId,
       conversationId,
@@ -7074,7 +7107,7 @@ describe("Coffee group foundation", () => {
       durationMinutes: 10,
       initialTopic: "Whether the premise holds together",
     });
-    updateCoffeeBotSocialDebug(
+    setCoffeeBotSocialForTest(
       db,
       userId,
       "conv-reclaim",
@@ -7187,7 +7220,7 @@ describe("Coffee group foundation", () => {
       groupBotIds: [ALICE.id, BORIS.id],
       durationMinutes: 10,
     });
-    updateCoffeeBotSocialDebug(db, userId, conversationId, ALICE.id, yieldSocial);
+    setCoffeeBotSocialForTest(db, userId, conversationId, ALICE.id, yieldSocial);
 
     const yieldTurnIds = Array.from({ length: 40 }, (_, index) => `yield-${index}`).filter(
       (candidate) =>
@@ -7274,7 +7307,7 @@ describe("Coffee group foundation", () => {
       groupBotIds: [ALICE.id, BORIS.id],
       durationMinutes: 10,
     });
-    updateCoffeeBotSocialDebug(db, userId, conversationId, ALICE.id, reclaimSocial);
+    setCoffeeBotSocialForTest(db, userId, conversationId, ALICE.id, reclaimSocial);
     db.prepare(
       `INSERT INTO messages
          (id, conversation_id, user_id, role, content, bot_id, created_at)
@@ -7340,7 +7373,7 @@ describe("Coffee group foundation", () => {
       groupBotIds: [ALICE.id, BORIS.id],
       durationMinutes: 10,
     });
-    updateCoffeeBotSocialDebug(db, userId, conversationId, ALICE.id, yieldSocial);
+    setCoffeeBotSocialForTest(db, userId, conversationId, ALICE.id, yieldSocial);
     db.prepare(
       `INSERT INTO messages
          (id, conversation_id, user_id, role, content, bot_id, created_at)
@@ -13622,44 +13655,6 @@ describe("coffee social state helpers", () => {
     assert.equal(events[0]?.kind === "mood" ? events[0].botId : null, BORIS.id);
   });
 
-  it("patches Coffee debug social state and returns the hydrated conversation", async () => {
-    const db = createCoffeeTestDb();
-    const userId = "user-1";
-    seedCoffeeBot(db, userId, ALICE);
-    seedCoffeeBot(db, userId, BORIS);
-    const created = await createCoffeeConversation(db, userId, {
-      groupBotIds: [ALICE.id, BORIS.id],
-    });
-
-    const conversation = updateCoffeeBotSocialDebug(
-      db,
-      userId,
-      created.conversation.id,
-      ALICE.id,
-      {
-        disposition: 1.4,
-        friction: -0.4,
-        restraint: 0.44,
-        engagement: 0.88,
-        leavePressure: 0.22,
-      }
-    );
-
-    assert.deepEqual(conversation.coffeeBotSocialById?.[ALICE.id], {
-      disposition: 1,
-      valuesFriction: 0,
-      restraint: 0.44,
-      engagement: 0.88,
-      leavePressure: 0.22,
-    });
-    const replayMessage = conversation.messages.find(
-      (message) => message.coffeeReplayEvents?.some((event) => event.kind === "mood")
-    );
-    assert.equal(replayMessage?.role, "system");
-    assert.equal(replayMessage?.content, "");
-    assert.equal(replayMessage?.coffeeReplayEvents?.[0]?.kind, "mood");
-  });
-
   it("records Coffee arrival replay events as hidden transcript rows", async () => {
     const db = createCoffeeTestDb();
     const userId = "user-1";
@@ -14413,91 +14408,6 @@ describe("coffee social state helpers", () => {
       ).get(conversationId, ALICE.id) as { count: number }).count,
       0,
     );
-  });
-
-  it("undoes the latest Coffee debug message and restores the pre-turn social snapshot", async () => {
-    const db = createCoffeeTestDb();
-    const userId = "user-1";
-    seedCoffeeBot(db, userId, ALICE);
-    seedCoffeeBot(db, userId, BORIS);
-    const created = await createCoffeeConversation(db, userId, {
-      groupBotIds: [ALICE.id, BORIS.id],
-    });
-    const conversationId = created.conversation.id;
-    const beforeSocial = {
-      [ALICE.id]: {
-        disposition: 0.61,
-        valuesFriction: 0.2,
-        restraint: 0.5,
-        engagement: 0.7,
-        leavePressure: 0.08,
-      },
-      [BORIS.id]: {
-        disposition: 0.44,
-        valuesFriction: 0.4,
-        restraint: 0.7,
-        engagement: 0.6,
-        leavePressure: 0.12,
-      },
-    };
-    const afterSocial = {
-      [ALICE.id]: {
-        disposition: 0.9,
-        valuesFriction: 0.05,
-        restraint: 0.3,
-        engagement: 0.95,
-        leavePressure: 0.02,
-      },
-      [BORIS.id]: {
-        disposition: 0.5,
-        valuesFriction: 0.35,
-        restraint: 0.65,
-        engagement: 0.55,
-        leavePressure: 0.16,
-      },
-    };
-    db.prepare(
-      `UPDATE coffee_bot_social_state
-          SET disposition = ?, values_friction = ?, restraint = ?, engagement = ?, leave_pressure = ?
-        WHERE user_id = ? AND conversation_id = ? AND bot_id = ?`
-    ).run(0.9, 0.05, 0.3, 0.95, 0.02, userId, conversationId, ALICE.id);
-    const now = "2026-01-01T00:00:00.000Z";
-    db.prepare(
-      `INSERT INTO messages
-         (id, conversation_id, user_id, role, content, provider, model, bot_id, tool_payload, created_at)
-       VALUES (?, ?, ?, 'assistant', ?, 'local', NULL, ?, ?, ?)`
-    ).run(
-      "debug-assistant-1",
-      conversationId,
-      userId,
-      "A debug turn changed the table mood.",
-      ALICE.id,
-      JSON.stringify({
-        v: 1,
-        coffeeDebugTurnSnapshot: {
-          v: 1,
-          name: "coffeeDebugTurnSnapshot",
-          beforeSocialByBotId: beforeSocial,
-          afterSocialByBotId: afterSocial,
-          beforeConversation: {
-            botGroupIds: JSON.stringify([ALICE.id, BORIS.id]),
-            coffeeAbsentBotIds: "[]",
-            coffeeTeamModeJson: null,
-          },
-          speakerBotId: ALICE.id,
-          createdAt: now,
-        },
-      }),
-      now
-    );
-
-    const result = undoLatestCoffeeDebugMessage(db, userId, conversationId);
-
-    assert.equal(result.deletedMessages, 1);
-    assert.deepEqual(result.messageIds, ["debug-assistant-1"]);
-    assert.equal(result.conversation.messages.length, 0);
-    assert.deepEqual(result.conversation.coffeeBotSocialById?.[ALICE.id], beforeSocial[ALICE.id]);
-    assert.deepEqual(result.conversation.coffeeBotSocialById?.[BORIS.id], beforeSocial[BORIS.id]);
   });
 
   it("offers an infrequent low-cup refill request only on suitable autonomous turns", () => {

@@ -20,6 +20,26 @@
   color: var(--fg-muted, rgba(255, 255, 255, 0.64));
 }
 
+.railShell > header .railHeaderActions {
+  display: flex;
+  flex: 0 0 auto;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 0.45rem;
+}
+
+@media (max-width: 560px) {
+  .railShell > header {
+    align-items: flex-start;
+    flex-direction: column;
+  }
+
+  .railShell > header .railHeaderActions {
+    justify-content: flex-start;
+  }
+}
+
 .rail {
   display: grid;
   grid-auto-flow: column;

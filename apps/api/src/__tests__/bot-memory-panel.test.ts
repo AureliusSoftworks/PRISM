@@ -119,7 +119,7 @@ function insertMemory(
     args.source ?? "direct",
     args.certainty ?? args.confidence ?? 0.8,
     JSON.stringify(["m-1"]),
-    args.createdAt ?? `2026-01-01T00:00:0${args.id.slice(-1)}.000Z`
+    args.createdAt ?? `2026-08-11T00:00:0${args.id.slice(-1)}.000Z`
   );
 }
 

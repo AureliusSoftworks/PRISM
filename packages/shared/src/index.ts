@@ -2724,8 +2724,21 @@ export interface UserMemory {
   userId: string;
   conversationId?: string;
   botId?: string;
+  /** Directed peer scope for bot-to-bot observations and opinions. */
+  targetBotId?: string;
   createdAt: string;
+  /** Effective confidence after short-term decay. */
   confidence: number;
+  /** Confidence at acquisition or the most recent reinforcement. */
+  baseConfidence?: number;
+  /** Explicit lifecycle; inferred opinions always use `derived`. */
+  lifecycle?: MemoryLifecycle;
+  /** Last acquisition/reinforcement point used by daily decay. */
+  lastReinforcedAt?: string;
+  /** Current projected expiry for short-term memories. */
+  expiresAt?: string;
+  /** Direct memory records supporting a derived opinion. */
+  evidenceMemoryIds?: string[];
   /** What this memory is about, used for memory-panel organization. */
   category?: MemoryCategory;
   /** Short-term memories can be rewritten/removed; long-term memories must be demoted first. */
@@ -2743,6 +2756,32 @@ export interface UserMemory {
 
 export type MemoryCategory = "general" | "user" | "bot_relation";
 export type MemoryTier = "short_term" | "long_term";
+export type MemoryLifecycle = MemoryTier | "derived";
+export type MemoryAcquisitionSensitivity = "cautious" | "balanced" | "curious";
+
+export interface MemoryEcologySettings {
+  learnAboutPlayer: boolean;
+  learnAboutBots: boolean;
+  acquisitionSensitivity: MemoryAcquisitionSensitivity;
+  shortTermRetentionDays: number;
+  longTermPromotionThreshold: number;
+  inferredMinEvidenceCount: number;
+  inferredConfidenceThreshold: number;
+}
+
+export type MemoryAcquisitionReceiptKind = "player_memory" | "bot_relation";
+
+export interface MemoryAcquisitionReceipt {
+  id: string;
+  memoryId: string;
+  learnerBotId: string | null;
+  targetBotId: string | null;
+  conversationId: string | null;
+  kind: MemoryAcquisitionReceiptKind;
+  createdAt: string;
+  readAt: string | null;
+  memory?: UserMemory;
+}
 
 export interface ZenSessionMemoryItem {
   id: string;

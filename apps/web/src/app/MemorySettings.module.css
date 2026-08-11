@@ -1,0 +1,408 @@
+.workspace {
+  position: relative;
+}
+
+.automaticStatus {
+  min-width: 46px;
+  padding: 4px 8px;
+  border: 1px solid var(--line-strong);
+  border-radius: 999px;
+  color: var(--fg-muted);
+  background: var(--bg);
+  font-size: var(--prism-type-caption);
+  font-weight: 760;
+  text-align: center;
+}
+
+.automaticStatus[data-enabled="true"] {
+  border-color: color-mix(in srgb, #36d399 42%, var(--line));
+  color: color-mix(in srgb, #36d399 72%, var(--fg));
+  background: color-mix(in srgb, #36d399 9%, var(--bg));
+}
+
+.automaticToggle {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 18px;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--accent) 24%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--accent) 6%, var(--bg-surface));
+  cursor: pointer;
+}
+
+.automaticToggle > span {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.automaticToggle strong {
+  color: var(--fg);
+  font-size: var(--prism-type-body);
+}
+
+.automaticToggle small {
+  color: var(--fg-muted);
+  font-size: var(--prism-type-caption);
+  line-height: 1.45;
+}
+
+.automaticToggle input {
+  width: 18px;
+  height: 18px;
+  accent-color: var(--accent);
+}
+
+.automaticToggle:has(input:focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--accent) 76%, transparent);
+  outline-offset: 2px;
+}
+
+.automaticToggle:has(input:disabled) {
+  cursor: wait;
+  opacity: 0.72;
+}
+
+.permissionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.sensitivityFieldset {
+  min-width: 0;
+  margin: 0;
+  padding: 0;
+  border: 0;
+}
+
+.sensitivityFieldset legend {
+  margin-bottom: 8px;
+  color: var(--fg);
+  font-size: var(--prism-type-body);
+  font-weight: 720;
+}
+
+.sensitivityGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.sensitivityGrid label {
+  position: relative;
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 11px;
+  border: 1px solid var(--line-strong);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 82%, var(--bg-surface));
+  cursor: pointer;
+}
+
+.sensitivityGrid label[data-selected="true"] {
+  border-color: color-mix(in srgb, var(--accent) 56%, var(--line));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-surface));
+  box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--accent) 14%, transparent);
+}
+
+.sensitivityGrid input {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  opacity: 0;
+}
+
+.sensitivityGrid label:has(input:focus-visible) {
+  outline: 2px solid color-mix(in srgb, var(--accent) 76%, transparent);
+  outline-offset: 2px;
+}
+
+.sensitivityGrid strong {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  color: var(--fg);
+  font-size: var(--prism-type-body);
+}
+
+.sensitivityGrid strong span {
+  color: color-mix(in srgb, var(--accent) 72%, var(--fg));
+  font-size: var(--prism-type-caption);
+}
+
+.sensitivityGrid small,
+.rangeControl small {
+  color: var(--fg-muted);
+  font-size: var(--prism-type-caption);
+  line-height: 1.42;
+}
+
+.rangeGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.rangeControl {
+  display: grid;
+  gap: 8px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 64%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 86%, var(--bg-surface));
+}
+
+.rangeControl > span {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 12px;
+}
+
+.rangeControl strong {
+  color: var(--fg);
+  font-size: var(--prism-type-body);
+}
+
+.rangeControl output {
+  color: color-mix(in srgb, var(--accent) 72%, var(--fg));
+  font-size: var(--prism-type-caption);
+  font-weight: 760;
+}
+
+.rangeControl input {
+  width: 100%;
+  accent-color: var(--accent);
+}
+
+.usageGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.usageCard {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px 12px;
+  align-items: start;
+  padding: 12px;
+  border: 1px solid color-mix(in srgb, var(--line-strong) 58%, var(--line));
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--bg) 84%, var(--bg-surface));
+}
+
+.usageIcon {
+  display: grid;
+  width: 34px;
+  height: 34px;
+  place-items: center;
+  border: 1px solid color-mix(in srgb, var(--accent) 30%, var(--line));
+  border-radius: 9px;
+  color: color-mix(in srgb, var(--accent) 70%, var(--fg));
+  background: color-mix(in srgb, var(--accent) 9%, var(--bg-surface));
+}
+
+.usageCopy {
+  min-width: 0;
+  display: grid;
+  gap: 3px;
+}
+
+.usageCopy > strong {
+  color: var(--fg);
+  font-size: var(--prism-type-body);
+}
+
+.usageCopy > span,
+.usageNumbers small,
+.total small {
+  color: var(--fg-muted);
+  font-size: var(--prism-type-caption);
+  line-height: 1.4;
+}
+
+.usageNumbers {
+  display: grid;
+  gap: 1px;
+  margin-top: 7px;
+}
+
+.usageNumbers b {
+  color: var(--fg);
+  font-size: 1.1rem;
+}
+
+.usageCard > button {
+  grid-column: 1 / -1;
+  margin-top: 2px;
+}
+
+.usageCard[data-memory-class="derived"] {
+  border-color: color-mix(in srgb, var(--accent) 30%, var(--line));
+  background:
+    radial-gradient(circle at 18% 18%, color-mix(in srgb, var(--accent) 9%, transparent), transparent 48%),
+    color-mix(in srgb, var(--bg) 84%, var(--bg-surface));
+}
+
+.derivedNote {
+  grid-column: 1 / -1;
+  color: var(--fg-muted);
+  font-size: var(--prism-type-caption);
+  line-height: 1.4;
+}
+
+.total {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  color: color-mix(in srgb, var(--accent) 72%, var(--fg));
+}
+
+.total > span {
+  display: grid;
+  gap: 1px;
+  text-align: right;
+}
+
+.total strong {
+  color: var(--fg);
+  font-size: var(--prism-type-body);
+}
+
+.state,
+.emptyState {
+  padding: 18px;
+  border: 1px dashed var(--line-strong);
+  border-radius: 10px;
+  color: var(--fg-muted);
+  text-align: center;
+  font-size: var(--prism-type-body);
+}
+
+.state[data-state="error"] {
+  display: grid;
+  justify-items: center;
+  gap: 9px;
+  color: var(--danger);
+}
+
+.state button {
+  border: 1px solid var(--line-strong);
+  border-radius: 8px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 7px 10px;
+  cursor: pointer;
+}
+
+.notice,
+.error {
+  margin: 0;
+  padding: 8px 10px;
+  border-radius: 8px;
+  font-size: var(--prism-type-caption);
+  line-height: 1.4;
+}
+
+.notice {
+  color: color-mix(in srgb, #36d399 70%, var(--fg));
+  background: color-mix(in srgb, #36d399 10%, transparent);
+}
+
+.error {
+  color: var(--danger);
+  background: var(--danger-soft);
+}
+
+.confirmBackdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  display: grid;
+  place-items: center;
+  padding: 24px;
+  background: color-mix(in srgb, #000 54%, transparent);
+  backdrop-filter: blur(8px);
+}
+
+.confirmDialog {
+  width: min(430px, 100%);
+  padding: 20px;
+  border: 1px solid color-mix(in srgb, var(--danger) 34%, var(--line-strong));
+  border-radius: 14px;
+  background: var(--bg-surface);
+  box-shadow: var(--shadow-lg);
+}
+
+.confirmDialog h2 {
+  margin: 0;
+  color: var(--fg);
+  font-size: 1.05rem;
+}
+
+.confirmDialog p {
+  margin: 9px 0 0;
+  color: var(--fg-muted);
+  font-size: var(--prism-type-body);
+  line-height: 1.5;
+}
+
+.confirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 8px;
+  margin-top: 18px;
+}
+
+.confirmActions button {
+  border: 1px solid var(--line-strong);
+  border-radius: 9px;
+  background: var(--bg);
+  color: var(--fg);
+  padding: 9px 12px;
+  cursor: pointer;
+}
+
+.confirmActions .confirmDelete {
+  border-color: var(--danger);
+  background: var(--danger);
+  color: white;
+}
+
+.confirmActions button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+@media (max-width: 700px) {
+  .usageGrid,
+  .permissionGrid,
+  .sensitivityGrid,
+  .rangeGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .total {
+    width: 100%;
+    justify-content: flex-start;
+  }
+
+  .total > span {
+    text-align: left;
+  }
+
+  .confirmActions {
+    flex-direction: column-reverse;
+  }
+
+  .confirmActions button {
+    width: 100%;
+  }
+}

@@ -4,7 +4,6 @@ import { DatabaseSync } from "node:sqlite";
 import { fallbackEmbedding } from "../providers.ts";
 import {
   analyzeMemoryIntent,
-  createDevSeedMemories,
   deleteMemoriesForBotScope,
   deleteMemoryById,
   deleteMemoriesLinkedToMessages,
@@ -663,7 +662,7 @@ describe("persistMemoryCandidates", () => {
     assert.equal(row?.tier, "long_term");
   });
 
-  it("requires confidence and certainty together for long-term promotion", async () => {
+  it("uses the configured direct confidence threshold for long-term promotion", async () => {
     const db = createMemoryTestDb();
     const [memory] = await persistMemoryCandidates(
       db,
@@ -679,8 +678,8 @@ describe("persistMemoryCandidates", () => {
       .prepare("SELECT tier FROM memories WHERE id = ?")
       .get(memory.id) as { tier: string } | undefined;
 
-    assert.equal(memory.tier, "short_term");
-    assert.equal(row?.tier, "short_term");
+    assert.equal(memory.tier, "long_term");
+    assert.equal(row?.tier, "long_term");
   });
 
   it("keeps durable inferred assumptions short-term below high confidence", async () => {
@@ -705,7 +704,7 @@ describe("persistMemoryCandidates", () => {
     assert.equal(row?.durability, 0.95);
   });
 
-  it("promotes high-confidence inferred memories to long-term", async () => {
+  it("keeps high-confidence inferred memories in the Derived layer", async () => {
     const db = createMemoryTestDb();
     const [memory] = await persistMemoryCandidates(
       db,
@@ -718,7 +717,8 @@ describe("persistMemoryCandidates", () => {
     );
 
     assert.equal(memory.source, "inferred");
-    assert.equal(memory.tier, "long_term");
+    assert.equal(memory.tier, "short_term");
+    assert.equal(memory.lifecycle, "derived");
   });
 
   it("promotes high-truth memories even when durability is only baseline", async () => {
@@ -756,7 +756,7 @@ describe("persistMemoryCandidates", () => {
     assert.ok((memory.durability ?? 0) >= 0.88);
   });
 
-  it("treats imported long-term tier as a confidence hint", async () => {
+  it("preserves an explicitly imported long-term tier", async () => {
     const db = createMemoryTestDb();
     const lowConfidence = await restoreMemory(db, "user-1", Buffer.alloc(32, 7), {
       conversationId: "conversation-1",
@@ -781,7 +781,7 @@ describe("persistMemoryCandidates", () => {
       source: "compiled",
     });
 
-    assert.equal(lowConfidence.tier, "short_term");
+    assert.equal(lowConfidence.tier, "long_term");
     assert.equal(highConfidence.tier, "long_term");
   });
 
@@ -1219,67 +1219,6 @@ describe("persistMemoryCandidates", () => {
       { bot_id: "bot-1", source: "direct", count: 2 },
       { bot_id: "bot-2", source: "direct", count: 1 },
     ]);
-  });
-});
-
-describe("createDevSeedMemories", () => {
-  it("distributes seeded memories across the provided bots", () => {
-    const db = createMemoryTestDb();
-    const created = createDevSeedMemories(
-      db,
-      "user-1",
-      Buffer.alloc(32, 7),
-      5,
-      ["bot-1", "bot-2"]
-    );
-
-    const rows = db
-      .prepare("SELECT bot_id FROM memories ORDER BY created_at ASC")
-      .all() as Array<{ bot_id: string | null }>;
-
-    assert.equal(created, 5);
-    assert.deepEqual(
-      rows.map((row) => row.bot_id),
-      ["bot-1", "bot-2", "bot-1", "bot-2", "bot-1"]
-    );
-  });
-
-  it("can seed all-bot memories unevenly with empty bots", () => {
-    const db = createMemoryTestDb();
-    const randomValues = [0.1, 0.6, 0.2, 0.8, 0.15, 0.45, 0.75];
-    let randomIndex = 0;
-    const created = createDevSeedMemories(
-      db,
-      "user-1",
-      Buffer.alloc(32, 7),
-      6,
-      ["bot-1", "bot-2", "bot-3", "bot-4"],
-      {
-        randomizeAcrossBots: true,
-        random: () => randomValues[randomIndex++ % randomValues.length] ?? 0,
-      }
-    );
-
-    const rows = db
-      .prepare("SELECT bot_id, COUNT(*) AS count FROM memories GROUP BY bot_id")
-      .all() as Array<{ bot_id: string | null; count: number }>;
-    const counts = new Map(rows.map((row) => [row.bot_id, row.count]));
-
-    assert.equal(created, 6);
-    assert.equal(counts.size, 3);
-    assert.deepEqual(
-      [...counts.values()].sort((a, b) => a - b),
-      [1, 2, 3]
-    );
-  });
-
-  it("rejects memory seeding when there are no target bots", () => {
-    const db = createMemoryTestDb();
-
-    assert.throws(
-      () => createDevSeedMemories(db, "user-1", Buffer.alloc(32, 7), 1, []),
-      /at least one bot/i
-    );
   });
 });
 

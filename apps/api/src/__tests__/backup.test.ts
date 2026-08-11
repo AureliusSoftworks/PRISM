@@ -25,6 +25,128 @@ import {
   normalizeCoffeeSessionSettings,
   parseStoredBotPowersV1,
 } from "@localai/shared";
+import { encryptJson } from "../security.ts";
+
+describe("backup memory ecology", () => {
+  it("round-trips memory ecology settings, lineage, timestamps, targets, and receipts", () => {
+    withBackupDatabase((db, userKey) => {
+      db.prepare(
+        `UPDATE users
+            SET memory_learn_about_player = 0,
+                memory_learn_about_bots = 1,
+                memory_acquisition_sensitivity = 'curious',
+                memory_short_term_days = 18,
+                memory_long_term_threshold = 0.84,
+                memory_inferred_min_evidence = 2,
+                memory_inferred_threshold = 0.76
+          WHERE id = 'user-1'`,
+      ).run();
+      const direct = encryptJson({ text: "Calvin interrupted twice." }, userKey);
+      const derived = encryptJson({ text: "Calvin can be impatient." }, userKey);
+      db.prepare(
+        `INSERT INTO memories
+          (id, user_id, bot_id, target_bot_id, ciphertext, iv, tag,
+           confidence, base_confidence, category, tier, lifecycle, durability,
+           source, certainty, source_message_ids, last_reinforced_at, created_at)
+         VALUES ('memory-direct', 'user-1', 'bot-a', 'bot-b', ?, ?, ?,
+                 0.72, 0.81, 'bot_relation', 'short_term', 'short_term', 0.7,
+                 'direct', 0.72, '["message-1"]', ?, ?)`,
+      ).run(
+        direct.ciphertext,
+        direct.iv,
+        direct.tag,
+        "2026-08-10T10:00:00.000Z",
+        "2026-08-09T10:00:00.000Z",
+      );
+      db.prepare(
+        `INSERT INTO memories
+          (id, user_id, bot_id, target_bot_id, ciphertext, iv, tag,
+           confidence, base_confidence, category, tier, lifecycle, durability,
+           source, certainty, source_message_ids, last_reinforced_at, created_at)
+         VALUES ('memory-derived', 'user-1', 'bot-a', 'bot-b', ?, ?, ?,
+                 0.77, 0.8, 'bot_relation', 'short_term', 'derived', 0.7,
+                 'inferred', 0.8, '["message-1","message-2"]', ?, ?)`,
+      ).run(
+        derived.ciphertext,
+        derived.iv,
+        derived.tag,
+        "2026-08-10T10:01:00.000Z",
+        "2026-08-10T10:01:00.000Z",
+      );
+      db.prepare(
+        `INSERT INTO memory_evidence_links
+          (user_id, inferred_memory_id, evidence_memory_id, created_at)
+         VALUES ('user-1', 'memory-derived', 'memory-direct', ?)`,
+      ).run("2026-08-10T10:01:00.000Z");
+      db.prepare(
+        `INSERT INTO memory_acquisition_receipts
+          (id, user_id, memory_id, learner_bot_id, target_bot_id,
+           conversation_id, kind, created_at, read_at)
+         VALUES ('receipt-1', 'user-1', 'memory-direct', 'bot-a', 'bot-b',
+                 NULL, 'bot_relation', ?, NULL)`,
+      ).run("2026-08-10T10:02:00.000Z");
+
+      const snapshot = exportUserSnapshot(db, "user-1", userKey);
+      assert.deepEqual(snapshot.settings?.memoryEcology, {
+        learnAboutPlayer: false,
+        learnAboutBots: true,
+        acquisitionSensitivity: "curious",
+        shortTermRetentionDays: 18,
+        longTermPromotionThreshold: 0.84,
+        inferredMinEvidenceCount: 2,
+        inferredConfidenceThreshold: 0.76,
+      });
+      const derivedSnapshot = snapshot.memories.find(
+        (memory) => memory.id === "memory-derived",
+      );
+      assert.equal(derivedSnapshot?.lifecycle, "derived");
+      assert.deepEqual(derivedSnapshot?.evidenceMemoryIds, ["memory-direct"]);
+      assert.equal(derivedSnapshot?.evidenceLineageKnown, true);
+      assert.equal(snapshot.memoryReceipts?.[0]?.targetBotId, "bot-b");
+
+      db.prepare("DELETE FROM memory_acquisition_receipts WHERE user_id = 'user-1'").run();
+      db.prepare("DELETE FROM memory_evidence_links WHERE user_id = 'user-1'").run();
+      db.prepare("DELETE FROM memories WHERE user_id = 'user-1'").run();
+      importUserSnapshot(db, "user-1", snapshot, userKey);
+
+      const restored = db
+        .prepare(
+          `SELECT target_bot_id, base_confidence, lifecycle, last_reinforced_at
+             FROM memories WHERE id = 'memory-direct'`,
+        )
+        .get() as {
+        target_bot_id: string;
+        base_confidence: number;
+        lifecycle: string;
+        last_reinforced_at: string;
+      };
+      assert.equal(restored.target_bot_id, "bot-b");
+      assert.equal(restored.base_confidence, 0.81);
+      assert.equal(restored.lifecycle, "short_term");
+      assert.equal(restored.last_reinforced_at, "2026-08-10T10:00:00.000Z");
+      assert.equal(
+        (db
+          .prepare("SELECT COUNT(*) AS count FROM memory_evidence_links")
+          .get() as { count: number }).count,
+        1,
+      );
+      assert.equal(
+        (db
+          .prepare(
+            "SELECT evidence_lineage_known AS known FROM memories WHERE id = 'memory-derived'",
+          )
+          .get() as { known: number }).known,
+        1,
+      );
+      assert.equal(
+        (db
+          .prepare("SELECT COUNT(*) AS count FROM memory_acquisition_receipts")
+          .get() as { count: number }).count,
+        1,
+      );
+    });
+  });
+});
 
 describe("backup response cues", () => {
   it("round-trips the audience-heard presentation beat", () => {
