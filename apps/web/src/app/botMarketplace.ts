@@ -1,5 +1,6 @@
 import {
   fullySaturateBotColor,
+  normalizeBotIdentityColor,
   normalizeBotFaceEyeCharacter,
 } from "@localai/shared";
 
@@ -60,6 +61,7 @@ export interface BotMarketplaceEntry {
   bundlePath: string;
   memoryCount: number;
   color: string | null;
+  accentColor: string | null;
   glyph: string | null;
   themeIds: string[];
   tags: string[];
@@ -176,6 +178,7 @@ export function normalizeBotMarketplaceManifest(raw: unknown): BotMarketplaceMan
       color: stringValue(botRecord.color)
         ? fullySaturateBotColor(stringValue(botRecord.color))
         : null,
+      accentColor: normalizeBotIdentityColor(botRecord.accentColor),
       glyph: stringValue(botRecord.glyph) || null,
       themeIds: stringList(botRecord.themeIds).map((themeId) => themeId.toLowerCase()),
       tags: stringList(botRecord.tags).map((tag) => tag.toLowerCase()),

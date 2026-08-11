@@ -3,6 +3,7 @@ import {
   DEFAULT_BOT_FACE_GLYPH_ANIMATION,
   DEFAULT_BOT_FACE_EYE_MOVEMENT,
   fullySaturateBotColor,
+  normalizeBotIdentityColor,
   normalizeBotFaceGlyphAnimation,
   normalizeBotFaceEyeMovement,
   parseBotAvatarDetailsV1,
@@ -40,6 +41,8 @@ export interface PrismBotArchiveJson {
     namePronunciation?: string;
     selfReferral?: string;
     color?: string | null;
+    /** Null/omitted means stable Auto resolution from the primary color. */
+    accentColor?: string | null;
     glyph?: string | null;
     avatarDetails?: BotAvatarDetailsV1 | null;
     temperature?: number;
@@ -221,6 +224,9 @@ function validateBotJson(parsed: unknown): PrismBotArchiveJson {
       ...botJson.bot,
       ...(typeof bot.color === "string"
         ? { color: fullySaturateBotColor(bot.color) }
+        : {}),
+      ...(bot.accentColor !== undefined
+        ? { accentColor: normalizeBotIdentityColor(bot.accentColor) }
         : {}),
       ...(bot.namePronunciation !== undefined
         ? { namePronunciation: normalizeBotNamePronunciation(bot.namePronunciation) }

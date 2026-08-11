@@ -27,6 +27,7 @@ export interface BotCustomizerSavePristine {
   topK: number;
   repetitionPenalty: number;
   color: string;
+  accentColor: string | null;
   glyph: string;
   faceEyesFont: string;
   faceEyeCharacter: string | null;
@@ -83,6 +84,7 @@ export interface BotCustomizerSaveCurrent {
   topK: number;
   repetitionPenalty: number;
   color: string;
+  accentColor: string | null;
   glyph: string;
   faceEyesFont: string;
   faceEyeCharacter: string | null;
@@ -130,6 +132,7 @@ export interface BotCustomizerSavePatch {
   topK?: number;
   repetitionPenalty?: number;
   color?: string;
+  accentColor?: string | null;
   glyph?: string;
   faceEyesFont?: string;
   faceEyeCharacter?: string | null;
@@ -195,6 +198,7 @@ export function buildBotCustomizerSavePatch(
       topK: current.topK,
       repetitionPenalty: current.repetitionPenalty,
       color: current.color,
+      accentColor: current.accentColor,
       glyph: current.glyph,
       faceEyesFont: current.faceEyesFont,
       faceEyeCharacter: current.faceEyeCharacter,
@@ -270,6 +274,12 @@ export function buildBotCustomizerSavePatch(
   }
   if (normalizeColorForCompare(current.color) !== normalizeColorForCompare(pristine.color)) {
     patch.color = current.color;
+  }
+  if (
+    normalizeColorForCompare(current.accentColor) !==
+    normalizeColorForCompare(pristine.accentColor)
+  ) {
+    patch.accentColor = current.accentColor;
   }
   if (current.glyph !== pristine.glyph) patch.glyph = current.glyph;
   if (serializeBotPowersV1(current.powers ?? []) !== serializeBotPowersV1(pristine.powers ?? [])) {

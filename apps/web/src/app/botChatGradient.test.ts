@@ -7,7 +7,6 @@ import { hexToHsl } from "@localai/shared";
 import {
   BOT_CHAT_PERSONA_FILL_EMPTY_ROOM,
   BOT_CHAT_PERSONA_FILL_FULL_AT_MESSAGES,
-  BOT_CHAT_PERSONA_FILL_START_WHISPER,
   botChatGradientPalette,
   botChatPersonaFillProgress,
   buildBotChatGradient,
@@ -91,6 +90,22 @@ describe("selected bot chat gradient", () => {
 
     assert.match(variables["--bot-chat-gradient"], /^radial-gradient/);
     assert.equal(variables["--bot-chat-persona-fill"], "0.420");
+    assert.equal(variables["--bot-primary-color"], "#40c0ae");
+    assert.equal(variables["--bot-color"], variables["--bot-primary-color"]);
+    assert.match(variables["--bot-accent-color"], /^#[0-9a-f]{6}$/u);
+  });
+
+  it("keeps primary light stronger than an explicit warm/cool accent", () => {
+    const light = buildBotChatGradient("bot:warm-cool", "#ff5500", "light", {
+      accentColor: "#00aaff",
+    });
+    const dark = buildBotChatGradient("bot:warm-cool", "#ff5500", "dark", {
+      accentColor: "#00aaff",
+    });
+    assert.match(light, /rgba\([^)]*, 0\.120\)/u);
+    assert.match(light, /rgba\(0, 170, 255, 0\.075\)/u);
+    assert.match(dark, /rgba\([^)]*, 0\.200\)/u);
+    assert.match(dark, /rgba\(0, 170, 255, 0\.120\)/u);
   });
 
   it("eases persona fill from an empty-room wash toward full over the conversation", () => {
@@ -151,7 +166,7 @@ describe("selected bot chat gradient", () => {
 
     assert.match(
       pageSource,
-      /buildBotChatGradientVariables\(\s*activeBot\.id,\s*accent,\s*resolvedTheme,\s*personaFillProgress,?\s*\)/,
+      /buildBotChatGradientVariables\(\s*activeBot\.id,\s*accent,\s*resolvedTheme,\s*personaFillProgress,\s*activeBot\.accentColor,?\s*\)/,
     );
     assert.match(pageSource, /botChatPersonaFillProgress\(/);
     assert.match(pageSource, /data-bot-gradient-active=/);

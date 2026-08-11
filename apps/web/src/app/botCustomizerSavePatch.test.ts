@@ -27,6 +27,7 @@ const pristine: BotCustomizerSavePristine = {
   topK: 40,
   repetitionPenalty: 1.1,
   color: "#66cc33",
+  accentColor: null,
   glyph: "bot",
   faceEyesFont: "warm",
   faceEyeCharacter: null,
@@ -85,6 +86,7 @@ const currentFromPristine = (
   topK: pristine.topK,
   repetitionPenalty: pristine.repetitionPenalty,
   color: pristine.color,
+  accentColor: pristine.accentColor,
   glyph: pristine.glyph,
   faceEyesFont: pristine.faceEyesFont,
   faceEyeCharacter: pristine.faceEyeCharacter,
@@ -176,6 +178,23 @@ describe("bot customizer save patch", () => {
     assert.deepEqual(
       buildBotCustomizerSavePatch(currentFromPristine({ color: "#66CC33" }), pristine),
       {}
+    );
+  });
+
+  it("patches explicit and Auto Atmosphere accents independently", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ accentColor: "#00AAFF" }),
+        pristine,
+      ),
+      { accentColor: "#00AAFF" },
+    );
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(currentFromPristine({ accentColor: null }), {
+        ...pristine,
+        accentColor: "#00aaff",
+      }),
+      { accentColor: null },
     );
   });
 

@@ -2,11 +2,16 @@ import {
   hexToHsl,
   hslToHex,
   normalizeAccentForTheme,
+  resolveBotAccentColor,
 } from "@localai/shared";
 
 export type BotChatGradientTheme = "light" | "dark";
 
 export interface BotChatGradientVariables {
+  "--bot-primary-color": string;
+  "--bot-accent-color": string;
+  /** Compatibility alias for primary identity consumers. */
+  "--bot-color": string;
   "--bot-chat-gradient": string;
   "--bot-chat-persona-fill": string;
 }
@@ -150,6 +155,8 @@ export function botChatGradientPalette(
 export interface BuildBotChatGradientOptions {
   /** 0..1 presence of persona color over the neutral base. Defaults to full. */
   fillProgress?: number;
+  /** Null/omitted resolves the stable +52 degree Auto companion hue. */
+  accentColor?: string | null;
 }
 
 /** Deterministic, local-only canvas atmosphere for one selected bot. */
@@ -160,6 +167,11 @@ export function buildBotChatGradient(
   options: BuildBotChatGradientOptions = {},
 ): string {
   const fillProgress = clamp(options.fillProgress ?? 1, 0, 1);
+  const resolvedAccent = normalizeAccentForTheme(
+    resolveBotAccentColor(rawColor, options.accentColor),
+    theme,
+  );
+  const accentHsl = hexToHsl(resolvedAccent);
   const seed = `bot-chat-gradient:${botId.trim() || rawColor.trim()}:${rawColor}:${theme}`;
   const palette = botChatGradientPalette(rawColor, theme, seed);
   // Keep the procedural variation inside a composed layout: one broad light
@@ -187,7 +199,7 @@ export function buildBotChatGradient(
 
   return [
     `radial-gradient(ellipse 132% 90% at ${primaryX.toFixed(1)}% ${primaryY.toFixed(1)}%, ${hexWithAlpha(palette.bloom, primaryAlpha)} 0%, ${hexWithAlpha(palette.body, primaryAlpha * 0.34)} 38%, ${hexWithAlpha(palette.bloom, 0)} 76%)`,
-    `radial-gradient(ellipse 92% 84% at ${counterX.toFixed(1)}% ${counterY.toFixed(1)}%, ${hexWithAlpha(palette.secondary, counterAlpha)} 0%, ${hexWithAlpha(palette.secondary, counterAlpha * 0.28)} 42%, ${hexWithAlpha(palette.secondary, 0)} 80%)`,
+    `radial-gradient(ellipse 92% 84% at ${counterX.toFixed(1)}% ${counterY.toFixed(1)}%, ${hexWithAlpha(resolvedAccent, counterAlpha)} 0%, ${hexWithAlpha(hslToHex(accentHsl.h, accentHsl.s * 0.72, accentHsl.l), counterAlpha * 0.28)} 42%, ${hexWithAlpha(resolvedAccent, 0)} 80%)`,
     `radial-gradient(ellipse 98% 76% at ${lowX.toFixed(1)}% ${lowY.toFixed(1)}%, ${hexWithAlpha(palette.deep, lowAlpha)} 0%, ${hexWithAlpha(palette.body, lowAlpha * 0.24)} 46%, ${hexWithAlpha(palette.deep, 0)} 82%)`,
     `radial-gradient(ellipse 64% 42% at ${focalX.toFixed(1)}% ${focalY.toFixed(1)}%, ${hexWithAlpha(palette.bloom, focalAlpha)} 0%, ${hexWithAlpha(palette.bloom, focalAlpha * 0.22)} 44%, ${hexWithAlpha(palette.bloom, 0)} 78%)`,
     neutralBase,
@@ -199,11 +211,20 @@ export function buildBotChatGradientVariables(
   rawColor: string,
   theme: BotChatGradientTheme,
   fillProgress = 1,
+  accentColor?: string | null,
 ): BotChatGradientVariables {
   const normalizedFill = clamp(fillProgress, 0, 1);
+  const resolvedAccent = normalizeAccentForTheme(
+    resolveBotAccentColor(rawColor, accentColor),
+    theme,
+  );
   return {
+    "--bot-primary-color": normalizeAccentForTheme(rawColor, theme),
+    "--bot-accent-color": resolvedAccent,
+    "--bot-color": normalizeAccentForTheme(rawColor, theme),
     "--bot-chat-gradient": buildBotChatGradient(botId, rawColor, theme, {
       fillProgress: normalizedFill,
+      accentColor,
     }),
     "--bot-chat-persona-fill": normalizedFill.toFixed(3),
   };

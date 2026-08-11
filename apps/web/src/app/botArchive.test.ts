@@ -29,6 +29,7 @@ function baseBotJson(overrides: Partial<PrismBotArchiveJson> = {}): PrismBotArch
       namePronunciation: "  Play-toe  ",
       selfReferral: "  Plato  ",
       color: "#4F46A5",
+      accentColor: "#7799AA",
       glyph: "lucideDrama",
       voicePreviewLine: "The examined voice is worth hearing.",
       authoredAudioVoiceProfile: {
@@ -104,6 +105,7 @@ describe("botArchive", () => {
       hexToHsl(parsed.botJson.bot.color ?? "").s > 99.5,
       `expected fully saturated archive color, got ${parsed.botJson.bot.color}`,
     );
+    assert.equal(parsed.botJson.bot.accentColor, "#22b5ff");
     assert.equal(parsed.botJson.bot.voicePreviewLine, "The examined voice is worth hearing.");
     assert.equal(
       parsed.botJson.bot.authoredAudioVoiceProfile?.v === 2
@@ -148,6 +150,15 @@ describe("botArchive", () => {
     assert.equal(parsed.botJson.bot.faceBlinkBar, "¦");
     assert.deepEqual(parsed.botJson.bot.faceThinkingFrames, ["·", "*", "✦", "*"]);
     assert.deepEqual(parsed.memories, ["Loves dialogue.", "Founded the Academy."]);
+  });
+
+  it("keeps older v2 archives without an Atmosphere accent valid", () => {
+    const legacy = baseBotJson();
+    delete legacy.bot.accentColor;
+    const parsed = parsePrismBotArchive(
+      createPrismBotArchive({ botJson: legacy, memories: [] }),
+    );
+    assert.equal(parsed.botJson.bot.accentColor, undefined);
   });
 
   it("omits empty memories and accepts missing memories.json", () => {

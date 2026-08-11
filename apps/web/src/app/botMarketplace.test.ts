@@ -44,6 +44,7 @@ const baseManifest = {
       bundlePath: "/bot-marketplace/bots/bot-plato.bot",
       memoryCount: 42.8,
       color: "#4F46A5",
+      accentColor: "#7799AA",
       glyph: "lucideDrama",
       themeIds: ["famous-philosophers"],
       tags: ["philosophy", "ancient"],
@@ -113,6 +114,8 @@ describe("bot marketplace helpers", () => {
     assert.equal(manifest.bots.length, 4);
     assert.equal(manifest.bots[0]?.memoryCount, 42);
     assert.ok(hexToHsl(manifest.bots[0]?.color ?? "").s > 99.5);
+    assert.equal(manifest.bots[0]?.accentColor, "#22b5ff");
+    assert.equal(manifest.bots[1]?.accentColor, null);
     assert.deepEqual(
       manifest.themes.find((theme) => theme.id === "famous-philosophers")?.botIds,
       ["plato", "aristotle"]
