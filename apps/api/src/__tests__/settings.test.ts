@@ -106,6 +106,7 @@ function baseline(overrides: Partial<CurrentSettings> = {}): CurrentSettings {
     comfyUiWorkflows: [],
     prismDefaultLlmModel: null,
     prismImageToolLlmModel: null,
+    textModelDisplayNames: null,
     voiceMode: "mute",
     voiceEffectsEnabled: 1,
     voiceVolume: 1,
@@ -946,6 +947,33 @@ describe("resolveNextSettings — prismImageToolLlmModel", () => {
       baseline()
     );
     assert.equal(next.prismImageToolLlmModel, DISABLED_MODEL_CHOICE);
+  });
+});
+
+describe("resolveNextSettings — textModelDisplayNames", () => {
+  it("persists normalized aliases and clears blank aliases back to catalog labels", () => {
+    const stored = resolveNextSettings(
+      {
+        textModelDisplayNames: {
+          "openai:gpt-5-mini": "  Fast Writer  ",
+          "anthropic:claude-sonnet-4-6": "Analysis",
+        },
+      },
+      baseline(),
+    );
+    assert.deepEqual(stored.textModelDisplayNames, {
+      "openai:gpt-5-mini": "Fast Writer",
+      "anthropic:claude-sonnet-4-6": "Analysis",
+    });
+    assert.deepEqual(
+      resolveNextSettings(
+        { textModelDisplayNames: { "openai:gpt-5-mini": "   " } },
+        baseline({
+          textModelDisplayNames: '{"openai:gpt-5-mini":"Fast Writer"}',
+        }),
+      ).textModelDisplayNames,
+      {},
+    );
   });
 });
 

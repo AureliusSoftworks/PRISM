@@ -27,6 +27,9 @@ import {
   type HubAtmosphereStyle,
   type ImageProviderName,
   type EphemeralChatProviderPreferences,
+  normalizeTextModelDisplayNames,
+  parseStoredTextModelDisplayNames,
+  type TextModelDisplayNames,
   isImageProviderName,
   normalizeEphemeralChatProviderPreferences,
   normalizeCrtFocus,
@@ -234,6 +237,7 @@ export interface CurrentSettings {
   prismDefaultLlmModel: string | null;
   /** Null/empty → use normal hub chat model for turns that emit `sendGeneratedImage`. */
   prismImageToolLlmModel: string | null;
+  textModelDisplayNames: string | null;
   primaryOllamaHost: string;
   voiceMode: VoiceMode | string | null;
   voiceEffectsEnabled: number;
@@ -307,6 +311,7 @@ export interface NextSettings {
   comfyUiWorkflows: ComfyUiWorkflowRegistration[];
   prismDefaultLlmModel: string | null;
   prismImageToolLlmModel: string | null;
+  textModelDisplayNames: TextModelDisplayNames;
   voiceMode: VoiceMode;
   voiceEffectsEnabled: boolean;
   voiceVolume: number;
@@ -1238,6 +1243,10 @@ export function resolveNextSettings(
     body.prismImageToolLlmModel,
     current.prismImageToolLlmModel
   );
+  const textModelDisplayNames =
+    body.textModelDisplayNames === undefined
+      ? parseStoredTextModelDisplayNames(current.textModelDisplayNames)
+      : normalizeTextModelDisplayNames(body.textModelDisplayNames);
   const voiceMode = normalizeVoiceMode(body.voiceMode, normalizeVoiceMode(current.voiceMode));
   const voiceEffectsEnabled = typeof body.voiceEffectsEnabled === "boolean"
     ? body.voiceEffectsEnabled
@@ -1391,6 +1400,7 @@ export function resolveNextSettings(
     comfyUiWorkflows,
     prismDefaultLlmModel,
     prismImageToolLlmModel,
+    textModelDisplayNames,
     voiceMode,
     voiceEffectsEnabled,
     voiceVolume,

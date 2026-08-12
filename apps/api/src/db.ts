@@ -290,6 +290,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       prism_default_bot_top_p REAL,
       prism_default_bot_top_k INTEGER,
       prism_default_bot_repetition_penalty REAL,
+      text_model_display_names TEXT NOT NULL DEFAULT '{}',
       composer_writing_assist INTEGER NOT NULL DEFAULT 1,
       dev_memories_enabled INTEGER NOT NULL DEFAULT 0,
       dev_memories_text TEXT NOT NULL DEFAULT '',
@@ -3263,6 +3264,14 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasPrismImageToolLlmModel) {
     db.exec("ALTER TABLE users ADD COLUMN prism_image_tool_llm_model TEXT;");
+  }
+  const hasTextModelDisplayNames = userColumns.some(
+    (column) => column.name === "text_model_display_names",
+  );
+  if (!hasTextModelDisplayNames) {
+    db.exec(
+      "ALTER TABLE users ADD COLUMN text_model_display_names TEXT NOT NULL DEFAULT '{}';",
+    );
   }
   const hasFallbackModelMessageStripe = userColumns.some(
     (column) => column.name === "fallback_model_message_stripe",

@@ -2018,6 +2018,38 @@ describe("API request integration", () => {
     assert.deepEqual(providerFactoryCalls.slice(providerStart), ["openai"]);
   });
 
+  it("persists text model display names per account through Settings", async () => {
+    const client = createClient();
+    const register = await client.request(
+      "/api/auth/register",
+      jsonInit({
+        username: "model-display-names@example.com",
+        password: "model-display-names-password",
+      }),
+    );
+    assert.equal(register.status, 201);
+    const saved = await client.request("/api/settings", {
+      method: "PATCH",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        textModelDisplayNames: {
+          "local:qwen3:8b": "Workshop",
+          "openai:gpt-5-mini": "Fast Writer",
+        },
+      }),
+    });
+    assert.equal(saved.status, 200);
+    assert.deepEqual((await json(saved)).settings.textModelDisplayNames, {
+      "local:qwen3:8b": "Workshop",
+      "openai:gpt-5-mini": "Fast Writer",
+    });
+    const loaded = await json(await client.request("/api/settings"));
+    assert.deepEqual(loaded.settings.textModelDisplayNames, {
+      "local:qwen3:8b": "Workshop",
+      "openai:gpt-5-mini": "Fast Writer",
+    });
+  });
+
   it("persists Zen player voice while ignoring retired account-wide defaults", async () => {
     const client = createClient();
     const register = await client.request(

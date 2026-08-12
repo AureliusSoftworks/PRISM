@@ -1064,6 +1064,17 @@ export {
 } from "./imageModels.js";
 
 export {
+  TEXT_MODEL_DISPLAY_NAME_MAX_LENGTH,
+  TEXT_MODEL_DISPLAY_NAME_MAX_ENTRIES,
+  textModelDisplayNameKey,
+  normalizeTextModelDisplayNames,
+  parseStoredTextModelDisplayNames,
+  resolveTextModelDisplayName,
+  type TextModelDisplayNames,
+  type TextModelProvider,
+} from "./modelDisplayNames.js";
+
+export {
   COMFYUI_REMOTE_WORKFLOW_PREFIX,
   COMFYUI_WORKFLOW_MODEL_PREFIX,
   MAX_COMFY_UI_WORKFLOW_REGISTRATIONS,

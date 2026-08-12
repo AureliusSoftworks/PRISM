@@ -1049,6 +1049,7 @@ import {
   actionSfxPackOwnerIdFor,
   isActionSfxPackKind,
   normalizeActionSfxPackOwnerKind,
+  parseStoredTextModelDisplayNames,
   resolveBotAudioVoiceProfileV1,
 } from "@localai/shared";
 import { editImage, generateImage } from "./image-provider.ts";
@@ -2764,6 +2765,7 @@ interface UserDbRow {
   prism_default_bot_repetition_penalty: number | null;
   prism_default_llm_model: string | null;
   prism_image_tool_llm_model: string | null;
+  text_model_display_names: string | null;
   dev_memories_enabled: number;
   dev_memories_text: string;
   openai_key_ciphertext: string | null;
@@ -25720,6 +25722,9 @@ function buildRoutes(): RouteDefinition[] {
           ...normalizeDefaultBotSettingsForResponse(user),
           prismDefaultLlmModel: user.prism_default_llm_model ?? "",
           prismImageToolLlmModel: user.prism_image_tool_llm_model ?? "",
+          textModelDisplayNames: parseStoredTextModelDisplayNames(
+            user.text_model_display_names,
+          ),
           hasOpenAiApiKey: Boolean(user.openai_key_ciphertext),
           hasAnthropicApiKey: Boolean(user.anthropic_key_ciphertext),
           hasElevenLabsApiKey: Boolean(user.elevenlabs_key_ciphertext),
@@ -26414,6 +26419,7 @@ function buildRoutes(): RouteDefinition[] {
         comfyUiWorkflows: parseStoredComfyUiWorkflows(user.comfyui_workflows),
         prismDefaultLlmModel: user.prism_default_llm_model,
         prismImageToolLlmModel: user.prism_image_tool_llm_model,
+        textModelDisplayNames: user.text_model_display_names,
         voiceMode: user.voice_mode,
         voiceEffectsEnabled: user.voice_effects_enabled,
         voiceVolume: user.voice_volume,
@@ -26502,7 +26508,7 @@ function buildRoutes(): RouteDefinition[] {
             experimental_dual_ollama_enabled = ?, experimental_all_model_effort_enabled = ?, coffee_experimental_table_angle_enabled = ?, psychic_mode_enabled = ?, auto_switch_model = ?, auto_fallback_chain = ?, online_auto_provider_bias = ?, preferred_local_model = ?, preferred_online_model = ?, lenient_local_image_fallback_model = ?, secondary_ollama_host = ?, comfyui_host = ?,
             preferred_local_image_model = ?, preferred_openai_image_model = ?, preferred_zen_wallpaper_local_image_model = ?, preferred_zen_wallpaper_openai_image_model = ?, preferred_home_atmosphere_image_model = ?, preferred_home_atmosphere_image_provider = ?, zen_wallpaper_opacity = ?, zen_wallpaper_text_mask_enabled = ?, zen_wallpaper_grayscale_enabled = ?, zen_wallpaper_blurred_edges_enabled = ?, zen_wallpaper_style_notes = ?,
             zen_session_idle_gap_ms = ?, zen_fresh_start_gap_ms = ?, zen_recent_context_messages = ?, zen_wallpaper_regen_message_interval = ?, zen_mood_sensitivity = ?, zen_canvas_typing_speed = ?, zen_message_font_min_px = ?, zen_message_font_max_px = ?, zen_ask_question_patience_enabled = ?, zen_ask_question_patience_ms = ?, zen_autonomy_enabled = ?, zen_persona_transition_choice = ?,
-            comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?,
+            comfyui_workflows = ?, prism_default_llm_model = ?, prism_image_tool_llm_model = ?, text_model_display_names = ?,
             voice_mode = ?, voice_effects_enabled = ?, voice_volume = ?, operating_system_voices_enabled = ?, english_voice_engine = ?, default_system_voice_name = ?, default_elevenlabs_voice_id = ?, elevenlabs_voice_bank = ?, elevenlabs_voice_model = ?, elevenlabs_voice_collection_id = ?, zen_player_voice_enabled = ?, player_audio_voice_profile = ?,
             dev_memories_enabled = ?, dev_memories_text = ?,
             openai_key_ciphertext = ?, openai_key_iv = ?, openai_key_tag = ?,
@@ -26567,6 +26573,7 @@ function buildRoutes(): RouteDefinition[] {
         JSON.stringify(next.comfyUiWorkflows),
         next.prismDefaultLlmModel,
         next.prismImageToolLlmModel,
+        JSON.stringify(next.textModelDisplayNames),
         next.voiceMode,
         next.voiceEffectsEnabled ? 1 : 0,
         next.voiceVolume,
@@ -26628,6 +26635,7 @@ function buildRoutes(): RouteDefinition[] {
             next.autoFallbackChain,
           ),
           onlineAutoProviderBias: next.onlineAutoProviderBias,
+          textModelDisplayNames: next.textModelDisplayNames,
           zenPersonaTransitionChoice: next.zenPersonaTransitionChoice,
           voiceMode: next.voiceMode,
           voiceEffectsEnabled: next.voiceEffectsEnabled,
