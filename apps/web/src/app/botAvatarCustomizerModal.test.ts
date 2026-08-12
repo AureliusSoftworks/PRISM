@@ -112,6 +112,10 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   assert.match(miniSource, /<BotAvatarMicroRenderer/);
   assert.match(miniSource, /avatarDetails=\{miniAvatarDetails\}/);
   assert.match(
+    pageSource,
+    /function BotAvatarMicroRenderer[\s\S]{0,3600}<CoffeeSeatPlateEmoji[\s\S]{0,100}\bpixelated\b/u,
+  );
+  assert.match(
     miniSource,
     /forceBlinkPhase=\{previewBlink \? "closed" : "open"\}/,
   );
@@ -150,11 +154,26 @@ test("Avatar Studio keeps a draft-driven mini preview visible with authored eye 
   assert.match(miniViewportRule, /width:\s*122px;/);
   assert.match(miniViewportRule, /height:\s*122px;/);
 
-  const microClassRule = cssRuleBody(
-    '.botAvatarStudioMicroPreview .messageMoodBadge[data-face="coffee"][data-variant="micro"]',
+  assert.match(
+    cssSource,
+    /\.botAvatarStudioMicroPreview\s+\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[^}]*width:\s*36px;[^}]*height:\s*36px;/u,
   );
-  assert.match(microClassRule, /width:\s*36px;/);
-  assert.match(microClassRule, /height:\s*36px;/);
+  assert.match(
+    cssSource,
+    /\.botAvatarStudioMicroPreview \.messageMoodMicroFace\s*\{[^}]*font-size:\s*15px;/u,
+  );
+  assert.match(
+    cssSource,
+    /\.messageMoodBadge\[data-face="coffee"\]\[data-variant="micro"\]\s*\{[\s\S]{0,900}#05080b[\s\S]{0,900}inset 0 0 0 1px/u,
+  );
+  assert.match(
+    cssSource,
+    /\.messageMoodMicroFace\s*\{[^}]*font-size:\s*12px;[^}]*color:\s*#ffffff;/u,
+  );
+  assert.match(
+    cssSource,
+    /\.themeLight \.messageMoodMicroFace\s*\{[^}]*color:\s*#05080b;/u,
+  );
 });
 
 test("Avatar Studio requires an Accent pin before named voice casting", () => {
@@ -262,15 +281,16 @@ test("avatar customizer supports explicit custom eye, blink, mouth, and thinking
     /faceMouthRotationDeg=\{newBotFaceMouthRotationDeg\}/,
   );
   assert.match(pageSource, /faceBlinkBar=\{newBotFaceBlinkBar\}/);
+  assert.match(pageSource, /faceBlinkCount=\{newBotFaceBlinkCount\}/);
   assert.match(
     pageSource,
     /faceBlinkRotationDeg=\{newBotFaceBlinkRotationDeg\}/,
   );
   assert.match(pageSource, /faceThinkingFrames=\{newBotFaceThinkingFrames\}/);
   assert.match(pageSource, /handleNewBotFaceEyeCharacterChange\(normalized\);/);
-  assert.match(
+  assert.doesNotMatch(
     pageSource,
-    /next === 2[\s\S]{0,180}DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG/,
+    /handleNewBotFaceEyeCountChange[\s\S]{0,500}DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG/,
   );
   assert.match(
     pageSource,

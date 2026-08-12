@@ -4653,6 +4653,11 @@ function botCreateCapability(
           "UPDATE bots SET face_eye_spacing = ? WHERE id = ? AND user_id = ?",
         )
         .run(draft.face.eyeSpacing, botId, context.userId);
+      context.db
+        .prepare(
+          "UPDATE bots SET face_blink_count = ? WHERE id = ? AND user_id = ?",
+        )
+        .run(draft.face.blinkCount, botId, context.userId);
       return {
         result: {
           bot: {

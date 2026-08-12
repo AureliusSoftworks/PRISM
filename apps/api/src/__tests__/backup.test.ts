@@ -1253,6 +1253,7 @@ describe("backup bot avatar face style", () => {
         faceMouthOffsetY: 0.06,
         faceMouthRotationDeg: 35,
         faceBlinkBar: "❘",
+        faceBlinkCount: 2,
         faceBlinkScale: 1.2,
         faceBlinkOffsetX: -0.08,
         faceBlinkOffsetY: 0.06,

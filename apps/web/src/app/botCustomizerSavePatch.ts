@@ -48,6 +48,7 @@ export interface BotCustomizerSavePristine {
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: string;
+  faceBlinkCount: 1 | 2;
   faceBlinkScale: number;
   faceBlinkOffsetX: number;
   faceBlinkOffsetY: number;
@@ -106,6 +107,7 @@ export interface BotCustomizerSaveCurrent {
   faceMouthOffsetY: number;
   faceMouthRotationDeg: number;
   faceBlinkBar: string;
+  faceBlinkCount: 1 | 2;
   faceBlinkScale: number;
   faceBlinkOffsetX: number;
   faceBlinkOffsetY: number;
@@ -155,6 +157,7 @@ export interface BotCustomizerSavePatch {
   faceMouthOffsetY?: number;
   faceMouthRotationDeg?: number;
   faceBlinkBar?: string;
+  faceBlinkCount?: 1 | 2;
   faceBlinkScale?: number;
   faceBlinkOffsetX?: number;
   faceBlinkOffsetY?: number;
@@ -345,6 +348,9 @@ export function buildBotCustomizerSavePatch(
   }
   if (current.faceBlinkBar !== pristine.faceBlinkBar) {
     patch.faceBlinkBar = current.faceBlinkBar;
+  }
+  if (current.faceBlinkCount !== pristine.faceBlinkCount) {
+    patch.faceBlinkCount = current.faceBlinkCount;
   }
   if (current.faceBlinkScale !== pristine.faceBlinkScale) {
     patch.faceBlinkScale = current.faceBlinkScale;

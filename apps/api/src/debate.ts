@@ -295,6 +295,7 @@ interface DebateBotRow {
   face_mouth_offset_y: number | null;
   face_mouth_rotation_deg: number | null;
   face_blink_bar: string | null;
+  face_blink_count: number | null;
   face_blink_scale: number | null;
   face_blink_offset_x: number | null;
   face_blink_offset_y: number | null;
@@ -363,7 +364,7 @@ const DEBATE_BOT_SELECT = `
          face_eye_scale, face_eye_offset_x, face_eye_offset_y,
          face_eye_rotation_deg, face_mouth_scale, face_mouth_offset_x,
          face_mouth_offset_y, face_mouth_rotation_deg, face_blink_bar,
-         face_blink_scale, face_blink_offset_x, face_blink_offset_y,
+         face_blink_count, face_blink_scale, face_blink_offset_x, face_blink_offset_y,
          face_blink_rotation_deg, face_thinking_frames, face_thinking_scale,
          face_thinking_offset_x, face_thinking_offset_y,
          authored_audio_voice_profile, audio_voice_profile_override,
@@ -2343,6 +2344,7 @@ function snapshotBot(
         faceMouthOffsetY: row.face_mouth_offset_y,
         faceMouthRotationDeg: row.face_mouth_rotation_deg,
         faceBlinkBar: row.face_blink_bar,
+        faceBlinkCount: row.face_blink_count ?? row.face_eye_count,
         faceBlinkScale: row.face_blink_scale,
         faceBlinkOffsetX: row.face_blink_offset_x,
         faceBlinkOffsetY: row.face_blink_offset_y,

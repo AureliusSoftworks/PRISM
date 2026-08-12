@@ -276,6 +276,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       prism_default_bot_face_mouth_offset_y REAL,
       prism_default_bot_face_mouth_rotation_deg REAL,
       prism_default_bot_face_blink_bar TEXT,
+      prism_default_bot_face_blink_count INTEGER,
       prism_default_bot_face_blink_scale REAL,
       prism_default_bot_face_blink_offset_x REAL,
       prism_default_bot_face_blink_offset_y REAL,
@@ -1685,6 +1686,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
       face_mouth_offset_y REAL,
       face_mouth_rotation_deg REAL,
       face_blink_bar TEXT,
+      face_blink_count INTEGER,
       face_blink_scale REAL,
       face_blink_offset_x REAL,
       face_blink_offset_y REAL,
@@ -3212,6 +3214,7 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
     ["prism_default_bot_face_mouth_offset_y", "REAL"],
     ["prism_default_bot_face_mouth_rotation_deg", "REAL"],
     ["prism_default_bot_face_blink_bar", "TEXT"],
+    ["prism_default_bot_face_blink_count", "INTEGER"],
     ["prism_default_bot_face_blink_scale", "REAL"],
     ["prism_default_bot_face_blink_offset_x", "REAL"],
     ["prism_default_bot_face_blink_offset_y", "REAL"],
@@ -4188,6 +4191,12 @@ export function initializeDatabase(db: DatabaseSync): DatabaseSync {
   );
   if (!hasBotFaceBlinkBarColumn) {
     db.exec("ALTER TABLE bots ADD COLUMN face_blink_bar TEXT;");
+  }
+  const hasBotFaceBlinkCountColumn = botColumns.some(
+    (column) => column.name === "face_blink_count",
+  );
+  if (!hasBotFaceBlinkCountColumn) {
+    db.exec("ALTER TABLE bots ADD COLUMN face_blink_count INTEGER;");
   }
   const hasBotFaceBlinkScaleColumn = botColumns.some(
     (column) => column.name === "face_blink_scale",

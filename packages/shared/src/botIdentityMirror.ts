@@ -82,6 +82,7 @@ export function botIdentityMirrorFaceV1(
     faceMouthRotationDeg:
       row.mouthRotationDeg ?? row.faceMouthRotationDeg,
     faceBlinkBar: row.blinkBar ?? row.faceBlinkBar,
+    faceBlinkCount: row.blinkCount ?? row.faceBlinkCount,
     faceBlinkScale: row.blinkScale ?? row.faceBlinkScale,
     faceBlinkOffsetX: row.blinkOffsetX ?? row.faceBlinkOffsetX,
     faceBlinkOffsetY: row.blinkOffsetY ?? row.faceBlinkOffsetY,

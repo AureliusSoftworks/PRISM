@@ -2,6 +2,7 @@ import { createHash } from "node:crypto";
 import type { DatabaseSync } from "node:sqlite";
 import {
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_BLINK_COUNT,
   DEFAULT_BOT_FACE_BLINK_OFFSET_X,
   DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
   DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
@@ -79,6 +80,7 @@ const DEFAULT_BOT_COLUMNS = [
   "prism_default_bot_face_mouth_offset_y",
   "prism_default_bot_face_mouth_rotation_deg",
   "prism_default_bot_face_blink_bar",
+  "prism_default_bot_face_blink_count",
   "prism_default_bot_face_blink_scale",
   "prism_default_bot_face_blink_offset_x",
   "prism_default_bot_face_blink_offset_y",
@@ -160,6 +162,13 @@ function nextValues(patch: PrismJsonObject): DefaultBotValues {
     "eye spacing",
     normalizeBotFaceEyeSpacing,
   );
+  const faceBlinkCount =
+    patch.faceBlinkCount === undefined
+      ? normalizeBotFaceEyeCharacter(patch.faceEyeCharacter) !== null
+        ? faceEyeCount
+        : DEFAULT_BOT_FACE_BLINK_COUNT
+      : normalizeBotFaceEyeCount(patch.faceBlinkCount);
+  if (faceBlinkCount === null) throw new Error("Invalid blink eye count.");
   let faceThinkingFrames: string | null = null;
   if (patch.faceThinkingFrames !== null) {
     faceThinkingFrames = serializeBotFaceThinkingFrames(
@@ -276,6 +285,8 @@ function nextValues(patch: PrismJsonObject): DefaultBotValues {
       "blink bar",
       normalizeBotFaceBlinkBar,
     ),
+    prism_default_bot_face_blink_count:
+      faceBlinkCount ?? DEFAULT_BOT_FACE_BLINK_COUNT,
     prism_default_bot_face_blink_scale: requiredNormalized(
       patch.faceBlinkScale,
       DEFAULT_BOT_FACE_BLINK_SCALE,

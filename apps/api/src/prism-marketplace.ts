@@ -114,6 +114,7 @@ interface MarketplaceArchiveBot {
   faceMouthOffsetY?: unknown;
   faceMouthRotationDeg?: unknown;
   faceBlinkBar?: unknown;
+  faceBlinkCount?: unknown;
   faceBlinkScale?: unknown;
   faceBlinkOffsetX?: unknown;
   faceBlinkOffsetY?: unknown;
@@ -517,6 +518,17 @@ function insertMarketplaceBot(args: {
     .run(
       normalizeBotFaceEyeSpacing(bot.faceEyeSpacing) ??
         DEFAULT_BOT_FACE_EYE_SPACING,
+      botId,
+      args.userId,
+    );
+  args.db
+    .prepare("UPDATE bots SET face_blink_count = ? WHERE id = ? AND user_id = ?")
+    .run(
+      normalizeBotFaceEyeCount(bot.faceBlinkCount) ??
+        (normalizeBotFaceEyeCharacter(bot.faceEyeCharacter) !== null
+          ? normalizeBotFaceEyeCount(bot.faceEyeCount)
+          : null) ??
+        DEFAULT_BOT_FACE_EYE_COUNT,
       botId,
       args.userId,
     );

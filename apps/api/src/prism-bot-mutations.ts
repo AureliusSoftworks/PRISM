@@ -77,6 +77,7 @@ export const PRISM_JOURNALED_BOT_PATCH_KEYS = new Set([
   "faceMouthOffsetY",
   "faceMouthRotationDeg",
   "faceBlinkBar",
+  "faceBlinkCount",
   "faceBlinkScale",
   "faceBlinkOffsetX",
   "faceBlinkOffsetY",
@@ -128,6 +129,7 @@ const BOT_MUTATION_COLUMNS = [
   "face_mouth_offset_y",
   "face_mouth_rotation_deg",
   "face_blink_bar",
+  "face_blink_count",
   "face_blink_scale",
   "face_blink_offset_x",
   "face_blink_offset_y",
@@ -433,6 +435,11 @@ function normalizedColumns(
         ? DEFAULT_BOT_FACE_BLINK_BAR
         : normalizeNullable(raw, "blink bar", normalizeBotFaceBlinkBar);
     next.face_blink_bar = blink;
+  }
+  if (own(patch, "faceBlinkCount")) {
+    const count = normalizeBotFaceEyeCount(patch.faceBlinkCount);
+    if (count === null) throw new Error("Invalid blink eye count.");
+    next.face_blink_count = count;
   }
   if (own(patch, "faceThinkingFrames")) {
     if (patch.faceThinkingFrames === null) {

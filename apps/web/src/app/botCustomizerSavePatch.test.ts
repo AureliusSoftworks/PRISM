@@ -48,6 +48,7 @@ const pristine: BotCustomizerSavePristine = {
   faceMouthOffsetY: 0,
   faceMouthRotationDeg: 0,
   faceBlinkBar: "|",
+  faceBlinkCount: 1,
   faceBlinkScale: 1,
   faceBlinkOffsetX: 0,
   faceBlinkOffsetY: 0,
@@ -108,6 +109,7 @@ const currentFromPristine = (
   faceMouthOffsetY: pristine.faceMouthOffsetY,
   faceMouthRotationDeg: pristine.faceMouthRotationDeg,
   faceBlinkBar: pristine.faceBlinkBar,
+  faceBlinkCount: pristine.faceBlinkCount,
   faceBlinkScale: pristine.faceBlinkScale,
   faceBlinkOffsetX: pristine.faceBlinkOffsetX,
   faceBlinkOffsetY: pristine.faceBlinkOffsetY,
@@ -363,6 +365,16 @@ describe("bot customizer save patch", () => {
         pristine
       ),
       { faceBlinkBar: "none" }
+    );
+  });
+
+  it("patches Blink eye count independently", () => {
+    assert.deepEqual(
+      buildBotCustomizerSavePatch(
+        currentFromPristine({ faceBlinkCount: 2 }),
+        pristine,
+      ),
+      { faceBlinkCount: 2 },
     );
   });
 

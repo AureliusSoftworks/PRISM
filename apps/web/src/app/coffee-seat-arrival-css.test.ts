@@ -430,6 +430,10 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
+      /faceBlinkCount\?: BotFaceEyeCount \| number \| null/,
+    );
+    assert.match(
+      coffeeSeatPlateEmojiSource,
       /const normalizedFaceBlinkBar =\s+normalizeBotFaceBlinkBar\(faceBlinkBar\) \?\? DEFAULT_BOT_FACE_BLINK_BAR;/,
     );
     assert.match(
@@ -438,7 +442,11 @@ describe("Coffee seat arrival CSS", () => {
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
-      /const faceBlinkRotationCssDeg =[\s\S]{0,220}DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG/,
+      /const faceBlinkRotationCssDeg = normalizedFaceBlinkRotationDeg \?\? 0;/,
+    );
+    assert.doesNotMatch(
+      coffeeSeatPlateEmojiSource,
+      /faceBlinkRotationCssDeg[\s\S]{0,220}DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG/,
     );
     assert.match(
       coffeeSeatPlateEmojiSource,
@@ -509,6 +517,7 @@ describe("Coffee seat arrival CSS", () => {
       /`\$\{faceMouthRotationCssDeg\}deg`/,
     );
     assert.match(pageSource, /faceBlinkBar=\{faceStyle\.blinkBar\}/);
+    assert.match(pageSource, /faceBlinkCount=\{faceStyle\.blinkCount\}/);
     assert.match(
       pageSource,
       /faceBlinkRotationDeg=\{faceStyle\.blinkRotationDeg\}/,

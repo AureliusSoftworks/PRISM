@@ -15,6 +15,7 @@ import {
   botFaceBlinkGeometryFollowsEyesByDefault,
   botFaceBlinkScaleForEyeScale,
   DEFAULT_BOT_FACE_BLINK_BAR,
+  DEFAULT_BOT_FACE_BLINK_COUNT,
   DEFAULT_BOT_FACE_BLINK_OFFSET_X,
   DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
   DEFAULT_BOT_FACE_BLINK_ROTATION_DEG,
@@ -165,6 +166,28 @@ describe("bot avatar face style", () => {
     assert.equal(normalizeBotFaceEyeSpacing(9), BOT_FACE_EYE_SPACING_MAX);
   });
 
+  it("keeps Blink count independent while preserving legacy eye-count fallback", () => {
+    assert.equal(DEFAULT_BOT_FACE_BLINK_COUNT, 1);
+    assert.equal(
+      resolveBotFaceStyle({ faceEyeCharacter: "•", faceEyeCount: 2 })
+        .blinkCount,
+      2,
+    );
+    assert.equal(resolveBotFaceStyle({ faceEyeCount: 2 }).blinkCount, 1);
+    assert.equal(
+      resolveBotFaceStyle({
+        faceEyeCharacter: "•",
+        faceEyeCount: 2,
+        faceBlinkCount: 1,
+      }).blinkCount,
+      1,
+    );
+    assert.equal(
+      resolveBotFaceStyle({ faceEyeCount: 1, faceBlinkCount: 2 }).blinkCount,
+      2,
+    );
+  });
+
   it("accepts broad single mouth glyphs while rejecting emoji presentation", () => {
     assert.equal(normalizeBotFaceMouthCharacter(" "), " ");
     assert.equal(normalizeBotFaceMouthCharacter("  △  "), "△");
@@ -205,6 +228,7 @@ describe("bot avatar face style", () => {
       mouthOffsetY: DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
       mouthRotationDeg: DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
       blinkBar: DEFAULT_BOT_FACE_BLINK_BAR,
+      blinkCount: DEFAULT_BOT_FACE_BLINK_COUNT,
       blinkScale: DEFAULT_BOT_FACE_BLINK_SCALE,
       blinkOffsetX: DEFAULT_BOT_FACE_BLINK_OFFSET_X,
       blinkOffsetY: DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
@@ -234,6 +258,7 @@ describe("bot avatar face style", () => {
       mouthOffsetY: DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
       mouthRotationDeg: DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
       blinkBar: DEFAULT_BOT_FACE_BLINK_BAR,
+      blinkCount: DEFAULT_BOT_FACE_BLINK_COUNT,
       blinkScale: DEFAULT_BOT_FACE_BLINK_SCALE,
       blinkOffsetX: DEFAULT_BOT_FACE_BLINK_OFFSET_X,
       blinkOffsetY: DEFAULT_BOT_FACE_BLINK_OFFSET_Y,
@@ -268,6 +293,7 @@ describe("bot avatar face style", () => {
           faceMouthOffsetY: 0.071,
           faceMouthRotationDeg: 47,
           faceBlinkBar: "¦",
+          faceBlinkCount: 2,
           faceBlinkScale: 1.18,
           faceBlinkOffsetX: -0.071,
           faceBlinkOffsetY: 0.071,
@@ -299,6 +325,7 @@ describe("bot avatar face style", () => {
         mouthOffsetY: 0.08,
         mouthRotationDeg: 45,
         blinkBar: "¦",
+        blinkCount: 2,
         blinkScale: 1.2,
         blinkOffsetX: -0.08,
         blinkOffsetY: 0.08,

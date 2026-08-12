@@ -283,6 +283,7 @@ export interface BackupBotSnapshot {
   faceMouthOffsetY?: number | null;
   faceMouthRotationDeg?: number | null;
   faceBlinkBar?: BotFaceBlinkBar | null;
+  faceBlinkCount?: BotFaceEyeCount | number | null;
   faceBlinkScale?: number | null;
   faceBlinkOffsetX?: number | null;
   faceBlinkOffsetY?: number | null;
@@ -2085,6 +2086,7 @@ export function exportUserSnapshot(
          face_mouth_offset_y,
          face_mouth_rotation_deg,
          face_blink_bar,
+         face_blink_count,
          face_blink_scale,
          face_blink_offset_x,
          face_blink_offset_y,
@@ -2149,6 +2151,7 @@ export function exportUserSnapshot(
     face_mouth_offset_y: number | null;
     face_mouth_rotation_deg: number | null;
     face_blink_bar: string | null;
+    face_blink_count: number | null;
     face_blink_scale: number | null;
     face_blink_offset_x: number | null;
     face_blink_offset_y: number | null;
@@ -2675,6 +2678,12 @@ export function exportUserSnapshot(
         faceBlinkBar:
           normalizeBotFaceBlinkBar(bot.face_blink_bar) ??
           DEFAULT_BOT_FACE_BLINK_BAR,
+        faceBlinkCount:
+          normalizeBotFaceEyeCount(bot.face_blink_count) ??
+          (normalizeBotFaceEyeCharacter(bot.face_eye_character) !== null
+            ? normalizeBotFaceEyeCount(bot.face_eye_count)
+            : null) ??
+          DEFAULT_BOT_FACE_EYE_COUNT,
         faceBlinkScale:
           normalizeBotFaceBlinkScale(bot.face_blink_scale) ??
           DEFAULT_BOT_FACE_BLINK_SCALE,
@@ -3764,6 +3773,7 @@ function importUserSnapshotWithinTransaction(
         face_mouth_offset_y,
         face_mouth_rotation_deg,
         face_blink_bar,
+        face_blink_count,
         face_blink_scale,
         face_blink_offset_x,
         face_blink_offset_y,
@@ -3778,7 +3788,7 @@ function importUserSnapshotWithinTransaction(
         visibility,
         created_at,
         updated_at
-      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+      ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
     `);
     for (const bot of snapshot.bots) {
       if (!bot || typeof bot.id !== "string" || bot.id.trim().length === 0)
@@ -3860,6 +3870,11 @@ function importUserSnapshotWithinTransaction(
         normalizeBotFaceMouthRotationDeg(bot.faceMouthRotationDeg),
         normalizeBotFaceBlinkBar(bot.faceBlinkBar) ??
           DEFAULT_BOT_FACE_BLINK_BAR,
+        normalizeBotFaceEyeCount(bot.faceBlinkCount) ??
+          (normalizeBotFaceEyeCharacter(bot.faceEyeCharacter) !== null
+            ? normalizeBotFaceEyeCount(bot.faceEyeCount)
+            : null) ??
+          DEFAULT_BOT_FACE_EYE_COUNT,
         normalizeBotFaceBlinkScale(bot.faceBlinkScale) ??
           DEFAULT_BOT_FACE_BLINK_SCALE,
         normalizeBotFaceBlinkOffsetX(bot.faceBlinkOffsetX) ??

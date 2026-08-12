@@ -50,6 +50,8 @@ export const BOT_FACE_EYE_COUNTS = [1, 2] as const;
 export type BotFaceEyeCount = (typeof BOT_FACE_EYE_COUNTS)[number];
 /** A custom glyph is one authored eye unit unless the user opts into a pair. */
 export const DEFAULT_BOT_FACE_EYE_COUNT: BotFaceEyeCount = 1;
+/** Blink duplication is authored independently from the open-eye count. */
+export const DEFAULT_BOT_FACE_BLINK_COUNT: BotFaceEyeCount = 1;
 /** Center-to-center distance for a cloned custom-eye pair. Keeps legacy ±0.18em. */
 export const DEFAULT_BOT_FACE_EYE_SPACING = 0.36;
 export const BOT_FACE_EYE_SPACING_MIN = 0.16;
@@ -177,6 +179,7 @@ export interface BotFaceStyle {
   mouthOffsetY: number;
   mouthRotationDeg: number;
   blinkBar: BotFaceBlinkBar;
+  blinkCount: BotFaceEyeCount;
   blinkScale: number;
   blinkOffsetX: number;
   blinkOffsetY: number;
@@ -207,6 +210,7 @@ export interface BotFaceStyleInput {
   faceMouthOffsetY?: unknown;
   faceMouthRotationDeg?: unknown;
   faceBlinkBar?: unknown;
+  faceBlinkCount?: unknown;
   faceBlinkScale?: unknown;
   faceBlinkOffsetX?: unknown;
   faceBlinkOffsetY?: unknown;
@@ -628,6 +632,11 @@ export function resolveBotFaceStyle(
   const eyeRotationDeg =
     normalizeBotFaceEyeRotationDeg(input.faceEyeRotationDeg) ??
     DEFAULT_BOT_FACE_EYE_ROTATION_DEG;
+  const eyeCount =
+    eyeCharacter !== null
+      ? normalizeBotFaceEyeCount(input.faceEyeCount) ??
+        DEFAULT_BOT_FACE_EYE_COUNT
+      : DEFAULT_BOT_FACE_EYE_COUNT;
   const storedBlinkScale =
     normalizeBotFaceBlinkScale(input.faceBlinkScale) ??
     DEFAULT_BOT_FACE_BLINK_SCALE;
@@ -653,11 +662,7 @@ export function resolveBotFaceStyle(
   return {
     eyesFont: normalizeBotFaceFontId(input.faceEyesFont) ?? fallbackFont,
     eyeCharacter,
-    eyeCount:
-      eyeCharacter !== null
-        ? normalizeBotFaceEyeCount(input.faceEyeCount) ??
-          DEFAULT_BOT_FACE_EYE_COUNT
-        : DEFAULT_BOT_FACE_EYE_COUNT,
+    eyeCount,
     eyeSpacing:
       normalizeBotFaceEyeSpacing(input.faceEyeSpacing) ??
       DEFAULT_BOT_FACE_EYE_SPACING,
@@ -694,6 +699,9 @@ export function resolveBotFaceStyle(
     blinkBar:
       normalizeBotFaceBlinkBar(input.faceBlinkBar) ??
       DEFAULT_BOT_FACE_BLINK_BAR,
+    blinkCount:
+      normalizeBotFaceEyeCount(input.faceBlinkCount) ??
+      eyeCount,
     blinkScale: blinkFollowsEyes
       ? botFaceBlinkScaleForEyeScale(eyeScale)
       : storedBlinkScale,
@@ -773,6 +781,7 @@ export function randomBotFaceStyle(random = Math.random): BotFaceStyle {
     mouthOffsetY: DEFAULT_BOT_FACE_MOUTH_OFFSET_Y,
     mouthRotationDeg: DEFAULT_BOT_FACE_MOUTH_ROTATION_DEG,
     blinkBar: DEFAULT_BOT_FACE_BLINK_BAR,
+    blinkCount: DEFAULT_BOT_FACE_BLINK_COUNT,
     blinkScale: botFaceBlinkScaleForEyeScale(eyeScale),
     blinkOffsetX: DEFAULT_BOT_FACE_EYE_OFFSET_X,
     blinkOffsetY: DEFAULT_BOT_FACE_EYE_OFFSET_Y,

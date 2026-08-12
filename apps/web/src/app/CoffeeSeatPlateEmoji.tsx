@@ -13,7 +13,6 @@ import {
   BOT_FACE_BLINK_BAR_VALUES,
   DEFAULT_BOT_FACE_BLINK_BAR,
   DEFAULT_BOT_FACE_EYE_SPACING,
-  DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG,
   DEFAULT_BOT_FACE_THINKING_FRAMES,
   botFaceThinkingSpinnerDisabled,
   botFaceThinkingFramesEqual,
@@ -215,6 +214,8 @@ export type CoffeeSeatPlateEmojiProps = {
   enabled: boolean;
   /** Quantizes the rendered font silhouette to the full-avatar phosphor grid. */
   pixelated?: boolean;
+  /** Uses binary cell alpha for a hard-edged authoring guide. */
+  hardPixels?: boolean;
   /** Active speaking state for speech-driven mouth sync and blink eligibility. */
   isTalking: boolean;
   /** Full streamed-text viseme used to animate authored custom mouth glyphs. */
@@ -255,6 +256,7 @@ export type CoffeeSeatPlateEmojiProps = {
   faceMouthOffsetY?: number | null;
   faceMouthRotationDeg?: number | null;
   faceBlinkBar?: BotFaceBlinkBar | null;
+  faceBlinkCount?: BotFaceEyeCount | number | null;
   faceBlinkScale?: number | null;
   faceBlinkOffsetX?: number | null;
   faceBlinkOffsetY?: number | null;
@@ -311,6 +313,7 @@ function coffeeSeatExtraBlinkCount(talking = false): number {
 export function CoffeeSeatPlateEmoji({
   enabled,
   pixelated = false,
+  hardPixels = false,
   isTalking,
   mouthShape,
   blinkWhileTalking = true,
@@ -342,6 +345,7 @@ export function CoffeeSeatPlateEmoji({
   faceMouthOffsetY,
   faceMouthRotationDeg,
   faceBlinkBar,
+  faceBlinkCount,
   faceBlinkScale,
   faceBlinkOffsetX,
   faceBlinkOffsetY,
@@ -396,9 +400,8 @@ export function CoffeeSeatPlateEmoji({
       : normalizedFaceMouthCharacter;
   const normalizedFaceBlinkBar =
     normalizeBotFaceBlinkBar(faceBlinkBar) ?? DEFAULT_BOT_FACE_BLINK_BAR;
-  const customBlinkBarActive = !BOT_FACE_BLINK_BAR_VALUES.some(
-    (blinkBar) => blinkBar === normalizedFaceBlinkBar,
-  );
+  const normalizedFaceBlinkCount =
+    normalizeBotFaceEyeCount(faceBlinkCount) ?? normalizedFaceEyeCount;
   const forcedBlinkPhase =
     forceBlinkPhase === "open" || forceBlinkPhase === "closed"
       ? forceBlinkPhase
@@ -750,11 +753,7 @@ export function CoffeeSeatPlateEmoji({
             rotateDeg,
           )
         : normalizedFaceEyeRotationDeg;
-  const faceBlinkRotationCssDeg =
-    (normalizedFaceBlinkRotationDeg ?? 0) +
-    (customBlinkBarActive && normalizedFaceEyeCount === 2
-      ? DEFAULT_BOT_FACE_PAIRED_EYE_ROTATION_DEG
-      : 0);
+  const faceBlinkRotationCssDeg = normalizedFaceBlinkRotationDeg ?? 0;
   const faceEyeOffset = rotatedFaceOffset(
     normalizedFaceEyeOffsetX,
     normalizedFaceEyeOffsetY,
@@ -850,6 +849,7 @@ export function CoffeeSeatPlateEmoji({
       }
       data-talking={isTalking ? "true" : undefined}
       data-face-blink-bar={normalizedFaceBlinkBar}
+      data-face-blink-count={normalizedFaceBlinkCount}
       data-coffee-plate-mouth-open={mouthOpen ? "true" : undefined}
       data-coffee-plate-mouth-shape={isTalking ? streamedMouthShape : undefined}
       style={
@@ -911,6 +911,7 @@ export function CoffeeSeatPlateEmoji({
           <CrtPixelTextGlyph
             content={thinkingSpinnerGlyph}
             enabled={pixelated}
+            binaryAlpha={hardPixels}
             rasterKey={faceMouthFont ?? "default"}
           />
         </span>
@@ -923,6 +924,7 @@ export function CoffeeSeatPlateEmoji({
           <CrtPixelTextGlyph
             content="?"
             enabled={pixelated}
+            binaryAlpha={hardPixels}
             rasterKey={faceMouthFont ?? faceEyesFont ?? "default"}
           />
         </span>
@@ -950,8 +952,7 @@ export function CoffeeSeatPlateEmoji({
               displayBlinkPhase !== "closed";
             const renderCustomBlinkPair =
               part === "eyes" &&
-              normalizedFaceEyeCharacter !== null &&
-              normalizedFaceEyeCount === 2 &&
+              normalizedFaceBlinkCount === 2 &&
               displayBlinkPhase === "closed";
             const partFaceFont = part === "eyes" ? faceEyesFont : faceMouthFont;
             const opticalOffset = coffeeSeatGlyphOpticalOffset({
@@ -994,12 +995,14 @@ export function CoffeeSeatPlateEmoji({
                       data-custom-eye-pair-side="left"
                       content={renderedGlyph}
                       enabled={pixelated}
+                      binaryAlpha={hardPixels}
                       rasterKey={partFaceFont ?? "default"}
                     />
                     <CrtPixelTextGlyph
                       data-custom-eye-pair-side="right"
                       content={renderedGlyph}
                       enabled={pixelated}
+                      binaryAlpha={hardPixels}
                       rasterKey={partFaceFont ?? "default"}
                     />
                   </span>
@@ -1008,6 +1011,7 @@ export function CoffeeSeatPlateEmoji({
                     ref={part === "mouth" ? customMouthGlyphRef : undefined}
                     content={renderedGlyph}
                     enabled={pixelated}
+                    binaryAlpha={hardPixels}
                     rasterKey={partFaceFont ?? "default"}
                   />
                 )}

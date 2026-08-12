@@ -73,6 +73,7 @@ export interface PrismBotArchiveJson {
     faceMouthOffsetY?: number | null;
     faceMouthRotationDeg?: number | null;
     faceBlinkBar?: BotFaceBlinkBar | null;
+    faceBlinkCount?: BotFaceEyeCount | number | null;
     faceBlinkScale?: number | null;
     faceBlinkOffsetX?: number | null;
     faceBlinkOffsetY?: number | null;

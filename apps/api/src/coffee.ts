@@ -465,6 +465,7 @@ export interface CoffeeBotProfile {
   faceMouthOffsetY?: number | null;
   faceMouthRotationDeg?: number | null;
   faceBlinkBar?: string | null;
+  faceBlinkCount?: number | null;
   faceBlinkScale?: number | null;
   faceBlinkOffsetX?: number | null;
   faceBlinkOffsetY?: number | null;
@@ -6589,6 +6590,7 @@ type CoffeeBotProfileRow = {
   face_mouth_offset_y: number | null;
   face_mouth_rotation_deg: number | null;
   face_blink_bar: string | null;
+  face_blink_count: number | null;
   face_blink_scale: number | null;
   face_blink_offset_x: number | null;
   face_blink_offset_y: number | null;
@@ -6652,6 +6654,14 @@ function mapCoffeeBotProfileRow(row: CoffeeBotProfileRow): CoffeeBotProfile {
         ? row.face_mouth_rotation_deg
         : null,
     faceBlinkBar: row.face_blink_bar ?? null,
+    faceBlinkCount:
+      row.face_blink_count === 2
+        ? 2
+        : row.face_blink_count === 1
+          ? 1
+          : row.face_eye_count === 2
+            ? 2
+            : 1,
     faceBlinkScale:
       typeof row.face_blink_scale === "number" ? row.face_blink_scale : null,
     faceBlinkOffsetX:
@@ -6723,6 +6733,7 @@ function loadCoffeeGroupProfileRows(
               ${selectOptionalBotColumn("face_mouth_offset_y")},
               ${selectOptionalBotColumn("face_mouth_rotation_deg")},
               ${selectOptionalBotColumn("face_blink_bar")},
+              ${selectOptionalBotColumn("face_blink_count")},
               ${selectOptionalBotColumn("face_blink_scale")},
               ${selectOptionalBotColumn("face_blink_offset_x")},
               ${selectOptionalBotColumn("face_blink_offset_y")},
