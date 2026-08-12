@@ -524,7 +524,7 @@ describe("shared routing model picker integration", () => {
   });
 
   it("explains simulated Effort and the deep experimental ladder", () => {
-    assert.match(pageSource, /data-glyph-tooltip=\{effortTriggerTooltip\}/u);
+    assert.match(pageSource, /data-glyph-tooltip=\{effortMenuOpen \? undefined : effortTriggerTooltip\}/u);
     assert.match(
       reasoningEffortSource,
       /simulated Effort/iu,

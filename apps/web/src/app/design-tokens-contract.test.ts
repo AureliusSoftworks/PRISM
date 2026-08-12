@@ -15,7 +15,7 @@ const layoutSource = readFileSync(join(appDir, "layout.tsx"), "utf8");
  *  app already downloads, which is why the same intent looks different
  *  between applets. Removing an entry requires picking which loaded face it
  *  means — see docs/design-system.md. */
-const UNMAPPED_FONT_ROLES = new Set(["--font-display", "--font-geist-sans"]);
+const UNMAPPED_FONT_ROLES = new Set(["--font-display"]);
 
 function collectSourceFiles(dir: string): string[] {
   return readdirSync(dir).flatMap((entry) => {
@@ -99,6 +99,10 @@ describe("design token contract", () => {
       "--prism-radius-pill",
       "--prism-space-sm",
       "--prism-space-xl",
+      "--prism-tooltip-bg",
+      "--prism-tooltip-fg",
+      "--prism-tooltip-border",
+      "--prism-tooltip-shadow",
     ]) {
       assert.ok(rootNames.has(name), `${name} must be defined at :root`);
     }

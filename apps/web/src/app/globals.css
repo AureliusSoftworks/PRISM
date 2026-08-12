@@ -52,6 +52,15 @@
   --prism-space-3xl: 18px;
   --prism-space-4xl: 20px;
   --prism-space-5xl: 24px;
+
+  /* Tooltip chrome lives here so portaled labels (bot names, model picker,
+     Prompt Center wildcards) still paint a solid card. Theme tokens such as
+     --bg-surface are authored on .themeDark/.themeLight and do not inherit
+     onto document.body. Values match the Color Filter info cards. */
+  --prism-tooltip-bg: #151311;
+  --prism-tooltip-fg: #edf3f8;
+  --prism-tooltip-border: #342f2a;
+  --prism-tooltip-shadow: 0 20px 48px rgba(0, 0, 0, 0.55);
 }
 
 html {
@@ -211,6 +220,13 @@ html[data-prism-companion-open="true"] [data-app-shell-header="true"] {
     0 30px 72px rgba(0, 0, 0, 0.56),
     0 0 34px color-mix(in srgb, #64cfff 18%, transparent),
     0 0 82px color-mix(in srgb, #7367ff 12%, transparent) !important;
+}
+
+body[data-prism-theme="light"] {
+  --prism-tooltip-bg: #ffffff;
+  --prism-tooltip-fg: #172638;
+  --prism-tooltip-border: #b7c9d8;
+  --prism-tooltip-shadow: 0 26px 58px rgba(31, 74, 112, 0.14);
 }
 
 body[data-prism-theme="light"] [data-navbar-picker-surface="true"] {

@@ -10650,7 +10650,12 @@ function PanelSectionInfo({
       >
         <Icon size={14} strokeWidth={2.1} aria-hidden="true" />
       </span>
-      <span id={id} className={styles.panelSectionInfoTooltip} role="tooltip">
+      <span
+        id={id}
+        className={styles.panelSectionInfoTooltip}
+        role="tooltip"
+        data-prism-tooltip="true"
+      >
         {children}
       </span>
     </span>
@@ -24614,7 +24619,13 @@ function ComposerModelPicker({
         onKeyDown={handleModelKeyDown}
         onWheel={handleModelWheel}
         disabled={interactionDisabled}
-        data-glyph-tooltip={loading ? "Models are still loading." : title}
+        data-glyph-tooltip={
+          menuOpen
+            ? undefined
+            : loading
+              ? "Models are still loading."
+              : title
+        }
         aria-haspopup="listbox"
         aria-expanded={menuOpen}
         aria-label={
@@ -24650,7 +24661,7 @@ function ComposerModelPicker({
               ? "true"
               : undefined
           }
-          data-glyph-tooltip={effortTriggerTooltip}
+          data-glyph-tooltip={effortMenuOpen ? undefined : effortTriggerTooltip}
           tabIndex={effortTriggerDisabled ? 0 : undefined}
           aria-label={
             effortTriggerDisabled && effortDisabledReason
@@ -28159,6 +28170,7 @@ function PromptCenterWildcardHoverButton({
               role="tooltip"
               aria-live="polite"
               className={styles.promptCenterPromptWildcardTooltip}
+              data-prism-tooltip="true"
               data-side={tooltipPosition?.side ?? "top"}
               data-status={preview.status}
               style={
@@ -118655,6 +118667,7 @@ function HomeContent(): React.JSX.Element {
               {activeFieldHelp && (
                 <div
                   className={styles.botParameterHelpTooltip}
+                  data-prism-tooltip="true"
                   style={{
                     top: `${activeFieldHelp.top}px`,
                     left: `${activeFieldHelp.left}px`,

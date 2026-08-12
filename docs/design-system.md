@@ -7,7 +7,7 @@ not re-author faces, radii, or spacing locally.
 
 `apps/web/src/app/design-tokens-contract.test.ts` pins this contract.
 
-## What is deliberately *not* unified
+## What is deliberately _not_ unified
 
 Per-applet accent hue is authored intent, not drift. `docs/brand-ethos.md` is
 explicit that "colors suggest plurality" and that a mode should never be
@@ -160,12 +160,12 @@ Faces are loaded once in `layout.tsx` via `next/font/google`.
 
 Applets ask for an intent; only `:root` names a face.
 
-| Role                     | Resolves to                                     |
-| ------------------------ | ----------------------------------------------- |
-| `--font-title`           | Raleway → Instrument Sans → system              |
-| `--font-serif`           | Lora → Georgia → serif                          |
-| `--font-mono`            | Geist Mono → `ui-monospace` → SF Mono → Menlo   |
-| `--font-ui-mono`         | alias of `--font-mono`                          |
+| Role             | Resolves to                                   |
+| ---------------- | --------------------------------------------- |
+| `--font-title`   | Raleway → Instrument Sans → system            |
+| `--font-serif`   | Lora → Georgia → serif                        |
+| `--font-mono`    | Geist Mono → `ui-monospace` → SF Mono → Menlo |
+| `--font-ui-mono` | alias of `--font-mono`                        |
 
 `--font-title` was previously authored only on `.appLayout`, so it resolved
 inside the shell subtree and silently fell back everywhere else.
@@ -182,28 +182,28 @@ Serif consumers are `DebateExperience`, `slateMirrorDesk`,
 
 ### Still unresolved
 
-| Referenced name     | Uses | Where                      | What actually renders |
-| ------------------- | ---- | -------------------------- | --------------------- |
-| `--font-display`    | 1    | `PrismFirstRunLivingLayer` | Georgia (fallback)    |
-| `--font-geist-sans` | 1    | `page.module.css`          | inherited sans        |
+| Referenced name  | Uses | Where                      | What actually renders |
+| ---------------- | ---- | -------------------------- | --------------------- |
+| `--font-display` | 1    | `PrismFirstRunLivingLayer` | Georgia (fallback)    |
 
-Geist Sans is not among the loaded faces at all. Both are listed in
-`UNMAPPED_FONT_ROLES` in the contract test, which fails on any *new* dead
+Geist Sans is not among the loaded faces. `--font-display` is listed in
+`UNMAPPED_FONT_ROLES` in the contract test, which fails on any _new_ dead
 reference.
 
 ### Keep fallbacks inside `var()`
 
-`--font-geist-sans` is written as `var(--name), ui-sans-serif, …` — with the
-fallback *outside* the parentheses. An undefined custom property used without an
-in-`var()` fallback makes the whole declaration invalid at computed-value time,
-so `font-family` resolves to the inherited value rather than to the listed
-faces. The now-removed `--font-editorial-serif` had the same shape.
+An undefined custom property used without an in-`var()` fallback makes the
+whole declaration invalid at computed-value time, so `font-family` resolves to
+the inherited value rather than to the listed faces. The now-removed
+`--font-geist-sans` and `--font-editorial-serif` had that shape: they were
+written as `var(--name), ui-sans-serif, …` with the fallback _outside_ the
+parentheses.
 
 Verified in-browser against a sans-font parent:
 
-| Declaration                              | Computed `font-family`   |
-| ---------------------------------------- | ------------------------ |
-| `var(--undefined), Georgia, serif`       | inherited sans           |
+| Declaration                                  | Computed `font-family`     |
+| -------------------------------------------- | -------------------------- |
+| `var(--undefined), Georgia, serif`           | inherited sans             |
 | `var(--undefined, ui-serif, Georgia, serif)` | `ui-serif, Georgia, serif` |
 
 This is why the seven former "editorial serif" surfaces were rendering the
@@ -255,3 +255,16 @@ Button, Card, Modal, or Input. Each applet hand-rolls its chrome inside its own
 stylesheet, which is why control styling diverges even where intent matches.
 There are also no shared surface, border, or text-color tokens; only the two
 `--baseline-*` anti-flash colors exist.
+
+## Tooltip chrome
+
+Help labels that float above the page (bot names, the model picker, Prompt
+Center wildcards) portal to `document.body`. Theme colors such as
+`--bg-surface` live on `.themeDark` / `.themeLight` and do not follow them,
+which used to leave those labels as bare text.
+
+`:root` and `body[data-prism-theme="light"]` now publish `--prism-tooltip-bg`,
+`--prism-tooltip-fg`, `--prism-tooltip-border`, and `--prism-tooltip-shadow`.
+Every help tooltip should use those four tokens so Light and Dark both get a
+solid rounded card with a thin border — the Color Filter info chip is the
+reference.

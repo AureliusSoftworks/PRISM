@@ -8,6 +8,20 @@ const TOOLTIP_TRIGGER_SELECTOR = "[data-glyph-tooltip]";
 const TOOLTIP_SHOW_DELAY_MS = 600;
 const TOOLTIP_VIEWPORT_MARGIN_PX = 8;
 const TOOLTIP_ANCHOR_GAP_PX = 10;
+const OPEN_OVERLAY_MENU_SELECTOR = [
+  '[data-navbar-picker-surface="true"]',
+  '[data-compose-model-menu="true"]',
+  '[data-compose-model-effort-menu="true"]',
+].join(", ");
+const NAVBAR_PICKER_OPEN_EVENT = "prism:navbar-picker-open";
+
+/** True when a dropdown owns the screen, so hover cards must not cover it. */
+export function glyphTooltipIsSuppressedForAnchor(anchor: HTMLElement): boolean {
+  if (anchor.getAttribute("aria-expanded") === "true") return true;
+  if (anchor.querySelector('[aria-expanded="true"]')) return true;
+  if (anchor.closest('[aria-expanded="true"][aria-haspopup]')) return true;
+  return Boolean(document.querySelector(OPEN_OVERLAY_MENU_SELECTOR));
+}
 
 type TooltipSource = "pointer" | "focus";
 
@@ -98,6 +112,10 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
   }, [clearShowTimer, detachDescription]);
 
   const showTooltip = useCallback((snapshot: TooltipSnapshot): void => {
+    if (glyphTooltipIsSuppressedForAnchor(snapshot.anchor)) {
+      hideTooltip();
+      return;
+    }
     activeSnapshotRef.current = snapshot;
     const describedBy = snapshot.anchor.getAttribute("aria-describedby");
     if (!describedBy) {
@@ -106,11 +124,11 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
       snapshot.anchor.setAttribute("aria-describedby", `${describedBy} ${tooltipId}`);
     }
     setTooltip(snapshot);
-  }, [tooltipId]);
+  }, [hideTooltip, tooltipId]);
 
   const scheduleTooltip = useCallback((anchor: HTMLElement, source: TooltipSource): void => {
     const label = extractTooltipLabel(anchor);
-    if (!label) {
+    if (!label || glyphTooltipIsSuppressedForAnchor(anchor)) {
       hideTooltip();
       return;
     }
@@ -118,7 +136,11 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
     const snapshot: TooltipSnapshot = { anchor, label, source };
     showTimerRef.current = window.setTimeout(() => {
       const currentLabel = extractTooltipLabel(anchor);
-      if (!anchor.isConnected || currentLabel !== label) {
+      if (
+        !anchor.isConnected ||
+        currentLabel !== label ||
+        glyphTooltipIsSuppressedForAnchor(anchor)
+      ) {
         showTimerRef.current = null;
         return;
       }
@@ -191,6 +213,7 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
     document.addEventListener("focusin", handleFocusIn, true);
     document.addEventListener("focusout", handleFocusOut, true);
     document.addEventListener("keydown", handleKeyDown, true);
+    window.addEventListener(NAVBAR_PICKER_OPEN_EVENT, hideTooltip);
 
     return () => {
       document.removeEventListener("pointerover", handlePointerOver, true);
@@ -199,6 +222,7 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
       document.removeEventListener("focusin", handleFocusIn, true);
       document.removeEventListener("focusout", handleFocusOut, true);
       document.removeEventListener("keydown", handleKeyDown, true);
+      window.removeEventListener(NAVBAR_PICKER_OPEN_EVENT, hideTooltip);
     };
   }, [canHover, clearShowTimer, hideTooltip, scheduleTooltip]);
 
@@ -215,7 +239,11 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
     const anchor = tooltip.anchor;
     const hideIfAnchorIsStale = (): void => {
       const currentLabel = extractTooltipLabel(anchor);
-      if (!anchor.isConnected || currentLabel !== tooltip.label) {
+      if (
+        !anchor.isConnected ||
+        currentLabel !== tooltip.label ||
+        glyphTooltipIsSuppressedForAnchor(anchor)
+      ) {
         hideTooltip();
       }
     };
@@ -225,7 +253,7 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
     const observer = new MutationObserver(hideIfAnchorIsStale);
     observer.observe(anchor, {
       attributes: true,
-      attributeFilter: ["data-glyph-tooltip"],
+      attributeFilter: ["data-glyph-tooltip", "aria-expanded"],
     });
 
     return () => observer.disconnect();
@@ -294,6 +322,7 @@ export default function GlyphTooltipLayer(): React.JSX.Element | null {
       className={`${styles.glyphTooltip} ${
         position?.side === "bottom" ? styles.glyphTooltipBottom : styles.glyphTooltipTop
       }`}
+      data-prism-tooltip="true"
       style={
         position
           ? {
