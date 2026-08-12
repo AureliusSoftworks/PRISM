@@ -252,6 +252,7 @@ import {
   unzipAccountBackupEntries,
 } from "./accountBackupArchive";
 import { CoffeeSeatPlateEmoji } from "./CoffeeSeatPlateEmoji";
+import { useBotCursorAttention } from "./useBotCursorAttention.ts";
 import { PhosphorPixelSvgGlyph } from "./PhosphorPixelGlyph";
 import { PHOSPHOR_FACE_CANONICAL_SCREEN_SIZE_PX } from "./phosphorPixelRaster";
 import { botScreenGlassProfileForSeed } from "./botScreenGlass";
@@ -31059,6 +31060,8 @@ interface ZenLiveBotMannequinProps {
   eyeTargetDirection?: import("./botFaceEyeMovement").BotFaceGazeDirection;
   eyeTimelineMs?: number | null;
   eyeStateStartedAtMs?: number | null;
+  /** Enables occasional nearby-pointer attention on opted-in full-size surfaces. */
+  cursorAttention?: boolean;
   runtimeEffectsEnabled?: boolean;
   screenMode?: "off" | "synthesis" | "live" | "editing";
   screenOverlay?: ReactNode;
@@ -31215,6 +31218,7 @@ function ZenLiveBotMannequin({
   eyeTargetDirection = 0,
   eyeTimelineMs,
   eyeStateStartedAtMs,
+  cursorAttention = false,
   runtimeEffectsEnabled = true,
   screenMode = "live",
   screenOverlay,
@@ -31440,6 +31444,17 @@ function ZenLiveBotMannequin({
   const screenFacingScaleX = showQuestionMark
     ? "1"
     : botAvatarScreenFacingScaleX(resolvedFacing);
+  const cursorAttentionGaze = useBotCursorAttention({
+    targetRef: presenceBodyRef,
+    enabled:
+      cursorAttention &&
+      detailLevel === "full" &&
+      !thinkingSpinnerActive &&
+      !showQuestionMark &&
+      screenMode === "live",
+    movement: faceStyle.eyeAnimation,
+    facingScaleX: screenFacingScaleX === "-1" ? -1 : 1,
+  });
   const presenceBodyStyle = {
     ...(canonicalIdentityMaterialStyle ?? {}),
     ...botAvatarFaceFacingStyle(resolvedFacing),
@@ -31627,6 +31642,7 @@ function ZenLiveBotMannequin({
                 eyeTargetDirection={eyeTargetDirection}
                 eyeTimelineMs={eyeTimelineMs}
                 eyeStateStartedAtMs={eyeStateStartedAtMs}
+                eyeGazeOverride={cursorAttentionGaze}
                 faceMouthFont={faceStyle.mouthFont}
                 faceMouthCharacter={faceStyle.mouthCharacter}
                 faceMouthAnimation={faceStyle.mouthAnimation}
@@ -31820,6 +31836,7 @@ function ZenLiveBotMannequin({
                   eyeTargetDirection={eyeTargetDirection}
                   eyeTimelineMs={eyeTimelineMs}
                   eyeStateStartedAtMs={eyeStateStartedAtMs}
+                  eyeGazeOverride={cursorAttentionGaze}
                   faceMouthFont={faceStyle.mouthFont}
                   faceMouthCharacter={faceStyle.mouthCharacter}
                   faceMouthAnimation={faceStyle.mouthAnimation}
@@ -33248,6 +33265,7 @@ function ZenLiveBotPresencePlate({
                 ? botOrPrismAccentForTheme(bot.color, resolvedTheme)
                 : null
             }
+            cursorAttention
           />
         )}
       </BotAmbientPresenceRig>
@@ -108544,6 +108562,7 @@ function HomeContent(): React.JSX.Element {
                   ? botOrPrismAccentForTheme(bot.color, resolvedTheme)
                   : null
               }
+              cursorAttention={!isMarketplacePreview}
             />
           </span>
         </div>

@@ -67,6 +67,7 @@ import {
   resolveBotFaceGazeFrame,
   type BotFaceAttentionState,
   type BotFaceGazeDirection,
+  type BotFaceGazeFrame,
 } from "./botFaceEyeMovement.ts";
 import { CrtPixelTextGlyph } from "./PhosphorPixelGlyph";
 
@@ -236,6 +237,8 @@ export type CoffeeSeatPlateEmojiProps = {
   eyeTargetDirection?: BotFaceGazeDirection;
   eyeTimelineMs?: number | null;
   eyeStateStartedAtMs?: number | null;
+  /** Temporary live override used by opted-in full-size cursor attention. */
+  eyeGazeOverride?: BotFaceGazeFrame | null;
   faceMouthFont?: BotFaceFontId | null;
   faceMouthCharacter?: string | null;
   faceMouthAnimation?: BotFaceGlyphAnimation | null;
@@ -324,6 +327,7 @@ export function CoffeeSeatPlateEmoji({
   eyeTargetDirection = 0,
   eyeTimelineMs,
   eyeStateStartedAtMs,
+  eyeGazeOverride,
   faceMouthFont,
   faceMouthCharacter,
   faceMouthAnimation,
@@ -609,7 +613,8 @@ export function CoffeeSeatPlateEmoji({
       enabled &&
       !thinkingSpinnerActive &&
       !questionGlyphActive
-        ? resolveBotFaceGazeFrame({
+        ? (eyeGazeOverride ??
+          resolveBotFaceGazeFrame({
             seed: scheduleKey,
             timelineMs: eyeTimeline,
             stateStartedAtMs:
@@ -619,11 +624,12 @@ export function CoffeeSeatPlateEmoji({
             state: eyeAttentionState,
             targetDirection: eyeTargetDirection,
             movement: normalizedEyeMovement,
-          })
+          }))
         : { xPx: 0, yPx: 0, transitionMs: 0 },
     [
       enabled,
       eyeAttentionState,
+      eyeGazeOverride,
       eyeMovementActive,
       eyeStateStartedAtMs,
       eyeTargetDirection,
